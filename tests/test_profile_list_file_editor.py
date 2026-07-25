@@ -63,6 +63,14 @@ class ProfileListFileEditorTests(unittest.TestCase):
 
         self.assertEqual(invalid, ())
 
+    def test_hostlist_accepts_single_label_suffixes_supported_by_nfqws2(self) -> None:
+        invalid = validate_profile_list_file_text(
+            "hostlist",
+            "ru\nsu\n",
+        )
+
+        self.assertEqual(invalid, ())
+
     def test_validates_ipset_entries(self) -> None:
         invalid = validate_profile_list_file_text(
             "ipset",

@@ -191,11 +191,12 @@ def _valid_hostlist_line(line: str) -> bool:
         ascii_domain = value.encode("idna").decode("ascii")
     except Exception:
         return False
-    if len(ascii_domain) > 253 or "." not in ascii_domain:
+    if len(ascii_domain) > 253:
         return False
     labels = ascii_domain.rstrip(".").split(".")
-    if len(labels) < 2:
-        return False
+    # Оригинальный nfqws2 ищет hostname по суффиксам:
+    # www.example.ru -> example.ru -> ru. Поэтому одиночная DNS-метка вроде
+    # ru или su — допустимая и осмысленная запись hostlist.
     # Числового TLD не существует (RFC 3696): такое значение — IP-подобная
     # запись, которой место в ipset, а не в hostlist.
     if labels[-1].isdigit():
