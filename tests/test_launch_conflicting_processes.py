@@ -1,4 +1,5 @@
 import inspect
+import sys
 import unittest
 from unittest.mock import Mock, patch
 
@@ -23,6 +24,7 @@ class LaunchConflictingProcessesTests(unittest.TestCase):
         self.assertTrue(callable(launch_conflicts.build_launch_conflict_advice))
         self.assertNotIn("CONFLICTING_PROCESSES", inspect.getsource(process_health_check))
 
+    @unittest.skipUnless(sys.platform == "win32", "проверка прав администратора использует WinAPI")
     def test_process_hacker_advice_is_added_after_windivert_launch_failure(self) -> None:
         import ctypes
 

@@ -12,18 +12,33 @@ class _FakeWindowsApi:
     def __getattr__(self, _name: str):
         return self
 
+    def __call__(self, *_args, **_kwargs):
+        return 0
+
 
 def _load_dns_core():
+    added_winreg_stub = False
     try:
         import winreg  # noqa: F401
     except ModuleNotFoundError:
-        sys.modules.setdefault("winreg", types.SimpleNamespace())
+        if "winreg" not in sys.modules:
+            sys.modules["winreg"] = types.SimpleNamespace()
+            added_winreg_stub = True
 
-    if not hasattr(ctypes, "windll"):
+    added_windll_stub = not hasattr(ctypes, "windll")
+    if added_windll_stub:
         ctypes.windll = _FakeWindowsApi()
 
-    sys.modules.pop("dns.dns_core", None)
-    return importlib.import_module("dns.dns_core")
+    try:
+        sys.modules.pop("dns.dns_core", None)
+        return importlib.import_module("dns.dns_core")
+    finally:
+        # dns_core уже сохранил нужные ему ссылки на заглушки. Глобальные
+        # ctypes.windll и winreg не должны отравлять последующие Linux-тесты.
+        if added_windll_stub:
+            del ctypes.windll
+        if added_winreg_stub:
+            sys.modules.pop("winreg", None)
 
 
 class _FakeWmi:

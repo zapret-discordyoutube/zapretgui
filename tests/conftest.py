@@ -68,6 +68,42 @@ def pytest_unconfigure(config):
 
 _QT_APP_KEEPALIVE: list[object] = []
 
+_SWEEP_WINDOW_KEEPALIVE: set = set()
+_WINDOW_KEEPALIVE_FILTER: object | None = None
+
+
+def _install_window_keepalive(qtwidgets, app) -> None:
+    """Держит Python-обёртки всех окон живыми до конца текущего теста.
+
+    Уборка _qt_state_sweep умеет sip.delete только виджеты во владении
+    Python (sip.ispyowned). Но если тест потерял последнюю ссылку на своё
+    окно ещё внутри тестового метода, исходная обёртка умирает, а
+    C++-виджет остаётся жить. При следующем app.topLevelWidgets() sip
+    создаёт для него новую, уже не владеющую обёртку, и sweep вечно её
+    пропускает.
+
+    Общий фильтр событий удерживает исходные обёртки окон до teardown.
+    Виджеты, созданные самим Qt на C++-стороне (например, popup QCompleter),
+    тоже попадают в набор, но остаются not py-owned и по-прежнему удаляются
+    своим C++-владельцем.
+    """
+    global _WINDOW_KEEPALIVE_FILTER
+    if _WINDOW_KEEPALIVE_FILTER is not None:
+        return
+    from PyQt6.QtCore import QObject
+
+    class _WindowKeepaliveFilter(QObject):
+        def eventFilter(self, obj, event):  # noqa: N802
+            try:
+                if isinstance(obj, qtwidgets.QWidget) and obj.isWindow():
+                    _SWEEP_WINDOW_KEEPALIVE.add(obj)
+            except (RuntimeError, TypeError):
+                pass
+            return False
+
+    _WINDOW_KEEPALIVE_FILTER = _WindowKeepaliveFilter()
+    app.installEventFilter(_WINDOW_KEEPALIVE_FILTER)
+
 
 def _ensure_qapplication_owned() -> None:
     """Создаёт и удерживает QApplication на весь pytest-процесс.
@@ -103,6 +139,8 @@ def _ensure_qapplication_owned() -> None:
     if app is None:
         app = qtwidgets.QApplication(["pytest"])
     _QT_APP_KEEPALIVE.append(app)
+    if isinstance(app, qtwidgets.QApplication):
+        _install_window_keepalive(qtwidgets, app)
 
 
 def pytest_collection_finish(session):
@@ -184,8 +222,8 @@ def _qt_state_sweep():
 
     1. дождаться пользовательских QThread — удаление работающего потока
        (например, воркера координатора) даёт мгновенный fail-fast 0xC0000409;
-    2. выбросить ВСЕ накопленные posted-события — тест завершён, доставлять
-       их некому, а доставка в мёртвые объекты и есть источник падений;
+    2. доставить накопленные DeferredDelete — исполнить deleteLater
+       текущего теста, пока Python-обёртки живы (детали у кода ниже);
     3. спрятать и удалить оставшиеся top-level-виджеты на C++-стороне, пока
        их Python-обёртки живы (иначе циклический GC оставит от них «оболочки»
        с разрушенным Python-состоянием); скрытие до удаления обязательно —
@@ -196,8 +234,15 @@ def _qt_state_sweep():
        оставляет висячий указатель, и деструктор QCompleter добивает чужую
        память — кучa портится, и позже процесс падает 0xC0000409/0xC0000005
        в случайном месте (или «умирает» посторонний QObject вроде qconfig);
-    4. снова выбросить события, поставленные в очередь самим удалением;
-    5. только теперь собрать циклический мусор.
+    4. доставить оставшиеся queued-метавызовы (и только их) — среди них
+       живёт startTimers глобального таймера анимаций Qt, без доставки
+       которого система анимаций отравляется навсегда (детали у кода ниже);
+       посторонние метавызовы адресованы ещё живым объектам: удалённые в
+       п.3 сняли свои события сами в ~QObject;
+    5. выбросить все оставшиеся posted-события — тест завершён, доставлять
+       их некому, а доставка в мёртвые объекты и есть источник падений;
+    6. очистить реестр styleSheetManager, отпустить keepalive-обёртки окон
+       и только теперь собрать циклический мусор.
     """
     # Setup-фаза: если Qt появился по ходу прогона (ленивый импорт в тестовом
     # методе), забрать владение QApplication до следующего Qt-теста.
@@ -218,7 +263,13 @@ def _qt_state_sweep():
     if qtcore is not None:
         _quiesce_user_qthreads(qtcore)
 
-    app.removePostedEvents(None, 0)
+    # Сначала честно исполняем накопленные deleteLater текущего теста.
+    # После deleteLater sip.ispyowned становится False, поэтому прежний
+    # цикл sip.delete такие окна пропускал, а следующий removePostedEvents
+    # удалял и сам DeferredDelete. В результате C++-окна с анимациями
+    # накапливались между тестами.
+    deferred_delete = int(qtcore.QEvent.Type.DeferredDelete) if qtcore is not None else 52
+    app.sendPostedEvents(None, deferred_delete)
 
     # Некоторые тесты создают QCoreApplication — у него нет виджетов.
     if isinstance(app, qtwidgets.QApplication):
@@ -234,7 +285,25 @@ def _qt_state_sweep():
                 sip.delete(widget)
             except (RuntimeError, TypeError):
                 pass  # уже удалён (например, вместе с другим top-level)
-        app.removePostedEvents(None, 0)
+
+    # Добираем deleteLater, которые могли поставить сами деструкторы.
+    app.sendPostedEvents(None, deferred_delete)
+
+    # Старт первой QAbstractAnimation (например, индикатора SegmentedWidget)
+    # ставит queued-вызов QUnifiedTimer::startTimers и одновременно взводит
+    # внутренний флаг startTimersPending. Флаг сбрасывает только сам
+    # startTimers. Если removePostedEvents выбросит этот MetaCall, драйвер
+    # анимаций больше не запускается: finished не приходит, а fluent-диалог
+    # навсегда остаётся в exec(), ожидая завершения fade-out.
+    #
+    # Доставляем только MetaCall и только после удаления окон: так
+    # QUnifiedTimer не дотикивает осиротевшие анимации старого теста.
+    # Второй проход нужен, если первая волна поставила новый MetaCall.
+    meta_call = int(qtcore.QEvent.Type.MetaCall) if qtcore is not None else 43
+    for _ in range(2):
+        app.sendPostedEvents(None, meta_call)
+
+    app.removePostedEvents(None, 0)
 
     # Глобальный styleSheetManager qfluentwidgets держит виджеты всех
     # прошедших тестов; setThemeColor()/updateStyleSheet() в позднем тесте
@@ -248,5 +317,8 @@ def _qt_state_sweep():
             qfw_style.styleSheetManager.widgets.clear()
         except Exception:
             pass
+
+    # После удаления C++-стороны окон можно отпустить их Python-обёртки.
+    _SWEEP_WINDOW_KEEPALIVE.clear()
 
     gc.collect()

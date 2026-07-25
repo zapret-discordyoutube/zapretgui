@@ -15,6 +15,7 @@ if str(SRC_ROOT) not in sys.path:
 from updater import update
 
 
+@unittest.skipUnless(sys.platform == "win32", "запуск установщика использует Windows API")
 class UpdaterInstallerLaunchTests(unittest.TestCase):
     def _installer_path(self, temp_dir: str) -> Path:
         installer = Path(temp_dir) / "O'Brien Setup.exe"

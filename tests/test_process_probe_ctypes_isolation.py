@@ -43,6 +43,7 @@ class ProcessProbeCtypesIsolationTests(unittest.TestCase):
             "probe-функции должны жить на приватном WinDLL, а не на глобальном windll",
         )
 
+    @unittest.skipUnless(sys.platform == "win32", "снимок процессов делается через WinAPI")
     def test_both_probes_work_after_importing_both_modules(self) -> None:
         """Сценарий бага: оба модуля импортированы, оба зовут Process32FirstW."""
         shared_records = shared_probe.iter_process_records_winapi()
@@ -56,6 +57,7 @@ class ProcessProbeCtypesIsolationTests(unittest.TestCase):
         pids = winws_probe.get_canonical_winws_process_pids()
         self.assertIsInstance(pids, dict)
 
+    @unittest.skipUnless(sys.platform == "win32", "снимок процессов делается через WinAPI")
     def test_winws_entries_are_subset_of_shared_snapshot_names(self) -> None:
         winws_names = {name for _pid, name in winws_probe._iter_winws_process_entries()}
         self.assertTrue(winws_names.issubset(winws_probe._WINWS_NAME_SET))

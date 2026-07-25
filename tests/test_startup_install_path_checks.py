@@ -18,6 +18,7 @@ from config.runtime_layout import ApplicationPaths  # noqa: E402
 
 
 class StartupInstallPathChecksTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "проверка использует семантику Windows-путей")
     def test_internal_runtime_path_is_not_treated_as_install_path(self) -> None:
         with (
             patch.object(
@@ -36,6 +37,7 @@ class StartupInstallPathChecksTests(unittest.TestCase):
         self.assertFalse(has_special_chars)
         self.assertEqual(message, "")
 
+    @unittest.skipUnless(sys.platform == "win32", "проверка использует семантику Windows-путей")
     def test_onedrive_check_uses_application_root_only(self) -> None:
         with (
             patch.object(
@@ -70,6 +72,7 @@ class StartupInstallPathChecksTests(unittest.TestCase):
         self.assertTrue(has_special_chars)
         self.assertIn(r"C:\Zapret Builds\Dev", message)
 
+    @unittest.skipUnless(sys.platform == "win32", "проверка использует семантику Windows-путей")
     def test_temporary_directory_check_uses_application_root(self) -> None:
         environment = {
             "TEMP": r"C:\Users\privacy\AppData\Local\Temp",
@@ -89,6 +92,7 @@ class StartupInstallPathChecksTests(unittest.TestCase):
         ):
             self.assertTrue(check_start.check_if_application_root_is_temporary())
 
+    @unittest.skipUnless(sys.platform == "win32", "проверка использует семантику Windows-путей")
     def test_similar_directory_prefix_is_not_treated_as_temporary(self) -> None:
         environment = {
             "TEMP": r"C:\Temp",
