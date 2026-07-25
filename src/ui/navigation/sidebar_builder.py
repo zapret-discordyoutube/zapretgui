@@ -263,29 +263,58 @@ def _restore_sidebar_expanded_state(window) -> None:
 
 
 def _bind_sidebar_expanded_state(window) -> None:
+    import time as _time
+
     nav = getattr(window, "navigationInterface", None)
     signal = getattr(nav, "displayModeChanged", None)
     connect = getattr(signal, "connect", None)
     if not callable(connect):
         return
 
+    def _on_menu_button_clicked(*_args) -> None:
+        controller = get_sidebar_intent_controller(window)
+        if controller is not None:
+            controller.note_user_toggle(_time.monotonic())
+
+    # Клик по гамбургеру — единственный пользовательский способ переключить
+    # панель на широком окне; без него смены displayMode считаются программными.
+    menu_clicked = getattr(getattr(getattr(nav, "panel", None), "menuButton", None), "clicked", None)
+    menu_connect = getattr(menu_clicked, "connect", None)
+    if callable(menu_connect):
+        menu_connect(_on_menu_button_clicked)
+    else:
+        log("[SIDEBAR] кнопка-гамбургер не найдена — намерение пользователя отслеживаться не будет", "WARNING")
+
     def _on_display_mode_changed(display_mode) -> None:
         controller = get_sidebar_intent_controller(window)
         if controller is None:
             return
+        now = _time.monotonic()
         width = _window_width(window)
         new_intent = controller.classify_display_mode_change(
             display_mode,
             window_width=width,
+            now=now,
             threshold=_sidebar_expand_threshold(window),
         )
+        user_recent = controller.is_user_toggle_recent(now)
         log(
-            f"[SIDEBAR] displayMode={normalize_display_mode_name(display_mode)}, width={width} → "
-            f"intent={'без изменений' if new_intent is None else new_intent}",
+            f"[SIDEBAR] displayMode={normalize_display_mode_name(display_mode)}, width={width}, "
+            f"user_toggle={user_recent} → intent={'без изменений' if new_intent is None else new_intent}",
             "INFO",
         )
         if new_intent is not None:
             _start_sidebar_expanded_save_worker(window, new_intent)
+            return
+        if not controller.applying and not user_recent:
+            # Программное сворачивание (maximize на старте и т.п.): вернуть
+            # панель к намерению пользователя сразу после завершения перехода.
+            QTimer.singleShot(
+                0,
+                lambda current_window=window: _reapply_sidebar_intent_if_diverged(
+                    current_window, reason="программная смена displayMode"
+                ),
+            )
 
     connect(_on_display_mode_changed)
 
@@ -329,22 +358,26 @@ def reapply_sidebar_intent_on_resize(window) -> bool:
     return False
 
 
-def _recheck_sidebar_intent_after_init(window) -> None:
-    """Страховка: если после старта панель свёрнута вопреки намерению — разворачивает.
+def _reapply_sidebar_intent_if_diverged(window, *, reason: str) -> None:
+    """Страховка: если панель свёрнута вопреки намерению — разворачивает.
 
-    WARNING в логе здесь — диагностический сигнал: основное восстановление в
-    init_navigation по какой-то причине не удержало панель развёрнутой.
+    WARNING в логе здесь — диагностический сигнал: панель оказалась свёрнута
+    без действия пользователя (программный переход или сбой восстановления).
     """
     try:
         if get_window_ui_session(window) is None:
             return
         if reapply_sidebar_intent_on_resize(window):
             log(
-                "[SIDEBAR] панель оказалась свёрнута после старта вопреки сохранённому намерению — развёрнута повторно",
+                f"[SIDEBAR] панель была свёрнута вопреки сохранённому намерению ({reason}) — развёрнута повторно",
                 "WARNING",
             )
     except Exception as e:
-        log(f"[SIDEBAR] перепроверка состояния панели после старта не удалась: {e}", "DEBUG")
+        log(f"[SIDEBAR] перепроверка состояния панели не удалась ({reason}): {e}", "DEBUG")
+
+
+def _recheck_sidebar_intent_after_init(window) -> None:
+    _reapply_sidebar_intent_if_diverged(window, reason="перепроверка после старта")
 
 
 def _scroll_layout_index(window, widget) -> int:

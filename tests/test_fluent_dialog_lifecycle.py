@@ -84,6 +84,47 @@ class FluentDialogLifecycleTests(unittest.TestCase):
 
         self.assertEqual(uncaught, [])
 
+    def test_event_filter_is_silent_without_window_mask_attribute(self) -> None:
+        # Регрессия v21.1.5.19: событие приходило в eventFilter во время
+        # зачистки Python-объекта, когда windowMask уже удалён →
+        # AttributeError: 'CloseDialog' object has no attribute 'windowMask'.
+        from PyQt6.QtCore import QEvent
+
+        parent = self._parent()
+        dialog = CloseDialog(parent, launch_running=True)
+        self.addCleanup(dialog.deleteLater)
+
+        dialog.__dict__.pop("windowMask")
+
+        result = dialog.eventFilter(parent, QEvent(QEvent.Type.Resize))
+
+        self.assertFalse(result)
+
+    def test_exec_detaches_window_mask_and_center_widget_filters(self) -> None:
+        parent = self._parent()
+        dialog = CloseDialog(parent, launch_running=True)
+        self.addCleanup(dialog.deleteLater)
+
+        removed: list[object] = []
+
+        def _track_removal(target):
+            original = target.removeEventFilter
+
+            def _tracking_remove(event_filter):
+                removed.append((target, event_filter))
+                original(event_filter)
+
+            target.removeEventFilter = _tracking_remove
+
+        _track_removal(dialog.windowMask)
+        _track_removal(dialog.widget)
+
+        QTimer.singleShot(0, dialog.reject)
+        self.assertEqual(dialog.exec(), 0)
+
+        self.assertIn((dialog.windowMask, dialog), removed)
+        self.assertIn((dialog.widget, dialog), removed)
+
     def test_application_does_not_import_unmanaged_message_boxes(self) -> None:
         offenders: list[str] = []
         for path in (ROOT / "src").rglob("*.py"):

@@ -703,6 +703,11 @@ class PresetSidebarNavigationTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.headers = []
                 self.displayModeChanged = FakeSignal()
+                self.panel = SimpleNamespace(
+                    minimumExpandWidth=700,
+                    isCollapsed=lambda: False,
+                    menuButton=SimpleNamespace(clicked=FakeSignal()),
+                )
 
             def addItemHeader(self, text, position):
                 header = SimpleNamespace(text=text, position=position)
@@ -776,6 +781,9 @@ class PresetSidebarNavigationTests(unittest.TestCase):
             )
             create_worker.return_value = worker
             sidebar_builder.init_navigation(window)
+            # Пользовательское сворачивание — это клик по гамбургеру и затем
+            # смена displayMode; без клика переход считается программным.
+            nav.panel.menuButton.clicked.emit(SimpleNamespace(name="clicked"))
             nav.displayModeChanged.emit(SimpleNamespace(name="COMPACT"))
 
         create_worker.assert_called_once()

@@ -26,12 +26,16 @@ class SidebarIntentControllerTests(unittest.TestCase):
 
         return SidebarIntentController(intent=intent, last_saved=last_saved)
 
+    def _classify_after_user_toggle(self, controller, mode, *, window_width: int, threshold: int = 700):
+        controller.note_user_toggle(100.0)
+        return controller.classify_display_mode_change(
+            mode, window_width=window_width, now=100.2, threshold=threshold
+        )
+
     def test_auto_collapse_on_narrow_window_does_not_change_intent(self) -> None:
         controller = self._controller(intent=True)
 
-        result = controller.classify_display_mode_change(
-            _mode("COMPACT"), window_width=680, threshold=700
-        )
+        result = self._classify_after_user_toggle(controller, _mode("COMPACT"), window_width=680)
 
         self.assertIsNone(result)
         self.assertTrue(controller.intent)
@@ -39,9 +43,7 @@ class SidebarIntentControllerTests(unittest.TestCase):
     def test_user_collapse_on_wide_window_changes_intent(self) -> None:
         controller = self._controller(intent=True)
 
-        result = controller.classify_display_mode_change(
-            _mode("COMPACT"), window_width=900, threshold=700
-        )
+        result = self._classify_after_user_toggle(controller, _mode("COMPACT"), window_width=900)
 
         self.assertFalse(result)
         self.assertFalse(controller.intent)
@@ -49,9 +51,7 @@ class SidebarIntentControllerTests(unittest.TestCase):
     def test_user_expand_on_wide_window_changes_intent(self) -> None:
         controller = self._controller(intent=False)
 
-        result = controller.classify_display_mode_change(
-            _mode("EXPAND"), window_width=900, threshold=700
-        )
+        result = self._classify_after_user_toggle(controller, _mode("EXPAND"), window_width=900)
 
         self.assertTrue(result)
         self.assertTrue(controller.intent)
@@ -59,18 +59,14 @@ class SidebarIntentControllerTests(unittest.TestCase):
     def test_minimal_mode_is_treated_as_collapse(self) -> None:
         controller = self._controller(intent=True)
 
-        result = controller.classify_display_mode_change(
-            _mode("MINIMAL"), window_width=900, threshold=700
-        )
+        result = self._classify_after_user_toggle(controller, _mode("MINIMAL"), window_width=900)
 
         self.assertFalse(result)
 
     def test_menu_overlay_transitions_are_ignored(self) -> None:
         controller = self._controller(intent=False)
 
-        result = controller.classify_display_mode_change(
-            _mode("MENU"), window_width=680, threshold=700
-        )
+        result = self._classify_after_user_toggle(controller, _mode("MENU"), window_width=680)
 
         self.assertIsNone(result)
         self.assertFalse(controller.intent)
@@ -78,9 +74,7 @@ class SidebarIntentControllerTests(unittest.TestCase):
     def test_expand_on_narrow_window_is_ignored(self) -> None:
         controller = self._controller(intent=False)
 
-        result = controller.classify_display_mode_change(
-            _mode("EXPAND"), window_width=680, threshold=700
-        )
+        result = self._classify_after_user_toggle(controller, _mode("EXPAND"), window_width=680)
 
         self.assertIsNone(result)
         self.assertFalse(controller.intent)
@@ -88,9 +82,7 @@ class SidebarIntentControllerTests(unittest.TestCase):
     def test_unchanged_intent_produces_no_save(self) -> None:
         controller = self._controller(intent=True)
 
-        result = controller.classify_display_mode_change(
-            _mode("EXPAND"), window_width=900, threshold=700
-        )
+        result = self._classify_after_user_toggle(controller, _mode("EXPAND"), window_width=900)
 
         self.assertIsNone(result)
 
@@ -98,9 +90,7 @@ class SidebarIntentControllerTests(unittest.TestCase):
         controller = self._controller(intent=True)
         controller.applying = True
 
-        result = controller.classify_display_mode_change(
-            _mode("COMPACT"), window_width=900, threshold=700
-        )
+        result = self._classify_after_user_toggle(controller, _mode("COMPACT"), window_width=900)
 
         self.assertIsNone(result)
         self.assertTrue(controller.intent)
@@ -108,11 +98,37 @@ class SidebarIntentControllerTests(unittest.TestCase):
     def test_raw_string_display_mode_is_accepted(self) -> None:
         controller = self._controller(intent=True)
 
-        result = controller.classify_display_mode_change(
-            "compact", window_width=900, threshold=700
-        )
+        result = self._classify_after_user_toggle(controller, "compact", window_width=900)
 
         self.assertFalse(result)
+
+    def test_programmatic_collapse_without_recent_toggle_is_ignored(self) -> None:
+        # Регрессия: применение maximized на старте сворачивало панель, COMPACT
+        # эмитился уже на широком окне и затирал сохранённое «развёрнуто».
+        controller = self._controller(intent=True)
+
+        result = controller.classify_display_mode_change(
+            _mode("COMPACT"), window_width=1920, now=100.0, threshold=700
+        )
+
+        self.assertIsNone(result)
+        self.assertTrue(controller.intent)
+
+    def test_stale_user_toggle_does_not_classify_late_transition(self) -> None:
+        from ui.navigation.sidebar_intent import USER_TOGGLE_INTENT_WINDOW_S
+
+        controller = self._controller(intent=True)
+        controller.note_user_toggle(100.0)
+
+        result = controller.classify_display_mode_change(
+            _mode("COMPACT"),
+            window_width=900,
+            now=100.0 + USER_TOGGLE_INTENT_WINDOW_S + 0.1,
+            threshold=700,
+        )
+
+        self.assertIsNone(result)
+        self.assertTrue(controller.intent)
 
     def test_reapply_expand_only_when_wide_collapsed_and_intended(self) -> None:
         controller = self._controller(intent=True)
@@ -150,7 +166,7 @@ class SidebarIntentControllerTests(unittest.TestCase):
         controller.mark_flushed(True)
         self.assertIsNone(controller.pending_flush())
 
-        controller.classify_display_mode_change(_mode("COMPACT"), window_width=900, threshold=700)
+        self._classify_after_user_toggle(controller, _mode("COMPACT"), window_width=900)
         self.assertFalse(controller.pending_flush())
 
         controller.mark_flushed(False)
@@ -178,7 +194,11 @@ class SidebarBuilderIntentBindingTests(unittest.TestCase):
     def _make_window(self, *, intent: bool, width: int, threshold: int = 700):
         from ui.navigation.sidebar_intent import SidebarIntentController
 
-        panel = SimpleNamespace(minimumExpandWidth=threshold, isCollapsed=lambda: True)
+        panel = SimpleNamespace(
+            minimumExpandWidth=threshold,
+            isCollapsed=lambda: True,
+            menuButton=SimpleNamespace(clicked=_FakeSignal()),
+        )
         nav = SimpleNamespace(
             displayModeChanged=_FakeSignal(),
             panel=panel,
@@ -194,13 +214,19 @@ class SidebarBuilderIntentBindingTests(unittest.TestCase):
         )
         return window, nav, session
 
+    def _click_menu_button(self, nav) -> None:
+        nav.panel.menuButton.clicked.emit(False)
+
     def test_responsive_collapse_does_not_start_save_worker(self) -> None:
         import ui.navigation.sidebar_builder as sidebar_builder
 
         window, nav, session = self._make_window(intent=True, width=680)
         sidebar_builder._bind_sidebar_expanded_state(window)
 
-        with patch.object(sidebar_builder, "_start_sidebar_expanded_save_worker") as start_worker:
+        with (
+            patch.object(sidebar_builder, "_start_sidebar_expanded_save_worker") as start_worker,
+            patch.object(sidebar_builder.QTimer, "singleShot"),
+        ):
             nav.displayModeChanged.emit(_mode("COMPACT"))
 
         start_worker.assert_not_called()
@@ -213,6 +239,7 @@ class SidebarBuilderIntentBindingTests(unittest.TestCase):
         sidebar_builder._bind_sidebar_expanded_state(window)
 
         with patch.object(sidebar_builder, "_start_sidebar_expanded_save_worker") as start_worker:
+            self._click_menu_button(nav)
             nav.displayModeChanged.emit(_mode("COMPACT"))
 
         start_worker.assert_called_once_with(window, False)
@@ -224,12 +251,43 @@ class SidebarBuilderIntentBindingTests(unittest.TestCase):
         window, nav, session = self._make_window(intent=True, width=680)
         sidebar_builder._bind_sidebar_expanded_state(window)
 
-        with patch.object(sidebar_builder, "_start_sidebar_expanded_save_worker") as start_worker:
+        with (
+            patch.object(sidebar_builder, "_start_sidebar_expanded_save_worker") as start_worker,
+            patch.object(sidebar_builder.QTimer, "singleShot"),
+        ):
+            self._click_menu_button(nav)
             nav.displayModeChanged.emit(_mode("MENU"))
             nav.displayModeChanged.emit(_mode("COMPACT"))
 
         start_worker.assert_not_called()
         self.assertTrue(session.sidebar_intent_controller.intent)
+
+    def test_programmatic_collapse_without_click_is_ignored_and_reapplied(self) -> None:
+        # Регрессия maximize-на-старте: COMPACT на широком окне без клика по
+        # гамбургеру не должен менять намерение и обязан вернуть панель назад.
+        import ui.navigation.sidebar_builder as sidebar_builder
+
+        window, nav, session = self._make_window(intent=True, width=1920)
+        sidebar_builder._bind_sidebar_expanded_state(window)
+        scheduled: list = []
+
+        with (
+            patch.object(sidebar_builder, "_start_sidebar_expanded_save_worker") as start_worker,
+            patch.object(
+                sidebar_builder.QTimer,
+                "singleShot",
+                side_effect=lambda _delay_ms, callback: scheduled.append(callback),
+            ),
+        ):
+            nav.displayModeChanged.emit(_mode("COMPACT"))
+
+            start_worker.assert_not_called()
+            self.assertTrue(session.sidebar_intent_controller.intent)
+            self.assertEqual(len(scheduled), 1)
+
+            scheduled[0]()
+
+        nav.expand.assert_called_once_with(False)
 
     def test_reapply_on_resize_expands_when_intent_is_expanded(self) -> None:
         import ui.navigation.sidebar_builder as sidebar_builder

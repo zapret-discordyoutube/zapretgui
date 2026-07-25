@@ -5,6 +5,11 @@ from dataclasses import dataclass
 
 DEFAULT_EXPAND_THRESHOLD = 700
 
+# Сколько секунд после клика по гамбургеру смена displayMode считается
+# действием пользователя. Покрывает анимацию сворачивания (~200ms) с запасом
+# на медленные машины; более поздние переходы — программные.
+USER_TOGGLE_INTENT_WINDOW_S = 2.0
+
 _EXPANDED_MODE = "EXPAND"
 _OVERLAY_MODE = "MENU"
 _COLLAPSED_MODES = frozenset({"COMPACT", "MINIMAL"})
@@ -19,23 +24,36 @@ class SidebarIntentController:
     """Владелец намерения пользователя «сайдбар развёрнут».
 
     qfluentwidgets меняет displayMode и по действиям пользователя, и сам —
-    responsive-сворачивание при сужении окна ниже minimumExpandWidth и
-    MENU-оверлей на узких окнах. Персистится только намерение пользователя,
-    поэтому события классифицируются по ширине окна на момент сигнала:
-    ниже порога закреплённый EXPAND недоступен, значит смена режима там
-    не может быть осознанным выбором «свернуть навсегда».
+    responsive-сворачивание, MENU-оверлей на узких окнах и переходные
+    сворачивания при смене размеров окна (например, применение maximized на
+    старте). Сигнал COMPACT при этом эмитится в конце анимации, когда окно
+    уже может быть широким, поэтому ширина окна в момент сигнала не отличает
+    пользователя от программной механики. Намерением считается только смена
+    режима вскоре после клика по кнопке-гамбургеру (note_user_toggle).
     """
 
     intent: bool
     last_saved: bool | None = None
     applying: bool = False
     flushed: bool | None = None
+    last_user_toggle_at: float | None = None
+
+    def note_user_toggle(self, now: float) -> None:
+        """Отмечает клик пользователя по кнопке-гамбургеру (монотонные секунды)."""
+        self.last_user_toggle_at = float(now)
+
+    def is_user_toggle_recent(self, now: float) -> bool:
+        if self.last_user_toggle_at is None:
+            return False
+        elapsed = float(now) - self.last_user_toggle_at
+        return 0.0 <= elapsed <= USER_TOGGLE_INTENT_WINDOW_S
 
     def classify_display_mode_change(
         self,
         display_mode,
         *,
         window_width: int,
+        now: float,
         threshold: int = DEFAULT_EXPAND_THRESHOLD,
     ) -> bool | None:
         """Возвращает новое намерение для сохранения или None (игнорировать)."""
@@ -51,6 +69,10 @@ class SidebarIntentController:
             new_intent = False
         else:
             # MENU-оверлей и любые переходы на узком окне — responsive-механика.
+            return None
+
+        if not self.is_user_toggle_recent(now):
+            # Программный переход (старт, maximize, responsive) — не намерение.
             return None
 
         if new_intent == self.intent:
@@ -95,6 +117,7 @@ class SidebarIntentController:
 
 __all__ = [
     "DEFAULT_EXPAND_THRESHOLD",
+    "USER_TOGGLE_INTENT_WINDOW_S",
     "SidebarIntentController",
     "normalize_display_mode_name",
 ]
