@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -810,6 +811,50 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 )
                 self.assertEqual(result_data["status"], "failed")
                 self.assertIn("confirm_release", result_data["error"])
+        finally:
+            sys.modules.pop("build_zapret.scheduled_release_task", None)
+            sys.path[:] = old_path
+
+    def test_scheduled_release_task_decodes_utf8_changes_without_windows_console(self) -> None:
+        old_path = list(sys.path)
+        sys.path.insert(0, str(PRIVATE_ROOT))
+        try:
+            sys.modules.pop("build_zapret.scheduled_release_task", None)
+            from build_zapret import scheduled_release_task
+
+            changes = (
+                "Интерфейс больше не зависает.\n"
+                "Русский текст передаётся без OEM-кодировки Windows."
+            )
+            encoded_changes = base64.b64encode(
+                changes.encode("utf-8")
+            ).decode("ascii")
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                task_root = Path(temp_dir)
+                (task_root / "request.json").write_text(
+                    json.dumps(
+                        {
+                            "request_id": "preview-utf8-base64",
+                            "changes_utf8_base64": encoded_changes,
+                            "args": ["--show-plan"],
+                        },
+                        ensure_ascii=True,
+                    ),
+                    encoding="utf-8",
+                )
+
+                captured_args: list[str] = []
+                with patch.object(
+                    scheduled_release_task,
+                    "release_main",
+                    side_effect=lambda args: captured_args.extend(args) or 0,
+                ):
+                    result = scheduled_release_task.run_task(task_root)
+
+                self.assertEqual(result, 0)
+                self.assertEqual(captured_args[-2:], ["--changes", changes])
+                self.assertNotIn("╨", captured_args[-1])
         finally:
             sys.modules.pop("build_zapret.scheduled_release_task", None)
             sys.path[:] = old_path
