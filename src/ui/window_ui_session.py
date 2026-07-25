@@ -50,6 +50,7 @@ class WindowUiSession:
     sidebar_search_profile_loader: Callable[[str], tuple[object, ...]] | None = None
     sidebar_search_preset_loader: Callable[[str], tuple[object, ...]] | None = None
     sidebar_intent_controller: Any | None = None
+    sidebar_menu_button_event_filter: Any | None = None
     sidebar_expanded_save_worker_factory: Callable[..., Any] | None = None
     sidebar_expanded_save_runtime: OneShotWorkerRuntime = field(default_factory=OneShotWorkerRuntime)
     sidebar_expanded_save_state: LatestValueWorkerState | None = None

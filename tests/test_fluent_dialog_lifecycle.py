@@ -100,6 +100,20 @@ class FluentDialogLifecycleTests(unittest.TestCase):
 
         self.assertFalse(result)
 
+    def test_event_filter_is_silent_without_center_widget_attribute(self) -> None:
+        from PyQt6.QtCore import QEvent
+
+        parent = self._parent()
+        dialog = CloseDialog(parent, launch_running=True)
+        self.addCleanup(dialog.deleteLater)
+        center_widget = dialog.widget
+
+        dialog.__dict__.pop("widget")
+
+        result = dialog.eventFilter(center_widget, QEvent(QEvent.Type.Resize))
+
+        self.assertFalse(result)
+
     def test_exec_detaches_window_mask_and_center_widget_filters(self) -> None:
         parent = self._parent()
         dialog = CloseDialog(parent, launch_running=True)

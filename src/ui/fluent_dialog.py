@@ -20,10 +20,15 @@ class _ManagedMaskDialogLifecycle:
     """
 
     def __init__(self, *args, **kwargs):
+        # Ставится до qfluentwidgets: если фильтр получит событие прямо во время
+        # неполной инициализации, eventFilter безопасно его пропустит.
+        self._mask_event_filter_ready = False
         super().__init__(*args, **kwargs)
         self._mask_event_filter_host = self.window()
+        self._mask_event_filter_ready = True
 
     def _detach_mask_event_filter(self) -> None:
+        self._mask_event_filter_ready = False
         host = getattr(self, "_mask_event_filter_host", None)
         self._mask_event_filter_host = None
         watched = (
@@ -41,9 +46,13 @@ class _ManagedMaskDialogLifecycle:
                 pass
 
     def eventFilter(self, obj, e):  # noqa: N802 (Qt API)
-        if getattr(self, "windowMask", None) is None:
+        if (
+            not getattr(self, "_mask_event_filter_ready", False)
+            or getattr(self, "windowMask", None) is None
+            or getattr(self, "widget", None) is None
+        ):
             # Событие пришло до полной инициализации или во время зачистки
-            # диалога — базовый eventFilter упал бы на self.windowMask.
+            # диалога — базовый eventFilter обращается к обоим дочерним объектам.
             return False
         return super().eventFilter(obj, e)
 

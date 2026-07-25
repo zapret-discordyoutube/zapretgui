@@ -703,10 +703,14 @@ class PresetSidebarNavigationTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.headers = []
                 self.displayModeChanged = FakeSignal()
+                menu_button = SimpleNamespace(event_filter=None)
+                menu_button.installEventFilter = (
+                    lambda event_filter: setattr(menu_button, "event_filter", event_filter)
+                )
                 self.panel = SimpleNamespace(
                     minimumExpandWidth=700,
                     isCollapsed=lambda: False,
-                    menuButton=SimpleNamespace(clicked=FakeSignal()),
+                    menuButton=menu_button,
                 )
 
             def addItemHeader(self, text, position):
@@ -781,9 +785,12 @@ class PresetSidebarNavigationTests(unittest.TestCase):
             )
             create_worker.return_value = worker
             sidebar_builder.init_navigation(window)
-            # Пользовательское сворачивание — это клик по гамбургеру и затем
-            # смена displayMode; без клика переход считается программным.
-            nav.panel.menuButton.clicked.emit(SimpleNamespace(name="clicked"))
+            from PyQt6.QtCore import QEvent
+
+            nav.panel.menuButton.event_filter.eventFilter(
+                nav.panel.menuButton,
+                QEvent(QEvent.Type.MouseButtonRelease),
+            )
             nav.displayModeChanged.emit(SimpleNamespace(name="COMPACT"))
 
         create_worker.assert_called_once()

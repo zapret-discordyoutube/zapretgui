@@ -29,7 +29,10 @@ class SidebarIntentControllerTests(unittest.TestCase):
     def _classify_after_user_toggle(self, controller, mode, *, window_width: int, threshold: int = 700):
         controller.note_user_toggle(100.0)
         return controller.classify_display_mode_change(
-            mode, window_width=window_width, now=100.2, threshold=threshold
+            mode,
+            window_width=window_width,
+            user_initiated=controller.consume_user_toggle(100.2),
+            threshold=threshold,
         )
 
     def test_auto_collapse_on_narrow_window_does_not_change_intent(self) -> None:
@@ -108,7 +111,10 @@ class SidebarIntentControllerTests(unittest.TestCase):
         controller = self._controller(intent=True)
 
         result = controller.classify_display_mode_change(
-            _mode("COMPACT"), window_width=1920, now=100.0, threshold=700
+            _mode("COMPACT"),
+            window_width=1920,
+            user_initiated=controller.consume_user_toggle(100.0),
+            threshold=700,
         )
 
         self.assertIsNone(result)
@@ -120,14 +126,49 @@ class SidebarIntentControllerTests(unittest.TestCase):
         controller = self._controller(intent=True)
         controller.note_user_toggle(100.0)
 
+        user_initiated = controller.consume_user_toggle(
+            100.0 + USER_TOGGLE_INTENT_WINDOW_S + 0.1
+        )
         result = controller.classify_display_mode_change(
             _mode("COMPACT"),
             window_width=900,
-            now=100.0 + USER_TOGGLE_INTENT_WINDOW_S + 0.1,
+            user_initiated=user_initiated,
             threshold=700,
         )
 
+        self.assertFalse(user_initiated)
         self.assertIsNone(result)
+        self.assertTrue(controller.intent)
+
+    def test_user_toggle_is_consumed_by_only_one_display_mode_change(self) -> None:
+        controller = self._controller(intent=True)
+        controller.note_user_toggle(100.0)
+
+        first = controller.consume_user_toggle(100.1)
+        second = controller.consume_user_toggle(100.2)
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+
+    def test_menu_transition_consumes_toggle_before_later_programmatic_collapse(self) -> None:
+        controller = self._controller(intent=True)
+        controller.note_user_toggle(100.0)
+
+        menu_result = controller.classify_display_mode_change(
+            _mode("MENU"),
+            window_width=680,
+            user_initiated=controller.consume_user_toggle(100.1),
+            threshold=700,
+        )
+        collapse_result = controller.classify_display_mode_change(
+            _mode("COMPACT"),
+            window_width=900,
+            user_initiated=controller.consume_user_toggle(100.2),
+            threshold=700,
+        )
+
+        self.assertIsNone(menu_result)
+        self.assertIsNone(collapse_result)
         self.assertTrue(controller.intent)
 
     def test_reapply_expand_only_when_wide_collapsed_and_intended(self) -> None:
@@ -185,9 +226,17 @@ class _FakeSignal:
     def connect(self, callback) -> None:
         self.callback = callback
 
-    def emit(self, value) -> None:
+    def emit(self, value=None) -> None:
         if self.callback is not None:
             self.callback(value)
+
+
+class _FakeMenuButton:
+    def __init__(self) -> None:
+        self.event_filter = None
+
+    def installEventFilter(self, event_filter) -> None:  # noqa: N802 (Qt API)
+        self.event_filter = event_filter
 
 
 class SidebarBuilderIntentBindingTests(unittest.TestCase):
@@ -197,7 +246,7 @@ class SidebarBuilderIntentBindingTests(unittest.TestCase):
         panel = SimpleNamespace(
             minimumExpandWidth=threshold,
             isCollapsed=lambda: True,
-            menuButton=SimpleNamespace(clicked=_FakeSignal()),
+            menuButton=_FakeMenuButton(),
         )
         nav = SimpleNamespace(
             displayModeChanged=_FakeSignal(),
@@ -215,7 +264,14 @@ class SidebarBuilderIntentBindingTests(unittest.TestCase):
         return window, nav, session
 
     def _click_menu_button(self, nav) -> None:
-        nav.panel.menuButton.clicked.emit(False)
+        from PyQt6.QtCore import QEvent
+
+        event_filter = nav.panel.menuButton.event_filter
+        self.assertIsNotNone(event_filter)
+        event_filter.eventFilter(
+            nav.panel.menuButton,
+            QEvent(QEvent.Type.MouseButtonRelease),
+        )
 
     def test_responsive_collapse_does_not_start_save_worker(self) -> None:
         import ui.navigation.sidebar_builder as sidebar_builder
@@ -244,6 +300,49 @@ class SidebarBuilderIntentBindingTests(unittest.TestCase):
 
         start_worker.assert_called_once_with(window, False)
         self.assertFalse(session.sidebar_intent_controller.intent)
+
+    def test_real_qfluent_expand_signal_after_user_activation_is_saved(self) -> None:
+        """Регрессия: qfluentwidgets эмитит EXPAND внутри clicked -> toggle()."""
+        import os
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+        from PyQt6.QtWidgets import QApplication, QWidget
+        from qfluentwidgets import NavigationInterface
+
+        import ui.navigation.sidebar_builder as sidebar_builder
+        from ui.navigation.sidebar_intent import SidebarIntentController
+
+        app = QApplication.instance() or QApplication([])
+        window = QWidget()
+        window.resize(900, 600)
+        nav = NavigationInterface(window)
+        nav.resize(900, 600)
+        nav.setMinimumExpandWidth(700)
+        window.navigationInterface = nav
+        window.ui_session = SimpleNamespace(
+            sidebar_intent_controller=SidebarIntentController(
+                intent=False,
+                last_saved=False,
+            ),
+        )
+        window.show()
+        app.processEvents()
+        self.addCleanup(window.deleteLater)
+
+        sidebar_builder._bind_sidebar_expanded_state(window)
+
+        with patch.object(
+            sidebar_builder,
+            "_start_sidebar_expanded_save_worker",
+        ) as start_worker:
+            QTest.mouseClick(nav.panel.menuButton, Qt.MouseButton.LeftButton)
+            app.processEvents()
+
+        start_worker.assert_called_once_with(window, True)
+        self.assertTrue(window.ui_session.sidebar_intent_controller.intent)
 
     def test_menu_overlay_close_does_not_start_save_worker(self) -> None:
         import ui.navigation.sidebar_builder as sidebar_builder

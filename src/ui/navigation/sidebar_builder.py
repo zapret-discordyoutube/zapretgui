@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QEvent, QObject, QTimer
 from PyQt6.QtWidgets import QWidget
 
 from log.log import log
@@ -37,6 +37,19 @@ SIDEBAR_SECONDARY_GROUPS_AFTER_INTERACTIVE_MS = 150
 SIDEBAR_SECONDARY_GROUP_STEP_MS = 6
 SIDEBAR_EXPANDED_UI_STATE_KEY = "sidebar_expanded"
 SIDEBAR_INTENT_RECHECK_AFTER_INIT_MS = 1500
+
+
+class _SidebarMenuButtonActivationFilter(QObject):
+    """Отмечает физический отпуск кнопки до clicked -> toggle библиотеки."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent if isinstance(parent, QObject) else None)
+        self._callback = callback
+
+    def eventFilter(self, watched, event):  # noqa: N802 (Qt API)
+        if event.type() == QEvent.Type.MouseButtonRelease:
+            self._callback()
+        return False
 
 
 def _get_page_host(window):
@@ -271,17 +284,26 @@ def _bind_sidebar_expanded_state(window) -> None:
     if not callable(connect):
         return
 
-    def _on_menu_button_clicked(*_args) -> None:
+    def _on_menu_button_activated(*_args) -> None:
         controller = get_sidebar_intent_controller(window)
         if controller is not None:
             controller.note_user_toggle(_time.monotonic())
 
-    # Клик по гамбургеру — единственный пользовательский способ переключить
-    # панель на широком окне; без него смены displayMode считаются программными.
-    menu_clicked = getattr(getattr(getattr(nav, "panel", None), "menuButton", None), "clicked", None)
-    menu_connect = getattr(menu_clicked, "connect", None)
-    if callable(menu_connect):
-        menu_connect(_on_menu_button_clicked)
+    # NavigationToolButton не имеет сигнала pressed. Его mouseReleaseEvent
+    # эмитит clicked, а фильтр получает MouseButtonRelease перед этим методом.
+    # Поэтому отметка уже существует, когда qfluentwidgets внутри clicked ->
+    # toggle() синхронно эмитит EXPAND.
+    menu_button = getattr(getattr(nav, "panel", None), "menuButton", None)
+    install_filter = getattr(menu_button, "installEventFilter", None)
+    if callable(install_filter):
+        activation_filter = _SidebarMenuButtonActivationFilter(
+            _on_menu_button_activated,
+            parent=menu_button,
+        )
+        install_filter(activation_filter)
+        session = get_window_ui_session(window)
+        if session is not None:
+            session.sidebar_menu_button_event_filter = activation_filter
     else:
         log("[SIDEBAR] кнопка-гамбургер не найдена — намерение пользователя отслеживаться не будет", "WARNING")
 
@@ -290,23 +312,23 @@ def _bind_sidebar_expanded_state(window) -> None:
         if controller is None:
             return
         now = _time.monotonic()
+        user_toggle = controller.consume_user_toggle(now)
         width = _window_width(window)
         new_intent = controller.classify_display_mode_change(
             display_mode,
             window_width=width,
-            now=now,
+            user_initiated=user_toggle,
             threshold=_sidebar_expand_threshold(window),
         )
-        user_recent = controller.is_user_toggle_recent(now)
         log(
             f"[SIDEBAR] displayMode={normalize_display_mode_name(display_mode)}, width={width}, "
-            f"user_toggle={user_recent} → intent={'без изменений' if new_intent is None else new_intent}",
+            f"user_toggle={user_toggle} → intent={'без изменений' if new_intent is None else new_intent}",
             "INFO",
         )
         if new_intent is not None:
             _start_sidebar_expanded_save_worker(window, new_intent)
             return
-        if not controller.applying and not user_recent:
+        if not controller.applying and not user_toggle:
             # Программное сворачивание (maximize на старте и т.п.): вернуть
             # панель к намерению пользователя сразу после завершения перехода.
             QTimer.singleShot(

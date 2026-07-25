@@ -5,9 +5,10 @@ from dataclasses import dataclass
 
 DEFAULT_EXPAND_THRESHOLD = 700
 
-# Сколько секунд после клика по гамбургеру смена displayMode считается
-# действием пользователя. Покрывает анимацию сворачивания (~200ms) с запасом
-# на медленные машины; более поздние переходы — программные.
+# Сколько секунд одноразовая отметка нажатия на гамбургер ждёт связанный
+# displayModeChanged. Срок покрывает анимацию сворачивания (~150ms) с запасом
+# на медленные машины; первый сигнал забирает отметку без возможности повторного
+# использования.
 USER_TOGGLE_INTENT_WINDOW_S = 2.0
 
 _EXPANDED_MODE = "EXPAND"
@@ -29,23 +30,28 @@ class SidebarIntentController:
     старте). Сигнал COMPACT при этом эмитится в конце анимации, когда окно
     уже может быть широким, поэтому ширина окна в момент сигнала не отличает
     пользователя от программной механики. Намерением считается только смена
-    режима вскоре после клика по кнопке-гамбургеру (note_user_toggle).
+    режима после подтверждённого нажатия на кнопку-гамбургер. Нажатие отмечается
+    до внутреннего toggle() библиотеки, а ближайший displayModeChanged
+    одноразово забирает отметку через consume_user_toggle().
     """
 
     intent: bool
     last_saved: bool | None = None
     applying: bool = False
     flushed: bool | None = None
-    last_user_toggle_at: float | None = None
+    pending_user_toggle_at: float | None = None
 
     def note_user_toggle(self, now: float) -> None:
-        """Отмечает клик пользователя по кнопке-гамбургеру (монотонные секунды)."""
-        self.last_user_toggle_at = float(now)
+        """Отмечает нажатие на гамбургер до запуска toggle() библиотеки."""
+        self.pending_user_toggle_at = float(now)
 
-    def is_user_toggle_recent(self, now: float) -> bool:
-        if self.last_user_toggle_at is None:
+    def consume_user_toggle(self, now: float) -> bool:
+        """Одноразово подтверждает, что ближайшая смена режима вызвана нажатием."""
+        started_at = self.pending_user_toggle_at
+        self.pending_user_toggle_at = None
+        if started_at is None:
             return False
-        elapsed = float(now) - self.last_user_toggle_at
+        elapsed = float(now) - started_at
         return 0.0 <= elapsed <= USER_TOGGLE_INTENT_WINDOW_S
 
     def classify_display_mode_change(
@@ -53,7 +59,7 @@ class SidebarIntentController:
         display_mode,
         *,
         window_width: int,
-        now: float,
+        user_initiated: bool,
         threshold: int = DEFAULT_EXPAND_THRESHOLD,
     ) -> bool | None:
         """Возвращает новое намерение для сохранения или None (игнорировать)."""
@@ -71,7 +77,7 @@ class SidebarIntentController:
             # MENU-оверлей и любые переходы на узком окне — responsive-механика.
             return None
 
-        if not self.is_user_toggle_recent(now):
+        if not bool(user_initiated):
             # Программный переход (старт, maximize, responsive) — не намерение.
             return None
 
