@@ -5,7 +5,6 @@ import time
 from log.log import log
 from main.post_startup_gate import bind_startup_gate, is_startup_host_alive
 from main.post_startup_threading import enqueue_subsystem_task, schedule_after
-from settings.dpi.strategy_settings import get_strategy_launch_method
 from settings.mode import ZAPRET1_MODE, ZAPRET2_MODE, is_preset_launch_method, normalize_launch_method
 from ui.performance_metrics import log_ui_timing_since
 
@@ -27,6 +26,7 @@ def install_user_presets_warmup(
     *,
     presets_feature,
     log_startup_metric,
+    current_launch_method: str = ZAPRET2_MODE,
     delay_ms: int = USER_PRESETS_WARMUP_DELAY_MS,
     secondary_delay_ms: int = USER_PRESETS_SECONDARY_WARMUP_DELAY_MS,
 ) -> None:
@@ -61,7 +61,7 @@ def install_user_presets_warmup(
         if not is_startup_host_alive(startup_host):
             return
         delay = max(0, int(delay_ms))
-        methods = user_presets_warmup_methods(get_strategy_launch_method())
+        methods = user_presets_warmup_methods(current_launch_method)
         current_methods = methods[:1]
         secondary_methods = methods[1:]
         secondary_delay = max(delay, int(secondary_delay_ms))

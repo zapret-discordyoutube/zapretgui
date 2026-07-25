@@ -45,9 +45,12 @@ class DpiSettingsWorker(QThread):
             elif self._action == "apply_launch_method":
                 launch_method = self._apply_launch_method(self._method)
                 visibility = self._describe_visibility(launch_method)
+                from program_settings.public import is_auto_dpi_enabled
+
                 result = {
                     "launch_method": launch_method,
                     "visibility": visibility,
+                    "autostart_enabled": bool(is_auto_dpi_enabled()),
                     "orchestra_settings": (
                         self._load_orchestra_settings()
                         if visibility.show_orchestra_settings

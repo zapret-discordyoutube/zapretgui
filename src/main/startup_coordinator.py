@@ -446,9 +446,8 @@ class StartupCoordinator:
 
         raw_method = launch_method
         if raw_method is None:
-            from settings.dpi.strategy_settings import get_strategy_launch_method
-
-            raw_method = get_strategy_launch_method()
+            snapshot = self.runtime.snapshot()
+            raw_method = getattr(snapshot, "launch_method", "")
 
         method = normalize_launch_method(raw_method)
         self._log_startup_step(

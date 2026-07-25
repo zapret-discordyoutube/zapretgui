@@ -235,7 +235,7 @@ def build_telegram_proxy_page_kwargs(*, page_name: PageName, runtime_feature, te
     _ = page_name
 
     def _get_zapret_running() -> bool:
-        return bool(runtime_feature.is_any_running(silent=True))
+        return bool(runtime_feature.is_running())
 
     return {
         "telegram_proxy_feature": telegram_proxy_feature,
@@ -247,7 +247,7 @@ def build_orchestra_page_kwargs(*, page_name: PageName, orchestra_feature, runti
     _ = page_name
 
     def _is_runtime_running() -> bool:
-        return bool(runtime_feature.is_any_running(silent=True))
+        return bool(runtime_feature.is_running())
 
     return {
         "orchestra_feature": orchestra_feature,

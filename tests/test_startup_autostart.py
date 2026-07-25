@@ -18,6 +18,13 @@ class StartupAutostartTests(unittest.TestCase):
         from winws_runtime.runtime.autostart import start_dpi_autostart
 
         runtime_service = SimpleNamespace(
+            snapshot=Mock(
+                return_value=SimpleNamespace(
+                    phase="autostart_pending",
+                    running=False,
+                    launch_method="zapret2_mode",
+                )
+            ),
             mark_start_failed=Mock(),
             mark_stopped=Mock(),
         )
@@ -38,13 +45,12 @@ class StartupAutostartTests(unittest.TestCase):
         )
         startup_state = SimpleNamespace(dpi_autostart_initiated=False)
 
-        with patch("program_settings.public.is_auto_dpi_enabled", return_value=True):
-            start_dpi_autostart(
-                startup_state,
-                runtime_feature=runtime_feature,
-                ui_state=object(),
-                launch_method="zapret2_mode",
-            )
+        start_dpi_autostart(
+            startup_state,
+            runtime_feature=runtime_feature,
+            ui_state=object(),
+            launch_method="zapret2_mode",
+        )
 
         presets_feature.get_launch_snapshot.assert_not_called()
         runtime_service.mark_start_failed.assert_not_called()
@@ -55,30 +61,39 @@ class StartupAutostartTests(unittest.TestCase):
         )
         presets_feature.refresh_launch_summary_in_store.assert_not_called()
 
-    def test_start_flow_defers_startup_snapshot_when_autostart_has_no_selected_mode(self) -> None:
+    def test_start_flow_defers_request_preparation_to_worker(self) -> None:
         from winws_runtime.runtime import start_flow
 
         runtime_owner = SimpleNamespace(
-            _runtime_feature=SimpleNamespace(
-                dependencies=SimpleNamespace(
-                    presets_feature=SimpleNamespace(
-                        get_launch_snapshot=Mock(side_effect=AssertionError("startup snapshot must be resolved in worker")),
-                    ),
-                ),
+            _runtime_feature=SimpleNamespace(),
+            _runtime_api=Mock(return_value=object()),
+            _runtime_service=Mock(
+                return_value=SimpleNamespace(
+                    snapshot=Mock(return_value=SimpleNamespace(launch_method="zapret2_mode")),
+                    set_busy=Mock(),
+                )
             ),
+            _begin_runtime_start=Mock(),
+            _on_dpi_start_finished=Mock(),
             _pending_launch_warnings=[],
         )
 
-        request = start_flow.build_start_request(
-            runtime_owner,
-            selected_mode=None,
-            launch_method="zapret2_mode",
-            startup_autostart=True,
-        )
+        with (
+            patch.object(start_flow, "prepare_start_preflight", return_value=True),
+            patch.object(start_flow, "set_runtime_owner_status"),
+            patch.object(start_flow, "runtime_owner_status_callback", return_value=Mock()),
+            patch.object(start_flow, "start_worker_thread") as start_worker_thread,
+        ):
+            start_flow.start_dpi_async(
+                runtime_owner,
+                selected_mode=None,
+                launch_method="zapret2_mode",
+                startup_autostart=True,
+            )
 
-        self.assertIsNotNone(request)
-        self.assertIsNone(request.selected_mode)
-        self.assertEqual(request.mode_name, "Пресет")
+        worker = start_worker_thread.call_args.kwargs["worker"]
+        self.assertTrue(worker._prepare_request)
+        self.assertIsNone(worker.selected_mode)
 
     def test_startup_worker_resolves_deferred_startup_preset_snapshot(self) -> None:
         from winws_runtime.runtime.start_workers import PresetLaunchStartWorker
@@ -120,6 +135,13 @@ class StartupAutostartTests(unittest.TestCase):
         from winws_runtime.runtime.autostart import start_dpi_autostart
 
         runtime_service = SimpleNamespace(
+            snapshot=Mock(
+                return_value=SimpleNamespace(
+                    phase="autostart_pending",
+                    running=False,
+                    launch_method="zapret2_mode",
+                )
+            ),
             mark_start_failed=Mock(),
             mark_stopped=Mock(),
         )
@@ -140,13 +162,12 @@ class StartupAutostartTests(unittest.TestCase):
         )
         startup_state = SimpleNamespace(dpi_autostart_initiated=False)
 
-        with patch("program_settings.public.is_auto_dpi_enabled", return_value=True):
-            start_dpi_autostart(
-                startup_state,
-                runtime_feature=runtime_feature,
-                ui_state=object(),
-                launch_method="zapret2_mode",
-            )
+        start_dpi_autostart(
+            startup_state,
+            runtime_feature=runtime_feature,
+            ui_state=object(),
+            launch_method="zapret2_mode",
+        )
 
         presets_feature.get_launch_snapshot.assert_not_called()
         launch_runtime.start_dpi_async.assert_called_once_with(
@@ -155,12 +176,10 @@ class StartupAutostartTests(unittest.TestCase):
             _startup_autostart=True,
         )
 
-    def test_preset_autostart_defers_launch_summary_refresh_until_after_start(self) -> None:
-        from winws_runtime.runtime import autostart
+    def test_preset_autostart_does_not_refresh_launch_summary_in_gui_thread(self) -> None:
         from winws_runtime.runtime.autostart import start_dpi_autostart
 
         calls: list[str] = []
-        scheduled: list[object] = []
         snapshot = SimpleNamespace(to_selected_mode=Mock(return_value={"is_preset_file": True}))
         launch_runtime = SimpleNamespace(start_dpi_async=Mock(side_effect=lambda **_kwargs: calls.append("start")))
         presets_feature = SimpleNamespace(
@@ -169,7 +188,17 @@ class StartupAutostartTests(unittest.TestCase):
         )
         runtime_feature = SimpleNamespace(
             objects=SimpleNamespace(
-                runtime_service=SimpleNamespace(mark_start_failed=Mock(), mark_stopped=Mock()),
+                runtime_service=SimpleNamespace(
+                    snapshot=Mock(
+                        return_value=SimpleNamespace(
+                            phase="autostart_pending",
+                            running=False,
+                            launch_method="zapret2_mode",
+                        )
+                    ),
+                    mark_start_failed=Mock(),
+                    mark_stopped=Mock(),
+                ),
                 launch_runtime=launch_runtime,
             ),
             dependencies=SimpleNamespace(
@@ -179,35 +208,32 @@ class StartupAutostartTests(unittest.TestCase):
         )
         startup_state = SimpleNamespace(dpi_autostart_initiated=False)
 
-        with (
-            patch("program_settings.public.is_auto_dpi_enabled", return_value=True),
-            patch.object(autostart.QTimer, "singleShot", side_effect=lambda _delay, callback: scheduled.append(callback)),
-        ):
-            start_dpi_autostart(
-                startup_state,
-                runtime_feature=runtime_feature,
-                ui_state=object(),
-                launch_method="zapret2_mode",
-            )
+        start_dpi_autostart(
+            startup_state,
+            runtime_feature=runtime_feature,
+            ui_state=object(),
+            launch_method="zapret2_mode",
+        )
 
         self.assertEqual(calls, ["start"])
         presets_feature.refresh_launch_summary_in_store.assert_not_called()
-        self.assertEqual(len(scheduled), 1)
-
-        scheduled[0]()
-
-        self.assertEqual(calls, ["start", "refresh_summary"])
+        presets_feature.get_launch_snapshot.assert_not_called()
 
     def test_preset_autostart_reuses_already_running_expected_process(self) -> None:
         from winws_runtime.runtime.autostart import start_dpi_autostart
 
         runtime_service = SimpleNamespace(
-            bootstrap_probe=Mock(),
+            snapshot=Mock(
+                return_value=SimpleNamespace(
+                    phase="running",
+                    running=True,
+                    launch_method="zapret2_mode",
+                )
+            ),
             mark_start_failed=Mock(),
             mark_stopped=Mock(),
         )
         launch_runtime = SimpleNamespace(start_dpi_async=Mock())
-        launch_runtime_api = SimpleNamespace(is_expected_running=Mock(return_value=True))
         presets_feature = SimpleNamespace(
             get_launch_snapshot=Mock(),
             refresh_launch_summary_in_store=Mock(),
@@ -216,7 +242,6 @@ class StartupAutostartTests(unittest.TestCase):
             objects=SimpleNamespace(
                 runtime_service=runtime_service,
                 launch_runtime=launch_runtime,
-                launch_runtime_api=launch_runtime_api,
             ),
             dependencies=SimpleNamespace(
                 presets_feature=presets_feature,
@@ -225,20 +250,14 @@ class StartupAutostartTests(unittest.TestCase):
         )
         startup_state = SimpleNamespace(dpi_autostart_initiated=False)
 
-        with patch("program_settings.public.is_auto_dpi_enabled", return_value=True):
-            start_dpi_autostart(
-                startup_state,
-                runtime_feature=runtime_feature,
-                ui_state=object(),
-                launch_method="zapret2_mode",
-            )
-
-        launch_runtime_api.is_expected_running.assert_called_once_with(silent=True)
-        runtime_service.bootstrap_probe.assert_called_once_with(
-            True,
+        start_dpi_autostart(
+            startup_state,
+            runtime_feature=runtime_feature,
+            ui_state=object(),
             launch_method="zapret2_mode",
-            expected_process="winws2.exe",
         )
+
+        runtime_service.snapshot.assert_called_once_with()
         launch_runtime.start_dpi_async.assert_not_called()
         presets_feature.get_launch_snapshot.assert_not_called()
         presets_feature.refresh_launch_summary_in_store.assert_not_called()
@@ -267,68 +286,31 @@ class StartupAutostartTests(unittest.TestCase):
         self.assertEqual(request.selected_mode, selected_mode)
         self.assertEqual(warnings, [])
 
-    def test_start_flow_passes_startup_autostart_flag_to_request_builder(self) -> None:
-        from winws_runtime.runtime import start_flow
-        from winws_runtime.runtime.start_workers import PreparedDpiStartRequest
-
-        runtime_owner = SimpleNamespace(
-            _runtime_feature=SimpleNamespace(
-                dependencies=SimpleNamespace(
-                    presets_feature=object(),
-                ),
-            ),
-            _pending_launch_warnings=[],
-        )
-        request = PreparedDpiStartRequest(
-            launch_method="zapret2_mode",
-            selected_mode={"is_preset_file": True},
-            mode_name="Пресет",
-            method_name="прямой winws2",
-        )
-
-        with patch.object(
-            start_flow,
-            "prepare_start_request",
-            return_value=(request, []),
-        ) as prepare:
-            result = start_flow.build_start_request(
-                runtime_owner,
-                selected_mode={"is_preset_file": True},
-                launch_method="zapret2_mode",
-                startup_autostart=True,
-            )
-
-        self.assertIs(result, request)
-        self.assertTrue(prepare.call_args.kwargs["skip_preset_prevalidation"])
-
     def test_start_flow_marks_start_worker_as_startup_autostart(self) -> None:
         from winws_runtime.runtime import start_flow
-        from winws_runtime.runtime.start_workers import PreparedDpiStartRequest
-
-        request = PreparedDpiStartRequest(
-            launch_method="zapret2_mode",
-            selected_mode={"is_preset_file": True},
-            mode_name="Пресет",
-            method_name="прямой winws2",
-        )
+        selected_mode = {"is_preset_file": True}
         runtime_owner = SimpleNamespace(
             _runtime_feature=SimpleNamespace(),
             _runtime_api=Mock(return_value=object()),
-            _runtime_service=Mock(return_value=SimpleNamespace(set_busy=Mock())),
+            _runtime_service=Mock(
+                return_value=SimpleNamespace(
+                    snapshot=Mock(return_value=SimpleNamespace(launch_method="zapret2_mode")),
+                    set_busy=Mock(),
+                )
+            ),
             _begin_runtime_start=Mock(),
             _on_dpi_start_finished=Mock(),
         )
 
         with (
             patch.object(start_flow, "prepare_start_preflight", return_value=True),
-            patch.object(start_flow, "build_start_request", return_value=request),
             patch.object(start_flow, "set_runtime_owner_status"),
             patch.object(start_flow, "runtime_owner_status_callback", return_value=Mock()),
             patch.object(start_flow, "start_worker_thread") as start_worker_thread,
         ):
             start_flow.start_dpi_async(
                 runtime_owner,
-                selected_mode=request.selected_mode,
+                selected_mode=selected_mode,
                 launch_method="zapret2_mode",
                 startup_autostart=True,
             )

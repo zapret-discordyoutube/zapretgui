@@ -8,7 +8,6 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from log.log import log
 from main.post_startup_gate import bind_startup_gate, is_startup_host_alive
 from main.post_startup_threading import enqueue_subsystem_task, schedule_after
-from settings.dpi.strategy_settings import get_strategy_launch_method
 from settings.mode import ZAPRET2_MODE, is_preset_launch_method, normalize_launch_method
 from ui.navigation_pages import resolve_preset_setup_page_for_method, resolve_profile_setup_page_for_method
 from ui.performance_metrics import log_ui_timing_since
@@ -37,6 +36,7 @@ def install_profile_warmup(
     *,
     profile_feature,
     log_startup_metric,
+    current_launch_method: str = DEFAULT_PROFILE_WARMUP_METHOD,
     delay_ms: int = PROFILE_WARMUP_DELAY_MS,
     preset_setup_page_delay_ms: int = PRESET_SETUP_PAGE_WARMUP_DELAY_MS,
     profile_setup_page_delay_ms: int = PROFILE_SETUP_PAGE_WARMUP_DELAY_MS,
@@ -67,8 +67,7 @@ def install_profile_warmup(
     def _run_preset_setup_page_warmup() -> None:
         if not is_startup_host_alive(startup_host):
             return
-        method = get_strategy_launch_method()
-        page_name = resolve_preset_setup_page_for_method(method)
+        page_name = resolve_preset_setup_page_for_method(current_launch_method)
         if page_name is None:
             return
         started_at = time.perf_counter()
@@ -88,8 +87,7 @@ def install_profile_warmup(
     def _run_profile_setup_page_warmup() -> None:
         if not is_startup_host_alive(startup_host):
             return
-        method = get_strategy_launch_method()
-        page_name = resolve_profile_setup_page_for_method(method)
+        page_name = resolve_profile_setup_page_for_method(current_launch_method)
         if page_name is None:
             return
         started_at = time.perf_counter()
@@ -115,7 +113,7 @@ def install_profile_warmup(
         if not is_startup_host_alive(startup_host):
             return
         delay = max(0, int(delay_ms))
-        method = profile_warmup_method(get_strategy_launch_method())
+        method = profile_warmup_method(current_launch_method)
         log_startup_metric("StartupProfileWarmupQueued", f"{delay}ms current after interactive")
         log(f"Фоновый прогрев профилей отложен на {delay}ms", "DEBUG")
         schedule_after(

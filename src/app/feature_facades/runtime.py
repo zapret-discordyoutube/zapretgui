@@ -75,11 +75,8 @@ class RuntimeFeature:
     def is_any_running(self, *, silent: bool = True) -> bool:
         return self.objects.is_any_running(silent=silent)
 
-    def current_strategy_runner(self):
-        return self.commands.current_strategy_runner()
-
-    def current_process_pid(self, launch_method: str, *, refresh: bool = False) -> int | None:
-        return self.objects.current_process_pid(launch_method, refresh=refresh)
+    def current_process_pid(self, launch_method: str) -> int | None:
+        return self.objects.current_process_pid(launch_method)
 
     def configure_runtime_ui_bridge(self, bridge) -> None:
         self.ui_port.configure_runtime_ui_bridge(bridge)
@@ -164,8 +161,12 @@ class RuntimeFeature:
     def start_autostart(self, launch_method: str | None = None) -> bool:
         return self.commands.start_autostart(launch_method)
 
-    def handle_launch_method_changed(self, method: str, *, set_status=None):
-        return self.commands.handle_launch_method_changed(method, set_status=set_status)
+    def handle_launch_method_changed(self, method: str, *, autostart_enabled: bool, set_status=None):
+        return self.commands.handle_launch_method_changed(
+            method,
+            autostart_enabled=autostart_enabled,
+            set_status=set_status,
+        )
 
     def apply_selected_source_preset(
         self,

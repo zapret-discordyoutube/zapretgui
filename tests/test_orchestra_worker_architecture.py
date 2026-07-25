@@ -26,7 +26,7 @@ class OrchestraWorkerArchitectureTests(unittest.TestCase):
         self.assertNotIn('"controller"', deps_source)
 
         runtime_feature = Mock()
-        runtime_feature.is_any_running.return_value = True
+        runtime_feature.is_running.return_value = True
         orchestra_feature = Mock()
         kwargs = build_orchestra_page_kwargs(
             page_name=PageName.ORCHESTRA,
@@ -37,7 +37,7 @@ class OrchestraWorkerArchitectureTests(unittest.TestCase):
         self.assertIs(kwargs["orchestra_feature"], orchestra_feature)
         self.assertTrue(callable(kwargs["is_runtime_running"]))
         self.assertTrue(kwargs["is_runtime_running"]())
-        runtime_feature.is_any_running.assert_called_once_with(silent=True)
+        runtime_feature.is_running.assert_called_once_with()
 
     def test_orchestra_page_deps_receive_runtime_state_callable(self) -> None:
         from app.page_names import PageName
@@ -47,10 +47,10 @@ class OrchestraWorkerArchitectureTests(unittest.TestCase):
 
         self.assertNotIn("OrchestraPageController", deps_source)
         self.assertIn("_is_runtime_running", deps_source)
-        self.assertIn("runtime_feature.is_any_running", deps_source)
+        self.assertIn("runtime_feature.is_running", deps_source)
 
         runtime_feature = Mock()
-        runtime_feature.is_any_running.return_value = True
+        runtime_feature.is_running.return_value = True
         kwargs = build_orchestra_page_kwargs(
             page_name=PageName.ORCHESTRA,
             orchestra_feature=Mock(),
@@ -58,7 +58,7 @@ class OrchestraWorkerArchitectureTests(unittest.TestCase):
         )
 
         self.assertTrue(kwargs["is_runtime_running"]())
-        runtime_feature.is_any_running.assert_called_once_with(silent=True)
+        runtime_feature.is_running.assert_called_once_with()
 
     def test_page_workers_receive_action_functions(self) -> None:
         from orchestra.page_workers import (

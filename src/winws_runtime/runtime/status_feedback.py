@@ -13,8 +13,8 @@ def set_runtime_owner_status(runtime_owner, text: str) -> None:
 
 
 def runtime_status_callback(runtime_feature) -> Callable[[str], None]:
-    return lambda text: set_runtime_feature_status(runtime_feature, text)
+    return lambda text: runtime_feature.events.publish_status(str(text or ""))
 
 
 def runtime_owner_status_callback(runtime_owner) -> Callable[[str], None]:
-    return lambda text: set_runtime_owner_status(runtime_owner, text)
+    return lambda text: runtime_owner._runtime_feature.events.publish_status(str(text or ""))

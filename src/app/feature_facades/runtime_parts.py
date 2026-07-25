@@ -9,10 +9,11 @@ from PyQt6.QtCore import QObject, Qt, pyqtSignal
 
 
 class RuntimeEventDispatcher(QObject):
+    status = pyqtSignal(str)
     runner_failure = pyqtSignal(object)
     launch_error = pyqtSignal(str)
     active_preset_content_changed = pyqtSignal(str)
-    unexpected_process_exit = pyqtSignal()
+    unexpected_process_exit = pyqtSignal(object)
 
 
 @dataclass(slots=True)
@@ -95,10 +96,11 @@ class RuntimeObjects:
         return self.launch_runtime is not None
 
     def is_running(self) -> bool:
-        if self.launch_runtime is None:
-            return False
         try:
-            return bool(self.launch_runtime.is_running())
+            snapshot = self.runtime_service.snapshot()
+            return bool(getattr(snapshot, "running", False)) and str(
+                getattr(snapshot, "phase", "") or ""
+            ).strip().lower() == "running"
         except Exception:
             return False
 
@@ -121,16 +123,8 @@ class RuntimeObjects:
         except Exception:
             pass
 
-    def current_process_pid(self, launch_method: str, *, refresh: bool = False) -> int | None:
-        if refresh:
-            manager = self.ensure_process_monitor_manager()
-            if manager is None or not hasattr(manager, "refresh_now"):
-                return None
-            try:
-                manager.refresh_now()
-            except Exception:
-                return None
-
+    def current_process_pid(self, launch_method: str) -> int | None:
+        """Возвращает PID только из опубликованного monitor snapshot."""
         try:
             snapshot = self.runtime_service.snapshot()
         except Exception:
@@ -218,6 +212,10 @@ class RuntimeEvents:
     def ensure_dispatcher(self) -> RuntimeEventDispatcher:
         if self.dispatcher is None:
             dispatcher = RuntimeEventDispatcher(self.qt_parent)
+            dispatcher.status.connect(
+                self.handle_status,
+                Qt.ConnectionType.QueuedConnection,
+            )
             dispatcher.runner_failure.connect(
                 self.handle_runner_failure,
                 Qt.ConnectionType.QueuedConnection,
@@ -245,6 +243,13 @@ class RuntimeEvents:
             }
         )
 
+    def publish_status(self, text: str) -> None:
+        self.ensure_dispatcher().status.emit(str(text or ""))
+
+    def handle_status(self, text: str) -> None:
+        if self.ui_port is not None:
+            self.ui_port.set_status(str(text or ""))
+
     def publish_launch_error(self, error: str = "") -> None:
         text = str(error or "").strip()
         if text:
@@ -255,9 +260,9 @@ class RuntimeEvents:
         if normalized_path:
             self.ensure_dispatcher().active_preset_content_changed.emit(normalized_path)
 
-    def publish_unexpected_process_exit(self) -> None:
-        """Thread-safe entry for the runner's exit watcher (queued to main thread)."""
-        self.ensure_dispatcher().unexpected_process_exit.emit()
+    def publish_unexpected_process_exit(self, resolution) -> None:
+        """Передаёт в UI уже готовый результат фоновой диагностики."""
+        self.ensure_dispatcher().unexpected_process_exit.emit(resolution)
 
     def handle_runner_failure(self, payload: object) -> None:
         if not isinstance(payload, dict):
@@ -291,21 +296,14 @@ class RuntimeEvents:
         except Exception:
             pass
 
-    def handle_unexpected_process_exit(self) -> None:
-        """Main-thread reaction to the runner's instant exit event.
-
-        Resolution is None while a BlockCheck scan owns the winws lifecycle or
-        when there is nothing to diagnose — then the poll path (with the same
-        guards) remains the only detector and this handler does nothing.
-        """
+    def handle_unexpected_process_exit(self, resolution) -> None:
+        """Main-thread reaction uses only the prepared immutable result."""
         from log.log import log
-        from winws_runtime.health.post_mortem import resolve_unexpected_exit
 
         snapshot = self.runtime_service.snapshot()
         if snapshot.phase not in {"starting", "running"}:
             return
 
-        resolution = resolve_unexpected_exit()
         if resolution is None:
             return
 
@@ -383,10 +381,6 @@ class RuntimeCommandPort:
 
         return runtime_commands
 
-    def current_strategy_runner(self):
-        runtime_commands = self._runtime_commands()
-        return runtime_commands.get_current_strategy_runner()
-
     def _mark_startup_runtime_init_failed(self, exc: Exception) -> None:
         runtime_service = self.owner.objects.runtime_service
         try:
@@ -409,6 +403,9 @@ class RuntimeCommandPort:
     def init_launch_runtime(self) -> None:
         runtime_commands = self._runtime_commands()
         try:
+            # QObject dispatcher создаётся один раз в главном Qt-потоке;
+            # фоновые watcher/worker затем только посылают его сигналы.
+            self.owner.events.ensure_dispatcher()
             notify = self.owner.ui_port.require_notifications()
             self.owner.objects.launch_runtime = runtime_commands.init_launch_runtime(
                 runtime_feature=self.owner,
@@ -516,12 +513,13 @@ class RuntimeCommandPort:
             )
         )
 
-    def handle_launch_method_changed(self, method: str, *, set_status=None):
+    def handle_launch_method_changed(self, method: str, *, autostart_enabled: bool, set_status=None):
         runtime_commands = self._runtime_commands()
         return runtime_commands.handle_launch_method_changed(
             method,
             runtime_feature=self.owner,
             ui_state=self.owner.events.ui_state,
+            autostart_enabled=autostart_enabled,
             set_status=set_status,
         )
 

@@ -13,13 +13,16 @@ if str(PROJECT_SRC) not in sys.path:
 
 
 class StartupPostInitAutostartTests(unittest.TestCase):
-    def test_post_init_defers_launch_method_read_until_autostart_callback(self) -> None:
+    def test_post_init_uses_runtime_snapshot_in_autostart_callback(self) -> None:
         from main import startup_coordinator
         from main.startup_coordinator import StartupCoordinator
 
         class Runtime:
             def __init__(self) -> None:
                 self.autostart_calls: list[str | None] = []
+                self.snapshot = Mock(
+                    return_value=SimpleNamespace(launch_method="zapret1_mode")
+                )
 
             def start_autostart(self, launch_method: str | None = None) -> None:
                 self.autostart_calls.append(launch_method)
@@ -41,16 +44,10 @@ class StartupPostInitAutostartTests(unittest.TestCase):
         )
         scheduled: list[tuple[int, object]] = []
 
-        with (
-            patch.object(
-                startup_coordinator.QTimer,
-                "singleShot",
-                side_effect=lambda delay_ms, callback: scheduled.append((int(delay_ms), callback)),
-            ),
-            patch(
-                "settings.dpi.strategy_settings.get_strategy_launch_method",
-                side_effect=AssertionError("method must not be read in quick post-init"),
-            ),
+        with patch.object(
+            startup_coordinator.QTimer,
+            "singleShot",
+            side_effect=lambda delay_ms, callback: scheduled.append((int(delay_ms), callback)),
         ):
             coordinator._post_init_tasks()
 
@@ -58,11 +55,11 @@ class StartupPostInitAutostartTests(unittest.TestCase):
         self.assertEqual(len(scheduled), 1)
         window_shell.mark_startup_post_init_done.assert_called_once_with("post_init_scheduled:auto")
 
-        with patch("settings.dpi.strategy_settings.get_strategy_launch_method", return_value="zapret1_mode"):
-            _delay_ms, callback = scheduled.pop(0)
-            callback()
+        _delay_ms, callback = scheduled.pop(0)
+        callback()
 
         self.assertEqual(runtime.autostart_calls, ["zapret1_mode"])
+        runtime.snapshot.assert_called_once_with()
 
 
 if __name__ == "__main__":

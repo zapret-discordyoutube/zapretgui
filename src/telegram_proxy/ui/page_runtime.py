@@ -72,7 +72,7 @@ class TelegramProxyPageInitPlan:
 
 
 def is_zapret_runtime_running(runtime_feature) -> bool:
-    return bool(runtime_feature.is_any_running(silent=True))
+    return bool(runtime_feature.is_running())
 
 
 def build_page_init_plan(*, runtime_initialized: bool) -> TelegramProxyPageInitPlan:

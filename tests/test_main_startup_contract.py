@@ -46,6 +46,9 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             def init_core_startup(self) -> None:
                 self.calls.append("core_startup")
 
+            def snapshot(self):
+                return SimpleNamespace(launch_method="zapret2_mode")
+
             def start_autostart(self, launch_method: str | None = None) -> None:
                 self.calls.append("autostart")
                 self.autostart_calls.append(launch_method)
@@ -89,7 +92,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 "start_daemon_thread",
                 side_effect=lambda name, target: background_targets.append((name, target)),
             ),
-            patch("settings.dpi.strategy_settings.get_strategy_launch_method", return_value="zapret2_mode"),
         ):
             coordinator.run_async_init()
             self.assertEqual(runtime.calls, [])
@@ -151,6 +153,9 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             def init_core_startup(self) -> None:
                 self.calls.append("core_startup")
 
+            def snapshot(self):
+                return SimpleNamespace(launch_method="zapret2_mode")
+
             def start_autostart(self, launch_method: str | None = None) -> None:
                 self.calls.append(f"autostart:{launch_method}")
 
@@ -190,7 +195,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 side_effect=lambda name, target: background_targets.append((name, target)),
                 create=True,
             ),
-            patch("settings.dpi.strategy_settings.get_strategy_launch_method", return_value="zapret2_mode"),
         ):
             coordinator.run_async_init()
             while scheduled:
@@ -243,6 +247,9 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             def init_core_startup(self) -> None:
                 self.calls.append("core_startup")
 
+            def snapshot(self):
+                return SimpleNamespace(launch_method="zapret2_mode")
+
             def start_autostart(self, launch_method: str | None = None) -> None:
                 self.calls.append(f"autostart:{launch_method}")
 
@@ -279,7 +286,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 side_effect=lambda name, target: background_targets.append((name, target)),
                 create=True,
             ),
-            patch("settings.dpi.strategy_settings.get_strategy_launch_method", return_value="zapret2_mode"),
         ):
             coordinator.run_async_init()
             while scheduled:
@@ -908,6 +914,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 launch_runtime=None,
                 runtime_service=runtime_service,
             ),
+            events=SimpleNamespace(ensure_dispatcher=Mock()),
             ui_port=SimpleNamespace(require_notifications=Mock(return_value=object())),
         )
         commands = RuntimeCommandPort(owner)
@@ -917,6 +924,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             commands.init_launch_runtime()
 
         self.assertIs(owner.objects.launch_runtime, runtime_object)
+        owner.events.ensure_dispatcher.assert_called_once_with()
         runtime_service.set_busy.assert_called_once_with(False)
 
     def test_runtime_api_init_failure_clears_startup_button_preparation(self) -> None:
@@ -949,6 +957,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 launch_runtime=None,
                 runtime_service=runtime_service,
             ),
+            events=SimpleNamespace(ensure_dispatcher=Mock()),
             ui_port=SimpleNamespace(require_notifications=Mock(return_value=object())),
         )
         commands = RuntimeCommandPort(owner)
@@ -2412,6 +2421,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             startup_host,
             profile_feature=profile_feature,
             log_startup_metric=log_startup_metric,
+            current_launch_method="",
             on_profile_warmup_ready=None,
         )
 
@@ -2514,6 +2524,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             startup_host,
             presets_feature=presets_feature,
             log_startup_metric=log_startup_metric,
+            current_launch_method="",
         )
 
     def test_user_presets_runtime_uses_cached_metadata_before_worker(self) -> None:
@@ -2742,16 +2753,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 "enqueue_subsystem_task",
                 side_effect=lambda queue, name, target: queued_tasks.append((queue, name)) or target(),
             ),
-            patch.object(
-                post_startup_profile_warmup,
-                "get_strategy_launch_method",
-                return_value="zapret1_mode",
-            ),
         ):
             install_profile_warmup(
                 startup_host,
                 profile_feature=profile_feature,
                 log_startup_metric=metric,
+                current_launch_method="zapret1_mode",
                 on_profile_warmup_ready=ready_methods.append,
             )
             signal.emit("interactive")
@@ -2820,16 +2827,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 "enqueue_subsystem_task",
                 side_effect=lambda queue, name, target: queued_tasks.append((queue, name)) or target(),
             ),
-            patch.object(
-                post_startup_user_presets_warmup,
-                "get_strategy_launch_method",
-                return_value="zapret1_mode",
-            ),
         ):
             install_user_presets_warmup(
                 startup_host,
                 presets_feature=presets_feature,
                 log_startup_metric=metric,
+                current_launch_method="zapret1_mode",
             )
             signal.emit("interactive")
 
@@ -3617,7 +3620,7 @@ class WindowsSessionShutdownTests(unittest.TestCase):
         q_application.processEvents.assert_not_called()
         q_application.quit.assert_called_once()
 
-    def test_final_close_skips_second_dpi_shutdown_when_processes_are_already_stopped(self) -> None:
+    def test_final_close_does_not_repeat_dpi_shutdown_or_probe(self) -> None:
         from main.application_lifecycle import ApplicationLifecycle
 
         close_state = SimpleNamespace(
@@ -3653,7 +3656,7 @@ class WindowsSessionShutdownTests(unittest.TestCase):
 
         lifecycle.run_final_close_cleanup()
 
-        runtime_feature.is_any_running.assert_called_once_with(silent=True)
+        runtime_feature.is_any_running.assert_not_called()
         runtime_feature.shutdown_sync.assert_not_called()
 
 

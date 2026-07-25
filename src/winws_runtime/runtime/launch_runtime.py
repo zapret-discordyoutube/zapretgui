@@ -49,25 +49,18 @@ class PresetLaunchRuntime:
         self._restart_active_start_generation = 0
         self._restart_force_stop_generation = 0
         self._restart_runner_wait_queued = False
-        self._preset_switch_runner_wait_queued = False
-        # Поколение проверки запуска защищает от старых QTimer-проверок
-        # после предыдущих попыток старта.
-        self._dpi_start_verify_generation = 0
-        self._dpi_start_verify_retry = 0
         self._pending_conflict_request_id = 0
         self._pending_conflict_selected_mode = None
         self._pending_conflict_launch_method = None
         self._first_runtime_apply = True
-        self._discord_manager = None
+        self._discord_restart_thread = None
+        self._discord_restart_worker = None
 
     def _runtime_service(self):
         return self._runtime_feature.objects.runtime_service
 
     def _runtime_api(self):
         return self._launch_runtime_api
-
-    def _process_monitor_manager(self):
-        return self._runtime_feature.objects.process_monitor_manager
 
     def _runtime_ui_bridge(self):
         return self._runtime_feature.ui_port.runtime_ui_bridge
@@ -86,17 +79,6 @@ class PresetLaunchRuntime:
         def _retry() -> None:
             self._restart_runner_wait_queued = False
             self._process_pending_restart_request()
-
-        QTimer.singleShot(200, _retry)
-
-    def _schedule_pending_preset_switch_retry(self) -> None:
-        if self._preset_switch_runner_wait_queued:
-            return
-        self._preset_switch_runner_wait_queued = True
-
-        def _retry() -> None:
-            self._preset_switch_runner_wait_queued = False
-            self._process_pending_presets_switch()
 
         QTimer.singleShot(200, _retry)
 

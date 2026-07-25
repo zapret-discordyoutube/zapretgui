@@ -23,14 +23,9 @@ def _resolve_launch_method(runtime_feature) -> str:
     except Exception:
         pass
 
-    try:
-        from settings.dpi.strategy_settings import get_strategy_launch_method
+    from settings.mode import DEFAULT_LAUNCH_METHOD
 
-        return str(get_strategy_launch_method() or "").strip().lower()
-    except Exception:
-        from settings.mode import DEFAULT_LAUNCH_METHOD
-
-        return DEFAULT_LAUNCH_METHOD
+    return DEFAULT_LAUNCH_METHOD
 
 
 def _resolve_runtime_api(runtime_feature, launch_method: str):

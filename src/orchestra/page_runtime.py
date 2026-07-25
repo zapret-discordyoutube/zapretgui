@@ -93,7 +93,7 @@ class OrchestraRunnerBindingPlan:
 
 
 def is_direct_runtime_running(runtime_feature) -> bool:
-    return bool(runtime_feature.is_any_running(silent=True))
+    return bool(runtime_feature.is_running())
 
 
 def build_status_display_plan(

@@ -119,21 +119,14 @@ class StartupBootstrapMetricsTests(unittest.TestCase):
         self.assertIn("StartupLateBootstrapDeferredHooks", source)
         self.assertIn("StartupLateBootstrapTotal", source)
 
-    def test_window_constructor_logs_bootstrap_substeps(self) -> None:
+    def test_window_constructor_does_not_read_launch_settings_after_first_frame(self) -> None:
         from main.window_startup import WindowStartupMixin
         from ui.fluent_app_window import ZapretFluentWindow
 
         constructor_source = inspect.getsource(WindowStartupMixin.__init__)
-        deferred_launch_method_logger = getattr(
-            WindowStartupMixin,
-            "_log_launch_method_after_ui_ready",
-            None,
-        )
-        self.assertIsNotNone(deferred_launch_method_logger)
         source = "\n".join(
             (
                 constructor_source,
-                inspect.getsource(deferred_launch_method_logger),
                 inspect.getsource(WindowStartupMixin._continue_startup_after_ui_ready),
                 inspect.getsource(ZapretFluentWindow.__init__),
                 inspect.getsource(ZapretFluentWindow._sync_titlebar_icon_from_application),
@@ -141,8 +134,8 @@ class StartupBootstrapMetricsTests(unittest.TestCase):
         )
 
         self.assertIn("StartupWindowCtorSuper", source)
-        self.assertIn("StartupWindowLaunchMethod", source)
-        self.assertNotIn("get_strategy_launch_method", constructor_source)
+        self.assertNotIn("get_strategy_launch_method", source)
+        self.assertNotIn("StartupWindowLaunchMethod", source)
         self.assertIn("StartupFluentWindowSuper", source)
         self.assertIn("_sync_titlebar_icon_from_application", source)
         self.assertNotIn("StartupFluentWindowIconDeferred", source)

@@ -3,12 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 
-def get_current_strategy_runner():
-    from winws_runtime.runners.runner_factory import get_current_runner
-
-    return get_current_runner()
-
-
 def is_dpi_running(*, runtime_feature: Any) -> bool:
     runtime_owner = runtime_feature.objects.launch_runtime
     if runtime_owner is None:
@@ -202,6 +196,7 @@ def handle_launch_method_changed(
     *,
     runtime_feature: Any,
     ui_state: Any,
+    autostart_enabled: bool,
     set_status: Any = None,
 ):
     from winws_runtime.runtime.method_switch_flow import handle_launch_method_changed_runtime
@@ -210,6 +205,7 @@ def handle_launch_method_changed(
         method,
         runtime_feature=runtime_feature,
         ui_state=ui_state,
+        autostart_enabled=bool(autostart_enabled),
         set_status=set_status,
     )
 

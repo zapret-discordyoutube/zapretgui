@@ -27,6 +27,7 @@ class PresetLaunchResult:
     success: bool
     error_message: str = ""
     selected_mode: object = None
+    pid: int | None = None
 
 
 class PresetLaunchService:
@@ -53,6 +54,7 @@ class PresetLaunchService:
         self._startup_autostart = bool(startup_autostart)
         self._progress_callback = progress_callback
         self.last_error_message = ""
+        self.started_pid: int | None = None
 
     def _progress(self, message: str) -> None:
         callback = self._progress_callback
@@ -64,6 +66,7 @@ class PresetLaunchService:
             success=bool(success),
             error_message=str(error_message or "").strip(),
             selected_mode=self.selected_mode,
+            pid=self.started_pid,
         )
 
     def _fail(self, message: str, *, progress_message: str | None = None) -> PresetLaunchResult:
@@ -108,7 +111,12 @@ class PresetLaunchService:
 
         def _publish_unexpected_process_exit() -> None:
             try:
-                self._runtime_feature.events.publish_unexpected_process_exit()
+                # Callback вызывается exit-watcher потоком. Чтение post-mortem
+                # файла остаётся здесь, а UI получает готовое решение.
+                from winws_runtime.health.post_mortem import resolve_unexpected_exit
+
+                resolution = resolve_unexpected_exit()
+                self._runtime_feature.events.publish_unexpected_process_exit(resolution)
             except Exception:
                 return
 
@@ -273,6 +281,12 @@ class PresetLaunchService:
         success = runner.start_from_preset_file(preset_path, strategy_name, **start_kwargs)
 
         if success:
+            try:
+                snapshot = runner.get_runner_state_snapshot()
+                pid = getattr(snapshot, "pid", None)
+                self.started_pid = pid if isinstance(pid, int) else None
+            except Exception:
+                self.started_pid = None
             log(f"Пресет '{strategy_name}' успешно запущен", "✅ SUCCESS")
             return True
 

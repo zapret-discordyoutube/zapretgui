@@ -34,6 +34,7 @@ class PresetLaunchStartWorker(QObject):
         runtime_feature,
         runtime_api,
         startup_autostart: bool = False,
+        prepare_request: bool = False,
     ):
         super().__init__()
         self.selected_mode = selected_mode
@@ -42,6 +43,11 @@ class PresetLaunchStartWorker(QObject):
         self.launch_runtime_api = runtime_api
         self._last_error_message: str = ""
         self._startup_autostart = bool(startup_autostart)
+        self._prepare_request = bool(prepare_request)
+        self.warnings: list[str] = []
+        self.started_pid: int | None = None
+        self.mode_name = ""
+        self.method_name = ""
 
     def _build_launch_service(self) -> PresetLaunchService:
         return PresetLaunchService(
@@ -55,8 +61,28 @@ class PresetLaunchStartWorker(QObject):
 
     def run(self):
         try:
+            if self._prepare_request:
+                # Вся подготовка читает preset/settings и поэтому обязана
+                # выполняться здесь, а не в обработчике команды GUI.
+                from winws_runtime.flow.start_preparation import prepare_start_request
+
+                request, warnings = prepare_start_request(
+                    self.selected_mode,
+                    self.launch_method,
+                    presets_feature=self._runtime_feature.dependencies.presets_feature,
+                    skip_preset_prevalidation=bool(self._startup_autostart),
+                    defer_preset_snapshot=bool(self._startup_autostart),
+                )
+                self.selected_mode = request.selected_mode
+                self.launch_method = request.launch_method
+                self.mode_name = request.mode_name
+                self.method_name = request.method_name
+                self.warnings = list(warnings or [])
+
             result = self._build_launch_service().run()
             self.selected_mode = result.selected_mode
+            pid = getattr(result, "pid", None)
+            self.started_pid = pid if isinstance(pid, int) else None
             self._last_error_message = str(result.error_message or "").strip()
             self.finished.emit(bool(result.success), "" if result.success else self._last_error_message)
         except Exception as e:

@@ -430,7 +430,11 @@ class DpiSettingsPage(BasePage):
             orchestra_settings = result.get("orchestra_settings")
             if visibility.show_orchestra_settings and orchestra_settings is not None:
                 self._load_orchestra_settings(orchestra_settings)
-            self._runtime_actions.handle_launch_method_changed(next_method, set_status=self._set_status)
+            self._runtime_actions.handle_launch_method_changed(
+                next_method,
+                autostart_enabled=bool(result.get("autostart_enabled", False)),
+                set_status=self._set_status,
+            )
             self._after_launch_method_changed(next_method)
 
     def _on_dpi_settings_worker_failed(self, request_id: int, action: str, error: str) -> None:

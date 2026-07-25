@@ -3,7 +3,6 @@ from __future__ import annotations
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from log.log import log
-from settings.dpi.strategy_settings import get_strategy_launch_method
 from settings.mode import is_orchestra_launch_method, is_preset_launch_method
 from winws_runtime.runtime.sync_shutdown import shutdown_runtime_sync
 
@@ -109,6 +108,7 @@ class PresetSwitchWorker(QObject):
         self.launch_method = normalize_launch_method(launch_method, default="")
         self.generation = int(generation)
         self._is_generation_current = is_generation_current
+        self.started_pid: int | None = None
 
     def _get_winws_exe(self) -> str:
         from settings.mode import exe_path_for_launch_method
@@ -165,6 +165,12 @@ class PresetSwitchWorker(QObject):
                 self.finished.emit(False, short_error, self.generation, self.launch_method, False)
                 return
 
+            try:
+                runner_snapshot = runner.get_runner_state_snapshot()
+                pid = getattr(runner_snapshot, "pid", None)
+                self.started_pid = pid if isinstance(pid, int) else None
+            except Exception:
+                self.started_pid = None
             self.finished.emit(True, "", self.generation, self.launch_method, False)
         except Exception as e:
             self.finished.emit(False, str(e), self.generation, self.launch_method, False)
@@ -179,7 +185,8 @@ class StopAndExitWorker(QObject):
     def __init__(self, *, runtime_feature):
         super().__init__()
         self._runtime_feature = runtime_feature
-        self.launch_method = get_strategy_launch_method()
+        snapshot = runtime_feature.objects.runtime_service.snapshot()
+        self.launch_method = str(getattr(snapshot, "launch_method", "") or "").strip().lower()
 
     def _get_winws_exe(self) -> str:
         from settings.mode import exe_path_for_launch_method

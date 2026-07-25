@@ -162,30 +162,23 @@ class UnexpectedExitHandlerTests(unittest.TestCase):
     def test_no_action_when_resolution_is_none(self) -> None:
         events = self._make_events()
         recorder = _LogRecorder()
-        with (
-            patch("winws_runtime.health.post_mortem.resolve_unexpected_exit", return_value=None),
-            patch("log.log.log", recorder),
-        ):
-            events.handle_unexpected_process_exit()
+        with patch("log.log.log", recorder):
+            events.handle_unexpected_process_exit(None)
 
         events.runtime_service.mark_start_failed.assert_not_called()
         self.assertEqual(recorder.messages("ERROR"), [])
 
     def test_no_action_when_phase_is_not_active(self) -> None:
         events = self._make_events(phase="stopped")
-        with patch("winws_runtime.health.post_mortem.resolve_unexpected_exit") as resolve:
-            events.handle_unexpected_process_exit()
-        resolve.assert_not_called()
+        events.handle_unexpected_process_exit(self._resolution(transient=False))
+        events.runtime_service.mark_start_failed.assert_not_called()
 
     def test_non_transient_failure_publishes_single_error(self) -> None:
         events = self._make_events()
         recorder = _LogRecorder()
         resolution = self._resolution(transient=False)
-        with (
-            patch("winws_runtime.health.post_mortem.resolve_unexpected_exit", return_value=resolution),
-            patch("log.log.log", recorder),
-        ):
-            events.handle_unexpected_process_exit()
+        with patch("log.log.log", recorder):
+            events.handle_unexpected_process_exit(resolution)
 
         self.assertEqual(recorder.messages("ERROR"), [resolution.message])
         events.runtime_service.mark_start_failed.assert_called_once_with(resolution.message)
@@ -195,11 +188,8 @@ class UnexpectedExitHandlerTests(unittest.TestCase):
         events = self._make_events(command_port=command_port)
         recorder = _LogRecorder()
         resolution = self._resolution(transient=True)
-        with (
-            patch("winws_runtime.health.post_mortem.resolve_unexpected_exit", return_value=resolution),
-            patch("log.log.log", recorder),
-        ):
-            events.handle_unexpected_process_exit()
+        with patch("log.log.log", recorder):
+            events.handle_unexpected_process_exit(resolution)
 
         command_port.start.assert_called_once_with()
         self.assertEqual(recorder.messages("ERROR"), [])
@@ -215,11 +205,8 @@ class UnexpectedExitHandlerTests(unittest.TestCase):
         events.auto_restart_history = [now - 1.0, now - 2.0]
         recorder = _LogRecorder()
         resolution = self._resolution(transient=True)
-        with (
-            patch("winws_runtime.health.post_mortem.resolve_unexpected_exit", return_value=resolution),
-            patch("log.log.log", recorder),
-        ):
-            events.handle_unexpected_process_exit()
+        with patch("log.log.log", recorder):
+            events.handle_unexpected_process_exit(resolution)
 
         command_port.start.assert_not_called()
         errors = recorder.messages("ERROR")

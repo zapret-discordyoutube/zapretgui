@@ -79,7 +79,6 @@ class ApplicationLifecycle:
         self._window_port.persist_sidebar_state(context="закрытии", level="❌ ERROR")
 
         self._cleanup_before_close()
-        self._finish_dpi_for_final_close()
         self._tray_feature.cleanup()
 
     def _prepare_full_exit(self, *, stop_dpi: bool) -> None:
@@ -133,31 +132,5 @@ class ApplicationLifecycle:
             telegram_proxy_feature=self._telegram_proxy_feature,
         )
         cleanup_runtime_threads_for_close(self._runtime_feature)
-
-    def _finish_dpi_for_final_close(self) -> None:
-        if not self._close_state.stop_dpi_on_exit:
-            log("Выход без остановки DPI: winws не трогаем", "DEBUG")
-            return
-
-        try:
-            if not bool(self._runtime_feature.is_any_running(silent=True)):
-                log("DPI уже остановлен перед финальным закрытием: повторную остановку пропускаем", "DEBUG")
-                return
-        except Exception as e:
-            log(f"Не удалось проверить процессы winws перед финальным закрытием: {e}", "DEBUG")
-
-        try:
-            result = self._runtime_feature.shutdown_sync(
-                reason="close_event exit_stop_dpi",
-                include_cleanup=True,
-            )
-            log(
-                f"Процессы winws завершены при закрытии приложения "
-                f"(running={result.had_running_processes}, still_running={result.still_running})",
-                "DEBUG",
-            )
-        except Exception as e:
-            log(f"Ошибка остановки winws при закрытии: {e}", "DEBUG")
-
 
 __all__ = ["ApplicationLifecycle"]

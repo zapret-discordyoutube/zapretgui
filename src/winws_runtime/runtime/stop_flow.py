@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from log.log import log
-from settings.dpi.strategy_settings import get_strategy_launch_method
 from winws_runtime.flow.start_preparation import resolve_method_name
 
 from .control_workers import PresetLaunchStopWorker, StopAndExitWorker
@@ -23,7 +22,8 @@ def stop_dpi_async(
     except RuntimeError:
         runtime_owner._dpi_stop_thread = None
 
-    launch_method = get_strategy_launch_method()
+    snapshot = runtime_owner._runtime_service().snapshot()
+    launch_method = str(getattr(snapshot, "launch_method", "") or "").strip().lower()
     method_name = resolve_method_name(launch_method)
     set_runtime_owner_status(runtime_owner, f"🛑 Остановка DPI ({method_name})...")
 

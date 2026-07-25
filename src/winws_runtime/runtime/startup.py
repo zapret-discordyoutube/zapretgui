@@ -2,13 +2,13 @@ from __future__ import annotations
 
 
 def init_launch_runtime_api(*, runtime_feature):
-    from settings.dpi.strategy_settings import get_strategy_launch_method
     from settings.mode import exe_name_for_launch_method, exe_path_for_launch_method
     from log.log import log
     from winws_runtime.runtime.status_feedback import runtime_status_callback
     from winws_runtime.runtime.runtime_api import PresetLaunchRuntimeApi
 
-    launch_method = get_strategy_launch_method()
+    snapshot = runtime_feature.objects.runtime_service.snapshot()
+    launch_method = str(getattr(snapshot, "launch_method", "") or "").strip().lower()
     winws_exe = exe_path_for_launch_method(launch_method)
     exe_name = exe_name_for_launch_method(launch_method)
     log(f"Используется {exe_name} для режима {launch_method}", "INFO")
@@ -35,11 +35,9 @@ def init_launch_runtime(*, runtime_feature, runtime_api, notify) -> None:
 
 
 def init_process_monitor(*, process_monitor_manager=None, runtime_api=None, runtime_service=None) -> None:
-    import os
     import time
 
     from log.log import log
-    from settings.mode import exe_path_for_launch_method, is_orchestra_launch_method, normalize_launch_method
 
     started_at = time.perf_counter()
 
@@ -47,28 +45,6 @@ def init_process_monitor(*, process_monitor_manager=None, runtime_api=None, runt
     if manager is None:
         raise RuntimeError("Process monitor manager is required")
     manager.initialize_process_monitor()
-
-    try:
-        from settings.dpi.strategy_settings import get_strategy_launch_method
-
-        launch_method = normalize_launch_method(get_strategy_launch_method())
-        expected_process = ""
-        target_exe = exe_path_for_launch_method(launch_method)
-        if not is_orchestra_launch_method(launch_method):
-            expected_process = os.path.basename(target_exe).strip().lower()
-
-        if runtime_api is None:
-            raise RuntimeError("Runtime API is required for process monitor")
-        if runtime_service is None:
-            raise RuntimeError("Runtime service is required for process monitor")
-        runtime_api.set_expected_exe_path(target_exe)
-        runtime_service.bootstrap_probe(
-            runtime_api.is_expected_running(silent=True),
-            launch_method=launch_method,
-            expected_process=expected_process,
-        )
-    except Exception as exc:
-        log(f"Ошибка начальной проверки process monitor: {exc}", "DEBUG")
 
     log(f"✅ Process monitor: {(time.perf_counter() - started_at) * 1000:.0f}ms", "DEBUG")
 

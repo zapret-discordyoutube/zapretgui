@@ -118,6 +118,7 @@ class PostStartupDeps:
     logs_feature: Any = None
     presets_feature: Any = None
     ui_state_store: Any = None
+    launch_method: str = ""
 
 
 def install_post_startup_tasks(deps: PostStartupDeps) -> None:
@@ -182,6 +183,7 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
         startup_host,
         profile_feature=deps.profile_feature,
         log_startup_metric=deps.log_startup_metric,
+        current_launch_method=str(getattr(deps, "launch_method", "") or ""),
         on_profile_warmup_ready=on_profile_warmup_ready,
     )
     if deps.presets_feature is not None:
@@ -189,6 +191,7 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
             startup_host,
             presets_feature=deps.presets_feature,
             log_startup_metric=deps.log_startup_metric,
+            current_launch_method=str(getattr(deps, "launch_method", "") or ""),
         )
     deps.install_tray_post_startup()
     install_update_check(

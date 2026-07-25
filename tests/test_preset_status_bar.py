@@ -19,6 +19,9 @@ class _RuntimeService:
         self.busy_calls.append((bool(busy), str(text or "")))
         return True
 
+    def snapshot(self):
+        return SimpleNamespace(launch_method=ZAPRET2_MODE)
+
 
 class _StoppedRuntimeOwner:
     def __init__(self) -> None:
@@ -41,12 +44,17 @@ class _RunningRuntimeOwner(_StoppedRuntimeOwner):
     def __init__(self) -> None:
         super().__init__()
         self.pending_switch_calls = 0
+        self._presets_switch_worker = SimpleNamespace(started_pid=4321)
+        self.running_pid_calls: list[int | None] = []
 
     def is_running(self) -> bool:
         return True
 
     def _process_pending_presets_switch(self) -> None:
         self.pending_switch_calls += 1
+
+    def _mark_runtime_running(self, *, pid=None) -> None:
+        self.running_pid_calls.append(pid)
 
 
 class _RuntimeToggleButton:
@@ -424,6 +432,7 @@ class PresetStatusBarPlanTests(unittest.TestCase):
 
         self.assertEqual(owner._runtime_service_obj.busy_calls, [(False, "")])
         self.assertEqual(owner._presets_switch_completed_generation, 7)
+        self.assertEqual(owner.running_pid_calls, [4321])
         single_shot.assert_not_called()
         set_status.assert_called_once_with(owner, "✅ Пресет успешно применён")
         maybe_restart.assert_called_once_with(owner, skip_first_start=False)

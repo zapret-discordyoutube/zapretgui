@@ -2,9 +2,6 @@ from PyQt6.QtCore import QObject
 from log.log import log
 
 
-from winws_runtime.runtime.process_probe import get_canonical_winws_process_pids
-
-
 class ProcessMonitorManager(QObject):
     """Менеджер для мониторинга процессов DPI"""
     
@@ -41,15 +38,6 @@ class ProcessMonitorManager(QObject):
             self._observe_process_details(normalized)
 
         return normalized
-
-    def refresh_now(self) -> dict[str, list[int]]:
-        """Синхронно перечитывает канонические winws-процессы тем же путём, что и monitor."""
-        try:
-            details = get_canonical_winws_process_pids()
-        except Exception as e:
-            log(f"Ошибка канонического probe при refresh_now: {e}", level="DEBUG")
-            details = {}
-        return self._apply_process_details(details)
 
     def _on_process_details_changed(self, details: dict):
         """Получает детали процессов (PID) от мониторинга и кэширует для UI"""

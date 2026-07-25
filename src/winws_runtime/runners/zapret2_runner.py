@@ -87,7 +87,11 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         # Human-readable last start error (for UI/status).
         self.last_error: Optional[str] = None
         self._prepared_preset_cache: dict[tuple[str, int, int], PreparedPresetArtifact] = {}
+        # Состояние и долгие операции защищаются разными блокировками.
+        # UI/monitor могут мгновенно прочитать immutable snapshot даже тогда,
+        # когда worker несколько секунд запускает или останавливает winws2.
         self._state_lock = threading.RLock()
+        self._operation_lock = threading.RLock()
         self._runner_state = PresetRunnerStateMachine()
         self._last_spawn_exit_code: Optional[int] = None
         self._last_spawn_stderr: str = ""
@@ -110,6 +114,15 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         with self._state_lock:
             return self._runner_state.snapshot()
 
+    def _operation_guard(self):
+        """Сериализует lifecycle-операции, не закрывая чтение state snapshot."""
+        lock = getattr(self, "_operation_lock", None)
+        if lock is None:
+            # Поддерживает узкие object.__new__-стабы в тестах.
+            lock = threading.RLock()
+            self._operation_lock = lock
+        return lock
+
     def _set_runner_state_locked(
         self,
         state: PresetRunnerState,
@@ -122,15 +135,16 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         allow_same: bool = False,
         publish_failure: bool = True,
     ):
-        snapshot = self._runner_state.transition(
-            state,
-            preset_path=preset_path,
-            strategy_name=strategy_name,
-            pid=pid,
-            error=error,
-            reason=reason,
-            allow_same=allow_same,
-        )
+        with self._state_lock:
+            snapshot = self._runner_state.transition(
+                state,
+                preset_path=preset_path,
+                strategy_name=strategy_name,
+                pid=pid,
+                error=error,
+                reason=reason,
+                allow_same=allow_same,
+            )
         log(
             f"Runner state: {snapshot.state.value} "
             f"(gen={snapshot.generation}, reason={snapshot.reason}, preset={snapshot.preset_path})",
@@ -1069,7 +1083,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
 
         self._set_last_error(None)
 
-        with self._state_lock:
+        with self._operation_guard():
             artifact = self._compile_preset_artifact(preset_path)
             if not artifact.validation_ok:
                 self._set_runner_state_locked(
@@ -1250,7 +1264,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
 
         self._set_last_error(None)
 
-        with self._state_lock:
+        with self._operation_guard():
             success = self._start_from_preset_file_locked(
                 preset_path,
                 strategy_name,
@@ -1477,7 +1491,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         return None
 
     def stop(self, *, cleanup_services: bool = True) -> bool:
-        with self._state_lock:
+        with self._operation_guard():
             if self.running_process and self.is_running():
                 self._set_runner_state_locked(
                     PresetRunnerState.STOPPING,

@@ -4,16 +4,13 @@ from PyQt6.QtCore import QTimer
 
 from log.log import log
 
-from settings.dpi.strategy_settings import get_strategy_launch_method
 from settings.mode import is_preset_launch_method
 
 from .discord_restart_flow import maybe_restart_discord_after_runtime_apply
 from .lifecycle_feedback import show_launch_error_top
 from .status_feedback import runtime_owner_status_callback, set_runtime_owner_status
-from .status_flow import runner_transition_in_progress
 from .thread_runtime import start_worker_thread
 from .control_workers import PresetSwitchWorker
-from winws_runtime.flow.start_preparation import resolve_launch_method
 
 
 def process_pending_presets_switch(runtime_owner) -> None:
@@ -22,18 +19,12 @@ def process_pending_presets_switch(runtime_owner) -> None:
         return
 
     launch_method = str(
-        runtime_owner._presets_switch_method or get_strategy_launch_method() or ""
+        runtime_owner._presets_switch_method
+        or getattr(runtime_owner._runtime_service().snapshot(), "launch_method", "")
+        or ""
     ).strip().lower()
     if not is_preset_launch_method(launch_method):
         runtime_owner._runtime_service().set_busy(False)
-        return
-
-    if runner_transition_in_progress(runtime_owner, launch_method=launch_method):
-        log(
-            f"Preset mode switch отложен: runner transition ещё идёт ({launch_method}), поколение {target_generation}",
-            "DEBUG",
-        )
-        runtime_owner._schedule_pending_preset_switch_retry()
         return
 
     try:
@@ -120,7 +111,8 @@ def _schedule_debounced_presets_switch(runtime_owner, method: str, delay_ms: int
 
 
 def switch_presets_async(runtime_owner, launch_method: str | None = None, *, delay_ms: int = 0) -> None:
-    method = str(launch_method or get_strategy_launch_method() or "").strip().lower()
+    current_method = getattr(runtime_owner._runtime_service().snapshot(), "launch_method", "")
+    method = str(launch_method or current_method or "").strip().lower()
     if not is_preset_launch_method(method):
         runtime_owner.restart_dpi_async()
         return
@@ -146,15 +138,6 @@ def process_pending_restart_request(runtime_owner) -> None:
         return
 
     force_full_stop = int(runtime_owner._restart_force_stop_generation or 0) == target_generation
-
-    method = resolve_launch_method()
-    if runner_transition_in_progress(runtime_owner, launch_method=method):
-        log(
-            f"Перезапуск DPI отложен: runner transition ещё идёт ({method}), актуальное поколение {target_generation}",
-            "DEBUG",
-        )
-        runtime_owner._schedule_pending_restart_retry()
-        return
 
     try:
         if runtime_owner._dpi_start_thread and runtime_owner._dpi_start_thread.isRunning():
@@ -235,6 +218,9 @@ def handle_presets_switch_finished(runtime_owner, success, error_message, genera
         runtime_owner._runtime_service().set_busy(False)
 
         if success:
+            worker = getattr(runtime_owner, "_presets_switch_worker", None)
+            pid = getattr(worker, "started_pid", None)
+            runtime_owner._mark_runtime_running(pid=pid if isinstance(pid, int) else None)
             log(
                 f"Preset mode switch успешно завершён, поколение {generation} ({launch_method})",
                 "INFO",

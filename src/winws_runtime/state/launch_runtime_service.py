@@ -96,7 +96,7 @@ class LaunchRuntimeService:
             canonical_readers=(
                 "app.feature_facades.runtime_parts.RuntimeEvents.handle_runner_failure",
                 "app.feature_facades.runtime_parts.RuntimeObjects.current_process_pid",
-                "winws_runtime.runtime.lifecycle_feedback.verify_dpi_process_running",
+                "winws_runtime.runtime.lifecycle_feedback.on_dpi_start_finished",
                 "presets.ui.control.zapret1.page.Zapret1ModeControlPage._get_current_dpi_runtime_state",
                 "presets.ui.control.zapret2.page.Zapret2ModeControlPage._on_ui_state_changed",
                 "tray.SystemTrayManager._is_launch_running/_launch_phase via RuntimeFeature.snapshot",

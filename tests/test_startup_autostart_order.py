@@ -33,6 +33,9 @@ class StartupAutostartOrderTests(unittest.TestCase):
             def init_core_startup(self) -> None:
                 self.calls.append("core_startup")
 
+            def snapshot(self):
+                return SimpleNamespace(launch_method="zapret2_mode")
+
             def start_autostart(self, launch_method: str | None = None) -> None:
                 self.calls.append(f"autostart:{launch_method}")
 
@@ -66,7 +69,6 @@ class StartupAutostartOrderTests(unittest.TestCase):
                 "start_daemon_thread",
                 side_effect=lambda name, target: background_targets.append((str(name), target)),
             ),
-            patch("settings.dpi.strategy_settings.get_strategy_launch_method", return_value="zapret2_mode"),
         ):
             coordinator.run_async_init()
             while scheduled:

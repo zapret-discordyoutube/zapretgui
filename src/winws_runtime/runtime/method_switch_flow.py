@@ -8,12 +8,9 @@ from PyQt6.QtCore import QTimer
 from log.log import log
 from settings.mode import (
     ALL_LAUNCH_METHODS,
-    ZAPRET1_MODE,
-    ZAPRET2_MODE,
     exe_path_for_launch_method,
     is_orchestra_launch_method,
     is_preset_launch_method,
-    is_zapret2_launch_method,
     normalize_launch_method,
 )
 
@@ -35,6 +32,7 @@ def handle_launch_method_changed_runtime(
     *,
     runtime_feature,
     ui_state,
+    autostart_enabled: bool,
     set_status=None,
 ) -> MethodSwitchRuntimePlan:
     log(f"Метод запуска изменён на: {method}", "INFO")
@@ -42,7 +40,6 @@ def handle_launch_method_changed_runtime(
     try:
         launch_runtime = runtime_feature.objects.launch_runtime
         if launch_runtime is not None:
-            launch_runtime._dpi_start_verify_generation += 1
             launch_runtime._pending_launch_warnings = []
     except Exception:
         pass
@@ -55,6 +52,7 @@ def handle_launch_method_changed_runtime(
     plan = build_method_switch_runtime_plan(
         method,
         runtime_feature=runtime_feature,
+        autostart_enabled=autostart_enabled,
         set_status=set_status,
     )
     apply_method_switch_runtime_plan(runtime_feature, plan)
@@ -71,10 +69,9 @@ def build_method_switch_runtime_plan(
     method: str,
     *,
     runtime_feature,
+    autostart_enabled: bool,
     set_status=None,
 ) -> MethodSwitchRuntimePlan:
-    from program_settings.public import is_auto_dpi_enabled
-
     normalized_method = normalize_launch_method(method, default="")
     expected_exe_path = ""
     expected_process_name = ""
@@ -82,15 +79,7 @@ def build_method_switch_runtime_plan(
         expected_exe_path = str(exe_path_for_launch_method(normalized_method) or "").strip()
         expected_process_name = os.path.basename(expected_exe_path).strip().lower()
 
-    residual_runtime_detected = False
-    try:
-        runtime_api = runtime_feature.objects.launch_runtime_api
-        if runtime_api is not None:
-            residual_runtime_detected = bool(runtime_api.has_residual_processes(silent=True))
-    except Exception:
-        residual_runtime_detected = False
-
-    active_runtime_detected = bool(residual_runtime_detected)
+    active_runtime_detected = False
     try:
         snapshot = runtime_feature.objects.snapshot()
         phase = str(getattr(snapshot, "phase", "") or "").strip().lower()
@@ -109,12 +98,14 @@ def build_method_switch_runtime_plan(
     except Exception:
         pass
 
-    can_autostart = _can_autostart_for_method(
-        normalized_method,
-        runtime_feature=runtime_feature,
-        set_status=set_status,
+    can_autostart = bool(
+        is_orchestra_launch_method(normalized_method)
+        or is_preset_launch_method(normalized_method)
     )
-    autostart_enabled = bool(is_auto_dpi_enabled())
+    if not can_autostart:
+        _set_status(set_status, "Ошибка: выбран удалённый или неподдерживаемый режим запуска")
+        log(f"Удалённый или неподдерживаемый режим запуска: {normalized_method}", "ERROR")
+    autostart_enabled = bool(autostart_enabled)
 
     if active_runtime_detected:
         dispatch_action = "restart" if (autostart_enabled and can_autostart) else "stop"
@@ -210,37 +201,6 @@ def apply_method_switch_runtime_plan(runtime_feature, plan: MethodSwitchRuntimeP
 def _set_status(set_status, text: str) -> None:
     if callable(set_status):
         set_status(text)
-
-
-def _can_autostart_for_method(method: str, *, runtime_feature, set_status=None) -> bool:
-    normalized_method = normalize_launch_method(method, default="")
-    if is_orchestra_launch_method(normalized_method):
-        return True
-    if not is_preset_launch_method(normalized_method):
-        try:
-            _set_status(set_status, "Ошибка: выбран удалённый или неподдерживаемый режим запуска")
-        except Exception:
-            pass
-        log(f"Удалённый или неподдерживаемый режим запуска: {normalized_method}", "ERROR")
-        return False
-
-    try:
-        runtime_feature.dependencies.presets_feature.get_launch_snapshot(
-            normalized_method,
-            require_filters=False,
-        )
-        return True
-    except Exception as e:
-        if is_zapret2_launch_method(normalized_method):
-            log(f"{ZAPRET2_MODE}: выбранный source-пресет не подготовлен", "ERROR")
-            try:
-                _set_status(set_status, "Ошибка: отсутствует Default v1 (game filter).txt (built-in пресет)")
-            except Exception:
-                pass
-            return False
-
-        log(f"{ZAPRET1_MODE}: ошибка инициализации пресета: {e}", "WARNING")
-        return False
 
 
 __all__ = [
