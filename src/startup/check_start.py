@@ -1,4 +1,5 @@
 #startup/check_start.py
+import ctypes
 import os
 import re
 import sys

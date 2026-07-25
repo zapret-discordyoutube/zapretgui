@@ -138,14 +138,22 @@ class SidebarIntentControllerTests(unittest.TestCase):
             controller.should_reapply_expand(window_width=900, is_collapsed=True, threshold=700)
         )
 
-    def test_pending_flush_reports_only_unsaved_intent(self) -> None:
+    def test_pending_flush_ignores_worker_saved_state(self) -> None:
+        # Сигналу saved асинхронного воркера сознательно не доверяем:
+        # flush при выходе пишет намерение, даже если last_saved совпадает.
         controller = self._controller(intent=True, last_saved=True)
+        self.assertTrue(controller.pending_flush())
+
+    def test_pending_flush_deduplicates_after_mark_flushed(self) -> None:
+        controller = self._controller(intent=True, last_saved=True)
+
+        controller.mark_flushed(True)
         self.assertIsNone(controller.pending_flush())
 
         controller.classify_display_mode_change(_mode("COMPACT"), window_width=900, threshold=700)
         self.assertFalse(controller.pending_flush())
 
-        controller.mark_saved(False)
+        controller.mark_flushed(False)
         self.assertIsNone(controller.pending_flush())
 
     def test_pending_flush_with_unknown_saved_state_reports_intent(self) -> None:
@@ -228,7 +236,7 @@ class SidebarBuilderIntentBindingTests(unittest.TestCase):
 
         window, nav, session = self._make_window(intent=True, width=900)
 
-        sidebar_builder.reapply_sidebar_intent_on_resize(window)
+        self.assertTrue(sidebar_builder.reapply_sidebar_intent_on_resize(window))
 
         nav.expand.assert_called_once_with(False)
         self.assertFalse(session.sidebar_intent_controller.applying)
@@ -238,7 +246,7 @@ class SidebarBuilderIntentBindingTests(unittest.TestCase):
 
         window, nav, _session = self._make_window(intent=False, width=900)
 
-        sidebar_builder.reapply_sidebar_intent_on_resize(window)
+        self.assertFalse(sidebar_builder.reapply_sidebar_intent_on_resize(window))
 
         nav.expand.assert_not_called()
 
@@ -247,7 +255,26 @@ class SidebarBuilderIntentBindingTests(unittest.TestCase):
 
         window, nav, _session = self._make_window(intent=True, width=680)
 
-        sidebar_builder.reapply_sidebar_intent_on_resize(window)
+        self.assertFalse(sidebar_builder.reapply_sidebar_intent_on_resize(window))
+
+        nav.expand.assert_not_called()
+
+    def test_startup_recheck_expands_collapsed_panel_against_intent(self) -> None:
+        import ui.navigation.sidebar_builder as sidebar_builder
+
+        window, nav, _session = self._make_window(intent=True, width=900)
+
+        sidebar_builder._recheck_sidebar_intent_after_init(window)
+
+        nav.expand.assert_called_once_with(False)
+
+    def test_startup_recheck_is_noop_when_panel_matches_intent(self) -> None:
+        import ui.navigation.sidebar_builder as sidebar_builder
+
+        window, nav, _session = self._make_window(intent=True, width=900)
+        nav.panel.isCollapsed = lambda: False
+
+        sidebar_builder._recheck_sidebar_intent_after_init(window)
 
         nav.expand.assert_not_called()
 
@@ -319,7 +346,8 @@ class SidebarExitFlushTests(unittest.TestCase):
         self.assertFalse(controller.last_saved)
         self.assertIsNone(controller.pending_flush())
 
-    def test_flush_skips_write_when_intent_already_persisted(self) -> None:
+    def test_flush_writes_even_when_worker_reported_saved(self) -> None:
+        # Защитная мера: сигналу saved воркера не доверяем — flush пишет всегда.
         from main.window_lifecycle_cleanup import persist_sidebar_state
         from ui.navigation.sidebar_intent import SidebarIntentController
 
@@ -330,7 +358,21 @@ class SidebarExitFlushTests(unittest.TestCase):
         with patch("program_settings.public.save_ui_state_settings") as save:
             persist_sidebar_state(window, context="test")
 
-        save.assert_not_called()
+        save.assert_called_once_with({"sidebar_expanded": True})
+
+    def test_flush_skips_second_write_in_same_exit(self) -> None:
+        from main.window_lifecycle_cleanup import persist_sidebar_state
+        from ui.navigation.sidebar_intent import SidebarIntentController
+
+        controller = SidebarIntentController(intent=True, last_saved=True)
+        session = SimpleNamespace(sidebar_intent_controller=controller)
+        window = SimpleNamespace(ui_session=session)
+
+        with patch("program_settings.public.save_ui_state_settings") as save:
+            persist_sidebar_state(window, context="request_exit")
+            persist_sidebar_state(window, context="закрытии")
+
+        save.assert_called_once_with({"sidebar_expanded": True})
 
     def test_flush_without_session_is_noop(self) -> None:
         from main.window_lifecycle_cleanup import persist_sidebar_state

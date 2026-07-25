@@ -253,7 +253,6 @@ def to_qcolor(value, fallback_hex: str = "#000000") -> QColor:
 
 
 __all__ = [
-    "QListView",
     "PRESET_DROP_MARKER_PROPERTY",
     "cached_icon",
     "fluent_icon",

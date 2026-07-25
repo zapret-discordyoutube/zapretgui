@@ -1305,6 +1305,10 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertIn("OldUninstaller + '.disabled'", iss)
 
         self.assertIn("function RetargetGuiAutostartTask(const OldRoot, NewRoot: string): Boolean;", iss)
+        # Задача автозапуска проверяется и при обновлении на месте,
+        # а не только при переносе установки в другую папку.
+        self.assertIn("RetargetGuiAutostartTask(AutostartOldRoot, NewInstallRoot)", iss)
+        self.assertIn("AutostartOldRoot := NewInstallRoot", iss)
         self.assertIn("'ZapretGUI Autostart'", iss)
         self.assertIn("Action.WorkingDirectory := NewRoot;", iss)
         self.assertIn("TaskUserId := Definition.Principal.UserId;", iss)
@@ -1433,7 +1437,10 @@ class BuildResourceLayoutTests(unittest.TestCase):
         remove_links_end = iss.index("procedure AppendRelocationReason", remove_links_start)
         remove_links = iss[remove_links_start:remove_links_end]
 
-        self.assertIn("if IsNestedPath(ActionPath, OldRoot) then", retarget)
+        self.assertIn("if PathsEqual(ActionPath, NewExe) then", retarget)
+        self.assertIn("else if IsNestedPath(ActionPath, OldRoot) or", retarget)
+        self.assertIn("IsNestedPath(ActionPath, NewRoot) then", retarget)
+        self.assertIn("GUI autostart task points to another install, left untouched.", retarget)
         self.assertNotIn("OldExe", retarget)
         self.assertIn("OldRootPrefix := AddBackslash(NormalizeInstallRoot(OldRoot));", repair)
         self.assertIn("$target.StartsWith($oldRoot,[StringComparison]::OrdinalIgnoreCase)", repair)
@@ -1462,8 +1469,13 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertIn('"-EncodedCommand",', updater)
         self.assertIn("process.communicate(timeout=120)", updater)
         self.assertNotIn("procedure DeinitializeSetup;", iss)
-        self.assertIn("if (CurStep = ssDone) and IsAutoUpdate() and", iss)
+        self.assertIn("if (CurStep = ssDone) and IsAutoUpdate() then", iss)
+        self.assertIn(
+            "Log('Post-install finalization incomplete; launching application anyway.');",
+            iss,
+        )
         self.assertIn("PostInstallFinalizationSucceeded", iss)
+        self.assertIn('f"/LOG={setup_log}"', updater)
         self.assertIn("function ShouldLaunchAfterInteractiveInstall: Boolean;", iss)
         self.assertIn("Check: ShouldLaunchAfterInteractiveInstall", iss)
 

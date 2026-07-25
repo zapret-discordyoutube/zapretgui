@@ -158,6 +158,14 @@ def ensure_qt_runtime() -> QApplication:
         "StartupQtAnimationCompat",
         f"{(_time.perf_counter() - t_animation) * 1000:.0f}ms",
     )
+    t_signal_guards = _time.perf_counter()
+    from ui.qfluent_signal_guards import install_qfluent_theme_signal_guards
+
+    install_qfluent_theme_signal_guards()
+    emit_startup_metric(
+        "StartupQtThemeSignalGuards",
+        f"{(_time.perf_counter() - t_signal_guards) * 1000:.0f}ms",
+    )
     t_accent_signal = _time.perf_counter()
     _connect_qfluent_accent_signal_lazy()
     emit_startup_metric(

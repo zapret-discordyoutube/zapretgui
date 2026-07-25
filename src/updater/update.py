@@ -497,6 +497,7 @@ class UpdateWorker(QObject):
 
             # Каждый параметр передаётся отдельно. Поэтому путь после /DIR не
             # развалится на несколько частей, даже если в нём есть пробелы.
+            setup_log = os.path.join(persistent_dir, "setup.log")
             arguments = [
                 "/AUTOUPDATE",
                 "/VERYSILENT",
@@ -505,6 +506,7 @@ class UpdateWorker(QObject):
                 "/NOCANCEL",
                 "/CLOSEAPPLICATIONS",
                 f"/DIR={install_dir}",
+                f"/LOG={setup_log}",
             ]
 
             # Запускаем установщик через WinAPI с правами администратора

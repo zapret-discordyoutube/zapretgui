@@ -55,6 +55,14 @@ class ThemeRefreshBinding(QObject):
             qconfig.themeColorChanged.connect(self._on_theme_signal)
         except Exception:
             pass
+        # Автоуборка: в Nuitka-сборке PyQt не разрывает qconfig-подписки
+        # при удалении C++-объекта (receiver у compiled-method не
+        # распознаётся), поэтому отписываемся сами в момент destroyed —
+        # он приходит до удаления детей target, binding ещё жив.
+        try:
+            target.destroyed.connect(self._on_target_destroyed)
+        except Exception:
+            pass
 
     def eventFilter(self, watched, event):  # noqa: N802 (Qt override)
         if self._cleanup_in_progress:
@@ -116,14 +124,34 @@ class ThemeRefreshBinding(QObject):
         self._pending_force = False
         self.request_refresh(force=pending_force)
 
+    def _on_target_destroyed(self, *_args) -> None:
+        self.cleanup()
+
+    def _target_is_dead(self) -> bool:
+        if self._target is None:
+            return True
+        try:
+            from PyQt6 import sip
+
+            return bool(sip.isdeleted(self._target))
+        except Exception:
+            return False
+
     def _on_theme_signal(self, *_args) -> None:
         if self._cleanup_in_progress:
+            return
+        if self._target_is_dead():
+            self.cleanup()
             return
         self.request_refresh()
 
     def _apply_debounced(self) -> None:
         if self._cleanup_in_progress or self._target is None:
             self._refresh_scheduled = False
+            return
+        if self._target_is_dead():
+            self._refresh_scheduled = False
+            self.cleanup()
             return
         self._refresh_scheduled = False
         force = bool(self._pending_force)

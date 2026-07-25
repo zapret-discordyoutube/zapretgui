@@ -1,5 +1,7 @@
 """DNS integrity check — compare UDP DNS vs DoH to detect faking/stubs."""
 
+from __future__ import annotations
+
 import logging
 import socket
 from collections import Counter

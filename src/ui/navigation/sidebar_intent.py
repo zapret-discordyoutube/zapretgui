@@ -29,6 +29,7 @@ class SidebarIntentController:
     intent: bool
     last_saved: bool | None = None
     applying: bool = False
+    flushed: bool | None = None
 
     def classify_display_mode_change(
         self,
@@ -74,10 +75,22 @@ class SidebarIntentController:
         self.last_saved = bool(value)
 
     def pending_flush(self) -> bool | None:
-        """Намерение, которое ещё не записано на диск (для flush при выходе)."""
-        if self.last_saved is None or bool(self.last_saved) != bool(self.intent):
-            return bool(self.intent)
-        return None
+        """Намерение для синхронной записи при выходе (None — уже записано flush'ем).
+
+        last_saved от асинхронного воркера здесь сознательно не учитывается:
+        потерянный или ложный сигнал saved не должен стоить пользователю
+        состояния панели — дешевле записать значение при выходе ещё раз.
+        Повторный вызов в той же цепочке выхода вернёт None благодаря
+        mark_flushed.
+        """
+        if self.flushed is not None and bool(self.flushed) == bool(self.intent):
+            return None
+        return bool(self.intent)
+
+    def mark_flushed(self, value: bool) -> None:
+        """Фиксирует значение, записанное синхронным flush при выходе."""
+        self.flushed = bool(value)
+        self.mark_saved(value)
 
 
 __all__ = [

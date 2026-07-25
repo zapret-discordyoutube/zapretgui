@@ -203,11 +203,11 @@ def _parse_hosts_catalog_json(text: str) -> HostsCatalog:
     try:
         data = json.loads(text or "{}")
     except Exception as exc:
-        _log(f"Не удалось разобрать {_CATALOG_FILE_NAME}: {exc}", "WARNING")
+        _log(f"Не удалось разобрать hosts-каталог: {exc}", "WARNING")
         return _empty_catalog()
 
     if not isinstance(data, dict):
-        _log(f"{_CATALOG_FILE_NAME} должен содержать JSON-объект", "WARNING")
+        _log("hosts-каталог должен содержать JSON-объект", "WARNING")
         return _empty_catalog()
 
     profiles: list[str] = []

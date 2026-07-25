@@ -25,11 +25,14 @@ def persist_window_geometry(window, *, context: str, level: str = "DEBUG") -> No
 
 
 def persist_sidebar_state(window, *, context: str, level: str = "DEBUG") -> None:
-    """Синхронно дозаписывает намерение сайдбара, не успевшее уйти через воркер.
+    """Синхронно записывает намерение сайдбара при выходе.
 
     Обычные сохранения идут асинхронно; при выходе Qt event loop уже не даст
-    воркеру и его reschedule-таймеру завершиться, поэтому pending-значение
-    пишется здесь напрямую — как и геометрия окна.
+    воркеру и его reschedule-таймеру завершиться, поэтому значение пишется
+    здесь напрямую — как и геометрия окна. Запись выполняется даже если воркер
+    отчитался об успехе (его сигналу не доверяем — потеря стоила бы состояния
+    панели); повторные вызовы в той же цепочке выхода дедуплицируются через
+    mark_flushed.
     """
     try:
         from ui.navigation.sidebar_builder import (
@@ -47,7 +50,8 @@ def persist_sidebar_state(window, *, context: str, level: str = "DEBUG") -> None
         from program_settings.public import save_ui_state_settings
 
         save_ui_state_settings({SIDEBAR_EXPANDED_UI_STATE_KEY: bool(pending)})
-        controller.mark_saved(bool(pending))
+        controller.mark_flushed(bool(pending))
+        log(f"[SIDEBAR] flush при {context}: expanded={bool(pending)}", "INFO")
     except Exception as e:
         log(f"Ошибка сохранения состояния сайдбара при {context}: {e}", level)
 

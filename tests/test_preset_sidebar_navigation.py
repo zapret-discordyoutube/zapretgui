@@ -268,7 +268,13 @@ class PresetSidebarNavigationTests(unittest.TestCase):
                 PageName.TELEGRAM_PROXY,
             ),
         )
-        self.assertEqual(plans["diagnostics"].page_names, (PageName.BLOCKCHECK,))
+        self.assertEqual(
+            plans["diagnostics"].page_names,
+            (
+                PageName.BLOCKCHECK,
+                PageName.WINWS_LOG_ANALYZER,
+            ),
+        )
 
     def test_common_sidebar_labels_use_dns_and_hosts_wording(self) -> None:
         from app.page_names import PageName
@@ -440,12 +446,17 @@ class PresetSidebarNavigationTests(unittest.TestCase):
             self.assertNotIn(PageName.ZAPRET2_USER_PRESETS, added_pages)
             self.assertNotIn(PageName.ZAPRET2_PRESET_SETUP, added_pages)
             self.assertNotIn(PageName.NETWORK, added_pages)
-            self.assertEqual(scheduled, [])
+            # Сразу после init_navigation запланирована только страховочная
+            # перепроверка состояния сайдбара, но не вторичные группы.
+            self.assertEqual(
+                [delay for delay, _callback in scheduled],
+                [sidebar_builder.SIDEBAR_INTENT_RECHECK_AFTER_INIT_MS],
+            )
 
             signal.emit()
 
-            self.assertEqual(len(scheduled), 1)
-            self.assertLessEqual(scheduled[0][0], 1_000)
+            self.assertEqual(len(scheduled), 2)
+            self.assertLessEqual(scheduled[1][0], 1_000)
 
             next_callback_index = 0
             while next_callback_index < len(scheduled):
