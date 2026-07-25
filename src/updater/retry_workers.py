@@ -76,4 +76,43 @@ class UpdaterDpiRestartWorker(QThread):
         self.loaded.emit(self._request_id, restarted)
 
 
-__all__ = ["UpdaterServerRetryWithoutDpiWorker", "UpdaterDpiRestartWorker"]
+class UpdaterDpiStopWorker(QThread):
+    loaded = pyqtSignal(int, bool, bool, str)
+    failed = pyqtSignal(int, str)
+
+    def __init__(
+        self,
+        request_id: int,
+        *,
+        is_any_running,
+        shutdown_sync,
+        stop_dpi_for_update,
+        reason: str,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._request_id = int(request_id)
+        self._is_any_running = is_any_running
+        self._shutdown_sync = shutdown_sync
+        self._stop_dpi_for_update = stop_dpi_for_update
+        self._reason = str(reason or "updater_pipeline")
+
+    def run(self) -> None:
+        try:
+            was_running, stopped, error = self._stop_dpi_for_update(
+                is_any_running=self._is_any_running,
+                shutdown_sync=self._shutdown_sync,
+                reason=self._reason,
+            )
+        except Exception as exc:
+            log(f"Не удалось остановить DPI для обновления: {exc}", "❌ ERROR")
+            self.failed.emit(self._request_id, str(exc))
+            return
+        self.loaded.emit(self._request_id, was_running, stopped, error)
+
+
+__all__ = [
+    "UpdaterDpiRestartWorker",
+    "UpdaterDpiStopWorker",
+    "UpdaterServerRetryWithoutDpiWorker",
+]

@@ -168,8 +168,14 @@ def build_servers_page_kwargs(
     updater_feature,
     external_actions_feature,
     show_page,
+    request_exit,
 ) -> dict:
     _ = page_name
+
+    def _mark_runtime_stopped_after_update() -> None:
+        runtime_service = runtime_feature.objects.runtime_service
+        if runtime_service is not None:
+            runtime_service.mark_stopped(clear_error=True)
 
     def _create_changelog_link_open_worker(request_id: int, *, url: str, parent=None):
         return external_actions_feature.create_open_url_worker(
@@ -184,6 +190,8 @@ def build_servers_page_kwargs(
             shutdown_sync=runtime_feature.shutdown_sync,
             is_available=runtime_feature.is_available,
             restart=runtime_feature.restart,
+            mark_stopped=_mark_runtime_stopped_after_update,
+            request_exit=request_exit,
         ),
         "updater_feature": updater_feature,
         "open_about": lambda: show_page(PageName.ABOUT),

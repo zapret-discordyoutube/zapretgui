@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QObject, QTimer
 
 from config.build_info import CHANNEL
 from config.config import CHANNEL_DEV, CHANNEL_STABLE
@@ -31,6 +31,11 @@ class ServerCheckRecoveryState:
 @dataclass(slots=True)
 class UpdateDownloadState:
     is_installing: bool = False
+    artifact: object | None = None
+    handoff: object | None = None
+    dpi_stopped_by_update: bool = False
+    pending_after_dpi_stop: str = ""
+    installer_launched: bool = False
 
 
 @dataclass(slots=True)
@@ -82,6 +87,10 @@ _UPDATER_CLEANUP_RUNTIME_POLICIES = (
     ("update_channel_open_worker", "update_channel_open_worker", False),
     ("cache_invalidate_worker", "cache_invalidate_worker", False),
     ("server_check_gate_worker", "server_check_gate_worker", False),
+    ("update_preflight_worker", "update_preflight_worker", True),
+    ("update_download_worker", "update_download_worker", True),
+    ("update_installer_worker", "update_installer_worker", True),
+    ("update_dpi_stop_worker", "update_dpi_stop_worker", True),
 )
 _UPDATER_CLEANUP_BLOCKING_BY_PREFIX = {
     warning_prefix: blocking
@@ -122,7 +131,7 @@ class UpdatePageView(Protocol):
     def show_update_channel_open_error(self, error: str) -> None: ...
 
 
-class UpdatePageRuntime:
+class UpdatePageRuntime(QObject):
     """Сценарный слой страницы обновлений.
 
     Держит воркеры подробной проверки серверов и загрузки обновления.
@@ -131,6 +140,7 @@ class UpdatePageRuntime:
     """
 
     def __init__(self, view: UpdatePageView, *, runtime_actions: UpdateRuntimeActions, updater_feature) -> None:
+        super().__init__()
         self._view = view
         self._runtime_actions = runtime_actions
         self._updater_feature = updater_feature
@@ -144,7 +154,10 @@ class UpdatePageRuntime:
         self._update_channel_open_runtime = OneShotWorkerRuntime()
         self._cache_invalidate_runtime = OneShotWorkerRuntime()
         self._server_check_gate_runtime = OneShotWorkerRuntime()
-        self._update_install_runtime = OneShotWorkerRuntime()
+        self._update_preflight_runtime = OneShotWorkerRuntime()
+        self._update_download_runtime = OneShotWorkerRuntime()
+        self._update_installer_runtime = OneShotWorkerRuntime()
+        self._update_dpi_stop_runtime = OneShotWorkerRuntime()
         self._update_check_unsubscribe = None
         self._manual_check_token: int | None = None
         self._cleanup_in_progress = False
@@ -329,11 +342,12 @@ class UpdatePageRuntime:
                 "_create_server_worker",
                 "create_server_retry_without_dpi_worker",
                 "_create_version_worker",
-                "_create_update_worker_runtime",
+                "create_update_dpi_stop_worker",
                 "_bind_server_worker_signals",
                 "_bind_version_worker_signals",
-                "_bind_update_worker_signals",
-                "_handle_update_install_finished",
+                "_bind_update_preflight_signals",
+                "_bind_update_download_signals",
+                "_bind_update_installer_signals",
                 "_teardown_server_worker",
                 "_teardown_server_retry_without_dpi_worker",
                 "_teardown_version_worker",
@@ -377,7 +391,10 @@ class UpdatePageRuntime:
                 "_auto_check_load_runtime",
                 "_update_channel_open_runtime",
                 "_cache_invalidate_runtime",
-                "_update_install_runtime",
+                "_update_preflight_runtime",
+                "_update_download_runtime",
+                "_update_installer_runtime",
+                "_update_dpi_stop_runtime",
             ),
             pure_helper_methods=(
                 "_resolve_idle_view_decision",
@@ -412,8 +429,9 @@ class UpdatePageRuntime:
             ),
             download_orchestration_candidates=(
                 "install_update",
-                "_bind_update_worker_signals",
-                "_handle_update_install_finished",
+                "_bind_update_preflight_signals",
+                "_bind_update_download_signals",
+                "_bind_update_installer_signals",
                 "_on_download_failed",
             ),
             check_orchestration_candidates=(
@@ -719,16 +737,16 @@ class UpdatePageRuntime:
 
     def _start_update_download(self) -> None:
         try:
-            self._update_install_runtime.start_qobject_worker(
+            self._update_preflight_runtime.start_qobject_worker(
                 parent=self._view.window(),
-                worker_factory=lambda _request_id: self._create_update_worker_runtime(),
-                bind_worker=self._bind_update_worker_signals,
-                on_finished=self._handle_update_install_finished,
+                worker_factory=lambda _request_id: self._updater_feature.create_update_preflight_worker(
+                    requested_version=self._found_state.version,
+                ),
+                bind_worker=self._bind_update_preflight_signals,
             )
         except Exception as e:
             log(f"Ошибка при запуске обновления: {e}", "❌ ERROR")
-            self._teardown_update_runtime()
-            self._view.mark_update_download_failed(str(e)[:50])
+            self._fail_update_pipeline(str(e))
 
     def _request_update_cache_invalidate(self, context: str) -> None:
         target = str(context or "")
@@ -1134,12 +1152,13 @@ class UpdatePageRuntime:
 
         return VersionCheckWorker()
 
-    def _create_update_worker_runtime(self):
-        parent_window = self._view.window()
-        return self._updater_feature.create_update_install_worker(
-            parent_window=parent_window,
+    def create_update_dpi_stop_worker(self, request_id: int, *, reason: str):
+        return self._updater_feature.create_dpi_stop_worker(
+            request_id,
             is_any_running=self._runtime_actions.is_any_running,
             shutdown_sync=self._runtime_actions.shutdown_sync,
+            reason=reason,
+            parent=self._view.window(),
         )
 
     def _bind_server_worker_signals(self, worker) -> None:
@@ -1150,27 +1169,174 @@ class UpdatePageRuntime:
         worker.version_found.connect(self._on_version_found)
         worker.complete.connect(self._on_versions_complete)
 
-    def _bind_update_worker_signals(self, worker) -> None:
-        worker.progress_bytes.connect(
-            lambda p, d, t: self._view.update_download_progress(p, d, t)
-        )
-        worker.download_complete.connect(self._view.mark_update_download_complete)
-        worker.download_failed.connect(self._view.mark_update_download_failed)
-        worker.download_failed.connect(self._on_download_failed)
-        worker.dpi_restart_needed.connect(self._restart_dpi_after_update)
-        worker.progress.connect(self._on_update_worker_progress)
+    def _bind_update_preflight_signals(self, worker) -> None:
+        worker.stage_changed.connect(self._on_update_stage_changed)
+        worker.ready.connect(self._on_update_preflight_ready)
+        worker.failed.connect(self._fail_update_pipeline)
+        worker.cancelled.connect(self._on_update_pipeline_cancelled)
 
-    def _on_update_worker_progress(self, message: str) -> None:
-        text = str(message or "").strip()
-        log(f"{text}", "🔁 UPDATE")
-        if not text or text.startswith("Скачивание"):
-            return
-        self._view.update_download_status_text(text)
+    def _bind_update_download_signals(self, worker) -> None:
+        worker.stage_changed.connect(self._on_update_stage_changed)
+        worker.progress_bytes.connect(self._on_update_download_progress)
+        worker.ready.connect(self._on_update_handoff_ready)
+        worker.failed.connect(self._fail_update_pipeline)
+        worker.cancelled.connect(self._on_update_pipeline_cancelled)
 
-    def _handle_update_install_finished(self, _request_id: int, _thread) -> None:
+    def _bind_update_installer_signals(self, worker) -> None:
+        worker.stage_changed.connect(self._on_update_stage_changed)
+        worker.launched.connect(self._on_update_installer_launched)
+        worker.failed.connect(self._fail_update_pipeline)
+
+    def _on_update_stage_changed(self, _stage: str, message: str) -> None:
         if self._cleanup_in_progress:
             return
-        self._teardown_update_runtime()
+        text = str(message or "").strip()
+        if text:
+            self._view.update_download_status_text(text)
+
+    def _on_update_download_progress(
+        self,
+        percent: int,
+        done_bytes: int,
+        total_bytes: int,
+    ) -> None:
+        if self._cleanup_in_progress:
+            return
+        self._view.update_download_progress(percent, done_bytes, total_bytes)
+
+    def _on_update_preflight_ready(self, result) -> None:
+        if self._cleanup_in_progress:
+            return
+        self._download_state.artifact = result.artifact
+        if bool(result.connectivity_ok):
+            self._start_update_download_stage()
+            return
+        self._request_update_dpi_stop(after_stop="download")
+
+    def _start_update_download_stage(self) -> None:
+        artifact = self._download_state.artifact
+        if artifact is None:
+            self._fail_update_pipeline("Не подготовлены данные обновления")
+            return
+        try:
+            self._update_download_runtime.start_qobject_worker(
+                parent=self._view.window(),
+                worker_factory=lambda _request_id: self._updater_feature.create_update_download_worker(
+                    artifact=artifact,
+                    silent=True,
+                ),
+                bind_worker=self._bind_update_download_signals,
+            )
+        except Exception as exc:
+            self._fail_update_pipeline(str(exc))
+
+    def _on_update_handoff_ready(self, handoff) -> None:
+        if self._cleanup_in_progress:
+            return
+        self._download_state.handoff = handoff
+        self._view.mark_update_download_complete()
+        if self._download_state.dpi_stopped_by_update:
+            self._start_update_installer_stage()
+            return
+        self._request_update_dpi_stop(after_stop="installer")
+
+    def _request_update_dpi_stop(self, *, after_stop: str) -> None:
+        if self._cleanup_in_progress:
+            return
+        if self._update_dpi_stop_runtime.is_running():
+            return
+        self._download_state.pending_after_dpi_stop = str(after_stop or "")
+        reason = (
+            "updater_download_connectivity"
+            if after_stop == "download"
+            else "updater_installer_handoff"
+        )
+        self._view.update_download_status_text("Остановка DPI перед обновлением…")
+        self._update_dpi_stop_runtime.start_qthread_worker(
+            worker_factory=lambda request_id: self.create_update_dpi_stop_worker(
+                request_id,
+                reason=reason,
+            ),
+            on_loaded=self._on_update_dpi_stop_finished,
+            on_failed=self._on_update_dpi_stop_failed,
+        )
+
+    def _on_update_dpi_stop_finished(
+        self,
+        request_id: int,
+        was_running: bool,
+        stopped: bool,
+        error: str,
+    ) -> None:
+        if not self._update_dpi_stop_runtime.is_current(
+            request_id,
+            cleanup_in_progress=self._cleanup_in_progress,
+        ):
+            return
+        if not stopped:
+            self._fail_update_pipeline(error or "DPI не удалось остановить")
+            return
+        if was_running:
+            self._runtime_actions.mark_stopped()
+            self._download_state.dpi_stopped_by_update = True
+        self._continue_after_update_dpi_stop()
+
+    def _on_update_dpi_stop_failed(self, request_id: int, error: str) -> None:
+        if not self._update_dpi_stop_runtime.is_current(
+            request_id,
+            cleanup_in_progress=self._cleanup_in_progress,
+        ):
+            return
+        self._fail_update_pipeline(error)
+
+    def _continue_after_update_dpi_stop(self) -> None:
+        next_stage = self._download_state.pending_after_dpi_stop
+        self._download_state.pending_after_dpi_stop = ""
+        if next_stage == "download":
+            self._start_update_download_stage()
+        elif next_stage == "installer":
+            self._start_update_installer_stage()
+
+    def _start_update_installer_stage(self) -> None:
+        handoff = self._download_state.handoff
+        if handoff is None:
+            self._fail_update_pipeline("Установщик не подготовлен")
+            return
+        try:
+            self._update_installer_runtime.start_qobject_worker(
+                parent=self._view.window(),
+                worker_factory=lambda _request_id: self._updater_feature.create_update_installer_worker(
+                    handoff=handoff,
+                ),
+                bind_worker=self._bind_update_installer_signals,
+            )
+        except Exception as exc:
+            self._fail_update_pipeline(str(exc))
+
+    def _on_update_installer_launched(self) -> None:
+        if self._cleanup_in_progress:
+            return
+        self._download_state.installer_launched = True
+        log("Установщик запущен; приложение закрывается штатно", "🔁 UPDATE")
+        QTimer.singleShot(
+            0,
+            lambda: self._runtime_actions.request_exit(stop_dpi=False),
+        )
+
+    def _on_update_pipeline_cancelled(self) -> None:
+        self._fail_update_pipeline("Обновление остановлено")
+
+    def _fail_update_pipeline(self, error: str) -> None:
+        if self._cleanup_in_progress:
+            return
+        message = str(error or "Не удалось установить обновление")
+        self._view.mark_update_download_failed(message)
+        self._on_download_failed(message)
+        self._download_state.is_installing = False
+        self._view.set_update_check_enabled(True)
+        if self._download_state.dpi_stopped_by_update:
+            self._download_state.dpi_stopped_by_update = False
+            self._restart_dpi_after_update(context="неудачного обновления")
 
     def _teardown_server_worker(self) -> None:
         self._server_worker_runtime.stop(
@@ -1251,21 +1417,26 @@ class UpdatePageRuntime:
         self._server_check_gate_runtime.cancel()
 
     def _teardown_update_runtime(self, *, wait_for_finish: bool = False) -> None:
-        try:
-            if wait_for_finish and self._update_install_runtime.is_running():
-                log("Останавливаем update_worker...", "DEBUG")
-            self._update_install_runtime.stop(
-                blocking=wait_for_finish,
-                log_fn=log,
-                warning_prefix="update_worker",
-            )
-            self._update_install_runtime.cancel()
-        except Exception as e:
-            log(f"Ошибка при очистке update runtime: {e}", "DEBUG")
-        finally:
-            self._reset_download_state()
-            if not self._cleanup_in_progress:
-                self._view.set_update_check_enabled(True)
+        runtimes = (
+            ("update_preflight_worker", self._update_preflight_runtime),
+            ("update_download_worker", self._update_download_runtime),
+            ("update_installer_worker", self._update_installer_runtime),
+            ("update_dpi_stop_worker", self._update_dpi_stop_runtime),
+        )
+        for warning_prefix, runtime in runtimes:
+            try:
+                runtime.stop(
+                    blocking=wait_for_finish,
+                    log_fn=log,
+                    warning_prefix=warning_prefix,
+                )
+                runtime.cancel()
+            except Exception as exc:
+                log(f"Ошибка при очистке {warning_prefix}: {exc}", "DEBUG")
+
+        self._reset_download_state()
+        if not self._cleanup_in_progress:
+            self._view.set_update_check_enabled(True)
 
     def _offer_current_update(self) -> None:
         if self._cleanup_in_progress:

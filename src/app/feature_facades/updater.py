@@ -128,17 +128,43 @@ class UpdaterFeature:
             parent=parent,
         )
 
-    def create_update_install_worker(self, *, parent_window, is_any_running, shutdown_sync):
-        from updater.update import UpdateWorker
+    def create_dpi_stop_worker(
+        self,
+        request_id: int,
+        *,
+        is_any_running,
+        shutdown_sync,
+        reason: str,
+        parent=None,
+    ):
+        from updater.retry_workers import UpdaterDpiStopWorker
 
-        return UpdateWorker(
-            parent_window,
-            silent=True,
-            skip_rate_limit=True,
+        return UpdaterDpiStopWorker(
+            request_id,
             is_any_running=is_any_running,
             shutdown_sync=shutdown_sync,
-            stop_dpi_for_download=self.stop_dpi_for_download,
+            stop_dpi_for_update=self.stop_dpi_for_update,
+            reason=reason,
+            parent=parent,
         )
+
+    @staticmethod
+    def create_update_preflight_worker(*, requested_version: str):
+        from updater.update_pipeline import UpdatePreflightWorker
+
+        return UpdatePreflightWorker(requested_version)
+
+    @staticmethod
+    def create_update_download_worker(*, artifact, silent: bool = True):
+        from updater.update_pipeline import UpdateDownloadWorker
+
+        return UpdateDownloadWorker(artifact, silent=silent)
+
+    @staticmethod
+    def create_update_installer_worker(*, handoff):
+        from updater.update_pipeline import UpdateInstallerWorker
+
+        return UpdateInstallerWorker(handoff)
 
     def run_startup_update_check(self) -> dict:
         return self._commands().run_startup_update_check()
@@ -166,6 +192,13 @@ class UpdaterFeature:
                 is_any_running=is_any_running,
                 shutdown_sync=shutdown_sync,
             )
+        )
+
+    def stop_dpi_for_update(self, *, is_any_running, shutdown_sync, reason: str):
+        return self._commands().stop_dpi_for_update(
+            is_any_running=is_any_running,
+            shutdown_sync=shutdown_sync,
+            reason=str(reason or "updater_pipeline"),
         )
 
     def restart_dpi_after_update(self, *, is_available, restart) -> bool:

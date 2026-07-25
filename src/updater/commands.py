@@ -92,3 +92,18 @@ def stop_dpi_for_download(*, is_any_running, shutdown_sync) -> bool:
         return False
     shutdown_sync(reason="updater_download_connectivity", include_cleanup=True)
     return True
+
+
+def stop_dpi_for_update(*, is_any_running, shutdown_sync, reason: str) -> tuple[bool, bool, str]:
+    """Останавливает DPI в отдельной управляемой стадии обновления."""
+    if not is_any_running():
+        return False, True, ""
+
+    result = shutdown_sync(
+        reason=str(reason or "updater_pipeline"),
+        include_cleanup=True,
+        update_runtime_state=False,
+    )
+    if bool(getattr(result, "still_running", False)):
+        return True, False, "DPI не остановился"
+    return True, True, ""

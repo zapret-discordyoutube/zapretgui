@@ -228,6 +228,7 @@ class ReleaseManager:
                     "source": info['source'],
                     "verify_ssl": True,
                     "file_size": info.get('file_size'),
+                    "sha256": info.get('sha256') or info.get('digest'),
                     "telegram_info": info,  # Сохраняем полную информацию для скачивания
                 }
             
@@ -495,6 +496,7 @@ class ReleaseManager:
             "source": server_name,
             "verify_ssl": verify_ssl,
             "file_size": data.get("file_size"),
+            "sha256": data.get("sha256") or data.get("digest"),
             "mtime": data.get("mtime"),
             "modified_at": data.get("modified_at")
         }

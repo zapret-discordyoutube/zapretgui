@@ -37,6 +37,10 @@ class UpdaterCleanupSourceContractTests(unittest.TestCase):
             "server_retry_without_dpi_worker",
             "dpi_restart_worker",
             "auto_check_save_worker",
+            "update_preflight_worker",
+            "update_download_worker",
+            "update_installer_worker",
+            "update_dpi_stop_worker",
         ):
             self.assertIs(blocking_by_name[name], True)
 

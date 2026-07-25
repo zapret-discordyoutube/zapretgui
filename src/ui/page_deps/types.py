@@ -31,6 +31,8 @@ class UpdateRuntimeActions:
     shutdown_sync: Callable[..., object]
     is_available: Callable[..., bool]
     restart: Callable[..., object]
+    mark_stopped: Callable[..., object]
+    request_exit: Callable[..., object]
 
 
 __all__ = [

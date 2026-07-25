@@ -19,7 +19,7 @@ def check_for_update_sync() -> dict:
         version      : str|None  — версия обновления (если has_update) или текущая
         release_notes: str       — заметки к релизу
         error        : str|None  — текст ошибки (если проверка не удалась)
-        release_info : dict|None — полный release_info (для передачи в UpdateWorker)
+        release_info : dict|None — полные метаданные найденного выпуска
     """
     try:
         from config.build_info import CHANNEL, APP_VERSION

@@ -140,7 +140,7 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
     PageName.SERVERS: PageDepsSpec(
         build_servers_page_kwargs,
         features=("runtime", "updater", "external_actions"),
-        actions=("show_page",),
+        actions=("show_page", "request_exit"),
     ),
     PageName.BLOCKCHECK: PageDepsSpec(
         build_blockcheck_page_kwargs,

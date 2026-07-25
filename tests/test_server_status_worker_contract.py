@@ -76,14 +76,19 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
             shutdown_sync=Mock(),
             is_available=Mock(),
             restart=Mock(),
+            objects=SimpleNamespace(
+                runtime_service=SimpleNamespace(mark_stopped=Mock()),
+            ),
         )
 
+        request_exit = Mock()
         kwargs = build_servers_page_kwargs(
             page_name=PageName.SERVERS,
             runtime_feature=runtime_feature,
             updater_feature=Mock(),
             external_actions_feature=Mock(),
             show_page=Mock(),
+            request_exit=request_exit,
         )
 
         self.assertNotIn("runtime_feature", inspect.signature(ServersPage.__init__).parameters)
@@ -95,6 +100,11 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
         self.assertIs(kwargs["runtime_actions"].shutdown_sync, runtime_feature.shutdown_sync)
         self.assertIs(kwargs["runtime_actions"].is_available, runtime_feature.is_available)
         self.assertIs(kwargs["runtime_actions"].restart, runtime_feature.restart)
+        kwargs["runtime_actions"].mark_stopped()
+        runtime_feature.objects.runtime_service.mark_stopped.assert_called_once_with(
+            clear_error=True
+        )
+        self.assertIs(kwargs["runtime_actions"].request_exit, request_exit)
 
     def _make_runtime(self):
         from ui.page_deps.types import UpdateRuntimeActions
@@ -131,6 +141,9 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
             shutdown_sync=Mock(return_value=SimpleNamespace(still_running=False)),
             is_available=Mock(return_value=True),
             restart=Mock(),
+            objects=SimpleNamespace(
+                runtime_service=SimpleNamespace(mark_stopped=Mock()),
+            ),
         )
         from app.feature_facades.updater import UpdaterFeature
 
@@ -141,6 +154,8 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
                 shutdown_sync=runtime_feature.shutdown_sync,
                 is_available=runtime_feature.is_available,
                 restart=runtime_feature.restart,
+                mark_stopped=runtime_feature.objects.runtime_service.mark_stopped,
+                request_exit=Mock(),
             ),
             updater_feature=UpdaterFeature(),
         )

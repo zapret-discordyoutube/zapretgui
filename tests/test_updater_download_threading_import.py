@@ -8,9 +8,9 @@ import unittest
 class UpdaterDownloadThreadingImportTests(unittest.TestCase):
     def _source(self) -> str:
         root = Path(__file__).resolve().parents[1]
-        return (root / "src" / "updater" / "update.py").read_text(encoding="utf-8")
+        return (root / "src" / "updater" / "update_pipeline.py").read_text(encoding="utf-8")
 
-    def test_update_module_has_threading_for_segmented_download(self) -> None:
+    def test_pipeline_imports_threading_for_segments_and_cancellation(self) -> None:
         tree = ast.parse(self._source())
         imported_names = {
             alias.name
@@ -18,13 +18,9 @@ class UpdaterDownloadThreadingImportTests(unittest.TestCase):
             if isinstance(node, ast.Import)
             for alias in node.names
         }
-
         self.assertIn("threading", imported_names)
-
-    def test_update_module_imports_threading_explicitly(self) -> None:
-        source = self._source()
-        self.assertIn("import threading", source)
-        self.assertIn("threading.Lock()", source)
+        self.assertIn("threading.Lock()", self._source())
+        self.assertIn("threading.Event()", self._source())
 
 
 if __name__ == "__main__":

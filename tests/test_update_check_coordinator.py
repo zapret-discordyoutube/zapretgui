@@ -145,6 +145,8 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
                 shutdown_sync=Mock(),
                 is_available=Mock(return_value=True),
                 restart=Mock(),
+                mark_stopped=Mock(),
+                request_exit=Mock(),
             ),
             updater_feature=feature,
         )
@@ -165,6 +167,8 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
                 shutdown_sync=Mock(),
                 is_available=Mock(return_value=True),
                 restart=Mock(),
+                mark_stopped=Mock(),
+                request_exit=Mock(),
             ),
             updater_feature=feature,
         )
@@ -196,6 +200,8 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
                 shutdown_sync=Mock(),
                 is_available=Mock(return_value=True),
                 restart=Mock(),
+                mark_stopped=Mock(),
+                request_exit=Mock(),
             ),
             updater_feature=feature,
         )
@@ -239,6 +245,8 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
                 shutdown_sync=Mock(),
                 is_available=Mock(return_value=True),
                 restart=Mock(),
+                mark_stopped=Mock(),
+                request_exit=Mock(),
             ),
             updater_feature=feature,
         )

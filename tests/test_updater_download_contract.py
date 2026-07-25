@@ -1,88 +1,89 @@
 from __future__ import annotations
 
-import ast
-import inspect
+import hashlib
 from pathlib import Path
+import tempfile
 import unittest
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
 
-
-SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
+from updater.update_pipeline import (
+    CancellationToken,
+    InstallerHandoff,
+    ThrottledProgress,
+    UpdateArtifact,
+    UpdateCancelled,
+    UpdateIntegrityError,
+    normalize_sha256,
+    verify_artifact,
+)
 
 
 class UpdaterDownloadContractTests(unittest.TestCase):
-    def test_update_module_imports_threading_when_download_code_uses_it(self) -> None:
-        tree = ast.parse((SRC_ROOT / "updater" / "update.py").read_text(encoding="utf-8"))
-
-        uses_threading = any(
-            isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "threading"
-            for node in ast.walk(tree)
+    def test_progress_is_limited_by_time_and_flushes_completion(self) -> None:
+        now = [10.0]
+        emitted: list[tuple[int, int, int]] = []
+        progress = ThrottledProgress(
+            lambda percent, done, total: emitted.append((percent, done, total)),
+            interval_seconds=0.25,
+            clock=lambda: now[0],
         )
-        imports_threading = any(
-            (isinstance(node, ast.Import) and any(alias.name == "threading" for alias in node.names))
-            or (
-                isinstance(node, ast.ImportFrom)
-                and node.module == "threading"
+
+        progress.update(1, 100)
+        progress.update(2, 100)
+        now[0] += 0.24
+        progress.update(3, 100)
+        now[0] += 0.01
+        progress.update(4, 100)
+        progress.update(100, 100)
+
+        self.assertEqual(
+            emitted,
+            [(1, 1, 100), (4, 4, 100), (100, 100, 100)],
+        )
+
+    def test_sha256_accepts_github_digest_format(self) -> None:
+        digest = "a" * 64
+        self.assertEqual(normalize_sha256(f"sha256:{digest}"), digest)
+        self.assertEqual(normalize_sha256(digest.upper()), digest)
+        self.assertEqual(normalize_sha256("md5:abcd"), "")
+
+    def test_verification_checks_size_and_sha256(self) -> None:
+        payload = b"verified installer"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "setup.exe"
+            path.write_bytes(payload)
+            artifact = UpdateArtifact(
+                version="21.1.5.1",
+                file_name="setup.exe",
+                expected_size=len(payload),
+                expected_sha256=hashlib.sha256(payload).hexdigest(),
+                sources=(),
             )
-            for node in ast.walk(tree)
+
+            verify_artifact(artifact, str(path), CancellationToken())
+
+            wrong = UpdateArtifact(
+                version=artifact.version,
+                file_name=artifact.file_name,
+                expected_size=artifact.expected_size,
+                expected_sha256="0" * 64,
+                sources=(),
+            )
+            with self.assertRaises(UpdateIntegrityError):
+                verify_artifact(wrong, str(path), CancellationToken())
+
+    def test_handoff_is_an_explicit_pipeline_value(self) -> None:
+        handoff = InstallerHandoff(
+            version="21.1.5.1",
+            installer_path=r"C:\Zapret\Dev\update\Zapret2Setup.exe",
+            arguments=("/AUTOUPDATE",),
         )
+        self.assertEqual(handoff.arguments, ("/AUTOUPDATE",))
 
-        self.assertTrue(uses_threading)
-        self.assertTrue(
-            imports_threading,
-            "updater.update использует threading, поэтому модуль должен импортировать его явно",
-        )
-
-    def test_update_worker_uses_narrow_runtime_actions_for_download_dpi_stop(self) -> None:
-        import updater.commands as updater_commands
-        import app.feature_facades.updater as updater_feature
-        from updater.update import UpdateWorker
-
-        init_signature = inspect.signature(UpdateWorker.__init__)
-        worker_source = inspect.getsource(UpdateWorker)
-        stop_source = inspect.getsource(UpdateWorker._stop_dpi_for_download)
-        feature_source = inspect.getsource(updater_feature.UpdaterFeature)
-        self.assertTrue(hasattr(updater_commands, "stop_dpi_for_download"))
-        command_source = inspect.getsource(updater_commands.stop_dpi_for_download)
-
-        self.assertNotIn("runtime_feature", init_signature.parameters)
-        self.assertNotIn("_runtime_feature", worker_source)
-        self.assertIn("stop_dpi_for_download", init_signature.parameters)
-        self.assertIn("stop_dpi_for_download=self.stop_dpi_for_download", feature_source)
-        self.assertIn("def stop_dpi_for_download", feature_source)
-        self.assertIn("_stop_dpi_for_download", stop_source)
-        self.assertNotIn("updater_commands", stop_source)
-        self.assertNotIn("self._shutdown_sync(", stop_source)
-        self.assertNotIn("self._is_any_running(", stop_source)
-        self.assertIn("shutdown_sync", command_source)
-        self.assertIn("is_any_running", command_source)
-
-        runtime_feature = SimpleNamespace(
-            is_any_running=Mock(return_value=True),
-            shutdown_sync=Mock(),
-        )
-        worker = UpdateWorker(
-            silent=True,
-            skip_rate_limit=True,
-            is_any_running=runtime_feature.is_any_running,
-            shutdown_sync=runtime_feature.shutdown_sync,
-            stop_dpi_for_download=updater_commands.stop_dpi_for_download,
-        )
-        progress = []
-        worker.progress.connect(progress.append)
-
-        with patch("updater.update.time.sleep") as sleep:
-            self.assertTrue(worker._stop_dpi_for_download())
-
-        runtime_feature.shutdown_sync.assert_called_once_with(
-            reason="updater_download_connectivity",
-            include_cleanup=True,
-        )
-        sleep.assert_called_once_with(0.5)
-        self.assertIn("Остановка DPI для скачивания...", progress)
+    def test_cancellation_token_stops_at_checkpoint(self) -> None:
+        token = CancellationToken()
+        token.cancel()
+        with self.assertRaises(UpdateCancelled):
+            token.checkpoint()
 
 
 if __name__ == "__main__":

@@ -3513,6 +3513,7 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
             updater_feature=Mock(),
             external_actions_feature=external_actions,
             show_page=Mock(),
+            request_exit=Mock(),
         )
         self.assertNotIn("external_actions_feature", kwargs)
         self.assertIn("create_changelog_link_open_worker", kwargs)
@@ -3525,17 +3526,22 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
             parent=parent,
         )
 
-    def test_updater_install_worker_is_created_through_feature(self) -> None:
+    def test_updater_pipeline_workers_are_created_through_feature(self) -> None:
         update_runtime_cls = __import__("updater.update_page_runtime", fromlist=["UpdatePageRuntime"]).UpdatePageRuntime
         updater_feature_cls = __import__("app.feature_facades.updater", fromlist=["UpdaterFeature"]).UpdaterFeature
 
-        runtime_factory_source = inspect.getsource(update_runtime_cls._create_update_worker_runtime)
+        preflight_source = inspect.getsource(update_runtime_cls._start_update_download)
+        download_source = inspect.getsource(update_runtime_cls._start_update_download_stage)
+        installer_source = inspect.getsource(update_runtime_cls._start_update_installer_stage)
         feature_source = inspect.getsource(updater_feature_cls)
 
-        self.assertIn("create_update_install_worker", runtime_factory_source)
-        self.assertNotIn("from updater.update import UpdateWorker", runtime_factory_source)
-        self.assertIn("create_update_install_worker", feature_source)
-        self.assertIn("UpdateWorker", feature_source)
+        self.assertIn("create_update_preflight_worker", preflight_source)
+        self.assertIn("create_update_download_worker", download_source)
+        self.assertIn("create_update_installer_worker", installer_source)
+        self.assertIn("UpdatePreflightWorker", feature_source)
+        self.assertIn("UpdateDownloadWorker", feature_source)
+        self.assertIn("UpdateInstallerWorker", feature_source)
+        self.assertNotIn("UpdateWorker", feature_source)
 
     def test_updater_cache_invalidation_runs_through_worker(self) -> None:
         settings_workers = importlib.import_module("updater.settings_workers")

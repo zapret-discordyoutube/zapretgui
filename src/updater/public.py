@@ -9,6 +9,7 @@ from updater.commands import (
     run_startup_update_check,
     set_auto_update_enabled,
     stop_dpi_for_download,
+    stop_dpi_for_update,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "run_startup_update_check",
     "set_auto_update_enabled",
     "stop_dpi_for_download",
+    "stop_dpi_for_update",
 ]
