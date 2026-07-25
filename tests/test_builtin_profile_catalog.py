@@ -31,6 +31,11 @@ ACCEPTED_LEGACY_CLOUDFLARE_TCP_PROFILES = {
 ACCEPTED_IPSET_AMAZON_TCP_PROFILES = {
     ("Default v1 (game filter).txt", "Amazon TCP"),
 }
+# Текущий Default v1 направляет Cloudflare TCP по полной IP-сети, как и
+# соседний UDP-профиль. Остальные встроенные пресеты пока используют hostlist.
+ACCEPTED_IPSET_CLOUDFLARE_TCP_PROFILES = {
+    ("Default v1 (game filter).txt", "Cloudflare TCP"),
+}
 ACCEPTED_WIDER_PROFILE_KEYS = {
     "winws2|hostlist=discord.txt|tcp=80,443-65535",
     "winws2|hostlist=facebook.txt|tcp=80,443-65535",
@@ -299,8 +304,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             [
                 "--out-range=-d10",
                 "--payload=tls_client_hello",
-                "--lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000",
-                "--lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000",
+                "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4",
             ],
         )
 
@@ -308,7 +312,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
         ipset_lines = ipset_path.read_text(encoding="utf-8").splitlines()
         self.assertEqual(ipset_lines[0], "# https://ipinfo.io/AS16509")
         entries = [line.strip() for line in ipset_lines if line.strip() and not line.lstrip().startswith("#")]
-        self.assertEqual(len(entries), 7317)
+        self.assertEqual(len(entries), 7323)
         self.assertEqual(len(entries), len(set(entries)))
         self.assertTrue(
             {
@@ -366,6 +370,14 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
                     cloudflare_tcp_profiles += 1
                     if name != "Cloudflare TCP":
                         offenders.append(f"{path.name} profile {profile.index}: старый Cloudflare TCP variant {name!r}")
+                        continue
+                    if (path.name, name) in ACCEPTED_IPSET_CLOUDFLARE_TCP_PROFILES:
+                        if profile.match.filter_lines != ["--filter-tcp=80,443-65535"]:
+                            offenders.append(f"{path.name} profile {profile.index}: {name}: неправильный TCP filter")
+                        if profile.match.hostlist_lines:
+                            offenders.append(f"{path.name} profile {profile.index}: {name}: остался hostlist")
+                        if profile.match.ipset_lines != ["--ipset=lists/ipset-cloudflare.txt"]:
+                            offenders.append(f"{path.name} profile {profile.index}: {name}: нет Cloudflare ipset")
                         continue
                 expected_hostlist = expected_hostlists.get(name)
                 if expected_hostlist is None:
@@ -857,8 +869,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
 
         self.assertEqual(len(supplied_ranges), 100)
         self.assertLessEqual(supplied_ranges, set(entries))
-        # Было 30 строк; три из 100 переданных сетей уже присутствовали.
-        self.assertEqual(len(entries), 127)
+        self.assertEqual(len(entries), 131)
         self.assertEqual(len(entries), len(set(entries)))
         for entry in entries:
             ipaddress.ip_network(entry, strict=False)
@@ -1137,10 +1148,10 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             for profile in builtin.profiles
             if str(profile.name or "").startswith("WorldStream ")
         ]
-        self.assertEqual(len(builtin_profiles), 2)
+        self.assertEqual(len(builtin_profiles), 1)
         self.assertEqual(
             {_profile_catalog_key("winws2", profile) for profile in builtin_profiles},
-            expected_keys,
+            {"winws2|ipset=ipset-worldstream.txt|tcp=80,443-65535"},
         )
         strategies = {
             str(profile.name): profile.strategy.strategy_lines
@@ -1152,10 +1163,6 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
                 "WorldStream TCP": [
                     "--out-range=-d8",
                     "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4",
-                ],
-                "WorldStream UDP": [
-                    "--out-range=-d8",
-                    "--lua-desync=fake:blob=stun_pat:repeats=6",
                 ],
             },
         )
@@ -1229,9 +1236,9 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             strategies,
             {
                 "Fastly TCP": [
-                    "--out-range=-d8",
+                    "--out-range=-n10",
                     "--payload=tls_client_hello",
-                    "--lua-desync=multisplit:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1",
+                    "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4",
                 ],
                 "Fastly UDP": [
                     "--out-range=-n8",
@@ -1249,11 +1256,11 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             if line.strip() and not line.lstrip().startswith("#")
         ]
         self.assertEqual(raw_lines[0], "# https://ipinfo.io/AS54113")
-        self.assertEqual(len(entries), 200)
+        self.assertEqual(len(entries), 202)
         self.assertEqual(len(entries), len(set(entries)))
         networks = [ipaddress.ip_network(entry, strict=False) for entry in entries]
-        self.assertEqual(sum(network.version == 4 for network in networks), 100)
-        self.assertEqual(sum(network.version == 6 for network in networks), 100)
+        self.assertEqual(sum(network.version == 4 for network in networks), 101)
+        self.assertEqual(sum(network.version == 6 for network in networks), 101)
         self.assertTrue(
             {
                 "151.101.0.0/16",
@@ -1328,10 +1335,10 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             if line.strip() and not line.lstrip().startswith("#")
         ]
         self.assertEqual(raw_lines[0], "# https://ipinfo.io/AS16625")
-        self.assertEqual(len(entries), 104)
+        self.assertEqual(len(entries), 109)
         self.assertEqual(len(entries), len(set(entries)))
         networks = [ipaddress.ip_network(entry, strict=True) for entry in entries]
-        self.assertEqual(sum(network.version == 4 for network in networks), 102)
+        self.assertEqual(sum(network.version == 4 for network in networks), 107)
         self.assertEqual(sum(network.version == 6 for network in networks), 2)
         self.assertTrue(
             {
@@ -1455,7 +1462,9 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             {
                 "FranTech Solutions TCP": [
                     "--out-range=-d8",
-                    "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4",
+                    "--lua-desync=send:repeats=2",
+                    "--lua-desync=syndata:blob=stun_pat",
+                    "--lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2",
                 ],
                 "FranTech Solutions UDP": [
                     "--out-range=-d8",
@@ -1536,7 +1545,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
                 "Railway TCP": [
                     "--out-range=-d8",
                     "--payload=tls_client_hello",
-                    "--lua-desync=multisplit:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1",
+                    "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4",
                 ],
                 "Railway UDP": [
                     "--out-range=-n8",
@@ -1709,11 +1718,11 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
         ]
 
         self.assertEqual(raw_lines[0], "# https://ipinfo.io/AS396982")
-        self.assertEqual(len(entries), 200)
+        self.assertEqual(len(entries), 203)
         self.assertEqual(len(entries), len(set(entries)))
         networks = [ipaddress.ip_network(entry, strict=False) for entry in entries]
-        self.assertEqual(sum(network.version == 4 for network in networks), 100)
-        self.assertEqual(sum(network.version == 6 for network in networks), 100)
+        self.assertEqual(sum(network.version == 4 for network in networks), 102)
+        self.assertEqual(sum(network.version == 6 for network in networks), 101)
 
     def test_builtin_presets_do_not_put_wide_discord_tcp_filter_on_other_lists(self) -> None:
         template_keys = _all_profile_keys()

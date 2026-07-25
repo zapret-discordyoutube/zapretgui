@@ -40,6 +40,7 @@ class ProfileListFileLoadResult:
     filter_kind: str
     filter_value: str
     state: object
+    file_name: str = ""
 
 
 class ProfileSetupLoadWorker(QThread):
@@ -101,6 +102,7 @@ class ProfileListFileLoadWorker(QThread):
                 filter_kind=self._filter_kind,
                 filter_value=self._filter_value,
                 state=state,
+                file_name=str(getattr(state, "file_name", "") or ""),
             ),
         )
 

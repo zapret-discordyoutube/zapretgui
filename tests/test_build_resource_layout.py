@@ -23,7 +23,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
         values = {
             "channel": "dev",
             "version": "1.2.3.4",
-            "notes": "test",
+            "changes": "test",
             "build_method": "nuitka",
             "fast_exe": False,
             "fast_exe_dest": None,
@@ -370,7 +370,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
         command = (
             "import sys; "
             "from build_zapret.build_release_cli import main; "
-            "result=main(['--show-plan','--no-run-installer']); "
+            "result=main(['--show-plan','--no-run-installer','--changes','test']); "
             "assert result == 0; "
             "assert 'build_zapret.build_release_gui' not in sys.modules; "
             "assert 'build_zapret.release_pipeline' not in sys.modules; "
@@ -592,6 +592,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     [
                         "--version",
                         "21.1.5.4",
+                        "--changes",
+                        "test",
                     ]
                 )
             self.assertFalse(show_plan)
@@ -609,6 +611,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     "dev",
                     "--version",
                     "21.1.5.4",
+                    "--changes",
+                    "test",
                     "--skip-github",
                     "--skip-ssh",
                     "--no-publish-telegram",
@@ -633,6 +637,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     [
                         "--version",
                         "21.1.5.4",
+                        "--changes",
+                        "test",
                         "--show-plan",
                     ]
                 )
@@ -642,7 +648,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
             request = build_release_cli.ReleaseRequest(
                 channel="dev",
                 version="21.1.5.4",
-                notes="test",
+                changes="test",
                 build_method="nuitka",
                 fast_exe=True,
                 fast_exe_dest="/Zapret/Dev/Zapret.exe",
@@ -694,8 +700,10 @@ class BuildResourceLayoutTests(unittest.TestCase):
                         return_value=(False, "Telegram не настроен"),
                     ),
                 ):
-                    dev, _ = build_release_cli.parse_args([])
-                    stable, _ = build_release_cli.parse_args(["--channel", "stable"])
+                    dev, _ = build_release_cli.parse_args(["--changes", "test"])
+                    stable, _ = build_release_cli.parse_args(
+                        ["--channel", "stable", "--changes", "test"]
+                    )
                     plan = build_release_cli.format_release_plan(
                         dev,
                         ssh_enabled=False,
@@ -920,7 +928,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
             request = release_model.ReleaseRequest(
                 channel="dev",
                 version="1.2.3.4",
-                notes="test",
+                changes="test",
                 build_method="nuitka",
                 fast_exe=True,
                 fast_exe_dest=None,
@@ -949,7 +957,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
             request = release_model.ReleaseRequest(
                 channel="dev",
                 version="1.2.3.4",
-                notes="test",
+                changes="test",
                 build_method="nuitka",
                 fast_exe=True,
                 fast_exe_dest=None,
@@ -1451,7 +1459,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
 
     def test_inno_auto_update_has_an_explicit_success_only_flow(self) -> None:
         iss = self._read_inno_script()
-        updater = (PUBLIC_ROOT / "src" / "updater" / "update.py").read_text(encoding="utf-8")
+        installer_launcher = (PUBLIC_ROOT / "src" / "updater" / "update.py").read_text(encoding="utf-8")
+        update_pipeline = (PUBLIC_ROOT / "src" / "updater" / "update_pipeline.py").read_text(encoding="utf-8")
 
         auto_update_start = iss.index("function IsAutoUpdate: Boolean;")
         auto_update_end = iss.index("function ReadPreviousInstallRoot", auto_update_start)
@@ -1460,14 +1469,15 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertNotIn("'/SILENT'", auto_update)
         self.assertNotIn("'/VERYSILENT'", auto_update)
         self.assertNotIn("'/NORESTART'", auto_update)
-        self.assertIn('"/AUTOUPDATE",', updater)
-        self.assertIn('"/VERYSILENT",', updater)
-        self.assertNotIn('"/RESTARTAPPLICATIONS",', updater)
-        self.assertIn('f"/DIR={install_dir}"', updater)
-        self.assertNotIn("arguments.split()", updater)
-        self.assertIn("subprocess.list2cmdline(argument_list)", updater)
-        self.assertIn('"-EncodedCommand",', updater)
-        self.assertIn("process.communicate(timeout=120)", updater)
+        self.assertIn('"/AUTOUPDATE",', update_pipeline)
+        self.assertIn('"/VERYSILENT",', update_pipeline)
+        self.assertNotIn('"/RESTARTAPPLICATIONS",', update_pipeline)
+        self.assertIn('f"/DIR={APPLICATION_PATHS.root}"', update_pipeline)
+        self.assertIn('f"/LOG={setup_log}"', update_pipeline)
+        self.assertNotIn("arguments.split()", installer_launcher)
+        self.assertIn("subprocess.list2cmdline(argument_list)", installer_launcher)
+        self.assertIn('"-EncodedCommand",', installer_launcher)
+        self.assertIn("process.communicate(timeout=120)", installer_launcher)
         self.assertNotIn("procedure DeinitializeSetup;", iss)
         self.assertIn("if (CurStep = ssDone) and IsAutoUpdate() then", iss)
         self.assertIn(
@@ -1475,7 +1485,6 @@ class BuildResourceLayoutTests(unittest.TestCase):
             iss,
         )
         self.assertIn("PostInstallFinalizationSucceeded", iss)
-        self.assertIn('f"/LOG={setup_log}"', updater)
         self.assertIn("function ShouldLaunchAfterInteractiveInstall: Boolean;", iss)
         self.assertIn("Check: ShouldLaunchAfterInteractiveInstall", iss)
 

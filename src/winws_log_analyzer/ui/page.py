@@ -10,6 +10,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QFileDialog, QTableWidgetItem
 
 from config.runtime_layout import APPLICATION_PATHS
+from ui.fluent_widgets import set_tooltip
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.pages.base_page import BasePage
 
@@ -164,7 +165,7 @@ class WinwsLogAnalyzerPage(BasePage):
         ui = self._ui
         self._runtime.stop(blocking=False)
         ui.path_label.setText(path)
-        ui.path_label.setToolTip(path)
+        set_tooltip(ui.path_label, path)
         ui.summary_label.setVisible(False)
         ui.progress_bar.setValue(0)
         ui.progress_bar.setVisible(True)

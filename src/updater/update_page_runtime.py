@@ -1031,7 +1031,10 @@ class UpdatePageRuntime(QObject):
         return max(time.time() - completed_at, 0.0)
 
     def _current_update_check_snapshot(self):
-        updater_feature = getattr(self, "_updater_feature", None)
+        # В небольших unit-тестах объект создаётся через __new__ без
+        # QObject.__init__. getattr у такой SIP-обёртки сам выбрасывает
+        # RuntimeError, а словарь Python читать безопасно.
+        updater_feature = self.__dict__.get("_updater_feature")
         if updater_feature is None:
             return None
         return updater_feature.current_update_check_snapshot()

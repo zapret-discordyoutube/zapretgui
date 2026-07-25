@@ -21,7 +21,7 @@ from qfluentwidgets import (
 
 from config.urls import WINWS_LOG_ANALYZER_INFO_URL
 from ui.accessibility import set_control_accessibility, set_state_text
-from ui.fluent_widgets import SettingsCard
+from ui.fluent_widgets import SettingsCard, set_tooltip
 
 CONNECTION_COLUMNS = [
     "Хост",
@@ -74,7 +74,7 @@ def _build_title_header(page, ui: SimpleNamespace) -> None:
         _HELP_BUTTON_TEXT.replace("&", "&&"),
         ui.title_header,
     )
-    ui.help_button.setToolTip("Открыть инструкцию к анализатору логов winws2")
+    set_tooltip(ui.help_button, "Открыть инструкцию к анализатору логов winws2")
     set_control_accessibility(
         ui.help_button,
         name=_HELP_BUTTON_TEXT,

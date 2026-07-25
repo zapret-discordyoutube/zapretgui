@@ -45,7 +45,7 @@ class UiPerformanceMetricsTests(unittest.TestCase):
 
         self.assertIn("open.navigation.first", source)
         self.assertIn("open.navigation.repeat", source)
-        self.assertIn("open.switch.set_current", switch_source)
+        self.assertIn("open.switch.qfluent", switch_source)
         self.assertNotIn("show.first", source)
         self.assertNotIn("show.repeat", source)
         self.assertNotIn("show.switch", source + switch_source)

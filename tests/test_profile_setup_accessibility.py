@@ -228,7 +228,7 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
             "Разделы profile, выбрано: Когда применяется",
         )
 
-    def test_tab_from_profile_sections_moves_to_strategy_search_then_list(self) -> None:
+    def test_tab_from_profile_sections_moves_to_list_and_ctrl_f_opens_search(self) -> None:
         page = self._make_page()
         self.addCleanup(page.deleteLater)
         page.show()
@@ -239,12 +239,13 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
         QTest.keyClick(page._strategy_tabs, Qt.Key.Key_Tab)
         self.app.processEvents()
 
-        self.assertIs(self.app.focusWidget(), page._strategy_list._search)
+        self.assertIs(self.app.focusWidget(), page._strategy_list._list)
 
-        QTest.keyClick(page._strategy_list._search, Qt.Key.Key_Tab)
+        QTest.keyClick(page._strategy_list._list, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
         self.app.processEvents()
 
-        self.assertIs(self.app.focusWidget(), page._strategy_list._list)
+        self.assertTrue(page._strategy_list._search_row.isVisible())
+        self.assertIs(self.app.focusWidget(), page._strategy_list._search)
 
     def test_strategy_branch_combo_options_are_named_for_screen_reader(self) -> None:
         page = self._make_page()

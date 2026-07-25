@@ -47,14 +47,13 @@ class PyInstallerArchiveImportLockTests(unittest.TestCase):
         prelaunch._PRELAUNCH_DONE = False
         with (
             patch.object(prelaunch, "_set_workdir_to_app", side_effect=lambda: calls.append("workdir")),
-            patch.object(prelaunch, "_require_frozen", side_effect=lambda: calls.append("require")),
             patch.object(prelaunch, "_install_crash_handler", side_effect=lambda: calls.append("crash")),
             patch.object(prelaunch, "install_pyinstaller_archive_import_lock", side_effect=lambda: calls.append("lock")),
             patch.object(prelaunch, "_preload_slow_modules", side_effect=lambda: calls.append("preload")),
         ):
             prelaunch.prepare_prelaunch()
 
-        self.assertEqual(calls, ["workdir", "require", "crash", "lock", "preload"])
+        self.assertEqual(calls, ["workdir", "crash", "lock", "preload"])
 
 
 if __name__ == "__main__":
