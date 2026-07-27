@@ -149,6 +149,14 @@ class BasePage(_FluentScrollArea):
             self.subtitle_label.setText(subtitle)
             set_state_text(self.subtitle_label, f"Описание страницы: {subtitle}")
             self.subtitle_label.setWordWrap(True)
+            # QLabel сохраняет слишком широкую подсказку размера даже при
+            # включённом переносе. Не учитываем её по горизонтали, чтобы
+            # компоновка сужала описание до окна, а Qt переносил строки.
+            self.subtitle_label.setMinimumWidth(0)
+            self.subtitle_label.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
             self.vBoxLayout.addWidget(self.subtitle_label)
         else:
             self.subtitle_label = None
