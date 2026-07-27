@@ -1901,6 +1901,42 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
 
         self.assertEqual(offenders, [])
 
+    def test_winws2_flowseal_1100_exp_uses_exact_catalog_profiles(self) -> None:
+        path = (
+            PUBLIC_ROOT
+            / "src"
+            / "presets"
+            / "builtin"
+            / "winws2"
+            / "general EXP 1.10.0 (game filter).txt"
+        )
+        preset = parse_preset_text(path.read_text(encoding="utf-8"), engine="winws2", source_name=path.name)
+        all_profiles = parse_preset_text(
+            ALL_PROFILES_PATH.read_text(encoding="utf-8"),
+            engine="winws2",
+            source_name=ALL_PROFILES_PATH.name,
+        )
+        catalog_pairs = {
+            (build_profile_logical_key(profile.match_signature), str(profile.name or "").strip())
+            for profile in all_profiles.profiles
+        }
+        offenders = [
+            f"profile {profile.index}: {profile.display_name}"
+            for profile in preset.profiles
+            if (build_profile_logical_key(profile.match_signature), str(profile.name or "").strip())
+            not in catalog_pairs
+        ]
+
+        self.assertEqual(len(preset.profiles), 96)
+        self.assertEqual(offenders, [])
+        self.assertIn(
+            "--lua-init=fake_unknown_256=string.rep(string.char(0),256);"
+            "fake_zero64=string.rep(string.char(0),64)",
+            preset.preamble_lines,
+        )
+        self.assertNotIn("--hostlist=lists/list-general-user.txt", path.read_text(encoding="utf-8"))
+        self.assertNotIn("--hostlist-exclude=lists/list-exclude-user.txt", path.read_text(encoding="utf-8"))
+
     def test_builtin_profiles_are_catalog_profiles_wider_profiles_or_runtime_only(self) -> None:
         catalog = _all_profile_catalog()
         offenders: list[str] = []

@@ -309,6 +309,23 @@ class Winws2LaunchPresetValidationTests(unittest.TestCase):
             self.assertEqual(len(missing), 1)
             self.assertIn(str(root / "tankix.txt"), missing[0][1])
 
+    def test_winws2_validation_accepts_inline_lua_init_source(self) -> None:
+        from winws_runtime.runners.zapret2_runner import Winws2StrategyRunner
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = object.__new__(Winws2StrategyRunner)
+            runner.work_dir = str(root)
+            runner.lists_dir = str(root / "lists")
+            runner.bin_dir = str(root / "bin")
+
+            source = (
+                "--lua-init=fake_unknown_256=string.rep(string.char(0),256);"
+                "fake_zero64=string.rep(string.char(0),64)\n"
+            )
+
+            self.assertEqual(runner._collect_missing_preset_references_from_text(source), [])
+
     def test_winws2_compile_accepts_explicit_lists_paths_for_at_launch(self) -> None:
         from threading import RLock
 

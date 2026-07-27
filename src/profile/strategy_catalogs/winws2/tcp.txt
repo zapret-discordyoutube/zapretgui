@@ -2847,3 +2847,57 @@ author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general SIMPLE FAKE ALT 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=tls_stun:tcp_seq=2:repeats=6
+
+# --- Flowseal general EXP 1.10.0 ---
+
+[flowseal_exp_1100_google]
+name = Flowseal EXP 1.10.0 / Google
+author = Flowseal
+label = experimental
+description = Подмена Host с отметкой времени TCP для Google и YouTube.
+--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:tcp_ts_up:ip_id=zero
+
+[flowseal_exp_1100_tcp]
+name = Flowseal EXP 1.10.0 / TCP
+author = Flowseal
+label = experimental
+description = Поддельный TLS и перекрытие начала настоящего пакета.
+blobs = tls_max,stun2
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=4
+--lua-desync=multisplit:pos=1:seqovl=480:seqovl_pattern=stun2
+
+[flowseal_exp_1100_discord_tls]
+name = Flowseal EXP 1.10.0 / Discord TLS
+author = Flowseal
+label = experimental
+blobs = tls_google
+--lua-desync=fake:blob=tls_google:tcp_ts=-600000:tcp_ts_up:repeats=8
+
+[flowseal_exp_1100_discord_http]
+name = Flowseal EXP 1.10.0 / Discord HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_ts=-600000:tcp_ts_up:repeats=8
+
+[flowseal_exp_1100_game_tls]
+name = Flowseal EXP 1.10.0 / Game TLS
+author = Flowseal
+label = game
+blobs = stun2,tls_max
+--lua-desync=fake:blob=stun2:tcp_ts=-600000:tcp_ts_up:repeats=8
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=8
+
+[flowseal_exp_1100_game_http]
+name = Flowseal EXP 1.10.0 / Game HTTP
+author = Flowseal
+label = game
+blobs = tls_max
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=8
+
+[flowseal_exp_1100_game_other]
+name = Flowseal EXP 1.10.0 / Game other
+author = Flowseal
+label = game
+blobs = fake_unknown_256,tls_max
+--lua-desync=fake:blob=fake_unknown_256:tcp_ts=-600000:tcp_ts_up:repeats=8:payload=~empty,tls_client_hello,http_req
+--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max:payload=~empty

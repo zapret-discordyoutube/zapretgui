@@ -234,6 +234,16 @@ class Winws2StrategyRunner(StrategyRunnerBase):
 
                 # lua/*.lua
                 if key_l == "--lua-init":
+                    # nfqws2 принимает здесь не только @файл, но и исходный
+                    # Lua-код. Встроенный код не является файловой ссылкой и
+                    # не должен попадать в проверку существования ресурсов.
+                    unquoted_value = _strip_outer_quotes(value_s)
+                    looks_like_lua_source = (
+                        not unquoted_value.startswith("@")
+                        and not unquoted_value.lower().endswith(".lua")
+                    )
+                    if looks_like_lua_source:
+                        continue
                     candidates = _resolve_candidates(value_s, default_dir=lua_dir)
                     if candidates and (not _exists_any(candidates)):
                         ref = f"{key.strip()}={_norm_slashes(_strip_outer_quotes(value_s).lstrip('@'))}"

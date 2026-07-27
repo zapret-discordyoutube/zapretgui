@@ -523,3 +523,28 @@ description = Добавлено, чтобы встроенный профиль
 --lua-desync=fake:blob=fake_dbankcloud:repeats=10
 
 # --- end missing builtin strategy coverage ---
+
+# --- Flowseal general EXP 1.10.0 ---
+
+[flowseal_exp_1100_discord]
+name = Flowseal EXP 1.10.0 / Discord discovery
+author = Flowseal
+label = experimental
+blobs = quic_google,discord_active
+--lua-desync=fake:blob=quic_google:repeats=4
+--lua-desync=fake:blob=discord_active:repeats=4
+
+[flowseal_exp_1100_stun]
+name = Flowseal EXP 1.10.0 / STUN
+author = Flowseal
+label = experimental
+blobs = discord_active
+--lua-desync=fake:blob=discord_active:repeats=4
+
+[flowseal_exp_1100_unknown_udp]
+name = Flowseal EXP 1.10.0 / Unknown UDP
+author = Flowseal
+label = experimental
+blobs = quic_google,discord_active
+--lua-desync=fake:blob=quic_google:repeats=4:payload=all
+--lua-desync=fake:blob=discord_active:repeats=4:payload=all

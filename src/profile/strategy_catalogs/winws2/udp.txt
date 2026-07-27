@@ -445,3 +445,49 @@ description = Добавлено, чтобы встроенный профиль
 --lua-desync=fake:blob=fake_dbankcloud:repeats=10
 
 # --- end missing builtin strategy coverage ---
+
+# --- Flowseal general EXP 1.10.0 ---
+
+[flowseal_exp_1100_game_quic]
+name = Flowseal EXP 1.10.0 / Game QUIC
+author = Flowseal
+label = game
+--lua-desync=fake:blob=fake_default_quic:repeats=5
+
+[flowseal_exp_1100_game_known_udp]
+name = Flowseal EXP 1.10.0 / Game known UDP
+author = Flowseal
+label = game
+blobs = fake_zero64
+--lua-desync=fake:blob=fake_zero64:repeats=5
+
+[flowseal_exp_1100_game_other_udp]
+name = Flowseal EXP 1.10.0 / Game other UDP
+author = Flowseal
+label = game
+blobs = quic_4pda,game_active
+--lua-desync=fake:blob=quic_4pda:repeats=5:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=game_active:repeats=5:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_exp_1100_discord]
+name = Flowseal EXP 1.10.0 / Discord discovery
+author = Flowseal
+label = experimental
+blobs = quic_google,discord_active
+--lua-desync=fake:blob=quic_google:repeats=4
+--lua-desync=fake:blob=discord_active:repeats=4
+
+[flowseal_exp_1100_stun]
+name = Flowseal EXP 1.10.0 / STUN
+author = Flowseal
+label = experimental
+blobs = discord_active
+--lua-desync=fake:blob=discord_active:repeats=4
+
+[flowseal_exp_1100_unknown_udp]
+name = Flowseal EXP 1.10.0 / Unknown UDP
+author = Flowseal
+label = experimental
+blobs = quic_google,discord_active
+--lua-desync=fake:blob=quic_google:repeats=4:payload=all
+--lua-desync=fake:blob=discord_active:repeats=4:payload=all

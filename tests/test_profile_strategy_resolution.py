@@ -11,6 +11,7 @@ from profile.derived_cache import (
     normalize_lines,
     profile_list_type,
     resolve_strategy,
+    strategy_branches_for_profile,
     strategy_identity_lines,
 )
 from profile.strategy_catalog import load_strategy_catalogs
@@ -147,12 +148,46 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                     continue
                 if not strategy_lines:
                     continue
-                strategy_id, _strategy_name = resolve_strategy(profile, basic_strategy_entries(profile, self.catalogs))
-                if strategy_id == "custom":
+                entries = basic_strategy_entries(profile, self.catalogs)
+                strategy_id, _strategy_name = resolve_strategy(profile, entries)
+                if strategy_id != "custom":
+                    continue
+                branches = strategy_branches_for_profile(profile, entries)
+                custom_branches = [branch for branch in branches if branch.strategy_id == "custom"]
+                if custom_branches:
                     catalog = strategy_catalog_from_match_lines(tuple(profile.match.all_lines()))
-                    unresolved.append(f"{path.name}:{index}: {profile.display_name} ({catalog}/{profile_list_type(profile)})")
+                    unresolved.append(
+                        f"{path.name}:{index}: {profile.display_name} "
+                        f"({catalog}/{profile_list_type(profile)}; custom branches={len(custom_branches)})"
+                    )
 
         self.assertEqual(unresolved, [])
+
+    def test_flowseal_exp_1100_keeps_payload_scopes_and_ready_branches(self) -> None:
+        path = Path("src/presets/builtin/winws2/general EXP 1.10.0 (game filter).txt")
+        preset = parse_preset_text(path.read_text(encoding="utf-8"), engine="winws2", source_name=path.name)
+
+        media = next(profile for profile in preset.profiles if profile.display_name == "discord.media (voice RTC)")
+        media_branches = strategy_branches_for_profile(media, basic_strategy_entries(media, self.catalogs))
+        self.assertEqual(
+            [(branch.payload, branch.strategy_id) for branch in media_branches],
+            [
+                ("tls_client_hello", "flowseal_exp_1100_discord_tls"),
+                ("http_req", "flowseal_exp_1100_discord_http"),
+                ("tls_client_hello,http_req", "general_alt6_184"),
+            ],
+        )
+
+        steam = next(profile for profile in preset.profiles if profile.display_name == "Steam")
+        steam_branches = strategy_branches_for_profile(steam, basic_strategy_entries(steam, self.catalogs))
+        self.assertEqual(
+            [(branch.out_range, branch.payload, branch.strategy_id) for branch in steam_branches],
+            [
+                ("<n4", "tls_client_hello", "flowseal_exp_1100_game_tls"),
+                ("<n4", "http_req", "flowseal_exp_1100_game_http"),
+                ("<n4", "all", "flowseal_exp_1100_game_other"),
+            ],
+        )
 
     def test_new_199_builtin_presets_do_not_mix_payload_scoped_strategies(self) -> None:
         violations: list[str] = []
