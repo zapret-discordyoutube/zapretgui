@@ -68,6 +68,10 @@ ACCEPTED_NARROWER_PROFILE_KEYS = {
     "winws1|ipset=ipset-cloudflare1.txt|tcp=80,443,8443",
     "winws1|ipset=ipset-cloudflare1.txt|udp=1024-65535",
     "winws1|ipset=ipset-cloudflare1.txt|udp=443",
+    "winws1|ipset=ipset-hetzner.txt|tcp=1024-65535",
+    "winws1|ipset=ipset-hetzner.txt|tcp=80,443,8443",
+    "winws1|ipset=ipset-hetzner.txt|udp=1024-65535",
+    "winws1|ipset=ipset-hetzner.txt|udp=443",
     "winws1|ipset=ipset-ovh.txt|tcp=1024-65535",
     "winws1|ipset=ipset-ovh.txt|tcp=80,443,8443",
     "winws1|ipset=ipset-ovh.txt|udp=1024-65535",
@@ -183,6 +187,22 @@ RUNTIME_ONLY_PROFILE_KEYS = {
     # Legacy-блоки, осиротевшие после реструктуризации all_profiles.txt 2026-07
     # (youtube.txt перешёл на ipset-youtube.txt, ntcparty/porn/tankix выпали из каталога):
     "winws1|(none)|l7=discord,stun;udp=19294-19344,50000-50100",
+    # Flowseal 1.10.0 EXP сохраняет исходные L7-фильтры QUIC и unknown,
+    # а hostlist-ы раскладывает по штатным спискам ZapretGUI.
+    "winws1|(none)|l7=discord,stun,unknown;udp=19294-19344,50000-50100",
+    "winws1|hostlist=discord-media.txt|l7=quic;udp=443",
+    "winws1|hostlist=discord.txt|l7=quic;udp=443",
+    "winws1|hostlist=facebook.txt|l7=quic;udp=443",
+    "winws1|hostlist=instagram.txt|l7=quic;udp=443",
+    "winws1|hostlist=itch.txt|l7=quic;udp=443",
+    "winws1|hostlist=other.txt|l7=quic;udp=443",
+    "winws1|hostlist=roblox.txt|l7=quic;udp=443",
+    "winws1|hostlist=rutor.txt|l7=quic;udp=443",
+    "winws1|hostlist=rutracker.txt|l7=quic;udp=443",
+    "winws1|hostlist=soundcloud.txt|l7=quic;udp=443",
+    "winws1|hostlist=twitter.txt|l7=quic;udp=443",
+    "winws1|hostlist=whatsapp.txt|l7=quic;udp=443",
+    "winws1|hostlist=youtube.txt|l7=quic;udp=443",
     "winws1|hostlist-domains=discord.media|tcp=2053,2083,2087,2096,8443",
     "winws1|hostlist=discord-media.txt|udp=443",
     "winws1|hostlist=discord.txt;hostlist=ntcparty.txt|tcp=443",
@@ -200,6 +220,48 @@ RUNTIME_ONLY_PROFILE_KEYS = {
 
 
 class BuiltinProfileCatalogTests(unittest.TestCase):
+    def test_winws1_flowseal_1100_exp_is_adapted_to_builtin_profiles(self) -> None:
+        path = (
+            PUBLIC_ROOT
+            / "src"
+            / "presets"
+            / "builtin"
+            / "winws1"
+            / "general EXP 1.10.0 (game filter).txt"
+        )
+        text = path.read_text(encoding="utf-8")
+        blocks = text.split("\n--new\n")
+
+        self.assertEqual(len(blocks), 53)
+        for obsolete_source_path in (
+            "list-general.txt",
+            "list-general-user.txt",
+            "list-exclude-user.txt",
+            "ipset-all.txt",
+            "ipset-exclude-user.txt",
+        ):
+            self.assertNotIn(obsolete_source_path, text)
+
+        quic_hostlist_blocks = [
+            block
+            for block in blocks
+            if "--filter-udp=443" in block
+            and any(line.startswith("--hostlist=lists/") for line in block.splitlines())
+        ]
+        self.assertEqual(len(quic_hostlist_blocks), 13)
+        self.assertTrue(all("--filter-l7=quic" in block for block in quic_hostlist_blocks))
+
+        ipset_blocks = [
+            block
+            for block in blocks
+            if any(line.startswith("--ipset=lists/") for line in block.splitlines())
+        ]
+        self.assertEqual(len(ipset_blocks), 24)
+        self.assertIn("--filter-l7=discord,stun,unknown", text)
+        self.assertIn("--dpi-desync-split-seqovl-pattern=bin/stun2.bin", text)
+        self.assertIn("--dpi-desync-fake-discord=bin/ACTIVE_DISCORD_UDP.bin", text)
+        self.assertIn("--dpi-desync-fake-unknown-udp=bin/ACTIVE_GAME_UDP.bin", text)
+
     def test_service_hostlist_profiles_use_requested_domain_lists(self) -> None:
         preset = parse_preset_text(
             ALL_PROFILES_PATH.read_text(encoding="utf-8"),

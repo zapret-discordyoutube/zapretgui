@@ -24,13 +24,14 @@ class FolderDefaultsTests(unittest.TestCase):
         )
         self.assertEqual(state["folders"][COMMON_FOLDER_KEY]["system"], True)
 
-    def test_winws1_default_preset_folders_have_199a_group(self) -> None:
+    def test_winws1_default_preset_folders_have_flowseal_version_groups(self) -> None:
         state = build_default_preset_folders("winws1")
 
         self.assertEqual(
             [folder["name"] for folder in state["folders"].values()],
             [
                 "Все сайты",
+                "1.10.0",
                 "1.9.9a",
                 "ALT",
                 "Игры",
@@ -79,6 +80,12 @@ class FolderDefaultsTests(unittest.TestCase):
         self.assertEqual(
             classify_preset_folder("general ALT10 1.9.9a (game filter).txt", "winws1"),
             "1-9-9a",
+        )
+
+    def test_winws1_1100_preset_wins_over_exp_and_game_filter(self) -> None:
+        self.assertEqual(
+            classify_preset_folder("general EXP 1.10.0 (game filter).txt", "winws1"),
+            "1-10-0",
         )
 
     def test_profile_default_folder_is_classified_from_profile_text(self) -> None:
