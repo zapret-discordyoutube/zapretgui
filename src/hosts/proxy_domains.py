@@ -882,6 +882,9 @@ QUICK_SERVICES = [
     ("fa5s.palette", "Canva", "#00c4cc"),
     ("fa5s.microphone-alt", "ElevenLabs", "#ffffff"),
     ("fa5s.code", "JetBrains", "#fe315d"),
+    ("fa5s.book-open", "MangaLib", "#f28c28"),
+    ("fa5s.desktop", "Parsec", "#5e5ce6"),
+    ("fa5s.credit-card", "Square", "#006aff"),
     ("fa5b.discord", "Discord", "#5865f2"),
     ("fa5b.youtube", "YouTube (иногда может не работать с ним! Отключите тумблер если YouTube не работает с пресетами)", "#ff0000"),
     ("fa5b.github", "GitHub", "#181717"),
@@ -892,5 +895,4 @@ QUICK_SERVICES = [
     ("fa5b.discord", "Решение от Flowseal для стабильной работы голосовых серверов в Discord", "#5865f2"),
     ("fa5s.gamepad", "Supercell", "#f4b400"),
     ("fa5b.instagram", "Instagram", "#e4405f"),
-    ("fa5s.box-open", "Остальное", "#6c757d"),
 ]

@@ -677,9 +677,19 @@ class HostsCatalogJsonTests(unittest.TestCase):
                     "hosts": [{"ip": "1.1.1.1", "host": "rutor.info"}],
                 },
                 {
-                    "name": "Остальное",
+                    "name": "MangaLib",
                     "mode": "dns",
-                    "domains": [{"host": "example.com", "ips": {"zapret_dns": "72.56.93.144"}}],
+                    "domains": [{"host": "api.cdnlibs.org", "ips": {"zapret_dns": "72.56.93.144"}}],
+                },
+                {
+                    "name": "Parsec",
+                    "mode": "dns",
+                    "domains": [{"host": "builds.parsec.app", "ips": {"zapret_dns": "72.56.93.144"}}],
+                },
+                {
+                    "name": "Square",
+                    "mode": "dns",
+                    "domains": [{"host": "api.squareup.com", "ips": {"zapret_dns": "72.56.93.144"}}],
                 },
             ],
         }
@@ -711,7 +721,10 @@ class HostsCatalogJsonTests(unittest.TestCase):
         self.assertEqual(rows["GitHub"].icon_name, "fa5b.github")
         self.assertEqual(rows["Instagram"].icon_name, "fa5b.instagram")
         self.assertEqual(rows["Rutor"].icon_name, "fa5s.magnet")
-        self.assertEqual(rows["Остальное"].icon_name, "fa5s.box-open")
+        self.assertEqual(rows["MangaLib"].icon_name, "fa5s.book-open")
+        self.assertEqual(rows["Parsec"].icon_name, "fa5s.desktop")
+        self.assertEqual(rows["Square"].icon_name, "fa5s.credit-card")
+        self.assertNotIn("Остальное", rows)
 
     def test_services_catalog_plan_groups_current_ai_service_names(self) -> None:
         from hosts import page_plans
