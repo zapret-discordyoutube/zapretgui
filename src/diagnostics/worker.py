@@ -596,25 +596,35 @@ class ConnectionTestWorker(QObject):
             return
         try:
             import socket
-            
+
+            from utils.net_resolve import DEFAULT_DNS_TIMEOUT, resolve_ipv4
+
             self.log_message(f"  🔍 Проверка порта 443 для {domain}...")
+
+            # Подключаемся по IP: и connect_ex, и create_connection сначала
+            # уходят в неограниченный по времени резолв, которого settimeout
+            # и параметр timeout не касаются.
+            domain_ip = resolve_ipv4(domain, timeout=DEFAULT_DNS_TIMEOUT)
+            if not domain_ip:
+                self.log_message(f"  ❌ {domain}: имя не резолвится")
+                return
 
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
-            
+
             try:
-                result = sock.connect_ex((domain, 443))
+                result = sock.connect_ex((domain_ip, 443))
                 if self.is_stop_requested():
                     return
-                
+
                 if result == 0:
                     self.log_message(f"  ✅ Порт 443 открыт")
 
                     try:
                         import ssl
                         context = ssl.create_default_context()
-                        
-                        with socket.create_connection((domain, 443), timeout=5) as sock:
+
+                        with socket.create_connection((domain_ip, 443), timeout=5) as sock:
                             with context.wrap_socket(sock, server_hostname=domain) as ssock:
                                 cert = ssock.getpeercert()
                                 if cert:

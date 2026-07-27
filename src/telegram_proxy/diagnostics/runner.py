@@ -12,6 +12,7 @@ from log.log import log
 from settings.mode import ENGINE_WINWS2
 import telegram_proxy.config.settings as telegram_proxy_settings
 from utils.windows_process_probe import iter_process_records_winapi
+from utils.net_resolve import connect_tcp
 
 DC_TARGETS = [
     ("149.154.167.220", "WSS relay", "—"),
@@ -423,7 +424,9 @@ def _test_upstream_proxy(
     }
     try:
         t0 = time.monotonic()
-        sock = socket.create_connection((host, port), timeout=5.0)
+        # create_connection ограничивает только фазу коннекта: разрешение имени
+        # внутри него висит без таймаута, если DNS не отвечает.
+        sock, _ip = connect_tcp(host, port, timeout=5.0)
         if tls:
             context = ssl.create_default_context()
             if not tls_verify:

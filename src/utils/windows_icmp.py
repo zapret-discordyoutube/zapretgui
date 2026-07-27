@@ -6,6 +6,8 @@ import struct
 from dataclasses import dataclass
 from ctypes import wintypes
 
+from utils.net_resolve import resolve_ipv4
+
 
 IP_SUCCESS = 0
 IP_REQ_TIMED_OUT = 11010
@@ -97,21 +99,38 @@ def _is_windows_icmp_available() -> bool:
     )
 
 
-def _resolve_ipv4(host: str) -> tuple[str | None, str | None]:
+def _resolve_ipv4(host: str, timeout: float) -> tuple[str | None, str | None]:
+    """Разрешает имя в IPv4 с дедлайном.
+
+    ``socket.gethostbyname`` прерывать нельзя и таймаута у него нет: на мёртвом
+    DNS он висел десятки секунд и удерживал поток пула, из-за чего приложение
+    не закрывалось.
+    """
     try:
-        return socket.gethostbyname(str(host or "").strip()), None
-    except socket.gaierror:
-        return None, "DNS_ERR"
+        ip = resolve_ipv4(str(host or "").strip(), timeout=timeout)
     except Exception:
         return None, "RESOLVE_ERR"
+    if not ip:
+        return None, "DNS_ERR"
+    return ip, None
 
 
 def _ipv4_to_dword(ip: str) -> int:
     return int(struct.unpack("!I", socket.inet_aton(ip))[0])
 
 
-def ping_ipv4_host_winapi(host: str, *, count: int, timeout_ms: int) -> WindowsPingResult:
-    """Пингует IPv4-хост через Windows ICMP API без вызова ping.exe."""
+def ping_ipv4_host_winapi(
+    host: str,
+    *,
+    count: int,
+    timeout_ms: int,
+    resolved_ip: str | None = None,
+) -> WindowsPingResult:
+    """Пингует IPv4-хост через Windows ICMP API без вызова ping.exe.
+
+    ``resolved_ip`` позволяет вызывающему передать уже известный адрес и не
+    платить за повторное разрешение имени.
+    """
     sent = max(0, int(count))
 
     if not _is_windows_icmp_available():
@@ -123,7 +142,12 @@ def ping_ipv4_host_winapi(host: str, *, count: int, timeout_ms: int) -> WindowsP
             detail="Windows ICMP API unavailable",
         )
 
-    resolved_ip, resolve_error = _resolve_ipv4(host)
+    if resolved_ip:
+        resolve_error = None
+    else:
+        resolved_ip, resolve_error = _resolve_ipv4(
+            host, timeout=max(1.0, float(timeout_ms) / 1000.0),
+        )
     if not resolved_ip:
         return WindowsPingResult(
             ok=False,

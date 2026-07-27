@@ -10,24 +10,38 @@ from blockcheck.config import (
     ISP_REDIRECT_MARKERS,
 )
 from blockcheck.models import SingleTestResult, TestStatus, TestType
+from utils.net_resolve import resolve_ipv4
 
 
 def check_http_injection(
     domain: str,
     timeout: int = ISP_PAGE_TIMEOUT,
+    resolved_ip: str | None = None,
 ) -> SingleTestResult:
     """Check for HTTP injection on port 80.
 
     Sends a plain HTTP GET and checks if the response is from the real server
     or an injected block page (common DPI technique).
+
+    Подключаемся по IP: ``sock.connect((domain, 80))`` сначала уходит в
+    неограниченный по времени резолв, на который ``settimeout`` не влияет.
     """
     start = time.time()
     sock = None
 
     try:
+        host_ip = resolved_ip or resolve_ipv4(domain, timeout=timeout)
+        if not host_ip:
+            return SingleTestResult(
+                target_name=domain, test_type=TestType.ISP_PAGE,
+                status=TestStatus.ERROR, error_code="CONNECT_ERR",
+                time_ms=round((time.time() - start) * 1000, 2),
+                detail="нет IPv4-адреса для проверки порта 80",
+            )
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
-        sock.connect((domain, 80))
+        sock.connect((host_ip, 80))
 
         request = (
             f"GET / HTTP/1.1\r\n"

@@ -15,6 +15,7 @@ from blockcheck.config import (
     DOH_TIMEOUT,
 )
 from blockcheck.models import DNSIntegrityResult
+from utils.net_resolve import resolve_addrinfo
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -101,7 +102,9 @@ def _resolve_udp(domain: str, nameserver: str, timeout: float = DNS_TIMEOUT) -> 
     except Exception:
         # Fallback: use system resolver
         try:
-            infos = socket.getaddrinfo(domain, None, socket.AF_INET)
+            infos = resolve_addrinfo(
+                domain, None, timeout=DNS_TIMEOUT, family=socket.AF_INET,
+            )
             return list({info[4][0] for info in infos})
         except Exception:
             return []

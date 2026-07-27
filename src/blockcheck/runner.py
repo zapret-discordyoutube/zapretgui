@@ -7,11 +7,15 @@ import re
 import socket
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+from utils.net_resolve import clear_cache as clear_dns_cache, resolve_ips
+from utils.concurrency import iter_completed
 
 from blockcheck.config import (
     DEFAULT_PARALLEL,
+    DNS_TIMEOUT,
     HTTPS_TIMEOUT,
     STUN_TIMEOUT,
     TCP_HEALTH_MAX_CANDIDATES,
@@ -125,6 +129,10 @@ class BlockcheckRunner:
     def run(self) -> BlockcheckReport:
         """Run all test phases sequentially, return report."""
         start_time = time.time()
+        # Диагностика должна видеть свежее состояние DNS, а не ответы прошлого
+        # прогона. Внутри одного прогона кэш, наоборот, нужен: домен резолвится
+        # в нескольких фазах подряд.
+        clear_dns_cache()
         report = BlockcheckReport()
         targets = build_targets_with_user_domains(self._extra_domains)
 
@@ -303,13 +311,11 @@ class BlockcheckRunner:
             )
 
         completed_targets = set()
-        cancelled_during_phase = False
         pool = ThreadPoolExecutor(max_workers=self.parallel)
         try:
             futures = []
             for name, data in target_map.items():
                 if self.cancelled:
-                    cancelled_during_phase = True
                     break
                 idx = int(data["index"])
                 host = str(data["host"])
@@ -319,10 +325,7 @@ class BlockcheckRunner:
                     for ip_family in families:
                         futures.append(pool.submit(_run_one, name, host, tls_v, ip_family))
 
-            for future in as_completed(futures):
-                if self.cancelled:
-                    cancelled_during_phase = True
-                    break
+            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
                 name, tls_v, ip_family, r = future.result()
                 target_data = target_map[name]
                 tr = target_data["target"]
@@ -341,7 +344,9 @@ class BlockcheckRunner:
                     completed_targets.add(name)
                     self.cb.on_target_complete(tr)
         finally:
-            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
+            # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
+            # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
+            pool.shutdown(wait=False, cancel_futures=True)
 
         # Emit for targets that finished partially (cancelled)
         for name, data in target_map.items():
@@ -375,20 +380,18 @@ class BlockcheckRunner:
 
             return tr, http_result, "http"
 
-        cancelled_during_phase = False
         pool = ThreadPoolExecutor(max_workers=self.parallel)
         try:
             futures = [pool.submit(_isp_one, tr) for tr in target_results]
-            for future in as_completed(futures):
-                if self.cancelled:
-                    cancelled_during_phase = True
-                    break
+            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
                 tr, r, source = future.result()
                 tr.tests.append(r)
                 self.cb.on_test_result(r)
                 self.cb.on_log(f"  ISP {tr.name} ({source.upper()}): {r.status.value} {r.detail}")
         finally:
-            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
+            # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
+            # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
+            pool.shutdown(wait=False, cancel_futures=True)
 
     def _run_tcp_phase(self) -> list[SingleTestResult]:
         """Run TCP 16-20KB tests (parallel, diverse provider subset)."""
@@ -444,20 +447,18 @@ class BlockcheckRunner:
                 r.raw_data.setdefault("url", url)
             return target_name, r
 
-        cancelled_during_phase = False
         pool = ThreadPoolExecutor(max_workers=self.parallel)
         try:
             futures = [pool.submit(_tcp_one, t) for t in tcp_targets]
-            for future in as_completed(futures):
-                if self.cancelled:
-                    cancelled_during_phase = True
-                    break
+            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
                 target_name, r = future.result()
                 tcp_results.append(r)
                 self.cb.on_test_result(r)
                 self.cb.on_log(f"  TCP 16-20KB {target_name}: {r.status.value} {r.detail}")
         finally:
-            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
+            # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
+            # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
+            pool.shutdown(wait=False, cancel_futures=True)
 
         return tcp_results
 
@@ -484,18 +485,16 @@ class BlockcheckRunner:
             return key, (ok, detail, elapsed)
 
         workers = min(max(2, self.parallel * 2), 16)
-        cancelled_during_phase = False
         pool = ThreadPoolExecutor(max_workers=workers)
         try:
             futures = [pool.submit(_probe_one, t) for t in targets]
-            for future in as_completed(futures):
-                if self.cancelled:
-                    cancelled_during_phase = True
-                    break
+            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
                 key, result = future.result()
                 health[key] = result
         finally:
-            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
+            # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
+            # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
+            pool.shutdown(wait=False, cancel_futures=True)
 
         return health
 
@@ -634,14 +633,10 @@ class BlockcheckRunner:
             r.target_name = target["name"]
             return target, r
 
-        cancelled_during_phase = False
         pool = ThreadPoolExecutor(max_workers=self.parallel)
         try:
             futures = [pool.submit(_test_one_stun, t) for t in stun_targets]
-            for future in as_completed(futures):
-                if self.cancelled:
-                    cancelled_during_phase = True
-                    break
+            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
                 target, r = future.result()
                 tr = TargetResult(name=target["name"], value=target["value"], tests=[r])
                 self.cb.on_test_result(r)
@@ -649,7 +644,9 @@ class BlockcheckRunner:
                 self.cb.on_log(f"  STUN {target['name']}: {r.status.value} {r.detail}")
                 results.append(tr)
         finally:
-            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
+            # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
+            # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
+            pool.shutdown(wait=False, cancel_futures=True)
 
         return results
 
@@ -677,14 +674,10 @@ class BlockcheckRunner:
             r.target_name = name
             return name, r
 
-        cancelled_during_phase = False
         pool = ThreadPoolExecutor(max_workers=self.parallel)
         try:
             futures = {pool.submit(_ping_one, name, host): (name, host, tr_ref) for name, host, tr_ref in jobs}
-            for future in as_completed(futures):
-                if self.cancelled:
-                    cancelled_during_phase = True
-                    break
+            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
                 name, host, tr_ref = futures[future]
                 _name, r = future.result()
                 self.cb.on_test_result(r)
@@ -699,7 +692,9 @@ class BlockcheckRunner:
                     tr = TargetResult(name=name, value=value, tests=[r])
                     target_results.append(tr)
         finally:
-            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
+            # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
+            # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
+            pool.shutdown(wait=False, cancel_futures=True)
 
     def _attach_dns_stub_tests(
         self,
@@ -816,27 +811,7 @@ class BlockcheckRunner:
         if not host:
             return [], []
 
-        ipv4: list[str] = []
-        ipv6: list[str] = []
-
-        try:
-            infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
-        except Exception:
-            return [], []
-
-        for family, _socktype, _proto, _canonname, sockaddr in infos:
-            ip_raw = sockaddr[0]
-            if not isinstance(ip_raw, str):
-                continue
-            ip = ip_raw
-            if family == socket.AF_INET:
-                if ip not in ipv4:
-                    ipv4.append(ip)
-            elif family == socket.AF_INET6:
-                if ip not in ipv6:
-                    ipv6.append(ip)
-
-        return ipv4, ipv6
+        return resolve_ips(host, port=443, proto=socket.IPPROTO_TCP, timeout=DNS_TIMEOUT)
 
     @staticmethod
     def _dns_status_text(result: DNSIntegrityResult) -> str:

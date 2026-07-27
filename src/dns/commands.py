@@ -130,7 +130,7 @@ def save_dns_check_results(*, file_path: str, plain_text: str):
 
 
 def run_quick_dns_check():
-    import socket
+    from utils.net_resolve import DEFAULT_DNS_TIMEOUT, resolve_ipv4
 
     from dns.dns_check_plans import DNSQuickCheckPlan
 
@@ -149,8 +149,14 @@ def run_quick_dns_check():
     all_ok = True
     for name, domain in test_domains.items():
         try:
-            ip = socket.gethostbyname(domain)
-            lines.append(f"✅ {name} ({domain}): {ip}")
+            # gethostbyname без таймаута подвешивал страницу DNS на мёртвом
+            # резолвере — здесь ждём результат не дольше дедлайна.
+            ip = resolve_ipv4(domain, timeout=DEFAULT_DNS_TIMEOUT)
+            if ip:
+                lines.append(f"✅ {name} ({domain}): {ip}")
+            else:
+                lines.append(f"❌ {name} ({domain}): не резолвится")
+                all_ok = False
         except Exception as e:
             lines.append(f"❌ {name} ({domain}): Ошибка - {e}")
             all_ok = False

@@ -11,6 +11,7 @@ from typing import Dict, Optional
 from log.log import log
 
 from blockcheck.config import KNOWN_BLOCK_IPS
+from utils.net_resolve import DEFAULT_DNS_TIMEOUT, resolve_ipv4
 
 
 class DNSChecker:
@@ -371,9 +372,14 @@ class DNSChecker:
                 # Используем nslookup для конкретного DNS сервера
                 result['ip'] = self._nslookup(domain, dns_server)
             else:
-                # Используем системный DNS
-                result['ip'] = socket.gethostbyname(domain)
-                
+                # Используем системный DNS. gethostbyname не имеет таймаута и
+                # не прерывается — на мёртвом резолвере он подвешивал проверку.
+                resolved = resolve_ipv4(domain, timeout=DEFAULT_DNS_TIMEOUT)
+                if not resolved:
+                    result['error'] = "DNS resolution failed"
+                else:
+                    result['ip'] = resolved
+
         except socket.gaierror as e:
             result['error'] = f"DNS resolution failed: {e}"
         except Exception as e:

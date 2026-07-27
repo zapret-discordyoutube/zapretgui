@@ -39,6 +39,7 @@ from blockcheck.models import TestStatus
 from blockcheck.scan_models import StrategyProbeResult, StrategyScanReport
 from blockcheck.stun_tester import test_stun
 from config.runtime_layout import APPLICATION_PATHS
+from utils.net_resolve import DEFAULT_DNS_TIMEOUT, resolve_addrinfo
 from profile.winws2_preset_source import WINWS2_LUA_INIT_LINES
 from settings.mode import (
     ENGINE_WINWS2,
@@ -407,7 +408,9 @@ class StrategyScanner:
     def _target_has_family(host: str, port: int, af: int, socktype: int) -> bool:
         """Check whether host resolves for a specific address family."""
         try:
-            infos = socket.getaddrinfo(host, port, af, socktype)
+            infos = resolve_addrinfo(
+                host, port, timeout=DEFAULT_DNS_TIMEOUT, family=af, socktype=socktype,
+            )
             return bool(infos)
         except (socket.gaierror, OSError):
             return False
@@ -918,12 +921,13 @@ class StrategyScanner:
                 continue
 
             try:
-                infos = socket.getaddrinfo(
+                infos = resolve_addrinfo(
                     host,
                     port,
-                    socket.AF_UNSPEC,
-                    socket.SOCK_DGRAM,
-                    socket.IPPROTO_UDP,
+                    timeout=DEFAULT_DNS_TIMEOUT,
+                    family=socket.AF_UNSPEC,
+                    socktype=socket.SOCK_DGRAM,
+                    proto=socket.IPPROTO_UDP,
                 )
             except (socket.gaierror, OSError):
                 continue
@@ -951,7 +955,13 @@ class StrategyScanner:
         query = b"\xff\xff\xff\xffTSource Engine Query\x00"
 
         try:
-            infos = socket.getaddrinfo(host, port, af, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            infos = resolve_addrinfo(
+                host, port,
+                timeout=min(timeout, DEFAULT_DNS_TIMEOUT),
+                family=af,
+                socktype=socket.SOCK_DGRAM,
+                proto=socket.IPPROTO_UDP,
+            )
         except OSError as e:
             return False, (time.monotonic() - start) * 1000, f"resolve error: {e}"
 
@@ -1011,7 +1021,13 @@ class StrategyScanner:
         request = b"\x01" + struct.pack(">Q", timestamp) + magic + secrets.token_bytes(8)
 
         try:
-            infos = socket.getaddrinfo(host, port, af, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            infos = resolve_addrinfo(
+                host, port,
+                timeout=min(timeout, DEFAULT_DNS_TIMEOUT),
+                family=af,
+                socktype=socket.SOCK_DGRAM,
+                proto=socket.IPPROTO_UDP,
+            )
         except OSError as e:
             return False, (time.monotonic() - start) * 1000, f"resolve error: {e}"
 
@@ -1195,7 +1211,12 @@ class StrategyScanner:
         overall_t0 = time.monotonic()
 
         try:
-            addr_info = socket.getaddrinfo(host, 443, af, socket.SOCK_STREAM)
+            addr_info = resolve_addrinfo(
+                host, 443,
+                timeout=min(timeout, DEFAULT_DNS_TIMEOUT),
+                family=af,
+                socktype=socket.SOCK_STREAM,
+            )
         except OSError as e:
             elapsed_ms = (time.monotonic() - overall_t0) * 1000
             return False, elapsed_ms, f"resolve error: {e}"

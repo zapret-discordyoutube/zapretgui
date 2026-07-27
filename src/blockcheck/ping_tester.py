@@ -9,13 +9,19 @@ def ping_host(
     host: str,
     count: int = PING_COUNT,
     timeout: int = PING_TIMEOUT,
+    resolved_ip: str | None = None,
 ) -> SingleTestResult:
-    """Ping a host via Windows ICMP API."""
+    """Ping a host via Windows ICMP API.
+
+    ``resolved_ip`` — уже известный адрес хоста; передавайте его, чтобы не
+    резолвить имя повторно.
+    """
     try:
         ping_result = ping_ipv4_host_winapi(
             host,
             count=count,
             timeout_ms=int(timeout * 1000),
+            resolved_ip=resolved_ip,
         )
         if ping_result.ok and ping_result.average_ms is not None:
             ms = float(ping_result.average_ms)

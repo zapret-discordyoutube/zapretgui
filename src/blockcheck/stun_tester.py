@@ -7,6 +7,7 @@ import time
 
 from blockcheck.config import STUN_TIMEOUT
 from blockcheck.models import SingleTestResult, TestStatus, TestType
+from utils.net_resolve import DEFAULT_DNS_TIMEOUT, resolve_addrinfo
 
 
 def build_stun_request() -> bytes:
@@ -125,7 +126,13 @@ def _resolve_udp_addresses(
         resolve_family = socket.AF_INET6
     else:
         resolve_family = socket.AF_UNSPEC
-    infos = socket.getaddrinfo(host, port, resolve_family, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    infos = resolve_addrinfo(
+        host, port,
+        timeout=DEFAULT_DNS_TIMEOUT,
+        family=resolve_family,
+        socktype=socket.SOCK_DGRAM,
+        proto=socket.IPPROTO_UDP,
+    )
 
     resolved: list[tuple[int, int, int, tuple]] = []
     seen: set[tuple[int, str, int]] = set()

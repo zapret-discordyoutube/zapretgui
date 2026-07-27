@@ -2892,7 +2892,10 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertIn("_run_quick_dns_check", worker_source)
         self.assertNotIn("dns.commands", worker_source)
         self.assertNotIn("socket.", plans_source)
-        self.assertIn("socket.gethostbyname", commands_source)
+        # Резолв живёт в commands, а не в plans. Через net_resolve, а не
+        # socket.gethostbyname: тот не имеет таймаута и подвешивал страницу.
+        self.assertIn("resolve_ipv4", commands_source)
+        self.assertNotIn("socket.gethostbyname", commands_source)
 
     def test_telegram_proxy_settings_save_runs_through_worker(self) -> None:
         page_source = inspect.getsource(TelegramProxyPage)
@@ -3183,7 +3186,9 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         kwargs["create_strategy_scan_worker"](target="example.org", mode="quick", parent=object())
         blockcheck_feature.create_strategy_scan_worker.assert_called_once()
         _, call_kwargs = blockcheck_feature.create_strategy_scan_worker.call_args
-        self.assertIs(call_kwargs["shutdown_sync"], runtime_feature.shutdown_sync)
+        # Сканер работает в своём QThread: остановка идёт через worker-вариант,
+        # который применяет runtime-state (и UI-подписчиков) в GUI-потоке.
+        self.assertIs(call_kwargs["shutdown_sync"], runtime_feature.shutdown_sync_from_worker)
 
     def test_blockcheck_support_bundle_prepares_through_worker(self) -> None:
         blockcheck_workers = importlib.import_module("blockcheck.workers")

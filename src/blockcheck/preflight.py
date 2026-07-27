@@ -15,8 +15,11 @@ from __future__ import annotations
 import logging
 import socket
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import TYPE_CHECKING
+
+from utils.net_resolve import DNSTimeoutError, resolve_addrinfo, resolve_ipv4
+from utils.concurrency import iter_completed
 
 from blockcheck.config import (
     DEFAULT_PARALLEL,
@@ -77,52 +80,42 @@ def _identify_provider(ip: str) -> str:
 # Individual checks
 # ---------------------------------------------------------------------------
 
-def _resolve_dns_raw(domain: str) -> list:
-    """Raw getaddrinfo call — runs in a thread pool for timeout support."""
-    return socket.getaddrinfo(domain, 443, socket.AF_UNSPEC, socket.SOCK_STREAM)
-
-
-def _check_dns(domain: str, timeout: float = PREFLIGHT_DNS_TIMEOUT,
-               _executor: ThreadPoolExecutor | None = None) -> SingleTestResult:
+def _check_dns(domain: str, timeout: float = PREFLIGHT_DNS_TIMEOUT) -> SingleTestResult:
     """Резолвим домен через системный DNS, сравниваем IP с заглушками провайдеров.
 
-    getaddrinfo() не поддерживает таймаут — используем Future.result(timeout).
-    Если передан _executor, используем его (без создания нового пула).
+    getaddrinfo() не поддерживает таймаут и не прерывается, поэтому идём через
+    net_resolve — он ждёт результат с дедлайном на демоническом потоке.
     """
     start = time.time()
 
-    # Запускаем getaddrinfo в пуле для поддержки таймаута
-    own_pool = _executor is None
-    pool = _executor or ThreadPoolExecutor(max_workers=1)
     try:
-        future = pool.submit(_resolve_dns_raw, domain)
-        try:
-            results = future.result(timeout=timeout)
-        except FuturesTimeout:
-            future.cancel()
-            return SingleTestResult(
-                target_name=domain, test_type=TestType.PREFLIGHT_DNS,
-                status=TestStatus.TIMEOUT, error_code="DNS_TIMEOUT",
-                time_ms=round((time.time() - start) * 1000, 2),
-                detail=f"DNS таймаут — сервер не ответил за {timeout:.0f}с",
-            )
-        except socket.gaierror as e:
-            return SingleTestResult(
-                target_name=domain, test_type=TestType.PREFLIGHT_DNS,
-                status=TestStatus.FAIL, error_code="DNS_FAIL",
-                time_ms=round((time.time() - start) * 1000, 2),
-                detail=f"домен не резолвится — {e}",
-            )
-        except Exception as e:
-            return SingleTestResult(
-                target_name=domain, test_type=TestType.PREFLIGHT_DNS,
-                status=TestStatus.ERROR, error_code="ERROR",
-                time_ms=round((time.time() - start) * 1000, 2),
-                detail=f"ошибка DNS: {str(e)[:80]}",
-            )
-    finally:
-        if own_pool:
-            pool.shutdown(wait=False)
+        results = resolve_addrinfo(
+            domain, 443,
+            timeout=timeout,
+            family=socket.AF_UNSPEC,
+            socktype=socket.SOCK_STREAM,
+        )
+    except DNSTimeoutError:
+        return SingleTestResult(
+            target_name=domain, test_type=TestType.PREFLIGHT_DNS,
+            status=TestStatus.TIMEOUT, error_code="DNS_TIMEOUT",
+            time_ms=round((time.time() - start) * 1000, 2),
+            detail=f"DNS таймаут — сервер не ответил за {timeout:.0f}с",
+        )
+    except socket.gaierror as e:
+        return SingleTestResult(
+            target_name=domain, test_type=TestType.PREFLIGHT_DNS,
+            status=TestStatus.FAIL, error_code="DNS_FAIL",
+            time_ms=round((time.time() - start) * 1000, 2),
+            detail=f"домен не резолвится — {e}",
+        )
+    except Exception as e:
+        return SingleTestResult(
+            target_name=domain, test_type=TestType.PREFLIGHT_DNS,
+            status=TestStatus.ERROR, error_code="ERROR",
+            time_ms=round((time.time() - start) * 1000, 2),
+            detail=f"ошибка DNS: {str(e)[:80]}",
+        )
 
     elapsed = (time.time() - start) * 1000
 
@@ -157,9 +150,24 @@ def _check_dns(domain: str, timeout: float = PREFLIGHT_DNS_TIMEOUT,
 
 def _check_tcp_443(domain: str, resolved_ip: str | None = None,
                    timeout: float = PREFLIGHT_TCP_TIMEOUT) -> SingleTestResult:
-    """Пробуем открыть TCP-соединение на порт 443."""
-    host = resolved_ip or domain
+    """Пробуем открыть TCP-соединение на порт 443.
+
+    Подключаемся только по IP: ``connect_ex`` с именем хоста снова уходит в
+    неограниченный по времени резолв, который ``settimeout`` не покрывает.
+    """
     start = time.time()
+
+    host = resolved_ip
+    if not host:
+        host = resolve_ipv4(domain, timeout=PREFLIGHT_DNS_TIMEOUT)
+    if not host:
+        return SingleTestResult(
+            target_name=domain, test_type=TestType.PREFLIGHT_TCP,
+            status=TestStatus.FAIL, error_code="NO_ADDR",
+            time_ms=round((time.time() - start) * 1000, 2),
+            detail="пропущен — нет IPv4-адреса",
+        )
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.settimeout(timeout)
@@ -196,10 +204,12 @@ def _check_tcp_443(domain: str, resolved_ip: str | None = None,
         sock.close()
 
 
-def _check_http_get(domain: str) -> SingleTestResult:
+def _check_http_get(domain: str, resolved_ip: str | None = None) -> SingleTestResult:
     """HTTP GET на порт 80 — детекция ISP-инъекции / страницы-заглушки."""
     # check_http_injection always returns a fresh SingleTestResult, safe to mutate
-    result = check_http_injection(domain, timeout=PREFLIGHT_HTTP_TIMEOUT)
+    result = check_http_injection(
+        domain, timeout=PREFLIGHT_HTTP_TIMEOUT, resolved_ip=resolved_ip,
+    )
     result.test_type = TestType.PREFLIGHT_HTTP
 
     # Russify details
@@ -219,6 +229,39 @@ def _check_http_get(domain: str) -> SingleTestResult:
 # ---------------------------------------------------------------------------
 # Per-domain orchestration
 # ---------------------------------------------------------------------------
+
+# Запас поверх собственного таймаута проверки: планирование потока, повторный
+# резолв из кэша, накладные расходы TLS-стека.
+_CHECK_GRACE_SECONDS = 2.0
+
+
+def _await_check(
+    future,
+    domain: str,
+    test_type: TestType,
+    budget: float,
+) -> SingleTestResult:
+    """Забираем результат проверки, не позволяя ей задержать нас навсегда.
+
+    Каждая проверка ограничена по времени изнутри, но страховка нужна: без неё
+    единственная незакрывшаяся операция снова подвешивает весь preflight.
+    """
+    try:
+        return future.result(timeout=budget + PREFLIGHT_DNS_TIMEOUT + _CHECK_GRACE_SECONDS)
+    except FuturesTimeout:
+        return SingleTestResult(
+            target_name=domain, test_type=test_type,
+            status=TestStatus.TIMEOUT, error_code="TIMEOUT",
+            detail="проверка не уложилась в отведённое время",
+        )
+    except Exception as e:  # noqa: BLE001 — падение одной проверки не рушит preflight
+        logger.debug("Preflight check %s failed for %s: %s", test_type, domain, e)
+        return SingleTestResult(
+            target_name=domain, test_type=test_type,
+            status=TestStatus.ERROR, error_code="ERROR",
+            detail=f"ошибка: {str(e)[:80]}",
+        )
+
 
 def check_one_domain(domain: str, cancelled: Callable[[], bool] | None = None) -> PreflightResult:
     """Запускаем все 4 проверки для одного домена.
@@ -241,53 +284,76 @@ def check_one_domain(domain: str, cancelled: Callable[[], bool] | None = None) -
         pf.verdict_detail = "проверка отменена"
         return pf
 
-    # Общий пул для DNS (таймаут через Future) + TCP/Ping/HTTP
-    cancelled_during_checks = False
-    pool = ThreadPoolExecutor(max_workers=4)
+    # 1. DNS резолвинг + IP blocklist. Резолв уже ограничен по времени внутри
+    #    net_resolve, отдельный пул под него не нужен.
+    if _is_cancelled():
+        return _mark_cancelled()
+
+    dns_r = _check_dns(domain)
+    pf.dns_result = dns_r
+    if dns_r.raw_data.get("ips"):
+        pf.resolved_ips = dns_r.raw_data["ips"]
+    if dns_r.error_code == "BLOCK_IP":
+        pf.is_block_ip = True
+        pf.block_ip_detail = dns_r.detail
+
+    # Выбираем первый IPv4 для TCP/Ping/HTTP — так они не резолвят имя повторно
+    first_ipv4 = None
+    for ip in pf.resolved_ips:
+        if ":" not in ip:  # skip IPv6
+            first_ipv4 = ip
+            break
+
+    # Без IPv4 проверять нечего: TCP :443, ICMP и HTTP :80 здесь работают
+    # только по IPv4. Раньше они шли по имени хоста и каждая заново упиралась
+    # в тот же неотвечающий DNS, утраивая время зависания.
+    if not first_ipv4:
+        pf.verdict, pf.verdict_detail = _compute_verdict(pf)
+        if pf.verdict == PreflightVerdict.PASSED:
+            # DNS ответил, но только IPv6 — остальные проверки не выполнялись,
+            # и объявлять «все проверки пройдены» было бы неправдой.
+            pf.verdict = PreflightVerdict.WARNING
+            pf.verdict_detail = (
+                "нет IPv4-адреса — TCP :443, Ping и HTTP :80 не проверялись"
+            )
+        return pf
+
+    # 2-4 параллельно: TCP, Ping, HTTP GET
+    pool = ThreadPoolExecutor(max_workers=3)
     try:
-        # 1. DNS резолвинг + IP blocklist (через пул для таймаута)
-        dns_r = _check_dns(domain, _executor=pool)
-        pf.dns_result = dns_r
-        if dns_r.raw_data.get("ips"):
-            pf.resolved_ips = dns_r.raw_data["ips"]
-        if dns_r.error_code == "BLOCK_IP":
-            pf.is_block_ip = True
-            pf.block_ip_detail = dns_r.detail
-
-        # Выбираем первый IPv4 для TCP-проверки
-        first_ipv4 = None
-        for ip in pf.resolved_ips:
-            if ":" not in ip:  # skip IPv6
-                first_ipv4 = ip
-                break
-
-        # 2-4 параллельно: TCP, Ping, HTTP GET
         tcp_future = pool.submit(_check_tcp_443, domain, first_ipv4)
         ping_future = pool.submit(
             ping_host, domain,
             count=PREFLIGHT_PING_COUNT, timeout=PREFLIGHT_PING_TIMEOUT,
+            resolved_ip=first_ipv4,
         )
-        http_future = pool.submit(_check_http_get, domain)
+        http_future = pool.submit(_check_http_get, domain, first_ipv4)
 
         if _is_cancelled():
-            cancelled_during_checks = True
             return _mark_cancelled()
 
-        pf.tcp_443 = tcp_future.result()
+        pf.tcp_443 = _await_check(
+            tcp_future, domain, TestType.PREFLIGHT_TCP, PREFLIGHT_TCP_TIMEOUT,
+        )
         if _is_cancelled():
-            cancelled_during_checks = True
             return _mark_cancelled()
 
-        ping_result = ping_future.result()
+        ping_result = _await_check(
+            ping_future, domain, TestType.PREFLIGHT_PING, PREFLIGHT_PING_TIMEOUT,
+        )
         ping_result.test_type = TestType.PREFLIGHT_PING
         pf.ping = ping_result
         if _is_cancelled():
-            cancelled_during_checks = True
             return _mark_cancelled()
 
-        pf.http_check = http_future.result()
+        pf.http_check = _await_check(
+            http_future, domain, TestType.PREFLIGHT_HTTP, PREFLIGHT_HTTP_TIMEOUT,
+        )
     finally:
-        pool.shutdown(wait=not cancelled_during_checks, cancel_futures=cancelled_during_checks)
+        # Никогда не ждём: все три проверки ограничены по времени изнутри, а
+        # ждать здесь означало бы вернуть ровно тот дедлок, из-за которого
+        # BlockCheck зависал на первой фазе.
+        pool.shutdown(wait=False, cancel_futures=True)
 
     # Вычисляем verdict
     pf.verdict, pf.verdict_detail = _compute_verdict(pf)
@@ -460,7 +526,6 @@ def run_preflight(
     total = len(domains)
 
     workers = min(parallel, total)
-    cancelled_during_phase = False
     pool = ThreadPoolExecutor(max_workers=workers)
     try:
         future_to_domain = {
@@ -468,11 +533,7 @@ def run_preflight(
             for domain in domains
         }
 
-        for future in as_completed(future_to_domain):
-            if cancelled and cancelled():
-                cancelled_during_phase = True
-                break
-
+        for future in iter_completed(future_to_domain, cancelled=cancelled):
             domain = future_to_domain[future]
             try:
                 pf_result = future.result()
@@ -492,7 +553,9 @@ def run_preflight(
             if _progress:
                 _progress(done, total, f"Preflight: {domain}")
     finally:
-        pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
+        # Результаты уже собраны выше, а при отмене ждать нечего: ожидание
+        # здесь возвращало бы зависание вместо остановки.
+        pool.shutdown(wait=False, cancel_futures=True)
 
     # Возвращаем в порядке входного списка
     ordered = []

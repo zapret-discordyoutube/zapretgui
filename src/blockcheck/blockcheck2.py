@@ -14,6 +14,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from utils.windows_icmp import ping_ipv4_host_winapi
+from utils.net_resolve import resolve_ipv4
 
 
 class Colors:
@@ -135,10 +136,9 @@ def test_stun(host: str, port: int = 3478, timeout: int = 5) -> dict:
     start = time.time()
 
     try:
-        # Резолвим хост
-        try:
-            ip = socket.gethostbyname(host)
-        except socket.gaierror:
+        # Резолвим хост (с дедлайном: gethostbyname прерывать нельзя)
+        ip = resolve_ipv4(host, timeout=timeout)
+        if not ip:
             result["error"] = "DNS_ERR"
             return result
 
@@ -193,7 +193,11 @@ def test_udp_port(host: str, port: int, timeout: int = 3) -> dict:
     start = time.time()
 
     try:
-        ip = socket.gethostbyname(host)
+        ip = resolve_ipv4(host, timeout=timeout)
+        if not ip:
+            result["error"] = "DNS_ERR"
+            return result
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(timeout)
 

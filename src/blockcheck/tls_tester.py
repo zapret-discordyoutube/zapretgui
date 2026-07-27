@@ -8,6 +8,7 @@ import time
 from blockcheck.config import HTTPS_TIMEOUT
 from blockcheck.dpi_classifier import classify_connect_error, classify_ssl_error
 from blockcheck.models import SingleTestResult, TestStatus, TestType
+from utils.net_resolve import DEFAULT_DNS_TIMEOUT, DNSTimeoutError, resolve_addrinfo
 
 
 def _normalize_ip_family(ip_family: str | None) -> str:
@@ -19,7 +20,9 @@ def _normalize_ip_family(ip_family: str | None) -> str:
     return "auto"
 
 
-def _resolve_connect_addrs(host: str, port: int, ip_family: str) -> list[tuple[int, tuple]]:
+def _resolve_connect_addrs(
+    host: str, port: int, ip_family: str, dns_timeout: float = DEFAULT_DNS_TIMEOUT,
+) -> list[tuple[int, tuple]]:
     if ip_family == "ipv4":
         family = socket.AF_INET
     elif ip_family == "ipv6":
@@ -27,7 +30,13 @@ def _resolve_connect_addrs(host: str, port: int, ip_family: str) -> list[tuple[i
     else:
         family = socket.AF_UNSPEC
 
-    infos = socket.getaddrinfo(host, port, family=family, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
+    infos = resolve_addrinfo(
+        host, port,
+        timeout=dns_timeout,
+        family=family,
+        socktype=socket.SOCK_STREAM,
+        proto=socket.IPPROTO_TCP,
+    )
     addrs: list[tuple[int, tuple]] = []
     for info in infos:
         addr_family, _socktype, _proto, _canonname, sockaddr = info
@@ -64,7 +73,15 @@ def test_https(
     family = _normalize_ip_family(ip_family)
 
     try:
-        connect_addrs = _resolve_connect_addrs(host, port, family)
+        connect_addrs = _resolve_connect_addrs(host, port, family, dns_timeout=timeout)
+    except DNSTimeoutError as e:
+        return SingleTestResult(
+            target_name=host, test_type=test_type,
+            status=TestStatus.TIMEOUT, error_code="DNS_TIMEOUT",
+            time_ms=round((time.time() - start) * 1000, 2),
+            detail=str(e),
+            raw_data={"ip_family": family},
+        )
     except socket.gaierror as e:
         return SingleTestResult(
             target_name=host, test_type=test_type,
