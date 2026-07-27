@@ -158,6 +158,22 @@ class RuntimeFeature:
             update_runtime_state=update_runtime_state,
         )
 
+    def shutdown_sync_from_worker(
+        self,
+        *,
+        reason: str = "",
+        include_cleanup: bool = True,
+        cleanup_services: bool = True,
+        update_runtime_state: bool = True,
+    ):
+        """Остановка из фонового потока: runtime-state применяется в GUI-потоке."""
+        return self.commands.shutdown_sync_from_worker(
+            reason=reason,
+            include_cleanup=include_cleanup,
+            cleanup_services=cleanup_services,
+            update_runtime_state=update_runtime_state,
+        )
+
     def start_autostart(self, launch_method: str | None = None) -> bool:
         return self.commands.start_autostart(launch_method)
 

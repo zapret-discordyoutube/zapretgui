@@ -264,6 +264,37 @@ class RuntimeEvents:
         """Передаёт в UI уже готовый результат фоновой диагностики."""
         self.ensure_dispatcher().unexpected_process_exit.emit(resolution)
 
+    def post_runtime_state_sync_after_shutdown(
+        self,
+        *,
+        still_running: bool,
+        launch_method: str,
+    ) -> None:
+        """Применяет runtime-state после остановки строго в GUI-потоке.
+
+        Подписчики UI-state — живые виджеты, поэтому запись состояния из
+        фонового потока (BlockCheck-сканер) обязана дойти до них через
+        GUI-поток; иначе правка QWidget уходит в чужой поток и подвешивает окно.
+        """
+        from winws_runtime.runtime.sync_shutdown import apply_runtime_state_after_shutdown
+
+        runtime_service = self.runtime_service
+
+        def _apply() -> None:
+            apply_runtime_state_after_shutdown(
+                runtime_service=runtime_service,
+                still_running=bool(still_running),
+                launch_method=str(launch_method or ""),
+            )
+
+        store = self.ui_state
+        post_to_ui_thread = getattr(store, "post_to_ui_thread", None) if store is not None else None
+        if callable(post_to_ui_thread):
+            post_to_ui_thread(_apply)
+            return
+
+        _apply()
+
     def handle_runner_failure(self, payload: object) -> None:
         if not isinstance(payload, dict):
             return
@@ -501,6 +532,35 @@ class RuntimeCommandPort:
             cleanup_services=cleanup_services,
             update_runtime_state=update_runtime_state,
         )
+
+    def shutdown_sync_from_worker(
+        self,
+        *,
+        reason: str = "",
+        include_cleanup: bool = True,
+        cleanup_services: bool = True,
+        update_runtime_state: bool = True,
+    ):
+        """Синхронная остановка для вызывающих из фоновых потоков.
+
+        Drop-in замена `shutdown_sync`: процессную часть выполняет вызывающий
+        поток, а runtime-state (и, значит, UI-подписчиков) обновляет GUI-поток.
+        """
+        from winws_runtime.runtime.sync_shutdown import resolve_launch_method
+
+        launch_method = resolve_launch_method(self.owner) if update_runtime_state else ""
+        result = self.shutdown_sync(
+            reason=reason,
+            include_cleanup=include_cleanup,
+            cleanup_services=cleanup_services,
+            update_runtime_state=False,
+        )
+        if update_runtime_state:
+            self.owner.events.post_runtime_state_sync_after_shutdown(
+                still_running=bool(getattr(result, "still_running", False)),
+                launch_method=launch_method,
+            )
+        return result
 
     def start_autostart(self, launch_method: str | None = None) -> bool:
         runtime_commands = self._runtime_commands()

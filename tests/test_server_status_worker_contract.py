@@ -74,6 +74,7 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
         runtime_feature = SimpleNamespace(
             is_any_running=Mock(),
             shutdown_sync=Mock(),
+            shutdown_sync_from_worker=Mock(),
             is_available=Mock(),
             restart=Mock(),
             objects=SimpleNamespace(
@@ -97,7 +98,12 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
         self.assertIn("runtime_actions", kwargs)
         self.assertNotIn("runtime_feature", kwargs)
         self.assertIs(kwargs["runtime_actions"].is_any_running, runtime_feature.is_any_running)
-        self.assertIs(kwargs["runtime_actions"].shutdown_sync, runtime_feature.shutdown_sync)
+        # Остановки updater'а идут из QThread-воркеров, поэтому здесь worker-вариант:
+        # runtime-state и UI-подписчиков обновляет GUI-поток.
+        self.assertIs(
+            kwargs["runtime_actions"].shutdown_sync,
+            runtime_feature.shutdown_sync_from_worker,
+        )
         self.assertIs(kwargs["runtime_actions"].is_available, runtime_feature.is_available)
         self.assertIs(kwargs["runtime_actions"].restart, runtime_feature.restart)
         kwargs["runtime_actions"].mark_stopped()

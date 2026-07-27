@@ -37,6 +37,33 @@ def _resolve_runtime_api(runtime_feature, launch_method: str):
     raise RuntimeError("Runtime API is not initialized")
 
 
+def resolve_launch_method(runtime_feature) -> str:
+    """Текущий launch method: нужен вызывающим, которые обновляют state отдельно."""
+    return _resolve_launch_method(runtime_feature)
+
+
+def apply_runtime_state_after_shutdown(
+    *,
+    runtime_service,
+    still_running: bool,
+    launch_method: str,
+) -> None:
+    """Приводит runtime-state к результату остановки.
+
+    Вынесено отдельно, потому что вызывающие из фоновых потоков (BlockCheck)
+    обязаны применять это в GUI-потоке, а не там, где выполнялась остановка.
+    """
+    try:
+        if runtime_service is None:
+            return
+        if still_running:
+            runtime_service.bootstrap_probe(True, launch_method=launch_method)
+        else:
+            runtime_service.mark_stopped(clear_error=True)
+    except Exception as e:
+        log(f"Ошибка обновления runtime state в sync shutdown: {e}", "DEBUG")
+
+
 def shutdown_runtime_sync(
     *,
     runtime_feature,
@@ -102,14 +129,11 @@ def shutdown_runtime_sync(
     still_running = bool(runtime_api.has_residual_processes(silent=True))
 
     if update_runtime_state:
-        try:
-            if runtime_service is not None:
-                if still_running:
-                    runtime_service.bootstrap_probe(True, launch_method=launch_method)
-                else:
-                    runtime_service.mark_stopped(clear_error=True)
-        except Exception as e:
-            log(f"Ошибка обновления runtime state в sync shutdown: {e}", "DEBUG")
+        apply_runtime_state_after_shutdown(
+            runtime_service=runtime_service,
+            still_running=still_running,
+            launch_method=launch_method,
+        )
 
     return RuntimeShutdownResult(
         had_running_processes=had_running_processes,

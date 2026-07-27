@@ -187,7 +187,9 @@ def build_servers_page_kwargs(
     return {
         "runtime_actions": UpdateRuntimeActions(
             is_any_running=runtime_feature.is_any_running,
-            shutdown_sync=runtime_feature.shutdown_sync,
+            # Остановки updater'а идут из QThread-воркеров, поэтому runtime-state
+            # (и UI-подписчиков) обновляет GUI-поток, а не поток воркера.
+            shutdown_sync=runtime_feature.shutdown_sync_from_worker,
             is_available=runtime_feature.is_available,
             restart=runtime_feature.restart,
             mark_stopped=_mark_runtime_stopped_after_update,
@@ -210,9 +212,11 @@ def build_blockcheck_page_kwargs(
     _ = page_name
 
     def _create_strategy_scan_worker(**kwargs):
+        # Сканер выполняет pre/post-scan cleanup в своём QThread, поэтому получает
+        # worker-вариант остановки: runtime-state и UI-подписчиков обновляет GUI-поток.
         return blockcheck_feature.create_strategy_scan_worker(
             **kwargs,
-            shutdown_sync=runtime_feature.shutdown_sync,
+            shutdown_sync=runtime_feature.shutdown_sync_from_worker,
         )
 
     return {
