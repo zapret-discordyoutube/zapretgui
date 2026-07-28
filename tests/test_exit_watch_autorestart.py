@@ -154,7 +154,7 @@ class UnexpectedExitHandlerTests(unittest.TestCase):
 
         return PostMortemResolution(
             message="winws2.exe неожиданно завершился: тестовая причина",
-            kind="transient_dll_init" if transient else "external_kill",
+            kind="transient_dll_init" if transient else "silent_exit",
             transient=transient,
             exit_code=0xC0000142 if transient else 1,
         )

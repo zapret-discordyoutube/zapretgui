@@ -24,14 +24,21 @@ if str(PROJECT_SRC) not in sys.path:
 
 
 class DiagnoseUnexpectedExitTests(unittest.TestCase):
-    def test_external_kill_for_code_one_without_output(self) -> None:
+    def test_silent_exit_for_code_one_without_output(self) -> None:
+        """Причина такого отказа не угадывается, а устанавливается пробами."""
         from winws_runtime.health.post_mortem import diagnose_unexpected_winws_exit
+        from winws_runtime.health.silent_exit_probe import SilentExitReport
 
-        result = diagnose_unexpected_winws_exit(1, "", exe_name="winws2.exe")
-        self.assertEqual(result.kind, "external_kill")
+        with patch(
+            "winws_runtime.health.post_mortem.probe_silent_exit",
+            return_value=SilentExitReport(verified=("файлы программы на месте",)),
+        ):
+            result = diagnose_unexpected_winws_exit(1, "", exe_name="winws2.exe")
+
+        self.assertEqual(result.kind, "silent_exit")
         self.assertIn("winws2.exe", result.message)
-        self.assertIn("завершён извне", result.message)
-        self.assertIn("антивирус", result.message)
+        self.assertIn("не выдав ни одного сообщения", result.message)
+        self.assertIn("Причина не установлена", result.message)
 
     def test_crash_codes_are_reported_as_crash(self) -> None:
         from winws_runtime.health.post_mortem import diagnose_unexpected_winws_exit
@@ -234,14 +241,21 @@ class ResolveUnexpectedExitMessageTests(unittest.TestCase):
             },
         )
         recorder = self._LogRecorder()
+        from winws_runtime.health.silent_exit_probe import SilentExitReport
+
         with (
             patch("winws_runtime.runners.runner_factory.get_current_runner", return_value=runner),
             patch("winws_runtime.health.post_mortem.log", recorder),
+            patch(
+                "winws_runtime.health.post_mortem.probe_silent_exit",
+                return_value=SilentExitReport(verified=("файлы программы на месте",)),
+            ) as probe,
         ):
             message = resolve_unexpected_exit_message()
 
         self.assertIn("winws2.exe", message)
-        self.assertIn("завершён извне", message)
+        self.assertIn("не выдав ни одного сообщения", message)
+        self.assertEqual(probe.call_args.kwargs["exe_path"], r"G:\zapret\exe\winws2.exe")
         self.assertEqual(recorder.error_messages(), [message])
 
     def test_returns_empty_and_silent_without_runner(self) -> None:

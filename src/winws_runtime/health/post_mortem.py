@@ -12,7 +12,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from log.log import log
-from winws_runtime.runners.spawn_failure import SpawnFailureKind, classify_spawn_failure
+from winws_runtime.health.silent_exit_probe import (
+    format_silent_exit_message,
+    probe_silent_exit,
+)
+from winws_runtime.health.winws_output import relevant_error_line
+from winws_runtime.runners.spawn_failure import (
+    SpawnFailureKind,
+    classify_spawn_failure,
+    is_silent_exit,
+)
 
 
 _STATUS_ACCESS_VIOLATION = 0xC0000005
@@ -37,16 +46,12 @@ class PostMortemResolution:
 
 
 def _first_relevant_output_line(output: str) -> str:
-    lines = [line.strip() for line in str(output or "").splitlines() if line.strip()]
-    for line in reversed(lines):
-        lower = line.lower()
-        if "windivert:" in lower or "error opening filter" in lower:
-            return line
-    for line in reversed(lines):
-        lower = line.lower()
-        if "error" in lower or "ошибка" in lower:
-            return line
-    return lines[-1] if lines else ""
+    """Строка вывода для показа пользователю (см. winws_output — единый разбор).
+
+    Здесь fallback идёт с конца: у процесса, прожившего сессию, последняя
+    строка ближе к моменту смерти, чем первая.
+    """
+    return relevant_error_line(output, fallback="last")
 
 
 def _format_exit_code(exit_code: int) -> str:
@@ -56,8 +61,19 @@ def _format_exit_code(exit_code: int) -> str:
     return str(code)
 
 
-def diagnose_unexpected_winws_exit(exit_code, output: str = "", *, exe_name: str) -> PostMortemDiagnosis:
-    """Builds a user-facing cause for a process that died while DPI was running."""
+def diagnose_unexpected_winws_exit(
+    exit_code,
+    output: str = "",
+    *,
+    exe_name: str,
+    exe_path: str = "",
+) -> PostMortemDiagnosis:
+    """Builds a user-facing cause for a process that died while DPI was running.
+
+    `exe_path` нужен пробам молчаливого отказа: по нему проверяется, на месте
+    ли сам файл и не срабатывал ли по нему Defender. Без пути эти проверки
+    просто не выполняются и в отчёт не попадают.
+    """
     try:
         code = int(exit_code)
     except Exception:
@@ -85,14 +101,14 @@ def diagnose_unexpected_winws_exit(exit_code, output: str = "", *, exe_name: str
             return PostMortemDiagnosis(message=message, kind="diagnosed")
 
     # 2. Mid-session specials the start-time diagnosis does not know about.
-    if code == 1 and not output_text.strip():
+    if is_silent_exit(code, output_text):
+        # Процесс умер молча: причину устанавливают пробы, а не догадка.
+        report = probe_silent_exit(exe_path=str(exe_path or ""), process_name=exe)
+        log(f"Silent exit probe: {report.log_summary()}", "DEBUG")
+        detail = format_silent_exit_message(report, exe_name=exe, exit_code=code)
         return PostMortemDiagnosis(
-            message=(
-                f"{prefix} (код 1): процесс был принудительно завершён извне — "
-                "возможно, антивирусом, оптимизатором или другой программой. "
-                "Проверьте карантин и исключения антивируса."
-            ),
-            kind="external_kill",
+            message=f"{prefix}. {detail}",
+            kind=SpawnFailureKind.SILENT_EXIT.value,
         )
     if code in (_STATUS_ACCESS_VIOLATION, _STATUS_STACK_BUFFER_OVERRUN):
         return PostMortemDiagnosis(
@@ -163,8 +179,14 @@ def resolve_unexpected_exit() -> PostMortemResolution | None:
 
     exit_code = snapshot.get("exit_code")
     output = snapshot.get("output") or ""
-    exe_name = os.path.basename(str(getattr(runner, "winws_exe", "") or "")) or "winws"
-    diagnosis = diagnose_unexpected_winws_exit(exit_code, output, exe_name=exe_name)
+    exe_path = str(getattr(runner, "winws_exe", "") or "")
+    exe_name = os.path.basename(exe_path) or "winws"
+    diagnosis = diagnose_unexpected_winws_exit(
+        exit_code,
+        output,
+        exe_name=exe_name,
+        exe_path=exe_path,
+    )
     strategy_name = str(snapshot.get("strategy_name") or "").strip()
     if strategy_name:
         log(f"Unexpected exit of '{strategy_name}' diagnosed as: {diagnosis.kind}", "INFO")
@@ -174,7 +196,7 @@ def resolve_unexpected_exit() -> PostMortemResolution | None:
     except Exception:
         code = -1
     transient = (
-        diagnosis.kind not in ("external_kill", "crash")
+        diagnosis.kind not in (SpawnFailureKind.SILENT_EXIT.value, "crash")
         and classify_spawn_failure(code, output).retryable
     )
     return PostMortemResolution(

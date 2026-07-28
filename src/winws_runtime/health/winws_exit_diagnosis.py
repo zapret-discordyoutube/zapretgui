@@ -16,6 +16,10 @@ from winws_runtime.health.antivirus_detection import (  # noqa: F401 (реэкс
     _find_known_antivirus_name,
     _is_windows_defender_active,
 )
+from winws_runtime.health.winws_output import (
+    has_diagnostic_output,
+    relevant_error_line,
+)
 from winws_runtime.health.windivert_diagnostics import (
     WINDIVERT_ERROR_TABLE,
     _ERROR_ACCESS_DENIED,
@@ -155,7 +159,9 @@ def diagnose_winws_exit(exit_code: int, stderr: str = "") -> Optional[WinDivertD
     # Winws2 can return the raw Win32 error truncated to one byte.
     # ERROR_SERVICE_DISABLED 1058 becomes process exit code 34, often without
     # stderr in GUI launch mode. Treat that as the same driver-service failure.
-    if win32_error == 34 and not stderr_lower.strip():
+    # "Без stderr" здесь означает "без диагностики": служебный баннер версии
+    # winws2 печатает всегда, и раньше он один ломал эту ветку.
+    if win32_error == 34 and not has_diagnostic_output(stderr):
         win32_error = _ERROR_SERVICE_DISABLED
 
     # 2. Dispatch to specific handlers
@@ -181,16 +187,8 @@ def diagnose_winws_exit(exit_code: int, stderr: str = "") -> Optional[WinDivertD
 
 
 def _extract_relevant_error_line(stderr: str) -> str:
-    lines = [line.strip() for line in str(stderr or "").splitlines() if line.strip()]
-    for line in reversed(lines):
-        lower = line.lower()
-        if "windivert:" in lower or "error opening filter" in lower:
-            return line
-    for line in reversed(lines):
-        lower = line.lower()
-        if "error" in lower or "ошибка" in lower:
-            return line
-    return lines[0] if lines else ""
+    """Самая содержательная строка вывода (см. winws_output — единый разбор)."""
+    return relevant_error_line(stderr, fallback="first")
 
 
 # ---------------------------------------------------------------------------

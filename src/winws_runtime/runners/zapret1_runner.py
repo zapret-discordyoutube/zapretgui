@@ -19,6 +19,7 @@ from settings.mode import EXE_NAME_WINWS1, ZAPRET1_MODE
 
 from .constants import CREATE_NO_WINDOW
 from .runner_base import StrategyRunnerBase
+from .spawn_failure import is_silent_exit
 from .preset_runner_support import (
     PreparedPresetArtifact,
     PresetRunnerState,
@@ -36,6 +37,11 @@ from winws_runtime.health.process_health_check import (
     diagnose_startup_error,
     format_winws_exit_diagnosis,
 )
+from winws_runtime.health.silent_exit_probe import (
+    format_silent_exit_message,
+    probe_silent_exit,
+)
+from winws_runtime.health.winws_output import relevant_error_line
 from winws_runtime.runtime.system_ops import get_process_pids_by_name
 
 
@@ -358,9 +364,12 @@ class Winws1StrategyRunner(StrategyRunnerBase):
         if completed.returncode == 0:
             return True
 
-        first_line = next((line.strip() for line in output.splitlines() if line.strip()), "")
-        detail = f": {first_line[:200]}" if first_line else ""
-        message = f"Проверка preset для winws не прошла (код {completed.returncode}){detail}"
+        summary = relevant_error_line(output, fallback="first")
+        if not summary and is_silent_exit(completed.returncode, output):
+            message = self._build_silent_exit_message(completed.returncode)
+        else:
+            detail = f": {summary[:200]}" if summary else ""
+            message = f"Проверка preset для winws не прошла (код {completed.returncode}){detail}"
         self._set_last_error(message, notify=False)
         if output:
             log(f"Winws1 dry-run error: {output[:500]}", "WARNING")
@@ -482,16 +491,14 @@ class Winws1StrategyRunner(StrategyRunnerBase):
                 )
                 log(f"Diagnosis: {diag.cause} | Fix: {diag.solution} | auto_fix={diag.auto_fix}", "INFO")
             else:
-                first_line = ""
-                try:
-                    first_line = next((ln.strip() for ln in (stderr_output or "").splitlines() if ln.strip()), "")
-                except Exception:
-                    first_line = ""
-                if first_line:
+                summary = relevant_error_line(stderr_output, fallback="first")
+                if summary:
                     self._set_last_error(
-                        f"winws завершился сразу (код {exit_code}): {first_line[:200]}",
+                        f"winws завершился сразу (код {exit_code}): {summary[:200]}",
                         notify=False,
                     )
+                elif is_silent_exit(exit_code, stderr_output):
+                    self._set_last_error(self._build_silent_exit_message(exit_code), notify=False)
                 else:
                     self._set_last_error(f"winws завершился сразу (код {exit_code})", notify=False)
 
@@ -706,13 +713,17 @@ class Winws1StrategyRunner(StrategyRunnerBase):
 
         return False
 
+    def _build_silent_exit_message(self, exit_code) -> str:
+        """Диагноз молчаливого отказа winws1: только проверяемые факты."""
+        report = probe_silent_exit(exe_path=str(self.winws_exe or ""), process_name=EXE_NAME_WINWS1)
+        log(f"Silent exit probe: {report.log_summary()}", "INFO")
+        return format_silent_exit_message(report, exe_name=EXE_NAME_WINWS1, exit_code=exit_code)
+
     @staticmethod
     def _should_retry_unclassified_code_one(exit_code: int, stderr_output: str, *, retry_count: int) -> bool:
         if retry_count >= 1:
             return False
-        if int(exit_code) != 1:
-            return False
-        return not str(stderr_output or "").strip()
+        return is_silent_exit(exit_code, stderr_output)
 
     def _start_from_preset_file_locked(
         self,

@@ -19,7 +19,11 @@ from log.log import log
 from settings.mode import ENGINE_WINWS2, ZAPRET2_MODE
 
 from .runner_base import StrategyRunnerBase, _ERROR_SERVICE_MARKED_FOR_DELETE
-from .spawn_failure import STATUS_DLL_INIT_FAILED, classify_spawn_failure
+from .spawn_failure import (
+    STATUS_DLL_INIT_FAILED,
+    classify_spawn_failure,
+    is_silent_exit,
+)
 from .preset_runner_support import (
     PreparedPresetArtifact,
     PresetRunnerState,
@@ -38,6 +42,11 @@ from winws_runtime.health.process_health_check import (
     diagnose_winws_exit,
     format_winws_exit_diagnosis,
 )
+from winws_runtime.health.silent_exit_probe import (
+    format_silent_exit_message,
+    probe_silent_exit,
+)
+from winws_runtime.health.winws_output import relevant_error_line
 from winws_runtime.runtime.system_ops import (
     find_stale_windivert_delete_pending_services_runtime,
     get_all_winws_process_pids,
@@ -50,6 +59,8 @@ _STATUS_DLL_INIT_FAILED = STATUS_DLL_INIT_FAILED
 _TRANSIENT_DRY_RUN_RETRY_DELAY_SEC = 0.75
 _TRANSIENT_DRY_RUN_RETRY_DELAYS_SEC = (_TRANSIENT_DRY_RUN_RETRY_DELAY_SEC, 2.0)
 _PRESET_SWITCH_AFTER_DRY_RUN_SETTLE_SEC = 0.15
+# Сколько символов стартового вывода winws2 попадает в общий лог при отказе.
+_STARTUP_OUTPUT_LOG_LIMIT = 2000
 
 
 def _is_windows_abs(path: str) -> bool:
@@ -437,18 +448,50 @@ class Winws2StrategyRunner(StrategyRunnerBase):
 
     @staticmethod
     def _summarize_startup_output(output: str) -> str:
-        lines = [line.strip() for line in str(output or "").splitlines() if line.strip()]
-        for line in reversed(lines):
-            lower = line.lower()
-            if "windivert:" in lower or "error opening filter" in lower:
-                return line
-        for line in reversed(lines):
-            lower = line.lower()
-            if "error" in lower or "ошибка" in lower:
-                return line
-        return lines[0] if lines else ""
+        """Строка вывода winws2, годная для показа пользователю.
 
-    def _set_spawn_exit_error(self, exit_code: int, output: str) -> None:
+        Пустая строка означает "winws2 не сказал ничего по существу": служебный
+        баннер версии он печатает всегда, и выдавать его за причину отказа
+        нельзя (см. winws_output — единый разбор вывода).
+        """
+        return relevant_error_line(output, fallback="first")
+
+    @staticmethod
+    def _log_full_startup_output(output: str) -> None:
+        """Кладёт весь стартовый вывод winws2 в общий лог при неудачном старте."""
+        text = str(output or "").strip()
+        if not text:
+            log(f"{ENGINE_WINWS2} не оставил стартового вывода", "WARNING")
+            return
+        truncated = text[:_STARTUP_OUTPUT_LOG_LIMIT]
+        suffix = " […]" if len(text) > _STARTUP_OUTPUT_LOG_LIMIT else ""
+        log(
+            f"{ENGINE_WINWS2} startup output ({len(text)} B): "
+            f"{truncated.replace(chr(10), ' | ')}{suffix}",
+            "WARNING",
+        )
+
+    def _publish_silent_exit_error(self, exit_code, *, lifetime_seconds: float | None = None) -> None:
+        """Диагноз молчаливого отказа: только то, что удалось проверить."""
+        report = probe_silent_exit(exe_path=str(self.winws_exe or ""))
+        self._set_last_error(
+            format_silent_exit_message(
+                report,
+                exe_name=ENGINE_WINWS2,
+                exit_code=exit_code,
+                lifetime_seconds=lifetime_seconds,
+            ),
+            notify=False,
+        )
+        log(f"Silent exit probe: {report.log_summary()}", "INFO")
+
+    def _set_spawn_exit_error(
+        self,
+        exit_code: int,
+        output: str,
+        *,
+        lifetime_seconds: float | None = None,
+    ) -> None:
         """Сохраняет для UI реальную причину, а не заголовок вывода winws2."""
         diagnosis = diagnose_winws_exit(exit_code, output)
         if diagnosis is not None:
@@ -469,6 +512,10 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                 f"{ENGINE_WINWS2} завершился сразу (код {exit_code}): {summary[:300]}",
                 notify=False,
             )
+        elif is_silent_exit(exit_code, output):
+            # Собственные сбои winws2 всегда объясняются в выводе, поэтому
+            # причину молчаливой смерти ищем вне процесса — по фактам.
+            self._publish_silent_exit_error(exit_code, lifetime_seconds=lifetime_seconds)
         elif self._should_retry_fast_switch_spawn_exit_code(int(exit_code or -1)):
             self._set_last_error(self._format_windows_process_init_failure(exit_code), notify=False)
         else:
@@ -801,6 +848,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             + (f": {output_summary[:300]}" if output_summary else ""),
             "WARNING",
         )
+        self._log_full_startup_output(output)
         self._set_runner_state_locked(
             PresetRunnerState.FAILED,
             preset_path=artifact.preset_path,
@@ -815,6 +863,8 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                 f"{output_summary[:300]}",
                 notify=False,
             )
+        elif is_silent_exit(self._last_spawn_exit_code, output):
+            self._publish_silent_exit_error(self._last_spawn_exit_code)
         else:
             self._set_last_error(
                 f"Проверка пресета через winws2 не прошла (код {self._last_spawn_exit_code})",
@@ -973,6 +1023,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                 strategy_name=strategy_name,
                 reason="preset_switch_start" if preset_switch else "start_from_preset",
             )
+            spawned_at = time.monotonic()
             try:
                 self.running_process = subprocess.Popen(
                     cmd,
@@ -1016,6 +1067,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                 return True
 
             exit_code = self.running_process.returncode
+            lifetime_seconds = max(0.0, time.monotonic() - spawned_at)
             # A single failed attempt is not yet a failed operation: retries may
             # follow, so log at WARNING and defer user-facing publication to
             # _publish_final_launch_failure at the end of the whole operation.
@@ -1034,9 +1086,13 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             stderr_output = self._read_startup_output_file(startup_output_path)
             if not stderr_output:
                 stderr_output = self._read_process_startup_output(self.running_process)
-            if stderr_output:
-                startup_summary = self._summarize_startup_output(stderr_output)
-                log(f"Error: {(startup_summary or stderr_output)[:500]}", "WARNING")
+            startup_summary = self._summarize_startup_output(stderr_output)
+            if startup_summary:
+                log(f"Error: {startup_summary[:500]}", "WARNING")
+            # Полный вывод — единственный шанс разобрать обращение постфактум:
+            # файл tmp/winws2_startup_output перезаписывается следующим стартом,
+            # а лог остаётся у пользователя. Путь отказа редкий, WARNING оправдан.
+            self._log_full_startup_output(stderr_output)
 
             self._last_spawn_exit_code = int(exit_code)
             self._last_spawn_stderr = str(stderr_output or "")
@@ -1052,7 +1108,11 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             # Обычный старт и быстрое переключение обязаны выдавать одинаково
             # подробный диагноз. В выводе winws2 первой идёт строка версии, а
             # настоящая ошибка WinDivert обычно находится в конце.
-            self._set_spawn_exit_error(int(exit_code), stderr_output)
+            self._set_spawn_exit_error(
+                int(exit_code),
+                stderr_output,
+                lifetime_seconds=lifetime_seconds,
+            )
 
             self._clear_process_state_locked()
             if artifact.preset_path and not preset_switch:
@@ -1399,11 +1459,23 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         stable_start_window_seconds: float,
         cleanup_required: bool = False,
     ):
-        """Hook: winws2 один раз повторяет DLL-init провал (0xC0000142)."""
+        """Hook: winws2 один раз повторяет DLL-init провал (0xC0000142) и
+        молчаливое завершение с кодом 1 (симметрично winws1)."""
         if retry_count == 0 and self._should_retry_fast_switch_spawn_exit_code(exit_code):
             log(
                 f"{self._format_windows_process_init_failure(exit_code)}. "
                 "Повторяем запуск после очистки состояния WinDivert",
+                "WARNING",
+            )
+            return self._relaunch_after_failed_spawn_locked(
+                preset_path,
+                strategy_name,
+                retry_count=retry_count,
+                stable_start_window_seconds=stable_start_window_seconds,
+            )
+        if retry_count == 0 and is_silent_exit(exit_code, stderr_output):
+            log(
+                "Winws2 exited with code 1 without diagnostic output after dry-run passed; retrying once",
                 "WARNING",
             )
             return self._relaunch_after_failed_spawn_locked(
