@@ -20,24 +20,44 @@ from main.shell import shell_bootstrap
 
 QT_SCROLL_STYLE_AFTER_INTERACTIVE_MS = 2_000
 
+IMPORT_WARMUP_MODULES = ("qtawesome", "asyncio")
+
+
+def warm_up_modules(names) -> tuple[str, ...]:
+    """Импортирует модули по одному, не прерываясь на неудачном.
+
+    Возвращает те, что удалось прогреть.
+    """
+    warmed: list[str] = []
+    for name in names:
+        try:
+            __import__(name)
+        except Exception:
+            continue
+        warmed.append(name)
+    return tuple(warmed)
+
 
 def start_qtawesome_warmup() -> None:
-    """Греет импорт qtawesome (~120-190 мс) в фоне после Qt bootstrap.
+    """Греет тяжёлые импорты в фоне после Qt bootstrap.
 
     Стартует после application_bootstrap(): к этому моменту тяжёлые импорты
     главного потока позади, дальше идёт конструктор окна (C++-код Qt, GIL
     свободен), и фоновый импорт успевает прогреться до сборки первой
     страницы, где qtawesome нужен.
+
+    Здесь же греется asyncio: первое обращение к Telegram Proxy тянет его
+    вместе с `asyncio.windows_events`, и в логе это давало рывок интерфейса
+    на ~64 мс прямо посреди работы пользователя.
     """
     import threading
 
-    def _warm() -> None:
-        try:
-            import qtawesome  # noqa: F401
-        except Exception:
-            pass
-
-    threading.Thread(target=_warm, daemon=True, name="qtawesome-warmup").start()
+    threading.Thread(
+        target=warm_up_modules,
+        args=(IMPORT_WARMUP_MODULES,),
+        daemon=True,
+        name="import-warmup",
+    ).start()
 
 
 def _build_application_post_startup_deps(**kwargs):

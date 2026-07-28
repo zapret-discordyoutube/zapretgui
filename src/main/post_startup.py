@@ -94,6 +94,12 @@ def install_telegram_proxy_page_warmup(*args, **kwargs):
     return install(*args, **kwargs)
 
 
+def install_secondary_page_warmup(*args, **kwargs):
+    from main.post_startup_secondary_page_warmup import install_secondary_page_warmup as install
+
+    return install(*args, **kwargs)
+
+
 def install_update_check(*args, **kwargs):
     from main.post_startup_update import install_update_check as install
 
@@ -155,6 +161,10 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
         log_startup_metric=deps.log_startup_metric,
     )
     install_telegram_proxy_page_warmup(
+        startup_host,
+        log_startup_metric=deps.log_startup_metric,
+    )
+    install_secondary_page_warmup(
         startup_host,
         log_startup_metric=deps.log_startup_metric,
     )
