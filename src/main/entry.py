@@ -289,4 +289,9 @@ def main() -> None:
             start_in_tray=bool(start_in_tray),
         ),
     )
+    # Наблюдатель за отзывчивостью интерфейса живёт ровно столько, сколько
+    # крутится event loop: блокировки GUI-потока попадают в лог со стеком.
+    from ui.ui_freeze_watchdog import install_ui_freeze_watchdog
+
+    install_ui_freeze_watchdog()
     sys.exit(app.exec())

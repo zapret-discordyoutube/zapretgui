@@ -40,12 +40,6 @@ def install_startup_audit(*args, **kwargs):
     return install(*args, **kwargs)
 
 
-def install_ui_freeze_watchdog(*args, **kwargs):
-    from ui.ui_freeze_watchdog import install_ui_freeze_watchdog as install
-
-    return install(*args, **kwargs)
-
-
 def install_dns_startup(*args, **kwargs):
     from main.post_startup_dns import install_dns_startup as install
 
@@ -225,7 +219,6 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
     install_qt_event_diagnostic_probe()
     install_startup_audit()
     install_global_exception_handler()
-    install_ui_freeze_watchdog()
 
 
 __all__ = ["PostStartupDeps", "install_post_startup_tasks"]

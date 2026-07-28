@@ -13,37 +13,17 @@ from blockcheck.ui.helpers import (
     sort_results_by_family,
     truncate_detail,
 )
+from blockcheck.ui.dpi_labels import (
+    DPI_BADGE_COLORS,
+    DPI_LABELS_RU,
+    INCONCLUSIVE_LABELS_RU,
+    NEUTRAL_COLOR,
+)
 from ui.accessibility import set_item_accessible_text, set_state_text
 from ui.widgets.fluent_item_tooltip import set_fluent_item_tooltip
 
 
-DPI_BADGE_COLORS = {
-    "none": ("#52c477", "#1a3a24"),
-    "dns_fake": ("#e0a854", "#3a2e1a"),
-    "http_inject": ("#e07854", "#3a221a"),
-    "isp_page": ("#e05454", "#3a1a1a"),
-    "tls_dpi": ("#e05454", "#3a1a1a"),
-    "tls_mitm": ("#e05454", "#3a1a1a"),
-    "tcp_reset": ("#e07854", "#3a221a"),
-    "tcp_16_20": ("#e0a854", "#3a2e1a"),
-    "stun_block": ("#e0a854", "#3a2e1a"),
-    "full_block": ("#e05454", "#3a1a1a"),
-}
-
 _BLOCKCHECK_RESULT_TABLE_ACCESSIBILITY_INSTALLED = "blockcheckResultTableAccessibilityInstalled"
-
-DPI_LABELS_RU = {
-    "none": "DPI не обнаружен",
-    "dns_fake": "DNS подмена",
-    "http_inject": "HTTP инъекция",
-    "isp_page": "Страница-заглушка ISP",
-    "tls_dpi": "TLS DPI (RST/EOF)",
-    "tls_mitm": "TLS MITM прокси",
-    "tcp_reset": "TCP RST",
-    "tcp_16_20": "TCP блок 16-20KB",
-    "stun_block": "STUN/UDP блокировка",
-    "full_block": "Полная блокировка",
-}
 
 
 def make_readonly_item(text: str) -> QTableWidgetItem:
@@ -305,8 +285,37 @@ def _tcp_row_accessible_text(
     return ", ".join(parts)
 
 
+def _dpi_cell(target_result) -> QTableWidgetItem:
+    """Ячейка колонки DPI: сигнатура, причина «без вывода» или прочерк.
+
+    Причина окрашена нейтрально намеренно: недоступный хост не должен выглядеть
+    в таблице так же, как обнаруженная блокировка. Пока цель не оценена
+    (``not_probed``), показываем прочерк, а не пугающий текст.
+    """
+    from blockcheck.models import DPIClassification, InconclusiveReason, TargetOutcome
+
+    cls = target_result.classification
+    if cls != DPIClassification.NONE:
+        item = make_readonly_item(DPI_LABELS_RU.get(cls.value, cls.value))
+        item.setForeground(QColor(DPI_BADGE_COLORS.get(cls.value, NEUTRAL_COLOR)[0]))
+        set_fluent_item_tooltip(item, target_result.classification_detail)
+        return item
+
+    reason = target_result.inconclusive_reason
+    if (
+        target_result.outcome == TargetOutcome.INCONCLUSIVE
+        and reason not in (InconclusiveReason.NONE, InconclusiveReason.NOT_PROBED)
+    ):
+        item = make_readonly_item(INCONCLUSIVE_LABELS_RU.get(reason.value, "Без вывода"))
+        item.setForeground(QColor(NEUTRAL_COLOR[0]))
+        set_fluent_item_tooltip(item, target_result.classification_detail)
+        return item
+
+    return make_readonly_item("—")
+
+
 def update_target_result_table(*, target_result, table, tcp_table, tcp_section_label) -> None:
-    from blockcheck.models import DPIClassification, TestStatus, TestType
+    from blockcheck.models import TestStatus, TestType
 
     ensure_blockcheck_result_table_current_row_accessibility(table, fallback_column=0)
     tests = target_result.tests
@@ -357,15 +366,7 @@ def update_target_result_table(*, target_result, table, tcp_table, tcp_section_l
     elif isp_tests:
         set_status_cell(table, row, 4, isp_tests[0])
 
-    cls = target_result.classification
-    if cls != DPIClassification.NONE:
-        label = DPI_LABELS_RU.get(cls.value, cls.value)
-        item = make_readonly_item(label)
-        color = DPI_BADGE_COLORS.get(cls.value, ("#e0a854", "#3a2e1a"))
-        item.setForeground(QColor(color[0]))
-        table.setItem(row, 5, item)
-    else:
-        table.setItem(row, 5, make_readonly_item("—"))
+    table.setItem(row, 5, _dpi_cell(target_result))
 
     ping = [test for test in tests if test.test_type == TestType.PING]
     if ping:

@@ -12,6 +12,10 @@ ALLOWED_UI_IMPORTS = {
     "app.ui_texts",
     "ui.one_shot_worker_runtime",
     "ui.queued_worker_state",
+    # Инфраструктура запуска воркеров, а не страницы: гейт параллелизма и
+    # проверка потокового контракта.
+    "ui.background_worker_gate",
+    "ui.ui_thread_guard",
 }
 
 

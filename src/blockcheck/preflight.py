@@ -1,13 +1,16 @@
-"""Preflight — быстрая предварительная проверка доменов перед блокчеком.
+"""Preflight — быстрая предварительная проверка одного домена.
 
 4 проверки на домен (параллельно):
 1. DNS резолвинг + сравнение IP с заглушками провайдеров
 2. TCP :443 — открыт ли порт HTTPS
-3. ICMP ping — базовая достижимость
+3. ICMP ping — базовая достижимость (справочно, на вердикт не влияет)
 4. HTTP GET :80 — детекция ISP-инъекции / страницы-заглушки
 
-Результаты информационные; блокчек продолжается в любом случае,
-если пользователь не включил чекбокс «Пропускать проблемные домены».
+Массовый прогон по списку доменов отсюда убран: в BlockCheck те же проверки
+выполняет планировщик проб (``runner``), и отдельная фаза означала бы двойной
+резолв и двойной коннект к каждому хосту. Модуль остался точкой входа для
+``strategy_scanner``, который проверяет ровно один домен, и владельцем правила
+``compute_verdict``.
 """
 
 from __future__ import annotations
@@ -19,10 +22,8 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from typing import TYPE_CHECKING
 
 from utils.net_resolve import DNSTimeoutError, resolve_addrinfo, resolve_ipv4
-from utils.concurrency import iter_completed
 
 from blockcheck.config import (
-    DEFAULT_PARALLEL,
     KNOWN_BLOCK_IPS,
     PREFLIGHT_DNS_TIMEOUT,
     PREFLIGHT_HTTP_TIMEOUT,
@@ -308,7 +309,7 @@ def check_one_domain(domain: str, cancelled: Callable[[], bool] | None = None) -
     # только по IPv4. Раньше они шли по имени хоста и каждая заново упиралась
     # в тот же неотвечающий DNS, утраивая время зависания.
     if not first_ipv4:
-        pf.verdict, pf.verdict_detail = _compute_verdict(pf)
+        pf.verdict, pf.verdict_detail = compute_verdict(pf)
         if pf.verdict == PreflightVerdict.PASSED:
             # DNS ответил, но только IPv6 — остальные проверки не выполнялись,
             # и объявлять «все проверки пройдены» было бы неправдой.
@@ -356,11 +357,11 @@ def check_one_domain(domain: str, cancelled: Callable[[], bool] | None = None) -
         pool.shutdown(wait=False, cancel_futures=True)
 
     # Вычисляем verdict
-    pf.verdict, pf.verdict_detail = _compute_verdict(pf)
+    pf.verdict, pf.verdict_detail = compute_verdict(pf)
     return pf
 
 
-def _compute_verdict(pf: PreflightResult) -> tuple[PreflightVerdict, str]:
+def compute_verdict(pf: PreflightResult) -> tuple[PreflightVerdict, str]:
     """Определяем итоговый verdict по результатам всех проверок."""
     reasons: list[str] = []
 
@@ -384,18 +385,15 @@ def _compute_verdict(pf: PreflightResult) -> tuple[PreflightVerdict, str]:
     if reasons:
         return PreflightVerdict.FAILED, "; ".join(reasons)
 
-    # Предупреждения
-    warnings: list[str] = []
+    # Предупреждения. Молчание на ICMP сюда не входит: CDN штатно не отвечают
+    # на ping, и раньше это давало предупреждение почти на каждом домене.
     if pf.tcp_443 and pf.tcp_443.status != TestStatus.OK:
-        warnings.append("TCP :443 недоступен — порт закрыт или IP заблокирован")
+        return (
+            PreflightVerdict.WARNING,
+            "TCP :443 недоступен — порт закрыт или IP заблокирован",
+        )
 
-    if pf.ping and pf.ping.status != TestStatus.OK:
-        warnings.append("ICMP ping не проходит (нормально для CDN)")
-
-    if warnings:
-        return PreflightVerdict.WARNING, "; ".join(warnings)
-
-    return PreflightVerdict.PASSED, "все проверки пройдены (DNS, TCP :443, Ping, HTTP)"
+    return PreflightVerdict.PASSED, "все проверки пройдены (DNS, TCP :443, HTTP)"
 
 
 # ---------------------------------------------------------------------------
@@ -483,101 +481,3 @@ def format_domain_log(pf: PreflightResult) -> str:
     lines.append(f"    Итого: {verdict_ru} — {pf.verdict_detail}")
 
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-def run_preflight(
-    domains: list[str],
-    callback: object | None = None,
-    parallel: int = DEFAULT_PARALLEL,
-    cancelled: Callable[[], bool] | None = None,
-) -> list[PreflightResult]:
-    """Запуск preflight-проверок для списка доменов.
-
-    Parameters
-    ----------
-    domains : list[str]
-        Домены для проверки.
-    callback : BlockcheckCallback-like, optional
-        Объект с методами ``on_log(msg)`` и ``on_progress(current, total, msg)``.
-    parallel : int
-        Макс. параллельных доменов.
-    cancelled : callable, optional
-        Возвращает True для отмены.
-
-    Returns
-    -------
-    list[PreflightResult]
-        Один результат на домен, в порядке входного списка.
-    """
-    if not domains:
-        return []
-
-    _log = getattr(callback, "on_log", None)
-    _progress = getattr(callback, "on_progress", None)
-
-    if _log:
-        _log(f"Preflight: проверяем {len(domains)} доменов")
-
-    results: dict[str, PreflightResult] = {}
-    total = len(domains)
-
-    workers = min(parallel, total)
-    pool = ThreadPoolExecutor(max_workers=workers)
-    try:
-        future_to_domain = {
-            pool.submit(check_one_domain, domain, cancelled): domain
-            for domain in domains
-        }
-
-        for future in iter_completed(future_to_domain, cancelled=cancelled):
-            domain = future_to_domain[future]
-            try:
-                pf_result = future.result()
-            except Exception as e:
-                logger.exception("Preflight failed for %s", domain)
-                pf_result = PreflightResult(
-                    domain=domain,
-                    verdict=PreflightVerdict.WARNING,
-                    verdict_detail=f"ошибка preflight: {e}",
-                )
-
-            results[domain] = pf_result
-            done = len(results)
-
-            if _log:
-                _log(format_domain_log(pf_result))
-            if _progress:
-                _progress(done, total, f"Preflight: {domain}")
-    finally:
-        # Результаты уже собраны выше, а при отмене ждать нечего: ожидание
-        # здесь возвращало бы зависание вместо остановки.
-        pool.shutdown(wait=False, cancel_futures=True)
-
-    # Возвращаем в порядке входного списка
-    ordered = []
-    for domain in domains:
-        if domain in results:
-            ordered.append(results[domain])
-            continue
-        if cancelled and cancelled():
-            ordered.append(
-                PreflightResult(
-                    domain=domain,
-                    verdict=PreflightVerdict.WARNING,
-                    verdict_detail="проверка отменена",
-                )
-            )
-        else:
-            ordered.append(PreflightResult(domain=domain))
-
-    if _log and not (cancelled and cancelled()):
-        passed = sum(1 for r in ordered if r.verdict == PreflightVerdict.PASSED)
-        warned = sum(1 for r in ordered if r.verdict == PreflightVerdict.WARNING)
-        failed = sum(1 for r in ordered if r.verdict == PreflightVerdict.FAILED)
-        _log(f"Preflight итого: {passed} ОК, {warned} предупреждений, {failed} ошибок")
-
-    return ordered

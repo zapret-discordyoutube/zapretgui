@@ -1,43 +1,56 @@
-"""BlockCheck runner — orchestrates all tests with callback progress and cancellation."""
+"""BlockCheck runner — планировщик проб и сборка отчёта.
+
+Три этапа вместо прежних семи последовательных фаз:
+
+1. **Опорная точка.** Контрольная группа хостов и однократный резолв всех целей.
+   Раньше один хост резолвился до пяти раз: в preflight, в каждой из трёх
+   TLS-проб, в ISP-пробе и в ping-пробе.
+2. **Пробы.** Все проверки — TLS, ISP, DNS, TCP, STUN, ping — идут одной
+   параллельной группой под общим дедлайном. Зависимостей между ними нет,
+   барьеры не нужны.
+3. **Анализ.** Чистые вычисления: исход каждой цели и вердикт отчёта.
+"""
 
 from __future__ import annotations
 
 import logging
-import re
-import socket
-import time
 import threading
-from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
 
-from utils.net_resolve import clear_cache as clear_dns_cache, resolve_ips
 from utils.concurrency import iter_completed
+from utils.net_resolve import clear_cache as clear_dns_cache, resolve_ips
 
 from blockcheck.config import (
     DEFAULT_PARALLEL,
     DNS_TIMEOUT,
     HTTPS_TIMEOUT,
+    MAX_PARALLEL,
+    RUN_DEADLINE_SECONDS,
     STUN_TIMEOUT,
-    TCP_HEALTH_MAX_CANDIDATES,
-    TCP_HEALTH_TIMEOUT,
-    TCP_TARGET_MAX_COUNT,
-    TCP_TARGETS_PER_PROVIDER,
 )
-from blockcheck.dpi_classifier import DPIClassifier
 from blockcheck.dns_integrity import check_dns_integrity
-from blockcheck.preflight import run_preflight
+from blockcheck.hosts import host_candidates, host_of, is_pseudo_target
 from blockcheck.isp_page_detector import check_http_injection, detect_isp_page
 from blockcheck.models import (
     BlockcheckReport,
-    DPIClassification,
+    DnsVerdict,
     DNSIntegrityResult,
+    DPIClassification,
+    InconclusiveReason,
+    NetworkBaseline,
+    PreflightResult,
     PreflightVerdict,
     SingleTestResult,
+    TargetOutcome,
     TargetResult,
     TestStatus,
     TestType,
 )
 from blockcheck.ping_tester import ping_host
+from blockcheck.preflight import compute_verdict
 from blockcheck.stun_tester import test_stun
 from blockcheck.targets import (
     build_targets_with_user_domains,
@@ -45,8 +58,9 @@ from blockcheck.targets import (
     load_tcp_targets_with_source,
     select_tcp_targets,
 )
-from blockcheck.tcp_test import check_tcp_16_20, probe_tcp_target_health
+from blockcheck.tcp_test import check_tcp_16_20
 from blockcheck.tls_tester import test_https
+from blockcheck.verdict import build_report_verdict, judge_target, probe_baseline
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +102,34 @@ class RunMode:
 
 
 # ---------------------------------------------------------------------------
+# Внутренние структуры планировщика
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ResolvedHost:
+    """Результат однократного резолва хоста — общий для всех проб."""
+
+    host: str
+    ipv4: list[str] = field(default_factory=list)
+    ipv6: list[str] = field(default_factory=list)
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.ipv4 or self.ipv6)
+
+
+@dataclass
+class ProbeJob:
+    """Одна проба: что запустить и к какой цели приклеить результат."""
+
+    kind: str
+    label: str
+    run: Any
+    target: TargetResult | None = None
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -104,6 +146,7 @@ class BlockcheckRunner:
         callback: BlockcheckCallback | None = None,
         extra_domains: list[str] | None = None,
         skip_preflight_failed: bool = False,
+        deadline_seconds: float = RUN_DEADLINE_SECONDS,
     ):
         self.mode = mode
         if timeout is not None:
@@ -112,11 +155,13 @@ class BlockcheckRunner:
             self.timeout = self.QUICK_TIMEOUT
         else:
             self.timeout = HTTPS_TIMEOUT
-        self.parallel = parallel
+        self.parallel = max(1, min(int(parallel), MAX_PARALLEL))
         self.cb = callback or _NullCallback()
         self._cancelled = threading.Event()
         self._extra_domains = extra_domains
         self._skip_preflight_failed = skip_preflight_failed
+        self._deadline_seconds = float(deadline_seconds)
+        self._deadline: float | None = None
 
     def cancel(self) -> None:
         """Thread-safe cancellation."""
@@ -126,132 +171,47 @@ class BlockcheckRunner:
     def cancelled(self) -> bool:
         return self._cancelled.is_set() or self.cb.is_cancelled()
 
+    @property
+    def expired(self) -> bool:
+        return self._deadline is not None and time.monotonic() >= self._deadline
+
+    def should_stop(self) -> bool:
+        """Единый признак остановки: отмена пользователем или общий дедлайн."""
+        return self.cancelled or self.expired
+
+    def _remaining(self) -> float | None:
+        if self._deadline is None:
+            return None
+        return max(0.0, self._deadline - time.monotonic())
+
+    # ------------------------------------------------------------------
+    # Точка входа
+    # ------------------------------------------------------------------
+
     def run(self) -> BlockcheckReport:
-        """Run all test phases sequentially, return report."""
         start_time = time.time()
+        self._deadline = time.monotonic() + self._deadline_seconds
         # Диагностика должна видеть свежее состояние DNS, а не ответы прошлого
         # прогона. Внутри одного прогона кэш, наоборот, нужен: домен резолвится
         # в нескольких фазах подряд.
         clear_dns_cache()
+
         report = BlockcheckReport()
         targets = build_targets_with_user_domains(self._extra_domains)
 
-        phase_count = self._count_phases()
-        current_phase = 0
+        report.baseline = self._stage_baseline()
+        resolution = self._stage_resolve(targets)
+        target_results = self._stage_probe(report, targets, resolution)
+        report.targets = target_results
+        report.preflight = self._build_preflight(resolution, target_results)
 
-        # ── Phase 0: Preflight ──
-        if not self.cancelled:
-            current_phase += 1
-            self.cb.on_phase_change(f"Фаза {current_phase}/{phase_count}: Preflight проверка")
-            self.cb.on_log("=== Preflight — предварительная проверка доменов ===")
-            preflight_domains = self._extract_unique_hosts(targets)
-            report.preflight = run_preflight(
-                preflight_domains,
-                callback=self.cb,
-                parallel=self.parallel,
-                cancelled=lambda: self.cancelled,
-            )
-            if self._skip_preflight_failed and report.preflight:
-                failed_domains = {
-                    p.domain for p in report.preflight
-                    if p.verdict == PreflightVerdict.FAILED
-                }
-                if failed_domains:
-                    before = len(targets)
-                    targets = [
-                        t for t in targets
-                        if self._extract_host_from_target(t) not in failed_domains
-                    ]
-                    skipped = before - len(targets)
-                    self.cb.on_log(
-                        f"Preflight: пропущено {skipped} целей "
-                        f"({len(failed_domains)} проблемных доменов)"
-                    )
+        self._stage_judge(report)
 
-        # ── Phase 1: DNS integrity ──
-        if self.mode in (RunMode.FULL, RunMode.DPI_ONLY) and not self.cancelled:
-            current_phase += 1
-            self.cb.on_phase_change(f"Фаза {current_phase}/{phase_count}: DNS проверка")
-            self.cb.on_log("=== DNS Integrity Check ===")
-            dns_domains, dns_source = load_domains_with_source()
-            self.cb.on_log(f"DNS domains source: {dns_source} ({len(dns_domains)} total)")
-            if dns_source.startswith("fallback"):
-                self.cb.on_log("WARNING: DNS domains list fallback is in use (reduced coverage)")
-            report.dns_integrity = check_dns_integrity(
-                dns_domains,
-                callback=lambda msg: self.cb.on_log(msg),
-                cancelled=lambda: self.cancelled,
-            )
-            for d in report.dns_integrity:
-                status = self._dns_status_text(d)
-                sys_v4, sys_v6 = self._resolve_host_ips(d.domain)
-                self.cb.on_log(
-                    f"  {d.domain}: UDP={d.udp_ips}, DoH={d.doh_ips}, "
-                    f"SYSv4={sys_v4 or ['-']}, SYSv6={sys_v6 or ['-']} → {status}"
-                )
-
-        # ── Phase 2: TLS tests ──
-        if not self.cancelled:
-            current_phase += 1
-            self.cb.on_phase_change(f"Фаза {current_phase}/{phase_count}: TLS тесты")
-            self.cb.on_log("\n=== TLS / HTTPS Tests ===")
-            https_targets = [t for t in targets if not t["value"].startswith(("PING:", "STUN:"))]
-            report.targets = self._run_https_phase(https_targets)
-
-        # ── Phase 3: ISP page detection ──
-        if self.mode in (RunMode.FULL, RunMode.DPI_ONLY) and not self.cancelled:
-            current_phase += 1
-            self.cb.on_phase_change(f"Фаза {current_phase}/{phase_count}: ISP детекция")
-            self.cb.on_log("\n=== ISP Page Detection ===")
-            self._run_isp_phase(report.targets)
-
-        # ── Phase 4: TCP 16-20KB ──
-        if self.mode in (RunMode.FULL, RunMode.DPI_ONLY) and not self.cancelled:
-            current_phase += 1
-            self.cb.on_phase_change(f"Фаза {current_phase}/{phase_count}: TCP 16-20KB")
-            self.cb.on_log("\n=== TCP 16-20KB Block Test ===")
-            tcp_results = self._run_tcp_phase()
-            if tcp_results:
-                tcp_target = TargetResult(
-                    name="TCP 16-20KB",
-                    value="TCP:16-20KB",
-                    tests=tcp_results,
-                )
-                report.targets.append(tcp_target)
-                self.cb.on_target_complete(tcp_target)
-
-        # ── Phase 5: STUN/UDP ──
-        if self.mode == RunMode.FULL and not self.cancelled:
-            current_phase += 1
-            self.cb.on_phase_change(f"Фаза {current_phase}/{phase_count}: STUN/UDP")
-            self.cb.on_log("\n=== STUN/UDP Tests ===")
-            stun_targets = [t for t in targets if t["value"].startswith("STUN:")]
-            stun_results = self._run_stun_phase(stun_targets)
-            report.targets.extend(stun_results)
-
-        # ── Phase 6: Ping ──
-        if self.mode in (RunMode.FULL, RunMode.QUICK) and not self.cancelled:
-            current_phase += 1
-            self.cb.on_phase_change(f"Фаза {current_phase}/{phase_count}: Ping")
-            self.cb.on_log("\n=== Ping Tests ===")
-            self._run_ping_phase(report.targets, targets)
-
-        # ── Phase 7: DPI Classification ──
-        if not self.cancelled:
-            self.cb.on_phase_change("Классификация DPI...")
-            self.cb.on_log("\n=== DPI Classification ===")
-            self._attach_dns_stub_tests(report.targets, report.dns_integrity)
-            for tr in report.targets:
-                classification, detail = DPIClassifier.classify(tr)
-                tr.classification = classification
-                tr.classification_detail = detail
-                self.cb.on_log(f"  {tr.name}: {classification.value} — {detail}")
-
-        # ── Summary ──
         was_cancelled = self.cancelled
         report.elapsed_seconds = time.time() - start_time
         report.cancelled = was_cancelled
         report.summary = self._build_summary(report)
+
         if was_cancelled:
             self.cb.on_phase_change("Отменено")
             self.cb.on_log(f"\nCancelled after {report.elapsed_seconds:.1f}s")
@@ -261,578 +221,532 @@ class BlockcheckRunner:
         return report
 
     # ------------------------------------------------------------------
-    # Phase implementations
+    # Этап 1: опорная точка и резолв
     # ------------------------------------------------------------------
 
-    def _run_https_phase(self, https_targets: list[dict]) -> list[TargetResult]:
-        """Run HTTP, TLS 1.2, TLS 1.3 tests for each HTTPS target (parallel)."""
-        total = len(https_targets)
-        # Pre-build TargetResult list to preserve order
-        results: list[TargetResult] = []
-        target_map: dict[str, dict[str, Any]] = {}
+    def _stage_baseline(self) -> NetworkBaseline:
+        if self.should_stop():
+            return NetworkBaseline()
 
-        for i, target in enumerate(https_targets):
-            name = target["name"]
-            value = target["value"]
-            host = re.sub(r"^https?://", "", value).rstrip("/").split("/")[0]
-            tr = TargetResult(name=name, value=value)
-            results.append(tr)
+        self.cb.on_phase_change("Этап 1/3: контрольная проверка сети")
+        self.cb.on_log("=== Контрольная группа ===")
+        baseline = probe_baseline(cancelled=self.should_stop, log=self.cb.on_log)
 
-            ipv4, ipv6 = self._resolve_host_ips(host)
-            families: list[str] = []
-            if ipv4:
-                families.append("ipv4")
-            if ipv6:
-                families.append("ipv6")
-            if not families:
-                # Keep at least one probe path for diagnostics.
-                families = ["ipv4"]
-
-            target_map[name] = {
-                "index": i,
-                "target": tr,
-                "host": host,
-                "families": families,
-                "expected": len(families) * 3,
-            }
-
+        if not baseline.internet_ok:
             self.cb.on_log(
-                f"  DNS {name}: IPv4={ipv4 or ['-']}, IPv6={ipv6 or ['-']}, test_families={families}"
+                "WARNING: контрольные хосты недоступны — выводы о блокировках "
+                "делаться не будут"
             )
-
-        # Submit all jobs to thread pool: 3 tests per target
-        def _run_one(name: str, host: str, tls_version: str | None, ip_family: str):
-            """Run a single TLS test — called in a pool thread."""
-            return name, tls_version, ip_family, test_https(
-                host,
-                timeout=self.timeout,
-                tls_version=tls_version,
-                ip_family=ip_family,
+        if not baseline.icmp_usable:
+            self.cb.on_log(
+                "ICMP недоступен на этой машине или в этой сети — ping показан "
+                "справочно и на вердикт не влияет"
             )
+        if not baseline.ipv6_usable:
+            self.cb.on_log("IPv6 недоступен — пробы по IPv6 пропускаются")
+        return baseline
 
-        completed_targets = set()
-        pool = ThreadPoolExecutor(max_workers=self.parallel)
-        try:
-            futures = []
-            for name, data in target_map.items():
-                if self.cancelled:
-                    break
-                idx = int(data["index"])
-                host = str(data["host"])
-                families = list(data["families"])
-                self.cb.on_target_started(name, idx, total)
-                for tls_v in (None, "1.2", "1.3"):
-                    for ip_family in families:
-                        futures.append(pool.submit(_run_one, name, host, tls_v, ip_family))
-
-            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
-                name, tls_v, ip_family, r = future.result()
-                target_data = target_map[name]
-                tr = target_data["target"]
-                r.target_name = name
-                r.raw_data.setdefault("ip_family", ip_family)
-                tr.tests.append(r)
-
-                label = {None: "HTTP", "1.2": "TLS1.2", "1.3": "TLS1.3"}[tls_v]
-                family_label = "IPv6" if ip_family == "ipv6" else "IPv4"
-                self.cb.on_test_result(r)
-                self.cb.on_log(f"  {name} {label} [{family_label}]: {r.status.value} {r.detail}")
-                self.cb.on_progress(len(completed_targets), total, f"{name} {label} [{family_label}]")
-
-                expected = int(target_data["expected"])
-                if len(tr.tests) >= expected and name not in completed_targets:
-                    completed_targets.add(name)
-                    self.cb.on_target_complete(tr)
-        finally:
-            # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
-            # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
-            pool.shutdown(wait=False, cancel_futures=True)
-
-        # Emit for targets that finished partially (cancelled)
-        for name, data in target_map.items():
-            tr = data["target"]
-            if name not in completed_targets and tr.tests:
-                self.cb.on_target_complete(tr)
-
-        return results
-
-    def _run_isp_phase(self, target_results: list[TargetResult]) -> None:
-        """Run ISP page detection for existing HTTPS targets (parallel)."""
-        if not target_results:
-            return
-
-        def _isp_one(tr):
-            host = re.sub(r"^https?://", "", tr.value).rstrip("/").split("/")[0]
-            http_result = check_http_injection(host)
-            http_result.target_name = tr.name
-
-            if http_result.status == TestStatus.FAIL and http_result.error_code == "HTTP_INJECT":
-                return tr, http_result, "http"
-
-            https_result = detect_isp_page(host)
-            https_result.target_name = tr.name
-
-            if https_result.status == TestStatus.FAIL and https_result.error_code == "ISP_PAGE":
-                return tr, https_result, "https"
-
-            if http_result.status != TestStatus.OK and https_result.status == TestStatus.OK:
-                return tr, https_result, "https"
-
-            return tr, http_result, "http"
-
-        pool = ThreadPoolExecutor(max_workers=self.parallel)
-        try:
-            futures = [pool.submit(_isp_one, tr) for tr in target_results]
-            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
-                tr, r, source = future.result()
-                tr.tests.append(r)
-                self.cb.on_test_result(r)
-                self.cb.on_log(f"  ISP {tr.name} ({source.upper()}): {r.status.value} {r.detail}")
-        finally:
-            # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
-            # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
-            pool.shutdown(wait=False, cancel_futures=True)
-
-    def _run_tcp_phase(self) -> list[SingleTestResult]:
-        """Run TCP 16-20KB tests (parallel, diverse provider subset)."""
-        all_tcp, source = load_tcp_targets_with_source()
-        self.cb.on_log(f"TCP targets source: {source} ({len(all_tcp)} total)")
-        if source.startswith("fallback"):
-            self.cb.on_log("WARNING: TCP target list fallback is in use (reduced coverage)")
-
-        candidate_targets = select_tcp_targets(
-            all_tcp,
-            max_count=TCP_HEALTH_MAX_CANDIDATES,
-            per_provider_cap=max(TCP_TARGETS_PER_PROVIDER + 1, 3),
-        )
-        health_map = self._probe_tcp_targets_health(candidate_targets)
-
-        healthy_count = sum(1 for ok, _detail, _elapsed in health_map.values() if ok)
-        self.cb.on_log(
-            f"TCP health probe: {healthy_count}/{len(candidate_targets)} reachable "
-            f"(timeout={TCP_HEALTH_TIMEOUT}s)"
-        )
-
-        tcp_targets = self._select_rotated_tcp_targets(candidate_targets, health_map)
-        if not tcp_targets:
-            self.cb.on_log("WARNING: No TCP targets selected for 16-20KB phase")
-            return []
-
-        selected_providers = sorted({str(t.get("provider") or "unknown") for t in tcp_targets})
-        self.cb.on_log(
-            f"TCP targets selected: {len(tcp_targets)} across {len(selected_providers)} providers "
-            f"(up to {TCP_TARGETS_PER_PROVIDER} per provider)"
-        )
-        selected_ids = ", ".join(
-            str(t.get("id") or t.get("name") or t.get("url") or "?") for t in tcp_targets
-        )
-        self.cb.on_log(f"TCP selected IDs: {selected_ids}")
-        if healthy_count == 0:
-            self.cb.on_log("WARNING: TCP health probe found no reachable URLs; results may be noisy")
-
-        tcp_results: list[SingleTestResult] = []
-
-        def _tcp_one(tcp_t):
-            target_name = str(tcp_t.get("name") or tcp_t.get("id") or tcp_t.get("url", "unknown"))
-            provider = str(tcp_t.get("provider") or "unknown")
-            asn = str(tcp_t.get("asn") or "")
-            url = str(tcp_t.get("url") or "")
-            r = check_tcp_16_20(tcp_t["url"])
-            r.target_name = target_name
-            r.raw_data.setdefault("target_id", target_name)
-            r.raw_data.setdefault("provider", provider)
-            if asn:
-                r.raw_data.setdefault("asn", asn)
-            if url:
-                r.raw_data.setdefault("url", url)
-            return target_name, r
-
-        pool = ThreadPoolExecutor(max_workers=self.parallel)
-        try:
-            futures = [pool.submit(_tcp_one, t) for t in tcp_targets]
-            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
-                target_name, r = future.result()
-                tcp_results.append(r)
-                self.cb.on_test_result(r)
-                self.cb.on_log(f"  TCP 16-20KB {target_name}: {r.status.value} {r.detail}")
-        finally:
-            # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
-            # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
-            pool.shutdown(wait=False, cancel_futures=True)
-
-        return tcp_results
-
-    @staticmethod
-    def _tcp_scan_key(target: dict) -> str:
-        return str(target.get("id") or target.get("url") or "")
-
-    def _probe_tcp_targets_health(
-        self,
-        targets: list[dict],
-    ) -> dict[str, tuple[bool, str, float]]:
-        """Probe candidate TCP target URLs and return health map."""
-        if not targets:
+    def _stage_resolve(self, targets: list[dict]) -> dict[str, ResolvedHost]:
+        """Резолвит каждый уникальный хост ровно один раз."""
+        hosts = self._unique_hosts(targets)
+        if not hosts or self.should_stop():
             return {}
 
-        health: dict[str, tuple[bool, str, float]] = {}
+        self.cb.on_log(f"=== Резолв {len(hosts)} хостов ===")
 
-        def _probe_one(target: dict) -> tuple[str, tuple[bool, str, float]]:
-            key = self._tcp_scan_key(target)
-            ok, detail, elapsed = probe_tcp_target_health(
-                str(target.get("url") or ""),
-                timeout=TCP_HEALTH_TIMEOUT,
-            )
-            return key, (ok, detail, elapsed)
+        def _resolve_one(host: str) -> ResolvedHost:
+            # resolve_ips не бросает исключений и сам ограничен по времени.
+            ipv4, ipv6 = resolve_ips(host, port=443, timeout=DNS_TIMEOUT)
+            return ResolvedHost(host=host, ipv4=list(ipv4), ipv6=list(ipv6))
 
-        workers = min(max(2, self.parallel * 2), 16)
-        pool = ThreadPoolExecutor(max_workers=workers)
+        collected: dict[str, ResolvedHost] = {}
+        pool = ThreadPoolExecutor(max_workers=max(1, min(self.parallel, len(hosts))))
         try:
-            futures = [pool.submit(_probe_one, t) for t in targets]
-            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
-                key, result = future.result()
-                health[key] = result
+            futures = {pool.submit(_resolve_one, host): host for host in hosts}
+            for future in iter_completed(futures, cancelled=self.should_stop):
+                host = futures[future]
+                try:
+                    resolved = future.result()
+                except Exception as e:  # noqa: BLE001 — сбой резолва не рушит прогон
+                    resolved = ResolvedHost(host=host, error=str(e)[:100])
+                collected[host] = resolved
+                self.cb.on_log(
+                    f"  DNS {host}: IPv4={resolved.ipv4 or ['-']}, "
+                    f"IPv6={resolved.ipv6 or ['-']}"
+                    + (" → не резолвится" if not resolved.ok else "")
+                )
         finally:
-            # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
-            # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
+            # При отмене ждать незавершимые сетевые задачи нельзя.
             pool.shutdown(wait=False, cancel_futures=True)
 
-        return health
+        # Порядок целей сохраняем: по нему строится preflight-сводка.
+        resolution = {
+            host: collected.get(host) or ResolvedHost(host=host, error="не проверялся")
+            for host in hosts
+        }
 
-    def _select_rotated_tcp_targets(
+        unresolved = [host for host, item in resolution.items() if not item.ok]
+        if unresolved:
+            self.cb.on_log(
+                f"Не резолвятся ({len(unresolved)}): {', '.join(unresolved[:5])}"
+                + (f" (+{len(unresolved) - 5})" if len(unresolved) > 5 else "")
+            )
+        return resolution
+
+    # ------------------------------------------------------------------
+    # Этап 2: пробы
+    # ------------------------------------------------------------------
+
+    def _stage_probe(
         self,
-        candidates: list[dict],
-        health_map: dict[str, tuple[bool, str, float]],
-    ) -> list[dict]:
-        """Select up to N targets with provider diversity and health-based rotation."""
-        if not candidates:
-            return []
-
-        provider_buckets: dict[str, dict[str, Any]] = {}
-        provider_order: list[str] = []
-
-        for target in candidates:
-            provider = str(target.get("provider") or "unknown")
-            key = self._tcp_scan_key(target)
-            is_healthy = health_map.get(key, (False, "", 0.0))[0]
-
-            if provider not in provider_buckets:
-                provider_buckets[provider] = {
-                    "healthy": [],
-                    "fallback": [],
-                    "healthy_idx": 0,
-                    "fallback_idx": 0,
-                    "taken": 0,
-                }
-                provider_order.append(provider)
-
-            if is_healthy:
-                provider_buckets[provider]["healthy"].append(target)
-            else:
-                provider_buckets[provider]["fallback"].append(target)
-
-        selected: list[dict] = []
-        picked_keys: set[str] = set()
-
-        def _round_robin(stage: str) -> bool:
-            added_any = False
-
-            for provider in provider_order:
-                bucket = provider_buckets[provider]
-                if bucket["taken"] >= TCP_TARGETS_PER_PROVIDER:
-                    continue
-
-                if stage == "healthy":
-                    idx = int(bucket["healthy_idx"])
-                    pool = bucket["healthy"]
-                else:
-                    idx = int(bucket["fallback_idx"])
-                    pool = bucket["fallback"]
-
-                if idx >= len(pool):
-                    continue
-
-                candidate = pool[idx]
-                key = self._tcp_scan_key(candidate)
-
-                if stage == "healthy":
-                    bucket["healthy_idx"] = idx + 1
-                else:
-                    bucket["fallback_idx"] = idx + 1
-
-                if key in picked_keys:
-                    continue
-
-                selected.append(candidate)
-                picked_keys.add(key)
-                bucket["taken"] = int(bucket["taken"]) + 1
-                added_any = True
-
-                if len(selected) >= TCP_TARGET_MAX_COUNT:
-                    break
-
-            return added_any
-
-        # Stage 1: prioritize healthy URLs.
-        while len(selected) < TCP_TARGET_MAX_COUNT and _round_robin("healthy"):
-            pass
-
-        # Stage 2: fill remaining slots with fallback URLs if needed.
-        while len(selected) < TCP_TARGET_MAX_COUNT and _round_robin("fallback"):
-            pass
-
-        if not selected:
-            return candidates[:TCP_TARGET_MAX_COUNT]
-
-        return selected
-
-    def _run_stun_phase(self, stun_targets: list[dict]) -> list[TargetResult]:
-        """Run STUN/UDP tests (parallel)."""
-        results: list[TargetResult] = []
-        if not stun_targets:
+        report: BlockcheckReport,
+        targets: list[dict],
+        resolution: dict[str, ResolvedHost],
+    ) -> list[TargetResult]:
+        results, jobs = self._plan(report, targets, resolution)
+        if not jobs or self.should_stop():
             return results
 
-        def _parse_stun_endpoint(value: str) -> tuple[str, int]:
-            raw = str(value or "").strip()
-            if raw.upper().startswith("STUN:"):
-                raw = raw[5:].strip()
-            if not raw:
-                return "", 3478
+        self.cb.on_phase_change("Этап 2/3: пробы")
+        self.cb.on_log(f"\n=== Пробы: {len(jobs)} проверок в {self.parallel} потоков ===")
 
-            if raw.startswith("["):
-                right = raw.find("]")
-                if right > 1:
-                    host = raw[1:right].strip()
-                    rest = raw[right + 1 :].strip()
-                    if rest.startswith(":"):
-                        try:
-                            port = int(rest[1:])
-                            if 1 <= port <= 65535:
-                                return host, port
-                        except ValueError:
-                            pass
-                    return host, 3478
+        expected: dict[int, int] = {}
+        for job in jobs:
+            if job.target is not None:
+                expected[id(job.target)] = expected.get(id(job.target), 0) + 1
+        received: dict[int, int] = {}
+        completed: set[int] = set()
 
-            if raw.count(":") == 1:
-                host, port_str = raw.rsplit(":", 1)
-                host = host.strip()
-                if host:
-                    try:
-                        port = int(port_str)
-                        if 1 <= port <= 65535:
-                            return host, port
-                    except ValueError:
-                        pass
-                    return host, 3478
-
-            return raw, 3478
-
-        def _test_one_stun(target):
-            value = target["value"]
-            host, port = _parse_stun_endpoint(value)
-            r = test_stun(host, port, timeout=STUN_TIMEOUT)
-            r.target_name = target["name"]
-            return target, r
-
+        done = 0
+        total = len(jobs)
         pool = ThreadPoolExecutor(max_workers=self.parallel)
         try:
-            futures = [pool.submit(_test_one_stun, t) for t in stun_targets]
-            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
-                target, r = future.result()
-                tr = TargetResult(name=target["name"], value=target["value"], tests=[r])
-                self.cb.on_test_result(r)
-                self.cb.on_target_complete(tr)
-                self.cb.on_log(f"  STUN {target['name']}: {r.status.value} {r.detail}")
-                results.append(tr)
+            futures = {pool.submit(job.run): job for job in jobs}
+            for future in iter_completed(
+                futures, cancelled=self.should_stop, timeout=self._remaining(),
+            ):
+                job = futures[future]
+                done += 1
+                try:
+                    payload = future.result()
+                except Exception:  # noqa: BLE001 — падение пробы не рушит прогон
+                    logger.debug("Probe %s failed", job.label, exc_info=True)
+                    payload = None
+
+                self._absorb(report, job, payload)
+                self.cb.on_progress(done, total, job.label)
+
+                target = job.target
+                if target is None:
+                    continue
+                key = id(target)
+                received[key] = received.get(key, 0) + 1
+                if received[key] >= expected.get(key, 0) and key not in completed:
+                    completed.add(key)
+                    self.cb.on_target_complete(target)
+        except FuturesTimeout:
+            self.cb.on_log("WARNING: превышен общий лимит времени — часть целей не проверена")
         finally:
             # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
             # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
             pool.shutdown(wait=False, cancel_futures=True)
 
+        for target in results:
+            if id(target) not in completed and target.tests:
+                self.cb.on_target_complete(target)
         return results
 
-    def _run_ping_phase(self, target_results: list[TargetResult], all_targets: list[dict]) -> None:
-        """Run ping tests for all targets (parallel)."""
-        # Build jobs: (target_name, host, existing_tr_or_None)
-        jobs: list[tuple[str, str, TargetResult | None]] = []
+    def _plan(
+        self,
+        report: BlockcheckReport,
+        targets: list[dict],
+        resolution: dict[str, ResolvedHost],
+    ) -> tuple[list[TargetResult], list[ProbeJob]]:
+        """Строит цели и полный список проб под текущий режим."""
+        baseline = report.baseline
+        results: list[TargetResult] = []
+        jobs: list[ProbeJob] = []
 
-        ping_targets = [t for t in all_targets if t["value"].startswith("PING:")]
-        for target in ping_targets:
-            host = target["value"].replace("PING:", "").strip()
-            jobs.append((target["name"], host, None))
+        https_targets = [t for t in targets if not is_pseudo_target(t["value"])]
+        total = len(https_targets)
 
-        for tr in target_results:
-            if tr.value.startswith(("PING:", "STUN:", "TCP:")):
+        for index, target in enumerate(https_targets):
+            host = host_of(target["value"])
+            resolved = resolution.get(host)
+
+            if resolved is not None and self._skip_preflight_failed and not resolved.ok:
+                self.cb.on_log(f"  Пропущен (не резолвится): {target['name']}")
                 continue
-            host = re.sub(r"^https?://", "", tr.value).rstrip("/").split("/")[0]
-            jobs.append((tr.name, host, tr))
 
-        if not jobs:
+            tr = TargetResult(name=target["name"], value=target["value"])
+            results.append(tr)
+
+            if resolved is None:
+                # Резолв не выполнялся (отмена или дедлайн) — цель осталась без
+                # данных, но это не значит, что хоста не существует.
+                continue
+
+            if not resolved.ok:
+                # Мёртвый хост незачем пробовать шесть раз: исход известен, а
+                # именно эти пробы раньше и давали ложную «полную блокировку».
+                self._attach_unresolved(tr, resolved)
+                continue
+
+            self.cb.on_target_started(target["name"], index, total)
+            jobs.extend(self._https_jobs(tr, host, resolved, baseline))
+
+        if self.mode in (RunMode.FULL, RunMode.DPI_ONLY):
+            jobs.append(
+                ProbeJob(kind="dns", label="DNS integrity", run=self._probe_dns_integrity)
+            )
+            tcp_target = self._append_tcp_jobs(jobs)
+            if tcp_target is not None:
+                results.append(tcp_target)
+
+        if self.mode == RunMode.FULL:
+            for target in targets:
+                if not str(target["value"]).startswith("STUN:"):
+                    continue
+                tr = TargetResult(name=target["name"], value=target["value"])
+                results.append(tr)
+                jobs.append(
+                    ProbeJob(
+                        kind="test",
+                        label=f"STUN {target['name']}",
+                        target=tr,
+                        run=lambda value=target["value"], name=target["name"]:
+                            self._probe_stun(value, name),
+                    )
+                )
+
+        if self.mode in (RunMode.FULL, RunMode.QUICK) and baseline.icmp_usable:
+            for target in targets:
+                if not str(target["value"]).startswith("PING:"):
+                    continue
+                # Отдельные ping-цели диагностируют канал ICMP, а не сервис,
+                # поэтому в знаменатель вердикта не входят.
+                tr = TargetResult(name=target["name"], value=target["value"], informational=True)
+                results.append(tr)
+                host = str(target["value"]).replace("PING:", "").strip()
+                jobs.append(
+                    ProbeJob(
+                        kind="test",
+                        label=f"Ping {target['name']}",
+                        target=tr,
+                        run=lambda h=host, name=target["name"]: self._probe_ping(h, name),
+                    )
+                )
+        elif self.mode in (RunMode.FULL, RunMode.QUICK):
+            self.cb.on_log("Ping-цели пропущены: ICMP недоступен")
+
+        return results, jobs
+
+    def _https_jobs(
+        self,
+        tr: TargetResult,
+        host: str,
+        resolved: ResolvedHost,
+        baseline: NetworkBaseline,
+    ) -> list[ProbeJob]:
+        families = ["ipv4"] if resolved.ipv4 else []
+        if resolved.ipv6 and baseline.ipv6_usable:
+            families.append("ipv6")
+        if not families:
+            families = ["ipv4"]
+
+        jobs = [
+            ProbeJob(
+                kind="test",
+                label=f"{tr.name} {label} [{family}]",
+                target=tr,
+                run=lambda v=version, f=family: self._probe_https(host, tr.name, v, f),
+            )
+            for version, label in ((None, "HTTP"), ("1.2", "TLS1.2"), ("1.3", "TLS1.3"))
+            for family in families
+        ]
+
+        # Адрес уже известен с этапа 1 — пробы не резолвят имя заново.
+        first_ipv4 = resolved.ipv4[0] if resolved.ipv4 else None
+
+        if self.mode in (RunMode.FULL, RunMode.DPI_ONLY):
+            jobs.append(
+                ProbeJob(
+                    kind="test",
+                    label=f"ISP {tr.name}",
+                    target=tr,
+                    run=lambda: self._probe_isp(host, tr.name, first_ipv4),
+                )
+            )
+
+        if self.mode in (RunMode.FULL, RunMode.QUICK) and baseline.icmp_usable:
+            jobs.append(
+                ProbeJob(
+                    kind="test",
+                    label=f"Ping {tr.name}",
+                    target=tr,
+                    run=lambda: self._probe_ping(host, tr.name, first_ipv4),
+                )
+            )
+        return jobs
+
+    def _append_tcp_jobs(self, jobs: list[ProbeJob]) -> TargetResult | None:
+        all_tcp, source = load_tcp_targets_with_source()
+        self.cb.on_log(f"TCP targets source: {source} ({len(all_tcp)} total)")
+
+        selected = select_tcp_targets(all_tcp)
+        if not selected:
+            self.cb.on_log("WARNING: не выбрано ни одной цели для TCP 16-20KB")
+            return None
+
+        selected_ids = ", ".join(
+            str(t.get("id") or t.get("name") or t.get("url") or "?") for t in selected
+        )
+        self.cb.on_log(f"TCP selected IDs: {selected_ids}")
+
+        tr = TargetResult(name="TCP 16-20KB", value="TCP:16-20KB")
+        for tcp_target in selected:
+            jobs.append(
+                ProbeJob(
+                    kind="test",
+                    label=f"TCP {tcp_target.get('name') or tcp_target.get('id')}",
+                    target=tr,
+                    run=lambda t=tcp_target: self._probe_tcp(t),
+                )
+            )
+        return tr
+
+    # ------------------------------------------------------------------
+    # Отдельные пробы
+    # ------------------------------------------------------------------
+
+    def _probe_https(
+        self, host: str, name: str, tls_version: str | None, family: str,
+    ) -> SingleTestResult:
+        result = test_https(host, timeout=self.timeout, tls_version=tls_version, ip_family=family)
+        result.target_name = name
+        result.raw_data.setdefault("ip_family", family)
+        return result
+
+    def _probe_isp(
+        self, host: str, name: str, resolved_ip: str | None = None,
+    ) -> SingleTestResult:
+        http_result = check_http_injection(host, resolved_ip=resolved_ip)
+        http_result.target_name = name
+        if http_result.status == TestStatus.FAIL and http_result.error_code == "HTTP_INJECT":
+            return http_result
+
+        https_result = detect_isp_page(host)
+        https_result.target_name = name
+        if https_result.status == TestStatus.FAIL and https_result.error_code == "ISP_PAGE":
+            return https_result
+        if http_result.status != TestStatus.OK and https_result.status == TestStatus.OK:
+            return https_result
+        return http_result
+
+    def _probe_ping(
+        self, host: str, name: str, resolved_ip: str | None = None,
+    ) -> SingleTestResult:
+        result = ping_host(host, resolved_ip=resolved_ip)
+        result.target_name = name
+        return result
+
+    def _probe_stun(self, value: str, name: str) -> SingleTestResult:
+        host, port = _parse_stun_endpoint(value)
+        result = test_stun(host, port, timeout=STUN_TIMEOUT)
+        result.target_name = name
+        return result
+
+    def _probe_tcp(self, tcp_target: dict) -> SingleTestResult:
+        target_name = str(
+            tcp_target.get("name") or tcp_target.get("id") or tcp_target.get("url", "unknown")
+        )
+        result = check_tcp_16_20(str(tcp_target.get("url") or ""))
+        result.target_name = target_name
+        result.raw_data.setdefault("target_id", target_name)
+        result.raw_data.setdefault("provider", str(tcp_target.get("provider") or "unknown"))
+        asn = str(tcp_target.get("asn") or "")
+        if asn:
+            result.raw_data.setdefault("asn", asn)
+        url = str(tcp_target.get("url") or "")
+        if url:
+            result.raw_data.setdefault("url", url)
+        return result
+
+    def _probe_dns_integrity(self) -> list[DNSIntegrityResult]:
+        domains, source = load_domains_with_source()
+        self.cb.on_log(f"DNS domains source: {source} ({len(domains)} total)")
+        return check_dns_integrity(
+            domains,
+            callback=self.cb.on_log,
+            cancelled=self.should_stop,
+            parallel=self.parallel,
+        )
+
+    def _absorb(self, report: BlockcheckReport, job: ProbeJob, payload: Any) -> None:
+        """Раскладывает результат пробы по отчёту."""
+        if payload is None:
             return
 
-        def _ping_one(name, host):
-            r = ping_host(host)
-            r.target_name = name
-            return name, r
+        if job.kind == "dns":
+            report.dns_integrity = list(payload)
+            for item in report.dns_integrity:
+                self.cb.on_log(
+                    f"  DNS {item.domain}: UDP={item.udp_ips or ['-']}, "
+                    f"DoH={item.doh_ips or ['-']} → {item.verdict.value} ({item.evidence})"
+                )
+            return
 
-        pool = ThreadPoolExecutor(max_workers=self.parallel)
-        try:
-            futures = {pool.submit(_ping_one, name, host): (name, host, tr_ref) for name, host, tr_ref in jobs}
-            for future in iter_completed(futures, cancelled=lambda: self.cancelled):
-                name, host, tr_ref = futures[future]
-                _name, r = future.result()
-                self.cb.on_test_result(r)
-                self.cb.on_log(f"  Ping {name}: {r.detail}")
+        if job.target is not None and isinstance(payload, SingleTestResult):
+            job.target.tests.append(payload)
+            self.cb.on_test_result(payload)
+            self.cb.on_log(f"  {job.label}: {payload.status.value} {payload.detail}")
 
-                if tr_ref is not None:
-                    tr_ref.tests.append(r)
-                else:
-                    # Ping-only target
-                    ping_t = next((t for t in ping_targets if t["name"] == name), None)
-                    value = ping_t["value"] if ping_t else f"PING:{host}"
-                    tr = TargetResult(name=name, value=value, tests=[r])
-                    target_results.append(tr)
-        finally:
-            # Результаты уже собраны в цикле выше; при отмене ждать незавершимые
-            # сетевые задачи нельзя — именно это и подвешивало BlockCheck.
-            pool.shutdown(wait=False, cancel_futures=True)
+    @staticmethod
+    def _attach_unresolved(tr: TargetResult, resolved: ResolvedHost) -> None:
+        """Помечает цель как непроверяемую, не тратя на неё ни одной пробы."""
+        detail = resolved.error or "имя не разрешается"
+        tr.tests.append(
+            SingleTestResult(
+                target_name=tr.name,
+                test_type=TestType.HTTP,
+                status=TestStatus.ERROR,
+                error_code="DNS_ERR",
+                detail=f"DNS: {detail}",
+            )
+        )
 
-    def _attach_dns_stub_tests(
-        self,
+    # ------------------------------------------------------------------
+    # Этап 3: анализ
+    # ------------------------------------------------------------------
+
+    def _stage_judge(self, report: BlockcheckReport) -> None:
+        self.cb.on_phase_change("Этап 3/3: анализ")
+        self.cb.on_log("\n=== Анализ ===")
+
+        self._attach_dns_evidence(report.targets, report.dns_integrity)
+        expired = self.expired
+
+        for target in report.targets:
+            if expired and not target.tests:
+                target.outcome = TargetOutcome.INCONCLUSIVE
+                target.inconclusive_reason = InconclusiveReason.BUDGET_EXCEEDED
+                target.classification_detail = "Не уложились в лимит времени"
+                continue
+
+            judgement = judge_target(target, report.baseline)
+            target.outcome = judgement.outcome
+            target.classification = judgement.classification
+            target.inconclusive_reason = judgement.reason
+            target.classification_detail = judgement.detail
+            self.cb.on_log(
+                f"  {target.name}: {judgement.outcome.value}"
+                f"/{judgement.classification.value} — {judgement.detail}"
+            )
+
+        report.verdict = build_report_verdict(report.targets, report.baseline)
+        self.cb.on_log(
+            f"Вердикт: {report.verdict.code.value} — {report.verdict.detail} "
+            f"(проверено {report.verdict.valid_targets}, "
+            f"недостоверно {report.verdict.inconclusive_targets})"
+        )
+
+    @staticmethod
+    def _attach_dns_evidence(
         target_results: list[TargetResult],
         dns_results: list[DNSIntegrityResult],
     ) -> None:
-        """Attach DNS stub/inconsistency evidence to matching HTTPS targets."""
-        if not dns_results or not target_results:
-            return
-
-        public_suffix_2level = {
-            "co.uk", "org.uk", "ac.uk", "gov.uk",
-            "com.au", "net.au", "org.au",
-            "co.jp", "ne.jp", "or.jp",
-            "com.br", "com.mx", "com.tr", "co.id",
-            "com.ua", "co.kr", "co.in",
-        }
-
-        def _host_candidates(raw_host: str) -> set[str]:
-            host = raw_host.strip().lower().rstrip(".")
-            if not host:
-                return set()
-
-            candidates = {host}
-            if host.startswith("www."):
-                candidates.add(host[4:])
-
-            parts = host.split(".")
-            if len(parts) >= 2:
-                base2 = ".".join(parts[-2:])
-                candidates.add(base2)
-                if len(parts) >= 3 and base2 in public_suffix_2level:
-                    candidates.add(".".join(parts[-3:]))
-
-            return {c for c in candidates if c and "." in c}
-
+        """Приклеивает улику о подмене DNS к соответствующим целям."""
         fake_domains: set[str] = set()
         for dns_result in dns_results:
-            comparable = dns_result.is_comparable or bool(dns_result.udp_ips and dns_result.doh_ips)
-            is_fake = dns_result.is_stub or (comparable and not dns_result.is_consistent)
-            if not is_fake:
-                continue
-            fake_domains.update(_host_candidates(dns_result.domain))
-
+            if dns_result.verdict == DnsVerdict.FAKE:
+                fake_domains.update(host_candidates(dns_result.domain))
         if not fake_domains:
             return
 
         for tr in target_results:
-            if tr.value.startswith(("PING:", "STUN:", "TCP:")):
+            if is_pseudo_target(tr.value):
                 continue
-
-            host = re.sub(r"^https?://", "", tr.value).rstrip("/").split("/")[0]
-            host = host.lower().split(":", 1)[0]
-            host_variants = _host_candidates(host)
-            if not host_variants:
-                continue
-
+            variants = host_candidates(tr.value)
             matched = any(
-                host_variant == fake_domain or host_variant.endswith(f".{fake_domain}")
-                for host_variant in host_variants
-                for fake_domain in fake_domains
+                variant == fake or variant.endswith(f".{fake}")
+                for variant in variants
+                for fake in fake_domains
             )
             if not matched:
                 continue
-
-            has_dns_stub = any(
-                t.test_type in (TestType.DNS_UDP, TestType.DNS_DOH) and t.error_code == "STUB"
-                for t in tr.tests
-            )
-            if has_dns_stub:
+            if any(t.error_code == "STUB" for t in tr.tests):
                 continue
-
             tr.tests.append(
                 SingleTestResult(
                     target_name=tr.name,
                     test_type=TestType.DNS_UDP,
                     status=TestStatus.FAIL,
                     error_code="STUB",
-                    detail="DNS integrity check detected stub/inconsistent response",
+                    detail="DNS отдаёт адрес с чужим сертификатом",
                 )
             )
+
+    # ------------------------------------------------------------------
+    # Preflight-секция отчёта
+    # ------------------------------------------------------------------
+
+    def _build_preflight(
+        self,
+        resolution: dict[str, ResolvedHost],
+        target_results: list[TargetResult],
+    ) -> list[PreflightResult]:
+        """Собирает preflight-сводку из уже выполненных проб.
+
+        Отдельная фаза preflight убрана: её четыре проверки — подмножество
+        этапов 1-2, и раньше каждый хост проверялся дважды.
+        """
+        by_host: dict[str, TargetResult] = {}
+        for target in target_results:
+            if is_pseudo_target(target.value):
+                continue
+            by_host.setdefault(host_of(target.value), target)
+
+        preflight: list[PreflightResult] = []
+        for host, resolved in resolution.items():
+            item = PreflightResult(domain=host, resolved_ips=resolved.ipv4 + resolved.ipv6)
+            item.dns_result = SingleTestResult(
+                target_name=host,
+                test_type=TestType.PREFLIGHT_DNS,
+                status=TestStatus.OK if resolved.ok else TestStatus.FAIL,
+                error_code=None if resolved.ok else "DNS_FAIL",
+                detail=(
+                    f"{len(item.resolved_ips)} адресов" if resolved.ok
+                    else (resolved.error or "домен не резолвится")
+                ),
+            )
+
+            target = by_host.get(host)
+            if target is not None:
+                item.tcp_443 = _summarize_tcp443(host, target)
+                item.http_check = _first_of(target, TestType.ISP_PAGE)
+                item.ping = _first_of(target, TestType.PING)
+
+            item.verdict, item.verdict_detail = compute_verdict(item)
+            preflight.append(item)
+        return preflight
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_unique_hosts(targets: list[dict]) -> list[str]:
-        """Extract unique domain names from HTTPS targets (skip PING/STUN/TCP)."""
+    def _unique_hosts(targets: list[dict]) -> list[str]:
         seen: set[str] = set()
-        result: list[str] = []
-        for t in targets:
-            v = t["value"]
-            if v.startswith(("PING:", "STUN:", "TCP:")):
+        hosts: list[str] = []
+        for target in targets:
+            value = target["value"]
+            if is_pseudo_target(value):
                 continue
-            host = re.sub(r"^https?://", "", v).rstrip("/").split("/")[0].lower()
+            host = host_of(value)
             if host and host not in seen:
                 seen.add(host)
-                result.append(host)
-        return result
-
-    @staticmethod
-    def _extract_host_from_target(target: dict) -> str:
-        """Extract host from a single target dict."""
-        v = target["value"]
-        if v.startswith(("PING:", "STUN:", "TCP:")):
-            return v
-        return re.sub(r"^https?://", "", v).rstrip("/").split("/")[0].lower()
-
-    @staticmethod
-    def _resolve_host_ips(host: str) -> tuple[list[str], list[str]]:
-        """Resolve host and return (ipv4_list, ipv6_list)."""
-        host = str(host or "").strip()
-        if not host:
-            return [], []
-
-        return resolve_ips(host, port=443, proto=socket.IPPROTO_TCP, timeout=DNS_TIMEOUT)
-
-    @staticmethod
-    def _dns_status_text(result: DNSIntegrityResult) -> str:
-        """Human status for DNS log lines."""
-        if result.is_stub:
-            return "FAKE(STUB)"
-        comparable = result.is_comparable or bool(result.udp_ips and result.doh_ips)
-        if comparable:
-            return "OK" if result.is_consistent else "FAKE"
-        if result.udp_ips and not result.doh_ips:
-            return "NO_DOH"
-        if result.doh_ips and not result.udp_ips:
-            return "NO_UDP"
-        return "NO_DNS"
-
-    def _count_phases(self) -> int:
-        if self.mode == RunMode.QUICK:
-            return 3  # Preflight + TLS + Ping
-        if self.mode == RunMode.DPI_ONLY:
-            return 5  # Preflight + DNS + TLS + ISP + TCP
-        return 7  # Preflight + Full: DNS + TLS + ISP + TCP + STUN + Ping
+                hosts.append(host)
+        return hosts
 
     @staticmethod
     def _build_summary(report: BlockcheckReport) -> dict:
@@ -851,75 +765,123 @@ class BlockcheckRunner:
             "dpi_count": 0,
         }
 
-        for tr in report.targets:
-            for t in tr.tests:
-                if t.test_type == TestType.HTTP:
-                    if t.status == TestStatus.OK:
-                        stats["http_ok"] += 1
-                    else:
-                        stats["http_fail"] += 1
-                elif t.test_type == TestType.TLS_12:
-                    if t.status == TestStatus.OK:
-                        stats["tls12_ok"] += 1
-                    elif t.status == TestStatus.UNSUPPORTED:
-                        stats["tls12_unsup"] += 1
-                    else:
-                        stats["tls12_fail"] += 1
-                elif t.test_type == TestType.TLS_13:
-                    if t.status == TestStatus.OK:
-                        stats["tls13_ok"] += 1
-                    elif t.status == TestStatus.UNSUPPORTED:
-                        stats["tls13_unsup"] += 1
-                    else:
-                        stats["tls13_fail"] += 1
-                elif t.test_type == TestType.STUN:
-                    if t.status == TestStatus.OK:
-                        stats["stun_ok"] += 1
-                    else:
-                        stats["stun_fail"] += 1
-                elif t.test_type == TestType.PING:
-                    if t.status == TestStatus.OK:
-                        stats["ping_ok"] += 1
-                    else:
-                        stats["ping_fail"] += 1
-                elif t.test_type == TestType.ISP_PAGE:
-                    if t.status == TestStatus.OK:
-                        stats["isp_ok"] += 1
-                    else:
-                        stats["isp_inject"] += 1
-                elif t.test_type == TestType.TCP_16_20:
-                    if t.status == TestStatus.OK:
-                        stats["tcp_ok"] += 1
-                    else:
-                        stats["tcp_block"] += 1
+        counters = {
+            TestType.HTTP: ("http_ok", "http_fail", None),
+            TestType.TLS_12: ("tls12_ok", "tls12_fail", "tls12_unsup"),
+            TestType.TLS_13: ("tls13_ok", "tls13_fail", "tls13_unsup"),
+            TestType.STUN: ("stun_ok", "stun_fail", None),
+            TestType.PING: ("ping_ok", "ping_fail", None),
+            TestType.ISP_PAGE: ("isp_ok", "isp_inject", None),
+            TestType.TCP_16_20: ("tcp_ok", "tcp_block", None),
+        }
 
-        for d in report.dns_integrity:
-            comparable = d.is_comparable or bool(d.udp_ips and d.doh_ips)
-            if d.is_stub:
-                stats["dns_fake"] += 1
-            elif comparable:
-                if d.is_consistent:
-                    stats["dns_ok"] += 1
+        for tr in report.targets:
+            for test in tr.tests:
+                keys = counters.get(test.test_type)
+                if keys is None:
+                    continue
+                ok_key, fail_key, unsup_key = keys
+                if test.status == TestStatus.OK:
+                    stats[ok_key] += 1
+                elif test.status == TestStatus.UNSUPPORTED and unsup_key:
+                    stats[unsup_key] += 1
                 else:
-                    stats["dns_fake"] += 1
+                    stats[fail_key] += 1
+
+        for item in report.dns_integrity:
+            if item.verdict == DnsVerdict.FAKE:
+                stats["dns_fake"] += 1
+            elif item.verdict == DnsVerdict.OK:
+                stats["dns_ok"] += 1
             else:
                 stats["dns_unknown"] += 1
 
-        # DPI classifications
-        classifications = [tr.classification for tr in report.targets]
-        dpi_detected = [c for c in classifications if c != DPIClassification.NONE]
-        stats["dpi_types"] = sorted({c.value for c in dpi_detected})
-        stats["dpi_count"] = len(dpi_detected)
+        detected = [
+            tr.classification for tr in report.targets
+            if tr.classification != DPIClassification.NONE
+        ]
+        stats["dpi_types"] = sorted({item.value for item in detected})
+        stats["dpi_count"] = len(detected)
 
-        # Preflight
         stats["preflight_passed"] = sum(
-            1 for p in report.preflight if p.verdict == PreflightVerdict.PASSED
+            1 for item in report.preflight if item.verdict == PreflightVerdict.PASSED
         )
         stats["preflight_warned"] = sum(
-            1 for p in report.preflight if p.verdict == PreflightVerdict.WARNING
+            1 for item in report.preflight if item.verdict == PreflightVerdict.WARNING
         )
         stats["preflight_failed"] = sum(
-            1 for p in report.preflight if p.verdict == PreflightVerdict.FAILED
+            1 for item in report.preflight if item.verdict == PreflightVerdict.FAILED
+        )
+        return stats
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+def _first_of(target: TargetResult, test_type: TestType) -> SingleTestResult | None:
+    for test in target.tests:
+        if test.test_type == test_type:
+            return test
+    return None
+
+
+def _summarize_tcp443(host: str, target: TargetResult) -> SingleTestResult:
+    """Свернуть веб-пробы цели в один результат «порт :443 отвечает».
+
+    Отдельная TCP-проба порта больше не нужна: HTTPS-пробы этапа 2 уже сообщают
+    всё, что о нём можно узнать.
+    """
+    web = [
+        test for test in target.tests
+        if test.test_type in (TestType.HTTP, TestType.TLS_12, TestType.TLS_13)
+    ]
+    if any(test.status == TestStatus.OK for test in web):
+        return SingleTestResult(
+            target_name=host, test_type=TestType.PREFLIGHT_TCP,
+            status=TestStatus.OK, detail="порт :443 отвечает",
         )
 
-        return stats
+    first_failure = next((test for test in web if test.status != TestStatus.OK), None)
+    return SingleTestResult(
+        target_name=host, test_type=TestType.PREFLIGHT_TCP,
+        status=TestStatus.FAIL,
+        error_code=(first_failure.error_code if first_failure else "NO_PROBE"),
+        detail=(first_failure.detail if first_failure else "проба не выполнялась"),
+    )
+
+
+def _parse_stun_endpoint(value: str) -> tuple[str, int]:
+    raw = str(value or "").strip()
+    if raw.upper().startswith("STUN:"):
+        raw = raw[5:].strip()
+    if not raw:
+        return "", 3478
+
+    if raw.startswith("["):
+        right = raw.find("]")
+        if right > 1:
+            host = raw[1:right].strip()
+            rest = raw[right + 1 :].strip()
+            if rest.startswith(":"):
+                try:
+                    port = int(rest[1:])
+                    if 1 <= port <= 65535:
+                        return host, port
+                except ValueError:
+                    pass
+            return host, 3478
+
+    if raw.count(":") == 1:
+        host, port_str = raw.rsplit(":", 1)
+        host = host.strip()
+        if host:
+            try:
+                port = int(port_str)
+                if 1 <= port <= 65535:
+                    return host, port
+            except ValueError:
+                pass
+            return host, 3478
+
+    return raw, 3478

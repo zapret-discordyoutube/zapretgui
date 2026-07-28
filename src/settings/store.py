@@ -186,6 +186,27 @@ def _get_path_value(data: dict[str, Any], path: tuple[str, ...], default: Any = 
     return current
 
 
+def _read_path_value(path: tuple[str, ...], default: Any = None) -> Any:
+    """Читает одно значение, не копируя весь settings.json.
+
+    `read_settings()` отдаёт глубокую копию всего документа — примерно 100 мкс
+    на вызов. Геттеры настроек дёргаются из GUI-потока десятками за одну
+    перерисовку, поэтому копия делается только когда значение действительно
+    составное: скаляры неизменяемы и отдаются как есть.
+    """
+    with _SETTINGS_LOCK:
+        value = _get_path_value(_read_settings_cached_locked(), path, default)
+        if isinstance(value, (dict, list)):
+            return copy.deepcopy(value)
+        return value
+
+
+def _read_section(name: str) -> Any:
+    """Копирует одну секцию настроек вместо всего документа."""
+    with _SETTINGS_LOCK:
+        return copy.deepcopy(_read_settings_cached_locked()[name])
+
+
 def _set_path_value(data: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
     current = data
     for part in path[:-1]:
@@ -208,7 +229,7 @@ def _update_settings(mutator) -> dict[str, Any]:
 
 
 def _get_bool(path: tuple[str, ...], default: bool = False) -> bool:
-    return bool(_get_path_value(read_settings(), path, default))
+    return bool(_read_path_value(path, default))
 
 
 def _set_bool(path: tuple[str, ...], value: bool) -> bool:
@@ -217,7 +238,7 @@ def _set_bool(path: tuple[str, ...], value: bool) -> bool:
 
 
 def _get_int(path: tuple[str, ...], default: int = 0) -> int:
-    return int(_get_path_value(read_settings(), path, default))
+    return int(_read_path_value(path, default))
 
 
 def _set_int(path: tuple[str, ...], value: int) -> bool:
@@ -226,7 +247,7 @@ def _set_int(path: tuple[str, ...], value: int) -> bool:
 
 
 def _get_str(path: tuple[str, ...], default: str = "") -> str:
-    return str(_get_path_value(read_settings(), path, default) or "")
+    return str(_read_path_value(path, default) or "")
 
 
 def _set_str(path: tuple[str, ...], value: str) -> bool:
@@ -247,7 +268,7 @@ def _set_str_in(path: tuple[str, ...], value: str, allowed: frozenset[str], defa
 
 
 def _get_str_list(path: tuple[str, ...]) -> list[str]:
-    value = _get_path_value(read_settings(), path, [])
+    value = _read_path_value(path, [])
     return list(value) if isinstance(value, list) else []
 
 
@@ -262,7 +283,7 @@ def _set_dc_ip_list(path: tuple[str, ...], value: object) -> bool:
 
 
 def _get_nullable_str(path: tuple[str, ...]) -> str | None:
-    value = _get_path_value(read_settings(), path, None)
+    value = _read_path_value(path, None)
     return value if isinstance(value, str) and value.strip() else None
 
 
@@ -279,7 +300,7 @@ def _presets_selection_path(engine: str) -> tuple[str, ...]:
 
 
 def get_program_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["program"])
+    return _read_section("program")
 
 
 def set_program_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -288,7 +309,7 @@ def set_program_settings(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_window_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["window"])
+    return _read_section("window")
 
 
 def set_window_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -297,7 +318,7 @@ def set_window_settings(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_appearance_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["appearance"])
+    return _read_section("appearance")
 
 
 def set_appearance_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -306,7 +327,7 @@ def set_appearance_settings(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_warnings_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["warnings"])
+    return _read_section("warnings")
 
 
 def set_warnings_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -315,7 +336,7 @@ def set_warnings_settings(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_telegram_proxy_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["telegram_proxy"])
+    return _read_section("telegram_proxy")
 
 
 def set_telegram_proxy_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -324,7 +345,7 @@ def set_telegram_proxy_settings(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_dns_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["dns"])
+    return _read_section("dns")
 
 
 def set_dns_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -333,7 +354,7 @@ def set_dns_settings(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_hosts_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["hosts"])
+    return _read_section("hosts")
 
 
 def set_hosts_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -342,7 +363,7 @@ def set_hosts_settings(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_premium_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["premium"])
+    return _read_section("premium")
 
 
 def set_premium_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -351,7 +372,7 @@ def set_premium_settings(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_ui_state_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["ui_state"])
+    return _read_section("ui_state")
 
 
 def set_ui_state_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -360,7 +381,7 @@ def set_ui_state_settings(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_profile_strategy_state_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["profile_strategy_state"])
+    return _read_section("profile_strategy_state")
 
 
 def set_profile_strategy_state_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -369,7 +390,7 @@ def set_profile_strategy_state_settings(values: dict[str, Any]) -> dict[str, Any
 
 
 def get_user_profiles_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["user_profiles"])
+    return _read_section("user_profiles")
 
 
 def set_user_profiles_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -391,7 +412,7 @@ def get_user_profiles_revision() -> str:
 
 
 def get_updater_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["updater"])
+    return _read_section("updater")
 
 
 def set_updater_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -408,7 +429,7 @@ def set_last_seen_version(value: str) -> bool:
 
 
 def get_self_repair_attempts() -> tuple[int, ...]:
-    raw = _get_path_value(read_settings(), ("updater", "self_repair", "attempts"), ())
+    raw = _read_path_value(("updater", "self_repair", "attempts"), ())
     return tuple(int(item) for item in raw or () if isinstance(item, (int, float)))
 
 
@@ -455,7 +476,7 @@ def reset_self_repair_attempts() -> None:
 
 
 def get_blockcheck_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["blockcheck"])
+    return _read_section("blockcheck")
 
 
 def set_blockcheck_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -464,7 +485,7 @@ def set_blockcheck_settings(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_folders_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["folders"])
+    return _read_section("folders")
 
 
 def set_folders_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -474,8 +495,7 @@ def set_folders_settings(values: dict[str, Any]) -> dict[str, Any]:
 
 def get_profile_identity_registry(engine: str) -> dict[str, Any]:
     key = str(engine or "").strip().lower()
-    registries = read_settings()["profile_identity"]
-    return copy.deepcopy(registries.get(key) or {})
+    return _read_path_value(("profile_identity", key), None) or {}
 
 
 def set_profile_identity_registry(engine: str, registry: dict[str, Any]) -> dict[str, Any]:
@@ -487,7 +507,7 @@ def set_profile_identity_registry(engine: str, registry: dict[str, Any]) -> dict
 
 
 def get_orchestra_settings() -> dict[str, Any]:
-    return copy.deepcopy(read_settings()["orchestra"]["settings"])
+    return _read_path_value(("orchestra", "settings"), None) or {}
 
 
 def set_orchestra_settings(values: dict[str, Any]) -> dict[str, Any]:
@@ -582,16 +602,17 @@ def get_defender_disabled_memory() -> bool:
 
 
 def get_window_geometry() -> dict[str, Any]:
-    data = read_settings()
-    return copy.deepcopy(
-        {
+    # Пять полей читаются под одним локом: геометрия запрашивается на каждом
+    # изменении размера окна.
+    with _SETTINGS_LOCK:
+        data = _read_settings_cached_locked()
+        return {
             "x": _get_path_value(data, ("window", "x"), None),
             "y": _get_path_value(data, ("window", "y"), None),
             "width": _get_path_value(data, ("window", "width"), None),
             "height": _get_path_value(data, ("window", "height"), None),
             "maximized": bool(_get_path_value(data, ("window", "maximized"), False)),
         }
-    )
 
 
 def set_window_geometry(*, x: int | None, y: int | None, width: int | None, height: int | None, maximized: bool) -> bool:
@@ -829,8 +850,8 @@ def set_dns_crash_count(value: int) -> bool:
 
 
 def get_custom_dns_servers() -> list[dict[str, Any]]:
-    value = _get_path_value(read_settings(), ("dns", "custom_servers"), [])
-    return copy.deepcopy(value if isinstance(value, list) else [])
+    value = _read_path_value(("dns", "custom_servers"), [])
+    return value if isinstance(value, list) else []
 
 
 def set_custom_dns_servers(value: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -862,7 +883,7 @@ def set_hosts_bootstrap_signature(value: str | None) -> bool:
 
 
 def get_active_hosts_domains() -> set[str]:
-    items = _get_path_value(read_settings(), ("hosts", "active_domains"), [])
+    items = _read_path_value(("hosts", "active_domains"), [])
     if not isinstance(items, list):
         return set()
     return set(_unique_str_list(items))
@@ -893,7 +914,7 @@ def clear_active_hosts_domains() -> bool:
 
 
 def get_hosts_selection() -> dict[str, str]:
-    data = _get_path_value(read_settings(), ("hosts", "selection"), {})
+    data = _read_path_value(("hosts", "selection"), {})
     if not isinstance(data, dict):
         return {}
     out: dict[str, str] = {}
@@ -941,7 +962,7 @@ def set_premium_last_check(value: str | None) -> bool:
 
 
 def get_premium_last_network_failure_ts() -> int | None:
-    value = _get_path_value(read_settings(), ("premium", "last_network_failure_ts"), None)
+    value = _read_path_value(("premium", "last_network_failure_ts"), None)
     try:
         return int(value) if value is not None else None
     except Exception:
@@ -985,7 +1006,7 @@ def set_premium_pair_code(*, code: str | None, expires_at: int | None) -> bool:
 
 
 def get_premium_pair_expires_at() -> int | None:
-    value = _get_path_value(read_settings(), ("premium", "pair_expires_at"), None)
+    value = _read_path_value(("premium", "pair_expires_at"), None)
     try:
         return int(value) if value is not None else None
     except Exception:
@@ -993,8 +1014,8 @@ def get_premium_pair_expires_at() -> int | None:
 
 
 def get_premium_cache() -> dict[str, Any] | None:
-    cache = _get_path_value(read_settings(), ("premium", "premium_cache"), None)
-    return copy.deepcopy(cache) if isinstance(cache, dict) else None
+    cache = _read_path_value(("premium", "premium_cache"), None)
+    return cache if isinstance(cache, dict) else None
 
 
 def set_premium_cache(cache: dict[str, Any] | None) -> bool:
@@ -1233,7 +1254,7 @@ def set_orchestra_unlock_fails(value: int) -> bool:
 
 
 def get_orchestra_whitelist_user_domains() -> list[str]:
-    values = _get_path_value(read_settings(), ("orchestra", "whitelist", "user_domains"), [])
+    values = _read_path_value(("orchestra", "whitelist", "user_domains"), [])
     return _unique_str_list(values)
 
 
@@ -1263,8 +1284,8 @@ def clear_orchestra_whitelist_user_domains() -> bool:
 
 def get_orchestra_locked_map(askey: str) -> dict[str, int]:
     key = _normalize_askey(askey)
-    data = _get_path_value(read_settings(), ("orchestra", "locked", key), {})
-    return copy.deepcopy(data if isinstance(data, dict) else {})
+    data = _read_path_value(("orchestra", "locked", key), {})
+    return data if isinstance(data, dict) else {}
 
 
 def set_orchestra_locked_map(askey: str, data: dict[str, int]) -> bool:
@@ -1307,7 +1328,7 @@ def clear_orchestra_locked_map(askey: str) -> bool:
 
 def get_orchestra_user_locked(askey: str) -> list[str]:
     key = _normalize_askey(askey)
-    values = _get_path_value(read_settings(), ("orchestra", "user_locked", key), [])
+    values = _read_path_value(("orchestra", "user_locked", key), [])
     return [_normalize_lookup_key(item) for item in _unique_str_list(values) if _normalize_lookup_key(item)]
 
 
@@ -1338,8 +1359,8 @@ def clear_orchestra_user_locked(askey: str) -> bool:
 
 def get_orchestra_user_blocked(askey: str) -> dict[str, list[int]]:
     key = _normalize_askey(askey)
-    data = _get_path_value(read_settings(), ("orchestra", "user_blocked", key), {})
-    return copy.deepcopy(data if isinstance(data, dict) else {})
+    data = _read_path_value(("orchestra", "user_blocked", key), {})
+    return data if isinstance(data, dict) else {}
 
 
 def set_orchestra_user_blocked(askey: str, data: dict[str, list[int]]) -> bool:
@@ -1385,8 +1406,8 @@ def clear_orchestra_user_blocked(askey: str) -> bool:
 
 
 def get_orchestra_history() -> dict[str, Any]:
-    data = _get_path_value(read_settings(), ("orchestra", "history"), {})
-    return copy.deepcopy(data if isinstance(data, dict) else {})
+    data = _read_path_value(("orchestra", "history"), {})
+    return data if isinstance(data, dict) else {}
 
 
 def set_orchestra_history(data: dict[str, Any]) -> bool:

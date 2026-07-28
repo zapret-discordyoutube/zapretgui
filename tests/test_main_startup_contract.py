@@ -1741,7 +1741,13 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             }
         }
 
-        with patch.object(settings_store, "read_settings", return_value=data) as read_settings:
+        # Геттер читает снимок настроек напрямую, минуя копию всего документа
+        # в read_settings(): геометрия запрашивается на каждом ресайзе окна.
+        with patch.object(
+            settings_store,
+            "_read_settings_cached_locked",
+            return_value=data,
+        ) as read_cached_settings:
             geometry = settings_store.get_window_geometry()
 
         self.assertEqual(
@@ -1754,7 +1760,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 "maximized": True,
             },
         )
-        read_settings.assert_called_once_with()
+        read_cached_settings.assert_called_once_with()
 
     def test_window_geometry_runtime_loads_saved_geometry_with_single_settings_read(self) -> None:
         from settings import store as settings_store

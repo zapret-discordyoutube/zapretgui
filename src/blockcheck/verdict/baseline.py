@@ -89,6 +89,11 @@ def probe_baseline(
         # Ждать зависшие сетевые пробы нельзя: именно это подвешивало BlockCheck.
         pool.shutdown(wait=False, cancel_futures=True)
 
+    if not any(results.values()):
+        # Ни одна проба не успела ответить — обычно это отмена. Объявлять
+        # «связи нет» на пустых данных нельзя: получится ложный вердикт.
+        return NetworkBaseline(detail="контрольная проверка не выполнена")
+
     tls_ok = any(results["tls"])
     http80_usable = any(results["http80"])
     baseline = NetworkBaseline(

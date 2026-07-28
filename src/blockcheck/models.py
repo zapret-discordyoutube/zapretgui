@@ -54,7 +54,8 @@ class VerdictCode(Enum):
     """Итог отчёта целиком."""
 
     CLEAN = "clean"              # блокировок не обнаружено
-    SIGNATURES = "signatures"    # обнаружены сигнатуры DPI
+    SIGNATURES = "signatures"    # обнаружена сигнатура DPI, общая для многих целей
+    PARTIAL = "partial"          # недоступна часть ресурсов, единой сигнатуры нет
     NO_INTERNET = "no_internet"  # контрольная группа недоступна — выводов не делаем
     UNRELIABLE = "unreliable"    # ни одной цели не удалось проверить достоверно
 

@@ -88,7 +88,7 @@ class TargetFacts:
 
     @property
     def has_any_probe(self) -> bool:
-        return bool(self.web or self.stun or self.tcp)
+        return bool(self.web or self.web_unsupported or self.stun or self.tcp)
 
     @property
     def resolution_failed(self) -> bool:

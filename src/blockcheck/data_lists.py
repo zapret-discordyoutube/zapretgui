@@ -1,4 +1,85 @@
-[
+"""Встроенные списки целей BlockCheck.
+
+Списки лежат в коде, а не в data-файлах рядом с exe, намеренно: в собранном
+приложении ``blockcheck/data/*`` не оказывалось, диагностика молча
+переключалась на урезанный fallback (3 TCP-цели вместо 62) и писала об этом
+только в лог. Питоновский модуль попадает в сборку всегда, и вместе с ним
+исчезает и сам fallback-путь, и дублирование дефолтов.
+
+Внешнее переопределение файлом рядом с приложением по-прежнему работает —
+см. ``targets.load_domains_with_source`` / ``load_tcp_targets_with_source``.
+"""
+
+from __future__ import annotations
+
+__all__ = ["DNS_EXTRA_DOMAINS", "HTTPS_TARGETS", "PING_TARGETS", "STUN_TARGETS", "TCP_16_20_TARGETS"]
+
+
+# Основные цели HTTPS-проверки: имя для таблицы + адрес.
+#
+# Эфемерных имён вида ``rr5---sn-c0q7lnz7.googlevideo.com`` здесь нет намеренно:
+# это адреса конкретных сессионных серверов YouTube, они регулярно перестают
+# существовать, а несуществующий хост читался диагностикой как блокировка.
+HTTPS_TARGETS: tuple[dict[str, str], ...] = (
+    # Social / Messaging
+    {"name": "Discord", "value": "https://discord.com"},
+    {"name": "Discord GW", "value": "https://gateway.discord.gg"},
+    {"name": "Discord CDN", "value": "https://cdn.discordapp.com"},
+    {"name": "Telegram", "value": "https://telegram.org"},
+    {"name": "Telegram Web", "value": "https://web.telegram.org"},
+    # Video
+    {"name": "YouTube", "value": "https://www.youtube.com"},
+    {"name": "YouTube Short", "value": "https://youtu.be"},
+    {"name": "YT Images", "value": "https://i.ytimg.com"},
+    # Стабильная точка входа в видеотракт YouTube: имя постоянное, в отличие от
+    # сессионных ``rrN---sn-*`` серверов, на которые оно резолвится.
+    {"name": "YT Media", "value": "https://redirector.googlevideo.com"},
+    # Search / Cloud
+    {"name": "Google", "value": "https://www.google.com"},
+    {"name": "Cloudflare", "value": "https://www.cloudflare.com"},
+    # Other commonly blocked
+    {"name": "RuTracker", "value": "https://rutracker.org"},
+    {"name": "LinkedIn", "value": "https://www.linkedin.com"},
+    {"name": "Instagram", "value": "https://www.instagram.com"},
+    {"name": "Facebook", "value": "https://www.facebook.com"},
+    {"name": "Twitter/X", "value": "https://x.com"},
+    {"name": "Spotify", "value": "https://www.spotify.com"},
+)
+
+
+STUN_TARGETS: tuple[dict[str, str], ...] = (
+    {"name": "Google STUN", "value": "STUN:stun.l.google.com:19302"},
+    {"name": "CF STUN", "value": "STUN:stun.cloudflare.com:3478"},
+    {"name": "Twilio STUN", "value": "STUN:global.stun.twilio.com:3478"},
+    {"name": "Telegram STUN", "value": "STUN:stun.telegram.org:3478"},
+    {"name": "Telegram VoIP STUN", "value": "STUN:stun.voip.telegram.org:3478"},
+)
+
+
+PING_TARGETS: tuple[dict[str, str], ...] = (
+    {"name": "CF DNS", "value": "PING:1.1.1.1"},
+    {"name": "Google DNS", "value": "PING:8.8.8.8"},
+)
+
+
+# Домены для DNS-проверки, которых нет среди HTTPS-целей. Полный список
+# собирается в ``targets.get_dns_check_domains``.
+DNS_EXTRA_DOMAINS: tuple[str, ...] = (
+    "discordapp.net",
+    "discord.media",
+    "googlevideo.com",
+    "www.speedtest.net",
+    "soundcloud.com",
+    "github.com",
+    "rutor.info",
+    "roblox.com",
+    "meduza.io",
+)
+
+
+# Цели проверки обрыва на 16-20 КБ: разные провайдеры и автономные системы,
+# чтобы обрыв у одного хостера не выглядел как DPI.
+TCP_16_20_TARGETS: tuple[dict[str, str], ...] = (
     {"id": "SE.AKM-01", "asn": "20940", "provider": "Akamai", "url": "https://media.miele.com/images/2000015/200001503/20000150334.png"},
     {"id": "US.AKM-02", "asn": "16625", "provider": "Akamai", "url": "https://www.roxio.com/static/roxio/videos/products/nxt9/lamp-magic.mp4"},
     {"id": "US.AKM-03", "asn": "63949", "provider": "Akamai HTTP", "url": "http://speedtest.newark.linode.com/100MB-newark.bin"},
@@ -60,5 +141,5 @@
     {"id": "US.VLTR-02", "asn": "20473", "provider": "Vultr", "url": "https://us.rudder.qntmnet.com/QN-CDN/images/qn_bg_.jpg"},
     {"id": "DE.HOST-01", "asn": "216127", "provider": "nuxt.cloud", "url": "https://kast-tv.ru/fonts/GraphikLCGRegular.woff"},
     {"id": "MD.HOST-02", "asn": "200019", "provider": "Alexhost", "url": "https://profinance.cc/img/landing/introduction.png"},
-    {"id": "FI.HOST-03", "asn": "215730", "provider": "H2nexus", "url": "https://cascademl.com/images/5.jpg"}
-]
+    {"id": "FI.HOST-03", "asn": "215730", "provider": "H2nexus", "url": "https://cascademl.com/images/5.jpg"},
+)

@@ -20,7 +20,7 @@ import time
 from collections import deque
 from typing import Callable
 
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import QCoreApplication, QObject, QTimer, pyqtSignal
 
 
 BACKGROUND_WORKER_LIMIT = 2
@@ -86,6 +86,7 @@ class BackgroundWorkerGate(QObject):
         self._lock = threading.RLock()
         self._active: set[BackgroundWorkerTicket] = set()
         self._queue: deque[tuple[BackgroundWorkerTicket, Callable[[], None]]] = deque()
+        self._pump_timer: QTimer | None = None
         # release() приходит из потока воркера — старт следующего обязан
         # выполниться в GUI-потоке, где живёт сам гейт.
         self._pump_requested.connect(self._pump)
@@ -180,17 +181,30 @@ class BackgroundWorkerGate(QObject):
             # Не стартовавший воркер не должен занимать слот навсегда.
             self.release(ticket)
             raise
-        self._schedule_long_running_release(ticket)
+        self._arm_pump_timer()
 
-    def _schedule_long_running_release(self, ticket: BackgroundWorkerTicket) -> None:
+    def _arm_pump_timer(self) -> None:
+        """Будит очередь, когда активные воркеры затянулись.
+
+        Собственный QTimer, а не `QTimer.singleShot`: тесты страниц подменяют
+        `singleShot` на уровне класса и считают запланированные колбэки —
+        таймер гейта попадал бы в их счётчики.
+        """
         if LONG_RUNNING_SLOT_RELEASE_MS <= 0:
             return
+        if QCoreApplication.instance() is None:
+            # Без работающего приложения таймеры не идут; очередь двигают
+            # release/cancel и переоценка «протухших» слотов в submit.
+            return
         try:
-            QTimer.singleShot(
-                LONG_RUNNING_SLOT_RELEASE_MS,
-                lambda: self._release_long_running(ticket),
-            )
-        except Exception:
+            timer = self._pump_timer
+            if timer is None:
+                timer = QTimer(self)
+                timer.setSingleShot(True)
+                timer.timeout.connect(self._pump)
+                self._pump_timer = timer
+            timer.start(LONG_RUNNING_SLOT_RELEASE_MS)
+        except RuntimeError:
             pass
 
     def _release_long_running(self, ticket: BackgroundWorkerTicket) -> None:

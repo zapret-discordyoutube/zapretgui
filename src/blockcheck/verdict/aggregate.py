@@ -82,8 +82,15 @@ def build_report_verdict(
         target_list = confirmed if _passes_quorum(summary, len(valid)) else isolated
         target_list.append(summary)
 
-    headline = _headline(confirmed)
-    code = VerdictCode.SIGNATURES if confirmed else VerdictCode.CLEAN
+    headline = _headline(confirmed, denominator=len(valid))
+    if headline is not None:
+        code = VerdictCode.SIGNATURES
+    elif confirmed:
+        # Ресурсы недоступны, но общей сигнатуры DPI не видно: несколько
+        # заблокированных сайтов — это не «блокировка всей сети».
+        code = VerdictCode.PARTIAL
+    else:
+        code = VerdictCode.CLEAN
 
     return ReportVerdict(
         code=code,
@@ -122,12 +129,25 @@ def _group_by_signature(
 
 def _passes_quorum(summary: SignatureSummary, denominator: int) -> bool:
     hits = len(summary.targets)
-    if summary.classification == DPIClassification.FULL_BLOCK:
-        return hits >= FULL_BLOCK_MIN_TARGETS and summary.share >= FULL_BLOCK_MIN_SHARE
     if denominator == 1:
         # Единственная проверенная цель — её результат и есть весь отчёт.
         return hits >= 1
     return hits >= QUORUM_MIN_TARGETS or summary.share >= QUORUM_MIN_SHARE
+
+
+def _is_network_wide_block(summary: SignatureSummary, denominator: int) -> bool:
+    """Недоступность подавляющего большинства целей — блокировка всей сети.
+
+    Отдельный порог существует ровно потому, что «Полная блокировка» — самый
+    громкий вердикт отчёта. Пять недоступных сайтов из семнадцати — это
+    заблокированные сайты, а не заблокированная сеть.
+    """
+    if summary.classification != DPIClassification.FULL_BLOCK:
+        return False
+    # Порог не может превышать число проверенных целей: иначе прогон одной цели
+    # никогда не смог бы сообщить о полной блокировке.
+    required = min(FULL_BLOCK_MIN_TARGETS, denominator)
+    return len(summary.targets) >= required and summary.share >= FULL_BLOCK_MIN_SHARE
 
 
 def _priority_index(summary: SignatureSummary) -> int:
@@ -137,10 +157,23 @@ def _priority_index(summary: SignatureSummary) -> int:
         return len(SIGNATURE_PRIORITY)
 
 
-def _headline(confirmed: list[SignatureSummary]) -> DPIClassification | None:
-    if not confirmed:
+def _headline(
+    confirmed: list[SignatureSummary], *, denominator: int,
+) -> DPIClassification | None:
+    """Сигнатура, выносимая в заголовок отчёта.
+
+    «Полная блокировка» попадает в заголовок только при сетевом масштабе —
+    иначе заголовок берёт следующая по весу сигнатура, а сам факт
+    недоступности отражает код :class:`VerdictCode.PARTIAL`.
+    """
+    candidates = [
+        summary for summary in confirmed
+        if summary.classification != DPIClassification.FULL_BLOCK
+        or _is_network_wide_block(summary, denominator)
+    ]
+    if not candidates:
         return None
-    return min(confirmed, key=_priority_index).classification
+    return min(candidates, key=_priority_index).classification
 
 
 def _detail(
@@ -154,6 +187,9 @@ def _detail(
             "Массовых блокировок не обнаружено" if isolated
             else "Блокировок не обнаружено"
         )
+    elif code == VerdictCode.PARTIAL:
+        affected = sorted({name for item in confirmed for name in item.targets})
+        parts.append(f"Недоступно ресурсов: {len(affected)}")
     for summary in confirmed:
         parts.append(f"{summary.classification.value}: {len(summary.targets)} целей")
     if isolated:

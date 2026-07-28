@@ -194,6 +194,22 @@ def _quiesce_user_qthreads(qtcore) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _background_worker_gate_reset():
+    """Отдаёт каждому тесту пустой гейт фоновых воркеров.
+
+    Гейт — общий на процесс, а тестовые воркеры почти всегда заглушки: они
+    не эмитят finished и рапортуют isRunning() истиной, поэтому занятые ими
+    слоты копились бы от теста к тесту, и чужие воркеры молча уходили бы в
+    очередь вместо старта."""
+    yield
+    try:
+        from ui.background_worker_gate import reset_background_worker_gate
+    except ImportError:
+        return
+    reset_background_worker_gate(None)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_settings_dir(tmp_path, monkeypatch):
     """Изолирует settings.json на каждый тест.
 

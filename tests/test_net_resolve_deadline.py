@@ -183,25 +183,27 @@ class PreflightHangRegressionTests(unittest.TestCase):
         self.assertNotIn("shutdown(wait=True", source)
         self.assertNotIn("wait=not cancelled", source)
 
-    def test_cancel_stops_preflight_promptly(self) -> None:
-        """«Остановить» обязана срабатывать, пока сеть ещё молчит."""
-        import blockcheck.preflight as preflight
+    def test_cancel_stops_mass_resolution_promptly(self) -> None:
+        """«Остановить» обязана срабатывать, пока сеть ещё молчит.
 
-        stop_at = time.monotonic() + 0.5
-        domains = [f"d{i}.test" for i in range(20)]
+        Массовый preflight заменён этапом резолва в планировщике проб — проверка
+        та же, точка входа новая.
+        """
+        from blockcheck.runner import BlockcheckRunner
+
+        targets = [{"name": f"d{i}", "value": f"https://d{i}.test"} for i in range(20)]
+
+        runner = BlockcheckRunner(parallel=4)
+        threading.Timer(0.5, runner.cancel).start()
 
         with _BlackholeDNS():
             started = time.monotonic()
-            preflight.run_preflight(
-                domains,
-                parallel=4,
-                cancelled=lambda: time.monotonic() >= stop_at,
-            )
+            runner._stage_resolve(targets)
             elapsed = time.monotonic() - started
 
         self.assertLess(
             elapsed, 4.0,
-            f"после отмены run_preflight возвращался {elapsed:.1f}с",
+            f"после отмены этап резолва возвращался {elapsed:.1f}с",
         )
 
 
