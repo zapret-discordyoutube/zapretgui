@@ -38,11 +38,8 @@ from blockcheck.models import (
     BlockcheckReport,
     DnsVerdict,
     DNSIntegrityResult,
-    DPIClassification,
     InconclusiveReason,
     NetworkBaseline,
-    PreflightResult,
-    PreflightVerdict,
     SingleTestResult,
     TargetOutcome,
     TargetResult,
@@ -50,7 +47,6 @@ from blockcheck.models import (
     TestType,
 )
 from blockcheck.ping_tester import ping_host
-from blockcheck.preflight import compute_verdict
 from blockcheck.stun_tester import test_stun
 from blockcheck.targets import (
     build_targets_with_user_domains,
@@ -201,16 +197,13 @@ class BlockcheckRunner:
 
         report.baseline = self._stage_baseline()
         resolution = self._stage_resolve(targets)
-        target_results = self._stage_probe(report, targets, resolution)
-        report.targets = target_results
-        report.preflight = self._build_preflight(resolution, target_results)
+        report.targets = self._stage_probe(report, targets, resolution)
 
         self._stage_judge(report)
 
         was_cancelled = self.cancelled
         report.elapsed_seconds = time.time() - start_time
         report.cancelled = was_cancelled
-        report.summary = self._build_summary(report)
 
         if was_cancelled:
             self.cb.on_phase_change("Отменено")
@@ -687,50 +680,6 @@ class BlockcheckRunner:
             )
 
     # ------------------------------------------------------------------
-    # Preflight-секция отчёта
-    # ------------------------------------------------------------------
-
-    def _build_preflight(
-        self,
-        resolution: dict[str, ResolvedHost],
-        target_results: list[TargetResult],
-    ) -> list[PreflightResult]:
-        """Собирает preflight-сводку из уже выполненных проб.
-
-        Отдельная фаза preflight убрана: её четыре проверки — подмножество
-        этапов 1-2, и раньше каждый хост проверялся дважды.
-        """
-        by_host: dict[str, TargetResult] = {}
-        for target in target_results:
-            if is_pseudo_target(target.value):
-                continue
-            by_host.setdefault(host_of(target.value), target)
-
-        preflight: list[PreflightResult] = []
-        for host, resolved in resolution.items():
-            item = PreflightResult(domain=host, resolved_ips=resolved.ipv4 + resolved.ipv6)
-            item.dns_result = SingleTestResult(
-                target_name=host,
-                test_type=TestType.PREFLIGHT_DNS,
-                status=TestStatus.OK if resolved.ok else TestStatus.FAIL,
-                error_code=None if resolved.ok else "DNS_FAIL",
-                detail=(
-                    f"{len(item.resolved_ips)} адресов" if resolved.ok
-                    else (resolved.error or "домен не резолвится")
-                ),
-            )
-
-            target = by_host.get(host)
-            if target is not None:
-                item.tcp_443 = _summarize_tcp443(host, target)
-                item.http_check = _first_of(target, TestType.ISP_PAGE)
-                item.ping = _first_of(target, TestType.PING)
-
-            item.verdict, item.verdict_detail = compute_verdict(item)
-            preflight.append(item)
-        return preflight
-
-    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
@@ -748,108 +697,9 @@ class BlockcheckRunner:
                 hosts.append(host)
         return hosts
 
-    @staticmethod
-    def _build_summary(report: BlockcheckReport) -> dict:
-        """Build summary statistics from the report."""
-        stats: dict[str, Any] = {
-            "http_ok": 0, "http_fail": 0,
-            "tls12_ok": 0, "tls12_fail": 0, "tls12_unsup": 0,
-            "tls13_ok": 0, "tls13_fail": 0, "tls13_unsup": 0,
-            "stun_ok": 0, "stun_fail": 0,
-            "ping_ok": 0, "ping_fail": 0,
-            "dns_ok": 0, "dns_fake": 0,
-            "dns_unknown": 0,
-            "isp_ok": 0, "isp_inject": 0,
-            "tcp_ok": 0, "tcp_block": 0,
-            "dpi_types": [],
-            "dpi_count": 0,
-        }
-
-        counters = {
-            TestType.HTTP: ("http_ok", "http_fail", None),
-            TestType.TLS_12: ("tls12_ok", "tls12_fail", "tls12_unsup"),
-            TestType.TLS_13: ("tls13_ok", "tls13_fail", "tls13_unsup"),
-            TestType.STUN: ("stun_ok", "stun_fail", None),
-            TestType.PING: ("ping_ok", "ping_fail", None),
-            TestType.ISP_PAGE: ("isp_ok", "isp_inject", None),
-            TestType.TCP_16_20: ("tcp_ok", "tcp_block", None),
-        }
-
-        for tr in report.targets:
-            for test in tr.tests:
-                keys = counters.get(test.test_type)
-                if keys is None:
-                    continue
-                ok_key, fail_key, unsup_key = keys
-                if test.status == TestStatus.OK:
-                    stats[ok_key] += 1
-                elif test.status == TestStatus.UNSUPPORTED and unsup_key:
-                    stats[unsup_key] += 1
-                else:
-                    stats[fail_key] += 1
-
-        for item in report.dns_integrity:
-            if item.verdict == DnsVerdict.FAKE:
-                stats["dns_fake"] += 1
-            elif item.verdict == DnsVerdict.OK:
-                stats["dns_ok"] += 1
-            else:
-                stats["dns_unknown"] += 1
-
-        detected = [
-            tr.classification for tr in report.targets
-            if tr.classification != DPIClassification.NONE
-        ]
-        stats["dpi_types"] = sorted({item.value for item in detected})
-        stats["dpi_count"] = len(detected)
-
-        stats["preflight_passed"] = sum(
-            1 for item in report.preflight if item.verdict == PreflightVerdict.PASSED
-        )
-        stats["preflight_warned"] = sum(
-            1 for item in report.preflight if item.verdict == PreflightVerdict.WARNING
-        )
-        stats["preflight_failed"] = sum(
-            1 for item in report.preflight if item.verdict == PreflightVerdict.FAILED
-        )
-        return stats
-
-
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
-
-def _first_of(target: TargetResult, test_type: TestType) -> SingleTestResult | None:
-    for test in target.tests:
-        if test.test_type == test_type:
-            return test
-    return None
-
-
-def _summarize_tcp443(host: str, target: TargetResult) -> SingleTestResult:
-    """Свернуть веб-пробы цели в один результат «порт :443 отвечает».
-
-    Отдельная TCP-проба порта больше не нужна: HTTPS-пробы этапа 2 уже сообщают
-    всё, что о нём можно узнать.
-    """
-    web = [
-        test for test in target.tests
-        if test.test_type in (TestType.HTTP, TestType.TLS_12, TestType.TLS_13)
-    ]
-    if any(test.status == TestStatus.OK for test in web):
-        return SingleTestResult(
-            target_name=host, test_type=TestType.PREFLIGHT_TCP,
-            status=TestStatus.OK, detail="порт :443 отвечает",
-        )
-
-    first_failure = next((test for test in web if test.status != TestStatus.OK), None)
-    return SingleTestResult(
-        target_name=host, test_type=TestType.PREFLIGHT_TCP,
-        status=TestStatus.FAIL,
-        error_code=(first_failure.error_code if first_failure else "NO_PROBE"),
-        detail=(first_failure.detail if first_failure else "проба не выполнялась"),
-    )
-
 
 def _parse_stun_endpoint(value: str) -> tuple[str, int]:
     raw = str(value or "").strip()

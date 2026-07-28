@@ -9,8 +9,7 @@
 Массовый прогон по списку доменов отсюда убран: в BlockCheck те же проверки
 выполняет планировщик проб (``runner``), и отдельная фаза означала бы двойной
 резолв и двойной коннект к каждому хосту. Модуль остался точкой входа для
-``strategy_scanner``, который проверяет ровно один домен, и владельцем правила
-``compute_verdict``.
+``strategy_scanner``, который проверяет ровно один домен.
 """
 
 from __future__ import annotations
@@ -309,7 +308,7 @@ def check_one_domain(domain: str, cancelled: Callable[[], bool] | None = None) -
     # только по IPv4. Раньше они шли по имени хоста и каждая заново упиралась
     # в тот же неотвечающий DNS, утраивая время зависания.
     if not first_ipv4:
-        pf.verdict, pf.verdict_detail = compute_verdict(pf)
+        pf.verdict, pf.verdict_detail = _compute_verdict(pf)
         if pf.verdict == PreflightVerdict.PASSED:
             # DNS ответил, но только IPv6 — остальные проверки не выполнялись,
             # и объявлять «все проверки пройдены» было бы неправдой.
@@ -357,11 +356,11 @@ def check_one_domain(domain: str, cancelled: Callable[[], bool] | None = None) -
         pool.shutdown(wait=False, cancel_futures=True)
 
     # Вычисляем verdict
-    pf.verdict, pf.verdict_detail = compute_verdict(pf)
+    pf.verdict, pf.verdict_detail = _compute_verdict(pf)
     return pf
 
 
-def compute_verdict(pf: PreflightResult) -> tuple[PreflightVerdict, str]:
+def _compute_verdict(pf: PreflightResult) -> tuple[PreflightVerdict, str]:
     """Определяем итоговый verdict по результатам всех проверок."""
     reasons: list[str] = []
 

@@ -182,9 +182,6 @@ def _build_detail_text(report, no_dpi_text: str) -> str:
     if report.baseline.probed:
         lines.append(f"Сеть: {report.baseline.detail}")
 
-    if report.preflight:
-        lines.append(_preflight_line(report))
-
     return "\n".join(lines) if lines else no_dpi_text
 
 
@@ -202,26 +199,6 @@ def _signature_label(summary, verdict) -> str:
     ):
         return "Полностью недоступны"
     return DPI_LABELS_RU.get(summary.classification.value, summary.classification.value)
-
-
-def _preflight_line(report) -> str:
-    passed = sum(1 for item in report.preflight if item.verdict.value == "passed")
-    warned = sum(1 for item in report.preflight if item.verdict.value == "warning")
-    failed = sum(1 for item in report.preflight if item.verdict.value == "failed")
-
-    text = f"Preflight: {passed} OK"
-    if warned:
-        text += f", {warned} предупр."
-    if failed:
-        text += f", {failed} ошибок"
-        failed_domains = [
-            item.domain for item in report.preflight if item.verdict.value == "failed"
-        ]
-        if failed_domains:
-            text += f"\nПроблемные: {', '.join(failed_domains[:5])}"
-            if len(failed_domains) > 5:
-                text += f" (+{len(failed_domains) - 5})"
-    return text
 
 
 def _build_dns_summary(report) -> str:

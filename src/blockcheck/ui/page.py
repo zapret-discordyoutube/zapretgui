@@ -317,7 +317,7 @@ class BlockcheckPage(BasePage):
 
         ctrl_row.addStretch()
 
-        # Preflight skip checkbox
+        # Пропуск нерезолвящихся доменов
         self._skip_failed_cb = CheckBox(
             tr_catalog("page.blockcheck.skip_failed",
                        default="Пропускать проблемные домены")
@@ -325,8 +325,8 @@ class BlockcheckPage(BasePage):
         self._skip_failed_cb.setChecked(False)
         set_tooltip(
             self._skip_failed_cb,
-            "Если включено, домены с провалившимся preflight "
-            "(DNS-заглушка, ISP-инъекция) будут пропущены в основном блокчеке"
+            "Если включено, домены, чьё имя не разрешается, не будут "
+            "проверяться и не попадут в таблицу результатов"
         )
         self._update_skip_failed_accessibility()
         self._skip_failed_cb.toggled.connect(self._update_skip_failed_accessibility)

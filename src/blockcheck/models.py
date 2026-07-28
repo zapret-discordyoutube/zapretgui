@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum, auto
+from enum import Enum
 from typing import Any
 
 
@@ -189,10 +189,8 @@ class ReportVerdict:
 
 @dataclass
 class BlockcheckReport:
-    preflight: list[PreflightResult] = field(default_factory=list)
     targets: list[TargetResult] = field(default_factory=list)
     dns_integrity: list[DNSIntegrityResult] = field(default_factory=list)
-    summary: dict[str, Any] = field(default_factory=dict)
     baseline: NetworkBaseline = field(default_factory=NetworkBaseline)
     verdict: ReportVerdict = field(default_factory=ReportVerdict)
     elapsed_seconds: float = 0.0
