@@ -57,10 +57,11 @@ def _install_qt_scroll_style(app) -> None:
         from main.qt_runtime import _install_non_transient_scrollbars_style
 
         t_style = _time.perf_counter()
-        _install_non_transient_scrollbars_style(app)
+        replaced = _install_non_transient_scrollbars_style(app)
         emit_startup_metric(
             "StartupQtScrollStyle",
-            f"{(_time.perf_counter() - t_style) * 1000:.0f}ms",
+            f"{(_time.perf_counter() - t_style) * 1000:.0f}ms"
+            f" | {'style replaced' if replaced else 'skipped: scrollbars already permanent'}",
         )
     except Exception:
         pass

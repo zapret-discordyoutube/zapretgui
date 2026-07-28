@@ -75,6 +75,7 @@ class UiFreezeWatchdog(QObject):
         repeat_seconds: float = FREEZE_REPEAT_SECONDS,
         thread_dump_min_seconds: float = THREAD_DUMP_MIN_SECONDS,
         hard_freeze_dump_seconds: float = HARD_FREEZE_DUMP_SECONDS,
+        jitter_mode: bool = False,
         log_fn=None,
         stack_fn=None,
         dump_dir=None,
@@ -82,11 +83,14 @@ class UiFreezeWatchdog(QObject):
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        self._heartbeat_interval_ms = max(50, int(heartbeat_interval_ms))
-        self._freeze_threshold = max(0.2, float(freeze_threshold_seconds))
-        self._repeat_seconds = max(0.2, float(repeat_seconds))
+        # Нижние границы малы ради jitter-режима: рывки интерфейса живут в
+        # десятках миллисекунд, и наблюдателю с шагом 500 мс они не видны.
+        self._heartbeat_interval_ms = max(5, int(heartbeat_interval_ms))
+        self._freeze_threshold = max(0.02, float(freeze_threshold_seconds))
+        self._repeat_seconds = max(0.02, float(repeat_seconds))
         self._thread_dump_min_seconds = max(0.0, float(thread_dump_min_seconds))
         self._hard_freeze_dump_seconds = max(0.2, float(hard_freeze_dump_seconds))
+        self._jitter_mode = bool(jitter_mode)
         self._log_fn = log_fn
         self._stack_fn = stack_fn or _format_gui_stack
         self._dump_dir = dump_dir
@@ -209,21 +213,42 @@ class UiFreezeWatchdog(QObject):
         except Exception:
             pass
 
+    def _is_jitter_mode(self) -> bool:
+        """Режим охоты за рывками включается явно, а не угадывается по порогу."""
+        return self._jitter_mode
+
+    @staticmethod
+    def _format_stall(stall: float) -> str:
+        return f"{stall * 1000:.0f}мс" if stall < 1.0 else f"{stall:.1f}с"
+
     def _report_freeze_started(self, stall: float) -> None:
+        headline = (
+            f"Рывок интерфейса: кадр задержан на {self._format_stall(stall)}"
+            if self._is_jitter_mode()
+            else f"Интерфейс не отвечает {stall:.1f}с"
+        )
         self._log(
-            f"Интерфейс не отвечает {stall:.1f}с. Стек GUI-потока:\n{self._stack_fn()}"
+            f"{headline}. Стек GUI-потока:\n{self._stack_fn()}"
             f"{self._save_full_dump(stall)}",
             "⚠ WARNING",
         )
 
     def _report_freeze_continues(self, stall: float) -> None:
+        headline = (
+            f"Интерфейс всё ещё стоит ({self._format_stall(stall)})"
+            if self._is_jitter_mode()
+            else f"Интерфейс всё ещё не отвечает ({stall:.1f}с)"
+        )
         self._log(
-            f"Интерфейс всё ещё не отвечает ({stall:.1f}с). Стек GUI-потока:\n{self._stack_fn()}"
+            f"{headline}. Стек GUI-потока:\n{self._stack_fn()}"
             f"{self._save_full_dump(stall)}",
             "⚠ WARNING",
         )
 
     def _report_freeze_ended(self, duration: float) -> None:
+        if self._is_jitter_mode():
+            self._log(f"Интерфейс снова отвечает, рывок длился {self._format_stall(duration)}", "INFO")
+            return
         self._log(f"Интерфейс снова отвечает, блокировка длилась {duration:.1f}с", "INFO")
 
     # ------------------------------------------------------------------
@@ -296,13 +321,64 @@ class UiFreezeWatchdog(QObject):
 
 _WATCHDOG: UiFreezeWatchdog | None = None
 
+# Диагностический режим для рывков: `ZAPRET_UI_JITTER_MS=60` заставляет
+# наблюдателя ловить не «программа не отвечает», а короткие задержки кадра,
+# из-за которых интерфейс дёргается. Порог задаётся в миллисекундах.
+UI_JITTER_ENV = "ZAPRET_UI_JITTER_MS"
+UI_JITTER_MIN_MS = 20
+
+
+def jitter_threshold_ms() -> int:
+    """Порог jitter-режима из окружения. 0 — режим выключен."""
+    import os
+
+    raw = str(os.environ.get(UI_JITTER_ENV, "") or "").strip()
+    if not raw:
+        return 0
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return 0
+    if value < UI_JITTER_MIN_MS:
+        return 0
+    return value
+
+
+def build_watchdog_settings(jitter_ms: int) -> dict[str, float | int]:
+    """Параметры наблюдателя: штатные или заточенные под ловлю рывков."""
+    if jitter_ms <= 0:
+        return {}
+    threshold_seconds = jitter_ms / 1000.0
+    return {
+        "jitter_mode": True,
+        # Бить чаще порога, иначе рывок укладывается между ударами.
+        "heartbeat_interval_ms": max(5, jitter_ms // 3),
+        "freeze_threshold_seconds": threshold_seconds,
+        "repeat_seconds": max(0.2, threshold_seconds * 4),
+        # thread_dump_min_seconds намеренно оставлен штатным: файлы со стеками
+        # всех потоков нужны только для настоящих заморозок, иначе каждый рывок
+        # писал бы отчёт в папку крэш-логов.
+    }
+
 
 def install_ui_freeze_watchdog() -> UiFreezeWatchdog:
     """Ставит наблюдателя один раз на процесс."""
     global _WATCHDOG
     if _WATCHDOG is None:
-        _WATCHDOG = UiFreezeWatchdog()
+        jitter_ms = jitter_threshold_ms()
+        _WATCHDOG = UiFreezeWatchdog(**build_watchdog_settings(jitter_ms))
         _WATCHDOG.start()
+        if jitter_ms:
+            try:
+                from log.log import log
+
+                log(
+                    f"UI jitter watchdog: логируются задержки кадра дольше {jitter_ms}мс "
+                    f"({UI_JITTER_ENV})",
+                    "INFO",
+                )
+            except Exception:
+                pass
     return _WATCHDOG
 
 
@@ -320,7 +396,11 @@ __all__ = [
     "HARD_FREEZE_DUMP_SECONDS",
     "HEARTBEAT_INTERVAL_MS",
     "THREAD_DUMP_MIN_SECONDS",
+    "UI_JITTER_ENV",
+    "UI_JITTER_MIN_MS",
     "UiFreezeWatchdog",
+    "build_watchdog_settings",
     "install_ui_freeze_watchdog",
+    "jitter_threshold_ms",
     "shutdown_ui_freeze_watchdog",
 ]

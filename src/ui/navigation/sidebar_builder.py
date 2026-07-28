@@ -755,25 +755,39 @@ def _install_secondary_sidebar_groups(window) -> None:
         if group_plan.group_name != "root"
     )
 
+    # Группы ставятся по одной через таймер, поэтому wall-clock метрики почти
+    # целиком состоит из ожидания в очереди событий GUI, занятой стартом.
+    # Собственную работу считаем отдельно, иначе метрика выглядит как тормоз
+    # сайдбара, хотя тормозит очередь.
+    work_seconds = 0.0
+
     def _finish() -> None:
+        nonlocal work_seconds
+        finish_started_at = _time.perf_counter()
         _refresh_existing_nav_mode_visibility(window, method)
         apply_nav_visibility_filter(window, method=method)
+        work_seconds += _time.perf_counter() - finish_started_at
         try:
             window.log_startup_metric(
                 "StartupSecondarySidebarReady",
-                f"{(_time.perf_counter() - started_at) * 1000:.0f}ms",
+                f"{(_time.perf_counter() - started_at) * 1000:.0f}ms wall"
+                f" | {work_seconds * 1000:.0f}ms work"
+                f" | {len(group_plans)} groups",
             )
         except Exception:
             pass
 
     def _install_next_group(index: int = 0) -> None:
+        nonlocal work_seconds
         if get_window_ui_session(window) is None:
             return
         if index >= len(group_plans):
             _finish()
             return
 
+        group_started_at = _time.perf_counter()
         _add_sidebar_group(window, group_plans[index], initial_visibility)
+        work_seconds += _time.perf_counter() - group_started_at
         QTimer.singleShot(
             SIDEBAR_SECONDARY_GROUP_STEP_MS,
             lambda next_index=index + 1: _install_next_group(next_index),

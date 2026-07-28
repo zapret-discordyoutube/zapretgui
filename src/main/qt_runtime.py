@@ -206,8 +206,22 @@ def ensure_qt_runtime() -> QApplication:
     return app
 
 
-def _install_non_transient_scrollbars_style(app: QApplication) -> None:
+def _install_non_transient_scrollbars_style(app: QApplication) -> bool:
+    """Отключает исчезающие скроллбары, если текущий стиль их включает.
+
+    `setStyle` заново полирует каждый живой виджет и блокирует GUI-поток на
+    сотни миллисекунд (в логах старта — ~630 мс). Штатные стили Windows и
+    Fusion и без подмены сообщают `SH_ScrollBar_Transient = 0`, поэтому сначала
+    спрашиваем стиль и подменяем его, только когда это действительно меняет
+    поведение. Возвращает True, если подмена состоялась.
+    """
     from PyQt6.QtWidgets import QProxyStyle, QStyle
+
+    current_style = app.style()
+    if current_style is not None and not current_style.styleHint(
+        QStyle.StyleHint.SH_ScrollBar_Transient
+    ):
+        return False
 
     class _NoTransientScrollbarsStyle(QProxyStyle):
         def styleHint(self, hint, option=None, widget=None, returnData=None):
@@ -215,7 +229,8 @@ def _install_non_transient_scrollbars_style(app: QApplication) -> None:
                 return 0
             return super().styleHint(hint, option, widget, returnData)
 
-    app.setStyle(_NoTransientScrollbarsStyle(app.style()))
+    app.setStyle(_NoTransientScrollbarsStyle(current_style))
+    return True
 
 
 def application_bootstrap() -> QApplication:
