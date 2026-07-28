@@ -8,6 +8,16 @@ event loop и при блокировке пишется стек GUI-поток
 
 Механика: таймер в GUI-потоке обновляет отметку времени, фоновый поток
 сравнивает её с текущим временем. Разрыв больше порога — заморозка.
+
+Наблюдение трёхслойное, потому что зависания бывают разной тяжести:
+
+* короткая блокировка — строка в логе со стеком GUI-потока;
+* долгая (`THREAD_DUMP_MIN_SECONDS`) — файл со стеками всех потоков рядом с
+  крэш-логами: виновник обычно виден именно в чужом потоке;
+* дедлок — сторожевой таймер `faulthandler` в нативном потоке. Он не берёт GIL
+  и потому пишет стеки даже там, где этот наблюдатель уже не выполнится:
+  правка QWidget из фонового потока на Windows уходит в `SendMessage` оконному
+  потоку, который не может ответить, пока вызывающий держит GIL.
 """
 
 from __future__ import annotations
@@ -15,6 +25,7 @@ from __future__ import annotations
 import threading
 import time
 import traceback
+from pathlib import Path
 
 from PyQt6.QtCore import QObject, QTimer
 
@@ -23,6 +34,12 @@ FREEZE_THRESHOLD_SECONDS = 2.0
 # Пока интерфейс стоит, стек снимается повторно: длинная блокировка обычно
 # проходит несколько стадий, и первая из них не самая интересная.
 FREEZE_REPEAT_SECONDS = 10.0
+# Отдельный порог для файлов: короткие подвисания случаются штатно, и дамп
+# всех потоков на каждое из них засорил бы папку крэш-логов.
+THREAD_DUMP_MIN_SECONDS = 5.0
+# Таймаут дедлок-уровня. Заметно больше порога заморозки: сюда должны попадать
+# только эпизоды, из которых интерфейс сам не вышел.
+HARD_FREEZE_DUMP_SECONDS = 8.0
 
 
 def _format_gui_stack() -> str:
@@ -56,16 +73,26 @@ class UiFreezeWatchdog(QObject):
         heartbeat_interval_ms: int = HEARTBEAT_INTERVAL_MS,
         freeze_threshold_seconds: float = FREEZE_THRESHOLD_SECONDS,
         repeat_seconds: float = FREEZE_REPEAT_SECONDS,
+        thread_dump_min_seconds: float = THREAD_DUMP_MIN_SECONDS,
+        hard_freeze_dump_seconds: float = HARD_FREEZE_DUMP_SECONDS,
         log_fn=None,
         stack_fn=None,
+        dump_dir=None,
+        native_timer=None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._heartbeat_interval_ms = max(50, int(heartbeat_interval_ms))
         self._freeze_threshold = max(0.2, float(freeze_threshold_seconds))
         self._repeat_seconds = max(0.2, float(repeat_seconds))
+        self._thread_dump_min_seconds = max(0.0, float(thread_dump_min_seconds))
+        self._hard_freeze_dump_seconds = max(0.2, float(hard_freeze_dump_seconds))
         self._log_fn = log_fn
         self._stack_fn = stack_fn or _format_gui_stack
+        self._dump_dir = dump_dir
+        self._native_timer = native_timer
+        self._native_timer_owned = native_timer is None
+        self._native_timer_failed = False
         self._last_beat = time.monotonic()
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -110,6 +137,15 @@ class UiFreezeWatchdog(QObject):
         self._thread = None
         if thread is not None and thread.is_alive():
             thread.join(timeout=2.0)
+        # Взведённый faulthandler пережил бы наблюдателя и дампил уже штатно
+        # завершающийся процесс.
+        native_timer = self._native_timer
+        if native_timer is not None and self._native_timer_owned:
+            self._native_timer = None
+            try:
+                native_timer.close()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Измерение
@@ -119,6 +155,7 @@ class UiFreezeWatchdog(QObject):
         """Отметка живого event loop. Вызывается только в GUI-потоке."""
         with self._lock:
             self._last_beat = time.monotonic()
+        self._arm_native_timer()
 
     def stall_seconds(self, now: float | None = None) -> float:
         with self._lock:
@@ -174,18 +211,87 @@ class UiFreezeWatchdog(QObject):
 
     def _report_freeze_started(self, stall: float) -> None:
         self._log(
-            f"Интерфейс не отвечает {stall:.1f}с. Стек GUI-потока:\n{self._stack_fn()}",
+            f"Интерфейс не отвечает {stall:.1f}с. Стек GUI-потока:\n{self._stack_fn()}"
+            f"{self._save_full_dump(stall)}",
             "⚠ WARNING",
         )
 
     def _report_freeze_continues(self, stall: float) -> None:
         self._log(
-            f"Интерфейс всё ещё не отвечает ({stall:.1f}с). Стек GUI-потока:\n{self._stack_fn()}",
+            f"Интерфейс всё ещё не отвечает ({stall:.1f}с). Стек GUI-потока:\n{self._stack_fn()}"
+            f"{self._save_full_dump(stall)}",
             "⚠ WARNING",
         )
 
     def _report_freeze_ended(self, duration: float) -> None:
         self._log(f"Интерфейс снова отвечает, блокировка длилась {duration:.1f}с", "INFO")
+
+    # ------------------------------------------------------------------
+    # Дампы всех потоков
+    # ------------------------------------------------------------------
+
+    def _save_full_dump(self, stall: float) -> str:
+        """Стеки всех потоков в файл: интерфейс обычно блокирует чужой поток.
+
+        Возвращает готовый хвост для лог-сообщения, потому что путь к отчёту
+        нужен там же, где сообщение о заморозке.
+        """
+        if stall < self._thread_dump_min_seconds:
+            return ""
+        try:
+            from log.thread_dump import (
+                format_thread_dump,
+                is_thread_dump_disabled,
+                save_thread_dump,
+            )
+            from ui.ui_thread_guard import gui_thread_id
+
+            if is_thread_dump_disabled():
+                return ""
+            report = format_thread_dump(
+                stalled_seconds=stall,
+                gui_thread_ident=gui_thread_id(),
+            )
+            path = save_thread_dump(report, folder=self._dump_dir)
+        except Exception:
+            return ""
+        return f"\nСтеки всех потоков: {path}" if path else ""
+
+    def _arm_native_timer(self) -> None:
+        """Перевзводит сторожевой таймер: живой event loop — значит дампа нет.
+
+        Этот уровень нужен ровно там, где два верхних не работают: при дедлоке
+        фоновый поток держит GIL, и питоновский наблюдатель не выполнится.
+        """
+        if self._native_timer_failed:
+            return
+        timer = self._native_timer
+        if timer is None:
+            if not self._native_timer_owned:
+                return
+            try:
+                from log.thread_dump import (
+                    FAULTHANDLER_DUMP_NAME,
+                    FaulthandlerHangTimer,
+                    dump_reports_dir,
+                    is_thread_dump_disabled,
+                )
+
+                if is_thread_dump_disabled():
+                    self._native_timer_failed = True
+                    return
+                folder = self._dump_dir if self._dump_dir is not None else dump_reports_dir()
+                timer = FaulthandlerHangTimer(Path(folder) / FAULTHANDLER_DUMP_NAME)
+            except Exception:
+                self._native_timer_failed = True
+                return
+            self._native_timer = timer
+        try:
+            timer.arm(self._hard_freeze_dump_seconds)
+        except Exception:
+            # Без файла или без faulthandler остаются два верхних уровня.
+            self._native_timer = None
+            self._native_timer_failed = True
 
 
 _WATCHDOG: UiFreezeWatchdog | None = None
@@ -211,7 +317,9 @@ def shutdown_ui_freeze_watchdog() -> None:
 __all__ = [
     "FREEZE_REPEAT_SECONDS",
     "FREEZE_THRESHOLD_SECONDS",
+    "HARD_FREEZE_DUMP_SECONDS",
     "HEARTBEAT_INTERVAL_MS",
+    "THREAD_DUMP_MIN_SECONDS",
     "UiFreezeWatchdog",
     "install_ui_freeze_watchdog",
     "shutdown_ui_freeze_watchdog",

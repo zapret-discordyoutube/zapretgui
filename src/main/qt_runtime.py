@@ -245,23 +245,6 @@ def application_bootstrap() -> QApplication:
             "StartupQtCrashHandler",
             f"{(_time.perf_counter() - t_crash) * 1000:.0f}ms",
         )
-
-        # Зависание GUI-потока не поднимает исключений, поэтому crash-обработчик
-        # его не видит: без наблюдателя от такого эпизода не остаётся следов.
-        # Отдельный try: диагностика не имеет права ломать запуск приложения.
-        try:
-            from log.hang_watchdog import install_gui_hang_watchdog
-
-            t_hang = _time.perf_counter()
-            install_gui_hang_watchdog(app)
-            emit_startup_metric(
-                "StartupQtHangWatchdog",
-                f"{(_time.perf_counter() - t_hang) * 1000:.0f}ms",
-            )
-        except Exception as hang_exc:
-            from log.log import log
-
-            log(f"Наблюдатель зависаний не запущен: {hang_exc}", "WARNING")
     except Exception as exc:
         ctypes.windll.user32.MessageBoxW(None, f"Ошибка инициализации Qt: {exc}", "Zapret", 0x10)
 
