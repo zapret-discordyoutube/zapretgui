@@ -4,10 +4,30 @@
 import os
 from typing import Optional
 
+from log.log import log
 from settings.mode import EXE_NAME_WINWS1
 
 from winws_runtime.health.antivirus_detection import _detect_active_antivirus
 from winws_runtime.health.process_monitor import _find_process_pid_by_name_winapi
+
+
+def publish_startup_diagnosis(diagnosis: str) -> str:
+    """Пишет диагноз в журнал одним блоком и отдаёт одну строку для UI.
+
+    Каждая строка уровня ERROR превращается в отдельное всплывающее
+    уведомление, поэтому построчная печать многострочного диагноза заваливала
+    пользователя четырьмя тостами про одну и ту же ошибку. Детали остаются в
+    журнале, наружу идёт единственная строка — её публикует вызывающий код.
+    """
+    text = str(diagnosis or "").strip()
+    if not text:
+        return ""
+    log(text, "WARNING")
+    for line in text.splitlines():
+        cleaned = line.strip()
+        if cleaned:
+            return cleaned
+    return text
 
 
 def diagnose_startup_error(error: Exception, exe_path: str = None) -> str:

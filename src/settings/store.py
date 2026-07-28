@@ -399,6 +399,61 @@ def set_updater_settings(values: dict[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(updated["updater"])
 
 
+def get_last_seen_version() -> str:
+    return _get_str(("program", "last_seen_version"), "")
+
+
+def set_last_seen_version(value: str) -> bool:
+    return _set_str(("program", "last_seen_version"), str(value or ""))
+
+
+def get_self_repair_attempts() -> tuple[int, ...]:
+    raw = _get_path_value(read_settings(), ("updater", "self_repair", "attempts"), ())
+    return tuple(int(item) for item in raw or () if isinstance(item, (int, float)))
+
+
+def append_self_repair_attempt(
+    *,
+    max_attempts: int,
+    window_seconds: int,
+    now: float | None = None,
+) -> tuple[bool, int]:
+    """Резервирует попытку восстановления поставки под суточным лимитом.
+
+    Решение и запись живут в одной транзакции настроек: иначе два запуска
+    подряд могли бы одновременно увидеть свободный лимит.
+    """
+    import time as _time
+
+    current = int(now if now is not None else _time.time())
+    window_start = current - max(int(window_seconds), 0)
+    allowed = False
+    attempts_in_window = 0
+
+    def _mutate(data: dict[str, Any]) -> None:
+        nonlocal allowed, attempts_in_window
+
+        raw = _get_path_value(data, ("updater", "self_repair", "attempts"), ()) or ()
+        kept = sorted(
+            int(item)
+            for item in raw
+            if isinstance(item, (int, float)) and int(item) > window_start
+        )
+        attempts_in_window = len(kept)
+        allowed = attempts_in_window < max(int(max_attempts), 0)
+        if allowed:
+            kept.append(current)
+            attempts_in_window = len(kept)
+        _set_path_value(data, ("updater", "self_repair", "attempts"), kept)
+
+    _update_settings(_mutate)
+    return allowed, attempts_in_window
+
+
+def reset_self_repair_attempts() -> None:
+    _update_settings(lambda data: _set_path_value(data, ("updater", "self_repair", "attempts"), []))
+
+
 def get_blockcheck_settings() -> dict[str, Any]:
     return copy.deepcopy(read_settings()["blockcheck"])
 
@@ -1375,6 +1430,7 @@ def clear_orchestra_history() -> bool:
 
 
 __all__ = [
+    "append_self_repair_attempt",
     "get_accent_color",
     "get_active_hosts_domains",
     "get_animations_enabled",
@@ -1396,6 +1452,7 @@ __all__ = [
     "get_hosts_selection",
     "get_isp_dns_info_shown",
     "get_kaspersky_warning_disabled",
+    "get_last_seen_version",
     "get_max_blocked",
     "get_mica_enabled",
     "get_orchestra_auto_restart_on_discord_fail",
@@ -1426,6 +1483,7 @@ __all__ = [
     "get_russian_state_media_blocked",
     "get_selected_theme",
     "get_selected_source_preset_file_name",
+    "get_self_repair_attempts",
     "get_sidebar_icon_style",
     "get_settings_path",
     "get_smooth_scroll_enabled",
@@ -1473,6 +1531,7 @@ __all__ = [
     "remove_orchestra_user_locked",
     "remove_orchestra_whitelist_domain",
     "reset_dns_crash_count",
+    "reset_self_repair_attempts",
     "reset_settings",
     "set_accent_color",
     "set_active_hosts_domains",
@@ -1495,6 +1554,7 @@ __all__ = [
     "set_hosts_selection",
     "set_isp_dns_info_shown",
     "set_kaspersky_warning_disabled",
+    "set_last_seen_version",
     "set_max_blocked",
     "set_mica_enabled",
     "set_orchestra_auto_restart_on_discord_fail",

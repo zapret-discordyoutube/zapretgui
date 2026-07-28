@@ -181,6 +181,11 @@ def build_app_features(*, deps: AppFeatureAssemblyDeps, paths: Any, state: Any) 
         f"{(_time.perf_counter() - t_tray) * 1000:.0f}ms",
     )
 
+    updater_feature = build_updater_feature()
+    # Runtime сообщает только факт «поставка повреждена»; чинит установку слой
+    # приложения через updater, поэтому порт связывается здесь.
+    runtime_feature.configure_installation_repair(updater_feature=updater_feature)
+
     t_secondary = _time.perf_counter()
     features = AppFeatures(
         appearance=build_appearance_feature(),
@@ -200,7 +205,7 @@ def build_app_features(*, deps: AppFeatureAssemblyDeps, paths: Any, state: Any) 
         dpi_settings=build_dpi_settings_feature(),
         telegram_proxy=telegram_proxy_feature,
         tray=tray_feature,
-        updater=build_updater_feature(),
+        updater=updater_feature,
         external_actions=build_external_actions_feature(),
         orchestra=orchestra_feature,
         program_settings=build_program_settings_feature(),

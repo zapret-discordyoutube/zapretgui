@@ -287,6 +287,10 @@ def normalize_program(data: object) -> dict[str, Any]:
             defaults["russian_state_media_blocked"],
         ),
         "defender_disabled": as_bool(raw.get("defender_disabled"), defaults["defender_disabled"]),
+        "last_seen_version": as_clean_str(
+            raw.get("last_seen_version"),
+            defaults["last_seen_version"],
+        ),
     }
 
 
@@ -625,6 +629,20 @@ def _json_safe(value: object) -> object:
     return as_str(value)
 
 
+SELF_REPAIR_ATTEMPTS_KEPT = 20
+
+
+def normalize_self_repair(data: object) -> dict[str, Any]:
+    raw = as_dict(data)
+    attempts: list[int] = []
+    for item in raw.get("attempts") or ():
+        stamp = as_int(item, 0, minimum=0)
+        if stamp:
+            attempts.append(stamp)
+    attempts.sort()
+    return {"attempts": attempts[-SELF_REPAIR_ATTEMPTS_KEPT:]}
+
+
 def normalize_updater(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     defaults = schema.default_updater()
@@ -650,6 +668,7 @@ def normalize_updater(data: object) -> dict[str, Any]:
             ),
             "server_stats": as_dict(_json_safe(release_manager_raw.get("server_stats"))),
         },
+        "self_repair": normalize_self_repair(raw.get("self_repair")),
     }
 
 

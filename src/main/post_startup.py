@@ -40,6 +40,12 @@ def install_startup_audit(*args, **kwargs):
     return install(*args, **kwargs)
 
 
+def install_ui_freeze_watchdog(*args, **kwargs):
+    from ui.ui_freeze_watchdog import install_ui_freeze_watchdog as install
+
+    return install(*args, **kwargs)
+
+
 def install_dns_startup(*args, **kwargs):
     from main.post_startup_dns import install_dns_startup as install
 
@@ -99,6 +105,12 @@ def install_update_check(*args, **kwargs):
 
     return install(*args, **kwargs)
 
+
+def install_installation_integrity_check(*args, **kwargs):
+    from main.post_startup_integrity import install_installation_integrity_check as install
+
+    return install(*args, **kwargs)
+
 @dataclass(frozen=True, slots=True)
 class PostStartupDeps:
     startup_host: Any
@@ -113,6 +125,7 @@ class PostStartupDeps:
     apply_dns_on_startup_async: Any
     install_tray_post_startup: Any
     updater_feature: Any
+    request_installation_repair: Any = None
     hosts_feature: Any = None
     premium_feature: Any = None
     logs_feature: Any = None
@@ -200,10 +213,19 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
         notify=deps.notify,
         set_status=deps.set_status,
     )
+    request_installation_repair = getattr(deps, "request_installation_repair", None)
+    if callable(request_installation_repair):
+        install_installation_integrity_check(
+            startup_host,
+            updater_feature=deps.updater_feature,
+            request_repair=request_installation_repair,
+            log_startup_metric=deps.log_startup_metric,
+        )
     install_cpu_diagnostic()
     install_qt_event_diagnostic_probe()
     install_startup_audit()
     install_global_exception_handler()
+    install_ui_freeze_watchdog()
 
 
 __all__ = ["PostStartupDeps", "install_post_startup_tasks"]

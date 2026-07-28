@@ -7,7 +7,7 @@ QObject-ы приложения. Они выполняют только сеть
 
 from __future__ import annotations
 
-import hashlib
+import json
 import os
 import shutil
 import tempfile
@@ -25,17 +25,24 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from config.build_info import APP_VERSION, CHANNEL
 from config.runtime_layout import APPLICATION_PATHS
 from log.log import log
+from utils.file_digest import sha256_file
 
+from . import update_paths
 from .github_release import normalize_version
+from .handoff_state import HandoffState, UpdateHandoffRecord
 from .network_hints import maybe_log_disable_dpi_for_update
+from .recovery_hook import build_recovery_command, clear_recovery_hook, set_recovery_hook
 from .release_manager import get_latest_release
-from .update import compare_versions, launch_installer_winapi
+from .update import compare_versions
+from .update_watchdog import build_watchdog_command, launch_update_watchdog
 
 
 NUM_SEGMENTS = 4
 CHUNK_SIZE = 1024 * 1024
 PROGRESS_INTERVAL_SECONDS = 0.25
 SHA256_HEX_LENGTH = 64
+CACHED_INSTALLER_NAME = update_paths.CACHED_INSTALLER_NAME
+CACHED_INSTALLER_META_NAME = update_paths.CACHED_INSTALLER_META_NAME
 
 
 class UpdateStage(StrEnum):
@@ -189,15 +196,7 @@ def normalize_sha256(value: object) -> str:
 
 
 def file_sha256(path: str | os.PathLike[str], token: CancellationToken) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as file_obj:
-        while True:
-            token.checkpoint()
-            chunk = file_obj.read(CHUNK_SIZE)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
+    return sha256_file(path, checkpoint=token.checkpoint, chunk_size=CHUNK_SIZE)
 
 
 def _release_sha256(release_info: dict) -> str:
@@ -320,8 +319,13 @@ def prepare_update(
     requested_version: str,
     token: CancellationToken,
     on_stage: Callable[[str, str], None] | None = None,
+    allow_same_version: bool = False,
 ) -> UpdatePreflightResult:
-    """Выполняет check → resolve → connectivity."""
+    """Выполняет check → resolve → connectivity.
+
+    ``allow_same_version`` нужен восстановлению поставки: там запрашивается
+    ровно установленная версия, а не более новая.
+    """
     token.checkpoint()
     _emit_stage(on_stage, UpdateStage.CHECK, "Проверка выпуска…")
     release_info = get_latest_release(CHANNEL, use_cache=False)
@@ -329,7 +333,8 @@ def prepare_update(
         raise UpdatePipelineError("Не удалось получить данные выпуска")
 
     remote_version = normalize_version(str(release_info.get("version") or ""))
-    if compare_versions(APP_VERSION, remote_version) >= 0:
+    version_gap = compare_versions(APP_VERSION, remote_version)
+    if version_gap > 0 or (version_gap == 0 and not allow_same_version):
         raise UpdatePipelineError(f"Обновление v{remote_version} уже не требуется")
     if requested_version and compare_versions(remote_version, requested_version) < 0:
         raise UpdatePipelineError("Сервер вернул более старый выпуск")
@@ -580,16 +585,61 @@ def verify_artifact(
     log(f"✅ SHA-256 установщика проверен: {actual_sha256}", "🔁 UPDATE")
 
 
+def cached_installer_path() -> Path:
+    return update_paths.cached_installer_path()
+
+
+def cached_installer_meta_path() -> Path:
+    return update_paths.cached_installer_meta_path()
+
+
+def read_cached_installer_meta() -> dict:
+    """Метаданные последнего сохранённого установщика.
+
+    Нужны восстановлению поставки: по ним видно, какой версии лежит файл и
+    какой у него SHA-256, поэтому починка возможна без сети — а без движка
+    сеть у пользователя как раз может не работать.
+    """
+    try:
+        raw = cached_installer_meta_path().read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return {}
+    try:
+        payload = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def installer_arguments(*, log_name: str = update_paths.SETUP_LOG_NAME) -> tuple[str, ...]:
+    """Единственный набор аргументов Inno Setup для установки без вопросов.
+
+    ``/SUPPRESSMSGBOXES`` здесь недопустим: в Inno он означает ответ Abort в
+    ситуациях Abort/Retry, то есть превращает сбой распаковки в молчаливый
+    выход без единого сообщения. ``/SILENT`` вместо ``/VERYSILENT`` оставляет
+    пользователю полосу прогресса и текст любой ошибки установщика.
+    """
+    setup_log = update_paths.setup_log_path(log_name)
+    return (
+        "/AUTOUPDATE",
+        "/SILENT",
+        "/NORESTART",
+        "/NOCANCEL",
+        "/CLOSEAPPLICATIONS",
+        f"/DIR={APPLICATION_PATHS.root}",
+        f"/LOG={setup_log}",
+    )
+
+
 def prepare_handoff(
     artifact: UpdateArtifact,
     downloaded_path: str,
     token: CancellationToken,
 ) -> InstallerHandoff:
-    """Копирует уже проверенный файл в устойчивый каталог приложения."""
+    """Копирует уже проверенный файл в каталог, переживающий переустановку."""
     token.checkpoint()
-    persistent_dir = Path(APPLICATION_PATHS.update_cache_dir)
-    persistent_dir.mkdir(parents=True, exist_ok=True)
-    persistent_path = persistent_dir / "Zapret2Setup.exe"
+    persistent_dir = update_paths.update_state_dir()
+    persistent_path = persistent_dir / update_paths.CACHED_INSTALLER_NAME
     temporary_path = persistent_path.with_suffix(".exe.new")
 
     try:
@@ -600,22 +650,61 @@ def prepare_handoff(
     finally:
         temporary_path.unlink(missing_ok=True)
 
-    setup_log = persistent_dir / "setup.log"
-    arguments = (
-        "/AUTOUPDATE",
-        "/VERYSILENT",
-        "/SUPPRESSMSGBOXES",
-        "/NORESTART",
-        "/NOCANCEL",
-        "/CLOSEAPPLICATIONS",
-        f"/DIR={APPLICATION_PATHS.root}",
-        f"/LOG={setup_log}",
-    )
+    try:
+        cached_installer_meta_path().write_text(
+            json.dumps(
+                {
+                    "version": artifact.version,
+                    "sha256": artifact.expected_sha256,
+                    "size": int(artifact.expected_size),
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        log(f"Не удалось сохранить метаданные установщика: {exc}", "WARNING")
+
     return InstallerHandoff(
         version=artifact.version,
         installer_path=str(persistent_path),
-        arguments=arguments,
+        arguments=installer_arguments(),
     )
+
+
+def start_supervised_installation(handoff: InstallerHandoff) -> bool:
+    """Передаёт установку наблюдателю и ставит системную страховку.
+
+    Приложение закрывается сразу после этого вызова, поэтому исход установки
+    больше некому увидеть: наблюдатель — единственный участник, который
+    дождётся кода возврата установщика и сверит версию на диске. Страховка в
+    ``RunOnce`` покрывает случай, когда не выживет и он.
+    """
+    record = UpdateHandoffRecord(
+        state=HandoffState.PREPARED,
+        version=handoff.version,
+        target_root=str(APPLICATION_PATHS.root),
+        installer_path=handoff.installer_path,
+        arguments=tuple(handoff.arguments),
+    )
+
+    hook_command = build_recovery_command(
+        build_watchdog_command(
+            script_path=update_paths.watchdog_script_path(),
+            state_path=update_paths.handoff_state_path(),
+            recovery=True,
+        )
+    )
+    hook_set = set_recovery_hook(hook_command)
+
+    if launch_update_watchdog(record):
+        return True
+
+    # Наблюдатель не поднялся, установка не начнётся — страховка стала бы
+    # обещанием восстановить то, чего никто не ломал.
+    if hook_set:
+        clear_recovery_hook()
+    return False
 
 
 class UpdatePipeline:
@@ -634,11 +723,17 @@ class UpdatePipeline:
         self._on_progress = on_progress
         self._silent = bool(silent)
 
-    def preflight(self, *, requested_version: str) -> UpdatePreflightResult:
+    def preflight(
+        self,
+        *,
+        requested_version: str,
+        allow_same_version: bool = False,
+    ) -> UpdatePreflightResult:
         return prepare_update(
             requested_version=requested_version,
             token=self._token,
             on_stage=self._on_stage,
+            allow_same_version=allow_same_version,
         )
 
     def download_and_prepare(self, artifact: UpdateArtifact) -> InstallerHandoff:
@@ -785,11 +880,7 @@ class UpdateInstallerWorker(QObject):
             UpdateStage.INSTALLER,
             "Запуск установщика…",
         )
-        launched = launch_installer_winapi(
-            self._handoff.installer_path,
-            self._handoff.arguments,
-        )
-        if not launched:
+        if not start_supervised_installation(self._handoff):
             self.failed.emit("Не удалось запустить установщик")
             self.finished.emit(False)
             return
@@ -813,11 +904,16 @@ __all__ = [
     "UpdatePreflightWorker",
     "UpdateStage",
     "build_download_sources",
+    "cached_installer_meta_path",
+    "cached_installer_path",
     "download_source",
     "file_sha256",
+    "installer_arguments",
+    "read_cached_installer_meta",
     "normalize_sha256",
     "prepare_handoff",
     "prepare_update",
+    "start_supervised_installation",
     "test_connectivity",
     "verify_artifact",
 ]

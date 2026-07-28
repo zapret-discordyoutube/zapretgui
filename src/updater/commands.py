@@ -34,6 +34,18 @@ def run_startup_update_check() -> dict:
     return check_for_update_sync()
 
 
+def check_installation_integrity(*, deep: bool = False):
+    from install_integrity import verify_installation
+
+    return verify_installation(deep=bool(deep))
+
+
+def repair_installation(report=None, *, allow_download: bool = True):
+    from updater.self_repair import repair_installation as _repair_installation
+
+    return _repair_installation(report, allow_download=bool(allow_download))
+
+
 def open_update_channel(channel: str) -> UpdateChannelActionResult:
     from config.telegram_links import open_telegram_link
     from updater.channel_utils import is_dev_update_channel

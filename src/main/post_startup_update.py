@@ -160,9 +160,45 @@ def install_update_check(
 
         enqueue_subsystem_task("update", "StartupUpdateCheckWorker", _startup_update_worker)
 
+    def _report_interrupted_update() -> None:
+        """Рассказывает про обновление, которое не довёл до конца прошлый запуск.
+
+        Проверка не зависит от настройки автообновления: сорвавшаяся установка
+        — это факт о состоянии программы, а не предложение обновиться.
+        """
+        if not is_startup_host_alive(startup_host):
+            return
+        try:
+            from updater.interrupted_update import (
+                describe_interrupted_update,
+                detect_interrupted_update,
+            )
+
+            interrupted = detect_interrupted_update()
+            if interrupted is None:
+                return
+
+            notify(
+                advisory_notification(
+                    level="warning",
+                    title="Обновление не завершилось",
+                    content=describe_interrupted_update(interrupted),
+                    source="startup.update_recovery",
+                    presentation="infobar",
+                    queue="immediate",
+                    duration=15000,
+                    dedupe_key=(
+                        f"startup.update_recovery:{interrupted.expected_version}"
+                    ),
+                )
+            )
+        except Exception as exc:
+            log(f"Не удалось разобрать состояние прошлого обновления: {exc}", "❌ ERROR")
+
     def _schedule_startup_update_check_deferred() -> None:
         if not is_startup_host_alive(startup_host):
             return
+        _report_interrupted_update()
         delay_ms = 12000
         log(f"Автопроверка обновлений отложена на {delay_ms}ms после готовности UI", "DEBUG")
         schedule_after(

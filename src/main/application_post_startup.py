@@ -28,6 +28,7 @@ def build_application_post_startup_deps(*, window, app_runtime) -> PostStartupDe
         apply_dns_on_startup_async=features.dns.apply_dns_on_startup_async,
         install_tray_post_startup=features.tray.install_post_startup,
         updater_feature=features.updater,
+        request_installation_repair=features.runtime.events.publish_installation_damaged,
         launch_method=str(getattr(runtime_snapshot, "launch_method", "") or ""),
     )
 

@@ -1,20 +1,37 @@
-"""DNS integrity check — compare UDP DNS vs DoH to detect faking/stubs."""
+"""DNS integrity check — детекция подмены DNS провайдером.
+
+Ключевое решение: **расхождение адресов между системным резолвером и DoH само по
+себе уликой не является**. Anycast и geo-DNS крупных CDN (Facebook, x.com,
+Google) штатно отдают разным резолверам разные адреса, и прежнее сравнение
+множеств IP давало ложную «DNS подмену» на каждом таком домене.
+
+Решает валидность сертификата: подключаемся к полученному адресу с SNI домена и
+полной проверкой цепочки. Настоящий сервер предъявит валидный сертификат с любого
+своего адреса; заглушка провайдера — нет.
+"""
 
 from __future__ import annotations
 
 import logging
 import socket
+import ssl
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 from blockcheck.config import (
+    CERT_PROBE_TIMEOUT,
+    DEFAULT_PARALLEL,
     DNS_CHECK_DOMAINS,
     DNS_TIMEOUT,
     DNS_UDP_SERVERS,
     DOH_SERVERS,
     DOH_TIMEOUT,
+    KNOWN_BLOCK_IPS,
 )
-from blockcheck.models import DNSIntegrityResult
+from blockcheck.hosts import base_domain
+from blockcheck.models import DnsVerdict, DNSIntegrityResult
+from utils.concurrency import iter_completed
 from utils.net_resolve import resolve_addrinfo
 
 if TYPE_CHECKING:
@@ -22,12 +39,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "check_dns_integrity",
+    "resolve_doh",
+    "resolve_udp",
+    "verify_certificate",
+]
+
+
+# Сколько DNS-серверов каждого вида опрашиваем, прежде чем сдаться.
+_SERVERS_PER_KIND = 2
+
 
 # ---------------------------------------------------------------------------
 # UDP DNS resolution (stdlib fallback — no aiodns required)
 # ---------------------------------------------------------------------------
 
-def _resolve_udp(domain: str, nameserver: str, timeout: float = DNS_TIMEOUT) -> list[str]:
+def resolve_udp(domain: str, nameserver: str, timeout: float = DNS_TIMEOUT) -> list[str]:
     """Resolve domain via a specific DNS server using raw UDP socket.
 
     Builds a minimal DNS query (A record) and parses the response.
@@ -103,7 +131,7 @@ def _resolve_udp(domain: str, nameserver: str, timeout: float = DNS_TIMEOUT) -> 
         # Fallback: use system resolver
         try:
             infos = resolve_addrinfo(
-                domain, None, timeout=DNS_TIMEOUT, family=socket.AF_INET,
+                domain, None, timeout=timeout, family=socket.AF_INET,
             )
             return list({info[4][0] for info in infos})
         except Exception:
@@ -114,7 +142,7 @@ def _resolve_udp(domain: str, nameserver: str, timeout: float = DNS_TIMEOUT) -> 
 # DoH resolution (httpx)
 # ---------------------------------------------------------------------------
 
-def _resolve_doh(domain: str, doh_url: str, timeout: float = DOH_TIMEOUT) -> list[str]:
+def resolve_doh(domain: str, doh_url: str, timeout: float = DOH_TIMEOUT) -> list[str]:
     """Resolve domain via DNS-over-HTTPS using httpx."""
     try:
         import httpx
@@ -141,6 +169,50 @@ def _resolve_doh(domain: str, doh_url: str, timeout: float = DOH_TIMEOUT) -> lis
 
 
 # ---------------------------------------------------------------------------
+# Certificate probe — решающая улика
+# ---------------------------------------------------------------------------
+
+def verify_certificate(
+    domain: str,
+    ip: str,
+    timeout: float = CERT_PROBE_TIMEOUT,
+) -> bool | None:
+    """Валиден ли сертификат домена на этом адресе.
+
+    Returns
+    -------
+    True
+        Сервер предъявил валидную цепочку для ``domain`` — адрес настоящий.
+    False
+        Сертификат не проходит проверку: на этом адресе сидит не тот сервер.
+    None
+        Выяснить не удалось (обрыв, таймаут, отказ) — улики нет.
+    """
+    if not domain or not ip:
+        return None
+
+    family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+    context = ssl.create_default_context()
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    ssock = None
+    try:
+        sock.settimeout(timeout)
+        ssock = context.wrap_socket(sock, server_hostname=domain)
+        ssock.connect((ip, 443))
+        return True
+    except ssl.SSLCertVerificationError:
+        return False
+    except Exception:
+        # Сброс, таймаут, отказ — это блокировка канала, а не подмена DNS.
+        return None
+    finally:
+        try:
+            (ssock or sock).close()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # DNS integrity check
 # ---------------------------------------------------------------------------
 
@@ -148,14 +220,12 @@ def check_dns_integrity(
     domains: list[str] | None = None,
     callback: Callable[[str], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
+    parallel: int = DEFAULT_PARALLEL,
 ) -> list[DNSIntegrityResult]:
-    """Compare UDP DNS vs DoH results to detect DNS faking/stubs.
+    """Сравнивает системный DNS с DoH и проверяет спорные адреса сертификатом.
 
-    Strategy:
-    1. Resolve each domain via first available UDP DNS server
-    2. Resolve each domain via first available DoH server
-    3. Compare results — if UDP returns IPs that DoH doesn't, flag as fake
-    4. Detect stub IPs (same IP appearing across multiple unrelated base domains)
+    Порядок: резолв (параллельно по доменам) → поиск заглушек по всему набору →
+    проверка сертификата только для доменов, где адреса разошлись.
     """
     if domains is None:
         domains = DNS_CHECK_DOMAINS
@@ -168,117 +238,185 @@ def check_dns_integrity(
         except Exception:
             return False
 
+    if not domains or _is_cancelled():
+        return []
+
+    if callback:
+        callback(f"DNS integrity: резолвим {len(domains)} доменов (UDP + DoH)")
+
+    resolved = _resolve_all(domains, parallel=parallel, cancelled=cancelled)
+    if _is_cancelled():
+        return []
+
+    stub_ips = _detect_stub_ips({d: ips for d, (ips, _) in resolved.items()}, len(domains))
+
+    if callback:
+        callback("DNS integrity: проверяем сертификаты спорных адресов")
+
+    results = _judge_all(domains, resolved, stub_ips, parallel=parallel, cancelled=cancelled)
+
     if callback and not _is_cancelled():
-        callback("DNS integrity: resolving via UDP...")
+        fake = sum(1 for item in results if item.verdict == DnsVerdict.FAKE)
+        unknown = sum(1 for item in results if item.verdict == DnsVerdict.INCONCLUSIVE)
+        callback(
+            f"DNS integrity: {len(results) - fake - unknown} OK, "
+            f"{fake} подмена, {unknown} без вывода"
+        )
 
-    # Phase 1: UDP DNS
-    udp_results: dict[str, list[str]] = {}
-    for domain in domains:
-        if _is_cancelled():
-            break
-        ips = []
-        for server in DNS_UDP_SERVERS[:2]:  # Use first 2 servers
-            if _is_cancelled():
+    return results
+
+
+def _resolve_all(
+    domains: list[str],
+    *,
+    parallel: int,
+    cancelled: Callable[[], bool] | None,
+) -> dict[str, tuple[list[str], list[str]]]:
+    """Резолвит все домены параллельно: домен → (udp_ips, doh_ips)."""
+
+    def _resolve_one(domain: str) -> tuple[str, tuple[list[str], list[str]]]:
+        udp_ips: list[str] = []
+        for server in DNS_UDP_SERVERS[:_SERVERS_PER_KIND]:
+            udp_ips = resolve_udp(domain, server)
+            if udp_ips:
                 break
-            ips = _resolve_udp(domain, server)
-            if ips:
+
+        doh_ips: list[str] = []
+        for server in DOH_SERVERS[:_SERVERS_PER_KIND]:
+            doh_ips = resolve_doh(domain, server["url"])
+            if doh_ips:
                 break
-        udp_results[domain] = ips
 
-    if _is_cancelled():
-        return []
+        return domain, (udp_ips, doh_ips)
 
-    if callback:
-        callback("DNS integrity: resolving via DoH...")
+    return _run_pool(domains, _resolve_one, parallel=parallel, cancelled=cancelled)
 
-    # Phase 2: DoH
-    doh_results: dict[str, list[str]] = {}
-    for domain in domains:
-        if _is_cancelled():
-            break
-        ips = []
-        for server in DOH_SERVERS[:2]:
-            if _is_cancelled():
-                break
-            ips = _resolve_doh(domain, server["url"])
-            if ips:
-                break
-        doh_results[domain] = ips
 
-    if _is_cancelled():
-        return []
-
-    if callback:
-        callback("DNS integrity: analyzing results...")
-
-    # Phase 3: Detect stub IPs by diversity of unrelated base domains.
-    # A shared IP on sibling domains (e.g. telegram.org + web.telegram.org) is legitimate.
-    public_suffix_2level = {
-        "co.uk", "org.uk", "ac.uk", "gov.uk",
-        "com.au", "net.au", "org.au",
-        "co.jp", "ne.jp", "or.jp",
-        "com.br", "com.mx", "com.tr", "co.id",
-        "com.ua", "co.kr", "co.in",
-    }
-
-    def _base_domain(domain: str) -> str:
-        host = domain.strip().lower().rstrip(".")
-        if host.startswith("www."):
-            host = host[4:]
-        parts = host.split(".")
-        if len(parts) <= 2:
-            return host
-
-        tail2 = ".".join(parts[-2:])
-        if tail2 in public_suffix_2level and len(parts) >= 3:
-            return ".".join(parts[-3:])
-        return tail2
-
+def _detect_stub_ips(udp_results: dict[str, list[str]], domain_count: int) -> set[str]:
+    """Адреса-заглушки: из известного списка или один IP на несвязанных доменах."""
     ip_to_bases: dict[str, set[str]] = {}
-    ip_counts = Counter()
+    ip_counts: Counter[str] = Counter()
     for domain, ips in udp_results.items():
-        base = _base_domain(domain)
+        base = base_domain(domain)
         for ip in ips:
             ip_counts[ip] += 1
             ip_to_bases.setdefault(ip, set()).add(base)
 
-    required_base_hits = 3 if len(domains) >= 3 else 2
-    stub_ips = {
+    required_hits = 3 if domain_count >= 3 else 2
+    shared = {
         ip
         for ip, bases in ip_to_bases.items()
-        if len(bases) >= required_base_hits and ip_counts[ip] >= required_base_hits
+        if len(bases) >= required_hits and ip_counts[ip] >= required_hits
     }
+    return shared | (set(ip_counts) & KNOWN_BLOCK_IPS)
 
-    # Phase 4: Build results
-    results = []
-    for domain in domains:
-        if _is_cancelled():
-            break
-        udp_ips = udp_results.get(domain, [])
-        doh_ips = doh_results.get(domain, [])
 
-        # Check if UDP result is a known stub
-        domain_stub_ips = [ip for ip in udp_ips if ip in stub_ips]
-        is_stub = bool(domain_stub_ips)
+def _judge_all(
+    domains: list[str],
+    resolved: dict[str, tuple[list[str], list[str]]],
+    stub_ips: set[str],
+    *,
+    parallel: int,
+    cancelled: Callable[[], bool] | None,
+) -> list[DNSIntegrityResult]:
+    def _judge_one(domain: str) -> tuple[str, DNSIntegrityResult]:
+        udp_ips, doh_ips = resolved.get(domain, ([], []))
+        return domain, judge_domain(domain, udp_ips, doh_ips, stub_ips)
 
-        is_comparable = bool(udp_ips and doh_ips)
+    judged = _run_pool(domains, _judge_one, parallel=parallel, cancelled=cancelled)
+    return [judged[domain] for domain in domains if domain in judged]
 
-        # Check consistency (at least one UDP IP should match DoH)
-        if is_comparable:
-            is_consistent = bool(set(udp_ips) & set(doh_ips))
-        elif udp_ips and not doh_ips:
-            is_consistent = True  # DoH unavailable, not enough data to compare
-        else:
-            is_consistent = False
 
-        results.append(DNSIntegrityResult(
-            domain=domain,
-            udp_ips=udp_ips,
-            doh_ips=doh_ips,
-            is_comparable=is_comparable,
-            is_consistent=is_consistent and not is_stub,
-            is_stub=is_stub,
-            stub_ip=domain_stub_ips[0] if domain_stub_ips else None,
-        ))
+def judge_domain(
+    domain: str,
+    udp_ips: list[str],
+    doh_ips: list[str],
+    stub_ips: set[str],
+    *,
+    verify: Callable[[str, str], bool | None] = verify_certificate,
+) -> DNSIntegrityResult:
+    """Вердикт по одному домену. Сеть трогается только при расхождении адресов."""
+    result = DNSIntegrityResult(
+        domain=domain,
+        udp_ips=list(udp_ips),
+        doh_ips=list(doh_ips),
+        is_comparable=bool(udp_ips and doh_ips),
+    )
 
-    return results
+    domain_stubs = [ip for ip in udp_ips if ip in stub_ips]
+    if domain_stubs:
+        result.is_stub = True
+        result.stub_ip = domain_stubs[0]
+        result.verdict = DnsVerdict.FAKE
+        result.is_consistent = False
+        result.evidence = f"адрес-заглушка {domain_stubs[0]}"
+        return result
+
+    if not udp_ips:
+        result.verdict = DnsVerdict.INCONCLUSIVE
+        result.is_consistent = False
+        result.evidence = "системный DNS не ответил"
+        return result
+
+    if doh_ips and (set(udp_ips) & set(doh_ips)):
+        result.verdict = DnsVerdict.OK
+        result.evidence = "адреса совпадают с DoH"
+        return result
+
+    # Адреса разошлись (или сравнивать не с чем) — спрашиваем сертификат.
+    udp_verdict = verify(domain, udp_ips[0])
+    if udp_verdict is True:
+        result.verdict = DnsVerdict.OK
+        result.evidence = (
+            "адреса отличаются от DoH, но сертификат валиден (anycast/geo-DNS)"
+            if doh_ips else "сертификат на адресе системного DNS валиден"
+        )
+        return result
+
+    if udp_verdict is None:
+        result.verdict = DnsVerdict.INCONCLUSIVE
+        result.is_consistent = False
+        result.evidence = "сертификат проверить не удалось — канал недоступен"
+        return result
+
+    # Сертификат невалиден. Если и на адресе от DoH он невалиден — проблема в
+    # канале (MITM/перехват), а не в DNS: вывода про подмену не делаем.
+    if doh_ips and verify(domain, doh_ips[0]) is not True:
+        result.verdict = DnsVerdict.INCONCLUSIVE
+        result.is_consistent = False
+        result.evidence = "сертификат невалиден на обоих адресах — перехват канала"
+        return result
+
+    result.verdict = DnsVerdict.FAKE
+    result.is_consistent = False
+    result.evidence = "на адресе от провайдера чужой сертификат"
+    return result
+
+
+def _run_pool(
+    items: list[str],
+    worker: Callable[[str], tuple[str, object]],
+    *,
+    parallel: int,
+    cancelled: Callable[[], bool] | None,
+) -> dict:
+    """Прогоняет ``worker`` по элементам в пуле, не мешая отмене."""
+    collected: dict = {}
+    if not items:
+        return collected
+
+    pool = ThreadPoolExecutor(max_workers=max(1, min(parallel, len(items))))
+    try:
+        futures = [pool.submit(worker, item) for item in items]
+        for future in iter_completed(futures, cancelled=cancelled):
+            try:
+                key, value = future.result()
+            except Exception:  # noqa: BLE001 — падение одного домена не рушит фазу
+                logger.debug("DNS integrity worker failed", exc_info=True)
+                continue
+            collected[key] = value
+    finally:
+        # При отмене ждать незавершимые сетевые задачи нельзя.
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    return collected

@@ -14,6 +14,7 @@ class RuntimeEventDispatcher(QObject):
     launch_error = pyqtSignal(str)
     active_preset_content_changed = pyqtSignal(str)
     unexpected_process_exit = pyqtSignal(object)
+    installation_damaged = pyqtSignal(object)
 
 
 @dataclass(slots=True)
@@ -207,6 +208,7 @@ class RuntimeEvents:
     qt_parent: Any = None
     dispatcher: RuntimeEventDispatcher | None = None
     command_port: Any = None
+    repair_port: Any = None
     auto_restart_history: list = field(default_factory=list)
 
     def ensure_dispatcher(self) -> RuntimeEventDispatcher:
@@ -230,6 +232,10 @@ class RuntimeEvents:
             )
             dispatcher.unexpected_process_exit.connect(
                 self.handle_unexpected_process_exit,
+                Qt.ConnectionType.QueuedConnection,
+            )
+            dispatcher.installation_damaged.connect(
+                self.handle_installation_damaged,
                 Qt.ConnectionType.QueuedConnection,
             )
             self.dispatcher = dispatcher
@@ -263,6 +269,25 @@ class RuntimeEvents:
     def publish_unexpected_process_exit(self, resolution) -> None:
         """Передаёт в UI уже готовый результат фоновой диагностики."""
         self.ensure_dispatcher().unexpected_process_exit.emit(resolution)
+
+    def publish_installation_damaged(self, report) -> None:
+        """Сообщает, что поставка не соответствует манифесту.
+
+        Runtime не умеет и не должен уметь чинить установку: решение и
+        исполнение живут в слое приложения, у которого есть updater.
+        """
+        if report is None:
+            return
+        self.ensure_dispatcher().installation_damaged.emit(report)
+
+    def handle_installation_damaged(self, report) -> None:
+        port = self.repair_port
+        if port is None:
+            return
+        try:
+            port.request_repair(report)
+        except Exception:
+            return
 
     def post_runtime_state_sync_after_shutdown(
         self,

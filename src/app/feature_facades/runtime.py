@@ -90,6 +90,14 @@ class RuntimeFeature:
     def configure_notifications(self, *, notify) -> None:
         self.ui_port.configure_notifications(notify=notify)
 
+    def configure_installation_repair(self, *, updater_feature) -> None:
+        from app.feature_facades.installation_repair import build_installation_repair_port
+
+        self.events.repair_port = build_installation_repair_port(
+            updater_feature=updater_feature,
+            ui_port=self.ui_port,
+        )
+
     def init_launch_runtime(self) -> None:
         self.commands.init_launch_runtime()
 

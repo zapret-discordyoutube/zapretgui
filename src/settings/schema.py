@@ -63,6 +63,9 @@ def default_program() -> dict[str, Any]:
         "max_blocked": False,
         "russian_state_media_blocked": False,
         "defender_disabled": False,
+        # Версия прошлого запуска: по её смене видно первый старт после
+        # обновления — именно там нужна полная проверка целостности.
+        "last_seen_version": "",
     }
 
 
@@ -233,6 +236,9 @@ def default_updater() -> dict[str, Any]:
             "vps_block_until": 0,
             "server_stats": {},
         },
+        # Отметки времени попыток восстановления поставки. Ограничивают
+        # переустановку в петле, когда файлы удаляет антивирус.
+        "self_repair": {"attempts": []},
     }
 
 

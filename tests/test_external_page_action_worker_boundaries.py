@@ -117,7 +117,7 @@ class ExternalPageActionWorkerBoundaryTests(unittest.TestCase):
 
         self.assertEqual(worker, ("forum_for_beginners", None))
         self.assertTrue(result.ok)
-        self.assertEqual(opened_urls, ["https://publish.obsidian.md/zapret/Privacy/Zapret/home"])
+        self.assertEqual(opened_urls, ["https://publish.obsidian.md/zapret/Zapret/home"])
 
     def test_support_open_actions_are_queued_while_worker_runs(self) -> None:
         class _Runtime:

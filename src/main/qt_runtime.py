@@ -31,6 +31,23 @@ def _apply_application_icon(app: QApplication) -> str:
     return icon_path
 
 
+GIL_SWITCH_INTERVAL_SEC = 0.001
+
+
+def apply_gui_gil_switch_interval() -> None:
+    """Даёт GUI-потоку чаще перехватывать GIL у фоновых воркеров.
+
+    Дефолтные 5 мс означают, что CPU-bound фоновая загрузка удерживает GIL
+    целыми кадрами: замеры джиттера показали худшие задержки кадра 48–54 мс
+    против 15–22 мс с интервалом 1 мс.
+    """
+    try:
+        if sys.getswitchinterval() > GIL_SWITCH_INTERVAL_SEC:
+            sys.setswitchinterval(GIL_SWITCH_INTERVAL_SEC)
+    except (AttributeError, ValueError):
+        pass
+
+
 def _set_attr_if_exists(name: str, on: bool = True) -> None:
     attr = getattr(Qt.ApplicationAttribute, name, None)
     if attr is None:
@@ -114,6 +131,7 @@ def ensure_qt_runtime() -> QApplication:
 
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     os.environ["QT_API"] = "pyqt6"
+    apply_gui_gil_switch_interval()
     _set_attr_if_exists("AA_EnableHighDpiScaling")
     _set_attr_if_exists("AA_UseHighDpiPixmaps")
 
@@ -123,6 +141,13 @@ def ensure_qt_runtime() -> QApplication:
         "StartupQtRuntimeQApplication",
         f"{(_time.perf_counter() - t_qapp) * 1000:.0f}ms",
     )
+
+    # Дальше по коду фоновые точки входа сверяются с этим потоком: работа,
+    # уехавшая в GUI-поток, обязана быть видна в логе, а не только по
+    # зависшему окну.
+    from ui.ui_thread_guard import mark_gui_thread
+
+    mark_gui_thread()
 
     if _QT_RUNTIME_READY:
         return app
@@ -220,6 +245,23 @@ def application_bootstrap() -> QApplication:
             "StartupQtCrashHandler",
             f"{(_time.perf_counter() - t_crash) * 1000:.0f}ms",
         )
+
+        # Зависание GUI-потока не поднимает исключений, поэтому crash-обработчик
+        # его не видит: без наблюдателя от такого эпизода не остаётся следов.
+        # Отдельный try: диагностика не имеет права ломать запуск приложения.
+        try:
+            from log.hang_watchdog import install_gui_hang_watchdog
+
+            t_hang = _time.perf_counter()
+            install_gui_hang_watchdog(app)
+            emit_startup_metric(
+                "StartupQtHangWatchdog",
+                f"{(_time.perf_counter() - t_hang) * 1000:.0f}ms",
+            )
+        except Exception as hang_exc:
+            from log.log import log
+
+            log(f"Наблюдатель зависаний не запущен: {hang_exc}", "WARNING")
     except Exception as exc:
         ctypes.windll.user32.MessageBoxW(None, f"Ошибка инициализации Qt: {exc}", "Zapret", 0x10)
 

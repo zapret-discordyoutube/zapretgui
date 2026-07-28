@@ -148,6 +148,30 @@ class UpdaterFeature:
             parent=parent,
         )
 
+    def create_installation_repair_worker(
+        self,
+        request_id: int,
+        *,
+        report=None,
+        allow_download: bool = True,
+        parent=None,
+    ):
+        from updater.repair_workers import InstallationRepairWorker
+
+        return InstallationRepairWorker(
+            request_id,
+            repair_installation=self.repair_installation,
+            report=report,
+            allow_download=bool(allow_download),
+            parent=parent,
+        )
+
+    def check_installation_integrity(self, *, deep: bool = False):
+        return self._commands().check_installation_integrity(deep=bool(deep))
+
+    def repair_installation(self, report=None, *, allow_download: bool = True):
+        return self._commands().repair_installation(report, allow_download=bool(allow_download))
+
     @staticmethod
     def create_update_preflight_worker(*, requested_version: str):
         from updater.update_pipeline import UpdatePreflightWorker

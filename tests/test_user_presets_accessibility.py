@@ -491,13 +491,13 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
             _MessageBox.instances[0].buttonLayout.widgets[0].click()
 
         dialog = _MessageBox.instances[0]
-        self.assertNotIn("https://publish.obsidian.md/zapret/Privacy/Zapret2/preset", dialog.body)
+        self.assertNotIn("https://publish.obsidian.md/zapret/Zapret2/preset", dialog.body)
         self.assertEqual(len(dialog.buttonLayout.widgets), 1)
         site_button = dialog.buttonLayout.widgets[0]
         self.assertEqual(site_button.text(), "Открыть сайт с пресетами")
         self.assertEqual(site_button.accessibleName(), "Открыть сайт с пресетами")
 
-        self.assertEqual(opened_urls, [QUrl("https://publish.obsidian.md/zapret/Privacy/Zapret2/preset")])
+        self.assertEqual(opened_urls, [QUrl("https://publish.obsidian.md/zapret/Zapret2/preset")])
 
     def test_create_preset_dialog_has_screen_reader_text(self) -> None:
         dialog = CreatePresetDialog([], self._dialog_parent())
@@ -603,7 +603,7 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
                 self.assertIn("@<config_file>", body)
                 self.assertIn("%AppData%\\ZapretTwoDev\\preset-zapret2.txt", body)
                 self.assertIn("Пресетами можно обмениваться напрямую.", body)
-                self.assertNotIn("https://publish.obsidian.md/zapret/Privacy/Zapret2/preset", body)
+                self.assertNotIn("https://publish.obsidian.md/zapret/Zapret2/preset", body)
                 self.assertIn("прямой запуск", body)
 
     def _assert_accessibility(self, widgets) -> None:

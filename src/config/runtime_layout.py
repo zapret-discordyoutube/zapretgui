@@ -7,10 +7,64 @@ import sys
 
 RUNTIME_DIR_NAME = "_internal"
 RUNTIME_EXE_NAME = "Zapret.exe"
+UPDATE_STATE_VENDOR_DIR = "Zapret"
+UPDATE_STATE_DIR_NAME = "update"
 
 
 class SourceApplicationLaunchForbidden(RuntimeError):
     pass
+
+
+def paths_overlap(first: str | Path, second: str | Path) -> bool:
+    """True, если один путь содержит другой или пути совпадают."""
+    try:
+        first_parts = Path(first).resolve().parts
+        second_parts = Path(second).resolve().parts
+    except (OSError, ValueError):
+        return False
+
+    shared = min(len(first_parts), len(second_parts))
+    if shared == 0:
+        return False
+    return [part.casefold() for part in first_parts[:shared]] == [
+        part.casefold() for part in second_parts[:shared]
+    ]
+
+
+def resolve_update_state_dir(
+    *,
+    channel: str,
+    application_root: str | Path,
+    program_data: str | None,
+    local_app_data: str | None,
+) -> Path:
+    """Каталог состояния обновления за пределами каталога установки.
+
+    Сбойное обновление стирает каталог установки вместе с сохранённым
+    установщиком и логами — именно поэтому после аварии не остаётся ни
+    средства восстановления, ни диагностики. Состояние обновления поэтому
+    живёт снаружи: в ``%ProgramData%``, при его недоступности — в
+    ``%LOCALAPPDATA%``. Прежний каталог внутри установки остаётся последним
+    запасным вариантом, когда обеих системных папок нет.
+    """
+    root = Path(application_root)
+    leaf = (
+        Path(UPDATE_STATE_VENDOR_DIR)
+        / UPDATE_STATE_DIR_NAME
+        / (str(channel or "").strip().lower() or "stable")
+    )
+
+    for base in (program_data, local_app_data):
+        if not str(base or "").strip():
+            continue
+        candidate = Path(base) / leaf
+        # Установка может лежать прямо в %ProgramData%: тогда «внешний»
+        # каталог оказался бы внутри зоны удаления и потерял бы смысл.
+        if paths_overlap(candidate, root):
+            continue
+        return candidate
+
+    return root / "_update_cache"
 
 
 @dataclass(frozen=True, slots=True)

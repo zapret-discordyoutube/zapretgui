@@ -68,6 +68,7 @@ from winws_runtime.health.startup_error_diagnosis import (  # noqa: F401
     _check_file_locked,
     _check_winws_already_running,
     diagnose_startup_error,
+    publish_startup_diagnosis,
 )
 from winws_runtime.health.process_monitor import (  # noqa: F401
     _check_process_running,
@@ -93,5 +94,6 @@ __all__ = [
     "format_winws_exit_diagnosis",
     "execute_windivert_auto_fix",
     "get_last_crash_info",
+    "publish_startup_diagnosis",
     "validate_command_line_length",
 ]

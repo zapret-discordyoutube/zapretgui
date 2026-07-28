@@ -75,6 +75,12 @@ class ApplicationLifecycle:
         from main.window_lifecycle_cleanup import detach_global_error_notifier
 
         detach_global_error_notifier()
+        try:
+            from ui.ui_freeze_watchdog import shutdown_ui_freeze_watchdog
+
+            shutdown_ui_freeze_watchdog()
+        except Exception:
+            pass
         self._window_port.persist_geometry(context="закрытии", level="❌ ERROR")
         self._window_port.persist_sidebar_state(context="закрытии", level="❌ ERROR")
 

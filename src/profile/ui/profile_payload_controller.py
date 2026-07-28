@@ -138,7 +138,22 @@ class ProfilePayloadController:
             return
         if not page._profile_payload_dirty:
             return
+        if self._page_is_hidden():
+            # Пересчёт списка профилей стоит десятки миллисекунд CPU и мешает
+            # GUI прямо в момент переключения. Скрытая страница остаётся dirty
+            # и грузит payload в on_page_activated, когда её действительно
+            # показывают.
+            return
         page._schedule_profiles_payload_request(force=True)
+
+    def _page_is_hidden(self) -> bool:
+        is_visible = getattr(self._page, "isVisible", None)
+        if not callable(is_visible):
+            return False
+        try:
+            return not bool(is_visible())
+        except RuntimeError:
+            return False
 
     def _request_profiles_payload(self, *, force: bool = False) -> None:
         page = self._page

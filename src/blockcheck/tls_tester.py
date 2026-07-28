@@ -5,7 +5,12 @@ import socket
 import ssl
 import time
 
-from blockcheck.config import HTTPS_TIMEOUT
+from blockcheck.config import (
+    DNS_TIMEOUT,
+    HTTPS_CONNECT_TIMEOUT,
+    HTTPS_MAX_ADDRESSES,
+    HTTPS_TIMEOUT,
+)
 from blockcheck.dpi_classifier import classify_connect_error, classify_ssl_error
 from blockcheck.models import SingleTestResult, TestStatus, TestType
 from utils.net_resolve import DEFAULT_DNS_TIMEOUT, DNSTimeoutError, resolve_addrinfo
@@ -69,11 +74,14 @@ def test_https(
         test_type = TestType.TLS_13
 
     start = time.time()
+    deadline = start + timeout
     bytes_read = 0
     family = _normalize_ip_family(ip_family)
 
     try:
-        connect_addrs = _resolve_connect_addrs(host, port, family, dns_timeout=timeout)
+        connect_addrs = _resolve_connect_addrs(
+            host, port, family, dns_timeout=min(timeout, DNS_TIMEOUT),
+        )
     except DNSTimeoutError as e:
         return SingleTestResult(
             target_name=host, test_type=test_type,
@@ -110,12 +118,18 @@ def test_https(
 
     last_exception: Exception | None = None
 
-    for addr_family, sockaddr in connect_addrs:
+    # Бюджет пробы общий на все адреса хоста. Раньше каждый адрес получал полный
+    # таймаут, и хост с четырьмя записями стоил четыре таймаута подряд.
+    for addr_family, sockaddr in connect_addrs[:HTTPS_MAX_ADDRESSES]:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+
         sock = None
         ssock = None
         try:
             sock = socket.socket(addr_family, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
+            sock.settimeout(min(HTTPS_CONNECT_TIMEOUT, remaining))
 
             context = ssl.create_default_context()
             if tls_version == "1.2":
@@ -127,6 +141,9 @@ def test_https(
 
             ssock = context.wrap_socket(sock, server_hostname=host)
             ssock.connect(sockaddr)
+
+            # Хендшейк прошёл — на чтение ответа отдаём остаток бюджета.
+            ssock.settimeout(max(1.0, deadline - time.time()))
 
             actual_tls = ssock.version()
 

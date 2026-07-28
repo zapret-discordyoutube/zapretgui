@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from winws_runtime.health.process_health_check import diagnose_startup_error
+from winws_runtime.health.process_health_check import (
+    diagnose_startup_error,
+    publish_startup_diagnosis,
+)
 from winws_runtime.runtime.preset_launch_service import (
     STARTUP_AUTOSTART_STABLE_WINDOW_SECONDS,
     PresetLaunchService,
@@ -87,6 +90,7 @@ class PresetLaunchStartWorker(QObject):
             self.finished.emit(bool(result.success), "" if result.success else self._last_error_message)
         except Exception as e:
             exe_path = getattr(self.launch_runtime_api, "expected_exe_path", "")
-            diagnosis = diagnose_startup_error(e, exe_path)
-            self._last_error_message = diagnosis.split("\n")[0]
+            self._last_error_message = publish_startup_diagnosis(
+                diagnose_startup_error(e, exe_path)
+            )
             self.finished.emit(False, self._last_error_message)

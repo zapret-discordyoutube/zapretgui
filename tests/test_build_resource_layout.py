@@ -4,6 +4,7 @@ import base64
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,37 @@ PRIVATE_ROOT = PUBLIC_ROOT.parent / "private_zapretgui"
 class BuildResourceLayoutTests(unittest.TestCase):
     def _read_inno_script(self) -> str:
         return (PRIVATE_ROOT / "build_zapret" / "zapret_universal.iss").read_text(encoding="utf-8")
+
+    @staticmethod
+    def _inno_code_routines(iss: str) -> dict[str, str]:
+        """Тела всех подпрограмм секции [Code], склеенные по имени."""
+        code = iss[iss.index("[Code]"):]
+        headers = list(
+            re.finditer(r"^(?:function|procedure)\s+([A-Za-z_]\w*)", code, re.MULTILINE)
+        )
+        routines: dict[str, str] = {}
+        for index, header in enumerate(headers):
+            end = headers[index + 1].start() if index + 1 < len(headers) else len(code)
+            name = header.group(1)
+            routines[name] = routines.get(name, "") + code[header.start():end]
+        return routines
+
+    @classmethod
+    def _inno_routines_reachable_from(cls, iss: str, entry: str) -> dict[str, str]:
+        """Подпрограммы, достижимые по вызовам из entry (включая сам entry)."""
+        routines = cls._inno_code_routines(iss)
+        reached: dict[str, str] = {}
+        pending = [entry]
+        while pending:
+            name = pending.pop()
+            if name in reached or name not in routines:
+                continue
+            body = routines[name]
+            reached[name] = body
+            for called in re.findall(r"\b([A-Za-z_]\w*)\s*[(;,]", body):
+                if called in routines and called not in reached:
+                    pending.append(called)
+        return reached
 
     @staticmethod
     def _release_request(release_model, **overrides):
@@ -742,11 +774,14 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertNotIn("_nuitka_runtime", pipeline)
         self.assertNotIn("_nuitka_runtime", installer)
         self.assertNotIn(r'Source: "{#SOURCEPATH}\Zapret.exe"', installer)
+        # Распаковка идёт рядом с рабочей папкой: {app}\_internal заменяется
+        # переименованием уже после того, как новая версия разложена целиком
+        # (см. tests/test_installer_runtime_swap.py).
         self.assertIn(
-            r'Source: "{#SOURCEPATH}\_internal\*"; DestDir: "{app}\_internal"',
+            r'Source: "{#SOURCEPATH}\_internal\*"; DestDir: "{app}\_internal.new"',
             installer,
         )
-        self.assertIn('Type: filesandordirs; Name: "{app}\\_internal"', installer)
+        self.assertIn('Type: filesandordirs; Name: "{app}\\_internal.new"', installer)
         self.assertIn('Type: files; Name: "{app}\\Zapret.exe"', installer)
         self.assertIn('Type: files; Name: "{app}\\*.dll"', installer)
         self.assertIn('Type: files; Name: "{app}\\*.pyd"', installer)
@@ -1081,6 +1116,13 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     directory = source_root / dir_name
                     directory.mkdir()
                     (directory / "required.dat").write_bytes(b"resource")
+                for exe_name, payload in (
+                    ("winws.exe", b"winws1-binary"),
+                    ("winws2.exe", b"winws2-binary"),
+                    ("WinDivert.dll", b"windivert-dll"),
+                    ("Monkey64.sys", b"windivert-driver"),
+                ):
+                    (source_root / "exe" / exe_name).write_bytes(payload)
                 icon_directory = source_root / "ico"
                 icon_directory.mkdir()
                 (icon_directory / "Zapret2.ico").write_bytes(b"stable-icon")
@@ -1123,6 +1165,80 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 self.assertTrue((stage_root / "profile" / "templates").is_dir())
                 self.assertTrue((stage_root / "json" / "hosts_catalog").is_dir())
                 self.assertTrue((stage_root / "ico" / "windows11_fluent" / "sidebar").is_dir())
+
+                # Манифест целостности едет внутри _internal: установщик
+                # заменяет этот каталог целиком, поэтому у установленной
+                # программы манифест всегда от её собственной версии.
+                from install_integrity import MANIFEST_FILE_NAME, load_manifest
+
+                manifest = load_manifest(stage_root / "_internal")
+                self.assertIsNotNone(manifest)
+                self.assertTrue((stage_root / "_internal" / MANIFEST_FILE_NAME).is_file())
+                manifest_paths = {entry.path for entry in manifest.entries}
+                self.assertIn("exe/winws2.exe", manifest_paths)
+                self.assertIn("exe/winws.exe", manifest_paths)
+                self.assertTrue(
+                    {"exe/winws.exe", "exe/winws2.exe", "exe/WinDivert.dll", "exe/Monkey64.sys"}
+                    <= {entry.path for entry in manifest.critical_entries()}
+                )
+                # Пользовательские данные в манифест не попадают: программа их
+                # правит сама, и расхождение с поставкой там нормально.
+                self.assertFalse(any(path.startswith("presets/") for path in manifest_paths))
+                self.assertFalse(any(path.startswith("lists/") for path in manifest_paths))
+        finally:
+            sys.modules.pop("build_zapret.release_pipeline", None)
+            sys.path[:] = old_path
+
+    def test_installer_stage_refuses_delivery_without_engine(self) -> None:
+        old_path = list(sys.path)
+        sys.path.insert(0, str(PRIVATE_ROOT))
+        try:
+            sys.modules.pop("build_zapret.release_pipeline", None)
+            from build_zapret import release_model, release_pipeline
+
+            builder = release_pipeline.ReleasePipeline(
+                self._release_request(release_model),
+                log=Mock(),
+            )
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_root = Path(temp_dir)
+                source_root = temp_root / "source"
+                runtime_root = temp_root / "runtime"
+                stage_parent = temp_root / "stage"
+                source_root.mkdir()
+                runtime_root.mkdir()
+                (runtime_root / "Zapret.exe").write_bytes(b"exe")
+                for dir_name in (
+                    "bin",
+                    "exe",
+                    "json",
+                    "lists",
+                    "lua",
+                    "sos",
+                    "windivert.filter",
+                    "themes",
+                ):
+                    directory = source_root / dir_name
+                    directory.mkdir()
+                    (directory / "required.dat").write_bytes(b"resource")
+                # Каталог exe непустой, но движка в нём нет: именно так
+                # выглядит сборка, у которой антивирус забрал winws2.exe.
+                (source_root / "exe" / "winws.exe").write_bytes(b"winws1-binary")
+                (source_root / "exe" / "WinDivert.dll").write_bytes(b"windivert-dll")
+                (source_root / "exe" / "Monkey64.sys").write_bytes(b"windivert-driver")
+                icon_directory = source_root / "ico"
+                icon_directory.mkdir()
+                (icon_directory / "Zapret2.ico").write_bytes(b"stable-icon")
+                (icon_directory / "ZapretDevLogo4.ico").write_bytes(b"dev-icon")
+
+                with (
+                    patch.object(release_pipeline, "DIST_DIR", source_root),
+                    patch.object(release_pipeline, "DIST_RUNTIME_DIR", runtime_root),
+                    patch.object(release_pipeline, "STAGE_DIR", stage_parent),
+                    self.assertRaisesRegex(FileNotFoundError, "winws2.exe"),
+                ):
+                    builder.prepare_installer_stage()
         finally:
             sys.modules.pop("build_zapret.release_pipeline", None)
             sys.path[:] = old_path
@@ -1515,7 +1631,11 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertNotIn("'/VERYSILENT'", auto_update)
         self.assertNotIn("'/NORESTART'", auto_update)
         self.assertIn('"/AUTOUPDATE",', update_pipeline)
-        self.assertIn('"/VERYSILENT",', update_pipeline)
+        # /SUPPRESSMSGBOXES означает ответ Abort в ситуациях Abort/Retry:
+        # с ним сбой распаковки проходил молча, без единого сообщения.
+        self.assertIn('"/SILENT",', update_pipeline)
+        self.assertNotIn('"/VERYSILENT",', update_pipeline)
+        self.assertNotIn('"/SUPPRESSMSGBOXES",', update_pipeline)
         self.assertNotIn('"/RESTARTAPPLICATIONS",', update_pipeline)
         self.assertIn('f"/DIR={APPLICATION_PATHS.root}"', update_pipeline)
         self.assertIn('f"/LOG={setup_log}"', update_pipeline)
@@ -1542,13 +1662,16 @@ class BuildResourceLayoutTests(unittest.TestCase):
     def test_inno_stops_only_processes_from_the_selected_installation(self) -> None:
         iss = self._read_inno_script()
 
-        self.assertIn("function StopInstallRootProcesses(const Root: string): Boolean;", iss)
+        self.assertIn(
+            "function StopInstallRootProcesses(const Root, ExcludeExe: string): Boolean;",
+            iss,
+        )
         self.assertIn("function StopRelocationInstallProcesses: Boolean;", iss)
         process_start = iss.index("function StopInstallRootProcesses")
         process_end = iss.index("function StopRelocationInstallProcesses", process_start)
         process_stop = iss[process_start:process_end]
         self.assertIn("RootPrefix := AddBackslash(NormalizedRoot);", process_stop)
-        self.assertIn("SourceInstaller := NormalizeInstallRoot(ExpandConstant('{srcexe}'));", process_stop)
+        self.assertIn("SourceInstaller := NormalizeInstallRoot(ExcludeExe);", process_stop)
         self.assertIn("if IsSharedInstallRoot(NormalizedRoot) then", process_stop)
         self.assertIn("NormalizedRoot + '\\Zapret.exe'", process_stop)
         self.assertIn("NormalizedRoot + '\\_internal\\Zapret.exe'", process_stop)
@@ -1589,12 +1712,55 @@ class BuildResourceLayoutTests(unittest.TestCase):
         uninstall = iss[uninstall_start:uninstall_end]
         self.assertIn("PrepareApplicationUninstall(AppRoot);", uninstall)
         self.assertIn("procedure PrepareApplicationUninstall(const AppRoot: string);", iss)
-        self.assertIn("StopInstallRootProcesses(AppRoot);", iss)
+        self.assertIn("StopInstallRootProcesses(AppRoot, '');", iss)
         self.assertIn("StopApplicationServices(AppRoot, '');", iss)
         self.assertIn("StopAndDeleteServiceForRoots('ZapretTelegramProxy', AppRoot, '');", iss)
         self.assertIn("function RemoveGuiAutostartTaskIfOwned(const AppRoot: string): Boolean;", iss)
         self.assertIn("Folder.DeleteTask('ZapretGUI Autostart', 0);", iss)
         self.assertIn("function RemoveAllUserShortcutsForUninstall(", iss)
+
+    def test_inno_uninstall_path_avoids_setup_only_api(self) -> None:
+        """Setup-only константы и API мастера роняют деинсталлятор.
+
+        ExpandConstant('{srcexe}') в StopInstallRootProcesses срывал удаление
+        с "Cannot evaluate "srcexe" constant during Uninstall", поэтому
+        проверяется вся цепочка вызовов из CurUninstallStepChanged.
+        """
+        iss = self._read_inno_script()
+        reachable = self._inno_routines_reachable_from(iss, "CurUninstallStepChanged")
+
+        for expected in (
+            "PrepareApplicationUninstall",
+            "StopInstallRootProcesses",
+            "StopApplicationServices",
+            "RemoveGuiAutostartTaskIfOwned",
+            "RemoveAllUserShortcutsForUninstall",
+        ):
+            self.assertIn(expected, reachable)
+
+        setup_only_constant = re.compile(r"ExpandConstant\('\{src(exe)?[}\\]")
+        setup_only_api = re.compile(
+            r"\bWizard(DirValue|Silent|Form|IsTaskSelected|IsComponentSelected)\b"
+        )
+        for name, body in sorted(reachable.items()):
+            self.assertIsNone(
+                setup_only_constant.search(body),
+                f"{name} раскрывает setup-only константу в деинсталляторе",
+            )
+            self.assertIsNone(
+                setup_only_api.search(body),
+                f"{name} использует setup-only API мастера в деинсталляторе",
+            )
+
+    def test_inno_uninstall_cleanup_failure_never_blocks_removal(self) -> None:
+        iss = self._read_inno_script()
+        prepare_start = iss.index("procedure PrepareApplicationUninstall(")
+        prepare_end = iss.index("function InitializeSetup: Boolean;", prepare_start)
+        prepare = iss[prepare_start:prepare_end]
+
+        self.assertIn("Uninstall preparation failed, continuing removal: ", prepare)
+        self.assertLess(prepare.index("try"), prepare.index("StopInstallRootProcesses"))
+        self.assertLess(prepare.index("StopAndDeleteServiceForRoots"), prepare.index("except"))
 
     def test_inno_reads_all_required_resources_only_from_prepared_stage(self) -> None:
         iss = self._read_inno_script()
