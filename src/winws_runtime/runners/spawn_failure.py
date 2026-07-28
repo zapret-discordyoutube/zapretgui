@@ -20,6 +20,7 @@ from winws_runtime.health.windivert_diagnostics import (
     _ERROR_SERVICE_DEPENDENCY_FAIL,
     _ERROR_SERVICE_DISABLED,
     _ERROR_SERVICE_DOES_NOT_EXIST,
+    _FWP_E_IN_USE,
 )
 from winws_runtime.health.winws_output import has_diagnostic_output
 
@@ -30,12 +31,17 @@ from winws_runtime.health.winws_output import has_diagnostic_output
 STATUS_DLL_INIT_FAILED = 0xC0000142
 
 # ERROR_INVALID_BLOCK — stale WinDivert state from a previous instance.
-_WINDIVERT_CONFLICT_EXIT_CODES = frozenset({9})
+# FWP_E_IN_USE — WFP-объекты прошлого экземпляра ещё удерживают драйвер: тоже
+# остаточное состояние, которое лечится тяжёлой очисткой, а не действием
+# пользователя.
+_WINDIVERT_CONFLICT_EXIT_CODES = frozenset({9, _FWP_E_IN_USE})
 
 _WINDIVERT_CONFLICT_SIGNATURES = (
     "guid or luid already exists",
     "object with that guid",
     "already running with the same filter",
+    # FWP_E_IN_USE: winws2 обрезает код завершения, поэтому опознаём по тексту.
+    "referenced by other objects",
 )
 
 # Errors that require user action (Secure Boot, AV, disabled service, ...)

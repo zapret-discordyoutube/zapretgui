@@ -23,6 +23,7 @@ from winws_runtime.health.winws_output import (
 from winws_runtime.health.windivert_diagnostics import (
     WINDIVERT_ERROR_TABLE,
     _ERROR_ACCESS_DENIED,
+    _FWP_E_IN_USE,
     _ERROR_BAD_PATHNAME,
     _ERROR_DRIVER_BLOCKED,
     _ERROR_DRIVER_FAILED_PRIOR_UNLOAD,
@@ -35,6 +36,8 @@ from winws_runtime.health.windivert_diagnostics import (
     _ERROR_SERVICE_DISABLED,
     _ERROR_SERVICE_DOES_NOT_EXIST,
     _WINDIVERT_DRIVER_SERVICE_NAMES,
+    describe_windivert_conflict_hint,
+    format_windows_error_code,
 )
 
 
@@ -47,6 +50,10 @@ class WinDivertDiagnosis:
     severity: str = "critical"        # "critical" | "warning"
     exit_code: int = 0                # Original exit code
     win32_error: Optional[int] = None # Mapped Win32 error (may differ from exit_code)
+    # True, когда win32_error не измерен, а восстановлен эвристикой из
+    # усечённого кода завершения (34 → 1058). Такой код и построенная на нём
+    # причина обязаны показываться пользователю как предположение.
+    win32_error_inferred: bool = False
 
 
 def format_winws_exit_diagnosis(
@@ -60,10 +67,16 @@ def format_winws_exit_diagnosis(
     WinDivert возвращает 1058, а ``winws2.exe`` завершается с кодом 34. Поэтому
     пользователю важно показать оба значения и не подменять причину первой
     служебной строкой вывода ``winws``.
+
+    Измеренное и предположенное разделены: если Win32-код не получен от
+    процесса, а восстановлен эвристикой (``win32_error_inferred``), он
+    показывается как предположение и стоит после фактического кода завершения,
+    а причина подаётся как вероятная, а не как установленная.
     """
     executable = str(exe_name or "winws").strip() or "winws"
     cause = str(getattr(diagnosis, "cause", "") or "").strip().rstrip(".")
     solution = str(getattr(diagnosis, "solution", "") or "").strip().rstrip(".")
+    inferred = bool(getattr(diagnosis, "win32_error_inferred", False))
 
     try:
         exit_code = int(getattr(diagnosis, "exit_code", 0))
@@ -77,17 +90,25 @@ def format_winws_exit_diagnosis(
 
     code_parts: list[str] = []
     if win32_error is not None:
+        win32_text = format_windows_error_code(win32_error)
         if exit_code and exit_code != win32_error:
-            code_parts.append(f"код ошибки Windows {win32_error}")
-            code_parts.append(f"код завершения процесса {exit_code}")
+            exit_text = format_windows_error_code(exit_code)
+            if inferred:
+                # Измеренный факт первым, восстановленный код — как догадка.
+                code_parts.append(f"код завершения процесса {exit_text}")
+                code_parts.append(f"предположительно код ошибки Windows {win32_text}")
+            else:
+                code_parts.append(f"код ошибки Windows {win32_text}")
+                code_parts.append(f"код завершения процесса {exit_text}")
         else:
-            code_parts.append(f"код ошибки {win32_error}")
+            code_parts.append(f"код ошибки {win32_text}")
     elif exit_code:
-        code_parts.append(f"код завершения процесса {exit_code}")
+        code_parts.append(f"код завершения процесса {format_windows_error_code(exit_code)}")
 
     message = f"{executable} не запустился"
     if cause:
-        message = f"{message}. Найдена причина: {cause}"
+        cause_label = "Вероятная причина" if inferred else "Найдена причина"
+        message = f"{message}. {cause_label}: {cause}"
     if code_parts:
         message = f"{message} ({'; '.join(code_parts)})"
     if solution:
@@ -123,6 +144,9 @@ _STDERR_TO_WIN32: List[Tuple[str, int]] = [
     ("driver blocked", _ERROR_DRIVER_BLOCKED),
     ("blocked from loading", _ERROR_DRIVER_BLOCKED),
     ("driver failed prior unload", _ERROR_DRIVER_FAILED_PRIOR_UNLOAD),
+    # FWP_E_IN_USE: winws2 печатает текст ошибки, а кодом завершения отдаёт
+    # усечённое значение, по которому этот случай не опознать.
+    ("referenced by other objects", _FWP_E_IN_USE),
     ("bad pathname", _ERROR_BAD_PATHNAME),
     ("service does not exist", _ERROR_SERVICE_DOES_NOT_EXIST),
     ("dependency service", _ERROR_SERVICE_DEPENDENCY_FAIL),
@@ -151,6 +175,7 @@ def diagnose_winws_exit(exit_code: int, stderr: str = "") -> Optional[WinDivertD
 
     # 1. Resolve the real Win32 error from stderr text (more reliable)
     win32_error = exit_code
+    win32_error_inferred = False
     for pattern, code in _STDERR_TO_WIN32:
         if pattern in stderr_lower:
             win32_error = code
@@ -161,8 +186,11 @@ def diagnose_winws_exit(exit_code: int, stderr: str = "") -> Optional[WinDivertD
     # stderr in GUI launch mode. Treat that as the same driver-service failure.
     # "Без stderr" здесь означает "без диагностики": служебный баннер версии
     # winws2 печатает всегда, и раньше он один ломал эту ветку.
+    # Это единственная ветка, где Win32-код не измерен, а угадан, поэтому она
+    # помечает диагноз как предположительный.
     if win32_error == 34 and not has_diagnostic_output(stderr):
         win32_error = _ERROR_SERVICE_DISABLED
+        win32_error_inferred = True
 
     # 2. Dispatch to specific handlers
     handler = _EXIT_CODE_HANDLERS.get(win32_error)
@@ -170,17 +198,19 @@ def diagnose_winws_exit(exit_code: int, stderr: str = "") -> Optional[WinDivertD
         diag = handler(exit_code, stderr)
         diag.exit_code = exit_code
         diag.win32_error = win32_error
+        diag.win32_error_inferred = win32_error_inferred
         return diag
 
     # 3. Fallback: generic WinDivert error
     if "windivert" in stderr_lower or "error opening filter" in stderr_lower:
         first_line = _extract_relevant_error_line(stderr)[:200]
         return WinDivertDiagnosis(
-            cause=f"Ошибка WinDivert (код {exit_code})",
+            cause=f"Ошибка WinDivert (код {format_windows_error_code(exit_code)})",
             solution=first_line or "Перезагрузите компьютер и попробуйте снова",
             severity="critical",
             exit_code=exit_code,
             win32_error=win32_error,
+            win32_error_inferred=win32_error_inferred,
         )
 
     return None
@@ -344,6 +374,19 @@ def _handle_process_aborted(exit_code: int, stderr: str) -> WinDivertDiagnosis:
     return _diagnosis_from_table(_ERROR_PROCESS_ABORTED)
 
 
+def _handle_fwp_in_use(exit_code: int, stderr: str) -> WinDivertDiagnosis:
+    """FWP_E_IN_USE — WinDivert держат остатки прошлого запуска или чужая программа.
+
+    Базовый текст говорит «закройте другие программы», а подсказка о конфликте
+    называет виновника по имени, если его удалось найти.
+    """
+    diagnosis = _diagnosis_from_table(_FWP_E_IN_USE)
+    hint = describe_windivert_conflict_hint()
+    if hint:
+        diagnosis.solution = f"{hint}. {diagnosis.solution}"
+    return diagnosis
+
+
 # Handler dispatch table
 _EXIT_CODE_HANDLERS = {
     _ERROR_SERVICE_DISABLED: _handle_service_disabled,
@@ -358,6 +401,7 @@ _EXIT_CODE_HANDLERS = {
     _ERROR_INVALID_PARAMETER: _handle_invalid_parameter,
     _ERROR_BAD_PATHNAME: _handle_bad_pathname,
     _ERROR_PROCESS_ABORTED: _handle_process_aborted,
+    _FWP_E_IN_USE: _handle_fwp_in_use,
 }
 
 
@@ -396,30 +440,7 @@ def _probe_service_disabled_cause() -> Tuple[str, str, Optional[str]]:
             "cleanup_driver",
         )
 
-    # Check 4: Driver installed but not yet ready after cleanup/restart.
-    try:
-        from winws_runtime.runtime.system_ops import probe_windivert_state_runtime
-
-        probe = probe_windivert_state_runtime()
-        probe_code_suffix = (
-            f" (код {int(probe.error_code)})" if probe.error_code is not None else ""
-        )
-        if probe.installed and not probe.ready:
-            return (
-                f"WinDivert ещё не готов после предыдущего запуска или очистки{probe_code_suffix}",
-                "Подождите пару секунд и попробуйте снова. Если повторяется — перезапустите программу или ПК",
-                None,
-            )
-        if not probe.installed and not probe.ready:
-            return (
-                f"WinDivert ещё не установился или не готов к открытию фильтра{probe_code_suffix}",
-                "Подождите пару секунд и попробуйте снова. Если повторяется — перезапустите программу или проверьте файлы WinDivert",
-                None,
-            )
-    except Exception:
-        pass
-
-    # Check 5: Kaspersky after a real WinDivert start failure.
+    # Check 4: Kaspersky after a real WinDivert start failure.
     try:
         from winws_runtime.health.launch_conflicts import build_launch_conflict_advice
 
@@ -430,7 +451,7 @@ def _probe_service_disabled_cause() -> Tuple[str, str, Optional[str]]:
     except Exception:
         pass
 
-    # Check 6: Antivirus
+    # Check 5: Antivirus
     av = _detect_active_antivirus()
     if av:
         return (
@@ -439,7 +460,7 @@ def _probe_service_disabled_cause() -> Tuple[str, str, Optional[str]]:
             None,
         )
 
-    # Check 7: Network adapters. This check must be late because Win32 1058
+    # Check 6: Network adapters. This check must be late because Win32 1058
     # is a generic service-disabled error and otherwise easily turns into a
     # ложный диагноз про адаптеры.
     if not _check_network_adapters():
@@ -448,6 +469,32 @@ def _probe_service_disabled_cause() -> Tuple[str, str, Optional[str]]:
             "Включите хотя бы один сетевой адаптер в системе и повторите запуск",
             "enable_adapters",
         )
+
+    # Check 7: драйвер зарегистрирован, но фильтр открыть нельзя.
+    #
+    # Проверка стоит последней намеренно. Probe выполняется уже после смерти
+    # winws2 и с флагом NO_INSTALL, а WinDivert по умолчанию снимает свою
+    # службу при закрытии последнего дескриптора. Поэтому "службы нет"
+    # (ERROR_SERVICE_DOES_NOT_EXIST) — это обычное состояние покоя, а не
+    # причина отказа: раньше эта ветка стояла четвёртой, срабатывала почти на
+    # каждом падении 34/1058 и глушила проверки Kaspersky/антивируса/адаптеров.
+    # Диагностическую ценность имеет только обратный случай: служба есть, а
+    # NETWORK layer всё равно не открывается.
+    try:
+        from winws_runtime.runtime.system_ops import probe_windivert_state_runtime
+
+        probe = probe_windivert_state_runtime()
+        if probe.installed and not probe.ready:
+            probe_code_suffix = (
+                f" (код {int(probe.error_code)})" if probe.error_code is not None else ""
+            )
+            return (
+                f"WinDivert ещё не готов после предыдущего запуска или очистки{probe_code_suffix}",
+                "Подождите пару секунд и попробуйте снова. Если повторяется — перезапустите программу или ПК",
+                None,
+            )
+    except Exception:
+        pass
 
     # Fallback: базовый текст 1058 из единой таблицы.
     record = WINDIVERT_ERROR_TABLE[_ERROR_SERVICE_DISABLED]

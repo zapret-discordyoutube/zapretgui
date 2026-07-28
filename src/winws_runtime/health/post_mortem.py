@@ -16,6 +16,7 @@ from winws_runtime.health.silent_exit_probe import (
     format_silent_exit_message,
     probe_silent_exit,
 )
+from winws_runtime.health.windivert_diagnostics import format_windows_error_code
 from winws_runtime.health.winws_output import relevant_error_line
 from winws_runtime.runners.spawn_failure import (
     SpawnFailureKind,
@@ -55,10 +56,8 @@ def _first_relevant_output_line(output: str) -> str:
 
 
 def _format_exit_code(exit_code: int) -> str:
-    code = int(exit_code)
-    if code < 0 or code > 0xFFFF:
-        return f"{code} / 0x{code & 0xFFFFFFFF:08X}"
-    return str(code)
+    """Единый формат кода Windows (см. windivert_diagnostics)."""
+    return format_windows_error_code(exit_code)
 
 
 def diagnose_unexpected_winws_exit(

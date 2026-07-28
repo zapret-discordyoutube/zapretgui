@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 
 from PyQt6.QtCore import Q_ARG, QMetaObject, QObject, Qt, QTimer, pyqtSlot
@@ -13,6 +14,14 @@ from ui.window_notification_actions import WindowNotificationActionHandler, Wind
 
 
 GLOBAL_ERROR_DEDUPE_WINDOW_MS = 15000
+
+# Источник-«приёмник всего»: сюда попадает любая ERROR-строка лога, в том числе
+# та, которую специализированный канал уже показал своим уведомлением.
+GLOBAL_LOGGER_SOURCE = "global_logger"
+
+# Служебные префиксы в начале текста: "[ERROR] ", "[AUTOFIX:cleanup_driver]".
+# Ограничение по длине не даёт съесть осмысленный текст в скобках.
+_SERVICE_PREFIX_RE = re.compile(r"^\[[^\[\]]{1,32}\]\s*")
 
 
 class WindowNotificationCenter(QObject):
@@ -49,6 +58,7 @@ class WindowNotificationCenter(QObject):
         self._startup_notification_timer.setSingleShot(True)
         self._startup_notification_timer.timeout.connect(self.flush_startup_notification_queue)
         self._recent_signatures: dict[str, float] = {}
+        self._recent_content_signatures: dict[str, float] = {}
         self._action_handler = WindowNotificationActionHandler(
             notify=self.notify,
             runtime_actions=runtime_actions,
@@ -82,7 +92,7 @@ class WindowNotificationCenter(QObject):
                 level="error",
                 title="Ошибка",
                 content=text,
-                source="global_logger",
+                source=GLOBAL_LOGGER_SOURCE,
                 presentation="infobar",
                 queue="immediate",
                 duration=10000,
@@ -93,10 +103,17 @@ class WindowNotificationCenter(QObject):
 
     @staticmethod
     def _strip_log_level_prefix(text: str) -> str:
+        """Снимает служебные префиксы вида "[ERROR] " и "[AUTOFIX:action]".
+
+        Их может быть несколько подряд: логгер добавляет уровень поверх текста,
+        который уже нёс маркер автолечения.
+        """
         stripped = str(text or "").strip()
-        if stripped.startswith("[") and "]" in stripped:
-            return stripped.split("]", 1)[1].strip()
-        return stripped
+        while True:
+            trimmed = _SERVICE_PREFIX_RE.sub("", stripped, count=1).strip()
+            if trimmed == stripped:
+                return stripped
+            stripped = trimmed
 
     @classmethod
     def _is_handled_global_error_notification(cls, message: str) -> bool:
@@ -933,6 +950,17 @@ class WindowNotificationCenter(QObject):
             "error": "Ошибка",
         }.get(level, "Уведомление")
 
+    @classmethod
+    def _content_dedupe_signature(cls, payload: dict) -> str:
+        """Подпись по одному лишь тексту — общая для всех источников.
+
+        Ключи ``dedupe_key`` включают имя источника, поэтому одна и та же
+        ошибка, пришедшая и от специализированного канала, и от глобального
+        логгера, ими не склеивается и показывается дважды.
+        """
+        text = cls._strip_log_level_prefix(str(payload.get("content") or ""))
+        return " ".join(text.split()).casefold()
+
     def _should_skip_duplicate(self, payload: dict) -> bool:
         self._prune_old_signatures()
 
@@ -959,14 +987,26 @@ class WindowNotificationCenter(QObject):
         if last_ts and (now_ts - last_ts) < (dedupe_window_ms / 1000.0):
             return True
 
+        content_signature = self._content_dedupe_signature(payload)
+        # Проверка по тексту намеренно односторонняя: она гасит только эхо
+        # глобального логгера. Обратное подавление стоило бы пользователю
+        # специализированного уведомления с кнопками (например «Исправить»),
+        # потому что уведомление логгера приходит без них.
+        if content_signature and str(payload.get("source") or "") == GLOBAL_LOGGER_SOURCE:
+            last_content_ts = float(self._recent_content_signatures.get(content_signature, 0.0) or 0.0)
+            if last_content_ts and (now_ts - last_content_ts) < (dedupe_window_ms / 1000.0):
+                return True
+
         self._recent_signatures[signature] = now_ts
+        if content_signature:
+            self._recent_content_signatures[content_signature] = now_ts
         return False
 
     def _prune_old_signatures(self) -> None:
-        if not self._recent_signatures:
-            return
-
         cutoff = time.time() - 30.0
-        stale_keys = [key for key, ts in self._recent_signatures.items() if ts < cutoff]
-        for key in stale_keys:
-            self._recent_signatures.pop(key, None)
+        for registry in (self._recent_signatures, self._recent_content_signatures):
+            if not registry:
+                continue
+            stale_keys = [key for key, ts in registry.items() if ts < cutoff]
+            for key in stale_keys:
+                registry.pop(key, None)
