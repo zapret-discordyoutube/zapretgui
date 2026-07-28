@@ -200,8 +200,18 @@ _AUTO_RESTART_WINDOW_SECONDS = 600.0
 _AUTO_RESTART_MAX_PER_WINDOW = 2
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, weakref_slot=True)
 class RuntimeEvents:
+    """Владелец Qt-диспетчера runtime-событий.
+
+    `weakref_slot` обязателен: методы этого объекта подключаются к сигналам
+    через `QueuedConnection`, а PyQt для такого соединения берёт слабую ссылку
+    на приёмник. У `slots=True` без этого флага нет `__weakref__`, и connect
+    падает `SystemError: ... QMetaObject.Connection returned a result with an
+    exception set` — из-за чего весь launch runtime не поднимался и DPI не
+    стартовал.
+    """
+
     runtime_service: Any
     ui_port: Any = None
     ui_state: Any = None
