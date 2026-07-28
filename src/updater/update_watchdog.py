@@ -39,7 +39,6 @@ GUI_EXIT_TIMEOUT_SECONDS = 60
 # может не быть возможности нажать «ОК» прямо сейчас.
 MESSAGE_TIMEOUT_SECONDS = 600
 
-_DETACHED_PROCESS = 0x00000008
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _SHELL_EXECUTE_MIN_SUCCESS = 32
 
@@ -327,17 +326,26 @@ def _rotate_watchdog_log(log_path: Path) -> None:
         log(f"Не удалось отодвинуть журнал наблюдателя: {exc}", "WARNING")
 
 
-def _spawn_detached(command: Sequence[str]) -> bool:
-    """Запуск от уже полученных прав администратора, без запроса UAC."""
+def _spawn_background(command: Sequence[str]) -> bool:
+    """Запуск от уже полученных прав администратора, без запроса UAC.
+
+    ``DETACHED_PROCESS`` здесь применять нельзя. Windows PowerShell 5.1 при
+    таком запуске может завершиться с кодом 0 ещё до исполнения ``-File``:
+    процесс формально создан, но наблюдатель и установщик не стартуют.
+    ``CREATE_NO_WINDOW`` уже скрывает консоль, а обычный дочерний процесс
+    Windows продолжает жить после закрытия родителя.
+    """
     try:
         subprocess.Popen(
             list(command),
             creationflags=(
-                _DETACHED_PROCESS
-                | _CREATE_NEW_PROCESS_GROUP
+                _CREATE_NEW_PROCESS_GROUP
                 | getattr(subprocess, "CREATE_NO_WINDOW", 0)
             ),
             close_fds=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         return True
     except Exception as exc:
@@ -402,7 +410,7 @@ def launch_update_watchdog(
     script_path: str | Path | None = None,
     log_path: str | Path | None = None,
     is_admin: Callable[[], bool] = _is_admin,
-    spawn_detached: Callable[[Sequence[str]], bool] = _spawn_detached,
+    spawn_background: Callable[[Sequence[str]], bool] = _spawn_background,
     spawn_elevated: Callable[[Sequence[str]], bool] = _spawn_elevated,
     timeout_seconds: float = WATCHDOG_START_TIMEOUT_SECONDS,
     poll_seconds: float = WATCHDOG_START_POLL_SECONDS,
@@ -444,7 +452,7 @@ def launch_update_watchdog(
         state_path=resolved_state_path,
     )
 
-    spawned = spawn_detached(command) if is_admin() else spawn_elevated(command)
+    spawned = spawn_background(command) if is_admin() else spawn_elevated(command)
     if not spawned:
         return False
 

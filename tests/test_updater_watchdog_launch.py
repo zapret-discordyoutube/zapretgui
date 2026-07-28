@@ -145,7 +145,7 @@ class WatchdogLaunchTests(unittest.TestCase):
             "script_path": script_path,
             "log_path": log_path,
             "is_admin": lambda: True,
-            "spawn_detached": Mock(return_value=True),
+            "spawn_background": Mock(return_value=True),
             "spawn_elevated": Mock(return_value=True),
             "timeout_seconds": 1.0,
             "poll_seconds": 0.1,
@@ -164,11 +164,11 @@ class WatchdogLaunchTests(unittest.TestCase):
 
             options, launched = self._launch(
                 temp_dir,
-                spawn_detached=Mock(side_effect=spawn),
+                spawn_background=Mock(side_effect=spawn),
             )
 
             self.assertTrue(launched)
-            options["spawn_detached"].assert_called_once()
+            options["spawn_background"].assert_called_once()
             options["spawn_elevated"].assert_not_called()
 
             stored = read_record(options["state_path"])
@@ -193,16 +193,28 @@ class WatchdogLaunchTests(unittest.TestCase):
 
             self.assertTrue(launched)
             options["spawn_elevated"].assert_called_once()
-            options["spawn_detached"].assert_not_called()
+            options["spawn_background"].assert_not_called()
 
     def test_launch_fails_when_process_cannot_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             _options, launched = self._launch(
                 temp_dir,
-                spawn_detached=Mock(return_value=False),
+                spawn_background=Mock(return_value=False),
             )
 
             self.assertFalse(launched)
+
+    @patch.object(update_watchdog.subprocess, "Popen")
+    def test_background_launch_does_not_use_detached_process(self, popen: Mock) -> None:
+        """DETACHED_PROCESS гасит Windows PowerShell до исполнения -File."""
+        self.assertTrue(update_watchdog._spawn_background(("powershell", "-File", "watchdog.ps1")))
+
+        options = popen.call_args.kwargs
+        self.assertEqual(options["creationflags"] & 0x00000008, 0)
+        self.assertNotEqual(options["creationflags"] & 0x00000200, 0)
+        self.assertIs(options["stdin"], update_watchdog.subprocess.DEVNULL)
+        self.assertIs(options["stdout"], update_watchdog.subprocess.DEVNULL)
+        self.assertIs(options["stderr"], update_watchdog.subprocess.DEVNULL)
 
     def test_launch_fails_when_watchdog_never_reports_for_duty(self) -> None:
         """Молчащий наблюдатель хуже отсутствующего: приложение бы закрылось."""
@@ -211,7 +223,7 @@ class WatchdogLaunchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             _options, launched = self._launch(
                 temp_dir,
-                spawn_detached=Mock(return_value=True),
+                spawn_background=Mock(return_value=True),
                 monotonic=lambda: next(ticks),
             )
 
@@ -226,7 +238,7 @@ class WatchdogLaunchTests(unittest.TestCase):
                 log_path.write_text("наблюдатель запущен", encoding="utf-8")
                 return True
 
-            self._launch(temp_dir, spawn_detached=Mock(side_effect=spawn))
+            self._launch(temp_dir, spawn_background=Mock(side_effect=spawn))
 
             previous = Path(temp_dir) / update_watchdog.PREVIOUS_WATCHDOG_LOG_NAME
             self.assertTrue(previous.is_file())

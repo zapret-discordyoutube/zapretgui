@@ -14,7 +14,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from unittest.mock import patch
 
 from updater import update_watchdog
 
@@ -95,6 +97,47 @@ class WatchdogExecutionTests(unittest.TestCase):
 
     def _stored_state(self) -> dict:
         return json.loads(self.state_path.read_text(encoding="utf-8-sig"))
+
+    def test_background_powershell_reaches_script_body(self) -> None:
+        """Тот же фоновый запуск, который приложение использует перед выходом."""
+        ready_path = self.state_dir / "background-ready.txt"
+        probe_path = self.state_dir / "background-probe.ps1"
+        probe_path.write_text(
+            "param([string]$ReadyPath)\n"
+            "Set-Content -LiteralPath $ReadyPath -Value 'ready' -Encoding UTF8\n",
+            encoding="utf-8-sig",
+        )
+        command = (
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(probe_path),
+            "-ReadyPath",
+            str(ready_path),
+        )
+
+        real_popen = subprocess.Popen
+        processes: list[subprocess.Popen] = []
+
+        def capture_process(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        with patch.object(update_watchdog.subprocess, "Popen", side_effect=capture_process):
+            self.assertTrue(update_watchdog._spawn_background(command))
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline and not ready_path.exists():
+                time.sleep(0.05)
+
+        self.assertTrue(
+            ready_path.exists(),
+            "фоновый PowerShell завершился до исполнения файла наблюдателя",
+        )
+        processes[0].wait(timeout=10)
 
     def test_zero_exit_code_with_expected_version_is_a_success(self) -> None:
         self._write_state(
