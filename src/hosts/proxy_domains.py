@@ -868,6 +868,7 @@ QUICK_SERVICES = [
     ("mdi.robot", "ChatGPT & Sora (OpenAI)", "#10a37f"),
     ("mdi.google", "Gemini AI", "#4285f4"),
     ("fa5s.brain", "Claude", "#cc9b7a"),
+    ("fa5s.route", "OpenRouter", "#6566f1"),
     ("fa5b.microsoft", "Microsoft (Copilot, Designer, Xbox)", "#00bcf2"),
     ("fa5b.twitter", "Grok", "#1da1f2"),
     ("fa5s.robot", "Manus", "#7c3aed"),

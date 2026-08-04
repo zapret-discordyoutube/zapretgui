@@ -647,6 +647,11 @@ class HostsCatalogJsonTests(unittest.TestCase):
                     "domains": [{"host": "chat.openai.com", "ips": {"zapret_dns": "72.56.93.144"}}],
                 },
                 {
+                    "name": "OpenRouter",
+                    "mode": "dns",
+                    "domains": [{"host": "openrouter.ai", "ips": {"zapret_dns": "72.56.93.144"}}],
+                },
+                {
                     "name": "Microsoft (Copilot, Designer, Xbox)",
                     "mode": "dns",
                     "domains": [{"host": "copilot.microsoft.com", "ips": {"zapret_dns": "72.56.93.144"}}],
@@ -715,6 +720,7 @@ class HostsCatalogJsonTests(unittest.TestCase):
 
         rows = {row.service_name: row for group in plan.groups for row in group.rows}
         self.assertEqual(rows["ChatGPT & Sora (OpenAI)"].icon_name, "mdi.robot")
+        self.assertEqual(rows["OpenRouter"].icon_name, "fa5s.route")
         self.assertEqual(rows["Microsoft (Copilot, Designer, Xbox)"].icon_name, "fa5b.microsoft")
         self.assertEqual(rows["Discord"].icon_name, "fa5b.discord")
         self.assertEqual(rows[youtube_name].icon_name, "fa5b.youtube")
@@ -747,6 +753,11 @@ class HostsCatalogJsonTests(unittest.TestCase):
                     "name": "Windsurf",
                     "mode": "dns",
                     "domains": [{"host": "windsurf.com", "ips": {"zapret_dns": "72.56.93.144"}}],
+                },
+                {
+                    "name": "OpenRouter",
+                    "mode": "dns",
+                    "domains": [{"host": "openrouter.ai", "ips": {"zapret_dns": "72.56.93.144"}}],
                 },
                 {
                     "name": "Tailscale",
@@ -784,11 +795,13 @@ class HostsCatalogJsonTests(unittest.TestCase):
         self.assertIn("Meta AI", groups["AI"])
         self.assertIn("Trae.ai", groups["AI"])
         self.assertIn("Windsurf", groups["AI"])
+        self.assertIn("OpenRouter", groups["AI"])
         self.assertIn("Tailscale", groups["Other"])
         self.assertIn("JetBrains", groups["Other"])
         self.assertEqual(groups["AI"]["Meta AI"].icon_name, "fa5b.facebook-f")
         self.assertEqual(groups["AI"]["Trae.ai"].icon_name, "fa5s.code")
         self.assertEqual(groups["AI"]["Windsurf"].icon_name, "fa5s.wind")
+        self.assertEqual(groups["AI"]["OpenRouter"].icon_name, "fa5s.route")
 
     def test_services_catalog_plan_keeps_saved_selection_when_hosts_is_empty(self) -> None:
         from hosts import page_plans

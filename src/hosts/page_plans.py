@@ -620,7 +620,16 @@ def is_ai_service(name: str) -> bool:
     service_name = (name or "").strip().lower()
     return any(
         marker in service_name
-        for marker in ("chatgpt", "openai", "gemini", "claude", "copilot", "grok", "manus")
+        for marker in (
+            "chatgpt",
+            "openai",
+            "gemini",
+            "claude",
+            "copilot",
+            "grok",
+            "manus",
+            "openrouter",
+        )
     ) or service_name in {"meta ai", "trae.ai", "windsurf"}
 
 
