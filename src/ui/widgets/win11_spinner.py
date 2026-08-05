@@ -1,6 +1,6 @@
 """Windows 11 style spinner based on the stock Fluent progress ring."""
 
-from PyQt6.QtCore import QAbstractAnimation
+from PyQt6.QtCore import QAbstractAnimation, QTimer
 from PyQt6.QtGui import QColor
 from qfluentwidgets import IndeterminateProgressRing
 
@@ -14,6 +14,9 @@ class Win11Spinner(IndeterminateProgressRing):
         super().__init__(parent=parent, start=False)
         self._size = max(12, int(size))
         self._running_requested = False
+        self._start_timer = QTimer(self)
+        self._start_timer.setSingleShot(True)
+        self._start_timer.timeout.connect(self._start_animation_after_show)
         self.setFixedSize(self._size, self._size)
         self.setStrokeWidth(2)
         if color is None:
@@ -35,20 +38,23 @@ class Win11Spinner(IndeterminateProgressRing):
         """Запускает анимацию"""
         self._running_requested = True
         self.show()
-        self._start_animation()
+        self._schedule_animation_start()
 
     def stop(self):
         """Останавливает анимацию"""
         self._running_requested = False
+        self._start_timer.stop()
         self._stop_animation()
         self.hide()
 
-    def _animation_is_running(self) -> bool:
-        return self.aniGroup.state() == QAbstractAnimation.State.Running
+    def _schedule_animation_start(self) -> None:
+        if self._running_requested:
+            self._start_timer.start(0)
 
-    def _start_animation(self) -> None:
-        if not self._running_requested or self._animation_is_running():
+    def _start_animation_after_show(self) -> None:
+        if not self._running_requested or not self.isVisible():
             return
+        self._stop_animation()
         super().start()
         self.spanAngle = 90
 
@@ -58,7 +64,9 @@ class Win11Spinner(IndeterminateProgressRing):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
-        self._start_animation()
+        self._schedule_animation_start()
 
     def hideEvent(self, event) -> None:  # noqa: N802
+        self._start_timer.stop()
+        self._stop_animation()
         super().hideEvent(event)
