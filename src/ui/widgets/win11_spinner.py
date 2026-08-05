@@ -8,7 +8,7 @@ from ui.theme import get_theme_tokens
 
 
 class Win11Spinner(IndeterminateProgressRing):
-    """Кольцо ожидания, которое возобновляет анимацию после показа страницы."""
+    """Кольцо ожидания с постоянно видимой вращающейся дугой."""
 
     def __init__(self, size=20, color=None, parent=None):
         super().__init__(parent=parent, start=False)
@@ -27,12 +27,15 @@ class Win11Spinner(IndeterminateProgressRing):
             QColor(0, 0, 0, 30),
             QColor(255, 255, 255, 30),
         )
+        for animation in (self.spanAngleAni1, self.spanAngleAni2):
+            animation.setStartValue(90)
+            animation.setEndValue(90)
 
     def start(self):
         """Запускает анимацию"""
         self._running_requested = True
         self.show()
-        self._start_animation_if_visible()
+        self._start_animation()
 
     def stop(self):
         """Останавливает анимацию"""
@@ -43,10 +46,11 @@ class Win11Spinner(IndeterminateProgressRing):
     def _animation_is_running(self) -> bool:
         return self.aniGroup.state() == QAbstractAnimation.State.Running
 
-    def _start_animation_if_visible(self) -> None:
-        if not self._running_requested or not self.isVisible() or self._animation_is_running():
+    def _start_animation(self) -> None:
+        if not self._running_requested or self._animation_is_running():
             return
         super().start()
+        self.spanAngle = 90
 
     def _stop_animation(self) -> None:
         if self.aniGroup.state() != QAbstractAnimation.State.Stopped:
@@ -54,8 +58,7 @@ class Win11Spinner(IndeterminateProgressRing):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
-        self._start_animation_if_visible()
+        self._start_animation()
 
     def hideEvent(self, event) -> None:  # noqa: N802
-        self._stop_animation()
         super().hideEvent(event)
