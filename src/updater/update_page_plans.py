@@ -380,8 +380,8 @@ def build_update_status_transition_plan(
             state_message="",
             state_elapsed=0.0,
             icon_mode="idle",
-            loading_mode="none",
-            stop_loading_text="",
+            loading_mode="stop",
+            stop_loading_text=tr("page.servers.update.button.recheck", "ПРОВЕРИТЬ СНОВА"),
             check_enabled=True,
         )
 
@@ -394,8 +394,8 @@ def build_update_status_transition_plan(
             state_message="",
             state_elapsed=0.0,
             icon_mode="error",
-            loading_mode="none",
-            stop_loading_text="",
+            loading_mode="stop",
+            stop_loading_text=tr("page.servers.update.button.recheck", "ПРОВЕРИТЬ СНОВА"),
             check_enabled=True,
         )
 
@@ -408,8 +408,8 @@ def build_update_status_transition_plan(
             state_message="",
             state_elapsed=0.0,
             icon_mode="idle",
-            loading_mode="none",
-            stop_loading_text="",
+            loading_mode="stop",
+            stop_loading_text=tr("page.servers.update.button.recheck", "ПРОВЕРИТЬ СНОВА"),
             check_enabled=True,
         )
 
@@ -422,8 +422,8 @@ def build_update_status_transition_plan(
             state_message="",
             state_elapsed=float(elapsed or 0.0),
             icon_mode="idle",
-            loading_mode="none",
-            stop_loading_text="",
+            loading_mode="stop",
+            stop_loading_text=tr("page.servers.update.button.recheck", "ПРОВЕРИТЬ СНОВА"),
             check_enabled=None,
         )
 
@@ -436,8 +436,8 @@ def build_update_status_transition_plan(
             state_message="",
             state_elapsed=0.0,
             icon_mode="idle",
-            loading_mode="none",
-            stop_loading_text="",
+            loading_mode="stop",
+            stop_loading_text=tr("page.servers.update.button.recheck", "ПРОВЕРИТЬ СНОВА"),
             check_enabled=None,
         )
 
@@ -450,8 +450,8 @@ def build_update_status_transition_plan(
             state_message="",
             state_elapsed=0.0,
             icon_mode="idle",
-            loading_mode="none",
-            stop_loading_text="",
+            loading_mode="stop",
+            stop_loading_text=tr("page.servers.update.button.manual", "ПРОВЕРИТЬ ВРУЧНУЮ"),
             check_enabled=None,
         )
 
@@ -463,8 +463,8 @@ def build_update_status_transition_plan(
         state_message="",
         state_elapsed=0.0,
         icon_mode="idle",
-        loading_mode="none",
-        stop_loading_text="",
+        loading_mode="stop",
+        stop_loading_text=tr("page.servers.update.button.check", "Проверить обновления"),
         check_enabled=None,
     )
 

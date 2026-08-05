@@ -5,7 +5,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QAbstractAnimation, QEvent, Qt
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication
 
@@ -115,6 +115,33 @@ class UpdaterUpdateCardAccessibilityTests(unittest.TestCase):
             card.check_btn.property("screenReaderStateText"),
             "Проверить обновления",
         )
+
+    def test_every_terminal_state_stops_and_hides_checking_ring(self) -> None:
+        transitions = (
+            (lambda card: card.show_found_update("21.1.5.36", "GitHub"), "ПРОВЕРИТЬ СНОВА"),
+            (lambda card: card.show_download_error(), "ПРОВЕРИТЬ СНОВА"),
+            (lambda card: card.show_deferred("21.1.5.36"), "ПРОВЕРИТЬ СНОВА"),
+            (lambda card: card.show_checked_ago(5.0), "ПРОВЕРИТЬ СНОВА"),
+            (lambda card: card.show_auto_enabled_hint(), "ПРОВЕРИТЬ СНОВА"),
+            (lambda card: card.show_manual_hint(), "ПРОВЕРИТЬ ВРУЧНУЮ"),
+        )
+
+        for transition, expected_text in transitions:
+            with self.subTest(expected_text=expected_text):
+                card = UpdateStatusCard(language="ru")
+                self.addCleanup(card.deleteLater)
+                card.start_checking()
+                self.assertFalse(card.check_btn._ring.isHidden())
+
+                transition(card)
+
+                self.assertTrue(card.check_btn._ring.isHidden())
+                self.assertEqual(
+                    card.check_btn._ring.aniGroup.state(),
+                    QAbstractAnimation.State.Stopped,
+                )
+                self.assertEqual(card.check_btn.text(), expected_text)
+                self.assertTrue(card.check_btn.isEnabled())
 
 
 if __name__ == "__main__":
