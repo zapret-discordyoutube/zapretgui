@@ -9,7 +9,7 @@ class _Signal:
     def __init__(self) -> None:
         self._callbacks = []
 
-    def connect(self, callback) -> None:
+    def connect(self, callback, *_args) -> None:
         self._callbacks.append(callback)
 
     def emit(self, *args) -> None:

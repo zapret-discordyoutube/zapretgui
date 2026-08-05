@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QThread
+from PyQt6.QtCore import QThread, Qt
 
 from log.log import log
+from ui.ui_thread_guard import build_background_worker_launcher
 
 
 
@@ -21,7 +22,13 @@ def start_worker_thread(
     setattr(owner, worker_attr, worker)
 
     worker.moveToThread(thread)
-    thread.started.connect(worker.run)
+    # В Nuitka обычный AutoConnection уже возвращал тяжёлый run() в GUI-поток.
+    # QThread.started испускается новым потоком, поэтому прямое соединение здесь
+    # гарантирует выполнение worker-а вне интерфейса.
+    thread.started.connect(
+        build_background_worker_launcher(worker, worker.run, "run"),
+        Qt.ConnectionType.DirectConnection,
+    )
 
     progress_signal = getattr(worker, "progress", None)
     if progress_slot is not None and progress_signal is not None:

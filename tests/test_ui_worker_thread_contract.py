@@ -12,6 +12,7 @@ from __future__ import annotations
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 
 
 def _process_events_until(app, predicate, timeout: float = 10.0) -> bool:
@@ -109,6 +110,54 @@ class OneShotWorkerThreadContractTests(unittest.TestCase):
         _process_events_until(app, lambda: not thread.isRunning(), timeout=5.0)
 
 
+class RuntimeWorkerThreadContractTests(unittest.TestCase):
+    def test_runtime_worker_runs_outside_gui_thread(self) -> None:
+        from PyQt6.QtCore import QObject, pyqtSignal
+        from PyQt6.QtWidgets import QApplication
+
+        from winws_runtime.runtime.thread_runtime import start_worker_thread
+
+        app = QApplication.instance() or QApplication([])
+        gui_thread_id = threading.get_ident()
+        observed: dict[str, object] = {}
+
+        class _Worker(QObject):
+            progress = pyqtSignal(str)
+            finished = pyqtSignal(bool, str)
+
+            def run(self) -> None:
+                observed["run_thread_id"] = threading.get_ident()
+                self.progress.emit("Применяем пресет...")
+                self.finished.emit(True, "")
+
+        owner = SimpleNamespace()
+        thread = start_worker_thread(
+            owner,
+            thread_attr="_thread",
+            worker_attr="_worker",
+            worker=_Worker(),
+            progress_slot=lambda _text: observed.setdefault(
+                "progress_thread_id",
+                threading.get_ident(),
+            ),
+            finished_slot=lambda *_args: observed.setdefault(
+                "finished_thread_id",
+                threading.get_ident(),
+            ),
+        )
+
+        expected_events = {
+            "run_thread_id",
+            "progress_thread_id",
+            "finished_thread_id",
+        }
+        self.assertTrue(_process_events_until(app, lambda: expected_events <= set(observed)))
+        self.assertNotEqual(observed["run_thread_id"], gui_thread_id)
+        self.assertEqual(observed["progress_thread_id"], gui_thread_id)
+        self.assertEqual(observed["finished_thread_id"], gui_thread_id)
+        _process_events_until(app, lambda: not thread.isRunning(), timeout=5.0)
+
+
 class WorkerStartWiringTests(unittest.TestCase):
     def test_started_signal_uses_direct_connection(self) -> None:
         # В обычном Python работа уходит в свой поток при любом типе
@@ -122,14 +171,24 @@ class WorkerStartWiringTests(unittest.TestCase):
         source = inspect.getsource(OneShotWorkerRuntime.start_qobject_worker)
 
         self.assertIn("DirectConnection", source)
-        self.assertIn("_build_worker_launcher", source)
+        self.assertIn("build_background_worker_launcher", source)
+
+    def test_runtime_started_signal_uses_direct_connection(self) -> None:
+        import inspect
+
+        from winws_runtime.runtime.thread_runtime import start_worker_thread
+
+        source = inspect.getsource(start_worker_thread)
+
+        self.assertIn("DirectConnection", source)
+        self.assertIn("build_background_worker_launcher", source)
 
     def test_launcher_checks_thread_contract(self) -> None:
         import inspect
 
-        from ui import one_shot_worker_runtime
+        from ui.ui_thread_guard import build_background_worker_launcher
 
-        source = inspect.getsource(one_shot_worker_runtime._build_worker_launcher)
+        source = inspect.getsource(build_background_worker_launcher)
 
         self.assertIn("ensure_background_thread", source)
 

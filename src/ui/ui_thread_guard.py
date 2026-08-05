@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import threading
 
 _gui_thread_id: int | None = None
@@ -73,7 +74,31 @@ def ensure_background_thread(context: str) -> bool:
     return False
 
 
+def build_background_worker_launcher(
+    worker,
+    run_method: Callable[[], object],
+    run_method_name: str = "run",
+) -> Callable[[], None]:
+    """Строит единую проверяемую точку входа фонового worker-а.
+
+    Её нужно подключать к ``QThread.started`` через ``DirectConnection``:
+    сигнал испускается уже новым потоком, поэтому тяжёлый ``run`` гарантированно
+    выполняется там же и не блокирует интерфейс в собранном приложении.
+    """
+    try:
+        label = f"{type(worker).__name__}.{run_method_name}"
+    except Exception:
+        label = str(run_method_name or "worker.run")
+
+    def _launch() -> None:
+        ensure_background_thread(label)
+        run_method()
+
+    return _launch
+
+
 __all__ = [
+    "build_background_worker_launcher",
     "ensure_background_thread",
     "gui_thread_id",
     "is_gui_thread",

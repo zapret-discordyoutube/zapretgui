@@ -5,30 +5,7 @@ from typing import Callable
 from PyQt6.QtCore import QThread, Qt
 
 from ui.background_worker_gate import BackgroundWorkerTicket, background_worker_gate
-from ui.ui_thread_guard import ensure_background_thread
-
-
-def _worker_label(worker, run_method_name: str) -> str:
-    try:
-        return f"{type(worker).__name__}.{run_method_name}"
-    except Exception:
-        return str(run_method_name or "worker.run")
-
-
-def _build_worker_launcher(worker, run_method: Callable[[], object], run_method_name: str):
-    """Точка входа воркера с проверкой потока.
-
-    Замыкание вызывается по DirectConnection из `QThread.started`, то есть уже
-    внутри рабочего потока. Проверка нужна как страховка: если работа всё же
-    оказалась в GUI-потоке, это видно в логе, а не только по зависшему окну.
-    """
-    label = _worker_label(worker, run_method_name)
-
-    def _launch() -> None:
-        ensure_background_thread(label)
-        run_method()
-
-    return _launch
+from ui.ui_thread_guard import build_background_worker_launcher
 
 
 def _verify_worker_affinity(worker, thread: QThread) -> None:
@@ -141,7 +118,7 @@ class OneShotWorkerRuntime:
         # QObject; в собранном приложении этот путь уводил работу обратно в
         # GUI-поток, и окно висело до конца проверки.
         thread.started.connect(
-            _build_worker_launcher(worker, run_method, run_method_name),
+            build_background_worker_launcher(worker, run_method, run_method_name),
             Qt.ConnectionType.DirectConnection,
         )
         if on_loaded is not None and hasattr(worker, "loaded"):
