@@ -1,52 +1,58 @@
 from __future__ import annotations
 
+import os
 import unittest
-from types import SimpleNamespace
-from unittest.mock import Mock
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-class _Timer:
-    def __init__(self, active: bool = False) -> None:
-        self._active = bool(active)
-        self.start_calls: list[int] = []
-        self.stop_calls = 0
-
-    def isActive(self) -> bool:  # noqa: N802
-        return self._active
-
-    def start(self, interval_ms: int) -> None:
-        self.start_calls.append(int(interval_ms))
-        self._active = True
-
-    def stop(self) -> None:
-        self.stop_calls += 1
-        self._active = False
+from PyQt6.QtCore import QAbstractAnimation
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QWidget
+from qfluentwidgets import IndeterminateProgressRing
 
 
 class Win11SpinnerTests(unittest.TestCase):
-    def test_start_skips_restarting_active_timer(self) -> None:
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_spinner_uses_stock_fluent_animation_and_changes_frame(self) -> None:
         from ui.widgets.win11_spinner import Win11Spinner
 
-        timer = _Timer(active=False)
-        spinner = SimpleNamespace(_timer=timer, show=Mock())
+        spinner = Win11Spinner(size=24)
+        self.addCleanup(spinner.deleteLater)
+        spinner.show()
+        spinner.start()
+        initial_frame = (spinner.startAngle, spinner.spanAngle)
 
-        Win11Spinner.start(spinner)
-        Win11Spinner.start(spinner)
+        QTest.qWait(80)
 
-        self.assertEqual(timer.start_calls, [16])
-        self.assertEqual(spinner.show.call_count, 1)
+        self.assertIsInstance(spinner, IndeterminateProgressRing)
+        self.assertEqual(spinner.aniGroup.state(), QAbstractAnimation.State.Running)
+        self.assertNotEqual((spinner.startAngle, spinner.spanAngle), initial_frame)
 
-    def test_stop_skips_stopping_inactive_timer(self) -> None:
+    def test_animation_stops_while_parent_is_hidden_and_resumes_after_show(self) -> None:
         from ui.widgets.win11_spinner import Win11Spinner
 
-        timer = _Timer(active=True)
-        spinner = SimpleNamespace(_timer=timer, hide=Mock())
+        parent = QWidget()
+        spinner = Win11Spinner(size=24, parent=parent)
+        self.addCleanup(parent.deleteLater)
+        parent.show()
+        spinner.start()
+        QTest.qWait(30)
+        self.assertEqual(spinner.aniGroup.state(), QAbstractAnimation.State.Running)
 
-        Win11Spinner.stop(spinner)
-        Win11Spinner.stop(spinner)
+        parent.hide()
+        QApplication.processEvents()
+        self.assertEqual(spinner.aniGroup.state(), QAbstractAnimation.State.Stopped)
 
-        self.assertEqual(timer.stop_calls, 1)
-        self.assertEqual(spinner.hide.call_count, 1)
+        parent.show()
+        QTest.qWait(30)
+        self.assertEqual(spinner.aniGroup.state(), QAbstractAnimation.State.Running)
+
+        spinner.stop()
+        self.assertEqual(spinner.aniGroup.state(), QAbstractAnimation.State.Stopped)
+        self.assertTrue(spinner.isHidden())
 
 
 if __name__ == "__main__":
