@@ -17,9 +17,9 @@ __all__ = ["DNS_EXTRA_DOMAINS", "HTTPS_TARGETS", "PING_TARGETS", "STUN_TARGETS",
 
 # Основные цели HTTPS-проверки: имя для таблицы + адрес.
 #
-# Эфемерных имён вида ``rr5---sn-c0q7lnz7.googlevideo.com`` здесь нет намеренно:
-# это адреса конкретных сессионных серверов YouTube, они регулярно перестают
-# существовать, а несуществующий хост читался диагностикой как блокировка.
+# Для видеотракта YouTube нужны две разные цели: постоянный redirector и
+# настоящий ``rr*`` CDN-хост. Если выбранный CDN-хост перестанет резолвиться,
+# BlockCheck пометит его как непроверяемый, а не как заблокированный.
 HTTPS_TARGETS: tuple[dict[str, str], ...] = (
     # Social / Messaging
     {"name": "Discord", "value": "https://discord.com"},
@@ -31,8 +31,12 @@ HTTPS_TARGETS: tuple[dict[str, str], ...] = (
     {"name": "YouTube", "value": "https://www.youtube.com"},
     {"name": "YouTube Short", "value": "https://youtu.be"},
     {"name": "YT Images", "value": "https://i.ytimg.com"},
+    {
+        "name": "YouTube Video (*.googlevideo.com)",
+        "value": "https://rr2---sn-axq7sn7z.googlevideo.com",
+    },
     # Стабильная точка входа в видеотракт YouTube: имя постоянное, в отличие от
-    # сессионных ``rrN---sn-*`` серверов, на которые оно резолвится.
+    # сессионных ``rrN---sn-*`` серверов.
     {"name": "YT Media", "value": "https://redirector.googlevideo.com"},
     # Search / Cloud
     {"name": "Google", "value": "https://www.google.com"},
