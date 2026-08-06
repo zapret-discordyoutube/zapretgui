@@ -32,6 +32,7 @@ from blockcheck.config import (
     STUN_TIMEOUT,
 )
 from blockcheck.dns_integrity import check_dns_integrity
+from blockcheck.googlevideo_discovery import discover_googlevideo_host
 from blockcheck.hosts import host_candidates, host_of, is_pseudo_target
 from blockcheck.isp_page_detector import check_http_injection, detect_isp_page
 from blockcheck.models import (
@@ -193,9 +194,12 @@ class BlockcheckRunner:
         clear_dns_cache()
 
         report = BlockcheckReport()
-        targets = build_targets_with_user_domains(self._extra_domains)
-
         report.baseline = self._stage_baseline()
+        googlevideo_host = self._discover_googlevideo_host(report.baseline)
+        targets = build_targets_with_user_domains(
+            self._extra_domains,
+            googlevideo_host=googlevideo_host,
+        )
         resolution = self._stage_resolve(targets)
         report.targets = self._stage_probe(report, targets, resolution)
 
@@ -216,6 +220,34 @@ class BlockcheckRunner:
     # ------------------------------------------------------------------
     # Этап 1: опорная точка и резолв
     # ------------------------------------------------------------------
+
+    def _discover_googlevideo_host(self, baseline: NetworkBaseline) -> str | None:
+        """Получает CDN, назначенный YouTube сети текущего пользователя."""
+        if self.should_stop():
+            return None
+        if not baseline.internet_ok:
+            self.cb.on_log("GoogleVideo CDN не ищем: контрольная сеть недоступна")
+            return None
+
+        self.cb.on_log("=== Поиск актуального GoogleVideo CDN ===")
+        remaining = self._remaining()
+        timeout = min(8.0, remaining) if remaining is not None else 8.0
+        if timeout <= 0:
+            return None
+
+        result = discover_googlevideo_host(
+            cancelled=self.should_stop,
+            timeout=timeout,
+        )
+        if result.host:
+            self.cb.on_log(
+                f"GoogleVideo CDN этой сети: {result.host} "
+                f"({result.detail})"
+            )
+            return result.host
+
+        self.cb.on_log(f"GoogleVideo CDN не найден: {result.detail}")
+        return None
 
     def _stage_baseline(self) -> NetworkBaseline:
         if self.should_stop():

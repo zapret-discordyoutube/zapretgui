@@ -18,6 +18,7 @@ from blockcheck.data_lists import (
     TCP_16_20_TARGETS,
 )
 from blockcheck.config import TCP_TARGET_MAX_COUNT, TCP_TARGETS_PER_PROVIDER
+from blockcheck.googlevideo_discovery import normalize_googlevideo_host
 from blockcheck.hosts import host_of, is_pseudo_target
 from config.runtime_layout import APPLICATION_PATHS
 from settings import store as settings_store
@@ -238,9 +239,26 @@ def select_tcp_targets(
 # Default targets
 # ---------------------------------------------------------------------------
 
-def get_default_https_targets() -> list[dict]:
-    """Default HTTPS targets for blockcheck."""
-    return [dict(target) for target in HTTPS_TARGETS]
+def get_default_https_targets(googlevideo_host: str | None = None) -> list[dict]:
+    """HTTPS-цели, включая свежий GoogleVideo CDN только для текущего запуска."""
+    targets = [dict(target) for target in HTTPS_TARGETS]
+    dynamic_host = normalize_googlevideo_host(googlevideo_host)
+    if not dynamic_host:
+        return targets
+
+    dynamic_target = {
+        "name": "YouTube Video (*.googlevideo.com)",
+        "value": f"https://{dynamic_host}",
+    }
+    redirector_index = next(
+        (
+            index for index, target in enumerate(targets)
+            if host_of(target["value"]) == "redirector.googlevideo.com"
+        ),
+        len(targets),
+    )
+    targets.insert(redirector_index, dynamic_target)
+    return targets
 
 
 def get_default_https_targets_domains() -> list[str]:
@@ -262,18 +280,22 @@ def get_default_ping_targets() -> list[dict]:
     return [dict(target) for target in PING_TARGETS]
 
 
-def get_all_default_targets() -> list[dict]:
+def get_all_default_targets(googlevideo_host: str | None = None) -> list[dict]:
     """Get all default targets combined."""
     return (
-        get_default_https_targets()
+        get_default_https_targets(googlevideo_host)
         + get_default_stun_targets()
         + get_default_ping_targets()
     )
 
 
-def build_targets_with_user_domains(extra_domains: list[str] | None = None) -> list[dict]:
+def build_targets_with_user_domains(
+    extra_domains: list[str] | None = None,
+    *,
+    googlevideo_host: str | None = None,
+) -> list[dict]:
     """Build full target list: defaults + user domains + extra domains."""
-    targets = get_all_default_targets()
+    targets = get_all_default_targets(googlevideo_host)
 
     # Load persisted user domains
     user_domains = load_user_domains()

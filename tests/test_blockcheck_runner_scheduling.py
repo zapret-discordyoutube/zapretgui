@@ -29,6 +29,7 @@ from blockcheck.models import (  # noqa: E402
     TestType,
     VerdictCode,
 )
+from blockcheck.googlevideo_discovery import GoogleVideoDiscoveryResult  # noqa: E402
 from blockcheck.runner import BlockcheckRunner, RunMode  # noqa: E402
 
 
@@ -74,6 +75,8 @@ class _Harness:
         self.resolve_calls: Counter[str] = Counter()
         self.probe_calls: Counter[str] = Counter()
         self._patches: list = []
+        self.target_builder = None
+        self.googlevideo_discovery = None
 
     def _resolve_ips(self, host, **_kwargs):
         self.resolve_calls[host] += 1
@@ -107,8 +110,17 @@ class _Harness:
             self._count("tcp")
             return ok_result(TestType.TCP_16_20)
 
+        target_builder_patch = patch(
+            "blockcheck.runner.build_targets_with_user_domains",
+            return_value=list(TARGETS),
+        )
+        discovery_patch = patch(
+            "blockcheck.runner.discover_googlevideo_host",
+            return_value=GoogleVideoDiscoveryResult(detail="test"),
+        )
         targets = [
-            patch("blockcheck.runner.build_targets_with_user_domains", return_value=list(TARGETS)),
+            target_builder_patch,
+            discovery_patch,
             patch("blockcheck.runner.probe_baseline", return_value=self.baseline),
             patch("blockcheck.runner.resolve_ips", side_effect=self._resolve_ips),
             patch("blockcheck.runner.clear_dns_cache"),
@@ -123,8 +135,12 @@ class _Harness:
             patch("blockcheck.runner.load_domains_with_source", return_value=([], "test")),
         ]
         for item in targets:
-            item.start()
+            started = item.start()
             self._patches.append(item)
+            if item is target_builder_patch:
+                self.target_builder = started
+            elif item is discovery_patch:
+                self.googlevideo_discovery = started
         return self
 
     def __exit__(self, *exc):
@@ -134,6 +150,21 @@ class _Harness:
 
 
 class RunnerSchedulingTests(unittest.TestCase):
+    def test_fresh_googlevideo_host_is_passed_to_target_builder(self) -> None:
+        discovered = "rr5---sn-current-user.googlevideo.com"
+        with _Harness() as harness:
+            harness.googlevideo_discovery.return_value = GoogleVideoDiscoveryResult(
+                host=discovered,
+                candidates=(discovered,),
+                detail="найдено вариантов: 1",
+            )
+            BlockcheckRunner(mode=RunMode.FULL).run()
+
+        harness.target_builder.assert_called_once_with(
+            None,
+            googlevideo_host=discovered,
+        )
+
     def test_each_host_is_resolved_exactly_once(self) -> None:
         """Раньше один хост резолвился до пяти раз за прогон."""
         with _Harness() as harness:
