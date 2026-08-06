@@ -36,7 +36,7 @@ def apply_profile_shell_accessibility(
         request_btn,
         name=tr_fn(
             toolbar_key("request.accessible_name"),
-            "Открыть форму добавления profile на GitHub",
+            "Открыть форму добавления profile в Forgejo",
         ),
         description=request_hint,
     )

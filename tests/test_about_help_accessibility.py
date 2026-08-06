@@ -57,7 +57,7 @@ class AboutHelpAccessibilityTests(unittest.TestCase):
             widgets.forum_card: ("Открыть вики-сайт", "Документация и инструкции"),
             widgets.info_card: ("Открыть руководство и ответы", "Руководство и ответы на вопросы"),
             widgets.android_card: ("Открыть инструкцию для Android", "Открыть инструкцию на сайте"),
-            widgets.github_card: ("Открыть GitHub", "Исходный код и документация"),
+            widgets.github_card: ("Открыть Forgejo", "Исходный код и документация"),
             widgets.telegram_card: ("Открыть Telegram канал", "Новости и обновления"),
             widgets.mastodon_card: ("Открыть Mastodon профиль", "Новости в Fediverse"),
             widgets.bastyon_card: ("Открыть Bastyon профиль", "Новости в Bastyon"),

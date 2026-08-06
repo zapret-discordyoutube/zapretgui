@@ -1,5 +1,5 @@
 # ui/pages/support_page.py
-"""Страница Поддержка - GitHub Discussions и каналы сообщества"""
+"""Страница Поддержка - Forgejo Issues и каналы сообщества"""
 
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ from .base_page import BasePage
 
 
 class SupportPage(BasePage):
-    """Страница поддержки с одним основным маршрутом через GitHub Discussions."""
+    """Страница поддержки с одним основным маршрутом через Forgejo Issues."""
 
     def __init__(self, parent=None, *, create_open_action_worker):
         super().__init__(
             "Поддержка",
-            "GitHub Discussions и каналы сообщества",
+            "Forgejo Issues и каналы сообщества",
             parent,
             title_key="page.support.title",
             subtitle_key="page.support.subtitle",
@@ -49,13 +49,13 @@ class SupportPage(BasePage):
         tokens = get_theme_tokens()
 
         self._support_group = SettingCardGroup(
-            self._tr("page.support.section.discussions", "GitHub Discussions"),
+            self._tr("page.support.section.discussions", "Forgejo Issues"),
             self.content,
         )
         self._support_card = PrimaryPushSettingCard(
             self._tr("page.support.discussions.button", "Открыть"),
             get_themed_qta_icon("fa5b.github", color=tokens.accent_hex),
-            self._tr("page.support.discussions.title", "GitHub Discussions")
+            self._tr("page.support.discussions.title", "Forgejo Issues")
         ,
             self._tr(
                 "page.support.discussions.description",
@@ -118,14 +118,14 @@ class SupportPage(BasePage):
         if self._support_group is not None:
             try:
                 self._support_group.titleLabel.setText(
-                    self._tr("page.support.section.discussions", "GitHub Discussions")
+                    self._tr("page.support.section.discussions", "Forgejo Issues")
                 )
             except Exception:
                 pass
         if self._support_card is not None:
             try:
                 self._support_card.setTitle(
-                    self._tr("page.support.discussions.title", "GitHub Discussions")
+                    self._tr("page.support.discussions.title", "Forgejo Issues")
                 )
                 self._support_card.setContent(
                     self._tr(
@@ -170,7 +170,7 @@ class SupportPage(BasePage):
         self._request_support_open_action(
             "discussions",
             error_key="page.support.error.open_discussions",
-            error_default="Не удалось открыть GitHub Discussions:\n{error}",
+            error_default="Не удалось открыть Forgejo Issues:\n{error}",
         )
 
     def _open_telegram_support(self) -> None:

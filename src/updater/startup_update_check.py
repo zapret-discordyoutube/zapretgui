@@ -25,7 +25,7 @@ def check_for_update_sync() -> dict:
         from config.build_info import CHANNEL, APP_VERSION
 
         from updater.release_manager import get_latest_release
-        from updater.github_release import normalize_version
+        from updater.forgejo_release import normalize_version
         from updater.update import compare_versions
         from updater.rate_limiter import UpdateRateLimiter
         from updater.update_cache import UpdateCache

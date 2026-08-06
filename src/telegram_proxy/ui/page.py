@@ -91,7 +91,7 @@ from qfluentwidgets import (
 # How often (ms) the GUI reads new log lines from the ring buffer
 _LOG_REFRESH_MS = 500
 
-_ZASTOGRAM_URL = "https://github.com/youtubediscord/ZaStoGram_desktop"
+_ZASTOGRAM_URL = "https://git.zapret.moe/zapretdiscordyoutube/ZaStoGram_desktop"
 
 
 
@@ -2290,7 +2290,7 @@ class TelegramProxyPage(BasePage):
         )
 
     def _on_open_zastogram(self):
-        """Open ZaStoGram Desktop GitHub page in browser."""
+        """Open the ZaStoGram Desktop Forgejo page in a browser."""
         self._start_external_link_worker(
             _ZASTOGRAM_URL,
             success_log=f"Opened ZaStoGram page: {_ZASTOGRAM_URL}",

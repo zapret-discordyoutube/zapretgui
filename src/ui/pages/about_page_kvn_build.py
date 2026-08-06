@@ -137,12 +137,12 @@ def build_about_page_kvn_content(
         "Открыть",
         get_themed_qta_icon("fa5b.github", color=tokens.accent_hex),
         "Исходный код",
-        "GitHub репозиторий Zapret KVN",
+        "Forgejo репозиторий Zapret KVN",
     )
     set_kvn_card_accessibility(
         gh_card,
         action_name="Открыть исходный код Zapret KVN",
-        description="GitHub репозиторий Zapret KVN",
+        description="Forgejo репозиторий Zapret KVN",
     )
     gh_card.clicked.connect(on_open_kvn_github)
 

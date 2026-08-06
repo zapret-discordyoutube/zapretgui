@@ -109,7 +109,7 @@ def build_user_presets_page_shell(
     configs_title_label = strong_body_label_cls(
         tr_fn(
             f"{tr_prefix}.configs.title",
-            "Обменивайтесь пресетами и профилями в разделе GitHub Discussions",
+            "Обменивайтесь пресетами и профилями в разделе Forgejo Issues",
         )
     )
     configs_title_label.setWordWrap(True)

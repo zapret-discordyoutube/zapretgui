@@ -62,8 +62,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
             "fast_exe_dest": None,
             "publish_telegram": False,
             "telegram_use_socks": False,
-            "skip_github": True,
-            "github_nonfatal": False,
+            "skip_forgejo": True,
+            "forgejo_nonfatal": False,
             "skip_ssh": True,
             "run_installer": False,
             "version_is_explicit": True,
@@ -258,7 +258,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
         pyinstaller = (PRIVATE_ROOT / "build_zapret" / "pyinstaller_builder.py").read_text(encoding="utf-8")
 
         self.assertNotIn("def cleanup_pyinstaller_temp", pyinstaller)
-        self.assertNotIn("tempfile.gettempdir()", pyinstaller)
+        self.assertIn('local_root / "ZapretGUI" / "build_zapret" / "pyinstaller"', pyinstaller)
+        self.assertIn("for generated in (work, out):", pyinstaller)
         self.assertIn("main.build Nuitka сохранён", pyinstaller)
 
     def test_release_builder_defaults_to_nuitka(self) -> None:
@@ -292,7 +293,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
             "def build_process",
             "def run_inno_setup",
             "def deploy_to_ssh",
-            "def create_github_release",
+            "def create_forgejo_release",
             "def fast_deploy_exe",
             "def prepare_installer_stage",
         ):
@@ -303,7 +304,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertIn("steps: list[tuple[int, str, Callable[[], None]]]", pipeline)
         self.assertIn("def prepare_installer_stage", pipeline)
         self.assertIn("def build_installer", pipeline)
-        self.assertIn("def publish_github", pipeline)
+        self.assertIn("def publish_forgejo", pipeline)
         self.assertIn("def deploy", pipeline)
         self.assertIn("GUI ─┐", readme)
         self.assertIn("ReleaseRequest → ReleasePipeline", readme)
@@ -319,12 +320,12 @@ class BuildResourceLayoutTests(unittest.TestCase):
             request = self._release_request(
                 release_model,
                 run_installer=True,
-                skip_github=False,
+                skip_forgejo=False,
                 skip_ssh=False,
             )
             builder = release_pipeline.ReleasePipeline(request, log=Mock())
             capabilities = release_pipeline.ReleaseCapabilities(
-                github=True,
+                forgejo=True,
                 ssh=True,
                 telegram=True,
                 nuitka=True,
@@ -364,8 +365,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 ),
                 patch.object(
                     builder,
-                    "publish_github",
-                    side_effect=lambda: calls.append("github"),
+                    "publish_forgejo",
+                    side_effect=lambda: calls.append("forgejo"),
                 ),
                 patch.object(
                     builder,
@@ -388,7 +389,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     "nuitka",
                     "installer",
                     "run_installer",
-                    "github",
+                    "forgejo",
                     "ssh",
                     "versions",
                 ],
@@ -484,7 +485,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
             "pyinstaller_builder.py",
             "runtime_output.py",
             "write_build_info.py",
-            "github_release.py",
+            "forgejo_release.py",
             "ssh_deploy.py",
             "release_model.py",
             "release_pipeline.py",
@@ -506,9 +507,9 @@ class BuildResourceLayoutTests(unittest.TestCase):
         package_source = (build_dir / "__init__.py").read_text(encoding="utf-8")
         gui_source = (build_dir / "build_release_gui.py").read_text(encoding="utf-8")
         self.assertNotIn("for p in (PUBLIC_SRC, BUILD_DIR)", paths_source)
-        self.assertNotIn("github_release import", package_source)
+        self.assertNotIn("forgejo_release import", package_source)
         self.assertNotIn("build_local_config import", package_source)
-        self.assertNotIn("setup_github_imports", gui_source)
+        self.assertNotIn("setup_forgejo_imports", gui_source)
         self.assertNotIn("setup_ssh_imports", gui_source)
 
     def test_ci_dispatches_both_builders_without_touching_real_outputs(self) -> None:
@@ -585,28 +586,19 @@ class BuildResourceLayoutTests(unittest.TestCase):
             sys.modules.pop("build_zapret.ci_build", None)
             sys.path[:] = old_path
 
-    def test_public_windows_workflow_uses_same_internal_layout_and_nuitka_default(self) -> None:
-        workflow = (PUBLIC_ROOT / ".github" / "workflows" / "windows-release.yml").read_text(
+    def test_forgejo_runs_source_guards_while_windows_release_stays_local(self) -> None:
+        workflow = (PUBLIC_ROOT / ".forgejo" / "workflows" / "source-guards.yml").read_text(
             encoding="utf-8"
         )
+        readme = (PRIVATE_ROOT / "build_zapret" / "README.md").read_text(encoding="utf-8")
 
-        self.assertIn("default: nuitka", workflow)
-        self.assertIn("- nuitka", workflow)
-        self.assertIn("- pyinstaller", workflow)
-        self.assertIn("ZAPRET_BUILD_METHOD: ${{ github.event.inputs.builder || 'nuitka' }}", workflow)
-        self.assertIn('$runtimeTarget = Join-Path $artifactRoot "_internal"', workflow)
-        self.assertIn('Join-Path $runtimeTarget "Zapret.exe"', workflow)
-        self.assertIn("path: artifact/", workflow)
-        self.assertIn(
-            "python -m pip install --upgrade --upgrade-strategy eager -r requirements-build.txt",
-            workflow,
+        self.assertIn("https://data.forgejo.org/actions/checkout@v6", workflow)
+        self.assertIn("python3 -m compileall -q src", workflow)
+        self.assertFalse(
+            (PUBLIC_ROOT / ".forgejo" / "workflows" / "windows-release.yml").exists()
         )
-        self.assertNotIn("pip install nuitka pyinstaller", workflow.lower())
-        self.assertNotIn("cd src", workflow)
-        self.assertNotIn("src/dist/Zapret/", workflow)
-        self.assertNotIn("--paths . main.py", workflow)
-        self.assertNotIn(r"src\ico", workflow)
-        self.assertNotIn("--windows-icon-from-ico", workflow)
+        self.assertIn("CodexZapretRelease", readme)
+        self.assertIn("Forgejo", readme)
 
     def test_cli_uses_nuitka_by_default_and_normalizes_old_flat_target(self) -> None:
         old_path = list(sys.path)
@@ -634,7 +626,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
             self.assertEqual(defaults.build_method, "nuitka")
             self.assertTrue(defaults.publish_telegram)
             self.assertTrue(defaults.run_installer)
-            self.assertFalse(defaults.skip_github)
+            self.assertFalse(defaults.skip_forgejo)
             self.assertFalse(defaults.skip_ssh)
             self.assertTrue(defaults.version_is_explicit)
 
@@ -646,7 +638,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     "21.1.5.4",
                     "--changes",
                     "test",
-                    "--skip-github",
+                    "--skip-forgejo",
                     "--skip-ssh",
                     "--no-publish-telegram",
                     "--no-run-installer",
@@ -687,8 +679,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 fast_exe_dest="/Zapret/Dev/Zapret.exe",
                 publish_telegram=False,
                 telegram_use_socks=False,
-                skip_github=True,
-                github_nonfatal=False,
+                skip_forgejo=True,
+                forgejo_nonfatal=False,
                 skip_ssh=True,
                 run_installer=False,
                 version_is_explicit=True,
@@ -912,8 +904,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
         pipeline = (
             PRIVATE_ROOT / "build_zapret" / "release_pipeline.py"
         ).read_text(encoding="utf-8")
-        github = (
-            PRIVATE_ROOT / "build_zapret" / "github_release.py"
+        forgejo = (
+            PRIVATE_ROOT / "build_zapret" / "forgejo_release.py"
         ).read_text(encoding="utf-8")
         ssh = (
             PRIVATE_ROOT / "build_zapret" / "ssh_deploy.py"
@@ -921,8 +913,14 @@ class BuildResourceLayoutTests(unittest.TestCase):
         installer = self._read_inno_script()
 
         self.assertIn('"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)', pipeline)
-        self.assertGreaterEqual(github.count("creationflags=_hidden_subprocess_flags()"), 2)
-        self.assertGreaterEqual(ssh.count("creationflags=_hidden_subprocess_flags()"), 7)
+        self.assertIn('FORGEJO_TOKEN_FILE_ENV = "ZAPRET_FORGEJO_TOKEN_PATH"', forgejo)
+        self.assertIn("def _trusted_asset_url", forgejo)
+        self.assertNotIn("subprocess", forgejo)
+        self.assertGreater(ssh.count("subprocess.Popen("), 0)
+        self.assertEqual(
+            ssh.count("creationflags=_hidden_subprocess_flags()"),
+            ssh.count("subprocess.Popen("),
+        )
         self.assertNotIn("capture_output=True,\n        text=True,\n        creationflags", ssh)
         self.assertIn("'', SW_HIDE, ewWaitUntilTerminated", installer)
 
@@ -1014,8 +1012,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 fast_exe_dest=None,
                 publish_telegram=True,
                 telegram_use_socks=False,
-                skip_github=True,
-                github_nonfatal=False,
+                skip_forgejo=True,
+                forgejo_nonfatal=False,
                 skip_ssh=True,
                 run_installer=False,
                 version_is_explicit=True,
@@ -1043,8 +1041,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 fast_exe_dest=None,
                 publish_telegram=False,
                 telegram_use_socks=False,
-                skip_github=True,
-                github_nonfatal=False,
+                skip_forgejo=True,
+                forgejo_nonfatal=False,
                 skip_ssh=True,
                 run_installer=False,
                 version_is_explicit=True,

@@ -93,7 +93,7 @@ class DiagnosticsControlsAccessibilityTests(unittest.TestCase):
         )
         self.assertEqual(
             header.hero_subtitle.property("screenReaderStateText"),
-            "Описание диагностики: Проверьте доступность Discord и YouTube, а затем одной кнопкой соберите ZIP с логами и откройте GitHub Discussions.",
+            "Описание диагностики: Проверьте доступность Discord и YouTube, а затем одной кнопкой соберите ZIP с логами и откройте Forgejo Issues.",
         )
         self.assertEqual(
             controls.test_select_label.property("screenReaderStateText"),

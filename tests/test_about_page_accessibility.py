@@ -65,9 +65,9 @@ class AboutPageAccessibilityTests(unittest.TestCase):
         self.assertEqual(widgets.premium_btn.property("screenReaderStateText"), "Открыть Premium и VPN")
         self.assertIn("Premium", widgets.premium_btn.accessibleDescription())
         self.assertEqual(widgets.kvn_btn.text(), "Zapret KVN")
-        self.assertEqual(widgets.kvn_btn.accessibleName(), "Открыть Zapret KVN на GitHub")
-        self.assertEqual(widgets.kvn_btn.property("screenReaderStateText"), "Открыть Zapret KVN на GitHub")
-        self.assertIn("GitHub", widgets.kvn_btn.accessibleDescription())
+        self.assertEqual(widgets.kvn_btn.accessibleName(), "Открыть Zapret KVN в Forgejo")
+        self.assertEqual(widgets.kvn_btn.property("screenReaderStateText"), "Открыть Zapret KVN в Forgejo")
+        self.assertIn("Forgejo", widgets.kvn_btn.accessibleDescription())
 
         self.assertEqual(widgets.course_group.accessibleName(), "Раздел о программе: Обучение")
         self.assertEqual(
@@ -171,9 +171,9 @@ class AboutPageAccessibilityTests(unittest.TestCase):
         self.assertEqual(page.premium_btn.property("screenReaderStateText"), "Открыть Premium и VPN")
         self.assertIn("Premium", page.premium_btn.accessible_description)
         self.assertEqual(page.kvn_btn.text(), "Zapret KVN")
-        self.assertEqual(page.kvn_btn.accessible_name, "Открыть Zapret KVN на GitHub")
-        self.assertEqual(page.kvn_btn.property("screenReaderStateText"), "Открыть Zapret KVN на GitHub")
-        self.assertIn("GitHub", page.kvn_btn.accessible_description)
+        self.assertEqual(page.kvn_btn.accessible_name, "Открыть Zapret KVN в Forgejo")
+        self.assertEqual(page.kvn_btn.property("screenReaderStateText"), "Открыть Zapret KVN в Forgejo")
+        self.assertIn("Forgejo", page.kvn_btn.accessible_description)
 
     def test_about_page_shows_support_blocks_on_about_tab(self) -> None:
         page = AboutPage(

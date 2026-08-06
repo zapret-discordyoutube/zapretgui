@@ -20,7 +20,7 @@ def apply_support_page_accessibility(page) -> None:
 
     tr_fn = page._tr
     if page._support_group is not None:
-        support_title = tr_fn("page.support.section.discussions", "GitHub Discussions")
+        support_title = tr_fn("page.support.section.discussions", "Forgejo Issues")
         set_state_text(page._support_group, f"Раздел поддержки: {support_title}")
     if page._community_group is not None:
         community_title = tr_fn("page.support.section.community", "Каналы сообщества")
@@ -28,7 +28,7 @@ def apply_support_page_accessibility(page) -> None:
     if page._support_card is not None:
         _set_card_and_button_accessibility(
             page._support_card,
-            name=tr_fn("page.support.discussions.accessible_name", "Открыть GitHub Discussions"),
+            name=tr_fn("page.support.discussions.accessible_name", "Открыть Forgejo Issues"),
             description=tr_fn(
                 "page.support.discussions.description",
                 "Основной канал поддержки. Здесь можно задать вопрос, описать проблему и приложить нужные материалы вручную.",

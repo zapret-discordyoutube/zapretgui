@@ -49,6 +49,7 @@ Desktop.ini
 # Runtime user state
 /settings/
 /lists/
+/tmp/
 
 # Local config
 .env.local

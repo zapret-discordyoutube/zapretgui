@@ -304,7 +304,7 @@ def build_support_feedback(result) -> LogsSupportFeedbackPlan:
     if result.copied_to_clipboard:
         status_parts.append("шаблон скопирован")
     if result.discussions_opened:
-        status_parts.append("GitHub открыт")
+        status_parts.append("Forgejo открыт")
     if result.bundle_folder_opened:
         status_parts.append("папка открыта")
 

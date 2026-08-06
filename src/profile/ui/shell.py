@@ -106,10 +106,10 @@ def build_profile_shell(
 
     request_hint = tr_fn(
         request_hint_key,
-        f"Хотите добавить новый сайт или сервис в {engine_label}? Откройте готовую форму на GitHub и опишите, что нужно добавить в hostlist или ipset.",
+        f"Хотите добавить новый сайт или сервис в {engine_label}? Откройте готовую форму в Forgejo и опишите, что нужно добавить в hostlist или ipset.",
     )
     request_btn = PrimaryPushButton(
-        tr_fn(request_button_key, "ОТКРЫТЬ ФОРМУ НА GITHUB"),
+        tr_fn(request_button_key, "ОТКРЫТЬ ФОРМУ В FORGEJO"),
         icon=FluentIcon.GITHUB,
     )
     request_btn.clicked.connect(on_open_profile_request_form)

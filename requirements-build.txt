@@ -1,5 +1,6 @@
-# Каноническое окружение сборки runtime.
-# Этот файл устанавливает действующий GitHub Actions workflow.
+# Каноническое окружение локальной Windows-сборки runtime.
+# Forgejo проверяет исходники в Linux, а готовый установщик выпускает
+# зарегистрированная задача CodexZapretRelease на Windows.
 
 -r requirements-runtime.txt
 

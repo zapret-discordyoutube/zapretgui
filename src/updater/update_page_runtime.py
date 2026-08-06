@@ -1660,7 +1660,7 @@ class UpdatePageRuntime(QObject):
             return None, ""
 
         try:
-            from updater.github_release import normalize_version
+            from updater.forgejo_release import normalize_version
 
             return normalize_version(str(raw_version)), notes
         except Exception:

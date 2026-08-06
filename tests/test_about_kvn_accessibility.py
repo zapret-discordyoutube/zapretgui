@@ -45,7 +45,7 @@ class AboutKvnAccessibilityTests(unittest.TestCase):
             widgets.tg_card: ("Открыть канал Zapret KVN", "Новости и обновления"),
             widgets.bot_card: ("Купить подписку Zapret KVN", "Оформление через Telegram-бота"),
             widgets.bypass_card: ("Открыть канал BypassBlock", "Второй канал с новостями"),
-            widgets.gh_card: ("Открыть исходный код Zapret KVN", "GitHub репозиторий Zapret KVN"),
+            widgets.gh_card: ("Открыть исходный код Zapret KVN", "Forgejo репозиторий Zapret KVN"),
         }
         for card, (name, description) in expected.items():
             with self.subTest(name=name):

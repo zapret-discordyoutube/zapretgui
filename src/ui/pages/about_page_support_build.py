@@ -30,13 +30,13 @@ def build_about_page_support_content(
     on_open_telegram,
     on_open_discord,
 ) -> AboutPageSupportWidgets:
-    discussions_title = tr_fn("page.about.support.section.discussions", "GitHub Discussions")
+    discussions_title = tr_fn("page.about.support.section.discussions", "Forgejo Issues")
     discussions_group = SettingCardGroup(discussions_title, content_parent)
     set_state_text(discussions_group, f"Раздел поддержки: {discussions_title}")
     discussions_card = PrimaryPushSettingCard(
         tr_fn("page.about.support.discussions.button", "Открыть"),
         get_themed_qta_icon("fa5b.github", color=tokens.accent_hex),
-        tr_fn("page.about.support.discussions.title", "GitHub Discussions"),
+        tr_fn("page.about.support.discussions.title", "Forgejo Issues"),
         tr_fn(
             "page.about.support.discussions.desc",
             "Основной канал поддержки. Здесь можно задать вопрос, описать проблему и приложить материалы вручную.",
@@ -44,7 +44,7 @@ def build_about_page_support_content(
     )
     set_support_card_accessibility(
         discussions_card,
-        action_name=tr_fn("page.about.support.discussions.accessible_name", "Открыть GitHub Discussions"),
+        action_name=tr_fn("page.about.support.discussions.accessible_name", "Открыть Forgejo Issues"),
         description=tr_fn(
             "page.about.support.discussions.desc",
             "Основной канал поддержки. Здесь можно задать вопрос, описать проблему и приложить материалы вручную.",

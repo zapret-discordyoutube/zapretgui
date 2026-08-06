@@ -290,14 +290,12 @@ def build_server_row_plan(
                 )
         else:
             extra_text = str(status.get("error", ""))[:40]
-    elif row_server_name == "GitHub API":
-        if status.get("rate_limit") is not None:
-            extra_text = tr("page.servers.table.versions.rate_limit_template", "Лимит: {remaining}/{limit}").format(
-                remaining=status["rate_limit"],
-                limit=status.get("rate_limit_max", 60),
-            )
-        else:
-            extra_text = str(status.get("error", ""))[:40]
+    elif row_server_name == "Forgejo API":
+        extra_text = (
+            str(status.get("details") or tr("page.servers.status.api_available", "API доступен"))
+            if status.get("status") == "online"
+            else str(status.get("error", ""))[:40]
+        )
     elif status.get("status") == "online":
         extra_text = tr("page.servers.table.versions.both_template", "S: {stable}, D: {dev}").format(
             stable=status.get("stable_version", "—"),

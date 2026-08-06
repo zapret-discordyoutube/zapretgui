@@ -323,7 +323,7 @@ def apply_connection_language(
         tr_catalog(
             "page.connection.hero.subtitle",
             language=language,
-            default="Проверьте доступность Discord и YouTube, а затем одной кнопкой соберите ZIP с логами и откройте GitHub Discussions.",
+            default="Проверьте доступность Discord и YouTube, а затем одной кнопкой соберите ZIP с логами и откройте Forgejo Issues.",
         )
     )
     test_select_label.setText(
@@ -385,7 +385,7 @@ def apply_connection_language(
         tr_catalog(
             "page.connection.action.support.description",
             language=language,
-            default="Собрать архив логов и открыть готовое обращение в GitHub Discussions.",
+            default="Собрать архив логов и открыть готовое обращение в Forgejo Issues.",
         )
     )
     _set_action_accessibility(
@@ -398,7 +398,7 @@ def apply_connection_language(
         description=tr_catalog(
             "page.connection.action.support.description",
             language=language,
-            default="Собрать архив логов и открыть готовое обращение в GitHub Discussions.",
+            default="Собрать архив логов и открыть готовое обращение в Forgejo Issues.",
         ),
     )
 

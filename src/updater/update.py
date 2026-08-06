@@ -16,7 +16,7 @@ from packaging import version
 
 from log.log import log
 
-from .github_release import normalize_version
+from .forgejo_release import normalize_version
 
 
 def _quote_powershell_literal(value: str) -> str:

@@ -45,7 +45,7 @@ class ServerStatusWorkerContractTests(unittest.TestCase):
             patch.object(server_status_workers.ServerCheckWorker, "_request_versions_json", return_value=(None, "timeout", "direct")),
             patch("updater.server_pool.get_server_pool", return_value=pool),
             patch("updater.telegram_updater.is_telegram_available", return_value=False),
-            patch("updater.github_release.check_rate_limit", return_value={"remaining": 1, "limit": 60}),
+            patch("updater.forgejo_release.check_api", return_value={"online": True, "response_time": 0.01}),
             patch.object(server_status_workers._time, "sleep"),
         ):
             worker.run()
@@ -278,7 +278,7 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
             runtime._continue_start_checks(telegram_only=False, keep_existing_rows=False)
             runtime._on_server_checked("Telegram Bot", {"status": "offline"})
             runtime._on_server_checked("Primary", {"status": "error"})
-            runtime._on_server_checked("GitHub API", {"status": "error"})
+            runtime._on_server_checked("Forgejo API", {"status": "error"})
             runtime._on_servers_complete()
             retry_request_id = runtime._server_retry_without_dpi_runtime.request_id
             runtime._on_server_retry_without_dpi_finished(retry_request_id, True, True, "")
@@ -298,7 +298,7 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
             self._stub_dpi_restart_worker_start(runtime),
         ):
             runtime._continue_start_checks(telegram_only=False, keep_existing_rows=False)
-            runtime._on_server_checked("GitHub API", {"status": "error"})
+            runtime._on_server_checked("Forgejo API", {"status": "error"})
             runtime._on_servers_complete()
             retry_request_id = runtime._server_retry_without_dpi_runtime.request_id
             runtime._on_server_retry_without_dpi_finished(retry_request_id, True, True, "")

@@ -694,24 +694,24 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Zapret KVN",
     },
     "page.about.action.zapret_kvn.accessible_name": {
-        "ru": "Открыть Zapret KVN на GitHub",
-        "en": "Open Zapret KVN on GitHub",
+        "ru": "Открыть Zapret KVN в Forgejo",
+        "en": "Open Zapret KVN on Forgejo",
     },
     "page.about.action.zapret_kvn.description": {
-        "ru": "Открывает репозиторий проекта Zapret KVN на GitHub.",
-        "en": "Opens the Zapret KVN project repository on GitHub.",
+        "ru": "Открывает репозиторий проекта Zapret KVN в Forgejo.",
+        "en": "Opens the Zapret KVN project repository on Forgejo.",
     },
     "page.about.support.section.discussions": {
-        "ru": "GitHub Discussions",
-        "en": "GitHub Discussions",
+        "ru": "Forgejo Issues",
+        "en": "Forgejo Issues",
     },
     "page.about.support.section.community": {
         "ru": "Каналы сообщества",
         "en": "Community Channels",
     },
     "page.about.support.discussions.title": {
-        "ru": "GitHub Discussions",
-        "en": "GitHub Discussions",
+        "ru": "Forgejo Issues",
+        "en": "Forgejo Issues",
     },
     "page.about.support.discussions.desc": {
         "ru": "Основной канал поддержки. Здесь можно задать вопрос, описать проблему и приложить материалы вручную.",
@@ -950,16 +950,16 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Connection Diagnostics",
     },
     "page.connection.subtitle": {
-        "ru": "Автотест Discord и YouTube, проверка DNS подмены и быстрая подготовка обращения в GitHub Discussions",
-        "en": "Auto-test Discord and YouTube, check DNS spoofing, and quickly prepare a GitHub Discussions report",
+        "ru": "Автотест Discord и YouTube, проверка DNS подмены и быстрая подготовка обращения в Forgejo Issues",
+        "en": "Auto-test Discord and YouTube, check DNS spoofing, and quickly prepare a Forgejo Issues report",
     },
     "page.connection.hero.title": {
         "ru": "Диагностика сетевых соединений",
         "en": "Network Connection Diagnostics",
     },
     "page.connection.hero.subtitle": {
-        "ru": "Проверьте доступность Discord и YouTube, а затем одной кнопкой соберите ZIP с логами и откройте GitHub Discussions.",
-        "en": "Check Discord and YouTube availability, then create a ZIP with logs and open GitHub Discussions in one click.",
+        "ru": "Проверьте доступность Discord и YouTube, а затем одной кнопкой соберите ZIP с логами и откройте Forgejo Issues.",
+        "en": "Check Discord and YouTube availability, then create a ZIP with logs and open Forgejo Issues in one click.",
     },
     "page.connection.card.testing": {
         "ru": "Тестирование",
@@ -1574,16 +1574,16 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "📊 Logs: {logs} (max {max_logs}) | 🔧 Debug: {debug} (max {max_debug}) | 💾 Size: {size:.2f} MB",
     },
     "page.logs.send.card.title": {
-        "ru": "Поддержка через GitHub Discussions",
-        "en": "Support via GitHub Discussions",
+        "ru": "Поддержка через Forgejo Issues",
+        "en": "Support via Forgejo Issues",
     },
     "page.logs.send.orchestra.active": {
         "ru": "В режиме оркестратора проверьте основной лог и файл orchestra_*.log",
         "en": "In orchestrator mode, check both the main log and the orchestra_*.log file",
     },
     "page.logs.send.desc": {
-        "ru": "Нажмите кнопку, чтобы собрать ZIP из свежих логов, скопировать шаблон обращения и открыть GitHub Discussions.",
-        "en": "Press the button to build a ZIP with fresh logs, copy a report template, and open GitHub Discussions.",
+        "ru": "Нажмите кнопку, чтобы собрать ZIP из свежих логов, скопировать шаблон обращения и открыть Forgejo Issues.",
+        "en": "Press the button to build a ZIP with fresh logs, copy a report template, and open Forgejo Issues.",
     },
     "page.logs.send.info": {
         "ru": "Будет создан архив в папке logs/support_bundles. Шаблон обращения автоматически попадёт в буфер обмена.",
@@ -2798,20 +2798,20 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Support",
     },
     "page.support.subtitle": {
-        "ru": "GitHub Discussions и каналы сообщества",
-        "en": "GitHub Discussions and community channels",
+        "ru": "Forgejo Issues и каналы сообщества",
+        "en": "Forgejo Issues and community channels",
     },
     "page.support.section.discussions": {
-        "ru": "GitHub Discussions",
-        "en": "GitHub Discussions",
+        "ru": "Forgejo Issues",
+        "en": "Forgejo Issues",
     },
     "page.support.section.community": {
         "ru": "Каналы сообщества",
         "en": "Community Channels",
     },
     "page.support.discussions.title": {
-        "ru": "GitHub Discussions",
-        "en": "GitHub Discussions",
+        "ru": "Forgejo Issues",
+        "en": "Forgejo Issues",
     },
     "page.support.discussions.description": {
         "ru": "Основной канал поддержки. Здесь можно задать вопрос, описать проблему и приложить нужные материалы вручную.",
@@ -2822,8 +2822,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Open",
     },
     "page.support.error.open_discussions": {
-        "ru": "Не удалось открыть GitHub Discussions:\n{error}",
-        "en": "Failed to open GitHub Discussions:\n{error}",
+        "ru": "Не удалось открыть Forgejo Issues:\n{error}",
+        "en": "Failed to open Forgejo Issues:\n{error}",
     },
     "page.support.channel.telegram.title": {
         "ru": "Telegram",
@@ -2958,8 +2958,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Control",
     },
     "page.winws1_user_presets.configs.title": {
-        "ru": "Обменивайтесь пресетами и профилями в разделе GitHub Discussions",
-        "en": "Share presets and profiles in GitHub Discussions",
+        "ru": "Обменивайтесь пресетами и профилями в разделе Forgejo Issues",
+        "en": "Share presets and profiles in Forgejo Issues",
     },
     "page.winws1_user_presets.configs.button": {
         "ru": "Получить конфиги",
@@ -3399,8 +3399,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Not selected",
     },
     "page.winws2_pages.request.button": {
-        "ru": "ОТКРЫТЬ ФОРМУ НА GITHUB",
-        "en": "OPEN GITHUB FORM",
+        "ru": "ОТКРЫТЬ ФОРМУ В FORGEJO",
+        "en": "OPEN FORGEJO FORM",
     },
     "page.winws2_pages.toolbar.title": {
         "ru": "Профили",
@@ -3447,8 +3447,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Control",
     },
     "page.winws2_user_presets.configs.title": {
-        "ru": "Обменивайтесь пресетами и профилями в разделе GitHub Discussions",
-        "en": "Share presets and profiles in GitHub Discussions",
+        "ru": "Обменивайтесь пресетами и профилями в разделе Forgejo Issues",
+        "en": "Share presets and profiles in Forgejo Issues",
     },
     "page.winws2_user_presets.configs.button": {
         "ru": "Получить конфиги",
@@ -4204,8 +4204,8 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "The selected preset has no profiles to show on this page. Try another preset or add the needed profile.",
     },
     "page.winws2_pages.request.hint": {
-        "ru": "Хотите добавить новый сайт или сервис в Zapret 2? Откройте готовую форму на GitHub и опишите, что нужно добавить в hostlist или ipset.",
-        "en": "Want to add a new site or service to Zapret 2? Open the GitHub form and describe what should be added to the hostlist or ipset.",
+        "ru": "Хотите добавить новый сайт или сервис в Zapret 2? Откройте готовую форму в Forgejo и опишите, что нужно добавить в hostlist или ipset.",
+        "en": "Want to add a new site or service to Zapret 2? Open the Forgejo form and describe what should be added to the hostlist or ipset.",
     },
     "page.winws2_pages.empty.no_presets": {
         "ru": "Пресеты Zapret 2 не найдены. Импортируйте пресет или переустановите приложение, чтобы вернуть встроенные пресеты.",

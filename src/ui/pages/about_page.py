@@ -395,7 +395,7 @@ class AboutPage(BasePage):
     def _open_support_discussions(self) -> None:
         self._request_about_open_action(
             "support_discussions",
-            error_default="Не удалось открыть GitHub Discussions:\n{error}",
+            error_default="Не удалось открыть Forgejo Issues:\n{error}",
         )
 
     def _open_telegram_support(self) -> None:
@@ -550,7 +550,7 @@ class AboutPage(BasePage):
     def _open_kvn_github(self):
         self._request_about_open_action(
             "kvn_github",
-            error_default="Не удалось открыть GitHub:\n{error}",
+            error_default="Не удалось открыть Forgejo:\n{error}",
         )
 
     def create_about_open_action_worker(self, request_id: int, *, action_name: str):

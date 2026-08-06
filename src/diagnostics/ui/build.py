@@ -52,7 +52,7 @@ def build_connection_header(*, container_layout, tr_fn, strong_body_label_cls, b
     hero_subtitle = body_label_cls(
         tr_fn(
             "page.connection.hero.subtitle",
-            "Проверьте доступность Discord и YouTube, а затем одной кнопкой соберите ZIP с логами и откройте GitHub Discussions.",
+            "Проверьте доступность Discord и YouTube, а затем одной кнопкой соберите ZIP с логами и откройте Forgejo Issues.",
         )
     )
     hero_subtitle.setWordWrap(True)
@@ -193,7 +193,7 @@ def build_connection_controls(
         send_log_btn,
         tr_fn(
             "page.connection.action.support.description",
-            "Собрать архив логов и открыть готовое обращение в GitHub Discussions.",
+            "Собрать архив логов и открыть готовое обращение в Forgejo Issues.",
         )
     )
     _set_action_accessibility(
@@ -201,7 +201,7 @@ def build_connection_controls(
         name=tr_fn("page.connection.action.support.accessible_name", "Подготовить обращение с логами"),
         description=tr_fn(
             "page.connection.action.support.description",
-            "Собрать архив логов и открыть готовое обращение в GitHub Discussions.",
+            "Собрать архив логов и открыть готовое обращение в Forgejo Issues.",
         ),
     )
     send_log_btn.clicked.connect(on_support)

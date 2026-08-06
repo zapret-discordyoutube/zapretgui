@@ -608,7 +608,7 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
 
     def _assert_accessibility(self, widgets) -> None:
         expected = {
-            widgets.get_configs_btn: ("Открыть GitHub Discussions с конфигами", "Обменивайтесь пресетами"),
+            widgets.get_configs_btn: ("Открыть Forgejo Issues с конфигами", "Обменивайтесь пресетами"),
             widgets.create_btn: ("Создать новый пресет", "Создать новый пресет"),
             widgets.import_btn: ("Импортировать пресет из файла", "Импорт пресета из файла"),
             widgets.open_folder_btn: ("Открыть папку пресетов", "Открыть папку, где лежат ваши пресеты"),

@@ -39,7 +39,7 @@ def apply_about_buttons_accessibility(*, tr_fn, update_btn=None, premium_btn=Non
     if kvn_btn is not None:
         kvn_name = tr_fn(
             "page.about.action.zapret_kvn.accessible_name",
-            "Открыть Zapret KVN на GitHub",
+            "Открыть Zapret KVN в Forgejo",
         )
         set_state_text(kvn_btn, kvn_name)
         set_control_accessibility(
@@ -47,7 +47,7 @@ def apply_about_buttons_accessibility(*, tr_fn, update_btn=None, premium_btn=Non
             name=kvn_name,
             description=tr_fn(
                 "page.about.action.zapret_kvn.description",
-                "Открывает репозиторий проекта Zapret KVN на GitHub.",
+                "Открывает репозиторий проекта Zapret KVN в Forgejo.",
             ),
         )
 

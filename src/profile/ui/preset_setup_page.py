@@ -1463,8 +1463,8 @@ class PresetSetupPageBase(BasePage):
 
     def _show_profile_request_form_open_error(self, error: str) -> None:
         InfoBar.warning(
-            title="Не удалось открыть GitHub",
-            content=f"Не удалось открыть форму GitHub:\n{error}",
+            title="Не удалось открыть Forgejo",
+            content=f"Не удалось открыть форму Forgejo:\n{error}",
             parent=self.window(),
         )
 
@@ -1551,4 +1551,3 @@ def _user_profile_id_from_item(profile_key: str, item) -> str:
     if key.startswith("template:user:"):
         return key.split("template:user:", 1)[1].strip()
     return ""
-

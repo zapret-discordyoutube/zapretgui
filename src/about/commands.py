@@ -13,12 +13,12 @@ class AboutActionResult:
 
 
 def open_support_discussions() -> AboutActionResult:
-    from config.urls import SUPPORT_DISCUSSIONS_URL
+    from config.urls import SUPPORT_ISSUES_URL
 
     try:
-        webbrowser.open(SUPPORT_DISCUSSIONS_URL)
-        log(f"Открыт GitHub Discussions: {SUPPORT_DISCUSSIONS_URL}", "INFO")
-        return AboutActionResult(True, SUPPORT_DISCUSSIONS_URL)
+        webbrowser.open(SUPPORT_ISSUES_URL)
+        log(f"Открыт Forgejo Issues: {SUPPORT_ISSUES_URL}", "INFO")
+        return AboutActionResult(True, SUPPORT_ISSUES_URL)
     except Exception as e:
         return AboutActionResult(False, str(e))
 
@@ -57,7 +57,7 @@ def open_discord(url: str) -> AboutActionResult:
 def open_github(url: str) -> AboutActionResult:
     try:
         webbrowser.open(url)
-        log(f"Открыт GitHub: {url}", "INFO")
+        log(f"Открыт Forgejo: {url}", "INFO")
         return AboutActionResult(True, url)
     except Exception as e:
         return AboutActionResult(False, str(e))

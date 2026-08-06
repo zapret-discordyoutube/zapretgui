@@ -42,7 +42,7 @@ class PageName(Enum):
     LOGS = auto()                    # Логи
     SERVERS = auto()                 # Серверы обновлений
     ABOUT = auto()                   # О программе
-    SUPPORT = auto()                 # Поддержка (GitHub Discussions и каналы сообщества)
+    SUPPORT = auto()                 # Поддержка (Forgejo Issues и каналы сообщества)
 
     # === Telegram Proxy ===
     TELEGRAM_PROXY = auto()          # Telegram WebSocket Proxy

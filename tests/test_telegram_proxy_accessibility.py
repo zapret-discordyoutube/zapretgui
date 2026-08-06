@@ -311,12 +311,12 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
             "Копировать ссылку Telegram Proxy",
         )
         self.assertIn("буфер обмена", widgets.setup_copy_btn.accessibleDescription())
-        self.assertEqual(widgets.setup_zastogram_btn.accessibleName(), "Открыть ZaStoGram Desktop на GitHub")
+        self.assertEqual(widgets.setup_zastogram_btn.accessibleName(), "Открыть ZaStoGram Desktop в Forgejo")
         self.assertEqual(
             widgets.setup_zastogram_btn.property("screenReaderStateText"),
-            "Открыть ZaStoGram Desktop на GitHub",
+            "Открыть ZaStoGram Desktop в Forgejo",
         )
-        self.assertIn("GitHub", widgets.setup_zastogram_btn.accessibleDescription())
+        self.assertIn("Forgejo", widgets.setup_zastogram_btn.accessibleDescription())
         self.assertEqual(widgets.host_edit.accessibleName(), "Адрес Telegram Proxy")
         self.assertIn("IP-адрес", widgets.host_edit.accessibleDescription())
         self.assertEqual(widgets.port_spin.accessibleName(), "Порт Telegram Proxy, значение: 1353")

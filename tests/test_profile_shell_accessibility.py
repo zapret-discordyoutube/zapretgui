@@ -44,7 +44,7 @@ class ProfileShellAccessibilityTests(unittest.TestCase):
 
         expected = {
             widgets.add_profile_btn: ("Добавить пользовательский profile", "Добавить новый пользовательский profile"),
-            widgets.request_btn: ("Открыть форму добавления profile на GitHub", "Откройте готовую форму на GitHub"),
+            widgets.request_btn: ("Открыть форму добавления profile в Forgejo", "Откройте готовую форму в Forgejo"),
             widgets.view_menu_btn: ("Открыть меню вида профилей", "развернуть или свернуть группы"),
             widgets.order_btn: ("Открыть порядок профилей в пресете", "изменения реального порядка профилей"),
             widgets.info_btn: ("Показать справку по профилям", "Показать краткое объяснение"),

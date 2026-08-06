@@ -267,13 +267,13 @@ def build_telegram_proxy_settings_panel(
 
     setup_zastogram_btn = push_button_cls("Zastogram", icon=FluentIcon.GITHUB)
     setup_zastogram_btn.setMinimumWidth(132)
-    set_tooltip(setup_zastogram_btn, "Открыть страницу ZaStoGram Desktop на GitHub.")
+    set_tooltip(setup_zastogram_btn, "Открыть страницу ZaStoGram Desktop в Forgejo.")
     set_control_accessibility(
         setup_zastogram_btn,
-        name="Открыть ZaStoGram Desktop на GitHub",
-        description="Открывает страницу проекта ZaStoGram Desktop на GitHub в браузере.",
+        name="Открыть ZaStoGram Desktop в Forgejo",
+        description="Открывает страницу проекта ZaStoGram Desktop в Forgejo в браузере.",
     )
-    set_state_text(setup_zastogram_btn, "Открыть ZaStoGram Desktop на GitHub")
+    set_state_text(setup_zastogram_btn, "Открыть ZaStoGram Desktop в Forgejo")
     setup_zastogram_btn.clicked.connect(on_open_zastogram)
     setup_card.add_button(setup_zastogram_btn)
 

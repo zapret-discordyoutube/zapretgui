@@ -28,7 +28,7 @@ from log.log import log
 from utils.file_digest import sha256_file
 
 from . import update_paths
-from .github_release import normalize_version
+from .forgejo_release import normalize_version
 from .handoff_state import HandoffState, UpdateHandoffRecord
 from .network_hints import maybe_log_disable_dpi_for_update
 from .recovery_hook import build_recovery_command, clear_recovery_hook, set_recovery_hook
@@ -182,7 +182,7 @@ def _make_session(verify_ssl: bool = True) -> requests.Session:
 
 
 def normalize_sha256(value: object) -> str:
-    """Принимает чистый SHA-256 или GitHub digest ``sha256:...``."""
+    """Принимает чистый SHA-256 или совместимый digest ``sha256:...``."""
     normalized = str(value or "").strip().lower()
     if normalized.startswith("sha256:"):
         normalized = normalized.split(":", 1)[1].strip()
@@ -207,26 +207,26 @@ def _release_sha256(release_info: dict) -> str:
     )
 
 
-def _matching_github_integrity(release_info: dict) -> tuple[str, int]:
-    """При необходимости получает SHA-256 из метаданных GitHub-релиза."""
+def _matching_forgejo_integrity(release_info: dict) -> tuple[str, int]:
+    """При необходимости получает SHA-256 из проверенного выпуска Forgejo."""
     expected_sha256 = _release_sha256(release_info)
     expected_size = int(release_info.get("file_size") or 0)
     if expected_sha256 and expected_size > 0:
         return expected_sha256, expected_size
 
     try:
-        from .github_release import get_latest_release as get_github_release
+        from .forgejo_release import get_latest_release as get_forgejo_release
 
-        github_info = get_github_release(CHANNEL)
+        forgejo_info = get_forgejo_release(CHANNEL)
     except Exception as exc:
-        log(f"Не удалось получить контрольную сумму GitHub: {exc}", "WARNING")
-        github_info = None
+        log(f"Не удалось получить контрольную сумму Forgejo: {exc}", "WARNING")
+        forgejo_info = None
 
-    if not github_info:
+    if not forgejo_info:
         return expected_sha256, expected_size
 
     try:
-        same_version = normalize_version(str(github_info.get("version") or "")) == normalize_version(
+        same_version = normalize_version(str(forgejo_info.get("version") or "")) == normalize_version(
             str(release_info.get("version") or "")
         )
     except ValueError:
@@ -235,8 +235,8 @@ def _matching_github_integrity(release_info: dict) -> tuple[str, int]:
         return expected_sha256, expected_size
 
     return (
-        expected_sha256 or _release_sha256(github_info),
-        expected_size or int(github_info.get("file_size") or 0),
+        expected_sha256 or _release_sha256(forgejo_info),
+        expected_size or int(forgejo_info.get("file_size") or 0),
     )
 
 
@@ -256,15 +256,15 @@ def build_download_sources(release_info: dict) -> tuple[DownloadSource, ...]:
     if update_url and not update_url.startswith("telegram://"):
         candidates.append(DownloadSource(update_url, verify_ssl))
 
-    if "github.com" not in update_url:
+    if "git.zapret.moe" not in update_url:
         try:
-            from .github_release import get_latest_release as get_github_release
+            from .forgejo_release import get_latest_release as get_forgejo_release
 
-            github_info = get_github_release(CHANNEL)
-            if github_info and github_info.get("update_url"):
-                candidates.append(DownloadSource(str(github_info["update_url"]), True))
+            forgejo_info = get_forgejo_release(CHANNEL)
+            if forgejo_info and forgejo_info.get("update_url"):
+                candidates.append(DownloadSource(str(forgejo_info["update_url"]), True))
         except Exception as exc:
-            log(f"Не удалось добавить зеркало GitHub: {exc}", "WARNING")
+            log(f"Не удалось добавить зеркало Forgejo: {exc}", "WARNING")
 
     try:
         from .server_config import VPS_SERVERS, should_verify_ssl
@@ -345,7 +345,7 @@ def prepare_update(
     if not sources:
         raise UpdatePipelineError("Нет доступных источников обновления")
 
-    expected_sha256, expected_size = _matching_github_integrity(release_info)
+    expected_sha256, expected_size = _matching_forgejo_integrity(release_info)
     if not expected_sha256:
         raise UpdateIntegrityError("В метаданных выпуска нет SHA-256")
     if expected_size <= 0:

@@ -870,7 +870,7 @@ class PresetsFeature:
         )
 
     def create_preset_link_action_worker(self, request_id: int, *, open_url, action: str, parent=None):
-        from config.urls import PRESET_INFO_URL, SUPPORT_DISCUSSIONS_URL
+        from config.urls import PRESET_INFO_URL, SUPPORT_ISSUES_URL
         from presets.user_presets_action_results import UserPresetActionResult
         from presets.user_presets_action_workers import UserPresetLinkActionWorker
 
@@ -907,8 +907,8 @@ class PresetsFeature:
                 error_message="Не удалось открыть страницу о пресетах",
             ),
             lambda: _open_url_action(
-                SUPPORT_DISCUSSIONS_URL,
-                success_message=f"Открыта страница пресетов: {SUPPORT_DISCUSSIONS_URL}",
+                SUPPORT_ISSUES_URL,
+                success_message=f"Открыта страница пресетов: {SUPPORT_ISSUES_URL}",
                 error_message="Не удалось открыть страницу пресетов",
             ),
             action=action,

@@ -120,7 +120,7 @@ def build_logs_send_tab(
     tokens = get_theme_tokens_fn()
 
     send_card = settings_card_cls(
-        tr_catalog_fn("page.logs.send.card.title", language=ui_language, default="Поддержка через GitHub Discussions")
+        tr_catalog_fn("page.logs.send.card.title", language=ui_language, default="Поддержка через Forgejo Issues")
     )
     send_layout = qvbox_layout_cls()
     send_layout.setSpacing(16)
@@ -180,7 +180,7 @@ def build_logs_send_tab(
         tr_catalog_fn(
             "page.logs.send.desc",
             language=ui_language,
-            default="Нажмите кнопку, чтобы собрать ZIP из свежих логов, скопировать шаблон обращения и открыть GitHub Discussions.",
+            default="Нажмите кнопку, чтобы собрать ZIP из свежих логов, скопировать шаблон обращения и открыть Forgejo Issues.",
         )
     )
     send_desc_label.setWordWrap(True)
@@ -262,7 +262,7 @@ def build_logs_send_tab(
     send_action_description = tr_catalog_fn(
         "page.logs.send.action.send.description",
         language=ui_language,
-        default="Собрать ZIP из свежих логов, скопировать шаблон обращения и открыть GitHub Discussions.",
+        default="Собрать ZIP из свежих логов, скопировать шаблон обращения и открыть Forgejo Issues.",
     )
     set_tooltip(
         send_log_btn,

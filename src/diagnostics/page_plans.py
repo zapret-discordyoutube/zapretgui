@@ -212,9 +212,9 @@ def prepare_support_request_for_connection(*, selection: str) -> ConnectionSuppo
             lines.append("⚠️ Не удалось скопировать шаблон обращения в буфер обмена.")
 
         if result.discussions_opened:
-            lines.append("🌐 GitHub Discussions открыты.")
+            lines.append("🌐 Forgejo Issues открыты.")
         else:
-            lines.append("⚠️ GitHub Discussions не удалось открыть автоматически.")
+            lines.append("⚠️ Forgejo Issues не удалось открыть автоматически.")
 
         if result.bundle_folder_opened:
             lines.append("📁 Папка с готовым архивом открыта.")

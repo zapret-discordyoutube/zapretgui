@@ -10,7 +10,7 @@ from log.log import log
 
 from app.ui_texts import tr as tr_catalog
 from updater.channel_utils import normalize_update_channel
-from updater.github_release import normalize_version
+from updater.forgejo_release import normalize_version
 from updater.server_config import CONNECT_TIMEOUT, READ_TIMEOUT, should_verify_ssl
 from updater.telegram_updater import TELEGRAM_CHANNELS
 
@@ -87,7 +87,7 @@ class ServerCheckWorker(QThread):
             return None, str(e)[:80], "direct"
 
     def run(self):
-        from updater.github_release import check_rate_limit
+        from updater.forgejo_release import check_api
         from updater.server_pool import get_server_pool
 
         pool = get_server_pool()
@@ -280,20 +280,19 @@ class ServerCheckWorker(QThread):
             return
 
         try:
-            rate_info = check_rate_limit()
-            github_status = {
+            api_info = check_api()
+            forgejo_status = {
                 "status": "online",
-                "response_time": 0.5,
-                "rate_limit": rate_info["remaining"],
-                "rate_limit_max": rate_info["limit"],
+                "response_time": api_info["response_time"],
+                "details": self._tr("page.servers.status.api_available", "API доступен"),
             }
         except Exception as e:
-            github_status = {
+            forgejo_status = {
                 "status": "error",
                 "error": str(e)[:50],
             }
 
-        self.server_checked.emit("GitHub API", github_status)
+        self.server_checked.emit("Forgejo API", forgejo_status)
 
         self.all_complete.emit()
 

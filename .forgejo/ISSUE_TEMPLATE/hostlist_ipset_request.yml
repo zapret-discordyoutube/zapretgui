@@ -53,7 +53,7 @@ body:
       label: Файл с доменами/IP
       description: |
         Перетащите сюда файл .txt со списком доменов или IP-адресов.
-        GitHub поддерживает drag & drop файлов в это поле.
+        Forgejo поддерживает drag & drop файлов в это поле.
       placeholder: "Перетащите файл .txt сюда"
     validations:
       required: true

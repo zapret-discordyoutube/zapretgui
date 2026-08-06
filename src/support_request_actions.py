@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from config.runtime_layout import APPLICATION_PATHS
 
-from config.urls import BLOCKCHECK_DISCUSSIONS_URL
+from config.urls import BLOCKCHECK_ISSUES_URL
 from log.log import global_logger, LOG_FILE
 
 from support_request_bundle import PreparedSupportRequest, prepare_support_request
@@ -29,7 +29,7 @@ def _build_feedback(result: PreparedSupportRequest) -> SupportRequestFeedback:
     if result.copied_to_clipboard:
         status_parts.append("шаблон скопирован")
     if result.discussions_opened:
-        status_parts.append("GitHub открыт")
+        status_parts.append("Forgejo открыт")
     if result.bundle_folder_opened:
         status_parts.append("папка открыта")
 
@@ -75,7 +75,7 @@ def prepare_blockcheck_support_request(
         candidate_paths=[run_log_file, *_common_candidate_paths()],
         recent_patterns=("blockcheck_run_*.log", "zapret_winws2_debug_*.log"),
         extra_note=extra_note,
-        discussions_url=BLOCKCHECK_DISCUSSIONS_URL,
+        discussions_url=BLOCKCHECK_ISSUES_URL,
     )
     return _build_feedback(result)
 
@@ -108,6 +108,6 @@ def prepare_strategy_scan_support_request(
         ],
         recent_patterns=("blockcheck_run_*.log", "zapret_winws2_debug_*.log"),
         extra_note=extra_note,
-        discussions_url=BLOCKCHECK_DISCUSSIONS_URL,
+        discussions_url=BLOCKCHECK_ISSUES_URL,
     )
     return _build_feedback(result)

@@ -44,7 +44,7 @@ class ConnectionTestPage(BasePage):
     def __init__(self, parent=None, *, diagnostics_feature):
         super().__init__(
             "Диагностика соединения",
-            "Автотест Discord и YouTube, проверка DNS подмены и быстрая подготовка обращения в GitHub Discussions",
+            "Автотест Discord и YouTube, проверка DNS подмены и быстрая подготовка обращения в Forgejo Issues",
             parent,
             title_key="page.connection.title",
             subtitle_key="page.connection.subtitle",

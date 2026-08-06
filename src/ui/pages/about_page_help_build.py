@@ -170,15 +170,15 @@ def build_about_page_help_content(
     )
 
     github_card = hyperlink_card_cls(
-        "https://github.com/youtubediscord/zapret",
+        "https://git.zapret.moe/zapretdiscordyoutube/zapret",
         tr_fn("page.about.help.button.open", "Открыть"),
         fluent_icon.GITHUB,
-        "GitHub",
+        "Forgejo",
         tr_fn("page.about.help.docs.github.desc", "Исходный код и документация"),
     )
     set_help_card_accessibility(
         github_card,
-        action_name=tr_fn("page.about.help.docs.github.accessible_name", "Открыть GitHub"),
+        action_name=tr_fn("page.about.help.docs.github.accessible_name", "Открыть Forgejo"),
         description=tr_fn("page.about.help.docs.github.desc", "Исходный код и документация"),
     )
 

@@ -51,9 +51,3 @@ VERIFY_SSL = False
 
 def should_verify_ssl() -> bool:
     return VERIFY_SSL
-
-# ═══════════════════════════════════════════════════════════════
-# GITHUB (резервный источник)
-# ═══════════════════════════════════════════════════════════════
-
-GITHUB_REPO = "youtubediscord/zapret"

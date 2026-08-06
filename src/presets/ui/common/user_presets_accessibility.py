@@ -33,9 +33,9 @@ def apply_user_presets_accessibility(
     _set_named_control(
         get_configs_btn,
         name_key=f"{tr_prefix}.configs.accessible_name",
-        name_default="Открыть GitHub Discussions с конфигами",
+        name_default="Открыть Forgejo Issues с конфигами",
         description_key=f"{tr_prefix}.configs.title",
-        description_default="Обменивайтесь пресетами и профилями в разделе GitHub Discussions",
+        description_default="Обменивайтесь пресетами и профилями в разделе Forgejo Issues",
     )
     _set_named_control(
         create_btn,

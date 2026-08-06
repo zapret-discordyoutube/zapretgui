@@ -2,7 +2,7 @@
 release_manager.py
 ────────────────────────────────────────────────────────────────
 Менеджер получения релизов с балансировкой серверов.
-Приоритет: VPS Pool (HTTPS/HTTP) -> GitHub API
+Приоритет: Forgejo API -> Telegram -> VPS Pool (HTTPS/HTTP)
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from .server_config import (
 )
 from .server_pool import get_server_pool  # ✅ НОВЫЙ ИМПОРТ
 
-from .github_release import (
-    get_latest_release as github_get_latest_release, 
+from .forgejo_release import (
+    get_latest_release as forgejo_get_latest_release,
     normalize_version, 
     is_rate_limited
 )
@@ -141,14 +141,14 @@ class ReleaseManager:
             log(f"🌐 ReleaseManager: пул серверов инициализирован ({len(VPS_SERVERS)} серверов)", "🔄 RELEASE")
         else:
             self.server_pool = None
-            log("⚠️ ReleaseManager: нет серверов в пуле, используем только GitHub", "🔄 RELEASE")
+            log("⚠️ ReleaseManager: нет серверов в пуле, используем Forgejo и Telegram", "🔄 RELEASE")
 
     def get_latest_release(self, channel: str) -> Optional[Dict[str, Any]]:
         """
         Получает информацию о последнем релизе
 
         Приоритет источников:
-        1. GitHub API (быстрый CDN для скачивания)
+        1. Forgejo API (основной выпускной канал)
         2. Telegram (версия через Bot API)
         3. VPS серверы (резерв)
 
@@ -160,8 +160,8 @@ class ReleaseManager:
         """
         channel = normalize_update_channel(channel)
 
-        # 1. GitHub API (быстрый CDN)
-        result = self._try_github(channel)
+        # 1. Forgejo API
+        result = self._try_forgejo(channel)
         if result:
             return result
 
@@ -548,38 +548,38 @@ class ReleaseManager:
         except Exception as e:
             log(f"⚠️ Не удалось проверить доступность файла: {e}", "🔄 RELEASE")
         
-    def _try_github(self, channel: str) -> Optional[Dict[str, Any]]:
-        """Пытается получить релиз с GitHub"""
-        log(f"🔍 Проверка обновлений через GitHub API...", "🔄 RELEASE")
+    def _try_forgejo(self, channel: str) -> Optional[Dict[str, Any]]:
+        """Пытается получить выпуск из собственного Forgejo."""
+        log("🔍 Проверка обновлений через Forgejo API...", "🔄 RELEASE")
         
         start_time = time.time()
         
         try:
-            result = github_get_latest_release(channel)
+            result = forgejo_get_latest_release(channel)
             
             if result:
                 response_time = time.time() - start_time
                 
-                result['source'] = 'GitHub API'
+                result['source'] = 'Forgejo API'
                 
                 # Записываем успех
-                self.server_stats.record_success('GitHub API', response_time)
+                self.server_stats.record_success('Forgejo API', response_time)
                 
-                log(f"✅ GitHub API: найден релиз {result['version']} ({response_time:.2f}с)", "🔄 RELEASE")
+                log(f"✅ Forgejo API: найден выпуск {result['version']} ({response_time:.2f}с)", "🔄 RELEASE")
                 
-                self.last_source = 'GitHub API'
+                self.last_source = 'Forgejo API'
                 self.last_error = None
                 
                 return result
             else:
-                log(f"❌ GitHub API: релиз не найден", "🔄 RELEASE")
-                self.server_stats.record_failure('GitHub API')
+                log("❌ Forgejo API: выпуск не найден", "🔄 RELEASE")
+                self.server_stats.record_failure('Forgejo API')
                 
         except Exception as e:
             error_msg = str(e)[:100]
-            log(f"❌ GitHub API: {error_msg}", "🔄 RELEASE")
+            log(f"❌ Forgejo API: {error_msg}", "🔄 RELEASE")
             
-            self.server_stats.record_failure('GitHub API')
+            self.server_stats.record_failure('Forgejo API')
             self.last_error = error_msg
             
         return None
@@ -593,7 +593,7 @@ class ReleaseManager:
             pool_stats = self.server_pool.get_all_stats()
             stats.update(pool_stats)
         
-        # ✅ Добавляем статистику GitHub и других источников
+        # ✅ Добавляем статистику Forgejo и других источников
         for server_name, server_stats in self.server_stats.stats.items():
             if server_name not in stats:
                 stats[server_name] = server_stats

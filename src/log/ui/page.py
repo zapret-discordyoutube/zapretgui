@@ -614,7 +614,7 @@ class LogsPage(BasePage):
         try:
             self._set_card_title(
                 self.send_card,
-                tr_catalog("page.logs.send.card.title", language=self._ui_language, default="Поддержка через GitHub Discussions"),
+                tr_catalog("page.logs.send.card.title", language=self._ui_language, default="Поддержка через Forgejo Issues"),
             )
             if self._send_actions_title is not None:
                 self._send_actions_title.setText(
@@ -631,7 +631,7 @@ class LogsPage(BasePage):
                 tr_catalog(
                     "page.logs.send.desc",
                     language=self._ui_language,
-                    default="Нажмите кнопку, чтобы собрать ZIP из свежих логов, скопировать шаблон обращения и открыть GitHub Discussions.",
+                    default="Нажмите кнопку, чтобы собрать ZIP из свежих логов, скопировать шаблон обращения и открыть Forgejo Issues.",
                 )
             )
             self.send_info_label.setText(
@@ -667,7 +667,7 @@ class LogsPage(BasePage):
             send_description = tr_catalog(
                 "page.logs.send.action.send.description",
                 language=self._ui_language,
-                default="Собрать ZIP из свежих логов, скопировать шаблон обращения и открыть GitHub Discussions.",
+                default="Собрать ZIP из свежих логов, скопировать шаблон обращения и открыть Forgejo Issues.",
             )
             set_control_accessibility(self.send_log_btn, name=send_name, description=send_description)
             set_state_text(self.send_log_btn, send_name)

@@ -47,12 +47,13 @@ class PythonDependencySourcesTests(unittest.TestCase):
                 )
                 seen[package] = filename
 
-    def test_active_windows_workflow_uses_canonical_build_requirements(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "windows-release.yml").read_text(
+    def test_forgejo_guards_do_not_duplicate_local_windows_build_environment(self) -> None:
+        workflow = (ROOT / ".forgejo" / "workflows" / "source-guards.yml").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("-r requirements-build.txt", workflow)
+        self.assertFalse((ROOT / ".forgejo" / "workflows" / "windows-release.yml").exists())
+        self.assertFalse((ROOT / ".github" / "workflows" / "windows-release.yml").exists())
         for package in ("PyQt6", "Nuitka", "PyInstaller", "TgCrypto"):
             self.assertNotRegex(workflow, rf"pip install[^\n]*\b{package}\b")
 

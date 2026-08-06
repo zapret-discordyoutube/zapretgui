@@ -118,7 +118,7 @@ class UpdaterUpdateCardAccessibilityTests(unittest.TestCase):
 
     def test_every_terminal_state_stops_and_hides_checking_ring(self) -> None:
         transitions = (
-            (lambda card: card.show_found_update("21.1.5.36", "GitHub"), "ПРОВЕРИТЬ СНОВА"),
+            (lambda card: card.show_found_update("21.1.5.36", "Forgejo"), "ПРОВЕРИТЬ СНОВА"),
             (lambda card: card.show_download_error(), "ПРОВЕРИТЬ СНОВА"),
             (lambda card: card.show_deferred("21.1.5.36"), "ПРОВЕРИТЬ СНОВА"),
             (lambda card: card.show_checked_ago(5.0), "ПРОВЕРИТЬ СНОВА"),

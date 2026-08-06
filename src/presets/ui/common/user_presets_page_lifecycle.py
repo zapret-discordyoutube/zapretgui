@@ -268,7 +268,7 @@ def apply_user_presets_language(
             configs_title_label,
             tr_fn(
                 f"{tr_prefix}.configs.title",
-                "Обменивайтесь пресетами и профилями в разделе GitHub Discussions",
+                "Обменивайтесь пресетами и профилями в разделе Forgejo Issues",
             ),
         )
     if get_configs_btn is not None:
