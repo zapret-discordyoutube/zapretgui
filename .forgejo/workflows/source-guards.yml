@@ -1,0 +1,27 @@
+name: Zapret source guards
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: linux
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: https://data.forgejo.org/actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate Python and repository data
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          python3 -m compileall -q src
+          while IFS= read -r -d '' json_file; do
+            python3 -m json.tool "$json_file" >/dev/null
+          done < <(git ls-files -z '*.json')
