@@ -20,6 +20,7 @@ _MAX_WATCH_PAGE_BYTES = 2_000_000
 _WATCH_URLS: tuple[str, ...] = (
     "https://www.youtube.com/watch?v=jNQXAC9IVRw&hl=en",
     "https://www.youtube.com/watch?v=dQw4w9WgXcQ&hl=en",
+    "https://www.youtube.com/watch?v=Qr1zDbHATw0&t=8s&hl=en",
 )
 _GOOGLEVIDEO_RR_RE = re.compile(
     r"(?i)\b((?:rr|r)\d+(?:---|\.)sn-[a-z0-9-]+\.googlevideo\.com)\b"

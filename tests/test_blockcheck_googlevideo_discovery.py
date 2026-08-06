@@ -35,9 +35,10 @@ class GoogleVideoDiscoveryTests(unittest.TestCase):
             ),
         )
 
-    def test_uses_next_control_video_when_first_page_has_no_stream_host(self) -> None:
+    def test_uses_third_control_video_when_first_two_have_no_stream_host(self) -> None:
         pages = [
             "YouTube page without streams",
+            "Another YouTube page without streams",
             "https://rr4---sn-fresh-user.googlevideo.com/videoplayback",
         ]
 
@@ -48,7 +49,11 @@ class GoogleVideoDiscoveryTests(unittest.TestCase):
             result = discover_googlevideo_host()
 
         self.assertEqual(result.host, "rr4---sn-fresh-user.googlevideo.com")
-        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(fetch.call_count, 3)
+        self.assertEqual(
+            fetch.call_args_list[-1].args[0],
+            "https://www.youtube.com/watch?v=Qr1zDbHATw0&t=8s&hl=en",
+        )
 
     def test_each_run_discovers_again_instead_of_reusing_old_host(self) -> None:
         pages = [
