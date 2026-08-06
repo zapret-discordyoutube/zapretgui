@@ -908,7 +908,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             if line.strip() and not line.lstrip().startswith("#")
         ]
         supplied_ranges = {
-            "2a06:98c1:3120::/48",
+            "2a06:98c1:3100::/40",
             "152.114.0.0/17",
             "150.48.128.0/18",
             "152.114.128.0/18",
@@ -932,7 +932,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
 
         self.assertEqual(len(supplied_ranges), 101)
         self.assertLessEqual(supplied_ranges, set(entries))
-        self.assertEqual(len(entries), 132)
+        self.assertEqual(len(entries), 130)
         self.assertEqual(len(entries), len(set(entries)))
         for entry in entries:
             ipaddress.ip_network(entry, strict=False)
