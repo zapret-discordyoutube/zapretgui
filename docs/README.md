@@ -1,4 +1,4 @@
-<h1 align="center"><a href="https://publish.obsidian.md/zapret/Privacy/Zapret2/Zapret2">Zapret 2</a> (Запрет: обход блокировки Дискорда и Ютуба) </h1>
+<h1 align="center"><a href="https://publish.obsidian.md/zapret/Zapret/home">Zapret 2</a> (Запрет: обход блокировки Дискорда и Ютуба) </h1>
 
 ### Документация доступна [здесь](https://publish.obsidian.md/zapret/Privacy/Zapret2/Zapret2) | Попробуйте наш новый [Zapret KVN](https://git.zapret.moe/zapretdiscordyoutube/zapret-kvn)!
 
