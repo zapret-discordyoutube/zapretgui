@@ -8,7 +8,7 @@
   <a href="https://www.youtube.com/channel/UCyEOuaB8EUwn1aU8a73_EWQ/"><img alt="YouTube" src="https://img.shields.io/badge/YouTube-канал-FF0000?style=for-the-badge&logo=youtube&logoColor=white"></a>
   <a href="https://discord.com/invite/kkcBDG2uws"><img alt="Discord" src="https://img.shields.io/badge/Discord-сообщество-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
   <a href="https://telegram.me//zapretvpns_bot"><img alt="Поддержать донатами" src="https://img.shields.io/badge/Поддержать-донат-FF424D?style=for-the-badge&logo=telegram&logoColor=white"></a>
-  <a href="https://publish.obsidian.md/zapret/Privacy/Zapret/home"><img alt="Вики" src="https://img.shields.io/badge/Вики-публичная-7C3AED?style=for-the-badge&logo=obsidian&logoColor=white"></a>
+  <a href="https://publish.obsidian.md/zapret/Zapret/home"><img alt="Вики" src="https://img.shields.io/badge/Вики-публичная-7C3AED?style=for-the-badge&logo=obsidian&logoColor=white"></a>
   <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret/issues/new"><img alt="Вопросы и баги" src="https://img.shields.io/badge/Вопросы_и_баги-Forgejo-FB923C?style=for-the-badge&logo=forgejo&logoColor=white"></a>
 </p>
 
