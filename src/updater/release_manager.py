@@ -2,16 +2,15 @@
 release_manager.py
 ────────────────────────────────────────────────────────────────
 Менеджер получения релизов с балансировкой серверов.
-Приоритет: Forgejo API -> Telegram -> VPS Pool (HTTPS/HTTP)
+Приоритет: Forgejo API -> VPS Pool (HTTPS/HTTP)
 """
 
 from __future__ import annotations
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 import requests
 import time
 import urllib3
 from datetime import datetime
-from pathlib import PurePosixPath
 
 from .server_config import (
     CONNECT_TIMEOUT, READ_TIMEOUT, should_verify_ssl,
@@ -26,10 +25,14 @@ from .forgejo_release import (
 from .channel_utils import (
     normalize_update_channel,
     is_dev_update_channel,
-    get_channel_installer_name,
 )
 from .network_hints import maybe_log_disable_dpi_for_update
 from .proxy_bypass import request_get_bypass_proxy
+from .release_contract import (
+    ReleaseArtifactMetadata,
+    ReleaseMetadataError,
+    is_installable_release,
+)
 from log.log import log
 from settings import store as settings_store
 
@@ -148,8 +151,7 @@ class ReleaseManager:
 
         Приоритет источников:
         1. Forgejo API (основной выпускной канал)
-        2. Telegram (версия через Bot API)
-        3. VPS серверы (резерв)
+        2. VPS серверы (резерв)
 
         Args:
             channel: "stable" или "dev"
@@ -161,15 +163,12 @@ class ReleaseManager:
 
         # 1. Forgejo API
         result = self._try_forgejo(channel)
-        if result:
+        if result and is_installable_release(result):
             return result
-
-        # 2. Telegram
-        result = self._try_telegram(channel)
         if result:
-            return result
+            log("❌ Forgejo вернул неполные метаданные установщика", "🔄 RELEASE")
 
-        # 3. VPS серверы
+        # 2. VPS серверы
         if self._is_vps_blocked():
             dt = datetime.fromtimestamp(self._vps_block_until)
             log(f"🚫 VPS заблокированы до {dt}", "🔄 RELEASE")
@@ -182,62 +181,6 @@ class ReleaseManager:
 
         return None
     
-    def _try_telegram(self, channel: str) -> Optional[Dict[str, Any]]:
-        """
-        Пытается получить информацию о релизе из Telegram
-        
-        Args:
-            channel: "stable" или "dev"
-            
-        Returns:
-            Dict с информацией о релизе или None
-        """
-        try:
-            from .telegram_updater import is_telegram_available, get_telegram_version_info
-            channel = normalize_update_channel(channel)
-            
-            if not is_telegram_available():
-                log("⏭️ Telegram недоступен (telethon не установлен)", "🔄 RELEASE")
-                return None
-            
-            tg_channel = normalize_update_channel(channel)
-            
-            log(f"📱 Проверка обновлений через Telegram ({tg_channel})...", "🔄 RELEASE")
-            
-            start_time = time.time()
-            info = get_telegram_version_info(tg_channel)
-            response_time = time.time() - start_time
-            
-            if info and info.get('version'):
-                version = normalize_version(info['version'])
-                
-                log(f"✅ Telegram: версия {version} ({response_time:.2f}с)", "🔄 RELEASE")
-                
-                # Формируем результат в стандартном формате
-                file_name = info.get('file_name') or get_channel_installer_name(channel)
-                return {
-                    "version": version,
-                    "tag_name": f"v{version}",
-                    "update_url": f"telegram://{info['channel']}",
-                    "file_name": file_name,
-                    "release_notes": "",
-                    "prerelease": is_dev_update_channel(channel),
-                    "name": f"Zapret {version} ({channel})",
-                    "published_at": info.get('date', ''),
-                    "source": info['source'],
-                    "verify_ssl": True,
-                    "file_size": info.get('file_size'),
-                    "sha256": info.get('sha256') or info.get('digest'),
-                    "telegram_info": info,  # Сохраняем полную информацию для скачивания
-                }
-            
-            log(f"⚠️ Telegram: версия не найдена ({response_time:.2f}с)", "🔄 RELEASE")
-            return None
-            
-        except Exception as e:
-            log(f"❌ Telegram ошибка: {e}", "🔄 RELEASE")
-            return None
-
     def _try_server_pool(self, channel: str) -> Optional[Dict[str, Any]]:
         """
         Пытается получить релиз из пула серверов с балансировкой.
@@ -325,127 +268,78 @@ class ReleaseManager:
         Returns:
             Dict с информацией о релизе или None
         """
-        from .update_cache import get_cached_all_versions, set_cached_all_versions, get_all_versions_source
-        
         server_id = server['id']
         server_name = f"{server['name']} ({protocol})"
         
         log(f"🔍 Проверка через {server_name}...", "🔄 RELEASE")
-        
-        # ✅ ПРОВЕРЯЕМ IN-MEMORY КЭШ СНАЧАЛА
-        cached_all_versions = get_cached_all_versions()
-        if cached_all_versions:
-            log(f"📦 Используем in-memory кэш all_versions (источник: {get_all_versions_source()})", "🔄 RELEASE")
-            all_data = cached_all_versions
-            # Пропускаем сетевой запрос, используем кэш
-            start_time = time.time()
-            response_time = 0.001  # Мгновенно из кэша
-        else:
-            start_time = time.time()
-            
-            try:
-                # Формируем URL API
-                api_url = f"{url}/api/all_versions.json"
-                
-                # Определяем проверку SSL
-                verify_ssl = should_verify_ssl() if protocol == 'HTTPS' else False
-                
-                log(f"📡 Запрос к {api_url} (verify_ssl={verify_ssl})", "🔄 RELEASE")
-                
-                # Отключаем предупреждения SSL
-                if not verify_ssl:
-                    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-                
-                # Делаем запрос (всегда без системного прокси)
-                response = request_get_bypass_proxy(
-                    api_url,
-                    timeout=TIMEOUT,
-                    verify=verify_ssl,
-                    headers={
-                        "Accept": "application/json",
-                        "User-Agent": "Zapret-Updater/3.1",
-                        "Cache-Control": "no-cache"
-                    }
-                )
-                response.raise_for_status()
-                
-                all_data = response.json()
-                response_time = time.time() - start_time  # ✅ Вычисляем время ответа
-                
-                # ✅ КЭШИРУЕМ РЕЗУЛЬТАТ
-                set_cached_all_versions(all_data, server_name)
-                
-            except requests.exceptions.HTTPError as e:
-                status_code = e.response.status_code if e.response else 'unknown'
-                error_msg = f"HTTP {status_code}"
-                
-                log(f"❌ {server_name}: {error_msg}", "🔄 RELEASE")
-                
-                # Записываем ошибку
-                self.server_pool.record_failure(server_id, error_msg)
-                self.server_stats.record_failure(server_name)
-                
-                # При серьёзных ошибках блокируем ВСЕ VPS
-                if isinstance(status_code, int) and 500 <= status_code < 600:
-                    self._block_vps(f"HTTP {status_code} from {server_name}")
-                
-                self.last_error = error_msg
-                return None
-            
-            except requests.exceptions.Timeout:
-                error_msg = "timeout"
-                log(f"❌ {server_name}: {error_msg}", "🔄 RELEASE")
-                
-                # Записываем ошибку
-                self.server_pool.record_failure(server_id, error_msg)
-                self.server_stats.record_failure(server_name)
-                
-                self.last_error = error_msg
-                return None
+        start_time = time.time()
+        try:
+            api_url = f"{url}/api/all_versions.json"
+            verify_ssl = should_verify_ssl() if protocol == 'HTTPS' else False
+            log(f"📡 Запрос к {api_url} (verify_ssl={verify_ssl})", "🔄 RELEASE")
+            if not verify_ssl:
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            response = request_get_bypass_proxy(
+                api_url,
+                timeout=TIMEOUT,
+                verify=verify_ssl,
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "Zapret-Updater/3.1",
+                    "Cache-Control": "no-cache",
+                },
+            )
+            response.raise_for_status()
+            all_data = response.json()
+            response_time = time.time() - start_time
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code if e.response else 'unknown'
+            error_msg = f"HTTP {status_code}"
+            log(f"❌ {server_name}: {error_msg}", "🔄 RELEASE")
+            self.server_pool.record_failure(server_id, error_msg)
+            self.server_stats.record_failure(server_name)
+            if isinstance(status_code, int) and 500 <= status_code < 600:
+                self._block_vps(f"HTTP {status_code} from {server_name}")
+            self.last_error = error_msg
+            return None
+        except requests.exceptions.Timeout:
+            error_msg = "timeout"
+            log(f"❌ {server_name}: {error_msg}", "🔄 RELEASE")
+            self.server_pool.record_failure(server_id, error_msg)
+            self.server_stats.record_failure(server_name)
+            self.last_error = error_msg
+            return None
+        except requests.exceptions.SSLError as e:
+            error_msg = f"SSL error: {str(e)[:50]}"
+            log(f"❌ {server_name}: {error_msg}", "🔄 RELEASE")
+            self.server_pool.record_failure(server_id, error_msg)
+            self.server_stats.record_failure(server_name)
+            self.last_error = error_msg
+            return None
+        except requests.exceptions.ConnectionError as e:
+            error_msg = f"connection error: {str(e)[:50]}"
+            log(f"❌ {server_name}: {error_msg}", "🔄 RELEASE")
+            self.server_pool.record_failure(server_id, error_msg)
+            self.server_stats.record_failure(server_name)
+            self.last_error = error_msg
+            maybe_log_disable_dpi_for_update(e, scope="update_check", level="🔄 RELEASE")
+            return None
+        except Exception as e:
+            error_msg = f"error: {str(e)[:50]}"
+            log(f"❌ {server_name}: {error_msg}", "🔄 RELEASE")
+            self.server_pool.record_failure(server_id, error_msg)
+            self.server_stats.record_failure(server_name)
+            self.last_error = error_msg
+            return None
 
-            except requests.exceptions.SSLError as e:
-                error_msg = f"SSL error: {str(e)[:50]}"
-                log(f"❌ {server_name}: {error_msg}", "🔄 RELEASE")
-                
-                # Записываем ошибку
-                self.server_pool.record_failure(server_id, error_msg)
-                self.server_stats.record_failure(server_name)
-                
-                self.last_error = error_msg
-                return None
-
-            except requests.exceptions.ConnectionError as e:
-                error_msg = f"connection error: {str(e)[:50]}"
-                log(f"❌ {server_name}: {error_msg}", "🔄 RELEASE")
-                self.server_pool.record_failure(server_id, error_msg)
-                self.server_stats.record_failure(server_name)
-                self.last_error = error_msg
-                maybe_log_disable_dpi_for_update(e, scope="update_check", level="🔄 RELEASE")
-                return None
-            
-            except Exception as e:
-                error_msg = f"error: {str(e)[:50]}"
-                log(f"❌ {server_name}: {error_msg}", "🔄 RELEASE")
-                
-                # Записываем ошибку
-                self.server_pool.record_failure(server_id, error_msg)
-                self.server_stats.record_failure(server_name)
-                
-                self.last_error = error_msg
-                return None
-        
-        # ✅ Теперь обрабатываем all_data (из кэша или из запроса)
         api_channel = normalize_update_channel(channel)
         
         if api_channel not in all_data or not all_data[api_channel]:
             error_msg = f"Канал {api_channel} не найден"
             log(f"⚠️ {server_name}: {error_msg}", "🔄 RELEASE")
             
-            # Записываем ошибку только если это не кэш
-            if not cached_all_versions:
-                self.server_pool.record_failure(server_id, error_msg)
-                self.server_stats.record_failure(server_name)
-            
+            self.server_pool.record_failure(server_id, error_msg)
+            self.server_stats.record_failure(server_name)
             return None
         
         data = all_data[api_channel]
@@ -454,56 +348,52 @@ class ReleaseManager:
             error_msg = f"Отсутствует версия для {api_channel}"
             log(f"⚠️ {server_name}: {error_msg}", "🔄 RELEASE")
             
-            # Записываем ошибку только если это не кэш
-            if not cached_all_versions:
-                self.server_pool.record_failure(server_id, error_msg)
-                self.server_stats.record_failure(server_name)
-            
+            self.server_pool.record_failure(server_id, error_msg)
+            self.server_stats.record_failure(server_name)
             return None
-        
-        # ✅ УСПЕХ - формируем результат
-        # Записываем успех только если это не кэш
-        if not cached_all_versions:
-            self.server_pool.record_success(server_id, response_time)
-            self.server_stats.record_success(server_name, response_time)
-        
-        # Формируем URL для скачивания
-        file_name = (data.get("file_name") or "").strip()
-        if not file_name:
-            file_path = (data.get("file_path") or "").strip()
-            if file_path:
-                file_name = PurePosixPath(file_path).name
-        if not file_name:
-            file_name = f"Zapret2Setup{'_DEV' if api_channel == 'dev' else ''}.exe"
+
+        file_name = str(data.get("file_name") or "").strip()
         download_url = f"{url}/download/{file_name}"
         
         # Определяем verify_ssl для результата
         verify_ssl = should_verify_ssl() if protocol == 'HTTPS' else False
         
         log(f"📦 {server_name}: версия {data['version']}, файл: {file_name}", "🔄 RELEASE")
+        
+        try:
+            normalized_version = normalize_version(str(data.get("version") or ""))
+            result = {
+                "version": normalized_version,
+                "tag_name": f"v{normalized_version}",
+                "update_url": download_url,
+                "file_name": file_name,
+                "release_notes": data.get("release_notes", ""),
+                "prerelease": is_dev_update_channel(channel),
+                "name": f"Zapret {normalized_version} ({api_channel})",
+                "published_at": data.get("date", ""),
+                "source": server_name,
+                "verify_ssl": verify_ssl,
+                "file_size": data.get("file_size"),
+                "sha256": data.get("sha256"),
+                "mtime": data.get("mtime"),
+                "modified_at": data.get("modified_at"),
+            }
+            metadata = ReleaseArtifactMetadata.from_mapping(result)
+        except (ReleaseMetadataError, TypeError, ValueError) as exc:
+            error_msg = str(exc)
+            log(f"❌ {server_name}: {error_msg}", "🔄 RELEASE")
+            self.server_pool.record_failure(server_id, error_msg)
+            self.server_stats.record_failure(server_name)
+            self.last_error = error_msg
+            return None
+
+        self.server_pool.record_success(server_id, response_time)
+        self.server_stats.record_success(server_name, response_time)
         log(f"✅ {server_name}: успех ({response_time*1000:.0f}мс)", "🔄 RELEASE")
-        
-        result = {
-            "version": normalize_version(data.get("version", "0.0.0")),
-            "tag_name": f"v{data.get('version', '0.0.0')}",
-            "update_url": download_url,
-            "file_name": file_name,
-            "release_notes": data.get("release_notes", ""),
-            "prerelease": is_dev_update_channel(channel),
-            "name": f"Zapret {data.get('version', '0.0.0')} ({api_channel})",
-            "published_at": data.get("date", ""),
-            "source": server_name,
-            "verify_ssl": verify_ssl,
-            "file_size": data.get("file_size"),
-            "sha256": data.get("sha256") or data.get("digest"),
-            "mtime": data.get("mtime"),
-            "modified_at": data.get("modified_at")
-        }
-        
+
         # Дополнительная информация
-        if data.get("file_size"):
-            size_mb = data["file_size"] / (1024 * 1024)
-            log(f"📊 Размер файла: {size_mb:.2f} MB", "🔄 RELEASE")
+        size_mb = metadata.file_size / (1024 * 1024)
+        log(f"📊 Размер файла: {size_mb:.2f} MB", "🔄 RELEASE")
         
         if data.get("modified_at"):
             log(f"🕒 Обновлено: {data['modified_at']}", "🔄 RELEASE")
@@ -674,9 +564,12 @@ def get_latest_release(channel: str, use_cache: bool = True) -> Optional[Dict[st
     # ✅ ПРОВЕРЯЕМ КЭШ только если use_cache=True
     if use_cache:
         cached = UpdateCache.get_cached_release(channel)
-        if cached:
+        if cached and is_installable_release(cached):
             log(f"📦 Используем кэшированную информацию о релизе {cached['version']} (источник: {cached.get('source', 'неизвестен')})", "🔄 RELEASE")
             return cached
+        if cached:
+            UpdateCache.invalidate(channel)
+            log("⚠️ Неполные метаданные старого кэша выпуска отброшены", "🔄 CACHE")
     else:
         log(f"🔄 Принудительная проверка обновлений (игнорируем кэш)", "🔄 RELEASE")
         from settings.mode import WINWS_ENGINE_FAMILY_LABEL

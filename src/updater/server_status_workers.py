@@ -10,9 +10,7 @@ from log.log import log
 
 from app.ui_texts import tr as tr_catalog
 from updater.channel_utils import normalize_update_channel
-from updater.forgejo_release import normalize_version
 from updater.server_config import CONNECT_TIMEOUT, READ_TIMEOUT, should_verify_ssl
-from updater.telegram_updater import TELEGRAM_CHANNELS
 
 
 class ServerCheckWorker(QThread):
@@ -120,18 +118,9 @@ class ServerCheckWorker(QThread):
                         "dev_version": dev_version,
                         "stable_notes": stable_notes,
                         "dev_notes": dev_notes,
-                        "is_current": True,
+                        "is_current": False,
+                        "update_source": False,
                     }
-                    self._first_online_server_id = "telegram"
-
-                    from updater.update_cache import get_cached_all_versions, set_cached_all_versions
-
-                    all_versions = get_cached_all_versions() or {}
-                    all_versions[tg_channel] = {
-                        "version": tg_info["version"],
-                        "release_notes": tg_info.get("release_notes", ""),
-                    }
-                    set_cached_all_versions(all_versions, f"Telegram @{TELEGRAM_CHANNELS.get(tg_channel, tg_channel)}")
                 else:
                     tg_status = {
                         "status": "error",
@@ -248,12 +237,8 @@ class ServerCheckWorker(QThread):
                         "stable_notes": stable_notes,
                         "dev_notes": dev_notes,
                         "is_current": is_first_online,
+                        "update_source": True,
                     }
-
-                    from updater.update_cache import set_cached_all_versions
-
-                    source = f"{server_name} ({protocol}{' bypass' if route == 'bypass' else ''})"
-                    set_cached_all_versions(data, source)
 
                     if self._update_pool_stats:
                         pool.record_success(server_id, response_time)
@@ -285,6 +270,7 @@ class ServerCheckWorker(QThread):
                 "status": "online",
                 "response_time": api_info["response_time"],
                 "details": self._tr("page.servers.status.api_available", "API доступен"),
+                "update_source": True,
             }
         except Exception as e:
             forgejo_status = {
@@ -315,67 +301,19 @@ class VersionCheckWorker(QThread):
 
     def run(self):
         from updater.release_manager import get_latest_release
-        from updater.server_pool import get_server_pool
-        from updater.update_cache import (
-            get_all_versions_source,
-            get_cached_all_versions,
-            set_cached_all_versions,
-        )
-
-        all_versions = get_cached_all_versions()
-        source_name = get_all_versions_source() if all_versions else None
         self._stop_requested = False
 
-        if not all_versions:
-            pool = get_server_pool()
-            current_server = pool.get_current_server()
-            server_urls = pool.get_server_urls(current_server)
-            monitor_timeout = (min(CONNECT_TIMEOUT, 3), min(READ_TIMEOUT, 5))
-
-            for protocol, base_url in [("HTTPS", server_urls["https"]), ("HTTP", server_urls["http"])]:
-                if self.is_stop_requested():
-                    self.complete.emit()
-                    return
-                verify_ssl = should_verify_ssl() if protocol == "HTTPS" else False
-                data, _, route = ServerCheckWorker._request_versions_json(
-                    f"{base_url}/api/all_versions.json",
-                    timeout=monitor_timeout,
-                    verify_ssl=verify_ssl,
-                )
-                if data:
-                    all_versions = data
-                    source_name = f"{current_server['name']} ({protocol}{' bypass' if route == 'bypass' else ''})"
-                    set_cached_all_versions(all_versions, source_name)
-                    break
-
-        if not all_versions:
-            for channel in [CHANNEL_STABLE, CHANNEL_DEV]:
-                if self.is_stop_requested():
-                    break
-                try:
-                    release = get_latest_release(channel, use_cache=False)
-                    if release:
-                        self.version_found.emit(channel, release)
-                    else:
-                        self.version_found.emit(channel, {"error": "Не удалось получить"})
-                except Exception as e:
-                    self.version_found.emit(channel, {"error": str(e)})
-            self.complete.emit()
-            return
-
-        for ui_channel, api_channel in {CHANNEL_STABLE: CHANNEL_STABLE, CHANNEL_DEV: CHANNEL_DEV}.items():
+        for channel in (CHANNEL_STABLE, CHANNEL_DEV):
             if self.is_stop_requested():
                 break
-            data = all_versions.get(api_channel, {})
-            if data and data.get("version"):
-                result = {
-                    "version": normalize_version(data.get("version", "0.0.0")),
-                    "release_notes": data.get("release_notes", ""),
-                    "source": source_name,
-                }
-                self.version_found.emit(ui_channel, result)
-            else:
-                self.version_found.emit(ui_channel, {"error": "Нет данных"})
+            try:
+                release = get_latest_release(channel, use_cache=False)
+                if release:
+                    self.version_found.emit(channel, release)
+                else:
+                    self.version_found.emit(channel, {"error": "Не удалось получить"})
+            except Exception as exc:
+                self.version_found.emit(channel, {"error": str(exc)})
 
         self.complete.emit()
 

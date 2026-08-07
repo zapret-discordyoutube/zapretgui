@@ -17,6 +17,7 @@ class UpdateFoundState:
     is_available: bool = False
     version: str = ""
     release_notes: str = ""
+    source: str = ""
 
 
 @dataclass(slots=True)
@@ -330,7 +331,6 @@ class UpdatePageRuntime(QObject):
                 "_on_server_checked",
                 "_on_versions_complete",
                 "_on_download_failed",
-                "_maybe_offer_update_from_server",
             ),
             state_and_worker_methods=(
                 "start_checks",
@@ -366,8 +366,6 @@ class UpdatePageRuntime(QObject):
                 "_restart_dpi_after_server_check_retry",
                 "_on_version_found",
                 "_on_versions_complete",
-                "_maybe_offer_update_from_server",
-                "_get_candidate_version_and_notes",
                 "_restart_dpi_after_update",
             ),
         )
@@ -405,7 +403,6 @@ class UpdatePageRuntime(QObject):
                 "_can_accept_startup_present",
                 "_can_start_new_check",
                 "_can_start_install",
-                "_get_candidate_version_and_notes",
                 "_app_version",
                 "_is_dev_update_channel",
             ),
@@ -445,7 +442,6 @@ class UpdatePageRuntime(QObject):
                 "_restart_dpi_after_server_check_retry",
                 "_on_version_found",
                 "_on_versions_complete",
-                "_maybe_offer_update_from_server",
             ),
         )
 
@@ -1095,10 +1091,11 @@ class UpdatePageRuntime(QObject):
             or self._is_download_in_progress()
         )
 
-    def _set_found_update_state(self, version: str, release_notes: str) -> None:
+    def _set_found_update_state(self, version: str, release_notes: str, *, source: str = "") -> None:
         self._found_state.is_available = bool(version)
         self._found_state.version = str(version or "")
         self._found_state.release_notes = str(release_notes or "")
+        self._found_state.source = str(source or "")
 
     def _reset_found_update_state(self) -> None:
         self._found_state = UpdateFoundState()
@@ -1490,7 +1487,6 @@ class UpdatePageRuntime(QObject):
             return
         self._observe_server_check_status(status)
         self._view.upsert_server_status(server_name, status)
-        self._maybe_offer_update_from_server(server_name, status)
 
     def _on_servers_complete(self) -> None:
         if self._cleanup_in_progress:
@@ -1504,7 +1500,10 @@ class UpdatePageRuntime(QObject):
     def _observe_server_check_status(self, status: dict) -> None:
         if not isinstance(status, dict):
             return
-        if str(status.get("status") or "").lower() == "online":
+        if (
+            str(status.get("status") or "").lower() == "online"
+            and bool(status.get("update_source", True))
+        ):
             self._server_check_recovery.online_source_seen = True
 
     def _maybe_retry_server_check_without_dpi(self) -> bool:
@@ -1595,6 +1594,7 @@ class UpdatePageRuntime(QObject):
                 self._set_found_update_state(
                     version,
                     version_info.get("release_notes", ""),
+                    source=version_info.get("source", ""),
                 )
         except Exception:
             pass
@@ -1606,6 +1606,8 @@ class UpdatePageRuntime(QObject):
 
         if self._found_state.is_available and self._can_accept_startup_present():
             self._offer_current_update()
+            if self._found_state.source:
+                self._present_found_update_source(self._found_state.source)
 
     def _on_download_failed(self, error: str) -> None:
         if self._cleanup_in_progress:
@@ -1618,53 +1620,6 @@ class UpdatePageRuntime(QObject):
             return
         self._view.show_update_status_card()
         self._view.show_update_download_error()
-
-    def _maybe_offer_update_from_server(self, server_name: str, status: dict) -> None:
-        if not self._is_update_check_active():
-            return
-
-        if not self._found_state.is_available and not status.get("is_current"):
-            return
-
-        if not self._can_accept_startup_present():
-            return
-
-        candidate_version, candidate_notes = self._get_candidate_version_and_notes(status)
-        if not candidate_version:
-            return
-
-        try:
-            from updater.update import compare_versions
-
-            if compare_versions(self._app_version(), candidate_version) >= 0:
-                return
-
-            if self._found_state.version and compare_versions(self._found_state.version, candidate_version) >= 0:
-                return
-        except Exception:
-            return
-
-        self._set_found_update_state(candidate_version, candidate_notes)
-        self._offer_current_update()
-        self._present_found_update_source(server_name)
-
-    def _get_candidate_version_and_notes(self, status: dict) -> tuple[str | None, str]:
-        if self._is_dev_update_channel():
-            raw_version = status.get("dev_version")
-            notes = status.get("dev_notes", "") or ""
-        else:
-            raw_version = status.get("stable_version")
-            notes = status.get("stable_notes", "") or ""
-
-        if not raw_version or raw_version == "—":
-            return None, ""
-
-        try:
-            from updater.forgejo_release import normalize_version
-
-            return normalize_version(str(raw_version)), notes
-        except Exception:
-            return None, ""
 
     def _restart_dpi_after_update(
         self,

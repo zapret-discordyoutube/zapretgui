@@ -32,6 +32,7 @@ from .forgejo_release import normalize_version
 from .handoff_state import HandoffState, UpdateHandoffRecord
 from .network_hints import maybe_log_disable_dpi_for_update
 from .recovery_hook import build_recovery_command, clear_recovery_hook, set_recovery_hook
+from .release_contract import ReleaseArtifactMetadata
 from .release_manager import get_latest_release
 from .update import compare_versions
 from .update_watchdog import build_watchdog_command, launch_update_watchdog
@@ -40,7 +41,6 @@ from .update_watchdog import build_watchdog_command, launch_update_watchdog
 NUM_SEGMENTS = 4
 CHUNK_SIZE = 1024 * 1024
 PROGRESS_INTERVAL_SECONDS = 0.25
-SHA256_HEX_LENGTH = 64
 CACHED_INSTALLER_NAME = update_paths.CACHED_INSTALLER_NAME
 CACHED_INSTALLER_META_NAME = update_paths.CACHED_INSTALLER_META_NAME
 
@@ -181,90 +181,13 @@ def _make_session(verify_ssl: bool = True) -> requests.Session:
     return session
 
 
-def normalize_sha256(value: object) -> str:
-    """Принимает чистый SHA-256 или совместимый digest ``sha256:...``."""
-    normalized = str(value or "").strip().lower()
-    if normalized.startswith("sha256:"):
-        normalized = normalized.split(":", 1)[1].strip()
-    if len(normalized) != SHA256_HEX_LENGTH:
-        return ""
-    try:
-        int(normalized, 16)
-    except ValueError:
-        return ""
-    return normalized
-
-
 def file_sha256(path: str | os.PathLike[str], token: CancellationToken) -> str:
     return sha256_file(path, checkpoint=token.checkpoint, chunk_size=CHUNK_SIZE)
 
 
-def _release_sha256(release_info: dict) -> str:
-    return normalize_sha256(
-        release_info.get("sha256")
-        or release_info.get("digest")
-        or release_info.get("checksum")
-    )
-
-
-def _matching_forgejo_integrity(release_info: dict) -> tuple[str, int]:
-    """При необходимости получает SHA-256 из проверенного выпуска Forgejo."""
-    expected_sha256 = _release_sha256(release_info)
-    expected_size = int(release_info.get("file_size") or 0)
-    if expected_sha256 and expected_size > 0:
-        return expected_sha256, expected_size
-
-    try:
-        from .forgejo_release import get_latest_release as get_forgejo_release
-
-        forgejo_info = get_forgejo_release(CHANNEL)
-    except Exception as exc:
-        log(f"Не удалось получить контрольную сумму Forgejo: {exc}", "WARNING")
-        forgejo_info = None
-
-    if not forgejo_info:
-        return expected_sha256, expected_size
-
-    try:
-        same_version = normalize_version(str(forgejo_info.get("version") or "")) == normalize_version(
-            str(release_info.get("version") or "")
-        )
-    except ValueError:
-        same_version = False
-    if not same_version:
-        return expected_sha256, expected_size
-
-    return (
-        expected_sha256 or _release_sha256(forgejo_info),
-        expected_size or int(forgejo_info.get("file_size") or 0),
-    )
-
-
-def build_download_sources(release_info: dict) -> tuple[DownloadSource, ...]:
-    """Собирает зеркала один раз и удаляет повторы."""
-    update_url = str(release_info.get("update_url") or "").strip()
-    verify_ssl = bool(release_info.get("verify_ssl", True))
-    file_name = str(release_info.get("file_name") or "").strip()
-    if not file_name and update_url and not update_url.startswith("telegram://"):
-        file_name = update_url.rsplit("/", 1)[-1]
-    if not file_name:
-        from .channel_utils import get_channel_installer_name
-
-        file_name = get_channel_installer_name(CHANNEL)
-
-    candidates: list[DownloadSource] = []
-    if update_url and not update_url.startswith("telegram://"):
-        candidates.append(DownloadSource(update_url, verify_ssl))
-
-    if "git.zapret.moe" not in update_url:
-        try:
-            from .forgejo_release import get_latest_release as get_forgejo_release
-
-            forgejo_info = get_forgejo_release(CHANNEL)
-            if forgejo_info and forgejo_info.get("update_url"):
-                candidates.append(DownloadSource(str(forgejo_info["update_url"]), True))
-        except Exception as exc:
-            log(f"Не удалось добавить зеркало Forgejo: {exc}", "WARNING")
+def build_download_sources(metadata: ReleaseArtifactMetadata) -> tuple[DownloadSource, ...]:
+    """Добавляет зеркала только для уже проверенного установщика выпуска."""
+    candidates = [DownloadSource(metadata.update_url, metadata.verify_ssl)]
 
     try:
         from .server_config import VPS_SERVERS, should_verify_ssl
@@ -272,14 +195,14 @@ def build_download_sources(release_info: dict) -> tuple[DownloadSource, ...]:
         for server in VPS_SERVERS:
             candidates.append(
                 DownloadSource(
-                    f"https://{server['host']}:{server['https_port']}/download/{file_name}",
+                    f"https://{server['host']}:{server['https_port']}/download/{metadata.file_name}",
                     bool(should_verify_ssl()),
                 )
             )
         for server in VPS_SERVERS:
             candidates.append(
                 DownloadSource(
-                    f"http://{server['host']}:{server['http_port']}/download/{file_name}",
+                    f"http://{server['host']}:{server['http_port']}/download/{metadata.file_name}",
                     False,
                 )
             )
@@ -332,7 +255,8 @@ def prepare_update(
     if not release_info:
         raise UpdatePipelineError("Не удалось получить данные выпуска")
 
-    remote_version = normalize_version(str(release_info.get("version") or ""))
+    metadata = ReleaseArtifactMetadata.from_mapping(release_info)
+    remote_version = normalize_version(metadata.version)
     version_gap = compare_versions(APP_VERSION, remote_version)
     if version_gap > 0 or (version_gap == 0 and not allow_same_version):
         raise UpdatePipelineError(f"Обновление v{remote_version} уже не требуется")
@@ -341,22 +265,15 @@ def prepare_update(
 
     token.checkpoint()
     _emit_stage(on_stage, UpdateStage.RESOLVE, "Подготовка источников и проверки файла…")
-    sources = build_download_sources(release_info)
+    sources = build_download_sources(metadata)
     if not sources:
         raise UpdatePipelineError("Нет доступных источников обновления")
 
-    expected_sha256, expected_size = _matching_forgejo_integrity(release_info)
-    if not expected_sha256:
-        raise UpdateIntegrityError("В метаданных выпуска нет SHA-256")
-    if expected_size <= 0:
-        raise UpdateIntegrityError("В метаданных выпуска нет размера файла")
-
-    file_name = str(release_info.get("file_name") or "").strip() or "Zapret2Setup.exe"
     artifact = UpdateArtifact(
         version=remote_version,
-        file_name=file_name,
-        expected_size=expected_size,
-        expected_sha256=expected_sha256,
+        file_name=metadata.file_name,
+        expected_size=metadata.file_size,
+        expected_sha256=metadata.sha256,
         sources=sources,
     )
 
@@ -910,7 +827,6 @@ __all__ = [
     "file_sha256",
     "installer_arguments",
     "read_cached_installer_meta",
-    "normalize_sha256",
     "prepare_handoff",
     "prepare_update",
     "start_supervised_installation",

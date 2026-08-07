@@ -21,12 +21,12 @@ from log.log import log
 from utils.file_digest import sha256_file
 
 from .update import launch_installer_winapi
+from .release_contract import normalize_sha256
 from .update_pipeline import (
     CancellationToken,
     UpdatePipeline,
     cached_installer_path,
     installer_arguments,
-    normalize_sha256,
     read_cached_installer_meta,
 )
 

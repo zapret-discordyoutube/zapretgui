@@ -63,6 +63,34 @@ class ServerStatusWorkerContractTests(unittest.TestCase):
         self.assertNotIn("shutdown_sync", worker_source)
         self.assertNotIn("is_any_running", worker_source)
 
+    def test_telegram_row_is_diagnostic_and_cannot_announce_an_update(self) -> None:
+        from updater import server_status_workers
+
+        pool = SimpleNamespace(servers=[], stats={})
+        worker = server_status_workers.ServerCheckWorker(telegram_only=False)
+        statuses: list[tuple[str, dict]] = []
+        worker.server_checked.connect(lambda name, status: statuses.append((name, status)))
+
+        with (
+            patch("updater.server_pool.get_server_pool", return_value=pool),
+            patch("updater.telegram_updater.is_telegram_available", return_value=True),
+            patch(
+                "updater.telegram_updater.get_telegram_version_info",
+                return_value={"version": "99.1.2.3", "release_notes": "announcement"},
+            ),
+            patch("updater.forgejo_release.check_api", return_value={"online": True, "response_time": 0.01}),
+            patch.object(server_status_workers._time, "sleep"),
+        ):
+            worker.run()
+
+        telegram_status = next(status for name, status in statuses if name == "Telegram Bot")
+        self.assertEqual(telegram_status["status"], "online")
+        self.assertFalse(telegram_status["is_current"])
+        self.assertFalse(telegram_status["update_source"])
+        worker_source = inspect.getsource(server_status_workers.ServerCheckWorker)
+        self.assertNotIn('self._first_online_server_id = "telegram"', worker_source)
+        self.assertNotIn("set_cached_all_versions", worker_source)
+
 
 class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
     def test_page_runtime_receives_runtime_actions_instead_of_full_runtime_feature(self) -> None:
