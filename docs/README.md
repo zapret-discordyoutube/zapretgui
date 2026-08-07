@@ -1,6 +1,6 @@
-<h1 align="center"><img width="30" alt="image" src="https://github.com/user-attachments/assets/a9865f26-a61d-444f-8f6c-d186e5e21973" /><a href="https://publish.obsidian.md/zapret/Privacy/Zapret2/Zapret2">Zapret 2</a> (Запрет: обход блокировки Дискорда и Ютуба) </h1>
+<h1 align="center"><a href="https://publish.obsidian.md/zapret/Privacy/Zapret2/Zapret2">Zapret 2</a> (Запрет: обход блокировки Дискорда и Ютуба) </h1>
 
-### Документация доступна [здесь](https://publish.obsidian.md/zapret/Privacy/Zapret2/Zapret2) | Попробуйте наш новый [Zapret KVN](https://github.com/youtubediscord/zapret-kvn)!
+### Документация доступна [здесь](https://publish.obsidian.md/zapret/Privacy/Zapret2/Zapret2) | Попробуйте наш новый [Zapret KVN](https://git.zapret.moe/zapretdiscordyoutube/zapret-kvn)!
 
 <p align="center">
   <a href="https://telegram.me//bypassblock"><img alt="Основной канал" src="https://img.shields.io/badge/Основной_канал-Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white"></a>
@@ -9,7 +9,7 @@
   <a href="https://discord.com/invite/kkcBDG2uws"><img alt="Discord" src="https://img.shields.io/badge/Discord-сообщество-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
   <a href="https://telegram.me//zapretvpns_bot"><img alt="Поддержать донатами" src="https://img.shields.io/badge/Поддержать-донат-FF424D?style=for-the-badge&logo=telegram&logoColor=white"></a>
   <a href="https://publish.obsidian.md/zapret/Privacy/Zapret/home"><img alt="Вики" src="https://img.shields.io/badge/Вики-публичная-7C3AED?style=for-the-badge&logo=obsidian&logoColor=white"></a>
-  <a href="https://github.com/youtubediscord/zapret/issues/new/choose"><img alt="Вопросы и баги" src="https://img.shields.io/badge/Вопросы_и_баги-GitHub-181717?style=for-the-badge&logo=github&logoColor=white"></a>
+  <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret/issues/new"><img alt="Вопросы и баги" src="https://img.shields.io/badge/Вопросы_и_баги-Forgejo-FB923C?style=for-the-badge&logo=forgejo&logoColor=white"></a>
 </p>
 
 Один из самых (_если не самый_) популярных GUI лаунчеров для программы Запрет.
@@ -34,8 +34,6 @@
 - Возможность прописать кастомные DNS сервера (против атак провайдеров типа подмены ДНС)
 - Блокировать (запретить) установку национального мессенджера `Max` на устройство пользователя
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/7a32230e-95fc-4b29-8a8b-c5d88fe0750e" />
-
 > [!IMPORTANT]  
 > Есть вопросы? Задай их здесь на нашем [Telegram канале](https://telegram.me/bypassblock) или же в [группе](https://telegram.me/youtubenotwork) или [Discord](https://discord.gg/kkcBDG2uws)
 
@@ -46,19 +44,13 @@
 
 ## ❗ Хочу быстро и просто. Как установить и использовать? 
 ### Для новичков
-**Для неопытных пользователей рекомендуем: https://t.me/bypassblock/399** ([зеркало](https://github.com/youtubediscord/zapret/releases/latest/download/ZapretSetup.exe))
+**Для неопытных пользователей рекомендуем: https://t.me/bypassblock/399** ([зеркало в Forgejo](https://git.zapret.moe/zapretdiscordyoutube/zapret/releases/download/21.1.1.5/Zapret2Setup_21_1_1_5.exe))
 
 ### Собрать Zapret самостоятельно
-Скопируйте из `Actions`
+Скачайте готовую сборку на [странице релизов Forgejo](https://git.zapret.moe/zapretdiscordyoutube/zapret/releases).
 
 <h2 align="center">Хочу узнать подробнее </h2>
 
 Подробности о блокировках и прочих интересных штучках доступно [на нашей вики](https://publish.obsidian.md/zapret/Privacy/Zapret/home).
 
 Другие полезные сервисы и VPN https://github.com/awesome-windows11/CensorNet
-
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=youtubediscord/zapret&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=youtubediscord/zapret&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=youtubediscord/zapret&type=Date" />
- </picture>

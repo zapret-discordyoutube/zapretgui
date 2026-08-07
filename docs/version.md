@@ -3,7 +3,7 @@
 Наш GUI лаунчер имеет несколько основных версий (каналов обновления).
 
 ### Стабильные версии
-Стабильные (релизные) сборки поставляются через лаунчер [`ZapretSetup.exe`](https://github.com/youtubediscord/zapret/releases/latest/download/ZapretSetup.exe).
+Стабильные (релизные) сборки поставляются через лаунчер [`Zapret2Setup.exe`](https://git.zapret.moe/zapretdiscordyoutube/zapret/releases/tag/21.1.1.5).
 
 Обновления доступно из под программы по кнопке "Обновить" или по ссылке: https://t.me/bypassblock/399
 
@@ -20,7 +20,7 @@
 - Усиленный сбор телеметрии
 - Поддержка по ним не поддерживается (при любых ошибках используйте стабильные релизные сборки)
 
-Обновления по ним доступны только через GitHub или Telegram канал по скачиваю нового `7z` архива.
+Обновления по ним доступны только через [Forgejo](https://git.zapret.moe/zapretdiscordyoutube/zapret/releases) или Telegram-канал — нужно скачать новую сборку вручную.
 
 ### Консольные версии (без GUI, Win7)
-Подробнее тут: https://github.com/youtubediscord/zapret/releases/tag/win7
+Подробнее тут: https://git.zapret.moe/zapretdiscordyoutube/zapret/releases/tag/win7
