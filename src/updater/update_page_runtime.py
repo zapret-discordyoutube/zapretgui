@@ -1163,7 +1163,7 @@ class UpdatePageRuntime(QObject):
 
     def _bind_server_worker_signals(self, worker) -> None:
         worker.server_checked.connect(self._on_server_checked)
-        worker.all_complete.connect(self._on_servers_complete)
+        worker.update_sources_complete.connect(self._on_servers_complete)
 
     def _bind_version_worker_signals(self, worker) -> None:
         worker.version_found.connect(self._on_version_found)

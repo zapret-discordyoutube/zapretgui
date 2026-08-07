@@ -1,13 +1,6 @@
-"""
-telegram_updater.py
-────────────────────────────────────────────────────────────────
-Проверка версии из Telegram каналов через Bot HTTP API.
-Используется как дополнительный источник информации о версии.
-"""
+"""Диагностическая проверка версии на публичной странице Telegram-канала."""
 
-import os
 import re
-import time as _time
 import requests
 from typing import Optional, Dict, Any
 from log.log import log
@@ -24,72 +17,15 @@ def _no_proxy_get(url: str, **kwargs) -> requests.Response:
     finally:
         s.close()
 
-# ────────────────────────────────────────────────────────────────
-#  ТОКЕН TELEGRAM BOT API (только из generated runtime config)
-# ────────────────────────────────────────────────────────────────
-from config._build_secrets import TG_UPDATE_BOT_TOKEN as _BUILD_TOKEN
-
-_TOKEN_CACHE = ""
-
 # Каналы для разных веток (username без @)
 TELEGRAM_CHANNELS = {
     'stable': 'zapretnetdiscordyoutube',
     'dev': 'zapretguidev',
 }
 
-# Таймаут для Telegram запросов (секунды)
-TELEGRAM_TIMEOUT = 10
-
-# Глобальный флаг - отключить Telegram после flood wait
-_telegram_disabled_until = 0
-
-# Bot API URL
-_API_URL_TEMPLATE = "https://api.telegram.org/bot{value}/{method}"
-
-
-def get_inline_value() -> str:
-    """Возвращает токен update-бота только из generated runtime config."""
-    global _TOKEN_CACHE
-
-    if _TOKEN_CACHE:
-        return _TOKEN_CACHE
-
-    if _BUILD_TOKEN:
-        _TOKEN_CACHE = _BUILD_TOKEN
-        return _TOKEN_CACHE
-
-    return ""
-
-
-def _call_bot_api(method: str, params: dict = None) -> Optional[dict]:
-    """Вызывает Bot HTTP API"""
-    key = get_inline_value()
-    if not key:
-        return None
-    
-    url = _API_URL_TEMPLATE.format(value=key, method=method)
-    
-    try:
-        response = _no_proxy_get(url, params=params, timeout=TELEGRAM_TIMEOUT)
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('ok'):
-                return data.get('result')
-        elif response.status_code == 429:
-            # Rate limit
-            retry_after = response.json().get('parameters', {}).get('retry_after', 60)
-            global _telegram_disabled_until
-            _telegram_disabled_until = _time.time() + retry_after
-            log(f"⚠️ Telegram rate limit: {retry_after}с", "📱 TG")
-        return None
-    except requests.exceptions.ProxyError as e:
-        log(f"❌ Bot API ошибка (proxy): {e}", "📱 TG")
-        maybe_log_disable_dpi_for_update(e, scope="update_check", level="📱 TG")
-        return None
-    except Exception as e:
-        log(f"❌ Bot API ошибка: {e}", "📱 TG")
-        maybe_log_disable_dpi_for_update(e, scope="update_check", level="📱 TG")
-        return None
+# Telegram не участвует в выборе выпуска, поэтому диагностика не должна долго
+# занимать фоновый слот при блокировке t.me.
+TELEGRAM_TIMEOUT = 5
 
 
 def _parse_telegram_web(channel: str) -> Optional[Dict[str, Any]]:
@@ -155,81 +91,9 @@ def _parse_telegram_web(channel: str) -> Optional[Dict[str, Any]]:
 
 
 def get_telegram_version_info(channel: str = 'stable') -> Optional[Dict[str, Any]]:
-    """
-    Получает информацию о последней версии из Telegram канала
-    
-    Использует несколько методов:
-    1. Bot API getChat (закрепленное сообщение)
-    2. Парсинг публичной страницы t.me/s/channel
-    
-    Args:
-        channel: 'stable' или 'dev'
-        
-    Returns:
-        Dict с информацией о версии или None
-    """
-    global _telegram_disabled_until
-    
-    # Проверяем не отключен ли Telegram из-за flood wait
-    if _time.time() < _telegram_disabled_until:
-        remaining = int(_telegram_disabled_until - _time.time())
-        log(f"⏭️ Telegram отключен (rate limit, осталось {remaining}с)", "📱 TG")
-        return None
-    
+    """Читает версию с публичной страницы канала без токена и авторизации."""
     channel_name = TELEGRAM_CHANNELS.get(channel, TELEGRAM_CHANNELS['stable'])
-    
-    # Метод 1: Bot API - getChat (получаем закрепленное сообщение)
-    key = get_inline_value()
-    if key:
-        try:
-            log(f"🔍 Telegram: проверка @{channel_name}...", "📱 TG")
-            
-            chat_info = _call_bot_api('getChat', {'chat_id': f'@{channel_name}'})
-            
-            if chat_info:
-                pinned = chat_info.get('pinned_message')
-                
-                if pinned:
-                    # Проверяем есть ли документ
-                    doc = pinned.get('document')
-                    caption = pinned.get('caption', '')
-                    text = pinned.get('text', '')
-                    
-                    # Извлекаем версию
-                    version = _extract_version(
-                        doc.get('file_name', '') if doc else '',
-                        caption or text
-                    )
-                    
-                    if version:
-                        result = {
-                            'version': version,
-                            'file_name': doc.get('file_name') if doc else f'Zapret2Setup_{version}.exe',
-                            'file_size': doc.get('file_size') if doc else None,
-                            'file_id': doc.get('file_id') if doc else None,
-                            'source': f'Telegram @{channel_name}',
-                            'channel': channel_name,
-                        }
-                        log(f"✅ Telegram: найдена версия {version} (закреп)", "📱 TG")
-                        return result
-                
-                # Проверяем описание канала
-                description = chat_info.get('description', '')
-                if description:
-                    version = _extract_version('', description)
-                    if version:
-                        log(f"✅ Telegram: найдена версия {version} (описание)", "📱 TG")
-                        return {
-                            'version': version,
-                            'source': f'Telegram @{channel_name}',
-                            'channel': channel_name,
-                        }
-                        
-        except Exception as e:
-            log(f"⚠️ Bot API ошибка: {e}", "📱 TG")
-            maybe_log_disable_dpi_for_update(e, scope="update_check", level="📱 TG")
-    
-    # Метод 2: Парсинг публичной страницы (fallback)
+
     try:
         log(f"🔍 Telegram: парсинг t.me/s/{channel_name}...", "📱 TG")
         result = _parse_telegram_web(channel)
@@ -239,7 +103,7 @@ def get_telegram_version_info(channel: str = 'stable') -> Optional[Dict[str, Any
     except Exception as e:
         log(f"⚠️ Web парсинг ошибка: {e}", "📱 TG")
     
-    log(f"⚠️ Telegram: версия не найдена в @{channel_name}", "📱 TG")
+    log(f"⚠️ Telegram: версия не найдена в публичной странице @{channel_name}", "📱 TG")
     return None
 
 
@@ -291,31 +155,3 @@ def _extract_version_from_filename(file_name: str) -> Optional[str]:
             return match.group(1)
     
     return None
-
-
-def _extract_version(file_name: str, text: str) -> Optional[str]:
-    """
-    Извлекает версию из имени файла или текста.
-    Приоритет: имя файла > текст сообщения.
-    """
-    # ✅ ПРИОРИТЕТ 1: Извлекаем из имени файла (самый надёжный источник)
-    version = _extract_version_from_filename(file_name)
-    if version:
-        return version
-    
-    # ✅ ПРИОРИТЕТ 2: Ищем в тексте сообщения (fallback)
-    text_patterns = [
-        r'v?(\d+\.\d+\.\d+\.\d+)',  # 19.6.0.12
-        r'v?(\d+\.\d+\.\d+)',        # 19.6.0
-    ]
-    for pattern in text_patterns:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
-    
-    return None
-
-
-def is_telegram_available() -> bool:
-    """Проверяет доступность Telegram Bot API"""
-    return bool(get_inline_value())

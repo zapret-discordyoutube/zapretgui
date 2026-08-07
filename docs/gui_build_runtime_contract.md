@@ -20,13 +20,13 @@
 - Нельзя возвращать repo-based `.env` как источник GUI build/runtime значений.
 - Нельзя держать второй скрытый runtime-источник истины для `PREMIUM_API_BASE_URL`.
 - Нельзя держать второй скрытый runtime-источник истины для `UPDATE_SERVERS`.
-- Для Telegram update runtime нельзя держать второй путь токена через env или локальный файл, если канонический runtime путь уже выбран через `_build_secrets.py`.
+- Нельзя помещать Telegram Bot API токен в пользовательскую сборку. Публичный
+  клиент проверяет Telegram только через общедоступную страницу канала.
 
 ## Что сейчас считается каноническим
 
 - `PREMIUM_API_BASE_URL` -> только `config._build_secrets`.
 - `UPDATE_SERVERS` -> только `config._build_secrets`.
-- `TG_UPDATE_BOT_TOKEN` -> только `config._build_secrets`.
 - `PROXY_PRESETS` -> только `config._build_secrets`.
 - `MTPROXY_LINK` -> только `config._build_secrets`.
 
@@ -35,4 +35,3 @@
 - Если в исходниках поменяли build-настройку, но не пересобрали `_build_secrets.py`, runtime GUI продолжит жить на старом generated файле.
 - Если в runtime оставить fallback к env или локальному файлу, появится второй источник истины, и сборка перестанет быть предсказуемой.
 - Поэтому для runtime-полей важнее один жёсткий путь, чем “гибкость на всякий случай”.
-
