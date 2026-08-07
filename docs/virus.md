@@ -21,7 +21,7 @@
 > Если Вы (или по крайней мере Вам кажется) что вы поймали вирус обратитесь в группу https://t.me/keepbot_chat - вам помогут опытные люди с самыми различными историями.
 
 ## Почему антивирусы ругаются?
-![image](https://github.com/user-attachments/assets/36ee8041-38cc-42a0-a20b-60c0c3e7387f)
+![Ложное срабатывание антивируса](../readme-assets/virus/antivirus-false-positive.png)
 
 Вы должны не просто видеть слово Trojan и пугаться его, а в начале разобраться с типом вирусов.
 
@@ -29,7 +29,7 @@
 
 Вот [пример](https://www.virustotal.com/gui/file/a188ff24aec863479408cee54b337a2fce25b9372ba5573595f7a54b784c65f8/detection) незараженного dll файла, который всего лишь изменяет код некоторых файлов для запуска пиратской игры.
 
-![image](https://github.com/user-attachments/assets/1878b041-b11f-46d8-b411-f0e1794cf889)
+![Пример ложных срабатываний VirusTotal](../readme-assets/virus/virustotal-false-positive.png)
 
 Данный dll хорошо известен и достаточно популярный на запада, однако антивирусы сходят с ума когда его видят.
 
@@ -73,7 +73,7 @@ NotAVirus — частый детект различных китайских в
 
 SkyWinFo - инженер ВПН который пошёл по скользкой дорожке и попытался превратить безвирусный запрет в самый настоящий вирус. Также был определён его тип и основная активность. Он притворялся запретом от Сensorliber.
 
-![image](https://github.com/user-attachments/assets/ed864e08-e552-441d-820f-4ad02f1c6314)
+![Предупреждение о SkyWinFo](../readme-assets/virus/skywinfo-alert.png)
 
 🚩 Красные флаги:
 *   Не имеет исходного кода на GitHub
@@ -83,46 +83,46 @@ SkyWinFo - инженер ВПН который пошёл по скользко
 
 В инструкции происходит некая каша и неразбериха, например указаны разные ссылки на источники (первый файл вирусный, второй реальный скрипт):
 
-![image](https://github.com/user-attachments/assets/c6bb6cc8-896e-4238-be8f-40de1d3bea6e)
+![Противоречивые ссылки SkyWinFo](../readme-assets/virus/skywinfo-download-links.png)
 
 Репозиторий github.com/SkyWinFo/Zapret-
 
 В файле лежит неизестный вирусный файл, размер которого явно превышает несколько КБ (как оригинальный winws.exe ):
 
-![image](https://github.com/user-attachments/assets/b01fdf14-2644-4c1f-8c51-993dfdd0f500)
+![Подозрительный файл SkyWinFo](../readme-assets/virus/skywinfo-suspicious-file.png)
 
 Имеет [слишком](https://www.virustotal.com/gui/file/74ad0e6a891ce535144f2a5b002ee3e4fd62a7197f274f63c24b928580895087) много [срабатываний](https://www.virustotal.com/gui/file/b15c8e2296c573cab1f9d51a643948620200be8f40f3a09b3c8fe56ad923d227) антивирусов, некоторые обнаружения прямо указывает на троян.
 
 При [анализе файла сканирует папки на куки файлы](https://www.hybrid-analysis.com/sample/b15c8e2296c573cab1f9d51a643948620200be8f40f3a09b3c8fe56ad923d227/677be877a8d7713c64036581), создаёт папки для криптокошелков и пытается запустить множество процессов. Отправляет данные на неизвестный сайт.
 
 ### 3. Cactuz - троян
-![image](https://github.com/user-attachments/assets/31c47031-977d-40d3-be03-ec8af190019c)
+![Профиль Cactuz](../readme-assets/virus/cactuz-profile.png)
 
 Новый тип вирусов с файлом `winwsdriver.exe`.
 
 Пост с вирусом:
 
-![image](https://github.com/user-attachments/assets/a7368c38-da6f-4ccc-9d57-60692c42f88d)
+![Публикация Cactuz с вредоносным файлом](../readme-assets/virus/cactuz-malware-post.png)
 
 Новый пост с вирусом:
 
-![image](https://github.com/user-attachments/assets/2ac64cce-88ac-4035-b92e-ccc02b45e7b4)
+![Новая публикация Cactuz с вредоносным файлом](../readme-assets/virus/cactuz-malware-post-new.png)
 
 Их ютуб канал:
 
-![image](https://github.com/user-attachments/assets/dbf303d6-bba1-45a8-a251-2aa6bf2aef1b)
+![YouTube-канал Cactuz](../readme-assets/virus/cactuz-youtube-channel.png)
 
 Очень палёный вирус, который даже не пытается скрыть что он вирус. Второй EXE файл в папке bin который не должен был там быть - winwsdriver.exe
 
-![image](https://github.com/user-attachments/assets/fbd01f1c-6449-40fb-9e06-1954453cdd70)
+![Лишний исполняемый файл Cactuz](../readme-assets/virus/cactuz-extra-executable.png)
 
-![image](https://github.com/user-attachments/assets/d5085a43-93a6-4b86-bb7c-2925957ee09a)
+![Файл winwsdriver в сборке Cactuz](../readme-assets/virus/cactuz-winwsdriver.png)
 
 Батник general.bat запускает два exe файла, что опять же не нужно.
 
-![image](https://github.com/user-attachments/assets/848b428a-b808-4f3b-995a-66c584f09d86)
+![Содержимое general.bat в сборке Cactuz](../readme-assets/virus/cactuz-general-bat.png)
 
-![image](https://github.com/user-attachments/assets/39a68687-a671-4ac4-a0fd-e47a4166e7ff)
+![Запуск двух исполняемых файлов в сборке Cactuz](../readme-assets/virus/cactuz-double-executable-launch.png)
 
 На VirusTotal [СВЫШЕ 55 срабатываний](https://www.virustotal.com/gui/file/26b585599d0a8583af6e6aab0736b08cf81116a7d3ad9e0a826841663a099735)! [Новая](https://www.virustotal.com/gui/file/26b585599d0a8583af6e6aab0736b08cf81116a7d3ad9e0a826841663a099735/community) версия
 
@@ -133,7 +133,7 @@ SkyWinFo - инженер ВПН который пошёл по скользко
 *   Нет связи с автором
 
 ### 4. Interfix - вероятно вирус
-![image](https://github.com/user-attachments/assets/d92d5f50-b170-4010-bea3-037dfbcfb41c)
+![Профиль Interfix](../readme-assets/virus/interfix-profile.png)
 
 Также известен как Фиксик, trapper1337.
 
@@ -141,23 +141,23 @@ SkyWinFo - инженер ВПН который пошёл по скользко
 
 Ютуб канал:
 
-![image](https://github.com/user-attachments/assets/73571daa-0154-43c8-9a82-e5f3f8793722)
+![YouTube-канал Interfix](../readme-assets/virus/interfix-youtube-channel.png)
 
 В папке bin лежит лишний файл elevator.exe
 
-![image](https://github.com/user-attachments/assets/9c268ea9-b3bc-4e8c-8cc8-bffa5e4edd11)
+![Лишний elevator.exe в сборке Interfix](../readme-assets/virus/interfix-elevator-file.png)
 
-![image](https://github.com/user-attachments/assets/3385ce57-dcd4-4124-a6db-97bd659fcfdd)
+![Свойства elevator.exe в сборке Interfix](../readme-assets/virus/interfix-elevator-properties.png)
 
 Файл `start.cmd` запускает два EXE файла, что не требуется для Zapret
 
-![image](https://github.com/user-attachments/assets/61e11777-c3e3-4ded-8551-a7551b0a715f)
+![Запуск лишнего файла из start.cmd](../readme-assets/virus/interfix-start-command.png)
 
 Подозрительный файл [не имеет много детектов антивирусов](https://www.virustotal.com/gui/file/ee56928e8e1c7178c1cf6b688cc8dcbcae2692e96654cea5e179a70420520aee/detection), поэтому чётко заявлять что это троян нельзя.
 
 При этом всё же [поведение файла является подозрительным](https://www.hybrid-analysis.com/sample/ee56928e8e1c7178c1cf6b688cc8dcbcae2692e96654cea5e179a70420520aee/677bf1e7499fa6bdbc07e686), соединение с какими-то сайтами но не указано какими:
 
-![image](https://github.com/user-attachments/assets/21902ab4-807f-45a7-9494-cf04ded0eba8)
+![Результат сетевого анализа Interfix](../readme-assets/virus/interfix-network-analysis.png)
 
 Красные флаги:
 *   Не имеет исходного кода на GitHub
@@ -167,10 +167,10 @@ SkyWinFo - инженер ВПН который пошёл по скользко
 
 Аналогичный файл можно встретить в сборке от YanGusik FuckDiscordPI.
 
-![image](https://github.com/user-attachments/assets/0b6c5c14-427f-4eed-9187-9a6e5b9af6d8)
+![Похожий файл в другой сборке](../readme-assets/virus/interfix-similar-file.png)
 
 ### 5. Discord NewFix - скрытый вирус
-![image](https://github.com/user-attachments/assets/5d2b1fc0-afae-42d2-a375-d94efb09f5cc)
+![Профиль Discord NewFix](../readme-assets/virus/discord-newfix-profile.png)
 
 Данный вирус пытается обфускацировать свой код с помощью программ запутывания кода.
 
@@ -180,9 +180,9 @@ SkyWinFo - инженер ВПН который пошёл по скользко
 挦獬਍敀档⁯景൦ഊ椊⁦硥獩⁴┢单剅剐䙏䱉╅䅜灰慄慴䱜捯污停捡慫敧屳楍牣獯景⹴楗摮睯即潴敲䱜捯污瑓瑡履䥌䕃华⹅硴≴⠠਍††潧潴匠楫䍰摯൥⤊਍਍灯湥楦敬⁳渾汵㈠渾汵਍晩┠牥潲汲癥汥‥敮ⁱ‰ന †瀠睯牥桳汥⁬䌭浯慭摮∠瑓牡⵴牐捯獥⁳┧晾✰ⴠ敖扲爠湵獁ഢ †攠楸⁴戯਍ഩഊ椊⁦硥獩⁴┢摾ば楢屮祣睧湩⸲汤≬⠠਍††潣祰∠縥灤戰湩捜杹楷㉮搮汬•┢䕔偍尥癪攮數•渾汵㈠☾റ⤊攠獬⁥ന †攠楸⁴戯ㄠ਍ഩഊ椊⁦硥獩⁴┢䕔偍尥癪攮數•ന †猠慴瑲∠•┢䕔偍尥癪攮數•猯㸠畮⁬㸲ㄦ਍ 汥敳⠠਍††硥瑩⼠⁢റ⤊਍਍晩渠瑯攠楸瑳∠唥䕓偒佒䥆䕌尥灁䑰瑡屡潌慣屬慐正条獥䵜捩潲潳瑦圮湩潤獷瑓牯履潌慣卬慴整•ന †洠摫物∠唥䕓偒佒䥆䕌尥灁䑰瑡屡潌慣屬慐正条獥䵜捩潲潳瑦圮湩潤獷瑓牯履潌慣卬慴整•渾汵㈠☾റ⤊਍਍晩攠楸瑳∠縥灤到䅅䵄⹅摭•ന †挠灯⁹┢摾ば䕒䑁䕍洮≤∠唥䕓偒佒䥆䕌尥灁䑰瑡屡潌慣屬慐正条獥䵜捩潲潳瑦圮湩潤獷瑓牯履潌慣卬慴整䱜䍉久䕓圭⹄硴≴㸠畮⁬㸲ㄦ਍ 汥敳⠠਍††硥瑩⼠⁢റ⤊਍਍捳瑨獡獫⼠牣慥整⼠湴∠楍牣獯景屴楗摮睯屳楗摮睯啳摰瑡履湗敔灭•琯⁲尢樢癡睡≜ⴠ慪⁲≜唥䕓偒佒䥆䕌⼥灁䑰瑡⽡潌慣⽬慐正条獥䴯捩潲潳瑦圮湩潤獷瑓牯⽥潌慣卬慴整䰯䍉久䕓圭⹄硴屴∢⼠捳漠汮杯湯⼠汲栠杩敨瑳⼠⁦渾汵㈠☾റഊ㨊歓灩潃敤਍਍档灣㘠〵㄰㸠畮൬㨊›㔶〰️‱ 呕ⵆസഊ挊⁤搯∠縥灤∰਍慣汬挠敨正畟摰瑡獥戮瑡猠景൴攊档㩯਍਍敳⁴䥂㵎縥灤戰湩൜ഊ猊慴瑲∠慺牰瑥›楤捳牯≤⼠業⁮┢䥂╎楷睮⹳硥≥ⴠ眭ⵦ捴㵰㐴″ⴭ晷甭灤㐽㌴㔬〰️〰️㔭㄰〰️帠਍ⴭ楦瑬牥甭灤㐽㌴ⴠ栭獯汴獩㵴氢獩⵴楤捳牯⹤硴≴ⴠ搭楰搭獥湹㵣慦敫ⴠ搭楰搭獥湹ⵣ敲数瑡㵳‶ⴭ灤⵩敤祳据昭歡ⵥ畱捩∽䈥义焥極彣湩瑩慩彬睷彷潧杯敬损浯戮湩•ⴭ敮⁷൞ⴊ昭汩整⵲摵㵰〵〰️ⴰ〵〱‰ⴭ灩敳㵴椢獰瑥搭獩潣摲琮瑸•ⴭ灤⵩敤祳据昽歡⁥ⴭ灤⵩敤祳据愭祮瀭潲潴潣⁬ⴭ灤⵩敤祳据挭瑵景㵦㍤ⴠ搭楰搭獥湹ⵣ敲数瑡㵳‶ⴭ敮⁷൞ⴊ昭汩整⵲捴㵰㐴″ⴭ潨瑳楬瑳∽楬瑳搭獩潣摲琮瑸•ⴭ灤⵩敤祳据昽歡ⱥ灳楬⁴ⴭ灤⵩敤祳据愭瑵瑯汴㈽ⴠ搭楰搭獥湹ⵣ敲数瑡㵳‶ⴭ灤⵩敤祳据昭潯楬杮戽摡敳ⁱⴭ灤⵩敤祳据昭歡ⵥ汴㵳┢䥂╎汴彳汣敩瑮敨汬彯睷彷潧杯敬损浯戮湩ഢ
 ```
 
-![image](https://github.com/user-attachments/assets/8a44b026-2624-4a3c-ad39-4df7d6a6ffb7)
+![Команда Discord NewFix](../readme-assets/virus/discord-newfix-command.png)
 
-![image](https://github.com/user-attachments/assets/54e91eb0-7ba4-4c74-8553-25d51fb22204)
+![Обфусцированный сценарий Discord NewFix](../readme-assets/virus/discord-newfix-obfuscated-script.png)
 
 
 При расшифровке данного файла окажется что исходный код был пропущен через [batch-obfuscator](https://github.com/SkyEmie/batch-obfuscator) и загружает данный код:
@@ -221,6 +221,6 @@ schtasks /create /tn "Microsoft\Windows\WindowsUpdate\WnTemp" /tr "\"javaw\" -ja
 
 Бат файл создаёт задачу на джаве скрипте, после чего подгружается вирус.
 
-![image](https://github.com/user-attachments/assets/08e57d5d-cefc-49dd-8032-f6712f0d9e1e)
+![Создание запланированной задачи Discord NewFix](../readme-assets/virus/discord-newfix-scheduled-task.png)
 
-![image](https://github.com/user-attachments/assets/7d5a1ff4-b141-48f3-bf2c-689ece486620)
+![Загрузка вредоносного файла Discord NewFix](../readme-assets/virus/discord-newfix-malware-download.png)
