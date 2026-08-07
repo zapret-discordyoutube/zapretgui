@@ -827,12 +827,6 @@ class SystemTrayManager:
                 status_callback=lambda m: self.show_notification("Консоль", m),
                 confirm_disable=self._confirm_disable_discord_restart,
             )
-            return
-
-        if cmd.lower() == "апигитхаб":
-            self._tray_feature.toggle_github_api_removal(
-                status_callback=lambda m: self.show_notification("Консоль", m),
-            )
 
     def show_window(self):
         try:

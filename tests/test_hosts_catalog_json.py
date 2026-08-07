@@ -1025,50 +1025,20 @@ class HostsCatalogJsonTests(unittest.TestCase):
 
         self.assertEqual(index.get("services"), ["ChatGPT", "Instagram"])
 
-    def test_hosts_manager_creation_does_not_bootstrap_hosts_by_default(self) -> None:
+    def test_hosts_manager_has_no_legacy_bootstrap(self) -> None:
         from hosts import hosts as hosts_module
 
-        with (
-            patch.object(hosts_module, "safe_read_hosts_file", return_value="") as read_hosts,
-            patch.object(hosts_module, "safe_write_hosts_file", return_value=True) as write_hosts,
-            patch("settings.store.get_hosts_bootstrap_signature", return_value=None),
-            patch("settings.store.set_hosts_bootstrap_signature", return_value=True),
-            patch("settings.store.get_remove_github_api", return_value=False),
-        ):
-            hosts_module.HostsManager()
+        manager = hosts_module.HostsManager()
+        self.assertFalse(hasattr(manager, "apply_hosts_bootstrap_if_needed"))
 
-        read_hosts.assert_not_called()
-        write_hosts.assert_not_called()
-
-    def test_hosts_bootstrap_signature_has_no_domain_payload(self) -> None:
-        from hosts import hosts as hosts_module
-
-        self.assertEqual(hosts_module._get_hosts_bootstrap_signature(), "v3")
-
-    def test_hosts_bootstrap_does_not_write_when_github_cleanup_is_disabled(self) -> None:
-        from hosts import hosts as hosts_module
-
-        with (
-            patch.object(hosts_module, "safe_read_hosts_file", return_value="127.0.0.1 localhost\n") as read_hosts,
-            patch.object(hosts_module, "safe_write_hosts_file", return_value=True) as write_hosts,
-            patch("settings.store.get_hosts_bootstrap_signature", return_value="old"),
-            patch("settings.store.set_hosts_bootstrap_signature", return_value=True) as set_signature,
-            patch("settings.store.get_remove_github_api", return_value=False),
-        ):
-            hosts_module.HostsManager().apply_hosts_bootstrap_if_needed()
-
-        read_hosts.assert_called_once()
-        write_hosts.assert_not_called()
-        set_signature.assert_called_once_with("v3")
-
-    def test_execute_hosts_operation_runs_bootstrap_only_for_explicit_operation(self) -> None:
+    def test_execute_hosts_operation_does_not_run_legacy_bootstrap(self) -> None:
         from hosts import commands as hosts_commands
 
         calls: list[str] = []
 
         class FakeHostsManager:
             def apply_hosts_bootstrap_if_needed(self) -> None:
-                calls.append("bootstrap")
+                raise AssertionError("legacy bootstrap must not run")
 
             def apply_service_dns_selections(self, service_dns) -> bool:
                 calls.append(f"apply:{service_dns.get('ChatGPT')}")
@@ -1081,7 +1051,7 @@ class HostsCatalogJsonTests(unittest.TestCase):
         )
 
         self.assertTrue(result.success)
-        self.assertEqual(calls, ["bootstrap", "apply:fin_dns"])
+        self.assertEqual(calls, ["apply:fin_dns"])
 
     def test_get_hosts_state_uses_read_only_access_check(self) -> None:
         from hosts import commands as hosts_commands

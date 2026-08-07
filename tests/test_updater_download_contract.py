@@ -40,7 +40,7 @@ class UpdaterDownloadContractTests(unittest.TestCase):
             [(1, 1, 100), (4, 4, 100), (100, 100, 100)],
         )
 
-    def test_sha256_accepts_github_digest_format(self) -> None:
+    def test_sha256_accepts_prefixed_format(self) -> None:
         digest = "a" * 64
         self.assertEqual(normalize_sha256(f"sha256:{digest}"), digest)
         self.assertEqual(normalize_sha256(digest.upper()), digest)

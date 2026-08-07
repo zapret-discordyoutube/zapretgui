@@ -58,7 +58,6 @@ def default_program() -> dict[str, Any]:
         SELECTED_SOURCE_PRESET_FILE_NAME_KEY_WINWS1: "",
         SELECTED_SOURCE_PRESET_FILE_NAME_KEY_WINWS2: "",
         "auto_update_enabled": True,
-        "remove_github_api": True,
         "discord_auto_restart": True,
         "max_blocked": False,
         "russian_state_media_blocked": False,
@@ -149,7 +148,6 @@ def default_dns() -> dict[str, Any]:
 
 def default_hosts() -> dict[str, Any]:
     return {
-        "bootstrap_signature": None,
         "active_domains": [],
         "selection": {},
     }
@@ -225,8 +223,6 @@ def default_updater() -> dict[str, Any]:
     return {
         "release_cache": {},
         "rate_limit": {},
-        "github_cache": {},
-        "github_rate_limit_reset": None,
         "server_pool": {
             "stats": {},
             "selected_server_id": None,

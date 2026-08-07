@@ -8,35 +8,6 @@ from app_notifications import advisory_notification
 from log.log import log
 
 
-def toggle_github_api_removal(*, status_callback=None) -> bool:
-    """Переключает флаг удаления api.github.com из hosts при запуске."""
-    from settings.store import get_remove_github_api, set_remove_github_api
-
-    try:
-        current_state = bool(get_remove_github_api())
-        new_state = not current_state
-
-        if set_remove_github_api(new_state):
-            state_text = "включено" if new_state else "отключено"
-            message = f"Удаление api.github.com из hosts {state_text}"
-            log(message, "INFO")
-            if status_callback:
-                status_callback(message)
-            return True
-
-        error_message = "Ошибка при сохранении настройки удаления GitHub API"
-        log(error_message, "❌ ERROR")
-        if status_callback:
-            status_callback(error_message)
-        return False
-    except Exception as exc:
-        error_message = f"Ошибка при переключении удаления GitHub API: {exc}"
-        log(error_message, "❌ ERROR")
-        if status_callback:
-            status_callback(error_message)
-        return False
-
-
 def get_discord_restart_enabled(default: bool = True) -> bool:
     from discord.discord_restart import get_discord_restart_setting
 

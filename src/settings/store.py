@@ -561,14 +561,6 @@ def set_auto_update_enabled(value: bool) -> bool:
     return _set_bool(("program", "auto_update_enabled"), value)
 
 
-def get_remove_github_api() -> bool:
-    return _get_bool(("program", "remove_github_api"), True)
-
-
-def set_remove_github_api(value: bool) -> bool:
-    return _set_bool(("program", "remove_github_api"), value)
-
-
 def get_discord_restart_enabled() -> bool:
     return _get_bool(("program", "discord_auto_restart"), True)
 
@@ -872,14 +864,6 @@ def increment_dns_crash_count() -> int:
 
 def reset_dns_crash_count() -> bool:
     return _set_int(("dns", "dns_crash_count"), 0)
-
-
-def get_hosts_bootstrap_signature() -> str | None:
-    return _get_nullable_str(("hosts", "bootstrap_signature"))
-
-
-def set_hosts_bootstrap_signature(value: str | None) -> bool:
-    return _set_nullable_str(("hosts", "bootstrap_signature"), value)
 
 
 def get_active_hosts_domains() -> set[str]:
@@ -1469,7 +1453,6 @@ __all__ = [
     "get_folders_settings",
     "get_garland_enabled",
     "get_gui_autostart_enabled",
-    "get_hosts_bootstrap_signature",
     "get_hosts_selection",
     "get_isp_dns_info_shown",
     "get_kaspersky_warning_disabled",
@@ -1499,7 +1482,6 @@ __all__ = [
     "get_premium_pair_expires_at",
     "get_premium_settings",
     "get_profile_strategy_state_settings",
-    "get_remove_github_api",
     "get_rkn_background",
     "get_russian_state_media_blocked",
     "get_selected_theme",
@@ -1571,7 +1553,6 @@ __all__ = [
     "set_folders_settings",
     "set_garland_enabled",
     "set_gui_autostart_enabled",
-    "set_hosts_bootstrap_signature",
     "set_hosts_selection",
     "set_isp_dns_info_shown",
     "set_kaspersky_warning_disabled",
@@ -1602,7 +1583,6 @@ __all__ = [
     "set_premium_pair_code",
     "set_premium_settings",
     "set_profile_strategy_state_settings",
-    "set_remove_github_api",
     "set_rkn_background",
     "set_russian_state_media_blocked",
     "set_selected_theme",

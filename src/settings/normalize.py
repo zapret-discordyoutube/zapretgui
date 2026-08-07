@@ -279,7 +279,6 @@ def normalize_program(data: object) -> dict[str, Any]:
             defaults[SELECTED_SOURCE_PRESET_FILE_NAME_KEY_WINWS2],
         ),
         "auto_update_enabled": as_bool(raw.get("auto_update_enabled"), defaults["auto_update_enabled"]),
-        "remove_github_api": as_bool(raw.get("remove_github_api"), defaults["remove_github_api"]),
         "discord_auto_restart": as_bool(raw.get("discord_auto_restart"), defaults["discord_auto_restart"]),
         "max_blocked": as_bool(raw.get("max_blocked"), defaults["max_blocked"]),
         "russian_state_media_blocked": as_bool(
@@ -424,7 +423,6 @@ def normalize_hosts(data: object) -> dict[str, Any]:
         if service_name and profile_name:
             selection[service_name] = profile_name
     return {
-        "bootstrap_signature": as_nullable_str(raw.get("bootstrap_signature")),
         "active_domains": unique_str_list(raw.get("active_domains")),
         "selection": selection,
     }
@@ -653,8 +651,6 @@ def normalize_updater(data: object) -> dict[str, Any]:
     return {
         "release_cache": as_dict(_json_safe(raw.get("release_cache"))),
         "rate_limit": as_dict(_json_safe(raw.get("rate_limit"))),
-        "github_cache": {},
-        "github_rate_limit_reset": as_nullable_int(raw.get("github_rate_limit_reset")),
         "server_pool": {
             "stats": as_dict(_json_safe(server_pool_raw.get("stats"))),
             "selected_server_id": as_nullable_str(server_pool_raw.get("selected_server_id")),

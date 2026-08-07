@@ -1009,7 +1009,7 @@ def check_settings_json_is_single_app_storage(files: list[Path]) -> list[Problem
                 r"\b(?:"
                 r"premium\.ini|user_hosts\.ini|post_activate|activation_key|RegistryWindowGeometryStore|"
                 r"\.update_cache\.json|\.update_rate_limit\.json|\.server_pool_stats\.json|"
-                r"\.selected_server\.json|\.github_cache\.json|\.github_rate_limit|"
+                r"\.selected_server\.json|"
                 r"\.vps_block\.json|\.server_stats\.json|strategy_scan_resume\.json|"
                 r"blockcheck_user_domains\.txt"
                 r")\b"

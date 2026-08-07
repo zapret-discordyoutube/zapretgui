@@ -8,21 +8,27 @@ from unittest.mock import patch
 
 
 class UpdaterForgejoCacheStorageTests(unittest.TestCase):
-    def test_normalize_settings_drops_legacy_github_cache_payload(self) -> None:
+    def test_normalize_settings_drops_legacy_github_api_state(self) -> None:
         from settings.normalize import normalize_settings
         from settings.schema import build_default_settings
 
         settings = build_default_settings()
+        settings["program"]["remove_github_api"] = True
+        settings["hosts"]["bootstrap_signature"] = "v3"
         settings["updater"]["github_cache"] = {
             "https://api.github.test/releases": {
                 "timestamp": 123,
                 "content": [{"body": "x" * 10_000}],
             }
         }
+        settings["updater"]["github_rate_limit_reset"] = 123
 
         normalized = normalize_settings(settings)
 
-        self.assertEqual(normalized["updater"]["github_cache"], {})
+        self.assertNotIn("remove_github_api", normalized["program"])
+        self.assertNotIn("bootstrap_signature", normalized["hosts"])
+        self.assertNotIn("github_cache", normalized["updater"])
+        self.assertNotIn("github_rate_limit_reset", normalized["updater"])
 
     def test_forgejo_cache_is_saved_outside_settings_json(self) -> None:
         from config.runtime_layout import ApplicationPaths
@@ -49,10 +55,11 @@ class UpdaterForgejoCacheStorageTests(unittest.TestCase):
                 forgejo_cache_storage.save_forgejo_cache(cache_payload)
 
                 settings_data = json.loads((root / "settings" / "settings.json").read_text(encoding="utf-8"))
-                self.assertEqual(settings_data["updater"]["github_cache"], {})
+                self.assertNotIn("github_cache", settings_data["updater"])
+                self.assertNotIn("github_rate_limit_reset", settings_data["updater"])
                 self.assertEqual(forgejo_cache_storage.load_forgejo_cache(), cache_payload)
 
-    def test_legacy_cache_file_is_read_during_upgrade(self) -> None:
+    def test_legacy_github_cache_file_is_ignored(self) -> None:
         from config.runtime_layout import ApplicationPaths
         from updater import forgejo_cache_storage
 
@@ -65,7 +72,7 @@ class UpdaterForgejoCacheStorageTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with patch("updater.forgejo_cache_storage.APPLICATION_PATHS", paths):
-                self.assertEqual(forgejo_cache_storage.load_forgejo_cache(), payload)
+                self.assertEqual(forgejo_cache_storage.load_forgejo_cache(), {})
 
     def test_materialize_settings_file_rewrites_legacy_github_cache_payload(self) -> None:
         from settings import store as settings_store
@@ -89,8 +96,8 @@ class UpdaterForgejoCacheStorageTests(unittest.TestCase):
                 materialized = settings_store.materialize_settings_file()
 
             rewritten = json.loads(settings_path.read_text(encoding="utf-8"))
-            self.assertEqual(materialized["updater"]["github_cache"], {})
-            self.assertEqual(rewritten["updater"]["github_cache"], {})
+            self.assertNotIn("github_cache", materialized["updater"])
+            self.assertNotIn("github_cache", rewritten["updater"])
             self.assertNotIn("x" * 1_000, settings_path.read_text(encoding="utf-8"))
             self.assertLess(settings_path.stat().st_size, original_size)
 

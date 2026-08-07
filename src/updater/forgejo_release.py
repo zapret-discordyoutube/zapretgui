@@ -8,7 +8,6 @@ Forgejo хранит установщик и отдельный файл ``<inst
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlsplit
@@ -259,17 +258,11 @@ def check_api() -> Dict[str, Any]:
     return {"online": True, "response_time": time.time() - started}
 
 
-def is_rate_limited() -> Tuple[bool, Optional[datetime]]:
-    """Совместимость со старым вызовом: у собственного Forgejo нет этого шлюза."""
-    return False, None
-
-
 __all__ = [
     "FORGEJO_API_URL",
     "check_api",
     "compare_versions",
     "get_all_releases_with_exe",
     "get_latest_release",
-    "is_rate_limited",
     "normalize_version",
 ]

@@ -9,7 +9,6 @@ from utils.atomic_text import atomic_write_text
 
 
 FORGEJO_CACHE_FILE_NAME = "updater_forgejo_cache.json"
-LEGACY_GITHUB_CACHE_FILE_NAME = "updater_github_cache.json"
 
 
 def get_forgejo_cache_path() -> Path:
@@ -17,15 +16,11 @@ def get_forgejo_cache_path() -> Path:
 
 
 def load_forgejo_cache() -> dict[str, Any]:
-    current = get_forgejo_cache_path()
-    legacy = APPLICATION_PATHS.tmp_dir / LEGACY_GITHUB_CACHE_FILE_NAME
-    for path in (current, legacy):
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        return raw if isinstance(raw, dict) else {}
-    return {}
+    try:
+        raw = json.loads(get_forgejo_cache_path().read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return raw if isinstance(raw, dict) else {}
 
 
 def save_forgejo_cache(cache_data: dict[str, Any]) -> None:
