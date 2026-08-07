@@ -1,56 +1,86 @@
-<h1 align="center"><a href="https://publish.obsidian.md/zapret/Zapret/home">Zapret 2</a> (Запрет: обход блокировки Дискорда и Ютуба) </h1>
+<h1 align="center"><a href="https://publish.obsidian.md/zapret/Zapret/home">Zapret 2</a> (Запрет: обход блокировки Дискорда и Ютуба)</h1>
 
-### Документация доступна [здесь](https://publish.obsidian.md/zapret/Privacy/Zapret2/Zapret2) | Попробуйте наш новый [Zapret KVN](https://git.zapret.moe/zapretdiscordyoutube/zapret-kvn)!
+<p align="center"><b>Документация доступна <a href="https://publish.obsidian.md/zapret/Privacy/Zapret2/Zapret2">здесь</a> · Попробуйте наш новый <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret-kvn">Zapret KVN</a>!</b></p>
 
 <p align="center">
-  <a href="https://telegram.me//bypassblock"><img alt="Основной канал" src="https://img.shields.io/badge/Основной_канал-Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white"></a>
-  <a href="https://telegram.me//vpndiscordyooutube"><img alt="VPN-канал" src="https://img.shields.io/badge/VPN_канал-Telegram-179CDE?style=for-the-badge&logo=telegram&logoColor=white"></a>
+  <a href="https://telegram.me/bypassblock"><img alt="Основной канал" src="https://img.shields.io/badge/Основной_канал-Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white"></a>
+  <a href="https://telegram.me/vpndiscordyooutube"><img alt="VPN-канал" src="https://img.shields.io/badge/VPN_канал-Telegram-179CDE?style=for-the-badge&logo=telegram&logoColor=white"></a>
+  <a href="https://t.me/nerdpapers"><img alt="Личный канал" src="https://img.shields.io/badge/Личный_канал-nerdpapers-229ED9?style=for-the-badge&logo=telegram&logoColor=white"></a>
   <a href="https://www.youtube.com/channel/UCyEOuaB8EUwn1aU8a73_EWQ/"><img alt="YouTube" src="https://img.shields.io/badge/YouTube-канал-FF0000?style=for-the-badge&logo=youtube&logoColor=white"></a>
   <a href="https://discord.com/invite/kkcBDG2uws"><img alt="Discord" src="https://img.shields.io/badge/Discord-сообщество-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
-  <a href="https://telegram.me//zapretvpns_bot"><img alt="Поддержать донатами" src="https://img.shields.io/badge/Поддержать-донат-FF424D?style=for-the-badge&logo=telegram&logoColor=white"></a>
+  <a href="https://telegram.me/zapretvpns_bot"><img alt="Поддержать донатами" src="https://img.shields.io/badge/Поддержать-донат-FF424D?style=for-the-badge&logo=telegram&logoColor=white"></a>
   <a href="https://publish.obsidian.md/zapret/Zapret/home"><img alt="Вики" src="https://img.shields.io/badge/Вики-публичная-7C3AED?style=for-the-badge&logo=obsidian&logoColor=white"></a>
   <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret/issues/new"><img alt="Вопросы и баги" src="https://img.shields.io/badge/Вопросы_и_баги-Forgejo-FB923C?style=for-the-badge&logo=forgejo&logoColor=white"></a>
 </p>
 
+<p align="center">
+  <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret/stars"><img alt="Звёзды в Forgejo" src="https://git.zapret.moe/zapretdiscordyoutube/zapret/badges/stars.svg"></a>
+  <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret/releases"><img alt="Последний релиз в Forgejo" src="https://git.zapret.moe/zapretdiscordyoutube/zapret/badges/release.svg"></a>
+  <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret/issues"><img alt="Открытые задачи в Forgejo" src="https://git.zapret.moe/zapretdiscordyoutube/zapret/badges/issues.svg"></a>
+  <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret/actions"><img alt="Проверка исходников в Forgejo Actions" src="https://git.zapret.moe/zapretdiscordyoutube/zapret/actions/workflows/source-guards.yml/badge.svg"></a>
+  <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret/releases"><img alt="Загрузки последнего релиза" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fgit.zapret.moe%2Fapi%2Fv1%2Frepos%2Fzapretdiscordyoutube%2Fzapret%2Freleases%3Flimit%3D1&query=%24%5B0%5D.assets%5B0%5D.download_count&label=загрузки%20релиза&color=45cfff"></a>
+  <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret/commits/branch/main"><img alt="Последний коммит" src="https://img.shields.io/gitea/last-commit/zapretdiscordyoutube/zapret?gitea_url=https%3A%2F%2Fgit.zapret.moe&label=последний%20коммит&color=2e7bff"></a>
+</p>
+
+<p align="center">
+  <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret/src/branch/main/docs/LICENSE"><img alt="Лицензия MIT" src="https://img.shields.io/badge/лицензия-MIT-45cfff"></a>
+  <img alt="Python 3" src="https://img.shields.io/badge/python-3-3776AB?logo=python&logoColor=white">
+  <img alt="Windows 10 и 11" src="https://img.shields.io/badge/windows-10%20%C2%B7%2011-2e7bff">
+  <a href="https://git.zapret.moe/"><img alt="Свой Git-сервер" src="https://img.shields.io/badge/self--hosted-git.zapret.moe-a980ff?logo=forgejo&logoColor=white"></a>
+  <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret/releases"><img alt="SHA256 в каждом релизе" src="https://img.shields.io/badge/sha256-в%20каждом%20релизе-2ea043"></a>
+</p>
+
+<p align="center">
+  <a href="https://git.zapret.moe/zapretdiscordyoutube/zapret"><img alt="Окно Zapret 2 GUI: статус обхода, пресеты и настройки программы" src="https://git.zapret.moe/assets/zapret-moe/shot-gui.webp" width="860"></a>
+</p>
+
 Один из самых (_если не самый_) популярных GUI лаунчеров для программы Запрет.
 
-Мы собрали и продолжаем собирать свыше **200 стратегий** обхода блокировок для Discord и YouTube. **Вы можете добавить свою Если напишите нам в Issues!** 
+Мы собрали и продолжаем собирать свыше **200 стратегий** обхода блокировок для Discord и YouTube. **Вы можете добавить свою, если напишете нам в Issues!**
 
-Также программа предоставляет широкие возможности по настройке для автоматического запуска как GUI, так и отдельных `bat` стратегий (в режиме Запрет 1 или Запрет 2). 
+Также программа предоставляет широкие возможности по настройке для автоматического запуска как GUI, так и отдельных `bat` стратегий (в режиме Запрет 1 или Запрет 2).
 
 А также тонких настроек поведения любой части программы (также Запрета 1 и 2, например, быстрое управление списками доменов прямо из GUI программы для всех стратегий).
 
-Мы ввели и задокументировали понятие [пресетов](https://publish.obsidian.md/zapret/Privacy/Zapret2/preset) (_понятие было введено `bol-van`_) и их настроек. Популизировали понятие "профиль" (_также от `bol-van`_), и привязали его к понятию "стратегия" (_хотя рекомендуем использовать понятие дессинхронизация_). А также написали несколько своих `lua` стратегий которые успешно обходят блокировки.
+Мы ввели и задокументировали понятие [пресетов](https://publish.obsidian.md/zapret/Privacy/Zapret2/preset) (_понятие было введено `bol-van`_) и их настроек. Популяризировали понятие "профиль" (_также от `bol-van`_), и привязали его к понятию "стратегия" (_хотя рекомендуем использовать понятие десинхронизация_). А также написали несколько своих `lua` стратегий, которые успешно обходят блокировки.
 
 > [!TIP]
-> Относитесь программе как к аптечке. По умолчанию Вам доступен стандартный набор возможностей, но Вы можете попробовать другие лекарства, которые кому-то помогают сильнее, у кого-то не вызывают аллергию, у кого-то вызывают аллергию (_но это не значит что преппарат опасен, он просто Вам не подходит_) а кому-то бесполезны и ничего не делают. Вы также можете добавлять свои лекарства в эту аптечку.
+> Относитесь к программе как к аптечке. По умолчанию Вам доступен стандартный набор возможностей, но Вы можете попробовать другие лекарства, которые кому-то помогают сильнее, у кого-то не вызывают аллергию, у кого-то вызывают аллергию (_но это не значит что препарат опасен, он просто Вам не подходит_) а кому-то бесполезны и ничего не делают. Вы также можете добавлять свои лекарства в эту аптечку.
 
-### Основные возможности
+## ⚙️ Основные возможности
+
 - Возможность обхода блокировок Ютуба и Дискорда и все остальные известные и доселе доступные сайты (через ядро `winws.exe`, а также ядро `winws2.exe`)
 - Возможность быстро переключить между режимами Запрет 1 и Запрет 2
 - Поддержка всех `general ALT` (от `ALT1` до `ALT12`)
-- Возможность разблокировать доступ к неработающим сайтом ChatGPT, Google Gemini, Notion и другим заблокированным для России ресурсам (через файл `hosts`)
-- Возможность запустить оркестратор - автоматический перебор стратегий в режиме live
+- Возможность разблокировать доступ к неработающим сайтам ChatGPT, Google Gemini, Notion и другим заблокированным для России ресурсам (через файл `hosts`)
+- Возможность запустить оркестратор — автоматический перебор стратегий в режиме live
 - Возможность прописать кастомные DNS сервера (против атак провайдеров типа подмены ДНС)
 - Блокировать (запретить) установку национального мессенджера `Max` на устройство пользователя
 
-> [!IMPORTANT]  
+> [!IMPORTANT]
 > Есть вопросы? Задай их здесь на нашем [Telegram канале](https://telegram.me/bypassblock) или же в [группе](https://telegram.me/youtubenotwork) или [Discord](https://discord.gg/kkcBDG2uws)
 
-> [!CAUTION]  
+> [!CAUTION]
 > Совсем никак не работает Запрет?
-> 
+>
 > Попробуйте наш новый VPN с безлимитной скоростью: https://t.me/zapretvpns_bot
 
-## ❗ Хочу быстро и просто. Как установить и использовать? 
+## ❗ Хочу быстро и просто. Как установить и использовать?
+
 ### Для новичков
+
 **Для неопытных пользователей рекомендуем: https://t.me/bypassblock/399** ([зеркало в Forgejo](https://git.zapret.moe/zapretdiscordyoutube/zapret/releases/download/21.1.1.5/Zapret2Setup_21_1_1_5.exe))
 
-### Собрать Zapret самостоятельно
-Скачайте готовую сборку на [странице релизов Forgejo](https://git.zapret.moe/zapretdiscordyoutube/zapret/releases).
+### Готовые сборки
 
-<h2 align="center">Хочу узнать подробнее </h2>
+Скачайте готовую сборку на [странице релизов Forgejo](https://git.zapret.moe/zapretdiscordyoutube/zapret/releases). Рядом с каждым установщиком лежит файл `.sha256` — по нему можно проверить, что файл скачался целым и не был подменён.
+
+<h2 align="center">Хочу узнать подробнее</h2>
 
 Подробности о блокировках и прочих интересных штучках доступно [на нашей вики](https://publish.obsidian.md/zapret/Privacy/Zapret/home).
 
-Другие полезные сервисы и VPN https://github.com/awesome-windows11/CensorNet
+Другие полезные сервисы и VPN: https://github.com/awesome-windows11/CensorNet
+
+## 📄 Лицензия
+
+Проект распространяется по лицензии [MIT](https://git.zapret.moe/zapretdiscordyoutube/zapret/src/branch/main/docs/LICENSE).
