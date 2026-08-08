@@ -42,6 +42,7 @@ class PresetLaunchRuntime:
         self._presets_switch_method = ""
         self._presets_switch_debounce_timer = None
         self._presets_switch_debounce_method = ""
+        self._presets_switch_wait_queued = False
         self._pending_launch_warnings: list[str] = []
         self._restart_request_generation = 0
         self._restart_completed_generation = 0

@@ -395,6 +395,15 @@ class PresetFileStore:
     def _write_source(path: Path, source_text: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         text = PresetFileStore._normalize_source_for_write(source_text)
+        # Пометка «своя запись» — вспомогательный механизм подавления watcher-а;
+        # её отказ (например, модуль отсутствует в неполной сборке) не должен
+        # ломать саму запись пресета.
+        try:
+            from .own_write_registry import mark_own_preset_write
+
+            mark_own_preset_write(str(path))
+        except Exception:
+            pass
         path.write_text(text, encoding="utf-8", newline="\n")
 
     def _manifest_path(self, engine: str, manifest: PresetManifest) -> Path:

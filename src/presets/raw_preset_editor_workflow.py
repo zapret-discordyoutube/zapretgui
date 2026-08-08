@@ -58,6 +58,7 @@ def save_raw_preset_text(
         file_name,
         source_text,
         publish_content_changed=publish_content_changed,
+        content_change_kind="editor_save",
     )
     path = presets_feature.get_preset_source_path_by_file_name(
         launch_method,
@@ -237,4 +238,4 @@ def publish_raw_preset_content_changed(*, presets_feature, launch_method: str | 
         return
     publish = getattr(presets_feature, "publish_preset_content_changed", None)
     if callable(publish):
-        publish(launch_method, file_name)
+        publish(launch_method, file_name, content_change_kind="editor_save")

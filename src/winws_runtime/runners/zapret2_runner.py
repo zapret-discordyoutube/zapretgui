@@ -109,6 +109,9 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         # The spawned winws2 keeps writing stdout/stderr to this file for its
         # whole life; post-mortem diagnosis reads it after an unexpected death.
         self._last_startup_output_path: str = ""
+        # Имя @config содержит sha1 содержимого: совпадение launch_args с
+        # применёнными означает идентичную конфигурацию работающего процесса.
+        self._last_applied_base_launch_args: tuple[str, ...] = ()
 
         log("Winws2StrategyRunner initialized", "INFO")
 
@@ -660,6 +663,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         self.running_process = None
         self.current_launch_label = None
         self.current_strategy_args = None
+        self._last_applied_base_launch_args = ()
 
     def _prepare_state_for_spawn_locked(self, preset_path: str, strategy_name: str) -> None:
         """Normalize stale runner state before a new spawn attempt."""
@@ -1196,6 +1200,16 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                 log("Fast preset switch skipped before spawn: request is stale", "DEBUG")
                 return True
 
+            applied_args = tuple(getattr(self, "_last_applied_base_launch_args", ()) or ())
+            if (
+                applied_args
+                and self.running_process is not None
+                and self.is_running()
+                and tuple(artifact.launch_args) == applied_args
+            ):
+                log("Fast preset switch пропущен: @config идентичен применённому", "INFO")
+                return True
+
             old_process = self.running_process if self.running_process and self.is_running() else None
             old_preset_path = str(self._preset_file_path or "")
             old_strategy_name = getattr(self, "current_launch_label", None)
@@ -1268,6 +1282,8 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                     artifact,
                     strategy_name,
                 )
+            if success:
+                self._last_applied_base_launch_args = tuple(artifact.launch_args)
         return success
 
     def _fast_switch_process_init_retry_allowed(self, exit_code: int) -> bool:
@@ -1559,6 +1575,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             stable_start_window_seconds=stable_start_window_seconds,
         )
         if success:
+            self._last_applied_base_launch_args = tuple(artifact.launch_args)
             return True
 
         return self._maybe_retry_after_failed_spawn_locked(

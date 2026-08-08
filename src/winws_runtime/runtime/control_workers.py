@@ -154,8 +154,18 @@ class PresetSwitchWorker(QObject):
                 )
             )
 
+            if success:
+                # PID нужен и stale-финишу: устаревшее поколение могло уже
+                # переключить процесс, и snapshot обязан узнать нового владельца.
+                try:
+                    runner_snapshot = runner.get_runner_state_snapshot()
+                    pid = getattr(runner_snapshot, "pid", None)
+                    self.started_pid = pid if isinstance(pid, int) else None
+                except Exception:
+                    self.started_pid = None
+
             if not bool(self._is_generation_current(self.generation)):
-                self.finished.emit(True, "", self.generation, self.launch_method, True)
+                self.finished.emit(success, "", self.generation, self.launch_method, True)
                 return
 
             if not success:
@@ -165,12 +175,6 @@ class PresetSwitchWorker(QObject):
                 self.finished.emit(False, short_error, self.generation, self.launch_method, False)
                 return
 
-            try:
-                runner_snapshot = runner.get_runner_state_snapshot()
-                pid = getattr(runner_snapshot, "pid", None)
-                self.started_pid = pid if isinstance(pid, int) else None
-            except Exception:
-                self.started_pid = None
             self.finished.emit(True, "", self.generation, self.launch_method, False)
         except Exception as e:
             self.finished.emit(False, str(e), self.generation, self.launch_method, False)

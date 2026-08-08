@@ -59,6 +59,25 @@ def _redirect_preset_switch_if_owner_differs(
     return True
 
 
+def _schedule_pending_presets_switch_retry(runtime_owner) -> None:
+    """Повтор для отложенного pending switch.
+
+    QThread ещё числится isRunning() короткое время после finished-сигнала,
+    а singleShot(0) из finish-хендлера успевает выстрелить раньше. Без
+    повтора pending-поколение теряется навсегда и busy («Применяем
+    пресет...») не снимается.
+    """
+    if getattr(runtime_owner, "_presets_switch_wait_queued", False):
+        return
+    runtime_owner._presets_switch_wait_queued = True
+
+    def _retry() -> None:
+        runtime_owner._presets_switch_wait_queued = False
+        process_pending_presets_switch(runtime_owner)
+
+    QTimer.singleShot(150, _retry)
+
+
 def process_pending_presets_switch(runtime_owner) -> None:
     target_generation = int(runtime_owner._presets_switch_requested_generation or 0)
     if target_generation <= int(runtime_owner._presets_switch_completed_generation or 0):
@@ -76,6 +95,7 @@ def process_pending_presets_switch(runtime_owner) -> None:
 
     try:
         if runtime_owner._presets_switch_thread and runtime_owner._presets_switch_thread.isRunning():
+            _schedule_pending_presets_switch_retry(runtime_owner)
             return
     except RuntimeError:
         runtime_owner._presets_switch_thread = None
@@ -86,6 +106,7 @@ def process_pending_presets_switch(runtime_owner) -> None:
                 f"Preset mode switch отложен: основной start pipeline ещё идёт, поколение {target_generation}",
                 "DEBUG",
             )
+            _schedule_pending_presets_switch_retry(runtime_owner)
             return
     except RuntimeError:
         runtime_owner._dpi_start_thread = None
@@ -96,6 +117,7 @@ def process_pending_presets_switch(runtime_owner) -> None:
                 f"Preset mode switch отложен: stop pipeline ещё идёт, поколение {target_generation}",
                 "DEBUG",
             )
+            _schedule_pending_presets_switch_retry(runtime_owner)
             return
     except RuntimeError:
         runtime_owner._dpi_stop_thread = None
@@ -203,6 +225,7 @@ def process_pending_restart_request(runtime_owner) -> None:
                 f"Перезапуск DPI отложен: запуск ещё идёт, актуальное поколение {target_generation}",
                 "DEBUG",
             )
+            runtime_owner._schedule_pending_restart_retry()
             return
     except RuntimeError:
         runtime_owner._dpi_start_thread = None
@@ -214,6 +237,7 @@ def process_pending_restart_request(runtime_owner) -> None:
                 f"Перезапуск DPI отложен: остановка ещё идёт, актуальное поколение {target_generation}",
                 "DEBUG",
             )
+            runtime_owner._schedule_pending_restart_retry()
             return
     except RuntimeError:
         runtime_owner._dpi_stop_thread = None
@@ -272,6 +296,13 @@ def handle_presets_switch_finished(runtime_owner, success, error_message, genera
 
         stale_finish = bool(skipped_as_stale) or finished_generation < requested_generation
         if stale_finish:
+            worker = getattr(runtime_owner, "_presets_switch_worker", None)
+            pid = getattr(worker, "started_pid", None)
+            if success and isinstance(pid, int):
+                # Устаревшее поколение уже успело переключить процесс: без
+                # фиксации snapshot держит PID убитого процесса, пока следующее
+                # поколение не завершится. busy не снимаем — pending ещё в полёте.
+                runtime_owner._mark_runtime_running(pid=pid)
             log(
                 f"Preset mode switch поколения {generation} пропущен как устаревший ({launch_method})",
                 "DEBUG",

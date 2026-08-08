@@ -5,6 +5,7 @@ from settings.mode import is_preset_launch_method, normalize_launch_method
 
 
 PRESET_CONTENT_APPLY_DEBOUNCE_MS = 900
+PRESET_EDITOR_SAVE_APPLY_DEBOUNCE_MS = 350
 PRESET_STRATEGY_ONLY_APPLY_DEBOUNCE_MS = 2200
 
 
@@ -56,4 +57,9 @@ def _preset_content_apply_debounce_ms(reason: str) -> int:
     clean_reason = str(reason or "").strip()
     if clean_reason == "strategy_only":
         return PRESET_STRATEGY_ONLY_APPLY_DEBOUNCE_MS
+    if clean_reason == "editor_save":
+        # Сохранение в редакторе — явное дискретное действие пользователя;
+        # внешним записям (сторонний редактор пишет в несколько приёмов)
+        # оставляем длинный debounce.
+        return PRESET_EDITOR_SAVE_APPLY_DEBOUNCE_MS
     return PRESET_CONTENT_APPLY_DEBOUNCE_MS
