@@ -1015,6 +1015,18 @@ description = Потом опишу подробнее
 --lua-desync=send:repeats=2
 --lua-desync=syndata:blob=stun_pat
 
+[send_x3_syndata_tls_google]
+name = send x3 + syndata tls_google
+blobs = tls_google
+--lua-desync=send:repeats=3
+--lua-desync=syndata:blob=tls_google
+
+[fake_tls_google_autottl_multidisorder_complex]
+name = fake tls_google x6 AutoTTL badack + MultiDisorder Complex
+blobs = tls_google
+--lua-desync=fake:blob=tls_google:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:repeats=6:tcp_ack=-66000
+--lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
+
 [pktmod_syndata]
 name = pktmod + syndata
 author = hz
