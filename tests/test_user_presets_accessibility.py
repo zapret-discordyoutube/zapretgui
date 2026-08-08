@@ -327,7 +327,7 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
         self.assertIs(self._app.focusWidget(), widgets.presets_list)
         self.assertEqual(widgets.presets_list.currentIndex().row(), 1)
 
-    def test_ctrl_f_toggles_preset_search(self) -> None:
+    def test_ctrl_f_focuses_always_visible_preset_search(self) -> None:
         from app.state_store import MainWindowStateStore
         from presets.ui.common.user_presets_page_runtime import UserPresetsRuntimeActions
         from presets.ui.zapret2.user_presets_page import Zapret2UserPresetsPage
@@ -366,7 +366,7 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
         page.show()
         self._app.processEvents()
 
-        self.assertTrue(page._preset_search_input.isHidden())
+        self.assertFalse(page._preset_search_input.isHidden())
 
         QTest.keyClick(page.presets_list, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
         self._app.processEvents()
@@ -375,12 +375,15 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
         self.assertIs(self._app.focusWidget(), page._preset_search_input)
 
         page._preset_search_input.setText("Gaming")
-        QTest.keyClick(page._preset_search_input, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
+        page.presets_list.setFocus()
+        self._app.processEvents()
+        QTest.keyClick(page.presets_list, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
         self._app.processEvents()
 
-        self.assertTrue(page._preset_search_input.isHidden())
-        self.assertEqual(page._preset_search_input.text(), "")
-        self.assertIs(self._app.focusWidget(), page.presets_list)
+        self.assertFalse(page._preset_search_input.isHidden())
+        self.assertEqual(page._preset_search_input.text(), "Gaming")
+        self.assertEqual(page._preset_search_input.selectedText(), "Gaming")
+        self.assertIs(self._app.focusWidget(), page._preset_search_input)
 
     def test_preset_list_navigation_does_not_use_native_selection_state(self) -> None:
         parent, widgets = self._build_widgets()
@@ -684,7 +687,7 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
                 self.assertEqual(widget.property("screenReaderStateText"), name)
 
         search_description = widgets.preset_search_input.accessibleDescription()
-        self.assertIn("Ctrl+F открывает или закрывает поиск", search_description)
+        self.assertIn("Ctrl+F переводит курсор в поле поиска", search_description)
         self.assertIn("После ввода перейдите в список клавишей Tab", search_description)
         self.assertIn("или нажмите Стрелка вниз", search_description)
         self.assertIn("выберите пресет стрелками вверх и вниз", search_description)

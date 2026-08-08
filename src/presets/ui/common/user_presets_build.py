@@ -192,8 +192,6 @@ def build_user_presets_page_shell(
     preset_search_input.setFixedHeight(34)
     preset_search_input.setProperty("noDrag", True)
     preset_search_input.textChanged.connect(on_preset_search_text_changed)
-    # Поиск не занимает место, пока пользователь не вызовет его через Ctrl+F.
-    preset_search_input.hide()
     apply_user_presets_accessibility(
         tr_fn=tr_fn,
         tr_prefix=tr_prefix,

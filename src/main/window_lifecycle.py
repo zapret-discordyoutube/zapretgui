@@ -13,6 +13,7 @@ from main.runtime_state import (
     log_startup_metric as emit_startup_metric,
     startup_elapsed_ms,
 )
+from ui.window_preset_file_drop import handle_native_preset_file_drop
 
 
 class WindowLifecycleMixin:
@@ -108,6 +109,8 @@ class WindowLifecycleMixin:
         return bool(provider())
 
     def nativeEvent(self, event_type, message):  # noqa: N802 (Qt override)
+        if handle_native_preset_file_drop(self, message):
+            return (True, 0)
         if handle_native_minimize_command(
             self,
             message,

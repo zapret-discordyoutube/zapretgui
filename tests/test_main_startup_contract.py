@@ -3194,6 +3194,26 @@ class WindowLifecycleEarlyEventTests(unittest.TestCase):
         window.close_to_tray.assert_called_once()
         self.assertEqual(window.calls, ["hide_to_tray"])
 
+    def test_native_file_drop_is_handled_before_base_window(self) -> None:
+        from main.window_lifecycle import WindowLifecycleMixin
+
+        class Window(WindowLifecycleMixin, _BaseWindowEvents):
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+        window = Window()
+        message = object()
+
+        with patch(
+            "main.window_lifecycle.handle_native_preset_file_drop",
+            return_value=True,
+        ) as handle_drop:
+            result = window.nativeEvent(b"windows_generic_MSG", message)
+
+        self.assertEqual(result, (True, 0))
+        handle_drop.assert_called_once_with(window, message)
+        self.assertEqual(window.calls, [])
+
     def test_native_minimize_command_uses_normal_window_flow_when_mode_is_normal(self) -> None:
         from main.window_native_commands import SC_MINIMIZE, WM_SYSCOMMAND
         from main.window_lifecycle import WindowLifecycleMixin

@@ -17,6 +17,23 @@ from qfluentwidgets import FluentIcon, InfoBar, InfoBarPosition, isDarkTheme
 
 from app.ui_texts import tr as tr_catalog
 from log.log import log
+from ui.windows_file_drop import windows_dropped_file_paths
+
+
+def valid_preset_file_paths(file_paths) -> list[str]:
+    """Оставляет уникальные существующие TXT-файлы."""
+    paths: list[str] = []
+    seen: set[str] = set()
+    for file_path in file_paths or ():
+        path = str(file_path or "").strip()
+        if not path or not path.lower().endswith(".txt") or not os.path.isfile(path):
+            continue
+        path_key = os.path.normcase(os.path.normpath(path))
+        if path_key in seen:
+            continue
+        seen.add(path_key)
+        paths.append(path)
+    return paths
 
 
 def dropped_preset_file_paths(mime_data) -> list[str]:
@@ -30,8 +47,7 @@ def dropped_preset_file_paths(mime_data) -> list[str]:
     except Exception:
         return []
 
-    paths: list[str] = []
-    seen: set[str] = set()
+    local_paths: list[str] = []
     for url in urls:
         try:
             if not url.isLocalFile():
@@ -39,14 +55,8 @@ def dropped_preset_file_paths(mime_data) -> list[str]:
             path = str(url.toLocalFile() or "").strip()
         except Exception:
             continue
-        if not path or not path.lower().endswith(".txt") or not os.path.isfile(path):
-            continue
-        path_key = os.path.normcase(os.path.normpath(path))
-        if path_key in seen:
-            continue
-        seen.add(path_key)
-        paths.append(path)
-    return paths
+        local_paths.append(path)
+    return valid_preset_file_paths(local_paths)
 
 
 class PresetFileDropOverlay(QWidget):
@@ -234,6 +244,21 @@ class WindowPresetFileDropFilter(QObject):
         action = getattr(target, "import_dropped_preset_files", None)
         return action if callable(action) else None
 
+    def import_file_paths(self, file_paths) -> bool:
+        """Передаёт файлы текущей странице через общий путь импорта."""
+        paths = valid_preset_file_paths(file_paths)
+        import_action = self._import_action()
+        if not paths or import_action is None:
+            self._hide_overlay()
+            return False
+        try:
+            imported = bool(import_action(paths))
+        except Exception as exc:
+            log(f"Не удалось передать TXT-файл на импорт: {exc}", "ERROR")
+            imported = False
+        self._hide_overlay()
+        return imported
+
     def eventFilter(self, watched, event):  # noqa: N802 (Qt override)
         if not self._belongs_to_window(watched):
             return False
@@ -260,15 +285,8 @@ class WindowPresetFileDropFilter(QObject):
             return False
 
         if event_type == QEvent.Type.Drop:
-            try:
-                if not bool(import_action(paths)):
-                    self._hide_overlay()
-                    return False
-            except Exception as exc:
-                log(f"Не удалось передать TXT-файл на импорт: {exc}", "ERROR")
-                self._hide_overlay()
+            if not self.import_file_paths(paths):
                 return False
-            self._hide_overlay()
         else:
             self._show_overlay(paths)
 
@@ -286,8 +304,22 @@ class WindowPresetFileDropFilter(QObject):
             action()
 
 
+def handle_native_preset_file_drop(window, message) -> bool:
+    """Направляет WM_DROPFILES в тот же фильтр, что и обычный Qt Drop."""
+    file_paths = windows_dropped_file_paths(message)
+    if file_paths is None:
+        return False
+    event_filter = getattr(window, "_preset_file_drop_filter", None)
+    import_file_paths = getattr(event_filter, "import_file_paths", None)
+    if callable(import_file_paths):
+        import_file_paths(file_paths)
+    return True
+
+
 __all__ = [
     "PresetFileDropOverlay",
     "WindowPresetFileDropFilter",
     "dropped_preset_file_paths",
+    "handle_native_preset_file_drop",
+    "valid_preset_file_paths",
 ]

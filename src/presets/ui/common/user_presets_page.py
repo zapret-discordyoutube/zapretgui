@@ -796,45 +796,18 @@ class UserPresetsPageBase(BasePage):
     def _install_preset_search_shortcut(self) -> None:
         shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Find), self)
         shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
-        shortcut.activated.connect(self._toggle_preset_search)
-        shortcut.activatedAmbiguously.connect(self._toggle_preset_search)
+        shortcut.activated.connect(self._focus_preset_search)
+        shortcut.activatedAmbiguously.connect(self._focus_preset_search)
         self._preset_search_shortcut = shortcut
 
-    def _toggle_preset_search(self) -> None:
+    def _focus_preset_search(self) -> None:
         if not self.isVisible() or not self.isEnabled():
             return
         search_input = self._preset_search_input
         if search_input is None:
             return
-        if search_input.isHidden():
-            self._show_preset_search()
-        else:
-            self._hide_preset_search()
-
-    def _show_preset_search(self) -> None:
-        search_input = self._preset_search_input
-        if search_input is None:
-            return
-        search_input.show()
-        self._resync_layout_metrics()
-        self._schedule_layout_resync()
         search_input.setFocus(Qt.FocusReason.ShortcutFocusReason)
         search_input.selectAll()
-
-    def _hide_preset_search(self) -> None:
-        search_input = self._preset_search_input
-        if search_input is None:
-            return
-        if search_input.text():
-            search_input.clear()
-            self._preset_search_timer.stop()
-            self._apply_preset_search()
-        search_input.hide()
-        self._resync_layout_metrics()
-        self._schedule_layout_resync()
-        presets_list = getattr(self, "presets_list", None)
-        if presets_list is not None:
-            presets_list.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _apply_preset_search(self) -> None:
         apply_preset_search(
@@ -848,8 +821,6 @@ class UserPresetsPageBase(BasePage):
         search_input = self._preset_search_input
         if search_input is not None:
             try:
-                if query:
-                    self._show_preset_search()
                 if str(search_input.text() or "") == query:
                     return True
                 search_input.setText(query)

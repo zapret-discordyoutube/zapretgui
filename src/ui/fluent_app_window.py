@@ -18,6 +18,7 @@ from config.build_info import APP_VERSION
 from log.log import log
 from main.runtime_state import log_startup_metric as emit_startup_metric
 from ui.window_preset_file_drop import WindowPresetFileDropFilter
+from ui.windows_file_drop import enable_windows_file_drop
 
 
 
@@ -80,6 +81,7 @@ class ZapretFluentWindow(FluentWindow):
             language_resolver=self._current_ui_language,
         )
         app.installEventFilter(self._preset_file_drop_filter)
+        self._windows_file_drop_enabled = enable_windows_file_drop(self)
 
     def _current_preset_file_drop_target(self):
         from ui.window_adapter import get_current_page

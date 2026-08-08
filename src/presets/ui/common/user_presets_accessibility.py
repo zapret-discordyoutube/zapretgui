@@ -85,7 +85,7 @@ def apply_user_presets_accessibility(
         name_default="Поиск пресетов",
         description_key=f"{tr_prefix}.search.accessible_description",
         description_default=(
-            "Поиск пресетов по имени. Ctrl+F открывает или закрывает поиск. "
+            "Поиск пресетов по имени. Ctrl+F переводит курсор в поле поиска. "
             "После ввода перейдите в список клавишей Tab или нажмите Стрелка вниз, "
             "выберите пресет стрелками вверх и вниз, затем нажмите Enter или Пробел."
         ),

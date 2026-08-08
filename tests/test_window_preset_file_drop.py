@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -53,7 +53,11 @@ class WindowPresetFileDropTests(unittest.TestCase):
             WindowPresetFileDropFilter,
         )
 
-        window = ZapretFluentWindow()
+        with patch(
+            "ui.fluent_app_window.enable_windows_file_drop",
+            return_value=True,
+        ) as enable_native_drop:
+            window = ZapretFluentWindow()
         self.addCleanup(window.deleteLater)
         event_filter = window._preset_file_drop_filter
         self.addCleanup(self._app.removeEventFilter, event_filter)
@@ -67,6 +71,8 @@ class WindowPresetFileDropTests(unittest.TestCase):
         self.assertIsInstance(event_filter.overlay, PresetFileDropOverlay)
         self.assertTrue(event_filter.overlay.isHidden())
         self.assertIs(window._current_preset_file_drop_target(), target)
+        self.assertTrue(window._windows_file_drop_enabled)
+        enable_native_drop.assert_called_once_with(window)
 
     def test_collects_only_unique_existing_txt_files(self) -> None:
         from ui.window_preset_file_drop import dropped_preset_file_paths
@@ -128,6 +134,60 @@ class WindowPresetFileDropTests(unittest.TestCase):
             leave_event = _DropEvent(QEvent.Type.DragLeave, [])
             self.assertFalse(event_filter.eventFilter(receiver, leave_event))
             self.assertEqual(overlay.hide_hint.call_count, 2)
+
+    def test_native_drop_uses_the_same_filter_import_path(self) -> None:
+        from ui.window_preset_file_drop import (
+            WindowPresetFileDropFilter,
+            handle_native_preset_file_drop,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            preset_path = Path(tmp) / "Native.txt"
+            preset_path.write_text("preset", encoding="utf-8")
+            target = SimpleNamespace(import_dropped_preset_files=Mock(return_value=True))
+            event_filter = WindowPresetFileDropFilter(
+                object(),
+                target_resolver=lambda: target,
+                overlay=Mock(),
+            )
+            window = SimpleNamespace(_preset_file_drop_filter=event_filter)
+
+            with patch(
+                "ui.window_preset_file_drop.windows_dropped_file_paths",
+                return_value=[str(preset_path)],
+            ):
+                handled = handle_native_preset_file_drop(window, object())
+
+            self.assertTrue(handled)
+            target.import_dropped_preset_files.assert_called_once_with([str(preset_path)])
+            event_filter.overlay.hide_hint.assert_called_once_with()
+
+    def test_native_drop_message_is_consumed_even_without_valid_txt(self) -> None:
+        from ui.window_preset_file_drop import handle_native_preset_file_drop
+
+        event_filter = Mock()
+        window = SimpleNamespace(_preset_file_drop_filter=event_filter)
+        with patch(
+            "ui.window_preset_file_drop.windows_dropped_file_paths",
+            return_value=["C:/Temp/ignored.log"],
+        ):
+            handled = handle_native_preset_file_drop(window, object())
+
+        self.assertTrue(handled)
+        event_filter.import_file_paths.assert_called_once_with(["C:/Temp/ignored.log"])
+
+    def test_non_drop_native_message_is_not_consumed(self) -> None:
+        from ui.window_preset_file_drop import handle_native_preset_file_drop
+
+        window = SimpleNamespace(_preset_file_drop_filter=Mock())
+        with patch(
+            "ui.window_preset_file_drop.windows_dropped_file_paths",
+            return_value=None,
+        ):
+            handled = handle_native_preset_file_drop(window, object())
+
+        self.assertFalse(handled)
+        window._preset_file_drop_filter.import_file_paths.assert_not_called()
 
     def test_overlay_covers_whole_window_and_uses_selected_language(self) -> None:
         from ui.window_preset_file_drop import PresetFileDropOverlay
