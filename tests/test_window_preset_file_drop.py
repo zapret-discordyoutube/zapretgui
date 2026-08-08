@@ -160,11 +160,12 @@ class WindowPresetFileDropTests(unittest.TestCase):
             self.assertTrue(event_filter.eventFilter(receiver, drop_event))
             self.assertTrue(drop_event.accepted)
             target.import_dropped_preset_files.assert_called_once_with([str(preset_path)])
-            overlay.hide_hint.assert_called_once_with()
+            overlay.show_accepted.assert_called_once_with([str(preset_path)])
+            overlay.hide_hint.assert_not_called()
 
             leave_event = _DropEvent(QEvent.Type.DragLeave, [])
             self.assertFalse(event_filter.eventFilter(receiver, leave_event))
-            self.assertEqual(overlay.hide_hint.call_count, 2)
+            self.assertEqual(overlay.hide_hint.call_count, 1)
 
     def test_native_drop_uses_the_same_filter_import_path(self) -> None:
         from ui.window_preset_file_drop import (
@@ -191,7 +192,8 @@ class WindowPresetFileDropTests(unittest.TestCase):
 
             self.assertTrue(handled)
             target.import_dropped_preset_files.assert_called_once_with([str(preset_path)])
-            event_filter.overlay.hide_hint.assert_called_once_with()
+            event_filter.overlay.show_accepted.assert_called_once_with([str(preset_path)])
+            event_filter.overlay.hide_hint.assert_not_called()
 
     def test_native_drop_message_is_consumed_even_without_valid_txt(self) -> None:
         from ui.window_preset_file_drop import handle_native_preset_file_drop
@@ -249,6 +251,55 @@ class WindowPresetFileDropTests(unittest.TestCase):
 
         overlay.hide_immediately()
         self.assertTrue(overlay.isHidden())
+
+    def test_overlay_flashes_accepted_message_and_auto_hides(self) -> None:
+        from ui.window_preset_file_drop import (
+            ACCEPTED_FLASH_DURATION_MS,
+            PresetFileDropOverlay,
+        )
+        from PyQt6.QtWidgets import QWidget
+
+        window = QWidget()
+        self.addCleanup(window.deleteLater)
+        window.resize(900, 600)
+        overlay = PresetFileDropOverlay(window, language_resolver=lambda: "en")
+
+        overlay.show_accepted(["C:/Temp/My preset.txt"])
+
+        self.assertFalse(overlay.isHidden())
+        self.assertEqual(overlay._title, "File accepted — importing…")
+        self.assertEqual(overlay._subtitle, "My preset.txt")
+        self.assertTrue(overlay._auto_hide_timer.isActive())
+        self.assertEqual(overlay._auto_hide_timer.interval(), ACCEPTED_FLASH_DURATION_MS)
+
+        # Наведение снова показывает подсказку и отменяет авто-скрытие броска.
+        overlay.show_hint(["C:/Temp/My preset.txt"])
+        self.assertFalse(overlay._auto_hide_timer.isActive())
+        self.assertEqual(overlay._title, "Drop the file to import")
+
+        overlay.hide_immediately()
+        self.assertTrue(overlay.isHidden())
+        self.assertFalse(overlay._auto_hide_timer.isActive())
+
+    def test_failed_import_hides_overlay_without_accepted_flash(self) -> None:
+        from ui.window_preset_file_drop import WindowPresetFileDropFilter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            preset_path = Path(tmp) / "Rejected.txt"
+            preset_path.write_text("preset", encoding="utf-8")
+            target = SimpleNamespace(import_dropped_preset_files=Mock(return_value=False))
+            overlay = Mock()
+            event_filter = WindowPresetFileDropFilter(
+                object(),
+                target_resolver=lambda: target,
+                overlay=overlay,
+            )
+
+            imported = event_filter.import_file_paths([str(preset_path)])
+
+            self.assertFalse(imported)
+            overlay.show_accepted.assert_not_called()
+            overlay.hide_hint.assert_called_once_with()
 
     def test_filter_ignores_other_windows_and_pages_without_import_action(self) -> None:
         from ui.window_preset_file_drop import WindowPresetFileDropFilter

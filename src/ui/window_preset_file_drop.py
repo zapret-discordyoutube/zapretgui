@@ -10,6 +10,7 @@ from PyQt6.QtCore import (
     QEvent,
     QObject,
     Qt,
+    QTimer,
     QVariantAnimation,
 )
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QVBoxLayout, QWidget
@@ -18,6 +19,10 @@ from qfluentwidgets import FluentIcon, InfoBar, InfoBarPosition, isDarkTheme
 from app.ui_texts import tr as tr_catalog
 from log.log import log
 from ui.windows_file_drop import windows_dropped_file_paths
+
+
+# Сколько держать плашку «файл принят» после броска, пока идёт импорт.
+ACCEPTED_FLASH_DURATION_MS = 1400
 
 
 def valid_preset_file_paths(file_paths) -> list[str]:
@@ -116,6 +121,9 @@ class PresetFileDropOverlay(QWidget):
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._animation.valueChanged.connect(self._set_visual_opacity)
         self._animation.finished.connect(self._on_animation_finished)
+        self._auto_hide_timer = QTimer(self)
+        self._auto_hide_timer.setSingleShot(True)
+        self._auto_hide_timer.timeout.connect(self.hide_hint)
         self.hide()
 
     def sync_geometry(self) -> None:
@@ -126,18 +134,27 @@ class PresetFileDropOverlay(QWidget):
             self._backdrop.lower()
 
     def show_hint(self, paths: list[str]) -> None:
+        self._show_for_paths(paths, "common.preset_drop.title", "Отпустите файл для импорта")
+
+    def show_accepted(self, paths: list[str]) -> None:
+        """Короткая плашка в момент броска: файл принят и уходит на импорт."""
+        if self._show_for_paths(paths, "common.preset_drop.accepted", "Файл принят — импортирую…"):
+            self._auto_hide_timer.start(ACCEPTED_FLASH_DURATION_MS)
+
+    def _show_for_paths(self, paths: list[str], title_key: str, default_title: str) -> bool:
         if not paths:
             self.hide_hint()
-            return
+            return False
 
+        self._auto_hide_timer.stop()
         try:
             language = self._language_resolver()
         except Exception:
             language = "ru"
         self._title = tr_catalog(
-            "common.preset_drop.title",
+            title_key,
             language=language,
-            default="Отпустите файл для импорта",
+            default=default_title,
         )
         if len(paths) == 1:
             self._subtitle = tr_catalog(
@@ -167,6 +184,7 @@ class PresetFileDropOverlay(QWidget):
         self.show()
         self.raise_()
         self._animate_to(1.0, duration=160)
+        return True
 
     def hide_hint(self) -> None:
         if self.isHidden():
@@ -175,6 +193,7 @@ class PresetFileDropOverlay(QWidget):
         self._animate_to(0.0, duration=120)
 
     def hide_immediately(self) -> None:
+        self._auto_hide_timer.stop()
         self._animation.stop()
         self._hide_after_animation = False
         self._set_visual_opacity(0.0)
@@ -256,7 +275,10 @@ class WindowPresetFileDropFilter(QObject):
         except Exception as exc:
             log(f"Не удалось передать TXT-файл на импорт: {exc}", "ERROR")
             imported = False
-        self._hide_overlay()
+        if imported:
+            self._flash_accepted(paths)
+        else:
+            self._hide_overlay()
         return imported
 
     def eventFilter(self, watched, event):  # noqa: N802 (Qt override)
@@ -297,6 +319,13 @@ class WindowPresetFileDropFilter(QObject):
         action = getattr(self.overlay, "show_hint", None)
         if callable(action):
             action(paths)
+
+    def _flash_accepted(self, paths: list[str]) -> None:
+        action = getattr(self.overlay, "show_accepted", None)
+        if callable(action):
+            action(paths)
+        else:
+            self._hide_overlay()
 
     def _hide_overlay(self) -> None:
         action = getattr(self.overlay, "hide_hint", None)

@@ -141,6 +141,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Количество TXT-файлов: {count}",
         "en": "TXT files: {count}",
     },
+    "common.preset_drop.accepted": {
+        "ru": "Файл принят — импортирую…",
+        "en": "File accepted — importing…",
+    },
     "page.control.status": {
         "ru": "Статус работы",
         "en": "Service Status",
