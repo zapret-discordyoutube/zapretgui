@@ -141,34 +141,65 @@ class PresetFileDropOverlay(QWidget):
         if self._show_for_paths(paths, "common.preset_drop.accepted", "Файл принят — импортирую…"):
             self._auto_hide_timer.start(ACCEPTED_FLASH_DURATION_MS)
 
+    def show_hover_hint(self) -> None:
+        """Подсказка наведения, когда имя файла ещё неизвестно (Windows)."""
+        language = self._resolve_language()
+        self._auto_hide_timer.stop()
+        self._apply_texts_and_show(
+            tr_catalog(
+                "common.preset_drop.title",
+                language=language,
+                default="Отпустите файл для импорта",
+            ),
+            tr_catalog(
+                "common.preset_drop.any_txt",
+                language=language,
+                default="TXT-файл с пресетом",
+            ),
+        )
+
+    def hide_hover_hint(self) -> None:
+        """Скрывает подсказку наведения, не трогая плашку «файл принят»."""
+        if self._auto_hide_timer.isActive():
+            return
+        self.hide_hint()
+
+    def _resolve_language(self) -> str:
+        try:
+            return self._language_resolver()
+        except Exception:
+            return "ru"
+
     def _show_for_paths(self, paths: list[str], title_key: str, default_title: str) -> bool:
         if not paths:
             self.hide_hint()
             return False
 
         self._auto_hide_timer.stop()
-        try:
-            language = self._language_resolver()
-        except Exception:
-            language = "ru"
-        self._title = tr_catalog(
+        language = self._resolve_language()
+        title = tr_catalog(
             title_key,
             language=language,
             default=default_title,
         )
         if len(paths) == 1:
-            self._subtitle = tr_catalog(
+            subtitle = tr_catalog(
                 "common.preset_drop.single",
                 language=language,
                 default="{file_name}",
             ).format(file_name=os.path.basename(paths[0]))
         else:
-            self._subtitle = tr_catalog(
+            subtitle = tr_catalog(
                 "common.preset_drop.multiple",
                 language=language,
                 default="Количество TXT-файлов: {count}",
             ).format(count=len(paths))
+        self._apply_texts_and_show(title, subtitle)
+        return True
 
+    def _apply_texts_and_show(self, title: str, subtitle: str) -> None:
+        self._title = title
+        self._subtitle = subtitle
         self._info_bar.title = self._title
         self._info_bar.content = self._subtitle
         self._info_bar.titleLabel.setText(self._title)
@@ -184,7 +215,6 @@ class PresetFileDropOverlay(QWidget):
         self.show()
         self.raise_()
         self._animate_to(1.0, duration=160)
-        return True
 
     def hide_hint(self) -> None:
         if self.isHidden():
@@ -314,6 +344,23 @@ class WindowPresetFileDropFilter(QObject):
 
         event.acceptProposedAction()
         return True
+
+    def show_hover_hint(self) -> bool:
+        """Показывает подсказку наведения, если текущая страница умеет импорт."""
+        if self._import_action() is None:
+            return False
+        action = getattr(self.overlay, "show_hover_hint", None)
+        if not callable(action):
+            return False
+        action()
+        return True
+
+    def hide_hover_hint(self) -> None:
+        action = getattr(self.overlay, "hide_hover_hint", None)
+        if callable(action):
+            action()
+        else:
+            self._hide_overlay()
 
     def _show_overlay(self, paths: list[str]) -> None:
         action = getattr(self.overlay, "show_hint", None)

@@ -18,6 +18,7 @@ from config.build_info import APP_VERSION
 from log.log import log
 from main.runtime_state import log_startup_metric as emit_startup_metric
 from ui.window_preset_file_drop import WindowPresetFileDropFilter
+from ui.windows_drag_hover_detector import WindowsDragHoverDetector
 from ui.windows_file_drop import enable_windows_file_drop, use_qt_file_drop
 
 
@@ -86,6 +87,14 @@ class ZapretFluentWindow(FluentWindow):
         )
         app.installEventFilter(self._preset_file_drop_filter)
         self._register_windows_file_drop()
+        # Событий наведения при переносе Windows повышенному окну не даёт,
+        # поэтому подсказку включает опрос косвенных признаков переноса.
+        self._drag_hover_detector = WindowsDragHoverDetector(
+            self,
+            on_hover_start=self._preset_file_drop_filter.show_hover_hint,
+            on_hover_end=self._preset_file_drop_filter.hide_hover_hint,
+        )
+        self._drag_hover_detector.start()
 
     def _register_windows_file_drop(self) -> None:
         """Привязывает WM_DROPFILES к текущему системному HWND окна."""

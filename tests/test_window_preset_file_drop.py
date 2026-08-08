@@ -281,6 +281,78 @@ class WindowPresetFileDropTests(unittest.TestCase):
         self.assertTrue(overlay.isHidden())
         self.assertFalse(overlay._auto_hide_timer.isActive())
 
+    def test_overlay_hover_hint_shows_generic_text_and_respects_accepted_flash(self) -> None:
+        from ui.window_preset_file_drop import PresetFileDropOverlay
+        from PyQt6.QtWidgets import QWidget
+
+        window = QWidget()
+        self.addCleanup(window.deleteLater)
+        window.resize(900, 600)
+        overlay = PresetFileDropOverlay(window, language_resolver=lambda: "en")
+
+        overlay.show_hover_hint()
+        self.assertFalse(overlay.isHidden())
+        self.assertEqual(overlay._title, "Drop the file to import")
+        self.assertEqual(overlay._subtitle, "TXT preset file")
+        self.assertFalse(overlay._auto_hide_timer.isActive())
+
+        # Пока показана плашка «файл принят», конец наведения её не гасит.
+        overlay.show_accepted(["C:/Temp/My preset.txt"])
+        overlay.hide_hover_hint()
+        self.assertFalse(overlay._hide_after_animation)
+        self.assertFalse(overlay.isHidden())
+
+        overlay._auto_hide_timer.stop()
+        overlay.hide_hover_hint()
+        self.assertTrue(overlay._hide_after_animation)
+
+        overlay.hide_immediately()
+        self.assertTrue(overlay.isHidden())
+
+    def test_filter_shows_hover_hint_only_for_import_capable_page(self) -> None:
+        from ui.window_preset_file_drop import WindowPresetFileDropFilter
+
+        overlay = Mock()
+        importing_filter = WindowPresetFileDropFilter(
+            object(),
+            target_resolver=lambda: SimpleNamespace(
+                import_dropped_preset_files=Mock(return_value=True),
+            ),
+            overlay=overlay,
+        )
+        self.assertTrue(importing_filter.show_hover_hint())
+        overlay.show_hover_hint.assert_called_once_with()
+
+        importing_filter.hide_hover_hint()
+        overlay.hide_hover_hint.assert_called_once_with()
+
+        ordinary_overlay = Mock()
+        ordinary_filter = WindowPresetFileDropFilter(
+            object(),
+            target_resolver=lambda: object(),
+            overlay=ordinary_overlay,
+        )
+        self.assertFalse(ordinary_filter.show_hover_hint())
+        ordinary_overlay.show_hover_hint.assert_not_called()
+
+    def test_main_window_creates_drag_hover_detector(self) -> None:
+        from ui.fluent_app_window import ZapretFluentWindow
+        from ui.windows_drag_hover_detector import WindowsDragHoverDetector
+
+        with patch(
+            "ui.fluent_app_window.enable_windows_file_drop",
+            return_value=True,
+        ):
+            window = ZapretFluentWindow()
+        self.addCleanup(window.deleteLater)
+        event_filter = window._preset_file_drop_filter
+        self.addCleanup(self._app.removeEventFilter, event_filter)
+
+        detector = window._drag_hover_detector
+        self.assertIsInstance(detector, WindowsDragHoverDetector)
+        self.assertIs(detector._on_hover_start.__self__, event_filter)
+        self.assertIs(detector._on_hover_end.__self__, event_filter)
+
     def test_failed_import_hides_overlay_without_accepted_flash(self) -> None:
         from ui.window_preset_file_drop import WindowPresetFileDropFilter
 
