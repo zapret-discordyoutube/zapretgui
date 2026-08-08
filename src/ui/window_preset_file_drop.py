@@ -9,14 +9,11 @@ from PyQt6.QtCore import (
     QEasingCurve,
     QEvent,
     QObject,
-    QPropertyAnimation,
-    QRectF,
     Qt,
-    pyqtProperty,
+    QVariantAnimation,
 )
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen
-from PyQt6.QtWidgets import QWidget
-from qfluentwidgets import isDarkTheme, themeColor
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QVBoxLayout, QWidget
+from qfluentwidgets import FluentIcon, InfoBar, InfoBarPosition, isDarkTheme
 
 from app.ui_texts import tr as tr_catalog
 from log.log import log
@@ -53,7 +50,7 @@ def dropped_preset_file_paths(mime_data) -> list[str]:
 
 
 class PresetFileDropOverlay(QWidget):
-    """Рисует полноэкранную подсказку, пока над окном держат TXT-файл."""
+    """Показывает штатную Fluent-подсказку поверх окна при переносе TXT."""
 
     def __init__(
         self,
@@ -63,23 +60,60 @@ class PresetFileDropOverlay(QWidget):
     ) -> None:
         super().__init__(window)
         self._language_resolver = language_resolver or (lambda: "ru")
-        self._overlay_opacity = 0.0
         self._title = ""
         self._subtitle = ""
+        self._visual_opacity = 0.0
         self._hide_after_animation = False
+        self.setObjectName("presetFileDropOverlay")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.hide()
 
-        self._animation = QPropertyAnimation(self, b"overlayOpacity", self)
+        self._backdrop = QWidget(self)
+        self._backdrop.setObjectName("presetFileDropBackdrop")
+        self._backdrop.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+        self._backdrop_effect = QGraphicsOpacityEffect(self._backdrop)
+        self._backdrop_effect.setOpacity(0.0)
+        self._backdrop.setGraphicsEffect(self._backdrop_effect)
+
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(48, 48, 48, 48)
+        self._layout.addStretch(2)
+        self._info_bar = InfoBar(
+            FluentIcon.DOCUMENT,
+            "",
+            "",
+            orient=Qt.Orientation.Horizontal,
+            isClosable=False,
+            duration=-1,
+            position=InfoBarPosition.NONE,
+            parent=self,
+        )
+        self._info_bar.setMinimumWidth(480)
+        self._info_bar.setMaximumWidth(720)
+        self._layout.addWidget(
+            self._info_bar,
+            0,
+            Qt.AlignmentFlag.AlignHCenter,
+        )
+        self._layout.addStretch(3)
+
+        self._info_bar.opacityEffect.setOpacity(0.0)
+        self._animation = QVariantAnimation(self)
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animation.valueChanged.connect(self._set_visual_opacity)
         self._animation.finished.connect(self._on_animation_finished)
+        self.hide()
 
     def sync_geometry(self) -> None:
         parent = self.parentWidget()
         if parent is not None:
             self.setGeometry(parent.rect())
+            self._backdrop.setGeometry(self.rect())
+            self._backdrop.lower()
 
     def show_hint(self, paths: list[str]) -> None:
         if not paths:
@@ -93,21 +127,31 @@ class PresetFileDropOverlay(QWidget):
         self._title = tr_catalog(
             "common.preset_drop.title",
             language=language,
-            default="Отпустите, чтобы импортировать пресет",
+            default="Отпустите файл для импорта",
         )
         if len(paths) == 1:
             self._subtitle = tr_catalog(
                 "common.preset_drop.single",
                 language=language,
-                default="TXT-файл: {file_name}",
+                default="{file_name}",
             ).format(file_name=os.path.basename(paths[0]))
         else:
             self._subtitle = tr_catalog(
                 "common.preset_drop.multiple",
                 language=language,
-                default="Будут импортированы TXT-файлы: {count}",
+                default="Количество TXT-файлов: {count}",
             ).format(count=len(paths))
 
+        self._info_bar.title = self._title
+        self._info_bar.content = self._subtitle
+        self._info_bar.titleLabel.setText(self._title)
+        self._info_bar.contentLabel.setText(self._subtitle)
+        self._info_bar.titleLabel.setVisible(bool(self._title))
+        self._info_bar.contentLabel.setVisible(bool(self._subtitle))
+        self._info_bar.setAccessibleName(self._title)
+        self._info_bar.setAccessibleDescription(self._subtitle)
+        self._info_bar.adjustSize()
+        self._refresh_backdrop()
         self.sync_geometry()
         self._hide_after_animation = False
         self.show()
@@ -123,121 +167,34 @@ class PresetFileDropOverlay(QWidget):
     def hide_immediately(self) -> None:
         self._animation.stop()
         self._hide_after_animation = False
-        self._set_overlay_opacity(0.0)
+        self._set_visual_opacity(0.0)
         self.hide()
 
     def _animate_to(self, value: float, *, duration: int) -> None:
-        if self._animation.state() == QPropertyAnimation.State.Running:
+        if self._animation.state() == QVariantAnimation.State.Running:
             self._animation.stop()
         self._animation.setDuration(duration)
-        self._animation.setStartValue(self._overlay_opacity)
+        self._animation.setStartValue(self._visual_opacity)
         self._animation.setEndValue(value)
         self._animation.start()
 
+    def _set_visual_opacity(self, value) -> None:
+        self._visual_opacity = max(0.0, min(1.0, float(value)))
+        self._backdrop_effect.setOpacity(self._visual_opacity)
+        self._info_bar.opacityEffect.setOpacity(self._visual_opacity)
+
     def _on_animation_finished(self) -> None:
-        if self._hide_after_animation and self._overlay_opacity <= 0.001:
+        if self._hide_after_animation and self._visual_opacity <= 0.001:
             self.hide()
             self._hide_after_animation = False
 
-    def _get_overlay_opacity(self) -> float:
-        return self._overlay_opacity
-
-    def _set_overlay_opacity(self, value: float) -> None:
-        self._overlay_opacity = max(0.0, min(1.0, float(value)))
-        self.update()
-
-    overlayOpacity = pyqtProperty(  # noqa: N815 (Qt property name)
-        float,
-        fget=_get_overlay_opacity,
-        fset=_set_overlay_opacity,
-    )
-
-    def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        del event
-        if self._overlay_opacity <= 0:
-            return
-
-        painter = QPainter(self)
-        painter.setRenderHints(
-            QPainter.RenderHint.Antialiasing
-            | QPainter.RenderHint.TextAntialiasing
+    def _refresh_backdrop(self) -> None:
+        color = "rgba(0, 0, 0, 68)" if isDarkTheme() else "rgba(255, 255, 255, 105)"
+        self._backdrop.setStyleSheet(
+            "#presetFileDropBackdrop {"
+            f" background-color: {color};"
+            " }"
         )
-        painter.setOpacity(self._overlay_opacity)
-
-        dark = isDarkTheme()
-        accent = QColor(themeColor())
-        veil = QColor(7, 12, 20, 190) if dark else QColor(244, 249, 255, 210)
-        accent_wash = QColor(accent)
-        accent_wash.setAlpha(45 if dark else 34)
-        painter.fillRect(self.rect(), veil)
-        painter.fillRect(self.rect(), accent_wash)
-
-        margin = 32.0
-        card_width = max(240.0, min(620.0, float(self.width()) - margin * 2))
-        card_height = min(230.0, max(180.0, float(self.height()) - margin * 2))
-        card = QRectF(
-            (self.width() - card_width) / 2,
-            (self.height() - card_height) / 2,
-            card_width,
-            card_height,
-        )
-
-        glow = card.adjusted(-10, -10, 10, 10)
-        glow_color = QColor(accent)
-        glow_color.setAlpha(34)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(glow_color)
-        painter.drawRoundedRect(glow, 28, 28)
-
-        card_color = QColor(31, 35, 42, 246) if dark else QColor(255, 255, 255, 248)
-        border_color = QColor(accent)
-        border_color.setAlpha(215)
-        painter.setBrush(card_color)
-        painter.setPen(QPen(border_color, 2))
-        painter.drawRoundedRect(card, 22, 22)
-
-        badge_size = 54.0
-        badge = QRectF(
-            card.center().x() - badge_size / 2,
-            card.top() + 28,
-            badge_size,
-            badge_size,
-        )
-        badge_color = QColor(accent)
-        badge_color.setAlpha(42)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(badge_color)
-        painter.drawEllipse(badge)
-
-        badge_font = QFont(self.font())
-        badge_font.setPixelSize(15)
-        badge_font.setWeight(QFont.Weight.DemiBold)
-        painter.setFont(badge_font)
-        painter.setPen(accent)
-        painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, "TXT")
-
-        text_color = QColor(247, 249, 252) if dark else QColor(27, 31, 38)
-        title_font = QFont(self.font())
-        title_font.setPixelSize(20)
-        title_font.setWeight(QFont.Weight.DemiBold)
-        painter.setFont(title_font)
-        painter.setPen(text_color)
-        title_rect = QRectF(card.left() + 24, badge.bottom() + 17, card.width() - 48, 31)
-        painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, self._title)
-
-        subtitle_color = QColor(190, 196, 207) if dark else QColor(94, 101, 113)
-        subtitle_font = QFont(self.font())
-        subtitle_font.setPixelSize(14)
-        painter.setFont(subtitle_font)
-        painter.setPen(subtitle_color)
-        subtitle = painter.fontMetrics().elidedText(
-            self._subtitle,
-            Qt.TextElideMode.ElideMiddle,
-            max(100, int(card.width() - 64)),
-        )
-        subtitle_rect = QRectF(card.left() + 32, title_rect.bottom() + 8, card.width() - 64, 24)
-        painter.drawText(subtitle_rect, Qt.AlignmentFlag.AlignCenter, subtitle)
-        painter.end()
 
 
 class WindowPresetFileDropFilter(QObject):

@@ -132,6 +132,7 @@ class WindowPresetFileDropTests(unittest.TestCase):
     def test_overlay_covers_whole_window_and_uses_selected_language(self) -> None:
         from ui.window_preset_file_drop import PresetFileDropOverlay
         from PyQt6.QtWidgets import QWidget
+        from qfluentwidgets import InfoBar
 
         window = QWidget()
         self.addCleanup(window.deleteLater)
@@ -141,8 +142,19 @@ class WindowPresetFileDropTests(unittest.TestCase):
 
         self.assertEqual(overlay.geometry(), window.rect())
         self.assertFalse(overlay.isHidden())
-        self.assertEqual(overlay._title, "Drop to import the preset")
-        self.assertEqual(overlay._subtitle, "TXT file: My preset.txt")
+        self.assertIsInstance(overlay._info_bar, InfoBar)
+        self.assertEqual(overlay._title, "Drop the file to import")
+        self.assertEqual(overlay._subtitle, "My preset.txt")
+        self.assertEqual(overlay._info_bar.title, overlay._title)
+        self.assertEqual(overlay._info_bar.content, overlay._subtitle)
+        self.assertFalse(overlay._info_bar.titleLabel.isHidden())
+        self.assertFalse(overlay._info_bar.contentLabel.isHidden())
+        self.assertEqual(overlay._info_bar.accessibleName(), overlay._title)
+        self.assertEqual(overlay._info_bar.accessibleDescription(), overlay._subtitle)
+        self.assertNotIn("paintEvent", PresetFileDropOverlay.__dict__)
+        self.assertIsNone(overlay.graphicsEffect())
+        self.assertIsNotNone(overlay._backdrop.graphicsEffect())
+        self.assertIsNotNone(overlay._info_bar.graphicsEffect())
 
         overlay.hide_immediately()
         self.assertTrue(overlay.isHidden())

@@ -130,16 +130,16 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Error",
     },
     "common.preset_drop.title": {
-        "ru": "Отпустите, чтобы импортировать пресет",
-        "en": "Drop to import the preset",
+        "ru": "Отпустите файл для импорта",
+        "en": "Drop the file to import",
     },
     "common.preset_drop.single": {
-        "ru": "TXT-файл: {file_name}",
-        "en": "TXT file: {file_name}",
+        "ru": "{file_name}",
+        "en": "{file_name}",
     },
     "common.preset_drop.multiple": {
-        "ru": "Будут импортированы TXT-файлы: {count}",
-        "en": "TXT files to import: {count}",
+        "ru": "Количество TXT-файлов: {count}",
+        "en": "TXT files: {count}",
     },
     "page.control.status": {
         "ru": "Статус работы",
