@@ -17,6 +17,7 @@ from config.build_info import APP_VERSION
 
 from log.log import log
 from main.runtime_state import log_startup_metric as emit_startup_metric
+from ui.window_preset_file_drop import WindowPresetFileDropFilter
 
 
 
@@ -36,6 +37,7 @@ class ZapretFluentWindow(FluentWindow):
         )
         self.setWindowTitle(f"Zapret2 v{APP_VERSION}")
         self._sync_titlebar_icon_from_application()
+        self._install_preset_file_drop_filter()
 
         # Theme mode (DARK/LIGHT) is set in main.py via _sync_theme_mode_to_qfluent()
         # before the window is created, so no hardcoded setTheme(DARK) here.
@@ -65,6 +67,25 @@ class ZapretFluentWindow(FluentWindow):
         icon = app.windowIcon()
         if not icon.isNull():
             set_icon(icon)
+
+    def _install_preset_file_drop_filter(self) -> None:
+        """Принимает TXT над всем окном, пока открыта страница preset-ов."""
+        app = QApplication.instance()
+        if app is None:
+            return
+        self.setAcceptDrops(True)
+        self._preset_file_drop_filter = WindowPresetFileDropFilter(
+            self,
+            target_resolver=self._current_preset_file_drop_target,
+        )
+        app.installEventFilter(self._preset_file_drop_filter)
+
+    def _current_preset_file_drop_target(self):
+        from ui.window_adapter import get_current_page
+
+        page = get_current_page(self)
+        action = getattr(page, "import_dropped_preset_files", None)
+        return page if callable(action) else None
 
     # ------------------------------------------------------------------
     # Background tint (Mica + semi-transparent Qt background layer)

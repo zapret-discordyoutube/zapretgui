@@ -990,6 +990,21 @@ class UserPresetsPageBase(BasePage):
             return
         self._request_preset_bulk_action("import", file_path=file_path)
 
+    def import_dropped_preset_files(self, file_paths) -> bool:
+        """Ставит перетащенные TXT-файлы в общую очередь импорта."""
+        if self.__dict__.get("_cleanup_in_progress", False):
+            return False
+
+        accepted = False
+        for file_path in file_paths or ():
+            path = str(file_path or "").strip()
+            if not path or not path.lower().endswith(".txt"):
+                continue
+            accepted = bool(
+                self._request_preset_bulk_action("import", file_path=path)
+            ) or accepted
+        return accepted
+
     def _on_reset_all_presets_clicked(self):
         dlg = self._config.reset_all_dialog_cls(self.window(), language=self._ui_language)
         if not dlg.exec():
