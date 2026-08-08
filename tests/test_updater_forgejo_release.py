@@ -9,14 +9,14 @@ class ForgejoReleaseTrustTests(unittest.TestCase):
     def test_accepts_exact_release_asset(self) -> None:
         self.assertTrue(
             _trusted_release_asset_url(
-                "https://git.zapret.moe/zapretdiscordyoutube/zapret/releases/download/21.1.5.42/Zapret2Setup_DEV_21_1_5_42.exe",
+                "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/releases/download/21.1.5.42/Zapret2Setup_DEV_21_1_5_42.exe",
                 tag_name="21.1.5.42",
                 file_name="Zapret2Setup_DEV_21_1_5_42.exe",
             )
         )
 
     def test_rejects_host_port_userinfo_query_fragment_and_wrong_path(self) -> None:
-        base = "/zapretdiscordyoutube/zapret/releases/download/21.1.5.42/file.exe"
+        base = "/zapretdiscordyoutube/zapretgui/releases/download/21.1.5.42/file.exe"
         invalid = (
             f"https://evil.example{base}",
             f"https://git.zapret.moe:8443{base}",
@@ -24,7 +24,7 @@ class ForgejoReleaseTrustTests(unittest.TestCase):
             f"https://git.zapret.moe{base}?download=1",
             f"https://git.zapret.moe{base}#fragment",
             "https://git.zapret.moe/other/repo/releases/download/21.1.5.42/file.exe",
-            "https://git.zapret.moe/zapretdiscordyoutube/zapret/releases/download/other/file.exe",
+            "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/releases/download/other/file.exe",
         )
         for url in invalid:
             with self.subTest(url=url):

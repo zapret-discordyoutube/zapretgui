@@ -144,7 +144,7 @@ def build_about_page_kwargs(*, page_name: PageName, external_actions_feature, sh
             "kvn_channel": lambda: about_commands.open_telegram("vpndiscordyooutube"),
             "kvn_bot": lambda: about_commands.open_telegram("zapretvpns_bot"),
             "kvn_bypass": lambda: about_commands.open_telegram("bypassblock"),
-            "kvn_github": lambda: about_commands.open_github("https://git.zapret.moe/zapretdiscordyoutube/zapret-kvn"),
+            "kvn_github": lambda: about_commands.open_github("https://git.zapret.moe/zapretkvn/zapret-kvn"),
         }
         return external_actions_feature.create_external_action_worker(
             request_id,

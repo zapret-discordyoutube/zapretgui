@@ -16,7 +16,7 @@ def _release(version: str = "99.1.2.3") -> dict:
     file_name = f"Zapret2Setup_DEV_{version.replace('.', '_')}.exe"
     return {
         "version": version,
-        "update_url": f"https://git.zapret.moe/zapretdiscordyoutube/zapret/releases/download/{version}/{file_name}",
+        "update_url": f"https://git.zapret.moe/zapretdiscordyoutube/zapretgui/releases/download/{version}/{file_name}",
         "file_name": file_name,
         "file_size": 12345,
         "sha256": "a" * 64,

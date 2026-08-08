@@ -26,7 +26,7 @@ from .proxy_bypass import request_get_bypass_proxy
 
 
 FORGEJO_ORIGIN = "https://git.zapret.moe"
-FORGEJO_REPOSITORY = "zapretdiscordyoutube/zapret"
+FORGEJO_REPOSITORY = "zapretdiscordyoutube/zapretgui"
 FORGEJO_API_URL = f"{FORGEJO_ORIGIN}/api/v1/repos/{FORGEJO_REPOSITORY}/releases"
 FORGEJO_REPOSITORY_API_URL = f"{FORGEJO_ORIGIN}/api/v1/repos/{FORGEJO_REPOSITORY}"
 FORGEJO_RELEASE_DOWNLOAD_PREFIX = f"/{FORGEJO_REPOSITORY}/releases/download/"

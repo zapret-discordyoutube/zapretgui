@@ -8,6 +8,6 @@ PROFILE_INFO_URL = "https://publish.obsidian.md/zapret/Zapret2/filter"  # URL о
 WINWS_LOG_ANALYZER_INFO_URL = "https://publish.obsidian.md/zapret/Zapret2/log-analyzer"  # URL об анализаторе логов winws2
 ANDROID_URL = "https://publish.obsidian.md/zapret/Zapret/android"  # URL инструкции для Android
 BOLVAN_URL = "https://github.com/bol-van/zapret-win-bundle"  # URL автора
-SUPPORT_ISSUES_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapret/issues"  # Основная ссылка поддержки
-BLOCKCHECK_ISSUES_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapret/issues/new?template=service_not_working.yml"  # Обращение по BlockCheck
-PROFILE_REQUEST_FORM_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapret/issues/new?template=hostlist_ipset_request.yml"  # Форма заявки на hostlist/ipset
+SUPPORT_ISSUES_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues"  # Основная ссылка поддержки
+BLOCKCHECK_ISSUES_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues/new?template=service_not_working.yml"  # Обращение по BlockCheck
+PROFILE_REQUEST_FORM_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues/new?template=hostlist_ipset_request.yml"  # Форма заявки на hostlist/ipset

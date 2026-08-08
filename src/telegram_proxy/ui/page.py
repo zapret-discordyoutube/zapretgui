@@ -91,7 +91,7 @@ from qfluentwidgets import (
 # How often (ms) the GUI reads new log lines from the ring buffer
 _LOG_REFRESH_MS = 500
 
-_ZASTOGRAM_URL = "https://git.zapret.moe/zapretdiscordyoutube/ZaStoGram_desktop"
+_ZASTOGRAM_URL = "https://git.zapret.moe/zastogram/ZaStoGram_desktop"
 
 
 

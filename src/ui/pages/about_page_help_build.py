@@ -170,7 +170,7 @@ def build_about_page_help_content(
     )
 
     github_card = hyperlink_card_cls(
-        "https://git.zapret.moe/zapretdiscordyoutube/zapret",
+        "https://git.zapret.moe/zapretdiscordyoutube/zapretgui",
         tr_fn("page.about.help.button.open", "Открыть"),
         fluent_icon.GITHUB,
         "Forgejo",
