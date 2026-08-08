@@ -57,6 +57,34 @@ class WinDivertServiceRecoveryTests(unittest.TestCase):
         self.assertIn("код завершения процесса 34", message)
         self.assertIn("Что сделать", message)
 
+    def test_recv_errno_5_exit_229_is_not_reported_as_windows_error_229(self) -> None:
+        from winws_runtime.health.winws_exit_diagnosis import (
+            diagnose_winws_exit,
+            format_winws_exit_diagnosis,
+        )
+
+        output = "\n".join(
+            (
+                "github version v1.0.3 (b78b52c4) lua_compat_ver 6",
+                "windivert initialized. capture is started.",
+                "windivert: recv failed. errno 5",
+            )
+        )
+
+        diagnosis = diagnose_winws_exit(229, output)
+
+        self.assertIsNotNone(diagnosis)
+        self.assertIsNone(diagnosis.win32_error)
+        self.assertFalse(diagnosis.cause_is_exact)
+        message = format_winws_exit_diagnosis(diagnosis, exe_name="winws2")
+        self.assertIn("Что известно", message)
+        self.assertIn("windivert: recv failed. errno 5", message)
+        self.assertIn("код завершения процесса 229", message)
+        self.assertIn("потерял исходный код Windows", message)
+        self.assertIn("ERROR_IO_PENDING (997)", message)
+        self.assertNotIn("код ошибки Windows 229", message)
+        self.assertNotIn("Найдена причина", message)
+
     def test_regular_runner_stop_does_not_delete_monkey_service(self) -> None:
         from winws_runtime.runners import runner_base
 

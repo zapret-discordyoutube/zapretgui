@@ -501,7 +501,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                 "Diagnosis: "
                 f"{diagnosis.cause} | Fix: {diagnosis.solution} | "
                 f"win32_error={diagnosis.win32_error} | exit_code={diagnosis.exit_code} | "
-                f"auto_fix={diagnosis.auto_fix}",
+                f"exact={diagnosis.cause_is_exact} | auto_fix={diagnosis.auto_fix}",
                 "INFO",
             )
             return

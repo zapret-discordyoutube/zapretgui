@@ -177,12 +177,14 @@ def apply_method_switch_runtime_plan(runtime_feature, plan: MethodSwitchRuntimeP
             f"Смена метода '{plan.method}' передана в единый restart pipeline",
             "INFO",
         )
-        QTimer.singleShot(
-            0,
-            lambda runtime=launch_runtime, force_stop=plan.requires_cleanup_stop: runtime.restart_dpi_async(
-                force_full_stop=force_stop,
-            ),
-        )
+
+        def _restart_target_mode() -> None:
+            launch_runtime.restart_dpi_async(
+                force_full_stop=plan.requires_cleanup_stop,
+                target_launch_method=plan.method,
+            )
+
+        QTimer.singleShot(0, _restart_target_mode)
         return
 
     if plan.dispatch_action == "stop":

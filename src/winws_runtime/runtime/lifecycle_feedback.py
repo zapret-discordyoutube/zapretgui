@@ -16,6 +16,19 @@ def _start_worker_result(runtime_owner) -> tuple[int | None, list[str]]:
     return (pid if isinstance(pid, int) else None), warnings
 
 
+def _finish_restart_request(runtime_owner, generation: int) -> None:
+    completed_generation = int(generation or 0)
+    if completed_generation <= 0:
+        return
+    runtime_owner._restart_completed_generation = max(
+        int(runtime_owner._restart_completed_generation or 0),
+        completed_generation,
+    )
+    runtime_owner._restart_active_start_generation = 0
+    if completed_generation >= int(runtime_owner._restart_request_generation or 0):
+        runtime_owner._restart_target_launch_method = ""
+
+
 def show_launch_error_top(runtime_owner, message: str) -> None:
     """Показывает человеко-понятную ошибку запуска через верхний InfoBar."""
     bridge = runtime_owner._runtime_ui_bridge()
@@ -39,12 +52,7 @@ def on_dpi_start_finished(runtime_owner, success, error_message):
             pid, warnings = _start_worker_result(runtime_owner)
             runtime_owner._pending_launch_warnings = warnings
             runtime_owner._mark_runtime_running(pid=pid)
-            if completed_restart_generation:
-                runtime_owner._restart_completed_generation = max(
-                    runtime_owner._restart_completed_generation,
-                    completed_restart_generation,
-                )
-                runtime_owner._restart_active_start_generation = 0
+            _finish_restart_request(runtime_owner, completed_restart_generation)
 
             log("DPI запущен асинхронно", "INFO")
             set_runtime_owner_status(runtime_owner, "✅ DPI успешно запущен")
@@ -57,12 +65,7 @@ def on_dpi_start_finished(runtime_owner, success, error_message):
                 log(f"Launch warning: {warning_text}", "WARNING")
                 QTimer.singleShot(150, lambda text=warning_text: show_launch_warning_top(runtime_owner, text))
         else:
-            if completed_restart_generation:
-                runtime_owner._restart_completed_generation = max(
-                    runtime_owner._restart_completed_generation,
-                    completed_restart_generation,
-                )
-                runtime_owner._restart_active_start_generation = 0
+            _finish_restart_request(runtime_owner, completed_restart_generation)
             log(f"Ошибка асинхронного запуска DPI: {error_message}", "❌ ERROR")
             set_runtime_owner_status(runtime_owner, f"❌ Ошибка запуска: {error_message}")
             show_launch_error_top(runtime_owner, error_message)
@@ -101,7 +104,12 @@ def on_dpi_stop_finished(runtime_owner, success, error_message):
                     restart_generation_after_stop,
                     runtime_owner._restart_request_generation,
                 )
-                runtime_owner.start_dpi_async()
+                target_launch_method = str(
+                    getattr(runtime_owner, "_restart_target_launch_method", "") or ""
+                ).strip().lower()
+                runtime_owner.start_dpi_async(
+                    launch_method=target_launch_method or None,
+                )
                 return
         else:
             log(f"Ошибка асинхронной остановки DPI: {error_message}", "❌ ERROR")
@@ -114,6 +122,7 @@ def on_dpi_stop_finished(runtime_owner, success, error_message):
                 runtime_owner._restart_force_stop_generation = 0
 
             runtime_owner._restart_pending_stop_generation = 0
+            _finish_restart_request(runtime_owner, restart_generation_after_stop)
 
     except Exception as e:
         log(f"Ошибка при обработке результата остановки DPI: {e}", "❌ ERROR")

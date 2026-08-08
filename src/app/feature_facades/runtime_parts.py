@@ -529,12 +529,18 @@ class RuntimeCommandPort:
             )
         )
 
-    def restart(self, *, force_full_stop: bool = False) -> bool:
+    def restart(
+        self,
+        *,
+        force_full_stop: bool = False,
+        target_launch_method: str | None = None,
+    ) -> bool:
         runtime_commands = self._runtime_commands()
         return bool(
             runtime_commands.restart_dpi_async(
                 runtime_feature=self.owner,
                 force_full_stop=force_full_stop,
+                target_launch_method=target_launch_method,
             )
         )
 

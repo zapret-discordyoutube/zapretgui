@@ -86,11 +86,19 @@ def stop_dpi_async(
     return True
 
 
-def restart_dpi_async(*, runtime_feature: Any, force_full_stop: bool = False) -> bool:
+def restart_dpi_async(
+    *,
+    runtime_feature: Any,
+    force_full_stop: bool = False,
+    target_launch_method: str | None = None,
+) -> bool:
     runtime_owner = runtime_feature.objects.launch_runtime
     if runtime_owner is None:
         return False
-    runtime_owner.restart_dpi_async(force_full_stop=bool(force_full_stop))
+    runtime_owner.restart_dpi_async(
+        force_full_stop=bool(force_full_stop),
+        target_launch_method=target_launch_method,
+    )
     return True
 
 

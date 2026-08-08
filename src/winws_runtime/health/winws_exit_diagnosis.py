@@ -54,6 +54,9 @@ class WinDivertDiagnosis:
     # усечённого кода завершения (34 → 1058). Такой код и построенная на нём
     # причина обязаны показываться пользователю как предположение.
     win32_error_inferred: bool = False
+    # False, когда известен сам тип сбоя, но исходный Win32-код уже потерян
+    # внутри winws2. В таком случае нельзя писать пользователю «Найдена причина».
+    cause_is_exact: bool = True
 
 
 def format_winws_exit_diagnosis(
@@ -77,6 +80,7 @@ def format_winws_exit_diagnosis(
     cause = str(getattr(diagnosis, "cause", "") or "").strip().rstrip(".")
     solution = str(getattr(diagnosis, "solution", "") or "").strip().rstrip(".")
     inferred = bool(getattr(diagnosis, "win32_error_inferred", False))
+    cause_is_exact = bool(getattr(diagnosis, "cause_is_exact", True))
 
     try:
         exit_code = int(getattr(diagnosis, "exit_code", 0))
@@ -107,7 +111,10 @@ def format_winws_exit_diagnosis(
 
     message = f"{executable} не запустился"
     if cause:
-        cause_label = "Вероятная причина" if inferred else "Найдена причина"
+        if not cause_is_exact:
+            cause_label = "Что известно"
+        else:
+            cause_label = "Вероятная причина" if inferred else "Найдена причина"
         message = f"{message}. {cause_label}: {cause}"
     if code_parts:
         message = f"{message} ({'; '.join(code_parts)})"
@@ -172,6 +179,34 @@ def diagnose_winws_exit(exit_code: int, stderr: str = "") -> Optional[WinDivertD
         return None
 
     stderr_lower = (stderr or "").lower()
+
+    # В zapret2 v1.0.3 и в текущем upstream после неудачного
+    # GetOverlappedResult() не сохраняется новый GetLastError(). В результате
+    # остаётся предыдущее штатное ERROR_IO_PENDING (997), а Cygwin-процесс
+    # завершает работу усечённым кодом 229. Это не ERROR_PIPE_LOCAL и не
+    # самостоятельная причина WinDivert — исходный Win32-код уже утрачен.
+    if (
+        int(exit_code) == 229
+        and "windivert: recv failed" in stderr_lower
+        and "errno 5" in stderr_lower
+    ):
+        return WinDivertDiagnosis(
+            cause=(
+                "winws2 сообщил «windivert: recv failed. errno 5»: "
+                "асинхронное чтение пакетов из WinDivert завершилось ошибкой, "
+                "но winws2 потерял исходный код Windows. Код 229 — усечённый "
+                "остаток штатного ERROR_IO_PENDING (997), а не причина сбоя WinDivert"
+            ),
+            solution=(
+                "Закройте другие программы, использующие WinDivert, и повторите запуск. "
+                "Если активен только один winws2, перезагрузите Windows. "
+                "Полный вывод winws2 сохранён в журнале программы"
+            ),
+            severity="critical",
+            exit_code=int(exit_code),
+            win32_error=None,
+            cause_is_exact=False,
+        )
 
     # 1. Resolve the real Win32 error from stderr text (more reliable)
     win32_error = exit_code
