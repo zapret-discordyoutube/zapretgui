@@ -11,14 +11,14 @@ from qfluentwidgets import (
 from qfluentwidgets import NavigationWidget
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel
 from PyQt6.QtGui import QPixmap, QPainter, QColor
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QEvent, Qt
 
 from config.build_info import APP_VERSION
 
 from log.log import log
 from main.runtime_state import log_startup_metric as emit_startup_metric
 from ui.window_preset_file_drop import WindowPresetFileDropFilter
-from ui.windows_file_drop import enable_windows_file_drop
+from ui.windows_file_drop import enable_windows_file_drop, use_qt_file_drop
 
 
 
@@ -74,14 +74,34 @@ class ZapretFluentWindow(FluentWindow):
         app = QApplication.instance()
         if app is None:
             return
-        self.setAcceptDrops(True)
+        # На Windows setAcceptDrops(True) регистрирует OLE drop-зону. Проводник
+        # выбирает её вместо WM_DROPFILES, но Windows блокирует OLE при переносе
+        # в повышенное окно. Оставляем Qt-путь другим ОС, а Windows — только
+        # системный WM_DROPFILES, разрешённый ниже через message filter.
+        self.setAcceptDrops(use_qt_file_drop())
         self._preset_file_drop_filter = WindowPresetFileDropFilter(
             self,
             target_resolver=self._current_preset_file_drop_target,
             language_resolver=self._current_ui_language,
         )
         app.installEventFilter(self._preset_file_drop_filter)
+        self._register_windows_file_drop()
+
+    def _register_windows_file_drop(self) -> None:
+        """Привязывает WM_DROPFILES к текущему системному HWND окна."""
         self._windows_file_drop_enabled = enable_windows_file_drop(self)
+
+    def event(self, event):
+        result = super().event(event)
+        if (
+            event.type() == QEvent.Type.WinIdChange
+            and hasattr(self, "_preset_file_drop_filter")
+        ):
+            # Qt может пересоздать HWND после изменения оконных флагов. Старое
+            # разрешение Windows относится только к прежнему HWND, поэтому
+            # сразу привязываем системный приём к уже созданному новому HWND.
+            self._register_windows_file_drop()
+        return result
 
     def _current_preset_file_drop_target(self):
         from ui.window_adapter import get_current_page

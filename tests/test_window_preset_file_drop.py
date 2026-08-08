@@ -74,6 +74,37 @@ class WindowPresetFileDropTests(unittest.TestCase):
         self.assertTrue(window._windows_file_drop_enabled)
         enable_native_drop.assert_called_once_with(window)
 
+    def test_windows_window_disables_qt_ole_drop_owner(self) -> None:
+        from ui.fluent_app_window import ZapretFluentWindow
+
+        with (
+            patch("ui.fluent_app_window.use_qt_file_drop", return_value=False),
+            patch("ui.fluent_app_window.enable_windows_file_drop", return_value=True),
+        ):
+            window = ZapretFluentWindow()
+        self.addCleanup(window.deleteLater)
+        event_filter = window._preset_file_drop_filter
+        self.addCleanup(self._app.removeEventFilter, event_filter)
+
+        self.assertFalse(window.acceptDrops())
+        self.assertTrue(window._windows_file_drop_enabled)
+
+    def test_rebinds_native_drop_after_qt_recreates_window_handle(self) -> None:
+        from ui.fluent_app_window import ZapretFluentWindow
+
+        with patch(
+            "ui.fluent_app_window.enable_windows_file_drop",
+            return_value=True,
+        ) as enable_native_drop:
+            window = ZapretFluentWindow()
+            self.addCleanup(window.deleteLater)
+            event_filter = window._preset_file_drop_filter
+            self.addCleanup(self._app.removeEventFilter, event_filter)
+            enable_native_drop.reset_mock()
+            window.event(QEvent(QEvent.Type.WinIdChange))
+
+        enable_native_drop.assert_called_once_with(window)
+
     def test_collects_only_unique_existing_txt_files(self) -> None:
         from ui.window_preset_file_drop import dropped_preset_file_paths
 

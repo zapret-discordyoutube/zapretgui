@@ -61,6 +61,20 @@ class PresetDragIndicatorTests(unittest.TestCase):
         self.assertIn("dragLeaveEvent", view_source)
         self.assertIn("self.set_drop_marker(-1, \"\")", view_source)
 
+    def test_internal_drag_temporarily_restores_qt_drop_target(self) -> None:
+        view_source = inspect.getsource(preset_view.LinkedWheelListView.mouseMoveEvent)
+
+        self.assertIn("restore_windows_qt_file_drop(window)", view_source)
+        self.assertIn("enable_windows_file_drop(window)", view_source)
+        self.assertLess(
+            view_source.index("restore_windows_qt_file_drop(window)"),
+            view_source.index("drag.exec"),
+        )
+        self.assertGreater(
+            view_source.index("enable_windows_file_drop(window)"),
+            view_source.index("drag.exec"),
+        )
+
     def test_view_updates_only_drop_marker_rows(self) -> None:
         payload_source = inspect.getsource(preset_view.LinkedWheelListView.set_drop_marker_payload)
         update_source = inspect.getsource(preset_view.LinkedWheelListView._update_drop_marker_rows)

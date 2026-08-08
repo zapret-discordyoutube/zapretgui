@@ -15,6 +15,10 @@ from .common import (
 )
 from .model import PresetListModel
 from ui.accessibility import set_state_text
+from ui.windows_file_drop import (
+    enable_windows_file_drop,
+    restore_windows_qt_file_drop,
+)
 from qfluentwidgets import ListView
 
 
@@ -184,9 +188,13 @@ class LinkedWheelListView(ListView):
         drag = QDrag(self)
         drag.setMimeData(mime)
         self._drag_start_pos = None
+        window = self.window()
+        qt_drop_restored = restore_windows_qt_file_drop(window)
         try:
             drag.exec(Qt.DropAction.MoveAction)
         finally:
+            if qt_drop_restored:
+                enable_windows_file_drop(window)
             self.set_drop_marker(-1, "")
         event.accept()
 

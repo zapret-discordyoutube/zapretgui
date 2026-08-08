@@ -10,6 +10,13 @@ def _value(value):
 
 
 class WindowsFileDropTests(unittest.TestCase):
+    def test_uses_legacy_drop_on_windows_and_qt_drop_elsewhere(self) -> None:
+        from ui.windows_file_drop import use_qt_file_drop
+
+        self.assertFalse(use_qt_file_drop(platform="win32"))
+        self.assertTrue(use_qt_file_drop(platform="linux"))
+        self.assertTrue(use_qt_file_drop(platform="darwin"))
+
     def test_enables_drop_messages_for_the_native_window(self) -> None:
         from ui.windows_file_drop import (
             ALLOWED_DROP_MESSAGES,
@@ -19,6 +26,7 @@ class WindowsFileDropTests(unittest.TestCase):
 
         allowed: list[tuple[int, int, int]] = []
         accepted: list[tuple[int, bool]] = []
+        revoked: list[int] = []
 
         class User32:
             @staticmethod
@@ -32,6 +40,12 @@ class WindowsFileDropTests(unittest.TestCase):
             def DragAcceptFiles(hwnd, accept):
                 accepted.append((_value(hwnd), bool(_value(accept))))
 
+        class Ole32:
+            @staticmethod
+            def RevokeDragDrop(hwnd):
+                revoked.append(_value(hwnd))
+                return 0
+
         window = Mock()
         window.winId.return_value = 0x123456789
 
@@ -40,6 +54,7 @@ class WindowsFileDropTests(unittest.TestCase):
             platform="win32",
             user32=User32(),
             shell32=Shell32(),
+            ole32=Ole32(),
         )
 
         self.assertTrue(enabled)
@@ -48,6 +63,42 @@ class WindowsFileDropTests(unittest.TestCase):
             [(0x123456789, message, MSGFLT_ALLOW) for message in ALLOWED_DROP_MESSAGES],
         )
         self.assertEqual(accepted, [(0x123456789, True)])
+        self.assertEqual(revoked, [0x123456789])
+
+    def test_restores_saved_qt_drop_target_for_internal_preset_drag(self) -> None:
+        from ui.windows_file_drop import restore_windows_qt_file_drop
+
+        accepted: list[tuple[int, bool]] = []
+        registered: list[tuple[int, int]] = []
+
+        class Shell32:
+            @staticmethod
+            def DragAcceptFiles(hwnd, accept):
+                accepted.append((_value(hwnd), bool(_value(accept))))
+
+        class Ole32:
+            @staticmethod
+            def RegisterDragDrop(hwnd, pointer):
+                registered.append((_value(hwnd), _value(pointer)))
+                return 0
+
+        window = Mock()
+        window.winId.return_value = 0x123456789
+        window._windows_qt_drop_target_state = {
+            "hwnd": 0x123456789,
+            "pointer": 0xABCDEF,
+        }
+
+        self.assertTrue(
+            restore_windows_qt_file_drop(
+                window,
+                platform="win32",
+                shell32=Shell32(),
+                ole32=Ole32(),
+            )
+        )
+        self.assertEqual(accepted, [(0x123456789, False)])
+        self.assertEqual(registered, [(0x123456789, 0xABCDEF)])
 
     def test_does_not_call_windows_api_on_other_platforms(self) -> None:
         from ui.windows_file_drop import enable_windows_file_drop
