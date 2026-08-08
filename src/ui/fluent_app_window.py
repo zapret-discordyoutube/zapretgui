@@ -77,6 +77,7 @@ class ZapretFluentWindow(FluentWindow):
         self._preset_file_drop_filter = WindowPresetFileDropFilter(
             self,
             target_resolver=self._current_preset_file_drop_target,
+            language_resolver=self._current_ui_language,
         )
         app.installEventFilter(self._preset_file_drop_filter)
 
@@ -86,6 +87,11 @@ class ZapretFluentWindow(FluentWindow):
         page = get_current_page(self)
         action = getattr(page, "import_dropped_preset_files", None)
         return page if callable(action) else None
+
+    def _current_ui_language(self) -> str:
+        from ui.navigation.text_sync import resolve_ui_language
+
+        return resolve_ui_language(self)
 
     # ------------------------------------------------------------------
     # Background tint (Mica + semi-transparent Qt background layer)
@@ -183,3 +189,8 @@ class ZapretFluentWindow(FluentWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._rescale_bg()
+        event_filter = getattr(self, "_preset_file_drop_filter", None)
+        overlay = getattr(event_filter, "overlay", None)
+        sync_geometry = getattr(overlay, "sync_geometry", None)
+        if callable(sync_geometry):
+            sync_geometry()

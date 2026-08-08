@@ -48,7 +48,10 @@ class WindowPresetFileDropTests(unittest.TestCase):
 
     def test_main_window_installs_filter_and_routes_to_current_page(self) -> None:
         from ui.fluent_app_window import ZapretFluentWindow
-        from ui.window_preset_file_drop import WindowPresetFileDropFilter
+        from ui.window_preset_file_drop import (
+            PresetFileDropOverlay,
+            WindowPresetFileDropFilter,
+        )
 
         window = ZapretFluentWindow()
         self.addCleanup(window.deleteLater)
@@ -61,6 +64,8 @@ class WindowPresetFileDropTests(unittest.TestCase):
 
         self.assertTrue(window.acceptDrops())
         self.assertIsInstance(event_filter, WindowPresetFileDropFilter)
+        self.assertIsInstance(event_filter.overlay, PresetFileDropOverlay)
+        self.assertTrue(event_filter.overlay.isHidden())
         self.assertIs(window._current_preset_file_drop_target(), target)
 
     def test_collects_only_unique_existing_txt_files(self) -> None:
@@ -101,20 +106,46 @@ class WindowPresetFileDropTests(unittest.TestCase):
             window = object()
             receiver = _Receiver(window)
             target = SimpleNamespace(import_dropped_preset_files=Mock(return_value=True))
+            overlay = Mock()
             event_filter = WindowPresetFileDropFilter(
                 window,
                 target_resolver=lambda: target,
+                overlay=overlay,
             )
 
             drag_event = _DropEvent(QEvent.Type.DragEnter, [url])
             self.assertTrue(event_filter.eventFilter(receiver, drag_event))
             self.assertTrue(drag_event.accepted)
             target.import_dropped_preset_files.assert_not_called()
+            overlay.show_hint.assert_called_once_with([str(preset_path)])
 
             drop_event = _DropEvent(QEvent.Type.Drop, [url])
             self.assertTrue(event_filter.eventFilter(receiver, drop_event))
             self.assertTrue(drop_event.accepted)
             target.import_dropped_preset_files.assert_called_once_with([str(preset_path)])
+            overlay.hide_hint.assert_called_once_with()
+
+            leave_event = _DropEvent(QEvent.Type.DragLeave, [])
+            self.assertFalse(event_filter.eventFilter(receiver, leave_event))
+            self.assertEqual(overlay.hide_hint.call_count, 2)
+
+    def test_overlay_covers_whole_window_and_uses_selected_language(self) -> None:
+        from ui.window_preset_file_drop import PresetFileDropOverlay
+        from PyQt6.QtWidgets import QWidget
+
+        window = QWidget()
+        self.addCleanup(window.deleteLater)
+        window.resize(900, 600)
+        overlay = PresetFileDropOverlay(window, language_resolver=lambda: "en")
+        overlay.show_hint(["C:/Temp/My preset.txt"])
+
+        self.assertEqual(overlay.geometry(), window.rect())
+        self.assertFalse(overlay.isHidden())
+        self.assertEqual(overlay._title, "Drop to import the preset")
+        self.assertEqual(overlay._subtitle, "TXT file: My preset.txt")
+
+        overlay.hide_immediately()
+        self.assertTrue(overlay.isHidden())
 
     def test_filter_ignores_other_windows_and_pages_without_import_action(self) -> None:
         from ui.window_preset_file_drop import WindowPresetFileDropFilter
