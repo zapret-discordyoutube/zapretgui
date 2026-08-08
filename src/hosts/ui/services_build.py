@@ -42,10 +42,13 @@ class HostsServicesRowWidgets:
 class HostsServiceHoverRow(QWidget):
     """Прозрачная строка сервиса с мягкой подложкой под курсором."""
 
+    _MINIMUM_HEIGHT = 32
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._hovered = False
         self.setObjectName("hostsServiceHoverRow")
+        self.setMinimumHeight(self._MINIMUM_HEIGHT)
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self._theme_refresh = ThemeRefreshBinding(self, self._refresh_theme)
@@ -117,6 +120,8 @@ def build_hosts_services_group(
     on_bulk_apply,
 ) -> HostsServicesGroupWidgets:
     card = SettingsCard()
+    if group_plan.direct_only:
+        card.main_layout.setSpacing(4)
 
     header = QHBoxLayout()
     header.setContentsMargins(0, 0, 0, 0)

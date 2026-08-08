@@ -129,6 +129,7 @@ class HostsServicesAccessibilityTests(unittest.TestCase):
         )
 
         self.assertIsInstance(widgets.row_widget, HostsServiceHoverRow)
+        self.assertEqual(widgets.row_widget.minimumHeight(), 32)
         widgets.row_widget.resize(700, max(24, widgets.row_widget.sizeHint().height()))
 
         def background_pixel() -> int:
@@ -151,6 +152,23 @@ class HostsServicesAccessibilityTests(unittest.TestCase):
 
         QApplication.sendEvent(widgets.row_widget, QEvent(QEvent.Type.Leave))
         self.assertFalse(widgets.row_widget.is_hovered())
+
+    def test_direct_service_group_compacts_spacing_for_taller_hover_rows(self) -> None:
+        widgets = build_hosts_services_group(
+            HostsServiceGroupPlan(
+                title="Напрямую из hosts",
+                direct_only=True,
+                service_names=["Discord", "YouTube"],
+                common_profiles=[],
+                rows=[],
+            ),
+            off_label="Отключено",
+            strong_body_label_cls=StrongBodyLabel,
+            make_chip=lambda _label: None,
+            on_bulk_apply=lambda *_args: None,
+        )
+
+        self.assertEqual(widgets.card.main_layout.spacing(), 4)
 
     def test_profile_combo_reads_selected_profile(self) -> None:
         widgets = build_hosts_service_row(
