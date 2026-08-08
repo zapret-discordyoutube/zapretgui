@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -326,6 +327,61 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
         self.assertIs(self._app.focusWidget(), widgets.presets_list)
         self.assertEqual(widgets.presets_list.currentIndex().row(), 1)
 
+    def test_ctrl_f_toggles_preset_search(self) -> None:
+        from app.state_store import MainWindowStateStore
+        from presets.ui.common.user_presets_page_runtime import UserPresetsRuntimeActions
+        from presets.ui.zapret2.user_presets_page import Zapret2UserPresetsPage
+
+        presets_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(presets_dir.cleanup)
+        noop = lambda *args, **kwargs: None
+        actions = UserPresetsRuntimeActions(
+            get_selected_source_preset_file_name=lambda *_args: "",
+            list_preset_manifests=lambda *_args: [],
+            get_user_presets_dir=lambda *_args: presets_dir.name,
+            get_cached_preset_list_metadata=lambda *_args: {},
+            warm_preset_list_metadata_cache=lambda *_args: {},
+            get_preset_source_path_by_file_name=lambda *_args: "",
+            preset_differs_from_builtin_by_file_name=lambda *_args: False,
+            read_single_preset_list_metadata=lambda *_args: None,
+        )
+        page = Zapret2UserPresetsPage(
+            preset_runtime_actions=actions,
+            connect_preset_signals=noop,
+            create_user_presets_open_folder_worker=noop,
+            create_preset_edit_action_worker=noop,
+            create_preset_bulk_action_worker=noop,
+            create_preset_activate_worker=noop,
+            create_preset_item_action_worker=noop,
+            create_preset_link_action_worker=noop,
+            create_preset_folder_action_worker=noop,
+            create_preset_storage_action_worker=noop,
+            load_preset_folder_state=lambda *_args: {},
+            open_preset_raw_editor=noop,
+            ui_state_store=MainWindowStateStore(),
+        )
+        self.addCleanup(page.deleteLater)
+        self.addCleanup(page.cleanup)
+        page.resize(1000, 700)
+        page.show()
+        self._app.processEvents()
+
+        self.assertTrue(page._preset_search_input.isHidden())
+
+        QTest.keyClick(page.presets_list, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
+        self._app.processEvents()
+
+        self.assertFalse(page._preset_search_input.isHidden())
+        self.assertIs(self._app.focusWidget(), page._preset_search_input)
+
+        page._preset_search_input.setText("Gaming")
+        QTest.keyClick(page._preset_search_input, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
+        self._app.processEvents()
+
+        self.assertTrue(page._preset_search_input.isHidden())
+        self.assertEqual(page._preset_search_input.text(), "")
+        self.assertIs(self._app.focusWidget(), page.presets_list)
+
     def test_preset_list_navigation_does_not_use_native_selection_state(self) -> None:
         parent, widgets = self._build_widgets()
         self.addCleanup(parent.deleteLater)
@@ -628,6 +684,7 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
                 self.assertEqual(widget.property("screenReaderStateText"), name)
 
         search_description = widgets.preset_search_input.accessibleDescription()
+        self.assertIn("Ctrl+F открывает или закрывает поиск", search_description)
         self.assertIn("После ввода перейдите в список клавишей Tab", search_description)
         self.assertIn("или нажмите Стрелка вниз", search_description)
         self.assertIn("выберите пресет стрелками вверх и вниз", search_description)

@@ -10,7 +10,7 @@ from PyQt6.QtCore import (
     QPoint,
     QUrl,
 )
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -174,6 +174,7 @@ class UserPresetsPageBase(BasePage):
         self._preset_search_timer.setSingleShot(True)
         self._preset_search_timer.timeout.connect(self._apply_preset_search)
         self._preset_search_input: Optional[LineEdit] = None
+        self._preset_search_shortcut: Optional[QShortcut] = None
         self._toolbar_layout: Optional[PresetsToolbarLayout] = None
         self.open_folder_btn = None
         self._preset_status_icon = None
@@ -572,6 +573,7 @@ class UserPresetsPageBase(BasePage):
         self.presets_list = shell.presets_list
         self._presets_model = shell.presets_model
         self._presets_delegate = shell.presets_delegate
+        self._install_preset_search_shortcut()
         self._install_title_status_icon()
 
         self.add_widget(shell.configs_card)
@@ -791,6 +793,49 @@ class UserPresetsPageBase(BasePage):
             refresh_presets_view_from_cache_fn=self._refresh_presets_view_from_cache,
         )
 
+    def _install_preset_search_shortcut(self) -> None:
+        shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Find), self)
+        shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        shortcut.activated.connect(self._toggle_preset_search)
+        shortcut.activatedAmbiguously.connect(self._toggle_preset_search)
+        self._preset_search_shortcut = shortcut
+
+    def _toggle_preset_search(self) -> None:
+        if not self.isVisible() or not self.isEnabled():
+            return
+        search_input = self._preset_search_input
+        if search_input is None:
+            return
+        if search_input.isHidden():
+            self._show_preset_search()
+        else:
+            self._hide_preset_search()
+
+    def _show_preset_search(self) -> None:
+        search_input = self._preset_search_input
+        if search_input is None:
+            return
+        search_input.show()
+        self._resync_layout_metrics()
+        self._schedule_layout_resync()
+        search_input.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        search_input.selectAll()
+
+    def _hide_preset_search(self) -> None:
+        search_input = self._preset_search_input
+        if search_input is None:
+            return
+        if search_input.text():
+            search_input.clear()
+            self._preset_search_timer.stop()
+            self._apply_preset_search()
+        search_input.hide()
+        self._resync_layout_metrics()
+        self._schedule_layout_resync()
+        presets_list = getattr(self, "presets_list", None)
+        if presets_list is not None:
+            presets_list.setFocus(Qt.FocusReason.OtherFocusReason)
+
     def _apply_preset_search(self) -> None:
         apply_preset_search(
             is_visible=self.isVisible(),
@@ -803,6 +848,8 @@ class UserPresetsPageBase(BasePage):
         search_input = self._preset_search_input
         if search_input is not None:
             try:
+                if query:
+                    self._show_preset_search()
                 if str(search_input.text() or "") == query:
                     return True
                 search_input.setText(query)
