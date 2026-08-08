@@ -6,11 +6,12 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QEvent, Qt
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtGui import QImage, QKeyEvent, QPainter
 from PyQt6.QtWidgets import QApplication
 from qfluentwidgets import BodyLabel, ComboBox, PushButton, StrongBodyLabel, SwitchButton
 
 from hosts.page_plans import HostsServiceGroupPlan, HostsServiceRowPlan
+from hosts.ui.services_build import HostsServiceHoverRow
 from hosts.ui.services_build import build_hosts_services_group
 from hosts.ui.services_build import build_hosts_services_section_title
 from hosts.ui.services_build import build_hosts_service_row
@@ -105,6 +106,51 @@ class HostsServicesAccessibilityTests(unittest.TestCase):
         self.assertTrue(event.isAccepted())
         self.assertEqual(events, [("Adobe", True)])
         self.assertEqual(widgets.control.accessibleName(), "Adobe, включено")
+
+    def test_direct_service_row_tracks_hover_for_soft_highlight(self) -> None:
+        widgets = build_hosts_service_row(
+            HostsServiceRowPlan(
+                service_name="Discord",
+                icon_name="fa5b.discord",
+                icon_color="#5865f2",
+                direct_only=True,
+                available_profiles=[],
+                profile_items=[],
+                selected_profile=None,
+                toggle_enabled=True,
+                toggle_checked=False,
+            ),
+            body_label_cls=BodyLabel,
+            combo_cls=ComboBox,
+            toggle_cls=SwitchButton,
+            off_label="Отключено",
+            on_direct_toggle=lambda *_args: None,
+            on_profile_changed=lambda *_args: None,
+        )
+
+        self.assertIsInstance(widgets.row_widget, HostsServiceHoverRow)
+        widgets.row_widget.resize(700, max(24, widgets.row_widget.sizeHint().height()))
+
+        def background_pixel() -> int:
+            image = QImage(
+                widgets.row_widget.size(),
+                QImage.Format.Format_ARGB32_Premultiplied,
+            )
+            image.fill(0)
+            painter = QPainter(image)
+            widgets.row_widget.render(painter)
+            painter.end()
+            return image.pixel(1, widgets.row_widget.height() // 2)
+
+        self.assertFalse(widgets.row_widget.is_hovered())
+        idle_pixel = background_pixel()
+
+        QApplication.sendEvent(widgets.row_widget, QEvent(QEvent.Type.Enter))
+        self.assertTrue(widgets.row_widget.is_hovered())
+        self.assertNotEqual(background_pixel(), idle_pixel)
+
+        QApplication.sendEvent(widgets.row_widget, QEvent(QEvent.Type.Leave))
+        self.assertFalse(widgets.row_widget.is_hovered())
 
     def test_profile_combo_reads_selected_profile(self) -> None:
         widgets = build_hosts_service_row(

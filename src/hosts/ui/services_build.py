@@ -5,13 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout, QFrame
 from qfluentwidgets import ScrollArea
 
 from ui.accessibility import enable_keyboard_toggle, set_control_accessibility, set_state_text
 from ui.combo_accessibility import set_combo_items_accessibility
 from ui.fluent_widgets import SettingsCard
-from ui.theme import get_theme_tokens
+from ui.theme import get_theme_tokens, to_qcolor
+from ui.theme_refresh import ThemeRefreshBinding
 
 
 @dataclass(slots=True)
@@ -30,10 +32,57 @@ class HostsServicesGroupWidgets:
 
 @dataclass(slots=True)
 class HostsServicesRowWidgets:
+    row_widget: "HostsServiceHoverRow"
     row_layout: QHBoxLayout
     icon_label: QLabel
     name_label: object
     control: object
+
+
+class HostsServiceHoverRow(QWidget):
+    """Прозрачная строка сервиса с мягкой подложкой под курсором."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._hovered = False
+        self.setObjectName("hostsServiceHoverRow")
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self._theme_refresh = ThemeRefreshBinding(self, self._refresh_theme)
+
+    def is_hovered(self) -> bool:
+        return self._hovered
+
+    def enterEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        self._set_hovered(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        self._set_hovered(False)
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().paintEvent(event)
+        if not self._hovered:
+            return
+
+        tokens = get_theme_tokens()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(to_qcolor(tokens.surface_bg_hover, tokens.surface_bg))
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 6, 6)
+        painter.end()
+
+    def _set_hovered(self, hovered: bool) -> None:
+        hovered = bool(hovered)
+        if self._hovered == hovered:
+            return
+        self._hovered = hovered
+        self.update()
+
+    def _refresh_theme(self, **_kwargs) -> None:
+        self.update()
 
 
 def build_hosts_services_container() -> HostsServicesContainerWidgets:
@@ -165,8 +214,9 @@ def build_hosts_service_row(
     on_direct_toggle,
     on_profile_changed,
 ) -> HostsServicesRowWidgets:
-    row = QHBoxLayout()
-    row.setContentsMargins(0, 0, 0, 0)
+    row_widget = HostsServiceHoverRow()
+    row = QHBoxLayout(row_widget)
+    row.setContentsMargins(8, 0, 8, 0)
     row.setSpacing(10)
 
     icon_label = QLabel()
@@ -234,6 +284,7 @@ def build_hosts_service_row(
         row.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter)
 
     return HostsServicesRowWidgets(
+        row_widget=row_widget,
         row_layout=row,
         icon_label=icon_label,
         name_label=name_label,

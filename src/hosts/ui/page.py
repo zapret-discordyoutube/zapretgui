@@ -1097,7 +1097,7 @@ class HostsPage(BasePage):
             on_profile_changed=self._on_profile_changed,
         )
         self.service_name_labels[row_plan.service_name] = row_widgets.name_label
-        card.add_layout(row_widgets.row_layout)
+        card.add_widget(row_widgets.row_widget)
         self.service_combos[row_plan.service_name] = row_widgets.control
         self.service_icon_labels[row_plan.service_name] = row_widgets.icon_label
         self.service_icon_names[row_plan.service_name] = row_plan.icon_name
