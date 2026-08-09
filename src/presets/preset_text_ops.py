@@ -126,6 +126,29 @@ def _header_preset_kind(kind: str | None) -> str | None:
     return None
 
 
+def validate_preset_source_text(source_text: str) -> str:
+    """Минимальная структурная проверка импортируемого пресета.
+
+    Возвращает пустую строку для валидного текста или человекочитаемую
+    причину отказа. Пресет winws состоит из строк-опций «--…», комментариев
+    «#» и пустых строк; любой другой текст (лог, JSON, случайный файл) не
+    должен превращаться в «пресет» при импорте.
+    """
+    text = (source_text or "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    option_lines = 0
+    for line_no, raw in enumerate(text.splitlines(), start=1):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not stripped.startswith("--"):
+            preview = stripped if len(stripped) <= 60 else f"{stripped[:57]}…"
+            return f"строка {line_no} не является опцией winws: «{preview}»"
+        option_lines += 1
+    if not option_lines:
+        return "в файле нет ни одной опции winws (строк вида «--…»)"
+    return ""
+
+
 def _normalize_presets_source_text(source_text: str) -> str:
     text = (source_text or "").replace("\r\n", "\n").replace("\r", "\n")
     lines = [

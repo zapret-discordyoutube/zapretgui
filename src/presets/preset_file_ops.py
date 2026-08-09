@@ -9,6 +9,7 @@ from presets.builtin_reset_support import (
 from presets.preset_text_ops import (
     _header_preset_kind,
     _rewrite_preset_headers,
+    validate_preset_source_text,
 )
 
 
@@ -86,6 +87,9 @@ def import_from_file(backend, src_path: Path, name: str | None = None):
         raise ValueError(f"Import source not found: {src}")
     preset_name = str(name or src.stem or "Imported").strip() or "Imported"
     source_text = src.read_text(encoding="utf-8", errors="replace")
+    validation_error = validate_preset_source_text(source_text)
+    if validation_error:
+        raise ValueError(f"Файл не похож на пресет: {validation_error}")
     rewritten = _rewrite_preset_headers(
         source_text,
         preset_name,
