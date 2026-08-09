@@ -12,6 +12,7 @@ from unittest.mock import Mock
 VALID_PRESET_TEXT = (
     "# Preset: Example\n"
     "\n"
+    "--wf-tcp-out=80,443,8080\n"
     "--new\n"
     "--name=revive\n"
     "--filter-tcp=80,8080\n"
@@ -28,17 +29,30 @@ LOG_FILE_TEXT = (
 
 
 class ValidatePresetSourceTextTests(unittest.TestCase):
-    def _validate(self, text: str) -> str:
+    def _validate(self, text: str, engine: str = "winws2") -> str:
         from presets.preset_text_ops import validate_preset_source_text
 
-        return validate_preset_source_text(text)
+        return validate_preset_source_text(text, engine=engine)
 
     def test_accepts_real_preset_with_comments_and_blank_lines(self) -> None:
         self.assertEqual(self._validate(VALID_PRESET_TEXT), "")
 
     def test_accepts_preset_with_bom_and_crlf(self) -> None:
-        text = "﻿# Preset: X\r\n--new\r\n--filter-tcp=443\r\n"
+        text = "﻿# Preset: X\r\n--wf-tcp-out=443\r\n--new\r\n--lua-desync=fake\r\n"
         self.assertEqual(self._validate(text), "")
+
+    def test_rejects_preset_without_wf_filter(self) -> None:
+        error = self._validate("--new\n--filter-tcp=443\n--lua-desync=fake\n")
+        self.assertIn("--wf", error)
+        self.assertIn("не перехватывает", error)
+
+    def test_rejects_winws2_preset_without_lua_desync(self) -> None:
+        error = self._validate("--wf-tcp-out=443\n--filter-tcp=443\n--hostlist=x.txt\n")
+        self.assertIn("--lua-desync", error)
+
+    def test_winws1_preset_does_not_require_lua_desync(self) -> None:
+        text = "--wf-tcp=443\n--dpi-desync=fake,split2\n"
+        self.assertEqual(self._validate(text, engine="winws1"), "")
 
     def test_rejects_log_file(self) -> None:
         error = self._validate(LOG_FILE_TEXT)

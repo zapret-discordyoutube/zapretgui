@@ -126,16 +126,23 @@ def _header_preset_kind(kind: str | None) -> str | None:
     return None
 
 
-def validate_preset_source_text(source_text: str) -> str:
+def validate_preset_source_text(source_text: str, *, engine: str = "") -> str:
     """Минимальная структурная проверка импортируемого пресета.
 
     Возвращает пустую строку для валидного текста или человекочитаемую
     причину отказа. Пресет winws состоит из строк-опций «--…», комментариев
     «#» и пустых строк; любой другой текст (лог, JSON, случайный файл) не
     должен превращаться в «пресет» при импорте.
+
+    Рабочему пресету нужны и содержательные опции: без фильтра «--wf…»
+    winws не перехватывает трафик, а пресет winws2 без единого
+    «--lua-desync» ничего не делает с перехваченным. Для zapret1 опции
+    --lua-desync не существует, поэтому там требуется только фильтр.
     """
     text = (source_text or "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     option_lines = 0
+    has_wf_filter = False
+    has_lua_desync = False
     for line_no, raw in enumerate(text.splitlines(), start=1):
         stripped = raw.strip()
         if not stripped or stripped.startswith("#"):
@@ -144,8 +151,17 @@ def validate_preset_source_text(source_text: str) -> str:
             preview = stripped if len(stripped) <= 60 else f"{stripped[:57]}…"
             return f"строка {line_no} не является опцией winws: «{preview}»"
         option_lines += 1
+        lowered = stripped.lower()
+        if lowered.startswith("--wf"):
+            has_wf_filter = True
+        if lowered.startswith("--lua-desync"):
+            has_lua_desync = True
     if not option_lines:
         return "в файле нет ни одной опции winws (строк вида «--…»)"
+    if not has_wf_filter:
+        return "нет ни одной опции фильтра «--wf…» — такой пресет не перехватывает трафик"
+    if str(engine or "").strip().lower() == ENGINE_WINWS2 and not has_lua_desync:
+        return "нет ни одной опции «--lua-desync» — такой пресет ничего не делает с трафиком"
     return ""
 
 

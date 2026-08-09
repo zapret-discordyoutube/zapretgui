@@ -87,7 +87,7 @@ def import_from_file(backend, src_path: Path, name: str | None = None):
         raise ValueError(f"Import source not found: {src}")
     preset_name = str(name or src.stem or "Imported").strip() or "Imported"
     source_text = src.read_text(encoding="utf-8", errors="replace")
-    validation_error = validate_preset_source_text(source_text)
+    validation_error = validate_preset_source_text(source_text, engine=backend.engine)
     if validation_error:
         raise ValueError(f"Файл не похож на пресет: {validation_error}")
     rewritten = _rewrite_preset_headers(
