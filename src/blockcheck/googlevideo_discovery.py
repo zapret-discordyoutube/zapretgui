@@ -14,6 +14,8 @@ import re
 import time
 from urllib.parse import unquote
 
+from blockcheck.hosts import host_of
+
 
 _DISCOVERY_TIMEOUT_SECONDS = 8.0
 _MAX_WATCH_PAGE_BYTES = 2_000_000
@@ -33,6 +35,16 @@ class GoogleVideoDiscoveryResult:
     candidates: tuple[str, ...] = ()
     source_url: str = ""
     detail: str = ""
+
+
+# Apex-домен не является видеосервером: прямая проверка всегда падает,
+# работают только rr*-поддомены или служебный redirector.
+_BARE_GOOGLEVIDEO_HOSTS = frozenset({"googlevideo.com", "www.googlevideo.com"})
+
+
+def is_bare_googlevideo_host(value: str | None) -> bool:
+    """True для голого googlevideo.com в любой записи (URL, порт, регистр)."""
+    return host_of(str(value or "")) in _BARE_GOOGLEVIDEO_HOSTS
 
 
 def normalize_googlevideo_host(value: str | None) -> str:

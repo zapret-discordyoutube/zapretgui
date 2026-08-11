@@ -1206,6 +1206,29 @@ class BlockcheckPage(BasePage):
             return
         if action == "add":
             text = str(context.get("domain") or "")
+            if isinstance(result, blockcheck_page_runtime.UserDomainRejection):
+                try:
+                    InfoBarHelper.warning(
+                        self.window(),
+                        tr_catalog(
+                            "page.blockcheck.domain_googlevideo_title",
+                            default="googlevideo.com добавлять не нужно",
+                        ),
+                        tr_catalog(
+                            "page.blockcheck.domain_googlevideo_text",
+                            default=(
+                                "Голый googlevideo.com — не видеосервер, его проверка "
+                                "всегда даёт ошибку. BlockCheck сам находит и проверяет "
+                                "актуальный видеосервер rr*.googlevideo.com при каждом "
+                                "запуске."
+                            ),
+                        ),
+                        duration=10000,
+                    )
+                except Exception:
+                    pass
+                self._domain_input.clear()
+                return
             normalized = str(result or "").strip()
             if normalized:
                 self._add_chip(normalized)

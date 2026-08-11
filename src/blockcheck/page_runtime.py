@@ -10,6 +10,14 @@ class BlockcheckPageInitialStatePlan:
     user_domains: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class UserDomainRejection:
+    """Домен отклонён по существу, а не как дубликат — UI объясняет причину."""
+
+    domain: str
+    reason: str = "googlevideo_apex"
+
+
 def _normalize_user_domains(values: object) -> tuple[str, ...]:
     if not isinstance(values, list):
         return ()
@@ -33,12 +41,17 @@ def load_user_domains() -> list[str]:
 
     return list(load_user_domains())
 
-def add_user_domain(text: str) -> str | None:
-    from blockcheck.targets import _normalize_domain, add_user_domain
+def add_user_domain(text: str) -> str | UserDomainRejection | None:
+    from blockcheck.googlevideo_discovery import is_bare_googlevideo_host
+    from blockcheck.hosts import host_of
+    from blockcheck.targets import add_user_domain
 
+    normalized = host_of(text)
+    if is_bare_googlevideo_host(normalized):
+        return UserDomainRejection(domain=normalized)
     if not add_user_domain(text):
         return None
-    return _normalize_domain(text)
+    return normalized
 
 def remove_user_domain(domain: str) -> None:
     from blockcheck.targets import remove_user_domain

@@ -18,7 +18,10 @@ from blockcheck.data_lists import (
     TCP_16_20_TARGETS,
 )
 from blockcheck.config import TCP_TARGET_MAX_COUNT, TCP_TARGETS_PER_PROVIDER
-from blockcheck.googlevideo_discovery import normalize_googlevideo_host
+from blockcheck.googlevideo_discovery import (
+    is_bare_googlevideo_host,
+    normalize_googlevideo_host,
+)
 from blockcheck.hosts import host_of, is_pseudo_target
 from config.runtime_layout import APPLICATION_PATHS
 from settings import store as settings_store
@@ -131,6 +134,10 @@ def add_user_domain(domain: str) -> bool:
     """Add a domain to user list. Returns True if added (not duplicate)."""
     domain = host_of(domain)
     if not domain:
+        return False
+    # Голый googlevideo.com не проверяется напрямую; актуальный rr-хост
+    # добавляется динамически в get_default_https_targets на каждом прогоне.
+    if is_bare_googlevideo_host(domain):
         return False
     domains = load_user_domains()
     if domain in domains:
@@ -313,6 +320,10 @@ def build_targets_with_user_domains(
     }
 
     for domain in user_domains:
+        # Сохранённый ранее голый googlevideo.com: rr-хост уже добавлен
+        # динамически выше, а apex всегда даёт ложную «блокировку».
+        if is_bare_googlevideo_host(domain):
+            continue
         if domain not in existing_hosts:
             # Use domain as display name (capitalize first letter)
             name = domain.split(".")[0].capitalize() if "." in domain else domain

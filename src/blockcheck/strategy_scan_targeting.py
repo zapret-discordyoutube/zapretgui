@@ -115,9 +115,9 @@ def normalize_target_domain(value: str) -> str:
     if not raw:
         return ""
     try:
-        from blockcheck.targets import _normalize_domain
+        from blockcheck.hosts import host_of
 
-        return _normalize_domain(raw)
+        return host_of(raw)
     except Exception:
         return raw.lower()
 
