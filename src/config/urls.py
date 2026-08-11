@@ -9,5 +9,6 @@ WINWS_LOG_ANALYZER_INFO_URL = "https://publish.obsidian.md/zapret/Zapret2/log-an
 ANDROID_URL = "https://publish.obsidian.md/zapret/Zapret/android"  # URL инструкции для Android
 BOLVAN_URL = "https://github.com/bol-van/zapret-win-bundle"  # URL автора
 SUPPORT_ISSUES_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues"  # Основная ссылка поддержки
-BLOCKCHECK_ISSUES_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues/new?template=service_not_working.yml"  # Обращение по BlockCheck
-PROFILE_REQUEST_FORM_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues/new?template=hostlist_ipset_request.yml"  # Форма заявки на hostlist/ipset
+# Forgejo (в отличие от GitHub) требует в ?template= полный путь к файлу шаблона
+BLOCKCHECK_ISSUES_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues/new?template=.forgejo%2FISSUE_TEMPLATE%2Fservice_not_working.yml"  # Обращение по BlockCheck
+PROFILE_REQUEST_FORM_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues/new?template=.forgejo%2FISSUE_TEMPLATE%2Fhostlist_ipset_request.yml"  # Форма заявки на hostlist/ipset
