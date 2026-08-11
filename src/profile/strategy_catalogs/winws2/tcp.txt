@@ -1021,6 +1021,12 @@ blobs = tls_google
 --lua-desync=send:repeats=3
 --lua-desync=syndata:blob=tls_google
 
+[send_x2_syndata_tls_google]
+name = send x2 + syndata tls_google
+blobs = tls_google
+--lua-desync=send:repeats=2
+--lua-desync=syndata:blob=tls_google
+
 [fake_tls_google_autottl_multidisorder_complex]
 name = fake tls_google x6 AutoTTL badack + MultiDisorder Complex
 blobs = tls_google
