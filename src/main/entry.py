@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time as _time
 
 from PyQt6.QtCore import QTimer
@@ -21,6 +22,9 @@ from main.shell import shell_bootstrap
 QT_SCROLL_STYLE_AFTER_INTERACTIVE_MS = 2_000
 
 IMPORT_WARMUP_MODULES = ("qtawesome", "asyncio")
+QT_AWESOME_WARMUP_TIMEOUT_SECONDS = 10.0
+_qtawesome_warmup_finished = threading.Event()
+_qtawesome_warmup_error: Exception | None = None
 
 
 def warm_up_modules(names) -> tuple[str, ...]:
@@ -28,14 +32,28 @@ def warm_up_modules(names) -> tuple[str, ...]:
 
     Возвращает те, что удалось прогреть.
     """
+    global _qtawesome_warmup_error
     warmed: list[str] = []
     for name in names:
         try:
-            __import__(name)
-        except Exception:
+            module = __import__(name)
+            if name == "qtawesome":
+                from main.qtawesome_font_policy import configure_qtawesome_module
+
+                configure_qtawesome_module(module)
+        except Exception as exc:
+            if name == "qtawesome":
+                _qtawesome_warmup_error = exc
             continue
         warmed.append(name)
     return tuple(warmed)
+
+
+def _run_import_warmup() -> None:
+    try:
+        warm_up_modules(IMPORT_WARMUP_MODULES)
+    finally:
+        _qtawesome_warmup_finished.set()
 
 
 def start_qtawesome_warmup() -> None:
@@ -50,14 +68,27 @@ def start_qtawesome_warmup() -> None:
     вместе с `asyncio.windows_events`, и в логе это давало рывок интерфейса
     на ~64 мс прямо посреди работы пользователя.
     """
-    import threading
+    global _qtawesome_warmup_error
+    _qtawesome_warmup_error = None
+    _qtawesome_warmup_finished.clear()
 
     threading.Thread(
-        target=warm_up_modules,
-        args=(IMPORT_WARMUP_MODULES,),
+        target=_run_import_warmup,
         daemon=True,
         name="import-warmup",
     ).start()
+
+
+def wait_for_qtawesome_warmup(
+    timeout: float = QT_AWESOME_WARMUP_TIMEOUT_SECONDS,
+) -> None:
+    """Не даёт окну запросить иконки до применения компактной политики."""
+    if not _qtawesome_warmup_finished.wait(timeout=max(0.0, float(timeout))):
+        raise RuntimeError("Фоновая подготовка qtawesome не завершилась вовремя")
+    if _qtawesome_warmup_error is not None:
+        raise RuntimeError("Не удалось применить политику шрифтов qtawesome") from (
+            _qtawesome_warmup_error
+        )
 
 
 def _build_application_post_startup_deps(**kwargs):
@@ -283,6 +314,12 @@ def main() -> None:
     emit_startup_metric(
         "StartupApplicationControllerImport",
         f"{(_time.perf_counter() - t_controller_import) * 1000:.0f}ms",
+    )
+    t_qtawesome = _time.perf_counter()
+    wait_for_qtawesome_warmup()
+    emit_startup_metric(
+        "StartupQtAwesomePolicyReady",
+        f"{(_time.perf_counter() - t_qtawesome) * 1000:.0f}ms",
     )
     t_window_import = _time.perf_counter()
     from main.window import LupiDPIApp

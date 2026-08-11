@@ -111,6 +111,7 @@ class StartupBootstrapMetricsTests(unittest.TestCase):
         self.assertIn("StartupShellBootstrap", source)
         self.assertIn("StartupApplicationBootstrap", source)
         self.assertIn("StartupApplicationControllerImport", source)
+        self.assertIn("StartupQtAwesomePolicyReady", source)
         self.assertIn("StartupWindowClassImport", source)
         self.assertIn("StartupApplicationControllerInit", source)
         self.assertIn("StartupLateBootstrapShutdownHook", source)

@@ -604,7 +604,7 @@ class AppearancePage(BasePage):
         accent_card.addSettingCard(accent_row)
 
         self._follow_windows_accent_cb = Win11ToggleRow(
-            "fa5s.windows",
+            "fa5b.windows",
             tr_catalog("page.appearance.accent.windows.title", language=self._ui_language, default="Акцент из Windows"),
             tr_catalog(
                 "page.appearance.accent.windows.description",

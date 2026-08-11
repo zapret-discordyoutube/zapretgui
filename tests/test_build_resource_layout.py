@@ -203,7 +203,12 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertNotIn('            "pkg_resources",', builder)
         self.assertIn('"--nofollow-import-to=numpy"', builder)
         self.assertIn('"--nofollow-import-to=PIL"', builder)
+        self.assertIn('"--nofollow-import-to=cryptography"', builder)
+        self.assertIn('"--nofollow-import-to=PyQt6.QtOpenGL"', builder)
         self.assertIn('"--noinclude-dlls=opengl32sw.dll"', builder)
+        self.assertIn('"--noinclude-dlls=Qt6Pdf.dll"', builder)
+        self.assertIn('"--python-flag=no_docstrings"', builder)
+        self.assertIn('"--report-diffable"', builder)
 
     def test_nuitka_uses_local_work_dir_for_windows_network_share(self) -> None:
         old_path = list(sys.path)
