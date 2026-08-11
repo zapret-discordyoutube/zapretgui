@@ -99,6 +99,39 @@ class ProfileTypeSelectorTests(unittest.TestCase):
         self.assertEqual(selector._buttons["tcp"].accessibleName(), "Тип profile: TCP, выбрано")
         self.assertEqual(selector._buttons["tcp"].property("screenReaderStateText"), "Тип profile: TCP, выбрано")
 
+    def test_every_profile_type_button_has_descriptive_tooltip(self) -> None:
+        from profile.ui.widgets.profile_type_selector import ProfileTypeSelector
+
+        selector = ProfileTypeSelector()
+        self.addCleanup(selector.deleteLater)
+
+        for key, btn in selector._buttons.items():
+            with self.subTest(profile_type=key):
+                tooltip = str(btn.toolTip() or "").strip()
+                self.assertTrue(tooltip, f"у кнопки {key!r} нет tooltip")
+                self.assertEqual(tooltip, ProfileTypeSelector.PROFILE_TYPE_DESCRIPTIONS[key])
+                # Fluent-подсказка ставится через ToolTipFilter из set_tooltip.
+                self.assertIsNotNone(getattr(btn, "_fluent_tooltip_filter", None))
+
+        self.assertIn("QUIC", selector._buttons["udp"].toolTip())
+        self.assertIn("Discord Voice", selector._buttons["voice"].toolTip())
+        self.assertIn("game filter", selector._buttons["games"].toolTip())
+
+    def test_tooltip_description_is_exposed_to_screen_reader(self) -> None:
+        from profile.ui.widgets.profile_type_selector import ProfileTypeSelector
+
+        selector = ProfileTypeSelector()
+        self.addCleanup(selector.deleteLater)
+
+        description = selector._buttons["voice"].accessibleDescription()
+        self.assertIn("Discord Voice", description)
+        self.assertIn("Фильтрует список profile", description)
+
+        # Описание не теряется после обновления состояния кнопок.
+        selector.set_active_profile_types({"voice"})
+        description = selector._buttons["voice"].accessibleDescription()
+        self.assertIn("Discord Voice", description)
+
     def test_profile_type_filter_explains_keyboard_navigation_to_screen_reader(self) -> None:
         from profile.ui.widgets.profile_type_selector import ProfileTypeSelector
 

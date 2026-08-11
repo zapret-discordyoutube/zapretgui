@@ -412,6 +412,25 @@ def _refresh_keyboard_toggle_accessibility(widget) -> None:
         pass
 
 
+_KEYBOARD_TOGGLE_ENABLED_PROPERTY = "_keyboardToggleEnabled"
+
+
+def mark_keyboard_toggle_handled(widget) -> None:
+    """Помечает виджет, который сам обрабатывает Enter/Пробел в keyPressEvent.
+
+    После пометки enable_keyboard_toggle не подменяет keyPressEvent: подмена
+    переключает состояние через setChecked() в обход click(), из-за чего
+    не эмитится clicked и ломается логика, завязанная на этот сигнал.
+    """
+
+    if widget is None:
+        return
+    try:
+        widget.setProperty(_KEYBOARD_TOGGLE_ENABLED_PROPERTY, True)
+    except Exception:
+        pass
+
+
 def enable_keyboard_toggle(widget) -> None:
     """Делает переключатель доступным через Tab, Enter и Пробел."""
 
@@ -422,9 +441,9 @@ def enable_keyboard_toggle(widget) -> None:
     except Exception:
         return
     try:
-        if widget.property("_keyboardToggleEnabled"):
+        if widget.property(_KEYBOARD_TOGGLE_ENABLED_PROPERTY):
             return
-        widget.setProperty("_keyboardToggleEnabled", True)
+        widget.setProperty(_KEYBOARD_TOGGLE_ENABLED_PROPERTY, True)
     except Exception:
         pass
     _install_keyboard_activation_filter(
@@ -511,6 +530,7 @@ def _toggle_keyboard_target(widget) -> bool:
 __all__ = [
     "enable_keyboard_click",
     "enable_keyboard_toggle",
+    "mark_keyboard_toggle_handled",
     "remove_switch_indicators_from_tab_order",
     "remove_line_edit_buttons_from_tab_order",
     "remove_scrollbar_arrow_buttons_from_tab_order",

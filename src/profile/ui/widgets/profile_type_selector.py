@@ -8,7 +8,13 @@ from PyQt6.QtWidgets import QWidget, QHBoxLayout
 from PyQt6.QtCore import Qt, pyqtSignal
 from qfluentwidgets import PillPushButton
 
-from ui.accessibility import set_accessible_description, set_control_accessibility, set_state_text
+from ui.accessibility import (
+    mark_keyboard_toggle_handled,
+    set_accessible_description,
+    set_control_accessibility,
+    set_state_text,
+)
+from ui.fluent_widgets import set_tooltip
 
 
 def set_button_checked_if_changed(button, checked: bool) -> bool:
@@ -30,6 +36,9 @@ class _ProfileTypeButton(PillPushButton):
         self.setText(label)
         self._profile_type = profile_type
         self.setCheckable(True)
+        # Enter/Пробел обрабатываются в keyPressEvent через click(), чтобы
+        # сработал clicked и логика "Все" ↔ остальные типы.
+        mark_keyboard_toggle_handled(self)
 
     @property
     def profile_type(self) -> str:
@@ -67,6 +76,15 @@ class ProfileTypeSelector(QWidget):
         ("games",   "Games"),
     ]
 
+    PROFILE_TYPE_DESCRIPTIONS = {
+        "all":     "Показать все profile без фильтра по типу трафика.",
+        "tcp":     "Profile с TCP-трафиком: обычные сайты и сервисы (TLS/HTTP, чаще всего порты 80 и 443).",
+        "udp":     "Profile с UDP-трафиком: QUIC, голосовые каналы и другие UDP-протоколы.",
+        "discord": "Profile Discord: сам сервис, обновления и звонки.",
+        "voice":   "Голосовой трафик: Discord Voice, STUN и WireGuard (обычно UDP 50000–59000).",
+        "games":   "Игровые profile (game filter): трафик игр и игровых платформ.",
+    }
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._buttons: dict[str, _ProfileTypeButton] = {}
@@ -89,6 +107,7 @@ class ProfileTypeSelector(QWidget):
         for profile_type, label in self.PROFILE_TYPES:
             btn = _ProfileTypeButton(label, profile_type, self)
             btn.clicked.connect(self._on_button_clicked)
+            set_tooltip(btn, self.PROFILE_TYPE_DESCRIPTIONS.get(profile_type, ""))
             self._buttons[profile_type] = btn
             layout.addWidget(btn)
 
@@ -156,13 +175,16 @@ class ProfileTypeSelector(QWidget):
             refresh_accessibility()
 
     def _refresh_accessibility(self) -> None:
-        for _key, btn in self._buttons.items():
+        for key, btn in self._buttons.items():
             label = str(btn.text() or "").strip()
             state = "выбрано" if btn.isChecked() else "не выбрано"
             set_state_text(btn, f"Тип profile: {label}, {state}")
+            description = str(self.PROFILE_TYPE_DESCRIPTIONS.get(key, "")).strip()
             set_accessible_description(
                 btn,
                 (
+                    f"{description} " if description else ""
+                ) + (
                     "Фильтрует список profile. Можно выбрать несколько типов. "
                     "Стрелками вверх, вниз, влево и вправо перейдите к соседнему типу, "
                     "Enter или Пробел меняет выбор."
