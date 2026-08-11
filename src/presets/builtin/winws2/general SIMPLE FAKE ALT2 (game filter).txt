@@ -1,5 +1,5 @@
 # Preset: general SIMPLE FAKE ALT2 (game filter)
-# BuiltinVersion: 2.25
+# BuiltinVersion: 2.26
 
 --lua-init=@lua/zapret-lib.lua
 --lua-init=@lua/zapret-antidpi.lua
@@ -80,6 +80,14 @@
 --wf-raw-part=@windivert.filter/windivert_part.discord_media.txt
 --wf-raw-part=@windivert.filter/windivert_part.stun.txt
 --wf-raw-part=@windivert.filter/windivert_part.wireguard.txt
+
+--name=git.zapret.moe
+--filter-tcp=443
+--hostlist=lists/git-zapret-moe.txt
+--out-range=-d8
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+
+--new
 
 --name=Исключения (RU сайты)
 --filter-tcp=80,443-65535

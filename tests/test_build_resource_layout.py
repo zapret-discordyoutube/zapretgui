@@ -1114,7 +1114,13 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     directory = source_root / dir_name
                     directory.mkdir()
                     (directory / "required.dat").write_bytes(b"resource")
-                for service_list in ("apple.txt", "gemini.txt", "linkedin.txt", "notion.txt"):
+                for service_list in (
+                    "apple.txt",
+                    "gemini.txt",
+                    "git-zapret-moe.txt",
+                    "linkedin.txt",
+                    "notion.txt",
+                ):
                     (source_root / "lists" / service_list).write_text("example.com\n", encoding="utf-8")
                 for exe_name, payload in (
                     ("winws.exe", b"winws1-binary"),
@@ -1164,7 +1170,13 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 self.assertTrue(any((stage_root / "presets" / "winws1_builtin").glob("*.txt")))
                 self.assertTrue((stage_root / "profile" / "strategy_catalogs" / "winws2").is_dir())
                 self.assertTrue((stage_root / "profile" / "templates").is_dir())
-                for service_list in ("apple.txt", "gemini.txt", "linkedin.txt", "notion.txt"):
+                for service_list in (
+                    "apple.txt",
+                    "gemini.txt",
+                    "git-zapret-moe.txt",
+                    "linkedin.txt",
+                    "notion.txt",
+                ):
                     self.assertTrue((stage_root / "lists" / service_list).is_file(), service_list)
                 self.assertTrue((stage_root / "json" / "hosts_catalog").is_dir())
                 self.assertTrue((stage_root / "ico" / "windows11_fluent" / "sidebar").is_dir())

@@ -1,5 +1,5 @@
 # Preset: general ALT9 1.9.4 (game filter)
-# BuiltinVersion: 2.25
+# BuiltinVersion: 2.26
 # IconColor: #e6c300ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -81,6 +81,14 @@
 --wf-raw-part=@windivert.filter/windivert_part.discord_media.txt
 --wf-raw-part=@windivert.filter/windivert_part.stun.txt
 --wf-raw-part=@windivert.filter/windivert_part.wireguard.txt
+
+--name=git.zapret.moe
+--filter-tcp=443
+--hostlist=lists/git-zapret-moe.txt
+--out-range=-d8
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+
+--new
 
 --name=Исключения (RU сайты)
 --filter-tcp=80,443-65535

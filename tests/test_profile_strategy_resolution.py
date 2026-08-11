@@ -163,6 +163,30 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
 
         self.assertEqual(unresolved, [])
 
+    def test_git_zapret_moe_is_first_and_uses_alt9_in_every_builtin_preset(self) -> None:
+        expected_strategy = (
+            "--out-range=-d8",
+            "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4",
+        )
+        preset_paths = sorted(Path("src/presets/builtin/winws2").glob("*.txt"))
+
+        self.assertGreater(len(preset_paths), 0)
+        for path in preset_paths:
+            with self.subTest(preset=path.name):
+                preset = parse_preset_text(
+                    path.read_text(encoding="utf-8"),
+                    engine="winws2",
+                    source_name=path.name,
+                )
+                matches = [profile for profile in preset.profiles if profile.display_name == "git.zapret.moe"]
+                self.assertEqual(len(matches), 1)
+                profile = matches[0]
+                self.assertIs(profile, preset.profiles[0])
+                self.assertEqual(profile.match.filter_lines, ["--filter-tcp=443"])
+                self.assertEqual(profile.match.hostlist_lines, ["--hostlist=lists/git-zapret-moe.txt"])
+                self.assertEqual(normalize_lines(profile.strategy.strategy_lines), expected_strategy)
+                self.assertEqual(self._resolved_strategy_id(profile), "alt9")
+
     def test_flowseal_exp_1100_keeps_payload_scopes_and_ready_branches(self) -> None:
         path = Path("src/presets/builtin/winws2/general EXP 1.10.0 (game filter).txt")
         preset = parse_preset_text(path.read_text(encoding="utf-8"), engine="winws2", source_name=path.name)

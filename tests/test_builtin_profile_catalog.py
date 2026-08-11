@@ -269,6 +269,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             source_name=ALL_PROFILES_PATH.name,
         )
         expected_profiles = {
+            "git.zapret.moe": ("--filter-tcp=443", "--hostlist=lists/git-zapret-moe.txt"),
             "Apple": ("--filter-tcp=80,443-65535", "--hostlist=lists/apple.txt"),
             "Gemini": ("--filter-tcp=80,443", "--hostlist=lists/gemini.txt"),
             "Notion": ("--filter-tcp=80,443", "--hostlist=lists/notion.txt"),
@@ -290,6 +291,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
                 self.assertEqual(profile.strategy.other_lines, [])
 
         expected_lists = {
+            "git-zapret-moe.txt": ["git.zapret.moe"],
             "apple.txt": [
                 "apple.com",
                 "icloud.com",
@@ -1945,7 +1947,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             not in catalog_pairs
         ]
 
-        self.assertEqual(len(preset.profiles), 96)
+        self.assertEqual(len(preset.profiles), 97)
         self.assertEqual(offenders, [])
         self.assertIn(
             "--lua-init=fake_unknown_256=string.rep(string.char(0),256);"

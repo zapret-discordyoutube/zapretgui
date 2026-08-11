@@ -1,6 +1,6 @@
 # Preset: syndata (circular)
 # ActivePreset: syndata (circular)
-# BuiltinVersion: 2.24
+# BuiltinVersion: 2.25
 # Modified: 2026-01-21T17:52:34.648239
 # IconColor: #a8c5ff
 
@@ -86,6 +86,14 @@
 --blob=hex_0f0e0e0f:0x0F0E0E0F
 --blob=hex_0f0f0f0f:0x0F0F0F0F
 --blob=hex_00:0x00
+
+--name=git.zapret.moe
+--filter-tcp=443
+--hostlist=lists/git-zapret-moe.txt
+--out-range=-d8
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+
+--new
 
 --name=Исключения (RU сайты)
 --filter-tcp=80,443-65535
