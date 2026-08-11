@@ -269,6 +269,11 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             source_name=ALL_PROFILES_PATH.name,
         )
         expected_profiles = {
+            "Apple": ("--filter-tcp=80,443-65535", "--hostlist=lists/apple.txt"),
+            "Gemini": ("--filter-tcp=80,443", "--hostlist=lists/gemini.txt"),
+            "Notion": ("--filter-tcp=80,443", "--hostlist=lists/notion.txt"),
+            "Claude": ("--filter-tcp=80,443", "--hostlist=lists/claude.txt"),
+            "LinkedIn": ("--filter-tcp=80,443", "--hostlist=lists/linkedin.txt"),
             "Cloudflare TCP": ("--filter-tcp=80,443-65535", "--hostlist=lists/cloudflare.txt"),
             "cloudfront.net": ("--filter-tcp=80,443-65535", "--hostlist=lists/cloudfront.txt"),
             "EpicGames & Fortnite": ("--filter-tcp=80,443-65535", "--hostlist=lists/epicgames-fortnite.txt"),
@@ -285,6 +290,18 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
                 self.assertEqual(profile.strategy.other_lines, [])
 
         expected_lists = {
+            "apple.txt": [
+                "apple.com",
+                "icloud.com",
+                "mzstatic.com",
+                "cdn-apple.com",
+                "apple-cloudkit.com",
+                "me.com",
+            ],
+            "gemini.txt": ["ai.google.dev"],
+            "notion.txt": ["notion.so", "notion.site"],
+            "claude.txt": ["claude.ai", "claude.com", "anthropic.com"],
+            "linkedin.txt": ["linkedin.com", "licdn.com"],
             "cloudflare.txt": [
                 "cloudflare-ech.com",
                 "cloudflare.com",
@@ -670,7 +687,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
         self.assertEqual(profiles[0].match.hostlist_lines, ["--hostlist=lists/chatgpt.txt"])
         self.assertEqual(
             _list_entries(PRIVATE_ROOT / "dist" / "lists" / "chatgpt.txt"),
-            ["chatgpt.com", "openai.com", "oaiusercontent.com"],
+            ["chatgpt.com", "openai.com", "oaistatic.com", "oaiusercontent.com"],
         )
 
     def test_builtin_presets_do_not_repeat_enabled_logical_profile_matches(self) -> None:
