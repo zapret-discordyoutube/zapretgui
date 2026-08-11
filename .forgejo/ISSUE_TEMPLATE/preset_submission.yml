@@ -1,0 +1,38 @@
+name: "Поделиться пресетом"
+description: "Прикрепите свой рабочий пресет (.txt) и расскажите, что он делает"
+title: "[Пресет]: "
+labels: ["preset"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Прикрепите файл пресета и коротко расскажите, что он делает.
+        Если пресет обновится — просто отредактируйте задачу и приложите новый файл
+        или добавьте его в комментарий.
+
+  - type: textarea
+    id: preset_file
+    attributes:
+      label: Файл пресета
+      description: "Перетащите сюда .txt-файл пресета или вставьте его содержимое"
+      placeholder: "Перетащите файл .txt сюда"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Что это за пресет
+      description: "Опишите пресет: провайдер, регион, какие сервисы разблокирует, на чём основан"
+      placeholder: "Ростелеком, Краснодар, разблокирует YouTube + Discord"
+    validations:
+      required: true
+
+  - type: input
+    id: gui_version
+    attributes:
+      label: Версия Zapret GUI
+      description: "На какой версии программы пресет проверен"
+      placeholder: "Например: 1.2.3"
+    validations:
+      required: true
