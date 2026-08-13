@@ -2534,8 +2534,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Confirmation",
     },
     "page.premium.dialog.reset.body": {
-        "ru": "Сбросить активацию на этом устройстве?\nБудут удалены device token, offline-кэш и код привязки.\nДля восстановления потребуется повторная привязка в боте.",
-        "en": "Reset activation on this device?\nThis will remove device token, offline cache, and pair code.\nYou will need to link again in the bot.",
+        "ru": "Отвязать это устройство от Premium?\nПриложение сначала закроет локальный доступ, затем сервер отзовёт точную привязку.\nДля восстановления потребуется новое сопряжение через Telegram-бота.",
+        "en": "Unlink this device from Premium?\nThe app will close local access first, then the server will revoke the exact binding.\nYou will need to pair again through the Telegram bot.",
     },
     "page.premium.error.open_telegram": {
         "ru": "Не удалось открыть Telegram: {error}",

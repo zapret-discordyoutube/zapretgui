@@ -26,9 +26,15 @@ class PremiumStatusSourceTests(unittest.TestCase):
     def _patch_valid_cache(self, *, token: str = "token-1"):
         return (
             patch("donater.service.PremiumStorage.get_device_id", return_value="device-1"),
-            patch("donater.service.PremiumStorage.get_device_token", return_value=token),
-            patch("donater.service.PremiumStorage.get_pair_code", return_value=None),
-            patch("donater.service.PremiumStorage.get_pair_expires_at", return_value=None),
+            patch(
+                "donater.service.PremiumStorage.get_binding",
+                return_value={
+                    "device_token": token,
+                    "binding_id": "binding-1",
+                    "binding_generation": 1,
+                },
+            ),
+            patch("donater.service.PremiumStorage.get_pending_pairing", return_value=None),
             patch("donater.service.PremiumStorage.get_premium_cache", return_value={"signed": {}}),
             patch("donater.service.verify_signed_response", side_effect=self._verify_valid_cache_only),
         )
@@ -39,7 +45,7 @@ class PremiumStatusSourceTests(unittest.TestCase):
         service = PremiumService(api_base_url="http://premium.local/api")
 
         patches = self._patch_valid_cache()
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
             result = service.check_device_activation(use_cache=True)
 
         self.assertTrue(result["is_premium"])
@@ -64,7 +70,6 @@ class PremiumStatusSourceTests(unittest.TestCase):
             patches[2],
             patches[3],
             patches[4],
-            patches[5],
             patch("donater.service.PremiumStorage.save_last_network_failure_now"),
         ):
             result = service.check_device_activation(use_cache=False)

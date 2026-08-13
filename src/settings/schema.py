@@ -153,18 +153,6 @@ def default_hosts() -> dict[str, Any]:
     }
 
 
-def default_premium() -> dict[str, Any]:
-    return {
-        "device_id": "",
-        "device_token": None,
-        "last_check": None,
-        "last_network_failure_ts": None,
-        "pair_code": None,
-        "pair_expires_at": None,
-        "premium_cache": None,
-    }
-
-
 def default_ui_state() -> dict[str, Any]:
     return {
         "sidebar_expanded": True,
@@ -275,7 +263,6 @@ def build_default_settings() -> dict[str, Any]:
         "telegram_proxy": default_telegram_proxy(),
         "dns": default_dns(),
         "hosts": default_hosts(),
-        "premium": default_premium(),
         "ui_state": default_ui_state(),
         "profile_strategy_state": default_profile_strategy_state(),
         "user_profiles": default_user_profiles(),

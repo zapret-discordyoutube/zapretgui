@@ -154,7 +154,10 @@ class PremiumControlsAccessibilityTests(unittest.TestCase):
 
         dialog = _MessageBox.instances[0]
         self.assertEqual(dialog.yesButton.accessibleName(), "Сбросить Premium-активацию")
-        self.assertIn("Будут удалены device token", dialog.yesButton.accessibleDescription())
+        self.assertIn(
+            "сервер отзовёт точную привязку",
+            dialog.yesButton.accessibleDescription(),
+        )
         self.assertEqual(dialog.cancelButton.accessibleName(), "Отменить сброс Premium-активации")
         self.assertTrue(dialog.exec_called)
         page._request_reset_storage.assert_not_called()

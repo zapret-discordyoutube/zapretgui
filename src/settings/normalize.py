@@ -428,21 +428,6 @@ def normalize_hosts(data: object) -> dict[str, Any]:
     }
 
 
-def normalize_premium(data: object) -> dict[str, Any]:
-    raw = as_dict(data)
-    cache = raw.get("premium_cache")
-    pair_code = as_clean_str(raw.get("pair_code")).upper()
-    return {
-        "device_id": as_clean_str(raw.get("device_id")),
-        "device_token": as_nullable_str(raw.get("device_token")),
-        "last_check": as_nullable_str(raw.get("last_check")),
-        "last_network_failure_ts": as_nullable_int(raw.get("last_network_failure_ts")),
-        "pair_code": pair_code or None,
-        "pair_expires_at": as_nullable_int(raw.get("pair_expires_at")),
-        "premium_cache": cache if isinstance(cache, dict) else None,
-    }
-
-
 def normalize_ui_state(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     defaults = schema.default_ui_state()
@@ -729,7 +714,6 @@ def normalize_settings(data: object) -> dict[str, Any]:
         "telegram_proxy": normalize_telegram_proxy(raw.get("telegram_proxy")),
         "dns": normalize_dns(raw.get("dns")),
         "hosts": normalize_hosts(raw.get("hosts")),
-        "premium": normalize_premium(raw.get("premium")),
         "ui_state": normalize_ui_state(raw.get("ui_state")),
         "profile_strategy_state": normalize_profile_strategy_state(raw.get("profile_strategy_state")),
         "user_profiles": normalize_user_profiles(raw.get("user_profiles")),

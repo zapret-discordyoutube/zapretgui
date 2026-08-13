@@ -98,21 +98,11 @@ def create_premium_worker_thread(target, args=None):
 
 
 def reset_premium_storage(checker, storage) -> None:
-    try:
-        if checker:
-            checker.clear_activation()
-            return
-    except Exception:
-        pass
-
-    if storage:
-        try:
-            storage.clear_device_token()
-            storage.clear_premium_cache()
-            storage.clear_pair_code()
-            storage.save_last_check()
-        except Exception:
-            pass
+    _ = storage
+    if checker is None:
+        raise RuntimeError("Сервис Premium не инициализирован")
+    if checker.clear_activation() is not True:
+        raise RuntimeError("Сервер не подтвердил отвязку устройства")
 
 
 def read_device_storage_snapshot(storage, *, current_time: int) -> dict:

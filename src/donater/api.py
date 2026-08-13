@@ -1,5 +1,3 @@
-# donater/api.py
-
 from __future__ import annotations
 
 import secrets
@@ -9,148 +7,171 @@ import requests
 
 
 class PremiumApiClient:
+    """Typed transport for the single Zapret Premium API contract."""
+
     def __init__(self, *, base_url: str, timeout: int = 10):
         self.base_url = (base_url or "").rstrip("/")
         self.timeout = int(timeout)
-        # Bypass system/env proxy settings to avoid interference from DPI tools (winws/winws2)
-        # that may configure system proxy or set HTTP_PROXY/HTTPS_PROXY env vars.
         self._session = requests.Session()
         self._session.trust_env = False
 
     def _url(self, endpoint: str) -> str:
-        endpoint = (endpoint or "").lstrip("/")
-        return f"{self.base_url}/{endpoint}"
+        return f"{self.base_url}/{str(endpoint or '').lstrip('/')}"
 
     @staticmethod
-    def _truncate_text(s: str, limit: int = 400) -> str:
-        s = (s or "").strip()
-        if not s:
-            return ""
-        if len(s) <= limit:
-            return s
-        return s[: limit - 3] + "..."
+    def _safe_error_code(value: Any) -> str:
+        if isinstance(value, dict):
+            value = value.get("code")
+        code = str(value or "unknown").strip().lower()
+        if not code or len(code) > 64 or not code.replace("_", "").isalnum():
+            return "unknown"
+        return code
 
-    @staticmethod
-    def _response_to_dict(r: requests.Response, *, nonce: str) -> Dict[str, Any]:
-        """Best-effort convert HTTP response into a dict with debug metadata."""
-        data: Dict[str, Any]
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        nonce: str = "",
+    ) -> Dict[str, Any]:
         try:
-            parsed = r.json() if r.content else None
-        except Exception:
-            parsed = None
-
-        if isinstance(parsed, dict):
-            data = parsed
-        else:
-            data = {
+            response = self._session.request(
+                method,
+                self._url(endpoint),
+                json=payload,
+                timeout=self.timeout,
+            )
+        except requests.Timeout:
+            return {
                 "success": False,
-                "error": "Некорректный ответ сервера",
+                "error": {"code": "timeout", "retryable": True},
+                "_nonce": nonce,
+                "_http_status": 0,
+            }
+        except requests.RequestException:
+            return {
+                "success": False,
+                "error": {"code": "network_error", "retryable": True},
+                "_nonce": nonce,
+                "_http_status": 0,
             }
 
-        # Attach metadata for debugging (client-side only).
         try:
-            data.setdefault("_nonce", nonce)
-            data.setdefault("_http_status", int(getattr(r, "status_code", 0) or 0))
-            if not data.get("_http_text"):
-                data["_http_text"] = PremiumApiClient._truncate_text(getattr(r, "text", "") or "")
-        except Exception:
-            pass
-
+            data = response.json() if response.content else None
+        except ValueError:
+            data = None
+        if not isinstance(data, dict):
+            return {
+                "success": False,
+                "error": {"code": "invalid_response", "retryable": response.status_code >= 500},
+                "_nonce": nonce,
+                "_http_status": int(response.status_code),
+            }
+        data["_nonce"] = nonce
+        data["_http_status"] = int(response.status_code)
+        if response.status_code >= 400 and not isinstance(data.get("signed"), dict):
+            data["success"] = False
+            data["error"] = {
+                "code": self._safe_error_code(data.get("error")),
+                "retryable": response.status_code in {408, 429, 500, 502, 503, 504},
+            }
         return data
 
-    @staticmethod
-    def _exception_to_dict(e: Exception, *, nonce: str) -> Dict[str, Any]:
-        # Keep message short and user-facing.
-        name = e.__class__.__name__
-        msg = (str(e) or "").strip()
-        text = (name + (": " + msg if msg else "")).strip()
-        return {
-            "success": False,
-            "error": "Ошибка сети",
-            "detail": PremiumApiClient._truncate_text(text, 400),
-            "_nonce": nonce,
-            "_http_status": 0,
-        }
-
     def get_status(self) -> Optional[Dict[str, Any]]:
-        nonce = ""  # no nonce for GET
-        try:
-            r = self._session.get(self._url("status"), timeout=self.timeout)
-            # Always return dict with HTTP metadata when possible.
-            return self._response_to_dict(r, nonce=nonce)
-        except Exception as e:
-            return self._exception_to_dict(e, nonce=nonce)
+        return self._request("GET", "status")
 
-    def post_pair_start(self, *, device_id: str, device_name: str | None = None) -> Tuple[Optional[Dict[str, Any]], str]:
+    def post_pair_start(
+        self,
+        *,
+        request_id: str,
+        device_id: str,
+        device_name: str | None = None,
+    ) -> Tuple[Dict[str, Any], str]:
         nonce = secrets.token_urlsafe(16)
-        try:
-            try:
-                from log.log import log
+        return (
+            self._request(
+                "POST",
+                "pairings/start",
+                payload={
+                    "request_id": request_id,
+                    "device_id": device_id,
+                    "device_name": device_name,
+                    "nonce": nonce,
+                },
+                nonce=nonce,
+            ),
+            nonce,
+        )
 
-
-                log(
-                    f"Premium pair_start request: base_url={self.base_url!r}, device_id={device_id[:12]}..., nonce={nonce[:8]}...",
-                    "DEBUG",
-                )
-            except Exception:
-                pass
-
-            r = self._session.post(
-                self._url("pair_start"),
-                json={"device_id": device_id, "device_name": device_name, "nonce": nonce},
-                timeout=self.timeout,
-            )
-            data = self._response_to_dict(r, nonce=nonce)
-            try:
-                from log.log import log
-
-
-                log(
-                    "Premium pair_start response: "
-                    f"http={data.get('_http_status')}, "
-                    f"success={data.get('success')}, "
-                    f"type={data.get('type')}, "
-                    f"error={data.get('error')!r}, "
-                    f"message={data.get('message')!r}",
-                    "DEBUG",
-                )
-            except Exception:
-                pass
-            return (data, nonce)
-        except Exception as e:
-            data = self._exception_to_dict(e, nonce=nonce)
-            try:
-                from log.log import log
-
-
-                log(
-                    f"Premium pair_start exception: base_url={self.base_url!r}, error={data.get('detail')!r}",
-                    "WARNING",
-                )
-            except Exception:
-                pass
-            return (data, nonce)
-
-    def post_pair_finish(self, *, device_id: str, pair_code: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    def post_pair_finish(
+        self,
+        *,
+        request_id: str,
+        device_id: str,
+        pairing_id: str,
+    ) -> Tuple[Dict[str, Any], str]:
         nonce = secrets.token_urlsafe(16)
-        try:
-            r = self._session.post(
-                self._url("pair_finish"),
-                json={"device_id": device_id, "pair_code": pair_code, "nonce": nonce},
-                timeout=self.timeout,
-            )
-            return (self._response_to_dict(r, nonce=nonce), nonce)
-        except Exception as e:
-            return (self._exception_to_dict(e, nonce=nonce), nonce)
+        return (
+            self._request(
+                "POST",
+                "pairings/finish",
+                payload={
+                    "request_id": request_id,
+                    "device_id": device_id,
+                    "pairing_id": pairing_id,
+                    "nonce": nonce,
+                },
+                nonce=nonce,
+            ),
+            nonce,
+        )
 
-    def post_check(self, *, device_id: str, device_token: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    def post_check(
+        self, *, request_id: str, device_id: str, device_token: str
+    ) -> Tuple[Dict[str, Any], str]:
         nonce = secrets.token_urlsafe(16)
-        try:
-            r = self._session.post(
-                self._url("check_device"),
-                json={"device_id": device_id, "device_token": device_token, "nonce": nonce},
-                timeout=self.timeout,
-            )
-            return (self._response_to_dict(r, nonce=nonce), nonce)
-        except Exception as e:
-            return (self._exception_to_dict(e, nonce=nonce), nonce)
+        return (
+            self._request(
+                "POST",
+                "devices/status",
+                payload={
+                    "request_id": request_id,
+                    "device_id": device_id,
+                    "device_token": device_token,
+                    "nonce": nonce,
+                },
+                nonce=nonce,
+            ),
+            nonce,
+        )
+
+    def post_revoke(
+        self,
+        *,
+        request_id: str,
+        device_id: str,
+        binding_id: str,
+        binding_generation: int,
+        device_token: str,
+    ) -> Tuple[Dict[str, Any], str]:
+        nonce = secrets.token_urlsafe(16)
+        return (
+            self._request(
+                "POST",
+                "devices/revoke",
+                payload={
+                    "request_id": request_id,
+                    "device_id": device_id,
+                    "binding_id": binding_id,
+                    "binding_generation": int(binding_generation),
+                    "device_token": device_token,
+                    "nonce": nonce,
+                },
+                nonce=nonce,
+            ),
+            nonce,
+        )
+
+
+__all__ = ["PremiumApiClient"]

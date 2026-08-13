@@ -1076,7 +1076,7 @@ class PremiumPage(BasePage):
         if MessageBox:
             body = self._tr(
                 "page.premium.dialog.reset.body",
-                "Сбросить активацию на этом устройстве?\nБудут удалены device token, offline-кэш и код привязки.\nДля восстановления потребуется повторная привязка в боте.",
+                "Отвязать это устройство от Premium?\nПриложение сначала закроет локальный доступ, затем сервер отзовёт точную привязку.\nДля восстановления потребуется новое сопряжение через Telegram-бота.",
             )
             box = MessageBox(
                 self._tr("page.premium.dialog.reset.title", "Подтверждение"),
