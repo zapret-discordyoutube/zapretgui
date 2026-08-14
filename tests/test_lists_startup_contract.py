@@ -177,6 +177,35 @@ class ListsStartupContractTests(unittest.TestCase):
 
             self.assertEqual((lists_root / "tiktok.txt").read_text(encoding="utf-8"), "tiktok.com\n")
 
+    def test_fast_required_files_check_replaces_updated_ipset_ru_base(self) -> None:
+        from lists import file_manager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lists_root = Path(tmp)
+            base_dir = lists_root / "base"
+            user_dir = lists_root / "user"
+            base_dir.mkdir()
+            user_dir.mkdir()
+            for name in ("other.txt", "ipset-all.txt"):
+                (lists_root / name).write_text("ready\n", encoding="utf-8")
+            (base_dir / "ipset-ru.txt").write_text("2.2.2.0/24\n", encoding="utf-8")
+            (user_dir / "ipset-ru.txt").write_text("9.9.9.9\n", encoding="utf-8")
+            (lists_root / "ipset-ru.txt").write_text(
+                "1.1.1.0/24\n9.9.9.9\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(file_manager, "LISTS_FOLDER", str(lists_root)),
+                patch.object(file_manager, "ensure_required_files", side_effect=AssertionError("unexpected full rebuild")),
+            ):
+                self.assertTrue(file_manager.ensure_required_files_fast())
+
+            self.assertEqual(
+                (lists_root / "ipset-ru.txt").read_text(encoding="utf-8"),
+                "2.2.2.0/24\n9.9.9.9\n",
+            )
+
     def test_fast_required_files_check_skips_unreferenced_user_only_lists(self) -> None:
         from lists import file_manager
 

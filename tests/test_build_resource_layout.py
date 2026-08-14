@@ -1209,6 +1209,63 @@ class BuildResourceLayoutTests(unittest.TestCase):
             sys.modules.pop("build_zapret.release_pipeline", None)
             sys.path[:] = old_path
 
+    def test_managed_lists_materialization_replaces_previous_ipset_ru(self) -> None:
+        old_path = list(sys.path)
+        sys.path.insert(0, str(PRIVATE_ROOT))
+        try:
+            sys.modules.pop("build_zapret.release_pipeline", None)
+            from build_zapret import release_model, release_pipeline
+
+            builder = release_pipeline.ReleasePipeline(
+                self._release_request(release_model),
+                log=Mock(),
+            )
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                lists_dir = Path(temp_dir) / "lists"
+                (lists_dir / "base").mkdir(parents=True)
+                (lists_dir / "user").mkdir()
+                (lists_dir / "base" / "ipset-ru.txt").write_text(
+                    "1.1.1.0/24\n",
+                    encoding="utf-8",
+                )
+                (lists_dir / "ipset-ru.txt").write_text(
+                    "1.1.1.0/24\n",
+                    encoding="utf-8",
+                )
+                user_path = lists_dir / "user" / "ipset-ru.txt"
+                user_path.write_text("9.9.9.9\n", encoding="utf-8")
+
+                with patch.object(
+                    release_pipeline,
+                    "get_ipset_ru_base_text",
+                    side_effect=("2.2.2.0/24\n", "3.3.3.0/24\n"),
+                ):
+                    builder._materialize_managed_lists(lists_dir)
+                    self.assertEqual(
+                        (lists_dir / "base" / "ipset-ru.txt").read_text(encoding="utf-8"),
+                        "2.2.2.0/24\n",
+                    )
+                    self.assertEqual(
+                        (lists_dir / "ipset-ru.txt").read_text(encoding="utf-8"),
+                        "2.2.2.0/24\n",
+                    )
+
+                    builder._materialize_managed_lists(lists_dir)
+
+                self.assertEqual(
+                    (lists_dir / "base" / "ipset-ru.txt").read_text(encoding="utf-8"),
+                    "3.3.3.0/24\n",
+                )
+                self.assertEqual(
+                    (lists_dir / "ipset-ru.txt").read_text(encoding="utf-8"),
+                    "3.3.3.0/24\n",
+                )
+                self.assertEqual(user_path.read_text(encoding="utf-8"), "9.9.9.9\n")
+        finally:
+            sys.modules.pop("build_zapret.release_pipeline", None)
+            sys.path[:] = old_path
+
     def test_installer_stage_refuses_delivery_without_engine(self) -> None:
         old_path = list(sys.path)
         sys.path.insert(0, str(PRIVATE_ROOT))
