@@ -9,6 +9,25 @@ from unittest.mock import patch
 
 
 class ListsStartupContractTests(unittest.TestCase):
+    def test_embedded_ipset_ru_contains_gemotest_network_as205567(self) -> None:
+        from lists.core.embedded_defaults import get_ipset_ru_base_text
+
+        network = "185.11.199.0/24"
+        lines = get_ipset_ru_base_text().splitlines()
+        entries = {
+            line.strip()
+            for line in lines
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+
+        self.assertIn("# https://ipinfo.io/AS205567", lines)
+        self.assertLess(
+            lines.index("# https://ipinfo.io/AS205567"),
+            lines.index("# DNS"),
+        )
+        self.assertIn(network, entries)
+        self.assertEqual(str(ipaddress.ip_network(network, strict=True)), network)
+
     def test_embedded_ipset_ru_contains_storm_networks_as43298(self) -> None:
         from lists.core.embedded_defaults import get_ipset_ru_base_text
 
