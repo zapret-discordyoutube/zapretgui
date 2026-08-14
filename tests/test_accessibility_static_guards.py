@@ -79,6 +79,7 @@ ALLOWED_NO_FOCUS_SOURCES = {
     "src/hosts/ui/services_build.py",
     "src/ui/accessibility.py",
     "src/ui/segmented_accessibility.py",
+    "src/ui/window_preset_file_drop.py",
     "src/ui/widgets/fluent_scrollbar.py",
     "src/ui/widgets/win11_controls.py",
 }
