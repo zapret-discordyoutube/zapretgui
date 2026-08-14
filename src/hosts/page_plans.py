@@ -616,23 +616,6 @@ def format_dns_profile_label(profile_name: str) -> str:
     return _DNS_PROFILE_IP_SUFFIX.sub("", label).strip()
 
 
-def is_ai_service(name: str) -> bool:
-    service_name = (name or "").strip().lower()
-    return any(
-        marker in service_name
-        for marker in (
-            "chatgpt",
-            "openai",
-            "gemini",
-            "claude",
-            "copilot",
-            "grok",
-            "manus",
-            "openrouter",
-        )
-    ) or service_name in {"meta ai", "trae.ai", "windsurf"}
-
-
 def build_services_catalog_plan(
     *,
     current_selection: dict[str, str],
@@ -641,10 +624,7 @@ def build_services_catalog_plan(
     ai_title: str,
     other_title: str,
 ) -> HostsServicesCatalogPlan:
-    from hosts.proxy_domains import (
-        QUICK_SERVICES,
-        get_services_profile_index,
-    )
+    from hosts.proxy_domains import get_services_profile_index
 
     profile_index = get_services_profile_index()
     all_dns_profiles = [
@@ -662,16 +642,11 @@ def build_services_catalog_plan(
         ).strip()
         for profile_name in all_dns_profiles
     }
-    ui_map = {name: (icon_name, icon_color) for icon_name, name, icon_color in QUICK_SERVICES}
-
-    all_services = list(profile_index.get("services") or [])
-    ordered_services: list[str] = []
-    for _icon, name, _color in QUICK_SERVICES:
-        if name in all_services and name not in ordered_services:
-            ordered_services.append(name)
-    for name in all_services:
-        if name not in ordered_services:
-            ordered_services.append(name)
+    ordered_services = list(profile_index.get("services") or [])
+    raw_categories = profile_index.get("category_by_service") or {}
+    raw_icons = profile_index.get("icon_by_service") or {}
+    category_by_service = dict(raw_categories) if isinstance(raw_categories, dict) else {}
+    icon_by_service = dict(raw_icons) if isinstance(raw_icons, dict) else {}
 
     raw_available = profile_index.get("available_by_service") or {}
     raw_has_proxy = profile_index.get("has_proxy_by_service") or {}
@@ -694,7 +669,7 @@ def build_services_catalog_plan(
     for service_name in ordered_services:
         if not service_has_proxy_by_service.get(service_name, False):
             no_geohide.append(service_name)
-        elif is_ai_service(service_name):
+        elif category_by_service.get(service_name) == "ai":
             ai.append(service_name)
         else:
             other.append(service_name)
@@ -771,11 +746,14 @@ def build_services_catalog_plan(
             elif entry is not None:
                 toggle_checked = bool(entry.toggle_checked)
 
+            icon = icon_by_service.get(service_name, ("fa5s.globe", None))
+            if not isinstance(icon, (list, tuple)) or len(icon) != 2:
+                icon = ("fa5s.globe", None)
             rows.append(
                 HostsServiceRowPlan(
                     service_name=service_name,
-                    icon_name=ui_map.get(service_name, ("fa5s.globe", None))[0],
-                    icon_color=ui_map.get(service_name, ("fa5s.globe", None))[1],
+                    icon_name=str(icon[0] or "fa5s.globe"),
+                    icon_color=str(icon[1]) if icon[1] is not None else None,
                     direct_only=bool(entry.direct_only) if entry is not None else direct_only,
                     available_profiles=available_profiles,
                     profile_items=[

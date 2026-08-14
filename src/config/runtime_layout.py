@@ -102,6 +102,14 @@ class ApplicationPaths:
         return self.root / "json"
 
     @property
+    def data_dir(self) -> Path:
+        return self.root / "data"
+
+    @property
+    def hosts_catalog_database(self) -> Path:
+        return self.data_dir / "hosts_catalog.sqlite3"
+
+    @property
     def lists_dir(self) -> Path:
         return self.root / "lists"
 

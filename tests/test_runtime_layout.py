@@ -34,6 +34,8 @@ class RuntimeLayoutTests(unittest.TestCase):
             "exe_dir": root / "exe",
             "ico_dir": root / "ico",
             "json_dir": root / "json",
+            "data_dir": root / "data",
+            "hosts_catalog_database": root / "data" / "hosts_catalog.sqlite3",
             "lists_dir": root / "lists",
             "lists_base_dir": root / "lists" / "base",
             "lists_user_dir": root / "lists" / "user",

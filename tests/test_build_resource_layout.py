@@ -1183,7 +1183,9 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     "notion.txt",
                 ):
                     self.assertTrue((stage_root / "lists" / service_list).is_file(), service_list)
-                self.assertTrue((stage_root / "json" / "hosts_catalog").is_dir())
+                self.assertTrue((stage_root / "data" / "hosts_catalog.sqlite3").is_file())
+                self.assertFalse((stage_root / "json" / "hosts_catalog").exists())
+                self.assertFalse((stage_root / "json" / "hosts_catalog.json").exists())
                 self.assertTrue((stage_root / "ico" / "windows11_fluent" / "sidebar").is_dir())
 
                 # Манифест целостности едет внутри _internal: установщик
@@ -1205,6 +1207,32 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 # правит сама, и расхождение с поставкой там нормально.
                 self.assertFalse(any(path.startswith("presets/") for path in manifest_paths))
                 self.assertFalse(any(path.startswith("lists/") for path in manifest_paths))
+        finally:
+            sys.modules.pop("build_zapret.release_pipeline", None)
+            sys.path[:] = old_path
+
+    def test_installer_stage_rejects_damaged_hosts_catalog_before_copy(self) -> None:
+        old_path = list(sys.path)
+        sys.path.insert(0, str(PRIVATE_ROOT))
+        try:
+            sys.modules.pop("build_zapret.release_pipeline", None)
+            from build_zapret import release_model, release_pipeline
+
+            builder = release_pipeline.ReleasePipeline(
+                self._release_request(release_model),
+                log=Mock(),
+            )
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_root = Path(temp_dir)
+                database = temp_root / "private" / "resources" / "data" / "hosts_catalog.sqlite3"
+                database.parent.mkdir(parents=True)
+                database.write_bytes(b"not a sqlite database")
+                with (
+                    patch.object(release_pipeline, "PRIVATE_ROOT", temp_root / "private"),
+                    patch.object(release_pipeline, "STAGE_DIR", temp_root / "stage"),
+                    self.assertRaisesRegex(RuntimeError, "база каталога Hosts повреждена"),
+                ):
+                    builder.prepare_installer_stage()
         finally:
             sys.modules.pop("build_zapret.release_pipeline", None)
             sys.path[:] = old_path
@@ -1689,6 +1717,24 @@ class BuildResourceLayoutTests(unittest.TestCase):
             migration,
         )
 
+    def test_inno_replaces_legacy_hosts_json_with_sqlite_catalog(self) -> None:
+        iss = self._read_inno_script()
+        install_delete = iss[iss.index("[InstallDelete]"):iss.index("[UninstallDelete]")]
+
+        self.assertIn(
+            r'Source: "{#SOURCEPATH}\data\hosts_catalog.sqlite3"; DestDir: "{app}\data"',
+            iss,
+        )
+        self.assertNotIn(r'Source: "{#SOURCEPATH}\json\hosts_catalog\*"', iss)
+        self.assertIn(
+            r'Type: filesandordirs; Name: "{app}\json\hosts_catalog"',
+            install_delete,
+        )
+        self.assertIn(
+            r'Type: files; Name: "{app}\json\hosts_catalog.json"',
+            install_delete,
+        )
+
     def test_inno_persistent_bindings_follow_install_roots_not_previous_exe_layout(self) -> None:
         iss = self._read_inno_script()
 
@@ -1870,7 +1916,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
             r'{#SOURCEPATH}\profile\templates\*.txt',
             r'{#SOURCEPATH}\presets\winws2_builtin\*.txt',
             r'{#SOURCEPATH}\presets\winws1_builtin\*.txt',
-            r'{#SOURCEPATH}\json\hosts_catalog\*',
+            r'{#SOURCEPATH}\data\hosts_catalog.sqlite3',
             r'{#SOURCEPATH}\ico\windows11_fluent\sidebar\*.svg',
         )
         for source in expected_sources:
@@ -1880,6 +1926,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertIn("resource_sets = (", builder)
         self.assertIn("PUBLIC_SRC / \"presets\" / \"builtin\" / \"winws2\"", builder)
         self.assertIn("PRIVATE_ROOT / \"resources\" / \"profile\" / \"templates\"", builder)
+        self.assertIn("PRIVATE_ROOT / \"resources\" / \"data\"", builder)
         self.assertNotIn("f'/DPUBLICSRC=", builder)
         self.assertNotIn("f'/DPRIVATERESOURCES=", builder)
 

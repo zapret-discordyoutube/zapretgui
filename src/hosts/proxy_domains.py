@@ -1,54 +1,27 @@
-"""Чтение hosts-каталога.
-
-Каталог содержит поставляемый список профилей, сервисов, доменов и IP.
-Пользовательский выбор хранится отдельно в `settings/settings.sqlite3`.
-"""
+"""Business facade for the shipped read-only Hosts SQLite catalog."""
 
 from __future__ import annotations
 
-import json
 import threading
 import time
-import zlib
-from dataclasses import dataclass
 from pathlib import Path
 
 from config.runtime_layout import APPLICATION_PATHS, PACKAGED_RUNTIME
+from hosts.catalog_repository import (
+    CATALOG_FILE_NAME,
+    HOSTS_PROFILE_ID,
+    HostsCatalog,
+    empty_catalog,
+    file_content_signature,
+    load_catalog,
+)
 from settings import store as settings_store
-
-
-def _log(msg: str, level: str = "INFO") -> None:
-    """Отложенный импорт log, чтобы модуль можно было импортировать без GUI."""
-    try:
-        from log.log import log as _log_impl  # type: ignore
-
-        _log_impl(msg, level)
-    except Exception:
-        print(f"[{level}] {msg}")
-
-
-@dataclass(frozen=True)
-class HostsCatalog:
-    dns_profiles: list[str]
-    dns_profile_names: dict[str, str]
-    services: dict[str, dict[str, list[str]]]
-    service_entries: dict[str, list[tuple[str, list[str]]]]
-    service_order: list[str]
-    service_modes: dict[str, str]
 
 
 _SERVICE_MODE_DNS = "dns"
 _SERVICE_MODE_HOSTS = "hosts"
-_LEGACY_SERVICE_MODE_DIRECT = "direct"
-_CATALOG_DIR_NAME = "hosts_catalog"
-_LEGACY_CATALOG_FILE_NAME = "hosts_catalog.json"
-_HOSTS_PROFILE_ID = "hosts"
-_HOSTS_PROFILE_NAME = "Вкл. (активировать hosts)"
-_LEGACY_DIRECT_PROFILE_ID = "direct"
-
 _CACHE_LOCK = threading.RLock()
 _CACHE: HostsCatalog | None = None
-_CACHE_TEXT: str | None = None
 _CACHE_SIG: tuple[int, int] | None = None
 _CACHE_PATH: Path | None = None
 _CACHE_PROFILE_INDEX: dict[str, object] | None = None
@@ -57,388 +30,44 @@ _RECENT_SIG: tuple[int, int] | None = None
 _RECENT_SIG_CHECKED_AT = 0.0
 _RECENT_SIG_TTL_SECONDS = 1.0
 _MISSING_CATALOG_LOGGED = False
+_LAST_LOAD_ERROR: tuple[Path, tuple[int, int] | None] | None = None
 
-# Явная тестовая точка подмены; production-значение всегда берётся из APPLICATION_PATHS.
+# Explicit test seam.  Production always receives the installation root.
 MAIN_DIRECTORY = str(APPLICATION_PATHS.root)
+
+
+def _log(message: str, level: str = "INFO") -> None:
+    try:
+        from log.log import log as log_impl  # type: ignore
+
+        log_impl(message, level)
+    except Exception:
+        print(f"[{level}] {message}")
 
 
 def _clean_str(value: object) -> str:
     return str(value or "").strip()
 
 
-def _get_app_root() -> Path:
-    """
-    Возвращает корень для hosts-каталога.
-
-    В собранном приложении это корень установки над `_internal`.
-    Вторая ветка нужна только для тестов и инструментов сборки;
-    запуск самого приложения из исходников запрещён в `main.py`.
-    """
-    if PACKAGED_RUNTIME:
-        return Path(MAIN_DIRECTORY)
-    return Path(__file__).resolve().parents[3]
-
-
-def _get_hosts_catalog_candidates() -> list[Path]:
-    root = _get_app_root()
-    if PACKAGED_RUNTIME:
-        json_root = root / "json"
-    else:
-        json_root = root / "private_zapretgui" / "resources" / "json"
-    return [
-        json_root / _CATALOG_DIR_NAME,
-        json_root / _LEGACY_CATALOG_FILE_NAME,
-    ]
-
-
 def _get_hosts_catalog_path() -> Path:
-    candidates = _get_hosts_catalog_candidates()
-    for path in candidates:
-        if path.exists():
-            return path
-    return candidates[0]
+    if PACKAGED_RUNTIME:
+        return Path(MAIN_DIRECTORY) / "data" / CATALOG_FILE_NAME
+    project_root = Path(__file__).resolve().parents[3]
+    return project_root / "private_zapretgui" / "resources" / "data" / CATALOG_FILE_NAME
 
 
 def get_hosts_catalog_path() -> Path:
     return _get_hosts_catalog_path()
 
 
-def _empty_catalog() -> HostsCatalog:
-    return HostsCatalog(
-        dns_profiles=[],
-        dns_profile_names={},
-        services={},
-        service_entries={},
-        service_order=[],
-        service_modes={},
-    )
-
-
-def _normalize_profile(raw: object) -> tuple[str, str] | None:
-    if not isinstance(raw, dict):
-        return None
-    profile_id = _clean_str(raw.get("id"))
-    name = _clean_str(raw.get("name"))
-    if not profile_id or not name:
-        return None
-    return profile_id, name
-
-
-def _normalize_mode(raw: object) -> str:
-    mode = _clean_str(raw).lower()
-    if mode in {_SERVICE_MODE_HOSTS, _LEGACY_SERVICE_MODE_DIRECT}:
-        return _SERVICE_MODE_HOSTS
-    return _SERVICE_MODE_DNS
-
-
-def _get_hosts_profile_id(profiles: list[str]) -> str:
-    if _HOSTS_PROFILE_ID in profiles:
-        return _HOSTS_PROFILE_ID
-    if _LEGACY_DIRECT_PROFILE_ID in profiles:
-        return _LEGACY_DIRECT_PROFILE_ID
-    return _HOSTS_PROFILE_ID
-
-
-def _ensure_hosts_profile(profiles: list[str], profile_names: dict[str, str]) -> None:
-    if _HOSTS_PROFILE_ID in profile_names or _LEGACY_DIRECT_PROFILE_ID in profile_names:
-        return
-    profiles.append(_HOSTS_PROFILE_ID)
-    profile_names[_HOSTS_PROFILE_ID] = _HOSTS_PROFILE_NAME
-
-
-def _normalize_ip_values(raw: object) -> list[str]:
-    if isinstance(raw, list):
-        return [_clean_str(item) for item in raw if _clean_str(item)]
-    value = _clean_str(raw)
-    return [value] if value else []
-
-
-def _append_service_entry(
-    *,
-    profiles: list[str],
-    services: dict[str, dict[str, list[str]]],
-    service_entries: dict[str, list[tuple[str, list[str]]]],
-    service_name: str,
-    host: str,
-    profile_id: str,
-    ip: str,
-) -> None:
-    if not host or not ip or profile_id not in profiles:
-        return
-    profile_index = profiles.index(profile_id)
-    row = [""] * len(profiles)
-    row[profile_index] = ip
-    service_entries.setdefault(service_name, []).append((host, row))
-    service_map = services.setdefault(service_name, {})
-    merged = list(service_map.get(host, [""] * len(profiles)))
-    if len(merged) < len(profiles):
-        merged.extend([""] * (len(profiles) - len(merged)))
-    merged[profile_index] = ip
-    service_map[host] = merged
-
-
-def _append_service_row(
-    *,
-    profiles: list[str],
-    services: dict[str, dict[str, list[str]]],
-    service_entries: dict[str, list[tuple[str, list[str]]]],
-    service_name: str,
-    host: str,
-    ips_by_profile: dict[str, str],
-) -> None:
-    if not host:
-        return
-    row = [""] * len(profiles)
-    for profile_id, ip in ips_by_profile.items():
-        if profile_id not in profiles or not ip:
-            continue
-        row[profiles.index(profile_id)] = ip
-    if not any(row):
-        return
-    service_entries.setdefault(service_name, []).append((host, row))
-    services.setdefault(service_name, {})[host] = list(row)
-
-
-def _parse_hosts_catalog_json(text: str) -> HostsCatalog:
-    try:
-        data = json.loads(text or "{}")
-    except Exception as exc:
-        _log(f"Не удалось разобрать hosts-каталог: {exc}", "WARNING")
-        return _empty_catalog()
-
-    if not isinstance(data, dict):
-        _log("hosts-каталог должен содержать JSON-объект", "WARNING")
-        return _empty_catalog()
-
-    profiles: list[str] = []
-    profile_names: dict[str, str] = {}
-    for raw_profile in data.get("profiles") or []:
-        normalized = _normalize_profile(raw_profile)
-        if normalized is None:
-            continue
-        profile_id, name = normalized
-        if profile_id in profile_names:
-            continue
-        profiles.append(profile_id)
-        profile_names[profile_id] = name
-
-    services: dict[str, dict[str, list[str]]] = {}
-    service_entries: dict[str, list[tuple[str, list[str]]]] = {}
-    service_order: list[str] = []
-    service_modes: dict[str, str] = {}
-
-    for raw_service in data.get("services") or []:
-        if not isinstance(raw_service, dict):
-            continue
-        service_name = _clean_str(raw_service.get("name"))
-        if not service_name:
-            continue
-
-        mode = _normalize_mode(raw_service.get("mode"))
-        if service_name not in service_order:
-            service_order.append(service_name)
-        services.setdefault(service_name, {})
-        service_entries.setdefault(service_name, [])
-        service_modes[service_name.casefold()] = mode
-
-        if mode == _SERVICE_MODE_HOSTS:
-            _ensure_hosts_profile(profiles, profile_names)
-            hosts_profile_id = _get_hosts_profile_id(profiles)
-            for raw_row in raw_service.get("hosts") or []:
-                if not isinstance(raw_row, dict):
-                    continue
-                host = _clean_str(raw_row.get("host"))
-                ip = _clean_str(raw_row.get("ip"))
-                _append_service_entry(
-                    profiles=profiles,
-                    services=services,
-                    service_entries=service_entries,
-                    service_name=service_name,
-                    host=host,
-                    profile_id=hosts_profile_id,
-                    ip=ip,
-                )
-            continue
-
-        for raw_domain in raw_service.get("domains") or []:
-            if not isinstance(raw_domain, dict):
-                continue
-            host = _clean_str(raw_domain.get("host") or raw_domain.get("domain"))
-            raw_ips = raw_domain.get("ips")
-            if not host or not isinstance(raw_ips, dict):
-                continue
-
-            values_by_profile: dict[str, list[str]] = {}
-            for profile_id in profiles:
-                if profile_id in {_HOSTS_PROFILE_ID, _LEGACY_DIRECT_PROFILE_ID}:
-                    continue
-                values = _normalize_ip_values(raw_ips.get(profile_id))
-                if values:
-                    values_by_profile[profile_id] = values
-
-            row_count = max((len(values) for values in values_by_profile.values()), default=0)
-            for row_index in range(row_count):
-                row_values: dict[str, str] = {}
-                for profile_id, values in values_by_profile.items():
-                    if row_index < len(values):
-                        row_values[profile_id] = values[row_index]
-                _append_service_row(
-                    profiles=profiles,
-                    services=services,
-                    service_entries=service_entries,
-                    service_name=service_name,
-                    host=host,
-                    ips_by_profile=row_values,
-                )
-
-    return HostsCatalog(
-        dns_profiles=profiles,
-        dns_profile_names=profile_names,
-        services=services,
-        service_entries=service_entries,
-        service_order=service_order,
-        service_modes=service_modes,
-    )
-
-
-def _read_json_file(path: Path) -> object:
-    return json.loads(path.read_text(encoding="utf-8", errors="replace") or "{}")
-
-
-def _decode_json_bytes(raw: bytes) -> object:
-    return json.loads(raw.decode("utf-8", errors="replace") or "{}")
-
-
-def _content_sig_entry(*, root: Path, path: Path, raw: bytes) -> tuple[str, int, int]:
-    rel = path.relative_to(root).as_posix()
-    return (rel, int(zlib.crc32(raw)), len(raw))
-
-
-def _combine_content_sig(entries: list[tuple[str, int, int]]) -> tuple[int, int]:
-    """Сворачивает записи (rel, crc32, size) в подпись каталога.
-
-    Записи сортируются перед свёрткой, поэтому результат не зависит от порядка
-    чтения файлов — загрузчик и watcher обязаны получать одно и то же значение.
-    """
-    checksum = 0
-    total_size = 0
-    for rel, raw_crc, size in sorted(entries):
-        checksum = zlib.crc32(f"{rel}\0{raw_crc}\0{size}\0".encode("utf-8", errors="replace"), checksum)
-        total_size += size
-    return (int(checksum), int(total_size))
-
-
-def _iter_json_files(path: Path) -> list[Path]:
-    if not path.exists() or not path.is_dir():
-        return []
-    return sorted(
-        child
-        for child in path.iterdir()
-        if child.is_file() and child.suffix.lower() == ".json"
-    )
-
-
-def _split_catalog_files(root: Path) -> list[Path]:
-    """Канонический список файлов split-каталога.
-
-    Единственный источник истины и для загрузчика, и для подписи watcher'а:
-    расхождение набора файлов давало ложные «изменения» каталога.
-    """
-    files: list[Path] = []
-    profiles_path = root / "dns_sources.json"
-    if profiles_path.is_file():
-        files.append(profiles_path)
-    files.extend(_iter_json_files(root / "dns"))
-    files.extend(_iter_json_files(root / "hosts"))
-    return files
-
-
-def _normalize_split_profiles(raw: object) -> list[dict[str, str]]:
-    if isinstance(raw, dict):
-        raw_profiles = raw.get("dns_sources") or raw.get("profiles") or []
-    elif isinstance(raw, list):
-        raw_profiles = raw
-    else:
-        raw_profiles = []
-
-    profiles: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for raw_profile in raw_profiles:
-        normalized = _normalize_profile(raw_profile)
-        if normalized is None:
-            continue
-        profile_id, name = normalized
-        if profile_id in {_HOSTS_PROFILE_ID, _LEGACY_DIRECT_PROFILE_ID} or profile_id in seen:
-            continue
-        seen.add(profile_id)
-        profiles.append({"id": profile_id, "name": name})
-    return profiles
-
-
-def _normalize_split_services(raw: object, *, mode: str) -> list[dict]:
-    if isinstance(raw, dict) and isinstance(raw.get("services"), list):
-        raw_services = raw.get("services") or []
-    elif isinstance(raw, list):
-        raw_services = raw
-    else:
-        raw_services = [raw]
-
-    services: list[dict] = []
-    for raw_service in raw_services:
-        if not isinstance(raw_service, dict):
-            continue
-        service = dict(raw_service)
-        service["mode"] = mode
-        services.append(service)
-    return services
-
-
-def _load_split_catalog_data(path: Path) -> dict:
-    data, _sig = _load_split_catalog_data_with_sig(path)
-    return data
-
-
-def _load_split_catalog_data_with_sig(path: Path) -> tuple[dict, tuple[int, int]]:
-    sig_entries: list[tuple[str, int, int]] = []
-
-    def read_json(service_path: Path) -> object:
-        raw = service_path.read_bytes()
-        sig_entries.append(_content_sig_entry(root=path, path=service_path, raw=raw))
-        return _decode_json_bytes(raw)
-
-    profiles_path = path / "dns_sources.json"
-    profiles = _normalize_split_profiles(read_json(profiles_path) if profiles_path.is_file() else [])
-
-    services: list[dict] = []
-    for service_path in _iter_json_files(path / "dns"):
-        try:
-            services.extend(_normalize_split_services(read_json(service_path), mode=_SERVICE_MODE_DNS))
-        except Exception as exc:
-            _log(f"Не удалось прочитать DNS-сервис hosts-каталога {service_path.name}: {exc}", "WARNING")
-
-    for service_path in _iter_json_files(path / "hosts"):
-        try:
-            services.extend(_normalize_split_services(read_json(service_path), mode=_SERVICE_MODE_HOSTS))
-        except Exception as exc:
-            _log(f"Не удалось прочитать hosts-сервис hosts-каталога {service_path.name}: {exc}", "WARNING")
-
-    return {
-        "version": 1,
-        "profiles": profiles,
-        "services": services,
-    }, _combine_content_sig(sig_entries)
-
-
-def _remember_recent_path_sig(path: Path, sig: tuple[int, int] | None) -> None:
+def _remember_recent_signature(path: Path, signature: tuple[int, int]) -> None:
     global _RECENT_SIG_PATH, _RECENT_SIG, _RECENT_SIG_CHECKED_AT
-    if sig is None:
-        return
     _RECENT_SIG_PATH = path
-    _RECENT_SIG = sig
+    _RECENT_SIG = signature
     _RECENT_SIG_CHECKED_AT = time.monotonic()
 
 
-def _get_recent_path_sig(path: Path) -> tuple[int, int] | None:
+def _recent_signature(path: Path) -> tuple[int, int] | None:
     if _RECENT_SIG_PATH != path or _RECENT_SIG is None:
         return None
     if time.monotonic() - _RECENT_SIG_CHECKED_AT > _RECENT_SIG_TTL_SECONDS:
@@ -446,111 +75,66 @@ def _get_recent_path_sig(path: Path) -> tuple[int, int] | None:
     return _RECENT_SIG
 
 
-def _get_split_catalog_content_sig(path: Path) -> tuple[int, int]:
-    sig_entries: list[tuple[str, int, int]] = []
-    for child in _split_catalog_files(path):
-        try:
-            raw = child.read_bytes()
-        except OSError:
-            continue
-        sig_entries.append(_content_sig_entry(root=path, path=child, raw=raw))
-    return _combine_content_sig(sig_entries)
-
-
-def _get_file_content_sig_from_raw(raw: bytes) -> tuple[int, int]:
-    return (int(zlib.crc32(raw)), int(len(raw)))
-
-
-def _get_file_content_sig(path: Path) -> tuple[int, int]:
-    return _get_file_content_sig_from_raw(path.read_bytes())
-
-
-def _get_path_sig(path: Path) -> tuple[int, int] | None:
+def _path_signature(path: Path) -> tuple[int, int] | None:
     try:
-        if path.is_dir():
-            sig = _get_split_catalog_content_sig(path)
-            _remember_recent_path_sig(path, sig)
-            return sig
-        sig = _get_file_content_sig(path)
-        _remember_recent_path_sig(path, sig)
-        return sig
-    except Exception:
+        signature = file_content_signature(path)
+    except (OSError, ValueError):
         return None
-
-
-def _select_catalog_path() -> tuple[Path, list[Path], bool]:
-    candidates = _get_hosts_catalog_candidates()
-    existing = [path for path in candidates if path.exists()]
-    if existing:
-        return existing[0], candidates, True
-    return candidates[0], candidates, False
+    _remember_recent_signature(path, signature)
+    return signature
 
 
 def _load_catalog() -> HostsCatalog:
-    global _CACHE, _CACHE_TEXT, _CACHE_SIG, _CACHE_PATH, _CACHE_PROFILE_INDEX, _MISSING_CATALOG_LOGGED
+    global _CACHE, _CACHE_SIG, _CACHE_PATH, _CACHE_PROFILE_INDEX
+    global _MISSING_CATALOG_LOGGED, _LAST_LOAD_ERROR
 
+    path = _get_hosts_catalog_path()
     with _CACHE_LOCK:
-        path, candidates, exists = _select_catalog_path()
-
-        if not exists:
-            if not _MISSING_CATALOG_LOGGED:
-                _log(
-                    "hosts-каталог не найден. Ожидается внешняя папка или файл: "
-                    + " | ".join(str(path) for path in candidates),
-                    "WARNING",
-                )
-                _MISSING_CATALOG_LOGGED = True
-        else:
-            _MISSING_CATALOG_LOGGED = False
-
-        has_cache = (
-            _CACHE is not None
-            and _CACHE_PATH is not None
-            and _CACHE_SIG is not None
-            and path.exists()
-            and _CACHE_PATH == path
-        )
-        sig = None
-        if has_cache:
-            sig = _get_recent_path_sig(path)
-            if sig is None:
-                sig = _get_path_sig(path)
+        signature = _recent_signature(path)
+        if signature is None and path.is_file():
+            signature = _path_signature(path)
 
         if (
-            has_cache
-            and sig is not None
-            and _CACHE_SIG == sig
+            _CACHE is not None
+            and _CACHE_PATH == path
+            and _CACHE_SIG == signature
         ):
             return _CACHE
 
-        try:
-            if path.exists() and path.is_dir():
-                data, sig = _load_split_catalog_data_with_sig(path)
-                text = json.dumps(data, ensure_ascii=False, sort_keys=True)
-            else:
-                raw = path.read_bytes() if path.exists() else b""
-                text = raw.decode("utf-8", errors="replace") if raw else ""
-                sig = _get_file_content_sig_from_raw(raw) if path.exists() else None
-        except Exception as exc:
-            _log(f"Не удалось прочитать hosts-каталог: {exc}", "WARNING")
-            text = ""
-            sig = None
+        if not path.is_file():
+            if not _MISSING_CATALOG_LOGGED:
+                _log(f"База hosts-каталога не найдена: {path}", "WARNING")
+                _MISSING_CATALOG_LOGGED = True
+            _CACHE = empty_catalog()
+            _CACHE_PATH = path
+            _CACHE_SIG = None
+            _CACHE_PROFILE_INDEX = None
+            return _CACHE
 
-        _CACHE_TEXT = text
-        _CACHE = _parse_hosts_catalog_json(text)
-        _CACHE_SIG = sig
+        _MISSING_CATALOG_LOGGED = False
+        try:
+            catalog = load_catalog(path)
+        except Exception as exc:
+            error_key = (path, signature)
+            if _LAST_LOAD_ERROR != error_key:
+                _log(f"База hosts-каталога отклонена: {exc}", "ERROR")
+                _LAST_LOAD_ERROR = error_key
+            catalog = empty_catalog()
+        else:
+            _LAST_LOAD_ERROR = None
+
+        _CACHE = catalog
         _CACHE_PATH = path
+        _CACHE_SIG = signature
         _CACHE_PROFILE_INDEX = None
-        _remember_recent_path_sig(path, sig)
-        return _CACHE
+        return catalog
 
 
 def invalidate_hosts_catalog_cache() -> None:
-    global _CACHE, _CACHE_TEXT, _CACHE_SIG, _CACHE_PATH, _CACHE_PROFILE_INDEX
+    global _CACHE, _CACHE_SIG, _CACHE_PATH, _CACHE_PROFILE_INDEX
     global _RECENT_SIG_PATH, _RECENT_SIG, _RECENT_SIG_CHECKED_AT
     with _CACHE_LOCK:
         _CACHE = None
-        _CACHE_TEXT = None
         _CACHE_SIG = None
         _CACHE_PATH = None
         _CACHE_PROFILE_INDEX = None
@@ -560,25 +144,18 @@ def invalidate_hosts_catalog_cache() -> None:
 
 
 def get_hosts_catalog_signature() -> tuple[str, int, int] | None:
-    """Возвращает сигнатуру текущего hosts-каталога: (path, revision, size)."""
-    path, _candidates, _exists = _select_catalog_path()
-    if not path.exists():
+    """Return (path, content revision, file size) outside the GUI thread."""
+    path = _get_hosts_catalog_path()
+    if not path.is_file():
         return None
     with _CACHE_LOCK:
-        sig = _get_recent_path_sig(path)
-    if sig is None:
-        sig = _get_path_sig(path)
-    if sig is None:
+        signature = _recent_signature(path)
+        if signature is None:
+            signature = _path_signature(path)
+    if signature is None:
         return None
-    revision, size = sig
-    return (str(path), revision, size)
-
-
-def get_hosts_catalog_text() -> str:
-    """Возвращает сырой текст hosts-каталога с учётом кэша."""
-    _load_catalog()
-    with _CACHE_LOCK:
-        return _CACHE_TEXT or ""
+    revision, size = signature
+    return str(path), revision, size
 
 
 def get_dns_profiles() -> list[str]:
@@ -598,180 +175,117 @@ def get_all_services() -> list[str]:
 
 def get_service_domain_names(service_name: str) -> list[str]:
     entries = _load_catalog().service_entries.get(service_name, []) or []
-    out: list[str] = []
+    result: list[str] = []
     seen: set[str] = set()
     for domain, _ips in entries:
         key = domain.casefold()
         if key in seen:
             continue
         seen.add(key)
-        out.append(domain)
-    return out
+        result.append(domain)
+    return result
 
 
 def get_service_domains(service_name: str) -> dict[str, str]:
-    out: dict[str, str] = {}
-    entries = _load_catalog().service_entries.get(service_name, []) or []
-    for domain, ips in entries:
+    result: dict[str, str] = {}
+    for domain, ips in _load_catalog().service_entries.get(service_name, []) or []:
         domain_key = _clean_str(domain).casefold()
-        if not domain_key or domain_key in out:
+        if not domain_key or domain_key in result:
             continue
-        for ip in ips or []:
-            ip_s = _clean_str(ip)
-            if ip_s:
-                out[domain_key] = ip_s
+        for ip_address in ips or []:
+            value = _clean_str(ip_address)
+            if value:
+                result[domain_key] = value
                 break
-    return out
+    return result
 
 
-def get_service_domain_ip_rows(service_name: str, profile_name: str) -> list[tuple[str, str]]:
-    cat = _load_catalog()
-    profile_id = _clean_str(profile_name)
-    return _get_complete_profile_rows(cat, service_name, profile_id)
-
-
-def _get_complete_profile_rows(cat: HostsCatalog, service_name: str, profile_id: str) -> list[tuple[str, str]]:
-    if profile_id not in cat.dns_profiles:
+def _get_complete_profile_rows(
+    catalog: HostsCatalog,
+    service_name: str,
+    profile_id: str,
+) -> list[tuple[str, str]]:
+    if profile_id not in catalog.dns_profiles:
         return []
-    profile_index = cat.dns_profiles.index(profile_id)
-
-    entries = cat.service_entries.get(service_name, []) or []
+    profile_index = catalog.dns_profiles.index(profile_id)
+    entries = catalog.service_entries.get(service_name, []) or []
     if not entries:
         return []
 
     required_domains = {domain.casefold() for domain, _ips in entries if domain}
-    out: list[tuple[str, str]] = []
+    result: list[tuple[str, str]] = []
     covered_domains: set[str] = set()
     for domain, ips in entries:
         if not ips or profile_index >= len(ips) or not ips[profile_index]:
             continue
-        out.append((domain, ips[profile_index]))
+        result.append((domain, ips[profile_index]))
         covered_domains.add(domain.casefold())
-
     if not required_domains or covered_domains != required_domains:
         return []
-    return out
+    return result
 
 
-def get_service_available_dns_profiles(service_name: str) -> list[str]:
-    cat = _load_catalog()
-    return _get_service_available_dns_profiles_from_catalog(cat, service_name)
-
-
-def _get_service_available_dns_profiles_from_catalog(cat: HostsCatalog, service_name: str) -> list[str]:
-    entries = cat.service_entries.get(service_name, []) or []
-    if not entries:
-        return []
-
-    available: list[str] = []
-    for profile_id in cat.dns_profiles:
-        if _get_complete_profile_rows(cat, service_name, profile_id):
-            available.append(profile_id)
-    return available
-
-
-def _is_direct_profile_name(profile_name: str) -> bool:
-    profile_id = _clean_str(profile_name).lower()
-    display_name = get_dns_profile_display_name(profile_name).lower()
-    text = f"{profile_id} {display_name}"
-    return (
-        profile_id in {_HOSTS_PROFILE_ID, _LEGACY_DIRECT_PROFILE_ID}
-        or "вкл. (активировать hosts)" in text
-        or "no proxy" in text
-        or "direct" in text
-        or "hosts" in text
+def get_service_domain_ip_rows(service_name: str, profile_name: str) -> list[tuple[str, str]]:
+    return _get_complete_profile_rows(
+        _load_catalog(),
+        service_name,
+        _clean_str(profile_name),
     )
 
 
-def _infer_direct_profile_index(cat: HostsCatalog) -> int | None:
-    for index, profile_id in enumerate(cat.dns_profiles):
-        profile_text = f"{profile_id} {cat.dns_profile_names.get(profile_id, '')}".lower()
-        if (
-            profile_id in {_HOSTS_PROFILE_ID, _LEGACY_DIRECT_PROFILE_ID}
-            or "вкл. (активировать hosts)" in profile_text
-            or "no proxy" in profile_text
-            or "direct" in profile_text
-            or "hosts" in profile_text
-        ):
-            return index
-    return None
+def _get_service_available_dns_profiles_from_catalog(
+    catalog: HostsCatalog,
+    service_name: str,
+) -> list[str]:
+    if not catalog.service_entries.get(service_name):
+        return []
+    return [
+        profile_id
+        for profile_id in catalog.dns_profiles
+        if _get_complete_profile_rows(catalog, service_name, profile_id)
+    ]
 
 
-def _get_declared_service_mode(cat: HostsCatalog, service_name: str) -> str | None:
-    key = _clean_str(service_name).casefold()
-    if not key:
+def get_service_available_dns_profiles(service_name: str) -> list[str]:
+    return _get_service_available_dns_profiles_from_catalog(_load_catalog(), service_name)
+
+
+def _infer_direct_profile_index(catalog: HostsCatalog) -> int | None:
+    try:
+        return catalog.dns_profiles.index(HOSTS_PROFILE_ID)
+    except ValueError:
         return None
-    return (cat.service_modes or {}).get(key)
-
-
-def _service_has_proxy_ips(cat: HostsCatalog, service_name: str) -> bool:
-    return _service_has_proxy_ips_with_direct_index(cat, service_name, _infer_direct_profile_index(cat))
-
-
-def _service_has_proxy_ips_with_direct_index(cat: HostsCatalog, service_name: str, direct_idx: int | None) -> bool:
-    declared_mode = _get_declared_service_mode(cat, service_name)
-    if declared_mode == _SERVICE_MODE_HOSTS:
-        return False
-    if declared_mode == _SERVICE_MODE_DNS:
-        return True
-
-    entries = cat.service_entries.get(service_name, []) or []
-    if not entries:
-        return False
-
-    proxy_indices = [i for i in range(len(cat.dns_profiles)) if direct_idx is None or i != direct_idx]
-    if not proxy_indices:
-        return False
-
-    for _domain, ips in entries:
-        direct_ip = ""
-        if direct_idx is not None and ips and direct_idx < len(ips):
-            direct_ip = _clean_str(ips[direct_idx])
-        for idx in proxy_indices:
-            if not ips or idx >= len(ips):
-                continue
-            ip = _clean_str(ips[idx])
-            if not ip:
-                continue
-            if direct_ip and ip == direct_ip:
-                continue
-            return True
-    return False
 
 
 def service_has_proxy_profiles(service_name: str) -> bool:
-    return _service_has_proxy_ips(_load_catalog(), service_name)
+    mode = _load_catalog().service_modes.get(_clean_str(service_name).casefold())
+    return mode == _SERVICE_MODE_DNS
 
 
-def _build_services_profile_index(cat: HostsCatalog) -> dict[str, object]:
-    services = list(cat.service_order)
+def _build_services_profile_index(catalog: HostsCatalog) -> dict[str, object]:
+    services = list(catalog.service_order)
+    profiles = list(catalog.dns_profiles)
     available_by_service: dict[str, list[str]] = {}
     profile_domain_maps_by_service: dict[str, dict[str, dict[str, str]]] = {}
     profile_domain_ip_candidates_by_service: dict[str, dict[str, dict[str, list[str]]]] = {}
     domain_names_by_service: dict[str, list[str]] = {}
-    direct_idx = _infer_direct_profile_index(cat)
-    direct_profile = cat.dns_profiles[direct_idx] if direct_idx is not None else None
-    profiles = list(cat.dns_profiles)
+    direct_index = _infer_direct_profile_index(catalog)
+    direct_profile = profiles[direct_index] if direct_index is not None else None
 
     for service_name in services:
-        entries = cat.service_entries.get(service_name, []) or []
+        entries = catalog.service_entries.get(service_name, []) or []
         domain_names: list[str] = []
         seen_domains: set[str] = set()
-        for domain, _ips in entries:
-            domain_key = _clean_str(domain).casefold()
-            if not domain_key or domain_key in seen_domains:
-                continue
-            seen_domains.add(domain_key)
-            domain_names.append(domain)
-        domain_names_by_service[service_name] = domain_names
-
-        required_domains = set(seen_domains)
         rows_by_profile: dict[str, list[tuple[str, str]]] = {profile_id: [] for profile_id in profiles}
         covered_by_profile: dict[str, set[str]] = {profile_id: set() for profile_id in profiles}
+
         for domain, ips in entries:
             domain_key = _clean_str(domain).casefold()
             if not domain_key:
                 continue
+            if domain_key not in seen_domains:
+                seen_domains.add(domain_key)
+                domain_names.append(domain)
             for profile_index, profile_id in enumerate(profiles):
                 if not ips or profile_index >= len(ips):
                     continue
@@ -781,12 +295,14 @@ def _build_services_profile_index(cat: HostsCatalog) -> dict[str, object]:
                 rows_by_profile[profile_id].append((domain_key, ip_value))
                 covered_by_profile[profile_id].add(domain_key)
 
+        domain_names_by_service[service_name] = domain_names
+        required_domains = set(seen_domains)
         service_maps: dict[str, dict[str, str]] = {}
         service_candidates: dict[str, dict[str, list[str]]] = {}
         available: list[str] = []
         for profile_id in profiles:
-            rows = rows_by_profile.get(profile_id, [])
-            if not required_domains or covered_by_profile.get(profile_id, set()) != required_domains:
+            rows = rows_by_profile[profile_id]
+            if not required_domains or covered_by_profile[profile_id] != required_domains:
                 continue
             available.append(profile_id)
             domain_map: dict[str, str] = {}
@@ -803,14 +319,17 @@ def _build_services_profile_index(cat: HostsCatalog) -> dict[str, object]:
         profile_domain_ip_candidates_by_service[service_name] = service_candidates
 
     return {
-        "dns_profiles": list(cat.dns_profiles),
-        "dns_profile_names": dict(cat.dns_profile_names),
+        "dns_profiles": profiles,
+        "dns_profile_names": dict(catalog.dns_profile_names),
         "services": services,
         "available_by_service": available_by_service,
         "has_proxy_by_service": {
-            service_name: _service_has_proxy_ips_with_direct_index(cat, service_name, direct_idx)
+            service_name: catalog.service_modes.get(service_name.casefold()) == _SERVICE_MODE_DNS
             for service_name in services
         },
+        "category_by_service": dict(catalog.service_categories),
+        "icon_by_service": dict(catalog.service_icons),
+        "service_id_by_name": dict(catalog.service_id_by_name),
         "direct_profile": direct_profile,
         "domain_names_by_service": domain_names_by_service,
         "profile_domain_maps_by_service": profile_domain_maps_by_service,
@@ -820,80 +339,92 @@ def _build_services_profile_index(cat: HostsCatalog) -> dict[str, object]:
 
 def get_services_profile_index() -> dict[str, object]:
     global _CACHE_PROFILE_INDEX
-
     with _CACHE_LOCK:
         if _CACHE_PROFILE_INDEX is not None:
             return _CACHE_PROFILE_INDEX
-
-    cat = _load_catalog()
+    catalog = _load_catalog()
     with _CACHE_LOCK:
         if _CACHE_PROFILE_INDEX is None:
-            _CACHE_PROFILE_INDEX = _build_services_profile_index(cat)
+            _CACHE_PROFILE_INDEX = _build_services_profile_index(catalog)
         return _CACHE_PROFILE_INDEX
 
 
 def get_service_domain_ip_map(service_name: str, profile_name: str) -> dict[str, str]:
-    rows = get_service_domain_ip_rows(service_name, profile_name)
-    if not rows:
-        return {}
-
-    out: dict[str, str] = {}
-    for domain, ip in rows:
+    result: dict[str, str] = {}
+    for domain, ip_address in get_service_domain_ip_rows(service_name, profile_name):
         domain_key = _clean_str(domain).casefold()
-        if not domain_key or domain_key in out:
-            continue
-        out[domain_key] = ip
-    return out
+        if domain_key and domain_key not in result:
+            result[domain_key] = ip_address
+    return result
 
 
 def load_user_hosts_selection() -> dict[str, str]:
-    """Возвращает выбор пользователя: {service_name: profile_id}."""
+    """Translate durable service IDs from settings.sqlite3 to current names."""
     try:
-        return dict(settings_store.get_hosts_selection() or {})
+        stored = dict(settings_store.get_hosts_selection() or {})
+        catalog = _load_catalog()
     except Exception as exc:
         _log(f"Не удалось прочитать выбор hosts из settings.sqlite3: {exc}", "WARNING")
         return {}
 
+    names_casefold = {name.casefold(): name for name in catalog.service_id_by_name}
+    result: dict[str, str] = {}
+    for key, profile_id in stored.items():
+        key_text = _clean_str(key)
+        service_name = catalog.service_name_by_id.get(key_text)
+        if service_name is None:
+            service_name = names_casefold.get(key_text.casefold())
+        if service_name is None:
+            continue
+        if profile_id in _get_service_available_dns_profiles_from_catalog(catalog, service_name):
+            result[service_name] = profile_id
+    return result
+
 
 def save_user_hosts_selection(selected_profiles: dict[str, str]) -> bool:
-    """Сохраняет выбор пользователя в settings.sqlite3."""
+    """Store stable service IDs and retain choices for temporarily removed services."""
     try:
-        return bool(settings_store.set_hosts_selection(dict(selected_profiles or {})))
+        catalog = _load_catalog()
+        previous = dict(settings_store.get_hosts_selection() or {})
+        known_ids = set(catalog.service_name_by_id)
+        known_names = {name.casefold() for name in catalog.service_id_by_name}
+        durable = {
+            _clean_str(key): _clean_str(value)
+            for key, value in previous.items()
+            if _clean_str(key) not in known_ids
+            and _clean_str(key).casefold() not in known_names
+            and _clean_str(key)
+            and _clean_str(value)
+        }
+        names_casefold = {name.casefold(): name for name in catalog.service_id_by_name}
+        for raw_name, raw_profile in dict(selected_profiles or {}).items():
+            service_name = names_casefold.get(_clean_str(raw_name).casefold())
+            profile_id = _clean_str(raw_profile)
+            if service_name is None:
+                continue
+            if profile_id not in _get_service_available_dns_profiles_from_catalog(catalog, service_name):
+                continue
+            durable[catalog.service_id_by_name[service_name]] = profile_id
+        return bool(settings_store.set_hosts_selection(durable))
     except Exception as exc:
         _log(f"Не удалось сохранить выбор hosts в settings.sqlite3: {exc}", "WARNING")
         return False
 
 
-QUICK_SERVICES = [
-    ("mdi.robot", "ChatGPT & Sora (OpenAI)", "#10a37f"),
-    ("mdi.google", "Gemini AI", "#4285f4"),
-    ("fa5s.brain", "Claude", "#cc9b7a"),
-    ("fa5s.route", "OpenRouter", "#6566f1"),
-    ("fa5b.microsoft", "Microsoft (Copilot, Designer, Xbox)", "#00bcf2"),
-    ("fa5b.twitter", "Grok", "#1da1f2"),
-    ("fa5s.robot", "Manus", "#7c3aed"),
-    ("fa5b.facebook-f", "Meta AI", "#1877f2"),
-    ("fa5s.code", "Trae.ai", "#7c3aed"),
-    ("fa5s.wind", "Windsurf", "#00a6ff"),
-    ("fa5b.tiktok", "TikTok", "#ff0050"),
-    ("fa5b.spotify", "Spotify", "#1db954"),
-    ("fa5b.twitch", "Twitch", "#9146ff"),
-    ("fa5s.sticky-note", "Notion", "#ffffff"),
-    ("fa5s.language", "DeepL", "#0f2b46"),
-    ("fa5s.palette", "Canva", "#00c4cc"),
-    ("fa5s.microphone-alt", "ElevenLabs", "#ffffff"),
-    ("fa5s.code", "JetBrains", "#fe315d"),
-    ("fa5s.book-open", "MangaLib", "#f28c28"),
-    ("fa5s.desktop", "Parsec", "#5e5ce6"),
-    ("fa5s.credit-card", "Square", "#006aff"),
-    ("fa5b.discord", "Discord", "#5865f2"),
-    ("fa5b.youtube", "YouTube (иногда может не работать с ним! Отключите тумблер если YouTube не работает с пресетами)", "#ff0000"),
-    ("fa5b.github", "GitHub", "#181717"),
-    ("fa5b.whatsapp", "WhatsApp (работает обход если есть IPv6)", "#25d366"),
-    ("fa5b.twitter", "x.com / Twitter", "#1da1f2"),
-    ("fa5s.magnet", "Rutor", "#e74c3c"),
-    ("fa5s.network-wired", "ntc.party (включить обход по IPv4)", "#3498db"),
-    ("fa5b.discord", "Решение от Flowseal для стабильной работы голосовых серверов в Discord", "#5865f2"),
-    ("fa5s.gamepad", "Supercell", "#f4b400"),
-    ("fa5b.instagram", "Instagram", "#e4405f"),
+__all__ = [
+    "get_all_services",
+    "get_dns_profile_display_name",
+    "get_dns_profiles",
+    "get_hosts_catalog_path",
+    "get_hosts_catalog_signature",
+    "get_service_available_dns_profiles",
+    "get_service_domain_ip_map",
+    "get_service_domain_ip_rows",
+    "get_service_domain_names",
+    "get_service_domains",
+    "get_services_profile_index",
+    "invalidate_hosts_catalog_cache",
+    "load_user_hosts_selection",
+    "save_user_hosts_selection",
+    "service_has_proxy_profiles",
 ]

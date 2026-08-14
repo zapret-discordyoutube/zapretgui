@@ -227,15 +227,19 @@ Runtime его не читает и не переписывает, а устан
 этого требует: DNS, Defender, политики запуска, службы, проверка установленных
 программ.
 
-Hosts-каталог остаётся поставляемым шаблоном каталога доменов и hosts-записей:
+Hosts-каталог остаётся поставляемой базой доменов и hosts-записей:
 
 ```text
-source: <project>/private_zapretgui/resources/json/hosts_catalog/
-exe:    <exe_dir>/json/hosts_catalog/
+source: <project>/private_zapretgui/resources/data/hosts_catalog.sqlite3
+exe:    <exe_dir>/data/hosts_catalog.sqlite3
 ```
 
-Папка `hosts_catalog` не является пользовательскими настройками. Пользовательский выбор
-из hosts-каталога хранится только в `settings.sqlite3`.
+`hosts_catalog.sqlite3` является готовым ресурсом только для чтения, а не
+пользовательскими настройками. Приложение не создаёт и не мигрирует эту базу при
+запуске. Постоянные `service_id`, категории, DNS-профили, домены и готовые
+hosts-записи хранятся внутри неё. Пользовательский выбор сохраняется по
+`service_id` только в `settings.sqlite3`. Старые `json/hosts_catalog` и
+`hosts_catalog.json` не читаются и удаляются установщиком.
 
 Встроенные ресурсы программы могут оставаться отдельными файлами, потому что это
 не состояние пользователя: preset-ы, `profile/templates`,
