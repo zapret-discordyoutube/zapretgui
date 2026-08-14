@@ -367,6 +367,8 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
             self._stub_retry_worker_start(runtime),
         ):
             runtime._continue_start_checks(telegram_only=False, keep_existing_rows=False)
+            # Версионная фаза стартует параллельно с обходом серверов.
+            start_version_check.assert_called_once()
             runtime._on_server_checked("Telegram Bot", {"status": "offline"})
             runtime._on_server_checked("Primary", {"status": "error"})
             runtime._on_server_checked("Forgejo API", {"status": "error"})
@@ -377,7 +379,8 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
         runtime_feature.shutdown_sync.assert_not_called()
         self.assertEqual(start_server_check.call_count, 2)
         start_server_check.assert_called_with(telegram_only=False)
-        start_version_check.assert_not_called()
+        # Во время повторного обхода без DPI версия повторно не запрашивается.
+        self.assertEqual(start_version_check.call_count, 1)
 
     def test_page_runtime_restarts_dpi_after_retry_before_version_check(self) -> None:
         runtime, _view, runtime_feature = self._make_runtime()
@@ -389,19 +392,24 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
             self._stub_dpi_restart_worker_start(runtime),
         ):
             runtime._continue_start_checks(telegram_only=False, keep_existing_rows=False)
+            # Параллельный запуск при старте проверки.
+            start_version_check.assert_called_once()
             runtime._on_server_checked("Forgejo API", {"status": "error"})
             runtime._on_servers_complete()
             retry_request_id = runtime._server_retry_without_dpi_runtime.request_id
             runtime._on_server_retry_without_dpi_finished(retry_request_id, True, True, "")
             runtime._on_server_checked("Primary", {"status": "online", "is_current": True})
             runtime._on_servers_complete()
-            start_version_check.assert_not_called()
+            # Пока DPI не перезапущен, повторная версионная фаза не начинается.
+            self.assertEqual(start_version_check.call_count, 1)
             restart_request_id = runtime._dpi_restart_runtime.request_id
             runtime._on_dpi_restart_finished(restart_request_id, True)
 
         runtime_feature.shutdown_sync.assert_not_called()
         runtime_feature.restart.assert_not_called()
-        start_version_check.assert_called_once()
+        # Первая попытка шла при сломанной сети — после рестарта DPI версия
+        # запрашивается заново.
+        self.assertEqual(start_version_check.call_count, 2)
 
     def test_page_runtime_does_not_retry_without_dpi_when_any_source_is_online(self) -> None:
         runtime, _view, runtime_feature = self._make_runtime()
@@ -411,13 +419,17 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
             patch.object(runtime, "_start_version_check_workflow") as start_version_check,
         ):
             runtime._continue_start_checks(telegram_only=False, keep_existing_rows=False)
+            # Параллельный запуск при старте проверки.
+            start_version_check.assert_called_once()
             runtime._on_server_checked("Telegram Bot", {"status": "offline"})
             runtime._on_server_checked("Primary", {"status": "online", "is_current": True})
             runtime._on_servers_complete()
 
         runtime_feature.shutdown_sync.assert_not_called()
         runtime_feature.restart.assert_not_called()
-        start_version_check.assert_called_once()
+        # Воркер версии в тесте подменён и не завершался — после серверов
+        # выполняется страховочный повторный запуск.
+        self.assertEqual(start_version_check.call_count, 2)
 
 
 if __name__ == "__main__":

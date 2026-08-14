@@ -703,6 +703,10 @@ class UpdatePageRuntime(QObject):
             self._view.reset_server_rows()
 
         self._start_server_check_workflow(telegram_only=telegram_only)
+        # Версию спрашиваем ПАРАЛЛЕЛЬНО с обходом серверов: предложение
+        # «Скачать» не должно ждать, пока ответят все резервные VPS.
+        self._version_check_completed = False
+        self._start_version_check_workflow()
 
     def request_manual_check(self) -> None:
         if not self._can_start_new_check():
@@ -1495,6 +1499,26 @@ class UpdatePageRuntime(QObject):
             return
         if self._restart_dpi_after_server_check_retry():
             return
+        self._maybe_restart_version_check_after_servers()
+
+    def _maybe_restart_version_check_after_servers(self) -> None:
+        """Повторяет версионную фазу после обхода серверов, если нужно.
+
+        Версия запрашивается параллельно с серверами, поэтому обычно к этому
+        моменту всё уже готово. Перезапуск нужен в двух случаях: параллельная
+        попытка шла при сломанной сети (сработал retry без DPI) или версионный
+        воркер не дожил до ответа.
+        """
+        if self._found_state.is_available:
+            return
+        if self._version_worker_runtime.is_running():
+            return
+        recovery = self._server_check_recovery
+        if bool(getattr(self, "_version_check_completed", False)) and not recovery.attempted:
+            return
+        if getattr(self, "_update_check_unsubscribe", None) is None:
+            self._view.start_checking()
+        self._version_check_completed = False
         self._start_version_check_workflow()
 
     def _observe_server_check_status(self, status: dict) -> None:
@@ -1602,6 +1626,7 @@ class UpdatePageRuntime(QObject):
     def _on_versions_complete(self) -> None:
         if self._cleanup_in_progress:
             return
+        self._version_check_completed = True
         self._finish_checking_workflow()
 
         if self._found_state.is_available and self._can_accept_startup_present():
