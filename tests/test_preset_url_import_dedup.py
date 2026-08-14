@@ -69,6 +69,15 @@ class UrlImportDedupTests(unittest.TestCase):
         )
         self.assertIsNone(result)
 
+    def test_update_preserves_local_preset_name_in_header(self):
+        self._bind()
+        stub = self._make_facade_stub(VALID_TEXT)
+        remote_text = "# Preset: Имя Из Источника\n" + UPDATED_TEXT.split("\n", 1)[1]
+        stub._update_url_bound_preset_from_file("zapret2", URL, self._downloaded_file(remote_text))
+        saved_text = stub.save_preset_source_by_file_name.call_args[0][2]
+        self.assertIn("# Preset: Мой пресет", saved_text)
+        self.assertNotIn("Имя Из Источника", saved_text)
+
     def test_bound_url_updates_existing_preset_without_duplicate(self):
         self._bind()
         stub = self._make_facade_stub(VALID_TEXT)

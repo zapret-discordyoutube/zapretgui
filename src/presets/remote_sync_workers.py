@@ -68,6 +68,17 @@ def sync_remote_preset_by_file_name(presets_feature, launch_method: str, file_na
             return fetch_remote_preset_text(url, etag=etag, last_modified=last_modified)
 
         def _save_text(text):
+            # Локальная identity пресета (имя в списке) не должна затираться
+            # заголовком из источника: переписываем шапку на локальное имя.
+            from presets.preset_text_ops import _rewrite_preset_headers
+
+            local_name = file_name
+            try:
+                manifest = presets_feature.get_preset_manifest_by_file_name(launch_method, file_name)
+                local_name = str(getattr(manifest, "name", "") or "").strip() or file_name
+            except Exception:
+                pass
+            text = _rewrite_preset_headers(text, local_name, preset_kind="imported")
             presets_feature.save_preset_source_by_file_name(
                 launch_method,
                 file_name,

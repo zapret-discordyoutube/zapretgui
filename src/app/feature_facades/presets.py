@@ -1362,7 +1362,7 @@ class PresetsFeature:
         """
         from pathlib import Path
 
-        from presets.preset_text_ops import validate_preset_source_text
+        from presets.preset_text_ops import _rewrite_preset_headers, validate_preset_source_text
         from presets.remote_bindings import load_remote_preset_bindings, set_remote_preset_binding
         from presets.remote_sync import comparison_hash, utc_now_iso
         from presets.user_presets_action_results import UserPresetImportResult
@@ -1398,6 +1398,8 @@ class PresetsFeature:
             content = f"Пресет «{display_name}» уже актуален — ссылка привязана к нему."
             log_message = f"Импорт по ссылке: пресет '{display_name}' уже актуален"
         else:
+            # Шапка источника не должна переименовывать локальный пресет.
+            new_text = _rewrite_preset_headers(new_text, display_name, preset_kind="imported")
             self.save_preset_source_by_file_name(
                 launch_method,
                 bound_file_name,
