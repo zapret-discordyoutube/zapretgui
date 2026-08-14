@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import QTextEdit
 from qfluentwidgets import PlainTextEdit, isDarkTheme, themeColor
 
 from ui.code_editor.line_number_area import LineNumberArea
+from ui.code_editor.match_ruler import RULER_WIDTH, MatchRuler
 from ui.code_editor.syntax import SyntaxTheme
 from ui.code_editor.line_ops import (
     delete_lines,
@@ -75,6 +76,9 @@ class CodeEditor(PlainTextEdit):
         super().__init__(parent)
         self.setProperty("noDrag", True)
         self._line_number_area = LineNumberArea(self)
+        self._match_ruler = MatchRuler(self)
+        self._match_ruler.hide()
+        self._match_ruler.lineRequested.connect(self._on_ruler_line_requested)
         self._search_selections: tuple = ()
         self._current_match_range: tuple[int, int] | None = None
         self._base_point_size = DEFAULT_POINT_SIZE
@@ -97,6 +101,7 @@ class CodeEditor(PlainTextEdit):
         self.blockCountChanged.connect(self._on_block_count_changed)
         self.textChanged.connect(self._on_text_changed)
         self.updateRequest.connect(self._on_update_request)
+        self.verticalScrollBar().valueChanged.connect(self._sync_ruler_visible_range)
         self.cursorPositionChanged.connect(self._on_cursor_position_changed)
         self.selectionChanged.connect(self._emit_cursor_status)
 
@@ -158,7 +163,7 @@ class CodeEditor(PlainTextEdit):
 
     def _update_line_number_area_width(self) -> None:
         width = self.line_number_area_width()
-        self.setViewportMargins(width, 0, 0, 0)
+        self.setViewportMargins(width, 0, self.match_ruler_width(), 0)
         self._line_number_area.setFixedWidth(width)
 
     def _on_block_count_changed(self, _count: int) -> None:
@@ -172,6 +177,7 @@ class CodeEditor(PlainTextEdit):
             self._line_number_area.update(0, rect.y(), self._line_number_area.width(), rect.height())
         if rect.contains(self.viewport().rect()):
             self._update_line_number_area_width()
+        self._sync_ruler_visible_range()
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
@@ -179,6 +185,50 @@ class CodeEditor(PlainTextEdit):
         self._line_number_area.setGeometry(
             QRect(contents.left(), contents.top(), self.line_number_area_width(), contents.height())
         )
+        self._update_match_ruler_geometry()
+
+    # ---------------------------------------------------- полоса совпадений
+
+    def match_ruler_width(self) -> int:
+        """Ширина полосы маркеров: 0, пока искать нечего."""
+        return RULER_WIDTH if self._match_ruler.has_markers() else 0
+
+    def _update_match_ruler_geometry(self) -> None:
+        contents = self.contentsRect()
+        width = self.match_ruler_width()
+        if not width:
+            self._match_ruler.hide()
+            return
+        self._match_ruler.setGeometry(
+            QRect(contents.right() - width + 1, contents.top(), width, contents.height())
+        )
+        self._match_ruler.show()
+        self._match_ruler.raise_()
+
+    def _visible_line_range(self) -> tuple[int, int]:
+        first_block = self.firstVisibleBlock()
+        if not first_block.isValid():
+            return (0, 0)
+        first = first_block.blockNumber()
+        offset = self.contentOffset()
+        bottom = self.viewport().rect().bottom()
+        block = first_block
+        last = first
+        top = self.blockBoundingGeometry(block).translated(offset).top()
+        while block.isValid() and top <= bottom:
+            last = block.blockNumber()
+            top += self.blockBoundingRect(block).height()
+            block = block.next()
+        return (first, last)
+
+    def _sync_ruler_visible_range(self) -> None:
+        if not self._match_ruler.has_markers():
+            return
+        first, last = self._visible_line_range()
+        self._match_ruler.set_visible_range(first, last)
+
+    def _on_ruler_line_requested(self, line: int) -> None:
+        self.goto_line(int(line) + 1)
 
     def paint_line_numbers(self, event) -> None:
         painter = QPainter(self._line_number_area)
@@ -244,6 +294,16 @@ class CodeEditor(PlainTextEdit):
         self._current_match_color = QColor(accent)
         self._current_match_color.setAlpha(160)
 
+        ruler_marker = QColor(accent)
+        ruler_marker.setAlpha(150)
+        ruler_viewport = QColor(text)
+        ruler_viewport.setAlpha(30)
+        self._match_ruler.set_colors(
+            marker=ruler_marker,
+            current=QColor(accent),
+            viewport=ruler_viewport,
+        )
+
         self._apply_highlighter_theme(theme)
 
         self._refresh_extra_selections()
@@ -286,11 +346,38 @@ class CodeEditor(PlainTextEdit):
             match = items[int(current_index)]
             self._current_match_range = (int(match.start), int(match.end))
         self._refresh_extra_selections()
+        self._refresh_match_ruler(current_index)
 
     def clear_search_highlights(self) -> None:
         self._search_selections = ()
         self._current_match_range = None
         self._refresh_extra_selections()
+        self._refresh_match_ruler(None)
+
+    def _refresh_match_ruler(self, current_index: int | None) -> None:
+        """Пересчитывает метки полосы: номера строк считаются один раз здесь."""
+        document = self.document()
+        limit = max(0, document.characterCount() - 1)
+        lines: list[int] = []
+        current_line: int | None = None
+        for index, match in enumerate(self._search_selections):
+            position = max(0, min(int(match.start), limit))
+            block = document.findBlock(position)
+            if not block.isValid():
+                continue
+            line = block.blockNumber()
+            lines.append(line)
+            if current_index is not None and index == int(current_index):
+                current_line = line
+
+        self._match_ruler.set_matches(
+            lines,
+            total_lines=max(1, self.blockCount()),
+            current_line=current_line,
+        )
+        self._update_line_number_area_width()
+        self._update_match_ruler_geometry()
+        self._sync_ruler_visible_range()
 
     def _refresh_extra_selections(self) -> None:
         selections = []
