@@ -398,10 +398,10 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         return "\n".join(shlex.quote(arg) for arg in args) + "\n"
 
     def _winws2_at_config_dir(self) -> str:
-        return os.path.join(str(self.work_dir or ""), "tmp", "winws2_at_config")
+        return os.path.join(str(self.work_dir or ""), "user", "tmp", "winws2_at_config")
 
     def _winws2_startup_output_dir(self) -> str:
-        return os.path.join(str(self.work_dir or ""), "tmp", "winws2_startup_output")
+        return os.path.join(str(self.work_dir or ""), "user", "tmp", "winws2_startup_output")
 
     def _write_winws2_at_config(self, preset_path: str, prepared_text: str) -> str:
         config_text = self._build_winws2_at_config_text(prepared_text)

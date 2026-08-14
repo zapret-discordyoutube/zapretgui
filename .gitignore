@@ -76,7 +76,7 @@ www_youtube_com.txt
 /.codex
 /.agent
 /ico
-/src/ico
+/src/system/ico
 
 # Пользовательское рантайм-состояние новой раскладки (создаётся при локальных запусках)
 /user/

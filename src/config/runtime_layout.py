@@ -95,7 +95,7 @@ class ApplicationPaths:
 
     @property
     def ico_dir(self) -> Path:
-        return self.root / "ico"
+        return self.system_dir / "ico"
 
     @property
     def system_dir(self) -> Path:
@@ -154,7 +154,7 @@ class ApplicationPaths:
 
     @property
     def logs_dir(self) -> Path:
-        return self.root / "logs"
+        return self.user_dir / "logs"
 
     @property
     def crash_logs_dir(self) -> Path:
@@ -162,11 +162,11 @@ class ApplicationPaths:
 
     @property
     def tmp_dir(self) -> Path:
-        return self.root / "tmp"
+        return self.user_dir / "tmp"
 
     @property
     def themes_dir(self) -> Path:
-        return self.root / "themes"
+        return self.system_dir / "themes"
 
     @property
     def windivert_filter_dir(self) -> Path:

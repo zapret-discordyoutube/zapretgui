@@ -256,7 +256,7 @@ class Winws1StrategyRunner(StrategyRunnerBase):
         return "\n".join(shlex.quote(arg) for arg in args) + "\n"
 
     def _winws1_at_config_dir(self) -> str:
-        return os.path.join(str(self.work_dir or ""), "tmp", "winws1_at_config")
+        return os.path.join(str(self.work_dir or ""), "user", "tmp", "winws1_at_config")
 
     def _write_winws1_at_config(self, preset_path: str, source_text: str) -> str:
         config_text = self._build_winws1_at_config_text(source_text)

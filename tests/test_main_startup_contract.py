@@ -2969,7 +2969,7 @@ class EarlyStartupCrashTests(unittest.TestCase):
                     assert exc is not None
                     early_startup_crash.write_early_startup_crash(exc_type, exc, tb)
 
-            crash_path = app_dir / "logs" / "crashes" / "early_startup_crash.log"
+            crash_path = app_dir / "user" / "logs" / "crashes" / "early_startup_crash.log"
             text = crash_path.read_text(encoding="utf-8")
 
         self.assertIn("RuntimeError: boom", text)
