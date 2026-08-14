@@ -99,11 +99,12 @@ class BuildResourceLayoutTests(unittest.TestCase):
             self.assertNotIn("recursesubdirs", line)
             self.assertNotIn("createallsubdirs", line)
 
-    def test_inno_installs_help_into_system_directory(self) -> None:
+    def test_inno_does_not_package_legacy_help_folder(self) -> None:
         iss = self._read_inno_script()
 
-        self.assertIn(r'Source: "{#SOURCEPATH}\help\*"; DestDir: "{app}\system\help"', iss)
-        self.assertNotIn(r'DestDir: "{app}\help"', iss)
+        self.assertNotIn(r'{#SOURCEPATH}\help', iss)
+        self.assertNotIn(r'{app}\system\help', iss)
+        self.assertNotIn(r'{app}\help', iss)
 
     def test_inno_shortcuts_are_recreated_without_touching_the_other_channel(self) -> None:
         iss = self._read_inno_script()
@@ -1109,7 +1110,6 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 for dir_name in (
                     "bin",
                     "exe",
-                    "help",
                     "lists",
                     "lua",
                     "windivert.filter",
@@ -1317,7 +1317,6 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 for dir_name in (
                     "bin",
                     "exe",
-                    "help",
                     "lists",
                     "lua",
                     "windivert.filter",
@@ -1517,7 +1516,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertIn("PreviousInstallRoot + '\\presets\\winws1'", iss)
         self.assertIn("PreviousInstallRoot + '\\presets\\winws2'", iss)
         # logs/tmp живут в user\ и переезжают вместе с ним;
-        # themes/ico/help — поставка system\, копировать их не нужно.
+        # themes/ico — поставка system\, копировать их не нужно.
         self.assertNotIn("PreviousInstallRoot + '\\logs'", iss)
         self.assertNotIn("PreviousInstallRoot + '\\themes'", iss)
         self.assertNotIn(
@@ -1956,10 +1955,10 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertIn("shutil.copy2(source, icon_directory / file_name)", builder)
         self.assertNotIn('"ico",\n            "lists",', builder)
 
-    def test_installer_stage_copies_help_folder(self) -> None:
+    def test_installer_stage_does_not_copy_legacy_help_folder(self) -> None:
         builder = (PRIVATE_ROOT / "build_zapret" / "release_pipeline.py").read_text(encoding="utf-8")
 
-        self.assertIn('"help",', builder)
+        self.assertNotIn('"help",', builder)
 
     def test_pyinstaller_hiddenimports_include_lazy_feature_facades(self) -> None:
         old_path = list(sys.path)
