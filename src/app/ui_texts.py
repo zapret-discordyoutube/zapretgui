@@ -2350,8 +2350,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Actions",
     },
     "page.premium.instructions": {
-        "ru": "1. Нажмите «Создать код»\n2. Отправьте код боту @zapretvpns_bot в Telegram (сообщением)\n3. Вернитесь сюда и нажмите «Проверить статус»",
-        "en": "1. Click \"Create code\"\n2. Send the code to @zapretvpns_bot in Telegram (as a message)\n3. Return here and click \"Refresh status\"",
+        "ru": "1. Нажмите «Создать код»\n2. Отправьте код боту @zapretvpns_bot в Telegram (сообщением)\n3. Вернитесь сюда — приложение обновит статус автоматически",
+        "en": "1. Click \"Create code\"\n2. Send the code to @zapretvpns_bot in Telegram (as a message)\n3. Return here — the app will refresh the status automatically",
     },
     "page.premium.placeholder.pair_code": {
         "ru": "ABCD12EF",
@@ -2446,8 +2446,16 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "🔄 Creating code...",
     },
     "page.premium.activation.success.code_created": {
-        "ru": "✅ Код создан примерно на 10 минут и скопирован. Сразу отправьте его боту в Telegram.",
-        "en": "✅ Code was created for about 10 minutes and copied. Send it to the bot right away.",
+        "ru": "✅ Код создан примерно на 10 минут и скопирован. Отправьте его боту — приложение само обновит статус.",
+        "en": "✅ Code was created for about 10 minutes and copied. Send it to the bot — the app will refresh automatically.",
+    },
+    "page.premium.activation.success.linked_active": {
+        "ru": "✅ Устройство привязано. Premium активен.",
+        "en": "✅ Device linked. Premium is active.",
+    },
+    "page.premium.activation.success.linked_inactive": {
+        "ru": "✅ Устройство привязано. Подписка сейчас не активна.",
+        "en": "✅ Device linked. The subscription is currently inactive.",
     },
     "page.premium.connection.progress.testing": {
         "ru": "🔄 Проверка соединения...",
@@ -2482,8 +2490,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Subscription inactive",
     },
     "page.premium.status.inactive.linked_hint": {
-        "ru": "Продлите подписку в боте и нажмите «Обновить статус».",
-        "en": "Extend subscription in the bot and click \"Refresh status\".",
+        "ru": "Продлите подписку в боте — статус обновится автоматически.",
+        "en": "Extend the subscription in the bot — the status will refresh automatically.",
     },
     "page.premium.status.inactive.unlinked_hint": {
         "ru": "Создайте код и привяжите устройство.",

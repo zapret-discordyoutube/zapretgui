@@ -190,7 +190,7 @@ def apply_premium_language(
     instructions_label.setText(
         tr_fn(
             "page.premium.instructions",
-            "1. Нажмите «Создать код»\n2. Отправьте код боту @zapretvpns_bot в Telegram (сообщением)\n3. Вернитесь сюда и нажмите «Проверить статус»",
+            "1. Нажмите «Создать код»\n2. Отправьте код боту @zapretvpns_bot в Telegram (сообщением)\n3. Вернитесь сюда — приложение обновит статус автоматически",
         )
     )
     apply_premium_instructions_accessibility(tr_fn=tr_fn, instructions_label=instructions_label)

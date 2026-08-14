@@ -57,7 +57,7 @@ def build_premium_activation_section(
     instructions_label = BodyLabel(
         tr(
             "page.premium.instructions",
-            "1. Нажмите «Создать код»\n2. Отправьте код боту @zapretvpns_bot в Telegram (сообщением)\n3. Вернитесь сюда и нажмите «Проверить статус»",
+            "1. Нажмите «Создать код»\n2. Отправьте код боту @zapretvpns_bot в Telegram (сообщением)\n3. Вернитесь сюда — приложение обновит статус автоматически",
         )
     )
     instructions_label.setWordWrap(True)

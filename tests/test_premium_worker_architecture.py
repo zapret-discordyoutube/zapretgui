@@ -11,10 +11,67 @@ import donater.commands as premium_commands
 import donater.open_bot_worker as open_bot_worker
 import donater.subscription_manager as subscription_manager
 import donater.subscription_worker as subscription_worker
+import donater.ui.page_plans as premium_page_plans
 from donater.ui.page import PremiumPage
 
 
 class PremiumWorkerArchitectureTests(unittest.TestCase):
+    def test_pairing_timer_survives_temporarily_busy_worker(self) -> None:
+        plan = premium_page_plans.build_pairing_autopoll_plan(
+            checker_ready=True,
+            storage_ready=True,
+            page_visible=True,
+            activation_in_progress=False,
+            connection_test_in_progress=False,
+            worker_running=True,
+            has_device_token=False,
+            has_pending_pair_code=True,
+        )
+
+        self.assertFalse(plan.can_poll)
+        self.assertTrue(plan.start_timer)
+        self.assertFalse(plan.stop_timer)
+
+    def test_automatic_status_check_is_dispatched_to_worker(self) -> None:
+        page = PremiumPage.__new__(PremiumPage)
+        page._cleanup_in_progress = False
+        page._premium_action_runtime = SimpleNamespace(is_running=Mock(return_value=False))
+        page._pending_premium_action = ""
+        page._pending_premium_action_start_scheduled = False
+        page._request_checker_init = Mock(return_value=True)
+        page._premium = SimpleNamespace(check_device_activation=Mock(return_value={"activated": False}))
+        page._start_worker_thread = Mock()
+        page.refresh_btn = Mock()
+        page._set_status_badge = Mock()
+
+        with patch("donater.ui.page.apply_status_check_start_ui") as start_ui:
+            PremiumPage._check_status(page, automatic=True)
+
+        start_ui.assert_not_called()
+        page._premium.check_device_activation.assert_not_called()
+        task = page._start_worker_thread.call_args.args[0]
+        task()
+        page._premium.check_device_activation.assert_called_once_with(automatic=True)
+
+    def test_fresh_device_snapshot_restarts_pairing_autopoll(self) -> None:
+        page = PremiumPage.__new__(PremiumPage)
+        page._cleanup_in_progress = False
+        page._device_info_runtime = SimpleNamespace(is_current=Mock(return_value=True))
+        page._device_info_state = SimpleNamespace(has_pending=Mock(return_value=False))
+        page._set_pairing_autopoll_snapshot_from_device_info = Mock()
+        page._sync_pairing_status_autopoll = Mock()
+        page._tr = Mock(side_effect=lambda _key, default, **kwargs: default.format(**kwargs))
+        page.device_id_label = Mock()
+        page.saved_key_label = Mock()
+        page.last_check_label = Mock()
+        snapshot = {"device_id": "device-1", "pair_code": "7YRFE33E"}
+
+        with patch("donater.ui.page.apply_device_info_snapshot_labels"):
+            PremiumPage._on_device_info_loaded(page, 4, snapshot)
+
+        page._set_pairing_autopoll_snapshot_from_device_info.assert_called_once_with(snapshot)
+        page._sync_pairing_status_autopoll.assert_called_once_with()
+
     def test_open_bot_worker_receives_feature_action_not_feature_object(self) -> None:
         feature_source = inspect.getsource(PremiumFeature.create_open_extend_bot_worker)
         worker_source = inspect.getsource(open_bot_worker.PremiumOpenBotWorker)

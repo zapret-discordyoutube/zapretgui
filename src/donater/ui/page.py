@@ -23,6 +23,7 @@ from donater.ui.pairing_workflow import (
     apply_pair_code_start_ui,
 )
 from donater.pairing_workflow import (
+    build_pairing_autopoll_runtime_plan,
     can_poll_pairing_status,
     poll_pairing_status,
     start_pairing_status_autopoll,
@@ -70,7 +71,7 @@ def _premium_action_runtime_running(page) -> bool:
 class PremiumPage(BasePage):
     """Страница управления Premium подпиской"""
 
-    _PAIRING_AUTOPOLL_INTERVAL_MS = 4000
+    _PAIRING_AUTOPOLL_INTERVAL_MS = 2500
 
     def __init__(self, parent=None, *, deps):
         super().__init__(
@@ -584,6 +585,7 @@ class PremiumPage(BasePage):
         stop_pairing_status_autopoll(self._pairing_status_timer)
 
     def _sync_pairing_status_autopoll(self) -> None:
+        was_active = self._pairing_status_timer.isActive()
         sync_pairing_status_autopoll(
             self._pairing_status_timer,
             premium_feature=self._premium,
@@ -594,12 +596,30 @@ class PremiumPage(BasePage):
             current_time=int(time.time()),
             pairing_snapshot=self._pairing_autopoll_snapshot,
         )
+        if (
+            not was_active
+            and self._pairing_status_timer.isActive()
+            and self._can_poll_pairing_status()
+        ):
+            # После возврата из Telegram первый запрос не должен ждать полного
+            # интервала. Сеть всё равно вызывается только внутри worker-а.
+            QTimer.singleShot(0, self._poll_pairing_status)
 
     def _poll_pairing_status(self) -> None:
+        plan = build_pairing_autopoll_runtime_plan(
+            premium_feature=self._premium,
+            page_visible=self.isVisible(),
+            activation_in_progress=self._activation_in_progress,
+            connection_test_in_progress=self._connection_test_in_progress,
+            worker_running=self._is_premium_action_running(),
+            current_time=int(time.time()),
+            pairing_snapshot=self._pairing_autopoll_snapshot,
+        )
         poll_pairing_status(
-            can_poll=self._can_poll_pairing_status(),
+            can_poll=plan.can_poll,
+            keep_timer=plan.start_timer,
             stop_autopoll=self._stop_pairing_status_autopoll,
-            check_status=self._check_status,
+            check_status=lambda: self._check_status(automatic=True),
         )
 
     def _update_device_info(self):
@@ -652,6 +672,7 @@ class PremiumPage(BasePage):
             saved_key_label=self.saved_key_label,
             last_check_label=self.last_check_label,
         )
+        self._sync_pairing_status_autopoll()
 
     def _on_device_info_failed(self, request_id: int, error: str) -> None:
         if not self._device_info_runtime.is_current(
@@ -898,7 +919,7 @@ class PremiumPage(BasePage):
 
     # ── status check ─────────────────────────────────────────────────────────
 
-    def _check_status(self):
+    def _check_status(self, *, automatic: bool = False):
         self._cleanup_in_progress = False
         gate_plan = premium_page_plans.build_worker_gate_plan(
             thread_running=self._is_premium_action_running(),
@@ -915,13 +936,14 @@ class PremiumPage(BasePage):
             )
             return
 
-        apply_status_check_start_ui(
-            refresh_btn=self.refresh_btn,
-            set_status_badge=self._set_status_badge,
-        )
+        if not automatic:
+            apply_status_check_start_ui(
+                refresh_btn=self.refresh_btn,
+                set_status_badge=self._set_status_badge,
+            )
 
         self._start_worker_thread(
-            self._premium.check_device_activation,
+            lambda: self._premium.check_device_activation(automatic=automatic),
             self._on_status_complete,
             self._on_status_error,
         )
@@ -934,8 +956,10 @@ class PremiumPage(BasePage):
                 result,
                 tr=self._tr,
                 refresh_btn=self.refresh_btn,
+                key_input=self.key_input,
                 update_device_info=self._update_device_info,
                 set_status_badge=self._set_status_badge,
+                set_activation_status=self._set_activation_status,
                 set_activation_section_visible=self._set_activation_section_visible,
                 stop_autopoll=self._stop_pairing_status_autopoll,
                 sync_autopoll=self._sync_pairing_status_autopoll,

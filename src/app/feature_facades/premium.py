@@ -113,8 +113,11 @@ class PremiumFeature:
     def start_pairing(self):
         return self._commands().start_pairing(self._require_checker())
 
-    def check_device_activation(self):
-        return self._commands().check_device_activation(self._require_checker())
+    def check_device_activation(self, *, automatic: bool = False):
+        return self._commands().check_device_activation(
+            self._require_checker(),
+            automatic=bool(automatic),
+        )
 
     def reset_premium_storage(self):
         self.ensure_checker_ready()

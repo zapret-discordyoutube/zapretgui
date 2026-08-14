@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import donater.ui.page_plans as premium_page_plans
-from donater.ui.accessibility import apply_premium_button_accessibility
+from donater.ui.accessibility import (
+    apply_premium_button_accessibility,
+    apply_premium_pair_code_accessibility,
+)
 from ui.accessibility import set_state_text
 
 
@@ -65,7 +68,7 @@ def render_server_status_label(
 def build_status_check_hints(*, tr: Callable[[str, str], str]) -> tuple[str, str]:
     linked_hint = tr(
         "page.premium.status.inactive.linked_hint",
-        "Продлите подписку в боте и нажмите «Обновить статус».",
+        "Продлите подписку в боте — статус обновится автоматически.",
     )
     unlinked_hint = tr(
         "page.premium.status.inactive.unlinked_hint",
@@ -94,8 +97,10 @@ def apply_status_check_success(
     *,
     tr: Callable[[str, str], str],
     refresh_btn,
+    key_input,
     update_device_info: Callable[[], None],
     set_status_badge: Callable[..., None],
+    set_activation_status: Callable[..., None],
     set_activation_section_visible: Callable[[bool], None],
     stop_autopoll: Callable[[], None],
     sync_autopoll: Callable[[], None],
@@ -120,6 +125,20 @@ def apply_status_check_success(
         details_kwargs=plan.badge_plan.details_kwargs,
     )
     set_activation_section_visible(not plan.hide_activation_section)
+
+    if plan.is_linked:
+        key_input.clear()
+        apply_premium_pair_code_accessibility(tr_fn=tr, key_input=key_input)
+        if plan.is_premium:
+            set_activation_status(
+                text_key="page.premium.activation.success.linked_active",
+                text_default="✅ Устройство привязано. Premium активен.",
+            )
+        else:
+            set_activation_status(
+                text_key="page.premium.activation.success.linked_inactive",
+                text_default="✅ Устройство привязано. Подписка сейчас не активна.",
+            )
 
     if plan.stop_autopoll:
         stop_autopoll()

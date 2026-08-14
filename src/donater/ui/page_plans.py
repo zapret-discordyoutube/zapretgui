@@ -410,7 +410,7 @@ def build_pair_code_result_plan(result) -> PremiumPairCodeResultPlan:
             copy_to_clipboard=bool(code),
             activation_status_plan=build_activation_status_plan(
                 text_key="page.premium.activation.success.code_created",
-                text_default="✅ Код создан примерно на 10 минут и скопирован. Сразу отправьте его боту в Telegram.",
+                text_default="✅ Код создан примерно на 10 минут и скопирован. Отправьте его боту — приложение само обновит статус.",
             ),
             update_device_info=True,
             start_autopoll=True,
@@ -577,28 +577,33 @@ def build_pairing_autopoll_plan(
     has_device_token: bool,
     has_pending_pair_code: bool,
     ) -> PremiumAutopollPlan:
-    can_poll = (
+    timer_eligible = (
         checker_ready
         and storage_ready
         and page_visible
-        and not activation_in_progress
-        and not connection_test_in_progress
-        and not worker_running
         and not has_device_token
         and has_pending_pair_code
     )
+    can_poll = (
+        timer_eligible
+        and not activation_in_progress
+        and not connection_test_in_progress
+        and not worker_running
+    )
     return PremiumAutopollPlan(
         can_poll=can_poll,
-        start_timer=can_poll,
-        stop_timer=not can_poll,
+        # Занятый worker — временное состояние, а не причина терять таймер.
+        # Иначе первый же запрос останавливал опрос до ручного обновления.
+        start_timer=timer_eligible,
+        stop_timer=not timer_eligible,
     )
 
 def build_worker_gate_plan(*, thread_running: bool) -> PremiumWorkerGatePlan:
     return PremiumWorkerGatePlan(can_start=not bool(thread_running))
 
-def build_pairing_poll_plan(*, can_poll: bool) -> PremiumPairingPollPlan:
+def build_pairing_poll_plan(*, can_poll: bool, keep_timer: bool) -> PremiumPairingPollPlan:
     return PremiumPairingPollPlan(
-        should_stop_timer=not bool(can_poll),
+        should_stop_timer=not bool(keep_timer),
         should_check_status=bool(can_poll),
     )
 

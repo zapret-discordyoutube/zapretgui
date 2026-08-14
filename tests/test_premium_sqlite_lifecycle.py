@@ -149,6 +149,8 @@ class PremiumSqliteLifecycleTest(unittest.TestCase):
             self.assertTrue(status.is_activated)
             binding = PremiumStorage.get_binding()
             self.assertEqual(binding["binding_id"], "binding-1")
+            self.assertIsNone(PremiumStorage.get_pending_pairing())
+            self.assertIsNone(PremiumStorage.get_pair_code())
             self.assertTrue(service.clear_activation())
 
         self.assertIsNone(PremiumStorage.get_binding(include_disabled=True))

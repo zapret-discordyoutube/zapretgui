@@ -9,9 +9,16 @@ import requests
 class PremiumApiClient:
     """Typed transport for the single Zapret Premium API contract."""
 
-    def __init__(self, *, base_url: str, timeout: int = 10):
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        timeout: float = 10,
+        health_timeout: float = 3,
+    ):
         self.base_url = (base_url or "").rstrip("/")
-        self.timeout = int(timeout)
+        self.timeout = max(0.1, float(timeout))
+        self.health_timeout = max(0.1, min(float(health_timeout), self.timeout))
         self._session = requests.Session()
         self._session.trust_env = False
 
@@ -34,13 +41,14 @@ class PremiumApiClient:
         *,
         payload: dict[str, Any] | None = None,
         nonce: str = "",
+        timeout: float | None = None,
     ) -> Dict[str, Any]:
         try:
             response = self._session.request(
                 method,
                 self._url(endpoint),
                 json=payload,
-                timeout=self.timeout,
+                timeout=self.timeout if timeout is None else max(0.1, float(timeout)),
             )
         except requests.Timeout:
             return {
@@ -79,7 +87,9 @@ class PremiumApiClient:
         return data
 
     def get_status(self) -> Optional[Dict[str, Any]]:
-        return self._request("GET", "status")
+        # Health-check не должен ждать полный срок мутационного запроса.
+        # Он не меняет состояние и используется только для быстрой индикации.
+        return self._request("GET", "status", timeout=self.health_timeout)
 
     def post_pair_start(
         self,

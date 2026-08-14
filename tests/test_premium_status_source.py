@@ -6,6 +6,28 @@ from unittest.mock import Mock, patch
 
 
 class PremiumStatusSourceTests(unittest.TestCase):
+    def test_health_check_uses_short_timeout_without_shortening_mutations(self) -> None:
+        from donater.api import PremiumApiClient
+
+        response = Mock()
+        response.content = b"{}"
+        response.status_code = 200
+        response.json.return_value = {"success": True}
+        client = PremiumApiClient(
+            base_url="https://premium.local/api",
+            timeout=5,
+            health_timeout=2,
+        )
+        client._session = Mock()
+        client._session.request.return_value = response
+
+        client.get_status()
+        self.assertEqual(client._session.request.call_args.kwargs["timeout"], 2.0)
+
+        client._session.request.reset_mock()
+        client.post_pair_start(request_id="r1", device_id="d1")
+        self.assertEqual(client._session.request.call_args.kwargs["timeout"], 5.0)
+
     def _signed_status(self) -> dict:
         return {
             "type": "zapret_premium_status",

@@ -136,11 +136,13 @@ def sync_pairing_status_autopoll(
 def poll_pairing_status(
     *,
     can_poll: bool,
+    keep_timer: bool,
     stop_autopoll: Callable[[], None],
     check_status: Callable[[], None],
 ) -> None:
     plan = premium_page_plans.build_pairing_poll_plan(
         can_poll=bool(can_poll),
+        keep_timer=bool(keep_timer),
     )
     if plan.should_stop_timer:
         stop_autopoll()

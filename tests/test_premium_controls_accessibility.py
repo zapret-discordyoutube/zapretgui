@@ -23,7 +23,11 @@ from donater.ui.pairing_workflow import (
     apply_pair_code_start_ui,
 )
 from donater.ui.page_lifecycle import apply_premium_language, render_activation_status_label
-from donater.ui.status_workflow import apply_connection_test_plan, render_server_status_label
+from donater.ui.status_workflow import (
+    apply_connection_test_plan,
+    apply_status_check_success,
+    render_server_status_label,
+)
 from donater.ui.accessibility import apply_premium_button_accessibility
 from donater.ui.page import PremiumPage
 from donater.ui.status_card import StatusCard
@@ -97,7 +101,7 @@ class PremiumControlsAccessibilityTests(unittest.TestCase):
             (
                 "Инструкция Premium: 1. Нажмите «Создать код» "
                 "2. Отправьте код боту @zapretvpns_bot в Telegram (сообщением) "
-                "3. Вернитесь сюда и нажмите «Проверить статус»"
+                "3. Вернитесь сюда — приложение обновит статус автоматически"
             ),
         )
         self.assertIn("как привязать Premium", activation.instructions_label.accessibleDescription())
@@ -239,8 +243,46 @@ class PremiumControlsAccessibilityTests(unittest.TestCase):
             (
                 "Инструкция Premium: 1. Нажмите «Создать код» "
                 "2. Отправьте код боту @zapretvpns_bot в Telegram (сообщением) "
-                "3. Вернитесь сюда и нажмите «Проверить статус»"
+                "3. Вернитесь сюда — приложение обновит статус автоматически"
             ),
+        )
+
+    def test_linked_status_clears_consumed_pair_code_from_ui(self) -> None:
+        activation = build_premium_activation_section(
+            tr=lambda _key, default, **kwargs: default.format(**kwargs),
+            on_create_pair_code=lambda: None,
+        )
+        activation.key_input.setText("7YRFE33E")
+        activation_status = Mock()
+
+        apply_status_check_success(
+            {
+                "activated": True,
+                "is_premium": True,
+                "found": True,
+                "days_remaining": 30,
+                "status": "Активировано",
+            },
+            tr=lambda _key, default, **kwargs: default.format(**kwargs),
+            refresh_btn=SimpleNamespace(set_loading=lambda _value: None),
+            key_input=activation.key_input,
+            update_device_info=lambda: None,
+            set_status_badge=lambda **_kwargs: None,
+            set_activation_status=activation_status,
+            set_activation_section_visible=lambda _visible: None,
+            stop_autopoll=lambda: None,
+            sync_autopoll=lambda: None,
+            apply_subscription_state=lambda _premium, _days: None,
+        )
+
+        self.assertEqual(activation.key_input.text(), "")
+        self.assertEqual(
+            activation.key_input.accessibleName(),
+            "Код привязки Premium: пока не создан",
+        )
+        activation_status.assert_called_once_with(
+            text_key="page.premium.activation.success.linked_active",
+            text_default="✅ Устройство привязано. Premium активен.",
         )
 
     def test_premium_runtime_actions_update_screen_reader_names(self) -> None:
