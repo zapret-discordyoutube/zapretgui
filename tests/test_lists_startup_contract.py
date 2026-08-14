@@ -9,6 +9,70 @@ from unittest.mock import patch
 
 
 class ListsStartupContractTests(unittest.TestCase):
+    def test_embedded_ipset_ru_contains_yandex_networks_as13238(self) -> None:
+        from lists.core.embedded_defaults import get_ipset_ru_base_text
+
+        expected = (
+            "95.108.128.0/17",
+            "5.45.192.0/18",
+            "5.255.192.0/18",
+            "37.9.64.0/18",
+            "37.140.128.0/18",
+            "77.88.0.0/18",
+            "93.158.128.0/18",
+            "141.8.128.0/18",
+            "84.252.160.0/19",
+            "87.250.224.0/19",
+            "178.154.128.0/19",
+            "178.154.160.0/19",
+            "213.180.192.0/19",
+            "92.255.112.0/20",
+            "5.45.202.0/24",
+            "5.45.205.0/24",
+            "5.45.215.0/24",
+            "5.255.197.0/24",
+            "5.255.255.0/24",
+            "37.9.64.0/24",
+            "37.9.87.0/24",
+            "37.9.112.0/24",
+            "77.88.8.0/24",
+            "77.88.44.0/24",
+            "77.88.55.0/24",
+            "87.250.247.0/24",
+            "87.250.255.0/24",
+            "178.154.131.0/24",
+            "185.32.187.0/24",
+            "213.180.199.0/24",
+            "2a02:6b8::/29",
+            "2a02:6b8::/32",
+            "2a02:6b8:4::/48",
+            "2a02:6b8:5::/48",
+            "2a02:6b8:6::/48",
+            "2a02:6b8:8::/48",
+            "2a02:6b8:a::/48",
+            "2a02:6b8:b::/48",
+            "2a02:6b8:c::/48",
+            "2a02:6b8:d::/48",
+            "2a02:6b8:e::/48",
+            "2a02:6b8:20::/48",
+            "2a02:6b8:21::/48",
+            "2a02:6b8:22::/48",
+            "2a02:6b8:23::/48",
+            "2a02:6b8:215::/48",
+        )
+        lines = get_ipset_ru_base_text().splitlines()
+        marker_index = lines.index("# https://ipinfo.io/AS13238")
+        next_section_index = next(
+            index
+            for index in range(marker_index + 1, len(lines))
+            if lines[index].startswith("#")
+        )
+        section_entries = tuple(lines[marker_index + 1 : next_section_index])
+
+        self.assertEqual(section_entries, expected)
+        for entry in expected:
+            self.assertEqual(str(ipaddress.ip_network(entry, strict=True)), entry)
+
     def test_embedded_ipset_ru_contains_gemotest_network_as205567(self) -> None:
         from lists.core.embedded_defaults import get_ipset_ru_base_text
 
