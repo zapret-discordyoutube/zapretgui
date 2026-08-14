@@ -331,7 +331,7 @@ def build_telegram_proxy_settings_panel(
     insert_widget_into_setting_card_group(settings_card, 1, settings_host_row)
 
     proxy_mode_row = win11_combo_row_cls(
-        icon_name="mdi.swap-horizontal",
+        icon_name="fa5s.exchange-alt",
         title=text.proxy_mode_title,
         description=text.proxy_mode_description,
         items=[
@@ -343,7 +343,7 @@ def build_telegram_proxy_settings_panel(
     settings_card.addSettingCard(proxy_mode_row)
 
     auto_deeplink_toggle = win11_toggle_row_cls(
-        "mdi.telegram",
+        "fa5b.telegram",
         text.auto_setup_title,
         text.auto_setup_description,
     )
@@ -351,7 +351,7 @@ def build_telegram_proxy_settings_panel(
     settings_card.addSettingCard(auto_deeplink_toggle)
 
     advanced_toggle = win11_toggle_row_cls(
-        "mdi.tune-variant",
+        "fa5s.sliders-h",
         text.advanced_title,
         text.advanced_description,
     )
@@ -535,7 +535,7 @@ def build_telegram_proxy_advanced_settings_panel(
     advanced_card.addSettingCard(fake_tls_domain_row)
 
     proxy_protocol_toggle = win11_toggle_row_cls(
-        "mdi.lan-connect",
+        "fa5s.network-wired",
         text.proxy_protocol_title,
         text.proxy_protocol_description,
     )
@@ -551,7 +551,7 @@ def build_telegram_proxy_advanced_settings_panel(
     insert_widget_into_setting_card_group(upstream_card, 1, upstream_desc_label)
 
     upstream_toggle = win11_toggle_row_cls(
-        "mdi.server-network",
+        "fa5s.server",
         text.upstream_toggle_title,
         text.upstream_toggle_description,
     )
@@ -559,7 +559,7 @@ def build_telegram_proxy_advanced_settings_panel(
     upstream_card.addSettingCard(upstream_toggle)
 
     upstream_preset_row = win11_combo_row_cls(
-        icon_name="mdi.server-network",
+        icon_name="fa5s.server",
         title=text.upstream_preset_title,
         description=text.upstream_preset_description,
         items=upstream_catalog.items(),
@@ -662,7 +662,7 @@ def build_telegram_proxy_advanced_settings_panel(
     upstream_card.addSettingCard(mtproxy_action_widget)
 
     upstream_mode_toggle = win11_toggle_row_cls(
-        "mdi.swap-horizontal",
+        "fa5s.exchange-alt",
         text.upstream_mode_title,
         text.upstream_mode_description,
     )
@@ -670,7 +670,7 @@ def build_telegram_proxy_advanced_settings_panel(
     upstream_card.addSettingCard(upstream_mode_toggle)
 
     upstream_udp_toggle = win11_toggle_row_cls(
-        "mdi.phone-in-talk",
+        "fa5s.phone-alt",
         text.upstream_udp_title,
         text.upstream_udp_description,
     )
@@ -678,7 +678,7 @@ def build_telegram_proxy_advanced_settings_panel(
     upstream_card.addSettingCard(upstream_udp_toggle)
 
     cloudflare_toggle = win11_toggle_row_cls(
-        "mdi.cloud",
+        "fa5s.cloud",
         text.cloudflare_toggle_title,
         text.cloudflare_toggle_description,
     )
@@ -728,7 +728,7 @@ def build_telegram_proxy_advanced_settings_panel(
     upstream_card.addSettingCard(cloudflare_domains_row)
 
     cloudflare_worker_toggle = win11_toggle_row_cls(
-        "mdi.cloud-outline",
+        "fa5s.cloud",
         text.cloudflare_worker_toggle_title,
         text.cloudflare_worker_toggle_description,
     )

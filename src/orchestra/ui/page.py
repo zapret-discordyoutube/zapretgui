@@ -322,7 +322,7 @@ class OrchestraPage(BasePage):
             unlocked_text=self._tr("page.orchestra.status.unlocked", "🔓 UNLOCKED - переобучение (RST блокировка)"),
             idle_color=tokens.fg_faint,
         )
-        self.status_icon.setPixmap(get_cached_qta_pixmap("mdi.brain", color=plan.icon_color, size=24))
+        self.status_icon.setPixmap(get_cached_qta_pixmap("fa5s.brain", color=plan.icon_color, size=24))
         self.status_label.setText(plan.label_text)
         self.status_label.setStyleSheet(f"color: {plan.label_color}; font-size: 14px;")
         set_orchestra_status_accessibility(self.status_label, plan.label_text, status_icon=self.status_icon)

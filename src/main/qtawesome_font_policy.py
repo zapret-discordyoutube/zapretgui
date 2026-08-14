@@ -7,8 +7,8 @@ from typing import Iterable, Sequence
 
 
 # Поиск по исходникам должен подтверждать, что все используемые префиксы
-# перечислены здесь. Сборщик оставляет данные только этих четырёх наборов.
-QT_AWESOME_ALLOWED_PREFIXES = ("fa5s", "fa5b", "mdi", "ri")
+# перечислены здесь. Сборщик оставляет данные только этих двух наборов.
+QT_AWESOME_ALLOWED_PREFIXES = ("fa5s", "fa5b")
 
 
 def select_qtawesome_bundles(

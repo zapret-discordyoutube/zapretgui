@@ -104,7 +104,7 @@ def build_winws1_pages_settings_sections(
 
     discord_restart_toggle = (
         win11_toggle_row_cls(
-            "mdi.discord",
+            "fa5b.discord",
             tr_fn("page.winws1_control.advanced.discord_restart.title", "Перезапуск Discord"),
             tr_fn("page.winws1_control.advanced.discord_restart.desc", "Автоперезапуск при смене стратегии"),
             "#7289da",
@@ -129,7 +129,7 @@ def build_winws1_pages_settings_sections(
 
     debug_log_toggle = (
         win11_toggle_row_cls(
-            "mdi.file-document-outline",
+            "fa5s.file-alt",
             tr_fn("page.winws1_control.advanced.debug_log.title", "Включить лог-файл (--debug)"),
             tr_fn("page.winws1_control.advanced.debug_log.desc", "Записывает логи winws в папку logs"),
         )

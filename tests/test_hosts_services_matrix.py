@@ -83,7 +83,7 @@ class HostsServicesMatrixTests(unittest.TestCase):
             rows=[
                 HostsServiceRowPlan(
                     service_name="ChatGPT",
-                    icon_name="mdi.robot",
+                    icon_name="fa5s.robot",
                     icon_color="#10a37f",
                     direct_only=False,
                     available_profiles=["zapret_dns"],
@@ -97,7 +97,7 @@ class HostsServicesMatrixTests(unittest.TestCase):
 
         model = HostsServicesMatrixModel([group], off_label="Откл.")
 
-        self.assertEqual(model.data(model.index(1, 0), model.IconNameRole), "mdi.robot")
+        self.assertEqual(model.data(model.index(1, 0), model.IconNameRole), "fa5s.robot")
         self.assertEqual(model.data(model.index(1, 0), model.IconColorRole), "#10a37f")
 
     def test_matrix_uses_lightweight_delegate_without_item_stylesheet(self) -> None:
@@ -109,7 +109,7 @@ class HostsServicesMatrixTests(unittest.TestCase):
             rows=[
                 HostsServiceRowPlan(
                     service_name="ChatGPT",
-                    icon_name="mdi.robot",
+                    icon_name="fa5s.robot",
                     icon_color="#10a37f",
                     direct_only=False,
                     available_profiles=["zapret_dns"],
@@ -207,7 +207,7 @@ class HostsServicesMatrixTests(unittest.TestCase):
     def test_selected_profile_menu_action_gets_accent_icon(self) -> None:
         row = HostsServiceRowPlan(
             service_name="ChatGPT",
-            icon_name="mdi.robot",
+            icon_name="fa5s.robot",
             icon_color="#10a37f",
             direct_only=False,
             available_profiles=["zapret_dns"],
@@ -260,7 +260,7 @@ class HostsServicesMatrixTests(unittest.TestCase):
             rows=[
                 HostsServiceRowPlan(
                     service_name="ChatGPT",
-                    icon_name="mdi.robot",
+                    icon_name="fa5s.robot",
                     icon_color="#10a37f",
                     direct_only=False,
                     available_profiles=["zapret_dns"],
@@ -332,7 +332,7 @@ class HostsServicesMatrixTests(unittest.TestCase):
     def test_canvas_clicks_keep_profile_selection_callbacks(self) -> None:
         row = HostsServiceRowPlan(
             service_name="ChatGPT",
-            icon_name="mdi.robot",
+            icon_name="fa5s.robot",
             icon_color="#10a37f",
             direct_only=False,
             available_profiles=["zapret_dns"],
@@ -383,7 +383,7 @@ class HostsServicesMatrixTests(unittest.TestCase):
     def test_canvas_keyboard_opens_profile_menu_for_current_service_row(self) -> None:
         row = HostsServiceRowPlan(
             service_name="ChatGPT",
-            icon_name="mdi.robot",
+            icon_name="fa5s.robot",
             icon_color="#10a37f",
             direct_only=False,
             available_profiles=["zapret_dns"],

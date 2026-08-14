@@ -449,7 +449,7 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
 
     def test_upstream_catalog_refresh_updates_menu_item_accessibility(self) -> None:
         row = Win11ComboRow(
-            icon_name="mdi.server-network",
+            icon_name="fa5s.server",
             title="Сервер",
             description="Выберите сервер из списка или переключитесь на ручной ввод",
             items=[],

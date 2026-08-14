@@ -33,25 +33,25 @@ class NotificationBanner(QWidget):
             'bg': 'rgba(255, 107, 107, 0.15)',
             'border': 'rgba(255, 107, 107, 0.4)',
             'icon_color': '#ff6b6b',
-            'icon': 'mdi.alert-circle',
+            'icon': 'fa5s.exclamation-circle',
         },
         'warning': {
             'bg': 'rgba(255, 152, 0, 0.15)',
             'border': 'rgba(255, 152, 0, 0.4)',
             'icon_color': '#ff9800',
-            'icon': 'mdi.alert',
+            'icon': 'fa5s.exclamation-triangle',
         },
         'info': {
             'bg': 'rgba(96, 205, 255, 0.15)',
             'border': 'rgba(96, 205, 255, 0.4)',
             'icon_color': '#5caee8',
-            'icon': 'mdi.information',
+            'icon': 'fa5s.info-circle',
         },
         'success': {
             'bg': 'rgba(76, 175, 80, 0.15)',
             'border': 'rgba(76, 175, 80, 0.4)',
             'icon_color': '#4CAF50',
-            'icon': 'mdi.check-circle',
+            'icon': 'fa5s.check-circle',
         },
     }
 

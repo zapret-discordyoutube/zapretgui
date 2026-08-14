@@ -295,7 +295,7 @@ class AdapterChoiceListDelegate(QStyledItemDelegate):
 
         left = rect.left() + (24 if checked else 18)
         right = rect.right() - 16
-        check_icon = "mdi.checkbox-marked" if checked else "mdi.checkbox-blank-outline"
+        check_icon = "fa5s.check-square" if checked else "fa5s.square"
         check_color = tokens.accent_hex if checked else tokens.fg_faint
         check_rect = QRect(left, rect.center().y() - self._ICON_SIZE // 2, self._ICON_SIZE, self._ICON_SIZE)
         pixmap = get_cached_qta_pixmap(check_icon, color=check_color, size=self._ICON_SIZE)

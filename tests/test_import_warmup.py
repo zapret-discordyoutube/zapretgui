@@ -88,7 +88,6 @@ class ImportWarmupTests(unittest.TestCase):
                 ("fa5", "fa5.ttf", "fa5.json"),
                 ("fa5s", "fa5s.ttf", "fa5s.json"),
                 ("fa5b", "fa5b.ttf", "fa5b.json"),
-                ("mdi", "mdi.ttf", "mdi.json"),
                 ("mdi6", "mdi6.ttf", "mdi6.json"),
                 ("ph", "ph.ttf", "ph.json"),
                 ("ri", "ri.ttf", "ri.json"),
@@ -106,11 +105,10 @@ class ImportWarmupTests(unittest.TestCase):
     def test_qtawesome_policy_fails_when_required_font_is_missing(self) -> None:
         bundles = (
             ("fa5s", "fa5s.ttf", "fa5s.json"),
-            ("fa5b", "fa5b.ttf", "fa5b.json"),
             ("mdi", "mdi.ttf", "mdi.json"),
         )
 
-        with self.assertRaisesRegex(RuntimeError, "ri"):
+        with self.assertRaisesRegex(RuntimeError, "fa5b"):
             select_qtawesome_bundles(bundles)
 
     def test_qtawesome_warmup_error_is_reported_before_window_import(self) -> None:

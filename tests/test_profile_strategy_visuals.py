@@ -15,7 +15,7 @@ class ProfileStrategyVisualTests(unittest.TestCase):
 
         self.assertEqual(visual.technique_keys, ("fake", "multidisorder"))
         self.assertEqual(visual.label, "Fake + MultiDisorder")
-        self.assertEqual(visual.icon_name, "ri.magic-line")
+        self.assertEqual(visual.icon_name, "fa5s.magic")
         self.assertEqual(visual.color, "#ff6b6b")
         self.assertIn("Fake", visual.description)
         self.assertIn("MultiDisorder", visual.description)
@@ -32,9 +32,9 @@ class ProfileStrategyVisualTests(unittest.TestCase):
 
         self.assertEqual(visual.technique_keys, ())
         self.assertEqual(visual.label, "Своя")
-        self.assertEqual(visual.icon_name, "ri.question-line")
+        self.assertEqual(visual.icon_name, "fa5s.question")
 
-    def test_strategy_icons_use_modern_outline_style(self) -> None:
+    def test_strategy_icons_use_the_shipped_font_bundle(self) -> None:
         samples = [
             "--lua-desync=fake",
             "--lua-desync=multisplit",
@@ -46,7 +46,7 @@ class ProfileStrategyVisualTests(unittest.TestCase):
         for args in samples:
             with self.subTest(args=args):
                 visual = describe_strategy_visual(args)
-                self.assertTrue(visual.icon_name.startswith("ri."))
+                self.assertTrue(visual.icon_name.startswith("fa5s."))
 
 
 if __name__ == "__main__":

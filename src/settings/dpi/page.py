@@ -183,7 +183,7 @@ class DpiSettingsPage(BasePage):
         # Zapret 2 mode - рекомендуется
         self.method_zapret2_mode = Win11RadioOption(
             *self._method_option_text(ZAPRET2_MODE),
-            icon_name="mdi.rocket-launch",
+            icon_name="fa5s.rocket",
             recommended=True,
             recommended_badge=self._tr("page.dpi_settings.option.recommended", "рекомендуется"),
         )
@@ -193,7 +193,7 @@ class DpiSettingsPage(BasePage):
         # Оркестр (auto-learning)
         self.method_orchestra = Win11RadioOption(
             *self._method_option_text(ORCHESTRA_MODE),
-            icon_name="mdi.brain",
+            icon_name="fa5s.brain",
             icon_color="#9c27b0",
         )
         self.method_orchestra.clicked.connect(lambda: self._select_method(ORCHESTRA_MODE))
@@ -213,7 +213,7 @@ class DpiSettingsPage(BasePage):
         # Zapret 1 mode
         self.method_zapret1_mode = Win11RadioOption(
             *self._method_option_text(ZAPRET1_MODE),
-            icon_name="mdi.rocket-launch-outline",
+            icon_name="fa5s.rocket",
             icon_color="#ff9800",
         )
         self.method_zapret1_mode.clicked.connect(lambda: self._select_method(ZAPRET1_MODE))
@@ -252,7 +252,7 @@ class DpiSettingsPage(BasePage):
         orchestra_settings_layout.addWidget(self._orchestra_label)
 
         self.strict_detection_toggle = Win11ToggleRow(
-            "mdi.check-decagram",
+            "fa5s.check-double",
             self._tr("page.dpi_settings.orchestra.strict_detection.title", "Строгий режим детекции"),
             self._tr("page.dpi_settings.orchestra.strict_detection.desc", "HTTP 200 + проверка блок-страниц"),
             "#4CAF50",
@@ -260,7 +260,7 @@ class DpiSettingsPage(BasePage):
         orchestra_settings_layout.addWidget(self.strict_detection_toggle)
 
         self.debug_file_toggle = Win11ToggleRow(
-            "mdi.file-document-outline",
+            "fa5s.file-alt",
             self._tr("page.dpi_settings.orchestra.debug_file.title", "Сохранять debug файл"),
             self._tr("page.dpi_settings.orchestra.debug_file.desc", "Сырой debug файл для отладки"),
             "#8a2be2",
@@ -268,7 +268,7 @@ class DpiSettingsPage(BasePage):
         orchestra_settings_layout.addWidget(self.debug_file_toggle)
 
         self.auto_restart_discord_toggle = Win11ToggleRow(
-            "mdi.discord",
+            "fa5b.discord",
             self._tr("page.dpi_settings.orchestra.auto_restart_discord.title", "Авторестарт Discord при FAIL"),
             self._tr(
                 "page.dpi_settings.orchestra.auto_restart_discord.desc",
@@ -279,7 +279,7 @@ class DpiSettingsPage(BasePage):
         orchestra_settings_layout.addWidget(self.auto_restart_discord_toggle)
 
         self.discord_fails_spin = Win11NumberRow(
-            "mdi.discord",
+            "fa5b.discord",
             self._tr("page.dpi_settings.orchestra.discord_fails.title", "Фейлов для рестарта Discord"),
             self._tr(
                 "page.dpi_settings.orchestra.discord_fails.desc",
@@ -291,7 +291,7 @@ class DpiSettingsPage(BasePage):
         orchestra_settings_layout.addWidget(self.discord_fails_spin)
 
         self.lock_successes_spin = Win11NumberRow(
-            "mdi.lock",
+            "fa5s.lock",
             self._tr("page.dpi_settings.orchestra.lock_successes.title", "Успехов для LOCK"),
             self._tr(
                 "page.dpi_settings.orchestra.lock_successes.desc",
@@ -303,7 +303,7 @@ class DpiSettingsPage(BasePage):
         orchestra_settings_layout.addWidget(self.lock_successes_spin)
 
         self.unlock_fails_spin = Win11NumberRow(
-            "mdi.lock-open",
+            "fa5s.unlock",
             self._tr("page.dpi_settings.orchestra.unlock_fails.title", "Ошибок для AUTO-UNLOCK"),
             self._tr(
                 "page.dpi_settings.orchestra.unlock_fails.desc",

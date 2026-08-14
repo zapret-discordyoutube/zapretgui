@@ -124,7 +124,7 @@ class _ClearButtonUpdater(QObject):
 def set_line_edit_clear_button_icon(
     line_edit: QLineEdit,
     *,
-    icon_name: str = "mdi.close",
+    icon_name: str = "fa5s.times",
     color: str | None = None,
     size: int = 14,
 ) -> None:

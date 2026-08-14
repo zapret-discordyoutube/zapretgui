@@ -130,7 +130,7 @@ class WhitelistDomainRow(QFrame):
 
         if self._lock_icon_label is not None:
             self._lock_icon_label.setPixmap(
-                get_cached_qta_pixmap("mdi.lock", color=tokens.fg_faint, size=14)
+                get_cached_qta_pixmap("fa5s.lock", color=tokens.fg_faint, size=14)
             )
 
         if self._delete_btn is not None:
