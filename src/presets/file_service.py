@@ -128,9 +128,9 @@ class PresetFileService:
 
     def _delete_remote_binding_meta(self, preset_file_name: str) -> None:
         try:
-            from presets.remote_bindings import delete_remote_preset_binding
+            from presets.remote_bindings import delete_preset_identity
 
-            delete_remote_preset_binding(self.engine, preset_file_name)
+            delete_preset_identity(self.engine, preset_file_name)
         except Exception:
             pass
 

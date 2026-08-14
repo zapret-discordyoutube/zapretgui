@@ -135,6 +135,40 @@ class ProfileStrategyStateStore:
                 profiles.pop(clean_profile_key, None)
             self._write(data)
 
+    def migrate_profile_keys(self, key_mapping: dict[str, str]) -> bool:
+        """Переносит записи с legacy-ключей (name:/sig:) на uid-ключи.
+
+        Уже существующая uid-запись побеждает: legacy-строка просто
+        удаляется, чтобы не воскрешать устаревшие оценки.
+        """
+        mapping = {
+            _normalize_profile_key(old): _normalize_profile_key(new)
+            for old, new in dict(key_mapping or {}).items()
+        }
+        mapping = {
+            old: new
+            for old, new in mapping.items()
+            if old and new and old != new and not old.startswith("uid:")
+        }
+        if not mapping:
+            return False
+        with _PROFILE_STRATEGY_STATE_LOCK:
+            data = self._read()
+            profiles = data.get("profiles")
+            if not isinstance(profiles, dict):
+                return False
+            changed = False
+            for old_key, new_key in mapping.items():
+                row = profiles.pop(old_key, None)
+                if row is None:
+                    continue
+                changed = True
+                if new_key not in profiles:
+                    profiles[new_key] = row
+            if changed:
+                self._write(data)
+            return changed
+
     def _read(self) -> dict[str, Any]:
         raw = settings_store.get_profile_strategy_state_settings()
         if not isinstance(raw, dict):
@@ -214,7 +248,9 @@ def _state_from_row(row: dict[str, Any]) -> ProfileStrategyState:
 
 def _normalize_profile_key(value: object) -> str:
     text = str(value or "").strip()
-    if text.startswith("name:") or text.startswith("sig:"):
+    # uid: — стабильная идентичность из реестра; name:/sig: — legacy-ключи
+    # старых сохранений, мигрируются на uid при resolve.
+    if text.startswith("uid:") or text.startswith("name:") or text.startswith("sig:"):
         return text
     return ""
 

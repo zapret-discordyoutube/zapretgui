@@ -179,10 +179,22 @@ class ProfilePresetService:
                 for profile in preset.profiles
             ]
             resolution = resolve_profile_identities(entries, registry)
+            legacy_key_mapping: dict[str, str] = {}
             for profile, uid in zip(preset.profiles, resolution.uids):
+                legacy_key = str(profile.persistent_key or "").strip()
+                if legacy_key and not legacy_key.startswith("uid:") and legacy_key != uid:
+                    legacy_key_mapping[legacy_key] = uid
                 profile.persistent_key = uid
             if resolution.registry != normalize_identity_registry(registry):
                 set_profile_identity_registry(self._engine, resolution.registry)
+            if legacy_key_mapping:
+                # Мета, сохранённая до появления uid, ключевалась контентными
+                # ключами парсера (name:/sig:) — переносим её на uid, чтобы
+                # переименование профиля больше ничего не теряло.
+                from profile.folders import migrate_profile_item_keys
+
+                migrate_profile_item_keys(legacy_key_mapping)
+                self._state_store.migrate_profile_keys(legacy_key_mapping)
             if resolution.new_uids:
                 materialize_profile_folder_items(
                     {

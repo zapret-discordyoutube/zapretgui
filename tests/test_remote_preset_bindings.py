@@ -15,6 +15,10 @@ class RemotePresetBindingsTests(unittest.TestCase):
         patcher = patch("settings.store.MAIN_DIRECTORY", str(Path(self._temp.name)))
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Флаг одноразовой миграции секции — сбрасываем между тестовыми БД.
+        from presets import remote_bindings as rb
+
+        rb._LEGACY_SECTION_MIGRATED = False
 
     def test_defaults_and_missing(self):
         from presets import remote_bindings as rb
@@ -99,6 +103,98 @@ class RemotePresetBindingsTests(unittest.TestCase):
         self.assertEqual(scope, "winws1")
         self.assertEqual(file_name, "C.txt")
         self.assertEqual(binding["url"], "https://example.com/c.txt")
+
+    def test_preset_uid_is_stable_across_rename(self):
+        from presets import remote_bindings as rb
+
+        uid = rb.get_or_create_preset_uid("winws2", "Дом.txt")
+        self.assertTrue(uid.startswith("pid:"))
+        self.assertEqual(rb.get_or_create_preset_uid("winws2", "Дом.txt"), uid)
+        rb.set_remote_preset_binding(
+            "winws2", "Дом.txt", rb.make_remote_preset_binding("https://example.com/d.txt")
+        )
+        self.assertTrue(rb.rename_remote_preset_binding("winws2", "Дом.txt", "Дача.txt"))
+        # uid не изменился, привязка переехала вместе с ним.
+        self.assertEqual(rb.get_preset_uid("winws2", "Дача.txt"), uid)
+        self.assertIsNone(rb.get_preset_uid("winws2", "Дом.txt"))
+        self.assertEqual(
+            rb.get_remote_preset_binding("winws2", "Дача.txt")["url"],
+            "https://example.com/d.txt",
+        )
+
+    def test_delete_identity_cascades_to_binding(self):
+        from presets import remote_bindings as rb
+
+        rb.set_remote_preset_binding(
+            "winws2", "Гость.txt", rb.make_remote_preset_binding("https://example.com/g.txt")
+        )
+        self.assertTrue(rb.delete_preset_identity("winws2", "Гость.txt"))
+        self.assertIsNone(rb.get_remote_preset_binding("winws2", "Гость.txt"))
+        self.assertIsNone(rb.get_preset_uid("winws2", "Гость.txt"))
+
+    def test_same_file_in_two_scopes_gets_two_uids(self):
+        from presets import remote_bindings as rb
+
+        uid2 = rb.get_or_create_preset_uid("winws2", "Общий.txt")
+        uid1 = rb.get_or_create_preset_uid("winws1", "Общий.txt")
+        self.assertNotEqual(uid1, uid2)
+
+    def test_rename_to_occupied_name_is_rejected(self):
+        from presets import remote_bindings as rb
+
+        rb.get_or_create_preset_uid("winws2", "A.txt")
+        rb.get_or_create_preset_uid("winws2", "B.txt")
+        # UNIQUE(scope, file_name) не даёт двум uid схлопнуться на одно имя.
+        self.assertFalse(rb.rename_remote_preset_binding("winws2", "A.txt", "B.txt"))
+
+    def test_legacy_json_section_migrates_into_tables(self):
+        from presets import remote_bindings as rb
+        from settings import store as settings_store
+
+        settings_store.set_remote_presets_settings(
+            {
+                "winws2": {
+                    "Старый.txt": {
+                        "url": "https://example.com/old.txt",
+                        "synced_hash": "abc",
+                        "auto": False,
+                    }
+                },
+                "winws1": {},
+            }
+        )
+        binding = rb.get_remote_preset_binding("winws2", "Старый.txt")
+        self.assertIsNotNone(binding)
+        self.assertEqual(binding["url"], "https://example.com/old.txt")
+        self.assertEqual(binding["synced_hash"], "abc")
+        self.assertFalse(binding["auto"])
+        # Секция после переноса очищена.
+        section = settings_store.get_remote_presets_settings()
+        self.assertEqual(section.get("winws2"), {})
+
+    def test_profile_identity_registry_uses_table_with_lazy_migration(self):
+        from settings import store as settings_store
+
+        # Легаси: реестр в JSON-секции.
+        settings_store._update_settings(
+            lambda data: settings_store._set_path_value(
+                data,
+                ("profile_identity", "winws2"),
+                {"uid:abc": {"name": "YouTube", "sig": "list=youtube"}},
+            )
+        )
+        registry = settings_store.get_profile_identity_registry("winws2")
+        self.assertEqual(registry, {"uid:abc": {"name": "YouTube", "sig": "list=youtube"}})
+        # Запись теперь в таблице: перезапишем и перечитаем.
+        saved = settings_store.set_profile_identity_registry(
+            "winws2", {"uid:def": {"name": "Discord", "sig": ""}}
+        )
+        self.assertEqual(saved, {"uid:def": {"name": "Discord", "sig": ""}})
+        self.assertEqual(
+            settings_store.get_profile_identity_registry("winws2"),
+            {"uid:def": {"name": "Discord", "sig": ""}},
+        )
+        self.assertEqual(settings_store.get_profile_identity_registry("winws1"), {})
 
     def test_normalization_survives_settings_roundtrip(self):
         from settings.normalize import normalize_settings

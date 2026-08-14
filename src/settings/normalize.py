@@ -443,7 +443,11 @@ def normalize_profile_strategy_state(data: object) -> dict[str, Any]:
     raw_profiles = as_dict(raw.get("profiles"))
     for raw_profile_key, raw_profile_row in raw_profiles.items():
         profile_key = as_clean_str(raw_profile_key)
-        if not (profile_key.startswith("name:") or profile_key.startswith("sig:")):
+        if not (
+            profile_key.startswith("uid:")
+            or profile_key.startswith("name:")
+            or profile_key.startswith("sig:")
+        ):
             continue
         profile_row = as_dict(raw_profile_row)
         raw_strategies = as_dict(profile_row.get("strategies"))

@@ -4,6 +4,7 @@ import copy
 import json
 import sqlite3
 import time
+import uuid
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -65,7 +66,54 @@ CREATE TABLE IF NOT EXISTS settings_meta (
     value INTEGER NOT NULL
 );
 INSERT OR IGNORE INTO settings_meta(key, value) VALUES('revision', 0);
+-- Постоянная идентичность пресетов: uid выдаётся один раз и не меняется,
+-- переименование файла меняет только file_name. UNIQUE не даёт выдать
+-- два uid одному файлу.
+CREATE TABLE IF NOT EXISTS presets (
+    uid TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    UNIQUE(scope, file_name)
+);
+-- Привязка пресета к удалённому источнику; живёт и умирает вместе с uid.
+CREATE TABLE IF NOT EXISTS preset_remote_sources (
+    preset_uid TEXT PRIMARY KEY REFERENCES presets(uid) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    etag TEXT NOT NULL DEFAULT '',
+    last_modified TEXT NOT NULL DEFAULT '',
+    synced_hash TEXT NOT NULL DEFAULT '',
+    checked_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    auto INTEGER NOT NULL DEFAULT 1,
+    detached INTEGER NOT NULL DEFAULT 0
+);
+-- Реестр идентичности профилей (uid ↔ последние известные имя/сигнатура).
+-- position фиксирует порядок реестра: резолвер идентичности перебирает
+-- кандидатов в этом порядке (важно для полных дублей профилей).
+CREATE TABLE IF NOT EXISTS profile_identities (
+    scope TEXT NOT NULL,
+    uid TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    sig TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (scope, uid)
+);
 """
+
+_PRESET_UID_PREFIX = "pid:"
+_REMOTE_SOURCE_FIELDS = (
+    "url",
+    "etag",
+    "last_modified",
+    "synced_hash",
+    "checked_at",
+    "updated_at",
+    "error",
+    "auto",
+    "detached",
+)
 _DIRECT_PRESET_SELECTION_PATHS = {
     ENGINE_WINWS1: ("program", SELECTED_SOURCE_PRESET_FILE_NAME_KEY_WINWS1),
     ENGINE_WINWS2: ("program", SELECTED_SOURCE_PRESET_FILE_NAME_KEY_WINWS2),
@@ -664,17 +712,253 @@ def set_remote_presets_settings(values: dict[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(updated["remote_presets"])
 
 
+# ─────────────────────────────────────────────────────────────────
+# Идентичность пресетов и привязки к удалённым источникам (таблицы)
+# ─────────────────────────────────────────────────────────────────
+
+
+def _generate_preset_uid() -> str:
+    return f"{_PRESET_UID_PREFIX}{uuid.uuid4().hex}"
+
+
+def _clean_scope_file(scope: str, file_name: str) -> tuple[str, str]:
+    return str(scope or "").strip().lower(), str(file_name or "").strip()
+
+
+def _remote_source_row_to_dict(row) -> dict[str, Any]:
+    return {
+        "url": str(row["url"]),
+        "etag": str(row["etag"]),
+        "last_modified": str(row["last_modified"]),
+        "synced_hash": str(row["synced_hash"]),
+        "checked_at": str(row["checked_at"]),
+        "updated_at": str(row["updated_at"]),
+        "error": str(row["error"]),
+        "auto": bool(row["auto"]),
+        "detached": bool(row["detached"]),
+    }
+
+
+def get_or_create_preset_uid(scope: str, file_name: str) -> str | None:
+    scope, file_name = _clean_scope_file(scope, file_name)
+    if not scope or not file_name:
+        return None
+    with _SETTINGS_LOCK:
+        connection = _get_connection_locked()
+        row = connection.execute(
+            "SELECT uid FROM presets WHERE scope=? AND file_name=?",
+            (scope, file_name),
+        ).fetchone()
+        if row is not None:
+            return str(row["uid"])
+        uid = _generate_preset_uid()
+        connection.execute(
+            "INSERT OR IGNORE INTO presets(uid, scope, file_name, created_at_ms) VALUES(?,?,?,?)",
+            (uid, scope, file_name, int(time.time() * 1000)),
+        )
+        # INSERT OR IGNORE: при гонке двух процессов выигрывает первый —
+        # перечитываем, чтобы оба увидели один и тот же uid.
+        row = connection.execute(
+            "SELECT uid FROM presets WHERE scope=? AND file_name=?",
+            (scope, file_name),
+        ).fetchone()
+        return str(row["uid"]) if row is not None else None
+
+
+def get_preset_uid(scope: str, file_name: str) -> str | None:
+    scope, file_name = _clean_scope_file(scope, file_name)
+    if not scope or not file_name:
+        return None
+    with _SETTINGS_LOCK:
+        connection = _get_connection_locked()
+        row = connection.execute(
+            "SELECT uid FROM presets WHERE scope=? AND file_name=?",
+            (scope, file_name),
+        ).fetchone()
+        return str(row["uid"]) if row is not None else None
+
+
+def rename_preset_identity(scope: str, old_file_name: str, new_file_name: str) -> bool:
+    scope, old_file_name = _clean_scope_file(scope, old_file_name)
+    _, new_file_name = _clean_scope_file(scope, new_file_name)
+    if not scope or not old_file_name or not new_file_name or old_file_name == new_file_name:
+        return False
+    with _SETTINGS_LOCK:
+        connection = _get_connection_locked()
+        try:
+            cursor = connection.execute(
+                "UPDATE presets SET file_name=? WHERE scope=? AND file_name=?",
+                (new_file_name, scope, old_file_name),
+            )
+        except sqlite3.IntegrityError:
+            return False
+        return cursor.rowcount > 0
+
+
+def delete_preset_identity(scope: str, file_name: str) -> bool:
+    """Удаляет пресет из реестра; привязка к источнику уходит каскадом."""
+    scope, file_name = _clean_scope_file(scope, file_name)
+    if not scope or not file_name:
+        return False
+    with _SETTINGS_LOCK:
+        connection = _get_connection_locked()
+        cursor = connection.execute(
+            "DELETE FROM presets WHERE scope=? AND file_name=?",
+            (scope, file_name),
+        )
+        return cursor.rowcount > 0
+
+
+def get_preset_remote_source(scope: str, file_name: str) -> dict[str, Any] | None:
+    scope, file_name = _clean_scope_file(scope, file_name)
+    if not scope or not file_name:
+        return None
+    with _SETTINGS_LOCK:
+        connection = _get_connection_locked()
+        row = connection.execute(
+            "SELECT s.* FROM preset_remote_sources s"
+            " JOIN presets p ON p.uid = s.preset_uid"
+            " WHERE p.scope=? AND p.file_name=?",
+            (scope, file_name),
+        ).fetchone()
+        return _remote_source_row_to_dict(row) if row is not None else None
+
+
+def list_preset_remote_sources(scope: str) -> dict[str, dict[str, Any]]:
+    scope = str(scope or "").strip().lower()
+    if not scope:
+        return {}
+    with _SETTINGS_LOCK:
+        connection = _get_connection_locked()
+        rows = connection.execute(
+            "SELECT p.file_name, s.* FROM preset_remote_sources s"
+            " JOIN presets p ON p.uid = s.preset_uid"
+            " WHERE p.scope=?",
+            (scope,),
+        ).fetchall()
+        return {str(row["file_name"]): _remote_source_row_to_dict(row) for row in rows}
+
+
+def set_preset_remote_source(scope: str, file_name: str, binding: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(binding, dict) or not str(binding.get("url") or "").strip():
+        return None
+    uid = get_or_create_preset_uid(scope, file_name)
+    if uid is None:
+        return None
+    values = {
+        "url": str(binding.get("url") or "").strip(),
+        "etag": str(binding.get("etag") or ""),
+        "last_modified": str(binding.get("last_modified") or ""),
+        "synced_hash": str(binding.get("synced_hash") or ""),
+        "checked_at": str(binding.get("checked_at") or ""),
+        "updated_at": str(binding.get("updated_at") or ""),
+        "error": str(binding.get("error") or ""),
+        "auto": 1 if bool(binding.get("auto", True)) else 0,
+        "detached": 1 if bool(binding.get("detached", False)) else 0,
+    }
+    with _SETTINGS_LOCK:
+        connection = _get_connection_locked()
+        connection.execute(
+            "INSERT INTO preset_remote_sources(preset_uid, url, etag, last_modified,"
+            " synced_hash, checked_at, updated_at, error, auto, detached)"
+            " VALUES(:uid, :url, :etag, :last_modified, :synced_hash, :checked_at,"
+            " :updated_at, :error, :auto, :detached)"
+            " ON CONFLICT(preset_uid) DO UPDATE SET"
+            " url=:url, etag=:etag, last_modified=:last_modified, synced_hash=:synced_hash,"
+            " checked_at=:checked_at, updated_at=:updated_at, error=:error,"
+            " auto=:auto, detached=:detached",
+            {"uid": uid, **values},
+        )
+    return get_preset_remote_source(scope, file_name)
+
+
+def delete_preset_remote_source(scope: str, file_name: str) -> bool:
+    scope, file_name = _clean_scope_file(scope, file_name)
+    if not scope or not file_name:
+        return False
+    with _SETTINGS_LOCK:
+        connection = _get_connection_locked()
+        cursor = connection.execute(
+            "DELETE FROM preset_remote_sources WHERE preset_uid IN"
+            " (SELECT uid FROM presets WHERE scope=? AND file_name=?)",
+            (scope, file_name),
+        )
+        return cursor.rowcount > 0
+
+
+def find_preset_remote_source_by_url(url: str) -> tuple[str, str, dict[str, Any]] | None:
+    needle = str(url or "").strip()
+    if not needle:
+        return None
+    with _SETTINGS_LOCK:
+        connection = _get_connection_locked()
+        row = connection.execute(
+            "SELECT p.scope, p.file_name, s.* FROM preset_remote_sources s"
+            " JOIN presets p ON p.uid = s.preset_uid"
+            " WHERE s.url=?",
+            (needle,),
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row["scope"]), str(row["file_name"]), _remote_source_row_to_dict(row)
+
+
+def _normalize_identity_rows(registry: object) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+    if not isinstance(registry, dict):
+        return result
+    for raw_uid, raw_meta in registry.items():
+        uid = str(raw_uid or "").strip()
+        if not uid or not isinstance(raw_meta, dict):
+            continue
+        result[uid] = {
+            "name": str(raw_meta.get("name") or "").strip(),
+            "sig": str(raw_meta.get("sig") or "").strip(),
+        }
+    return result
+
+
 def get_profile_identity_registry(engine: str) -> dict[str, Any]:
     key = str(engine or "").strip().lower()
-    return _read_path_value(("profile_identity", key), None) or {}
+    if not key:
+        return {}
+    with _SETTINGS_LOCK:
+        connection = _get_connection_locked()
+        rows = connection.execute(
+            "SELECT uid, name, sig FROM profile_identities WHERE scope=? ORDER BY position",
+            (key,),
+        ).fetchall()
+        if rows:
+            return {str(row["uid"]): {"name": str(row["name"]), "sig": str(row["sig"])} for row in rows}
+    # Ленивая миграция: реестр раньше жил JSON-секцией profile_identity.
+    legacy = _normalize_identity_rows(_read_path_value(("profile_identity", key), None) or {})
+    if legacy:
+        set_profile_identity_registry(key, legacy)
+    return legacy
 
 
 def set_profile_identity_registry(engine: str, registry: dict[str, Any]) -> dict[str, Any]:
     key = str(engine or "").strip().lower()
-    updated = _update_settings(
-        lambda data: _set_path_value(data, ("profile_identity", key), _as_dict(registry))
-    )
-    return copy.deepcopy(updated["profile_identity"].get(key) or {})
+    normalized = _normalize_identity_rows(registry)
+    if not key:
+        return {}
+    with _SETTINGS_LOCK:
+        connection = _get_connection_locked()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute("DELETE FROM profile_identities WHERE scope=?", (key,))
+            connection.executemany(
+                "INSERT INTO profile_identities(scope, uid, name, sig, position) VALUES(?,?,?,?,?)",
+                [
+                    (key, uid, meta["name"], meta["sig"], position)
+                    for position, (uid, meta) in enumerate(normalized.items())
+                ],
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+    return copy.deepcopy(normalized)
 
 
 def get_orchestra_settings() -> dict[str, Any]:

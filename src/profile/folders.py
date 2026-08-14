@@ -139,6 +139,41 @@ def materialize_profile_folder_items(folder_by_profile_key: dict[str, str]) -> b
         return True
 
 
+def migrate_profile_item_keys(key_mapping: dict[str, str]) -> bool:
+    """Переносит мету папок с legacy-ключей (name:/sig:) на uid-ключи.
+
+    Существующая uid-запись побеждает; legacy-запись в любом случае
+    удаляется, чтобы не плодить двойников одного профиля.
+    """
+    mapping = {
+        str(old or "").strip(): str(new or "").strip()
+        for old, new in dict(key_mapping or {}).items()
+    }
+    mapping = {
+        old: new
+        for old, new in mapping.items()
+        if old and new and old != new and not old.startswith("uid:")
+    }
+    if not mapping:
+        return False
+    with profile_folder_state_lock():
+        state = load_profile_folder_state()
+        items = state.get("items")
+        if not isinstance(items, dict):
+            return False
+        changed = False
+        for old_key, new_key in mapping.items():
+            row = items.pop(old_key, None)
+            if row is None:
+                continue
+            changed = True
+            if new_key not in items:
+                items[new_key] = row
+        if changed:
+            save_profile_folder_state(state)
+        return changed
+
+
 def reset_profile_folders(folder_by_profile_key: dict[str, str] | None = None) -> dict[str, Any]:
     """Сброс к начальному правилу: дефолтные папки + первичное размещение всех
     переданных профилей (ключ → папка от классификатора). Детерминирован и

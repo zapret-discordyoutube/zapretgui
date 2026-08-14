@@ -1,8 +1,11 @@
 """Привязки пресетов к удалённым источникам (URL).
 
-Источник истины — секция ``remote_presets`` settings store; файлы
-пресетов никаких служебных параметров не содержат. Привязка хранится
-по file_name внутри scope движка (winws1/winws2).
+Источник истины — таблицы ``presets`` и ``preset_remote_sources`` в
+settings.sqlite3: у каждого пресета есть постоянный uid (``pid:<uuid4>``),
+привязка держится за uid и переживает переименование файла (меняется
+только колонка file_name). Файлы пресетов никаких служебных параметров
+не содержат. Публичный API этого модуля по-прежнему оперирует парой
+(scope, file_name) — остальному коду uid знать не нужно.
 """
 
 from __future__ import annotations
@@ -14,14 +17,42 @@ from settings.mode import ENGINE_WINWS1, ENGINE_WINWS2
 
 REMOTE_PRESET_SCOPES = (ENGINE_WINWS2, ENGINE_WINWS1)
 
+_LEGACY_SECTION_MIGRATED = False
+
 
 def _normalize_scope(scope_key: str) -> str:
     scope = str(scope_key or "").strip().lower()
     return scope if scope in REMOTE_PRESET_SCOPES else ENGINE_WINWS2
 
 
-def _normalize_file_name(file_name: str) -> str:
-    return str(file_name or "").strip()
+def _migrate_legacy_section_once() -> None:
+    """Одноразовый перенос привязок из старой JSON-секции remote_presets."""
+    global _LEGACY_SECTION_MIGRATED
+    if _LEGACY_SECTION_MIGRATED:
+        return
+    _LEGACY_SECTION_MIGRATED = True
+    try:
+        section = settings_store.get_remote_presets_settings()
+    except Exception:
+        return
+    if not isinstance(section, dict):
+        return
+    migrated_any = False
+    for scope in REMOTE_PRESET_SCOPES:
+        legacy = section.get(scope)
+        if not isinstance(legacy, dict) or not legacy:
+            continue
+        for file_name, binding in legacy.items():
+            if not isinstance(binding, dict) or not str(binding.get("url") or "").strip():
+                continue
+            if settings_store.get_preset_remote_source(scope, file_name) is None:
+                settings_store.set_preset_remote_source(scope, file_name, binding)
+                migrated_any = True
+    if migrated_any or any(section.get(scope) for scope in REMOTE_PRESET_SCOPES):
+        try:
+            settings_store.set_remote_presets_settings({scope: {} for scope in REMOTE_PRESET_SCOPES})
+        except Exception:
+            pass
 
 
 def make_remote_preset_binding(url: str, *, synced_hash: str = "", now_iso: str = "") -> dict[str, Any]:
@@ -38,35 +69,27 @@ def make_remote_preset_binding(url: str, *, synced_hash: str = "", now_iso: str 
     }
 
 
+def get_or_create_preset_uid(scope_key: str, file_name: str) -> str | None:
+    return settings_store.get_or_create_preset_uid(_normalize_scope(scope_key), file_name)
+
+
+def get_preset_uid(scope_key: str, file_name: str) -> str | None:
+    return settings_store.get_preset_uid(_normalize_scope(scope_key), file_name)
+
+
 def load_remote_preset_bindings(scope_key: str) -> dict[str, dict[str, Any]]:
-    scope = _normalize_scope(scope_key)
-    section = settings_store.get_remote_presets_settings()
-    bindings = section.get(scope) if isinstance(section, dict) else None
-    return dict(bindings) if isinstance(bindings, dict) else {}
+    _migrate_legacy_section_once()
+    return settings_store.list_preset_remote_sources(_normalize_scope(scope_key))
 
 
 def get_remote_preset_binding(scope_key: str, file_name: str) -> dict[str, Any] | None:
-    key = _normalize_file_name(file_name)
-    if not key:
-        return None
-    return load_remote_preset_bindings(scope_key).get(key)
+    _migrate_legacy_section_once()
+    return settings_store.get_preset_remote_source(_normalize_scope(scope_key), file_name)
 
 
 def set_remote_preset_binding(scope_key: str, file_name: str, binding: dict[str, Any]) -> dict[str, Any] | None:
-    scope = _normalize_scope(scope_key)
-    key = _normalize_file_name(file_name)
-    if not key or not isinstance(binding, dict) or not str(binding.get("url") or "").strip():
-        return None
-    section = settings_store.get_remote_presets_settings()
-    if not isinstance(section, dict):
-        section = {}
-    scope_bindings = section.get(scope)
-    if not isinstance(scope_bindings, dict):
-        scope_bindings = {}
-    scope_bindings[key] = dict(binding)
-    section[scope] = scope_bindings
-    saved = settings_store.set_remote_presets_settings(section)
-    return saved.get(scope, {}).get(key)
+    _migrate_legacy_section_once()
+    return settings_store.set_preset_remote_source(_normalize_scope(scope_key), file_name, binding)
 
 
 def update_remote_preset_binding(scope_key: str, file_name: str, **fields) -> dict[str, Any] | None:
@@ -78,43 +101,26 @@ def update_remote_preset_binding(scope_key: str, file_name: str, **fields) -> di
 
 
 def delete_remote_preset_binding(scope_key: str, file_name: str) -> bool:
-    scope = _normalize_scope(scope_key)
-    key = _normalize_file_name(file_name)
-    if not key:
-        return False
-    section = settings_store.get_remote_presets_settings()
-    scope_bindings = section.get(scope) if isinstance(section, dict) else None
-    if not isinstance(scope_bindings, dict) or key not in scope_bindings:
-        return False
-    scope_bindings.pop(key, None)
-    section[scope] = scope_bindings
-    settings_store.set_remote_presets_settings(section)
-    return True
+    """Удаляет только привязку к источнику; uid пресета остаётся."""
+    _migrate_legacy_section_once()
+    return settings_store.delete_preset_remote_source(_normalize_scope(scope_key), file_name)
 
 
 def rename_remote_preset_binding(scope_key: str, old_file_name: str, new_file_name: str) -> bool:
-    scope = _normalize_scope(scope_key)
-    old_key = _normalize_file_name(old_file_name)
-    new_key = _normalize_file_name(new_file_name)
-    if not old_key or not new_key or old_key == new_key:
-        return False
-    section = settings_store.get_remote_presets_settings()
-    scope_bindings = section.get(scope) if isinstance(section, dict) else None
-    if not isinstance(scope_bindings, dict) or old_key not in scope_bindings:
-        return False
-    scope_bindings[new_key] = scope_bindings.pop(old_key)
-    section[scope] = scope_bindings
-    settings_store.set_remote_presets_settings(section)
-    return True
+    """Переименование файла пресета: uid и привязка не двигаются."""
+    _migrate_legacy_section_once()
+    return settings_store.rename_preset_identity(
+        _normalize_scope(scope_key), old_file_name, new_file_name
+    )
+
+
+def delete_preset_identity(scope_key: str, file_name: str) -> bool:
+    """Пресет удалён: убирает uid, привязка уходит каскадом."""
+    _migrate_legacy_section_once()
+    return settings_store.delete_preset_identity(_normalize_scope(scope_key), file_name)
 
 
 def find_remote_preset_by_url(url: str) -> tuple[str, str, dict[str, Any]] | None:
-    """Ищет привязанный пресет по URL во всех scope (дедупликация импорта)."""
-    needle = str(url or "").strip()
-    if not needle:
-        return None
-    for scope in REMOTE_PRESET_SCOPES:
-        for file_name, binding in load_remote_preset_bindings(scope).items():
-            if str(binding.get("url") or "").strip() == needle:
-                return scope, file_name, binding
-    return None
+    """Ищет привязанный пресет по URL (дедупликация импорта)."""
+    _migrate_legacy_section_once()
+    return settings_store.find_preset_remote_source_by_url(url)
