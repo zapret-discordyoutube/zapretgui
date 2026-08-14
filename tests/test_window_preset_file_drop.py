@@ -293,7 +293,7 @@ class WindowPresetFileDropTests(unittest.TestCase):
         overlay.show_hover_hint()
         self.assertFalse(overlay.isHidden())
         self.assertEqual(overlay._title, "Drop the file to import")
-        self.assertEqual(overlay._subtitle, "TXT preset file")
+        self.assertEqual(overlay._subtitle, "TXT preset or ZIP archive")
         self.assertFalse(overlay._auto_hide_timer.isActive())
 
         # Пока показана плашка «файл принят», конец наведения её не гасит.
@@ -404,7 +404,7 @@ class WindowPresetFileDropTests(unittest.TestCase):
 
         result = UserPresetsPageBase.import_dropped_preset_files(
             page,
-            ["C:/Temp/First.txt", "C:/Temp/Second.TXT"],
+            ["C:/Temp/First.txt", "C:/Temp/Second.ZIP"],
         )
 
         self.assertTrue(result)
@@ -412,7 +412,7 @@ class WindowPresetFileDropTests(unittest.TestCase):
             page._request_preset_bulk_action.call_args_list,
             [
                 unittest.mock.call("import", file_path="C:/Temp/First.txt"),
-                unittest.mock.call("import", file_path="C:/Temp/Second.TXT"),
+                unittest.mock.call("import", file_path="C:/Temp/Second.ZIP"),
             ],
         )
 

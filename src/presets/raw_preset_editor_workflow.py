@@ -186,10 +186,10 @@ def duplicate_raw_preset(*, presets_feature, launch_method: str | None, file_nam
     )
 
 
-def export_raw_preset(*, presets_feature, launch_method: str | None, file_name: str, target_path: str) -> None:
+def export_raw_preset(*, presets_feature, launch_method: str | None, file_name: str, target_path: str):
     if not file_name:
         raise ValueError("Не удалось определить имя файла пресета для экспорта.")
-    presets_feature.export_preset_plain_text(
+    return presets_feature.export_preset_plain_text(
         launch_method,
         file_name,
         target_path,

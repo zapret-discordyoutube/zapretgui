@@ -26,12 +26,12 @@ ACCEPTED_FLASH_DURATION_MS = 1400
 
 
 def valid_preset_file_paths(file_paths) -> list[str]:
-    """Оставляет уникальные существующие TXT-файлы."""
+    """Оставляет уникальные существующие TXT- и ZIP-файлы preset-ов."""
     paths: list[str] = []
     seen: set[str] = set()
     for file_path in file_paths or ():
         path = str(file_path or "").strip()
-        if not path or not path.lower().endswith(".txt") or not os.path.isfile(path):
+        if not path or not path.lower().endswith((".txt", ".zip")) or not os.path.isfile(path):
             continue
         path_key = os.path.normcase(os.path.normpath(path))
         if path_key in seen:
@@ -42,7 +42,7 @@ def valid_preset_file_paths(file_paths) -> list[str]:
 
 
 def dropped_preset_file_paths(mime_data) -> list[str]:
-    """Возвращает уникальные локальные TXT-файлы из данных перетаскивания."""
+    """Возвращает уникальные локальные TXT- и ZIP-файлы из перетаскивания."""
     if mime_data is None:
         return []
     try:
@@ -152,9 +152,9 @@ class PresetFileDropOverlay(QWidget):
                 default="Отпустите файл для импорта",
             ),
             tr_catalog(
-                "common.preset_drop.any_txt",
+                "common.preset_drop.any_file",
                 language=language,
-                default="TXT-файл с пресетом",
+                default="TXT preset or ZIP archive" if language == "en" else "TXT-пресет или ZIP-архив",
             ),
         )
 
@@ -190,9 +190,13 @@ class PresetFileDropOverlay(QWidget):
             ).format(file_name=os.path.basename(paths[0]))
         else:
             subtitle = tr_catalog(
-                "common.preset_drop.multiple",
+                "common.preset_drop.file_count",
                 language=language,
-                default="Количество TXT-файлов: {count}",
+                default=(
+                    "Preset files: {count}"
+                    if language == "en"
+                    else "Количество файлов пресетов: {count}"
+                ),
             ).format(count=len(paths))
         self._apply_texts_and_show(title, subtitle)
         return True
@@ -257,7 +261,7 @@ class PresetFileDropOverlay(QWidget):
 
 
 class WindowPresetFileDropFilter(QObject):
-    """Направляет TXT-файлы текущей странице, если она умеет их импортировать."""
+    """Направляет TXT/ZIP текущей странице, если она умеет их импортировать."""
 
     def __init__(
         self,
@@ -303,7 +307,7 @@ class WindowPresetFileDropFilter(QObject):
         try:
             imported = bool(import_action(paths))
         except Exception as exc:
-            log(f"Не удалось передать TXT-файл на импорт: {exc}", "ERROR")
+            log(f"Не удалось передать файл пресета на импорт: {exc}", "ERROR")
             imported = False
         if imported:
             self._flash_accepted(paths)

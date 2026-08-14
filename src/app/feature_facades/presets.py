@@ -500,8 +500,8 @@ class PresetsFeature:
                 new_name=new_name,
             )
 
-        def _export_preset(*, file_name: str, target_path: str) -> None:
-            export_raw_preset(
+        def _export_preset(*, file_name: str, target_path: str):
+            return export_raw_preset(
                 presets_feature=self,
                 launch_method=clean_launch_method,
                 file_name=file_name,
@@ -652,6 +652,12 @@ class PresetsFeature:
                 f"Отображаемое имя: {actual_name}\n"
                 f"Имя файла: {actual_file_name}"
             )
+            imported_lists = tuple(getattr(imported, "imported_list_files", ()) or ())
+            renamed_lists = tuple(getattr(imported, "renamed_list_files", ()) or ())
+            if imported_lists:
+                content += f"\nФайлов списков установлено: {len(imported_lists)}"
+            if renamed_lists:
+                content += f"\nИз-за совпадения имён переименовано: {len(renamed_lists)}"
             return UserPresetImportResult(
                 ok=True,
                 actual_name=actual_name,
@@ -660,7 +666,13 @@ class PresetsFeature:
                 log_level="INFO",
                 log_message=f"Импортирован пресет '{actual_name}'",
                 infobar_level="warning" if file_name_changed else "success",
-                infobar_title="Импортирован с новым именем файла" if file_name_changed else "Пресет импортирован",
+                infobar_title=(
+                    "Импортирован с новым именем файла"
+                    if file_name_changed
+                    else "Пресет и списки импортированы"
+                    if imported_lists
+                    else "Пресет импортирован"
+                ),
                 infobar_content=content,
                 structure_changed=True,
             )
@@ -845,14 +857,26 @@ class PresetsFeature:
             )
 
         def _export_preset(*, file_name: str, file_path: str, display_name: str) -> UserPresetActionResult:
-            self.export_preset_plain_text(launch_method, file_name, file_path)
+            exported = self.export_preset_plain_text(launch_method, file_name, file_path)
+            actual_path = str(getattr(exported, "path", exported) or file_path)
+            archived_lists = tuple(getattr(exported, "archived_list_files", ()) or ())
+            if archived_lists:
+                title = "Пресет и списки экспортированы"
+                content = (
+                    "В пресете есть пользовательские файлы списков, поэтому создан ZIP-архив.\n"
+                    f"Файлов списков: {len(archived_lists)}\n"
+                    f"Путь: {actual_path}"
+                )
+            else:
+                title = "Успех"
+                content = f"Пресет экспортирован: {actual_path}"
             return UserPresetActionResult(
                 ok=True,
                 log_level="INFO",
-                log_message=f"Экспортирован пресет '{display_name}' в {file_path}",
+                log_message=f"Экспортирован пресет '{display_name}' в {actual_path}",
                 infobar_level="success",
-                infobar_title="Успех",
-                infobar_content=f"Пресет экспортирован: {file_path}",
+                infobar_title=title,
+                infobar_content=content,
                 structure_changed=False,
             )
 

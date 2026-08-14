@@ -261,10 +261,10 @@ class PresetFileService:
     def create(self, name: str, *, from_current: bool = True) -> PresetManifest:
         return _create_preset(self, name, from_current=from_current)
 
-    def import_from_file(self, src_path: Path, name: str | None = None) -> PresetManifest:
+    def import_from_file(self, src_path: Path, name: str | None = None):
         return _import_from_file(self, src_path, name=name)
 
-    def export_plain_text_by_file_name(self, file_name: str, dest_path: Path) -> Path:
+    def export_plain_text_by_file_name(self, file_name: str, dest_path: Path):
         return _export_plain_text_by_file_name(self, file_name, dest_path)
 
     def reset_to_builtin_by_file_name(self, file_name: str) -> PresetManifest:

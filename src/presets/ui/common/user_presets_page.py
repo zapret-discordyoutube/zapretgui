@@ -1002,21 +1002,21 @@ class UserPresetsPageBase(BasePage):
             self,
             self._tr(f"{self._config.tr_prefix}.file_dialog.import_title", "Импортировать пресет"),
             "",
-            "Файлы пресетов (*.txt);;Все файлы (*.*)",
+            "Пресеты и архивы (*.txt *.zip);;Все файлы (*.*)",
         )
         if not file_path:
             return
         self._request_preset_bulk_action("import", file_path=file_path)
 
     def import_dropped_preset_files(self, file_paths) -> bool:
-        """Ставит перетащенные TXT-файлы в общую очередь импорта."""
+        """Ставит перетащенные TXT/ZIP-файлы в общую очередь импорта."""
         if self.__dict__.get("_cleanup_in_progress", False):
             return False
 
         accepted = False
         for file_path in file_paths or ():
             path = str(file_path or "").strip()
-            if not path or not path.lower().endswith(".txt"):
+            if not path or not path.lower().endswith((".txt", ".zip")):
                 continue
             accepted = bool(
                 self._request_preset_bulk_action("import", file_path=path)

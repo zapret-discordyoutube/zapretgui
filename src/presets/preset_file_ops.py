@@ -11,6 +11,11 @@ from presets.preset_text_ops import (
     _rewrite_preset_headers,
     validate_preset_source_text,
 )
+from presets.portable_archive import (
+    PresetImportResult,
+    export_preset_with_lists,
+    import_portable_preset,
+)
 
 
 def _read_standard_builtin_preset(backend) -> str:
@@ -86,6 +91,8 @@ def import_from_file(backend, src_path: Path, name: str | None = None):
     if not src.exists():
         raise ValueError(f"Import source not found: {src}")
     preset_name = str(name or src.stem or "Imported").strip() or "Imported"
+    if src.suffix.lower() == ".zip":
+        return import_portable_preset(backend, src, name=preset_name)
     source_text = src.read_text(encoding="utf-8", errors="replace")
     validation_error = validate_preset_source_text(source_text, engine=backend.engine)
     if validation_error:
@@ -99,17 +106,11 @@ def import_from_file(backend, src_path: Path, name: str | None = None):
     imported = backend.preset_file_store.create_preset(backend.engine, preset_name, rewritten, kind="imported")
     backend._delete_folder_item_meta(imported.file_name)
     backend.notify_presets_changed()
-    return imported
+    return PresetImportResult(manifest=imported)
 
 
-def export_plain_text_by_file_name(backend, file_name: str, dest_path: Path) -> Path:
-    dest = Path(dest_path)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    text = backend.read_source_text_by_file_name(file_name)
-    if not text.endswith("\n"):
-        text += "\n"
-    dest.write_text(text, encoding="utf-8")
-    return dest
+def export_plain_text_by_file_name(backend, file_name: str, dest_path: Path):
+    return export_preset_with_lists(backend, file_name, Path(dest_path))
 
 
 def reset_to_builtin_by_file_name(backend, file_name: str):

@@ -125,11 +125,11 @@ class RawPresetActionWorker(QThread):
                 result = (updated, self._source_path(updated.file_name), self._load_result_after_action(updated.file_name))
             elif action == "export":
                 target_path = str(payload.get("target_path") or "")
-                self._export_preset(
+                exported = self._export_preset(
                     file_name=str(payload.get("file_name") or ""),
                     target_path=target_path,
                 )
-                result = target_path
+                result = exported
             elif action == "reset":
                 updated = self._reset_to_builtin(
                     file_name=str(payload.get("file_name") or ""),

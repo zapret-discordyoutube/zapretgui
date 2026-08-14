@@ -1950,7 +1950,15 @@ class PresetRawEditorPage(BasePage):
             self._refresh_header()
             self._show_success(f"Создан дубликат: {payload.get('new_name') or duplicated.name}")
         elif action == "export":
-            self._show_success(f"Пресет экспортирован: {result}")
+            actual_path = str(getattr(result, "path", result) or "")
+            archived_lists = tuple(getattr(result, "archived_list_files", ()) or ())
+            if archived_lists:
+                self._show_success(
+                    "В пресете есть пользовательские списки, поэтому создан ZIP-архив "
+                    f"с пресетом и {len(archived_lists)} файлами: {actual_path}"
+                )
+            else:
+                self._show_success(f"Пресет экспортирован: {actual_path}")
         elif action == "reset":
             updated, path, load_result = result
             self._preset_name = updated.name
