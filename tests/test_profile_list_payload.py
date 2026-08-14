@@ -91,7 +91,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_strategy_only_apply_updates_cached_profile_list_item_without_dropping_snapshot(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            catalogs_dir = root / "profile" / "strategy_catalogs" / "winws2"
+            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
             catalogs_dir.mkdir(parents=True)
             (catalogs_dir / "tcp.txt").write_text(
                 "\n".join(
@@ -151,7 +151,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir.mkdir()
             (lists_dir / "youtube.txt").write_text("youtube.com\n", encoding="utf-8")
             (lists_dir / "ipset-youtube.txt").write_text("1.1.1.1\n", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -206,7 +206,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir.mkdir()
             (lists_dir / "youtube.txt").write_text("youtube.com\n", encoding="utf-8")
             (lists_dir / "ipset-youtube.txt").write_text("1.1.1.1\n", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             original_text = "\n".join(
@@ -243,7 +243,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir.mkdir()
             for name in ("ipset-one.txt", "ipset-two.txt", "ipset-three.txt", "ipset-four.txt", "youtube.txt"):
                 (lists_dir / name).write_text("127.0.0.1\n", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -332,7 +332,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir = root / "lists"
             lists_dir.mkdir()
             (lists_dir / "youtube.txt").write_text("youtube.com\n", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _FileBackedPresetStore(
@@ -367,7 +367,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir = root / "lists"
             lists_dir.mkdir()
             (lists_dir / "youtube.txt").write_text("youtube.com\n", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _BlockingFileBackedPresetStore(
@@ -419,7 +419,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir = root / "lists"
             lists_dir.mkdir()
             (lists_dir / "youtube.txt").write_text("youtube.com\n", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _FileBackedPresetStore(
@@ -460,7 +460,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir.mkdir()
             (lists_dir / "facebook.txt").write_text("", encoding="utf-8")
             (lists_dir / "ipset-facebook.txt").write_text("", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _SwitchableFileBackedPresetStore(
@@ -534,7 +534,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir.mkdir()
             (lists_dir / "facebook.txt").write_text("", encoding="utf-8")
             (lists_dir / "ipset-facebook.txt").write_text("", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _SwitchableFileBackedPresetStore(
@@ -628,7 +628,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir.mkdir()
             (lists_dir / "youtube.txt").write_text("youtube.com\n", encoding="utf-8")
             (lists_dir / "ipset-youtube.txt").write_text("1.1.1.1\n", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -674,7 +674,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir.mkdir()
             (lists_dir / "youtube.txt").write_text("youtube.com\n", encoding="utf-8")
             (lists_dir / "ipset-youtube.txt").write_text("1.1.1.1\n", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -712,7 +712,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir.mkdir()
             (lists_dir / "youtube.txt").write_text("youtube.com\n", encoding="utf-8")
             (lists_dir / "ipset-youtube.txt").write_text("1.1.1.1\n", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore(
@@ -743,7 +743,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_enabled_profile_without_strategy_is_shown_as_no_strategy_selected(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore(
@@ -777,7 +777,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir.mkdir()
             (lists_dir / "youtube.txt").write_text("", encoding="utf-8")
             (lists_dir / "ipset-youtube.txt").write_text("", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -818,7 +818,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_named_template_collapses_with_unnamed_preset_profile_by_same_list(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -857,7 +857,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_unnamed_preset_profile_uses_matching_template_display_name(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -900,7 +900,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir = root / "lists"
             lists_dir.mkdir()
             (lists_dir / "facebook.txt").write_text("facebook.com\n", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -937,7 +937,7 @@ class ProfileListPayloadTests(unittest.TestCase):
             lists_dir = root / "lists"
             lists_dir.mkdir()
             (lists_dir / "facebook.txt").write_text("facebook.com\n", encoding="utf-8")
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -967,7 +967,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_lowercase_preset_profile_name_wins_over_template_case(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -1009,7 +1009,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_profile_folder_does_not_depend_on_preset_membership(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -1056,9 +1056,9 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_profile_setup_loads_selected_profile_without_rebuilding_whole_list(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
-            catalogs_dir = root / "profile" / "strategy_catalogs" / "winws2"
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
             catalogs_dir.mkdir(parents=True)
             (catalogs_dir / "tcp.txt").write_text(
                 "\n".join(
@@ -1101,7 +1101,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_profile_move_updates_interface_order_without_rewriting_preset_text(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             source_text = "\n".join(
@@ -1140,7 +1140,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_profile_move_inside_folder_does_not_pull_other_default_groups(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             source_text = "\n".join(
@@ -1185,7 +1185,7 @@ class ProfileListPayloadTests(unittest.TestCase):
 
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             source_text = "\n".join(
@@ -1226,7 +1226,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_profile_can_move_to_folder_without_rewriting_preset_text(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             source_text = "\n".join(
@@ -1257,7 +1257,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_preset_order_profiles_use_raw_preset_order_without_templates_or_deduplication(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -1310,7 +1310,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_preset_order_move_rewrites_preset_file_order(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore(
@@ -1357,7 +1357,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_preset_order_move_preserves_new_line_name_when_profile_becomes_first(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore(
@@ -1394,7 +1394,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_preset_order_move_uses_exact_row_key_for_duplicate_profiles(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore(
@@ -1441,7 +1441,7 @@ class ProfileListPayloadTests(unittest.TestCase):
     def test_preset_order_move_rejects_ambiguous_logical_key(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             source_text = "\n".join(
@@ -1485,7 +1485,7 @@ class ProfileListPayloadTests(unittest.TestCase):
         суффиксы (см. _assign_profile_keys)."""
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             source_text = "\n".join(
@@ -1553,9 +1553,9 @@ class ProfileListPayloadTests(unittest.TestCase):
 
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
-            catalogs_dir = root / "profile" / "strategy_catalogs" / "winws2"
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
             catalogs_dir.mkdir(parents=True)
             catalog_lines: list[str] = []
             for index in range(80):
@@ -1599,7 +1599,7 @@ class ProfileDerivedCacheTests(unittest.TestCase):
 
     @staticmethod
     def _make_environment(root: Path, files: dict[str, str], selected: str):
-        templates_dir = root / "profile" / "templates"
+        templates_dir = root / "system" / "templates"
         templates_dir.mkdir(parents=True)
         (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
         store = _SwitchableFileBackedPresetStore(root, files, selected=selected)

@@ -98,16 +98,31 @@ class ApplicationPaths:
         return self.root / "ico"
 
     @property
-    def json_dir(self) -> Path:
-        return self.root / "json"
+    def system_dir(self) -> Path:
+        """Каталог, который целиком кладёт и заменяет установщик."""
+        return self.root / "system"
 
     @property
-    def data_dir(self) -> Path:
-        return self.root / "data"
+    def user_dir(self) -> Path:
+        """Каталог пользовательского состояния; установщик его не трогает."""
+        return self.root / "user"
+
+    @property
+    def user_lua_dir(self) -> Path:
+        """Рантайм-файлы оркестратора (генерируются приложением)."""
+        return self.user_dir / "lua"
 
     @property
     def hosts_catalog_database(self) -> Path:
-        return self.data_dir / "hosts_catalog.sqlite3"
+        return self.system_dir / "hosts_catalog.sqlite3"
+
+    @property
+    def strategy_catalogs_dir(self) -> Path:
+        return self.system_dir / "strategy_catalogs"
+
+    @property
+    def profile_templates_dir(self) -> Path:
+        return self.system_dir / "templates"
 
     @property
     def lists_dir(self) -> Path:
@@ -130,16 +145,12 @@ class ApplicationPaths:
         return self.root / "presets"
 
     @property
-    def profile_dir(self) -> Path:
-        return self.root / "profile"
-
-    @property
-    def settings_dir(self) -> Path:
-        return self.root / "settings"
-
-    @property
     def settings_database(self) -> Path:
-        return self.settings_dir / "settings.sqlite3"
+        return self.user_dir / "settings.sqlite3"
+
+    @property
+    def premium_database(self) -> Path:
+        return self.user_dir / "premium.sqlite3"
 
     @property
     def logs_dir(self) -> Path:
@@ -156,10 +167,6 @@ class ApplicationPaths:
     @property
     def themes_dir(self) -> Path:
         return self.root / "themes"
-
-    @property
-    def sos_dir(self) -> Path:
-        return self.root / "sos"
 
     @property
     def windivert_filter_dir(self) -> Path:

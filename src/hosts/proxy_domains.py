@@ -51,9 +51,9 @@ def _clean_str(value: object) -> str:
 
 def _get_hosts_catalog_path() -> Path:
     if PACKAGED_RUNTIME:
-        return Path(MAIN_DIRECTORY) / "data" / CATALOG_FILE_NAME
+        return Path(MAIN_DIRECTORY) / "system" / CATALOG_FILE_NAME
     project_root = Path(__file__).resolve().parents[3]
-    return project_root / "private_zapretgui" / "resources" / "data" / CATALOG_FILE_NAME
+    return project_root / "private_zapretgui" / "resources" / "system" / CATALOG_FILE_NAME
 
 
 def get_hosts_catalog_path() -> Path:

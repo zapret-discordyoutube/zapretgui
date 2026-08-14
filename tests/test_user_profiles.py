@@ -136,7 +136,7 @@ class UserProfilesTests(unittest.TestCase):
     def test_user_profile_name_must_not_intersect_with_system_profile_names(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(
@@ -188,7 +188,7 @@ class UserProfilesTests(unittest.TestCase):
     def test_winws1_user_profile_uses_first_strategy_from_protocol_catalog(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            catalog_dir = root / "profile" / "strategy_catalogs" / "winws1"
+            catalog_dir = root / "system" / "strategy_catalogs" / "winws1"
             catalog_dir.mkdir(parents=True)
             (catalog_dir / "tcp.txt").write_text(
                 "\n".join(
@@ -222,8 +222,8 @@ class UserProfilesTests(unittest.TestCase):
     def test_list_profiles_includes_user_profile_and_enabling_adds_it_to_preset(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore("")
             feature = SimpleNamespace(
                 _presets_feature=store,
@@ -257,8 +257,8 @@ class UserProfilesTests(unittest.TestCase):
         """Регресс: create после уже построенного списка (тёплый PresetSourcesCache)."""
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore("")
             feature = SimpleNamespace(
                 _presets_feature=store,
@@ -278,8 +278,8 @@ class UserProfilesTests(unittest.TestCase):
     def test_deleted_user_profile_disappears_after_warm_profile_list(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             library = _PresetLibrary({"zapret2_mode": {"selected.txt": ""}})
             feature = SimpleNamespace(
                 _presets_feature=library,
@@ -299,8 +299,8 @@ class UserProfilesTests(unittest.TestCase):
         """Регресс: кэш шаблонов ключуется ревизией user_profiles, а не чистится вручную."""
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             feature = SimpleNamespace(
                 _presets_feature=_PresetStore(""),
                 _app_paths=AppPaths(user_root=root, local_root=root),
@@ -318,14 +318,14 @@ class UserProfilesTests(unittest.TestCase):
     def test_corrupt_settings_database_is_backed_up_before_defaults_recreate(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            settings_path = root / "settings" / "settings.sqlite3"
+            settings_path = root / "user" / "settings.sqlite3"
             settings_path.parent.mkdir(parents=True)
             settings_path.write_bytes(b"not a sqlite database")
 
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
                 settings = read_settings()
 
-            backups = list((root / "settings").glob("settings.sqlite3.corrupt.*.bak"))
+            backups = list((root / "user").glob("settings.sqlite3.corrupt.*.bak"))
             self.assertEqual(settings["user_profiles"]["profiles"], {})
             self.assertEqual(len(backups), 1)
             self.assertEqual(backups[0].read_bytes(), b"not a sqlite database")
@@ -336,7 +336,7 @@ class UserProfilesTests(unittest.TestCase):
 
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            settings_path = root / "settings" / "settings.json"
+            settings_path = root / "user" / "settings.json"
             settings_path.parent.mkdir(parents=True)
             settings_path.write_text('{"appearance":{"display_mode":"light"}}', encoding="utf-8")
 
@@ -369,8 +369,8 @@ class UserProfilesTests(unittest.TestCase):
     def test_save_list_file_text_raises_for_unknown_profile_key(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore("")
             feature = SimpleNamespace(
                 _presets_feature=store,
@@ -385,8 +385,8 @@ class UserProfilesTests(unittest.TestCase):
     def test_enabling_user_profile_reloads_ranges_from_written_preset(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore("")
             feature = SimpleNamespace(
                 _presets_feature=store,
@@ -410,8 +410,8 @@ class UserProfilesTests(unittest.TestCase):
     def test_not_added_user_profile_can_preview_selected_ipset_file(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore("")
             feature = SimpleNamespace(
                 _presets_feature=store,
@@ -438,8 +438,8 @@ class UserProfilesTests(unittest.TestCase):
     def test_enabling_not_added_user_profile_uses_selected_ipset_variant(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore("")
             feature = SimpleNamespace(
                 _presets_feature=store,
@@ -468,9 +468,9 @@ class UserProfilesTests(unittest.TestCase):
     def test_applying_strategy_to_not_added_user_profile_writes_only_default_out_range(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
-            catalogs_dir = root / "profile" / "strategy_catalogs" / "winws2"
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
             catalogs_dir.mkdir(parents=True)
             (catalogs_dir / "tcp.txt").write_text(
                 "\n".join(
@@ -508,9 +508,9 @@ class UserProfilesTests(unittest.TestCase):
     def test_applying_strategy_to_skipped_profile_does_not_enable_or_rewrite_it(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
-            catalogs_dir = root / "profile" / "strategy_catalogs" / "winws2"
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
             catalogs_dir.mkdir(parents=True)
             (catalogs_dir / "tcp.txt").write_text(
                 "\n".join(
@@ -555,7 +555,7 @@ class UserProfilesTests(unittest.TestCase):
     def test_applying_strategy_to_template_profile_removes_blank_before_strategy(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             templates_dir.joinpath("all_profiles.txt").write_text(
                 "\n".join(
@@ -568,7 +568,7 @@ class UserProfilesTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            catalogs_dir = root / "profile" / "strategy_catalogs" / "winws2"
+            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
             catalogs_dir.mkdir(parents=True)
             (catalogs_dir / "tcp.txt").write_text(
                 "\n".join(
@@ -613,7 +613,7 @@ class UserProfilesTests(unittest.TestCase):
     def test_enabling_stock_template_adds_safe_pass_without_internal_blanks(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             templates_dir.joinpath("all_profiles.txt").write_text(
                 "\n".join(
@@ -657,8 +657,8 @@ class UserProfilesTests(unittest.TestCase):
     def test_enabling_missing_profile_adds_it_to_top_of_preset(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore(
                 "\n".join(
                     (
@@ -719,8 +719,8 @@ class UserProfilesTests(unittest.TestCase):
     def test_adding_and_deleting_profile_keeps_plain_profile_boundaries(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore(
                 "\n".join(
                     (
@@ -761,8 +761,8 @@ class UserProfilesTests(unittest.TestCase):
     def test_update_user_profile_renames_files_and_updates_named_profiles_in_all_presets(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetLibrary({
                 ZAPRET2_MODE: {
                     "one.txt": "\n".join((
@@ -825,8 +825,8 @@ class UserProfilesTests(unittest.TestCase):
     def test_delete_user_profile_removes_files_and_named_profiles_from_all_presets(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            (root / "profile" / "templates").mkdir(parents=True)
-            (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetLibrary({
                 ZAPRET2_MODE: {
                     "one.txt": "\n".join((
@@ -878,7 +878,7 @@ class UserProfilesTests(unittest.TestCase):
     def test_template_library_is_single_entry_for_stock_and_user_profiles(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text(
                 "\n".join(

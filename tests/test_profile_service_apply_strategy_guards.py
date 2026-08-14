@@ -179,7 +179,7 @@ class ProfileServiceApplyStrategyGuardTests(unittest.TestCase):
     def test_move_profile_to_end_skips_folder_write_when_profile_is_already_last(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore(
@@ -225,7 +225,7 @@ class ProfileServiceApplyStrategyGuardTests(unittest.TestCase):
     def test_move_profile_before_skips_folder_write_when_profile_is_already_before_target(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore(
@@ -272,7 +272,7 @@ class ProfileServiceApplyStrategyGuardTests(unittest.TestCase):
     def test_move_profile_after_skips_folder_write_when_profile_is_already_after_target(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            templates_dir = root / "profile" / "templates"
+            templates_dir = root / "system" / "templates"
             templates_dir.mkdir(parents=True)
             (templates_dir / "all_profiles.txt").write_text("", encoding="utf-8")
             store = _PresetStore(
@@ -389,7 +389,7 @@ class ProfileServiceApplyStrategyGuardTests(unittest.TestCase):
     def test_apply_strategy_skips_save_when_profile_already_uses_strategy(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            catalogs_dir = root / "profile" / "strategy_catalogs" / "winws2"
+            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
             catalogs_dir.mkdir(parents=True)
             (catalogs_dir / "tcp.txt").write_text(
                 "\n".join(
@@ -429,7 +429,7 @@ class ProfileServiceApplyStrategyGuardTests(unittest.TestCase):
     def test_apply_strategy_reports_strategy_only_change_contract(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            catalogs_dir = root / "profile" / "strategy_catalogs" / "winws2"
+            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
             catalogs_dir.mkdir(parents=True)
             (catalogs_dir / "tcp.txt").write_text(
                 "\n".join(
@@ -478,7 +478,7 @@ class ProfileServiceApplyStrategyGuardTests(unittest.TestCase):
     def test_apply_strategy_already_selected_reports_no_precise_rebuild_needed(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            catalogs_dir = root / "profile" / "strategy_catalogs" / "winws2"
+            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
             catalogs_dir.mkdir(parents=True)
             (catalogs_dir / "tcp.txt").write_text(
                 "\n".join(
@@ -541,7 +541,7 @@ class ProfileServiceApplyStrategyGuardTests(unittest.TestCase):
     def test_apply_strategy_reports_stale_reload_when_requested_branch_disappeared(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            catalogs_dir = root / "profile" / "strategy_catalogs" / "winws2"
+            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
             catalogs_dir.mkdir(parents=True)
             (catalogs_dir / "tcp.txt").write_text(
                 "\n".join(

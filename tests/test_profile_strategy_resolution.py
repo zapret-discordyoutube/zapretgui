@@ -127,7 +127,7 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
 
     def test_winws2_catalogs_contain_only_lua_desync_args(self) -> None:
         invalid_lines: list[str] = []
-        for path in sorted(Path("src/profile/strategy_catalogs/winws2").glob("*.txt")):
+        for path in sorted(Path("src/system/strategy_catalogs/winws2").glob("*.txt")):
             invalid_lines.extend(
                 f"{path.name}:{line_number}: {line.strip()}"
                 for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1)

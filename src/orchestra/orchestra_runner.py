@@ -202,17 +202,20 @@ class OrchestraRunner:
         self.lua_path = str(paths.lua_dir)
         self.logs_path = str(paths.logs_dir)
         self.bin_path = str(paths.bin_dir)
+        # Генерируемые в рантайме файлы живут в user\lua — каталог установщика
+        # lua\ остаётся неизменяемым (только поставка).
+        self.user_lua_path = str(paths.user_lua_dir)
 
-        # Файлы конфигурации (в lua папке)
-        # ВАЖНО: circular-config.txt теперь СТАТИЧЕСКИЙ файл в /home/privacy/zapret/lua/
-        # Стратегии встроены напрямую в circular-config.txt, отдельные strategies-*.txt не нужны
+        # ВАЖНО: circular-config.txt — СТАТИЧЕСКИЙ файл поставки в lua\.
+        # Стратегии встроены напрямую в circular-config.txt, отдельные strategies-*.txt не нужны.
         self.config_path = os.path.join(self.lua_path, "circular-config.txt")
-        self.runtime_config_path = os.path.join(self.lua_path, "circular-config.runtime.txt")
+        self.runtime_config_path = os.path.join(self.user_lua_path, "circular-config.runtime.txt")
         self.launch_config_path = self.config_path
-        self.blobs_path = os.path.join(self.lua_path, "blobs.txt")
+        self.blobs_path = os.path.join(self.user_lua_path, "blobs.txt")
 
-        # Белый список (exclude hostlist)
-        self.whitelist_path = os.path.join(self.lua_path, "whitelist.txt")
+        # Белый список (exclude hostlist); путь user/lua/whitelist.txt прописан
+        # в circular-config.txt относительно корня установки (cwd запуска winws2)
+        self.whitelist_path = os.path.join(self.user_lua_path, "whitelist.txt")
 
         # Debug log от winws2 (для детекции LOCKED/UNLOCKING)
         # Теперь используем уникальные имена с ID сессии
@@ -754,7 +757,8 @@ class OrchestraRunner:
         if not has_any_locked and not has_history and not has_blocked:
             return None
 
-        lua_path = os.path.join(self.lua_path, "learned-strategies.lua")
+        lua_path = os.path.join(self.user_lua_path, "learned-strategies.lua")
+        os.makedirs(self.user_lua_path, exist_ok=True)
 
         # Собираем статистику по всем askey
         counts = {askey: len(self.locked_manager.locked_by_askey[askey]) for askey in ASKEY_ALL}
@@ -1411,6 +1415,7 @@ class OrchestraRunner:
             return self.launch_config_path
 
         try:
+            os.makedirs(self.user_lua_path, exist_ok=True)
             with open(self.runtime_config_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(runtime_content)
             self.launch_config_path = self.runtime_config_path
@@ -1674,7 +1679,7 @@ class OrchestraRunner:
         result = self.locked_manager.clear()
 
         # Удаляем файл learned-strategies.lua чтобы при перезапуске был чистый старт
-        learned_lua = os.path.join(self.lua_path, "learned-strategies.lua")
+        learned_lua = os.path.join(self.user_lua_path, "learned-strategies.lua")
         if os.path.exists(learned_lua):
             try:
                 os.remove(learned_lua)
@@ -1873,6 +1878,7 @@ class OrchestraRunner:
             if not self.whitelist:
                 self.load_whitelist()
 
+            os.makedirs(self.user_lua_path, exist_ok=True)
             with open(self.whitelist_path, 'w', encoding='utf-8') as f:
                 f.write("# Orchestra whitelist - exclude these domains from DPI bypass\n")
                 f.write("# System domains (built-in) + User domains (from settings.sqlite3)\n\n")

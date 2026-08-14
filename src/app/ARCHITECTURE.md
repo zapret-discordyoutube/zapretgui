@@ -185,7 +185,7 @@ Feature state остаётся внутри feature-слоёв. Например
 Обычные настройки и состояние интерфейса хранятся в транзакционной базе:
 
 ```text
-<install_dir>/settings/settings.sqlite3
+<install_dir>/user/settings.sqlite3
 ```
 
 В `settings.sqlite3` хранятся:
@@ -200,7 +200,7 @@ Feature state остаётся внутри feature-слоёв. Например
 Защищённое состояние Premium принадлежит отдельной базе:
 
 ```text
-<install_dir>/settings/premium.sqlite3
+<install_dir>/user/premium.sqlite3
 ```
 
 Она хранит идентификатор устройства, pairing, точную серверную привязку,
@@ -218,9 +218,9 @@ user_hosts.ini
 ```
 
 Старый `settings.json` выведен из эксплуатации без импортера и fallback-веток.
-Runtime его не читает и не переписывает, а установщик удаляет точный старый
-файл. После перехода обычные настройки начинаются с нормализованных значений
-по умолчанию; `premium.sqlite3` при этом сохраняется.
+Runtime его не читает и не переписывает. Каталог `user` является единственным
+рабочим местом пользовательского состояния, и установщик не удаляет его
+содержимое.
 
 Реестр Windows не используется как хранилище настроек ZapretGUI. При этом
 системные Windows-функции могут работать с реестром, если сам механизм Windows
@@ -230,8 +230,8 @@ Runtime его не читает и не переписывает, а устан
 Hosts-каталог остаётся поставляемой базой доменов и hosts-записей:
 
 ```text
-source: <project>/private_zapretgui/resources/data/hosts_catalog.sqlite3
-exe:    <exe_dir>/data/hosts_catalog.sqlite3
+source: <project>/private_zapretgui/resources/system/hosts_catalog.sqlite3
+exe:    <exe_dir>/system/hosts_catalog.sqlite3
 ```
 
 `hosts_catalog.sqlite3` является готовым ресурсом только для чтения, а не
@@ -242,8 +242,9 @@ hosts-записи хранятся внутри неё. Пользовател�
 `hosts_catalog.json` не читаются и удаляются установщиком.
 
 Встроенные ресурсы программы могут оставаться отдельными файлами, потому что это
-не состояние пользователя: preset-ы, `profile/templates`,
-`profile/strategy_catalogs`, lua, иконки, темы, exe/bin.
+не состояние пользователя: preset-ы, `system/templates`,
+`system/strategy_catalogs`, поставляемые lua-файлы, иконки, темы, exe/bin.
+Создаваемые оркестратором lua-файлы хранятся отдельно в `user/lua`.
 
 ## Fluent UI
 

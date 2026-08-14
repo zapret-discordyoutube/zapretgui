@@ -144,8 +144,8 @@ class ProfileReferenceKeyTests(unittest.TestCase):
 
 class StaleReferenceCorrectnessTests(unittest.TestCase):
     def _make_service(self, root: Path, text: str) -> tuple[ProfilePresetService, _PresetStore]:
-        (root / "profile" / "templates").mkdir(parents=True, exist_ok=True)
-        (root / "profile" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+        (root / "system" / "templates").mkdir(parents=True, exist_ok=True)
+        (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
         store = _PresetStore(text)
         feature = SimpleNamespace(
             _presets_feature=store,

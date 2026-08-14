@@ -27,7 +27,7 @@ class Winws2PayloadStrategyBranchTests(unittest.TestCase):
     def test_payload_scoped_lua_desync_lines_are_separate_strategy_branches(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            catalogs_dir = root / "profile" / "strategy_catalogs" / "winws2"
+            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
             catalogs_dir.mkdir(parents=True)
             (catalogs_dir / "tcp.txt").write_text(
                 "\n".join(

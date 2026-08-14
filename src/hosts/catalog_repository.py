@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,8 +66,15 @@ def file_content_signature(path: Path) -> tuple[int, int]:
 
 def _connect_read_only(path: Path) -> sqlite3.Connection:
     try:
-        uri = path.resolve().as_uri() + "?mode=ro"
-        connection = sqlite3.connect(uri, uri=True, timeout=5.0)
+        resolved = path.resolve()
+        is_windows_unc = os.name == "nt" and str(resolved).startswith(("\\\\", "//"))
+        if is_windows_unc:
+            # SQLite URI treats the server name as a forbidden authority unless
+            # its optional SQLITE_ALLOW_URI_AUTHORITY flag was compiled in.
+            connection = sqlite3.connect(resolved, timeout=5.0)
+        else:
+            uri = resolved.as_uri() + "?mode=ro"
+            connection = sqlite3.connect(uri, uri=True, timeout=5.0)
     except (OSError, sqlite3.Error) as exc:
         raise HostsCatalogError(f"не удалось открыть базу только для чтения: {exc}") from exc
     connection.row_factory = sqlite3.Row

@@ -24,7 +24,7 @@ _STRATEGY_CATALOGS_CACHE: dict[
 
 def strategy_catalog_root(paths: AppPaths) -> Path:
     """Каталог готовых стратегий рядом с программой, подготовленный установщиком."""
-    return paths.user_root / "profile" / "strategy_catalogs"
+    return paths.user_root / "system" / "strategy_catalogs"
 
 
 def _tree_signature(root: Path, pattern: str = "*.txt") -> tuple[tuple[str, int, int], ...]:

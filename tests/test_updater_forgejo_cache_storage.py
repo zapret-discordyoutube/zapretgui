@@ -83,8 +83,8 @@ class UpdaterForgejoCacheStorageTests(unittest.TestCase):
                 prepared = settings_store.prepare_settings_database()
 
             self.assertNotIn("github_cache", prepared["updater"])
-            self.assertTrue((root / "settings" / "settings.sqlite3").is_file())
-            self.assertFalse((root / "settings" / "settings.json").exists())
+            self.assertTrue((root / "user" / "settings.sqlite3").is_file())
+            self.assertFalse((root / "user" / "settings.json").exists())
 
 
 if __name__ == "__main__":

@@ -81,7 +81,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
     def test_inno_installs_profile_templates_from_prepared_stage(self) -> None:
         iss = self._read_inno_script()
 
-        self.assertIn(r'{#SOURCEPATH}\profile\templates\*.txt', iss)
+        self.assertIn(r'{#SOURCEPATH}\system\templates\*.txt', iss)
         self.assertNotIn("PUBLICSRC", iss)
         self.assertNotIn("PRIVATERESOURCES", iss)
         self.assertNotIn("PROJECTPATH", iss)
@@ -1109,10 +1109,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 for dir_name in (
                     "bin",
                     "exe",
-                    "json",
                     "lists",
                     "lua",
-                    "sos",
                     "windivert.filter",
                     "themes",
                 ):
@@ -1173,8 +1171,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 self.assertTrue((stage_root / "presets" / "winws2_builtin" / "Universal V5.txt").is_file())
                 self.assertTrue((stage_root / "presets" / "winws1_builtin").is_dir())
                 self.assertTrue(any((stage_root / "presets" / "winws1_builtin").glob("*.txt")))
-                self.assertTrue((stage_root / "profile" / "strategy_catalogs" / "winws2").is_dir())
-                self.assertTrue((stage_root / "profile" / "templates").is_dir())
+                self.assertTrue((stage_root / "system" / "strategy_catalogs" / "winws2").is_dir())
+                self.assertTrue((stage_root / "system" / "templates").is_dir())
                 for service_list in (
                     "apple.txt",
                     "gemini.txt",
@@ -1183,9 +1181,10 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     "notion.txt",
                 ):
                     self.assertTrue((stage_root / "lists" / service_list).is_file(), service_list)
-                self.assertTrue((stage_root / "data" / "hosts_catalog.sqlite3").is_file())
-                self.assertFalse((stage_root / "json" / "hosts_catalog").exists())
-                self.assertFalse((stage_root / "json" / "hosts_catalog.json").exists())
+                self.assertTrue((stage_root / "system" / "hosts_catalog.sqlite3").is_file())
+                # json и sos выведены из поставки целиком
+                self.assertFalse((stage_root / "json").exists())
+                self.assertFalse((stage_root / "sos").exists())
                 self.assertTrue((stage_root / "ico" / "windows11_fluent" / "sidebar").is_dir())
 
                 # Манифест целостности едет внутри _internal: установщик
@@ -1317,10 +1316,8 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 for dir_name in (
                     "bin",
                     "exe",
-                    "json",
                     "lists",
                     "lua",
-                    "sos",
                     "windivert.filter",
                     "themes",
                 ):
@@ -1510,7 +1507,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertIn("procedure ApplySelectedInstallRoot;", iss)
         self.assertIn("WizardForm.DirBrowseButton.OnClick := @SelectInstallParent;", iss)
         self.assertIn("function MigrateUserDataIfInstallRootChanged: Boolean;", iss)
-        self.assertIn("PreviousInstallRoot + '\\settings'", iss)
+        self.assertIn("PreviousInstallRoot + '\\user'", iss)
         self.assertIn("PreviousInstallRoot + '\\lists\\user'", iss)
         self.assertIn("function CopyExternalListFiles(const SourceListsDir, DestListsDir: string): Boolean;", iss)
         self.assertIn("External list migrated as user data", iss)
@@ -1518,10 +1515,19 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertIn("PreviousInstallRoot + '\\presets\\winws1'", iss)
         self.assertIn("PreviousInstallRoot + '\\presets\\winws2'", iss)
         self.assertIn("PreviousInstallRoot + '\\logs'", iss)
-        self.assertIn("PreviousInstallRoot + '\\lua'", iss)
         self.assertIn("PreviousInstallRoot + '\\themes'", iss)
         self.assertNotIn(
             "CopyDirectoryTree(PreviousInstallRoot + '\\profile'",
+            iss,
+        )
+        # lua\ теперь чисто поставочный: при смене корня копировать нечего.
+        self.assertNotIn(
+            "CopyDirectoryTree(PreviousInstallRoot + '\\lua'",
+            iss,
+        )
+        # Старый settings\ намеренно не переносится: раскладка user\ начинается с чистого состояния.
+        self.assertNotIn(
+            "CopyDirectoryTree(PreviousInstallRoot + '\\settings'",
             iss,
         )
         self.assertNotIn(
@@ -1695,45 +1701,53 @@ class BuildResourceLayoutTests(unittest.TestCase):
         )
         self.assertIn("if not IsSharedInstallRoot(AppRoot) then", iss)
 
-    def test_inno_retires_json_settings_but_preserves_both_sqlite_databases(self) -> None:
+    def test_inno_retires_legacy_layout_but_preserves_user_state(self) -> None:
         iss = self._read_inno_script()
         install_delete_start = iss.index("[InstallDelete]")
         install_delete_end = iss.index("[UninstallDelete]", install_delete_start)
         install_delete = iss[install_delete_start:install_delete_end]
-        migration_start = iss.index("function MigrateUserDataIfInstallRootChanged")
-        migration_end = iss.index("function RegistryValueReferencesRoot", migration_start)
-        migration = iss[migration_start:migration_end]
         deleted_names = re.findall(r'Name:\s*"([^"]+)"', install_delete)
 
-        self.assertIn(
-            'Type: files; Name: "{app}\\settings\\settings.json"',
-            install_delete,
-        )
-        self.assertNotIn(r"{app}\settings\settings.sqlite3", deleted_names)
-        self.assertNotIn(r"{app}\settings\premium.sqlite3", deleted_names)
-        self.assertIn("DeleteFile(NewInstallRoot + '\\settings\\settings.json')", migration)
-        self.assertIn(
-            "CopyDirectoryTree(PreviousInstallRoot + '\\settings', NewInstallRoot + '\\settings')",
-            migration,
-        )
+        # user\ — пользовательское состояние: установщик его не трогает.
+        self.assertNotIn(r"{app}\user", deleted_names)
+        self.assertNotIn(r"{app}\user\settings.sqlite3", deleted_names)
+        self.assertNotIn(r"{app}\user\premium.sqlite3", deleted_names)
+        # Старый settings\ тоже не удаляется: там может остаться привязка
+        # Premium dev-установки прежней раскладки.
+        self.assertNotIn(r"{app}\settings", deleted_names)
+        # Мёртвые каталоги старой раскладки вычищаются при обновлении.
+        self.assertIn(r'Type: filesandordirs; Name: "{app}\json"', install_delete)
+        self.assertIn(r'Type: filesandordirs; Name: "{app}\sos"', install_delete)
+        self.assertIn(r'Type: filesandordirs; Name: "{app}\data"', install_delete)
+        self.assertIn(r'Type: filesandordirs; Name: "{app}\profile"', install_delete)
+        # Рантайм-файлы оркестратора старой раскладки внутри lua\
+        self.assertIn(r'Type: files; Name: "{app}\lua\whitelist.txt"', install_delete)
+        self.assertIn(r'Type: files; Name: "{app}\lua\learned-strategies.lua"', install_delete)
 
-    def test_inno_replaces_legacy_hosts_json_with_sqlite_catalog(self) -> None:
+    def test_inno_replaces_system_directory_content_from_delivery(self) -> None:
         iss = self._read_inno_script()
         install_delete = iss[iss.index("[InstallDelete]"):iss.index("[UninstallDelete]")]
 
         self.assertIn(
-            r'Source: "{#SOURCEPATH}\data\hosts_catalog.sqlite3"; DestDir: "{app}\data"',
+            r'Source: "{#SOURCEPATH}\system\hosts_catalog.sqlite3"; DestDir: "{app}\system"',
             iss,
         )
         self.assertNotIn(r'Source: "{#SOURCEPATH}\json\hosts_catalog\*"', iss)
         self.assertIn(
-            r'Type: filesandordirs; Name: "{app}\json\hosts_catalog"',
+            r'Type: filesandordirs; Name: "{app}\system\strategy_catalogs"',
             install_delete,
         )
         self.assertIn(
-            r'Type: files; Name: "{app}\json\hosts_catalog.json"',
+            r'Type: filesandordirs; Name: "{app}\system\templates"',
             install_delete,
         )
+        self.assertIn(
+            r'Type: files; Name: "{app}\system\hosts_catalog.sqlite3"',
+            install_delete,
+        )
+        # system\ целиком в [InstallDelete] нельзя: там уже лежит
+        # system\install-owner, записанный до начала копирования.
+        self.assertNotIn(r'Type: filesandordirs; Name: "{app}\system"', install_delete)
 
     def test_inno_persistent_bindings_follow_install_roots_not_previous_exe_layout(self) -> None:
         iss = self._read_inno_script()
@@ -1911,12 +1925,12 @@ class BuildResourceLayoutTests(unittest.TestCase):
         iss = self._read_inno_script()
 
         expected_sources = (
-            r'{#SOURCEPATH}\profile\strategy_catalogs\winws2\*.txt',
-            r'{#SOURCEPATH}\profile\strategy_catalogs\winws1\*.txt',
-            r'{#SOURCEPATH}\profile\templates\*.txt',
+            r'{#SOURCEPATH}\system\strategy_catalogs\winws2\*.txt',
+            r'{#SOURCEPATH}\system\strategy_catalogs\winws1\*.txt',
+            r'{#SOURCEPATH}\system\templates\*.txt',
             r'{#SOURCEPATH}\presets\winws2_builtin\*.txt',
             r'{#SOURCEPATH}\presets\winws1_builtin\*.txt',
-            r'{#SOURCEPATH}\data\hosts_catalog.sqlite3',
+            r'{#SOURCEPATH}\system\hosts_catalog.sqlite3',
             r'{#SOURCEPATH}\ico\windows11_fluent\sidebar\*.svg',
         )
         for source in expected_sources:
@@ -1926,7 +1940,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertIn("resource_sets = (", builder)
         self.assertIn("PUBLIC_SRC / \"presets\" / \"builtin\" / \"winws2\"", builder)
         self.assertIn("PRIVATE_ROOT / \"resources\" / \"profile\" / \"templates\"", builder)
-        self.assertIn("PRIVATE_ROOT / \"resources\" / \"data\"", builder)
+        self.assertIn("PRIVATE_ROOT / \"resources\" / \"system\"", builder)
         self.assertNotIn("f'/DPUBLICSRC=", builder)
         self.assertNotIn("f'/DPRIVATERESOURCES=", builder)
 

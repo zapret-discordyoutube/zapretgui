@@ -37,7 +37,7 @@ def _iter_override_candidates(filename: str, filepath: str | Path | None = None)
     app_dir = APPLICATION_PATHS.root
     candidates = [
         app_dir / "blockcheck" / "data" / filename,
-        app_dir / "data" / filename,
+        app_dir / "user" / "blockcheck" / filename,
     ]
 
     seen: set[str] = set()

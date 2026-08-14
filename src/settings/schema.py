@@ -9,7 +9,8 @@ from settings.mode import (
     SELECTED_SOURCE_PRESET_FILE_NAME_KEY_WINWS2,
 )
 
-SETTINGS_DIR_NAME = "settings"
+# Пользовательское состояние живёт в <root>/user; установщик этот каталог не трогает.
+SETTINGS_DIR_NAME = "user"
 SETTINGS_DATABASE_FILE_NAME = "settings.sqlite3"
 SETTINGS_VERSION = 1
 

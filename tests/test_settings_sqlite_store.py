@@ -55,7 +55,7 @@ class SettingsSqliteStoreTests(unittest.TestCase):
             self.assertEqual(sections, set(prepared))
             self.assertGreaterEqual(revision, 1)
             self.assertEqual(user_version, 1)
-            self.assertFalse((root / "settings" / "settings.json").exists())
+            self.assertFalse((root / "user" / "settings.json").exists())
 
     def test_cache_refreshes_after_another_connection_commits(self) -> None:
         from settings import store as settings_store
@@ -91,7 +91,7 @@ class SettingsSqliteStoreTests(unittest.TestCase):
 
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            premium_path = root / "settings" / "premium.sqlite3"
+            premium_path = root / "user" / "premium.sqlite3"
             premium_path.parent.mkdir(parents=True)
             premium_path.write_bytes(b"premium-binding-sentinel")
 

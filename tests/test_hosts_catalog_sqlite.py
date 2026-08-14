@@ -7,12 +7,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 PUBLIC_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = PUBLIC_ROOT.parent
-PRIVATE_DATABASE = PROJECT_ROOT / "private_zapretgui" / "resources" / "data" / "hosts_catalog.sqlite3"
+PRIVATE_DATABASE = PROJECT_ROOT / "private_zapretgui" / "resources" / "system" / "hosts_catalog.sqlite3"
 SRC_ROOT = PUBLIC_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
@@ -57,7 +57,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             with patch.object(self.proxy_domains, "__file__", str(fake_module)):
                 self.assertEqual(
                     self.proxy_domains.get_hosts_catalog_path(),
-                    root / "private_zapretgui" / "resources" / "data" / "hosts_catalog.sqlite3",
+                    root / "private_zapretgui" / "resources" / "system" / "hosts_catalog.sqlite3",
                 )
 
             install_root = root / "Zapret" / "Dev"
@@ -67,7 +67,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             ):
                 self.assertEqual(
                     self.proxy_domains.get_hosts_catalog_path(),
-                    install_root / "data" / "hosts_catalog.sqlite3",
+                    install_root / "system" / "hosts_catalog.sqlite3",
                 )
 
     def test_tracked_catalog_is_complete_and_integral(self) -> None:
@@ -125,6 +125,22 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         load_catalog(PRIVATE_DATABASE)
         after = file_content_signature(PRIVATE_DATABASE)
         self.assertEqual(after, before)
+
+    def test_windows_unc_catalog_uses_plain_path_with_query_only(self) -> None:
+        from hosts.catalog_repository import _connect_read_only
+
+        unc_path = Path("//10.20.0.1/zapretgui/candidate/hosts_catalog.sqlite3")
+        connection = MagicMock(spec=sqlite3.Connection)
+        with (
+            patch("hosts.catalog_repository.os.name", "nt"),
+            patch.object(Path, "resolve", return_value=unc_path),
+            patch("hosts.catalog_repository.sqlite3.connect", return_value=connection) as connect,
+        ):
+            actual = _connect_read_only(Path("ignored.sqlite3"))
+
+        self.assertIs(actual, connection)
+        connect.assert_called_once_with(unc_path, timeout=5.0)
+        connection.execute.assert_any_call("PRAGMA query_only = ON")
 
     def test_missing_database_is_not_created(self) -> None:
         from hosts.catalog_repository import HostsCatalogError, load_catalog
