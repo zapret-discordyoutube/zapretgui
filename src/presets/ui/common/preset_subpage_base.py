@@ -353,9 +353,11 @@ class PresetRawEditorPage(BasePage):
             set_footer=self._set_footer,
             cleanup_in_progress=lambda: bool(self.__dict__.get("_cleanup_in_progress", False))
             or bool(self.__dict__.get("_is_loading", False)),
+            set_cursor_status=self._set_cursor_status,
         )
         self._sync_raw_text_editor_state_from_legacy()
         self.searchInput = self._raw_text_editor.search_input
+        self.findBar = self._raw_text_editor.find_bar
         self.editor = self._raw_text_editor.editor
         self._save_timer = self._raw_text_editor.save_timer
         self._commit_timer = self._raw_text_editor.commit_timer
@@ -910,9 +912,9 @@ class PresetRawEditorPage(BasePage):
         actions_layout.addWidget(self.runtimeToggleButton)
 
         actions_layout.addStretch(1)
-        actions_layout.addWidget(self.searchInput, 1)
         self.add_widget(actions)
 
+        self.add_widget(self.findBar)
         self.add_widget(self.editor, 1)
 
         self.footerStatusBar = PresetStatusBar(self)
@@ -1599,6 +1601,18 @@ class PresetRawEditorPage(BasePage):
     def _set_footer(self, text: str) -> None:
         self._footer_status, self._footer_text = self._footer_status_from_text(text)
         self._render_footer_status()
+
+    def _set_cursor_status(self, text: str) -> None:
+        """Позиция курсора справа в статус-баре (строка/колонка/выделение)."""
+        if bool(self.__dict__.get("_cleanup_in_progress", False)):
+            return
+        status_bar = self.__dict__.get("footerStatusBar")
+        if status_bar is None:
+            return
+        try:
+            status_bar.set_detail_text(str(text or ""))
+        except Exception:
+            pass
 
     def _footer_status_from_text(self, text: str) -> tuple[str, str]:
         value = str(text or "").strip()

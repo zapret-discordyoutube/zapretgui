@@ -375,13 +375,15 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
 
         self.assertTrue(hasattr(RawPresetTextEditor, "search_text"))
         self.assertTrue(hasattr(RawPresetTextEditor, "find_next"))
-        self.assertIn("SearchLineEdit", editor_init_source)
-        self.assertIn("self.search_input.setPlaceholderText", editor_init_source)
+        # Поиск живёт в общем ui.code_editor: панель Find/Replace плюс
+        # контроллер, владеющий состоянием совпадений.
+        self.assertIn("FindReplaceBar(parent)", editor_init_source)
+        self.assertIn("FindController(self.editor, self.find_bar", editor_init_source)
+        self.assertIn("self.search_input = self.find_bar.search_input", editor_init_source)
         self.assertIn("actions_layout.addStretch(1)", build_source)
-        self.assertIn("actions_layout.addWidget(self.searchInput, 1)", build_source)
-        self.assertIn(".find(query", find_source)
-        self.assertIn("QTextDocument.FindFlag(0)", find_source)
-        self.assertIn("FindBackward", find_source)
+        self.assertIn("self.add_widget(self.findBar)", build_source)
+        self.assertIn("self.find_controller.search_text(query)", search_source)
+        self.assertIn("self.find_controller.find_next(reverse=", find_source)
 
     def test_refresh_after_switch_uses_profile_snapshot_not_full_list(self) -> None:
         source = inspect.getsource(display_state.resolve_profile_strategy_display_state)

@@ -164,7 +164,23 @@ class PresetStatusBar(QWidget):
         layout.addWidget(self.text_label, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addStretch(1)
 
+        # Правый индикатор редактора (строка/колонка/выделение) — отдельная
+        # надпись, чтобы не конкурировать со статусом сохранения слева.
+        self.detail_label = CaptionLabel("", self)
+        self.detail_label.setWordWrap(False)
+        self.detail_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.detail_label.hide()
+        layout.addWidget(self.detail_label, 0, Qt.AlignmentFlag.AlignVCenter)
+
         self.set_plan(build_preset_status_plan("neutral", launch_method=ZAPRET2_MODE))
+
+    def set_detail_text(self, text: str) -> None:
+        """Показывает вспомогательный текст справа (позиция курсора в редакторе)."""
+        value = str(text or "")
+        changed = set_text_if_changed(self.detail_label, value)
+        self.detail_label.setVisible(bool(value))
+        if changed or value:
+            set_state_text(self.detail_label, value or "Позиция курсора")
 
     def set_plan(self, plan: PresetStatusPlan) -> None:
         indicator = str(plan.indicator or "none").strip().lower()
@@ -221,6 +237,8 @@ class PresetStatusBar(QWidget):
 
         set_pulse_dot_color_if_changed(self.pulse_dot, color)
         set_style_sheet_if_changed(self.text_label, f"color: {color};")
+        muted = "#5f6368" if is_light else "#b8b8b8"
+        set_style_sheet_if_changed(self.detail_label, f"color: {muted};")
 
 
 class PresetStatusIcon(QWidget):

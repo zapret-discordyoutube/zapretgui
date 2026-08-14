@@ -141,5 +141,134 @@ class RawPresetTextEditorTests(unittest.TestCase):
         self.assertEqual(editor.resolve_save_text(None), document_text)
 
 
+    def _editor(self, **kwargs):
+        from presets.ui.common.raw_preset_text_editor import RawPresetTextEditor
+
+        parent = QWidget()
+        self.addCleanup(parent.deleteLater)
+        options = {
+            "request_save": lambda *, publish_content_changed=False: True,
+            "set_footer": lambda _text: None,
+            "cleanup_in_progress": lambda: False,
+        }
+        options.update(kwargs)
+        editor = RawPresetTextEditor(parent, **options)
+        self.addCleanup(editor.cleanup)
+        return editor
+
+    def test_search_highlights_every_match_in_preset_text(self) -> None:
+        editor = self._editor()
+        editor.apply_loaded_text("--new\n--filter-tcp=443\n--new\n")
+
+        editor.search_input.setText("--new")
+        self.app.processEvents()
+
+        self.assertEqual(editor.find_controller.result.count, 2)
+        # текущая строка + два совпадения
+        self.assertEqual(len(editor.editor.extraSelections()), 3)
+        self.assertEqual(editor.find_bar.counterLabel.text(), "1 / 2")
+
+    def test_line_operations_keep_text_cache_in_sync(self) -> None:
+        editor = self._editor()
+        editor.apply_loaded_text("--new\n--filter-tcp=80\n")
+        # Прогреваем мемо, чтобы поймать рассинхрон кэша после правки строк.
+        self.assertEqual(editor.current_text(), "--new\n--filter-tcp=80\n")
+
+        editor.editor.duplicate_selected_lines()
+        editor.editor.move_selected_lines(delta=1)
+        editor.editor.toggle_selected_comment()
+        self.app.processEvents()
+
+        document_text = editor.editor.toPlainText()
+        self.assertEqual(editor.current_text(), document_text)
+        self.assertEqual(editor.resolve_save_text(None), document_text)
+
+    def test_replace_all_keeps_text_cache_in_sync_and_marks_dirty(self) -> None:
+        save_requests: list[bool] = []
+        editor = self._editor(
+            request_save=lambda *, publish_content_changed=False: save_requests.append(
+                bool(publish_content_changed)
+            )
+            or True,
+        )
+        editor.apply_loaded_text("--filter-tcp=80\n--filter-udp=80\n")
+        self.assertEqual(editor.current_text(), "--filter-tcp=80\n--filter-udp=80\n")
+
+        editor.find_bar.search_input.setText("80")
+        editor.find_bar.replace_input.setText("443")
+        self.app.processEvents()
+        replaced = editor.find_controller.replace_all()
+        self.app.processEvents()
+
+        self.assertEqual(replaced, 2)
+        document_text = editor.editor.toPlainText()
+        self.assertEqual(document_text, "--filter-tcp=443\n--filter-udp=443\n")
+        self.assertEqual(editor.current_text(), document_text)
+        self.assertTrue(editor.content_publish_pending)
+
+    def test_cursor_status_callback_receives_position(self) -> None:
+        statuses: list[str] = []
+        editor = self._editor(set_cursor_status=statuses.append)
+        editor.apply_loaded_text("--new\n--filter-tcp=443\n")
+
+        editor.editor.goto_line(2)
+        self.app.processEvents()
+
+        self.assertTrue(statuses)
+        self.assertIn("Стр 2", statuses[-1])
+        self.assertIn("всего строк: 3", statuses[-1])
+
+    def test_theme_change_does_not_mark_preset_as_edited(self) -> None:
+        # Регрессия: QSyntaxHighlighter.rehighlight() закрывает edit-block и Qt
+        # эмитит textChanged без правки текста — смена темы помечала пресет
+        # изменённым и запускала автосохранение.
+        footer_messages: list[str] = []
+        save_requests: list[bool] = []
+        editor = self._editor(
+            request_save=lambda *, publish_content_changed=False: save_requests.append(
+                bool(publish_content_changed)
+            )
+            or True,
+            set_footer=footer_messages.append,
+        )
+        editor.apply_loaded_text("--new\n--filter-tcp=443\n")
+        editor.content_dirty = False
+        editor.content_publish_pending = False
+        footer_messages.clear()
+
+        editor.editor._apply_highlighter_theme(True)
+        editor.editor._apply_highlighter_theme(False)
+        self.app.processEvents()
+
+        self.assertFalse(editor.content_publish_pending)
+        self.assertFalse(editor.content_dirty)
+        self.assertEqual(footer_messages, [])
+        self.assertEqual(save_requests, [])
+        self.assertFalse(editor.save_timer.isActive())
+
+    def test_user_edit_still_marks_preset_as_edited(self) -> None:
+        footer_messages: list[str] = []
+        editor = self._editor(set_footer=footer_messages.append)
+        editor.apply_loaded_text("--new\n")
+        editor.content_publish_pending = False
+        footer_messages.clear()
+
+        editor.editor.insertPlainText("--filter-tcp=443\n")
+        self.app.processEvents()
+
+        self.assertTrue(editor.content_publish_pending)
+        self.assertIn("Изменения", footer_messages[-1])
+
+    def test_editor_uses_shared_code_editor_widget(self) -> None:
+        from ui.code_editor.editor import CodeEditor
+        from ui.code_editor.find_bar import FindReplaceBar
+
+        editor = self._editor()
+
+        self.assertIsInstance(editor.editor, CodeEditor)
+        self.assertIsInstance(editor.find_bar, FindReplaceBar)
+        self.assertIs(editor.search_input, editor.find_bar.search_input)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
-from PyQt6.QtGui import QTextCursor, QTextDocument
-from PyQt6.QtWidgets import QSizePolicy
-from qfluentwidgets import PlainTextEdit, SearchLineEdit
+from PyQt6.QtCore import QEvent, QObject, QTimer
 
-from ui.accessibility import remove_line_edit_buttons_from_tab_order, set_control_accessibility, set_state_text
+from ui.accessibility import set_control_accessibility, set_state_text
+from ui.code_editor.editor import CodeEditor, build_cursor_status_text
+from ui.code_editor.find_bar import FindReplaceBar
+from ui.code_editor.find_controller import FindController
+from ui.code_editor.syntax import PresetSyntaxHighlighter
 from ui.fluent_widgets import set_tooltip
-from ui.smooth_scroll import apply_editor_smooth_scroll_preference
 
 
 class RawPresetTextEditor(QObject):
@@ -22,11 +22,13 @@ class RawPresetTextEditor(QObject):
         request_save: Callable[..., bool],
         set_footer: Callable[[str], None],
         cleanup_in_progress: Callable[[], bool],
+        set_cursor_status: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__(None)
         self._request_save = request_save
         self._set_footer = set_footer
         self._cleanup_in_progress = cleanup_in_progress
+        self._set_cursor_status = set_cursor_status
         self.text_snapshot: str | None = None
         self.content_loaded_once = False
         self.content_dirty = True
@@ -34,45 +36,48 @@ class RawPresetTextEditor(QObject):
         self.cache_update_suspended = False
         self.show_scheduled = False
 
-        self.search_input = SearchLineEdit(parent)
-        self.search_input.setPlaceholderText("Поиск по тексту пресета")
-        set_tooltip(self.search_input, "Найти строку в тексте открытого пресета.")
+        self.find_bar = FindReplaceBar(parent)
+        self.search_input = self.find_bar.search_input
+        set_tooltip(self.search_input, "Найти строку в тексте открытого пресета (Ctrl+F).")
         search_input_name = "Поиск по тексту пресета"
         set_control_accessibility(
             self.search_input,
             name=search_input_name,
             description=(
                 "Введите текст, чтобы найти строку внутри открытого пресета. "
-                "Enter ищет дальше, Shift+Enter ищет назад. "
+                "Enter ищет дальше, Shift+Enter ищет назад, F3 повторяет поиск. "
                 "После ввода перейдите к тексту пресета клавишей Tab или нажмите Стрелка вниз."
             ),
         )
         set_state_text(self.search_input, search_input_name)
-        self.search_input.setClearButtonEnabled(True)
-        remove_line_edit_buttons_from_tab_order(self.search_input)
-        self.search_input.setFixedHeight(34)
-        self.search_input.setMinimumWidth(320)
-        self.search_input.setMaximumWidth(460)
-        self.search_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.search_input.setProperty("noDrag", True)
-        self.search_input.textChanged.connect(self.search_text)
-        self.search_input.installEventFilter(self)
 
-        self.editor = PlainTextEdit(parent)
+        self.editor = CodeEditor(
+            parent,
+            highlighter_factory=lambda document: PresetSyntaxHighlighter(document),
+        )
         editor_name = "Текст открытого пресета"
         set_control_accessibility(
             self.editor,
             name=editor_name,
-            description="Здесь можно читать и редактировать содержимое открытого пресета.",
+            description=(
+                "Здесь можно читать и редактировать содержимое открытого пресета. "
+                "Ctrl+F — поиск, Ctrl+H — замена, Ctrl+G — переход к строке, "
+                "Ctrl+D — дублировать строку, Ctrl+/ — комментарий, "
+                "Alt со стрелками — перенос строки, Ctrl с колесом мыши — масштаб."
+            ),
         )
         set_state_text(self.editor, editor_name)
-        apply_editor_smooth_scroll_preference(self.editor)
-        self.editor.textChanged.connect(self.on_text_changed)
+        # contentEdited, а не textChanged: перекраска синтаксиса при смене темы
+        # тоже эмитит textChanged, и пресет ложно становился «изменённым».
+        self.editor.contentEdited.connect(self.on_text_changed)
+        self.editor.cursorStatusChanged.connect(self.on_cursor_status_changed)
         self.editor.installEventFilter(self)
         try:
             self.editor.viewport().installEventFilter(self)
         except Exception:
             pass
+
+        self.find_controller = FindController(self.editor, self.find_bar, parent=self)
 
         self.save_timer = QTimer(parent)
         self.save_timer.setSingleShot(True)
@@ -163,29 +168,24 @@ class RawPresetTextEditor(QObject):
         return text
 
     def search_text(self, text: str) -> bool:
+        """Поиск по вводу в поле: переход к первому совпадению от начала."""
         query = str(text or "")
-        cursor = self.editor.textCursor()
-        if not query.strip():
-            cursor.clearSelection()
-            self.editor.setTextCursor(cursor)
-            return False
-        cursor.movePosition(QTextCursor.MoveOperation.Start)
-        self.editor.setTextCursor(cursor)
-        return self.find_next()
+        if query != str(self.search_input.text() or ""):
+            self.search_input.setText(query)
+            return bool(self.find_controller.result.count)
+        return bool(self.find_controller.search_text(query))
 
     def find_next(self, *, reverse: bool = False) -> bool:
-        query = str(self.search_input.text() or "")
-        if not query.strip():
-            return False
-        flags = QTextDocument.FindFlag.FindBackward if reverse else QTextDocument.FindFlag(0)
-        if self.editor.find(query, flags):
-            return True
-        cursor = self.editor.textCursor()
-        cursor.movePosition(
-            QTextCursor.MoveOperation.End if reverse else QTextCursor.MoveOperation.Start,
-        )
-        self.editor.setTextCursor(cursor)
-        return bool(self.editor.find(query, flags))
+        return bool(self.find_controller.find_next(reverse=bool(reverse)))
+
+    def on_cursor_status_changed(self, status) -> None:
+        callback = self._set_cursor_status
+        if callback is None:
+            return
+        try:
+            callback(build_cursor_status_text(status))
+        except Exception:
+            pass
 
     def on_text_changed(self) -> None:
         # Правка инвалидирует мемо: текст перечитывается из документа целиком
@@ -256,16 +256,9 @@ class RawPresetTextEditor(QObject):
         return self.handle_event(obj, event)
 
     def handle_event(self, obj, event) -> bool:
+        # Клавиши поля поиска (Enter/Shift+Enter/Стрелка вниз/F3/Esc) обрабатывает
+        # сама панель FindReplaceBar — здесь остаётся только коммит правок.
         event_type = event.type()
-        if obj is self.search_input and event_type == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Down:
-                self.editor.setFocus(Qt.FocusReason.OtherFocusReason)
-                event.accept()
-                return True
-            if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
-                self.find_next(reverse=bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier))
-                event.accept()
-                return True
         if event_type in {QEvent.Type.FocusOut, QEvent.Type.Leave} and self.is_editor_object(obj):
             self.schedule_pending_content_commit()
         elif (
@@ -282,7 +275,7 @@ class RawPresetTextEditor(QObject):
         except Exception:
             pass
         try:
-            self.search_input.removeEventFilter(self)
+            self.find_controller.cleanup()
         except Exception:
             pass
         try:
