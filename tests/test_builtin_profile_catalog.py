@@ -275,6 +275,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             "Notion": ("--filter-tcp=80,443", "--hostlist=lists/notion.txt"),
             "Claude": ("--filter-tcp=80,443", "--hostlist=lists/claude.txt"),
             "LinkedIn": ("--filter-tcp=80,443", "--hostlist=lists/linkedin.txt"),
+            "LordFilm (зеркала)": ("--filter-tcp=80,443", "--hostlist=lists/lordfilm.txt"),
             "Cloudflare TCP": ("--filter-tcp=80,443-65535", "--hostlist=lists/cloudflare.txt"),
             "cloudfront.net": ("--filter-tcp=80,443-65535", "--hostlist=lists/cloudfront.txt"),
             "EpicGames & Fortnite": ("--filter-tcp=80,443-65535", "--hostlist=lists/epicgames-fortnite.txt"),
@@ -304,6 +305,14 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             "notion.txt": ["notion.so", "notion.site"],
             "claude.txt": ["claude.ai", "claude.com", "anthropic.com"],
             "linkedin.txt": ["linkedin.com", "licdn.com"],
+            "lordfilm.txt": [
+                "lordfilms.day",
+                "lordfilm.fi",
+                "lordfilm.legal",
+                "lordfilm.fm",
+                "lord-film.ru",
+                "lord-films.com",
+            ],
             "cloudflare.txt": [
                 "cloudflare-ech.com",
                 "cloudflare.com",
