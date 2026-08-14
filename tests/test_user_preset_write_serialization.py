@@ -117,6 +117,8 @@ class UserPresetWriteSerializationTests(unittest.TestCase):
                     "destination_folder_key": "",
                     "file_name": "",
                     "file_path": "",
+                    "source_url": "",
+                    "auto_update": False,
                 }
             ],
         )
@@ -312,6 +314,8 @@ class UserPresetWriteSerializationTests(unittest.TestCase):
                     "destination_folder_key": "",
                     "file_name": "Preset.txt",
                     "file_path": "",
+                    "source_url": "",
+                    "auto_update": False,
                 }
             ],
         )
@@ -350,6 +354,8 @@ class UserPresetWriteSerializationTests(unittest.TestCase):
                     "destination_folder_key": "",
                     "file_name": "Next.txt",
                     "file_path": "",
+                    "source_url": "",
+                    "auto_update": False,
                 }
             ],
         )
@@ -583,6 +589,8 @@ class UserPresetWriteSerializationTests(unittest.TestCase):
             1,
             action="import",
             file_path="C:/Temp/Preset.txt",
+            source_url="",
+            auto_update=False,
         )
 
     def test_folder_action_restarts_later_after_storage_worker_finished(self) -> None:
@@ -653,6 +661,8 @@ class UserPresetWriteSerializationTests(unittest.TestCase):
                 "destination_folder_key": "",
                 "file_name": "",
                 "file_path": "",
+                "source_url": "",
+                "auto_update": False,
             }
         ]
         page._pending_preset_storage_actions = [
@@ -968,6 +978,8 @@ class UserPresetWriteSerializationTests(unittest.TestCase):
             1,
             action="import",
             file_path="C:/Temp/Preset.txt",
+            source_url="",
+            auto_update=False,
         )
 
     def test_cleanup_clears_pending_write_actions(self) -> None:

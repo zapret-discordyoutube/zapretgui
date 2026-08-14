@@ -228,6 +228,7 @@ def build_user_presets_page_kwargs(
         "create_preset_link_action_worker": _create_preset_link_action_worker,
         "create_preset_folder_action_worker": presets_feature.create_preset_folder_action_worker,
         "create_preset_storage_action_worker": presets_feature.create_preset_storage_action_worker,
+        "create_preset_remote_sync_worker": presets_feature.create_preset_remote_sync_worker,
         "load_preset_folder_state": presets_feature.load_preset_folder_state,
         "open_preset_raw_editor": lambda preset_name, m=method: open_preset_raw_editor(
             m,

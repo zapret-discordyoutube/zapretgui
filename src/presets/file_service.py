@@ -118,6 +118,22 @@ class PresetFileService:
         except Exception:
             pass
 
+    def _rename_remote_binding_meta(self, old_file_name: str, new_file_name: str) -> None:
+        try:
+            from presets.remote_bindings import rename_remote_preset_binding
+
+            rename_remote_preset_binding(self.engine, old_file_name, new_file_name)
+        except Exception:
+            pass
+
+    def _delete_remote_binding_meta(self, preset_file_name: str) -> None:
+        try:
+            from presets.remote_bindings import delete_remote_preset_binding
+
+            delete_remote_preset_binding(self.engine, preset_file_name)
+        except Exception:
+            pass
+
     def _refresh_selected_source_preset(self) -> None:
         selected_file_name = self.get_selected_file_name()
         if not selected_file_name or self.get_manifest_by_file_name(selected_file_name) is None:

@@ -655,6 +655,15 @@ def set_folders_settings(values: dict[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(updated["folders"])
 
 
+def get_remote_presets_settings() -> dict[str, Any]:
+    return _read_section("remote_presets")
+
+
+def set_remote_presets_settings(values: dict[str, Any]) -> dict[str, Any]:
+    updated = _update_settings(lambda data: _set_path_value(data, ("remote_presets",), _as_dict(values)))
+    return copy.deepcopy(updated["remote_presets"])
+
+
 def get_profile_identity_registry(engine: str) -> dict[str, Any]:
     key = str(engine or "").strip().lower()
     return _read_path_value(("profile_identity", key), None) or {}

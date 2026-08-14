@@ -104,6 +104,7 @@ class UserPresetsPageConfig:
     create_dialog_cls: type
     rename_dialog_cls: type
     reset_all_dialog_cls: type
+    import_dialog_cls: type | None = None
     delegate_language_scope: str = "winws2"
     delegate_help_name_role: str = "name"
 
@@ -125,6 +126,7 @@ class UserPresetsPageBase(BasePage):
         create_preset_link_action_worker,
         create_preset_folder_action_worker,
         create_preset_storage_action_worker,
+        create_preset_remote_sync_worker=None,
         load_preset_folder_state,
         open_preset_raw_editor,
         notify=None,
@@ -147,6 +149,7 @@ class UserPresetsPageBase(BasePage):
         self._create_preset_link_action_worker_fn = create_preset_link_action_worker
         self._create_preset_folder_action_worker_fn = create_preset_folder_action_worker
         self._create_preset_storage_action_worker_fn = create_preset_storage_action_worker
+        self._create_preset_remote_sync_worker_fn = create_preset_remote_sync_worker
         self._load_preset_folder_state_fn = load_preset_folder_state
         self._open_preset_raw_editor_callback = open_preset_raw_editor
         self._notify = notify
@@ -998,15 +1001,42 @@ class UserPresetsPageBase(BasePage):
         self._show_inline_action_create()
 
     def _on_import_clicked(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            self._tr(f"{self._config.tr_prefix}.file_dialog.import_title", "Импортировать пресет"),
-            "",
-            "Пресеты и архивы (*.txt *.zip);;Все файлы (*.*)",
-        )
+        dialog_cls = getattr(self._config, "import_dialog_cls", None)
+        if dialog_cls is None:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                self._tr(f"{self._config.tr_prefix}.file_dialog.import_title", "Импортировать пресет"),
+                "",
+                "Пресеты и архивы (*.txt *.zip);;Все файлы (*.*)",
+            )
+            if not file_path:
+                return
+            self._request_preset_bulk_action("import", file_path=file_path)
+            return
+
+        dlg = dialog_cls(self.window(), language=self._ui_language)
+        # Пока диалог открыт, оконный drop-фильтр отдаёт файлы ему,
+        # а не странице (иначе drop уйдёт в импорт мимо диалога).
+        drop_filter = getattr(self.window(), "_preset_file_drop_filter", None)
+        set_delegate = getattr(drop_filter, "set_drop_delegate", None)
+        if callable(set_delegate):
+            set_delegate(dlg)
+        try:
+            accepted = dlg.exec()
+        finally:
+            if callable(set_delegate):
+                set_delegate(None)
+        if not accepted:
+            return
+        file_path = str(getattr(dlg, "result_file_path", "") or "")
         if not file_path:
             return
-        self._request_preset_bulk_action("import", file_path=file_path)
+        self._request_preset_bulk_action(
+            "import",
+            file_path=file_path,
+            source_url=str(getattr(dlg, "result_source_url", "") or ""),
+            auto_update=bool(getattr(dlg, "result_auto_update", False)),
+        )
 
     def import_dropped_preset_files(self, file_paths) -> bool:
         """Ставит перетащенные TXT/ZIP-файлы в общую очередь импорта."""
@@ -1031,27 +1061,58 @@ class UserPresetsPageBase(BasePage):
         if not self._request_preset_bulk_action("reset_all"):
             self._bulk_reset_running = False
 
-    def create_preset_bulk_action_worker(self, request_id: int, *, action: str, file_path: str = ""):
+    def create_preset_bulk_action_worker(
+        self,
+        request_id: int,
+        *,
+        action: str,
+        file_path: str = "",
+        source_url: str = "",
+        auto_update: bool = False,
+    ):
         return self._create_preset_bulk_action_worker_fn(
             request_id,
             launch_method=self._config.launch_method,
             action=action,
             file_path=file_path,
+            source_url=source_url,
+            auto_update=auto_update,
             parent=self,
         )
 
-    def _request_preset_bulk_action(self, action: str, *, file_path: str = "") -> bool:
+    def _request_preset_bulk_action(
+        self,
+        action: str,
+        *,
+        file_path: str = "",
+        source_url: str = "",
+        auto_update: bool = False,
+    ) -> bool:
         if self._preset_write_action_running():
             self._queue_preset_write_action(
                 "bulk",
                 action=action,
                 file_path=file_path,
+                source_url=source_url,
+                auto_update=auto_update,
             )
             return True
-        self._start_preset_bulk_action_worker(action, file_path=file_path)
+        self._start_preset_bulk_action_worker(
+            action,
+            file_path=file_path,
+            source_url=source_url,
+            auto_update=auto_update,
+        )
         return True
 
-    def _start_preset_bulk_action_worker(self, action: str, *, file_path: str = "") -> None:
+    def _start_preset_bulk_action_worker(
+        self,
+        action: str,
+        *,
+        file_path: str = "",
+        source_url: str = "",
+        auto_update: bool = False,
+    ) -> None:
         runtime = self._worker_runtime("_preset_bulk_action_runtime")
         self._preset_bulk_action_request_id = int(self.__dict__.get("_preset_bulk_action_request_id", 0) or 0) + 1
         request_id = self._preset_bulk_action_request_id
@@ -1066,6 +1127,8 @@ class UserPresetsPageBase(BasePage):
                 request_id,
                 action=str(action or ""),
                 file_path=str(file_path or ""),
+                source_url=str(source_url or ""),
+                auto_update=bool(auto_update),
             ),
             bind_worker=_bind_worker,
             on_finished=self._on_preset_bulk_action_worker_finished,
@@ -1078,7 +1141,11 @@ class UserPresetsPageBase(BasePage):
             return
         log(str(getattr(result, "log_message", "") or ""), str(getattr(result, "log_level", "") or "INFO"))
         structure_changed = bool(getattr(result, "structure_changed", False))
-        if action == "import" and bool(getattr(result, "ok", False)):
+        if (
+            action == "import"
+            and bool(getattr(result, "ok", False))
+            and not bool(getattr(result, "updated_existing", False))
+        ):
             if self._runtime_service.add_created_preset_locally(
                 str(getattr(result, "actual_file_name", "") or ""),
                 str(getattr(result, "actual_name", "") or ""),
@@ -1227,6 +1294,8 @@ class UserPresetsPageBase(BasePage):
                 delete=self._on_delete_preset,
                 export=self._on_export_preset,
                 toggle_folder=self._on_toggle_folder,
+                update_remote=self._on_update_remote_preset,
+                unlink_remote=self._on_unlink_remote_preset,
             ),
         )
 
@@ -1636,6 +1705,8 @@ class UserPresetsPageBase(BasePage):
         destination_folder_key: str = "",
         file_name: str = "",
         file_path: str = "",
+        source_url: str = "",
+        auto_update: bool = False,
         current_name: str = "",
         new_name: str = "",
         from_current: bool = False,
@@ -1655,6 +1726,8 @@ class UserPresetsPageBase(BasePage):
             "destination_folder_key": str(destination_folder_key or ""),
             "file_name": str(file_name or ""),
             "file_path": str(file_path or ""),
+            "source_url": str(source_url or ""),
+            "auto_update": bool(auto_update),
         }
         if operation["kind"] == "edit":
             operation["current_name"] = str(current_name or "")
@@ -1827,6 +1900,8 @@ class UserPresetsPageBase(BasePage):
             {
                 "action": str(operation.get("action") or ""),
                 "file_path": str(operation.get("file_path") or ""),
+                "source_url": str(operation.get("source_url") or ""),
+                "auto_update": bool(operation.get("auto_update")),
             }
             for operation in self._preset_write_state_obj().pending
             if str(operation.get("kind") or "") == "bulk"
@@ -1956,6 +2031,8 @@ class UserPresetsPageBase(BasePage):
             action=str(pending.get("action") or ""),
         )
         result["file_path"] = str(pending.get("file_path") or "")
+        result["source_url"] = str(pending.get("source_url") or "")
+        result["auto_update"] = bool(pending.get("auto_update"))
         return result
 
     @classmethod
@@ -1992,6 +2069,8 @@ class UserPresetsPageBase(BasePage):
             "destination_folder_key": "",
             "file_name": "",
             "file_path": "",
+            "source_url": "",
+            "auto_update": False,
         }
 
     @staticmethod
@@ -2153,6 +2232,8 @@ class UserPresetsPageBase(BasePage):
             self._start_preset_bulk_action_worker(
                 str(pending.get("action") or ""),
                 file_path=str(pending.get("file_path") or ""),
+                source_url=str(pending.get("source_url") or ""),
+                auto_update=bool(pending.get("auto_update")),
             )
             return True
         if pending.get("kind") == "edit":
@@ -2424,6 +2505,7 @@ class UserPresetsPageBase(BasePage):
             is_builtin_preset_file_fn=self._is_builtin_preset_file,
             is_selected_preset_file_fn=self._is_selected_source_preset_file,
             can_reset_preset_to_builtin_fn=self._can_reset_preset_to_builtin,
+            is_remote_bound_preset_file_fn=self._is_remote_bound_preset_file,
             tr_fn=self._tr,
             make_menu_action=make_menu_action,
             fluent_icon=fluent_icon,
@@ -2437,6 +2519,148 @@ class UserPresetsPageBase(BasePage):
         current = str(self._runtime_service.active_preset_file_name() or "").strip().lower()
         candidate = str(name or "").strip().lower()
         return bool(current and candidate and current == candidate)
+
+    # ------------------------------------------------- удалённые пресеты
+
+    def _get_remote_preset_binding(self, file_name: str):
+        try:
+            from presets.remote_bindings import get_remote_preset_binding
+
+            return get_remote_preset_binding(self._config.folder_scope, file_name)
+        except Exception:
+            return None
+
+    def _is_remote_bound_preset_file(self, name: str) -> bool:
+        return self._get_remote_preset_binding(name) is not None
+
+    def _on_update_remote_preset(self, name: str) -> None:
+        binding = self._get_remote_preset_binding(name)
+        if binding is None:
+            return
+        force = False
+        if bool(binding.get("detached")):
+            dlg = MessageBox(
+                self._tr(
+                    f"{self._config.tr_prefix}.remote.confirm_overwrite.title",
+                    "Перезаписать локальные правки?",
+                ),
+                self._tr(
+                    f"{self._config.tr_prefix}.remote.confirm_overwrite.body",
+                    "Этот пресет был изменён локально, поэтому автообновление приостановлено.\n"
+                    "Обновление из источника перезапишет ваши правки и снова включит автообновление.",
+                ),
+                self.window(),
+            )
+            if not dlg.exec():
+                return
+            force = True
+        self._start_preset_remote_sync_worker("update", name, force=force)
+
+    def _on_unlink_remote_preset(self, name: str) -> None:
+        self._start_preset_remote_sync_worker("unlink", name)
+
+    def _start_preset_remote_sync_worker(self, action: str, file_name: str, *, force: bool = False) -> None:
+        if not callable(self._create_preset_remote_sync_worker_fn):
+            return
+        runtime = self._worker_runtime("_preset_remote_sync_runtime")
+        if runtime.is_running():
+            return
+        self._preset_remote_sync_request_id = int(self.__dict__.get("_preset_remote_sync_request_id", 0) or 0) + 1
+        request_id = self._preset_remote_sync_request_id
+
+        def _bind_worker(worker) -> None:
+            worker.completed.connect(self._on_preset_remote_sync_finished)
+            worker.failed.connect(self._on_preset_remote_sync_failed)
+
+        runtime.start_qthread_worker(
+            worker_factory=lambda _runtime_request_id: self._create_preset_remote_sync_worker_fn(
+                request_id,
+                launch_method=self._config.launch_method,
+                action=str(action or ""),
+                file_name=str(file_name or ""),
+                force=bool(force),
+                parent=self,
+            ),
+            bind_worker=_bind_worker,
+        )
+
+    def _on_preset_remote_sync_finished(self, request_id: int, action: str, outcome, context) -> None:
+        if request_id != int(getattr(self, "_preset_remote_sync_request_id", 0) or 0):
+            return
+        file_name = str((context or {}).get("file_name") or "")
+        status = str(getattr(outcome, "status", "") or "")
+        detail = str(getattr(outcome, "detail", "") or "")
+        prefix = self._config.tr_prefix
+        if action == "unlink":
+            if status == "unlinked":
+                log(f"Пресет '{file_name}' отвязан от источника", "INFO")
+                InfoBar.success(
+                    title=self._tr(f"{prefix}.remote.unlinked.title", "Автообновление отключено"),
+                    content=self._tr(
+                        f"{prefix}.remote.unlinked.content",
+                        "Пресет «{name}» больше не привязан к ссылке.",
+                        name=file_name,
+                    ),
+                    parent=self.window(),
+                )
+            else:
+                InfoBar.error(
+                    title=self._tr("common.error.title", "Ошибка"),
+                    content=detail or self._tr(f"{prefix}.remote.error.generic", "Не удалось выполнить действие."),
+                    parent=self.window(),
+                )
+            self._runtime_service.mark_presets_structure_changed()
+            return
+        if status == "updated":
+            log(f"Пресет '{file_name}' обновлён из источника", "INFO")
+            InfoBar.success(
+                title=self._tr(f"{prefix}.remote.updated.title", "Пресет обновлён из источника"),
+                content=self._tr(
+                    f"{prefix}.remote.updated.content",
+                    "Пресет «{name}» обновлён по ссылке.",
+                    name=file_name,
+                ),
+                parent=self.window(),
+            )
+        elif status in ("unchanged", "not_modified"):
+            InfoBar.success(
+                title=self._tr(f"{prefix}.remote.up_to_date.title", "Пресет актуален"),
+                content=self._tr(
+                    f"{prefix}.remote.up_to_date.content",
+                    "Пресет «{name}» уже совпадает с источником.",
+                    name=file_name,
+                ),
+                parent=self.window(),
+            )
+        elif status == "detached":
+            InfoBar.warning(
+                title=self._tr(f"{prefix}.remote.detached.title", "Автообновление приостановлено"),
+                content=self._tr(
+                    f"{prefix}.remote.detached.content",
+                    "Пресет «{name}» изменён локально. Обновите его из источника вручную, чтобы вернуть автообновление.",
+                    name=file_name,
+                ),
+                parent=self.window(),
+            )
+        elif status == "skipped":
+            pass
+        else:
+            InfoBar.error(
+                title=self._tr("common.error.title", "Ошибка"),
+                content=detail or self._tr(f"{prefix}.remote.error.generic", "Не удалось выполнить действие."),
+                parent=self.window(),
+            )
+        self._runtime_service.mark_presets_structure_changed()
+
+    def _on_preset_remote_sync_failed(self, request_id: int, action: str, error: str, _context) -> None:
+        if request_id != int(getattr(self, "_preset_remote_sync_request_id", 0) or 0):
+            return
+        log(f"Ошибка remote-действия preset ({action}): {error}", "ERROR")
+        InfoBar.error(
+            title=self._tr("common.error.title", "Ошибка"),
+            content=self._tr(f"{self._config.tr_prefix}.error.generic", "Ошибка: {error}", error=error),
+            parent=self.window(),
+        )
 
     def _update_cached_preset_rating(self, name: str, rating: int) -> bool:
         cached_metadata = self._runtime_service.cached_presets_metadata()

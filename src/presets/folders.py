@@ -424,6 +424,12 @@ def build_preset_folder_rows(
 ) -> list[dict[str, Any]]:
     scope = _normalize_scope(scope_key)
     state = normalize_folder_state(folder_state, build_default_preset_folders(scope))
+    try:
+        from presets.remote_bindings import load_remote_preset_bindings
+
+        remote_bindings = load_remote_preset_bindings(scope)
+    except Exception:
+        remote_bindings = {}
     live_items: list[dict[str, Any]] = []
     for entry in visible_entries:
         file_name = str(entry.get("file_name") or "").strip()
@@ -472,6 +478,15 @@ def build_preset_folder_rows(
         file_name = str(row.get("key") or "").strip()
         preset = all_presets.get(file_name) or {}
         meta = state.get("items", {}).get(file_name) or {}
+        remote_binding = remote_bindings.get(file_name)
+        if remote_binding is None:
+            remote_state = ""
+        elif bool(remote_binding.get("detached", False)):
+            remote_state = "detached"
+        elif str(remote_binding.get("error") or "").strip():
+            remote_state = "error"
+        else:
+            remote_state = "ok"
         rows.append(
             {
                 "kind": "preset",
@@ -488,6 +503,8 @@ def build_preset_folder_rows(
                 "folder_name": current_folder_name,
                 "is_pinned": bool(meta.get("pinned", False)),
                 "rating": int(meta.get("rating", 0) or 0),
+                "is_remote": remote_binding is not None,
+                "remote_state": remote_state,
             }
         )
     return rows

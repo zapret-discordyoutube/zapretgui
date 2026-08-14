@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import weakref
 from collections.abc import Callable
 
 from PyQt6.QtCore import (
@@ -274,6 +275,7 @@ class WindowPresetFileDropFilter(QObject):
         super().__init__(window if isinstance(window, QObject) else None)
         self._window = window
         self._target_resolver = target_resolver
+        self._drop_delegate_ref = None
         self.overlay = overlay
         if self.overlay is None and isinstance(window, QWidget):
             self.overlay = PresetFileDropOverlay(
@@ -289,7 +291,30 @@ class WindowPresetFileDropFilter(QObject):
         except Exception:
             return False
 
+    def set_drop_delegate(self, delegate) -> None:
+        """Временный приёмник drop-ов (модальный диалог импорта) вместо страницы.
+
+        Держится weakref-ом: если диалог удалён без снятия делегата,
+        фильтр автоматически возвращается к обычному поведению.
+        """
+        if delegate is None:
+            self._drop_delegate_ref = None
+            return
+        try:
+            self._drop_delegate_ref = weakref.ref(delegate)
+        except TypeError:
+            self._drop_delegate_ref = lambda: delegate
+
+    def _drop_delegate_action(self):
+        ref = self._drop_delegate_ref
+        delegate = ref() if ref is not None else None
+        action = getattr(delegate, "handle_dropped_preset_files", None)
+        return action if callable(action) else None
+
     def _import_action(self):
+        delegate_action = self._drop_delegate_action()
+        if delegate_action is not None:
+            return delegate_action
         try:
             target = self._target_resolver()
         except Exception:
@@ -367,11 +392,17 @@ class WindowPresetFileDropFilter(QObject):
             self._hide_overlay()
 
     def _show_overlay(self, paths: list[str]) -> None:
+        if self._drop_delegate_action() is not None:
+            # Активен диалог импорта: он сам подсвечивает свою drop-зону.
+            return
         action = getattr(self.overlay, "show_hint", None)
         if callable(action):
             action(paths)
 
     def _flash_accepted(self, paths: list[str]) -> None:
+        if self._drop_delegate_action() is not None:
+            self._hide_overlay()
+            return
         action = getattr(self.overlay, "show_accepted", None)
         if callable(action):
             action(paths)

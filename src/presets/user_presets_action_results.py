@@ -30,6 +30,9 @@ class UserPresetImportResult:
     infobar_title: str
     infobar_content: str
     structure_changed: bool
+    # Импорт по уже привязанной ссылке обновил существующий пресет,
+    # нового файла не появилось — страница не должна добавлять строку.
+    updated_existing: bool = False
 
 
 @dataclass(slots=True)

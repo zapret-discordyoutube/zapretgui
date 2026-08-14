@@ -82,6 +82,12 @@ def install_user_presets_warmup(*args, **kwargs):
     return install(*args, **kwargs)
 
 
+def install_remote_presets_sync(*args, **kwargs):
+    from main.post_startup_remote_presets import install_remote_presets_sync as install
+
+    return install(*args, **kwargs)
+
+
 def install_telegram_proxy_startup(*args, **kwargs):
     from main.post_startup_proxy import install_telegram_proxy_startup as install
 
@@ -209,6 +215,12 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
             presets_feature=deps.presets_feature,
             log_startup_metric=deps.log_startup_metric,
             current_launch_method=str(getattr(deps, "launch_method", "") or ""),
+        )
+        install_remote_presets_sync(
+            startup_host,
+            presets_feature=deps.presets_feature,
+            log_startup_metric=deps.log_startup_metric,
+            notify=deps.notify,
         )
     deps.install_tray_post_startup()
     install_update_check(

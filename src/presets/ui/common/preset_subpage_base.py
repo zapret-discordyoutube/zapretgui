@@ -997,10 +997,38 @@ class PresetRawEditorPage(BasePage):
             status = "Импортированный пресет"
         else:
             status = "Пользовательский пресет"
+        meta_text = f"Имя: {self._preset_name}"
+        remote_binding = self._remote_preset_binding()
+        if remote_binding is not None:
+            if bool(remote_binding.get("detached", False)):
+                status += " · изменён локально, автообновление приостановлено"
+            else:
+                status += " · обновляется по ссылке"
+            source_url = str(remote_binding.get("url") or "")
+            if source_url:
+                meta_text += f" · Источник: {source_url}"
+            updated_at = str(remote_binding.get("updated_at") or "")
+            if updated_at:
+                meta_text += f" · Синхронизирован: {updated_at}"
         set_text_if_changed(self.statusLabel, status)
         set_visible_if_changed(self.activateButton, not is_active)
-        set_text_if_changed(self.metaLabel, f"Имя: {self._preset_name}")
+        set_text_if_changed(self.metaLabel, meta_text)
         set_text_if_changed(self.pathLabel, str(self._preset_path or ""))
+
+    def _remote_preset_binding(self):
+        file_name = str(self._preset_file_name or "").strip()
+        if not file_name:
+            return None
+        try:
+            from presets.remote_bindings import get_remote_preset_binding
+            from settings.mode import ENGINE_BY_LAUNCH_METHOD, ENGINE_WINWS2, normalize_launch_method
+
+            scope = ENGINE_BY_LAUNCH_METHOD.get(
+                normalize_launch_method(self._launch_method), ENGINE_WINWS2
+            )
+            return get_remote_preset_binding(scope, file_name)
+        except Exception:
+            return None
 
     def _load_file(self) -> None:
         self._request_raw_preset_text()

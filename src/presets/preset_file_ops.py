@@ -50,6 +50,10 @@ def rename_by_file_name(backend, file_name: str, new_name: str):
         manifest.file_name,
         updated.file_name,
     )
+    backend._rename_remote_binding_meta(
+        manifest.file_name,
+        updated.file_name,
+    )
     if was_selected:
         backend.preset_selection_service.select_preset(backend.engine, updated.file_name)
         backend.notify_preset_identity_changed(updated.file_name)
@@ -153,4 +157,5 @@ def delete_by_file_name(backend, file_name: str) -> None:
     backend.preset_selection_service.ensure_can_delete(backend.engine, manifest.file_name)
     backend.preset_file_store.delete_preset(backend.engine, manifest.file_name)
     backend._delete_folder_item_meta(manifest.file_name)
+    backend._delete_remote_binding_meta(manifest.file_name)
     backend.notify_presets_changed()

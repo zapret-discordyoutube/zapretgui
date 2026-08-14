@@ -703,6 +703,38 @@ def normalize_profile_identity(data: object) -> dict[str, Any]:
     }
 
 
+def _normalize_remote_preset_binding(data: object) -> dict[str, Any] | None:
+    raw = as_dict(data)
+    url = str(raw.get("url") or "").strip()
+    if not url:
+        return None
+    return {
+        "url": url,
+        "etag": str(raw.get("etag") or ""),
+        "last_modified": str(raw.get("last_modified") or ""),
+        "synced_hash": str(raw.get("synced_hash") or ""),
+        "checked_at": str(raw.get("checked_at") or ""),
+        "updated_at": str(raw.get("updated_at") or ""),
+        "error": str(raw.get("error") or ""),
+        "auto": bool(raw.get("auto", True)),
+        "detached": bool(raw.get("detached", False)),
+    }
+
+
+def normalize_remote_presets(data: object) -> dict[str, Any]:
+    raw = as_dict(data)
+    result: dict[str, Any] = {}
+    for scope in ("winws2", "winws1"):
+        scope_bindings: dict[str, Any] = {}
+        for file_name, binding in as_dict(raw.get(scope)).items():
+            key = str(file_name or "").strip()
+            normalized = _normalize_remote_preset_binding(binding)
+            if key and normalized is not None:
+                scope_bindings[key] = normalized
+        result[scope] = scope_bindings
+    return result
+
+
 def normalize_settings(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     return {
@@ -722,4 +754,5 @@ def normalize_settings(data: object) -> dict[str, Any]:
         "blockcheck": normalize_blockcheck(raw.get("blockcheck")),
         "folders": normalize_folders(raw.get("folders")),
         "profile_identity": normalize_profile_identity(raw.get("profile_identity")),
+        "remote_presets": normalize_remote_presets(raw.get("remote_presets")),
     }

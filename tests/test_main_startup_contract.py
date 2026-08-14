@@ -2472,6 +2472,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_hosts_page_warmup"),
             patch.object(post_startup, "install_profile_warmup") as install_profile_warmup,
             patch.object(post_startup, "install_user_presets_warmup"),
+            patch.object(post_startup, "install_remote_presets_sync"),
             patch.object(post_startup, "install_update_check"),
             patch.object(post_startup, "install_cpu_diagnostic"),
             patch.object(post_startup, "install_qt_event_diagnostic_probe"),
@@ -2525,6 +2526,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_hosts_page_warmup"),
             patch.object(post_startup, "install_profile_warmup"),
             patch.object(post_startup, "install_user_presets_warmup") as install_user_presets_warmup,
+            patch.object(post_startup, "install_remote_presets_sync") as install_remote_presets_sync,
             patch.object(post_startup, "install_update_check"),
             patch.object(post_startup, "install_cpu_diagnostic"),
             patch.object(post_startup, "install_qt_event_diagnostic_probe"),
@@ -2537,6 +2539,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             presets_feature=presets_feature,
             log_startup_metric=log_startup_metric,
             current_launch_method="",
+        )
+        install_remote_presets_sync.assert_called_once_with(
+            startup_host,
+            presets_feature=presets_feature,
+            log_startup_metric=log_startup_metric,
+            notify=deps.notify,
         )
 
     def test_user_presets_runtime_uses_cached_metadata_before_worker(self) -> None:

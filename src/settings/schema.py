@@ -253,6 +253,13 @@ def default_profile_identity() -> dict[str, Any]:
     }
 
 
+def default_remote_presets() -> dict[str, Any]:
+    return {
+        "winws2": {},
+        "winws1": {},
+    }
+
+
 def build_default_settings() -> dict[str, Any]:
     return {
         "version": SETTINGS_VERSION,
@@ -271,4 +278,5 @@ def build_default_settings() -> dict[str, Any]:
         "blockcheck": default_blockcheck(),
         "folders": default_folders(),
         "profile_identity": default_profile_identity(),
+        "remote_presets": default_remote_presets(),
     }

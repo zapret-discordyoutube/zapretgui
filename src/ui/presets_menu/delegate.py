@@ -507,6 +507,21 @@ class PresetListDelegate(QStyledItemDelegate):
         elided_name = name_metrics.elidedText(name, Qt.TextElideMode.ElideRight, name_rect.width())
         painter.drawText(name_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), elided_name)
 
+        if bool(index.data(PresetListModel.RemoteRole)):
+            remote_state = str(index.data(PresetListModel.RemoteStateRole) or "")
+            cloud_left = name_rect.left() + name_metrics.horizontalAdvance(elided_name) + 6
+            if cloud_left + 14 <= name_rect.right():
+                cloud_color = tokens.fg_faint
+                if remote_state in ("detached", "error"):
+                    try:
+                        from ui.theme_semantic import get_semantic_palette
+
+                        cloud_color = get_semantic_palette(tokens.theme_name).warning_soft
+                    except Exception:
+                        cloud_color = "#ff9800"
+                cloud_rect = QRect(cloud_left, name_rect.center().y() - 6, 13, 13)
+                cached_icon("fa5s.cloud", cloud_color).paint(painter, cloud_rect)
+
         painter.setFont(meta_font)
         if date_rect.width() > 0:
             painter.setPen(to_qcolor(tokens.fg_faint, "#aeb5c1"))

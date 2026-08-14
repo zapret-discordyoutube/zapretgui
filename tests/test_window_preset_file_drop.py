@@ -416,6 +416,92 @@ class WindowPresetFileDropTests(unittest.TestCase):
             ],
         )
 
+    def test_drop_delegate_takes_over_drop_and_suppresses_overlay(self) -> None:
+        from ui.window_preset_file_drop import WindowPresetFileDropFilter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            preset_path = Path(tmp) / "Delegated.txt"
+            preset_path.write_text("preset", encoding="utf-8")
+            url = QUrl.fromLocalFile(str(preset_path))
+            window = object()
+            receiver = _Receiver(window)
+            target = SimpleNamespace(import_dropped_preset_files=Mock(return_value=True))
+            overlay = Mock()
+            event_filter = WindowPresetFileDropFilter(
+                window,
+                target_resolver=lambda: target,
+                overlay=overlay,
+            )
+            delegate = SimpleNamespace(handle_dropped_preset_files=Mock(return_value=True))
+            event_filter.set_drop_delegate(delegate)
+
+            drag_event = _DropEvent(QEvent.Type.DragEnter, [url])
+            self.assertTrue(event_filter.eventFilter(receiver, drag_event))
+            overlay.show_hint.assert_not_called()
+
+            drop_event = _DropEvent(QEvent.Type.Drop, [url])
+            self.assertTrue(event_filter.eventFilter(receiver, drop_event))
+            delegate.handle_dropped_preset_files.assert_called_once_with([str(preset_path)])
+            target.import_dropped_preset_files.assert_not_called()
+            overlay.show_accepted.assert_not_called()
+
+            event_filter.set_drop_delegate(None)
+            second_drop = _DropEvent(QEvent.Type.Drop, [url])
+            self.assertTrue(event_filter.eventFilter(receiver, second_drop))
+            target.import_dropped_preset_files.assert_called_once_with([str(preset_path)])
+
+    def test_native_drop_respects_drop_delegate(self) -> None:
+        from ui.window_preset_file_drop import (
+            WindowPresetFileDropFilter,
+            handle_native_preset_file_drop,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            preset_path = Path(tmp) / "NativeDelegated.txt"
+            preset_path.write_text("preset", encoding="utf-8")
+            target = SimpleNamespace(import_dropped_preset_files=Mock(return_value=True))
+            event_filter = WindowPresetFileDropFilter(
+                object(),
+                target_resolver=lambda: target,
+                overlay=Mock(),
+            )
+            delegate = SimpleNamespace(handle_dropped_preset_files=Mock(return_value=True))
+            event_filter.set_drop_delegate(delegate)
+            window = SimpleNamespace(_preset_file_drop_filter=event_filter)
+
+            with patch(
+                "ui.window_preset_file_drop.windows_dropped_file_paths",
+                return_value=[str(preset_path)],
+            ):
+                handled = handle_native_preset_file_drop(window, object())
+
+            self.assertTrue(handled)
+            delegate.handle_dropped_preset_files.assert_called_once_with([str(preset_path)])
+            target.import_dropped_preset_files.assert_not_called()
+
+    def test_dead_delegate_falls_back_to_page(self) -> None:
+        from ui.window_preset_file_drop import WindowPresetFileDropFilter
+
+        class _Delegate:
+            def handle_dropped_preset_files(self, paths):
+                return True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            preset_path = Path(tmp) / "Fallback.txt"
+            preset_path.write_text("preset", encoding="utf-8")
+            target = SimpleNamespace(import_dropped_preset_files=Mock(return_value=True))
+            event_filter = WindowPresetFileDropFilter(
+                object(),
+                target_resolver=lambda: target,
+                overlay=Mock(),
+            )
+            delegate = _Delegate()
+            event_filter.set_drop_delegate(delegate)
+            del delegate  # weakref фильтра должен отпустить удалённый диалог
+
+            self.assertTrue(event_filter.import_file_paths([str(preset_path)]))
+            target.import_dropped_preset_files.assert_called_once_with([str(preset_path)])
+
 
 if __name__ == "__main__":
     unittest.main()

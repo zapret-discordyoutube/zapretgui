@@ -3065,6 +3065,126 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Отмена",
         "en": "Cancel",
     },
+    "page.winws1_user_presets.dialog.import.title": {
+        "ru": "Импортировать пресет",
+        "en": "Import preset",
+    },
+    "page.winws1_user_presets.dialog.import.subtitle": {
+        "ru": "Перетащите файл пресета или вставьте ссылку — пресет по ссылке сможет обновляться автоматически.",
+        "en": "Drop a preset file or paste a link — a preset imported by link can update automatically.",
+    },
+    "page.winws1_user_presets.dialog.import.drop.hint": {
+        "ru": "Перетащите сюда файл пресета (.txt или .zip)",
+        "en": "Drop a preset file here (.txt or .zip)",
+    },
+    "page.winws1_user_presets.dialog.import.drop.browse": {
+        "ru": "Выбрать файл",
+        "en": "Browse file",
+    },
+    "page.winws1_user_presets.dialog.import.or": {
+        "ru": "или",
+        "en": "or",
+    },
+    "page.winws1_user_presets.dialog.import.url.label": {
+        "ru": "Вставьте ссылку",
+        "en": "Paste a link",
+    },
+    "page.winws1_user_presets.dialog.import.url.placeholder": {
+        "ru": "https://…/preset.txt",
+        "en": "https://…/preset.txt",
+    },
+    "page.winws1_user_presets.dialog.import.auto_update.label": {
+        "ru": "Автоматически обновлять по ссылке",
+        "en": "Update automatically from the link",
+    },
+    "page.winws1_user_presets.dialog.import.button": {
+        "ru": "Импортировать",
+        "en": "Import",
+    },
+    "page.winws1_user_presets.dialog.import.validation.empty": {
+        "ru": "Перетащите файл или вставьте ссылку на пресет.",
+        "en": "Drop a file or paste a preset link.",
+    },
+    "page.winws1_user_presets.dialog.import.error.url": {
+        "ru": "Некорректная ссылка: {error}",
+        "en": "Invalid link: {error}",
+    },
+    "page.winws1_user_presets.dialog.import.error.ssl": {
+        "ru": "Не удалось проверить SSL-сертификат: {error}",
+        "en": "SSL certificate check failed: {error}",
+    },
+    "page.winws1_user_presets.dialog.import.error.timeout": {
+        "ru": "Сервер не ответил вовремя. Попробуйте ещё раз.",
+        "en": "The server did not respond in time. Try again.",
+    },
+    "page.winws1_user_presets.dialog.import.error.network": {
+        "ru": "Не удалось скачать пресет: {error}",
+        "en": "Failed to download the preset: {error}",
+    },
+    "page.winws1_user_presets.dialog.import.error.http": {
+        "ru": "Сервер вернул ошибку: {error}",
+        "en": "The server returned an error: {error}",
+    },
+    "page.winws1_user_presets.dialog.import.error.too_large": {
+        "ru": "Файл по ссылке слишком большой.",
+        "en": "The file behind the link is too large.",
+    },
+    "page.winws1_user_presets.dialog.import.error.content": {
+        "ru": "Файл по ссылке пуст или не похож на пресет.",
+        "en": "The file behind the link is empty or is not a preset.",
+    },
+    "page.winws1_user_presets.menu.update_remote": {
+        "ru": "Обновить из источника",
+        "en": "Update from source",
+    },
+    "page.winws1_user_presets.menu.unlink_remote": {
+        "ru": "Отвязать от источника",
+        "en": "Unlink from source",
+    },
+    "page.winws1_user_presets.remote.confirm_overwrite.title": {
+        "ru": "Перезаписать локальные правки?",
+        "en": "Overwrite local changes?",
+    },
+    "page.winws1_user_presets.remote.confirm_overwrite.body": {
+        "ru": "Этот пресет был изменён локально, поэтому автообновление приостановлено.\nОбновление из источника перезапишет ваши правки и снова включит автообновление.",
+        "en": "This preset was modified locally, so automatic updates are paused.\nUpdating from the source will overwrite your changes and re-enable automatic updates.",
+    },
+    "page.winws1_user_presets.remote.updated.title": {
+        "ru": "Пресет обновлён из источника",
+        "en": "Preset updated from source",
+    },
+    "page.winws1_user_presets.remote.updated.content": {
+        "ru": "Пресет «{name}» обновлён по ссылке.",
+        "en": "Preset '{name}' was updated from its link.",
+    },
+    "page.winws1_user_presets.remote.up_to_date.title": {
+        "ru": "Пресет актуален",
+        "en": "Preset is up to date",
+    },
+    "page.winws1_user_presets.remote.up_to_date.content": {
+        "ru": "Пресет «{name}» уже совпадает с источником.",
+        "en": "Preset '{name}' already matches the source.",
+    },
+    "page.winws1_user_presets.remote.detached.title": {
+        "ru": "Автообновление приостановлено",
+        "en": "Automatic updates paused",
+    },
+    "page.winws1_user_presets.remote.detached.content": {
+        "ru": "Пресет «{name}» изменён локально. Обновите его из источника вручную, чтобы вернуть автообновление.",
+        "en": "Preset '{name}' was modified locally. Update it from the source manually to re-enable automatic updates.",
+    },
+    "page.winws1_user_presets.remote.unlinked.title": {
+        "ru": "Автообновление отключено",
+        "en": "Automatic updates disabled",
+    },
+    "page.winws1_user_presets.remote.unlinked.content": {
+        "ru": "Пресет «{name}» больше не привязан к ссылке.",
+        "en": "Preset '{name}' is no longer linked to a URL.",
+    },
+    "page.winws1_user_presets.remote.error.generic": {
+        "ru": "Не удалось выполнить действие.",
+        "en": "The action could not be completed.",
+    },
     "page.winws1_user_presets.dialog.reset_single.title": {
         "ru": "Вернуть встроенный пресет?",
         "en": "Restore built-in preset?",
@@ -3553,6 +3673,126 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.winws2_user_presets.dialog.button.cancel": {
         "ru": "Отмена",
         "en": "Cancel",
+    },
+    "page.winws2_user_presets.dialog.import.title": {
+        "ru": "Импортировать пресет",
+        "en": "Import preset",
+    },
+    "page.winws2_user_presets.dialog.import.subtitle": {
+        "ru": "Перетащите файл пресета или вставьте ссылку — пресет по ссылке сможет обновляться автоматически.",
+        "en": "Drop a preset file or paste a link — a preset imported by link can update automatically.",
+    },
+    "page.winws2_user_presets.dialog.import.drop.hint": {
+        "ru": "Перетащите сюда файл пресета (.txt или .zip)",
+        "en": "Drop a preset file here (.txt or .zip)",
+    },
+    "page.winws2_user_presets.dialog.import.drop.browse": {
+        "ru": "Выбрать файл",
+        "en": "Browse file",
+    },
+    "page.winws2_user_presets.dialog.import.or": {
+        "ru": "или",
+        "en": "or",
+    },
+    "page.winws2_user_presets.dialog.import.url.label": {
+        "ru": "Вставьте ссылку",
+        "en": "Paste a link",
+    },
+    "page.winws2_user_presets.dialog.import.url.placeholder": {
+        "ru": "https://…/preset.txt",
+        "en": "https://…/preset.txt",
+    },
+    "page.winws2_user_presets.dialog.import.auto_update.label": {
+        "ru": "Автоматически обновлять по ссылке",
+        "en": "Update automatically from the link",
+    },
+    "page.winws2_user_presets.dialog.import.button": {
+        "ru": "Импортировать",
+        "en": "Import",
+    },
+    "page.winws2_user_presets.dialog.import.validation.empty": {
+        "ru": "Перетащите файл или вставьте ссылку на пресет.",
+        "en": "Drop a file or paste a preset link.",
+    },
+    "page.winws2_user_presets.dialog.import.error.url": {
+        "ru": "Некорректная ссылка: {error}",
+        "en": "Invalid link: {error}",
+    },
+    "page.winws2_user_presets.dialog.import.error.ssl": {
+        "ru": "Не удалось проверить SSL-сертификат: {error}",
+        "en": "SSL certificate check failed: {error}",
+    },
+    "page.winws2_user_presets.dialog.import.error.timeout": {
+        "ru": "Сервер не ответил вовремя. Попробуйте ещё раз.",
+        "en": "The server did not respond in time. Try again.",
+    },
+    "page.winws2_user_presets.dialog.import.error.network": {
+        "ru": "Не удалось скачать пресет: {error}",
+        "en": "Failed to download the preset: {error}",
+    },
+    "page.winws2_user_presets.dialog.import.error.http": {
+        "ru": "Сервер вернул ошибку: {error}",
+        "en": "The server returned an error: {error}",
+    },
+    "page.winws2_user_presets.dialog.import.error.too_large": {
+        "ru": "Файл по ссылке слишком большой.",
+        "en": "The file behind the link is too large.",
+    },
+    "page.winws2_user_presets.dialog.import.error.content": {
+        "ru": "Файл по ссылке пуст или не похож на пресет.",
+        "en": "The file behind the link is empty or is not a preset.",
+    },
+    "page.winws2_user_presets.menu.update_remote": {
+        "ru": "Обновить из источника",
+        "en": "Update from source",
+    },
+    "page.winws2_user_presets.menu.unlink_remote": {
+        "ru": "Отвязать от источника",
+        "en": "Unlink from source",
+    },
+    "page.winws2_user_presets.remote.confirm_overwrite.title": {
+        "ru": "Перезаписать локальные правки?",
+        "en": "Overwrite local changes?",
+    },
+    "page.winws2_user_presets.remote.confirm_overwrite.body": {
+        "ru": "Этот пресет был изменён локально, поэтому автообновление приостановлено.\nОбновление из источника перезапишет ваши правки и снова включит автообновление.",
+        "en": "This preset was modified locally, so automatic updates are paused.\nUpdating from the source will overwrite your changes and re-enable automatic updates.",
+    },
+    "page.winws2_user_presets.remote.updated.title": {
+        "ru": "Пресет обновлён из источника",
+        "en": "Preset updated from source",
+    },
+    "page.winws2_user_presets.remote.updated.content": {
+        "ru": "Пресет «{name}» обновлён по ссылке.",
+        "en": "Preset '{name}' was updated from its link.",
+    },
+    "page.winws2_user_presets.remote.up_to_date.title": {
+        "ru": "Пресет актуален",
+        "en": "Preset is up to date",
+    },
+    "page.winws2_user_presets.remote.up_to_date.content": {
+        "ru": "Пресет «{name}» уже совпадает с источником.",
+        "en": "Preset '{name}' already matches the source.",
+    },
+    "page.winws2_user_presets.remote.detached.title": {
+        "ru": "Автообновление приостановлено",
+        "en": "Automatic updates paused",
+    },
+    "page.winws2_user_presets.remote.detached.content": {
+        "ru": "Пресет «{name}» изменён локально. Обновите его из источника вручную, чтобы вернуть автообновление.",
+        "en": "Preset '{name}' was modified locally. Update it from the source manually to re-enable automatic updates.",
+    },
+    "page.winws2_user_presets.remote.unlinked.title": {
+        "ru": "Автообновление отключено",
+        "en": "Automatic updates disabled",
+    },
+    "page.winws2_user_presets.remote.unlinked.content": {
+        "ru": "Пресет «{name}» больше не привязан к ссылке.",
+        "en": "Preset '{name}' is no longer linked to a URL.",
+    },
+    "page.winws2_user_presets.remote.error.generic": {
+        "ru": "Не удалось выполнить действие.",
+        "en": "The action could not be completed.",
     },
     "page.winws2_user_presets.dialog.reset_single.title": {
         "ru": "Вернуть встроенный пресет?",

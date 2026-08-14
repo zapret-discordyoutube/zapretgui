@@ -24,6 +24,8 @@ class PresetListModel(QAbstractListModel):
     SystemRole = Qt.ItemDataRole.UserRole + 16
     ServiceRole = Qt.ItemDataRole.UserRole + 17
     CanResetRole = Qt.ItemDataRole.UserRole + 18
+    RemoteRole = Qt.ItemDataRole.UserRole + 19
+    RemoteStateRole = Qt.ItemDataRole.UserRole + 20
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -550,6 +552,10 @@ class PresetListModel(QAbstractListModel):
             return bool(row.get("is_system", False))
         if role == self.ServiceRole:
             return bool(row.get("is_service", False))
+        if role == self.RemoteRole:
+            return bool(row.get("is_remote", False))
+        if role == self.RemoteStateRole:
+            return str(row.get("remote_state", "") or "")
 
         return None
 
@@ -722,6 +728,14 @@ def _preset_accessible_text(row: dict[str, object]) -> str:
             parts.append(f"папка: {folder_name}")
         if bool(row.get("is_pinned", False)):
             parts.append("закреплённый")
+        if bool(row.get("is_remote", False)):
+            remote_state = str(row.get("remote_state") or "")
+            if remote_state == "detached":
+                parts.append("обновляется по ссылке, изменён локально, автообновление приостановлено")
+            elif remote_state == "error":
+                parts.append("обновляется по ссылке, последняя проверка с ошибкой")
+            else:
+                parts.append("обновляется по ссылке")
         rating = _safe_int(row.get("rating"))
         if rating:
             parts.append(f"оценка {rating}")

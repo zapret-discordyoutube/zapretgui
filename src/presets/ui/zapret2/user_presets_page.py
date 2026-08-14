@@ -5,6 +5,7 @@ from __future__ import annotations
 from presets.ui.common.user_presets_page import UserPresetsPageBase, UserPresetsPageConfig
 from presets.ui.zapret2.user_presets_dialogs import (
     CreatePresetDialog,
+    ImportPresetDialog,
     RenamePresetDialog,
     ResetAllPresetsDialog,
 )
@@ -23,6 +24,7 @@ class Zapret2UserPresetsPage(UserPresetsPageBase):
         create_dialog_cls=CreatePresetDialog,
         rename_dialog_cls=RenamePresetDialog,
         reset_all_dialog_cls=ResetAllPresetsDialog,
+        import_dialog_cls=ImportPresetDialog,
         delegate_language_scope="winws2",
     )
 

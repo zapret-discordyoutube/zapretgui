@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from presets.ui.common.preset_import_dialog import ImportPresetDialog as _ImportPresetDialog
 from presets.ui.common.user_presets_dialogs import (
     CreatePresetDialog as _CreatePresetDialog,
     RenamePresetDialog as _RenamePresetDialog,
@@ -21,4 +22,8 @@ class ResetAllPresetsDialog(_ResetAllPresetsDialog):
     tr_prefix = "page.winws2_user_presets"
 
 
-__all__ = ["CreatePresetDialog", "RenamePresetDialog", "ResetAllPresetsDialog"]
+class ImportPresetDialog(_ImportPresetDialog):
+    tr_prefix = "page.winws2_user_presets"
+
+
+__all__ = ["CreatePresetDialog", "ImportPresetDialog", "RenamePresetDialog", "ResetAllPresetsDialog"]

@@ -33,6 +33,8 @@ class UserPresetBulkActionQueueTests(unittest.TestCase):
             page,
             "import",
             file_path="C:/Temp/Preset.txt",
+            source_url="https://example.com/preset.txt",
+            auto_update=True,
         )
 
         self.assertTrue(result)
@@ -43,6 +45,8 @@ class UserPresetBulkActionQueueTests(unittest.TestCase):
                 {
                     "action": "import",
                     "file_path": "C:/Temp/Preset.txt",
+                    "source_url": "https://example.com/preset.txt",
+                    "auto_update": True,
                 },
             ],
         )
@@ -60,6 +64,8 @@ class UserPresetBulkActionQueueTests(unittest.TestCase):
             {
                 "action": "reset_all",
                 "file_path": "",
+                "source_url": "",
+                "auto_update": False,
             }
         ]
         page._cleanup_in_progress = False
@@ -82,6 +88,8 @@ class UserPresetBulkActionQueueTests(unittest.TestCase):
             2,
             action="reset_all",
             file_path="",
+            source_url="",
+            auto_update=False,
         )
         self.assertEqual(runtime.started, [worker])
         self.assertEqual(page._preset_bulk_action_pending, [])

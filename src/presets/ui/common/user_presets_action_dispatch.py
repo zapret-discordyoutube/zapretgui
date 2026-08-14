@@ -20,6 +20,8 @@ class UserPresetListActionHandlers:
     delete: Callable[[str], object]
     export: Callable[[str], object]
     toggle_folder: Callable[[str], object] | None = None
+    update_remote: Callable[[str], object] | None = None
+    unlink_remote: Callable[[str], object] | None = None
 
 
 def dispatch_user_preset_list_action(*, action: str, name: str, handlers: UserPresetListActionHandlers) -> None:
@@ -39,6 +41,10 @@ def dispatch_user_preset_list_action(*, action: str, name: str, handlers: UserPr
     }
     if handlers.toggle_folder is not None:
         callbacks["toggle_folder"] = handlers.toggle_folder
+    if handlers.update_remote is not None:
+        callbacks["update_remote"] = handlers.update_remote
+    if handlers.unlink_remote is not None:
+        callbacks["unlink_remote"] = handlers.unlink_remote
     callback = callbacks.get(action)
     if callback is not None:
         callback(name)

@@ -16,6 +16,7 @@ def show_preset_actions_menu(
     global_pos: QPoint | None,
     is_builtin: bool,
     can_reset_to_builtin: bool = False,
+    is_remote_bound: bool = False,
     disabled_actions: set[str] | None = None,
     labels: dict[str, str],
     make_menu_action: Callable[..., object],
@@ -33,6 +34,8 @@ def show_preset_actions_menu(
         ("duplicate", "COPY"),
         ("export", "SHARE"),
         ("reset", "SYNC"),
+        ("update_remote", "CLOUD_DOWNLOAD"),
+        ("unlink_remote", "LINK"),
         ("delete", "DELETE"),
     ]
 
@@ -49,6 +52,9 @@ def show_preset_actions_menu(
         action_order.insert(4, "rename")
         if can_reset_to_builtin:
             action_order.append("reset")
+        if is_remote_bound:
+            action_order.append("update_remote")
+            action_order.append("unlink_remote")
         action_order.append("delete")
 
     disabled_action_keys = {str(key or "").strip() for key in (disabled_actions or set())}
