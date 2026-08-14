@@ -26,6 +26,138 @@ class _PresetStore:
         self.text = text
 
 
+class _SilentlyDroppingPresetStore(_PresetStore):
+    """Стор, который рапортует успех записи, но оставляет файл прежним.
+
+    Моделирует все реальные причины молчаливой потери записи: read-only файл,
+    перезапись чужим снапшотом, запись не в тот файл.
+    """
+
+    def save_selected_preset_source(self, _launch_method: str, text: str, *, content_change_kind: str = "") -> None:
+        self.save_count += 1
+        self.content_change_kinds.append(str(content_change_kind or ""))
+
+
+class ProfileServiceWriteVerificationTests(unittest.TestCase):
+    _PRESET_TEXT = "\n".join(
+        (
+            "--name=SpeedTest",
+            "--filter-tcp=443,8080",
+            "--hostlist=lists/speedtest.txt",
+            "--lua-desync=pass",
+            "",
+        )
+    )
+
+    def _service(self, store, root: Path) -> ProfilePresetService:
+        feature = SimpleNamespace(
+            _presets_feature=store,
+            _app_paths=AppPaths(user_root=root, local_root=root),
+        )
+        return ProfilePresetService(feature, "zapret2_mode")
+
+    def _write_catalog(self, root: Path) -> None:
+        catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
+        catalogs_dir.mkdir(parents=True)
+        (catalogs_dir / "tcp.txt").write_text(
+            "\n".join(
+                (
+                    "[tcp_md5]",
+                    "name = TCP MD5",
+                    "--lua-desync=multidisorder:pos=4:repeats=10:tcp_md5",
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+
+    def test_apply_strategy_reports_write_failed_when_write_is_silently_dropped(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._write_catalog(root)
+            store = _SilentlyDroppingPresetStore(self._PRESET_TEXT)
+
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                service = self._service(store, root)
+                result = service.apply_strategy("profile:0", "tcp_md5")
+
+        self.assertEqual(result.status, "write_failed")
+        self.assertTrue(result.should_reload)
+        self.assertIn("strategy_mismatch_after_write", result.message)
+        self.assertEqual(store.text, self._PRESET_TEXT)
+
+    def test_apply_strategy_to_branch_reports_write_failed_when_write_is_silently_dropped(self) -> None:
+        preset_text = "\n".join(
+            (
+                "--name=SpeedTest",
+                "--filter-tcp=443,8080",
+                "--hostlist=lists/speedtest.txt",
+                "--payload=tls_client_hello",
+                "--lua-desync=pass",
+                "",
+            )
+        )
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._write_catalog(root)
+            store = _SilentlyDroppingPresetStore(preset_text)
+
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                service = self._service(store, root)
+                result = service.apply_strategy("profile:0", "tcp_md5", strategy_branch_id="branch:0")
+
+        self.assertEqual(result.status, "write_failed")
+        self.assertTrue(result.should_reload)
+        self.assertEqual(store.text, preset_text)
+
+    def test_set_profile_enabled_reports_failure_when_write_is_silently_dropped(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = _SilentlyDroppingPresetStore(f"--skip\n{self._PRESET_TEXT}")
+
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                service = self._service(store, root)
+                result = service.set_profile_enabled("profile:0", True)
+
+        self.assertIsNone(result)
+
+    def test_update_profile_raw_text_reports_failure_when_write_is_silently_dropped(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = _SilentlyDroppingPresetStore(self._PRESET_TEXT)
+
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                service = self._service(store, root)
+                result = service.update_profile_raw_text(
+                    "profile:0",
+                    "\n".join(
+                        (
+                            "--name=SpeedTest",
+                            "--filter-tcp=443",
+                            "--hostlist=lists/speedtest.txt",
+                            "--lua-desync=split",
+                        )
+                    ),
+                )
+
+        self.assertIsNone(result)
+
+    def test_save_selected_preset_writes_when_file_diverged_from_snapshot(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = _PresetStore(self._PRESET_TEXT)
+
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                service = self._service(store, root)
+                preset, _manifest = service.load_selected_preset()
+                # Файл правят мимо приложения: снапшот в памяти больше не отражает диск.
+                store.text = self._PRESET_TEXT.replace("--lua-desync=pass", "--lua-desync=split")
+                service.save_selected_preset(preset)
+
+        self.assertEqual(store.save_count, 1)
+        self.assertIn("--lua-desync=pass", store.text)
+
+
 class ProfileServiceApplyStrategyGuardTests(unittest.TestCase):
     def test_save_selected_preset_skips_save_when_loaded_preset_is_unchanged(self) -> None:
         with TemporaryDirectory() as temp_dir:

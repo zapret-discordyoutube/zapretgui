@@ -34,6 +34,20 @@ def _page_module():
     return profile_setup_page
 
 
+_CONFIRMED_APPLY_STATUSES = frozenset({"applied", "already_applied"})
+
+
+def _apply_result_confirms_write(apply_result) -> bool:
+    """Подтвердил ли сервис, что выбранная стратегия лежит в файле пресета.
+
+    Отсутствие результата — не подтверждение: без него страница держала бы
+    оптимистичное состояние, не проверенное ни одним чтением пресета.
+    """
+    if apply_result is None:
+        return False
+    return str(getattr(apply_result, "status", "") or "").strip() in _CONFIRMED_APPLY_STATUSES
+
+
 class ProfileStrategyController:
     """Stateless-оркестратор apply/feedback стратегий со ссылкой на страницу."""
 
@@ -71,8 +85,12 @@ class ProfileStrategyController:
         request_id = page._strategy_apply_request_id
         page._strategy_apply_runtime_strategy_id = strategy_id
         page._strategy_apply_runtime_branch_id = strategy_branch_id
+        # Стабильная ссылка вместо возможного "profile:N": позиционный ключ,
+        # захваченный при открытии страницы, после сдвига соседей резолвится
+        # в чужой профиль — и стратегия уходит не туда.
+        profile_key = page._profile_result_reference(page.__dict__.get("_payload"), page._profile_key)
         worker_kwargs = {
-            "profile_key": page._profile_key,
+            "profile_key": profile_key,
             "strategy_id": strategy_id,
             "parent": page,
         }
@@ -125,6 +143,7 @@ class ProfileStrategyController:
         new_key = page._profile_result_reference(result_payload, profile_key)
         if new_key:
             page._profile_key = new_key
+        self._report_strategy_write_rejected(apply_result)
         if apply_result is not None and bool(getattr(apply_result, "should_reload", False)):
             if result_payload is not None:
                 branch_id = str(getattr(page, "_strategy_apply_runtime_branch_id", "") or "").strip()
@@ -139,6 +158,12 @@ class ProfileStrategyController:
                     getattr(result_payload, "item", None),
                 )
                 return
+            page.reload_current_profile()
+            page._on_profile_changed_callback(page._profile_key, "strategy")
+            return
+        if not _apply_result_confirms_write(apply_result):
+            # Сервис не подтвердил, что стратегия действительно легла в файл:
+            # отметка выбора недостоверна, факт берём из пресета.
             page.reload_current_profile()
             page._on_profile_changed_callback(page._profile_key, "strategy")
             return
@@ -159,13 +184,31 @@ class ProfileStrategyController:
                 getattr(result_payload, "item", None),
             )
             return
-        applied_locally = page._apply_strategy_locally(strategy_id)
-        if not applied_locally or page._profile_key != previous_key:
-            page.reload_current_profile()
-            page._on_profile_changed_callback(page._profile_key, "strategy")
+        # Запись подтверждена, но payload не приехал: состояние всё равно
+        # берём из пресета, а не достраиваем на странице.
+        page.reload_current_profile()
+        page._on_profile_changed_callback(page._profile_key, "strategy")
+
+    def _report_strategy_write_rejected(self, apply_result) -> None:
+        """Сообщить пользователю, что выбор не записан в пресет.
+
+        Молчаливый отказ — худший исход: пользователь уверен, что стратегия
+        применена, а в бой уходит прежняя.
+        """
+        page = self._page
+        status = str(getattr(apply_result, "status", "") or "").strip()
+        if status not in {"write_failed", "not_applicable"}:
             return
-        item = getattr(getattr(page, "_payload", None), "item", None)
-        page._on_profile_changed_callback(page._profile_key, "strategy", item)
+        message = str(getattr(apply_result, "message", "") or "").strip()
+        _page_module().log(
+            f"{page.__class__.__name__}: стратегия не записана в пресет: {status} {message}".strip(),
+            "ERROR",
+        )
+        _page_module().InfoBar.warning(
+            title="Стратегия не применена",
+            content="Выбор не записан в пресет — показано состояние из файла.",
+            parent=page.window(),
+        )
 
     def _on_strategy_apply_failed(self, request_id: int, error: str) -> None:
         page = self._page

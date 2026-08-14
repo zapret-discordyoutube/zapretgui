@@ -16,7 +16,6 @@ from profile.match_filters import filter_values
 from profile.editable_settings import normalize_filter_value
 from profile.key_resolution import profile_reference_key
 from profile.profile_setup_loader import profile_save_result_keys
-from profile.setup_match_text import build_profile_setup_match_tab_text
 from profile.ui.profile_setup_controls import (
     range_expression_from_controls,
     set_combo_by_data,
@@ -43,7 +42,6 @@ from profile.ui.profile_strategy_list_widget import (
     _set_strategy_favorite_button_state,
     _set_strategy_feedback_button_state,
     _strategy_branch_label,
-    _strategy_branch_summary_name,
     _sync_combo_items_accessibility,
     _sync_strategy_branch_combo_items_accessibility,
     _update_strategy_branch_combo_in_place,
@@ -230,32 +228,6 @@ def set_tab_item_text_if_changed(widget, item_key: str, text: str) -> bool:
         pass
     widget.setItemText(route_key, value)
     return True
-
-
-def _branch_raw_strategy_text(branch, strategy_args: str) -> str:
-    lines = []
-    in_range = str(getattr(branch, "in_range", "") or "x").strip() or "x"
-    out_range = str(getattr(branch, "out_range", "") or "a").strip() or "a"
-    payload = str(getattr(branch, "payload", "") or "all").strip() or "all"
-    if in_range != "x":
-        lines.append(f"--in-range={in_range}")
-    if out_range != "a":
-        lines.append(f"--out-range={out_range}")
-    if payload != "all":
-        lines.append(f"--payload={payload}")
-    clean_strategy_args = str(strategy_args or "").strip()
-    if clean_strategy_args:
-        lines.append(clean_strategy_args)
-    return "\n".join(lines).strip()
-
-
-def _branch_match_tab_text(payload, branch, raw_strategy_text: str) -> str:
-    return build_profile_setup_match_tab_text(
-        match_summary=str(getattr(payload, "match_summary", "") or ""),
-        strategy_id=str(getattr(branch, "strategy_id", "") or ""),
-        strategy_name=str(getattr(branch, "strategy_name", "") or ""),
-        raw_strategy_text=raw_strategy_text,
-    )
 
 
 def _profile_editor_tab_title(payload) -> str:
@@ -2560,7 +2532,7 @@ class ProfileSetupPageBase(BasePage):
             return
         if strategy_id == _current_strategy_id(self._payload):
             return
-        self._apply_strategy_locally(strategy_id)
+        self._mark_strategy_selection_pending(strategy_id)
         self._request_strategy_apply(strategy_id)
 
     def _request_strategy_apply(self, strategy_id: str) -> None:
@@ -2590,110 +2562,20 @@ class ProfileSetupPageBase(BasePage):
 
     _pending_strategy_apply = _worker_pending_property("_strategy_apply_state_obj")
 
-    def _apply_strategy_locally(self, strategy_id: str) -> bool:
-        payload = self._payload
-        if payload is None:
-            return False
-        item = getattr(payload, "item", None)
-        if item is None or not bool(getattr(item, "in_preset", False)):
-            return False
-        entry = (getattr(payload, "strategy_entries", {}) or {}).get(strategy_id)
-        if entry is None:
-            return False
+    def _mark_strategy_selection_pending(self, strategy_id: str) -> bool:
+        """Отметить выбор стратегии до подтверждения записи.
 
-        state = (getattr(payload, "strategy_states", {}) or {}).get(strategy_id, ProfileStrategyState())
-        branches = tuple(getattr(payload, "strategy_branches", ()) or ())
-        current_branch_id = _current_strategy_branch_id(payload)
-        if branches and current_branch_id:
-            entry_args = str(getattr(entry, "args", "") or "").strip()
-            updated_branch_items = []
-            for branch in branches:
-                if str(getattr(branch, "branch_id", "") or "").strip() != current_branch_id:
-                    updated_branch_items.append(branch)
-                    continue
-                raw_strategy_text = _branch_raw_strategy_text(branch, entry_args)
-                updated_branch = replace(
-                    branch,
-                    strategy_id=strategy_id,
-                    strategy_name=str(getattr(entry, "name", "") or strategy_id),
-                    raw_strategy_text=raw_strategy_text,
-                )
-                updated_branch_items.append(
-                    replace(
-                        updated_branch,
-                        match_tab_text=_branch_match_tab_text(payload, updated_branch, raw_strategy_text),
-                    )
-                )
-            updated_branches = tuple(updated_branch_items)
-            selected_branch = next(
-                (
-                    branch
-                    for branch in updated_branches
-                    if str(getattr(branch, "branch_id", "") or "").strip() == current_branch_id
-                ),
-                None,
-            )
-            next_raw_strategy_text = str(getattr(selected_branch, "raw_strategy_text", "") or entry_args)
-            next_strategy_name = str(getattr(entry, "name", "") or strategy_id)
-            if len(updated_branches) <= 1:
-                updated_item = replace(
-                    item,
-                    strategy_id=strategy_id,
-                    strategy_name=next_strategy_name,
-                    enabled=True,
-                    rating=str(getattr(state, "rating", "") or ""),
-                    favorite=bool(getattr(state, "favorite", False)),
-                    strategy_branches=updated_branches,
-                )
-            else:
-                updated_item = replace(
-                    item,
-                    strategy_id="custom",
-                    strategy_name=_strategy_branch_summary_name(updated_branches),
-                    enabled=True,
-                    rating="",
-                    favorite=False,
-                    strategy_branches=updated_branches,
-                )
-            self._payload = replace(
-                payload,
-                item=updated_item,
-                strategy_branches=updated_branches,
-                raw_strategy_text=next_raw_strategy_text,
-                match_tab_text=str(getattr(selected_branch, "match_tab_text", "") or ""),
-                current_strategy_state=state,
-            )
-            self._strategy_list.set_current_strategy_id(strategy_id)
-            self._apply_strategy_branch_selector(self._payload)
-            self._apply_feedback_buttons(self._payload)
-            if self._match_tab_built:
-                self._apply_match_tab_payload()
-            return True
-
-        updated_item = replace(
-            item,
-            strategy_id=strategy_id,
-            strategy_name=str(getattr(entry, "name", "") or strategy_id),
-            enabled=True,
-            rating=str(getattr(state, "rating", "") or ""),
-            favorite=bool(getattr(state, "favorite", False)),
-        )
-        self._payload = replace(
-            payload,
-            item=updated_item,
-            raw_strategy_text=str(getattr(entry, "args", "") or ""),
-            match_tab_text=build_profile_setup_match_tab_text(
-                match_summary=str(getattr(payload, "match_summary", "") or ""),
-                strategy_id=strategy_id,
-                strategy_name=str(getattr(entry, "name", "") or strategy_id),
-                raw_strategy_text=str(getattr(entry, "args", "") or ""),
-            ),
-            current_strategy_state=state,
-        )
-        self._strategy_list.set_current_strategy_id(strategy_id)
-        self._apply_feedback_buttons(self._payload)
-        if self._match_tab_built:
-            self._apply_match_tab_payload()
+        Только подсветка строки в списке: item, ветки, аргументы и match-текст
+        остаются такими, какими их прочитал сервис из пресета. Раньше страница
+        пересчитывала их сама — намерение пользователя выглядело как факт даже
+        тогда, когда запись в пресет не состоялась.
+        """
+        # __dict__ вместо getattr: поведенческие тесты создают страницу через
+        # __new__, и обращение к атрибуту QWidget без __init__ бросает RuntimeError.
+        strategy_list = self.__dict__.get("_strategy_list")
+        if strategy_list is None:
+            return False
+        strategy_list.set_current_strategy_id(str(strategy_id or "").strip())
         return True
 
     def _set_current_strategy_feedback(self, *, rating: str) -> None:

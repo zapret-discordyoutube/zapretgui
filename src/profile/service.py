@@ -20,7 +20,12 @@ from settings.store import (
 )
 from ui.performance_metrics import log_ui_timing_since
 
-from .derived_cache import PresetSourcesCache, ProfileDerivedCache, profile_raw_text
+from .derived_cache import (
+    PresetSourcesCache,
+    ProfileDerivedCache,
+    profile_raw_text,
+    strategy_identity_lines,
+)
 from .folders import (
     load_profile_folder_state,
     materialize_profile_folder_items,
@@ -198,13 +203,76 @@ class ProfilePresetService:
     ) -> None:
         source_text = serialize_preset(preset)
         snapshot = self._selected_preset_snapshot
-        if snapshot is not None and serialize_preset(snapshot.preset) == source_text:
+        if (
+            snapshot is not None
+            and serialize_preset(snapshot.preset) == source_text
+            and self._snapshot_matches_disk(snapshot)
+        ):
             return
         self._save_selected_preset_source(source_text, content_change_kind=content_change_kind)
         if str(content_change_kind or "").strip() == "strategy_only" and str(changed_profile_key or "").strip():
             self._refresh_strategy_only_snapshots(str(changed_profile_key or "").strip())
             return
         self._invalidate_selected_preset_snapshot()
+
+    def _commit_preset(
+        self,
+        preset: Preset,
+        *,
+        content_change_kind: str = "",
+        changed_profile_key: str = "",
+        expect=None,
+    ) -> str:
+        """Записать пресет и подтвердить результат чтением файла.
+
+        Единственная точка записи мутаций профиля. `expect` получает
+        перечитанный пресет и возвращает причину расхождения ("" — совпало):
+        без такой проверки «успех» означал бы лишь «мы попросили записать»,
+        и любой молчаливый no-op оставлял UI в состоянии, которого нет на диске.
+        """
+        self.save_selected_preset(
+            preset,
+            content_change_kind=content_change_kind,
+            changed_profile_key=changed_profile_key,
+        )
+        if expect is None:
+            return ""
+        try:
+            stored = self._read_stored_preset()
+        except Exception as exc:
+            log(f"ProfilePresetService: не удалось перечитать пресет после записи: {exc}", "ERROR")
+            return f"reload_failed_after_write: {exc}"
+        reason = str(expect(stored) or "").strip()
+        if reason:
+            log(f"ProfilePresetService: запись пресета не подтверждена: {reason}", "ERROR")
+        return reason
+
+    def _read_stored_preset(self) -> Preset:
+        """Пресет прямо из файла, без кэшей и перештамповки идентичностей.
+
+        Верификация записи обязана смотреть на диск, но не должна двигать
+        реестр идентичности: его обновляет вызывающая мутация.
+        """
+        source_text, manifest = self._presets.read_selected_preset_source(self._launch_method)
+        return parse_preset_text(
+            source_text,
+            engine=self._engine,
+            source_name=str(getattr(manifest, "file_name", "") or ""),
+        )
+
+    def _snapshot_matches_disk(self, snapshot: _SelectedPresetSnapshot) -> bool:
+        """Отражает ли снапшот в памяти текущее содержимое файла.
+
+        Пропуск записи опирается на сравнение с этим снапшотом, поэтому его
+        расхождение с диском (внешняя правка файла, неудачная предыдущая
+        запись) превращало «нечего писать» в молчаливую потерю изменений.
+        """
+        try:
+            revision, _manifest, _source_text = self._selected_preset_revision()
+        except Exception as exc:
+            log(f"profile_feature.save_selected_preset.revision_check_failed: {exc}", "DEBUG")
+            return False
+        return snapshot.revision == revision
 
     def _save_selected_preset_source(self, source_text: str, *, content_change_kind: str = "") -> None:
         save = self._presets.save_selected_preset_source
@@ -589,7 +657,8 @@ class ProfilePresetService:
             if bool(preset.profiles[index].enabled) == bool(enabled):
                 return preset.profiles[index].key
             preset = with_profile_enabled(preset, index, bool(enabled))
-            self.save_selected_preset(preset)
+            if self._commit_preset(preset, expect=_expect_profile_enabled(index, bool(enabled))):
+                return None
             return preset.profiles[index].key if 0 <= index < len(preset.profiles) else None
 
         if profile_key.startswith("template:") and enabled:
@@ -694,14 +763,31 @@ class ProfilePresetService:
                     should_reload=True,
                     message="profile_index_missing",
                 )
-            preset = _with_profile_strategy_branch_lines(preset, index, branch_id, entry.args.splitlines())
-            preset = with_profile_enabled(preset, index, True)
-            self.save_selected_preset(
+            updated_preset = _with_profile_strategy_branch_lines(preset, index, branch_id, entry.args.splitlines())
+            if updated_preset is None:
+                return _strategy_apply_result(
+                    "stale_reloaded",
+                    profile_key=setup.item.key,
+                    strategy_id=strategy_id,
+                    should_reload=True,
+                    message="strategy_branch_segments_missing",
+                )
+            preset = with_profile_enabled(updated_preset, index, True)
+            write_failure = self._commit_preset(
                 preset,
                 content_change_kind="strategy_only",
                 changed_profile_key=profile_key,
+                expect=_expect_strategy_lines(index, branch_id, entry.args.splitlines()),
             )
             applied_key = preset.profiles[index].key if 0 <= index < len(preset.profiles) else ""
+            if write_failure:
+                return _strategy_apply_result(
+                    "write_failed",
+                    profile_key=applied_key or setup.item.key,
+                    strategy_id=strategy_id,
+                    should_reload=True,
+                    message=write_failure,
+                )
             return _strategy_apply_result(
                 "applied",
                 profile_key=applied_key,
@@ -755,12 +841,21 @@ class ProfilePresetService:
             )
         preset = with_profile_strategy_lines(preset, index, entry.args.splitlines())
         preset = with_profile_enabled(preset, index, True)
-        self.save_selected_preset(
+        write_failure = self._commit_preset(
             preset,
             content_change_kind="preset_structure" if list_structure_changed else "strategy_only",
             changed_profile_key="" if list_structure_changed else resolved_key,
+            expect=_expect_strategy_lines(index, "", entry.args.splitlines()),
         )
         applied_key = preset.profiles[index].key if 0 <= index < len(preset.profiles) else ""
+        if write_failure:
+            return _strategy_apply_result(
+                "write_failed",
+                profile_key=applied_key or resolved_key,
+                strategy_id=strategy_id,
+                should_reload=True,
+                message=write_failure,
+            )
         return _strategy_apply_result(
             "applied",
             profile_key=applied_key,
@@ -880,7 +975,8 @@ class ProfilePresetService:
             index,
             next_settings,
         )
-        self.save_selected_preset(preset)
+        if self._commit_preset(preset, expect=_expect_editable_settings(index, next_settings)):
+            return None
         return self._profile_edit_result(preset, index, old_persistent_key)
 
     def update_profile_raw_text(self, profile_key: str, raw_text: str) -> tuple[str, str] | None:
@@ -893,7 +989,8 @@ class ProfilePresetService:
         if profile_raw_text(preset.profiles[index]) == normalized_text:
             return old_persistent_key, old_persistent_key
         preset = with_profile_raw_text(preset, index, raw_text)
-        self.save_selected_preset(preset)
+        if self._commit_preset(preset, expect=_expect_profile_raw_text(index, normalized_text)):
+            return None
         return self._profile_edit_result(preset, index, old_persistent_key)
 
     def _profile_edit_result(self, preset: Preset, index: int, old_persistent_key: str) -> tuple[str, str] | None:
@@ -1013,18 +1110,16 @@ class ProfilePresetService:
         if filter_kind_switch_creates_preset_duplicate(profile, preset.profiles, current, resolved):
             return None
 
-        preset = with_editable_profile_settings(
-            preset,
-            index,
-            EditableProfileSettings(
-                filter_kind=resolved.filter_kind,
-                filter_value=resolved.filter_value,
-                filter_role=current.filter_role,
-                in_range=current.in_range,
-                out_range=current.out_range,
-            ),
+        next_settings = EditableProfileSettings(
+            filter_kind=resolved.filter_kind,
+            filter_value=resolved.filter_value,
+            filter_role=current.filter_role,
+            in_range=current.in_range,
+            out_range=current.out_range,
         )
-        self.save_selected_preset(preset)
+        preset = with_editable_profile_settings(preset, index, next_settings)
+        if self._commit_preset(preset, expect=_expect_editable_settings(index, next_settings)):
+            return None
         return self._profile_edit_result(preset, index, old_persistent_key)
 
     def delete_profile(self, profile_key: str) -> bool:
@@ -1678,13 +1773,19 @@ def _with_profile_strategy_branch_lines(
     profile_index: int,
     branch_id: str,
     strategy_lines,
-) -> Preset:
+) -> Preset | None:
+    """Пресет с заменёнными строками ветки или None, если ветки нет.
+
+    None вместо исходного пресета: возврат неизменённого пресета выглядел для
+    вызывающего как успешная замена и превращался в статус `applied` при
+    фактическом no-op — UI закреплял выбор, которого нет в файле.
+    """
     updated = deepcopy(preset)
     profile = updated.profiles[int(profile_index)]
     groups = _strategy_branch_segment_groups(profile)
     target = groups.get(str(branch_id or "").strip())
     if not target:
-        return preset
+        return None
 
     normalized_lines = [str(line or "").strip() for line in strategy_lines or () if str(line or "").strip()]
     replacement = [_strategy_segment(line) for line in normalized_lines]
@@ -1695,6 +1796,84 @@ def _with_profile_strategy_branch_lines(
         engine=updated.engine,
         source_name=updated.source_name,
     )
+
+
+def _expect_profile(profile_index: int, check):
+    """Ожидание к профилю по индексу в перечитанном пресете."""
+
+    def _expect(stored: Preset) -> str:
+        profiles = tuple(getattr(stored, "profiles", ()) or ())
+        if not (0 <= int(profile_index) < len(profiles)):
+            return f"profile_missing_after_write: index={profile_index}"
+        return str(check(profiles[int(profile_index)]) or "")
+
+    return _expect
+
+
+def _expect_strategy_lines(profile_index: int, branch_id: str, strategy_lines):
+    """Ожидание: строки стратегии профиля (или его ветки) равны заданным."""
+    clean_branch_id = str(branch_id or "").strip()
+    requested = tuple(str(line or "").strip() for line in strategy_lines or () if str(line or "").strip())
+
+    def _check(profile: Profile) -> str:
+        expected = strategy_identity_lines(profile, requested)
+        if clean_branch_id:
+            target = _strategy_branch_segment_groups(profile).get(clean_branch_id)
+            if not target:
+                return f"branch_missing_after_write: branch={clean_branch_id}"
+            start, end = target
+            actual_segments = profile.segments[start : end + 1]
+        else:
+            actual_segments = profile.segments
+        actual = strategy_identity_lines(
+            profile,
+            [segment.text for segment in actual_segments if segment.kind == "strategy"],
+        )
+        if actual == expected:
+            return ""
+        return (
+            "strategy_mismatch_after_write: "
+            f"branch={clean_branch_id or '-'} expected={list(expected)} actual={list(actual)}"
+        )
+
+    return _expect_profile(profile_index, _check)
+
+
+def _expect_profile_enabled(profile_index: int, enabled: bool):
+    def _check(profile: Profile) -> str:
+        if bool(profile.enabled) == bool(enabled):
+            return ""
+        return f"enabled_mismatch_after_write: expected={bool(enabled)} actual={bool(profile.enabled)}"
+
+    return _expect_profile(profile_index, _check)
+
+
+def _expect_editable_settings(profile_index: int, settings: EditableProfileSettings):
+    def _check(profile: Profile) -> str:
+        actual = read_editable_profile_settings(profile)
+        if (
+            actual.filter_kind == settings.filter_kind
+            and actual.filter_value == settings.filter_value
+            and actual.filter_role == settings.filter_role
+            and actual.in_range == settings.in_range
+            and actual.out_range == settings.out_range
+        ):
+            return ""
+        return f"settings_mismatch_after_write: expected={settings} actual={actual}"
+
+    return _expect_profile(profile_index, _check)
+
+
+def _expect_profile_raw_text(profile_index: int, raw_text: str):
+    expected = str(raw_text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+    def _check(profile: Profile) -> str:
+        actual = profile_raw_text(profile)
+        if actual == expected:
+            return ""
+        return "raw_text_mismatch_after_write"
+
+    return _expect_profile(profile_index, _check)
 
 
 def _strategy_branch_segment_groups(profile: Profile) -> dict[str, tuple[int, int]]:
