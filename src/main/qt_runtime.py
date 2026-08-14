@@ -153,6 +153,14 @@ def ensure_qt_runtime() -> QApplication:
         return app
 
     t_hooks = _time.perf_counter()
+    t_fluent_translator = _time.perf_counter()
+    from ui.fluent_translator import install_fluent_translator
+
+    install_fluent_translator(app)
+    emit_startup_metric(
+        "StartupQtFluentTranslator",
+        f"{(_time.perf_counter() - t_fluent_translator) * 1000:.0f}ms",
+    )
     t_infobar_duration = _time.perf_counter()
     from ui.infobar_duration import install_infobar_min_duration
 

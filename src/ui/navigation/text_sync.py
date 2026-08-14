@@ -64,6 +64,14 @@ def on_ui_language_changed(window, language: str) -> None:
     if session is None:
         return
     session.ui_language = normalize_language(language)
+    # Встроенные строки qfluentwidgets (контекстные меню полей, кнопки
+    # диалогов) переводит отдельный переводчик — его тоже переставляем.
+    try:
+        from ui.fluent_translator import install_fluent_translator
+
+        install_fluent_translator(language=session.ui_language)
+    except Exception:
+        pass
     refresh_navigation_texts(window)
     refresh_pages_language(window)
 
