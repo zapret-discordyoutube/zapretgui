@@ -41,8 +41,8 @@ class UrlImportDedupTests(unittest.TestCase):
             _remote_scope_for_launch_method=PresetsFeature._remote_scope_for_launch_method,
         )
         stub._update_url_bound_preset_from_file = (
-            lambda launch_method, source_url, file_path: PresetsFeature._update_url_bound_preset_from_file(
-                stub, launch_method, source_url, file_path
+            lambda launch_method, source_url, file_path, auto=True: PresetsFeature._update_url_bound_preset_from_file(
+                stub, launch_method, source_url, file_path, auto=auto
             )
         )
         return stub
@@ -112,6 +112,51 @@ class UrlImportDedupTests(unittest.TestCase):
                 "zapret2", URL, self._downloaded_file("просто текст\n")
             )
         stub.save_preset_source_by_file_name.assert_not_called()
+
+    def test_reimport_after_unlink_resumes_binding_without_duplicate(self):
+        from app.feature_facades.presets import PresetsFeature
+        from presets.remote_bindings import get_remote_preset_binding, update_remote_preset_binding
+
+        self._bind()
+        # «Отвязать» = пауза: URL остаётся в базе с auto=False.
+        update_remote_preset_binding("winws2", "Мой пресет.txt", auto=False, detached=False)
+        stub = self._make_facade_stub(VALID_TEXT)
+        result = stub._update_url_bound_preset_from_file(
+            "zapret2", URL, self._downloaded_file(UPDATED_TEXT)
+        )
+        self.assertIsNotNone(result)  # дубликат не создаётся
+        self.assertTrue(result.updated_existing)
+        binding = get_remote_preset_binding("winws2", "Мой пресет.txt")
+        self.assertTrue(binding["auto"])  # привязка возобновлена
+
+    def test_unbind_keeps_url_as_paused_binding(self):
+        from app.feature_facades.presets import PresetsFeature
+        from presets.remote_bindings import get_remote_preset_binding
+
+        self._bind()
+        stub = self._make_facade_stub(VALID_TEXT)
+        stub.unbind_preset_remote_source = (
+            lambda launch_method, file_name: PresetsFeature.unbind_preset_remote_source(
+                stub, launch_method, file_name
+            )
+        )
+        self.assertTrue(stub.unbind_preset_remote_source("zapret2", "Мой пресет.txt"))
+        binding = get_remote_preset_binding("winws2", "Мой пресет.txt")
+        self.assertIsNotNone(binding)  # URL сохранён
+        self.assertFalse(binding["auto"])
+        self.assertEqual(binding["url"], URL)
+
+    def test_rename_migrates_binding_with_url(self):
+        from presets.remote_bindings import get_remote_preset_binding, rename_remote_preset_binding
+
+        self._bind()
+        self.assertTrue(
+            rename_remote_preset_binding("winws2", "Мой пресет.txt", "Новое имя.txt")
+        )
+        self.assertIsNone(get_remote_preset_binding("winws2", "Мой пресет.txt"))
+        self.assertEqual(
+            get_remote_preset_binding("winws2", "Новое имя.txt")["url"], URL
+        )
 
     def test_binding_updates_after_successful_update(self):
         from presets.remote_bindings import get_remote_preset_binding

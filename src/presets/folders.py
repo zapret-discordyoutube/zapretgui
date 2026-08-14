@@ -479,6 +479,10 @@ def build_preset_folder_rows(
         preset = all_presets.get(file_name) or {}
         meta = state.get("items", {}).get(file_name) or {}
         remote_binding = remote_bindings.get(file_name)
+        # Пауза («Отвязать») сохраняет URL в настройках, но в списке пресет
+        # выглядит обычным: облачко только у активных привязок.
+        if remote_binding is not None and not bool(remote_binding.get("auto", True)):
+            remote_binding = None
         if remote_binding is None:
             remote_state = ""
         elif bool(remote_binding.get("detached", False)):

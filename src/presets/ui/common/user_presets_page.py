@@ -2523,10 +2523,14 @@ class UserPresetsPageBase(BasePage):
     # ------------------------------------------------- удалённые пресеты
 
     def _get_remote_preset_binding(self, file_name: str):
+        """Активная привязка пресета; пауза (auto=False) считается отсутствием."""
         try:
             from presets.remote_bindings import get_remote_preset_binding
 
-            return get_remote_preset_binding(self._config.folder_scope, file_name)
+            binding = get_remote_preset_binding(self._config.folder_scope, file_name)
+            if binding is not None and not bool(binding.get("auto", True)):
+                return None
+            return binding
         except Exception:
             return None
 

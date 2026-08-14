@@ -1028,7 +1028,10 @@ class PresetRawEditorPage(BasePage):
             scope = ENGINE_BY_LAUNCH_METHOD.get(
                 normalize_launch_method(self._launch_method), ENGINE_WINWS2
             )
-            return get_remote_preset_binding(scope, file_name)
+            binding = get_remote_preset_binding(scope, file_name)
+            if binding is not None and not bool(binding.get("auto", True)):
+                return None
+            return binding
         except Exception:
             return None
 
