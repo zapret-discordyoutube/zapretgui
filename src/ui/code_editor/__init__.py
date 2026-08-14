@@ -16,14 +16,20 @@ from ui.code_editor.find_engine import (
     locate_match,
     replace_all,
 )
-from ui.code_editor.syntax import PresetSyntaxHighlighter
+from ui.code_editor.syntax import (
+    ListFileSyntaxHighlighter,
+    PresetSyntaxHighlighter,
+    SyntaxTheme,
+)
 
 __all__ = [
     "CodeEditor",
     "CursorStatus",
     "FindController",
     "FindReplaceBar",
+    "ListFileSyntaxHighlighter",
     "PresetSyntaxHighlighter",
+    "SyntaxTheme",
     "SearchMatch",
     "SearchOptions",
     "SearchResult",

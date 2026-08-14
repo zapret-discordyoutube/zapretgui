@@ -69,6 +69,10 @@ from ui.accessibility import (
     set_control_accessibility,
     set_state_text,
 )
+from ui.code_editor.editor import CodeEditor
+from ui.code_editor.find_bar import FindReplaceBar
+from ui.code_editor.find_controller import FindController
+from ui.code_editor.syntax import ListFileSyntaxHighlighter, PresetSyntaxHighlighter
 from ui.fluent_widgets import set_tooltip
 from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.message_box_accessibility import set_message_box_button_accessibility
@@ -927,7 +931,9 @@ class ProfileSetupPageBase(BasePage):
         self._list_file_base_title.setWordWrap(True)
         editor_layout.addWidget(self._list_file_base_title)
 
-        self._list_file_base_text = PlainTextEdit()
+        self._list_file_base_text = CodeEditor(
+            highlighter_factory=lambda document: ListFileSyntaxHighlighter(document),
+        )
         self._list_file_base_text.setReadOnly(True)
         self._list_file_base_text.setMinimumHeight(180)
         self._list_file_base_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
@@ -947,10 +953,23 @@ class ProfileSetupPageBase(BasePage):
         self._list_file_user_title.setWordWrap(True)
         editor_layout.addWidget(self._list_file_user_title)
 
-        self._list_file_text = PlainTextEdit()
+        self._list_file_find_bar = FindReplaceBar(editor_tab)
+        self._list_file_find_bar.setVisible(False)
+        editor_layout.addWidget(self._list_file_find_bar)
+
+        self._list_file_text = CodeEditor(
+            highlighter_factory=lambda document: ListFileSyntaxHighlighter(document),
+        )
+        self._list_file_find_controller = FindController(
+            self._list_file_text,
+            self._list_file_find_bar,
+            parent=self,
+        )
         self._list_file_text.setMinimumHeight(320)
         self._list_file_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._list_file_text.textChanged.connect(self._on_list_file_text_changed)
+        # contentEdited, а не textChanged: перекраска синтаксиса при смене темы
+        # иначе запускала бы валидацию и автосохранение списка.
+        self._list_file_text.contentEdited.connect(self._on_list_file_text_changed)
         set_tooltip(
             self._list_file_text,
             "Пользовательская часть списка. Сохраняется в lists/user и добавляется к базе.",
@@ -958,7 +977,10 @@ class ProfileSetupPageBase(BasePage):
         set_control_accessibility(
             self._list_file_text,
             name="Ваши записи списка profile",
-            description="Пользовательская часть списка. Эти строки можно редактировать и сохранить.",
+            description=(
+                "Пользовательская часть списка. Эти строки можно редактировать и сохранить. "
+                "Ctrl+F — поиск, Ctrl+H — замена, Ctrl+G — переход к строке."
+            ),
         )
         set_state_text(self._list_file_text, "Ваши записи списка profile")
         editor_layout.addWidget(self._list_file_text, 1)
@@ -1007,7 +1029,18 @@ class ProfileSetupPageBase(BasePage):
         match_layout.addWidget(self._match_text, 1)
 
         match_layout.addWidget(BodyLabel("Текст profile в текущем preset"))
-        self._raw_profile_text = PlainTextEdit()
+        self._raw_profile_find_bar = FindReplaceBar(match_tab)
+        self._raw_profile_find_bar.setVisible(False)
+        match_layout.addWidget(self._raw_profile_find_bar)
+
+        self._raw_profile_text = CodeEditor(
+            highlighter_factory=lambda document: PresetSyntaxHighlighter(document),
+        )
+        self._raw_profile_find_controller = FindController(
+            self._raw_profile_text,
+            self._raw_profile_find_bar,
+            parent=self,
+        )
         self._raw_profile_text.setMinimumHeight(150)
         self._raw_profile_text.setMaximumHeight(220)
         set_tooltip(
@@ -1017,10 +1050,16 @@ class ProfileSetupPageBase(BasePage):
         set_control_accessibility(
             self._raw_profile_text,
             name="Текст profile в текущем preset",
-            description="Сырой текст profile. Сохраняется только в текущий preset.",
+            description=(
+                "Сырой текст profile. Сохраняется только в текущий preset. "
+                "Ctrl+F — поиск, Ctrl+H — замена, Ctrl+G — переход к строке, "
+                "Ctrl с колесом мыши — масштаб."
+            ),
         )
         set_state_text(self._raw_profile_text, "Текст profile в текущем preset")
-        self._raw_profile_text.textChanged.connect(self._on_raw_profile_text_changed)
+        # contentEdited, а не textChanged: перекраска синтаксиса при смене темы
+        # тоже эмитит textChanged и сбрасывала бы кэш текста без правки.
+        self._raw_profile_text.contentEdited.connect(self._on_raw_profile_text_changed)
         match_layout.addWidget(self._raw_profile_text)
 
         raw_actions = QWidget(match_tab)
@@ -2174,15 +2213,16 @@ class ProfileSetupPageBase(BasePage):
             return
         tokens = get_theme_tokens()
         error_color = "#ff6b6b"
+        # Шрифт здесь не задаём: CodeEditor сам ставит моноширинный и меняет
+        # его размер по Ctrl+колесу — QSS-правило font-size это ломало бы.
+        # Отступ слева меньше остальных: там колонка номеров строк.
         normal_style = f"""
             QPlainTextEdit {{
                 background: {tokens.surface_bg};
                 border: 1px solid {tokens.surface_border};
                 border-radius: 8px;
-                padding: 12px;
+                padding: 12px 12px 12px 4px;
                 color: {tokens.fg};
-                font-family: Consolas, 'Courier New', monospace;
-                font-size: 13px;
             }}
             QPlainTextEdit:hover {{
                 background: {tokens.surface_bg_hover};
@@ -2197,10 +2237,8 @@ class ProfileSetupPageBase(BasePage):
                 background: rgba(255, 100, 100, 0.06);
                 border: 1px solid {error_color};
                 border-radius: 8px;
-                padding: 12px;
+                padding: 12px 12px 12px 4px;
                 color: {tokens.fg};
-                font-family: Consolas, 'Courier New', monospace;
-                font-size: 13px;
             }}
             QPlainTextEdit:focus {{
                 border: 1px solid {error_color};

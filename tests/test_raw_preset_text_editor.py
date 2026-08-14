@@ -236,8 +236,16 @@ class RawPresetTextEditorTests(unittest.TestCase):
         editor.content_publish_pending = False
         footer_messages.clear()
 
-        editor.editor._apply_highlighter_theme(True)
-        editor.editor._apply_highlighter_theme(False)
+        from PyQt6.QtGui import QColor
+
+        from ui.code_editor.syntax import SyntaxTheme
+
+        editor.editor._apply_highlighter_theme(
+            SyntaxTheme(accent=QColor("#ff8c00"), text=QColor(0, 0, 0))
+        )
+        editor.editor._apply_highlighter_theme(
+            SyntaxTheme(accent=QColor("#0078d4"), text=QColor(255, 255, 255))
+        )
         self.app.processEvents()
 
         self.assertFalse(editor.content_publish_pending)

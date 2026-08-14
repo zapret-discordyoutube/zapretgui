@@ -10,11 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QRect, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QTextCursor, QTextFormat
+from PyQt6.QtGui import QColor, QFont, QPainter, QPalette, QTextCursor, QTextFormat
 from PyQt6.QtWidgets import QTextEdit
 from qfluentwidgets import PlainTextEdit, isDarkTheme, themeColor
 
 from ui.code_editor.line_number_area import LineNumberArea
+from ui.code_editor.syntax import SyntaxTheme
 from ui.code_editor.line_ops import (
     delete_lines,
     duplicate_lines,
@@ -215,34 +216,40 @@ class CodeEditor(PlainTextEdit):
 
     # ------------------------------------------------------------------ тема
 
-    def _apply_theme(self, *, tokens=None) -> None:
-        is_light = bool(getattr(tokens, "is_light", None)) if tokens is not None else not isDarkTheme()
+    def theme_colors(self) -> SyntaxTheme:
+        """Акцент и цвет текста текущей темы qfluentwidgets."""
         try:
             accent = QColor(themeColor())
         except Exception:
             accent = QColor("#0078d4")
+        text = QColor(self.palette().color(QPalette.ColorRole.Text))
+        if not text.isValid() or text.alpha() == 0:
+            text = QColor(255, 255, 255) if isDarkTheme() else QColor(0, 0, 0)
+        return SyntaxTheme(accent=accent, text=text)
 
-        if is_light:
-            self._line_number_color = QColor(0, 0, 0, 90)
-            self._line_number_current_color = QColor(0, 0, 0, 190)
-            self._current_line_color = QColor(0, 0, 0, 10)
-            self._match_color = QColor(255, 200, 0, 110)
-        else:
-            self._line_number_color = QColor(255, 255, 255, 90)
-            self._line_number_current_color = QColor(255, 255, 255, 210)
-            self._current_line_color = QColor(255, 255, 255, 14)
-            self._match_color = QColor(255, 214, 0, 80)
+    def _apply_theme(self, *, tokens=None) -> None:
+        theme = self.theme_colors()
+        accent = theme.accent
+        text = theme.text
 
-        current = QColor(accent)
-        current.setAlpha(150)
-        self._current_match_color = current
+        # Служебные подсветки — тем же акцентом и цветом текста темы,
+        # различаются только прозрачностью.
+        self._line_number_color = QColor(text)
+        self._line_number_color.setAlpha(95)
+        self._line_number_current_color = QColor(accent)
+        self._current_line_color = QColor(text)
+        self._current_line_color.setAlpha(14)
+        self._match_color = QColor(accent)
+        self._match_color.setAlpha(70)
+        self._current_match_color = QColor(accent)
+        self._current_match_color.setAlpha(160)
 
-        self._apply_highlighter_theme(is_light)
+        self._apply_highlighter_theme(theme)
 
         self._refresh_extra_selections()
         self._line_number_area.update()
 
-    def _apply_highlighter_theme(self, is_light: bool) -> None:
+    def _apply_highlighter_theme(self, theme=None) -> None:
         """Перекрашивает синтаксис, не выдавая это за правку документа.
 
         QSyntaxHighlighter.rehighlight() открывает edit-block на документе и
@@ -251,12 +258,12 @@ class CodeEditor(PlainTextEdit):
         автосохранение — поэтому наружу отдаётся contentEdited, а не
         сырой textChanged.
         """
-        setter = getattr(self._highlighter, "set_light_theme", None)
+        setter = getattr(self._highlighter, "apply_theme", None)
         if not callable(setter):
             return
         self._suppress_content_signals = True
         try:
-            setter(bool(is_light))
+            setter(theme if theme is not None else self.theme_colors())
         except Exception:
             pass
         finally:

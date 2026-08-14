@@ -268,18 +268,52 @@ class PresetSyntaxHighlighterTests(unittest.TestCase):
         self.assertEqual(editor.toPlainText(), source)
         self.assertFalse(editor.document().isModified())
 
-    def test_palette_switches_with_theme(self) -> None:
-        from PyQt6.QtGui import QTextDocument
+    def test_palette_follows_theme_accent_and_text_color(self) -> None:
+        from PyQt6.QtGui import QColor, QTextDocument
 
-        from ui.code_editor.syntax import DARK_PALETTE, LIGHT_PALETTE, PresetSyntaxHighlighter
+        from ui.code_editor.syntax import PresetSyntaxHighlighter, SyntaxTheme
 
         document = QTextDocument()
-        highlighter = PresetSyntaxHighlighter(document, is_light=False)
-        self.assertIs(highlighter.palette, DARK_PALETTE)
+        dark = SyntaxTheme(accent=QColor("#0078d4"), text=QColor(255, 255, 255))
+        highlighter = PresetSyntaxHighlighter(document, theme=dark)
+        self.assertEqual(highlighter.theme, dark)
 
-        self.assertTrue(highlighter.set_light_theme(True))
-        self.assertIs(highlighter.palette, LIGHT_PALETTE)
-        self.assertFalse(highlighter.set_light_theme(True))
+        light = SyntaxTheme(accent=QColor("#ff8c00"), text=QColor(0, 0, 0))
+        self.assertTrue(highlighter.apply_theme(light))
+        self.assertEqual(highlighter.theme, light)
+        self.assertFalse(highlighter.apply_theme(light))
+
+    def test_syntax_colors_are_taken_from_theme_only(self) -> None:
+        from PyQt6.QtGui import QColor, QTextDocument
+
+        from ui.code_editor.syntax import PresetSyntaxHighlighter, SyntaxTheme
+
+        accent = QColor("#c50f1f")
+        text = QColor(255, 255, 255)
+        highlighter = PresetSyntaxHighlighter(
+            QTextDocument(), theme=SyntaxTheme(accent=accent, text=text)
+        )
+
+        for role, text_format in highlighter._formats.items():
+            color = text_format.foreground().color()
+            source = (accent, text)[role in {"comment", "operator", "path"}]
+            self.assertEqual(
+                (color.red(), color.green(), color.blue()),
+                (source.red(), source.green(), source.blue()),
+                role,
+            )
+
+    def test_editor_theme_colors_use_qfluent_accent(self) -> None:
+        from qfluentwidgets import themeColor
+
+        from ui.code_editor.editor import CodeEditor
+
+        editor = CodeEditor()
+        self.addCleanup(editor.deleteLater)
+        theme = editor.theme_colors()
+
+        self.assertEqual(theme.accent.name(), themeColor().name())
+        self.assertTrue(theme.text.isValid())
 
 
 if __name__ == "__main__":
