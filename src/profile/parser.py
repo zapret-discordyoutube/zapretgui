@@ -235,7 +235,7 @@ def _parse_profile(lines: list[str], *, engine: EngineName, index: int, new_line
 
 def _assign_profile_keys(profiles: list[Profile]) -> None:
     """persistent_key обязан быть уникален в пределах пресета: им ключуются
-    мета папок/рейтингов и состояние стратегий в settings.json, и он служит
+    мета папок/рейтингов и состояние стратегий в settings.sqlite3, и он служит
     стабильной ссылкой на профиль между UI и сервисом.
 
     Ровно один из дубликатов сохраняет базовый ключ без суффикса (совместимость

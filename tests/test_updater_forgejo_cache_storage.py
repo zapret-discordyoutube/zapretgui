@@ -30,7 +30,7 @@ class UpdaterForgejoCacheStorageTests(unittest.TestCase):
         self.assertNotIn("github_cache", normalized["updater"])
         self.assertNotIn("github_rate_limit_reset", normalized["updater"])
 
-    def test_forgejo_cache_is_saved_outside_settings_json(self) -> None:
+    def test_forgejo_cache_is_saved_outside_settings_database(self) -> None:
         from config.runtime_layout import ApplicationPaths
         from settings import store as settings_store
         from updater import forgejo_cache_storage
@@ -54,7 +54,7 @@ class UpdaterForgejoCacheStorageTests(unittest.TestCase):
                 settings_store.reset_settings()
                 forgejo_cache_storage.save_forgejo_cache(cache_payload)
 
-                settings_data = json.loads((root / "settings" / "settings.json").read_text(encoding="utf-8"))
+                settings_data = settings_store.read_settings()
                 self.assertNotIn("github_cache", settings_data["updater"])
                 self.assertNotIn("github_rate_limit_reset", settings_data["updater"])
                 self.assertEqual(forgejo_cache_storage.load_forgejo_cache(), cache_payload)
@@ -74,32 +74,17 @@ class UpdaterForgejoCacheStorageTests(unittest.TestCase):
             with patch("updater.forgejo_cache_storage.APPLICATION_PATHS", paths):
                 self.assertEqual(forgejo_cache_storage.load_forgejo_cache(), {})
 
-    def test_materialize_settings_file_rewrites_legacy_github_cache_payload(self) -> None:
+    def test_prepare_settings_database_creates_only_sqlite_storage(self) -> None:
         from settings import store as settings_store
-        from settings.schema import build_default_settings
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            settings_path = root / "settings" / "settings.json"
-            settings_path.parent.mkdir(parents=True, exist_ok=True)
-            data = build_default_settings()
-            data["updater"]["github_cache"] = {
-                "https://api.github.test/releases": {
-                    "timestamp": 123,
-                    "content": [{"body": "x" * 10_000}],
-                }
-            }
-            settings_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-            original_size = settings_path.stat().st_size
-
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
-                materialized = settings_store.materialize_settings_file()
+                prepared = settings_store.prepare_settings_database()
 
-            rewritten = json.loads(settings_path.read_text(encoding="utf-8"))
-            self.assertNotIn("github_cache", materialized["updater"])
-            self.assertNotIn("github_cache", rewritten["updater"])
-            self.assertNotIn("x" * 1_000, settings_path.read_text(encoding="utf-8"))
-            self.assertLess(settings_path.stat().st_size, original_size)
+            self.assertNotIn("github_cache", prepared["updater"])
+            self.assertTrue((root / "settings" / "settings.sqlite3").is_file())
+            self.assertFalse((root / "settings" / "settings.json").exists())
 
 
 if __name__ == "__main__":

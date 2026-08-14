@@ -1061,7 +1061,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 internal.mkdir(parents=True)
                 settings.mkdir()
                 (internal / "Zapret.exe").write_bytes(b"new")
-                (settings / "settings.json").write_text("{}", encoding="utf-8")
+                (settings / "settings.sqlite3").write_bytes(b"sqlite")
                 (app_root / "Zapret.exe").write_bytes(b"old")
                 (app_root / "python314.dll").write_bytes(b"old")
                 (app_root / "_socket.pyd").write_bytes(b"old")
@@ -1073,7 +1073,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
 
                 self.assertEqual(removed, 6)
                 self.assertTrue((internal / "Zapret.exe").is_file())
-                self.assertTrue((settings / "settings.json").is_file())
+                self.assertTrue((settings / "settings.sqlite3").is_file())
                 self.assertFalse((app_root / "Zapret.exe").exists())
                 self.assertFalse((app_root / "python314.dll").exists())
                 self.assertFalse((app_root / "_socket.pyd").exists())
@@ -1666,6 +1666,28 @@ class BuildResourceLayoutTests(unittest.TestCase):
             install_delete,
         )
         self.assertIn("if not IsSharedInstallRoot(AppRoot) then", iss)
+
+    def test_inno_retires_json_settings_but_preserves_both_sqlite_databases(self) -> None:
+        iss = self._read_inno_script()
+        install_delete_start = iss.index("[InstallDelete]")
+        install_delete_end = iss.index("[UninstallDelete]", install_delete_start)
+        install_delete = iss[install_delete_start:install_delete_end]
+        migration_start = iss.index("function MigrateUserDataIfInstallRootChanged")
+        migration_end = iss.index("function RegistryValueReferencesRoot", migration_start)
+        migration = iss[migration_start:migration_end]
+        deleted_names = re.findall(r'Name:\s*"([^"]+)"', install_delete)
+
+        self.assertIn(
+            'Type: files; Name: "{app}\\settings\\settings.json"',
+            install_delete,
+        )
+        self.assertNotIn(r"{app}\settings\settings.sqlite3", deleted_names)
+        self.assertNotIn(r"{app}\settings\premium.sqlite3", deleted_names)
+        self.assertIn("DeleteFile(NewInstallRoot + '\\settings\\settings.json')", migration)
+        self.assertIn(
+            "CopyDirectoryTree(PreviousInstallRoot + '\\settings', NewInstallRoot + '\\settings')",
+            migration,
+        )
 
     def test_inno_persistent_bindings_follow_install_roots_not_previous_exe_layout(self) -> None:
         iss = self._read_inno_script()

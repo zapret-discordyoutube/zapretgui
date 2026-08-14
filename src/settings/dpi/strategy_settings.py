@@ -12,7 +12,7 @@ def get_strategy_launch_method() -> str:
     try:
         return normalize_launch_method(settings_store.get_strategy_launch_method())
     except Exception as e:
-        log(f"Ошибка чтения метода запуска из settings.json: {e}", "ERROR")
+        log(f"Ошибка чтения метода запуска из settings.sqlite3: {e}", "ERROR")
     return DEFAULT_LAUNCH_METHOD
 
 

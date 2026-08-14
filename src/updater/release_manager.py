@@ -56,7 +56,7 @@ class ServerStats:
         self.stats = self._load_stats()
     
     def _load_stats(self) -> Dict[str, Dict[str, Any]]:
-        """Загружает статистику из settings.json."""
+        """Загружает статистику из settings.sqlite3."""
         try:
             updater = settings_store.get_updater_settings()
             release_manager = updater.get("release_manager", {})
@@ -67,7 +67,7 @@ class ServerStats:
         return {}
     
     def _save_stats(self):
-        """Сохраняет статистику в settings.json."""
+        """Сохраняет статистику в settings.sqlite3."""
         try:
             updater = settings_store.get_updater_settings()
             release_manager = updater.get("release_manager", {})
@@ -501,7 +501,7 @@ class ReleaseManager:
         }
 
     def _load_vps_block_until(self) -> float:
-        """Читает из settings.json, до какого времени заблокирован VPS."""
+        """Читает из settings.sqlite3, до какого времени заблокирован VPS."""
         try:
             updater = settings_store.get_updater_settings()
             release_manager = updater.get("release_manager", {})

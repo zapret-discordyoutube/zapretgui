@@ -218,7 +218,7 @@ class OrchestraRunner:
         # Теперь используем уникальные имена с ID сессии
         self.current_log_id: Optional[str] = None
         self.debug_log_path: Optional[str] = None
-        # Загружаем настройку сохранения debug файла из settings.json
+        # Загружаем настройку сохранения debug файла из settings.sqlite3
         self.keep_debug_file = bool(get_orchestra_keep_debug_file())
 
         # Загружаем настройку авторестарта при Discord FAIL
@@ -244,7 +244,7 @@ class OrchestraRunner:
         self.ipset_networks: list[tuple[ipaddress._BaseNetwork, str]] = []
 
         # Белый список (exclude list) - домены которые НЕ обрабатываются
-        self.user_whitelist: list = []  # Только пользовательские (из settings.json)
+        self.user_whitelist: list = []  # Только пользовательские (из settings.sqlite3)
         self.whitelist: set = set()     # Полный список (default + user) для генерации файла
 
         # Callbacks
@@ -726,7 +726,7 @@ class OrchestraRunner:
         return startupinfo
 
     def load_existing_strategies(self) -> Dict[str, int]:
-        """Загружает ранее сохраненные стратегии и историю из settings.json."""
+        """Загружает ранее сохраненные стратегии и историю из settings.sqlite3."""
         # Загружаем blocked сначала (нужен для проверки конфликтов в locked)
         self.blocked_manager.load()
 
@@ -767,7 +767,7 @@ class OrchestraRunner:
 
         try:
             with open(lua_path, 'w', encoding='utf-8') as f:
-                f.write("-- Auto-generated: preload strategies from settings.json\n")
+                f.write("-- Auto-generated: preload strategies from settings.sqlite3\n")
                 f.write(f"-- Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"-- {stats_str or 'empty'}, History: {total_history}\n\n")
 
@@ -1443,7 +1443,7 @@ class OrchestraRunner:
         self.last_launch_command = []
         self._startup_forwarded_signatures.clear()
 
-        # Загружаем предыдущие стратегии и историю из settings.json
+        # Загружаем предыдущие стратегии и историю из settings.sqlite3
         self.load_existing_strategies()
 
         # Инициализируем счётчики успехов из истории
@@ -1463,7 +1463,7 @@ class OrchestraRunner:
         total_history = len(self.locked_manager.strategy_history)
         if total_locked or total_history:
             stats_str = ", ".join(f"{askey.upper()}: {cnt}" for askey, cnt in counts.items() if cnt > 0)
-            log(f"Загружено из settings.json: {stats_str or 'пусто'}, история для {total_history} доменов", "INFO")
+            log(f"Загружено из settings.sqlite3: {stats_str or 'пусто'}, история для {total_history} доменов", "INFO")
 
         # Генерируем уникальный ID для этой сессии логов
         self.current_log_id = self._generate_log_id()
@@ -1485,7 +1485,7 @@ class OrchestraRunner:
             # Запускаем winws2 с @config_file
             cmd = [self.winws_exe, f"@{launch_config_path}"]
 
-            # Добавляем предзагрузку стратегий из settings.json
+            # Добавляем предзагрузку стратегий из settings.sqlite3
             if learned_lua:
                 cmd.append(f"--lua-init=@{learned_lua}")
 
@@ -1494,7 +1494,7 @@ class OrchestraRunner:
 
             log_msg = f"Запуск: {EXE_NAME_WINWS2} @{os.path.basename(launch_config_path)}"
             if total_locked:
-                log_msg += f" ({total_locked} стратегий из settings.json)"
+                log_msg += f" ({total_locked} стратегий из settings.sqlite3)"
             log(log_msg, "INFO")
             log(f"Командная строка: {' '.join(cmd)}", "DEBUG")
 
@@ -1703,7 +1703,7 @@ class OrchestraRunner:
     # ==================== WHITELIST METHODS ====================
 
     def load_whitelist(self) -> set:
-        """Загружает whitelist из settings.json + добавляет системные домены"""
+        """Загружает whitelist из settings.sqlite3 + добавляет системные домены"""
         # 1. Очищаем
         self.user_whitelist = []
         self.whitelist = set()
@@ -1712,7 +1712,7 @@ class OrchestraRunner:
         self.whitelist.update(DEFAULT_WHITELIST_DOMAINS)
         default_count = len(DEFAULT_WHITELIST_DOMAINS)
         
-        # 3. Загружаем пользовательские из settings.json
+        # 3. Загружаем пользовательские из settings.sqlite3
         try:
             self.user_whitelist = list(get_orchestra_whitelist_user_domains())
             self.whitelist.update(self.user_whitelist)
@@ -1726,7 +1726,7 @@ class OrchestraRunner:
         return self.whitelist
 
     def save_whitelist(self):
-        """Сохраняет пользовательский whitelist в settings.json."""
+        """Сохраняет пользовательский whitelist в settings.sqlite3."""
         try:
             set_orchestra_whitelist_user_domains(list(self.user_whitelist))
             log(f"Сохранено {len(self.user_whitelist)} пользовательских доменов в whitelist", "DEBUG")
@@ -1875,7 +1875,7 @@ class OrchestraRunner:
 
             with open(self.whitelist_path, 'w', encoding='utf-8') as f:
                 f.write("# Orchestra whitelist - exclude these domains from DPI bypass\n")
-                f.write("# System domains (built-in) + User domains (from settings.json)\n\n")
+                f.write("# System domains (built-in) + User domains (from settings.sqlite3)\n\n")
                 for domain in sorted(self.whitelist):
                     f.write(f"{domain}\n")
 

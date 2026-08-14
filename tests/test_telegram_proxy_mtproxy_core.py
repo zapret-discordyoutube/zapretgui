@@ -142,7 +142,7 @@ class TelegramProxyMTProxyCoreTests(unittest.TestCase):
         self.assertIn("secret", joined)
         self.assertIn("dd/ee", joined)
 
-    def test_mtproxy_settings_are_normalized_in_settings_json_shape(self) -> None:
+    def test_mtproxy_settings_are_normalized_in_settings_schema_shape(self) -> None:
         from settings.normalize import normalize_telegram_proxy
         from settings.schema import VALID_TG_PROXY_MODES, default_telegram_proxy
         from telegram_proxy.config.settings import default_state, normalize_proxy_mode
@@ -237,7 +237,7 @@ class TelegramProxyMTProxyCoreTests(unittest.TestCase):
             "tg://proxy?server=proxy.example.com&port=443&secret=ddaabbccddeeff00112233445566778899",
         )
 
-    def test_fake_tls_settings_are_normalized_in_settings_json_shape(self) -> None:
+    def test_fake_tls_settings_are_normalized_in_settings_schema_shape(self) -> None:
         from settings.normalize import normalize_telegram_proxy
         from settings.schema import default_telegram_proxy
         from telegram_proxy.config.settings import default_state

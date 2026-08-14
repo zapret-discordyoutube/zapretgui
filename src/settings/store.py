@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import json
+import sqlite3
+import time
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -39,26 +41,37 @@ from settings.schema import (
     DEFAULT_TG_PROXY_UPSTREAM_PORT as _DEFAULT_TG_PROXY_UPSTREAM_PORT,
     DEFAULT_TINTED_INTENSITY as _DEFAULT_TINTED_INTENSITY,
     DEFAULT_WINDOW_OPACITY as _DEFAULT_WINDOW_OPACITY,
+    SETTINGS_DATABASE_FILE_NAME as _SETTINGS_DATABASE_FILE_NAME,
     SETTINGS_DIR_NAME as _SETTINGS_DIR_NAME,
-    SETTINGS_FILE_NAME as _SETTINGS_FILE_NAME,
     TRAY_CLOSE_MODE_NORMAL as _TRAY_CLOSE_MODE_NORMAL,
     VALID_TRAY_CLOSE_MODES as _VALID_TRAY_CLOSE_MODES,
     build_default_settings as _build_default_settings,
 )
-from utils.atomic_text import atomic_write_text
 
 _SETTINGS_LOCK = RLock()
 _SETTINGS_CACHE: dict[str, Any] | None = None
-_SETTINGS_CACHE_SIGNATURE: tuple[str, int | None, int | None] | None = None
-# Кэш, заполненный чтением с materialize=False, не гарантирует, что файл на
-# диске починен/создан — materialize-чтение обязано пройти мимо такого кэша.
-_SETTINGS_CACHE_MATERIALIZED = False
+_SETTINGS_CACHE_REVISION: int | None = None
+_SETTINGS_CONNECTION: sqlite3.Connection | None = None
+_SETTINGS_CONNECTION_PATH: Path | None = None
+_SETTINGS_SCHEMA_VERSION = 1
+_SETTINGS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS settings_sections (
+    section TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings_meta (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO settings_meta(key, value) VALUES('revision', 0);
+"""
 _DIRECT_PRESET_SELECTION_PATHS = {
     ENGINE_WINWS1: ("program", SELECTED_SOURCE_PRESET_FILE_NAME_KEY_WINWS1),
     ENGINE_WINWS2: ("program", SELECTED_SOURCE_PRESET_FILE_NAME_KEY_WINWS2),
 }
 
-# Тесты подменяют только этот корень, чтобы не писать в живой settings.json.
+# Тесты подменяют только этот корень, чтобы не писать в живую settings.sqlite3.
 # В установленном приложении значение всегда приходит из APPLICATION_PATHS.
 MAIN_DIRECTORY = str(APPLICATION_PATHS.root)
 
@@ -67,95 +80,214 @@ def _settings_root() -> Path:
     return Path(MAIN_DIRECTORY)
 
 
-def get_settings_path() -> Path:
-    return _settings_root() / _SETTINGS_DIR_NAME / _SETTINGS_FILE_NAME
+def get_settings_database_path() -> Path:
+    return _settings_root() / _SETTINGS_DIR_NAME / _SETTINGS_DATABASE_FILE_NAME
 
 
-def _settings_file_signature(path: Path | None = None) -> tuple[str, int | None, int | None]:
-    resolved = path or get_settings_path()
-    try:
-        stat = resolved.stat()
-        return (str(resolved), int(stat.st_mtime_ns), int(stat.st_size))
-    except OSError:
-        return (str(resolved), None, None)
+def _serialize_section(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
-def _format_settings_json(data: dict[str, Any]) -> str:
-    return json.dumps(data, ensure_ascii=False, indent=2)
+def _close_connection_locked() -> None:
+    global _SETTINGS_CONNECTION, _SETTINGS_CONNECTION_PATH
+    global _SETTINGS_CACHE, _SETTINGS_CACHE_REVISION
+
+    connection = _SETTINGS_CONNECTION
+    _SETTINGS_CONNECTION = None
+    _SETTINGS_CONNECTION_PATH = None
+    _SETTINGS_CACHE = None
+    _SETTINGS_CACHE_REVISION = None
+    if connection is not None:
+        try:
+            connection.close()
+        except sqlite3.Error:
+            pass
 
 
-def _write_settings_file_locked(data: dict[str, Any]) -> None:
-    global _SETTINGS_CACHE, _SETTINGS_CACHE_SIGNATURE, _SETTINGS_CACHE_MATERIALIZED
-
-    normalized = _normalize_settings(data)
-    path = get_settings_path()
+def _open_connection(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, _format_settings_json(normalized), encoding="utf-8")
-    _SETTINGS_CACHE = copy.deepcopy(normalized)
-    _SETTINGS_CACHE_SIGNATURE = _settings_file_signature(path)
-    _SETTINGS_CACHE_MATERIALIZED = True
-
-
-def _read_settings_file_locked(*, materialize: bool = True) -> dict[str, Any]:
-    path = get_settings_path()
-    defaults = _build_default_settings()
-    if not path.exists():
-        if materialize:
-            _write_settings_file_locked(defaults)
-        return defaults
-
+    connection: sqlite3.Connection | None = None
     try:
-        raw_text = path.read_text(encoding="utf-8")
-        raw = json.loads(raw_text)
-    except Exception as exc:
-        # Перезапись дефолтами стирает user_profiles и прочие пользовательские
-        # данные — повреждённый оригинал обязан сохраниться рядом.
-        _backup_corrupt_settings_locked(path, exc)
-        if materialize:
-            _write_settings_file_locked(defaults)
-        return defaults
+        connection = sqlite3.connect(
+            path,
+            timeout=10.0,
+            isolation_level=None,
+            check_same_thread=False,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=NORMAL")
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA busy_timeout=10000")
+        connection.executescript(_SETTINGS_SCHEMA)
+        quick_check = connection.execute("PRAGMA quick_check(1)").fetchone()
+        if quick_check is None or str(quick_check[0]).lower() != "ok":
+            detail = quick_check[0] if quick_check is not None else "no result"
+            raise sqlite3.DatabaseError(f"database disk image is malformed: {detail}")
+        current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if current_version > _SETTINGS_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"settings.sqlite3 schema {current_version} is newer than supported "
+                f"{_SETTINGS_SCHEMA_VERSION}"
+            )
+        connection.execute(f"PRAGMA user_version={_SETTINGS_SCHEMA_VERSION}")
+        return connection
+    except Exception:
+        if connection is not None:
+            connection.close()
+        raise
 
-    normalized = _normalize_settings(raw)
-    should_rewrite = False
-    if materialize:
-        should_rewrite = _format_settings_json(normalized) != _format_settings_json(raw)
-    if should_rewrite:
-        _write_settings_file_locked(normalized)
-    return normalized
 
-
-def _backup_corrupt_settings_locked(path: Path, error: Exception) -> None:
-    backup_path = path.with_name(path.name + ".corrupt.bak")
-    try:
-        backup_path.write_bytes(path.read_bytes())
-    except OSError:
-        backup_path = None
+def _backup_corrupt_database_locked(path: Path, error: Exception) -> None:
+    timestamp = time.time_ns()
+    backups: list[Path] = []
+    for suffix in ("", "-wal", "-shm"):
+        source = Path(str(path) + suffix)
+        if not source.exists():
+            continue
+        target = path.with_name(f"{path.name}.corrupt.{timestamp}{suffix}.bak")
+        try:
+            source.replace(target)
+            backups.append(target)
+        except OSError:
+            pass
     try:
         from log.log import log
 
-        target = f", копия: {backup_path}" if backup_path is not None else ", копию сохранить не удалось"
-        log(f"settings.json не читается ({error}); файл будет перезаписан дефолтами{target}", "ERROR")
+        target = ", ".join(str(item) for item in backups) or "копию сохранить не удалось"
+        log(
+            f"settings.sqlite3 повреждена ({error}); создана новая база, резерв: {target}",
+            "ERROR",
+        )
     except Exception:
         pass
 
 
-def _read_settings_cached_locked(*, materialize: bool = True) -> dict[str, Any]:
-    global _SETTINGS_CACHE, _SETTINGS_CACHE_SIGNATURE, _SETTINGS_CACHE_MATERIALIZED
+def _is_corruption_error(error: Exception) -> bool:
+    if isinstance(error, json.JSONDecodeError):
+        return True
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in (
+            "file is not a database",
+            "database disk image is malformed",
+            "database malformed",
+            "malformed json",
+        )
+    )
 
-    signature = _settings_file_signature()
-    if (
-        _SETTINGS_CACHE is not None
-        and _SETTINGS_CACHE_SIGNATURE == signature
-        and (_SETTINGS_CACHE_MATERIALIZED or not materialize)
-    ):
-        return _SETTINGS_CACHE
 
-    data = _read_settings_file_locked(materialize=materialize)
+def _read_revision_locked(connection: sqlite3.Connection) -> int:
+    row = connection.execute(
+        "SELECT value FROM settings_meta WHERE key='revision'"
+    ).fetchone()
+    return int(row[0]) if row is not None else 0
+
+
+def _read_settings_database_locked(connection: sqlite3.Connection) -> dict[str, Any]:
+    return _normalize_settings(_read_raw_sections_locked(connection))
+
+
+def _read_raw_sections_locked(connection: sqlite3.Connection) -> dict[str, Any]:
+    raw: dict[str, Any] = {}
+    for row in connection.execute("SELECT section, payload FROM settings_sections"):
+        raw[str(row["section"])] = json.loads(str(row["payload"]))
+    return raw
+
+
+def _write_changed_sections_locked(
+    connection: sqlite3.Connection,
+    current: dict[str, Any],
+    updated: dict[str, Any],
+) -> bool:
+    changed = False
+    now_ms = int(time.time() * 1000)
+    for section, value in updated.items():
+        if current.get(section) == value and section in current:
+            continue
+        connection.execute(
+            """
+            INSERT INTO settings_sections(section, payload, updated_at_ms)
+            VALUES(?, ?, ?)
+            ON CONFLICT(section) DO UPDATE SET
+                payload=excluded.payload,
+                updated_at_ms=excluded.updated_at_ms
+            """,
+            (section, _serialize_section(value), now_ms),
+        )
+        changed = True
+    obsolete = set(current) - set(updated)
+    if obsolete:
+        connection.executemany(
+            "DELETE FROM settings_sections WHERE section=?",
+            ((name,) for name in sorted(obsolete)),
+        )
+        changed = True
+    if changed:
+        connection.execute(
+            "UPDATE settings_meta SET value=value+1 WHERE key='revision'"
+        )
+    return changed
+
+
+def _initialize_database_locked(connection: sqlite3.Connection) -> dict[str, Any]:
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        current = _read_raw_sections_locked(connection)
+        normalized = _normalize_settings(current if current else _build_default_settings())
+        _write_changed_sections_locked(connection, current, normalized)
+        connection.commit()
+        return normalized
+    except Exception:
+        connection.rollback()
+        raise
+
+
+def _create_connection_with_recovery_locked(path: Path) -> tuple[sqlite3.Connection, dict[str, Any]]:
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = _open_connection(path)
+        return connection, _initialize_database_locked(connection)
+    except Exception as error:
+        try:
+            if connection is not None:
+                connection.close()
+        except Exception:
+            pass
+        if not _is_corruption_error(error):
+            raise
+        _backup_corrupt_database_locked(path, error)
+        connection = _open_connection(path)
+        return connection, _initialize_database_locked(connection)
+
+
+def _get_connection_locked() -> sqlite3.Connection:
+    global _SETTINGS_CONNECTION, _SETTINGS_CONNECTION_PATH
+    global _SETTINGS_CACHE, _SETTINGS_CACHE_REVISION
+
+    path = get_settings_database_path().resolve()
+    if _SETTINGS_CONNECTION is not None and _SETTINGS_CONNECTION_PATH == path:
+        return _SETTINGS_CONNECTION
+    _close_connection_locked()
+    connection, data = _create_connection_with_recovery_locked(path)
+    _SETTINGS_CONNECTION = connection
+    _SETTINGS_CONNECTION_PATH = path
     _SETTINGS_CACHE = copy.deepcopy(data)
-    _SETTINGS_CACHE_SIGNATURE = _settings_file_signature()
-    # Флаг описывает ИМЕННО этот снапшот: после materialize-чтения файл на
-    # диске гарантированно нормализован, после обычного — гарантий нет.
-    _SETTINGS_CACHE_MATERIALIZED = materialize
+    _SETTINGS_CACHE_REVISION = _read_revision_locked(connection)
+    return connection
+
+
+def _read_settings_cached_locked() -> dict[str, Any]:
+    global _SETTINGS_CACHE, _SETTINGS_CACHE_REVISION
+
+    connection = _get_connection_locked()
+    revision = _read_revision_locked(connection)
+    if _SETTINGS_CACHE is not None and _SETTINGS_CACHE_REVISION == revision:
+        return _SETTINGS_CACHE
+    data = _read_settings_database_locked(connection)
+    _SETTINGS_CACHE = copy.deepcopy(data)
+    _SETTINGS_CACHE_REVISION = revision
     return _SETTINGS_CACHE
 
 
@@ -164,16 +296,40 @@ def read_settings() -> dict[str, Any]:
         return copy.deepcopy(_read_settings_cached_locked())
 
 
-def materialize_settings_file() -> dict[str, Any]:
-    """Гарантирует, что settings.json существует и содержит полный нормализованный JSON."""
+def prepare_settings_database() -> dict[str, Any]:
+    """Создаёт и проверяет каноническую SQLite-базу настроек."""
     with _SETTINGS_LOCK:
-        return copy.deepcopy(_read_settings_cached_locked(materialize=True))
+        return copy.deepcopy(_read_settings_cached_locked())
+
+
+def close_settings_database() -> None:
+    """Закрывает SQLite перед удалением каталога или заменой установки."""
+    with _SETTINGS_LOCK:
+        _close_connection_locked()
+
+
+def get_settings_revision() -> int:
+    """Возвращает монотонную ревизию для зависимых кэшей."""
+    with _SETTINGS_LOCK:
+        return _read_revision_locked(_get_connection_locked())
 
 
 def reset_settings() -> dict[str, Any]:
-    data = _build_default_settings()
+    global _SETTINGS_CACHE, _SETTINGS_CACHE_REVISION
+
+    data = _normalize_settings(_build_default_settings())
     with _SETTINGS_LOCK:
-        _write_settings_file_locked(data)
+        connection = _get_connection_locked()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            current = _read_settings_database_locked(connection)
+            _write_changed_sections_locked(connection, current, data)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        _SETTINGS_CACHE = copy.deepcopy(data)
+        _SETTINGS_CACHE_REVISION = _read_revision_locked(connection)
     return copy.deepcopy(data)
 
 
@@ -187,7 +343,7 @@ def _get_path_value(data: dict[str, Any], path: tuple[str, ...], default: Any = 
 
 
 def _read_path_value(path: tuple[str, ...], default: Any = None) -> Any:
-    """Читает одно значение, не копируя весь settings.json.
+    """Читает одно значение, не копируя весь снимок настроек.
 
     `read_settings()` отдаёт глубокую копию всего документа — примерно 100 мкс
     на вызов. Геттеры настроек дёргаются из GUI-потока десятками за одну
@@ -217,15 +373,30 @@ def _set_path_value(data: dict[str, Any], path: tuple[str, ...], value: Any) -> 
 
 
 def _update_settings(mutator) -> dict[str, Any]:
+    global _SETTINGS_CACHE, _SETTINGS_CACHE_REVISION
+
     with _SETTINGS_LOCK:
-        current = _read_settings_cached_locked()
-        working = copy.deepcopy(current)
-        mutator(working)
-        normalized = _normalize_settings(working)
-        if normalized == current:
-            return copy.deepcopy(current)
-        _write_settings_file_locked(normalized)
-        return copy.deepcopy(normalized)
+        connection = _get_connection_locked()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            # Внутри write-транзакции перечитываем базу заново. Именно это
+            # защищает read-modify-write от потери изменений другого процесса.
+            current = _read_settings_database_locked(connection)
+            working = copy.deepcopy(current)
+            mutator(working)
+            normalized = _normalize_settings(working)
+            changed = _write_changed_sections_locked(connection, current, normalized)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        if changed:
+            _SETTINGS_CACHE = copy.deepcopy(normalized)
+            _SETTINGS_CACHE_REVISION = _read_revision_locked(connection)
+        else:
+            _SETTINGS_CACHE = copy.deepcopy(current)
+            _SETTINGS_CACHE_REVISION = _read_revision_locked(connection)
+        return copy.deepcopy(_SETTINGS_CACHE)
 
 
 def _get_bool(path: tuple[str, ...], default: bool = False) -> bool:
@@ -397,7 +568,7 @@ def get_user_profiles_revision() -> str:
     в том числе из другого экземпляра сервиса или другого процесса.
     """
     with _SETTINGS_LOCK:
-        data = _read_settings_cached_locked(materialize=False)
+        data = _read_settings_cached_locked()
         payload = data.get("user_profiles") if isinstance(data, dict) else None
         return json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
 
@@ -1335,6 +1506,7 @@ def clear_orchestra_history() -> bool:
 
 __all__ = [
     "append_self_repair_attempt",
+    "close_settings_database",
     "get_accent_color",
     "get_active_hosts_domains",
     "get_animations_enabled",
@@ -1379,7 +1551,8 @@ __all__ = [
     "get_selected_source_preset_file_name",
     "get_self_repair_attempts",
     "get_sidebar_icon_style",
-    "get_settings_path",
+    "get_settings_database_path",
+    "get_settings_revision",
     "get_smooth_scroll_enabled",
     "get_snowflakes_enabled",
     "get_strategy_launch_method",
@@ -1416,7 +1589,7 @@ __all__ = [
     "get_window_opacity",
     "get_windows_system_accent",
     "increment_dns_crash_count",
-    "materialize_settings_file",
+    "prepare_settings_database",
     "read_settings",
     "remove_active_hosts_domain",
     "remove_orchestra_history_target",

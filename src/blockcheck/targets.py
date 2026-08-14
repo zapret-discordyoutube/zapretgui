@@ -104,7 +104,7 @@ def get_dns_check_domains() -> list[str]:
 # ---------------------------------------------------------------------------
 
 def load_user_domains() -> list[str]:
-    """Load user-added custom domains from settings.json."""
+    """Load user-added custom domains from settings.sqlite3."""
     try:
         domains = settings_store.get_blockcheck_settings().get("user_domains", [])
         if not isinstance(domains, list):
@@ -115,7 +115,7 @@ def load_user_domains() -> list[str]:
 
 
 def save_user_domains(domains: list[str]) -> None:
-    """Save user custom domains to settings.json."""
+    """Save user custom domains to settings.sqlite3."""
     try:
         # Deduplicate while preserving order
         seen = set()

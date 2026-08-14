@@ -62,7 +62,7 @@ class MaxBlockerManager:
             return False
     
     def set_max_blocked(self, blocked: bool) -> bool:
-        """Сохраняет состояние блокировки в settings.json."""
+        """Сохраняет состояние блокировки в settings.sqlite3."""
         try:
             from settings.store import set_max_blocked as store_set_max_blocked
 

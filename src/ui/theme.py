@@ -1187,7 +1187,7 @@ class ThemeManager:
 
         Args:
             theme_name: Имя темы (если None, используется текущая)
-            persist: Сохранять ли выбор в settings.json
+            persist: Сохранять ли выбор в settings.sqlite3
             progress_callback: Функция для обновления прогресса (str)
             done_callback: Функция вызываемая после завершения (bool success, str message)
         """

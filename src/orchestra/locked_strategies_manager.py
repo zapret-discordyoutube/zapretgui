@@ -127,7 +127,7 @@ class LockedStrategiesManager:
 
     def load(self) -> Dict[str, int]:
         """
-        Загружает залоченные стратегии и историю из settings.json.
+        Загружает залоченные стратегии и историю из settings.sqlite3.
 
         Returns:
             Словарь TLS стратегий {hostname: strategy}
@@ -177,7 +177,7 @@ class LockedStrategiesManager:
             self._clean_blocked_conflicts()
 
         except Exception as e:
-            log(f"Ошибка загрузки стратегий из settings.json: {e}", "DEBUG")
+            log(f"Ошибка загрузки стратегий из settings.sqlite3: {e}", "DEBUG")
 
         # Загружаем историю
         self.load_history()
@@ -239,7 +239,7 @@ class LockedStrategiesManager:
                 log(f"  - {hostname} strategy={strategy} [{askey_upper}]", "INFO")
 
     def save(self):
-        """Сохраняет залоченные стратегии в settings.json."""
+        """Сохраняет залоченные стратегии в settings.sqlite3."""
         try:
             total_saved = 0
 
@@ -256,7 +256,7 @@ class LockedStrategiesManager:
                 log(f"Сохранено {total_saved} стратегий ({stats})", "DEBUG")
 
         except Exception as e:
-            log(f"Ошибка сохранения стратегий в settings.json: {e}", "ERROR")
+            log(f"Ошибка сохранения стратегий в settings.sqlite3: {e}", "ERROR")
 
     # ==================== LOCK/UNLOCK ====================
 
@@ -279,14 +279,14 @@ class LockedStrategiesManager:
                 self.output_callback(f"[INFO] Пропущен lock для proxy-цели {hostname}")
             return
 
-        # Получаем словари settings.json для данного askey
+        # Получаем словари settings.sqlite3 для данного askey
         target_dict = self.locked_by_askey[askey]
         user_set = self.user_locked_by_askey[askey]
         # Сохраняем стратегию
         target_dict[hostname] = strategy
         set_orchestra_locked_strategy(askey, hostname, strategy)
 
-        # Если user_lock - добавляем в user set и сохраняем в settings.json
+        # Если user_lock - добавляем в user set и сохраняем в settings.sqlite3
         if user_lock:
             user_set.add(hostname)
             set_orchestra_user_locked(askey, sorted(user_set))
@@ -314,7 +314,7 @@ class LockedStrategiesManager:
         hostname = hostname.lower()
         askey = self._normalize_askey(proto)
 
-        # Получаем словари settings.json для данного askey
+        # Получаем словари settings.sqlite3 для данного askey
         target_dict = self.locked_by_askey[askey]
         user_set = self.user_locked_by_askey[askey]
         if hostname in target_dict:
@@ -370,7 +370,7 @@ class LockedStrategiesManager:
                 clear_orchestra_user_locked(askey)
 
             clear_orchestra_history()
-            log("Очищены обученные стратегии, user locks и история в settings.json", "INFO")
+            log("Очищены обученные стратегии, user locks и история в settings.sqlite3", "INFO")
 
             # Очищаем все словари по askey БЕЗ создания новых (сохраняем ссылки!)
             for askey in ASKEY_ALL:
@@ -452,7 +452,7 @@ class LockedStrategiesManager:
     # ==================== ИСТОРИЯ СТРАТЕГИЙ ====================
 
     def load_history(self):
-        """Загружает историю стратегий из settings.json."""
+        """Загружает историю стратегий из settings.sqlite3."""
         self.strategy_history = {}
         try:
             history_data = get_orchestra_history()
@@ -473,7 +473,7 @@ class LockedStrategiesManager:
             self.strategy_history = {}
 
     def save_history(self):
-        """Сохраняет историю стратегий в settings.json."""
+        """Сохраняет историю стратегий в settings.sqlite3."""
         try:
             sanitized: dict[str, dict[str, dict[str, int]]] = {}
             for domain, strategies in self.strategy_history.items():

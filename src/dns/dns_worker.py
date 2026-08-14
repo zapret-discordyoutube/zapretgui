@@ -172,7 +172,7 @@ def enable_dns_on_startup():
 # ══════════════════════════════════════════════════════════════════════
 
 def reset_crash_counter():
-    """Сбрасывает счетчик крашей DNS в settings.json."""
+    """Сбрасывает счетчик крашей DNS в settings.sqlite3."""
     try:
         from settings.store import reset_dns_crash_count
 

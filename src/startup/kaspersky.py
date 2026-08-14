@@ -25,7 +25,7 @@ def _check_kaspersky_antivirus() -> bool:
 
 def _check_kaspersky_warning_disabled():
     """
-    Проверяет, отключено ли предупреждение о Kaspersky в settings.json.
+    Проверяет, отключено ли предупреждение о Kaspersky в settings.sqlite3.
     
     Returns:
         bool: True если предупреждение отключено, False если нет
@@ -39,7 +39,7 @@ def _check_kaspersky_warning_disabled():
 
 def _set_kaspersky_warning_disabled(disabled: bool) -> bool:
     """
-    Сохраняет в settings.json настройку отключения предупреждения о Kaspersky.
+    Сохраняет в settings.sqlite3 настройку отключения предупреждения о Kaspersky.
     
     Args:
         disabled: True для отключения предупреждения, False для включения

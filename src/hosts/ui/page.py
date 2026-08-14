@@ -1549,7 +1549,7 @@ class HostsPage(BasePage):
         self._applying = state["applying"]
 
     def _reset_all_service_profiles(self) -> None:
-        """Сбрасывает выбор профилей в UI и settings.json (после очистки hosts)."""
+        """Сбрасывает выбор профилей в UI и settings.sqlite3 (после очистки hosts)."""
         self._service_dns_selection = reset_all_service_profiles_ui(
             service_combos=self.service_combos,
             is_fluent_combo=_is_fluent_combo,

@@ -5,7 +5,7 @@ from pathlib import Path
 from settings import store as settings_store
 
 def resume_state_path() -> Path:
-    return settings_store.get_settings_path()
+    return settings_store.get_settings_database_path()
 
 
 def scan_key(

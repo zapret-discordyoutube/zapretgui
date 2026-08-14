@@ -34,7 +34,7 @@ class ProfileFilterKindSwitchTests(unittest.TestCase):
     ) -> tuple[ProfilePresetService, _PresetStore]:
         store = _PresetStore(text)
         base = root or Path("src").resolve()
-        # Изоляция settings.json: реестр идентичности профилей пишется при
+        # Изоляция settings.sqlite3: реестр идентичности профилей пишется при
         # каждой загрузке пресета и не должен попадать в рабочие настройки.
         settings_dir = self.enterContext(TemporaryDirectory())
         self.enterContext(patch("settings.store.MAIN_DIRECTORY", settings_dir))

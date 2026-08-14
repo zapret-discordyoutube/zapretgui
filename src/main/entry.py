@@ -278,15 +278,15 @@ def main() -> None:
 
     try:
         t_settings = _time.perf_counter()
-        from settings.store import materialize_settings_file
+        from settings.store import prepare_settings_database
 
-        materialize_settings_file()
+        prepare_settings_database()
         emit_startup_metric(
-            "StartupSettingsMaterialize",
+            "StartupSettingsDatabase",
             f"{(_time.perf_counter() - t_settings) * 1000:.0f}ms",
         )
     except Exception as exc:
-        log(f"Не удалось подготовить settings.json: {exc}", "WARNING")
+        log(f"Не удалось подготовить settings.sqlite3: {exc}", "WARNING")
 
     t_shell = _time.perf_counter()
     start_in_tray = shell_bootstrap()

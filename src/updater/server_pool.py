@@ -43,7 +43,7 @@ class ServerPool:
         log(f"📍 Выбран сервер: {self.selected_server['name']}", "POOL")
     
     def _load_stats(self) -> Dict[str, Any]:
-        """Загружает статистику серверов из settings.json."""
+        """Загружает статистику серверов из settings.sqlite3."""
         try:
             pool = settings_store.get_updater_settings().get("server_pool", {})
             stats = pool.get("stats") if isinstance(pool, dict) else {}
@@ -68,7 +68,7 @@ class ServerPool:
         return stats
     
     def _save_stats(self):
-        """Сохраняет статистику серверов в settings.json."""
+        """Сохраняет статистику серверов в settings.sqlite3."""
         try:
             pool = settings_store.get_updater_settings().get("server_pool", {})
             if not isinstance(pool, dict):
@@ -79,7 +79,7 @@ class ServerPool:
             log(f"Ошибка сохранения статистики: {e}", "⚠️ POOL")
     
     def _load_selected_server(self) -> Optional[Dict[str, Any]]:
-        """Загружает выбранный сервер из settings.json."""
+        """Загружает выбранный сервер из settings.sqlite3."""
         try:
             pool = settings_store.get_updater_settings().get("server_pool", {})
             server_id = pool.get("selected_server_id") if isinstance(pool, dict) else None
@@ -92,7 +92,7 @@ class ServerPool:
         return None
     
     def _save_selected_server(self):
-        """Сохраняет выбранный сервер в settings.json."""
+        """Сохраняет выбранный сервер в settings.sqlite3."""
         try:
             pool = settings_store.get_updater_settings().get("server_pool", {})
             if not isinstance(pool, dict):

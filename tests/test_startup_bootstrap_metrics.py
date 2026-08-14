@@ -107,7 +107,7 @@ class StartupBootstrapMetricsTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("StartupSettingsMaterialize", source)
+        self.assertIn("StartupSettingsDatabase", source)
         self.assertIn("StartupShellBootstrap", source)
         self.assertIn("StartupApplicationBootstrap", source)
         self.assertIn("StartupApplicationControllerImport", source)

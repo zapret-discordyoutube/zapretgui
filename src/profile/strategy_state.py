@@ -11,11 +11,9 @@ from settings import store as settings_store
 
 VALID_RATINGS = frozenset({"", "work", "notwork"})
 
-# Мутации — read-modify-write над общим settings.json и зовутся из разных
-# QThread-воркеров (save-воркеры мигрируют ключ, оценки пишутся из feedback-
-# воркеров). _read()/_write() атомарны по отдельности, связка — нет: без
-# общего лока интерлив теряет рейтинг или мигрированную мету. Паттерн — как
-# _PROFILE_FOLDER_STATE_LOCK в folders.py.
+# Составная мутация этой feature-модели остаётся под локальным lock, а
+# settings.store дополнительно сериализует её с другими процессами через
+# SQLite write-транзакцию.
 _PROFILE_STRATEGY_STATE_LOCK = threading.RLock()
 
 
@@ -26,11 +24,11 @@ class ProfileStrategyState:
 
 
 class ProfileStrategyStateStore:
-    """Хранит оценки готовых стратегий профилей в общем settings.json."""
+    """Хранит оценки готовых стратегий в общей SQLite-базе настроек."""
 
     @property
     def path(self) -> Path:
-        return settings_store.get_settings_path()
+        return settings_store.get_settings_database_path()
 
     def get_strategy_state(self, profile_key: str, strategy_id: str) -> ProfileStrategyState:
         states = self.get_strategy_states(profile_key, (strategy_id,))

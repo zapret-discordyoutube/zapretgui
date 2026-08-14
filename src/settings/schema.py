@@ -10,7 +10,7 @@ from settings.mode import (
 )
 
 SETTINGS_DIR_NAME = "settings"
-SETTINGS_FILE_NAME = "settings.json"
+SETTINGS_DATABASE_FILE_NAME = "settings.sqlite3"
 SETTINGS_VERSION = 1
 
 DEFAULT_WINDOW_OPACITY = 100

@@ -1,7 +1,7 @@
 """Чтение hosts-каталога.
 
 Каталог содержит поставляемый список профилей, сервисов, доменов и IP.
-Пользовательский выбор хранится отдельно в `settings/settings.json`.
+Пользовательский выбор хранится отдельно в `settings/settings.sqlite3`.
 """
 
 from __future__ import annotations
@@ -851,16 +851,16 @@ def load_user_hosts_selection() -> dict[str, str]:
     try:
         return dict(settings_store.get_hosts_selection() or {})
     except Exception as exc:
-        _log(f"Не удалось прочитать выбор hosts из settings.json: {exc}", "WARNING")
+        _log(f"Не удалось прочитать выбор hosts из settings.sqlite3: {exc}", "WARNING")
         return {}
 
 
 def save_user_hosts_selection(selected_profiles: dict[str, str]) -> bool:
-    """Сохраняет выбор пользователя в settings.json."""
+    """Сохраняет выбор пользователя в settings.sqlite3."""
     try:
         return bool(settings_store.set_hosts_selection(dict(selected_profiles or {})))
     except Exception as exc:
-        _log(f"Не удалось сохранить выбор hosts в settings.json: {exc}", "WARNING")
+        _log(f"Не удалось сохранить выбор hosts в settings.sqlite3: {exc}", "WARNING")
         return False
 
 

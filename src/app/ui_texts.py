@@ -1962,8 +1962,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "[ERROR] Failed to restart orchestrator",
     },
     "page.orchestra.log.not_running_user_lock_saved": {
-        "ru": "[WARNING] Оркестратор не запущен, user lock сохранён в settings.json",
-        "en": "[WARNING] Orchestrator is not running, user lock is saved in settings.json",
+        "ru": "[WARNING] Оркестратор не запущен, user lock сохранён в settings.sqlite3",
+        "en": "[WARNING] Orchestrator is not running, user lock is saved in settings.sqlite3",
     },
     "page.orchestra.log.not_initialized": {
         "ru": "[ERROR] Оркестратор не инициализирован",

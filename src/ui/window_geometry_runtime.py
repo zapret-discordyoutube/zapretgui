@@ -18,7 +18,7 @@ class StoredWindowGeometry:
 
 
 class SettingsWindowGeometryStore:
-    """Низкоуровневое хранилище геометрии окна в settings.json."""
+    """Низкоуровневое хранилище геометрии окна в settings.sqlite3."""
 
     def load(self) -> StoredWindowGeometry:
         from settings import store as settings_store

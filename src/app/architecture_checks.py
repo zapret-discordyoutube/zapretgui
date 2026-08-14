@@ -1000,8 +1000,20 @@ def check_nested_preset_pages_use_breadcrumbs() -> list[Problem]:
     )
 
 
-def check_settings_json_is_single_app_storage(files: list[Path]) -> list[Problem]:
+def check_settings_sqlite_is_canonical_app_storage(files: list[Path]) -> list[Problem]:
     problems: list[Problem] = []
+    source_scopes = [
+        path
+        for path in files
+        if _under(path, "src/") and path != SRC_ROOT / "app" / "architecture_checks.py"
+    ]
+    problems.extend(
+        _scan_lines(
+            source_scopes,
+            re.compile(r"settings\.json"),
+            "settings.json выведен из эксплуатации; runtime должен использовать только settings.sqlite3",
+        )
+    )
     problems.extend(
         _scan_lines(
             files,
@@ -1014,7 +1026,7 @@ def check_settings_json_is_single_app_storage(files: list[Path]) -> list[Problem
                 r"blockcheck_user_domains\.txt"
                 r")\b"
             ),
-            "настройки/состояние приложения должны жить в settings.json; отдельные state-файлы запрещены",
+            "обычные настройки должны жить в settings.sqlite3; отдельные state-файлы запрещены",
         )
     )
 
@@ -1027,7 +1039,7 @@ def check_settings_json_is_single_app_storage(files: list[Path]) -> list[Problem
         _scan_lines(
             app_storage_scopes,
             re.compile(r"\b(?:ConfigParser|configparser)\b"),
-            "для рабочих настроек приложения нельзя возвращать ini-парсер; используйте settings.json",
+            "для рабочих настроек приложения нельзя возвращать ini-парсер; используйте settings.sqlite3",
         )
     )
     return problems
@@ -1283,7 +1295,7 @@ def run_checks() -> list[Problem]:
     problems.extend(check_pages_have_no_command_request_signals(files))
     problems.extend(check_pages_have_no_navigation_request_signals(files))
     problems.extend(check_nested_preset_pages_use_breadcrumbs())
-    problems.extend(check_settings_json_is_single_app_storage(files))
+    problems.extend(check_settings_sqlite_is_canonical_app_storage(files))
     problems.extend(check_page_deps_context_has_explicit_fields(files))
     problems.extend(check_preset_switch_has_no_full_start_fallback())
     problems.extend(check_fast_switch_runners_do_not_call_full_start_pipeline())

@@ -2,7 +2,7 @@
 """
 Страница управления залоченными стратегиями оркестратора.
 Каждый домен отображается в виде редактируемого ряда с QSpinBox для номера стратегии.
-Изменения автоматически сохраняются в settings.json.
+Изменения автоматически сохраняются в settings.sqlite3.
 """
 from PyQt6.QtCore import Qt, QSize, QTimer, QEvent
 from PyQt6.QtWidgets import (
@@ -317,7 +317,7 @@ class OrchestraLockedPage(BasePage):
         self.search_input.installEventFilter(self)
         top_row.addWidget(self.search_input)
 
-        # Кнопка обновления списка из settings.json
+        # Кнопка обновления списка из settings.sqlite3
         self.refresh_btn = TransparentToolButton(self)
         self.refresh_btn.setFixedSize(32, 32)
         set_tooltip(
@@ -565,7 +565,7 @@ class OrchestraLockedPage(BasePage):
         self._refresh_locked_list()
 
     def _reload_from_settings(self):
-        """Перезагружает данные из settings.json и обновляет список."""
+        """Перезагружает данные из settings.sqlite3 и обновляет список."""
         if self._cleanup_in_progress:
             return
         self._set_refresh_loading(True)

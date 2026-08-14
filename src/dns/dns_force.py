@@ -337,7 +337,7 @@ class DNSForceManager:
 # ──────────────────────────────────────────────────────────────────────
 
 def ensure_default_force_dns():
-    """Гарантирует наличие значения ForceDNS по умолчанию в settings.json."""
+    """Гарантирует наличие значения ForceDNS по умолчанию в settings.sqlite3."""
     try:
         settings_store.read_settings()
     except Exception as e:

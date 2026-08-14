@@ -94,11 +94,11 @@ def _dpapi_decrypt(raw: bytes) -> bytes:
 
 
 class PremiumStorage:
-    """Transactional Premium client state; settings.json is not trusted."""
+    """Транзакционное состояние Premium в отдельной защищённой базе."""
 
     @classmethod
     def _path(cls) -> Path:
-        return settings_store.get_settings_path().parent / "premium.sqlite3"
+        return settings_store.get_settings_database_path().parent / "premium.sqlite3"
 
     @classmethod
     def _key_path(cls) -> Path:
@@ -128,7 +128,7 @@ class PremiumStorage:
             return
         # Old identifiers, tokens and caches are deliberately discarded.  They
         # came from the retired server model and cannot prove current access.
-        settings_store.materialize_settings_file()
+        settings_store.prepare_settings_database()
         conn.execute(
             "INSERT INTO client_meta(key,value) VALUES('legacy_trust_retired',?)",
             (str(int(time.time())),),

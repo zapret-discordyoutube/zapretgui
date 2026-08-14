@@ -377,7 +377,7 @@ def lock_strategy(runner, *, domain: str, strategy: int, protocol: str, ignored_
         else:
             messages.append("[ERROR] Не удалось перезапустить оркестратор")
     else:
-        messages.append("[WARNING] Оркестратор не запущен, user lock сохранён в settings.json")
+        messages.append("[WARNING] Оркестратор не запущен, user lock сохранён в settings.sqlite3")
 
     return OrchestraRunnerActionPlan(messages=messages, refresh_learned=True)
 

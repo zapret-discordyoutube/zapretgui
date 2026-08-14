@@ -5,7 +5,7 @@ from settings import store as settings_store
 
 
 def get_window_position():
-    """Получает сохраненную позицию окна из settings.json."""
+    """Получает сохраненную позицию окна из settings.sqlite3."""
     try:
         geometry = settings_store.get_window_geometry()
         x = geometry.get("x")
@@ -19,7 +19,7 @@ def get_window_position():
 
 
 def set_window_position(x, y):
-    """Сохраняет позицию окна в settings.json."""
+    """Сохраняет позицию окна в settings.sqlite3."""
     try:
         geometry = settings_store.get_window_geometry()
         settings_store.set_window_geometry(
@@ -37,7 +37,7 @@ def set_window_position(x, y):
 
 
 def get_window_size():
-    """Получает сохраненный размер окна из settings.json."""
+    """Получает сохраненный размер окна из settings.sqlite3."""
     try:
         geometry = settings_store.get_window_geometry()
         width = geometry.get("width")
@@ -51,7 +51,7 @@ def get_window_size():
 
 
 def set_window_size(width, height):
-    """Сохраняет размер окна в settings.json."""
+    """Сохраняет размер окна в settings.sqlite3."""
     try:
         geometry = settings_store.get_window_geometry()
         settings_store.set_window_geometry(
@@ -69,7 +69,7 @@ def set_window_size(width, height):
 
 
 def get_window_maximized():
-    """Получает сохранённое состояние развёрнутого окна из settings.json."""
+    """Получает сохранённое состояние развёрнутого окна из settings.sqlite3."""
     try:
         geometry = settings_store.get_window_geometry()
         return bool(geometry.get("maximized"))
@@ -79,7 +79,7 @@ def get_window_maximized():
 
 
 def set_window_maximized(maximized: bool):
-    """Сохраняет состояние развёрнутого окна в settings.json."""
+    """Сохраняет состояние развёрнутого окна в settings.sqlite3."""
     try:
         geometry = settings_store.get_window_geometry()
         settings_store.set_window_geometry(

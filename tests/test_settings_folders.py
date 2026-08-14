@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
 from settings.normalize import normalize_settings
-from settings.schema import SETTINGS_DIR_NAME, SETTINGS_FILE_NAME, build_default_settings
+from settings.schema import SETTINGS_DATABASE_FILE_NAME, SETTINGS_DIR_NAME, build_default_settings
 
 
 class SettingsFoldersTests(unittest.TestCase):
@@ -127,10 +126,12 @@ class SettingsFoldersTests(unittest.TestCase):
                     }
                 )
                 loaded = settings_store.get_folders_settings()
-                settings_path = root / SETTINGS_DIR_NAME / SETTINGS_FILE_NAME
-                raw = json.loads(settings_path.read_text(encoding="utf-8"))
+                settings_path = root / SETTINGS_DIR_NAME / SETTINGS_DATABASE_FILE_NAME
+                raw = settings_store.read_settings()
+                database_exists = settings_path.is_file()
 
         self.assertEqual(saved, loaded)
+        self.assertTrue(database_exists)
         self.assertEqual(raw["folders"]["presets"]["winws1"]["items"]["preset.txt"]["folder_key"], "common")
 
 

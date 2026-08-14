@@ -48,7 +48,7 @@ def _check_telega_installed() -> str | None:
 
 
 def _check_telega_warning_disabled() -> bool:
-    """Проверяет, отключено ли предупреждение о Telega в settings.json."""
+    """Проверяет, отключено ли предупреждение о Telega в settings.sqlite3."""
     try:
         from settings.store import get_telega_warning_disabled
 
@@ -58,7 +58,7 @@ def _check_telega_warning_disabled() -> bool:
 
 
 def _set_telega_warning_disabled(disabled: bool) -> bool:
-    """Сохраняет в settings.json настройку отключения предупреждения о Telega."""
+    """Сохраняет в settings.sqlite3 настройку отключения предупреждения о Telega."""
     try:
         from settings.store import set_telega_warning_disabled
 

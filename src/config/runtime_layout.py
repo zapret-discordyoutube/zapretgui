@@ -130,8 +130,8 @@ class ApplicationPaths:
         return self.root / "settings"
 
     @property
-    def settings_file(self) -> Path:
-        return self.settings_dir / "settings.json"
+    def settings_database(self) -> Path:
+        return self.settings_dir / "settings.sqlite3"
 
     @property
     def logs_dir(self) -> Path:

@@ -41,7 +41,7 @@ class TelegramProxyCloudflareRuntimeTests(unittest.TestCase):
         self.assertTrue(should_route_upstream(selected_always_config, mode="always"))
         self.assertFalse(should_route_upstream(selected_always_config, mode="fallback"))
 
-    def test_cloudflare_settings_are_normalized_in_settings_json_shape(self) -> None:
+    def test_cloudflare_settings_are_normalized_in_settings_schema_shape(self) -> None:
         from settings.normalize import normalize_telegram_proxy
         from settings.schema import default_telegram_proxy
 

@@ -184,7 +184,7 @@ class BlockedStrategiesManager:
     # ==================== ЗАГРУЗКА/СОХРАНЕНИЕ ====================
 
     def load(self):
-        """Загружает заблокированные стратегии из settings.json + дефолтные блокировки s1."""
+        """Загружает заблокированные стратегии из settings.sqlite3 + дефолтные блокировки s1."""
         # Очищаем все словари по askey БЕЗ создания новых (сохраняем ссылки!)
         for askey in ASKEY_ALL:
             self.blocked_by_askey[askey].clear()
@@ -196,7 +196,7 @@ class BlockedStrategiesManager:
             tls_dict[domain] = [1]
         default_count = len(DEFAULT_BLOCKED_PASS_DOMAINS)
 
-        # 2. Загружаем пользовательские блокировки из settings.json для всех askey профилей
+        # 2. Загружаем пользовательские блокировки из settings.sqlite3 для всех askey профилей
         try:
             total_user_count = 0
 
@@ -234,10 +234,10 @@ class BlockedStrategiesManager:
             else:
                 log(f"Загружено {default_count} дефолтных блокировок (s1 для заблокированных сайтов)", "DEBUG")
         except Exception as e:
-            log(f"Ошибка загрузки blocked strategies из settings.json: {e}", "DEBUG")
+            log(f"Ошибка загрузки blocked strategies из settings.sqlite3: {e}", "DEBUG")
 
     def save(self):
-        """Сохраняет заблокированные стратегии в settings.json (только пользовательские)."""
+        """Сохраняет заблокированные стратегии в settings.sqlite3 (только пользовательские)."""
         try:
             total_saved = 0
 
@@ -464,7 +464,7 @@ class BlockedStrategiesManager:
                     if not user_dict[hostname]:
                         del user_dict[hostname]
 
-                # Если остались только дефолтные блокировки - удаляем пользовательский ключ из settings.json
+                # Если остались только дефолтные блокировки - удаляем пользовательский ключ из settings.sqlite3
                 user_strategies = [s for s in target_dict[hostname] if not self.is_default_blocked(hostname, s)]
                 if not user_strategies:
                     if not target_dict[hostname]:

@@ -71,13 +71,13 @@ class LockedListSnapshot:
 def reload_blocked_snapshot(*, orchestra, runner, askey_all: tuple[str, ...]) -> BlockedListSnapshot:
     if runner and hasattr(runner, "blocked_manager"):
         runner.blocked_manager.load()
-        log("Список заблокированных перезагружен из settings.json (runner)", "INFO")
+        log("Список заблокированных перезагружен из settings.sqlite3 (runner)", "INFO")
         return build_blocked_snapshot(orchestra=orchestra, runner=runner, direct_blocked_by_askey=None, askey_all=askey_all)
 
     temp_manager = orchestra.create_loaded_blocked_manager()
     direct = {askey: dict(temp_manager.blocked_by_askey[askey]) for askey in askey_all}
     total = sum(len(strategies) for askey_data in temp_manager.blocked_by_askey.values() for strategies in askey_data.values())
-    log(f"Загружено напрямую из settings.json: {total} заблокированных стратегий", "INFO")
+    log(f"Загружено напрямую из settings.sqlite3: {total} заблокированных стратегий", "INFO")
     return build_blocked_snapshot(orchestra=orchestra, runner=None, direct_blocked_by_askey=direct, askey_all=askey_all)
 
 
@@ -119,13 +119,13 @@ def build_blocked_snapshot(*, orchestra, runner, direct_blocked_by_askey: dict |
 def reload_locked_snapshot(*, orchestra, runner, askey_all: tuple[str, ...]) -> LockedListSnapshot:
     if runner and hasattr(runner, "locked_manager"):
         runner.locked_manager.load()
-        log("Список залоченных перезагружен из settings.json (runner)", "INFO")
+        log("Список залоченных перезагружен из settings.sqlite3 (runner)", "INFO")
         return build_locked_snapshot(orchestra=orchestra, runner=runner, direct_locked_by_askey=None, askey_all=askey_all)
 
     temp_manager = orchestra.create_loaded_locked_manager()
     direct = {askey: dict(temp_manager.locked_by_askey[askey]) for askey in askey_all}
     total = sum(len(strategies) for strategies in direct.values())
-    log(f"Загружено напрямую из settings.json: {total} залоченных стратегий", "INFO")
+    log(f"Загружено напрямую из settings.sqlite3: {total} залоченных стратегий", "INFO")
     return build_locked_snapshot(orchestra=orchestra, runner=None, direct_locked_by_askey=direct, askey_all=askey_all)
 
 

@@ -14,7 +14,7 @@ if str(PROJECT_SRC) not in sys.path:
 
 
 class ProgramSettingsFastSnapshotTests(unittest.TestCase):
-    def test_fast_snapshot_reads_only_settings_json_values(self) -> None:
+    def test_fast_snapshot_reads_only_settings_database_values(self) -> None:
         from core.runtime.program_settings_runtime_service import ProgramSettingsRuntimeService
 
         defender_cls = Mock()
@@ -57,7 +57,7 @@ class ProgramSettingsFastSnapshotTests(unittest.TestCase):
         self.assertNotIn("_read_defender_disabled", service_source)
         self.assertNotIn("_read_max_blocked", service_source)
 
-    def test_load_snapshot_refreshes_settings_json_instead_of_old_cached_snapshot(self) -> None:
+    def test_load_snapshot_refreshes_settings_database_instead_of_old_cached_snapshot(self) -> None:
         from core.runtime.program_settings_runtime_service import ProgramSettingsRuntimeService
 
         service = ProgramSettingsRuntimeService()

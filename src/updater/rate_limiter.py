@@ -29,7 +29,7 @@ class UpdateRateLimiter:
     
     @staticmethod
     def _load_state() -> dict:
-        """Загружает состояние из settings.json."""
+        """Загружает состояние из settings.sqlite3."""
         try:
             state = settings_store.get_updater_settings().get("rate_limit", {})
             return state if isinstance(state, dict) else {}
@@ -48,7 +48,7 @@ class UpdateRateLimiter:
     
     @staticmethod
     def _save_state(state: dict):
-        """Сохраняет состояние в settings.json."""
+        """Сохраняет состояние в settings.sqlite3."""
         try:
             settings_store.set_updater_settings({"rate_limit": state})
         except Exception as e:

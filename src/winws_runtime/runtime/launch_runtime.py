@@ -140,7 +140,7 @@ class PresetLaunchRuntime:
 
         Args:
             selected_mode: Стратегия для запуска
-            launch_method: Метод запуска из settings.mode. Если None - читается из settings.json.
+            launch_method: Метод запуска из settings.mode. Если None - читается из settings.sqlite3.
         """
         start_dpi_async_impl(
             self,

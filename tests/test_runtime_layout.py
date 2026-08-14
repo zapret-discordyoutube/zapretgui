@@ -41,7 +41,7 @@ class RuntimeLayoutTests(unittest.TestCase):
             "presets_dir": root / "presets",
             "profile_dir": root / "profile",
             "settings_dir": root / "settings",
-            "settings_file": root / "settings" / "settings.json",
+            "settings_database": root / "settings" / "settings.sqlite3",
             "logs_dir": root / "logs",
             "crash_logs_dir": root / "logs" / "crashes",
             "tmp_dir": root / "tmp",

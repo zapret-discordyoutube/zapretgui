@@ -211,14 +211,18 @@ def _background_worker_gate_reset():
 
 @pytest.fixture(autouse=True)
 def _isolated_settings_dir(tmp_path, monkeypatch):
-    """Изолирует settings.json на каждый тест.
+    """Изолирует settings.sqlite3 на каждый тест.
 
     Реестр идентичности профилей (и прочая мета) пишется при любой загрузке
     выбранного пресета через ProfilePresetService — тест без изоляции молча
-    засорял бы рабочий settings/settings.json репозитория. Тесты, которым
+    засорял бы рабочую settings/settings.sqlite3 репозитория. Тесты, которым
     нужен свой каталог, по-прежнему патчат settings.store.MAIN_DIRECTORY
     сами — их patch вкладывается поверх этого."""
     monkeypatch.setattr("settings.store.MAIN_DIRECTORY", str(tmp_path), raising=False)
+    yield
+    from settings import store as settings_store
+
+    settings_store.close_settings_database()
 
 
 @pytest.fixture(autouse=True)

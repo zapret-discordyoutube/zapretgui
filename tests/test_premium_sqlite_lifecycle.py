@@ -107,16 +107,12 @@ class PremiumSqliteLifecycleTest(unittest.TestCase):
 
         self.store = store
         self.old_root = store.MAIN_DIRECTORY
+        store.close_settings_database()
         store.MAIN_DIRECTORY = self.tmp.name
-        store._SETTINGS_CACHE = None
-        store._SETTINGS_CACHE_SIGNATURE = None
-        store._SETTINGS_CACHE_MATERIALIZED = False
 
     def tearDown(self) -> None:
+        self.store.close_settings_database()
         self.store.MAIN_DIRECTORY = self.old_root
-        self.store._SETTINGS_CACHE = None
-        self.store._SETTINGS_CACHE_SIGNATURE = None
-        self.store._SETTINGS_CACHE_MATERIALIZED = False
         self.tmp.cleanup()
 
     @staticmethod
@@ -182,7 +178,7 @@ class PremiumSqliteLifecycleTest(unittest.TestCase):
             self.assertIsNone(PremiumStorage.get_binding())
             self.assertIsNotNone(PremiumStorage.get_binding(include_disabled=True))
             database_bytes = (
-                self.store.get_settings_path().parent / "premium.sqlite3"
+                self.store.get_settings_database_path().parent / "premium.sqlite3"
             ).read_bytes()
             self.assertNotIn(b"new-secret-token", database_bytes)
             service._api.revoke_fails = False
@@ -195,30 +191,35 @@ class PremiumSqliteLifecycleTest(unittest.TestCase):
     def test_legacy_settings_and_plaintext_token_are_not_carried_forward(self) -> None:
         from donater.storage import PremiumStorage
 
-        settings_path = self.store.get_settings_path()
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        raw = self.store.read_settings()
-        raw["premium"] = {
-            "device_id": "legacy-device",
-            "device_token": "legacy-token",
-            "premium_cache": {"activated": True},
-        }
-        settings_path.write_text(json.dumps(raw), encoding="utf-8")
-        self.store._SETTINGS_CACHE = None
-        self.store._SETTINGS_CACHE_SIGNATURE = None
+        settings_database = self.store.get_settings_database_path()
+        settings_database.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path = settings_database.parent / "settings.json"
+        legacy_path.write_text(
+            json.dumps(
+                {
+                    "premium": {
+                        "device_id": "legacy-device",
+                        "device_token": "legacy-token",
+                        "premium_cache": {"activated": True},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
 
         device_id = PremiumStorage.get_device_id()
         self.assertNotEqual(device_id, "legacy-device")
-        normalized = json.loads(settings_path.read_text(encoding="utf-8"))
+        normalized = self.store.read_settings()
         self.assertNotIn("premium", normalized)
+        self.assertIn("legacy-token", legacy_path.read_text(encoding="utf-8"))
 
         service = self._service()
         with patch("donater.service.verify_signed_response", side_effect=self._verify):
             self.assertTrue(service.pair_start()[0])
             self.assertTrue(service.check_status().is_activated)
-        database_bytes = (settings_path.parent / "premium.sqlite3").read_bytes()
+        database_bytes = (settings_database.parent / "premium.sqlite3").read_bytes()
         self.assertNotIn(b"new-secret-token", database_bytes)
-        with closing(sqlite3.connect(settings_path.parent / "premium.sqlite3")) as conn:
+        with closing(sqlite3.connect(settings_database.parent / "premium.sqlite3")) as conn:
             self.assertEqual(conn.execute("PRAGMA quick_check").fetchone()[0], "ok")
 
 

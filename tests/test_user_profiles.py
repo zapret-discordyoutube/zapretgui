@@ -315,41 +315,39 @@ class UserProfilesTests(unittest.TestCase):
 
         self.assertEqual([item.user_profile_id for item in payload.items], [profile_id])
 
-    def test_corrupt_settings_file_is_backed_up_before_defaults_rewrite(self) -> None:
+    def test_corrupt_settings_database_is_backed_up_before_defaults_recreate(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            settings_path = root / "settings" / "settings.json"
+            settings_path = root / "settings" / "settings.sqlite3"
             settings_path.parent.mkdir(parents=True)
-            settings_path.write_text("{broken json", encoding="utf-8")
+            settings_path.write_bytes(b"not a sqlite database")
 
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
                 settings = read_settings()
 
-            backup_path = root / "settings" / "settings.json.corrupt.bak"
+            backups = list((root / "settings").glob("settings.sqlite3.corrupt.*.bak"))
             self.assertEqual(settings["user_profiles"]["profiles"], {})
-            self.assertTrue(backup_path.is_file())
-            self.assertEqual(backup_path.read_text(encoding="utf-8"), "{broken json")
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), b"not a sqlite database")
+            self.assertTrue(settings_path.is_file())
 
-    def test_revision_read_does_not_prevent_corrupt_settings_repair(self) -> None:
-        """Регресс: не-materialize чтение (get_user_profiles_revision) не должно
-        отравлять кэш так, чтобы битый settings.json больше не чинился."""
-        from settings.store import get_user_profiles_revision, materialize_settings_file
+    def test_legacy_settings_json_is_not_read_or_rewritten(self) -> None:
+        from settings import store as settings_store
 
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             settings_path = root / "settings" / "settings.json"
             settings_path.parent.mkdir(parents=True)
-            settings_path.write_text("{broken json", encoding="utf-8")
+            settings_path.write_text('{"appearance":{"display_mode":"light"}}', encoding="utf-8")
 
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
-                get_user_profiles_revision()
-                self.assertEqual(settings_path.read_text(encoding="utf-8"), "{broken json")
-                materialize_settings_file()
+                prepared = settings_store.prepare_settings_database()
 
-            import json
-
-            repaired = json.loads(settings_path.read_text(encoding="utf-8"))
-            self.assertIn("user_profiles", repaired)
+            self.assertEqual(prepared["appearance"]["display_mode"], "dark")
+            self.assertEqual(
+                settings_path.read_text(encoding="utf-8"),
+                '{"appearance":{"display_mode":"light"}}',
+            )
 
     def test_recreating_profile_preserves_orphaned_domains(self) -> None:
         with TemporaryDirectory() as temp_dir:

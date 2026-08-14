@@ -2,7 +2,7 @@
 """
 Страница управления заблокированными стратегиями оркестратора (чёрный список).
 Каждая блокировка отображается в виде ряда с редактируемым номером стратегии.
-Изменения автоматически сохраняются в settings.json.
+Изменения автоматически сохраняются в settings.sqlite3.
 """
 from PyQt6.QtCore import Qt, QSize, QTimer, QEvent
 from PyQt6.QtWidgets import (
@@ -409,7 +409,7 @@ class OrchestraBlockedPage(BasePage):
         # Styled in _apply_theme()
         top_row.addWidget(self.search_input)
 
-        # Кнопка обновления списка из settings.json
+        # Кнопка обновления списка из settings.sqlite3
         self.refresh_btn = TransparentToolButton(self)
         self.refresh_btn.setFixedSize(32, 32)
         set_tooltip(
@@ -677,7 +677,7 @@ class OrchestraBlockedPage(BasePage):
             )
 
     def _reload_from_settings(self):
-        """Перезагружает данные из settings.json и обновляет список."""
+        """Перезагружает данные из settings.sqlite3 и обновляет список."""
         if self._cleanup_in_progress:
             return
         self._set_refresh_loading(True)

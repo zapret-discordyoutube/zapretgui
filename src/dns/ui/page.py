@@ -2023,7 +2023,7 @@ class NetworkPage(BasePage):
             self._on_dns_selected("Quad9", recommended)
 
     def _dismiss_isp_dns_warning(self):
-        """Скрывает баннер (settings.json уже записан при показе)."""
+        """Скрывает баннер (settings.sqlite3 уже записан при показе)."""
         dismiss_isp_dns_warning(
             cleanup_in_progress=self._cleanup_in_progress,
             build_dismiss_plan_fn=dns_page_plans.build_dismiss_isp_dns_warning_plan,

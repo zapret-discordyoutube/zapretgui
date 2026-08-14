@@ -6,12 +6,12 @@ import time
 from typing import Callable
 
 from core.paths import AppPaths
-from settings.schema import SETTINGS_DIR_NAME, SETTINGS_FILE_NAME
 from settings.mode import (
     DEFAULT_PRESET_FILE_NAME_BY_ENGINE,
     ENGINE_BY_LAUNCH_METHOD,
     normalize_launch_method,
 )
+from settings import store as settings_store
 
 from presets.cache_signatures import path_stat_signature
 from presets.file_store import PresetFileStore
@@ -297,13 +297,11 @@ class PresetModeCoordinator:
         except Exception:
             return None
 
-        settings_path = self._app_paths.user_root / SETTINGS_DIR_NAME / SETTINGS_FILE_NAME
-
         return (
             self._normalize_method(launch_method),
             engine,
             candidate.lower(),
-            *path_stat_signature(settings_path),
+            settings_store.get_settings_revision(),
             *path_stat_signature(preset_path),
         )
 
