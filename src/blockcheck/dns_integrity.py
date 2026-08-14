@@ -139,22 +139,29 @@ def resolve_udp(domain: str, nameserver: str, timeout: float = DNS_TIMEOUT) -> l
 
 
 # ---------------------------------------------------------------------------
-# DoH resolution (httpx)
+# DoH resolution (requests)
 # ---------------------------------------------------------------------------
 
 def resolve_doh(domain: str, doh_url: str, timeout: float = DOH_TIMEOUT) -> list[str]:
-    """Resolve domain via DNS-over-HTTPS using httpx."""
+    """Resolve domain via DNS-over-HTTPS using requests."""
     try:
-        import httpx
+        import requests
     except ImportError:
-        logger.warning("httpx not installed, skipping DoH check")
+        logger.warning("requests not installed, skipping DoH check")
         return []
 
     try:
-        with httpx.Client(timeout=timeout, verify=True, follow_redirects=True) as client:
+        with requests.Session() as client:
             params = {"name": domain, "type": "A"}
             headers = {"Accept": "application/dns-json"}
-            resp = client.get(doh_url, params=params, headers=headers)
+            resp = client.get(
+                doh_url,
+                params=params,
+                headers=headers,
+                timeout=timeout,
+                verify=True,
+                allow_redirects=True,
+            )
             resp.raise_for_status()
             data = resp.json()
 

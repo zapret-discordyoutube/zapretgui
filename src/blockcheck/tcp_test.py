@@ -23,28 +23,31 @@ def check_tcp_16_20_single(
     start = time.time()
 
     try:
-        import httpx
+        import requests
     except ImportError:
         return SingleTestResult(
             target_name=url, test_type=TestType.TCP_16_20,
-            status=TestStatus.ERROR, error_code="NO_HTTPX",
-            detail="httpx not installed",
+            status=TestStatus.ERROR, error_code="NO_REQUESTS",
+            detail="requests not installed",
         )
 
     bytes_received = 0
 
     try:
-        with httpx.Client(
-            timeout=timeout,
-            verify=True,
-            follow_redirects=True,
-            max_redirects=5,
-        ) as client:
-            with client.stream("GET", url, headers={
-                "User-Agent": "Mozilla/5.0",
-                "Accept": "*/*",
-            }) as resp:
-                for chunk in resp.iter_bytes(chunk_size=1024):
+        with requests.Session() as client:
+            client.max_redirects = 5
+            with client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "*/*",
+                },
+                timeout=timeout,
+                verify=True,
+                allow_redirects=True,
+                stream=True,
+            ) as resp:
+                for chunk in resp.iter_content(chunk_size=1024):
                     bytes_received += len(chunk)
                     # We only need to check up to 25KB
                     if bytes_received > 25_000:

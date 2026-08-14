@@ -81,7 +81,7 @@ def _fetch_watch_page(
     cancelled: Callable[[], bool],
 ) -> str:
     """Загружает не больше 2 МБ страницы и останавливается после stream URL."""
-    import httpx
+    import requests
 
     headers = {
         "User-Agent": (
@@ -93,16 +93,18 @@ def _fetch_watch_page(
         "Accept-Language": "en-US,en;q=0.8",
     }
     payload = bytearray()
-    with httpx.Client(
-        timeout=timeout,
-        verify=True,
-        follow_redirects=True,
-        max_redirects=5,
-        headers=headers,
-    ) as client:
-        with client.stream("GET", url) as response:
+    with requests.Session() as client:
+        client.max_redirects = 5
+        with client.get(
+            url,
+            timeout=timeout,
+            verify=True,
+            allow_redirects=True,
+            headers=headers,
+            stream=True,
+        ) as response:
             response.raise_for_status()
-            for chunk in response.iter_bytes(chunk_size=32 * 1024):
+            for chunk in response.iter_content(chunk_size=32 * 1024):
                 if cancelled():
                     return ""
                 remaining = _MAX_WATCH_PAGE_BYTES - len(payload)
@@ -147,7 +149,7 @@ def discover_googlevideo_host(
         try:
             page = _fetch_watch_page(url, max(0.1, remaining), is_cancelled)
         except ImportError:
-            return GoogleVideoDiscoveryResult(detail="компонент httpx недоступен")
+            return GoogleVideoDiscoveryResult(detail="компонент requests недоступен")
         except Exception as exc:  # сбой одной страницы не отменяет вторую попытку
             errors.append(str(exc).strip()[:120] or type(exc).__name__)
             continue

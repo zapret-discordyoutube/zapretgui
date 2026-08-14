@@ -130,27 +130,28 @@ def detect_isp_page(
 ) -> SingleTestResult:
     """Detect ISP block page via HTTPS with body inspection.
 
-    Uses httpx to follow redirects and inspect the final page content.
+    Uses requests to follow redirects and inspect the final page content.
     """
     start = time.time()
 
     try:
-        import httpx
+        import requests
     except ImportError:
         return SingleTestResult(
             target_name=domain, test_type=TestType.ISP_PAGE,
-            status=TestStatus.ERROR, error_code="NO_HTTPX",
-            detail="httpx not installed",
+            status=TestStatus.ERROR, error_code="NO_REQUESTS",
+            detail="requests not installed",
         )
 
     try:
-        with httpx.Client(
-            timeout=timeout,
-            verify=False,  # We want to see the page even with bad certs
-            follow_redirects=True,
-            max_redirects=5,
-        ) as client:
-            resp = client.get(f"https://{domain}/")
+        with requests.Session() as client:
+            client.max_redirects = 5
+            resp = client.get(
+                f"https://{domain}/",
+                timeout=timeout,
+                verify=False,  # We want to see the page even with bad certs
+                allow_redirects=True,
+            )
             elapsed = (time.time() - start) * 1000
             body = resp.text[:8192]
 
