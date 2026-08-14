@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PyQt6 import QtWidgets
 from PyQt6.QtCore import QRect, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPalette, QTextCursor, QTextFormat
-from PyQt6.QtWidgets import QTextEdit
 from qfluentwidgets import PlainTextEdit, isDarkTheme, themeColor
 
 from ui.code_editor.line_number_area import LineNumberArea
@@ -382,7 +382,7 @@ class CodeEditor(PlainTextEdit):
     def _refresh_extra_selections(self) -> None:
         selections = []
 
-        current_line = QTextEdit.ExtraSelection()
+        current_line = QtWidgets.QTextEdit.ExtraSelection()
         current_line.format.setBackground(self._current_line_color)
         current_line.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
         cursor = self.textCursor()
@@ -399,7 +399,7 @@ class CodeEditor(PlainTextEdit):
             end = max(start, min(int(match.end), limit))
             if end <= start:
                 continue
-            selection = QTextEdit.ExtraSelection()
+            selection = QtWidgets.QTextEdit.ExtraSelection()
             is_current = (
                 self._current_match_range is not None
                 and (int(match.start), int(match.end)) == self._current_match_range
