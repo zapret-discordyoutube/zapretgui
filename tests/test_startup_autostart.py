@@ -319,15 +319,56 @@ class StartupAutostartTests(unittest.TestCase):
         self.assertTrue(worker._startup_autostart)
 
     def test_startup_manifest_cache_signature_does_not_read_preset_body(self) -> None:
-        import inspect
+        import os
+        from presets import mode_coordinator as mode_coordinator_module
         from presets.mode_coordinator import PresetModeCoordinator
 
-        source = inspect.getsource(PresetModeCoordinator._selected_manifest_cache_key)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            preset_path = Path(tmp_dir) / "preset.txt"
+            preset_path.write_bytes(b"--new\n--filter-tcp=80\n")
+            stat = preset_path.stat()
 
-        self.assertIn("path_stat_signature(settings_path)", source)
-        self.assertIn("path_stat_signature(preset_path)", source)
-        self.assertNotIn("path_cache_signature(settings_path)", source)
-        self.assertNotIn("path_cache_signature(preset_path)", source)
+            coordinator = PresetModeCoordinator(
+                app_paths=SimpleNamespace(),
+                preset_selection_service=SimpleNamespace(),
+                preset_file_store=SimpleNamespace(get_source_path=Mock(return_value=preset_path)),
+            )
+
+            def cache_key(revision: int) -> tuple[object, ...] | None:
+                # Тело пресета читать нельзя, но сигнатуры глушат исключения,
+                # поэтому чтение не запрещаем, а считаем.
+                with (
+                    patch.object(
+                        mode_coordinator_module.settings_store,
+                        "get_settings_revision",
+                        return_value=revision,
+                    ),
+                    patch.object(Path, "read_bytes", autospec=True, side_effect=Path.read_bytes) as read_bytes,
+                    patch.object(Path, "read_text", autospec=True, side_effect=Path.read_text) as read_text,
+                    patch.object(Path, "open", autospec=True, side_effect=Path.open) as open_file,
+                ):
+                    key = coordinator._selected_manifest_cache_key("zapret2_mode", "winws2", "preset.txt")
+
+                read_bytes.assert_not_called()
+                read_text.assert_not_called()
+                open_file.assert_not_called()
+                return key
+
+            baseline = cache_key(7)
+            self.assertIsNotNone(baseline)
+
+            # Другое тело при тех же size и mtime не должно менять ключ.
+            preset_path.write_bytes(b"--new\n--filter-tcp=99\n")
+            os.utime(preset_path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            self.assertEqual(cache_key(7), baseline)
+
+            # Изменение stat-сигнатуры пресета обязано инвалидировать кэш.
+            os.utime(preset_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+            self.assertNotEqual(cache_key(7), baseline)
+
+            # Как и изменение ревизии настроек.
+            os.utime(preset_path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            self.assertNotEqual(cache_key(8), baseline)
 
     def test_startup_worker_rejects_preset_without_enabled_profiles_before_stop(self) -> None:
         from winws_runtime.runtime.preset_launch_service import PresetLaunchService
