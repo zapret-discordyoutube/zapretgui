@@ -200,7 +200,9 @@ def _build_stable_debug_log_file(preset_name: str) -> str:
     safe_name = re.sub(r"[^\w.-]+", "_", str(preset_name or "").strip(), flags=re.UNICODE).strip("._")
     if not safe_name:
         safe_name = "preset"
-    return f"logs/{safe_name}_debug.log"
+    from presets.preset_text_ops import DEBUG_LOG_DIR
+
+    return f"{DEBUG_LOG_DIR}/{safe_name}_debug.log"
 
 
 def _default_debug_insert_index(lines: list[str]) -> int:

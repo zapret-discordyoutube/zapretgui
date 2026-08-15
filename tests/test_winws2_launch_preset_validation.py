@@ -366,7 +366,7 @@ class Winws2LaunchPresetValidationTests(unittest.TestCase):
             self.assertTrue(artifact.launch_args[0].startswith("@"))
             at_config_path = Path(artifact.launch_args[0][1:])
             self.assertTrue(at_config_path.exists())
-            self.assertEqual(at_config_path.parent, root / "tmp" / "winws2_at_config")
+            self.assertEqual(at_config_path.parent, root / "user" / "tmp" / "winws2_at_config")
             self.assertIn("--hostlist=lists/tankix.txt", at_config_path.read_text(encoding="utf-8"))
 
     def test_winws2_compile_launches_safe_at_config_file(self) -> None:

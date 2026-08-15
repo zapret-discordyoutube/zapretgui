@@ -65,7 +65,7 @@ class Winws2PresetSwitchTests(unittest.TestCase):
             root = Path(tmp_dir)
             preset_path = root / "selected.txt"
             preset_path.write_text("--wf-tcp-out=443\n", encoding="utf-8")
-            config_dir = root / "tmp" / "winws2_at_config"
+            config_dir = root / "user" / "tmp" / "winws2_at_config"
             config_dir.mkdir(parents=True)
             for index in range(70):
                 stale = config_dir / f"winws2_at_stale_{index:02d}.txt"
@@ -93,7 +93,7 @@ class Winws2PresetSwitchTests(unittest.TestCase):
             root = Path(tmp_dir)
             preset_path = root / "selected.txt"
             preset_path.write_text("--wf-tcp=443\n", encoding="utf-8")
-            config_dir = root / "tmp" / "winws1_at_config"
+            config_dir = root / "user" / "tmp" / "winws1_at_config"
             config_dir.mkdir(parents=True)
             for index in range(70):
                 stale = config_dir / f"winws1_at_stale_{index:02d}.txt"

@@ -6,6 +6,9 @@ from typing import Optional
 from log.log import log
 from settings.mode import ENGINE_WINWS2
 
+# Каталог debug-логов относительно корня установки (cwd запуска winws2).
+DEBUG_LOG_DIR = "user/logs"
+
 
 
 def _normalize_strategy_selection_value(value: object) -> str:
@@ -176,8 +179,24 @@ def _normalize_presets_source_text(source_text: str) -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+def _relocate_legacy_debug_log_lines(source_text: str) -> str:
+    """Чинит `--debug=@logs/...` в существующих пресетах: логи живут в user\\logs."""
+    text = (source_text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if "--debug=" not in text.lower():
+        return text
+    out: list[str] = []
+    for raw in text.split("\n"):
+        stripped = raw.strip()
+        if stripped.lower().startswith("--debug=@logs/"):
+            value = stripped.split("=", 1)[1].strip().lstrip("@").replace("\\", "/")
+            out.append(f"--debug=@{_relocate_legacy_debug_log_file(value)}")
+            continue
+        out.append(raw)
+    return "\n".join(out)
+
+
 def normalize_preset_source_text_for_engine(source_text: str, engine: str) -> str:
-    normalized = _normalize_presets_source_text(source_text)
+    normalized = _normalize_presets_source_text(_relocate_legacy_debug_log_lines(source_text))
     if str(engine or "").strip().lower() != ENGINE_WINWS2:
         return normalized
 
@@ -202,7 +221,24 @@ def _build_stable_debug_log_file(preset_name: str) -> str:
     safe_name = re.sub(r"[^\w.-]+", "_", str(preset_name or "").strip(), flags=re.UNICODE).strip("._")
     if not safe_name:
         safe_name = "preset"
-    return f"logs/{safe_name}_debug.log"
+    # Путь относителен корня установки (cwd запуска winws2), где логи
+    # живут в user\logs.
+    return f"{DEBUG_LOG_DIR}/{safe_name}_debug.log"
+
+
+def _relocate_legacy_debug_log_file(value: str) -> str:
+    """Переносит старый путь logs/... на актуальный user/logs/...
+
+    Пресеты, созданные до переезда логов в user\\, содержат
+    `--debug=@logs/...`; winws2 не находит такой каталог и отказывается
+    стартовать («bad file»).
+    """
+    path = str(value or "").strip()
+    if not path:
+        return ""
+    if path.lower().startswith("logs/"):
+        return f"{DEBUG_LOG_DIR}/{path[len('logs/'):]}"
+    return path
 
 
 def _default_debug_insert_index(lines: list[str]) -> int:
@@ -242,7 +278,7 @@ def _rewrite_debug_log_setting(source_text: str, preset_name: str, enabled: bool
         cleaned.append(raw)
 
     if enabled:
-        debug_file = existing_value or _build_stable_debug_log_file(preset_name)
+        debug_file = _relocate_legacy_debug_log_file(existing_value) or _build_stable_debug_log_file(preset_name)
         debug_line = f"--debug=@{debug_file}"
         insert_at = existing_insert_at if existing_insert_at is not None else _default_debug_insert_index(cleaned)
         if insert_at < 0:

@@ -122,3 +122,37 @@ class ImportFromFileValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DebugLogPathRelocationTests(unittest.TestCase):
+    """Логи переехали в user\\logs — старый путь ломал запуск winws2."""
+
+    def test_new_debug_line_points_to_user_logs(self) -> None:
+        from presets.preset_text_ops import _rewrite_debug_log_setting
+
+        result = _rewrite_debug_log_setting(VALID_PRESET_TEXT, "Мой пресет", True)
+        self.assertIn("--debug=@user/logs/", result)
+        self.assertNotIn("--debug=@logs/", result)
+
+    def test_legacy_debug_line_is_relocated_on_normalize(self) -> None:
+        from presets.preset_text_ops import normalize_preset_source_text_for_engine
+
+        legacy = VALID_PRESET_TEXT + "--debug=@logs/Default_v1_game_filter_debug.log\n"
+        result = normalize_preset_source_text_for_engine(legacy, "winws2")
+        self.assertIn("--debug=@user/logs/Default_v1_game_filter_debug.log", result)
+        self.assertNotIn("--debug=@logs/", result)
+
+    def test_absolute_debug_path_is_left_untouched(self) -> None:
+        from presets.preset_text_ops import normalize_preset_source_text_for_engine
+
+        absolute = VALID_PRESET_TEXT + "--debug=@C:/Zapret/custom.log\n"
+        result = normalize_preset_source_text_for_engine(absolute, "winws2")
+        self.assertIn("--debug=@C:/Zapret/custom.log", result)
+
+    def test_existing_user_logs_path_survives_toggle(self) -> None:
+        from presets.preset_text_ops import _rewrite_debug_log_setting
+
+        text = VALID_PRESET_TEXT + "--debug=@user/logs/Мой_debug.log\n"
+        result = _rewrite_debug_log_setting(text, "Мой", True)
+        self.assertEqual(result.count("--debug="), 1)
+        self.assertIn("--debug=@user/logs/Мой_debug.log", result)
