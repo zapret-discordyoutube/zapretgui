@@ -4,7 +4,7 @@
 - AC6a: полнота декларативной таблицы кодов;
 - AC6b/AC8: describe_windivert_error содержит десятичный код и осмысленную
   русскую подсказку для 5/1058/1060/1072/1275/577;
-- AC6c: transient-набор readiness recovery == {5, 1058, 1060, 1753, 1072}
+- AC6c: transient-набор readiness recovery == {5, 433, 1058, 1060, 1753, 1072}
   плюс FWP_E_IN_USE — остаточное состояние WFP лечится тем же recovery-циклом.
 
 Плюс порядок уточняющих проверок причины 1058 и разделение измеренного
@@ -72,7 +72,7 @@ def _system_state(*, adapters=True, antivirus="", conflict=None, probe=None):
 
 # Коды из AC2 плюс дополнительные коды диагностики exit-кодов.
 _REQUIRED_TABLE_CODES = (
-    5, 577, 654, 1058, 1060, 1068, 1072, 1275, 8, 31, 87, 161, 1067, 0x80320010,
+    5, 433, 577, 654, 1058, 1060, 1068, 1072, 1275, 8, 31, 87, 161, 1067, 0x80320010,
 )
 
 # Смысловая инварианта пользовательских текстов (AC8): код → ключевое слово
@@ -80,6 +80,7 @@ _REQUIRED_TABLE_CODES = (
 # помечена на удаление / HVCI / подпись).
 _READINESS_SEMANTIC_KEYWORDS = {
     5: "доступ",
+    433: "смены сети",
     1058: "отключена",
     1060: "не установлен",
     1072: "удаление",
@@ -100,6 +101,7 @@ class WinDivertErrorTableTests(unittest.TestCase):
 
     def test_codes_are_defined_once_via_named_constants(self) -> None:
         self.assertEqual(windivert_diagnostics._ERROR_ACCESS_DENIED, 5)
+        self.assertEqual(windivert_diagnostics._ERROR_NO_SUCH_DEVICE, 433)
         self.assertEqual(windivert_diagnostics._ERROR_INVALID_IMAGE_HASH, 577)
         self.assertEqual(windivert_diagnostics._ERROR_DRIVER_FAILED_PRIOR_UNLOAD, 654)
         self.assertEqual(windivert_diagnostics._ERROR_SERVICE_DISABLED, 1058)
@@ -158,8 +160,37 @@ class TransientReadinessCodesTests(unittest.TestCase):
     def test_transient_set_matches_frozen_recovery_codes(self) -> None:
         self.assertEqual(
             TRANSIENT_WINDIVERT_READINESS_CODES,
-            frozenset({5, 1058, 1060, 1753, 1072, 0x80320010}),
+            frozenset({5, 433, 1058, 1060, 1753, 1072, 0x80320010}),
         )
+
+    def test_transient_no_such_device_probe_runs_recovery_cycle(self) -> None:
+        """433 после смены сети — плавающий случай, лечится recovery-циклом."""
+        from winws_runtime.runtime import system_ops
+        from winws_runtime.runtime.system_ops import WinDivertRuntimeProbeResult
+
+        no_device_probe = WinDivertRuntimeProbeResult(
+            installed=True,
+            ready=False,
+            error_code=433,
+            stage="network_open",
+        )
+        recovered_probe = WinDivertRuntimeProbeResult(
+            installed=True,
+            ready=True,
+            error_code=None,
+            stage="network_open",
+        )
+        calls = []
+        with patch.object(
+            system_ops, "wait_for_windivert_spawn_ready_runtime", return_value=recovered_probe
+        ):
+            result = windivert_diagnostics.retry_windivert_spawn_readiness_after_recovery(
+                no_device_probe,
+                aggressive_cleanup=lambda: calls.append("cleanup"),
+                wait_after_cleanup=lambda: calls.append("wait"),
+            )
+        self.assertIs(result, recovered_probe)
+        self.assertEqual(calls, ["cleanup", "wait"])
 
     def test_non_transient_probe_skips_recovery_cycle(self) -> None:
         from winws_runtime.runtime.system_ops import WinDivertRuntimeProbeResult

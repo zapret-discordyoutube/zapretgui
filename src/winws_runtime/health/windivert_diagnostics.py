@@ -29,6 +29,9 @@ _ERROR_NOT_ENOUGH_MEMORY = 8
 _ERROR_GEN_FAILURE = 31
 _ERROR_INVALID_PARAMETER = 87
 _ERROR_BAD_PATHNAME = 161
+# ERROR_NO_SUCH_DEVICE: сетевой стек/WFP ещё переинициализируется — типично
+# сразу после переключения сети или выхода из сна.
+_ERROR_NO_SUCH_DEVICE = 433
 _ERROR_INVALID_IMAGE_HASH = 577
 _ERROR_DRIVER_FAILED_PRIOR_UNLOAD = 654
 _ERROR_SERVICE_DISABLED = 1058
@@ -101,6 +104,19 @@ WINDIVERT_ERROR_TABLE: dict[int, WinDivertErrorRecord] = {
             short_hint_ru="не найден файл драйвера WinDivert",
             cause="Не найден файл драйвера WinDivert",
             solution="Переустановите программу или проверьте антивирус",
+        ),
+        WinDivertErrorRecord(
+            code=_ERROR_NO_SUCH_DEVICE,
+            short_hint_ru=(
+                "сетевое устройство временно недоступно — обычно сразу после "
+                "смены сети или выхода из сна"
+            ),
+            cause="Сетевое устройство для WinDivert временно недоступно",
+            solution=(
+                "Подождите несколько секунд после смены сети и повторите запуск. "
+                "Если не помогает — перезагрузите компьютер"
+            ),
+            transient=True,
         ),
         WinDivertErrorRecord(
             code=_ERROR_INVALID_IMAGE_HASH,
@@ -182,7 +198,7 @@ WINDIVERT_ERROR_TABLE: dict[int, WinDivertErrorRecord] = {
     )
 }
 
-# Transient-набор pre-spawn readiness recovery: {5, 1058, 1060, 1753, 1072}.
+# Transient-набор pre-spawn readiness recovery: {5, 433, 1058, 1060, 1753, 1072}.
 TRANSIENT_WINDIVERT_READINESS_CODES = frozenset(
     record.code for record in WINDIVERT_ERROR_TABLE.values() if record.transient
 )
