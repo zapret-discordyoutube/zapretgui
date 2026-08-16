@@ -1715,6 +1715,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertNotIn(r"{app}\user", deleted_names)
         self.assertNotIn(r"{app}\user\settings.sqlite3", deleted_names)
         self.assertNotIn(r"{app}\user\premium.sqlite3", deleted_names)
+        self.assertNotIn(r"{app}\user\update_cache", deleted_names)
         # Старый settings\ тоже не удаляется: там может остаться привязка
         # Premium dev-установки прежней раскладки.
         self.assertNotIn(r"{app}\settings", deleted_names)
@@ -1723,6 +1724,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertIn(r'Type: filesandordirs; Name: "{app}\sos"', install_delete)
         self.assertIn(r'Type: filesandordirs; Name: "{app}\data"', install_delete)
         self.assertIn(r'Type: filesandordirs; Name: "{app}\profile"', install_delete)
+        self.assertIn(r'Type: filesandordirs; Name: "{app}\_update_cache"', install_delete)
         # Рантайм-файлы оркестратора старой раскладки внутри lua\
         self.assertIn(r'Type: files; Name: "{app}\lua\whitelist.txt"', install_delete)
         self.assertIn(r'Type: files; Name: "{app}\lua\learned-strategies.lua"', install_delete)

@@ -51,7 +51,7 @@ class RuntimeLayoutTests(unittest.TestCase):
             "tmp_dir": root / "user" / "tmp",
             "themes_dir": root / "system" / "themes",
             "windivert_filter_dir": root / "windivert.filter",
-            "update_cache_dir": root / "_update_cache",
+            "update_cache_dir": root / "user" / "update_cache",
             "stable_icon": root / "system" / "ico" / "Zapret2.ico",
             "dev_icon": root / "system" / "ico" / "ZapretDevLogo4.ico",
             "sidebar_icons_dir": root / "system" / "ico" / "windows11_fluent" / "sidebar",

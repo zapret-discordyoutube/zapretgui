@@ -44,8 +44,8 @@ def resolve_update_state_dir(
     установщиком и логами — именно поэтому после аварии не остаётся ни
     средства восстановления, ни диагностики. Состояние обновления поэтому
     живёт снаружи: в ``%ProgramData%``, при его недоступности — в
-    ``%LOCALAPPDATA%``. Прежний каталог внутри установки остаётся последним
-    запасным вариантом, когда обеих системных папок нет.
+    ``%LOCALAPPDATA%``. Если обеих системных папок нет, последним запасным
+    вариантом служит пользовательский каталог ``user\\update_cache``.
     """
     root = Path(application_root)
     leaf = (
@@ -64,7 +64,7 @@ def resolve_update_state_dir(
             continue
         return candidate
 
-    return root / "_update_cache"
+    return root / "user" / "update_cache"
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,7 +174,7 @@ class ApplicationPaths:
 
     @property
     def update_cache_dir(self) -> Path:
-        return self.root / "_update_cache"
+        return self.user_dir / "update_cache"
 
     @property
     def stable_icon(self) -> Path:

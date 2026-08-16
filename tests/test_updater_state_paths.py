@@ -59,7 +59,10 @@ class UpdateStateDirectoryTests(unittest.TestCase):
             local_app_data=None,
         )
 
-        self.assertEqual(resolved, Path(r"C:\Zapret\Stable") / "_update_cache")
+        self.assertEqual(
+            resolved,
+            Path(r"C:\Zapret\Stable") / "user" / "update_cache",
+        )
 
     def test_unknown_channel_falls_back_to_stable_leaf(self) -> None:
         resolved = resolve_update_state_dir(
