@@ -6,6 +6,7 @@ import sys
 from config.runtime_layout import APPLICATION_PATHS
 from main.pyinstaller_archive_import_lock import install_pyinstaller_archive_import_lock
 from main.runtime_state import is_startup_debug_enabled
+from main.win32_shellcon_compat import install_win32_shellcon_compat
 
 
 _PRELAUNCH_DONE = False
@@ -80,5 +81,6 @@ def prepare_prelaunch() -> None:
     _set_workdir_to_app()
     _install_crash_handler()
     install_pyinstaller_archive_import_lock()
+    install_win32_shellcon_compat()
     _preload_slow_modules()
     _PRELAUNCH_DONE = True
