@@ -1,89 +1,17 @@
 from __future__ import annotations
 
 import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import xml.etree.ElementTree as ET
 
 
 PROJECT_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
-
-
-class _FakeComObject:
-    """Пустышка с динамическими атрибутами для узлов COM-задачи."""
-
-    def __init__(self):
-        object.__setattr__(self, "attrs", {})
-
-    def __setattr__(self, name, value):
-        self.attrs[name] = value
-
-    def __getattr__(self, name):
-        try:
-            return object.__getattribute__(self, "attrs")[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
-
-
-class _FakeComCollection:
-    def __init__(self):
-        self.created: list[tuple[int, _FakeComObject]] = []
-
-    def Create(self, item_type: int):
-        item = _FakeComObject()
-        self.created.append((int(item_type), item))
-        return item
-
-
-class _FakeTaskDefinition:
-    def __init__(self):
-        self.RegistrationInfo = _FakeComObject()
-        self.Triggers = _FakeComCollection()
-        self.Actions = _FakeComCollection()
-        self.Principal = _FakeComObject()
-        self.Settings = _FakeComObject()
-
-
-class _FakeTaskFolder:
-    def __init__(self):
-        self.registered: list[tuple] = []
-        self.deleted: list[str] = []
-        self.tasks: dict[str, object] = {}
-
-    def RegisterTaskDefinition(self, name, definition, flags, user, password, logon_type):
-        self.registered.append((name, definition, flags, user, password, logon_type))
-
-    def GetTask(self, name):
-        try:
-            return self.tasks[name]
-        except KeyError as exc:
-            raise OSError(f"task not found: {name}") from exc
-
-    def DeleteTask(self, name, flags):
-        if name not in self.tasks:
-            raise OSError(f"task not found: {name}")
-        del self.tasks[name]
-        self.deleted.append(name)
-
-
-class _FakeScheduler:
-    def __init__(self):
-        self.folder = _FakeTaskFolder()
-        self.task_definitions: list[_FakeTaskDefinition] = []
-
-    def Connect(self):
-        pass
-
-    def GetFolder(self, path: str):
-        return self.folder
-
-    def NewTask(self, flags: int):
-        definition = _FakeTaskDefinition()
-        self.task_definitions.append(definition)
-        return definition
 
 
 class _FakeToggle:
@@ -103,63 +31,98 @@ class GuiAutostartContractTests(unittest.TestCase):
     def test_registers_elevated_logon_task_in_scheduler(self) -> None:
         from autostart import scheduled_task_api
 
-        scheduler = _FakeScheduler()
         exe_path = r"C:\Program Files\Zapret\_internal\Zapret.exe"
+        captured_xml = b""
 
-        with patch.object(
-            scheduled_task_api,
-            "_connect_scheduler",
-            return_value=scheduler,
+        def run_schtasks(arguments):
+            nonlocal captured_xml
+            self.assertEqual(
+                arguments[:3],
+                ["/Create", "/TN", scheduled_task_api.AUTOSTART_TASK_NAME],
+            )
+            xml_path = Path(arguments[4])
+            captured_xml = xml_path.read_bytes()
+            return subprocess.CompletedProcess(arguments, 0, b"SUCCESS", b"")
+
+        with (
+            patch.object(scheduled_task_api, "_current_user_id", return_value=r"DESKTOP\Tester"),
+            patch.object(scheduled_task_api, "_run_schtasks", side_effect=run_schtasks),
         ):
             result = scheduled_task_api.create_or_update_autostart_task(exe_path)
 
         self.assertTrue(result)
+        root = ET.fromstring(captured_xml)
+        values = {
+            node.tag.rsplit("}", 1)[-1]: str(node.text or "")
+            for node in root.iter()
+        }
+        self.assertEqual(values["UserId"], r"DESKTOP\Tester")
+        self.assertEqual(values["Delay"], "PT3S")
+        self.assertEqual(values["LogonType"], "InteractiveToken")
+        self.assertEqual(values["RunLevel"], "HighestAvailable")
+        self.assertEqual(values["MultipleInstancesPolicy"], "IgnoreNew")
+        self.assertEqual(values["DisallowStartIfOnBatteries"], "false")
+        self.assertEqual(values["StopIfGoingOnBatteries"], "false")
+        self.assertEqual(values["ExecutionTimeLimit"], "PT0S")
+        self.assertEqual(values["Command"], exe_path)
+        self.assertEqual(values["Arguments"], "--tray")
+        self.assertEqual(values["WorkingDirectory"], r"C:\Program Files\Zapret")
 
-        definition = scheduler.task_definitions[0]
+    def test_reads_task_action_from_utf16_schtasks_xml(self) -> None:
+        from autostart import scheduled_task_api
 
-        # Триггер: вход текущего пользователя в систему
-        (trigger_type, trigger), = definition.Triggers.created
-        self.assertEqual(trigger_type, scheduled_task_api.TASK_TRIGGER_LOGON)
-
-        # Действие: запуск exe в трее
-        (action_type, action), = definition.Actions.created
-        self.assertEqual(action_type, scheduled_task_api.TASK_ACTION_EXEC)
-        self.assertEqual(action.Path, exe_path)
-        self.assertEqual(action.Arguments, "--tray")
-        self.assertEqual(action.WorkingDirectory, r"C:\Program Files\Zapret")
-
-        # Ключ решения: запуск с наивысшими правами без UAC-запроса.
-        # Ярлык автозагрузки для requireAdministrator-exe Windows молча игнорирует.
-        self.assertEqual(
-            definition.Principal.RunLevel,
-            scheduled_task_api.TASK_RUNLEVEL_HIGHEST,
+        payload = scheduled_task_api._build_autostart_task_xml(
+            r"C:\Zapret\_internal\Zapret.exe",
+            r"DESKTOP\Tester",
         )
-        self.assertEqual(
-            definition.Principal.LogonType,
-            scheduled_task_api.TASK_LOGON_INTERACTIVE_TOKEN,
+        result = subprocess.CompletedProcess([], 0, payload, b"")
+        with patch.object(scheduled_task_api, "_run_schtasks", return_value=result) as run:
+            action = scheduled_task_api.get_autostart_task_action()
+
+        self.assertEqual(action, (r"C:\Zapret\_internal\Zapret.exe", "--tray"))
+        run.assert_called_once_with(
+            ["/Query", "/TN", scheduled_task_api.AUTOSTART_TASK_NAME, "/XML", "ONE"]
         )
 
-        # Дефолты планировщика ломают GUI: батарея и лимит времени выполнения
-        self.assertFalse(definition.Settings.DisallowStartIfOnBatteries)
-        self.assertFalse(definition.Settings.StopIfGoingOnBatteries)
-        self.assertEqual(definition.Settings.ExecutionTimeLimit, "PT0S")
+    def test_task_xml_preserves_windows_paths_with_xml_characters(self) -> None:
+        from autostart import scheduled_task_api
 
-        (name, registered_def, flags, _user, _password, logon_type), = scheduler.folder.registered
-        self.assertEqual(name, scheduled_task_api.AUTOSTART_TASK_NAME)
-        self.assertIs(registered_def, definition)
-        self.assertEqual(flags, scheduled_task_api.TASK_CREATE_OR_UPDATE)
-        self.assertEqual(logon_type, scheduled_task_api.TASK_LOGON_INTERACTIVE_TOKEN)
+        exe_path = r"C:\Zapret & Tools\_internal\Zapret.exe"
+        payload = scheduled_task_api._build_autostart_task_xml(
+            exe_path,
+            r"DESKTOP\Tester",
+        )
+        root = ET.fromstring(payload)
+        values = {
+            node.tag.rsplit("}", 1)[-1]: str(node.text or "")
+            for node in root.iter()
+        }
+        self.assertEqual(values["Command"], exe_path)
+        self.assertEqual(values["WorkingDirectory"], r"C:\Zapret & Tools")
+        self.assertEqual(
+            scheduled_task_api._first_task_action(payload.decode("utf-16")),
+            (exe_path, "--tray"),
+        )
+
+    def test_autostart_runtime_does_not_import_com(self) -> None:
+        from autostart import scheduled_task_api
+
+        source = Path(scheduled_task_api.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("pythoncom", source)
+        self.assertNotIn("win32com", source)
+        self.assertNotIn('Dispatch("Schedule.Service")', source)
+        self.assertIn("schtasks.exe", source)
 
     def test_rejects_flat_or_source_autostart_target(self) -> None:
         from autostart import scheduled_task_api
 
-        with patch.object(scheduled_task_api, "_connect_scheduler") as connect_scheduler:
+        with patch.object(scheduled_task_api, "_run_schtasks") as run_schtasks:
             result = scheduled_task_api.create_or_update_autostart_task(
                 r"C:\Program Files\Zapret\Zapret.exe"
             )
 
         self.assertFalse(result)
-        connect_scheduler.assert_not_called()
+        run_schtasks.assert_not_called()
 
     def test_enable_gui_autostart_creates_task_and_removes_legacy_shortcut(self) -> None:
         from autostart.public import enable_gui_autostart
@@ -290,11 +253,11 @@ class GuiAutostartContractTests(unittest.TestCase):
     def test_autostart_error_notification_payload_is_user_readable(self) -> None:
         from autostart.ui.notifications import build_autostart_error_notification
 
-        payload = build_autostart_error_notification("COM raw details")
+        payload = build_autostart_error_notification("Подробности Планировщика")
 
         self.assertEqual(payload["level"], "error")
         self.assertEqual(payload["title"], "Автозапуск не включён")
-        self.assertIn("COM raw details", payload["content"])
+        self.assertIn("Подробности Планировщика", payload["content"])
         self.assertEqual(payload["source"], "autostart.gui")
         self.assertEqual(payload["queue"], "immediate")
 

@@ -19,10 +19,10 @@ def apply_dns_on_startup_async(status_callback=None):
     return _apply_dns_on_startup_async(status_callback=status_callback)
 
 
-def get_adapters_info_native():
-    from dns.dns_core import get_adapters_info_native as _get_adapters_info_native
+def get_network_adapters_native():
+    from dns.dns_core import get_network_adapters_native as _get_network_adapters_native
 
-    return _get_adapters_info_native()
+    return _get_network_adapters_native()
 
 
 def normalize_adapter_alias(alias: str) -> str:

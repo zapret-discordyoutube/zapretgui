@@ -103,6 +103,13 @@ class DnsCoreWinApiTests(unittest.TestCase):
         self.assertIn("DNS_SETTING_NAMESERVER", source)
         self.assertIn("DNS_SETTING_DOH", source)
 
+    def test_adapter_enumeration_uses_get_adapters_addresses_only(self) -> None:
+        source = _source()
+
+        self.assertIn("GetAdaptersAddresses", source)
+        self.assertNotIn("GetAdaptersInfo", source)
+        self.assertNotIn("import wmi", source)
+
     def test_doh_is_not_written_through_registry_keys(self) -> None:
         source = _source()
 

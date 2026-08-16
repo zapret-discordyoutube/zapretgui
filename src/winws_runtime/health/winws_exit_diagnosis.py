@@ -539,9 +539,9 @@ def _probe_service_disabled_cause() -> Tuple[str, str, Optional[str]]:
 def _check_network_adapters() -> bool:
     """Return True if at least one network adapter is enabled/up."""
     try:
-        from dns.public import get_adapters_info_native
+        from dns.public import get_network_adapters_native
 
-        adapters = get_adapters_info_native()
+        adapters = get_network_adapters_native()
         for adapter in adapters:
             adapter_type = int(adapter.get("type") or 0)
             if adapter_type == 24:  # MIB_IF_TYPE_LOOPBACK

@@ -5,11 +5,12 @@
 """
 from __future__ import annotations
 
-import ctypes, socket, struct, platform, sys, winreg
+import ctypes
+import sys
+import winreg
 from ctypes import (
     Union,
     byref,
-    c_ulong,
     c_ulonglong,
     c_ushort,
     c_void_p,
@@ -32,11 +33,16 @@ from log.log import log
 iphlpapi = windll.iphlpapi
 
 # Константы
-MAX_ADAPTER_NAME_LENGTH = 256
-MAX_ADAPTER_DESCRIPTION_LENGTH = 128
 MAX_ADAPTER_ADDRESS_LENGTH = 8
 ERROR_SUCCESS = 0
 ERROR_BUFFER_OVERFLOW = 111
+AF_UNSPEC = 0
+GAA_FLAG_SKIP_UNICAST = 0x0001
+GAA_FLAG_SKIP_ANYCAST = 0x0002
+GAA_FLAG_SKIP_MULTICAST = 0x0004
+GAA_FLAG_SKIP_DNS_SERVER = 0x0008
+GAA_FLAG_INCLUDE_ALL_INTERFACES = 0x0100
+IF_OPER_STATUS_UP = 1
 MIB_IF_TYPE_ETHERNET = 6
 MIB_IF_TYPE_PPP = 23
 MIB_IF_TYPE_LOOPBACK = 24
@@ -52,38 +58,30 @@ DNS_DOH_SERVER_SETTINGS_FALLBACK_TO_UDP = 0x0004
 DnsServerDohProperty = 1
 _last_dns_winapi_error = ""
 
-class IP_ADDR_STRING(Structure):
+class IP_ADAPTER_ADDRESSES(Structure):
     pass
 
-IP_ADDR_STRING._fields_ = [
-    ('Next', POINTER(IP_ADDR_STRING)),
-    ('IpAddress', c_wchar_p * 16),
-    ('IpMask', c_wchar_p * 16),
-    ('Context', wintypes.DWORD),
-]
-
-class IP_ADAPTER_INFO(Structure):
-    pass
-
-IP_ADAPTER_INFO._fields_ = [
-    ('Next', POINTER(IP_ADAPTER_INFO)),
-    ('ComboIndex', wintypes.DWORD),
-    ('AdapterName', ctypes.c_char * (MAX_ADAPTER_NAME_LENGTH + 4)),
-    ('Description', ctypes.c_char * (MAX_ADAPTER_DESCRIPTION_LENGTH + 4)),
-    ('AddressLength', wintypes.UINT),
-    ('Address', ctypes.c_byte * MAX_ADAPTER_ADDRESS_LENGTH),
-    ('Index', wintypes.DWORD),
-    ('Type', wintypes.UINT),
-    ('DhcpEnabled', wintypes.UINT),
-    ('CurrentIpAddress', POINTER(IP_ADDR_STRING)),
-    ('IpAddressList', IP_ADDR_STRING),
-    ('GatewayList', IP_ADDR_STRING),
-    ('DhcpServer', IP_ADDR_STRING),
-    ('HaveWins', wintypes.BOOL),
-    ('PrimaryWinsServer', IP_ADDR_STRING),
-    ('SecondaryWinsServer', IP_ADDR_STRING),
-    ('LeaseObtained', ctypes.c_int64),
-    ('LeaseExpires', ctypes.c_int64),
+IP_ADAPTER_ADDRESSES._fields_ = [
+    # Первые два DWORD в SDK объединены с ULONGLONG Alignment. Явное описание
+    # сохраняет одинаковое смещение Next на 32- и 64-битной Windows.
+    ("Length", ctypes.c_uint32),
+    ("IfIndex", ctypes.c_uint32),
+    ("Next", POINTER(IP_ADAPTER_ADDRESSES)),
+    ("AdapterName", ctypes.c_char_p),
+    ("FirstUnicastAddress", c_void_p),
+    ("FirstAnycastAddress", c_void_p),
+    ("FirstMulticastAddress", c_void_p),
+    ("FirstDnsServerAddress", c_void_p),
+    ("DnsSuffix", c_wchar_p),
+    ("Description", c_wchar_p),
+    ("FriendlyName", c_wchar_p),
+    ("PhysicalAddress", ctypes.c_ubyte * MAX_ADAPTER_ADDRESS_LENGTH),
+    ("PhysicalAddressLength", ctypes.c_uint32),
+    ("Flags", ctypes.c_uint32),
+    ("Mtu", ctypes.c_uint32),
+    ("IfType", ctypes.c_uint32),
+    ("OperStatus", ctypes.c_int32),
+    ("Ipv6IfIndex", ctypes.c_uint32),
 ]
 
 class GUID(Structure):
@@ -165,20 +163,6 @@ DEFAULT_EXCLUSIONS: list[str] = [
     "pppoe", "pptp", "l2tp", "sstp", "ndiswan", "raspppoe", "raspptp",
 ]
 
-SOFTWARE_PNP_PREFIXES = (
-    "ROOT\\",
-    "SWD\\",
-    "BTH\\",
-    "HTREE\\",
-)
-
-PHYSICAL_NETWORK_PNP_PREFIXES = (
-    "PCI\\",
-    "USB\\",
-    "PCMCIA\\",
-)
-
-WMI_DNS_ADAPTER_TYPE_IDS = {0, 9}
 NATIVE_DNS_ADAPTER_TYPES = {MIB_IF_TYPE_ETHERNET, MIB_IF_TYPE_IEEE80211}
 
 # ──────────────────────────────────────────────────────────────────────
@@ -212,96 +196,95 @@ def refresh_exclusion_cache() -> None:
 #  Низкоуровневые Win32 функции
 # ──────────────────────────────────────────────────────────────────────
 
-def get_adapters_info_native() -> List[Dict]:
-    """Получает информацию об адаптерах через IP Helper API"""
-    adapters = []
-    
-    # Получаем размер буфера
-    size = c_ulong(0)
-    result = iphlpapi.GetAdaptersInfo(None, ctypes.byref(size))
-    
-    if result != ERROR_BUFFER_OVERFLOW:
-        if result != ERROR_SUCCESS:
-            log(f"GetAdaptersInfo failed: {result}", "ERROR")
-            return []
-    
-    # Выделяем буфер
-    buffer = ctypes.create_string_buffer(size.value)
-    adapter_info = ctypes.cast(buffer, POINTER(IP_ADAPTER_INFO))
-    
-    # Получаем данные
-    result = iphlpapi.GetAdaptersInfo(adapter_info, ctypes.byref(size))
-    
-    if result != ERROR_SUCCESS:
-        log(f"GetAdaptersInfo failed: {result}", "ERROR")
-        return []
-    
-    # Парсим адаптеры
-    current = adapter_info
+def _canonical_adapter_guid(value: str) -> str:
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    if not value.startswith("{"):
+        value = "{" + value
+    if not value.endswith("}"):
+        value += "}"
+    return value
+
+
+def _read_network_adapter_chain(
+    current: POINTER(IP_ADAPTER_ADDRESSES),
+) -> List[Dict]:
+    """Преобразует связный список GetAdaptersAddresses в безопасный снимок."""
+    adapters: List[Dict] = []
+    visited: set[int] = set()
     while current:
+        address = int(ctypes.cast(current, c_void_p).value or 0)
+        if not address or address in visited:
+            break
+        visited.add(address)
         adapter = current.contents
-        
         try:
-            name = adapter.Description.decode('cp866', errors='ignore')
-            adapter_name = adapter.AdapterName.decode('ascii', errors='ignore')
-            
-            # Пропускаем loopback
-            if adapter.Type == MIB_IF_TYPE_LOOPBACK:
+            adapter_type = int(adapter.IfType)
+            if adapter_type == MIB_IF_TYPE_LOOPBACK:
                 current = adapter.Next
                 continue
-            
-            adapter_dict = {
-                'name': name,
-                'adapter_name': adapter_name,
-                'index': adapter.Index,
-                'type': adapter.Type,
-                'dhcp_enabled': bool(adapter.DhcpEnabled),
-            }
-            
-            adapters.append(adapter_dict)
-            
-        except Exception as e:
-            log(f"Error parsing adapter: {e}", "DEBUG")
-        
+
+            raw_adapter_name = bytes(adapter.AdapterName or b"").decode(
+                "ascii", errors="ignore"
+            ).strip()
+            friendly_name = _normalize_alias(str(adapter.FriendlyName or ""))
+            description = _normalize_alias(str(adapter.Description or ""))
+            display_name = friendly_name or description or raw_adapter_name
+            if not display_name:
+                current = adapter.Next
+                continue
+
+            adapters.append(
+                {
+                    "name": display_name,
+                    "description": description or display_name,
+                    "adapter_name": raw_adapter_name,
+                    "guid": _canonical_adapter_guid(raw_adapter_name),
+                    "index": int(adapter.IfIndex or adapter.Ipv6IfIndex),
+                    "type": adapter_type,
+                    "oper_status": int(adapter.OperStatus),
+                    "connected": int(adapter.OperStatus) == IF_OPER_STATUS_UP,
+                }
+            )
+        except Exception as exc:
+            log(f"GetAdaptersAddresses parse error: {exc}", "DEBUG")
         current = adapter.Next
-    
     return adapters
 
-def get_interface_guid_from_name(adapter_name: str) -> Optional[str]:
-    """Получает GUID интерфейса по имени через реестр"""
-    try:
-        # Ищем в реестре
-        reg_path = r"SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}"
-        
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path) as network_key:
-            i = 0
-            while True:
-                try:
-                    guid = winreg.EnumKey(network_key, i)
-                    
-                    # Пропускаем специальные ключи
-                    if not guid.startswith('{'):
-                        i += 1
-                        continue
-                    
-                    try:
-                        conn_path = f"{reg_path}\\{guid}\\Connection"
-                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, conn_path) as conn_key:
-                            name, _ = winreg.QueryValueEx(conn_key, "Name")
-                            
-                            if _normalize_alias(name) == _normalize_alias(adapter_name):
-                                return guid
-                    except:
-                        pass
-                    
-                    i += 1
-                except OSError:
-                    break
-        
-    except Exception as e:
-        log(f"Error getting GUID for {adapter_name}: {e}", "DEBUG")
-    
-    return None
+
+def get_network_adapters_native() -> List[Dict]:
+    """Получает единый снимок адаптеров через современный IP Helper API."""
+    flags = (
+        GAA_FLAG_SKIP_UNICAST
+        | GAA_FLAG_SKIP_ANYCAST
+        | GAA_FLAG_SKIP_MULTICAST
+        | GAA_FLAG_SKIP_DNS_SERVER
+        | GAA_FLAG_INCLUDE_ALL_INTERFACES
+    )
+    size = ctypes.c_uint32(15 * 1024)
+
+    for _attempt in range(3):
+        buffer = ctypes.create_string_buffer(max(1, int(size.value)))
+        first = ctypes.cast(buffer, POINTER(IP_ADAPTER_ADDRESSES))
+        result = int(
+            iphlpapi.GetAdaptersAddresses(
+                AF_UNSPEC,
+                flags,
+                None,
+                first,
+                ctypes.byref(size),
+            )
+        )
+        if result == ERROR_BUFFER_OVERFLOW:
+            continue
+        if result != ERROR_SUCCESS:
+            log(f"GetAdaptersAddresses failed: {result}", "ERROR")
+            return []
+        return _read_network_adapter_chain(first)
+
+    log("GetAdaptersAddresses returned an unstable buffer size", "ERROR")
+    return []
 
 
 def _guid_from_string(guid: str) -> GUID:
@@ -576,20 +559,7 @@ class DNSManager:
     """Менеджер DNS на основе Win32 API"""
     
     def __init__(self):
-        self._wmi_conn = None
-        self._adapter_cache = {}
         self._guid_cache = {}
-    
-    @property
-    def wmi_conn(self):
-        """Ленивая инициализация WMI"""
-        if self._wmi_conn is None:
-            try:
-                import wmi
-                self._wmi_conn = wmi.WMI()
-            except:
-                self._wmi_conn = False
-        return self._wmi_conn if self._wmi_conn else None
     
     @staticmethod
     def should_ignore_adapter(name: str, description: str) -> bool:
@@ -607,121 +577,60 @@ class DNSManager:
         name: str,
         description: str,
         *,
-        pnp_device_id: str = "",
-        service_name: str = "",
-        adapter_type_id: int | None = None,
-        native_type: int | None = None,
+        native_type: int,
     ) -> bool:
         """Проверяет, можно ли менять DNS на этом адаптере."""
         if DNSManager.should_ignore_adapter(name, description):
             return False
-
-        pnp_upper = _normalize_alias(pnp_device_id or "").upper()
-        service_lower = _normalize_alias(service_name or "").lower()
-
-        if service_lower and any(
-            pattern in service_lower
-            for pattern in _get_dynamic_exclusions()
-        ):
+        try:
+            return int(native_type) in NATIVE_DNS_ADAPTER_TYPES
+        except (TypeError, ValueError):
             return False
-
-        if native_type is not None:
-            try:
-                return int(native_type) in NATIVE_DNS_ADAPTER_TYPES
-            except (TypeError, ValueError):
-                return False
-
-        if pnp_upper:
-            if pnp_upper.startswith(SOFTWARE_PNP_PREFIXES):
-                return False
-            if pnp_upper.startswith(PHYSICAL_NETWORK_PNP_PREFIXES):
-                return True
-
-        if adapter_type_id is not None:
-            try:
-                return int(adapter_type_id) in WMI_DNS_ADAPTER_TYPE_IDS
-            except (TypeError, ValueError):
-                return False
-
-        return False
     
     def get_network_adapters_fast(
         self,
         include_ignored: bool = False,
         include_disconnected: bool = True
     ) -> List[Tuple[str, str]]:
-        """Быстрое получение списка адаптеров через WMI"""
-        adapters = []
-        
-        # Пробуем WMI
-        if self.wmi_conn:
-            try:
-                for adapter in self.wmi_conn.Win32_NetworkAdapter(PhysicalAdapter=True):
-                    if not adapter.NetConnectionID or not adapter.Description:
-                        continue
-                    
-                    # Проверяем статус подключения
-                    if not include_disconnected and adapter.NetConnectionStatus != 2:
-                        continue
-                    
-                    alias = _normalize_alias(adapter.NetConnectionID)
-                    desc = adapter.Description
-                    
-                    pnp_device_id = str(getattr(adapter, "PNPDeviceID", "") or "")
-                    service_name = str(getattr(adapter, "ServiceName", "") or "")
-                    adapter_type_id = getattr(adapter, "AdapterTypeID", None)
-
-                    # Проверяем исключения и оставляем только обычные Wi-Fi/Ethernet.
-                    if not include_ignored and not self.is_supported_dns_adapter(
-                        alias,
-                        desc,
-                        pnp_device_id=pnp_device_id,
-                        service_name=service_name,
-                        adapter_type_id=adapter_type_id,
-                    ):
-                        continue
-                    
-                    adapters.append((adapter.NetConnectionID, desc))
-                    
-                return adapters
-                
-            except Exception as e:
-                log(f"WMI error: {e}", "DEBUG")
-        
-        # Fallback на нативный API
+        """Возвращает отображаемые имена адаптеров из единого WinAPI-снимка."""
+        adapters: List[Tuple[str, str]] = []
         try:
-            native_adapters = get_adapters_info_native()
-            
-            for adapter in native_adapters:
-                name = adapter['name']
-                
+            for adapter in get_network_adapters_native():
+                name = _normalize_alias(str(adapter.get("name") or ""))
+                description = _normalize_alias(
+                    str(adapter.get("description") or name)
+                )
+                if not name:
+                    continue
+                if not include_disconnected and not bool(adapter.get("connected")):
+                    continue
                 if not include_ignored and not self.is_supported_dns_adapter(
                     name,
-                    name,
-                    native_type=adapter.get("type"),
+                    description,
+                    native_type=int(adapter.get("type") or 0),
                 ):
                     continue
-                
-                adapters.append((name, name))
-                
-        except Exception as e:
-            log(f"Native API error: {e}", "ERROR")
-        
+                guid = str(adapter.get("guid") or "").strip()
+                if guid:
+                    self._guid_cache[_normalize_alias(name).casefold()] = guid
+                adapters.append((name, description))
+        except Exception as exc:
+            log(f"GetAdaptersAddresses error: {exc}", "ERROR")
         return adapters
     
     def get_adapter_guid(self, adapter_name: str) -> Optional[str]:
         """Получает GUID адаптера с кешированием"""
-        norm_name = _normalize_alias(adapter_name)
+        norm_name = _normalize_alias(adapter_name).casefold()
         
         if norm_name in self._guid_cache:
             return self._guid_cache[norm_name]
         
-        guid = get_interface_guid_from_name(adapter_name)
-        
-        if guid:
-            self._guid_cache[norm_name] = guid
-        
-        return guid
+        for adapter in get_network_adapters_native():
+            name = _normalize_alias(str(adapter.get("name") or ""))
+            guid = str(adapter.get("guid") or "").strip()
+            if name and guid:
+                self._guid_cache[name.casefold()] = guid
+        return self._guid_cache.get(norm_name)
     
     def get_current_dns(self, adapter_name: str, address_family: str = "IPv4") -> List[str]:
         """Получает текущие DNS серверы через реестр"""

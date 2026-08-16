@@ -18,7 +18,6 @@ PySocks==1.7.1
 # Интеграция с Windows
 pywin32==312
 psutil==7.2.2
-WMI==1.5.1
 
 # Остальное
 packaging==26.2
