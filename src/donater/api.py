@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import socket
 from typing import Any, Dict, Optional, Tuple
 
 import requests
@@ -43,13 +44,41 @@ class PremiumApiClient:
         nonce: str = "",
         timeout: float | None = None,
     ) -> Dict[str, Any]:
-        try:
-            response = self._session.request(
+        request_timeout = self.timeout if timeout is None else max(0.1, float(timeout))
+
+        def _send():
+            return self._session.request(
                 method,
                 self._url(endpoint),
                 json=payload,
-                timeout=self.timeout if timeout is None else max(0.1, float(timeout)),
+                timeout=request_timeout,
             )
+
+        try:
+            from winws_runtime.runtime.direct_network import run_with_direct_network_access
+
+            response = run_with_direct_network_access(_send)
+        except requests.exceptions.SSLError:
+            return {
+                "success": False,
+                "error": {"code": "tls_error", "retryable": True},
+                "_nonce": nonce,
+                "_http_status": 0,
+            }
+        except requests.exceptions.ConnectTimeout:
+            return {
+                "success": False,
+                "error": {"code": "connect_timeout", "retryable": True},
+                "_nonce": nonce,
+                "_http_status": 0,
+            }
+        except requests.exceptions.ReadTimeout:
+            return {
+                "success": False,
+                "error": {"code": "read_timeout", "retryable": True},
+                "_nonce": nonce,
+                "_http_status": 0,
+            }
         except requests.Timeout:
             return {
                 "success": False,
@@ -57,10 +86,31 @@ class PremiumApiClient:
                 "_nonce": nonce,
                 "_http_status": 0,
             }
+        except requests.ConnectionError as exc:
+            return {
+                "success": False,
+                "error": {
+                    "code": "dns_error" if self._is_name_resolution_error(exc) else "network_error",
+                    "retryable": True,
+                },
+                "_nonce": nonce,
+                "_http_status": 0,
+            }
         except requests.RequestException:
             return {
                 "success": False,
-                "error": {"code": "network_error", "retryable": True},
+                "error": {"code": "network_error", "retryable": False},
+                "_nonce": nonce,
+                "_http_status": 0,
+            }
+        except RuntimeError as exc:
+            from winws_runtime.runtime.direct_network import DirectNetworkAccessError
+
+            if not isinstance(exc, DirectNetworkAccessError):
+                raise
+            return {
+                "success": False,
+                "error": {"code": "winws_restore_failed", "retryable": False},
                 "_nonce": nonce,
                 "_http_status": 0,
             }
@@ -85,6 +135,27 @@ class PremiumApiClient:
                 "retryable": response.status_code in {408, 429, 500, 502, 503, 504},
             }
         return data
+
+    @staticmethod
+    def _is_name_resolution_error(exc: BaseException) -> bool:
+        pending: list[BaseException] = [exc]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            identity = id(current)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            class_name = type(current).__name__.lower()
+            if isinstance(current, socket.gaierror) or "nameresolution" in class_name:
+                return True
+            for linked in (current.__cause__, current.__context__):
+                if isinstance(linked, BaseException):
+                    pending.append(linked)
+            for value in getattr(current, "args", ()):
+                if isinstance(value, BaseException):
+                    pending.append(value)
+        return False
 
     def get_status(self) -> Optional[Dict[str, Any]]:
         # Health-check не должен ждать полный срок мутационного запроса.

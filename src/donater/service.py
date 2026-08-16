@@ -15,8 +15,19 @@ from .types import ActivationStatus
 
 
 REQUEST_TIMEOUT = 5
-AUTO_NETWORK_RETRY_COOLDOWN_SEC = 30
+BACKGROUND_NETWORK_REFRESH_SEC = 3 * 60 * 60
 PAIR_CODE_TTL_MINUTES = 10
+
+_TRANSIENT_NETWORK_ERROR_CODES = frozenset(
+    {
+        "timeout",
+        "connect_timeout",
+        "read_timeout",
+        "dns_error",
+        "tls_error",
+        "network_error",
+    }
+)
 
 
 def _error_data(raw: Any, signed: Any = None) -> tuple[str, bool]:
@@ -30,7 +41,7 @@ def _error_data(raw: Any, signed: Any = None) -> tuple[str, bool]:
         retryable = bool(value.get("retryable"))
     else:
         code = str(value or "unknown").strip().lower()
-        retryable = code in {"timeout", "network_error"}
+        retryable = code in _TRANSIENT_NETWORK_ERROR_CODES
         if code.casefold() == "ошибка сети".casefold():
             code = "network_error"
             retryable = True
@@ -42,7 +53,12 @@ def _error_data(raw: Any, signed: Any = None) -> tuple[str, bool]:
 def _error_message(code: str, *, pairing: bool = False) -> str:
     messages = {
         "timeout": "Сервер не ответил вовремя. Повторите попытку.",
+        "connect_timeout": "Не удалось установить соединение с сервером Premium вовремя.",
+        "read_timeout": "Сервер Premium принял соединение, но не прислал ответ вовремя.",
+        "dns_error": "Не удалось найти адрес сервера Premium через DNS.",
+        "tls_error": "Не удалось установить защищённое TLS-соединение с сервером Premium.",
         "network_error": "Нет соединения с сервером Premium.",
+        "winws_restore_failed": "Сервер проверен напрямую, но winws2 не удалось безопасно восстановить.",
         "pairing_not_confirmed": "Код ещё не подтверждён в Telegram-боте.",
         "pairing_not_found": "Сопряжение не найдено. Создайте новый код.",
         "pairing_expired": "Код истёк. Создайте новый код.",
@@ -60,6 +76,19 @@ class PremiumService:
     def __init__(self, *, api_base_url: str = API_BASE_URL, timeout: int = REQUEST_TIMEOUT):
         self._lock = threading.Lock()
         self._api = PremiumApiClient(base_url=api_base_url, timeout=timeout)
+        self._last_background_network_attempt_at = 0.0
+
+    def _automatic_network_due(self, *, has_pending_pairing: bool) -> bool:
+        """Allow startup probe, three-hour refreshes and active pairing polls."""
+
+        if has_pending_pairing:
+            return True
+        now = time.monotonic()
+        previous = float(self._last_background_network_attempt_at or 0.0)
+        if previous > 0.0 and now - previous < BACKGROUND_NETWORK_REFRESH_SEC:
+            return False
+        self._last_background_network_attempt_at = now
+        return True
 
     @property
     def device_id(self) -> str:
@@ -170,7 +199,7 @@ class PremiumService:
             PremiumStorage.clear_last_network_failure()
             return False
         code, retryable = _error_data(raw)
-        if retryable and code in {"timeout", "network_error"}:
+        if retryable and code in _TRANSIENT_NETWORK_ERROR_CODES:
             PremiumStorage.save_last_network_failure_now()
             return True
         return False
@@ -238,18 +267,19 @@ class PremiumService:
             network_cooldown = False
             network_failed = False
 
-            if allow_network and automatic:
-                last_failure = PremiumStorage.get_last_network_failure_ts() or 0
-                if int(time.time()) - int(last_failure) < AUTO_NETWORK_RETRY_COOLDOWN_SEC:
-                    allow_network = False
-                    network_cooldown = True
-
             pending = PremiumStorage.get_pending_pairing()
             has_pending = bool(
                 pending
                 and pending.get("pairing_id")
                 and int(pending.get("expires_at") or 0) >= int(time.time())
             )
+            if (
+                allow_network
+                and automatic
+                and not self._automatic_network_due(has_pending_pairing=has_pending)
+            ):
+                allow_network = False
+                network_cooldown = True
             pairing_message: str | None = None
             if pending and not has_pending and pending.get("pairing_id"):
                 PremiumStorage.clear_pair_code()

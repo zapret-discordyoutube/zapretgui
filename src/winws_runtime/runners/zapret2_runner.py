@@ -13,7 +13,8 @@ import shlex
 import subprocess
 import time
 import threading
-from typing import Optional
+from collections.abc import Callable
+from typing import Optional, TypeVar
 
 from log.log import log
 from settings.mode import ENGINE_WINWS2, ZAPRET2_MODE
@@ -61,6 +62,8 @@ _TRANSIENT_DRY_RUN_RETRY_DELAYS_SEC = (_TRANSIENT_DRY_RUN_RETRY_DELAY_SEC, 2.0)
 _PRESET_SWITCH_AFTER_DRY_RUN_SETTLE_SEC = 0.15
 # Сколько символов стартового вывода winws2 попадает в общий лог при отказе.
 _STARTUP_OUTPUT_LOG_LIMIT = 2000
+_DIRECT_NETWORK_RESTORE_STABLE_WINDOW_SEC = 0.3
+_DirectResult = TypeVar("_DirectResult")
 
 
 def _is_windows_abs(path: str) -> bool:
@@ -658,6 +661,74 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         except Exception as e:
             log(f"Error stopping process for preset switch: {e}", "ERROR")
             return False
+
+    def run_with_direct_network_access(
+        self,
+        operation: Callable[[], _DirectResult],
+    ) -> _DirectResult:
+        """Temporarily pause this exact winws2 process for one direct request.
+
+        Premium HTTPS must not pass through TLS desynchronisation.  The same
+        lifecycle lock covers pause, request and restoration, so a preset
+        switch or the process monitor cannot create a competing winws2 while
+        the direct window is open.
+        """
+
+        if not callable(operation):
+            raise TypeError("operation must be callable")
+
+        with self._operation_guard():
+            if not (self.running_process is not None and self.is_running()):
+                return operation()
+
+            preset_path = str(self._preset_file_path or "").strip()
+            strategy_name = str(self.current_launch_label or "Preset").strip() or "Preset"
+            if not preset_path or not os.path.exists(preset_path):
+                from winws_runtime.runtime.direct_network import DirectNetworkAccessError
+
+                raise DirectNetworkAccessError(
+                    "Нельзя безопасно приостановить winws2: активный preset не найден."
+                )
+
+            log("Premium direct request: temporarily pausing winws2", "INFO")
+            if not self._stop_process_only_locked():
+                from winws_runtime.runtime.direct_network import DirectNetworkAccessError
+
+                raise DirectNetworkAccessError(
+                    "Не удалось безопасно приостановить winws2 для прямого запроса."
+                )
+
+            operation_error: BaseException | None = None
+            try:
+                return operation()
+            except BaseException as exc:
+                operation_error = exc
+                raise
+            finally:
+                restore_exception: Exception | None = None
+                try:
+                    restored = self._start_from_preset_file_locked(
+                        preset_path,
+                        strategy_name,
+                        force_cleanup=False,
+                        retry_count=0,
+                        stable_start_window_seconds=_DIRECT_NETWORK_RESTORE_STABLE_WINDOW_SEC,
+                    )
+                except Exception as exc:
+                    restored = False
+                    restore_exception = exc
+                if restored:
+                    log("Premium direct request: winws2 preset restored", "INFO")
+                else:
+                    from winws_runtime.runtime.direct_network import DirectNetworkAccessError
+
+                    restore_error = DirectNetworkAccessError(
+                        "Прямой запрос завершён, но прежний preset winws2 не восстановился."
+                    )
+                    cause = restore_exception or operation_error
+                    if cause is not None:
+                        raise restore_error from cause
+                    raise restore_error
 
     def _clear_process_state_locked(self) -> None:
         self.running_process = None
