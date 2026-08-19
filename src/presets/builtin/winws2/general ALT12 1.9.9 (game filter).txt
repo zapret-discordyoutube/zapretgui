@@ -1,5 +1,5 @@
 # Preset: general ALT12 1.9.9 (game filter)
-# BuiltinVersion: 2.26
+# BuiltinVersion: 2.39
 # IconColor: #60cdff
 
 --lua-init=@lua/zapret-lib.lua
@@ -34,17 +34,6 @@
 
 --new
 
---name=Исключения (RU сайты)
---filter-tcp=80,443-65535
---ipset=lists/ipset-ru.txt
---ipset=lists/ipset-dns.txt
---ipset=lists/ipset-exclude.txt
---out-range=-d8
---payload=tls_client_hello
---lua-desync=pass
-
---new
-
 --name=googlevideo.com (CDN сервера)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
@@ -66,6 +55,17 @@
 --ipset=lists/ipset-youtube.txt
 --payload=all
 --lua-desync=fake:blob=quic_google:repeats=11
+
+--new
+
+--name=Исключения (RU сайты)
+--filter-tcp=80,443-65535
+--ipset=lists/ipset-ru.txt
+--ipset=lists/ipset-dns.txt
+--ipset=lists/ipset-exclude.txt
+--out-range=-d8
+--payload=tls_client_hello
+--lua-desync=pass
 
 --new
 

@@ -1,5 +1,5 @@
 # Preset: Preset X v3 (game filter)
-# BuiltinVersion: 2.25
+# BuiltinVersion: 2.39
 # IconColor: #60cdff
 # Description: 
 
@@ -92,17 +92,6 @@
 
 --new
 
---name=Исключения (RU сайты)
---filter-tcp=80,443-65535
---ipset=lists/ipset-ru.txt
---ipset=lists/ipset-dns.txt
---ipset=lists/ipset-exclude.txt
---out-range=-d8
---payload=tls_client_hello
---lua-desync=pass
-
---new
-
 --name=googlevideo.com (CDN сервера)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
@@ -116,6 +105,27 @@
 --hostlist=lists/youtube.txt
 --out-range=-d8
 --lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
+
+--new
+
+--name=youtube.com (RTMPS Россия)
+--filter-tcp=80,443-65535
+--ipset=lists/ipset-russia-youtube-rtmps.txt
+--out-range=-n8
+--lua-desync=send:repeats=2
+--lua-desync=syndata:blob=tls_google
+--lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
+
+--new
+
+--name=Исключения (RU сайты)
+--filter-tcp=80,443-65535
+--ipset=lists/ipset-ru.txt
+--ipset=lists/ipset-dns.txt
+--ipset=lists/ipset-exclude.txt
+--out-range=-d8
+--payload=tls_client_hello
+--lua-desync=pass
 
 --new
 
@@ -244,16 +254,6 @@
 --lua-desync=send:repeats=2
 --lua-desync=syndata:blob=tls_google
 --lua-desync=multisplit:pos=midsld
-
---new
-
---name=youtube.com (RTMPS Россия)
---filter-tcp=80,443-65535
---ipset=lists/ipset-russia-youtube-rtmps.txt
---out-range=-n8
---lua-desync=send:repeats=2
---lua-desync=syndata:blob=tls_google
---lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 --new
 

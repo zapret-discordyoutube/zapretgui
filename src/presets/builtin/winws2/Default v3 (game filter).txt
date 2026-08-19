@@ -1,5 +1,5 @@
 # Preset: Default v3 (game filter)
-# BuiltinVersion: 2.26
+# BuiltinVersion: 2.39
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -91,17 +91,6 @@
 
 --new
 
---name=Исключения (RU сайты)
---filter-tcp=80,443-65535
---ipset=lists/ipset-ru.txt
---ipset=lists/ipset-dns.txt
---ipset=lists/ipset-exclude.txt
---out-range=-d8
---payload=tls_client_hello
---lua-desync=pass
-
---new
-
 --name=googlevideo.com (CDN сервера)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
@@ -125,6 +114,27 @@
 --out-range=-n8
 --payload=all
 --lua-desync=fake:repeats=6:blob=fake_default_quic
+
+--new
+
+--name=youtube.com (RTMPS Россия)
+--filter-tcp=80,443-65535
+--ipset=lists/ipset-russia-youtube-rtmps.txt
+--out-range=-n8
+--lua-desync=send:repeats=2
+--lua-desync=syndata:blob=tls_google
+--lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
+
+--new
+
+--name=Исключения (RU сайты)
+--filter-tcp=80,443-65535
+--ipset=lists/ipset-ru.txt
+--ipset=lists/ipset-dns.txt
+--ipset=lists/ipset-exclude.txt
+--out-range=-d8
+--payload=tls_client_hello
+--lua-desync=pass
 
 --new
 
@@ -279,16 +289,6 @@
 --out-range=-n8
 --lua-desync=fake:blob=fake_default_http:repeats=4:ip_autottl=2,3-20:ip6_autottl=2,3-20:tcp_md5
 --lua-desync=multidisorder:pos=host+1
-
---new
-
---name=youtube.com (RTMPS Россия)
---filter-tcp=80,443-65535
---ipset=lists/ipset-russia-youtube-rtmps.txt
---out-range=-n8
---lua-desync=send:repeats=2
---lua-desync=syndata:blob=tls_google
---lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 --new
 

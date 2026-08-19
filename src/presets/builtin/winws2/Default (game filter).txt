@@ -1,5 +1,5 @@
 # Preset: Default
-# BuiltinVersion: 2.25
+# BuiltinVersion: 2.39
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -91,17 +91,6 @@
 
 --new
 
---name=Исключения (RU сайты)
---filter-tcp=80,443-65535
---ipset=lists/ipset-ru.txt
---ipset=lists/ipset-dns.txt
---ipset=lists/ipset-exclude.txt
---out-range=-d8
---payload=tls_client_hello
---lua-desync=pass
-
---new
-
 --name=youtube.com (интерфейс)
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
@@ -124,6 +113,17 @@
 --hostlist=lists/googlevideo.txt
 --out-range=-d8
 --lua-desync=multisplit:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
+
+--new
+
+--name=Исключения (RU сайты)
+--filter-tcp=80,443-65535
+--ipset=lists/ipset-ru.txt
+--ipset=lists/ipset-dns.txt
+--ipset=lists/ipset-exclude.txt
+--out-range=-d8
+--payload=tls_client_hello
+--lua-desync=pass
 
 --new
 

@@ -1,5 +1,5 @@
 # Preset: general ALT2 + syndata
-# BuiltinVersion: 2.25
+# BuiltinVersion: 2.39
 # IconColor: #b475f0ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -90,6 +90,24 @@
 
 --new
 
+--name=googlevideo.com (CDN сервера)
+--filter-tcp=80,443
+--hostlist=lists/googlevideo.txt
+--out-range=-d8
+--lua-desync=syndata:blob=tls_google:repeats=11:tcp_ack=-66000:tcp_ts_up
+--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google
+
+--new
+
+--name=youtube.com (интерфейс)
+--filter-tcp=80,443
+--hostlist=lists/youtube.txt
+--out-range=-d8
+--lua-desync=syndata:blob=tls_google:repeats=11:tcp_ack=-66000:tcp_ts_up
+--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google
+
+--new
+
 --name=Исключения (RU сайты)
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-ru.txt
@@ -135,24 +153,6 @@
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --out-range=-d10
 --hostlist=lists/discord-media.txt
---lua-desync=syndata:blob=tls_google:repeats=11:tcp_ack=-66000:tcp_ts_up
---lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google
-
---new
-
---name=googlevideo.com (CDN сервера)
---filter-tcp=80,443
---hostlist=lists/googlevideo.txt
---out-range=-d8
---lua-desync=syndata:blob=tls_google:repeats=11:tcp_ack=-66000:tcp_ts_up
---lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google
-
---new
-
---name=youtube.com (интерфейс)
---filter-tcp=80,443
---hostlist=lists/youtube.txt
---out-range=-d8
 --lua-desync=syndata:blob=tls_google:repeats=11:tcp_ack=-66000:tcp_ts_up
 --lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google
 

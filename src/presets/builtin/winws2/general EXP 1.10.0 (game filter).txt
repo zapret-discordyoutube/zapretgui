@@ -1,5 +1,5 @@
 # Preset: general EXP 1.10.0 (game filter)
-# BuiltinVersion: 2.27
+# BuiltinVersion: 2.39
 # IconColor: #60cdff
 # Description: Flowseal 1.10.0 EXP, adapted to ZapretGUI profiles
 
@@ -23,17 +23,6 @@
 --hostlist=lists/git-zapret-moe.txt
 --out-range=-d8
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
-
---new
-
---name=Исключения (RU сайты)
---filter-tcp=80,443-65535
---ipset=lists/ipset-ru.txt
---ipset=lists/ipset-dns.txt
---ipset=lists/ipset-exclude.txt
---out-range=-d8
---payload=tls_client_hello
---lua-desync=pass
 
 --new
 
@@ -66,6 +55,17 @@
 --ipset=lists/ipset-youtube.txt
 --payload=quic_initial
 --lua-desync=fake:blob=quic_google:repeats=11
+
+--new
+
+--name=Исключения (RU сайты)
+--filter-tcp=80,443-65535
+--ipset=lists/ipset-ru.txt
+--ipset=lists/ipset-dns.txt
+--ipset=lists/ipset-exclude.txt
+--out-range=-d8
+--payload=tls_client_hello
+--lua-desync=pass
 
 --new
 

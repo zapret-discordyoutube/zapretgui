@@ -9,31 +9,36 @@ from unittest.mock import patch
 
 
 class ListsStartupContractTests(unittest.TestCase):
-    def test_embedded_ipset_ru_excludes_as12389_for_youtube_google(self) -> None:
+    def test_embedded_ipset_ru_keeps_as12389_rostelecom_networks(self) -> None:
         from lists.core.embedded_defaults import get_ipset_ru_base_text
 
         lines = get_ipset_ru_base_text().splitlines()
-        marker = "# ИСКЛЮЧЕНО: https://ipinfo.io/AS12389"
-        reason = (
-            "# YouTube/Google: в AS12389 находятся российские кэш-серверы Google; "
-            "сети ASN нельзя возвращать в ipset-ru."
-        )
+        marker = "# https://ipinfo.io/AS12389 Rostelecom gosuslugi"
         marker_index = lines.index(marker)
-        entries = {
+        next_section_index = next(
+            index
+            for index in range(marker_index + 1, len(lines))
+            if lines[index].startswith("#")
+        )
+        section_entries = {
             line.strip()
-            for line in lines
-            if line.strip() and not line.lstrip().startswith("#")
+            for line in lines[marker_index + 1 : next_section_index]
+            if line.strip()
         }
 
-        self.assertEqual(lines[marker_index + 1], reason)
-        self.assertEqual(lines[marker_index + 2], "# ozon")
-        for excluded_network in (
+        self.assertEqual(lines[next_section_index], "# ozon")
+        self.assertEqual(len(section_entries), 400)
+        for expected_network in (
             "5.136.0.0/13",
             "95.167.0.0/16",
             "188.128.0.0/17",
             "188.254.0.0/17",
         ):
-            self.assertNotIn(excluded_network, entries)
+            self.assertIn(expected_network, section_entries)
+            self.assertEqual(
+                str(ipaddress.ip_network(expected_network, strict=True)),
+                expected_network,
+            )
 
     def test_embedded_ipset_ru_contains_yandex_networks_as13238(self) -> None:
         from lists.core.embedded_defaults import get_ipset_ru_base_text

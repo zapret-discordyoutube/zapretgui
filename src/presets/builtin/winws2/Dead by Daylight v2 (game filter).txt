@@ -1,5 +1,5 @@
 # Preset: Dead by Daylight v2 (game filter)
-# BuiltinVersion: 2.26
+# BuiltinVersion: 2.39
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -91,17 +91,6 @@
 
 --new
 
---name=Исключения (RU сайты)
---filter-tcp=80,443-65535
---ipset=lists/ipset-ru.txt
---ipset=lists/ipset-dns.txt
---ipset=lists/ipset-exclude.txt
---out-range=-d8
---payload=tls_client_hello
---lua-desync=pass
-
---new
-
 --name=googlevideo.com (CDN сервера)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
@@ -115,6 +104,26 @@
 --hostlist=lists/youtube.txt
 --out-range=-d8
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000
+
+--new
+
+--name=youtube.com (QUIC)
+--filter-udp=443
+--ipset=lists/ipset-youtube.txt
+--out-range=-n8
+--payload=all
+--lua-desync=fake:repeats=6:blob=fake_default_quic
+
+--new
+
+--name=Исключения (RU сайты)
+--filter-tcp=80,443-65535
+--ipset=lists/ipset-ru.txt
+--ipset=lists/ipset-dns.txt
+--ipset=lists/ipset-exclude.txt
+--out-range=-d8
+--payload=tls_client_hello
+--lua-desync=pass
 
 --new
 
@@ -149,15 +158,6 @@
 --payload=tls_client_hello
 --lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,sni=www.google.com:repeats=3:tcp_ts=-600000
 --lua-desync=fake:blob=tls_4pda:repeats=3:tcp_ts=-600000
-
---new
-
---name=youtube.com (QUIC)
---filter-udp=443
---ipset=lists/ipset-youtube.txt
---out-range=-n8
---payload=all
---lua-desync=fake:repeats=6:blob=fake_default_quic
 
 --new
 

@@ -1,5 +1,5 @@
 # Preset: Default v4 (game filter)
-# BuiltinVersion: 2.26
+# BuiltinVersion: 2.39
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -91,31 +91,6 @@
 
 --new
 
---name=Исключения (RU сайты)
---filter-tcp=80,443-65535
---ipset=lists/ipset-ru.txt
---ipset=lists/ipset-dns.txt
---ipset=lists/ipset-exclude.txt
---out-range=-d8
---payload=tls_client_hello
---lua-desync=pass
-
---new
-
---name=DeepSeek
---filter-tcp=80,443-65535
---hostlist=lists/deepseek.txt
-
---new
-
---name=Ubisoft
---filter-tcp=80,443-65535
---hostlist=lists/ubisoft.txt
---out-range=-n1
---lua-desync=pass
-
---new
-
 --name=googlevideo.com (CDN сервера)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
@@ -142,6 +117,31 @@
 --out-range=-n8
 --payload=all
 --lua-desync=fake:repeats=6:blob=fake_default_quic
+
+--new
+
+--name=Исключения (RU сайты)
+--filter-tcp=80,443-65535
+--ipset=lists/ipset-ru.txt
+--ipset=lists/ipset-dns.txt
+--ipset=lists/ipset-exclude.txt
+--out-range=-d8
+--payload=tls_client_hello
+--lua-desync=pass
+
+--new
+
+--name=DeepSeek
+--filter-tcp=80,443-65535
+--hostlist=lists/deepseek.txt
+
+--new
+
+--name=Ubisoft
+--filter-tcp=80,443-65535
+--hostlist=lists/ubisoft.txt
+--out-range=-n1
+--lua-desync=pass
 
 --new
 

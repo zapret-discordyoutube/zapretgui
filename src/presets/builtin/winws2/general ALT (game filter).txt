@@ -1,5 +1,5 @@
 # Preset: general ALT (game filter)
-# BuiltinVersion: 2.26
+# BuiltinVersion: 2.39
 # IconColor: #f0a675ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -90,6 +90,24 @@
 
 --new
 
+--name=googlevideo.com (CDN сервера)
+--filter-tcp=80,443
+--hostlist=lists/googlevideo.txt
+--out-range=-d8
+--lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000:ip_id=zero
+--lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000:ip_id=zero
+
+--new
+
+--name=youtube.com (интерфейс)
+--filter-tcp=80,443
+--hostlist=lists/youtube.txt
+--out-range=-d8
+--lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000
+--lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000
+
+--new
+
 --name=Исключения (RU сайты)
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-ru.txt
@@ -135,24 +153,6 @@
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --out-range=-d10
 --hostlist=lists/discord-media.txt
---lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000
---lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000
-
---new
-
---name=googlevideo.com (CDN сервера)
---filter-tcp=80,443
---hostlist=lists/googlevideo.txt
---out-range=-d8
---lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000:ip_id=zero
---lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000:ip_id=zero
-
---new
-
---name=youtube.com (интерфейс)
---filter-tcp=80,443
---hostlist=lists/youtube.txt
---out-range=-d8
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000
 --lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000
 

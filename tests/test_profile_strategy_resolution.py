@@ -187,6 +187,52 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                 self.assertEqual(normalize_lines(profile.strategy.strategy_lines), expected_strategy)
                 self.assertEqual(self._resolved_strategy_id(profile), "alt9")
 
+    def test_youtube_profiles_precede_ru_pass_in_every_builtin_preset(self) -> None:
+        # AS12389 остаётся в ipset-ru: внутри него могут находиться российские
+        # кэш-серверы Google/YouTube. Поэтому специальные YouTube-профили должны
+        # проверяться раньше широкого RU-профиля с действием pass.
+        offenders: list[str] = []
+        checked_presets = 0
+
+        for path in sorted(Path("src/presets/builtin/winws2").glob("*.txt")):
+            preset = parse_preset_text(
+                path.read_text(encoding="utf-8"),
+                engine="winws2",
+                source_name=path.name,
+            )
+            youtube_indexes = [
+                index
+                for index, profile in enumerate(preset.profiles)
+                if _is_youtube_profile(profile)
+            ]
+            ru_pass_indexes = [
+                index
+                for index, profile in enumerate(preset.profiles)
+                if "--ipset=lists/ipset-ru.txt" in profile.match.all_lines()
+            ]
+            if not youtube_indexes or not ru_pass_indexes:
+                continue
+
+            checked_presets += 1
+            if max(youtube_indexes) >= min(ru_pass_indexes):
+                offenders.append(
+                    f"{path.name}: YouTube {youtube_indexes}, RU pass {ru_pass_indexes}"
+                )
+
+            version_line = next(
+                (
+                    line
+                    for line in path.read_text(encoding="utf-8").splitlines()[:5]
+                    if line.startswith("# BuiltinVersion: ")
+                ),
+                "",
+            )
+            if version_line != "# BuiltinVersion: 2.39":
+                offenders.append(f"{path.name}: версия набора не 2.39")
+
+        self.assertGreater(checked_presets, 0)
+        self.assertEqual(offenders, [])
+
     def test_flowseal_exp_1100_keeps_payload_scopes_and_ready_branches(self) -> None:
         path = Path("src/presets/builtin/winws2/general EXP 1.10.0 (game filter).txt")
         preset = parse_preset_text(path.read_text(encoding="utf-8"), engine="winws2", source_name=path.name)
@@ -311,6 +357,19 @@ def _ready_strategy_identity(engine: str, lines) -> tuple[str, ...]:
     if engine == "winws2":
         return tuple(line for line in normalized if line.lower().startswith("--lua-desync="))
     return normalized
+
+
+def _is_youtube_profile(profile) -> bool:
+    identity = "\n".join(
+        (
+            str(profile.display_name or ""),
+            *profile.match.all_lines(),
+        )
+    ).lower()
+    return any(
+        token in identity
+        for token in ("youtube", "googlevideo", "i.ytimg", "i-ytimg")
+    )
 
 
 def _payload_groups_with_lua(lines) -> int:
