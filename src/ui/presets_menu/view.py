@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import QDrag
 from PyQt6.QtWidgets import QApplication
 
 from .common import (
@@ -15,10 +14,6 @@ from .common import (
 )
 from .model import PresetListModel
 from ui.accessibility import set_state_text
-from ui.windows_file_drop import (
-    enable_windows_file_drop,
-    restore_windows_qt_file_drop,
-)
 from qfluentwidgets import ListView
 
 
@@ -37,6 +32,7 @@ class LinkedWheelListView(ListView):
     def __init__(self, parent=None, *, draggable_kinds: set[str] | None = None):
         super().__init__(parent)
         self._drag_start_pos: QPoint | None = None
+        self._drag_source: tuple[str, str] | None = None
         self._draggable_kinds = {str(kind) for kind in (draggable_kinds or {"preset"})}
         self.set_drop_marker(-1, "")
 
@@ -157,6 +153,11 @@ class LinkedWheelListView(ListView):
             super().mouseMoveEvent(event)
             return
 
+        if self._drag_source is not None:
+            self._update_internal_drag(event.position().toPoint())
+            event.accept()
+            return
+
         if self._drag_start_pos is None:
             super().mouseMoveEvent(event)
             return
@@ -175,30 +176,27 @@ class LinkedWheelListView(ListView):
             super().mouseMoveEvent(event)
             return
 
-        model = self.model()
-        if model is None:
+        source_id = str(index.data(PresetListModel.FileNameRole) or "").strip()
+        if kind != "preset" or not source_id:
             super().mouseMoveEvent(event)
             return
 
-        mime = model.mimeData([index])
-        if mime is None:
-            super().mouseMoveEvent(event)
-            return
-
-        drag = QDrag(self)
-        drag.setMimeData(mime)
+        # Внутреннее перемещение строк не должно зависеть от системного OLE
+        # drag-and-drop. В повышенном Windows-окне OLE специально отключён,
+        # чтобы Проводник мог передавать preset-файлы через WM_DROPFILES.
+        # Поэтому перестановку внутри списка ведём обычными событиями мыши.
+        self._drag_source = (kind, source_id)
         self._drag_start_pos = None
-        window = self.window()
-        qt_drop_restored = restore_windows_qt_file_drop(window)
-        try:
-            drag.exec(Qt.DropAction.MoveAction)
-        finally:
-            if qt_drop_restored:
-                enable_windows_file_drop(window)
-            self.set_drop_marker(-1, "")
+        self._update_internal_drag(event.position().toPoint())
         event.accept()
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = None
+            if self._drag_source is not None:
+                self._finish_internal_drag(event.position().toPoint())
+                event.accept()
+                return
         if event.button() == Qt.MouseButton.RightButton:
             index = self.indexAt(event.position().toPoint())
             if index.isValid() and str(index.data(PresetListModel.KindRole) or "") == "folder":
@@ -221,6 +219,34 @@ class LinkedWheelListView(ListView):
                 return
         super().mouseReleaseEvent(event)
 
+    def _update_internal_drag(self, point: QPoint) -> None:
+        if not self.viewport().rect().contains(point):
+            self.set_drop_marker(-1, "")
+            return
+        target, _destination_id, _destination_folder_key = self._drop_target_at(point)
+        self.set_drop_marker_payload(dict(target.get("marker") or {}))
+
+    def _finish_internal_drag(self, point: QPoint) -> bool:
+        source = self._drag_source
+        self._drag_source = None
+        self.set_drop_marker(-1, "")
+        if source is None or not self.viewport().rect().contains(point):
+            return False
+
+        source_kind, source_id = source
+        target, destination_id, destination_folder_key = self._drop_target_at(point)
+        destination_kind = str(target.get("destination_kind") or "end")
+        if destination_kind not in {"folder", "preset", "preset_after"}:
+            destination_kind = "end"
+        self.item_dropped.emit(
+            source_kind,
+            source_id,
+            destination_kind,
+            destination_id,
+            destination_folder_key,
+        )
+        return True
+
     def focusInEvent(self, event):
         super().focusInEvent(event)
         if not self.currentIndex().isValid() and self.model() is not None:
@@ -231,15 +257,27 @@ class LinkedWheelListView(ListView):
                     break
 
     def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
-            index = self.currentIndex()
-            if index.isValid() and str(index.data(PresetListModel.KindRole) or "") == "preset":
-                name = str(index.data(PresetListModel.FileNameRole) or "")
-                if name:
-                    direction = -1 if event.key() == Qt.Key.Key_PageUp else 1
-                    self.preset_move_requested.emit(name, direction)
+        key = event.key()
+        modifiers = event.modifiers()
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            direction = -1 if key == Qt.Key.Key_Up else 1
+            if modifiers & Qt.KeyboardModifier.ControlModifier:
+                if self._request_current_preset_move(direction):
                     event.accept()
                     return
+            elif not modifiers & (
+                Qt.KeyboardModifier.AltModifier
+                | Qt.KeyboardModifier.MetaModifier
+                | Qt.KeyboardModifier.ShiftModifier
+            ):
+                if self._move_current_to_adjacent_preset(direction):
+                    event.accept()
+                    return
+        if event.key() in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
+            direction = -1 if event.key() == Qt.Key.Key_PageUp else 1
+            if self._request_current_preset_move(direction):
+                event.accept()
+                return
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
             if self._activate_current_index_from_keyboard():
                 event.accept()
@@ -251,6 +289,37 @@ class LinkedWheelListView(ListView):
                 event.accept()
                 return
         super().keyPressEvent(event)
+
+    def _request_current_preset_move(self, direction: int) -> bool:
+        index = self.currentIndex()
+        if not index.isValid() or str(index.data(PresetListModel.KindRole) or "") != "preset":
+            return False
+        name = str(index.data(PresetListModel.FileNameRole) or "").strip()
+        if not name:
+            return False
+        self.preset_move_requested.emit(name, -1 if int(direction) < 0 else 1)
+        return True
+
+    def _move_current_to_adjacent_preset(self, direction: int) -> bool:
+        model = self.model()
+        if model is None or model.rowCount() <= 0:
+            return False
+
+        step = -1 if int(direction) < 0 else 1
+        current = self.currentIndex()
+        row = current.row() if current.isValid() else (-1 if step > 0 else model.rowCount())
+        candidate_row = row + step
+        while 0 <= candidate_row < model.rowCount():
+            candidate = model.index(candidate_row, 0)
+            if str(candidate.data(PresetListModel.KindRole) or "") == "preset":
+                self.setCurrentIndex(candidate)
+                self.scrollTo(candidate)
+                return True
+            candidate_row += step
+
+        # На границе списка стрелка считается обработанной: иначе базовый
+        # QListView может перевести выделение на заголовок папки.
+        return current.isValid()
 
     def _activate_current_index_from_keyboard(self) -> bool:
         index = self.currentIndex()

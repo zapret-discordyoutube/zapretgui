@@ -245,6 +245,66 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
         self.assertTrue(event.isAccepted())
         self.assertEqual(requested, ["games"])
 
+    def test_plain_arrows_select_presets_and_skip_folder_rows(self) -> None:
+        from ui.presets_menu.model import PresetListModel
+        from ui.presets_menu.view import LinkedWheelListView
+
+        model = PresetListModel()
+        model.set_rows(
+            [
+                {"kind": "folder", "name": "Общие", "folder_key": "common"},
+                {"kind": "preset", "name": "Первый", "file_name": "First.txt", "folder_key": "common"},
+                {"kind": "folder", "name": "Игры", "folder_key": "games"},
+                {"kind": "preset", "name": "Второй", "file_name": "Second.txt", "folder_key": "games"},
+            ]
+        )
+        view = LinkedWheelListView()
+        self.addCleanup(view.deleteLater)
+        view.setModel(model)
+        view.setCurrentIndex(model.index(1, 0))
+        moved: list[tuple[str, int]] = []
+        view.preset_move_requested.connect(lambda name, direction: moved.append((name, direction)))
+
+        down = QKeyEvent(QKeyEvent.Type.KeyPress, int(Qt.Key.Key_Down), Qt.KeyboardModifier.NoModifier)
+        view.keyPressEvent(down)
+        self.assertTrue(down.isAccepted())
+        self.assertEqual(view.currentIndex().row(), 3)
+
+        up = QKeyEvent(QKeyEvent.Type.KeyPress, int(Qt.Key.Key_Up), Qt.KeyboardModifier.NoModifier)
+        view.keyPressEvent(up)
+        self.assertTrue(up.isAccepted())
+        self.assertEqual(view.currentIndex().row(), 1)
+        self.assertEqual(moved, [])
+
+    def test_ctrl_arrows_request_preset_reordering_without_changing_selection(self) -> None:
+        from ui.presets_menu.model import PresetListModel
+        from ui.presets_menu.view import LinkedWheelListView
+
+        model = PresetListModel()
+        model.set_rows(
+            [
+                {"kind": "preset", "name": "Первый", "file_name": "First.txt", "folder_key": "common"},
+                {"kind": "preset", "name": "Второй", "file_name": "Second.txt", "folder_key": "common"},
+            ]
+        )
+        view = LinkedWheelListView()
+        self.addCleanup(view.deleteLater)
+        view.setModel(model)
+        view.setCurrentIndex(model.index(0, 0))
+        moved: list[tuple[str, int]] = []
+        view.preset_move_requested.connect(lambda name, direction: moved.append((name, direction)))
+
+        down = QKeyEvent(
+            QKeyEvent.Type.KeyPress,
+            int(Qt.Key.Key_Down),
+            Qt.KeyboardModifier.ControlModifier,
+        )
+        view.keyPressEvent(down)
+
+        self.assertTrue(down.isAccepted())
+        self.assertEqual(moved, [("First.txt", 1)])
+        self.assertEqual(view.currentIndex().row(), 0)
+
     def test_preset_list_activates_selected_preset_with_space(self) -> None:
         from ui.presets_menu.model import PresetListModel
         from ui.presets_menu.view import LinkedWheelListView
@@ -676,7 +736,7 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
             widgets.preset_search_input: ("Поиск пресетов", "Поиск пресетов по имени"),
             widgets.presets_list: (
                 "Список пользовательских пресетов: список пока загружается",
-                "Стрелки выбирают пресет или папку, Enter или Пробел активирует пресет или сворачивает и разворачивает папку, PageUp и PageDown перемещают пресет, клавиша меню открывает действия",
+                "Стрелки вверх и вниз выбирают пресет, Enter или Пробел активирует пресет или сворачивает и разворачивает папку, Ctrl со стрелкой вверх или вниз перемещает пресет, пресет также можно перетащить мышью, клавиша меню открывает действия",
             ),
         }
         self.assertTrue(widgets.presets_info_btn.isHidden())

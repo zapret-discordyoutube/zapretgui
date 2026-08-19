@@ -4,6 +4,8 @@ import inspect
 import unittest
 from unittest.mock import Mock
 
+from PyQt6.QtCore import QPoint
+
 from ui.presets_menu import delegate as preset_delegate
 from ui.presets_menu import common as preset_common
 from ui.presets_menu.model import PresetListModel
@@ -61,19 +63,35 @@ class PresetDragIndicatorTests(unittest.TestCase):
         self.assertIn("dragLeaveEvent", view_source)
         self.assertIn("self.set_drop_marker(-1, \"\")", view_source)
 
-    def test_internal_drag_temporarily_restores_qt_drop_target(self) -> None:
+    def test_internal_drag_does_not_depend_on_windows_ole_drop_target(self) -> None:
         view_source = inspect.getsource(preset_view.LinkedWheelListView.mouseMoveEvent)
+        finish_source = inspect.getsource(preset_view.LinkedWheelListView._finish_internal_drag)
 
-        self.assertIn("restore_windows_qt_file_drop(window)", view_source)
-        self.assertIn("enable_windows_file_drop(window)", view_source)
-        self.assertLess(
-            view_source.index("restore_windows_qt_file_drop(window)"),
-            view_source.index("drag.exec"),
+        self.assertIn("self._drag_source = (kind, source_id)", view_source)
+        self.assertIn("self._update_internal_drag", view_source)
+        self.assertNotIn("QDrag", view_source)
+        self.assertNotIn("restore_windows_qt_file_drop", view_source)
+        self.assertIn("self.item_dropped.emit", finish_source)
+
+    def test_internal_mouse_drag_emits_the_resolved_preset_move(self) -> None:
+        view = preset_view.LinkedWheelListView()
+        self.addCleanup(view.deleteLater)
+        view.resize(500, 300)
+        view._drag_source = ("preset", "A.txt")
+        view._drop_target_at = Mock(
+            return_value=(
+                {"marker": {"row": 2, "mode": "before"}, "destination_kind": "preset"},
+                "B.txt",
+                "games",
+            )
         )
-        self.assertGreater(
-            view_source.index("enable_windows_file_drop(window)"),
-            view_source.index("drag.exec"),
-        )
+        dropped: list[tuple[str, str, str, str, str]] = []
+        view.item_dropped.connect(lambda *args: dropped.append(tuple(args)))
+
+        self.assertTrue(view._finish_internal_drag(QPoint(20, 20)))
+
+        self.assertEqual(dropped, [("preset", "A.txt", "preset", "B.txt", "games")])
+        self.assertIsNone(view._drag_source)
 
     def test_view_updates_only_drop_marker_rows(self) -> None:
         payload_source = inspect.getsource(preset_view.LinkedWheelListView.set_drop_marker_payload)
