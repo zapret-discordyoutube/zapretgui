@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from settings.mode import DEFAULT_PRESET_FILE_NAME_BY_ENGINE
+from presets.builtin_catalog import list_builtin_presets
 from presets.builtin_reset_support import (
     reset_all_builtin_overrides as _reset_all_builtin_overrides,
 )
@@ -28,6 +29,59 @@ def _read_standard_builtin_preset(backend) -> str:
     if not source_path.is_file():
         raise ValueError(f"Default built-in preset not found: {source_path}")
     return source_path.read_text(encoding="utf-8", errors="replace")
+
+
+def _remove_active_remote_binding_after_reset(backend, file_name: str) -> None:
+    """Удаляет активную URL-привязку после удаления user-копии.
+
+    ``auto=False`` означает не удалённую привязку, а запомненный URL после
+    действия «Отвязать». Её нельзя удалять при сбросе: повторный импорт той
+    же ссылки должен найти прежнюю запись и не создать дубликат. Активная
+    привязка, наоборот, больше не должна относиться к восстановленному
+    builtin-файлу — иначе автосинхронизация снова создаст user-копию.
+    """
+    key = str(file_name or "").strip()
+    if not key:
+        return
+    try:
+        delete_identity = getattr(backend, "_delete_remote_binding_meta", None)
+        if not callable(delete_identity):
+            return
+        from presets.remote_bindings import get_remote_preset_binding
+
+        binding = get_remote_preset_binding(str(getattr(backend, "engine", "") or ""), key)
+        if binding is None or not bool(binding.get("auto", True)):
+            return
+        delete_identity(key)
+    except Exception:
+        # Сброс файла не должен превращаться в ошибку из-за недоступного
+        # хранилища привязок. Сам wrapper backend-а также изолирует такие
+        # ошибки, если он доступен.
+        return
+
+
+def _existing_builtin_override_paths(backend) -> dict[str, Path]:
+    """Возвращает user-файлы, которые соответствуют текущим builtin-файлам."""
+    try:
+        engine = str(getattr(backend, "engine", "") or "").strip()
+        engine_paths = backend.app_paths.engine_paths(engine).ensure_directories()
+        user_dir = engine_paths.user_presets_dir
+        return {
+            builtin_path.name: user_dir / builtin_path.name
+            for builtin_path in list_builtin_presets(engine_paths.builtin_presets_dir)
+            if (user_dir / builtin_path.name).exists()
+        }
+    except Exception:
+        return {}
+
+
+def _user_preset_path(backend, file_name: str) -> Path | None:
+    try:
+        engine = str(getattr(backend, "engine", "") or "").strip()
+        engine_paths = backend.app_paths.engine_paths(engine).ensure_directories()
+        return engine_paths.user_presets_dir / str(file_name or "").strip()
+    except Exception:
+        return None
 
 
 def rename_by_file_name(backend, file_name: str, new_name: str):
@@ -125,10 +179,14 @@ def reset_to_builtin_by_file_name(backend, file_name: str):
     if str(manifest.kind or "").strip().lower() == "builtin":
         return manifest
     if builtin_path.exists():
+        user_path = _user_preset_path(backend, manifest.file_name)
+        user_existed = bool(user_path is not None and user_path.exists())
         backend.preset_file_store.delete_preset(backend.engine, manifest.file_name)
         updated = backend.get_manifest_by_file_name(manifest.file_name)
         if updated is None:
             raise ValueError("Built-in preset not found after reset")
+        if user_existed and user_path is not None and not user_path.exists():
+            _remove_active_remote_binding_after_reset(backend, manifest.file_name)
         if backend.is_selected_file_name(manifest.file_name):
             backend._refresh_selected_source_preset()
         backend.notify_preset_content_changed(updated.file_name)
@@ -139,7 +197,11 @@ def reset_to_builtin_by_file_name(backend, file_name: str):
 
 
 def reset_all_to_builtin(backend) -> tuple[int, int, list[str]]:
+    override_paths = _existing_builtin_override_paths(backend)
     result = _reset_all_builtin_overrides(backend.engine, backend.app_paths)
+    for file_name, user_path in override_paths.items():
+        if not user_path.exists():
+            _remove_active_remote_binding_after_reset(backend, file_name)
     backend.notify_presets_changed()
     selected_file_name = backend.get_selected_file_name()
     if selected_file_name and backend.get_manifest_by_file_name(selected_file_name) is not None:

@@ -35,6 +35,45 @@ class _Runtime:
 
 
 class ProfileMoveQueueTests(unittest.TestCase):
+    def test_queued_profile_move_uses_stable_references_for_both_rows(self) -> None:
+        page = PresetSetupPageBase.__new__(PresetSetupPageBase)
+        page.launch_method = "zapret2_mode"
+        page._profile_move_runtime = _Runtime(running=True)
+        page._pending_profile_moves = []
+        page._profile_reference_for = Mock(
+            side_effect={
+                "profile-a": "uid:a",
+                "profile-b": "uid:b",
+            }.get
+        )
+
+        PresetSetupPageBase._request_profile_move(
+            page,
+            "after",
+            "profile-a",
+            destination_profile_key="profile-b",
+            destination_group_key="games",
+        )
+
+        self.assertEqual(
+            page._pending_profile_moves,
+            [
+                {
+                    "action": "after",
+                    "source_profile_key": "uid:a",
+                    "destination_profile_key": "uid:b",
+                    "destination_group_key": "games",
+                }
+            ],
+        )
+        self.assertEqual(
+            page._profile_reference_for.call_args_list,
+            [
+                unittest.mock.call("profile-a"),
+                unittest.mock.call("profile-b"),
+            ],
+        )
+
     def test_profile_move_request_queues_pending_moves_while_worker_runs(self) -> None:
         page = PresetSetupPageBase.__new__(PresetSetupPageBase)
         page.launch_method = "zapret2_mode"

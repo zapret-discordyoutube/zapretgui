@@ -152,11 +152,25 @@ def preset_profile_move_key_map(result) -> dict[str, str]:
 
 
 def _profile_content_signature(profile: Profile) -> tuple[str, ...]:
-    return tuple(
-        str(getattr(segment, "text", "") or "").strip()
-        for segment in tuple(getattr(profile, "segments", ()) or ())
-        if str(getattr(segment, "text", "") or "").strip()
-    )
+    # `--new=Name` хранится в `profile.new_line`, а при переносе на первое
+    # место сериализатор превращает его в `--name=Name` внутри segments.
+    # Граница profile-а не является содержимым: не учитываем её и явно
+    # добавляем разобранное имя, чтобы карта ключей оставалась полной.
+    engine = str(getattr(profile, "engine", "") or "").strip().lower()
+    name_directive = "--comment" if engine == "winws1" else "--name"
+    name = str(getattr(profile, "name", "") or "").strip()
+    signature: list[str] = [f"profile-name:{name}"]
+    for segment in tuple(getattr(profile, "segments", ()) or ()):
+        text = str(getattr(segment, "text", "") or "").strip()
+        if not text:
+            continue
+        if (
+            str(getattr(segment, "kind", "") or "").strip() == "directive"
+            and str(getattr(segment, "name", "") or "").strip().lower() == name_directive
+        ):
+            continue
+        signature.append(text)
+    return tuple(signature)
 
 
 def _profile_item_with_key(item: Any, key: str, row: int):

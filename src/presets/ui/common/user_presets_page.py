@@ -1233,6 +1233,16 @@ class UserPresetsPageBase(BasePage):
     ) -> bool:
         if self._presets_model is None:
             return False
+        source_row = self._presets_model.find_preset_row(file_name)
+        if source_row >= 0:
+            source_index = self._presets_model.index(source_row, 0)
+            pinned_role = getattr(type(self._presets_model), "PinnedRole", None)
+            if pinned_role is not None and bool(source_index.data(pinned_role)):
+                # «Закрепленные» — виртуальная группа, которой нет в обычной
+                # модели папок. Общий оптимистический move временно помещает
+                # строку под обычный заголовок. Для pinned-порядка безопасно
+                # сразу перестроить строки из уже сохранённого folder_state.
+                return False
         view_state = self._runtime_service.capture_presets_view_state()
         moved = self._presets_model.move_preset(
             file_name,
@@ -1435,8 +1445,9 @@ class UserPresetsPageBase(BasePage):
         action = str(queued.get("action") or "")
         folder_key = str(queued.get("folder_key") or "")
         pending = self._preset_folder_action_state_obj().pending
-        if action == "move" and queued in pending:
-            return
+        # Перемещение — пошаговая команда, а не установка состояния. Два
+        # одинаковых быстрых клика означают два шага и не должны схлопываться
+        # в одну операцию, как два одинаковых set_collapsed.
         if action == "set_collapsed" and folder_key:
             pending[:] = [
                 item
@@ -2294,9 +2305,16 @@ class UserPresetsPageBase(BasePage):
     def _on_preset_storage_action_finished(self, request_id: int, action: str, result, context) -> None:
         if request_id != int(getattr(self, "_preset_storage_action_request_id", 0) or 0):
             return
-        if self._has_pending_preset_write_action():
-            return
         context = dict(context or {})
+        has_pending = self._has_pending_preset_write_action()
+        # Порядок перемещений должен применяться к модели по шагам. Если
+        # отбросить промежуточный успешный move/drop, следующий worker уже
+        # работает над изменённым на диске порядком, а локальная модель — над
+        # старым; итоговый destination тогда применяется не к тому списку.
+        # Остальные действия по-прежнему не показываем до последнего элемента
+        # очереди, чтобы не мигали промежуточные уведомления и строки.
+        if has_pending and action not in {"move_step", "drop"}:
+            return
         if isinstance(context.get("folder_state"), dict):
             self._runtime_service.update_cached_folder_state(context.get("folder_state"))
         if action == "pin":

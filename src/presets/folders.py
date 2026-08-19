@@ -14,18 +14,22 @@ def load_preset_folder_state(scope_key: str) -> dict[str, Any]:
     folders = settings_store.get_folders_settings()
     presets = folders.get("presets", {}) if isinstance(folders, dict) else {}
     raw_state = presets.get(scope) if isinstance(presets, dict) else None
-    return normalize_folder_state(raw_state, build_default_preset_folders(scope))
+    state = normalize_folder_state(raw_state, build_default_preset_folders(scope))
+    _repair_virtual_pinned_item_folders(state)
+    return state
 
 
 def save_preset_folder_state(scope_key: str, state: dict[str, Any]) -> dict[str, Any]:
     scope = _normalize_scope(scope_key)
     default_state = build_default_preset_folders(scope)
     next_state = normalize_folder_state(state, default_state)
+    _repair_virtual_pinned_item_folders(next_state)
     folders = settings_store.get_folders_settings()
     presets = folders.get("presets", {}) if isinstance(folders, dict) else {}
     if not isinstance(presets, dict):
         presets = {}
     current_state = normalize_folder_state(presets.get(scope), default_state)
+    _repair_virtual_pinned_item_folders(current_state)
     if current_state == next_state:
         return current_state
     presets[scope] = next_state
@@ -119,6 +123,11 @@ def move_preset_to_folder(
         return False
     folders = state.get("folders", {})
     target_folder = str(folder_key or "").strip() or COMMON_FOLDER_KEY
+    if target_folder == PINNED_FOLDER_KEY:
+        # `pinned` is a virtual service folder, not a real destination. The
+        # pin button owns that state transition; an ordinary folder move must
+        # never make an item disappear from the visible list.
+        return False
     if not isinstance(folders, dict) or target_folder not in folders:
         target_folder = COMMON_FOLDER_KEY
     if _plan_and_save_preset_move(
@@ -212,11 +221,38 @@ def move_preset_by_step(
         live_items=live_items,
         include_pinned_folder=True,
     )
-    ordered = [
-        str(row.get("key") or "").strip()
+    item_rows = [
+        row
         for row in rows
         if row.get("kind") == "item" and str(row.get("key") or "").strip()
     ]
+    source_row = next(
+        (row for row in item_rows if str(row.get("key") or "").strip() == source),
+        None,
+    )
+    if source_row is None:
+        return False
+
+    # `Закрепленные` is a virtual group above real folders. Its items must
+    # move only among other pinned items; feeding a pinned source into the
+    # ordinary planner would silently change its real folder and the next
+    # render would put it back at the top.
+    source_is_pinned = bool(source_row.get("pinned", False))
+    if source_is_pinned:
+        pinned_rows = [row for row in item_rows if bool(row.get("pinned", False))]
+        return _move_pinned_preset_by_step(
+            scope_key,
+            state,
+            pinned_rows,
+            source,
+            step,
+        )
+
+    # Обычная последовательность начинается после виртуальной pinned-группы.
+    # Первый обычный preset не может «подняться» внутрь Закреплённых без
+    # отдельного действия закрепления.
+    ordered_rows = [row for row in item_rows if not bool(row.get("pinned", False))]
+    ordered = [str(row.get("key") or "").strip() for row in ordered_rows]
     if source not in ordered:
         return False
     index = ordered.index(source)
@@ -231,7 +267,15 @@ def move_preset_by_step(
     after_target_index = without_source.index(target) + 1
     if after_target_index < len(without_source):
         return move_preset_before(scope_key, source, without_source[after_target_index], live_items=live_items)
-    return move_preset_to_end(scope_key, source, live_items=live_items)
+    target_row = ordered_rows[target_index]
+    target_folder = str(target_row.get("folder_key") or "").strip()
+    return move_preset_after(
+        scope_key,
+        source,
+        target,
+        destination_folder_key=target_folder,
+        live_items=live_items,
+    )
 
 
 def _plan_and_save_preset_move(
@@ -246,9 +290,40 @@ def _plan_and_save_preset_move(
 ) -> bool:
     """Единый путь перемещения пресетов: та же база (отображаемый порядок) и
     тот же планировщик, что у папок профилей."""
+    if str(destination_folder_key or "").strip() == PINNED_FOLDER_KEY:
+        return False
+    plan_live_items = _live_items_for_plan(
+        state,
+        live_items,
+        required_keys=(source_key, destination_key),
+    )
+    source_is_pinned = _preset_is_pinned(state, plan_live_items, source_key)
+    destination_is_pinned = _preset_is_pinned(state, plan_live_items, destination_key)
+    if source_is_pinned or destination_is_pinned:
+        if action in {"before", "after"} and source_is_pinned and destination_is_pinned:
+            return _move_pinned_preset_relative(
+                scope_key,
+                state,
+                plan_live_items,
+                action=action,
+                source_key=source_key,
+                destination_key=destination_key,
+            )
+        if action == "end" and source_is_pinned:
+            return _move_pinned_preset_relative(
+                scope_key,
+                state,
+                plan_live_items,
+                action=action,
+                source_key=source_key,
+            )
+        # Границу виртуальной группы меняет только явное закрепление или
+        # открепление. Обычный folder/before/after не должен давать ложный
+        # успех и сохранять скрытый порядок.
+        return False
     planned = plan_item_move(
         state,
-        _live_items_for_plan(state, live_items, required_keys=(source_key, destination_key)),
+        plan_live_items,
         action=action,
         source_key=source_key,
         destination_key=destination_key,
@@ -258,6 +333,113 @@ def _plan_and_save_preset_move(
         return False
     save_preset_folder_state(scope_key, planned)
     return True
+
+
+def _move_pinned_preset_by_step(
+    scope_key: str,
+    state: dict[str, Any],
+    pinned_rows: list[dict[str, Any]],
+    source: str,
+    step: int,
+) -> bool:
+    ordered = [str(row.get("key") or "").strip() for row in pinned_rows]
+    if source not in ordered:
+        return False
+    source_index = ordered.index(source)
+    target_index = source_index + step
+    if target_index < 0 or target_index >= len(ordered):
+        return False
+
+    ordered[source_index], ordered[target_index] = ordered[target_index], ordered[source_index]
+    return _save_pinned_preset_order(scope_key, state, pinned_rows, ordered)
+
+
+def _move_pinned_preset_relative(
+    scope_key: str,
+    state: dict[str, Any],
+    live_items: list[dict[str, Any]],
+    *,
+    action: str,
+    source_key: str,
+    destination_key: str = "",
+) -> bool:
+    rows = build_folder_rows(
+        state,
+        live_items=live_items,
+        include_pinned_folder=True,
+    )
+    pinned_rows = [
+        row
+        for row in rows
+        if row.get("kind") == "item" and bool(row.get("pinned", False))
+    ]
+    ordered = [str(row.get("key") or "").strip() for row in pinned_rows]
+    source = str(source_key or "").strip()
+    destination = str(destination_key or "").strip()
+    if source not in ordered:
+        return False
+
+    next_order = [key for key in ordered if key != source]
+    if action == "end":
+        next_order.append(source)
+    elif action in {"before", "after"} and destination in next_order:
+        insert_at = next_order.index(destination) + (1 if action == "after" else 0)
+        next_order.insert(insert_at, source)
+    else:
+        return False
+    if next_order == ordered:
+        return False
+    return _save_pinned_preset_order(scope_key, state, pinned_rows, next_order)
+
+
+def _save_pinned_preset_order(
+    scope_key: str,
+    state: dict[str, Any],
+    pinned_rows: list[dict[str, Any]],
+    ordered: list[str],
+) -> bool:
+    next_state = normalize_folder_state(state, build_default_preset_folders(_normalize_scope(scope_key)))
+    _repair_virtual_pinned_item_folders(next_state)
+    items = next_state.setdefault("items", {})
+    rows_by_key = {str(row.get("key") or "").strip(): row for row in pinned_rows}
+    for order, key in enumerate(ordered):
+        if not key:
+            continue
+        meta = items.get(key)
+        if not isinstance(meta, dict):
+            row = rows_by_key.get(key) or {}
+            meta = {
+                "folder_key": str(row.get("folder_key") or COMMON_FOLDER_KEY).strip() or COMMON_FOLDER_KEY,
+                "order": None,
+                "rating": int(row.get("rating", 0) or 0),
+                "pinned": True,
+            }
+            items[key] = meta
+        # The virtual reorder must not rehome an item to another real folder.
+        meta["order"] = order
+
+    if next_state == state:
+        return False
+    save_preset_folder_state(scope_key, next_state)
+    return True
+
+
+def _preset_is_pinned(
+    state: dict[str, Any],
+    live_items: list[dict[str, Any]],
+    item_key: str,
+) -> bool:
+    key = str(item_key or "").strip()
+    if not key:
+        return False
+    items = state.get("items") if isinstance(state, dict) else None
+    meta = items.get(key) if isinstance(items, dict) else None
+    if isinstance(meta, dict) and bool(meta.get("pinned", False)):
+        return True
+    return any(
+        str(item.get("key") or "").strip() == key and bool(item.get("pinned", False))
+        for item in live_items
+    )
 
 
 def _live_items_for_plan(
@@ -535,6 +717,23 @@ def _ensure_item_meta(
 def _normalize_scope(scope_key: str) -> str:
     scope = str(scope_key or "").strip().lower()
     return scope if scope in {ENGINE_WINWS1, ENGINE_WINWS2} else ENGINE_WINWS2
+
+
+def _repair_virtual_pinned_item_folders(state: dict[str, Any]) -> None:
+    """Возвращает старые ошибочные элементы из виртуальной папки в Общие.
+
+    `pinned` — служебная папка только для отображения. Она никогда не должна
+    попадать в `items[*].folder_key`: иначе обычный preset группируется под
+    служебной папкой, а затем пропускается обычным рендерером.
+    """
+    items = state.get("items") if isinstance(state, dict) else None
+    if not isinstance(items, dict):
+        return
+    for meta in items.values():
+        if not isinstance(meta, dict):
+            continue
+        if str(meta.get("folder_key") or "").strip() == PINNED_FOLDER_KEY:
+            meta["folder_key"] = COMMON_FOLDER_KEY
 
 
 __all__ = [

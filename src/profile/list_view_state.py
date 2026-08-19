@@ -314,7 +314,7 @@ def build_profile_rows_from(
             "collapsed": not expanded,
             "count": len(group_items),
         })
-        if not expanded:
+        if not expanded and not str(search_query or "").strip():
             continue
         rows.extend(row_for_profile(item) for item in group_items)
     return rows

@@ -134,6 +134,21 @@ class PresetWriteQueue:
         ports: str = "",
     ) -> None:
         page = self._page
+        if str(kind or "").strip() == "move":
+            # Перемещение может ждать завершения другого изменения пресета.
+            # Позиционный `profile:N` за это время меняется после duplicate и
+            # delete, поэтому в очередь кладём ту же стабильную ссылку, что и
+            # для контекстных действий. При повторной постановке уже готового
+            # persistent_key `_profile_reference_for` безопасно вернёт его как
+            # есть.
+            reference_for = getattr(page, "_profile_reference_for", None)
+            if callable(reference_for):
+                source_profile_key = reference_for(
+                    str(source_profile_key or profile_key or "").strip()
+                )
+                destination_profile_key = reference_for(
+                    str(destination_profile_key or "").strip()
+                ) if str(destination_profile_key or "").strip() else ""
         operation = {
             "kind": str(kind or ""),
             "action": str(action or ""),

@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from core.paths import AppPaths
-from profile.key_resolution import profile_reference_key
+from profile.key_resolution import profile_reference_key, remap_profile_item_keys
 from profile.parser import parse_preset_text
 from profile.service import ProfilePresetService
 
@@ -223,6 +223,49 @@ class StaleReferenceCorrectnessTests(unittest.TestCase):
                         getattr(setup.item, "persistent_key", ""),
                         getattr(item, "persistent_key", ""),
                     )
+
+    def test_preset_order_move_remaps_profile_that_started_as_new_name(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "system" / "templates").mkdir(parents=True, exist_ok=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            store = _PresetStore(
+                "\n".join(
+                    (
+                        "--name=YouTube",
+                        "--filter-tcp=80,443",
+                        "--hostlist=lists/youtube.txt",
+                        "--lua-desync=pass",
+                        "",
+                        "--new=Discord",
+                        "--filter-tcp=443",
+                        "--hostlist=lists/discord.txt",
+                        "--lua-desync=fake",
+                        "",
+                    )
+                )
+            )
+            feature = SimpleNamespace(
+                _presets_feature=store,
+                _app_paths=AppPaths(user_root=root, local_root=root),
+            )
+            service = ProfilePresetService(feature, "zapret2_mode")
+
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                youtube, discord = service.list_preset_order_profiles().items
+                moved = service.move_preset_profile_before(discord.key, youtube.key)
+
+        self.assertEqual(
+            moved.key_map,
+            {
+                "profile:0": "profile:1",
+                "profile:1": "profile:0",
+            },
+        )
+        self.assertEqual(moved.profile_key, "profile:0")
+        remapped = remap_profile_item_keys((youtube, discord), moved.key_map)
+        self.assertEqual([item.key for item in remapped], ["profile:1", "profile:0"])
+        self.assertEqual(len({item.key for item in remapped}), 2)
 
 
 if __name__ == "__main__":

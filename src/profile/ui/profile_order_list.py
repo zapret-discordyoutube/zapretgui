@@ -254,7 +254,8 @@ class ProfileOrderList(QWidget):
         self._model = ProfileOrderListModel(self)
         self._view = ProfileListView(self)
         order_list_description = (
-            "Стрелки выбирают profile. PageUp и PageDown меняют порядок выбранного profile."
+            "Стрелки выбирают profile. Ctrl со стрелкой вверх или вниз, PageUp и PageDown "
+            "меняют порядок выбранного profile."
         )
         set_control_accessibility(self, name="Порядок profile", description=order_list_description)
         set_control_accessibility(self._view, name="Порядок profile", description=order_list_description)
@@ -299,7 +300,10 @@ class ProfileOrderList(QWidget):
         super().keyPressEvent(event)
 
     def _handle_order_wrapper_key_event(self, event) -> bool:
-        if event.key() in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
+        if event.key() in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown) or (
+            event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down)
+            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ):
             self._view.setFocus(Qt.FocusReason.OtherFocusReason)
             return self._handle_order_key_event(event)
 
@@ -334,7 +338,35 @@ class ProfileOrderList(QWidget):
         return True
 
     def _handle_order_key_event(self, event) -> bool:
-        if event.key() not in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
+        key = event.key()
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            index = self._view.currentIndex()
+            if not index.isValid() or str(index.data(ProfileListModel.KindRole) or "") != "profile":
+                return False
+            source_key = str(index.data(ProfileListModel.ProfileKeyRole) or "")
+            if not source_key:
+                return False
+            step = -1 if key == Qt.Key.Key_Up else 1
+            destination_row = index.row() + step
+            if destination_row < 0 or destination_row >= self._model.rowCount():
+                event.accept()
+                return True
+            destination_index = self._model.index(destination_row, 0)
+            if not destination_index.isValid():
+                event.accept()
+                return True
+            destination_key = str(destination_index.data(ProfileListModel.ProfileKeyRole) or "")
+            if not destination_key:
+                event.accept()
+                return True
+            if step < 0:
+                self.profile_move_requested.emit(source_key, destination_key)
+            else:
+                self.profile_move_after_requested.emit(source_key, destination_key)
+            event.accept()
+            return True
+
+        if key not in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
             return False
         index = self._view.currentIndex()
         if not index.isValid() or str(index.data(ProfileListModel.KindRole) or "") != "profile":
@@ -342,7 +374,7 @@ class ProfileOrderList(QWidget):
         source_key = str(index.data(ProfileListModel.ProfileKeyRole) or "")
         if not source_key:
             return False
-        step = -1 if event.key() == Qt.Key.Key_PageUp else 1
+        step = -1 if key == Qt.Key.Key_PageUp else 1
         destination_row = index.row() + step
         if destination_row < 0 or destination_row >= self._model.rowCount():
             return False
@@ -514,7 +546,11 @@ def _profile_order_accessible_text(
     if description:
         parts.append(description)
     text = ", ".join(parts)
-    return f"{text}. PageUp и PageDown меняют порядок profile." if text else ""
+    return (
+        f"{text}. Ctrl со стрелкой вверх или вниз, PageUp и PageDown меняют порядок profile."
+        if text
+        else ""
+    )
 
 
 def _profile_order_data_roles() -> list[int]:

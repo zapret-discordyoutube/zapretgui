@@ -907,6 +907,106 @@ class UserPresetWriteSerializationTests(unittest.TestCase):
         )
         page._refresh_presets_view_from_cache.assert_not_called()
 
+    def test_pinned_move_skips_incompatible_optimistic_folder_model(self) -> None:
+        from ui.presets_menu.model import PresetListModel
+
+        page = UserPresetsPageBase.__new__(UserPresetsPageBase)
+        page._presets_model = PresetListModel()
+        page._presets_model.set_rows(
+            [
+                {
+                    "kind": "folder",
+                    "folder_key": "pinned",
+                    "name": "Закрепленные",
+                    "is_service": True,
+                    "count": 1,
+                },
+                {
+                    "kind": "preset",
+                    "file_name": "Pinned.txt",
+                    "name": "Pinned",
+                    "folder_key": "common",
+                    "is_pinned": True,
+                },
+            ]
+        )
+        page._runtime_service = Mock()
+        page._update_presets_view_height = Mock()
+        page._schedule_layout_resync = Mock()
+
+        self.assertFalse(
+            UserPresetsPageBase._apply_preset_move_locally(
+                page,
+                "Pinned.txt",
+                "preset_after",
+                "Other.txt",
+                "common",
+            )
+        )
+
+        page._runtime_service.capture_presets_view_state.assert_not_called()
+        page._update_presets_view_height.assert_not_called()
+        page._schedule_layout_resync.assert_not_called()
+
+    def test_pending_move_step_result_updates_local_order_and_folder_cache(self) -> None:
+        page = UserPresetsPageBase.__new__(UserPresetsPageBase)
+        page._preset_storage_action_request_id = 4
+        page._pending_preset_write_actions = [
+            {
+                "kind": "storage",
+                "action": "move_step",
+                "name": "Next.txt",
+                "direction": 1,
+            }
+        ]
+        page._preset_folder_action_pending = []
+        page._runtime_service = Mock()
+        page._apply_preset_move_locally = Mock(return_value=True)
+        page._refresh_presets_view_from_cache = Mock(
+            side_effect=AssertionError("successful queued move must apply locally")
+        )
+        folder_state = {"folders": {}, "items": {"Preset.txt": {"order": 1}}}
+
+        UserPresetsPageBase._on_preset_storage_action_finished(
+            page,
+            4,
+            "move_step",
+            True,
+            {
+                "name": "Preset.txt",
+                "destination_kind": "preset_after",
+                "destination_id": "Other.txt",
+                "destination_folder_key": "common",
+                "folder_state": folder_state,
+            },
+        )
+
+        page._runtime_service.update_cached_folder_state.assert_called_once_with(folder_state)
+        page._apply_preset_move_locally.assert_called_once_with(
+            "Preset.txt",
+            "preset_after",
+            "Other.txt",
+            "common",
+        )
+
+    def test_repeated_pending_folder_moves_are_kept_as_separate_steps(self) -> None:
+        page = UserPresetsPageBase.__new__(UserPresetsPageBase)
+        page._preset_folder_action_runtime = _Runtime(running=True)
+        page._preset_folder_action_pending = []
+
+        payload = {
+            "action": "move",
+            "folder_key": "games",
+            "name": "",
+            "direction": 1,
+            "collapsed": False,
+            "context_extra": {},
+        }
+        UserPresetsPageBase._queue_preset_folder_action(page, payload)
+        UserPresetsPageBase._queue_preset_folder_action(page, payload)
+
+        self.assertEqual(page._preset_folder_action_pending, [payload, payload])
+
     def test_legacy_pending_edit_action_restarts_later_after_worker_finished(self) -> None:
         page = UserPresetsPageBase.__new__(UserPresetsPageBase)
         page._preset_activate_runtime = _Runtime(running=False)

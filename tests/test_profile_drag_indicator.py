@@ -4,6 +4,8 @@ import inspect
 import unittest
 from unittest.mock import Mock
 
+from PyQt6.QtCore import QPoint
+
 from profile.ui import profile_list_delegate, profile_list_view
 
 
@@ -57,6 +59,77 @@ class ProfileDragIndicatorTests(unittest.TestCase):
         self.assertIn("set_drop_marker", view_source)
         self.assertIn("dragLeaveEvent", view_source)
         self.assertIn("self.set_drop_marker(-1, \"\")", view_source)
+
+    def test_internal_drag_does_not_depend_on_windows_ole_drop_target(self) -> None:
+        view_source = inspect.getsource(profile_list_view.ProfileListView.mouseMoveEvent)
+        finish_source = inspect.getsource(profile_list_view.ProfileListView._finish_internal_drag)
+
+        self.assertIn('self._drag_source = ("profile", source_key)', view_source)
+        self.assertIn("self._update_internal_drag", view_source)
+        self.assertNotIn("QDrag", view_source)
+        self.assertNotIn("drag.exec", view_source)
+        self.assertIn("profile_move_to_folder_requested", finish_source)
+        self.assertIn("profile_move_requested", finish_source)
+        self.assertIn("profile_move_after_requested", finish_source)
+        self.assertIn("profile_move_to_end_requested", finish_source)
+
+    def test_internal_mouse_drag_emits_before_after_folder_and_end_moves(self) -> None:
+        view = profile_list_view.ProfileListView()
+        self.addCleanup(view.deleteLater)
+        view.resize(500, 300)
+
+        moved: list[tuple[str, tuple[str, ...]]] = []
+        view.profile_move_requested.connect(lambda *args: moved.append(("before", tuple(args))))
+        view.profile_move_after_requested.connect(lambda *args: moved.append(("after", tuple(args))))
+        view.profile_move_to_folder_requested.connect(lambda *args: moved.append(("folder", tuple(args))))
+        view.profile_move_to_end_requested.connect(lambda *args: moved.append(("end", tuple(args))))
+
+        targets = (
+            (
+                {"marker": {"row": 1, "mode": "before"}, "destination_kind": "profile"},
+                "profile:b",
+                "games",
+                "before",
+            ),
+            (
+                {"marker": {"row": 1, "mode": "after"}, "destination_kind": "profile_after"},
+                "profile:b",
+                "games",
+                "after",
+            ),
+            (
+                {"marker": {"row": 0, "mode": "folder"}, "destination_kind": "folder"},
+                "games",
+                "games",
+                "folder",
+            ),
+            (
+                {"marker": {"row": -1, "mode": ""}, "destination_kind": "end"},
+                "",
+                "",
+                "end",
+            ),
+        )
+
+        for target, destination_id, destination_group_key, action in targets:
+            with self.subTest(action=action):
+                view._drag_source = ("profile", "profile:a")
+                view._drop_target_at = Mock(
+                    return_value=(target, destination_id, destination_group_key)
+                )
+
+                self.assertTrue(view._finish_internal_drag(QPoint(20, 20)))
+
+        self.assertEqual(
+            moved,
+            [
+                ("before", ("profile:a", "profile:b", "games")),
+                ("after", ("profile:a", "profile:b", "games")),
+                ("folder", ("profile:a", "games")),
+                ("end", ("profile:a",)),
+            ],
+        )
+        self.assertIsNone(view._drag_source)
 
     def test_view_updates_only_drop_marker_rows(self) -> None:
         payload_source = inspect.getsource(profile_list_view.ProfileListView.set_drop_marker_payload)

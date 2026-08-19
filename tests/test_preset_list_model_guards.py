@@ -70,6 +70,75 @@ class PresetListModelGuardTests(unittest.TestCase):
         self.assertEqual(model.index(2, 0).data(PresetListModel.FileNameRole), "B.txt")
         self.assertEqual(model.index(3, 0).data(PresetListModel.FolderKeyRole), "games")
 
+    def test_move_to_collapsed_folder_caches_row_until_folder_expands(self) -> None:
+        model = PresetListModel()
+        model.set_rows(
+            [
+                {"kind": "folder", "folder_key": "common", "name": "Общие", "is_collapsed": False, "count": 1},
+                {
+                    "kind": "preset",
+                    "file_name": "A.txt",
+                    "name": "A",
+                    "folder_key": "common",
+                    "folder_name": "Общие",
+                },
+                {"kind": "folder", "folder_key": "games", "name": "Игры", "is_collapsed": True, "count": 0},
+            ]
+        )
+
+        self.assertTrue(model.move_preset("A.txt", "folder", "games", "games"))
+        self.assertEqual(model.rowCount(), 2)
+        self.assertEqual(model.index(0, 0).data(PresetListModel.CountRole), 0)
+        self.assertEqual(model.index(1, 0).data(PresetListModel.CountRole), 1)
+
+        self.assertTrue(model.set_folder_collapsed("games", False))
+        moved_row = model.index(2, 0)
+        self.assertEqual(moved_row.data(PresetListModel.FileNameRole), "A.txt")
+        self.assertEqual(moved_row.data(PresetListModel.FolderKeyRole), "games")
+        self.assertIn("папка: Игры", moved_row.data(Qt.ItemDataRole.AccessibleTextRole))
+
+    def test_folder_updates_emit_accessible_text_role(self) -> None:
+        model = PresetListModel()
+        model.set_rows(
+            [
+                {"kind": "folder", "folder_key": "common", "name": "Общие", "is_collapsed": False, "count": 1},
+                {"kind": "preset", "file_name": "A.txt", "name": "A", "folder_key": "common"},
+            ]
+        )
+        changed_roles: list[list[int]] = []
+        model.dataChanged.connect(
+            lambda _top_left, _bottom_right, roles: changed_roles.append([int(role) for role in roles])
+        )
+
+        self.assertTrue(model.set_folder_collapsed("common", True))
+
+        self.assertIn(int(Qt.ItemDataRole.AccessibleTextRole), changed_roles[-1])
+        self.assertIn(PresetListModel.CollapsedRole, changed_roles[-1])
+
+    def test_remote_row_updates_emit_remote_roles(self) -> None:
+        model = PresetListModel()
+        model.set_rows(
+            [
+                {
+                    "kind": "preset",
+                    "file_name": "Remote.txt",
+                    "name": "Remote",
+                    "is_remote": False,
+                    "remote_state": "",
+                }
+            ]
+        )
+        changed_roles: list[list[int]] = []
+        model.dataChanged.connect(
+            lambda _top_left, _bottom_right, roles: changed_roles.append([int(role) for role in roles])
+        )
+
+        self.assertTrue(model.update_preset_row("Remote.txt", is_remote=True, remote_state="ok"))
+
+        self.assertIn(PresetListModel.RemoteRole, changed_roles[-1])
+        self.assertIn(PresetListModel.RemoteStateRole, changed_roles[-1])
+        self.assertIn(int(Qt.ItemDataRole.AccessibleTextRole), changed_roles[-1])
+
     def test_preset_display_name_cache_updates_with_row_metadata(self) -> None:
         model = PresetListModel()
         model.set_rows(

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import inspect
+import os
 import unittest
 from unittest.mock import Mock
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from PyQt6.QtCore import QPoint
+from PyQt6.QtWidgets import QApplication
 
 from ui.presets_menu import delegate as preset_delegate
 from ui.presets_menu import common as preset_common
@@ -14,6 +18,10 @@ from presets.ui.common.user_presets_page import UserPresetsPageBase
 
 
 class PresetDragIndicatorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
     def test_drop_marker_maps_targets_to_clear_visual_modes(self) -> None:
         self.assertEqual(
             preset_view.preset_drop_marker_for_target(2, "folder"),

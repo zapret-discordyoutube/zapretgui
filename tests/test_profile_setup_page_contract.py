@@ -1218,6 +1218,45 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         ]
         self.assertIn(("profile", "voice", "profile:0"), expanded_rows)
 
+    def test_profile_model_search_shows_match_inside_collapsed_group(self) -> None:
+        from profile.ui.profile_list_model import ProfileListModel
+
+        profile = SimpleNamespace(
+            key="profile:youtube",
+            persistent_key="youtube-profile",
+            profile_index=0,
+            display_name="YouTube",
+            enabled=True,
+            in_preset=True,
+            strategy_id="fake",
+            strategy_name="Fake",
+            match_lines=("--filter-tcp=443", "--hostlist=lists/youtube.txt"),
+            list_type="hostlist",
+            rating="",
+            favorite=False,
+            group="youtube",
+            group_name="YouTube",
+            order=0,
+            order_is_manual=False,
+            group_collapsed=True,
+        )
+
+        model = ProfileListModel()
+        model.set_profiles((profile,))
+        self.assertEqual(model.rowCount(), 1)
+
+        model.set_search_query("youtube")
+
+        rows = [
+            (
+                model.index(row, 0).data(ProfileListModel.KindRole),
+                model.index(row, 0).data(ProfileListModel.ProfileKeyRole),
+            )
+            for row in range(model.rowCount())
+        ]
+        self.assertIn(("folder", ""), rows)
+        self.assertIn(("profile", "profile:youtube"), rows)
+
     def test_profile_model_set_profiles_skips_reset_for_same_payload(self) -> None:
         from profile.ui.profile_list_model import ProfileListModel
 

@@ -73,7 +73,7 @@ class ListAccessibilityModelTests(unittest.TestCase):
         self.assertEqual(
             text,
             "Позиция 1, YouTube, включён, стратегия: TLS fake, TCP | TCP 443. "
-            "PageUp и PageDown меняют порядок profile.",
+            "Ctrl со стрелкой вверх или вниз, PageUp и PageDown меняют порядок profile.",
         )
 
     def test_preset_rows_expose_screen_reader_text(self) -> None:

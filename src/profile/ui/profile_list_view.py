@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 
-from PyQt6.QtCore import QEvent, QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import QCursor, QDrag
+from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 from qfluentwidgets import ListView
 
@@ -102,7 +101,7 @@ class ProfileListView(ListView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._drag_start_pos: QPoint | None = None
-        self._drag_wheel_scroll_active = False
+        self._drag_source: tuple[str, str] | None = None
         self.set_drop_marker(-1, "")
 
     def set_screen_reader_list_name(self, name: str) -> None:
@@ -216,61 +215,6 @@ class ProfileListView(ListView):
         super().wheelEvent(event)
         event.accept()
 
-    def eventFilter(self, watched, event):  # noqa: N802
-        if (
-            self.__dict__.get("_drag_wheel_scroll_active", False)
-            and event.type() == QEvent.Type.Wheel
-            and self._cursor_is_over_viewport()
-            and self._scroll_from_wheel_event(event)
-        ):
-            return True
-        return super().eventFilter(watched, event)
-
-    def _cursor_is_over_viewport(self) -> bool:
-        viewport = self.viewport()
-        if viewport is None:
-            return False
-        try:
-            point = viewport.mapFromGlobal(QCursor.pos())
-            return viewport.rect().contains(point)
-        except Exception:
-            return False
-
-    def _scroll_from_wheel_event(self, event) -> bool:
-        scrollbar = self.verticalScrollBar()
-        if scrollbar is None:
-            return False
-        minimum = scrollbar.minimum()
-        maximum = scrollbar.maximum()
-        if maximum <= minimum:
-            return False
-
-        pixel_delta = 0
-        angle_delta = 0
-        try:
-            pixel_delta = int(event.pixelDelta().y())
-        except Exception:
-            pixel_delta = 0
-        try:
-            angle_delta = int(event.angleDelta().y())
-        except Exception:
-            angle_delta = 0
-        if pixel_delta == 0 and angle_delta == 0:
-            return False
-
-        current = scrollbar.value()
-        if pixel_delta:
-            next_value = current - pixel_delta
-        else:
-            lines = max(1, int(QApplication.wheelScrollLines()))
-            step = max(1, int(scrollbar.singleStep())) * lines
-            next_value = current - round((angle_delta / 120) * step)
-        next_value = max(minimum, min(maximum, int(next_value)))
-        if next_value != current:
-            scrollbar.setValue(next_value)
-        event.accept()
-        return True
-
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_start_pos = event.position().toPoint()
@@ -280,6 +224,12 @@ class ProfileListView(ListView):
         if not (event.buttons() & Qt.MouseButton.LeftButton):
             super().mouseMoveEvent(event)
             return
+
+        if self._drag_source is not None:
+            self._update_internal_drag(event.position().toPoint())
+            event.accept()
+            return
+
         if self._drag_start_pos is None:
             super().mouseMoveEvent(event)
             return
@@ -292,33 +242,28 @@ class ProfileListView(ListView):
             super().mouseMoveEvent(event)
             return
 
-        model = self.model()
-        if model is None:
-            super().mouseMoveEvent(event)
-            return
-        mime = model.mimeData([index])
-        if mime is None or not mime.hasFormat(ProfileListModel.MIME_TYPE):
+        source_key = str(index.data(ProfileListModel.ProfileKeyRole) or "").strip()
+        if not source_key:
             super().mouseMoveEvent(event)
             return
 
-        drag = QDrag(self)
-        drag.setMimeData(mime)
+        # Внутреннее перемещение профиля не должно зависеть от системного OLE
+        # drag-and-drop. В повышенном окне Windows OLE отключён для приёма
+        # файлов из Проводника, поэтому перемещаем строки обычными событиями
+        # мыши и отправляем уже готовые сигналы перемещения.
+        self._drag_source = ("profile", source_key)
         self._drag_start_pos = None
-        app = QApplication.instance()
-        if app is not None:
-            app.installEventFilter(self)
-        self._drag_wheel_scroll_active = True
-        try:
-            drag.exec(Qt.DropAction.MoveAction)
-        finally:
-            self._drag_wheel_scroll_active = False
-            if app is not None:
-                app.removeEventFilter(self)
-            self.set_drop_marker(-1, "")
+        self._update_internal_drag(event.position().toPoint())
         event.accept()
 
     def mouseReleaseEvent(self, event):  # noqa: N802
         pos = event.position().toPoint()
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = None
+            if self._drag_source is not None:
+                self._finish_internal_drag(pos)
+                event.accept()
+                return
         index = self.indexAt(pos)
         if event.button() == Qt.MouseButton.RightButton:
             if index.isValid() and str(index.data(ProfileListModel.KindRole) or "") == "folder":
@@ -336,6 +281,38 @@ class ProfileListView(ListView):
                     event.accept()
                     return
         super().mouseReleaseEvent(event)
+
+    def _update_internal_drag(self, point: QPoint) -> None:
+        if not self.viewport().rect().contains(point):
+            self.set_drop_marker(-1, "")
+            return
+        target, _destination_id, _destination_group_key = self._drop_target_at(point)
+        self.set_drop_marker_payload(dict(target.get("marker") or {}))
+
+    def _finish_internal_drag(self, point: QPoint) -> bool:
+        source = self._drag_source
+        self._drag_source = None
+        self.set_drop_marker(-1, "")
+        if source is None or not self.viewport().rect().contains(point):
+            return False
+
+        _source_kind, source_key = source
+        target, destination_id, destination_group_key = self._drop_target_at(point)
+        destination_kind = str(target.get("destination_kind") or "end")
+        if destination_kind == "folder" and destination_id:
+            self.profile_move_to_folder_requested.emit(source_key, destination_id)
+            return True
+        if destination_kind == "profile" and destination_id and destination_id != source_key:
+            self.profile_move_requested.emit(source_key, destination_id, destination_group_key)
+            return True
+        if destination_kind == "profile_after" and destination_id and destination_id != source_key:
+            self.profile_move_after_requested.emit(source_key, destination_id, destination_group_key)
+            return True
+        if destination_kind in {"profile", "profile_after"} and destination_id == source_key:
+            return True
+
+        self.profile_move_to_end_requested.emit(source_key)
+        return True
 
     def keyPressEvent(self, event):  # noqa: N802
         if self._move_current_index_from_keyboard(event.key()):
