@@ -34,7 +34,7 @@ class ProfileListViewStateWorker(QThread):
         show_only_added: bool,
         group_expanded: dict[str, bool] | None,
         folder_state: dict[str, Any] | None = None,
-        move_request: dict[str, str] | None = None,
+        move_requests: tuple[dict[str, str], ...] = (),
         parent=None,
     ):
         super().__init__(parent)
@@ -48,25 +48,30 @@ class ProfileListViewStateWorker(QThread):
         )
         self._group_expanded = dict(group_expanded) if isinstance(group_expanded, dict) else None
         self._folder_state = dict(folder_state) if isinstance(folder_state, dict) else None
-        self._move_request = dict(move_request or {}) if isinstance(move_request, dict) else None
+        self._move_requests = tuple(
+            dict(request)
+            for request in tuple(move_requests or ())
+            if isinstance(request, dict)
+        )
 
     def run(self) -> None:
         try:
             items = self._items
             group_expanded = self._group_expanded
-            if self._move_request:
+            for move_request in self._move_requests:
                 items = _moved_profile_items(
                     items,
-                    str(self._move_request.get("source_profile_key") or ""),
-                    str(self._move_request.get("destination_kind") or ""),
-                    str(self._move_request.get("destination_profile_key") or ""),
-                    str(self._move_request.get("destination_group_key") or ""),
+                    str(move_request.get("source_profile_key") or ""),
+                    str(move_request.get("destination_kind") or ""),
+                    str(move_request.get("destination_profile_key") or ""),
+                    str(move_request.get("destination_group_key") or ""),
+                    folder_state=self._folder_state,
                 )
                 if items is None:
                     raise ValueError("Не удалось подготовить локальное перемещение profile")
                 group_expanded = _group_expanded_with_target(
                     group_expanded,
-                    str(self._move_request.get("destination_group_key") or ""),
+                    str(move_request.get("destination_group_key") or ""),
                     items,
                 )
             state = build_profile_list_view_state(
@@ -97,17 +102,17 @@ class _PendingViewStateMutation:
     """Накопитель точечных правок view-state между запросом и стартом воркера.
 
     Единственное место, где живут pending-значения items / group_expanded /
-    folder_state / move_request: виджет не держит теневых копий состояния
+    folder_state / move_requests: виджет не держит теневых копий состояния
     модели, а pending items читаются только через `_current_view_state_items`.
     """
 
-    __slots__ = ("items", "group_expanded", "folder_state", "move_request", "reset_group_expanded")
+    __slots__ = ("items", "group_expanded", "folder_state", "move_requests", "reset_group_expanded")
 
     def __init__(self) -> None:
         self.items: tuple[Any, ...] | None = None
         self.group_expanded: dict[str, bool] | None = None
         self.folder_state: dict[str, Any] | None = None
-        self.move_request: dict[str, str] | None = None
+        self.move_requests: list[dict[str, str]] = []
         self.reset_group_expanded = False
 
     def take_reset_group_expanded(self) -> bool:
@@ -120,9 +125,9 @@ class _PendingViewStateMutation:
         self.folder_state = None
         return value
 
-    def take_move_request(self) -> dict[str, str] | None:
-        value = self.move_request
-        self.move_request = None
+    def take_move_requests(self) -> tuple[dict[str, str], ...]:
+        value = tuple(dict(request) for request in self.move_requests)
+        self.move_requests.clear()
         return value
 
 
@@ -604,9 +609,16 @@ class ProfilesList(QWidget):
         destination_profile_key: str = "",
         destination_group_key: str = "",
     ) -> bool:
-        source_key = str(source_profile_key or "").strip()
+        # Backend/очередь используют постоянные uid, а модель рисует текущие
+        # позиционные profile:N. Разрешаем обе ссылки по свежему снимку прямо
+        # на границе локального UI и не передаём uid в row-планировщик.
+        source_key = self._display_key_for(source_profile_key)
         kind = str(destination_kind or "").strip()
-        destination_key = str(destination_profile_key or "").strip()
+        destination_key = (
+            self._display_key_for(destination_profile_key)
+            if str(destination_profile_key or "").strip()
+            else ""
+        )
         group_key = str(destination_group_key or "").strip()
         if not self._can_queue_profile_move(source_key, kind, destination_key, group_key):
             return False
@@ -737,7 +749,7 @@ class ProfilesList(QWidget):
         if items is not None:
             pending.items = tuple(items or ())
         if isinstance(move_request, dict):
-            pending.move_request = dict(move_request)
+            pending.move_requests.append(dict(move_request))
         if reset_group_expanded:
             pending.group_expanded = None
             pending.reset_group_expanded = True
@@ -757,7 +769,7 @@ class ProfilesList(QWidget):
         else:
             group_expanded = dict(pending.group_expanded or options.get("group_expanded") or {})
         folder_state = pending.take_folder_state()
-        move_request = pending.take_move_request()
+        move_requests = pending.take_move_requests()
         filters = self._filter_state()
         active_profile_types = set(filters.active_profile_types or {"all"})
         search_query = str(filters.search_query or "")
@@ -772,7 +784,7 @@ class ProfilesList(QWidget):
                 show_only_added=show_only_added,
                 group_expanded=group_expanded,
                 folder_state=folder_state,
-                move_request=move_request,
+                move_requests=move_requests,
                 parent=self,
             ),
             on_loaded=self._on_view_state_loaded,
@@ -831,6 +843,11 @@ class ProfilesList(QWidget):
         if runtime is None or not runtime.is_current(request_id):
             return
         if self._view_state_state_obj().has_pending():
+            pending = self._pending_view_state_mutation()
+            if pending.items is None and pending.move_requests:
+                # Следующее локальное перемещение должно строиться поверх уже
+                # рассчитанного порядка, а не поверх старой модели.
+                pending.items = tuple(getattr(state, "all_items", ()) or ())
             return
         self.apply_view_state(state)
 
@@ -889,17 +906,57 @@ def _moved_profile_items(
     destination_kind: str,
     destination_profile_key: str = "",
     destination_group_key: str = "",
+    *,
+    folder_state: dict[str, Any] | None = None,
 ) -> tuple[Any, ...] | None:
     # Делегирование единственной реализации оптимистичного перемещения
     # (list_view_state.moved_profile_display_items) — та же математика,
     # что и у персиста.
-    return moved_profile_display_items(
-        items,
-        source_profile_key,
-        destination_kind,
-        destination_profile_key,
-        destination_group_key,
+    items = tuple(items or ())
+    source_key = _display_key_for_items(items, source_profile_key)
+    destination_kind = str(destination_kind or "").strip()
+    destination_key = (
+        _display_key_for_items(items, destination_profile_key)
+        if str(destination_profile_key or "").strip()
+        else ""
     )
+    if not source_key:
+        return None
+    if destination_kind in {"profile", "profile_after"} and not destination_key:
+        return None
+
+    moved = moved_profile_display_items(
+        items,
+        source_key,
+        destination_kind,
+        destination_key,
+        destination_group_key,
+        folder_state=folder_state,
+    )
+    # Общий планировщик возвращает None и для ошибки, и для корректного
+    # no-op. Ключи выше уже проверены, поэтому здесь None означает, что
+    # отображаемый порядок и так совпадает с запросом: возвращаем исходный
+    # снимок без ложного ERROR.
+    return items if moved is None else moved
+
+
+def _display_key_for_items(items: tuple[Any, ...], reference: str) -> str:
+    key = str(reference or "").strip()
+    if not key:
+        return ""
+    exact = [
+        str(getattr(item, "key", "") or "").strip()
+        for item in items
+        if str(getattr(item, "key", "") or "").strip() == key
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    persistent_matches = [
+        str(getattr(item, "key", "") or "").strip()
+        for item in items
+        if str(getattr(item, "persistent_key", "") or "").strip() == key
+    ]
+    return persistent_matches[0] if len(persistent_matches) == 1 else ""
 
 
 def _group_expanded_with_target(

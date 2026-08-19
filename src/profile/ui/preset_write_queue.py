@@ -192,6 +192,9 @@ class PresetWriteQueue:
                 )
             ]
         if operation["kind"] == "move":
+            # Move хранит абсолютную цель (before/after конкретной строки),
+            # а не относительный шаг. Более свежая команда того же profile
+            # полностью заменяет старое ожидающее намерение.
             source_profile_key_to_replace = str(operation["source_profile_key"] or "")
             pending_operations = page._profile_preset_write_state_obj().pending
             pending_operations[:] = [

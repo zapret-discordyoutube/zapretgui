@@ -42,6 +42,29 @@ from profile.ui.profiles_list import ProfileListViewStateWorker, ProfilesList
 from ui.presets_menu.delegate import PresetListDelegate
 
 
+def _profile_item_for_local_move(key: str, persistent_key: str, order: int) -> ProfileListItem:
+    return ProfileListItem(
+        key=key,
+        persistent_key=persistent_key,
+        profile_index=order,
+        display_name=key,
+        enabled=True,
+        in_preset=True,
+        strategy_id="none",
+        strategy_name="None",
+        match_lines=(),
+        list_type="",
+        rating="",
+        favorite=False,
+        group="common",
+        group_name="Общие",
+        order=order,
+        source_order=order,
+        group_rank=0,
+        group_collapsed=False,
+    )
+
+
 class _TextWidget:
     def __init__(self, text: str = "") -> None:
         self._text = str(text)
@@ -933,6 +956,54 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             },
         )
 
+    def test_profile_list_move_resolves_stable_references_to_current_row_keys(self) -> None:
+        first = SimpleNamespace(
+            key="profile:0",
+            persistent_key="uid:first",
+            group="common",
+            group_name="Общие",
+            order=0,
+            order_is_manual=False,
+        )
+        second = SimpleNamespace(
+            key="profile:1",
+            persistent_key="uid:second",
+            group="common",
+            group_name="Общие",
+            order=1,
+            order_is_manual=False,
+        )
+        profiles_list = ProfilesList.__new__(ProfilesList)
+        profiles_list._model = SimpleNamespace(
+            view_state_options=Mock(
+                return_value={
+                    "items": (first, second),
+                    "group_expanded": {"common": True},
+                }
+            ),
+        )
+        profiles_list._request_view_state_rebuild = Mock()
+
+        self.assertTrue(
+            ProfilesList.move_profile_item(
+                profiles_list,
+                "uid:second",
+                "profile",
+                "uid:first",
+                "common",
+            )
+        )
+
+        self.assertEqual(
+            profiles_list._request_view_state_rebuild.call_args.kwargs["move_request"],
+            {
+                "source_profile_key": "profile:1",
+                "destination_kind": "profile",
+                "destination_profile_key": "profile:0",
+                "destination_group_key": "common",
+            },
+        )
+
     def test_profile_list_move_builds_local_view_state_in_worker(self) -> None:
         move_source = inspect.getsource(ProfilesList.move_profile_item)
         worker_source = inspect.getsource(ProfileListViewStateWorker.run)
@@ -993,12 +1064,14 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             search_query="",
             show_only_added=False,
             group_expanded={"common": True, "video": True},
-            move_request={
-                "source_profile_key": "profile-1",
-                "destination_kind": "profile_after",
-                "destination_profile_key": "profile-2",
-                "destination_group_key": "video",
-            },
+            move_requests=(
+                {
+                    "source_profile_key": "profile-1",
+                    "destination_kind": "profile_after",
+                    "destination_profile_key": "profile-2",
+                    "destination_group_key": "video",
+                },
+            ),
         )
         worker.loaded.connect(lambda _request_id, state: loaded.append(state))
 
@@ -1009,6 +1082,83 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         self.assertEqual(moved.group, "video")
         self.assertEqual(moved.group_name, "Видео")
         self.assertEqual(moved.order, 1)
+
+    def test_profile_list_move_worker_treats_valid_noop_as_loaded_state(self) -> None:
+        items = (
+            _profile_item_for_local_move("profile:0", "uid:first", 0),
+            _profile_item_for_local_move("profile:1", "uid:second", 1),
+        )
+        loaded = []
+        failed = []
+        worker = ProfileListViewStateWorker(
+            6,
+            items=items,
+            active_profile_types={"all"},
+            search_query="",
+            show_only_added=False,
+            group_expanded={"common": True},
+            move_requests=(
+                {
+                    "source_profile_key": "uid:first",
+                    "destination_kind": "profile",
+                    "destination_profile_key": "uid:second",
+                    "destination_group_key": "common",
+                },
+            ),
+        )
+        worker.loaded.connect(lambda _request_id, state: loaded.append(state))
+        worker.failed.connect(lambda _request_id, error: failed.append(error))
+
+        worker.run()
+
+        self.assertEqual(failed, [])
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(
+            [item.key for item in loaded[0].all_items],
+            ["profile:0", "profile:1"],
+        )
+
+    def test_profile_list_move_worker_composes_multiple_pending_moves(self) -> None:
+        items = (
+            _profile_item_for_local_move("profile:0", "uid:a", 0),
+            _profile_item_for_local_move("profile:1", "uid:b", 1),
+            _profile_item_for_local_move("profile:2", "uid:c", 2),
+        )
+        loaded = []
+        failed = []
+        worker = ProfileListViewStateWorker(
+            7,
+            items=items,
+            active_profile_types={"all"},
+            search_query="",
+            show_only_added=False,
+            group_expanded={"common": True},
+            move_requests=(
+                {
+                    "source_profile_key": "uid:a",
+                    "destination_kind": "profile_after",
+                    "destination_profile_key": "uid:b",
+                    "destination_group_key": "common",
+                },
+                {
+                    "source_profile_key": "uid:a",
+                    "destination_kind": "profile_after",
+                    "destination_profile_key": "uid:c",
+                    "destination_group_key": "common",
+                },
+            ),
+        )
+        worker.loaded.connect(lambda _request_id, state: loaded.append(state))
+        worker.failed.connect(lambda _request_id, error: failed.append(error))
+
+        worker.run()
+
+        self.assertEqual(failed, [])
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(
+            [item.key for item in loaded[0].all_items],
+            ["profile:1", "profile:2", "profile:0"],
+        )
 
     def test_profile_list_reserves_space_for_visible_fluent_scrollbar(self) -> None:
         list_source = inspect.getsource(ProfilesList._build_ui)
