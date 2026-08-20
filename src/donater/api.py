@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import secrets
-import socket
 from typing import Any, Dict, Optional, Tuple
 
 import requests
+
+from utils.https_dns_fallback import (
+    is_name_resolution_error,
+    request_with_dns_fallback,
+)
 
 
 class PremiumApiClient:
@@ -47,7 +51,8 @@ class PremiumApiClient:
         request_timeout = self.timeout if timeout is None else max(0.1, float(timeout))
 
         def _send():
-            return self._session.request(
+            return request_with_dns_fallback(
+                self._session,
                 method,
                 self._url(endpoint),
                 json=payload,
@@ -138,24 +143,7 @@ class PremiumApiClient:
 
     @staticmethod
     def _is_name_resolution_error(exc: BaseException) -> bool:
-        pending: list[BaseException] = [exc]
-        seen: set[int] = set()
-        while pending:
-            current = pending.pop()
-            identity = id(current)
-            if identity in seen:
-                continue
-            seen.add(identity)
-            class_name = type(current).__name__.lower()
-            if isinstance(current, socket.gaierror) or "nameresolution" in class_name:
-                return True
-            for linked in (current.__cause__, current.__context__):
-                if isinstance(linked, BaseException):
-                    pending.append(linked)
-            for value in getattr(current, "args", ()):
-                if isinstance(value, BaseException):
-                    pending.append(value)
-        return False
+        return is_name_resolution_error(exc)
 
     def get_status(self) -> Optional[Dict[str, Any]]:
         # Health-check не должен ждать полный срок мутационного запроса.

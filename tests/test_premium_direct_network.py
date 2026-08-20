@@ -94,6 +94,9 @@ class PremiumDirectNetworkTests(unittest.TestCase):
                 with patch(
                     "winws_runtime.runtime.direct_network.run_with_direct_network_access",
                     side_effect=lambda operation: operation(),
+                ), patch(
+                    "utils.https_dns_fallback.resolve_hostname_via_doh",
+                    return_value=(),
                 ):
                     result = client.get_status()
                 self.assertEqual(result["error"]["code"], expected_code)
@@ -106,9 +109,36 @@ class PremiumDirectNetworkTests(unittest.TestCase):
         with patch(
             "winws_runtime.runtime.direct_network.run_with_direct_network_access",
             side_effect=lambda operation: operation(),
+        ), patch(
+            "utils.https_dns_fallback.resolve_hostname_via_doh",
+            return_value=(),
         ):
             result = client.get_status()
         self.assertEqual(result["error"]["code"], "dns_error")
+
+    def test_premium_uses_shared_dynamic_dns_transport(self) -> None:
+        from donater.api import PremiumApiClient
+
+        response = Mock()
+        response.content = b'{"success": true}'
+        response.status_code = 200
+        response.json.return_value = {"success": True}
+        client = PremiumApiClient(base_url="https://premium.example/api")
+
+        with patch(
+            "donater.api.request_with_dns_fallback",
+            return_value=response,
+        ) as request:
+            result = client.get_status()
+
+        self.assertTrue(result["success"])
+        request.assert_called_once_with(
+            client._session,
+            "GET",
+            "https://premium.example/api/status",
+            json=None,
+            timeout=client.health_timeout,
+        )
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from __future__ import annotations
 import requests
 from typing import Optional, Dict, Any
 from log.log import log
+from utils.https_dns_fallback import request_with_dns_fallback
 
 
 
@@ -46,7 +47,9 @@ def request_get_bypass_proxy(
     """
     session = session_bypass_proxy()
     try:
-        return session.get(
+        return request_with_dns_fallback(
+            session,
+            "GET",
             url,
             headers=headers,
             timeout=timeout,
