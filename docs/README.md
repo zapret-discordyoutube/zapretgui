@@ -1,6 +1,6 @@
-<h1 align="center"><a href="https://publish.obsidian.md/zapret/Zapret/home">Zapret 2</a> (Запрет: обход блокировки Дискорда и Ютуба)</h1>
+<h1 align="center"><a href="https://wiki.zapret.moe/Zapret/home">Zapret 2</a> (Запрет: обход блокировки Дискорда и Ютуба)</h1>
 
-<p align="center"><b>Документация доступна <a href="https://publish.obsidian.md/zapret/Privacy/Zapret2/Zapret2">здесь</a> · Попробуйте наш новый <a href="https://git.zapret.moe/zapretkvn/zapret-kvn">Zapret KVN</a>!</b></p>
+<p align="center"><b>Документация доступна <a href="https://wiki.zapret.moe/Zapret2/Zapret2">здесь</a> · Попробуйте наш новый <a href="https://git.zapret.moe/zapretkvn/zapret-kvn">Zapret KVN</a>!</b></p>
 
 <p align="center">
   <a href="https://telegram.me/bypassblock"><img alt="Основной канал" src="https://img.shields.io/badge/Основной_канал-Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white"></a>
@@ -9,7 +9,7 @@
   <a href="https://www.youtube.com/channel/UCyEOuaB8EUwn1aU8a73_EWQ/"><img alt="YouTube" src="https://img.shields.io/badge/YouTube-канал-FF0000?style=for-the-badge&logo=youtube&logoColor=white"></a>
   <a href="https://discord.com/invite/kkcBDG2uws"><img alt="Discord" src="https://img.shields.io/badge/Discord-сообщество-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
   <a href="https://telegram.me/zapretvpns_bot"><img alt="Поддержать донатами" src="https://img.shields.io/badge/Поддержать-донат-FF424D?style=for-the-badge&logo=telegram&logoColor=white"></a>
-  <a href="https://publish.obsidian.md/zapret/Zapret/home"><img alt="Вики" src="https://img.shields.io/badge/Вики-публичная-7C3AED?style=for-the-badge&logo=obsidian&logoColor=white"></a>
+  <a href="https://wiki.zapret.moe/Zapret/home"><img alt="Вики" src="https://img.shields.io/badge/Вики-публичная-7C3AED?style=for-the-badge&logo=obsidian&logoColor=white"></a>
   <a href="https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues/new"><img alt="Вопросы и баги" src="https://img.shields.io/badge/Вопросы_и_баги-Forgejo-FB923C?style=for-the-badge&logo=forgejo&logoColor=white"></a>
 </p>
 
@@ -42,7 +42,7 @@
 
 А также тонких настроек поведения любой части программы (также Запрета 1 и 2, например, быстрое управление списками доменов прямо из GUI программы для всех стратегий).
 
-Мы ввели и задокументировали понятие [пресетов](https://publish.obsidian.md/zapret/Privacy/Zapret2/preset) (_понятие было введено `bol-van`_) и их настроек. Популяризировали понятие "профиль" (_также от `bol-van`_), и привязали его к понятию "стратегия" (_хотя рекомендуем использовать понятие десинхронизация_). А также написали несколько своих `lua` стратегий, которые успешно обходят блокировки.
+Мы ввели и задокументировали понятие [пресетов](https://wiki.zapret.moe/Zapret2/preset) (_понятие было введено `bol-van`_) и их настроек. Популяризировали понятие "профиль" (_также от `bol-van`_), и привязали его к понятию "стратегия" (_хотя рекомендуем использовать понятие десинхронизация_). А также написали несколько своих `lua` стратегий, которые успешно обходят блокировки.
 
 > [!TIP]
 > Относитесь к программе как к аптечке. По умолчанию Вам доступен стандартный набор возможностей, но Вы можете попробовать другие лекарства, которые кому-то помогают сильнее, у кого-то не вызывают аллергию, у кого-то вызывают аллергию (_но это не значит что препарат опасен, он просто Вам не подходит_) а кому-то бесполезны и ничего не делают. Вы также можете добавлять свои лекарства в эту аптечку.
@@ -77,7 +77,7 @@
 
 <h2 align="center">Хочу узнать подробнее</h2>
 
-Подробности о блокировках и прочих интересных штучках доступно [на нашей вики](https://publish.obsidian.md/zapret/Privacy/Zapret/home).
+Подробности о блокировках и прочих интересных штучках доступно [на нашей вики](https://wiki.zapret.moe/Zapret/home).
 
 Другие полезные сервисы и VPN: https://github.com/awesome-windows11/CensorNet
 

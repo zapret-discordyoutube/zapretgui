@@ -400,7 +400,7 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
         site_button = dialog.buttonLayout.widgets[0]
         self.assertEqual(site_button.text(), "Открыть сайт с профилями")
         self.assertEqual(site_button.accessibleName(), "Открыть сайт с профилями")
-        self.assertEqual(opened_urls, [QUrl("https://publish.obsidian.md/zapret/Zapret2/filter")])
+        self.assertEqual(opened_urls, [QUrl("https://wiki.zapret.moe/Zapret2/filter")])
 
 
 if __name__ == "__main__":
