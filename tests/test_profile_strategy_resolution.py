@@ -163,6 +163,55 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
 
         self.assertEqual(unresolved, [])
 
+    def test_every_builtin_preset_has_domain_and_ip_ru_exclusions_with_pass(self) -> None:
+        expected_profiles = {
+            "Исключения домены (RU сайты)": (
+                "--filter-tcp=80,443-65535",
+                "--hostlist=lists/netrogat.txt",
+            ),
+            "Исключения айпи (RU сайты)": (
+                "--filter-tcp=80,443-65535",
+                "--ipset=lists/ipset-ru.txt",
+                "--ipset=lists/ipset-dns.txt",
+                "--ipset=lists/ipset-exclude.txt",
+            ),
+        }
+        expected_strategy = (
+            "--out-range=-d8",
+            "--payload=tls_client_hello",
+            "--lua-desync=pass",
+        )
+        preset_paths = sorted(Path("src/presets/builtin/winws2").glob("*.txt"))
+
+        self.assertGreater(len(preset_paths), 0)
+        for path in preset_paths:
+            with self.subTest(preset=path.name):
+                text = path.read_text(encoding="utf-8")
+                preset = parse_preset_text(text, engine="winws2", source_name=path.name)
+                exclusion_profiles = [
+                    profile
+                    for profile in preset.profiles
+                    if profile.display_name in expected_profiles
+                ]
+
+                self.assertEqual(
+                    [profile.display_name for profile in exclusion_profiles],
+                    list(expected_profiles),
+                )
+                self.assertNotIn("--name=Исключения (RU сайты)", text)
+                self.assertIn("# BuiltinVersion: 2.40", text.splitlines()[:5])
+
+                for profile in exclusion_profiles:
+                    self.assertEqual(
+                        tuple(profile.match.all_lines()),
+                        expected_profiles[profile.display_name],
+                    )
+                    self.assertEqual(
+                        normalize_lines(profile.strategy.strategy_lines),
+                        expected_strategy,
+                    )
+                    self.assertEqual(self._resolved_strategy_id(profile), "pass")
+
     def test_git_zapret_moe_is_first_and_uses_alt9_in_every_builtin_preset(self) -> None:
         expected_strategy = (
             "--out-range=-d8",
@@ -227,8 +276,8 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                 ),
                 "",
             )
-            if version_line != "# BuiltinVersion: 2.39":
-                offenders.append(f"{path.name}: версия набора не 2.39")
+            if version_line != "# BuiltinVersion: 2.40":
+                offenders.append(f"{path.name}: версия набора не 2.40")
 
         self.assertGreater(checked_presets, 0)
         self.assertEqual(offenders, [])

@@ -1,5 +1,5 @@
 # Preset: general ALT4
-# BuiltinVersion: 2.39
+# BuiltinVersion: 2.40
 # IconColor: #67d1e4ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -108,7 +108,16 @@
 
 --new
 
---name=Исключения (RU сайты)
+--name=Исключения домены (RU сайты)
+--filter-tcp=80,443-65535
+--hostlist=lists/netrogat.txt
+--out-range=-d8
+--payload=tls_client_hello
+--lua-desync=pass
+
+--new
+
+--name=Исключения айпи (RU сайты)
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-ru.txt
 --ipset=lists/ipset-dns.txt

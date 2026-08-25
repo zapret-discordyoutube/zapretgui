@@ -1,5 +1,5 @@
 # Preset: Universal V5
-# BuiltinVersion: 2.39
+# BuiltinVersion: 2.40
 # IconColor: #a371f7
 # Description: Основной пресет. Десинк применяется точечно и только к реально заблокированным сервисам; работающие сайты, RU-трафик и личный прокси проходят нетронутыми. Покрытие: YouTube, Discord, Telegram, соцсети, Google, AI, LinkedIn, торренты, Twitch, EpicGames/Fortnite, Amazon.
 
@@ -126,7 +126,16 @@
 
 --new
 
---name=Исключения (RU сайты)
+--name=Исключения домены (RU сайты)
+--filter-tcp=80,443-65535
+--hostlist=lists/netrogat.txt
+--out-range=-d8
+--payload=tls_client_hello
+--lua-desync=pass
+
+--new
+
+--name=Исключения айпи (RU сайты)
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-ru.txt
 --ipset=lists/ipset-dns.txt

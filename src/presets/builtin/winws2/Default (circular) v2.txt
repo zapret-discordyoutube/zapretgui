@@ -1,6 +1,6 @@
 # Preset: Default v2 (circular)
 # ActivePreset: Default v2 (circular)
-# BuiltinVersion: 2.25
+# BuiltinVersion: 2.40
 # Modified: 2026-01-21T17:52:34.648239
 # IconColor: #a8c5ff
 
@@ -95,7 +95,16 @@
 
 --new
 
---name=Исключения (RU сайты)
+--name=Исключения домены (RU сайты)
+--filter-tcp=80,443-65535
+--hostlist=lists/netrogat.txt
+--out-range=-d8
+--payload=tls_client_hello
+--lua-desync=pass
+
+--new
+
+--name=Исключения айпи (RU сайты)
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-ru.txt
 --ipset=lists/ipset-dns.txt
