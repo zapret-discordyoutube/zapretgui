@@ -25,7 +25,17 @@ class ServerPool:
     """Пул серверов с балансировкой нагрузки и автоматическим переключением"""
     
     def __init__(self):
-        self.servers = VPS_SERVERS.copy()
+        # Старые и некоторые сгенерированные runtime-конфиги не содержат
+        # priority. Порядок элементов в UPDATE_SERVERS уже задаёт тот же
+        # приоритет, поэтому восстанавливаем его до первого обращения к пулу.
+        self.servers = []
+        for index, configured_server in enumerate(VPS_SERVERS, start=1):
+            server = dict(configured_server)
+            try:
+                server["priority"] = int(server.get("priority", index))
+            except (TypeError, ValueError):
+                server["priority"] = index
+            self.servers.append(server)
         self.stats = self._load_stats()
         self.selected_server = self._load_selected_server()
 
