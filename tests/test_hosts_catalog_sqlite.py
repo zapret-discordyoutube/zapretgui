@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.08.27.1")
+        self.assertEqual(catalog.catalog_version, "2026.08.27.2")
         self.assertEqual(len(catalog.content_sha256), 64)
         self.assertEqual(len(catalog.service_order), 73)
         self.assertEqual(len(catalog.dns_profiles), 8)
@@ -116,7 +116,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             github_order = connection.execute(
                 "SELECT sort_order FROM services WHERE service_id = 'hosts.github'"
             ).fetchone()[0]
-            self.assertEqual(sort_order, github_order + 1)
+            self.assertEqual(sort_order, github_order - 1)
             rows = connection.execute(
                 "SELECT hostname, ip_address FROM hosts_entries"
                 " WHERE service_id = 'hosts.githubusercontent_ipv6'"
