@@ -81,9 +81,9 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.08.14.1")
+        self.assertEqual(catalog.catalog_version, "2026.08.27.1")
         self.assertEqual(len(catalog.content_sha256), 64)
-        self.assertEqual(len(catalog.service_order), 72)
+        self.assertEqual(len(catalog.service_order), 73)
         self.assertEqual(len(catalog.dns_profiles), 8)
         self.assertEqual(catalog.service_id_by_name["Discord"], "hosts.discord")
         self.assertEqual(
@@ -99,9 +99,38 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 818)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 5723)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM hosts_entries").fetchone()[0], 427)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM hosts_entries").fetchone()[0], 499)
         finally:
             connection.close()
+
+    def test_githubusercontent_ipv6_service_is_present_and_pure_ipv6(self) -> None:
+        connection = sqlite3.connect(PRIVATE_DATABASE)
+        try:
+            service = connection.execute(
+                "SELECT category, kind, sort_order FROM services"
+                " WHERE service_id = 'hosts.githubusercontent_ipv6'"
+            ).fetchone()
+            self.assertIsNotNone(service)
+            category, kind, sort_order = service
+            self.assertEqual((category, kind), ("direct", "hosts"))
+            github_order = connection.execute(
+                "SELECT sort_order FROM services WHERE service_id = 'hosts.github'"
+            ).fetchone()[0]
+            self.assertEqual(sort_order, github_order + 1)
+            rows = connection.execute(
+                "SELECT hostname, ip_address FROM hosts_entries"
+                " WHERE service_id = 'hosts.githubusercontent_ipv6'"
+            ).fetchall()
+        finally:
+            connection.close()
+
+        self.assertEqual(len(rows), 72)
+        hostnames = {hostname for hostname, _ in rows}
+        self.assertEqual(len(hostnames), 18)
+        self.assertIn("raw.githubusercontent.com", hostnames)
+        self.assertIn("objects.githubusercontent.com", hostnames)
+        for _, ip in rows:
+            self.assertTrue(ip.startswith("2606:50c0:800"), ip)
 
     def test_runtime_reads_dns_and_direct_rows_from_sqlite(self) -> None:
         self.assertEqual(

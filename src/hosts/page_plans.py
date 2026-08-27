@@ -43,6 +43,7 @@ class HostsServiceRowPlan:
     selected_profile: str | None
     toggle_enabled: bool
     toggle_checked: bool
+    unavailable_reason: str | None = None
 
 
 @dataclass(slots=True)
@@ -616,6 +617,21 @@ def format_dns_profile_label(profile_name: str) -> str:
     return _DNS_PROFILE_IP_SUFFIX.sub("", label).strip()
 
 
+IPV6_UNAVAILABLE_REASON = "Недоступно: для этого сервиса требуется IPv6-подключение"
+
+
+def _service_is_ipv6_only(candidates_by_profile: dict[str, dict[str, list[str]]]) -> bool:
+    from hosts.ipv6_detection import is_ipv6_address
+
+    all_ips = [
+        ip
+        for domain_candidates in (candidates_by_profile or {}).values()
+        for ips in (domain_candidates or {}).values()
+        for ip in (ips or [])
+    ]
+    return bool(all_ips) and all(is_ipv6_address(ip) for ip in all_ips)
+
+
 def build_services_catalog_plan(
     *,
     current_selection: dict[str, str],
@@ -623,8 +639,14 @@ def build_services_catalog_plan(
     direct_title: str,
     ai_title: str,
     other_title: str,
+    ipv6_available: bool | None = None,
 ) -> HostsServicesCatalogPlan:
     from hosts.proxy_domains import get_services_profile_index
+
+    if ipv6_available is None:
+        from hosts.ipv6_detection import is_ipv6_available
+
+        ipv6_available = is_ipv6_available()
 
     profile_index = get_services_profile_index()
     all_dns_profiles = [
@@ -732,19 +754,32 @@ def build_services_catalog_plan(
             selected_profile: str | None = None
             toggle_checked = False
             toggle_enabled = bool(entry.toggle_enabled) if entry is not None else False
+            unavailable_reason: str | None = None
 
-            inferred_profile = entry.selected_profile if entry is not None else None
-            if inferred_profile in available_profiles:
-                selected_profile = inferred_profile
-                new_selection[service_name] = inferred_profile
-            elif saved_profile in available_profiles and not bool(entry and entry.has_active_domains):
-                selected_profile = saved_profile
-                new_selection[service_name] = saved_profile
+            ipv6_blocked = not ipv6_available and _service_is_ipv6_only(
+                profile_domain_ip_candidates_by_service.get(service_name) or {}
+            )
+            if ipv6_blocked:
+                # Без IPv6 записи такого сервиса всё равно не применятся; тумблер
+                # гасится, но сохранённый выбор пользователя не трогаем, чтобы он
+                # вернулся сам при появлении IPv6.
+                toggle_enabled = False
+                unavailable_reason = IPV6_UNAVAILABLE_REASON
+                if saved_profile is not None:
+                    new_selection[service_name] = saved_profile
+            else:
+                inferred_profile = entry.selected_profile if entry is not None else None
+                if inferred_profile in available_profiles:
+                    selected_profile = inferred_profile
+                    new_selection[service_name] = inferred_profile
+                elif saved_profile in available_profiles and not bool(entry and entry.has_active_domains):
+                    selected_profile = saved_profile
+                    new_selection[service_name] = saved_profile
 
-            if entry is not None and entry.direct_only:
-                toggle_checked = bool(selected_profile and selected_profile == direct_profile)
-            elif entry is not None:
-                toggle_checked = bool(entry.toggle_checked)
+                if entry is not None and entry.direct_only:
+                    toggle_checked = bool(selected_profile and selected_profile == direct_profile)
+                elif entry is not None:
+                    toggle_checked = bool(entry.toggle_checked)
 
             icon = icon_by_service.get(service_name, ("fa5s.globe", None))
             if not isinstance(icon, (list, tuple)) or len(icon) != 2:
@@ -765,6 +800,7 @@ def build_services_catalog_plan(
                     selected_profile=selected_profile,
                     toggle_enabled=toggle_enabled,
                     toggle_checked=toggle_checked,
+                    unavailable_reason=unavailable_reason,
                 )
             )
 

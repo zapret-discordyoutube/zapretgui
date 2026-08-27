@@ -966,6 +966,8 @@ class HostsPage(BasePage):
         self.add_widget(widgets.card)
 
     def _service_row_plan_with_current_selection(self, row_plan):
+        if getattr(row_plan, "unavailable_reason", None):
+            return replace(row_plan, selected_profile=None, toggle_checked=False)
         selected_profile = self._service_dns_selection.get(row_plan.service_name, row_plan.selected_profile)
         if selected_profile in row_plan.available_profiles:
             return replace(

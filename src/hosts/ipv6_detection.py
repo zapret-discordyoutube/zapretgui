@@ -4,7 +4,8 @@ import ctypes
 import ipaddress
 import os
 import socket
-from functools import lru_cache
+import threading
+import time
 
 
 _IPV6_PROBE_TARGETS: tuple[tuple[str, int], ...] = (
@@ -18,6 +19,8 @@ _ERROR_BUFFER_OVERFLOW = 111
 _ERROR_SUCCESS = 0
 _IF_OPER_STATUS_UP = 1
 _IF_TYPE_SOFTWARE_LOOPBACK = 24
+_IF_TYPE_TUNNEL = 131
+_IP_DAD_STATE_PREFERRED = 4
 _GAA_FLAGS = 0x0002 | 0x0004 | 0x0008 | 0x0080
 
 
@@ -111,16 +114,31 @@ def is_ipv6_address(value: str) -> bool:
         return False
 
 
-def _is_usable_local_ipv6(value: str) -> bool:
+def _parse_ipv6(value: str) -> ipaddress.IPv6Address | None:
     try:
         addr = ipaddress.ip_address(str(value or "").strip())
     except ValueError:
+        return None
+    return addr if addr.version == 6 else None
+
+
+def _is_usable_local_ipv6(value: str) -> bool:
+    # Наружу по IPv6 можно ходить только с глобального адреса: is_global разом
+    # отсекает ULA (fd00::/8), Teredo, 6to4, link-local, loopback и multicast.
+    addr = _parse_ipv6(value)
+    if addr is None or addr.ipv4_mapped is not None:
         return False
+    return bool(addr.is_global) and not addr.is_multicast
+
+
+def _is_usable_gateway_ipv6(value: str) -> bool:
+    # Шлюз из Router Advertisement — почти всегда link-local (fe80::/10),
+    # поэтому здесь link-local допустим, в отличие от локального адреса.
+    addr = _parse_ipv6(value)
     return (
-        addr.version == 6
+        addr is not None
         and not addr.is_unspecified
         and not addr.is_loopback
-        and not addr.is_link_local
         and not addr.is_multicast
     )
 
@@ -138,7 +156,7 @@ def _has_gateway_ipv6(adapter: _IpAdapterAddresses) -> bool:
     gateway = adapter.FirstGatewayAddress
     while gateway:
         ip = _socket_address_to_ipv6(gateway.contents.Address)
-        if _is_usable_local_ipv6(ip):
+        if _is_usable_gateway_ipv6(ip):
             return True
         gateway = gateway.contents.Next
     return False
@@ -147,10 +165,12 @@ def _has_gateway_ipv6(adapter: _IpAdapterAddresses) -> bool:
 def _has_unicast_ipv6(adapter: _IpAdapterAddresses) -> bool:
     unicast = adapter.FirstUnicastAddress
     while unicast:
-        ip = _socket_address_to_ipv6(unicast.contents.Address)
-        if _is_usable_local_ipv6(ip):
-            return True
-        unicast = unicast.contents.Next
+        current = unicast.contents
+        if current.DadState == _IP_DAD_STATE_PREFERRED:
+            ip = _socket_address_to_ipv6(current.Address)
+            if _is_usable_local_ipv6(ip):
+                return True
+        unicast = current.Next
     return False
 
 
@@ -188,6 +208,7 @@ def _is_ipv6_available_winapi() -> bool:
         if (
             current.OperStatus == _IF_OPER_STATUS_UP
             and current.IfType != _IF_TYPE_SOFTWARE_LOOPBACK
+            and current.IfType != _IF_TYPE_TUNNEL
             and _has_gateway_ipv6(current)
             and _has_unicast_ipv6(current)
         ):
@@ -218,13 +239,34 @@ def _is_ipv6_available_socket_probe() -> bool:
     return False
 
 
-@lru_cache(maxsize=1)
+# IPv6 может появиться или пропасть посреди сессии (VPN, кабель, Wi-Fi),
+# поэтому результат кэшируется лишь на короткий срок, а не на весь процесс.
+_IPV6_CACHE_TTL_SECONDS = 30.0
+_ipv6_cache_lock = threading.Lock()
+_ipv6_cache_value: bool | None = None
+_ipv6_cache_at = 0.0
+
+
 def is_ipv6_available() -> bool:
     """Проверяет, есть ли рабочий IPv6 у пользователя."""
+    global _ipv6_cache_value, _ipv6_cache_at
+    with _ipv6_cache_lock:
+        if (
+            _ipv6_cache_value is not None
+            and time.monotonic() - _ipv6_cache_at < _IPV6_CACHE_TTL_SECONDS
+        ):
+            return _ipv6_cache_value
     if os.name == "nt":
-        return _is_ipv6_available_winapi()
-    return _is_ipv6_available_socket_probe()
+        value = _is_ipv6_available_winapi()
+    else:
+        value = _is_ipv6_available_socket_probe()
+    with _ipv6_cache_lock:
+        _ipv6_cache_value = value
+        _ipv6_cache_at = time.monotonic()
+    return value
 
 
 def reset_ipv6_detection_cache() -> None:
-    is_ipv6_available.cache_clear()
+    global _ipv6_cache_value
+    with _ipv6_cache_lock:
+        _ipv6_cache_value = None

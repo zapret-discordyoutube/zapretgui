@@ -426,6 +426,7 @@ class HostsFileManagerTests(unittest.TestCase):
         from hosts import ipv6_detection
 
         ipv6_detection.reset_ipv6_detection_cache()
+        self.addCleanup(ipv6_detection.reset_ipv6_detection_cache)
         with (
             patch.object(ipv6_detection.os, "name", "nt"),
             patch.object(ipv6_detection, "_is_ipv6_available_winapi", return_value=True) as winapi_probe,

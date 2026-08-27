@@ -236,10 +236,15 @@ def build_hosts_service_row(
         enable_keyboard_toggle(control)
         control.setEnabled(row_plan.toggle_enabled)
         control.setChecked(row_plan.toggle_checked)
+        unavailable_reason = getattr(row_plan, "unavailable_reason", None)
+        if unavailable_reason:
+            row_widget.setToolTip(str(unavailable_reason))
+            control.setToolTip(str(unavailable_reason))
         _update_direct_service_accessibility(
             control,
             service_name=row_plan.service_name,
             checked=row_plan.toggle_checked,
+            unavailable_reason=unavailable_reason,
         )
         toggle_signal = getattr(control, "checkedChanged", None) or getattr(control, "toggled", None)
         toggle_signal.connect(
@@ -297,9 +302,18 @@ def build_hosts_service_row(
     )
 
 
-def _update_direct_service_accessibility(control, *, service_name: str, checked: bool) -> None:
-    state = "включено" if bool(checked) else "выключено"
-    state_text = f"{service_name}, {state}"
+def _update_direct_service_accessibility(
+    control,
+    *,
+    service_name: str,
+    checked: bool,
+    unavailable_reason: str | None = None,
+) -> None:
+    if unavailable_reason:
+        state_text = f"{service_name}, {unavailable_reason}"
+    else:
+        state = "включено" if bool(checked) else "выключено"
+        state_text = f"{service_name}, {state}"
     set_state_text(control, state_text)
     set_control_accessibility(
         control,
