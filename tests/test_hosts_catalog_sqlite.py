@@ -84,7 +84,8 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertEqual(catalog.catalog_version, "2026.08.27.2")
         self.assertEqual(len(catalog.content_sha256), 64)
         self.assertEqual(len(catalog.service_order), 73)
-        self.assertEqual(len(catalog.dns_profiles), 8)
+        self.assertEqual(len(catalog.dns_profiles), 7)
+        self.assertNotIn("fin_dns", catalog.dns_profiles)
         self.assertEqual(catalog.service_id_by_name["Discord"], "hosts.discord")
         self.assertEqual(
             catalog.service_id_by_name["ChatGPT & Sora (OpenAI)"],
@@ -98,7 +99,18 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 818)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 5723)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 4905)
+            self.assertIsNone(
+                connection.execute(
+                    "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
+                ).fetchone()
+            )
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM dns_answers WHERE ip_address = '31.77.140.129'"
+                ).fetchone()[0],
+                0,
+            )
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM hosts_entries").fetchone()[0], 499)
         finally:
             connection.close()
@@ -245,7 +257,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                     """
                 ).fetchone()[0]
                 connection.execute(
-                    "DELETE FROM dns_answers WHERE domain_id = ? AND profile_id = 'fin_dns'",
+                    "DELETE FROM dns_answers WHERE domain_id = ? AND profile_id = 'xbox_dns_old'",
                     (domain_id,),
                 )
                 connection.commit()
@@ -258,7 +270,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                 available = self.proxy_domains.get_service_available_dns_profiles(
                     "ChatGPT & Sora (OpenAI)"
                 )
-            self.assertNotIn("fin_dns", available)
+            self.assertNotIn("xbox_dns_old", available)
             self.assertIn("xbox_dns", available)
 
     def test_multiple_answers_preserve_priority_and_top_ip_map(self) -> None:
@@ -317,7 +329,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
     def test_user_selection_is_stored_by_stable_id_and_orphans_are_retained(self) -> None:
         stored = {
             "dns.chatgpt_and_sora_openai": "xbox_dns_old",
-            "removed.future_service": "fin_dns",
+            "removed.future_service": "future_dns",
         }
         written: list[dict[str, str]] = []
         with (
@@ -341,7 +353,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertEqual(
             written,
             [{
-                "removed.future_service": "fin_dns",
+                "removed.future_service": "future_dns",
                 "dns.chatgpt_and_sora_openai": "xbox_dns",
             }],
         )

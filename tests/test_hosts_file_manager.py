@@ -28,11 +28,11 @@ class HostsFileManagerTests(unittest.TestCase):
         result = hosts_commands.execute_hosts_operation(
             FakeHostsManager(),
             "apply_selection",
-            {"ChatGPT": "fin_dns"},
+            {"ChatGPT": "xbox_dns"},
         )
 
         self.assertTrue(result.success)
-        self.assertEqual(calls, ["apply:fin_dns"])
+        self.assertEqual(calls, ["apply:xbox_dns"])
 
     def test_get_hosts_state_uses_read_only_access_check(self) -> None:
         from hosts import commands as hosts_commands
