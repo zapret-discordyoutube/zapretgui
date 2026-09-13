@@ -402,7 +402,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
         ipset_lines = ipset_path.read_text(encoding="utf-8").splitlines()
         self.assertEqual(ipset_lines[0], "# https://ipinfo.io/AS16509")
         entries = [line.strip() for line in ipset_lines if line.strip() and not line.lstrip().startswith("#")]
-        self.assertEqual(len(entries), 7875)
+        self.assertEqual(len(entries), 7876)
         self.assertEqual(len(entries), len(set(entries)))
         self.assertTrue(
             {
@@ -410,6 +410,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
                 "15.129.0.0/18",
                 "108.157.224.0/21",
                 "184.192.0.0/10",
+                "195.93.178.0/24",
                 "2406:da00::/24",
                 "2600:1f20:c000::/36",
                 "2620:108:d000::/44",
