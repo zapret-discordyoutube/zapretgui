@@ -16,6 +16,13 @@ class SemanticPalette:
     error: str
     info: str
 
+    # Читаемый цвет текста/значка статуса поверх мягкого фона: в светлой теме
+    # яркие success/warning/error слишком бледные, поэтому берутся тёмные
+    # оттенки Windows 11.
+    success_text: str
+    warning_text: str
+    error_text: str
+
     warning_soft: str
     warning_soft_bg: str
     warning_button: str
@@ -50,13 +57,19 @@ class SemanticPalette:
 def get_semantic_palette(theme_name: str | None = None) -> SemanticPalette:
     tokens = get_theme_tokens(theme_name)
     on_color = "rgba(18, 18, 18, 0.92)" if tokens.is_light else "rgba(245, 245, 245, 0.95)"
+    success = "#6ccb5f"
+    warning = "#ff9800"
+    error = "#ff5252"
 
     return SemanticPalette(
         on_color=on_color,
-        success="#6ccb5f",
-        warning="#ff9800",
-        error="#ff5252",
+        success=success,
+        warning=warning,
+        error=error,
         info=tokens.accent_hex,
+        success_text="#0f7b0f" if tokens.is_light else success,
+        warning_text="#9d5d00" if tokens.is_light else warning,
+        error_text="#c42b1c" if tokens.is_light else error,
         warning_soft="rgba(255, 152, 0, 0.85)",
         warning_soft_bg="rgba(255, 152, 0, 0.15)",
         warning_button="rgba(255, 152, 0, 0.8)",
