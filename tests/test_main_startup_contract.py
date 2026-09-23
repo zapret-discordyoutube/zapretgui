@@ -1413,7 +1413,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         premium_deps = SimpleNamespace(
             thread_parent=object(),
             set_status=Mock(),
-            update_title_badge=Mock(),
             init_holiday_effects=Mock(),
             mark_startup_ready=Mock(),
         )
@@ -1469,7 +1468,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         deps = SimpleNamespace(
             thread_parent="thread-parent",
             set_status=Mock(),
-            update_title_badge=Mock(),
             init_holiday_effects=Mock(),
             mark_startup_ready=Mock(),
         )

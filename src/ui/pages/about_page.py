@@ -341,17 +341,7 @@ class AboutPage(BasePage):
         plan = about_page_plans.build_subscription_status_plan(
             is_premium=is_premium,
             days=days,
-            free_text=tr_catalog("page.about.subscription.free", language=self._ui_language, default="Free версия"),
-            premium_active_text=tr_catalog(
-                "page.about.subscription.premium_active",
-                language=self._ui_language,
-                default="Premium активен",
-            ),
-            premium_days_template=tr_catalog(
-                "page.about.subscription.premium_days",
-                language=self._ui_language,
-                default="Premium (осталось {days} дней)",
-            ),
+            language=self._ui_language,
             free_icon_color=tokens.fg_faint,
             premium_icon_color="#ffc107",
         )

@@ -51,6 +51,26 @@ class AppearancePageUiGuardTests(unittest.TestCase):
         page.set_garland_state.assert_not_called()
         page.set_snowflakes_state.assert_not_called()
 
+    def test_subscription_check_result_passes_known_status_to_premium_gating(self) -> None:
+        from ui.pages.appearance_page import AppearancePage
+
+        page = AppearancePage.__new__(AppearancePage)
+        page._cleanup_in_progress = False
+        page.set_opacity_value = Mock()
+        page.set_premium_status = Mock()
+        page.set_garland_state = Mock()
+        page.set_snowflakes_state = Mock()
+        page._current_bg_preset_from_ui = Mock(return_value="amoled")
+
+        for known in (False, True):
+            page.set_premium_status.reset_mock()
+            AppearancePage._on_ui_state_changed(
+                page,
+                AppUiState(subscription_known=known, subscription_is_premium=False),
+                frozenset({"subscription_known"}),
+            )
+            self.assertEqual(page.set_premium_status.call_args.kwargs["status_known"], known)
+
     def test_garland_state_change_skips_unrelated_appearance_repaint_for_premium(self) -> None:
         from ui.pages.appearance_page import AppearancePage
 

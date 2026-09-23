@@ -844,11 +844,23 @@ def save_selected_theme(theme_name: str) -> bool:
 def build_premium_status_plan(
     *,
     is_premium: bool,
+    status_known: bool,
     current_preset: str,
     was_garland_enabled: bool,
     was_snowflakes_enabled: bool,
     premium_effects: AppearancePremiumEffectsPlan,
 ) -> AppearancePremiumStatusPlan:
+    if not status_known:
+        # Статус подписки ещё не проверен: ничего не сбрасываем и не сохраняем,
+        # иначе у Premium-пользователя при запуске пропали бы фон и эффекты.
+        return AppearancePremiumStatusPlan(
+            effective_preset=None,
+            garland_checked=bool(premium_effects.garland_enabled),
+            snowflakes_checked=bool(premium_effects.snowflakes_enabled),
+            disable_garland=False,
+            disable_snowflakes=False,
+        )
+
     effective_preset = None
     if not is_premium and current_preset in ("amoled", "rkn_chan"):
         effective_preset = "standard"

@@ -47,7 +47,7 @@ src/ui/state/app_runtime_state.py
 | Feature | State | Где живёт | Что можно класть в MainWindowStateStore |
 | --- | --- | --- | --- |
 | Runtime | public snapshot + private tracking state | `winws_runtime/state/launch_runtime_service.py` | Только `launch_*` UI-сводку. `pid`, expected process и счётчики проверок остаются внутри runtime. |
-| Premium | `PremiumState` | `src/donater/state.py` | Только `subscription_is_premium` и `subscription_days_remaining` для глобального UI. Pairing, status, level, source, error остаются в Premium layer. |
+| Premium | `PremiumState` | `src/donater/state.py` | Только `subscription_known`, `subscription_is_premium` и `subscription_days_remaining` для глобального UI (`subscription_known=False` — первая проверка ещё не завершилась, это не Free). Пишет только `donater/subscription_ui.py`, показывает всё через правила `donater/premium_display.py`. Pairing, status, level, source остаются в Premium layer. |
 | Presets/Profile | `PresetSelectionState`, profile payload/state | `src/presets/state.py`, `src/profile/state.py` | Только `current_strategy_summary` и revision-счётчики. Имена файлов, profile details и selected source path остаются в presets/profile. |
 | DNS | `DnsState`, `DnsCommandResult` | `src/dns/state.py` | Ничего. DNS details нужны DNS-странице и DNS feature. |
 | Hosts | `HostsState`, `HostsCommandResult` | `src/hosts/state.py` | Ничего. Hosts details нужны Hosts-странице и Hosts feature. |

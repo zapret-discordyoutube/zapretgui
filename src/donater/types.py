@@ -17,14 +17,3 @@ class ActivationStatus:
     is_linked: Optional[bool] = None
     subscription_level: str = "–"
     source: str = "api"
-
-    def get_formatted_expiry(self) -> str:
-        if not self.is_activated:
-            return "Не активировано"
-        if self.days_remaining is None:
-            return "Активировано"
-        if self.days_remaining == 0:
-            return "Истекает сегодня"
-        if self.days_remaining == 1:
-            return "1 день"
-        return f"{self.days_remaining} дн."

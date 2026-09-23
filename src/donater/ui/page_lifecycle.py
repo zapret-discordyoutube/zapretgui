@@ -7,24 +7,21 @@ from donater.ui.accessibility import (
     apply_premium_instructions_accessibility,
     apply_premium_pair_code_accessibility,
 )
+from donater.premium_display import premium_display_from_ui_state
 from ui.accessibility import set_state_text
 from ui.fluent_widgets import set_tooltip
 
 
 def apply_subscription_snapshot_ui(
     *,
-    is_premium: bool,
-    days_remaining: int | None,
-    build_subscription_snapshot_plan_fn,
+    display,
+    build_premium_display_plans_fn,
     set_status_badge_fn,
     set_days_state_kind_fn,
     set_days_state_value_fn,
     render_days_label_fn,
 ) -> None:
-    badge_plan, days_plan, _emitted_days = build_subscription_snapshot_plan_fn(
-        is_premium=is_premium,
-        days_remaining=days_remaining,
-    )
+    badge_plan, days_plan = build_premium_display_plans_fn(display)
     set_status_badge_fn(
         status=badge_plan.status,
         text_key=badge_plan.text_key,
@@ -81,7 +78,7 @@ def bind_premium_subscription_state_store(
     set_unsubscribe_fn(
         store.subscribe(
             on_ui_state_changed_fn,
-            fields={"subscription_is_premium", "subscription_days_remaining"},
+            fields={"subscription_known", "subscription_is_premium", "subscription_days_remaining"},
             emit_initial=True,
         )
     )
@@ -92,10 +89,11 @@ def handle_premium_ui_state_changed(
     state,
     apply_subscription_snapshot_fn,
 ) -> None:
-    apply_subscription_snapshot_fn(
-        state.subscription_is_premium,
-        state.subscription_days_remaining,
-    )
+    display = premium_display_from_ui_state(state)
+    if not display.is_known:
+        # Первая проверка ещё идёт — оставляем карточку «Проверка...».
+        return
+    apply_subscription_snapshot_fn(display)
 
 
 def run_premium_runtime_init_once(
@@ -159,8 +157,14 @@ def cleanup_premium_page(
     set_cleanup_in_progress_fn,
     stop_pairing_status_autopoll_fn,
     premium_action_runtime,
+    unsubscribe_ui_state_fn,
 ) -> None:
     set_cleanup_in_progress_fn(True)
+    if callable(unsubscribe_ui_state_fn):
+        try:
+            unsubscribe_ui_state_fn()
+        except Exception:
+            pass
     stop_pairing_status_autopoll_fn()
     premium_action_runtime.stop(
         blocking=False,

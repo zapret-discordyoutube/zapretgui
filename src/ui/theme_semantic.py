@@ -38,6 +38,14 @@ class SemanticPalette:
     success_soft_bg: str
     success_soft_border: str
 
+    # Янтарные Premium-метки и серая метка Free.
+    premium_fg: str
+    premium_bg: str
+    premium_bg_hover: str
+    neutral_badge_fg: str
+    neutral_badge_bg: str
+    neutral_badge_bg_hover: str
+
 
 def get_semantic_palette(theme_name: str | None = None) -> SemanticPalette:
     tokens = get_theme_tokens(theme_name)
@@ -66,4 +74,10 @@ def get_semantic_palette(theme_name: str | None = None) -> SemanticPalette:
         success_badge="#2e7d32",
         success_soft_bg="rgba(108, 203, 95, 0.15)",
         success_soft_border="rgba(108, 203, 95, 0.5)",
+        premium_fg="#b45309" if tokens.is_light else "#fbbf24",
+        premium_bg="rgba(255, 193, 7, 0.16)",
+        premium_bg_hover="rgba(255, 193, 7, 0.28)",
+        neutral_badge_fg=tokens.fg_muted,
+        neutral_badge_bg="rgba(128, 128, 128, 0.16)",
+        neutral_badge_bg_hover="rgba(128, 128, 128, 0.28)",
     )

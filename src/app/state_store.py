@@ -16,6 +16,10 @@ class AppUiState:
     last_status_message: str = ""
     current_strategy_summary: str = ""
     preset_content_change_kind: str = ""
+    # Пока первая проверка Premium не завершилась, False в subscription_is_premium
+    # означает «ещё не знаем», а не Free — такой статус нельзя показывать и
+    # по нему нельзя отключать Premium-настройки.
+    subscription_known: bool = False
     subscription_is_premium: bool = False
     subscription_days_remaining: int | None = None
     garland_enabled: bool = False
@@ -180,6 +184,7 @@ class MainWindowStateStore:
     def set_subscription(self, is_premium: bool, days_remaining: int | None = None) -> bool:
         normalized_days = None if not is_premium else days_remaining
         return self.update(
+            subscription_known=True,
             subscription_is_premium=bool(is_premium),
             subscription_days_remaining=normalized_days,
         )

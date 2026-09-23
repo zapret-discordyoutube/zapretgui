@@ -4,7 +4,7 @@ from PyQt6.QtCore import QObject
 from donater.state import premium_state_from_activation_info
 from donater.subscription_ui import (
     apply_subscription_progress_to_ui,
-    apply_premium_state_to_ui,
+    apply_premium_state_to_store,
     apply_subscription_init_failed_to_ui,
     apply_subscription_ready_to_ui,
     apply_subscription_starting_to_ui,
@@ -78,7 +78,6 @@ class SubscriptionManager:
         if not success:
             log("PremiumService не инициализирован", "⚠ WARNING")
             apply_subscription_init_failed_to_ui(
-                update_title_badge=self.ui_actions.update_title_badge,
                 set_status=self.ui_actions.set_status,
                 mark_startup_ready=self.ui_actions.mark_startup_ready,
             )
@@ -92,9 +91,8 @@ class SubscriptionManager:
             "DEBUG",
         )
 
-        apply_premium_state_to_ui(
+        apply_premium_state_to_store(
             ui_state_store=self.ui_actions.ui_state_store,
-            update_title_badge=self.ui_actions.update_title_badge,
             state=state,
         )
         apply_subscription_ready_to_ui(

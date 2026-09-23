@@ -25,7 +25,6 @@ def build_window_feature_deps(window_deps: FeatureWindowDeps, *, appearance_acti
         premium=PremiumFeatureDeps(
             thread_parent=window_deps.qt_parent,
             set_status=window_deps.set_status,
-            update_title_badge=window_deps.update_title_badge,
             init_holiday_effects=lambda effects_allowed: initialize_window_holiday_effects(
                 window_deps.qt_parent,
                 effects_allowed=effects_allowed,

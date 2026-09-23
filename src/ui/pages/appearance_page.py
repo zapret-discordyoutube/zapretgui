@@ -257,7 +257,13 @@ class AppearancePage(BasePage):
         self._ui_state_store = store
         self._ui_state_unsubscribe = store.subscribe(
             self._on_ui_state_changed,
-            fields={"subscription_is_premium", "garland_enabled", "snowflakes_enabled", "window_opacity"},
+            fields={
+                "subscription_known",
+                "subscription_is_premium",
+                "garland_enabled",
+                "snowflakes_enabled",
+                "window_opacity",
+            },
             emit_initial=True,
         )
 
@@ -280,6 +286,7 @@ class AppearancePage(BasePage):
         )
         self.set_premium_status(
             state.subscription_is_premium,
+            status_known=state.subscription_known,
             current_preset=self._current_bg_preset_from_ui(),
             premium_effects=premium_effects,
         )
@@ -719,9 +726,12 @@ class AppearancePage(BasePage):
 
         self.set_mica_state(initial_state.mica_enabled)
         try:
-            is_premium, garland_enabled, snowflakes_enabled, window_opacity = self._current_appearance_state()
+            is_premium, status_known, garland_enabled, snowflakes_enabled, window_opacity = (
+                self._current_appearance_state()
+            )
             self.set_premium_status(
                 is_premium,
+                status_known=status_known,
                 current_preset=self._current_bg_preset_from_ui(),
                 premium_effects=appearance_settings.AppearancePremiumEffectsPlan(
                     garland_enabled=garland_enabled,
@@ -1679,6 +1689,7 @@ class AppearancePage(BasePage):
         self,
         is_premium: bool,
         *,
+        status_known: bool,
         current_preset: str,
         premium_effects: appearance_settings.AppearancePremiumEffectsPlan,
     ):
@@ -1695,6 +1706,7 @@ class AppearancePage(BasePage):
 
         premium_plan = appearance_settings.build_premium_status_plan(
             is_premium=is_premium,
+            status_known=status_known,
             current_preset=current_preset,
             was_garland_enabled=was_garland_enabled,
             was_snowflakes_enabled=was_snowflakes_enabled,
@@ -1781,13 +1793,14 @@ class AppearancePage(BasePage):
             self._opacity_label.setText(f"{value}%")
             update_opacity_value_label_accessibility(self._opacity_label, value)
 
-    def _current_appearance_state(self) -> tuple[bool, bool, bool, int]:
+    def _current_appearance_state(self) -> tuple[bool, bool, bool, bool, int]:
         store = self._ui_state_store
         if store is not None:
             try:
                 snapshot = store.snapshot()
                 return (
                     bool(snapshot.subscription_is_premium),
+                    bool(snapshot.subscription_known),
                     bool(snapshot.garland_enabled),
                     bool(snapshot.snowflakes_enabled),
                     int(snapshot.window_opacity),
@@ -1798,7 +1811,7 @@ class AppearancePage(BasePage):
         garland_enabled = bool(self._garland_checkbox and self._garland_checkbox.isChecked())
         snowflakes_enabled = bool(self._snowflakes_checkbox and self._snowflakes_checkbox.isChecked())
         window_opacity = int(self._opacity_slider.value()) if self._opacity_slider is not None else 100
-        return False, garland_enabled, snowflakes_enabled, window_opacity
+        return False, False, garland_enabled, snowflakes_enabled, window_opacity
 
     def _on_animations_changed(self, enabled: bool):
         """Handle animations SwitchButton toggle."""

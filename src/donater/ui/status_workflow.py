@@ -104,7 +104,7 @@ def apply_status_check_success(
     set_activation_section_visible: Callable[[bool], None],
     stop_autopoll: Callable[[], None],
     sync_autopoll: Callable[[], None],
-    apply_subscription_state: Callable[[bool, int], None],
+    apply_subscription_state: Callable[[bool, int | None], None],
 ) -> tuple[bool, int]:
     refresh_btn.set_loading(False)
     update_device_info()
@@ -114,6 +114,11 @@ def apply_status_check_success(
         linked_hint=linked_hint,
         unlinked_hint=unlinked_hint,
     )
+    # Сначала store: его подписчики (включая эту страницу) перерисуются по
+    # общим правилам, а карточка ниже добавит детали именно этой проверки.
+    # Невалидный ответ сервера не означает Free — store в этом случае не трогаем.
+    if plan.valid:
+        apply_subscription_state(plan.is_premium, plan.days_remaining)
 
     set_status_badge(
         status=plan.badge_plan.status,
@@ -145,7 +150,6 @@ def apply_status_check_success(
     elif plan.sync_autopoll:
         sync_autopoll()
 
-    apply_subscription_state(plan.emitted_is_premium, plan.emitted_days)
     return plan.days_plan.kind, plan.days_plan.value
 
 
@@ -206,9 +210,12 @@ def apply_reset_plan_ui(
     render_days_label: Callable[[], None],
     set_activation_section_visible: Callable[[bool], None],
     stop_autopoll: Callable[[], None],
-    apply_subscription_state: Callable[[bool, int], None],
+    apply_subscription_state: Callable[[bool, int | None], None],
 ) -> tuple[str, int]:
     plan = premium_page_plans.build_reset_plan()
+    # Привязка сброшена — устройство теперь Free. Store пишем до карточки,
+    # чтобы подписка страницы не перетёрла сообщение «Привязка сброшена».
+    apply_subscription_state(False, None)
 
     if plan.clear_pair_input:
         key_input.clear()
@@ -232,5 +239,4 @@ def apply_reset_plan_ui(
     set_activation_section_visible(plan.show_activation_section)
     if plan.stop_autopoll:
         stop_autopoll()
-    apply_subscription_state(plan.emitted_is_premium, plan.emitted_days)
     return plan.days_plan.kind, plan.days_plan.value

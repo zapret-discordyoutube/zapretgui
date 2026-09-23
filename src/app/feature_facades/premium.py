@@ -8,7 +8,6 @@ from typing import Any
 @dataclass(frozen=True, slots=True)
 class PremiumPageData:
     device_info: dict | None
-    premium_state: Any | None
 
 
 @dataclass(slots=True)
@@ -36,7 +35,6 @@ class PremiumFeature:
             self._ui_actions = SubscriptionUiActions(
                 set_status=deps.set_status,
                 ui_state_store=self._ui_state_store,
-                update_title_badge=deps.update_title_badge,
                 init_holiday_effects=deps.init_holiday_effects,
                 mark_startup_ready=deps.mark_startup_ready,
             )
@@ -148,20 +146,12 @@ class PremiumFeature:
     def warm_page_data_cache(self) -> PremiumPageData:
         current_time = int(time.time())
         device_info = self.read_device_info_snapshot(current_time=current_time)
-        premium_state = None
         try:
-            premium_state = self.get_premium_state(use_cache=True)
-            self.apply_subscription_state_to_ui_store(
-                is_premium=bool(premium_state.is_premium),
-                days_remaining=premium_state.days_remaining,
-            )
+            self._apply_premium_state_to_ui_store(self.get_premium_state(use_cache=True))
         except Exception:
-            premium_state = None
+            pass
 
-        self._warmed_page_data = PremiumPageData(
-            device_info=device_info,
-            premium_state=premium_state,
-        )
+        self._warmed_page_data = PremiumPageData(device_info=device_info)
         return self._warmed_page_data
 
     def consume_warmed_page_data(self) -> PremiumPageData | None:
@@ -171,13 +161,18 @@ class PremiumFeature:
 
     def apply_subscription_state_to_ui_store(self, *, is_premium: bool, days_remaining: int | None) -> None:
         premium_commands = self._commands()
-        premium_commands.apply_premium_state_to_store(
-            ui_state_store=self._ui_state_store or self._ensure_ui_actions().ui_state_store,
-            state=premium_commands.PremiumState(
+        self._apply_premium_state_to_ui_store(
+            premium_commands.PremiumState(
                 is_premium=bool(is_premium),
-                days_remaining=int(days_remaining or 0) if is_premium else None,
+                days_remaining=premium_commands.normalize_days_remaining(days_remaining) if is_premium else None,
                 source="premium_page",
-            ),
+            )
+        )
+
+    def _apply_premium_state_to_ui_store(self, state) -> None:
+        self._commands().apply_premium_state_to_store(
+            ui_state_store=self._ui_state_store or self._ensure_ui_actions().ui_state_store,
+            state=state,
         )
 
 

@@ -8,7 +8,6 @@ from main.window_lifecycle import WindowLifecycleMixin
 from main.window_startup import WindowStartupMixin
 from main.window_state_sync import WindowStateSyncMixin
 from ui.fluent_app_window import ZapretFluentWindow
-from ui.theme_subscription_manager import ThemeSubscriptionManager
 from ui.window_ui_facade import MainWindowUI
 
 class LupiDPIApp(
@@ -18,9 +17,8 @@ class LupiDPIApp(
     WindowStateSyncMixin,
     ZapretFluentWindow,
     MainWindowUI,
-    ThemeSubscriptionManager,
 ):
-    """Главное окно приложения — FluentWindow + навигация + подписки."""
+    """Главное окно приложения — FluentWindow + навигация."""
 
     deferred_init_requested = pyqtSignal()
     continue_startup_requested = pyqtSignal()

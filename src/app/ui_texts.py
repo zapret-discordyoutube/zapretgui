@@ -185,10 +185,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Базовые функции",
         "en": "Basic features",
     },
-    "page.control.summary.premium.days_left": {
-        "ru": "Осталось {days} дней",
-        "en": "{days} days left",
-    },
     "page.control.summary.premium.active_details": {
         "ru": "Активен",
         "en": "Active",
@@ -698,8 +694,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Premium active",
     },
     "page.about.subscription.premium_days": {
-        "ru": "Premium (осталось {days} дней)",
-        "en": "Premium ({days} days left)",
+        "ru": "Premium (осталось {days} {unit})",
+        "en": "Premium ({days} {unit} left)",
     },
     "page.about.subscription.desc": {
         "ru": "Подписка Zapret Premium открывает доступ к дополнительным темам, приоритетной поддержке и VPN-сервису.",
@@ -2476,10 +2472,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.premium.status.active.title": {
         "ru": "Подписка активна",
         "en": "Subscription active",
-    },
-    "page.premium.status.active.days_left": {
-        "ru": "Осталось {days} дней",
-        "en": "{days} days left",
     },
     "page.premium.status.expiring_soon.title": {
         "ru": "Скоро истекает!",
@@ -4516,6 +4508,54 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
     "common.badge.premium": {
         "ru": "⭐ Premium",
         "en": "⭐ Premium",
+    },
+    "common.premium.tier.free": {
+        "ru": "Free",
+        "en": "Free",
+    },
+    "common.premium.tier.premium": {
+        "ru": "Premium",
+        "en": "Premium",
+    },
+    "common.premium.days_left": {
+        "ru": "Осталось {days} {unit}",
+        "en": "{days} {unit} left",
+    },
+    "common.premium.days_unit.one": {
+        "ru": "день",
+        "en": "day",
+    },
+    "common.premium.days_unit.few": {
+        "ru": "дня",
+        "en": "days",
+    },
+    "common.premium.days_unit.many": {
+        "ru": "дней",
+        "en": "days",
+    },
+    "titlebar.subscription.free": {
+        "ru": "FREE",
+        "en": "FREE",
+    },
+    "titlebar.subscription.premium": {
+        "ru": "PREMIUM",
+        "en": "PREMIUM",
+    },
+    "titlebar.subscription.premium_days": {
+        "ru": "PREMIUM · {days} дн.",
+        "en": "PREMIUM · {days} d",
+    },
+    "titlebar.subscription.free.tooltip": {
+        "ru": "Бесплатная версия. Нажмите, чтобы узнать о Premium",
+        "en": "Free version. Click to learn about Premium",
+    },
+    "titlebar.subscription.premium.tooltip": {
+        "ru": "Premium активен. Нажмите, чтобы открыть страницу подписки",
+        "en": "Premium is active. Click to open the subscription page",
+    },
+    "titlebar.subscription.premium_days.tooltip": {
+        "ru": "Premium активен. {days_left}. Нажмите, чтобы открыть страницу подписки",
+        "en": "Premium is active: {days_left}. Click to open the subscription page",
     },
     "common.toggle.on_off": {
         "ru": "Вкл/Выкл",

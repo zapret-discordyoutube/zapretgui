@@ -2,6 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from donater.premium_display import (
+    TIER_ACTIVE,
+    TIER_URGENT,
+    TIER_WARNING,
+    PremiumDisplay,
+    build_premium_display,
+)
+
 
 @dataclass(slots=True)
 class PremiumStatusBadgePlan:
@@ -39,12 +47,11 @@ class PremiumServerStatusPlan:
 class PremiumStatusCheckPlan:
     valid: bool
     is_premium: bool
+    days_remaining: int | None
     is_linked: bool
     hide_activation_section: bool
     stop_autopoll: bool
     sync_autopoll: bool
-    emitted_is_premium: bool
-    emitted_days: int
     badge_plan: PremiumStatusBadgePlan
     days_plan: PremiumDaysPlan
 
@@ -92,8 +99,6 @@ class PremiumResetPlan:
     days_plan: PremiumDaysPlan
     show_activation_section: bool
     stop_autopoll: bool
-    emitted_is_premium: bool
-    emitted_days: int
 
 
 @dataclass(slots=True)
@@ -144,76 +149,62 @@ def build_page_init_plan(*, runtime_initialized: bool) -> PremiumPageInitPlan:
         init_server_status_plan=build_server_status_plan(mode="idle"),
     )
 
-def build_subscription_snapshot_plan(is_premium: bool, days_remaining: int | None) -> tuple[PremiumStatusBadgePlan, PremiumDaysPlan, int]:
-    if is_premium:
-        if days_remaining is None:
-            return (
-                PremiumStatusBadgePlan(
-                    status="active",
-                    text_key="page.premium.status.active.title",
-                    text_default="Premium активен",
-                    text_kwargs={},
-                    details_key=None,
-                    details_default="",
-                    details_kwargs={},
-                ),
-                PremiumDaysPlan(kind="none", value=0),
-                0,
-            )
-        if days_remaining > 30:
-            return (
-                PremiumStatusBadgePlan(
-                    status="active",
-                    text_key="page.premium.status.active.title",
-                    text_default="Premium активен",
-                    text_kwargs={},
-                    details_key="page.premium.status.active.days_left",
-                    details_default="Осталось {days} дней",
-                    details_kwargs={"days": days_remaining},
-                ),
-                PremiumDaysPlan(kind="normal", value=int(days_remaining)),
-                int(days_remaining),
-            )
-        if days_remaining > 7:
-            return (
-                PremiumStatusBadgePlan(
-                    status="warning",
-                    text_key="page.premium.status.active.title",
-                    text_default="Premium активен",
-                    text_kwargs={},
-                    details_key="page.premium.status.active.days_left",
-                    details_default="Осталось {days} дней",
-                    details_kwargs={"days": days_remaining},
-                ),
-                PremiumDaysPlan(kind="warning", value=int(days_remaining)),
-                int(days_remaining),
-            )
+_DAYS_KIND_BY_TIER = {
+    TIER_ACTIVE: "normal",
+    TIER_WARNING: "warning",
+    TIER_URGENT: "urgent",
+}
+
+
+def build_premium_display_plans(display: PremiumDisplay) -> tuple[PremiumStatusBadgePlan, PremiumDaysPlan]:
+    """Карточка статуса и подпись дней по общим правилам donater.premium_display."""
+    if not display.is_premium:
         return (
             PremiumStatusBadgePlan(
-                status="expired",
-                text_key="page.premium.status.expiring_soon.title",
-                text_default="Premium скоро закончится",
+                status="neutral",
+                text_key="page.premium.status.inactive.title",
+                text_default="Подписка не активна",
                 text_kwargs={},
-                details_key="page.premium.status.active.days_left",
-                details_default="Осталось {days} дней",
-                details_kwargs={"days": days_remaining},
+                details_key=None,
+                details_default="",
+                details_kwargs={},
             ),
-            PremiumDaysPlan(kind="urgent", value=int(days_remaining)),
-            int(days_remaining),
+            PremiumDaysPlan(kind="none", value=0),
+        )
+
+    if display.tier == TIER_URGENT:
+        title_key = "page.premium.status.expiring_soon.title"
+        title_default = "Скоро истекает!"
+    else:
+        title_key = "page.premium.status.active.title"
+        title_default = "Подписка активна"
+
+    if display.days is None:
+        return (
+            PremiumStatusBadgePlan(
+                status="active",
+                text_key=title_key,
+                text_default=title_default,
+                text_kwargs={},
+                details_key=None,
+                details_default="",
+                details_kwargs={},
+            ),
+            PremiumDaysPlan(kind="none", value=0),
         )
 
     return (
         PremiumStatusBadgePlan(
-            status="neutral",
-            text_key="page.premium.status.inactive.title",
-            text_default="Подписка не активирована",
+            # ≤7 дней — жёлтое предупреждение, а не красный крест: подписка ещё работает.
+            status="active" if display.tier == TIER_ACTIVE else "warning",
+            text_key=title_key,
+            text_default=title_default,
             text_kwargs={},
-            details_key=None,
-            details_default="",
-            details_kwargs={},
+            details_key="common.premium.days_left",
+            details_default="Осталось {days} {unit}",
+            details_kwargs={"days": display.days},
         ),
-        PremiumDaysPlan(kind="none", value=0),
-        0,
+        PremiumDaysPlan(kind=_DAYS_KIND_BY_TIER[display.tier], value=display.days),
     )
 
 def build_activation_status_plan(
@@ -242,12 +233,11 @@ def build_status_check_plan(result, *, linked_hint: str, unlinked_hint: str, err
         return PremiumStatusCheckPlan(
             valid=False,
             is_premium=False,
+            days_remaining=None,
             is_linked=False,
             hide_activation_section=False,
             stop_autopoll=False,
             sync_autopoll=False,
-            emitted_is_premium=False,
-            emitted_days=0,
             badge_plan=PremiumStatusBadgePlan(
                 status="expired",
                 text_key="page.premium.status.error.title",
@@ -264,12 +254,11 @@ def build_status_check_plan(result, *, linked_hint: str, unlinked_hint: str, err
         return PremiumStatusCheckPlan(
             valid=False,
             is_premium=False,
+            days_remaining=None,
             is_linked=False,
             hide_activation_section=False,
             stop_autopoll=False,
             sync_autopoll=False,
-            emitted_is_premium=False,
-            emitted_days=0,
             badge_plan=PremiumStatusBadgePlan(
                 status="expired",
                 text_key="page.premium.status.error.title",
@@ -284,99 +273,39 @@ def build_status_check_plan(result, *, linked_hint: str, unlinked_hint: str, err
 
     is_premium = bool(result.get("is_premium", result.get("activated")))
     is_linked = bool(result.get("found"))
+    display = build_premium_display(
+        is_premium=is_premium,
+        days_remaining=result.get("days_remaining") if is_premium else None,
+    )
+    badge_plan, days_plan = build_premium_display_plans(display)
 
     if is_premium:
-        days_remaining = result.get("days_remaining")
-        if days_remaining is None:
-            badge_plan = PremiumStatusBadgePlan(
-                status="active",
-                text_key="page.premium.status.active.title",
-                text_default="Подписка активна",
-                text_kwargs={},
-                details_key=None,
-                details_default="",
-                details_kwargs={},
-            )
-            details = result.get("status", "")
-            badge_plan = PremiumStatusBadgePlan(
-                status=badge_plan.status,
-                text_key=badge_plan.text_key,
-                text_default=badge_plan.text_default,
-                text_kwargs=badge_plan.text_kwargs,
-                details_key=None,
-                details_default=str(details or ""),
-                details_kwargs={},
-            )
-            return PremiumStatusCheckPlan(
-                valid=True,
-                is_premium=True,
-                is_linked=True,
-                hide_activation_section=True,
-                stop_autopoll=True,
-                sync_autopoll=False,
-                emitted_is_premium=True,
-                emitted_days=0,
-                badge_plan=badge_plan,
-                days_plan=PremiumDaysPlan(kind="none", value=0),
-            )
-
-        if days_remaining > 30:
-            status = "active"
-            title_key = "page.premium.status.active.title"
-            title_default = "Подписка активна"
-            days_kind = "normal"
-        elif days_remaining > 7:
-            status = "warning"
-            title_key = "page.premium.status.active.title"
-            title_default = "Подписка активна"
-            days_kind = "warning"
-        else:
-            status = "warning"
-            title_key = "page.premium.status.expiring_soon.title"
-            title_default = "Скоро истекает!"
-            days_kind = "urgent"
-
+        if display.days is None:
+            # Срок неизвестен — показываем текст статуса от сервиса вместо «осталось N дней».
+            badge_plan.details_default = str(result.get("status", "") or "")
         return PremiumStatusCheckPlan(
             valid=True,
             is_premium=True,
+            days_remaining=display.days,
             is_linked=True,
             hide_activation_section=True,
             stop_autopoll=True,
             sync_autopoll=False,
-            emitted_is_premium=True,
-            emitted_days=int(days_remaining),
-            badge_plan=PremiumStatusBadgePlan(
-                status=status,
-                text_key=title_key,
-                text_default=title_default,
-                text_kwargs={},
-                details_key="page.premium.status.active.days_left",
-                details_default="Осталось {days} дней",
-                details_kwargs={"days": days_remaining},
-            ),
-            days_plan=PremiumDaysPlan(kind=days_kind, value=int(days_remaining)),
+            badge_plan=badge_plan,
+            days_plan=days_plan,
         )
 
-    details = result.get("status", "") or (linked_hint if is_linked else unlinked_hint)
+    badge_plan.details_default = str(result.get("status", "") or (linked_hint if is_linked else unlinked_hint))
     return PremiumStatusCheckPlan(
         valid=True,
         is_premium=False,
+        days_remaining=None,
         is_linked=is_linked,
         hide_activation_section=bool(is_linked),
         stop_autopoll=bool(is_linked),
         sync_autopoll=not bool(is_linked),
-        emitted_is_premium=False,
-        emitted_days=0,
-        badge_plan=PremiumStatusBadgePlan(
-            status="expired",
-            text_key="page.premium.status.inactive.title",
-            text_default="Подписка не активна",
-            text_kwargs={},
-            details_key=None,
-            details_default=str(details or ""),
-            details_kwargs={},
-        ),
-        days_plan=PremiumDaysPlan(kind="none", value=0),
+        badge_plan=badge_plan,
+        days_plan=days_plan,
     )
 
 def build_pair_code_start_plan() -> PremiumPairCodeStartPlan:
@@ -525,8 +454,6 @@ def build_reset_plan() -> PremiumResetPlan:
         days_plan=PremiumDaysPlan(kind="none", value=0),
         show_activation_section=True,
         stop_autopoll=True,
-        emitted_is_premium=False,
-        emitted_days=0,
     )
 
 def build_device_info_plan(

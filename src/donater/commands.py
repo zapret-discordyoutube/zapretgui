@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from donater.state import PremiumState, premium_state_from_subscription_info
+from donater.state import PremiumState, normalize_days_remaining, premium_state_from_activation_info
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,9 +80,8 @@ def get_premium_state(
     use_cache: bool = True,
     automatic: bool = False,
 ) -> PremiumState:
-    service = checker if checker is not None else get_premium_checker()
-    info = dict(service.get_full_subscription_info(use_cache=use_cache, automatic=automatic) or {})
-    return premium_state_from_subscription_info(info)
+    info = check_device_activation(checker, use_cache=use_cache, automatic=automatic)
+    return premium_state_from_activation_info(info)
 
 
 def apply_premium_state_to_store(*, ui_state_store, state: PremiumState) -> None:

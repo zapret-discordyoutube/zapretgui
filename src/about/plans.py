@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.ui_texts import tr as tr_catalog
+from donater.premium_display import build_premium_display, days_unit
+
 
 @dataclass(slots=True)
 class AboutTabSwitchPlan:
@@ -46,25 +49,32 @@ def build_subscription_status_plan(
     *,
     is_premium: bool,
     days: int | None,
-    free_text: str,
-    premium_active_text: str,
-    premium_days_template: str,
+    language: str,
     free_icon_color: str,
     premium_icon_color: str,
 ) -> AboutSubscriptionPlan:
-    if is_premium:
-        if days is not None:
-            label_text = premium_days_template.format(days=days)
-        else:
-            label_text = premium_active_text
+    display = build_premium_display(is_premium=is_premium, days_remaining=days)
+    if not display.is_premium:
         return AboutSubscriptionPlan(
-            icon_name="fa5s.star",
-            icon_color=premium_icon_color,
-            label_text=label_text,
+            icon_name="fa5s.user",
+            icon_color=free_icon_color,
+            label_text=tr_catalog("page.about.subscription.free", language=language, default="Free версия"),
         )
 
+    if display.days is None:
+        label_text = tr_catalog(
+            "page.about.subscription.premium_active",
+            language=language,
+            default="Premium активен",
+        )
+    else:
+        label_text = tr_catalog(
+            "page.about.subscription.premium_days",
+            language=language,
+            default="Premium (осталось {days} {unit})",
+        ).format(days=display.days, unit=days_unit(display.days, language=language))
     return AboutSubscriptionPlan(
-        icon_name="fa5s.user",
-        icon_color=free_icon_color,
-        label_text=free_text,
+        icon_name="fa5s.star",
+        icon_color=premium_icon_color,
+        label_text=label_text,
     )

@@ -422,24 +422,6 @@ class PremiumService:
             "source": status.source,
         }
 
-    def get_full_subscription_info(
-        self, *, use_cache: bool = False, automatic: bool = False
-    ) -> Dict[str, Any]:
-        info = self.check_device_activation(
-            use_cache=use_cache, automatic=automatic
-        )
-        is_premium = bool(info.get("activated"))
-        return {
-            "is_premium": is_premium,
-            "status_msg": info.get("status")
-            or ("Premium активен" if is_premium else "Не активировано"),
-            "days_remaining": info["days_remaining"] if is_premium else None,
-            "subscription_level": (
-                info["subscription_level"] if is_premium else "–"
-            ),
-            "source": info.get("source") or "api",
-        }
-
 
 _SERVICE: Optional[PremiumService] = None
 

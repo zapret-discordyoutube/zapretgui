@@ -25,7 +25,6 @@ class RuntimeFeatureDeps:
 class PremiumFeatureDeps:
     thread_parent: Any
     set_status: Any
-    update_title_badge: Any
     init_holiday_effects: Any
     mark_startup_ready: Any
 

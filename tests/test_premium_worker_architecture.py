@@ -441,10 +441,14 @@ class PremiumWorkerArchitectureTests(unittest.TestCase):
         page._premium_action_runtime_worker = object()
         page._pending_premium_action = "activate"
         page._pending_premium_action_start_scheduled = True
+        unsubscribe_ui_state = Mock()
+        page._ui_state_unsubscribe = unsubscribe_ui_state
 
         PremiumPage.cleanup(page)
 
         self.assertTrue(page._cleanup_in_progress)
+        unsubscribe_ui_state.assert_called_once_with()
+        self.assertIsNone(page._ui_state_unsubscribe)
         self.assertFalse(page._open_bot_pending)
         self.assertFalse(page._open_bot_start_scheduled)
         self.assertFalse(page._device_info_pending)

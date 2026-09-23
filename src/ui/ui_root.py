@@ -12,6 +12,7 @@ from ui.window_bootstrap_runtime import (
     initialize_build_ui_state,
 )
 from ui.navigation.schema import get_eager_page_names_for_method
+from ui.window_state_binder import bind_window_ui_state
 from app.page_names import PageName
 
 
@@ -75,6 +76,7 @@ class WindowUiRoot:
         started_at = time.perf_counter()
         init_navigation(self._window)
         _metric("StartupWindowUiRootNavigation", started_at)
+        bind_window_ui_state(self._window, self._runtime_bootstrap_deps.ui_state_store)
         started_at = time.perf_counter()
         finalize_page_stack_bootstrap(self._window)
         _metric("StartupWindowUiRootStack", started_at)

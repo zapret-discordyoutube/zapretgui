@@ -56,6 +56,7 @@ from donater.ui.status_workflow import (
 from app.state_store import AppUiState, MainWindowStateStore
 from ui.theme_semantic import get_semantic_palette
 from app.ui_texts import tr as tr_catalog
+from donater.premium_display import PremiumDisplay, days_unit
 from ui.accessibility import set_state_text
 
 
@@ -143,6 +144,10 @@ class PremiumPage(BasePage):
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         text = tr_catalog(key, language=self._ui_language, default=default)
+        if "{unit}" in text and "days" in kwargs and "unit" not in kwargs:
+            # «Осталось {days} {unit}»: склонение «день/дня/дней» зависит от языка,
+            # поэтому считается при каждой отрисовке, а не хранится в плане.
+            kwargs["unit"] = days_unit(int(kwargs["days"]), language=self._ui_language)
         if kwargs:
             try:
                 return text.format(**kwargs)
@@ -202,7 +207,7 @@ class PremiumPage(BasePage):
 
         self.status_badge.set_status(text, details, state.get("status") or "neutral")
 
-    def _apply_subscription_state(self, is_premium: bool, days_remaining: int) -> None:
+    def _apply_subscription_state(self, is_premium: bool, days_remaining: int | None) -> None:
         self._premium.apply_subscription_state_to_ui_store(
             is_premium=bool(is_premium),
             days_remaining=days_remaining,
@@ -283,11 +288,10 @@ class PremiumPage(BasePage):
             apply_subscription_snapshot_fn=self._apply_subscription_snapshot,
         )
 
-    def _apply_subscription_snapshot(self, is_premium: bool, days_remaining: int | None) -> None:
+    def _apply_subscription_snapshot(self, display: PremiumDisplay) -> None:
         apply_subscription_snapshot_ui(
-            is_premium=is_premium,
-            days_remaining=days_remaining,
-            build_subscription_snapshot_plan_fn=premium_page_plans.build_subscription_snapshot_plan,
+            display=display,
+            build_premium_display_plans_fn=premium_page_plans.build_premium_display_plans,
             set_status_badge_fn=self._set_status_badge,
             set_days_state_kind_fn=lambda value: setattr(self, "_days_state_kind", value),
             set_days_state_value_fn=lambda value: setattr(self, "_days_state_value", value),
@@ -354,7 +358,9 @@ class PremiumPage(BasePage):
             set_cleanup_in_progress_fn=lambda value: setattr(self, "_cleanup_in_progress", value),
             stop_pairing_status_autopoll_fn=self._stop_pairing_status_autopoll,
             premium_action_runtime=self._premium_action_runtime,
+            unsubscribe_ui_state_fn=self._ui_state_unsubscribe,
         )
+        self._ui_state_unsubscribe = None
         self._open_bot_state_obj().reset()
         self._open_bot_runtime.stop(
             blocking=False,

@@ -225,7 +225,7 @@ class BackendPageDataWarmupTests(unittest.TestCase):
         snapshot = {"device_token": "token", "pair_code": None, "last_check": 123, "device_id": "dev"}
         page = SimpleNamespace(
             _premium_action_runtime=SimpleNamespace(is_running=Mock(return_value=False)),
-            _premium=SimpleNamespace(consume_warmed_page_data=Mock(return_value=PremiumPageData(device_info=snapshot, premium_state=None))),
+            _premium=SimpleNamespace(consume_warmed_page_data=Mock(return_value=PremiumPageData(device_info=snapshot))),
             _start_worker_thread=Mock(),
             _on_premium_init_complete=Mock(),
         )

@@ -75,6 +75,10 @@ def on_ui_language_changed(window, language: str) -> None:
     refresh_navigation_texts(window)
     refresh_pages_language(window)
 
+    from ui.window_state_binder import retranslate_subscription_title_badge
+
+    retranslate_subscription_title_badge(window)
+
 
 def apply_ui_language_to_page(window, page: QWidget | None) -> None:
     if page is None:

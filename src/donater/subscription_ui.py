@@ -11,7 +11,6 @@ from log.log import log
 class SubscriptionUiActions:
     set_status: Callable[[str], None]
     ui_state_store: object
-    update_title_badge: Callable
     init_holiday_effects: Callable[[bool], None]
     mark_startup_ready: Callable[[str], None]
 
@@ -26,40 +25,30 @@ def apply_subscription_progress_to_ui(*, set_status, message: str) -> None:
     set_status(str(message or ""))
 
 
-def apply_premium_state_to_ui(
-    *,
-    ui_state_store,
-    update_title_badge,
-    state: PremiumState,
-) -> None:
-    """Применяет Premium-статус к состоянию окна и верхней метке."""
-    ui_state_store.set_subscription(state.is_premium, state.days_remaining)
-    update_title_badge(
-        state.is_premium,
-        state.days_remaining,
-        source=state.source,
-    )
-    log(f"Обновлена Premium-метка: premium={state.is_premium}", "DEBUG")
-
-
 def apply_premium_state_to_store(*, ui_state_store, state: PremiumState) -> None:
     """Записывает Premium-статус в общий UI-store.
 
-    Страница Premium не должна напрямую решать, какие поля store менять.
-    Она передаёт готовое Premium-состояние сюда, а этот слой остаётся
-    единым местом применения Premium-состояния к AppUiState.
+    Это единственное место, где Premium-состояние попадает в AppUiState.
+    Заголовок окна, страницы и сводки подписаны на store и обновляются сами.
     """
     ui_state_store.set_subscription(state.is_premium, state.days_remaining)
+    log(
+        f"Premium-статус записан в UI-store: premium={state.is_premium}, "
+        f"days={state.days_remaining}, source={state.source}",
+        "DEBUG",
+    )
 
 
 def apply_subscription_init_failed_to_ui(
     *,
-    update_title_badge,
     set_status,
     mark_startup_ready,
 ) -> None:
-    """Показывает состояние, когда PremiumService не удалось запустить."""
-    update_title_badge(False, source="subscription_init_failed")
+    """Показывает состояние, когда PremiumService не удалось запустить.
+
+    Store не трогаем: статус остаётся «неизвестен», поэтому метка в заголовке
+    не показывает ложный FREE, а Premium-настройки не сбрасываются.
+    """
     set_status("Ошибка инициализации подписок")
     mark_startup_ready("subscription_init_failed")
 

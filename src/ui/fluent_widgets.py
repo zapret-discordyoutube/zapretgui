@@ -588,14 +588,23 @@ def build_premium_badge(text: str, parent=None) -> QLabel:
 
     badge_text = str(text or "")
     badge = QLabel(badge_text, parent)
-    badge.setStyleSheet(
-        "color: #b45309; "
-        "font-size: 10px; "
-        "font-weight: bold; "
-        "background: rgba(255, 193, 7, 0.15); "
-        "padding: 2px 6px; "
-        "border-radius: 4px;"
-    )
+
+    def _apply(tokens=None, force: bool = False) -> None:
+        _ = force
+        from ui.theme_semantic import get_semantic_palette
+
+        palette = get_semantic_palette(getattr(tokens, "theme_name", None))
+        badge.setStyleSheet(
+            f"color: {palette.premium_fg}; "
+            "font-size: 10px; "
+            "font-weight: 600; "
+            f"background: {palette.premium_bg}; "
+            "padding: 2px 6px; "
+            "border-radius: 4px;"
+        )
+
+    _apply()
+    badge._premium_badge_theme_refresh = ThemeRefreshBinding(badge, _apply)  # type: ignore[attr-defined]
     clean_text = " ".join(badge_text.strip().split())
     if clean_text:
         set_state_text(badge, f"Метка Premium: {clean_text}")
