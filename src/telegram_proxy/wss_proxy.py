@@ -311,6 +311,12 @@ class TelegramWSProxy:
         self.stats.upstream_connections += 1
         return opened
 
+    def spawn_background(self, coro) -> None:
+        """Фоновая задача сессии, которая может пережить соединение клиента."""
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
     def upstream_recv_ok(self, opened: OpenedUpstream) -> None:
         self._upstream_runtime.record_recv_ok(opened)
 

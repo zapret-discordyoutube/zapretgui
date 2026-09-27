@@ -53,9 +53,12 @@ def rpc_packet(body_len: int) -> bytes:
 class FakeTelegramWs:
     """WebSocket, за которым «Telegram»: принимает заголовок и отвечает эхом пакетов."""
 
-    def __init__(self, target: ws_module.WsTarget, *, answer: bool):
+    def __init__(self, target: ws_module.WsTarget, *, answer: bool, answer_delay: float = 0.0):
         self.target = target
         self.answer = answer
+        self.answer_delay = answer_delay
+        # Сырой поток сокета: сессия смотрит в него, когда клиент ушёл раньше ответа.
+        self.reader = asyncio.StreamReader()
         self.frames: list[bytes] = []
         self.packets: list[bytes] = []
         self.header_tail = b""
@@ -83,13 +86,21 @@ class FakeTelegramWs:
             self.packets.extend(packets)
             if self.answer:
                 for packet in packets:
-                    self._inbox.put_nowait(self._encrypt.update(encode_packet(ABRIDGED, answer_for(packet))))
+                    reply = self._encrypt.update(encode_packet(ABRIDGED, answer_for(packet)))
+                    asyncio.get_running_loop().call_later(self.answer_delay, self._deliver, reply)
+
+    def _deliver(self, reply: bytes) -> None:
+        if self.is_closing:
+            return
+        self.reader.feed_data(reply)
+        self._inbox.put_nowait(reply)
 
     async def recv(self) -> bytes | None:
         return await self._inbox.get()
 
     async def close(self) -> None:
         self.is_closing = True
+        self.reader.feed_eof()
         self._inbox.put_nowait(None)
 
 
@@ -132,11 +143,16 @@ class SessionScenarioTests(unittest.IsolatedAsyncioTestCase):
         self.sockets: list[FakeTelegramWs] = []
         self.logs: list[str] = []
         self.refuse_ws = False
+        self.relay_answer_delay: float | None = None
 
         async def fake_connect(target, **_kwargs):
             if self.refuse_ws:
                 raise ws_module.WsConnectError(ws_module.STAGE_TCP, "refused")
-            sock = FakeTelegramWs(target, answer=target.connect_host != RELAY_IP)
+            if target.connect_host == RELAY_IP:
+                delay = self.relay_answer_delay
+                sock = FakeTelegramWs(target, answer=delay is not None, answer_delay=delay or 0.0)
+            else:
+                sock = FakeTelegramWs(target, answer=True)
             self.sockets.append(sock)
             return sock
 
@@ -220,16 +236,49 @@ class SessionScenarioTests(unittest.IsolatedAsyncioTestCase):
         relay = self.sockets[0]
         self.assertEqual(relay.target.sni, "kws4-1.web.telegram.org")
 
-    async def test_client_gone_before_answer_is_not_blamed_on_route(self) -> None:
+    async def _leave_early(self) -> TelegramWSProxy:
         proxy = await self._start(mode="socks5")
         reader, writer = await self._socks5_connect("149.154.167.51", 443)
         header, to_server, _from_server = make_client_header(b"\xef" * 4, 2)
         writer.write(header + to_server.update(encode_packet(ABRIDGED, rpc_packet(16))))
         await writer.drain()
+        # Desktop на первых попытках ждёт ответа всего ~1 с — уходит раньше сторожа.
         await asyncio.sleep(0.1)
         writer.close()
-        await asyncio.sleep(0.3)
-        self.assertFalse(proxy.route_health._entries.get("kws2.web.telegram.org"))
+        await asyncio.sleep(0.5)
+        return proxy
+
+    async def test_silent_relay_is_blamed_even_if_client_left_early(self) -> None:
+        proxy = await self._leave_early()
+        self.assertTrue(
+            any("route=WSS" in line and "result=error" in line and "client left early" in line for line in self.logs),
+            self.logs,
+        )
+        self.assertEqual(proxy.stats.recv_zero_count, 1)
+
+    async def test_relay_answering_after_client_left_is_not_blamed(self) -> None:
+        self.relay_answer_delay = 0.2
+        proxy = await self._leave_early()
+        self.assertTrue(any("answered later" in line for line in self.logs), self.logs)
+        self.assertFalse(any("result=error" in line for line in self.logs), self.logs)
+        self.assertEqual(proxy.stats.recv_zero_count, 0)
+
+    async def test_silent_pooled_socket_is_not_retried_fresh(self) -> None:
+        proxy = await self._start(mode="socks5")
+        pooled = FakeTelegramWs(ws_module.WsTarget(RELAY_IP, "kws2.web.telegram.org"), answer=False)
+        proxy.ws_pool.take = lambda route: pooled if route.kind == "relay" else None
+        reader, writer = await self._socks5_connect("149.154.167.51", 443)
+        header, to_server, from_server = make_client_header(b"\xef" * 4, 2)
+        packet = rpc_packet(16)
+        writer.write(header + to_server.update(encode_packet(ABRIDGED, packet)))
+        await writer.drain()
+
+        self.assertEqual(await self._read_packets(reader, from_server, ABRIDGED, 1), [answer_for(packet)])
+        writer.close()
+        # Молчащий сокет из пула — это отказ релея: следующим идёт фронт,
+        # а не второе 5,5-секундное ожидание свежего релея.
+        self.assertFalse(any(sock.target.connect_host == RELAY_IP for sock in self.sockets))
+        self.assertFalse(any("retry fresh" in line for line in self.logs))
 
     async def test_country_socks_carries_traffic_when_wss_is_closed(self) -> None:
         requests: list[tuple[str, int]] = []

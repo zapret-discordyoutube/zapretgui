@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import ssl
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -91,16 +92,27 @@ class SessionHost(Protocol):
 
     def plan_input(self, *, dc: int, is_media: bool, target_host: str, target_port: int) -> PlanInput: ...
 
+    def spawn_background(self, coro) -> None: ...
+
 
 class _RouteFailed(Exception):
-    def __init__(self, reason: str, *, tcp_reached: bool = True, counted: bool = True):
+    def __init__(self, reason: str, *, tcp_reached: bool = True, counted: bool = True, silent: bool = False):
         self.tcp_reached = tcp_reached
         self.counted = counted
+        self.silent = silent
         super().__init__(reason)
 
 
 class _ClientGone(Exception):
-    pass
+    """Desktop закрыл соединение раньше ответа сервера.
+
+    deadline — до какого момента ещё идёт срок сторожа для уже отправленных
+    пакетов (None — к серверу ничего не ушло).
+    """
+
+    def __init__(self, deadline: float | None = None):
+        self.deadline = deadline
+        super().__init__("client closed before answer")
 
 
 class _ServerConn:
@@ -119,6 +131,10 @@ class _ServerConn:
             return
         self.writer.write(b"".join(chunks))
         await self.writer.drain()
+
+    @property
+    def raw_reader(self):
+        return self.ws.reader if self.ws is not None else self.reader
 
     async def recv(self) -> bytes | None:
         if self.ws is not None:
@@ -322,6 +338,10 @@ class TelegramSession:
                 try:
                     return await self._await_answer(route, conn, started)
                 except _RouteFailed as exc:
+                    if exc.silent:
+                        # Сервер молчал весь срок сторожа: это отказ маршрута,
+                        # а не устаревший сокет. Повтор только удвоил бы ожидание.
+                        raise
                     # Запасной сокет из пула мог устареть: не винить маршрут,
                     # а один раз открыть свежее соединение.
                     self._host.log(f"[{self._label}] pooled {route.describe()} failed: {exc}; retry fresh")
@@ -329,9 +349,15 @@ class TelegramSession:
                     conn = None
                     conn = await self._open(route, use_pool=False)
             return await self._await_answer(route, conn, started)
-        except _ClientGone:
+        except _ClientGone as gone:
             if conn is not None:
-                await self._abandon(conn)
+                if gone.deadline is not None:
+                    # Desktop ждёт ответа всего 1–2 с на первых попытках и уходит
+                    # раньше нашего сторожа. Маршрут всё равно надо оценить,
+                    # иначе молчащий релей навсегда останется первым.
+                    self._host.spawn_background(self._judge_abandoned(route, conn, gone.deadline, started))
+                else:
+                    await self._abandon(conn)
             raise
         except _RouteFailed as exc:
             if conn is not None:
@@ -365,11 +391,11 @@ class TelegramSession:
                     await conn.send(chunks)
                     sent = len(self._packets)
                     deadline = time.monotonic() + self._watchdog
-                if self._client_eof:
-                    raise _ClientGone()
+                if self._client_eof and not recv_task.done():
+                    raise _ClientGone(deadline if sent else None)
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise _RouteFailed(f"no answer in {self._watchdog:.1f}s (recv=0)")
+                    raise _RouteFailed(f"no answer in {self._watchdog:.1f}s (recv=0)", silent=True)
                 wake = asyncio.create_task(self._packet_event.wait())
                 try:
                     done, _ = await asyncio.wait(
@@ -405,6 +431,35 @@ class TelegramSession:
                 except BaseException:
                     pass
             raise
+
+    async def _judge_abandoned(self, route: Route, conn: _ServerConn, deadline: float, started: float) -> None:
+        """Досмотреть маршрут, от которого Desktop ушёл раньше срока сторожа."""
+        answered = False
+        reason = f"no answer in {self._watchdog:.1f}s (recv=0)"
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                try:
+                    data = await asyncio.wait_for(conn.raw_reader.read(1), timeout=remaining)
+                    answered = bool(data)
+                    if not data:
+                        reason = "closed before answer (recv=0)"
+                except TimeoutError:
+                    pass
+                except (ConnectionError, OSError, ssl.SSLError) as exc:
+                    reason = f"closed before answer: {_error_text(exc)}"
+            if answered:
+                self._note_route_ok(route, conn)
+                self._host.log(f"[{self._label}] client left early; {route.describe()} answered later")
+            else:
+                self._note_failure(
+                    route,
+                    _RouteFailed(f"{reason}; client left early", silent=True),
+                    started,
+                    None,
+                )
+        finally:
+            await self._abandon(conn, zero_recv=not answered)
 
     async def _abandon(self, conn: _ServerConn, *, zero_recv: bool = False) -> None:
         if conn.opened is not None:
@@ -468,18 +523,21 @@ class TelegramSession:
             reason=reason,
         )
 
-    def _note_answer(self, committed: _Committed) -> None:
-        route = committed.route
-        host = self._host
-        health = host.route_health
+    def _note_route_ok(self, route: Route, conn: _ServerConn) -> None:
+        health = self._host.route_health
         if route.connect_host:
             health.note_tcp_connected(route.connect_host)
         if route.health_key:
             health.note_answer(route.health_key)
         if route.kind == KIND_FRONT:
             health.note_front_result(route.front_index, route.front_family, tcp_ok=True, answered=True)
-        if committed.conn.opened is not None:
-            host.upstream_recv_ok(committed.conn.opened)
+        if conn.opened is not None:
+            self._host.upstream_recv_ok(conn.opened)
+
+    def _note_answer(self, committed: _Committed) -> None:
+        route = committed.route
+        host = self._host
+        self._note_route_ok(route, committed.conn)
         counter = {
             KIND_RELAY: "wss_connections",
             KIND_FRONT: "cloudflare_connections",
