@@ -9,14 +9,17 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PyQt6.QtCore import QPointF, Qt
-from PyQt6.QtGui import QPainter
+import math
+
+from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, QVariantAnimation
+from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QRadialGradient
 from PyQt6.QtWidgets import QSizePolicy
 from qfluentwidgets import TransparentPushButton, setCustomStyleSheet
 
 from app.ui_texts import tr as tr_catalog
 from donater.premium_display import TIER_UNKNOWN, PremiumDisplay, format_days_left
 from ui.accessibility import set_control_accessibility
+from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import set_tooltip
 from ui.theme_semantic import get_semantic_palette
 from ui.widgets.star_glyph import paint_star
@@ -26,6 +29,13 @@ SUBSCRIPTION_TITLE_BADGE_OBJECT_NAME = "subscriptionTitleBadge"
 # Звезда у PREMIUM рисуется кодом (не эмодзи), см. ui/widgets/star_glyph.py.
 PREMIUM_STAR_SIZE = 12
 PREMIUM_STAR_LEFT = 7
+# Раз в несколько секунд метка PREMIUM мягко разгорается золотом и гаснет:
+# звезда вспыхивает со свечением и искрой, по метке пробегает блик.
+# Между вспышками кадры не рисуются — ждёт только одиночный таймер.
+PREMIUM_SHINE_INTERVAL_MS = 6000
+PREMIUM_SHINE_DURATION_MS = 1600
+PREMIUM_SHINE_FIRST_DELAY_MS = 1200
+PREMIUM_GLOW_GOLD = "#fbbf24"
 
 
 def build_title_badge_texts(display: PremiumDisplay, *, language: str | None) -> tuple[str, str]:
@@ -101,6 +111,19 @@ class SubscriptionTitleBadge(TransparentPushButton):
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.setFixedHeight(22)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+        self._shine_t = 0.0
+        # QVariantAnimation, а не QPropertyAnimation: при выключенных
+        # анимациях WinUI общий fallback подменяет QPropertyAnimation.start.
+        self._shine = QVariantAnimation(self)
+        self._shine.setStartValue(0.0)
+        self._shine.setEndValue(1.0)
+        self._shine.setDuration(PREMIUM_SHINE_DURATION_MS)
+        self._shine.valueChanged.connect(self._on_shine_value)
+        self._shine.finished.connect(self._on_shine_finished)
+        self._shine_timer = QTimer(self)
+        self._shine_timer.setSingleShot(True)
+        self._shine_timer.timeout.connect(self.play_shine)
         self.hide()
 
     def display(self) -> PremiumDisplay:
@@ -127,6 +150,11 @@ class SubscriptionTitleBadge(TransparentPushButton):
             return not was_hidden
 
         self._apply_style(is_premium=self._display.is_premium)
+        if self._display.is_premium:
+            if not self._shine_timer.isActive() and not self.is_shining():
+                self._schedule_shine(PREMIUM_SHINE_FIRST_DELAY_MS)
+        else:
+            self._stop_shine()
         if old_text != text:
             self.setText(text)
             self.adjustSize()
@@ -136,13 +164,141 @@ class SubscriptionTitleBadge(TransparentPushButton):
             self.show()
         return was_hidden or old_text != text
 
+    # ---- вспышка PREMIUM ----------------------------------------------
+
+    def _can_shine(self) -> bool:
+        if not self._display.is_premium or not self.isVisible():
+            return False
+        window = self.window()
+        if window is not None and window.isMinimized():
+            return False
+        return are_live_animations_enabled()
+
+    def _schedule_shine(self, delay_ms: int = PREMIUM_SHINE_INTERVAL_MS) -> None:
+        self._shine_timer.stop()
+        if self._can_shine():
+            self._shine_timer.start(delay_ms)
+
+    def play_shine(self) -> None:
+        if not self._can_shine():
+            return
+        self._shine.stop()
+        self._shine.start()
+
+    def is_shining(self) -> bool:
+        return self._shine.state() == QVariantAnimation.State.Running
+
+    def _on_shine_value(self, value) -> None:
+        try:
+            self._shine_t = float(value)
+        except (TypeError, ValueError):
+            return
+        self.update()
+
+    def _on_shine_finished(self) -> None:
+        self._shine_t = 0.0
+        self.update()
+        self._schedule_shine()
+
+    def _stop_shine(self) -> None:
+        self._shine_timer.stop()
+        self._shine.stop()
+        self._shine_t = 0.0
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._schedule_shine(PREMIUM_SHINE_FIRST_DELAY_MS)
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._stop_shine()
+        super().hideEvent(event)
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            window = self.window()
+            if window is not None and window.isMinimized():
+                self._stop_shine()
+            else:
+                self._schedule_shine(PREMIUM_SHINE_FIRST_DELAY_MS)
+
     def paintEvent(self, event) -> None:  # noqa: N802
         super().paintEvent(event)
         if not self._display.is_premium:
             return
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        t = self._shine_t if self.is_shining() else 0.0
+        # Разгорание и затухание: быстро вверх, плавно вниз.
+        glow = math.sin(math.pi * min(1.0, t / 0.35)) if t < 0.35 else (1.0 - (t - 0.35) / 0.65) ** 1.5
+        glow = max(0.0, glow) if t > 0.0 else 0.0
+        body = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        shape = QPainterPath()
+        shape.addRoundedRect(body, 4, 4)
+        gold = QColor(PREMIUM_GLOW_GOLD)
+
+        if glow > 0.0:
+            # Метка целиком мягко наливается золотом и тонко очерчивается.
+            fill = QColor(gold)
+            fill.setAlphaF(0.22 * glow)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(fill)
+            painter.drawPath(shape)
+            edge = QColor(gold)
+            edge.setAlphaF(0.75 * glow)
+            painter.setPen(edge)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(shape)
+
+        if 0.12 < t < 0.8:
+            # Косой блик пробегает по метке слева направо.
+            p = (t - 0.12) / 0.68
+            band = body.width() * 0.35
+            x = body.left() - band + (body.width() + band * 2) * p
+            gradient = QLinearGradient(QPointF(x - band / 2, 0.0), QPointF(x + band / 2, body.height()))
+            gradient.setColorAt(0.0, QColor(255, 255, 255, 0))
+            gradient.setColorAt(0.5, QColor(255, 244, 214, round(120 * math.sin(math.pi * p))))
+            gradient.setColorAt(1.0, QColor(255, 255, 255, 0))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(gradient)
+            painter.drawPath(shape)
+
         center = QPointF(PREMIUM_STAR_LEFT + PREMIUM_STAR_SIZE / 2, self.height() / 2)
-        paint_star(painter, center, PREMIUM_STAR_SIZE / 2)
+        if glow > 0.0:
+            halo = QRadialGradient(center, PREMIUM_STAR_SIZE * 1.1)
+            inner = QColor(gold)
+            inner.setAlphaF(0.85 * glow)
+            outer = QColor(gold)
+            outer.setAlphaF(0.0)
+            halo.setColorAt(0.0, inner)
+            halo.setColorAt(1.0, outer)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(halo)
+            painter.drawEllipse(center, PREMIUM_STAR_SIZE * 1.1, PREMIUM_STAR_SIZE * 1.1)
+
+        painter.save()
+        painter.translate(center)
+        painter.rotate(18.0 * math.sin(2.0 * math.pi * t) * (1.0 - t))
+        scale = 1.0 + 0.3 * glow
+        painter.scale(scale, scale)
+        paint_star(painter, QPointF(0.0, 0.0), PREMIUM_STAR_SIZE / 2)
+        painter.restore()
+
+        if glow > 0.3:
+            # Искорка у верхнего кончика звезды.
+            spark = QColor(255, 255, 255)
+            spark.setAlphaF(min(1.0, glow))
+            r = 4.0 * glow
+            cx, cy = center.x() + 5.0, center.y() - 5.0
+            path = QPainterPath()
+            path.moveTo(cx, cy - r)
+            path.quadTo(cx, cy, cx + r, cy)
+            path.quadTo(cx, cy, cx, cy + r)
+            path.quadTo(cx, cy, cx - r, cy)
+            path.quadTo(cx, cy, cx, cy - r)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(spark)
+            painter.drawPath(path)
         painter.end()
 
     def _apply_style(self, *, is_premium: bool) -> None:
