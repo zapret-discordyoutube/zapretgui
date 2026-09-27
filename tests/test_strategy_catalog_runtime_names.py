@@ -91,6 +91,14 @@ class LuaDesyncFunctionsTest(_PrivateDistTestCase):
             functions |= defined & set(registered)
         return functions
 
+    def test_lua_init_files_define_each_function_once(self) -> None:
+        # Повторное `function name(` молча перетирает первое определение.
+        for init_path in WINWS2_LUA_INIT_PATHS:
+            names = _LUA_FUNCTION_RE.findall(_read(_lua_file(init_path)))
+            with self.subTest(init_path=init_path):
+                duplicates = sorted({name for name in names if names.count(name) > 1})
+                self.assertEqual(duplicates, [], f"{init_path}: функции объявлены дважды")
+
     def test_lua_init_files_exist(self) -> None:
         for init_path in WINWS2_LUA_INIT_PATHS:
             with self.subTest(init_path=init_path):
