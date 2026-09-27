@@ -389,7 +389,12 @@ def _ensure_profile_boundaries(preset: Preset) -> None:
         if _profile_has_name_directive(profile, preset.engine):
             profile.new_line = "--new"
             continue
-        name = str(profile.name or profile.display_name or f"profile {index + 1}").strip() or f"profile {index + 1}"
+        if preset.engine == ENGINE_WINWS1:
+            # winws1 (nfqws1) объявляет --new без аргумента: `--new=имя` не запускается
+            # ("option doesn't take an argument -- new"). Имя профиля в winws1 — только --comment.
+            profile.new_line = "--new"
+            continue
+        name =str(profile.name or profile.display_name or f"profile {index + 1}").strip() or f"profile {index + 1}"
         profile.new_line = f"--new={name}"
 
 
