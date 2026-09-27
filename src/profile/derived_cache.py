@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
@@ -24,9 +24,8 @@ from .match_filters import (
     strategy_catalog_from_match_lines,
 )
 from .models import Preset, Profile
-from .setup_match_text import build_profile_setup_match_tab_text
-from .state import ProfileStrategyBranch
 from .strategy_catalog import StrategyEntry
+from .strategy_shape import composite_identity, strategy_shape
 
 
 PROFILE_DERIVED_CACHE_LIMIT = 512
@@ -35,10 +34,10 @@ PROFILE_DERIVED_CACHE_LIMIT = 512
 @dataclass(slots=True, frozen=True)
 class ProfileDerivedCore:
     strategy_entries: dict[str, StrategyEntry]
-    strategy_branches: tuple[ProfileStrategyBranch, ...]
-    strategy_branches_with_match: tuple[ProfileStrategyBranch, ...]
     strategy_id: str
     strategy_name: str
+    # Типы пакетов веток составной стратегии profile-а (пусто — обычная).
+    strategy_payload_scopes: tuple[str, ...]
     list_type: str
     match_summary: str
     raw_profile_text: str
@@ -55,8 +54,7 @@ def build_profile_derived_core(
 ) -> ProfileDerivedCore:
     raw_text = profile_raw_text(profile) if raw_profile_text is None else raw_profile_text
     strategy_entries = basic_strategy_entries(profile, catalogs)
-    strategy_branches = strategy_branches_for_profile(profile, strategy_entries)
-    strategy_id, strategy_name = profile_strategy_summary(profile, strategy_entries, strategy_branches)
+    strategy_id, strategy_name = resolve_strategy(profile, strategy_entries)
     editable = read_editable_profile_settings(profile)
     # Проверки файлов hostlist/ipset — единственный диск в ядре; считаем один раз
     # и переиспользуем для list_type и editable_filter_kinds.
@@ -65,13 +63,9 @@ def build_profile_derived_core(
     match_summary = profile_match_summary(profile, list_type=list_type)
     return ProfileDerivedCore(
         strategy_entries=strategy_entries,
-        strategy_branches=strategy_branches,
-        strategy_branches_with_match=strategy_branches_with_match_text(
-            strategy_branches,
-            match_summary=match_summary,
-        ),
         strategy_id=strategy_id,
         strategy_name=strategy_name,
+        strategy_payload_scopes=profile_strategy_payload_scopes(profile),
         list_type=list_type,
         match_summary=match_summary,
         raw_profile_text=raw_text,
@@ -148,20 +142,7 @@ def basic_strategy_entries(profile: Profile, catalogs: dict[str, dict[str, Strat
     return dict(catalogs.get(catalog_name_for_profile(profile)) or {})
 
 
-def profile_strategy_summary(
-    profile: Profile,
-    entries: dict[str, StrategyEntry],
-    branches: tuple[ProfileStrategyBranch, ...],
-) -> tuple[str, str]:
-    if len(branches) <= 1:
-        return resolve_strategy(profile, entries)
-    names = [str(branch.strategy_name or "").strip() for branch in branches if str(branch.strategy_name or "").strip()]
-    visible = names[:2]
-    suffix = f" +{len(names) - len(visible)}" if len(names) > len(visible) else ""
-    label = ", ".join(visible)
-    if label:
-        return "custom", f"{len(branches)} стратегии: {label}{suffix}"
-    return "custom", f"{len(branches)} стратегии"
+CUSTOM_STRATEGY_NAME = "Своя стратегия"
 
 
 def resolve_strategy(profile: Profile, entries: dict[str, StrategyEntry]) -> tuple[str, str]:
@@ -182,97 +163,58 @@ def _entry_identity_lines(engine: str, args: str) -> tuple[str, ...]:
     return tuple(line for line in normalized if line.lower().startswith("--lua-desync="))
 
 
+@lru_cache(maxsize=4096)
+def _entry_composite_identity(args: str) -> tuple[tuple[str, str], ...]:
+    """Отпечаток составной записи каталога (кэш по тексту, как у обычных)."""
+    return composite_identity(strategy_shape(args.splitlines()).body_lines)
+
+
 def resolve_strategy_lines(profile: Profile, entries: dict[str, StrategyEntry], lines) -> tuple[str, str]:
-    current = strategy_identity_lines(profile, lines)
-    if not current:
-        return "none", "Стратегия не выбрана"
-    matches = [
-        entry
-        for entry in entries.values()
-        if _entry_identity_lines(profile.engine, entry.args) == current
-    ]
+    """Готовая стратегия, которой равны строки стратегии profile-а.
+
+    winws2: составная стратегия profile-а (несколько веток ``--payload``)
+    сравнивается целиком только с составными записями каталога, обычная — по
+    строкам ``--lua-desync`` только с обычными записями
+    (см. ``profile.strategy_shape``).
+    """
+    if profile.engine != ENGINE_WINWS2:
+        current = normalize_lines(lines)
+        if not current:
+            return "none", "Стратегия не выбрана"
+        matches = [entry for entry in entries.values() if _entry_identity_lines(profile.engine, entry.args) == current]
+    else:
+        shape = strategy_shape(lines)
+        if not shape.lua_lines:
+            return "none", "Стратегия не выбрана"
+        if shape.composite:
+            current_composite = composite_identity(shape.body_lines)
+            matches = [
+                entry
+                for entry in entries.values()
+                if entry.is_composite and _entry_composite_identity(entry.args) == current_composite
+            ]
+        else:
+            current = shape.lua_lines
+            matches = [
+                entry
+                for entry in entries.values()
+                if not entry.is_composite and _entry_identity_lines(profile.engine, entry.args) == current
+            ]
     if len(matches) == 1:
         return matches[0].strategy_id, matches[0].name
-    return "custom", "custom"
+    return "custom", CUSTOM_STRATEGY_NAME
 
 
-def strategy_branches_for_profile(profile: Profile, entries: dict[str, StrategyEntry]) -> tuple[ProfileStrategyBranch, ...]:
+def profile_strategy_shape(profile: Profile):
+    """Форма стратегии profile-а winws2 по порядку строк в пресете."""
+    return strategy_shape(getattr(profile.strategy, "strategy_lines", ()) or ())
+
+
+def profile_strategy_payload_scopes(profile: Profile) -> tuple[str, ...]:
     if profile.engine != ENGINE_WINWS2:
         return ()
-
-    payload = "all"
-    in_range = "x"
-    out_range = "a"
-    raw_lines: list[str] = []
-    branches: list[ProfileStrategyBranch] = []
-
-    def flush() -> None:
-        nonlocal raw_lines
-        if not raw_lines:
-            return
-        strategy_id, strategy_name = resolve_strategy_lines(profile, entries, raw_lines)
-        scope_lines = strategy_branch_scope_lines(payload=payload, in_range=in_range, out_range=out_range)
-        branches.append(
-            ProfileStrategyBranch(
-                branch_id=f"branch:{len(branches)}",
-                payload=payload,
-                in_range=in_range,
-                out_range=out_range,
-                strategy_id=strategy_id,
-                strategy_name=strategy_name,
-                raw_strategy_text="\n".join((*scope_lines, *raw_lines)).strip(),
-            )
-        )
-        raw_lines = []
-
-    for segment in tuple(getattr(profile, "segments", ()) or ()):
-        name = str(getattr(segment, "name", "") or "").strip().lower()
-        text = str(getattr(segment, "text", "") or "").strip()
-        if segment.kind == "strategy_filter":
-            flush()
-            value = str(getattr(segment, "value", "") or "").strip()
-            if name == "--payload":
-                payload = value or "all"
-            elif name == "--in-range":
-                in_range = value or "x"
-            elif name == "--out-range":
-                out_range = value or "a"
-            continue
-        if segment.kind == "strategy" and text:
-            raw_lines.append(text)
-
-    flush()
-    return tuple(branches)
-
-
-def strategy_branches_with_match_text(
-    branches: tuple[ProfileStrategyBranch, ...],
-    *,
-    match_summary: str,
-) -> tuple[ProfileStrategyBranch, ...]:
-    return tuple(
-        replace(
-            branch,
-            match_tab_text=build_profile_setup_match_tab_text(
-                match_summary=match_summary,
-                strategy_id=branch.strategy_id,
-                strategy_name=branch.strategy_name,
-                raw_strategy_text=branch.raw_strategy_text,
-            ),
-        )
-        for branch in branches
-    )
-
-
-def strategy_branch_scope_lines(*, payload: str, in_range: str, out_range: str) -> tuple[str, ...]:
-    lines: list[str] = []
-    if str(in_range or "x").strip() != "x":
-        lines.append(f"--in-range={str(in_range).strip()}")
-    if str(out_range or "a").strip() != "a":
-        lines.append(f"--out-range={str(out_range).strip()}")
-    if str(payload or "all").strip() != "all":
-        lines.append(f"--payload={str(payload).strip()}")
-    return tuple(lines)
+    shape = profile_strategy_shape(profile)
+    return shape.payload_scopes if shape.composite else ()
 
 
 def normalize_lines(lines) -> tuple[str, ...]:
@@ -380,12 +322,11 @@ __all__ = [
     "profile_list_type",
     "profile_match_summary",
     "profile_raw_text",
-    "profile_strategy_summary",
+    "CUSTOM_STRATEGY_NAME",
+    "profile_strategy_payload_scopes",
+    "profile_strategy_shape",
     "resolve_strategy",
     "resolve_strategy_lines",
-    "strategy_branch_scope_lines",
-    "strategy_branches_for_profile",
-    "strategy_branches_with_match_text",
     "strategy_identity_lines",
     "visible_list_type",
 ]

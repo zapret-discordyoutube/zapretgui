@@ -27,7 +27,13 @@ from PyQt6.QtWidgets import (
 from log.log import log
 from profile.strategy_list_filter import ProfileStrategyListFilterWorker, ProfileStrategyListPlan
 from profile.strategy_state import ProfileStrategyState
+from profile.strategy_shape import payload_badge_accessible_text, payload_badge_text
 from profile.strategy_visuals import describe_strategy_visual
+from profile.ui.widgets.payload_badge import (
+    PAYLOAD_BADGE_HEIGHT,
+    paint_payload_badge,
+    payload_badge_width,
+)
 from qfluentwidgets import (
     BodyLabel,
     ComboBox,
@@ -124,6 +130,18 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
             visual_rect = QRect(max(left, right - visual_width), rect.top(), visual_width, rect.height())
             right = visual_rect.left() - 12
 
+        payload_badge = str(index.data(ProfileStrategyListWidget._ROLE_PAYLOAD_BADGE_TEXT) or "")
+        payload_badge_rect = QRect()
+        badge_width = payload_badge_width(metrics, payload_badge)
+        if badge_width and right - left >= badge_width + 10 + 120:
+            payload_badge_rect = QRect(
+                right - badge_width,
+                rect.center().y() - PAYLOAD_BADGE_HEIGHT // 2,
+                badge_width,
+                PAYLOAD_BADGE_HEIGHT,
+            )
+            right = payload_badge_rect.left() - 10
+
         name = str(index.data(ProfileStrategyListWidget._ROLE_NAME_TEXT) or "")
         name_rect = QRect(left, rect.top(), max(0, right - left), rect.height())
         painter.setPen(to_qcolor(tokens.fg, "#f5f5f5"))
@@ -132,6 +150,8 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             metrics.elidedText(name, Qt.TextElideMode.ElideRight, name_rect.width()),
         )
+
+        paint_payload_badge(painter, payload_badge_rect, payload_badge, metrics, tokens)
 
         if visual_rect.width() > 0:
             painter.setPen(to_qcolor(visual_color or tokens.fg_faint, "#aeb5c1"))
@@ -370,6 +390,7 @@ class ProfileStrategyListWidget(QWidget):
     _ROLE_VISUAL_LABEL_TEXT = int(Qt.ItemDataRole.UserRole) + 7
     _ROLE_VISUAL_DESCRIPTION = int(Qt.ItemDataRole.UserRole) + 8
     _ROLE_TOOLTIP_TEXT = int(Qt.ItemDataRole.UserRole) + 9
+    _ROLE_PAYLOAD_BADGE_TEXT = int(Qt.ItemDataRole.UserRole) + 10
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -742,6 +763,7 @@ class ProfileStrategyListWidget(QWidget):
             visual_search = f"{visual_label} {visual_description}".lower()
             if search_text and search_text not in name.lower() and search_text not in args.lower() and search_text not in visual_search:
                 continue
+            payload_badge = payload_badge_text(getattr(entry, "payload_scopes", ()) or ())
 
             item = QListWidgetItem()
             state = self._states.get(strategy_id)
@@ -755,10 +777,12 @@ class ProfileStrategyListWidget(QWidget):
                 status_parts=accessible_status_parts,
                 visual_label=visual_label,
                 visual_description=visual_description,
+                payload_badge=payload_badge,
             )
             item.setText(accessible_text)
             item.setData(self._ROLE_STRATEGY_ID, strategy_id)
             item.setData(self._ROLE_NAME_TEXT, name)
+            item.setData(self._ROLE_PAYLOAD_BADGE_TEXT, payload_badge)
             item.setData(self._ROLE_STATUS_TEXT, status_text)
             item.setData(self._ROLE_IS_ACTIVE, is_current)
             item.setData(self._ROLE_VISUAL_ICON_NAME, str(visual.icon_name or ""))
@@ -817,6 +841,7 @@ class ProfileStrategyListWidget(QWidget):
                 status_parts=accessible_status_parts,
                 visual_label=str(item.data(self._ROLE_VISUAL_LABEL_TEXT) or ""),
                 visual_description=str(item.data(self._ROLE_VISUAL_DESCRIPTION) or ""),
+                payload_badge=str(item.data(self._ROLE_PAYLOAD_BADGE_TEXT) or ""),
             )
             if str(item.data(Qt.ItemDataRole.AccessibleTextRole) or "") != accessible_text:
                 item.setData(Qt.ItemDataRole.AccessibleTextRole, accessible_text)
@@ -1010,6 +1035,7 @@ class ProfileStrategyListWidget(QWidget):
             item.setText(row.accessible_text or row.name)
             item.setData(self._ROLE_STRATEGY_ID, row.strategy_id)
             item.setData(self._ROLE_NAME_TEXT, row.name)
+            item.setData(self._ROLE_PAYLOAD_BADGE_TEXT, row.payload_badge)
             item.setData(self._ROLE_STATUS_TEXT, row.status_text)
             item.setData(self._ROLE_IS_ACTIVE, row.is_current)
             item.setData(self._ROLE_VISUAL_ICON_NAME, row.visual_icon_name)
@@ -1136,8 +1162,9 @@ def _strategy_screen_reader_text(
     status_parts: list[str],
     visual_label: str,
     visual_description: str,
+    payload_badge: str = "",
 ) -> str:
-    parts = [str(name or "").strip()]
+    parts = [str(name or "").strip(), payload_badge_accessible_text(payload_badge)]
     parts.extend(_lower_first(part) for part in status_parts if str(part or "").strip())
     parts.extend(
         str(part or "").strip()
@@ -1218,84 +1245,9 @@ def _single_strategy_order_move(
     return candidates[0]
 
 
-def _current_strategy_branch(payload):
-    branches = tuple(getattr(payload, "strategy_branches", ()) or ())
-    if not branches:
-        return None
-    current_id = str(getattr(payload, "current_strategy_branch_id", "") or "").strip()
-    for branch in branches:
-        if str(getattr(branch, "branch_id", "") or "").strip() == current_id:
-            return branch
-    return branches[0]
-
-
 def _current_strategy_id(payload) -> str:
-    branch = _current_strategy_branch(payload)
-    if branch is not None:
-        return str(getattr(branch, "strategy_id", "") or "").strip()
     item = getattr(payload, "item", None)
     return str(getattr(item, "strategy_id", "") or "").strip()
-
-
-def _current_strategy_branch_id(payload) -> str:
-    branch = _current_strategy_branch(payload)
-    return str(getattr(branch, "branch_id", "") or "").strip() if branch is not None else ""
-
-
-def _payload_with_strategy_branch(payload, branch_id: str):
-    clean_branch_id = str(branch_id or "").strip()
-    branches = tuple(getattr(payload, "strategy_branches", ()) or ())
-    branch = next(
-        (
-            item
-            for item in branches
-            if str(getattr(item, "branch_id", "") or "").strip() == clean_branch_id
-        ),
-        None,
-    )
-    if branch is None:
-        return payload
-    states = getattr(payload, "strategy_states", {}) or {}
-    strategy_id = str(getattr(branch, "strategy_id", "") or "").strip()
-    in_range = str(getattr(branch, "in_range", "") or "x").strip() or "x"
-    out_range = str(getattr(branch, "out_range", "") or "a").strip() or "a"
-    return replace(
-        payload,
-        current_strategy_branch_id=clean_branch_id,
-        in_range=in_range,
-        out_range=out_range,
-        raw_strategy_text=str(getattr(branch, "raw_strategy_text", "") or ""),
-        match_tab_text=str(getattr(branch, "match_tab_text", "") or ""),
-        current_strategy_state=states.get(strategy_id, ProfileStrategyState()),
-    )
-
-
-def _strategy_branch_label(branch) -> str:
-    payload = str(getattr(branch, "payload", "") or "all").strip() or "all"
-    in_range = str(getattr(branch, "in_range", "") or "x").strip() or "x"
-    out_range = str(getattr(branch, "out_range", "") or "a").strip() or "a"
-    strategy_name = str(getattr(branch, "strategy_name", "") or "Своя стратегия").strip()
-    parts = [f"payload: {payload}"]
-    if in_range != "x":
-        parts.append(f"in: {in_range}")
-    if out_range != "a":
-        parts.append(f"out: {out_range}")
-    return f"{' · '.join(parts)} — {strategy_name}"
-
-
-def _strategy_branch_summary_name(branches) -> str:
-    branch_items = tuple(branches or ())
-    names = [
-        str(getattr(branch, "strategy_name", "") or "").strip()
-        for branch in branch_items
-        if str(getattr(branch, "strategy_name", "") or "").strip()
-    ]
-    visible = names[:2]
-    suffix = f" +{len(names) - len(visible)}" if len(names) > len(visible) else ""
-    label = ", ".join(visible)
-    if label:
-        return f"{len(branch_items)} стратегии: {label}{suffix}"
-    return f"{len(branch_items)} стратегии"
 
 
 def _combo_item_accessible_text(
@@ -1346,37 +1298,6 @@ def _sync_combo_items_accessibility(
         )
 
 
-def _strategy_branch_accessible_text(label: str, *, selected: bool) -> str:
-    return _combo_item_accessible_text(
-        name="Ветка готовой стратегии",
-        label=label,
-        selected=selected,
-        selected_word="выбрана",
-        unselected_word="не выбрана",
-    )
-
-
-def _sync_strategy_branch_combo_items_accessibility(combo) -> None:
-    if combo is None:
-        return
-    try:
-        current_index = int(combo.currentIndex())
-        count = int(combo.count())
-    except Exception:
-        return
-    set_item_accessible_text = getattr(combo, "setItemAccessibleText", None)
-    if not callable(set_item_accessible_text):
-        return
-    for index in range(count):
-        try:
-            label = str(combo.itemText(index) or "").strip()
-        except Exception:
-            label = ""
-        if not label:
-            continue
-        set_item_accessible_text(index, _strategy_branch_accessible_text(label, selected=index == current_index))
-
-
 def _join_accessible_options(labels: list[str]) -> str:
     clean_labels = [str(label or "").strip() for label in labels if str(label or "").strip()]
     if not clean_labels:
@@ -1384,24 +1305,3 @@ def _join_accessible_options(labels: list[str]) -> str:
     if len(clean_labels) == 1:
         return clean_labels[0]
     return f"{', '.join(clean_labels[:-1])} или {clean_labels[-1]}"
-
-
-def _update_strategy_branch_combo_in_place(
-    combo,
-    rows: tuple[tuple[str, str], ...] | list[tuple[str, str]],
-    selected_index: int,
-) -> bool:
-    try:
-        if int(combo.count()) != len(rows):
-            return False
-        for index, (branch_id, _label) in enumerate(rows):
-            if str(combo.itemData(index) or "").strip() != str(branch_id or "").strip():
-                return False
-        for index, (_branch_id, label) in enumerate(rows):
-            if str(combo.itemText(index) or "") != str(label or ""):
-                combo.setItemText(index, str(label or ""))
-        if int(combo.currentIndex()) != int(selected_index):
-            combo.setCurrentIndex(int(selected_index))
-        return True
-    except Exception:
-        return False

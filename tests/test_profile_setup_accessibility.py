@@ -150,11 +150,6 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
             page._out_range_mode.property("screenReaderStateText"),
             "Режим out-range, выбрано: a — всегда",
         )
-        self.assertEqual(page._strategy_branch_combo.accessibleName(), "Ветка готовой стратегии, не выбрано")
-        self.assertEqual(
-            page._strategy_branch_combo.property("screenReaderStateText"),
-            "Ветка готовой стратегии, не выбрано",
-        )
         self.assertEqual(page._list_file_base_text.accessibleName(), "Базовая часть списка profile")
         self.assertEqual(
             page._list_file_base_text.property("screenReaderStateText"),
@@ -246,43 +241,6 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
 
         self.assertTrue(page._strategy_list._search_row.isVisible())
         self.assertIs(self.app.focusWidget(), page._strategy_list._search)
-
-    def test_strategy_branch_combo_options_are_named_for_screen_reader(self) -> None:
-        page = self._make_page()
-        self.addCleanup(page.deleteLater)
-        payload = SimpleNamespace(
-            current_strategy_branch_id="branch:2",
-            strategy_branches=(
-                SimpleNamespace(
-                    branch_id="branch:1",
-                    payload="tls",
-                    in_range="",
-                    out_range="",
-                    strategy_name="TLS fake",
-                ),
-                SimpleNamespace(
-                    branch_id="branch:2",
-                    payload="http",
-                    in_range="",
-                    out_range="",
-                    strategy_name="HTTP fake",
-                ),
-            ),
-        )
-
-        page._apply_strategy_branch_selector(payload)
-        create_menu = getattr(page._strategy_branch_combo, "_create_accessible_combo_menu", None)
-        self.assertIsNotNone(create_menu)
-        menu = create_menu()
-
-        self.assertEqual(
-            menu.view.item(0).data(Qt.ItemDataRole.AccessibleTextRole),
-            "Ветка готовой стратегии: payload: tls — TLS fake, не выбрана",
-        )
-        self.assertEqual(
-            menu.view.item(1).data(Qt.ItemDataRole.AccessibleTextRole),
-            "Ветка готовой стратегии: payload: http — HTTP fake, выбрана",
-        )
 
     def test_range_mode_combo_options_are_named_for_screen_reader(self) -> None:
         page = self._make_page()

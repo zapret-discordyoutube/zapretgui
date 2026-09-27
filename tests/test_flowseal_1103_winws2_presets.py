@@ -17,8 +17,8 @@ from folders.defaults import classify_preset_folder
 from profile.derived_cache import (
     basic_strategy_entries,
     normalize_lines,
+    profile_strategy_shape,
     resolve_strategy,
-    strategy_branches_for_profile,
 )
 from profile.models import build_profile_logical_key
 from profile.parser import parse_preset_text
@@ -261,17 +261,17 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
                 with self.subTest(name=name, bin=match.group(1)):
                     self.assertTrue((SHIPPED_BIN_DIR / match.group(1)).is_file())
 
-    def test_every_branch_resolves_to_a_ready_strategy(self) -> None:
+    def test_every_profile_resolves_to_one_ready_strategy(self) -> None:
+        # Ветки --payload одного bat-блока — одна готовая стратегия: profile
+        # целиком узнаётся как составная запись каталога.
         for name, preset in self.presets.items():
             for profile in preset.profiles:
                 with self.subTest(name=name, profile=profile.display_name):
                     entries = basic_strategy_entries(profile, self.catalogs)
-                    whole, _ = resolve_strategy(profile, entries)
-                    if whole != "custom":
-                        continue
-                    branches = strategy_branches_for_profile(profile, entries)
-                    self.assertTrue(branches)
-                    self.assertEqual([b.payload for b in branches if b.strategy_id == "custom"], [])
+                    strategy_id, _name = resolve_strategy(profile, entries)
+                    self.assertNotEqual(strategy_id, "custom")
+                    if profile_strategy_shape(profile).composite:
+                        self.assertTrue(entries[strategy_id].is_composite)
 
     def test_strategies_are_payload_scoped_not_generalised(self) -> None:
         for name, preset in self.presets.items():

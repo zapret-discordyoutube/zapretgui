@@ -524,31 +524,6 @@ description = Добавлено, чтобы встроенный профиль
 
 # --- end missing builtin strategy coverage ---
 
-# --- Flowseal general EXP 1.10.0 ---
-
-[flowseal_exp_1100_discord]
-name = Flowseal EXP 1.10.0 / Discord discovery
-author = Flowseal
-label = experimental
-blobs = quic_google,discord_active
---lua-desync=fake:blob=quic_google:repeats=4
---lua-desync=fake:blob=discord_active:repeats=4
-
-[flowseal_exp_1100_stun]
-name = Flowseal EXP 1.10.0 / STUN
-author = Flowseal
-label = experimental
-blobs = discord_active
---lua-desync=fake:blob=discord_active:repeats=4
-
-[flowseal_exp_1100_unknown_udp]
-name = Flowseal EXP 1.10.0 / Unknown UDP
-author = Flowseal
-label = experimental
-blobs = quic_google,discord_active
---lua-desync=fake:blob=quic_google:repeats=4:payload=all
---lua-desync=fake:blob=discord_active:repeats=4:payload=all
-
 # --- Flowseal 1.10.3 winws2 ports (generated) ---
 
 [flowseal_1103_general_voice_discord_stun]
@@ -558,24 +533,42 @@ label = experimental
 blobs = discord_active
 --lua-desync=fake:blob=discord_active:repeats=6
 
-[flowseal_1103_alt12_voice_discord]
-name = Flowseal 1.10.3 / ALT12 / Discord voice Discord discovery
-author = Flowseal
-label = experimental
-blobs = stun_pat,discord_active
---lua-desync=fake:blob=stun_pat:repeats=3
---lua-desync=fake:blob=discord_active:repeats=3
-
-[flowseal_1103_alt12_voice_stun]
-name = Flowseal 1.10.3 / ALT12 / Discord voice STUN
-author = Flowseal
-label = experimental
-blobs = discord_active
---lua-desync=fake:blob=discord_active:repeats=3
-
 [flowseal_1103_alt13_voice_discord_stun]
 name = Flowseal 1.10.3 / ALT13 / Discord voice Discord+STUN
 author = Flowseal
 label = experimental
 blobs = discord_active
 --lua-desync=fake:blob=discord_active:repeats=5
+
+# --- Составные стратегии встроенных пресетов (несколько веток --payload) ---
+# Одна запись — одна стратегия целиком: строки --payload разделяют ветки для
+# разных типов пакетов, --in-range/--out-range допустимы только после первой
+# --lua-desync (диапазон до неё — настройка profile-а). Текст записи ровно
+# такой, как в profile-ах пресетов, поэтому они узнаются как эта стратегия.
+
+[flowseal_1103_alt12_voice]
+name = Flowseal 1.10.3 / ALT12 / Голос (Discord, STUN)
+author = Flowseal
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (Discord · STUN). Из пресетов: Flowseal 1.10.3 ALT12.
+blobs = stun_pat,discord_active
+--payload=discord_ip_discovery
+--lua-desync=fake:blob=stun_pat:repeats=3
+--lua-desync=fake:blob=discord_active:repeats=3
+--payload=stun
+--lua-desync=fake:blob=discord_active:repeats=3
+
+[flowseal_exp_1100_voice]
+name = Flowseal EXP 1.10.0 + Flowseal 1.10.3 / EXP / Голос (Discord, STUN)
+author = Flowseal
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (Discord · STUN · прочее). Из пресетов: Flowseal EXP 1.10.0, Flowseal 1.10.3 EXP.
+blobs = quic_google,discord_active
+--payload=discord_ip_discovery
+--lua-desync=fake:blob=quic_google:repeats=4
+--lua-desync=fake:blob=discord_active:repeats=4
+--payload=stun
+--lua-desync=fake:blob=discord_active:repeats=4
+--payload=unknown
+--lua-desync=fake:blob=quic_google:repeats=4:payload=all
+--lua-desync=fake:blob=discord_active:repeats=4:payload=all

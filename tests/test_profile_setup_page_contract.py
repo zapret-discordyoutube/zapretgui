@@ -32,7 +32,7 @@ from profile.profile_setup_loader import (
     ProfileUserProfileUpdateWorker,
 )
 from profile.strategy_list_filter import ProfileStrategyListFilterWorker, build_profile_strategy_list_plan
-from profile.state import ProfileListItem, ProfileSetupPayload, ProfileStrategyBranch
+from profile.state import ProfileListItem, ProfileSetupPayload
 from profile.strategy_catalog import StrategyEntry
 from profile.strategy_state import ProfileStrategyState
 from profile.ui.preset_setup_page import PresetSetupPageBase, preset_setup_title_for_payload
@@ -6244,7 +6244,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             filter_value="lists/youtube.txt",
             in_range="x",
             out_range="x",
-            strategy_branch_id="",
             parent=page,
         )
         worker.start.assert_called_once()
@@ -6337,7 +6336,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             filter_value="lists/youtube.txt",
             in_range="x",
             out_range="a",
-            strategy_branch_id="",
         )
         load_profile.assert_called_once_with("profile-2")
         self.assertEqual(len(saved), 1)
@@ -6742,39 +6740,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page.create_profile_strategy_apply_worker.assert_not_called()
         page._on_profile_changed_callback.assert_not_called()
 
-    def test_clicking_strategy_while_apply_is_running_preserves_branch_pending(self) -> None:
-        class _Runtime:
-            def is_running(self) -> bool:
-                return True
-
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._loading = False
-        page._profile_key = "profile-1"
-        page._payload = SimpleNamespace(
-            item=SimpleNamespace(strategy_id="first", in_preset=True, enabled=True),
-            current_strategy_branch_id="branch:2",
-            strategy_branches=(
-                SimpleNamespace(branch_id="branch:1", strategy_id="first"),
-                SimpleNamespace(branch_id="branch:2", strategy_id="first"),
-            ),
-        )
-        page._strategy_apply_runtime = _Runtime()
-        page._strategy_apply_request_id = 1
-        page._strategy_apply_runtime_strategy_id = "first"
-        page._strategy_apply_runtime_branch_id = "branch:1"
-        page._pending_strategy_apply = None
-        page.create_profile_strategy_apply_worker = Mock()
-        page.reload_current_profile = Mock()
-        page._on_profile_changed_callback = Mock()
-        page._mark_strategy_selection_pending = Mock(return_value=True)
-
-        ProfileSetupPageBase._on_strategy_list_activated(page, "second")
-
-        page._mark_strategy_selection_pending.assert_called_once_with("second")
-        self.assertEqual(page._pending_strategy_apply, ("second", "branch:2"))
-        page.create_profile_strategy_apply_worker.assert_not_called()
-        page._on_profile_changed_callback.assert_not_called()
-
     def test_stale_strategy_apply_finish_waits_for_pending_last_choice(self) -> None:
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page._profile_key = "profile-1"
@@ -6821,7 +6786,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page._strategy_apply_request_id = 4
         page._strategy_apply_runtime_strategy_id = "current"
-        page._strategy_apply_runtime_branch_id = "branch:1"
         page._pending_strategy_apply = "second"
         page._start_next_profile_setup_write_operation = Mock(
             side_effect=AssertionError("stale worker must not drive write queue")
@@ -6832,7 +6796,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
         self.assertEqual(page._strategy_apply_request_id, 4)
         self.assertEqual(page._strategy_apply_runtime_strategy_id, "current")
-        self.assertEqual(page._strategy_apply_runtime_branch_id, "branch:1")
         self.assertEqual(page._pending_strategy_apply, "second")
         page._schedule_profile_setup_write_operation_start.assert_not_called()
 
@@ -6841,7 +6804,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page._strategy_apply_request_id = 4
         page._strategy_apply_runtime_strategy_id = "current"
-        page._strategy_apply_runtime_branch_id = "branch:1"
         page._pending_strategy_apply = "second"
         page._start_next_profile_setup_write_operation = Mock(
             side_effect=AssertionError("cleared strategy worker must not drive write queue")
@@ -6852,7 +6814,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
         self.assertEqual(page._strategy_apply_request_id, 4)
         self.assertEqual(page._strategy_apply_runtime_strategy_id, "current")
-        self.assertEqual(page._strategy_apply_runtime_branch_id, "branch:1")
         self.assertEqual(page._pending_strategy_apply, "second")
         page._schedule_profile_setup_write_operation_start.assert_not_called()
 
@@ -7109,213 +7070,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page._apply_feedback_buttons.assert_not_called()
         page._apply_match_tab_payload.assert_not_called()
         page._rebuild_breadcrumb.assert_not_called()
-
-    def test_strategy_selection_pending_keeps_branch_payload_intact(self) -> None:
-        item = ProfileListItem(
-            key="profile-1",
-            persistent_key="profile-1",
-            profile_index=0,
-            display_name="YouTube",
-            enabled=True,
-            in_preset=True,
-            strategy_id="old",
-            strategy_name="Old",
-            match_lines=(),
-            list_type="hostlist",
-            rating="",
-            favorite=False,
-            group="video",
-            group_name="Video",
-            order=0,
-        )
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._payload = ProfileSetupPayload(
-            item=item,
-            strategy_entries={
-                "tls_fake": StrategyEntry(
-                    strategy_id="tls_fake",
-                    catalog_name="tls",
-                    name="TLS fake",
-                    args="--payload=tls_client_hello\n--lua-desync=fake",
-                    visual=SimpleNamespace(label="", description=""),
-                ),
-            },
-            strategy_states={"tls_fake": ProfileStrategyState(rating="work", favorite=True)},
-            raw_profile_text="",
-            raw_strategy_text="",
-            match_summary="",
-            current_strategy_branch_id="branch:0",
-            strategy_branches=(
-                ProfileStrategyBranch(
-                    branch_id="branch:0",
-                    payload="tls_client_hello",
-                    in_range="x",
-                    out_range="a",
-                    strategy_id="old",
-                    strategy_name="Old",
-                    raw_strategy_text="--payload=tls_client_hello\n--lua-desync=old",
-                    match_tab_text="Old match",
-                ),
-            ),
-        )
-        page._strategy_list = SimpleNamespace(set_current_strategy_id=Mock())
-        page._apply_strategy_branch_selector = Mock()
-        page._apply_feedback_buttons = Mock()
-        page._match_tab_built = False
-        page._apply_match_tab_payload = Mock()
-        branches_before = page._payload.strategy_branches
-
-        self.assertTrue(ProfileSetupPageBase._mark_strategy_selection_pending(page, "tls_fake"))
-
-        page._strategy_list.set_current_strategy_id.assert_called_once_with("tls_fake")
-        self.assertEqual(page._payload.item.strategy_id, "old")
-        self.assertIs(page._payload.strategy_branches, branches_before)
-        self.assertEqual(page._payload.strategy_branches[0].strategy_id, "old")
-        page._apply_strategy_branch_selector.assert_not_called()
-
-    def test_strategy_branch_selector_updates_labels_without_rebuilding_combo(self) -> None:
-        class _Bar:
-            def __init__(self) -> None:
-                self._visible = True
-
-            def isVisible(self) -> bool:  # noqa: N802
-                return self._visible
-
-            def setVisible(self, visible: bool) -> None:  # noqa: N802
-                self._visible = bool(visible)
-
-        class _Combo:
-            def __init__(self) -> None:
-                self.rows: list[tuple[str, str]] = []
-                self.current_index = 0
-                self.clear_calls = 0
-                self.add_calls = 0
-                self.text_updates: list[tuple[int, str]] = []
-
-            def blockSignals(self, _blocked: bool) -> None:  # noqa: N802
-                pass
-
-            def clear(self) -> None:
-                self.clear_calls += 1
-                self.rows.clear()
-
-            def addItem(self, text: str, userData: str = "") -> None:  # noqa: N802
-                self.add_calls += 1
-                self.rows.append((str(text), str(userData)))
-
-            def count(self) -> int:
-                return len(self.rows)
-
-            def itemData(self, index: int):
-                return self.rows[index][1]
-
-            def itemText(self, index: int) -> str:  # noqa: N802
-                return self.rows[index][0]
-
-            def setItemText(self, index: int, text: str) -> None:  # noqa: N802
-                self.text_updates.append((index, str(text)))
-                self.rows[index] = (str(text), self.rows[index][1])
-
-            def currentIndex(self) -> int:  # noqa: N802
-                return self.current_index
-
-            def setCurrentIndex(self, index: int) -> None:  # noqa: N802
-                self.current_index = int(index)
-
-        def _payload(first_name: str):
-            return SimpleNamespace(
-                current_strategy_branch_id="branch:1",
-                strategy_branches=(
-                    SimpleNamespace(
-                        branch_id="branch:1",
-                        payload="tls",
-                        in_range="",
-                        out_range="",
-                        strategy_name=first_name,
-                    ),
-                    SimpleNamespace(
-                        branch_id="branch:2",
-                        payload="http",
-                        in_range="",
-                        out_range="",
-                        strategy_name="HTTP fake",
-                    ),
-                ),
-            )
-
-        combo = _Combo()
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._strategy_branch_combo = combo
-        page._strategy_branch_bar = _Bar()
-
-        ProfileSetupPageBase._apply_strategy_branch_selector(page, _payload("Old TLS"))
-        ProfileSetupPageBase._apply_strategy_branch_selector(page, _payload("New TLS"))
-
-        self.assertEqual(combo.clear_calls, 1)
-        self.assertEqual(combo.add_calls, 2)
-        self.assertEqual(combo.text_updates, [(0, "payload: tls — New TLS")])
-
-    def test_strategy_branch_change_updates_visible_range_settings(self) -> None:
-        class _Combo:
-            def __init__(self) -> None:
-                self.current_index = 1
-                self.rows = ("branch:1", "branch:2")
-
-            def currentIndex(self) -> int:  # noqa: N802
-                return self.current_index
-
-            def itemData(self, index: int):
-                return self.rows[index]
-
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._loading = False
-        page._strategy_branch_combo = _Combo()
-        page._payload = ProfileSetupPayload(
-            item=SimpleNamespace(in_preset=True, enabled=True),
-            strategy_entries={},
-            raw_profile_text="",
-            raw_strategy_text="--lua-desync=fake",
-            match_summary="",
-            current_strategy_branch_id="branch:1",
-            in_range="x",
-            out_range="a",
-            strategy_states={"http_fake": ProfileStrategyState(rating="work")},
-            strategy_branches=(
-                ProfileStrategyBranch(
-                    branch_id="branch:1",
-                    payload="tls_client_hello",
-                    in_range="x",
-                    out_range="a",
-                    strategy_id="tls_fake",
-                    strategy_name="TLS fake",
-                    raw_strategy_text="--lua-desync=fake",
-                    match_tab_text="TLS branch",
-                ),
-                ProfileStrategyBranch(
-                    branch_id="branch:2",
-                    payload="http_req",
-                    in_range="x",
-                    out_range="-d8",
-                    strategy_id="http_fake",
-                    strategy_name="HTTP fake",
-                    raw_strategy_text="--out-range=-d8\n--payload=http_req\n--lua-desync=fake",
-                    match_tab_text="HTTP branch",
-                ),
-            ),
-        )
-        page._strategy_list = SimpleNamespace(set_current_strategy_id=Mock())
-        page._apply_editable_settings = Mock()
-        page._apply_feedback_buttons = Mock()
-        page._match_tab_built = False
-        page._apply_match_tab_payload = Mock()
-
-        ProfileSetupPageBase._on_strategy_branch_changed(page, 1)
-
-        self.assertEqual(page._payload.current_strategy_branch_id, "branch:2")
-        self.assertEqual(page._payload.in_range, "x")
-        self.assertEqual(page._payload.out_range, "-d8")
-        page._apply_editable_settings.assert_called_once_with(page._payload)
-        page._strategy_list.set_current_strategy_id.assert_called_once_with("http_fake")
 
     def test_strategy_apply_worker_emits_new_profile_key(self) -> None:
         apply_result = SimpleNamespace(status="applied", profile_key="profile-1", should_reload=False)

@@ -23,18 +23,6 @@ class ProfileListFileEditorState:
 
 
 @dataclass(frozen=True)
-class ProfileStrategyBranch:
-    branch_id: str
-    payload: str
-    in_range: str
-    out_range: str
-    strategy_id: str
-    strategy_name: str
-    raw_strategy_text: str
-    match_tab_text: str = ""
-
-
-@dataclass(frozen=True)
 class ProfileListItem:
     key: str
     persistent_key: str
@@ -57,7 +45,8 @@ class ProfileListItem:
     group_collapsed: bool = False
     user_profile_id: str = ""
     profile_name: str = ""
-    strategy_branches: tuple[ProfileStrategyBranch, ...] = ()
+    # Типы пакетов веток составной стратегии (значок «TLS · HTTP»), пусто — обычная.
+    strategy_payload_scopes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -78,8 +67,6 @@ class ProfileSetupPayload:
     raw_strategy_text: str
     match_summary: str
     match_tab_text: str = ""
-    strategy_branches: tuple[ProfileStrategyBranch, ...] = ()
-    current_strategy_branch_id: str = ""
     editable_filter_kind: str = ""
     editable_filter_value: str = ""
     editable_filter_enabled: bool = True

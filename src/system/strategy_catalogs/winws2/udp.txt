@@ -446,110 +446,188 @@ description = Добавлено, чтобы встроенный профиль
 
 # --- end missing builtin strategy coverage ---
 
-# --- Flowseal general EXP 1.10.0 ---
+# --- Составные стратегии встроенных пресетов (несколько веток --payload) ---
+# Одна запись — одна стратегия целиком: строки --payload разделяют ветки для
+# разных типов пакетов, --in-range/--out-range допустимы только после первой
+# --lua-desync (диапазон до неё — настройка profile-а). Текст записи ровно
+# такой, как в profile-ах пресетов, поэтому они узнаются как эта стратегия.
 
-[flowseal_exp_1100_game_quic]
-name = Flowseal EXP 1.10.0 / Game QUIC
+[flowseal_1103_general_game_udp]
+name = Flowseal 1.10.3 / general, ALT1, ALT2 и ещё 7 / Игры UDP
 author = Flowseal
-label = game
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 general, Flowseal 1.10.3 ALT1, Flowseal 1.10.3 ALT2, Flowseal 1.10.3 ALT6, Flowseal 1.10.3 ALT7, Flowseal 1.10.3 ALT8, Flowseal 1.10.3 ALT9, Flowseal 1.10.3 ALT10, Flowseal 1.10.3 SIMPLE FAKE, Flowseal 1.10.3 SIMPLE FAKE ALT2.
+blobs = fake_zero64,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=fake_default_quic:repeats=12
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=12
+--payload=all
+--lua-desync=fake:blob=game_active:repeats=12:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_1103_general_ipset_udp]
+name = Flowseal 1.10.3 / general, ALT2, ALT6 и ещё 4 / IP-set UDP (QUIC + игры)
+author = Flowseal
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 general, Flowseal 1.10.3 ALT2, Flowseal 1.10.3 ALT6, Flowseal 1.10.3 ALT7, Flowseal 1.10.3 ALT8, Flowseal 1.10.3 ALT9, Flowseal 1.10.3 ALT10.
+blobs = quic_google,fake_zero64,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=quic_google:repeats=6
+--out-range=<n2
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=12
+--payload=all
+--lua-desync=fake:blob=game_active:repeats=12:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_1103_alt1_ipset_udp]
+name = Flowseal 1.10.3 / ALT1, SIMPLE FAKE, SIMPLE FAKE ALT2 / IP-set UDP (QUIC + игры)
+author = Flowseal
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT1, Flowseal 1.10.3 SIMPLE FAKE, Flowseal 1.10.3 SIMPLE FAKE ALT2.
+blobs = quic_google,fake_zero64,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=quic_google:repeats=6
+--out-range=<n3
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=12
+--payload=all
+--lua-desync=fake:blob=game_active:repeats=12:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_1103_alt3_game_udp]
+name = Flowseal 1.10.3 / ALT3, ALT4, ALT11 и ещё 7 / Игры UDP
+author = Flowseal
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT3, Flowseal 1.10.3 ALT4, Flowseal 1.10.3 ALT11, Flowseal 1.10.3 ALT12, Flowseal 1.10.3 ALT13, Flowseal 1.10.3 FAKE TLS AUTO, Flowseal 1.10.3 FAKE TLS AUTO ALT, Flowseal 1.10.3 FAKE TLS AUTO ALT2, Flowseal 1.10.3 FAKE TLS AUTO ALT3, Flowseal 1.10.3 SIMPLE FAKE ALT.
+blobs = fake_zero64,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=fake_default_quic:repeats=10
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=10
+--payload=all
+--lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_1103_alt11_ipset_udp]
+name = Flowseal 1.10.3 / ALT11, ALT12, ALT13 / IP-set UDP (QUIC + игры)
+author = Flowseal
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT11, Flowseal 1.10.3 ALT12, Flowseal 1.10.3 ALT13.
+blobs = quic_google,fake_zero64,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=quic_google:repeats=11
+--out-range=<n4
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=10
+--payload=all
+--lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_1103_alt3_ipset_udp]
+name = Flowseal 1.10.3 / ALT3 / IP-set UDP (QUIC + игры)
+author = Flowseal
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT3.
+blobs = quic_google,fake_zero64,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=quic_google:repeats=6
+--out-range=<n4
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=10
+--payload=all
+--lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_1103_alt4_ipset_udp]
+name = Flowseal 1.10.3 / ALT4, SIMPLE FAKE ALT / IP-set UDP (QUIC + игры)
+author = Flowseal
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT4, Flowseal 1.10.3 SIMPLE FAKE ALT.
+blobs = quic_google,fake_zero64,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=quic_google:repeats=6
+--out-range=<n2
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=10
+--payload=all
+--lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_1103_alt5_game_udp]
+name = Flowseal 1.10.3 / ALT5 / Игры UDP
+author = Flowseal
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT5.
+blobs = fake_zero64,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=fake_default_quic:repeats=14
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=14
+--payload=all
+--lua-desync=fake:blob=game_active:repeats=14:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_1103_alt5_ipset_udp]
+name = Flowseal 1.10.3 / ALT5 / IP-set UDP (QUIC + игры)
+author = Flowseal
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT5.
+blobs = quic_google,fake_zero64,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=quic_google:repeats=6
+--out-range=<n3
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=14
+--payload=all
+--lua-desync=fake:blob=game_active:repeats=14:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_exp_1100_ipset_udp]
+name = Flowseal EXP 1.10.0 + Flowseal 1.10.3 / EXP / IP-set UDP (QUIC + игры)
+author = Flowseal
+label = experimental
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal EXP 1.10.0, Flowseal 1.10.3 EXP.
+blobs = fake_zero64,quic_4pda,game_active
+--payload=quic_initial
 --lua-desync=fake:blob=fake_default_quic:repeats=5
-
-[flowseal_exp_1100_game_known_udp]
-name = Flowseal EXP 1.10.0 / Game known UDP
-author = Flowseal
-label = game
-blobs = fake_zero64
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
 --lua-desync=fake:blob=fake_zero64:repeats=5
-
-[flowseal_exp_1100_game_other_udp]
-name = Flowseal EXP 1.10.0 / Game other UDP
-author = Flowseal
-label = game
-blobs = quic_4pda,game_active
+--payload=all
 --lua-desync=fake:blob=quic_4pda:repeats=5:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 --lua-desync=fake:blob=game_active:repeats=5:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
-[flowseal_exp_1100_discord]
-name = Flowseal EXP 1.10.0 / Discord discovery
+[flowseal_1103_exp_ipset_udp]
+name = Flowseal 1.10.3 / EXP / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
-blobs = quic_google,discord_active
---lua-desync=fake:blob=quic_google:repeats=4
---lua-desync=fake:blob=discord_active:repeats=4
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 EXP.
+blobs = quic_google,fake_zero64,quic_4pda,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=quic_google:repeats=11
+--out-range=<n4
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=5
+--payload=all
+--lua-desync=fake:blob=quic_4pda:repeats=5:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=game_active:repeats=5:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
-[flowseal_exp_1100_stun]
-name = Flowseal EXP 1.10.0 / STUN
+[flowseal_1103_fake_tls_auto_ipset_udp]
+name = Flowseal 1.10.3 / FAKE TLS AUTO, FAKE TLS AUTO ALT, FAKE TLS AUTO ALT2 / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
-blobs = discord_active
---lua-desync=fake:blob=discord_active:repeats=4
-
-[flowseal_exp_1100_unknown_udp]
-name = Flowseal EXP 1.10.0 / Unknown UDP
-author = Flowseal
-label = experimental
-blobs = quic_google,discord_active
---lua-desync=fake:blob=quic_google:repeats=4:payload=all
---lua-desync=fake:blob=discord_active:repeats=4:payload=all
-
-# --- Flowseal 1.10.3 winws2 ports (generated) ---
-
-[flowseal_1103_general_game_quic]
-name = Flowseal 1.10.3 / general / Game QUIC
-author = Flowseal
-label = experimental
---lua-desync=fake:blob=fake_default_quic:repeats=12
-
-[flowseal_1103_general_game_known_udp]
-name = Flowseal 1.10.3 / general / Game known UDP
-author = Flowseal
-label = experimental
-blobs = fake_zero64
---lua-desync=fake:blob=fake_zero64:repeats=12
-
-[flowseal_1103_general_game_other_udp]
-name = Flowseal 1.10.3 / general / Game other UDP
-author = Flowseal
-label = experimental
-blobs = game_active
---lua-desync=fake:blob=game_active:repeats=12:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
-
-[flowseal_1103_alt3_game_quic]
-name = Flowseal 1.10.3 / ALT3 / Game QUIC
-author = Flowseal
-label = experimental
---lua-desync=fake:blob=fake_default_quic:repeats=10
-
-[flowseal_1103_alt3_game_known_udp]
-name = Flowseal 1.10.3 / ALT3 / Game known UDP
-author = Flowseal
-label = experimental
-blobs = fake_zero64
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO, Flowseal 1.10.3 FAKE TLS AUTO ALT, Flowseal 1.10.3 FAKE TLS AUTO ALT2.
+blobs = quic_google,fake_zero64,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=quic_google:repeats=11
+--out-range=<n2
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
 --lua-desync=fake:blob=fake_zero64:repeats=10
-
-[flowseal_1103_alt3_game_other_udp]
-name = Flowseal 1.10.3 / ALT3 / Game other UDP
-author = Flowseal
-label = experimental
-blobs = game_active
+--payload=all
 --lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
-[flowseal_1103_alt5_game_quic]
-name = Flowseal 1.10.3 / ALT5 / Game QUIC
+[flowseal_1103_fake_tls_auto_alt3_ipset_udp]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
---lua-desync=fake:blob=fake_default_quic:repeats=14
-
-[flowseal_1103_alt5_game_known_udp]
-name = Flowseal 1.10.3 / ALT5 / Game known UDP
-author = Flowseal
-label = experimental
-blobs = fake_zero64
---lua-desync=fake:blob=fake_zero64:repeats=14
-
-[flowseal_1103_alt5_game_other_udp]
-name = Flowseal 1.10.3 / ALT5 / Game other UDP
-author = Flowseal
-label = experimental
-blobs = game_active
---lua-desync=fake:blob=game_active:repeats=14:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT3.
+blobs = quic_google,fake_zero64,game_active
+--payload=quic_initial
+--lua-desync=fake:blob=quic_google:repeats=11
+--out-range=<n3
+--payload=wireguard_initiation,dht,discord_ip_discovery,stun
+--lua-desync=fake:blob=fake_zero64:repeats=10
+--payload=all
+--lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun

@@ -7,6 +7,7 @@ from PyQt6.QtGui import QFontMetrics, QMouseEvent, QPainter, QPen
 from PyQt6.QtWidgets import QListView, QStyledItemDelegate, QStyle, QStyleOptionViewItem
 
 from profile.ui.profile_icon import profile_icon_pixmap
+from profile.ui.widgets.payload_badge import PAYLOAD_BADGE_HEIGHT, paint_payload_badge, payload_badge_width
 from ui.theme import get_theme_tokens, to_qcolor
 from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.folder_header import FOLDER_HEADER_HEIGHT, is_folder_toggle_click, paint_folder_header_row
@@ -194,6 +195,7 @@ class ProfileListDelegate(QStyledItemDelegate):
         )
 
         strategy_name = str(index.data(ProfileListModel.StrategyNameRole) or "")
+        payload_badge = str(index.data(ProfileListModel.StrategyPayloadBadgeRole) or "")
         rating = str(index.data(ProfileListModel.RatingRole) or "").strip().lower()
         favorite = bool(index.data(ProfileListModel.FavoriteRole))
         feedback_text = _feedback_text(rating, favorite)
@@ -204,6 +206,9 @@ class ProfileListDelegate(QStyledItemDelegate):
         meta_font.setBold(False)
         meta_metrics = QFontMetrics(meta_font)
         strategy_text_width = meta_metrics.horizontalAdvance(strategy_name) + 8 if strategy_name else 0
+        payload_badge_full_width = payload_badge_width(meta_metrics, payload_badge) if strategy_name else 0
+        if payload_badge_full_width:
+            strategy_text_width += payload_badge_full_width + _PAYLOAD_BADGE_GAP
         feedback_text_width = meta_metrics.horizontalAdvance(feedback_text) + 8 if feedback_text else 0
         badge_width = meta_metrics.horizontalAdvance(badge_text) + self._BADGE_H_PADDING * 2 if badge_text else 0
         name = str(index.data(ProfileListModel.DisplayNameRole) or "")
@@ -269,11 +274,17 @@ class ProfileListDelegate(QStyledItemDelegate):
 
         strategy_color = tokens.fg if active else tokens.fg_muted
         if row_layout.strategy_rect.isValid():
+            payload_badge_rect, strategy_text_rect = _strategy_payload_badge_rects(
+                row_layout.strategy_rect,
+                payload_badge_full_width,
+            )
+            paint_payload_badge(painter, payload_badge_rect, payload_badge, meta_metrics, tokens)
+            painter.setFont(meta_font)
             painter.setPen(to_qcolor(strategy_color, "#b7bec8"))
             painter.drawText(
-                row_layout.strategy_rect,
+                strategy_text_rect,
                 int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
-                meta_metrics.elidedText(strategy_name, Qt.TextElideMode.ElideRight, row_layout.strategy_rect.width()),
+                meta_metrics.elidedText(strategy_name, Qt.TextElideMode.ElideRight, strategy_text_rect.width()),
             )
 
         if feedback_text and row_layout.feedback_rect.isValid():
@@ -285,6 +296,34 @@ class ProfileListDelegate(QStyledItemDelegate):
             )
 
         painter.restore()
+
+
+_PAYLOAD_BADGE_GAP = 6
+# Сколько места оставить имени стратегии рядом со значком (дальше — многоточие).
+_PAYLOAD_BADGE_MIN_NAME_WIDTH = 24
+
+
+def _strategy_payload_badge_rects(strategy_rect: QRect, badge_width: int) -> tuple[QRect, QRect]:
+    """(значок типов пакетов, имя стратегии) внутри области стратегии.
+
+    Значок составной стратегии стоит слева и виден всегда; имя стратегии
+    сокращается многоточием в оставшемся месте. Если места совсем мало,
+    сокращается и сам значок.
+    """
+    text_rect = QRect(strategy_rect)
+    if badge_width <= 0 or not strategy_rect.isValid():
+        return QRect(), text_rect
+    width = min(int(badge_width), strategy_rect.width() - _PAYLOAD_BADGE_GAP - _PAYLOAD_BADGE_MIN_NAME_WIDTH)
+    if width <= 0:
+        return QRect(), text_rect
+    badge_rect = QRect(
+        strategy_rect.left(),
+        strategy_rect.center().y() - PAYLOAD_BADGE_HEIGHT // 2,
+        width,
+        PAYLOAD_BADGE_HEIGHT,
+    )
+    text_rect.setLeft(badge_rect.right() + 1 + _PAYLOAD_BADGE_GAP)
+    return badge_rect, text_rect
 
 
 @dataclass(frozen=True)

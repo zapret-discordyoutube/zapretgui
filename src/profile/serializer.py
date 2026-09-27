@@ -7,6 +7,7 @@ from settings.mode import ENGINE_WINWS1, ENGINE_WINWS2
 
 from .models import EngineName, Preset, Profile, ProfileSegment
 from .parser import parse_preset_text
+from .strategy_shape import PAYLOAD_OPTION, RANGE_OPTIONS, strategy_shape, union_payload
 
 
 _STRATEGY_KINDS = {"strategy", "strategy_filter"}
@@ -93,6 +94,94 @@ def with_profile_strategy_lines(preset: Preset, profile_index: int, strategy_lin
     return _reparse(updated)
 
 
+def with_profile_whole_strategy(preset: Preset, profile_index: int, strategy_lines) -> Preset:
+    """Пресет, где стратегия profile-а (winws2) заменена строками целиком.
+
+    Остаются только настройки profile-а — строки ``--in-range``/``--out-range``
+    до первой ``--lua-desync`` (см. ``profile.strategy_shape``); все остальные
+    строки стратегии (``--payload``, диапазоны между ветками, ``--lua-desync``)
+    удаляются, а новые строки вставляются как есть. Так применяется составная
+    готовая стратегия и обычная стратегия поверх составной.
+    """
+    updated = deepcopy(preset)
+    profile = updated.profiles[int(profile_index)]
+    replacement = [
+        _segment_for_strategy_line(updated.engine, line)
+        for line in (str(raw or "").strip() for raw in strategy_lines or ())
+        if line
+    ]
+    first_lua = next(
+        (index for index, segment in enumerate(profile.segments) if segment.kind == "strategy"),
+        None,
+    )
+    kept: list[ProfileSegment] = []
+    first_removed: int | None = None
+    after_last_profile_range: int | None = None
+    for index, segment in enumerate(profile.segments):
+        if segment.kind in _STRATEGY_KINDS:
+            is_profile_range = (
+                segment.kind == "strategy_filter"
+                and str(segment.name or "").strip().lower() in RANGE_OPTIONS
+                and (first_lua is None or index < first_lua)
+            )
+            if not is_profile_range:
+                if first_removed is None:
+                    first_removed = len(kept)
+                continue
+            kept.append(segment)
+            after_last_profile_range = len(kept)
+            continue
+        kept.append(segment)
+
+    if first_removed is None:
+        insert_at = len(kept)
+        while insert_at > 0 and kept[insert_at - 1].kind == "blank":
+            insert_at -= 1
+    else:
+        insert_at = first_removed
+    # Диапазоны profile-а должны остаться ДО первой --lua-desync новой стратегии.
+    if after_last_profile_range is not None:
+        insert_at = max(insert_at, after_last_profile_range)
+    profile.segments = [*kept[:insert_at], *replacement, *kept[insert_at:]]
+    return _reparse(updated)
+
+
+def with_profile_ready_strategy(
+    preset: Preset,
+    profile_index: int,
+    strategy_lines,
+) -> tuple[Preset, tuple[str, ...] | None]:
+    """Пресет с выбранной готовой стратегией у profile-а — единое правило для
+    выбора на странице profile-а и для «Применить» в blockcheck.
+
+    winws2 (см. ``profile.strategy_shape``):
+
+    - составная стратегия: её строки целиком вместо стратегии profile-а
+      (остаются только диапазоны profile-а до первой ``--lua-desync``);
+    - обычная стратегия поверх составной: один ``--payload`` с объединением
+      типов пакетов прежних веток (``all``, если хоть одна ветка была на все
+      пакеты) и строки стратегии;
+    - обычная стратегия поверх обычной: меняются только строки
+      ``--lua-desync``, ``--payload`` и диапазоны profile-а остаются.
+
+    Второй элемент — строки стратегии, записанные целиком (для проверки после
+    записи), или None, если заменены только строки ``--lua-desync``.
+    """
+    lines = [str(line or "").strip() for line in strategy_lines or () if str(line or "").strip()]
+    if preset.engine == ENGINE_WINWS2:
+        profile = preset.profiles[int(profile_index)]
+        current = strategy_shape(getattr(profile.strategy, "strategy_lines", ()) or ())
+        if strategy_shape(lines).composite:
+            whole: tuple[str, ...] | None = tuple(lines)
+        elif current.composite:
+            whole = (f"{PAYLOAD_OPTION}={union_payload(current.payload_scopes)}", *lines)
+        else:
+            whole = None
+        if whole is not None:
+            return with_profile_whole_strategy(preset, profile_index, whole), whole
+    return with_profile_strategy_lines(preset, profile_index, lines), None
+
+
 def with_profile_user_match(
     preset: Preset,
     profile_index: int,
@@ -158,60 +247,6 @@ def with_profile_user_match(
         result.insert(insert, _segment_for_match_line(f"--hostlist={hostlist}"))
 
     profile.segments = result
-    return _reparse(updated)
-
-
-def strategy_branch_spans(segments) -> dict[str, tuple[int, int]]:
-    """Ветки стратегии profile: `branch:N` -> (индекс первой, индекс последней strategy-строки).
-
-    Ветка — подряд идущие strategy-строки (`--lua-desync` / строки winws1),
-    которые разделяет любая strategy_filter-строка (`--payload`, `--in-range`,
-    `--out-range`). Нумерация совпадает с `strategy_branches_for_profile`, по
-    ней UI выбирает ветку, поэтому источник у неё один.
-    """
-    spans: dict[str, tuple[int, int]] = {}
-    current: list[int] = []
-
-    def flush() -> None:
-        nonlocal current
-        if current:
-            spans[f"branch:{len(spans)}"] = (current[0], current[-1])
-            current = []
-
-    for index, segment in enumerate(tuple(segments or ())):
-        if segment.kind == "strategy_filter":
-            flush()
-            continue
-        if segment.kind == "strategy":
-            current.append(index)
-    flush()
-    return spans
-
-
-def with_profile_strategy_branch_lines(
-    preset: Preset,
-    profile_index: int,
-    branch_id: str,
-    strategy_lines,
-) -> Preset | None:
-    """Пресет с заменёнными строками одной ветки стратегии или None, если ветки нет.
-
-    Фильтры `--payload`/`--in-range`/`--out-range` и остальные ветки profile
-    не меняются. None вместо исходного пресета: возврат неизменённого пресета
-    выглядел бы для вызывающего как успешная замена.
-    """
-    updated = deepcopy(preset)
-    profile = updated.profiles[int(profile_index)]
-    target = strategy_branch_spans(profile.segments).get(str(branch_id or "").strip())
-    if not target:
-        return None
-    replacement = [
-        _segment_for_strategy_line(updated.engine, line)
-        for line in (str(raw or "").strip() for raw in strategy_lines or ())
-        if line
-    ]
-    start, end = target
-    profile.segments = [*profile.segments[:start], *replacement, *profile.segments[end + 1 :]]
     return _reparse(updated)
 
 

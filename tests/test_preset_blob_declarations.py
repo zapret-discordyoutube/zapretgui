@@ -309,6 +309,13 @@ class ServiceApplyStrategyBlobTests(unittest.TestCase):
                     "--lua-desync=fake:blob=tls_google:repeats=2",
                     "--lua-desync=multisplit:pos=1",
                     "",
+                    "[site_composite]",
+                    "name = Site composite",
+                    "--payload=tls_client_hello",
+                    "--lua-desync=fake:blob=tls_google:repeats=6",
+                    "--payload=http_req",
+                    "--lua-desync=multisplit:pos=2",
+                    "",
                 )
             ),
             encoding="utf-8",
@@ -334,13 +341,13 @@ class ServiceApplyStrategyBlobTests(unittest.TestCase):
             results = []
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
                 service = self._service(store, root, loader)
-                for strategy_id, branch_id in applies:
-                    results.append(service.apply_strategy("profile:0", strategy_id, strategy_branch_id=branch_id))
+                for strategy_id in applies:
+                    results.append(service.apply_strategy("profile:0", strategy_id))
         return store, results
 
     def test_plain_apply_declares_missing_fake_once_across_repeated_applies(self) -> None:
         text = "\n".join((_LUA_INIT, "", "--name=Site", "--filter-tcp=443", "--hostlist=lists/site.txt", "--lua-desync=pass", ""))
-        store, results = self._run(text, [("fake_google", ""), ("fake_google_split", ""), ("fake_google", "")])
+        store, results = self._run(text, ["fake_google", "fake_google_split", "fake_google"])
 
         self.assertEqual([result.status for result in results], ["applied", "applied", "applied"])
         self.assertEqual(store.text.count("--blob=tls_google:"), 1)
@@ -349,7 +356,9 @@ class ServiceApplyStrategyBlobTests(unittest.TestCase):
         self.assertIn(TLS_GOOGLE_LINE, preset.preamble_lines)
         self.assertEqual(results[0].blob_warnings, ())
 
-    def test_branch_apply_declares_missing_fake(self) -> None:
+    def test_apply_onto_multi_branch_profile_declares_missing_fake(self) -> None:
+        # Обычная стратегия поверх составной: один --payload с объединением
+        # типов прежних веток, фейк стратегии объявлен один раз.
         text = "\n".join(
             (
                 _LUA_INIT,
@@ -364,12 +373,18 @@ class ServiceApplyStrategyBlobTests(unittest.TestCase):
                 "",
             )
         )
-        store, results = self._run(text, [("fake_google", "branch:0"), ("fake_google_split", "branch:0")])
+        store, results = self._run(text, ["fake_google", "fake_google_split"])
 
         self.assertEqual([result.status for result in results], ["applied", "applied"])
         self.assertEqual(store.text.count("--blob=tls_google:"), 1)
         self.assertIn(TLS_GOOGLE_LINE, _preset(store.text).preamble_lines)
-        self.assertIn("--payload=http_req\n--lua-desync=multisplit:pos=2", store.text)
+        self.assertIn(
+            "--payload=tls_client_hello,http_req\n"
+            "--lua-desync=fake:blob=tls_google:repeats=2\n"
+            "--lua-desync=multisplit:pos=1\n",
+            store.text,
+        )
+        self.assertEqual(store.text.count("--payload="), 1)
 
     def test_apply_without_registry_writes_strategy_and_warns(self) -> None:
         text = "--name=Site\n--filter-tcp=443\n--hostlist=lists/site.txt\n--lua-desync=pass\n"
@@ -377,7 +392,7 @@ class ServiceApplyStrategyBlobTests(unittest.TestCase):
         def _broken():
             raise RuntimeError("файл не найден")
 
-        store, results = self._run(text, [("fake_google", "")], loader=_broken)
+        store, results = self._run(text, ["fake_google"], loader=_broken)
 
         self.assertEqual(results[0].status, "applied")
         self.assertNotIn("--blob=", store.text)
@@ -395,14 +410,14 @@ class ServiceApplyStrategyBlobTests(unittest.TestCase):
             results = []
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
                 service = self._service(store, root, loader)
-                for strategy_id, branch_id in applies:
-                    results.append(service.apply_strategy("profile:0", strategy_id, strategy_branch_id=branch_id))
+                for strategy_id in applies:
+                    results.append(service.apply_strategy("profile:0", strategy_id))
         return store, results
 
     def test_reselecting_applied_strategy_declares_only_missing_fake(self) -> None:
         body = ("--name=Site", "--filter-tcp=443", "--hostlist=lists/site.txt", "--lua-desync=fake:blob=tls_google:repeats=6")
         text = "\n".join((_LUA_INIT, "", "--wf-tcp-out=443", "", *body, ""))
-        store, results = self._run_with_store(text, [("fake_google", "")])
+        store, results = self._run_with_store(text, ["fake_google"])
 
         self.assertEqual(results[0].status, "already_applied")
         self.assertEqual(store.save_count, 1)
@@ -410,7 +425,7 @@ class ServiceApplyStrategyBlobTests(unittest.TestCase):
         self.assertEqual(added, [TLS_GOOGLE_LINE])
         self.assertEqual(store.text, text.replace(_LUA_INIT + "\n", _LUA_INIT + "\n\n" + TLS_GOOGLE_LINE + "\n", 1))
 
-    def test_reselecting_applied_branch_strategy_declares_missing_fake(self) -> None:
+    def test_reselecting_applied_composite_strategy_declares_missing_fake(self) -> None:
         text = "\n".join(
             (
                 _LUA_INIT,
@@ -425,7 +440,7 @@ class ServiceApplyStrategyBlobTests(unittest.TestCase):
                 "",
             )
         )
-        store, results = self._run_with_store(text, [("fake_google", "branch:0")])
+        store, results = self._run_with_store(text, ["site_composite"])
 
         self.assertEqual(results[0].status, "already_applied")
         self.assertEqual(store.save_count, 1)
@@ -446,7 +461,7 @@ class ServiceApplyStrategyBlobTests(unittest.TestCase):
                 "",
             )
         )
-        store, results = self._run_with_store(text, [("fake_google", ""), ("fake_google", "")])
+        store, results = self._run_with_store(text, ["fake_google", "fake_google"])
 
         self.assertEqual([result.status for result in results], ["already_applied", "already_applied"])
         self.assertEqual(store.save_count, 0)

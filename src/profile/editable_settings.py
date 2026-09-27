@@ -8,7 +8,7 @@ from settings.mode import ENGINE_WINWS1, ENGINE_WINWS2
 
 from .models import Preset, Profile, ProfileSegment
 from .parser import parse_preset_text
-from .serializer import serialize_preset, strategy_branch_spans
+from .serializer import serialize_preset
 from .winws2_transport import parse_out_range_expression
 
 
@@ -35,11 +35,10 @@ class EditableProfileSettings:
 
 
 _DEFAULT_RANGE_BY_OPTION = {"--in-range": "x", "--out-range": "a"}
-_DEFAULT_BRANCH_ID = "branch:0"
 
 
 def read_editable_profile_settings(profile: Profile) -> EditableProfileSettings:
-    in_range, out_range = read_strategy_branch_ranges(profile)
+    in_range, out_range = read_profile_ranges(profile)
     return EditableProfileSettings(
         filter_kind=_editable_filter_kind(profile),
         filter_value=_editable_filter_value(profile),
@@ -51,48 +50,37 @@ def read_editable_profile_settings(profile: Profile) -> EditableProfileSettings:
     )
 
 
-def read_strategy_branch_ranges(profile: Profile, strategy_branch_id: str = "") -> tuple[str, str]:
-    """Действующие для ветки `--in-range`/`--out-range` (по умолчанию x/a).
+def read_profile_ranges(profile: Profile) -> tuple[str, str]:
+    """Диапазоны ``--in-range``/``--out-range`` profile-а (по умолчанию x/a).
 
-    В zapret2 внутрипрофильный фильтр действует с места указания до
-    переопределения, поэтому значение ветки — последнее перед её первой
-    `--lua-desync`. Без стратегии — значение после всех фильтров profile:
-    так оно подействует на стратегию, добавленную в конец.
+    Это настройки profile-а: значения, которые действуют на первую
+    ``--lua-desync`` (в zapret2 внутрипрофильный фильтр действует с места
+    указания до переопределения). Диапазоны после первой ``--lua-desync``
+    принадлежат составной стратегии и здесь не читаются. Без стратегии —
+    значение после всех фильтров profile: так оно подействует на стратегию,
+    добавленную в конец.
     """
     if profile.engine != ENGINE_WINWS2:
         return _DEFAULT_RANGE_BY_OPTION["--in-range"], _DEFAULT_RANGE_BY_OPTION["--out-range"]
-    scope = _branch_scope(profile.segments, strategy_branch_id)
+    start = _first_strategy_line_index(profile.segments)
     return (
-        _effective_range(profile.segments, scope.start, "--in-range"),
-        _effective_range(profile.segments, scope.start, "--out-range"),
+        _effective_range(profile.segments, start, "--in-range"),
+        _effective_range(profile.segments, start, "--out-range"),
     )
-
-
-def has_strategy_branch(profile: Profile, strategy_branch_id: str) -> bool:
-    clean_id = str(strategy_branch_id or "").strip()
-    if not clean_id:
-        return True
-    spans = strategy_branch_spans(profile.segments)
-    if not spans:
-        return clean_id == _DEFAULT_BRANCH_ID
-    return clean_id in spans
 
 
 def with_editable_profile_settings(
     preset: Preset,
     profile_index: int,
     settings: EditableProfileSettings,
-    *,
-    strategy_branch_id: str = "",
 ) -> Preset:
     """Меняет только то, что отличается от текущих настроек profile.
 
     Фильтр-список правится, только если изменились тип/значение, и при этом
     заменяется лишь редактируемая группа строк (остальные hostlist/ipset
-    profile не трогаются). Диапазоны правятся только у выбранной ветки
-    стратегии (`strategy_branch_id`, по умолчанию первая); следующая ветка,
-    которая наследовала прежнее значение, получает его явной строкой, чтобы её
-    поведение не изменилось.
+    profile не трогаются). Диапазоны — настройки profile-а: правится строка
+    до первой ``--lua-desync`` (или добавляется прямо перед ней), а строки
+    внутри составной стратегии не трогаются.
     """
     if preset.engine not in {ENGINE_WINWS1, ENGINE_WINWS2}:
         raise ValueError(f"Unsupported profile preset engine: {preset.engine}")
@@ -125,10 +113,8 @@ def with_editable_profile_settings(
             )
 
     if preset.engine == ENGINE_WINWS2:
-        if not has_strategy_branch(profile, strategy_branch_id):
-            raise ValueError(f"Strategy branch not found: {strategy_branch_id}")
         for option_name, value in (("--in-range", settings.in_range), ("--out-range", settings.out_range)):
-            profile.segments = _with_branch_range(profile.segments, strategy_branch_id, option_name, value)
+            profile.segments = _with_profile_range(profile.segments, option_name, value)
 
     return _reparse(updated)
 
@@ -288,32 +274,10 @@ def _is_service_exclusion_profile(profile: Profile) -> bool:
     return False
 
 
-@dataclass(frozen=True)
-class _BranchScope:
-    # Индекс первой strategy-строки ветки (len(segments) — у profile нет стратегии).
-    start: int
-    # Индекс последней strategy-строки предыдущей ветки (-1 — предыдущей нет).
-    previous_end: int
-    # Индекс первой strategy-строки следующей ветки (None — следующей нет).
-    next_start: int | None
-    # Индекс последней strategy-строки самой ветки (None — стратегии нет).
-    end: int | None
-
-
-def _branch_scope(segments, strategy_branch_id: str = "") -> _BranchScope:
-    spans = list(strategy_branch_spans(segments).items())
-    clean_id = str(strategy_branch_id or "").strip() or _DEFAULT_BRANCH_ID
-    if not spans:
-        if clean_id != _DEFAULT_BRANCH_ID:
-            raise ValueError(f"Strategy branch not found: {strategy_branch_id}")
-        return _BranchScope(start=len(tuple(segments or ())), previous_end=-1, next_start=None, end=None)
-    for position, (branch_id, (start, end)) in enumerate(spans):
-        if branch_id != clean_id:
-            continue
-        previous_end = spans[position - 1][1][1] if position > 0 else -1
-        next_start = spans[position + 1][1][0] if position + 1 < len(spans) else None
-        return _BranchScope(start=start, previous_end=previous_end, next_start=next_start, end=end)
-    raise ValueError(f"Strategy branch not found: {strategy_branch_id}")
+def _first_strategy_line_index(segments) -> int:
+    """Индекс первой ``--lua-desync`` (len(segments) — у profile нет стратегии)."""
+    items = tuple(segments or ())
+    return next((index for index, segment in enumerate(items) if segment.kind == "strategy"), len(items))
 
 
 def _effective_range(segments, before_index: int, option_name: str) -> str:
@@ -342,36 +306,29 @@ def _range_segment(option_name: str, expression: str) -> ProfileSegment:
     )
 
 
-def _with_branch_range(
+def _with_profile_range(
     segments: list[ProfileSegment],
-    strategy_branch_id: str,
     option_name: str,
     value: str,
 ) -> list[ProfileSegment]:
     requested = _canonical_range_expression(option_name, value)
-    scope = _branch_scope(segments, strategy_branch_id)
-    previous = _effective_range(segments, scope.start, option_name)
+    start = _first_strategy_line_index(segments)
+    previous = _effective_range(segments, start, option_name)
     if _same_range(option_name, previous, requested):
         return segments
 
     result = list(segments)
-    # Сначала правки с большими индексами, чтобы индексы ветки остались верны.
-    if scope.next_start is not None and scope.end is not None:
-        next_has_own = _last_range_segment_index(result, scope.end + 1, scope.next_start, option_name) is not None
-        if not next_has_own:
-            result.insert(scope.next_start, _range_segment(option_name, previous))
-
-    own_index = _last_range_segment_index(result, scope.previous_end + 1, scope.start, option_name)
+    own_index = _last_range_segment_index(result, 0, start, option_name)
     if own_index is not None:
         result[own_index] = _range_segment(option_name, requested)
     else:
-        result.insert(_range_insert_index(result, scope), _range_segment(option_name, requested))
+        result.insert(_range_insert_index(result, start), _range_segment(option_name, requested))
     return result
 
 
-def _range_insert_index(segments: list[ProfileSegment], scope: _BranchScope) -> int:
-    if scope.end is not None:
-        return scope.start
+def _range_insert_index(segments: list[ProfileSegment], first_strategy_index: int) -> int:
+    if first_strategy_index < len(segments):
+        return first_strategy_index
     insert_at = len(segments)
     while insert_at > 0 and segments[insert_at - 1].kind == "blank":
         insert_at -= 1

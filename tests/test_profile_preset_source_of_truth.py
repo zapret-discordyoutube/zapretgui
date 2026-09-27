@@ -1,6 +1,6 @@
 """GUI-действие меняет в пресете ровно то, что попросил пользователь.
 
-Регрессии побочных эффектов: схлопывание веток диапазонов, чужие match-строки,
+Регрессии побочных эффектов: правка диапазонов внутри составной стратегии, чужие match-строки,
 второй `--wf-udp-out`, молчаливое разрезание profile-ов, перестановка строк
 wssize, удаление хвоста пресета, правка чужих/встроенных пресетов при
 изменении пользовательского profile.
@@ -88,32 +88,51 @@ class RangeEditTests(unittest.TestCase):
                 result = service.update_winws2_editable_settings("profile:0", **params)
         return store.text, result
 
-    def test_editing_second_branch_range_changes_only_that_branch(self) -> None:
+    def test_profile_range_edit_keeps_composite_strategy_and_its_inner_range(self) -> None:
+        # Поля страницы правят только диапазон profile-а (до первой
+        # --lua-desync); диапазон внутри составной стратегии не трогается,
+        # и стратегия по-прежнему узнаётся как готовая.
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
+            catalogs = root / "system" / "strategy_catalogs" / "winws2"
+            catalogs.mkdir(parents=True)
+            (catalogs / "tcp.txt").write_text(
+                "\n".join(
+                    (
+                        "[youtube_composite]",
+                        "name = YouTube composite",
+                        "--payload=tls_client_hello",
+                        "--lua-desync=fake:blob=tls_google",
+                        "--payload=http_req",
+                        "--out-range=-n4",
+                        "--lua-desync=multisplit:pos=2",
+                        "",
+                    )
+                ),
+                encoding="utf-8",
+            )
             store = _PresetStore(_TWO_BRANCH_PROFILE)
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
                 service = _service(root, store)
                 setup = service.get_profile_setup("profile:0")
-                # Ветку берём ровно так, как её показывает UI.
-                branch = setup.strategy_branches[1]
-                self.assertEqual((branch.payload, branch.out_range), ("http_req", "-n4"))
+                self.assertEqual((setup.item.strategy_id, setup.out_range), ("youtube_composite", "-d8"))
                 result = service.update_winws2_editable_settings(
                     "profile:0",
                     filter_kind=setup.editable_filter_kind,
                     filter_value=setup.editable_filter_value,
-                    in_range=branch.in_range,
+                    in_range=setup.in_range,
                     out_range="-n2",
-                    strategy_branch_id=branch.branch_id,
                 )
                 after = service.get_profile_setup("profile:0")
 
         self.assertIsNotNone(result)
-        self.assertEqual(store.text, _TWO_BRANCH_PROFILE.replace("--out-range=-n4", "--out-range=-n2"))
-        self.assertEqual([item.out_range for item in after.strategy_branches], ["-d8", "-n2"])
-        self.assertEqual([item.payload for item in after.strategy_branches], ["tls_client_hello", "http_req"])
+        self.assertEqual(store.text, _TWO_BRANCH_PROFILE.replace("--out-range=-d8", "--out-range=-n2"))
+        self.assertEqual((after.item.strategy_id, after.out_range), ("youtube_composite", "-n2"))
 
-    def test_editing_first_branch_pins_inherited_value_of_next_branch(self) -> None:
+    def test_profile_range_edit_on_composite_profile_adds_no_restore_lines(self) -> None:
+        # Диапазон до первой --lua-desync — настройка всего profile-а: его
+        # правка меняет одну строку, и в середину составной стратегии не
+        # вставляются строки «вернуть прежнее значение» для следующих веток.
         text = "\n".join(
             (
                 "--name=YouTube",
@@ -130,13 +149,32 @@ class RangeEditTests(unittest.TestCase):
         saved, result = self._edit(text, out_range="-n3")
 
         self.assertIsNotNone(result)
-        preset = parse_preset_text(saved, engine="winws2")
-        from profile.derived_cache import strategy_branches_for_profile
+        self.assertEqual(saved, text.replace("--out-range=-d8", "--out-range=-n3"))
 
-        branches = strategy_branches_for_profile(preset.profiles[0], {})
-        # Ветка 0 получила новое значение, ветка 1 по-прежнему работает с -d8.
-        self.assertEqual([(item.payload, item.out_range) for item in branches], [("tls_client_hello", "-n3"), ("http_req", "-d8")])
-        self.assertEqual(saved.count("--payload="), 2)
+    def test_new_profile_range_goes_right_before_first_lua_desync(self) -> None:
+        text = "\n".join(
+            (
+                "--name=YouTube",
+                "--filter-tcp=80,443",
+                "--hostlist=lists/youtube.txt",
+                "--payload=tls_client_hello",
+                "--lua-desync=fake:blob=tls_google",
+                "--payload=http_req",
+                "--out-range=-n4",
+                "--lua-desync=multisplit:pos=2",
+                "",
+            )
+        )
+        saved, result = self._edit(text, out_range="-d8")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            saved,
+            text.replace(
+                "--payload=tls_client_hello\n",
+                "--payload=tls_client_hello\n--out-range=-d8\n",
+            ),
+        )
 
     def test_filter_only_edit_keeps_every_range_and_payload_line(self) -> None:
         text = "\n".join(
@@ -218,7 +256,7 @@ class RangeEditTests(unittest.TestCase):
         # Проверка после записи читает ту же группу, что правилась.
         self.assertEqual((actual.filter_kind, actual.filter_value), ("ipset", "lists/ipset-site.txt"))
 
-    def test_settings_save_worker_returns_payload_on_saved_branch(self) -> None:
+    def test_settings_save_worker_returns_payload_with_saved_profile_range(self) -> None:
         from app.feature_facades.profile import ProfileFeature
 
         with TemporaryDirectory() as temp_dir:
@@ -237,35 +275,14 @@ class RangeEditTests(unittest.TestCase):
                     filter_value="lists/youtube.txt",
                     in_range="x",
                     out_range="-n2",
-                    strategy_branch_id="branch:1",
                 )
                 worker.saved.connect(lambda _request_id, _keys, result: emitted.append(result))
                 worker.run()
 
         self.assertEqual(len(emitted), 1)
         payload = emitted[0].payload
-        # После сохранения страница остаётся на той же ветке, а не прыгает на первую.
-        self.assertEqual(payload.current_strategy_branch_id, "branch:1")
         self.assertEqual((payload.in_range, payload.out_range), ("x", "-n2"))
-        self.assertEqual(store.text, _TWO_BRANCH_PROFILE.replace("--out-range=-n4", "--out-range=-n2"))
-
-    def test_unknown_branch_is_rejected_without_write(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            store = _PresetStore(_TWO_BRANCH_PROFILE)
-            with patch("settings.store.MAIN_DIRECTORY", str(root)):
-                service = _service(root, store)
-                result = service.update_winws2_editable_settings(
-                    "profile:0",
-                    filter_kind="hostlist",
-                    filter_value="lists/youtube.txt",
-                    in_range="x",
-                    out_range="-n2",
-                    strategy_branch_id="branch:7",
-                )
-
-        self.assertIsNone(result)
-        self.assertEqual(store.save_count, 0)
+        self.assertEqual(store.text, _TWO_BRANCH_PROFILE.replace("--out-range=-d8", "--out-range=-n2"))
 
 
 class AutoSplitTests(unittest.TestCase):
@@ -508,7 +525,9 @@ class BlockcheckApplyTests(unittest.TestCase):
         udp_lines = [line for line in store.text.splitlines() if line.startswith("--wf-udp-out=")]
         self.assertEqual(udp_lines, ["--wf-udp-out=443,19294-19344,50000-50100,443-65535"])
 
-    def test_apply_to_multi_branch_profile_replaces_only_tls_branch(self) -> None:
+    def test_apply_to_multi_branch_profile_writes_one_union_payload(self) -> None:
+        # Как выбор готовой стратегии на странице: у profile-а одна стратегия,
+        # поверх веток пишется один --payload с объединением их типов.
         text = "\n".join(
             (
                 "--name=YouTube",
@@ -529,7 +548,41 @@ class BlockcheckApplyTests(unittest.TestCase):
         self.assertEqual(result.operation, "updated")
         self.assertEqual(
             store.text,
-            text.replace("--lua-desync=multisplit:pos=1", "--lua-desync=fake:blob=tls_google"),
+            "\n".join(
+                (
+                    "--name=YouTube",
+                    "--filter-tcp=80,443",
+                    "--hostlist-domains=www.youtube.com",
+                    "--out-range=-d8",
+                    "--payload=tls_client_hello,http_req",
+                    "--lua-desync=fake:blob=tls_google",
+                    "",
+                )
+            ),
+        )
+
+    def test_apply_adds_scanned_payload_when_profile_payload_misses_it(self) -> None:
+        text = "\n".join(
+            (
+                "--name=YouTube",
+                "--filter-tcp=80,443",
+                "--hostlist-domains=www.youtube.com",
+                "--out-range=-d8",
+                "--payload=http_req",
+                "--lua-desync=multisplit:pos=1",
+                "",
+            )
+        )
+        store = _PresetStore(text)
+
+        result = self._apply(store)
+
+        self.assertEqual(result.operation, "updated")
+        self.assertEqual(
+            store.text,
+            text.replace("--payload=http_req", "--payload=http_req,tls_client_hello").replace(
+                "--lua-desync=multisplit:pos=1", "--lua-desync=fake:blob=tls_google"
+            ),
         )
 
     def test_unconfirmed_write_is_an_error_not_success(self) -> None:

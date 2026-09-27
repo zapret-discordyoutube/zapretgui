@@ -226,11 +226,11 @@ def _merge_preamble_lines(preamble_lines: list[str], extra_lines: list[str]) -> 
         known.add(line)
 
 
-def _branch_covers_payload(branch_payload: str, scanned: tuple[str, ...]) -> bool:
-    tokens = {part.strip().lower() for part in str(branch_payload or "all").split(",") if part.strip()}
+def _payload_covers(payload: str, scanned: tuple[str, ...]) -> bool:
+    tokens = {part.strip().lower() for part in str(payload or "all").split(",") if part.strip()}
     if not scanned or tokens & {"all", "known"}:
         return True
-    return bool(tokens & set(scanned))
+    return set(scanned) <= tokens
 
 
 def _lua_lines(profile) -> list[str]:
@@ -261,82 +261,61 @@ def _expect_profile_lua_lines(profile_index: int, lua_lines: list[str]):
     return _expect
 
 
-def _with_strategy_in_existing_profile(source, profile, new_profile, scan_protocol: str):
+def _with_strategy_in_existing_profile(source, profile, new_profile, ready_strategy_lines, scan_protocol: str):
     """Ставит найденную стратегию в существующий profile.
 
     Пользователь явно применяет найденную стратегию к этому profile-у, поэтому
-    profile включается. Меняются только строки `--lua-desync` одной ветки —
-    той, чей `--payload` пропускает проверенный трафик (TLS ClientHello для
-    HTTPS, STUN для голоса); остальные ветки и фильтры profile-а
-    (`--payload`/`--in-range`/`--out-range`) остаются как в файле. Если такой
-    ветки нет, стратегия добавляется новой веткой со своим `--payload`.
+    profile включается. Правило то же, что у выбора готовой стратегии на
+    странице profile-а (``profile.serializer.with_profile_ready_strategy``):
+    у profile-а одна стратегия, диапазоны profile-а до первой ``--lua-desync``
+    остаются, а поверх составной стратегии пишется один ``--payload`` с
+    объединением типов пакетов прежних веток. Если прежний ``--payload``
+    profile-а не пропускает проверенный трафик (TLS ClientHello для HTTPS,
+    STUN для голоса), его типы добавляются к объединению — иначе найденная
+    стратегия не сработала бы на том, на чём её проверяли.
     Profile без стратегии получает строки найденного profile-а целиком.
     """
-    from profile.derived_cache import strategy_branches_for_profile
     from profile.serializer import (
-        strategy_branch_spans,
         with_profile_enabled,
-        with_profile_strategy_branch_lines,
+        with_profile_ready_strategy,
         with_profile_strategy_lines,
+        with_profile_whole_strategy,
     )
+    from profile.strategy_shape import PAYLOAD_OPTION, is_lua_desync_line, strategy_shape, union_payload
 
-    new_strategy_lines = list(getattr(new_profile.strategy, "strategy_lines", ()) or ())
-    new_lua_lines = _lua_lines(new_profile)
+    ready_lines = [str(line or "").strip() for line in ready_strategy_lines or () if str(line or "").strip()]
+    ready_lua_lines = [line for line in ready_lines if is_lua_desync_line(line)]
     index = profile.index
-    if len(strategy_branch_spans(new_profile.segments)) > 1 or not strategy_branch_spans(profile.segments):
-        # Стратегия сама несёт внутрипрофильные фильтры между инстансами или
-        # у profile ещё нет стратегии — ветку выбрать не из чего.
-        updated = with_profile_strategy_lines(source, index, new_strategy_lines)
-    else:
-        scanned = _SCANNED_PAYLOADS.get(str(scan_protocol or "").strip(), ())
-        branch = next(
-            (
-                item
-                for item in strategy_branches_for_profile(profile, {})
-                if _branch_covers_payload(item.payload, scanned)
-            ),
-            None,
+    current = strategy_shape(getattr(profile.strategy, "strategy_lines", ()) or ())
+    scanned = _SCANNED_PAYLOADS.get(str(scan_protocol or "").strip(), ())
+    if not current.lua_lines:
+        updated = with_profile_strategy_lines(
+            source,
+            index,
+            list(getattr(new_profile.strategy, "strategy_lines", ()) or ()),
         )
-        if branch is not None:
-            updated = with_profile_strategy_branch_lines(source, index, branch.branch_id, new_lua_lines)
-            if updated is None:
-                raise RuntimeError("Не удалось найти ветку стратегии profile")
-        else:
-            updated = _with_appended_payload_branch(source, index, scanned, new_lua_lines)
-    return with_profile_enabled(updated, index, True), _expect_profile_lua_lines(index, new_lua_lines)
-
-
-def _with_appended_payload_branch(source, profile_index: int, payloads: tuple[str, ...], lua_lines: list[str]):
-    from copy import deepcopy
-
-    from profile.models import ProfileSegment
-    from profile.parser import parse_preset_text
-    from profile.serializer import serialize_preset, strategy_branch_spans
-
-    updated = deepcopy(source)
-    profile = updated.profiles[int(profile_index)]
-    spans = strategy_branch_spans(profile.segments)
-    insert_at = max(end for _start, end in spans.values()) + 1
-    payload_value = ",".join(payloads)
-    new_segments = [
-        ProfileSegment(kind="strategy_filter", text=f"--payload={payload_value}", name="--payload", value=payload_value),
-        *[
-            ProfileSegment(kind="strategy", text=line, name="--lua-desync", value=line.partition("=")[2])
-            for line in lua_lines
-        ],
-    ]
-    profile.segments[insert_at:insert_at] = new_segments
-    return parse_preset_text(serialize_preset(updated), engine=updated.engine, source_name=updated.source_name)
+    elif strategy_shape(ready_lines).composite or _payload_covers(union_payload(current.payload_scopes), scanned):
+        updated, _whole = with_profile_ready_strategy(source, index, ready_lines)
+    else:
+        payload = union_payload((*current.payload_scopes, ",".join(scanned)))
+        updated = with_profile_whole_strategy(source, index, (f"{PAYLOAD_OPTION}={payload}", *ready_lines))
+    return with_profile_enabled(updated, index, True), _expect_profile_lua_lines(index, ready_lua_lines)
 
 
 def plan_selected_preset_strategy_apply(
     source,
     *,
     strategy_lines: list[str],
+    ready_strategy_lines: list[str],
     match_target: str = "",
     scan_protocol: str = "",
 ):
-    """Чистый план правки выбранного пресета: (новый пресет, "created"/"updated", expect)."""
+    """Чистый план правки выбранного пресета: (новый пресет, "created"/"updated", expect).
+
+    ``strategy_lines`` — profile найденной стратегии целиком (для нового
+    profile-а), ``ready_strategy_lines`` — сама найденная готовая стратегия
+    (для существующего profile-а).
+    """
     from copy import deepcopy
 
     from profile.parser import parse_preset_text
@@ -364,7 +343,13 @@ def plan_selected_preset_strategy_apply(
     if existing_profile is None and str(scan_protocol or "").strip() == "tcp_https":
         existing_profile = _find_existing_tcp_https_profile_for_target(updated.profiles, match_target)
     if existing_profile is not None:
-        planned, expect = _with_strategy_in_existing_profile(updated, existing_profile, new_profile, scan_protocol)
+        planned, expect = _with_strategy_in_existing_profile(
+            updated,
+            existing_profile,
+            new_profile,
+            ready_strategy_lines,
+            scan_protocol,
+        )
         return planned, "updated", expect
 
     # Найденная стратегия проверена на конкретной цели — её profile идёт
@@ -377,6 +362,7 @@ def apply_profile_to_selected_preset(
     *,
     profile_feature,
     strategy_lines: list[str],
+    ready_strategy_lines: list[str],
     match_target: str = "",
     scan_protocol: str = "",
 ) -> tuple[str, str, tuple[str, ...]]:
@@ -397,6 +383,7 @@ def apply_profile_to_selected_preset(
         planned, operation, expect = plan_selected_preset_strategy_apply(
             source,
             strategy_lines=strategy_lines,
+            ready_strategy_lines=ready_strategy_lines,
             match_target=match_target,
             scan_protocol=scan_protocol,
         )
@@ -477,6 +464,7 @@ def apply_strategy(
     selected_file_name, operation, blob_warnings = apply_profile_to_selected_preset(
         profile_feature=profile_feature,
         strategy_lines=new_strategy_lines,
+        ready_strategy_lines=str(strategy_args or "").splitlines(),
         match_target=target,
         scan_protocol=scan_protocol,
     )

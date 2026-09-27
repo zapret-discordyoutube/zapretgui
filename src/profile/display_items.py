@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .strategy_shape import payload_badge_text
+
 
 @dataclass(frozen=True)
 class ProfileDisplayItem:
@@ -27,6 +29,8 @@ class ProfileDisplayItem:
     group_rank: int = 10_000
     group_collapsed: bool = False
     user_profile_id: str = ""
+    # Типы пакетов веток составной стратегии («TLS · HTTP»), пусто — обычная.
+    strategy_payload_badge: str = ""
 
 
 def build_profile_display_items(items: tuple[Any, ...]) -> tuple[ProfileDisplayItem, ...]:
@@ -68,6 +72,7 @@ def _display_item_from_profile(item: Any) -> ProfileDisplayItem:
         group_rank=int(getattr(item, "group_rank", 10_000) or 0),
         group_collapsed=bool(getattr(item, "group_collapsed", False)),
         user_profile_id=str(getattr(item, "user_profile_id", "") or ""),
+        strategy_payload_badge=payload_badge_text(getattr(item, "strategy_payload_scopes", ()) or ()),
     )
 
 

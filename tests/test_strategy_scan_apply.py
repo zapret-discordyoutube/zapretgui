@@ -217,5 +217,89 @@ class StrategyScanApplyTests(unittest.TestCase):
         self.assertNotIn("hostfakesplit:host=ozon.ru", feature.saved_text)
 
 
+    def test_apply_to_composite_profile_writes_one_union_payload_and_resolves(self) -> None:
+        from core.paths import AppPaths
+        from profile.derived_cache import basic_strategy_entries, resolve_strategy
+        from profile.parser import parse_preset_text
+        from profile.strategy_catalog import load_strategy_catalogs
+        from settings.mode import ENGINE_WINWS2
+
+        feature = _PresetFeature(
+            "\n".join(
+                [
+                    "--new",
+                    "--name=youtube.com (интерфейс)",
+                    "--filter-tcp=443",
+                    "--hostlist-domains=www.youtube.com",
+                    "--out-range=-d8",
+                    "--payload=tls_client_hello",
+                    "--lua-desync=multisplit:pos=1",
+                    "--payload=all",
+                    "--lua-desync=fake:blob=fake_default_http",
+                    "",
+                ]
+            )
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            catalogs_dir = Path(temp_dir) / "system" / "strategy_catalogs" / "winws2"
+            catalogs_dir.mkdir(parents=True)
+            (catalogs_dir / "tcp.txt").write_text(
+                "[found]\nname = Found\n--lua-desync=fake:blob=tls_google\n",
+                encoding="utf-8",
+            )
+            result = _apply(feature, temp_dir)
+            catalogs = load_strategy_catalogs(AppPaths(user_root=Path(temp_dir), local_root=Path(temp_dir)), ENGINE_WINWS2)
+
+        self.assertEqual(result.operation, "updated")
+        profile_lines = feature.saved_text.split("--name=youtube.com (интерфейс)", 1)[1].splitlines()[1:]
+        self.assertEqual(
+            [line for line in profile_lines if line.strip()],
+            [
+                "--filter-tcp=443",
+                "--hostlist-domains=www.youtube.com",
+                "--out-range=-d8",
+                "--payload=all",
+                "--lua-desync=fake:blob=tls_google",
+            ],
+        )
+        self.assertIn(TLS_GOOGLE_BLOB_LINE, feature.saved_text)
+        preset = parse_preset_text(feature.saved_text, engine=ENGINE_WINWS2, source_name="Selected.txt")
+        profile = preset.profiles[0]
+        self.assertEqual(resolve_strategy(profile, basic_strategy_entries(profile, catalogs)), ("found", "Found"))
+
+    def test_apply_composite_found_strategy_replaces_whole_strategy(self) -> None:
+        feature = _PresetFeature(
+            "\n".join(
+                [
+                    "--new",
+                    "--filter-tcp=443",
+                    "--hostlist-domains=www.youtube.com",
+                    "--out-range=-d10",
+                    "--payload=tls_client_hello",
+                    "--lua-desync=pass",
+                    "",
+                ]
+            )
+        )
+        composite = "\n".join(
+            (
+                "--payload=tls_client_hello",
+                "--lua-desync=fake:blob=tls_google",
+                "--payload=http_req",
+                "--lua-desync=multisplit:pos=2",
+            )
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            result = _apply(feature, temp_dir, strategy_args=composite)
+
+        self.assertEqual(result.operation, "updated")
+        self.assertIn("--out-range=-d10\n" + composite + "\n", feature.saved_text)
+        self.assertEqual(feature.saved_text.count("--payload="), 2)
+        self.assertNotIn("--out-range=-d8", feature.saved_text)
+        self.assertIn(TLS_GOOGLE_BLOB_LINE, feature.saved_text)
+
+
 if __name__ == "__main__":
     unittest.main()

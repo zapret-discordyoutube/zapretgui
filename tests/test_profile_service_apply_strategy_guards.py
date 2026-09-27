@@ -86,13 +86,15 @@ class ProfileServiceWriteVerificationTests(unittest.TestCase):
         self.assertIn("strategy_mismatch_after_write", result.message)
         self.assertEqual(store.text, self._PRESET_TEXT)
 
-    def test_apply_strategy_to_branch_reports_write_failed_when_write_is_silently_dropped(self) -> None:
+    def test_apply_strategy_to_multi_branch_profile_reports_write_failed_when_write_is_silently_dropped(self) -> None:
         preset_text = "\n".join(
             (
                 "--name=SpeedTest",
                 "--filter-tcp=443,8080",
                 "--hostlist=lists/speedtest.txt",
                 "--payload=tls_client_hello",
+                "--lua-desync=pass",
+                "--payload=http_req",
                 "--lua-desync=pass",
                 "",
             )
@@ -104,10 +106,11 @@ class ProfileServiceWriteVerificationTests(unittest.TestCase):
 
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
                 service = self._service(store, root)
-                result = service.apply_strategy("profile:0", "tcp_md5", strategy_branch_id="branch:0")
+                result = service.apply_strategy("profile:0", "tcp_md5")
 
         self.assertEqual(result.status, "write_failed")
         self.assertTrue(result.should_reload)
+        self.assertIn("strategy_mismatch_after_write", result.message)
         self.assertEqual(store.text, preset_text)
 
     def test_set_profile_enabled_reports_failure_when_write_is_silently_dropped(self) -> None:
@@ -667,47 +670,6 @@ class ProfileServiceApplyStrategyGuardTests(unittest.TestCase):
 
         self.assertEqual(result.status, "profile_missing")
         self.assertEqual(result.profile_key, "")
-        self.assertTrue(result.should_reload)
-        self.assertEqual(store.save_count, 0)
-
-    def test_apply_strategy_reports_stale_reload_when_requested_branch_disappeared(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            catalogs_dir = root / "system" / "strategy_catalogs" / "winws2"
-            catalogs_dir.mkdir(parents=True)
-            (catalogs_dir / "tcp.txt").write_text(
-                "\n".join(
-                    (
-                        "[tls_fake]",
-                        "name = TLS fake",
-                        "--lua-desync=fake",
-                        "",
-                    )
-                ),
-                encoding="utf-8",
-            )
-            store = _PresetStore(
-                "\n".join(
-                    (
-                        "--name=SpeedTest",
-                        "--filter-tcp=443,8080",
-                        "--hostlist=lists/speedtest.txt",
-                        "--lua-desync=pass",
-                        "",
-                    )
-                )
-            )
-            feature = SimpleNamespace(
-                _presets_feature=store,
-                _app_paths=AppPaths(user_root=root, local_root=root),
-            )
-
-            with patch("settings.store.MAIN_DIRECTORY", str(root)):
-                service = ProfilePresetService(feature, "zapret2_mode")
-                result = service.apply_strategy("profile:0", "tls_fake", strategy_branch_id="branch:9")
-
-        self.assertEqual(result.status, "stale_reloaded")
-        self.assertEqual(result.profile_key, "profile:0")
         self.assertTrue(result.should_reload)
         self.assertEqual(store.save_count, 0)
 

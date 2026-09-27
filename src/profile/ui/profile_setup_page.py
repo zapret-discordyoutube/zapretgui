@@ -34,17 +34,12 @@ from profile.ui.profile_strategy_list_widget import (
     ProfileStrategyListView,
     ProfileStrategyListWidget,
     ProfileStrategySearchLineEdit,
-    _current_strategy_branch_id,
     _current_strategy_id,
     _join_accessible_options,
-    _payload_with_strategy_branch,
     _set_strategy_clear_feedback_button_state,
     _set_strategy_favorite_button_state,
     _set_strategy_feedback_button_state,
-    _strategy_branch_label,
     _sync_combo_items_accessibility,
-    _sync_strategy_branch_combo_items_accessibility,
-    _update_strategy_branch_combo_in_place,
 )
 from profile.ui.user_profile_dialog import CreateUserProfileDialog
 from qfluentwidgets import (
@@ -448,7 +443,6 @@ class ProfileSetupPageBase(BasePage):
         self._strategy_apply_runtime = OneShotWorkerRuntime()
         self._strategy_apply_request_id = 0
         self._strategy_apply_runtime_strategy_id = ""
-        self._strategy_apply_runtime_branch_id = ""
         self._strategy_apply_state = LatestValueWorkerState(
             self._strategy_apply_runtime,
             empty_value=None,
@@ -469,8 +463,6 @@ class ProfileSetupPageBase(BasePage):
         self._strategy_stack = None
         self._strategy_tabs = None
         self._strategy_list = None
-        self._strategy_branch_bar = None
-        self._strategy_branch_combo = None
         self._strategy_tab = None
         self._list_file_editor_placeholder = None
         self._match_tab_placeholder = None
@@ -779,19 +771,6 @@ class ProfileSetupPageBase(BasePage):
         self._strategy_tabs.currentItemChanged.connect(self._update_strategy_tabs_accessibility)
         self.layout.addWidget(self._strategy_tabs)
 
-        self._strategy_branch_bar = QWidget(self)
-        branch_layout = QHBoxLayout(self._strategy_branch_bar)
-        branch_layout.setContentsMargins(0, 0, 0, 0)
-        branch_layout.setSpacing(8)
-        branch_layout.addWidget(BodyLabel("Ветка"))
-        self._strategy_branch_combo = CompactDisplayComboBox()
-        self._strategy_branch_combo.setMinimumWidth(260)
-        self._strategy_branch_combo.currentIndexChanged.connect(self._on_strategy_branch_changed)
-        self._strategy_branch_combo.currentIndexChanged.connect(self._update_profile_setup_accessibility)
-        branch_layout.addWidget(self._strategy_branch_combo, 1)
-        self._strategy_branch_bar.hide()
-        self.layout.addWidget(self._strategy_branch_bar)
-
         self._strategy_list = ProfileStrategyListWidget(self)
         self._strategy_list.strategy_activated.connect(self._on_strategy_list_activated)
         self._strategy_stack.addWidget(self._strategy_list)
@@ -852,12 +831,6 @@ class ProfileSetupPageBase(BasePage):
             name="Режим out-range",
             description="Выберите режим --out-range для исходящих пакетов.",
         )
-        self._update_combo_accessibility(
-            self.__dict__.get("_strategy_branch_combo"),
-            name="Ветка готовой стратегии",
-            description="Выберите ветку готовой стратегии для этого profile.",
-        )
-        _sync_strategy_branch_combo_items_accessibility(self.__dict__.get("_strategy_branch_combo"))
         self._update_strategy_tabs_accessibility()
 
     def _strategy_tab_accessible_labels(self) -> dict[str, str]:
@@ -1681,10 +1654,9 @@ class ProfileSetupPageBase(BasePage):
         filter_value: str,
         in_range: str,
         out_range: str,
-        strategy_branch_id: str = "",
         parent=None,
     ):
-        return self._create_profile_settings_save_worker_fn(request_id, self.launch_method, profile_key=profile_key, filter_kind=filter_kind, filter_value=filter_value, in_range=in_range, out_range=out_range, strategy_branch_id=strategy_branch_id, parent=parent)
+        return self._create_profile_settings_save_worker_fn(request_id, self.launch_method, profile_key=profile_key, filter_kind=filter_kind, filter_value=filter_value, in_range=in_range, out_range=out_range, parent=parent)
 
     def create_profile_raw_text_save_worker(self, request_id: int, profile_key: str, raw_text: str, parent=None):
         return self._create_profile_raw_text_save_worker_fn(request_id, self.launch_method, profile_key=profile_key, raw_text=raw_text, parent=parent)
@@ -1722,10 +1694,9 @@ class ProfileSetupPageBase(BasePage):
         *,
         profile_key: str,
         strategy_id: str,
-        strategy_branch_id: str = "",
         parent=None,
     ):
-        return self._create_profile_strategy_apply_worker_fn(request_id, self.launch_method, profile_key=profile_key, strategy_id=strategy_id, strategy_branch_id=strategy_branch_id, parent=parent)
+        return self._create_profile_strategy_apply_worker_fn(request_id, self.launch_method, profile_key=profile_key, strategy_id=strategy_id, parent=parent)
 
     def create_profile_strategy_feedback_save_worker(
         self,
@@ -1806,7 +1777,6 @@ class ProfileSetupPageBase(BasePage):
             self._apply_editable_settings(payload)
             self._set_list_file_editor_available(_profile_has_list_file_editor(payload))
             self._sync_editor_tab_label(payload)
-            self._apply_strategy_branch_selector(payload)
 
             self._strategy_list.set_rows(
                 entries=payload.strategy_entries,
@@ -1822,58 +1792,6 @@ class ProfileSetupPageBase(BasePage):
             self._rebuild_breadcrumb()
         finally:
             self._loading = False
-
-    def _apply_strategy_branch_selector(self, payload) -> None:
-        combo = self._strategy_branch_combo
-        bar = self._strategy_branch_bar
-        if combo is None or bar is None:
-            return
-        branches = tuple(getattr(payload, "strategy_branches", ()) or ())
-        visible = len(branches) > 1
-        set_widget_visible_if_changed(bar, visible)
-        if not visible:
-            return
-
-        current_id = _current_strategy_branch_id(payload) or str(getattr(branches[0], "branch_id", "") or "")
-        branch_rows: list[tuple[str, str]] = []
-        selected_index = 0
-        for index, branch in enumerate(branches):
-            branch_id = str(getattr(branch, "branch_id", "") or "").strip()
-            branch_rows.append((branch_id, _strategy_branch_label(branch)))
-            if branch_id == current_id:
-                selected_index = index
-        combo.blockSignals(True)
-        try:
-            if not _update_strategy_branch_combo_in_place(combo, branch_rows, selected_index):
-                combo.clear()
-                for branch_id, label in branch_rows:
-                    combo.addItem(label, userData=branch_id)
-                combo.setCurrentIndex(selected_index)
-            _sync_strategy_branch_combo_items_accessibility(combo)
-        finally:
-            combo.blockSignals(False)
-        self._update_profile_setup_accessibility()
-
-    def _on_strategy_branch_changed(self, _index: int) -> None:
-        if self._loading or self._payload is None or self._strategy_branch_combo is None:
-            return
-        branch_id = str(self._strategy_branch_combo.itemData(self._strategy_branch_combo.currentIndex()) or "").strip()
-        if not branch_id:
-            return
-        branches = tuple(getattr(self._payload, "strategy_branches", ()) or ())
-        branch = next((item for item in branches if str(getattr(item, "branch_id", "") or "").strip() == branch_id), None)
-        if branch is None:
-            return
-        self._payload = _payload_with_strategy_branch(self._payload, branch_id)
-        self._loading = True
-        try:
-            self._apply_editable_settings(self._payload)
-        finally:
-            self._loading = False
-        self._strategy_list.set_current_strategy_id(str(getattr(branch, "strategy_id", "") or "none").strip() or "none")
-        self._apply_feedback_buttons(self._payload)
-        if self._match_tab_built:
-            self._apply_match_tab_payload()
 
     def _set_list_file_editor_available(self, available: bool) -> None:
         if self._strategy_tabs is None or self._strategy_stack is None:
@@ -2577,8 +2495,8 @@ class ProfileSetupPageBase(BasePage):
     def _request_strategy_apply(self, strategy_id: str) -> None:
         return self._strategy_controller_obj()._request_strategy_apply(strategy_id)
 
-    def _start_strategy_apply_worker(self, strategy_id: str, *, strategy_branch_id: str = "") -> None:
-        return self._strategy_controller_obj()._start_strategy_apply_worker(strategy_id, strategy_branch_id=strategy_branch_id)
+    def _start_strategy_apply_worker(self, strategy_id: str) -> None:
+        return self._strategy_controller_obj()._start_strategy_apply_worker(strategy_id)
 
     def _on_strategy_apply_finished(
         self,
@@ -2604,7 +2522,7 @@ class ProfileSetupPageBase(BasePage):
     def _mark_strategy_selection_pending(self, strategy_id: str) -> bool:
         """Отметить выбор стратегии до подтверждения записи.
 
-        Только подсветка строки в списке: item, ветки, аргументы и match-текст
+        Только подсветка строки в списке: item, аргументы и match-текст
         остаются такими, какими их прочитал сервис из пресета. Раньше страница
         пересчитывала их сама — намерение пользователя выглядело как факт даже
         тогда, когда запись в пресет не состоялась.

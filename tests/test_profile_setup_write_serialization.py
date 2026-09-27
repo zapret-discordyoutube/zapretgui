@@ -352,11 +352,10 @@ class ProfileSetupWriteSerializationTests(unittest.TestCase):
         page._strategy_apply_runtime = _Runtime(running=False)
         page._strategy_apply_request_id = 0
         page._strategy_apply_runtime_strategy_id = ""
-        page._strategy_apply_runtime_branch_id = ""
         page._pending_strategy_apply = None
         page._pending_profile_setup_write_operations = []
         page._profile_key = "profile-1"
-        page._payload = SimpleNamespace(strategy_branches=(), current_strategy_branch_id="")
+        page._payload = SimpleNamespace(item=SimpleNamespace(strategy_id="none"))
         page.create_profile_strategy_apply_worker = Mock(return_value=_Worker())
 
         ProfileSetupPageBase._request_strategy_apply(page, "tls_fake")
@@ -364,7 +363,7 @@ class ProfileSetupWriteSerializationTests(unittest.TestCase):
         page.create_profile_strategy_apply_worker.assert_not_called()
         self.assertEqual(
             page._pending_profile_setup_write_operations,
-            [{"kind": "strategy_apply", "strategy_id": "tls_fake", "branch_id": ""}],
+            [{"kind": "strategy_apply", "strategy_id": "tls_fake"}],
         )
 
         page._raw_profile_save_runtime.running = False
@@ -441,7 +440,6 @@ class ProfileSetupWriteSerializationTests(unittest.TestCase):
             filter_value="example.com",
             in_range="x",
             out_range="a",
-            strategy_branch_id="",
             parent=page,
         )
 
@@ -480,7 +478,6 @@ class ProfileSetupWriteSerializationTests(unittest.TestCase):
         page._strategy_apply_runtime = _Runtime(running=False)
         page._strategy_apply_request_id = 0
         page._strategy_apply_runtime_strategy_id = "old"
-        page._strategy_apply_runtime_branch_id = ""
         page._pending_profile_setup_write_operations = []
         page._pending_strategy_apply = "tls_fake"
         page._profile_key = "profile-1"

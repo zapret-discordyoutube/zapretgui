@@ -6,6 +6,7 @@ from typing import Any
 from PyQt6.QtCore import QAbstractListModel, QMimeData, QModelIndex, Qt
 
 from profile.display_items import ProfileDisplayItem, build_profile_display_items
+from profile.strategy_shape import payload_badge_accessible_text
 from profile.list_view_state import (
     ProfileListViewState,
     apply_profile_folder_state_to_items as _apply_profile_folder_state_to_items,
@@ -39,6 +40,7 @@ class ProfileListModel(QAbstractListModel):
     IconNameRole = Qt.ItemDataRole.UserRole + 18
     IconColorRole = Qt.ItemDataRole.UserRole + 19
     TooltipRole = Qt.ItemDataRole.UserRole + 20
+    StrategyPayloadBadgeRole = Qt.ItemDataRole.UserRole + 21
 
     MIME_TYPE = "application/x-zapret-profile-key"
 
@@ -467,6 +469,8 @@ class ProfileListModel(QAbstractListModel):
             return row.get("strategy_id", "")
         if role == self.StrategyNameRole:
             return row.get("strategy_name", "")
+        if role == self.StrategyPayloadBadgeRole:
+            return row.get("strategy_payload_badge", "")
         if role == self.MatchLinesRole:
             return tuple(row.get("match_lines", ()) or ())
         if role == self.ListTypeRole:
@@ -680,6 +684,7 @@ def _profile_data_roles() -> list[int]:
         ProfileListModel.DescriptionRole,
         ProfileListModel.StrategyIdRole,
         ProfileListModel.StrategyNameRole,
+        ProfileListModel.StrategyPayloadBadgeRole,
         ProfileListModel.MatchLinesRole,
         ProfileListModel.ListTypeRole,
         ProfileListModel.RatingRole,
@@ -707,6 +712,9 @@ def _profile_accessible_text(row: dict[str, Any]) -> str:
         strategy_name = str(row.get("strategy_name") or "").strip()
         if strategy_name:
             parts.append(f"стратегия: {strategy_name}")
+        payload_badge = payload_badge_accessible_text(str(row.get("strategy_payload_badge") or ""))
+        if payload_badge:
+            parts.append(payload_badge)
         if bool(row.get("favorite", False)):
             parts.append("в избранном")
         rating = str(row.get("rating") or "").strip()

@@ -265,6 +265,7 @@ def row_for_profile(item: ProfileDisplayItem) -> dict[str, Any]:
         "description": " | ".join(description_parts),
         "strategy_id": item.strategy_id,
         "strategy_name": item.strategy_name,
+        "strategy_payload_badge": getattr(item, "strategy_payload_badge", ""),
         "match_lines": match_lines,
         "list_type": item.list_type,
         "rating": item.rating,

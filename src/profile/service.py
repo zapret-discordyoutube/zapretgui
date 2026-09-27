@@ -23,6 +23,7 @@ from .derived_cache import (
     PresetSourcesCache,
     ProfileDerivedCache,
     profile_raw_text,
+    profile_strategy_shape,
     strategy_identity_lines,
 )
 from .folders import (
@@ -59,19 +60,18 @@ from .parser import parse_preset_text
 from .serializer import (
     append_profile_from_template,
     serialize_preset,
-    strategy_branch_spans,
     with_profile_deleted,
     with_profile_duplicated,
     with_profile_enabled,
     with_profile_moved,
     with_profile_raw_text,
-    with_profile_strategy_branch_lines,
-    with_profile_strategy_lines,
+    with_profile_ready_strategy,
     with_profile_user_match,
 )
 from .setup_match_text import build_profile_setup_match_tab_text
 from .strategy_state import ProfileStrategyState, ProfileStrategyStateStore
 from .strategy_catalog import StrategyEntry, load_strategy_catalogs_with_signature
+from .strategy_shape import composite_identity, strategy_shape
 from .state import (
     ProfileListFileEditorState,
     ProfileListItem,
@@ -84,11 +84,9 @@ from .user_profiles import create_user_profile, delete_user_profile, update_user
 from .editable_settings import (
     EditableProfileSettings,
     filter_value_is_file_reference,
-    has_strategy_branch,
     new_profile_insert_index,
     normalize_filter_value,
     read_editable_profile_settings,
-    read_strategy_branch_ranges,
     with_editable_profile,
     with_editable_profile_settings,
 )
@@ -569,14 +567,11 @@ class ProfilePresetService:
             "active_strategy_count": len(active_items),
         }
 
-    def get_profile_setup(self, profile_key: str, *, strategy_branch_id: str = "") -> ProfileSetupPayload | None:
-        """Данные страницы profile-а; `strategy_branch_id` — какую ветку
-        стратегии показать текущей (по умолчанию первую). Нужен, чтобы после
-        сохранения диапазонов ветки страница осталась на этой же ветке."""
+    def get_profile_setup(self, profile_key: str) -> ProfileSetupPayload | None:
         with self._profile_list_lock:
-            return self._get_profile_setup_locked(profile_key, strategy_branch_id=strategy_branch_id)
+            return self._get_profile_setup_locked(profile_key)
 
-    def _get_profile_setup_locked(self, profile_key: str, *, strategy_branch_id: str = "") -> ProfileSetupPayload | None:
+    def _get_profile_setup_locked(self, profile_key: str) -> ProfileSetupPayload | None:
         key = str(profile_key or "").strip()
         if not key:
             return None
@@ -608,22 +603,7 @@ class ProfilePresetService:
             user_template_key=getattr(source, "user_template_key", ""),
             resolved_display_name=getattr(source, "resolved_display_name", ""),
         )
-        strategy_branches = core.strategy_branches_with_match
-        wanted_branch_id = str(strategy_branch_id or "").strip()
-        current_branch = next(
-            (branch for branch in strategy_branches if wanted_branch_id and branch.branch_id == wanted_branch_id),
-            strategy_branches[0] if strategy_branches else None,
-        )
-        current_strategy_id = (
-            str(current_branch.strategy_id or "").strip()
-            if current_branch is not None
-            else str(item.strategy_id or "").strip()
-        )
-        raw_strategy_text = (
-            current_branch.raw_strategy_text
-            if current_branch is not None
-            else "\n".join(getattr(profile.strategy, "strategy_lines", ()) or ())
-        )
+        raw_strategy_text = "\n".join(getattr(profile.strategy, "strategy_lines", ()) or ())
         editable = core.editable
         strategy_states = self._state_store.get_strategy_states(
             profile.persistent_key,
@@ -636,18 +616,12 @@ class ProfilePresetService:
             raw_profile_text=core.raw_profile_text,
             raw_strategy_text=raw_strategy_text,
             match_summary=core.match_summary,
-            match_tab_text=(
-                str(current_branch.match_tab_text or "")
-                if current_branch is not None
-                else build_profile_setup_match_tab_text(
-                    match_summary=core.match_summary,
-                    strategy_id=item.strategy_id,
-                    strategy_name=item.strategy_name,
-                    raw_strategy_text=raw_strategy_text,
-                )
+            match_tab_text=build_profile_setup_match_tab_text(
+                match_summary=core.match_summary,
+                strategy_id=item.strategy_id,
+                strategy_name=item.strategy_name,
+                raw_strategy_text=raw_strategy_text,
             ),
-            strategy_branches=strategy_branches,
-            current_strategy_branch_id=str(getattr(current_branch, "branch_id", "") or ""),
             editable_filter_kind=editable.filter_kind,
             editable_filter_value=editable.filter_value,
             editable_filter_enabled=editable.filter_editable,
@@ -661,9 +635,9 @@ class ProfilePresetService:
                 core.editable_filter_kinds,
                 self._app_paths,
             ),
-            in_range=str(current_branch.in_range) if current_branch is not None else editable.in_range,
-            out_range=str(current_branch.out_range) if current_branch is not None else editable.out_range,
-            current_strategy_state=strategy_states.get(current_strategy_id, ProfileStrategyState()),
+            in_range=editable.in_range,
+            out_range=editable.out_range,
+            current_strategy_state=strategy_states.get(str(item.strategy_id or "").strip(), ProfileStrategyState()),
         )
 
     def set_profile_enabled(
@@ -697,29 +671,14 @@ class ProfilePresetService:
             return resolved_key
         return None
 
-    def apply_strategy(self, profile_key: str, strategy_id: str, *, strategy_branch_id: str = "") -> StrategyApplyResult:
-        result = self._apply_strategy_once(
-            profile_key,
-            strategy_id,
-            strategy_branch_id=strategy_branch_id,
-        )
+    def apply_strategy(self, profile_key: str, strategy_id: str) -> StrategyApplyResult:
+        result = self._apply_strategy_once(profile_key, strategy_id)
         if result.status in {"profile_missing", "stale_reloaded"} and result.should_reload:
             self._invalidate_selected_preset_snapshot()
-            retried = self._apply_strategy_once(
-                profile_key,
-                strategy_id,
-                strategy_branch_id=strategy_branch_id,
-            )
-            return retried
+            return self._apply_strategy_once(profile_key, strategy_id)
         return result
 
-    def _apply_strategy_once(
-        self,
-        profile_key: str,
-        strategy_id: str,
-        *,
-        strategy_branch_id: str = "",
-    ) -> StrategyApplyResult:
+    def _apply_strategy_once(self, profile_key: str, strategy_id: str) -> StrategyApplyResult:
         strategy_id = str(strategy_id or "").strip()
         if not strategy_id or strategy_id in {"none", "custom"}:
             return _strategy_apply_result("not_applicable", strategy_id=strategy_id)
@@ -752,68 +711,13 @@ class ProfilePresetService:
                 should_reload=True,
                 message="strategy_entry_missing",
             )
-        branch_id = str(strategy_branch_id or "").strip()
-        if not branch_id:
-            branch_id = str(getattr(setup, "current_strategy_branch_id", "") or "").strip()
-        strategy_branches = tuple(getattr(setup, "strategy_branches", ()) or ())
-        if branch_id and strategy_branches and setup.item.in_preset:
-            branch = next((item for item in strategy_branches if item.branch_id == branch_id), None)
-            if branch is None:
-                return _strategy_apply_result(
-                    "stale_reloaded",
-                    profile_key=setup.item.key,
-                    strategy_id=strategy_id,
-                    should_reload=True,
-                    message="strategy_branch_missing",
-                )
-            if (
-                setup.item.in_preset
-                and setup.item.enabled
-                and str(branch.strategy_id or "").strip() == strategy_id
-            ):
-                return self._declare_blobs_of_applied_strategy(setup.item.key, strategy_id, entry.args.splitlines())
-            preset, _manifest = self.load_selected_preset()
-            index = resolve_preset_profile_reference_index(preset, profile_key)
-            if index is None:
-                return _strategy_apply_result(
-                    "stale_reloaded",
-                    profile_key=setup.item.key,
-                    strategy_id=strategy_id,
-                    should_reload=True,
-                    message="profile_index_missing",
-                )
-            updated_preset = with_profile_strategy_branch_lines(preset, index, branch_id, entry.args.splitlines())
-            if updated_preset is None:
-                return _strategy_apply_result(
-                    "stale_reloaded",
-                    profile_key=setup.item.key,
-                    strategy_id=strategy_id,
-                    should_reload=True,
-                    message="strategy_branch_segments_missing",
-                )
-            return self._commit_applied_strategy(
-                with_profile_enabled(updated_preset, index, True),
-                index=index,
-                branch_id=branch_id,
-                strategy_lines=entry.args.splitlines(),
-                strategy_id=strategy_id,
-                changed_profile_key=profile_key,
-                fallback_profile_key=setup.item.key,
-            )
-        if setup.item.in_preset and strategy_branches and len(strategy_branches) > 1:
-            return _strategy_apply_result(
-                "stale_reloaded",
-                profile_key=setup.item.key,
-                strategy_id=strategy_id,
-                should_reload=True,
-                message="strategy_branch_required",
-            )
+        entry_lines = entry.args.splitlines()
         if (
             setup.item.in_preset
             and setup.item.enabled
             and str(setup.item.strategy_id or "").strip() == strategy_id
         ):
-            return self._declare_blobs_of_applied_strategy(setup.item.key, strategy_id, entry.args.splitlines())
+            return self._declare_blobs_of_applied_strategy(setup.item.key, strategy_id, entry_lines)
 
         preset, _manifest = self.load_selected_preset()
         resolved_key = profile_key
@@ -837,12 +741,12 @@ class ProfilePresetService:
                 should_reload=True,
                 message="profile_index_missing",
             )
-        preset = with_profile_strategy_lines(preset, index, entry.args.splitlines())
+        preset, whole_strategy_lines = with_profile_ready_strategy(preset, index, entry_lines)
         return self._commit_applied_strategy(
             with_profile_enabled(preset, index, True),
             index=index,
-            branch_id="",
-            strategy_lines=entry.args.splitlines(),
+            strategy_lines=entry_lines,
+            whole_strategy_lines=whole_strategy_lines,
             strategy_id=strategy_id,
             changed_profile_key="" if list_structure_changed else resolved_key,
             fallback_profile_key=resolved_key,
@@ -854,8 +758,8 @@ class ProfilePresetService:
         preset: Preset,
         *,
         index: int,
-        branch_id: str,
         strategy_lines: list[str],
+        whole_strategy_lines: tuple[str, ...] | None,
         strategy_id: str,
         changed_profile_key: str,
         fallback_profile_key: str,
@@ -875,7 +779,7 @@ class ProfilePresetService:
             preset,
             content_change_kind=change_kind,
             changed_profile_key=changed_profile_key,
-            expect=_expect_strategy_lines(index, branch_id, strategy_lines),
+            expect=_expect_strategy_lines(index, strategy_lines, whole_strategy_lines=whole_strategy_lines),
         )
         applied_key = preset.profiles[index].key if 0 <= index < len(preset.profiles) else ""
         if write_failure:
@@ -1025,25 +929,19 @@ class ProfilePresetService:
         filter_value: str,
         in_range: str,
         out_range: str,
-        strategy_branch_id: str = "",
     ) -> tuple[str, str] | None:
         """Правит только изменённые настройки profile.
 
-        Диапазоны относятся к ветке стратегии `strategy_branch_id` (как её
-        показывает UI; пусто — первая ветка), поэтому и сравнение «ничего не
-        изменилось», и проверка после записи идут по этой ветке.
+        Диапазоны — настройки profile-а: строки до первой ``--lua-desync``
+        (см. ``profile.strategy_shape``); строки внутри составной стратегии
+        не меняются.
         """
         preset, _manifest = self.load_selected_preset()
         index = resolve_preset_profile_reference_index(preset, profile_key)
         if index is None:
             return None
-        branch_id = str(strategy_branch_id or "").strip()
-        if not has_strategy_branch(preset.profiles[index], branch_id):
-            return None
         old_persistent_key = str(preset.profiles[index].persistent_key or "").strip()
         current = read_editable_profile_settings(preset.profiles[index])
-        current_in_range, current_out_range = read_strategy_branch_ranges(preset.profiles[index], branch_id)
-        current = replace(current, in_range=current_in_range, out_range=current_out_range)
         next_filter_kind = str(filter_kind or "").strip().lower()
         if next_filter_kind != current.filter_kind:
             resolved = resolve_filter_kind_switch(current, next_filter_kind, self._app_paths)
@@ -1077,13 +975,8 @@ class ProfilePresetService:
             and current.out_range == next_settings.out_range
         ):
             return old_persistent_key, old_persistent_key
-        preset = with_editable_profile_settings(
-            preset,
-            index,
-            next_settings,
-            strategy_branch_id=branch_id,
-        )
-        if self._commit_preset(preset, expect=_expect_editable_settings(index, next_settings, branch_id)):
+        preset = with_editable_profile_settings(preset, index, next_settings)
+        if self._commit_preset(preset, expect=_expect_editable_settings(index, next_settings)):
             return None
         return self._profile_edit_result(preset, index, old_persistent_key)
 
@@ -1613,7 +1506,7 @@ class ProfilePresetService:
             group_collapsed=folder.collapsed,
             user_profile_id=_user_profile_id_from_template_key(user_template_key),
             profile_name=profile.name,
-            strategy_branches=core.strategy_branches,
+            strategy_payload_scopes=core.strategy_payload_scopes if effective_strategy_id != "none" else (),
         )
 
     def _load_profile_templates(self) -> dict[str, Profile]:
@@ -1873,31 +1766,28 @@ def _expect_profile(profile_index: int, check):
     return _expect
 
 
-def _expect_strategy_lines(profile_index: int, branch_id: str, strategy_lines):
-    """Ожидание: строки стратегии профиля (или его ветки) равны заданным."""
-    clean_branch_id = str(branch_id or "").strip()
+def _expect_strategy_lines(profile_index: int, strategy_lines, *, whole_strategy_lines=None):
+    """Ожидание: стратегия профиля равна выбранной.
+
+    ``whole_strategy_lines`` — стратегия записана целиком (составная или
+    обычная поверх составной): сверяются все строки стратегии, кроме
+    диапазонов profile-а. Иначе сверяются строки ``--lua-desync``.
+    """
     requested = tuple(str(line or "").strip() for line in strategy_lines or () if str(line or "").strip())
 
     def _check(profile: Profile) -> str:
-        expected = strategy_identity_lines(profile, requested)
-        if clean_branch_id:
-            target = _strategy_branch_segment_groups(profile).get(clean_branch_id)
-            if not target:
-                return f"branch_missing_after_write: branch={clean_branch_id}"
-            start, end = target
-            actual_segments = profile.segments[start : end + 1]
+        if whole_strategy_lines is not None:
+            expected = composite_identity(strategy_shape(whole_strategy_lines).body_lines)
+            actual = composite_identity(profile_strategy_shape(profile).body_lines)
         else:
-            actual_segments = profile.segments
-        actual = strategy_identity_lines(
-            profile,
-            [segment.text for segment in actual_segments if segment.kind == "strategy"],
-        )
+            expected = strategy_identity_lines(profile, requested)
+            actual = strategy_identity_lines(
+                profile,
+                [segment.text for segment in profile.segments if segment.kind == "strategy"],
+            )
         if actual == expected:
             return ""
-        return (
-            "strategy_mismatch_after_write: "
-            f"branch={clean_branch_id or '-'} expected={list(expected)} actual={list(actual)}"
-        )
+        return f"strategy_mismatch_after_write: expected={list(expected)} actual={list(actual)}"
 
     return _expect_profile(profile_index, _check)
 
@@ -1924,13 +1814,9 @@ def _expect_profile_enabled(profile_index: int, enabled: bool):
     return _expect_profile(profile_index, _check)
 
 
-def _expect_editable_settings(profile_index: int, settings: EditableProfileSettings, strategy_branch_id: str = ""):
+def _expect_editable_settings(profile_index: int, settings: EditableProfileSettings):
     def _check(profile: Profile) -> str:
         actual = read_editable_profile_settings(profile)
-        if not has_strategy_branch(profile, strategy_branch_id):
-            return f"branch_missing_after_write: branch={strategy_branch_id}"
-        in_range, out_range = read_strategy_branch_ranges(profile, strategy_branch_id)
-        actual = replace(actual, in_range=in_range, out_range=out_range)
         if (
             actual.filter_kind == settings.filter_kind
             and actual.filter_value == settings.filter_value
@@ -1954,10 +1840,6 @@ def _expect_profile_raw_text(profile_index: int, raw_text: str):
         return "raw_text_mismatch_after_write"
 
     return _expect_profile(profile_index, _check)
-
-
-def _strategy_branch_segment_groups(profile: Profile) -> dict[str, tuple[int, int]]:
-    return strategy_branch_spans(getattr(profile, "segments", ()) or ())
 
 
 def _is_builtin_preset_manifest(manifest) -> bool:

@@ -6,6 +6,7 @@ from typing import Optional
 
 from core.paths import AppPaths
 from log.log import log
+from .strategy_shape import is_filter_line, is_lua_desync_line, is_range_line, strategy_shape
 from .strategy_visuals import StrategyVisual, describe_strategy_visual
 
 
@@ -16,6 +17,10 @@ class StrategyEntry:
     name: str
     args: str
     visual: StrategyVisual
+    # Составная стратегия: несколько веток --payload (см. profile.strategy_shape).
+    is_composite: bool = False
+    # --payload каждой ветки составной стратегии, для значка типов пакетов.
+    payload_scopes: tuple[str, ...] = ()
 
 
 _STRATEGY_CATALOGS_CACHE: dict[
@@ -64,12 +69,19 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
                 "WARNING",
             )
             return
+        branch_problem = _branch_filter_problem(args.splitlines())
+        if branch_problem:
+            log(f"StrategyCatalog: {path.name} [{current_id}] пропущена — {branch_problem}", "WARNING")
+            return
+        shape = strategy_shape(args.splitlines())
         strategies[current_id] = StrategyEntry(
             strategy_id=current_id,
             catalog_name=catalog_name,
             name=current_name or current_id,
             args=args,
             visual=describe_strategy_visual(args),
+            is_composite=shape.composite,
+            payload_scopes=shape.payload_scopes if shape.composite else (),
         )
 
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -105,6 +117,38 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
 
     _flush()
     return strategies
+
+
+def _branch_filter_problem(lines: list[str]) -> str:
+    """Почему строки ``--payload``/диапазонов недопустимы в записи ("" — допустимы).
+
+    Обычная готовая стратегия — только строки ``--lua-desync``. Внутрипрофильные
+    фильтры разрешены лишь в составной стратегии как разделители веток:
+    диапазон до первой ``--lua-desync`` — настройка profile-а, а ``--payload``
+    без второй ветки — тоже настройка profile-а, а не часть стратегии.
+    """
+    clean = [str(line or "").strip() for line in lines if str(line or "").strip()]
+    filters = [line for line in clean if is_filter_line(line)]
+    if not filters:
+        return ""
+    first_lua = next((index for index, line in enumerate(clean) if is_lua_desync_line(line)), None)
+    if first_lua is None:
+        return f"фильтры без строк --lua-desync: {', '.join(filters)}"
+    early_ranges = [line for line in clean[:first_lua] if is_range_line(line)]
+    if early_ranges:
+        return (
+            "диапазон до первой --lua-desync — это настройка profile-а, "
+            f"а не готовой стратегии: {', '.join(early_ranges)}"
+        )
+    if not strategy_shape(clean).composite:
+        return (
+            "--payload в готовой стратегии допустим только как разделитель веток "
+            f"составной стратегии: {', '.join(filters)}"
+        )
+    unknown = [line for line in clean if not (is_lua_desync_line(line) or is_filter_line(line))]
+    if unknown:
+        return f"в составной стратегии допустимы только --payload, диапазоны и --lua-desync: {', '.join(unknown)}"
+    return ""
 
 
 def _profile_scoped_lines(lines: list[str]) -> list[str]:

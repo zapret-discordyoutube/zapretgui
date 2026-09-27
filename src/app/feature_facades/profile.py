@@ -91,13 +91,8 @@ class ProfileFeature:
             max_items=max_items,
         )
 
-    def get_profile_setup(self, launch_method: str, profile_key: str, *, strategy_branch_id: str = ""):
-        return self._commands().get_profile_setup(
-            self,
-            launch_method,
-            profile_key,
-            strategy_branch_id=strategy_branch_id,
-        )
+    def get_profile_setup(self, launch_method: str, profile_key: str):
+        return self._commands().get_profile_setup(self, launch_method, profile_key)
 
     def create_profile_setup_load_worker(self, request_id: int, launch_method: str, *, profile_key: str, parent=None):
         from profile.profile_setup_loader import ProfileSetupLoadWorker
@@ -228,7 +223,6 @@ class ProfileFeature:
         filter_value: str,
         in_range: str,
         out_range: str,
-        strategy_branch_id: str = "",
         parent=None,
     ):
         from profile.profile_setup_loader import ProfileSettingsSaveWorker
@@ -242,7 +236,6 @@ class ProfileFeature:
             filter_value: str,
             in_range: str,
             out_range: str,
-            strategy_branch_id: str = "",
         ):
             return self.update_winws2_profile_settings(
                 clean_launch_method,
@@ -251,12 +244,10 @@ class ProfileFeature:
                 filter_value=filter_value,
                 in_range=in_range,
                 out_range=out_range,
-                strategy_branch_id=strategy_branch_id,
             )
 
         def _load_profile_setup(profile_key: str):
-            # Страница остаётся на той ветке стратегии, диапазоны которой сохранялись.
-            return self.get_profile_setup(clean_launch_method, profile_key, strategy_branch_id=strategy_branch_id)
+            return self.get_profile_setup(clean_launch_method, profile_key)
 
         return ProfileSettingsSaveWorker(
             request_id,
@@ -267,7 +258,6 @@ class ProfileFeature:
             filter_value=filter_value,
             in_range=in_range,
             out_range=out_range,
-            strategy_branch_id=strategy_branch_id,
             parent=parent,
         )
 
@@ -407,20 +397,14 @@ class ProfileFeature:
         *,
         profile_key: str,
         strategy_id: str,
-        strategy_branch_id: str = "",
         parent=None,
     ):
         from profile.profile_setup_loader import ProfileStrategyApplyWorker
 
         clean_launch_method = str(launch_method or "")
 
-        def _apply_strategy(*, profile_key: str, strategy_id: str, strategy_branch_id: str = ""):
-            return self.apply_strategy_to_profile(
-                clean_launch_method,
-                profile_key,
-                strategy_id,
-                strategy_branch_id=strategy_branch_id,
-            )
+        def _apply_strategy(*, profile_key: str, strategy_id: str):
+            return self.apply_strategy_to_profile(clean_launch_method, profile_key, strategy_id)
 
         def _load_profile_setup(profile_key: str):
             return self.get_profile_setup(clean_launch_method, profile_key)
@@ -431,7 +415,6 @@ class ProfileFeature:
             _load_profile_setup,
             profile_key,
             strategy_id,
-            strategy_branch_id,
             parent,
         )
 
@@ -494,16 +477,8 @@ class ProfileFeature:
         launch_method: str,
         profile_key: str,
         strategy_id: str,
-        *,
-        strategy_branch_id: str = "",
     ) -> StrategyApplyResult:
-        return self._commands().apply_strategy_to_profile(
-            self,
-            launch_method,
-            profile_key,
-            strategy_id,
-            strategy_branch_id=strategy_branch_id,
-        )
+        return self._commands().apply_strategy_to_profile(self, launch_method, profile_key, strategy_id)
 
     def set_profile_enabled(
         self,
@@ -532,7 +507,6 @@ class ProfileFeature:
         filter_value: str,
         in_range: str,
         out_range: str,
-        strategy_branch_id: str = "",
     ) -> tuple[str, str] | None:
         return self._commands().update_winws2_profile_settings(
             self,
@@ -542,7 +516,6 @@ class ProfileFeature:
             filter_value=filter_value,
             in_range=in_range,
             out_range=out_range,
-            strategy_branch_id=strategy_branch_id,
         )
 
     def edit_selected_preset(self, launch_method: str, edit):

@@ -14,11 +14,7 @@ request_id живут на странице — поведенческие те�
 from __future__ import annotations
 
 from profile.strategy_state import ProfileStrategyState
-from profile.ui.profile_strategy_list_widget import (
-    _current_strategy_branch_id,
-    _current_strategy_id,
-    _payload_with_strategy_branch,
-)
+from profile.ui.profile_strategy_list_widget import _current_strategy_id
 from ui.latest_value_worker_state import LatestValueWorkerState
 
 
@@ -57,49 +53,37 @@ class ProfileStrategyController:
     def _request_strategy_apply(self, strategy_id: str) -> None:
         page = self._page
         strategy_id = str(strategy_id or "").strip()
-        branch_id = _current_strategy_branch_id(page._payload)
         if page._profile_setup_write_is_running():
-            if (
-                strategy_id != str(getattr(page, "_strategy_apply_runtime_strategy_id", "") or "").strip()
-                or branch_id != str(getattr(page, "_strategy_apply_runtime_branch_id", "") or "").strip()
-            ):
-                page._strategy_apply_state_obj().pending = (strategy_id, branch_id) if branch_id else strategy_id
+            if strategy_id != str(getattr(page, "_strategy_apply_runtime_strategy_id", "") or "").strip():
+                page._strategy_apply_state_obj().pending = strategy_id
                 page._queue_profile_setup_write_operation(
                     {
                         "kind": "strategy_apply",
                         "strategy_id": strategy_id,
-                        "branch_id": branch_id,
                     }
                 )
             return
-        page._start_strategy_apply_worker(strategy_id, strategy_branch_id=branch_id)
+        page._start_strategy_apply_worker(strategy_id)
 
-    def _start_strategy_apply_worker(self, strategy_id: str, *, strategy_branch_id: str = "") -> None:
+    def _start_strategy_apply_worker(self, strategy_id: str) -> None:
         page = self._page
         strategy_id = str(strategy_id or "").strip()
-        strategy_branch_id = str(strategy_branch_id or "").strip()
         if not strategy_id or not page._profile_key:
             return
         runtime = page._worker_runtime("_strategy_apply_runtime")
         page._strategy_apply_request_id = int(getattr(page, "_strategy_apply_request_id", 0) or 0) + 1
         request_id = page._strategy_apply_request_id
         page._strategy_apply_runtime_strategy_id = strategy_id
-        page._strategy_apply_runtime_branch_id = strategy_branch_id
         # Стабильная ссылка вместо возможного "profile:N": позиционный ключ,
         # захваченный при открытии страницы, после сдвига соседей резолвится
         # в чужой профиль — и стратегия уходит не туда.
         profile_key = page._profile_result_reference(page.__dict__.get("_payload"), page._profile_key)
-        worker_kwargs = {
-            "profile_key": profile_key,
-            "strategy_id": strategy_id,
-            "parent": page,
-        }
-        if strategy_branch_id:
-            worker_kwargs["strategy_branch_id"] = strategy_branch_id
         runtime.start_qthread_worker(
             worker_factory=lambda _runtime_request_id: page.create_profile_strategy_apply_worker(
                 request_id,
-                **worker_kwargs,
+                profile_key=profile_key,
+                strategy_id=strategy_id,
+                parent=page,
             ),
             on_loaded=page._on_strategy_apply_finished,
             on_failed=page._on_strategy_apply_failed,
@@ -125,12 +109,7 @@ class ProfileStrategyController:
         item_key = str(getattr(getattr(page.__dict__.get("_payload"), "item", None), "key", "") or "").strip()
         if requested not in {current, item_key}:
             return
-        pending = page._strategy_apply_state_obj().pending
-        pending_strategy_id = ""
-        if isinstance(pending, tuple):
-            pending_strategy_id = str(pending[0] or "").strip()
-        else:
-            pending_strategy_id = str(pending or "").strip()
+        pending_strategy_id = str(page._strategy_apply_state_obj().pending or "").strip()
         if pending_strategy_id and pending_strategy_id != str(strategy_id or "").strip():
             return
         apply_result = _page_module()._profile_setup_apply_result_from_worker_result(payload)
@@ -147,10 +126,6 @@ class ProfileStrategyController:
         self._report_strategy_blob_warnings(apply_result)
         if apply_result is not None and bool(getattr(apply_result, "should_reload", False)):
             if result_payload is not None:
-                branch_id = str(getattr(page, "_strategy_apply_runtime_branch_id", "") or "").strip()
-                if branch_id:
-                    result_payload = _payload_with_strategy_branch(result_payload, branch_id)
-                    apply_signature = None
                 page._payload = result_payload
                 page._schedule_profile_setup_payload_apply(result_payload, apply_signature=apply_signature)
                 page._on_profile_changed_callback(
@@ -173,10 +148,6 @@ class ProfileStrategyController:
             page._on_profile_changed_callback(page._profile_key, "strategy", item)
             return
         if result_payload is not None:
-            branch_id = str(getattr(page, "_strategy_apply_runtime_branch_id", "") or "").strip()
-            if branch_id:
-                result_payload = _payload_with_strategy_branch(result_payload, branch_id)
-                apply_signature = None
             page._payload = result_payload
             page._schedule_profile_setup_payload_apply(result_payload, apply_signature=apply_signature)
             page._on_profile_changed_callback(
@@ -240,28 +211,17 @@ class ProfileStrategyController:
         if not accepted:
             return
         page._strategy_apply_runtime_strategy_id = ""
-        page._strategy_apply_runtime_branch_id = ""
         if scheduled:
             return
         pending = page._strategy_apply_state_obj().pending
         page._strategy_apply_state_obj().pending = None
         if pending:
-            if isinstance(pending, tuple):
-                page._schedule_profile_setup_write_operation_start(
-                    {
-                        "kind": "strategy_apply",
-                        "strategy_id": str(pending[0] or ""),
-                        "branch_id": str(pending[1] or ""),
-                    }
-                )
-            else:
-                page._schedule_profile_setup_write_operation_start(
-                    {
-                        "kind": "strategy_apply",
-                        "strategy_id": str(pending or ""),
-                        "branch_id": "",
-                    }
-                )
+            page._schedule_profile_setup_write_operation_start(
+                {
+                    "kind": "strategy_apply",
+                    "strategy_id": str(pending or ""),
+                }
+            )
 
     def _strategy_apply_state_obj(self) -> LatestValueWorkerState:
         page = self._page

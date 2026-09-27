@@ -15,8 +15,6 @@ def profile_setup_payload_apply_signature(payload) -> tuple[object, ...]:
         str(getattr(payload, "raw_profile_text", "") or ""),
         str(getattr(payload, "raw_strategy_text", "") or ""),
         str(getattr(payload, "match_summary", "") or ""),
-        tuple(getattr(payload, "strategy_branches", ()) or ()),
-        str(getattr(payload, "current_strategy_branch_id", "") or ""),
         str(getattr(payload, "editable_filter_kind", "") or ""),
         str(getattr(payload, "editable_filter_value", "") or ""),
         bool(getattr(payload, "editable_filter_enabled", True)),
