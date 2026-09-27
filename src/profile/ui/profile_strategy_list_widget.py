@@ -95,6 +95,8 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
             hovered=hovered,
             selected=selected,
             show_active_marker=not (motion is not None and motion.hides_static_marker(index)),
+            active_reveal=motion.row_reveal(index) if motion is not None else None,
+            residual_active=motion.row_residual(index) if motion is not None else 0.0,
         )
         icon_dy = round(motion.icon_offset(index)) if motion is not None else 0
 

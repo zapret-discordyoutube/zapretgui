@@ -64,13 +64,39 @@ class ActiveRowMotionTests(unittest.TestCase):
 
         anim = self.motion._anim
         anim.setCurrentTime(int(anim.duration() * 0.7))
-        self.assertFalse(self.motion.hides_static_marker(new_index))
+        # На приземлении капсула пружинит сама, своя полоска строки ещё скрыта.
+        self.assertTrue(self.motion.hides_static_marker(new_index))
         self.assertLess(self.motion.icon_offset(new_index), 0.0)
 
         anim.setCurrentTime(anim.duration())
         self.assertFalse(self.motion.is_running())
         self.assertEqual(self.motion.icon_offset(new_index), 0.0)
         self.assertFalse(self.motion._overlay.isVisible())
+
+    def test_new_row_fills_while_old_row_fades(self) -> None:
+        self._switch_active(1, 4)
+        new_index = self.view.model().index(4, 0)
+        old_index = self.view.model().index(1, 0)
+        other_index = self.view.model().index(2, 0)
+        anim = self.motion._anim
+
+        self.assertEqual(self.motion.row_reveal(new_index), 0.0)
+        self.assertEqual(self.motion.row_residual(old_index), 1.0)
+        self.assertIsNone(self.motion.row_reveal(other_index))
+        self.assertEqual(self.motion.row_residual(other_index), 0.0)
+
+        anim.setCurrentTime(int(anim.duration() * 0.3))
+        middle_reveal = self.motion.row_reveal(new_index)
+        self.assertGreater(middle_reveal, 0.0)
+        self.assertLess(self.motion.row_residual(old_index), 1.0)
+
+        anim.setCurrentTime(int(anim.duration() * 0.6))
+        self.assertEqual(self.motion.row_reveal(new_index), 1.0)
+        self.assertEqual(self.motion.row_residual(old_index), 0.0)
+
+        anim.setCurrentTime(anim.duration())
+        self.assertIsNone(self.motion.row_reveal(new_index))
+        self.assertEqual(self.motion.row_residual(old_index), 0.0)
 
     def test_rebuilding_the_list_does_not_animate(self) -> None:
         self.view.clear()

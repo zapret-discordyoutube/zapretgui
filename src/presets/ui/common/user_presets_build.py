@@ -253,7 +253,12 @@ def build_user_presets_page_shell(
     presets_delegate.action_triggered.connect(on_preset_list_action)
     presets_list.setModel(presets_model)
     # При смене активного пресета полоска акцента переезжает к новой строке.
-    attach_active_row_motion(presets_list, PresetListModel.ActiveRole, row_rect_fn=profile_hover_row_rect)
+    attach_active_row_motion(
+        presets_list,
+        PresetListModel.ActiveRole,
+        row_rect_fn=profile_hover_row_rect,
+        static_marker=False,
+    )
     wire_preset_search_keyboard_activation(preset_search_input, presets_list)
     apply_user_presets_accessibility(
         tr_fn=tr_fn,

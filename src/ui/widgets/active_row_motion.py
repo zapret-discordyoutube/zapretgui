@@ -1,10 +1,12 @@
-"""Переезд активной строки в списке: акцентная полоска скользит к новой строке.
+"""Переезд активной строки в списке: акцентный бегунок скользит к новой строке.
 
 Помощник подключается к готовому списку (QListView/QListWidget) и следит за
-ролью «активна» в модели. Когда активной становится другая строка, поверх
-списка по прозрачному слою едет акцентная полоска — «гусеницей»: передний
-край убегает вперёд, задний догоняет. За ней скользит мягкая подсветка
-строки, а после приземления значок новой строки подпрыгивает.
+ролью «активна» в модели. Когда активной становится другая строка:
+- по левому краю списка едет короткая акцентная капсула со свечением и
+  тающим «хвостом» — сразу видно, что это движение, а не сбой отрисовки;
+- подсветка старой строки плавно гаснет, а новая строка «закрашивается»
+  подсветкой слева направо (это рисует сам delegate, под текстом);
+- капсула пружинит на новой строке, значок строки подпрыгивает.
 
 При полной перестройке списка (фильтр, обновление) ничего не анимируется.
 В покое помощник ничего не рисует и таймеров не держит.
@@ -16,14 +18,14 @@ import math
 
 from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QObject, QPersistentModelIndex, QRect, QRectF, Qt, QTimer, QVariantAnimation
-from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter
 from PyQt6.QtWidgets import QWidget
 
 from ui.animation_policy import are_live_animations_enabled
 
 
-SLIDE_DURATION_MS = 460
-BOUNCE_DURATION_MS = 420
+SLIDE_DURATION_MS = 380
+BOUNCE_DURATION_MS = 380
 # Доля общего времени, отведённая на переезд; остальное — прыжок значка.
 _SLIDE_SHARE = SLIDE_DURATION_MS / (SLIDE_DURATION_MS + BOUNCE_DURATION_MS)
 _MOTION_ATTR = "_zapret_active_row_motion"
@@ -39,6 +41,12 @@ def _ease_in_out_cubic(t: float) -> float:
 
 def _lerp(a: float, b: float, t: float) -> float:
     return a + (b - a) * t
+
+
+def _with_alpha(color: QColor, alpha: float) -> QColor:
+    result = QColor(color)
+    result.setAlphaF(max(0.0, min(1.0, alpha)) * color.alphaF())
+    return result
 
 
 class _MotionOverlay(QWidget):
@@ -57,14 +65,26 @@ class _MotionOverlay(QWidget):
 
 
 class ActiveRowMotion(QObject):
-    def __init__(self, view, active_role: int, *, marker_inset: int = 6, row_rect_fn=None) -> None:
+    def __init__(
+        self,
+        view,
+        active_role: int,
+        *,
+        marker_inset: int = 6,
+        row_rect_fn=None,
+        static_marker: bool = True,
+    ) -> None:
         super().__init__(view)
         self._view = view
         self._active_role = int(active_role)
         self._marker_inset = int(marker_inset)
         self._row_rect_fn = row_rect_fn
+        # Есть ли у активной строки своя постоянная полоска. Если нет (список
+        # пресетов), капсула после приземления тает.
+        self._static_marker = bool(static_marker)
         self._active = QPersistentModelIndex()
         self._landing = QPersistentModelIndex()
+        self._leaving = QPersistentModelIndex()
         self._from_rect = QRect()
         self._t = 0.0
         self._check_scheduled = False
@@ -181,6 +201,7 @@ class ActiveRowMotion(QObject):
             return
         self._from_rect = self._row_rect(previous)
         self._landing = current
+        self._leaving = previous
         self._overlay.setGeometry(self._view.viewport().rect())
         self._overlay.show()
         self._overlay.raise_()
@@ -199,8 +220,9 @@ class ActiveRowMotion(QObject):
         except (TypeError, ValueError):
             return
         self._overlay.update()
-        if self._landing.isValid():
-            self._view.viewport().update(self._row_rect(self._landing).adjusted(0, -8, 0, 8))
+        for index in (self._landing, self._leaving):
+            if index.isValid():
+                self._view.viewport().update(self._row_rect(index).adjusted(0, -8, 0, 8))
 
     def _alive(self) -> bool:
         return not (sip.isdeleted(self._overlay) or sip.isdeleted(self._view))
@@ -209,12 +231,15 @@ class ActiveRowMotion(QObject):
         if not self._alive():
             # Список уже разбирается при закрытии, а модель ещё шлёт сигналы.
             return
-        landing = self._landing
+        touched = (self._landing, self._leaving)
         self._t = 0.0
         self._landing = QPersistentModelIndex()
+        self._leaving = QPersistentModelIndex()
         self._overlay.hide()
-        if landing.isValid() and self._model is not None:
-            self._view.viewport().update(self._row_rect(landing).adjusted(0, -8, 0, 8))
+        if self._model is not None:
+            for index in touched:
+                if index.isValid():
+                    self._view.viewport().update(self._row_rect(index).adjusted(0, -8, 0, 8))
 
     def is_running(self) -> bool:
         return self._anim.state() != QVariantAnimation.State.Stopped
@@ -231,8 +256,28 @@ class ActiveRowMotion(QObject):
         )
 
     def hides_static_marker(self, index) -> bool:
-        """Пока полоска едет, у новой строки своя полоска не рисуется."""
-        return self._is_landing(index) and self._t < _SLIDE_SHARE
+        """Пока идёт переезд и приземление, у новой строки своя полоска не рисуется."""
+        return self._is_landing(index)
+
+    def row_reveal(self, index) -> float | None:
+        """Насколько новая строка уже «закрашена» подсветкой (None — как обычно)."""
+        if not self._is_landing(index):
+            return None
+        start = _SLIDE_SHARE * 0.3
+        span = _SLIDE_SHARE * 0.9
+        return _ease_out_cubic(max(0.0, min(1.0, (self._t - start) / span)))
+
+    def row_residual(self, index) -> float:
+        """Сколько подсветки ещё осталось у старой строки (0 — погасла)."""
+        if (
+            not self._leaving.isValid()
+            or index is None
+            or not index.isValid()
+            or index.row() != self._leaving.row()
+            or not self.is_running()
+        ):
+            return 0.0
+        return 1.0 - _ease_in_out_cubic(max(0.0, min(1.0, self._t / (_SLIDE_SHARE * 0.8))))
 
     def icon_offset(self, index) -> float:
         """Сдвиг значка новой строки по вертикали: прыжок после приземления."""
@@ -244,7 +289,7 @@ class ActiveRowMotion(QObject):
     # ---- отрисовка слоя ------------------------------------------------
 
     def paint_overlay(self, overlay: QWidget) -> None:
-        if not self._landing.isValid() or self._t >= _SLIDE_SHARE:
+        if not self._landing.isValid():
             return
         from ui.theme import get_theme_tokens, to_qcolor
 
@@ -252,39 +297,56 @@ class ActiveRowMotion(QObject):
         accent = to_qcolor(tokens.accent_hex, "#5caee8")
         target = self._row_rect(self._landing)
         source = self._from_rect
-        t = self._t / _SLIDE_SHARE
-        moving_down = target.top() >= source.top()
+        inset = self._marker_inset
+        base_height = max(12.0, target.height() - inset * 2.0)
+        left = target.left() + inset
+
+        if self._t < _SLIDE_SHARE:
+            p = self._t / _SLIDE_SHARE
+            eased = _ease_in_out_cubic(p)
+            center_y = _lerp(source.center().y(), target.center().y(), eased)
+            speed = math.sin(math.pi * p)
+            # В полёте капсула чуть вытягивается и оставляет хвост.
+            height = base_height * (1.0 + 0.35 * speed)
+            tail = min(abs(target.center().y() - source.center().y()), 36.0) * speed
+            direction = 1.0 if target.center().y() >= source.center().y() else -1.0
+            alpha = 1.0
+        else:
+            q = (self._t - _SLIDE_SHARE) / (1.0 - _SLIDE_SHARE)
+            center_y = float(target.center().y())
+            # Приземление: короткая пружинка, потом капсула становится обычной
+            # полоской строки (или тает, если у строки своей полоски нет).
+            height = base_height * (1.0 + 0.22 * math.sin(math.pi * min(1.0, q / 0.55)) * (1.0 - q))
+            tail = 0.0
+            direction = 1.0
+            alpha = 1.0 if self._static_marker else max(0.0, 1.0 - q)
 
         painter = QPainter(overlay)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
+        top = center_y - height / 2.0
 
-        # Мягкая подсветка строки скользит следом и тает к приземлению.
-        eased = _ease_in_out_cubic(t)
-        ghost = QRectF(
-            _lerp(source.left(), target.left(), eased),
-            _lerp(source.top(), target.top(), eased),
-            _lerp(source.width(), target.width(), eased),
-            _lerp(source.height(), target.height(), eased),
-        )
-        fill = QColor(accent)
-        fill.setAlphaF(0.16 * (1.0 - t))
-        painter.setBrush(fill)
-        painter.drawRoundedRect(ghost, 10, 10)
+        if tail > 1.0:
+            # Хвост тает против направления движения.
+            if direction > 0:
+                tail_rect = QRectF(left, top - tail, 4.0, tail + height / 2.0)
+                gradient = QLinearGradient(tail_rect.topLeft(), tail_rect.bottomLeft())
+                gradient.setColorAt(0.0, _with_alpha(accent, 0.0))
+                gradient.setColorAt(1.0, _with_alpha(accent, 0.45 * alpha))
+            else:
+                tail_rect = QRectF(left, center_y, 4.0, tail + height / 2.0)
+                gradient = QLinearGradient(tail_rect.topLeft(), tail_rect.bottomLeft())
+                gradient.setColorAt(0.0, _with_alpha(accent, 0.45 * alpha))
+                gradient.setColorAt(1.0, _with_alpha(accent, 0.0))
+            painter.setBrush(QBrush(gradient))
+            painter.drawRoundedRect(tail_rect, 2, 2)
 
-        # Полоска едет «гусеницей»: передний край быстрее заднего.
-        lead = _ease_out_cubic(min(1.0, t * 1.25))
-        trail = _ease_in_out_cubic(t)
-        inset = self._marker_inset
-        if moving_down:
-            top = _lerp(source.top() + inset, target.top() + inset, trail)
-            bottom = _lerp(source.bottom() - inset, target.bottom() - inset, lead)
-        else:
-            top = _lerp(source.top() + inset, target.top() + inset, lead)
-            bottom = _lerp(source.bottom() - inset, target.bottom() - inset, trail)
-        left = _lerp(source.left(), target.left(), eased) + inset
-        painter.setBrush(accent)
-        painter.drawRoundedRect(QRectF(left, top, 4.0, max(8.0, bottom - top)), 2, 2)
+        # Мягкое свечение вокруг капсулы.
+        painter.setBrush(_with_alpha(accent, 0.22 * alpha))
+        painter.drawRoundedRect(QRectF(left - 3.0, top - 3.0, 10.0, height + 6.0), 5, 5)
+
+        painter.setBrush(_with_alpha(accent, alpha))
+        painter.drawRoundedRect(QRectF(left, top, 4.0, height), 2, 2)
         painter.end()
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802

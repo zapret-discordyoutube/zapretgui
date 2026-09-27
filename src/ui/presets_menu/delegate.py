@@ -429,6 +429,7 @@ class PresetListDelegate(QStyledItemDelegate):
         focused = bool(option.state & QStyle.StateFlag.State_HasFocus)
         pressed = self._pressed_row == index.row()
 
+        motion = active_row_motion(self._view)
         row_paint = paint_profile_hover_row(
             painter,
             rect,
@@ -436,13 +437,14 @@ class PresetListDelegate(QStyledItemDelegate):
             hovered=bool(hovered) or focused,
             pressed=pressed,
             show_active_marker=False,
+            active_reveal=motion.row_reveal(index) if motion is not None else None,
+            residual_active=motion.row_residual(index) if motion is not None else 0.0,
         )
         bg = row_paint.background
 
         icon_rect = self._icon_rect_for_row(rect, depth)
-        motion = active_row_motion(self._view)
         if motion is not None:
-            # После переезда полоски значок нового активного пресета подпрыгивает.
+            # После переезда бегунка значок нового активного пресета подпрыгивает.
             icon_rect = icon_rect.translated(0, round(motion.icon_offset(index)))
         icon_color = pick_contrast_color(
             normalize_preset_icon_color(str(index.data(PresetListModel.IconColorRole) or "")),
