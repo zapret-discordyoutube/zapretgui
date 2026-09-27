@@ -77,12 +77,31 @@ class PageTransitionTests(unittest.TestCase):
         self.assertFalse(self._switch())
         self.assertIs(self.second.graphicsEffect(), own)
 
-    def test_window_disables_stock_page_animation(self) -> None:
-        import inspect
-
+    def test_window_reveals_any_page_switch_and_disables_stock_animation(self) -> None:
         from ui.fluent_app_window import ZapretFluentWindow
 
-        self.assertIn("self.stackedWidget.setAnimationEnabled(False)", inspect.getsource(ZapretFluentWindow.__init__))
+        window = ZapretFluentWindow()
+        self.addCleanup(window.deleteLater)
+        self.assertFalse(window.stackedWidget.isAnimationEnabled())
+        first = self._page("Первая")
+        first.setObjectName("first")
+        second = self._page("Вторая")
+        second.setObjectName("second")
+        window.stackedWidget.addWidget(first)
+        window.stackedWidget.addWidget(second)
+        window.resize(700, 500)
+        window.show()
+        QApplication.processEvents()
+
+        # Переключение в обход page_host (как у пунктов меню qfluentwidgets
+        # и кнопки «назад») тоже раскрывает страницу.
+        window.switchTo(second)
+        self.assertTrue(is_page_revealing(second))
+
+        window.switchTo(first)
+        self.assertFalse(is_page_revealing(second))
+        self.assertIsNone(second.graphicsEffect())
+        self.assertTrue(is_page_revealing(first))
 
 
 if __name__ == "__main__":

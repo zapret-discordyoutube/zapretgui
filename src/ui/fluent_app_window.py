@@ -45,12 +45,29 @@ class ZapretFluentWindow(FluentWindow):
         self.setWindowTitle(f"Zapret2 v{APP_VERSION}")
         # Стандартный «выезд» страниц снизу отключён: переход рисует
         # ui/page_transition.py (проявление и раскрытие сверху вниз).
+        # Слушаем сам стек страниц, а не page_host: так раскрытие работает
+        # везде — пункты меню, вложенные страницы, хлебные крошки, «назад».
         self.stackedWidget.setAnimationEnabled(False)
+        self._revealed_page = None
+        self.stackedWidget.currentChanged.connect(self._reveal_current_page)
         self._sync_titlebar_icon_from_application()
         self._install_preset_file_drop_filter()
 
         # Theme mode (DARK/LIGHT) is set in main.py via _sync_theme_mode_to_qfluent()
         # before the window is created, so no hardcoded setTheme(DARK) here.
+
+    def _reveal_current_page(self, index: int) -> None:
+        page = self.stackedWidget.widget(index)
+        previous = self._revealed_page
+        if page is None or page is previous:
+            return
+        self._revealed_page = page
+        try:
+            from ui.page_transition import reveal_page
+
+            reveal_page(page, previous=previous)
+        except Exception:
+            pass
 
     def setTitleBar(self, title_bar) -> None:  # noqa: N802 (qfluentwidgets API)
         """Безопасно заменяет верхнюю панель окна.
