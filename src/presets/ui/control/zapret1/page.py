@@ -41,6 +41,7 @@ from app.ui_texts import tr as tr_catalog
 from presets.ui.control.top_summary_widget import ControlTopSummaryWidget
 from log.log import log
 
+from ui.widgets.gesture_buttons import GesturePrimaryPushButton, GesturePushButton
 from qfluentwidgets import (
     CaptionLabel, StrongBodyLabel,
     IndeterminateProgressBar, InfoBar,
@@ -199,8 +200,8 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
             caption_label_cls=CaptionLabel,
             indeterminate_progress_bar_cls=IndeterminateProgressBar,
-            big_action_button_cls=PrimaryPushButton,
-            stop_button_cls=PushButton,
+            big_action_button_cls=GesturePrimaryPushButton,
+            stop_button_cls=GesturePushButton,
             on_start=self._start_dpi,
             on_stop=self._stop_dpi,
             on_stop_and_exit=self._stop_and_exit,

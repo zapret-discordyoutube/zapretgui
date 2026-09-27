@@ -13,6 +13,7 @@ from presets.ui.control.control_page_runtime_shared import (
     set_button_text_accessibility,
 )
 from ui.pulsing_dot import PulsingDot
+from ui.widgets.gesture_buttons import ICON_GESTURE_NUDGE, ICON_GESTURE_SPIN, ICON_GESTURE_SQUEEZE
 from ui.accessibility import enable_keyboard_click, set_control_accessibility, set_state_text
 from ui.theme import get_themed_qta_icon
 
@@ -155,6 +156,7 @@ def build_mode_management_section_common(
         description="Запускает обход блокировок в выбранном режиме.",
     )
     set_state_text(start_btn, start_text)
+    _set_icon_gesture(start_btn, ICON_GESTURE_NUDGE)
     start_btn.clicked.connect(on_start)
     buttons_layout.addWidget(start_btn)
 
@@ -165,6 +167,7 @@ def build_mode_management_section_common(
         description="Останавливает запущенный процесс обхода блокировок.",
     )
     set_state_text(stop_winws_btn, stop_text)
+    _set_icon_gesture(stop_winws_btn, ICON_GESTURE_SQUEEZE)
     stop_winws_btn.clicked.connect(on_stop)
     stop_winws_btn.setVisible(False)
     schedule_stop_button_icon(stop_winws_btn)
@@ -180,6 +183,7 @@ def build_mode_management_section_common(
         description="Останавливает обход блокировок и закрывает программу.",
     )
     set_state_text(stop_and_exit_btn, stop_exit_text)
+    _set_icon_gesture(stop_and_exit_btn, ICON_GESTURE_SPIN)
     stop_and_exit_btn.clicked.connect(on_stop_and_exit)
     stop_and_exit_btn.setVisible(False)
     buttons_layout.addWidget(stop_and_exit_btn)
@@ -203,6 +207,13 @@ def build_mode_management_section_common(
     content_layout.addWidget(loading_label)
 
     return control_card, start_btn, stop_winws_btn, stop_and_exit_btn, progress_bar, loading_label
+
+
+def _set_icon_gesture(button, gesture: str) -> None:
+    """Включает жест значка, если кнопка его умеет (GesturePushButton)."""
+    set_gesture = getattr(button, "set_icon_gesture", None)
+    if callable(set_gesture):
+        set_gesture(gesture)
 
 
 def schedule_stop_button_icon(button, *, delay_ms: int = 250) -> None:

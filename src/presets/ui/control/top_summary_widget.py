@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import QLabel, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtCore import QEasingCurve, Qt, QTimer, QVariantAnimation, pyqtSignal
+from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 
 from qfluentwidgets import CaptionLabel, FlowLayout, StrongBodyLabel, SubtitleLabel
 
@@ -9,6 +9,15 @@ from app.ui_texts import tr as tr_catalog
 from donater.premium_display import TIER_UNKNOWN, PremiumDisplay
 from presets.ui.control.top_summary_plan import build_premium_summary, build_profiles_value
 from ui.accessibility import set_control_accessibility, set_state_text
+from ui.animation_policy import are_animations_enabled
+from ui.widgets.motion_icon import MotionIcon
+
+
+# Число профилей не перескакивает, а быстро «докручивается» до нового значения.
+PROFILE_COUNT_ROLL_MS = 480
+# Звезда Free/Premium изредка поблёскивает; Premium ещё и мягко светится золотом.
+PREMIUM_TWINKLE_INTERVAL_MS = 9000
+PREMIUM_GLOW_COLOR = "#f5c542"
 
 
 def set_visible_if_changed(widget, visible: bool) -> bool:
@@ -54,8 +63,7 @@ class ControlTopSummaryItem(QWidget):
         self._clickable = bool(clickable)
         self._last_texts: tuple[str, str, str] | None = None
         self._last_icon_theme_key: tuple[str, str] | None = None
-        self._icon_label = QLabel(self)
-        self._icon_label.setFixedSize(24, 24)
+        self._icon_label = MotionIcon(self, size=24)
         self._caption_label = CaptionLabel(self)
         self._value_label = SubtitleLabel(self) if prominent else StrongBodyLabel(self)
         self._details_label = CaptionLabel(self)
@@ -117,6 +125,13 @@ class ControlTopSummaryItem(QWidget):
             )
             set_control_accessibility(self, name=accessible_text, description=description)
             set_state_text(self, accessible_text)
+
+    def show_value_frame(self, value: str) -> None:
+        """Промежуточный кадр анимации: меняет только видимый текст значения."""
+        set_text_if_changed(self._value_label, value)
+
+    def bounce_icon(self) -> None:
+        self._icon_label.bounce()
 
     def mousePressEvent(self, event):  # noqa: N802
         if self._clickable and event.button() == Qt.MouseButton.LeftButton:
@@ -213,7 +228,14 @@ class ControlTopSummaryWidget(QWidget):
         for item in (self.profiles_item, self.mode_item, self.premium_item):
             item.setMinimumWidth(120)
 
+        self._profile_roll = QVariantAnimation(self)
+        self._profile_roll.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._profile_roll.setDuration(PROFILE_COUNT_ROLL_MS)
+        self._profile_roll.valueChanged.connect(self._on_profile_roll_value)
+        self._profile_roll.finished.connect(self._on_profile_roll_finished)
+
         self.retranslate()
+        self._apply_premium_icon_mood()
 
     def set_language(self, language: str) -> None:
         next_language = str(language or "ru")
@@ -226,14 +248,48 @@ class ControlTopSummaryWidget(QWidget):
         next_value = str(value or "")
         if self._preset_value == next_value:
             return
+        previous = self._preset_value
         self._preset_value = next_value
         self.retranslate()
+        # Первое заполнение после запуска — не изменение, прыгать не нужно.
+        if previous:
+            self.preset_item.bounce_icon()
 
     def set_profile_count(self, enabled_count: int | None) -> None:
         if self._profile_count == enabled_count:
             return
+        previous = self._profile_count
         self._profile_count = enabled_count
         self.retranslate()
+        if isinstance(previous, int) and isinstance(enabled_count, int):
+            self._roll_profile_count(previous, enabled_count)
+            self.profiles_item.bounce_icon()
+        else:
+            self._profile_roll.stop()
+
+    def _roll_profile_count(self, start: int, end: int) -> None:
+        if not are_animations_enabled() or not self.isVisible():
+            self._profile_roll.stop()
+            return
+        current = self._profile_roll.currentValue()
+        if self._profile_roll.state() == QVariantAnimation.State.Running and current is not None:
+            start = int(round(float(current)))
+        self._profile_roll.stop()
+        self._profile_roll.setStartValue(float(start))
+        self._profile_roll.setEndValue(float(end))
+        self._profile_roll.start()
+
+    def _on_profile_roll_value(self, value) -> None:
+        try:
+            count = int(round(float(value)))
+        except (TypeError, ValueError):
+            return
+        self.profiles_item.show_value_frame(build_profiles_value(count, language=self._language))
+
+    def _on_profile_roll_finished(self) -> None:
+        self.profiles_item.show_value_frame(
+            build_profiles_value(self._profile_count, language=self._language)
+        )
 
     def set_profiles_visible(self, visible: bool) -> None:
         value = bool(visible)
@@ -245,8 +301,18 @@ class ControlTopSummaryWidget(QWidget):
     def set_premium(self, display: PremiumDisplay) -> None:
         if self._premium_display == display:
             return
+        previous = self._premium_display
         self._premium_display = display
         self.retranslate()
+        self._apply_premium_icon_mood()
+        if previous.is_known and display.is_known and previous.is_premium != display.is_premium:
+            self.premium_item.bounce_icon()
+
+    def _apply_premium_icon_mood(self) -> None:
+        icon = self.premium_item._icon_label
+        display = self._premium_display
+        icon.set_glow(PREMIUM_GLOW_COLOR if display.is_known and display.is_premium else None)
+        icon.set_idle_twinkle(PREMIUM_TWINKLE_INTERVAL_MS if display.is_known else 0)
 
     def retranslate(self) -> None:
         language = self._language
