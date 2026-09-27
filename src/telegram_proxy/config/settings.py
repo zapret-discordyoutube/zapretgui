@@ -643,8 +643,26 @@ def get_upstream_mtproxy_link(preset_id: str) -> str:
     except Exception:
         return ""
 
+def is_telegram_link_handler_registered() -> bool:
+    """Есть ли в Windows программа для ссылок tg:// (обычно это Telegram).
+
+    Без неё открытие ссылки показало бы системное окно «выберите приложение».
+    """
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"tg\shell\open\command"):
+            return True
+    except Exception:
+        return False
+
+
 def consume_auto_deeplink_request() -> bool:
-    """True только один раз: когда авто-настройка включена и ссылку ещё не открывали."""
+    """True только один раз: авто-настройка включена, Telegram установлен и ссылку ещё не открывали.
+
+    Пока Telegram не установлен, отметка не ставится: ссылка откроется,
+    когда он появится.
+    """
     try:
         from settings.store import (
             get_tg_proxy_auto_deeplink,
@@ -655,6 +673,8 @@ def consume_auto_deeplink_request() -> bool:
         if not get_tg_proxy_auto_deeplink():
             return False
         if get_tg_proxy_deeplink_done():
+            return False
+        if not is_telegram_link_handler_registered():
             return False
         set_tg_proxy_deeplink_done(True)
         return True

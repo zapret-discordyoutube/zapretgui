@@ -16,21 +16,27 @@ import telegram_proxy.config.settings as telegram_proxy_settings
 
 
 class _Store:
-    def __init__(self, *, auto_deeplink: bool, done: bool) -> None:
+    def __init__(self, *, auto_deeplink: bool, done: bool, telegram_installed: bool = True) -> None:
         self.auto_deeplink = auto_deeplink
         self.done = done
+        self.telegram_installed = telegram_installed
 
     def patches(self):
         return (
             patch("settings.store.get_tg_proxy_auto_deeplink", lambda: self.auto_deeplink),
             patch("settings.store.get_tg_proxy_deeplink_done", lambda: self.done),
             patch("settings.store.set_tg_proxy_deeplink_done", lambda value: setattr(self, "done", bool(value))),
+            patch.object(
+                telegram_proxy_settings,
+                "is_telegram_link_handler_registered",
+                lambda: self.telegram_installed,
+            ),
         )
 
 
 def _consume(store: _Store) -> bool:
-    first, second, third = store.patches()
-    with first, second, third:
+    first, second, third, fourth = store.patches()
+    with first, second, third, fourth:
         return telegram_proxy_settings.consume_auto_deeplink_request()
 
 
@@ -47,6 +53,16 @@ class ConsumeAutoDeeplinkRequestTests(unittest.TestCase):
         self.assertTrue(_consume(store))
         self.assertTrue(store.done)
         self.assertFalse(_consume(store))
+
+    def test_without_telegram_link_is_not_opened_and_waits_for_install(self) -> None:
+        # Без программы для tg:// Windows показала бы окно «выберите приложение».
+        store = _Store(auto_deeplink=True, done=False, telegram_installed=False)
+
+        self.assertFalse(_consume(store))
+        self.assertFalse(store.done)
+
+        store.telegram_installed = True
+        self.assertTrue(_consume(store))
 
     def test_setting_is_part_of_schema_and_page_state(self) -> None:
         from settings.normalize import normalize_telegram_proxy
