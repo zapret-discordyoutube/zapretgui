@@ -505,6 +505,27 @@ def normalize_user_profiles(data: object) -> dict[str, Any]:
     }
 
 
+def normalize_user_fakes(data: object) -> dict[str, Any]:
+    """Свои фейки: строка без обязательных полей или с чужим форматом отбрасывается.
+
+    Правила имени и файла — те же, что проверяет ``fakes.user_fakes`` при
+    добавлении, поэтому здесь отсекается только испорченная запись.
+    """
+    from fakes.user_fakes import normalize_user_fake_row
+
+    raw = as_dict(data)
+    fakes: dict[str, Any] = {}
+    for raw_name, raw_row in as_dict(raw.get("fakes")).items():
+        name = str(raw_name or "").strip()
+        row = normalize_user_fake_row(name, raw_row)
+        if row is not None:
+            fakes[name] = row
+    return {
+        "version": 1,
+        "fakes": fakes,
+    }
+
+
 def normalize_orchestra_settings(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     defaults = schema.default_orchestra_settings()
@@ -729,6 +750,7 @@ def normalize_settings(data: object) -> dict[str, Any]:
         "ui_state": normalize_ui_state(raw.get("ui_state")),
         "profile_strategy_state": normalize_profile_strategy_state(raw.get("profile_strategy_state")),
         "user_profiles": normalize_user_profiles(raw.get("user_profiles")),
+        "user_fakes": normalize_user_fakes(raw.get("user_fakes")),
         "orchestra": normalize_orchestra(raw.get("orchestra")),
         "updater": normalize_updater(raw.get("updater")),
         "blockcheck": normalize_blockcheck(raw.get("blockcheck")),

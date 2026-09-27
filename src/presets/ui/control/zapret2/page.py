@@ -107,6 +107,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         open_presets,
         open_preset_setup,
         open_premium,
+        open_fakes,
         create_external_open_url_worker,
         ui_state_store,
     ):
@@ -139,6 +140,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self._open_presets_callback = open_presets
         self._open_preset_setup_callback = open_preset_setup
         self._open_premium_callback = open_premium
+        self._open_fakes_callback = open_fakes
         self._create_external_open_url_worker = create_external_open_url_worker
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
@@ -161,6 +163,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.debug_log_toggle = None
         self.additional_settings_card = None
         self.additional_settings_notice = None
+        self.fakes_card = None
         self.last_status_message_card = None
         self.last_status_message_dot = None
         self.last_status_message_title = None
@@ -486,6 +489,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             on_open_internet_cleanup=self._on_internet_cleanup_clicked,
             on_open_folder=self._open_folder,
             on_open_docs=self._open_docs,
+            on_open_fakes=self._open_fakes,
         )
         _log_startup_winws2_control_metric(
             "_build_ui.settings_sections_build", (_time.perf_counter() - _t_sections_build) * 1000
@@ -508,6 +512,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.debug_log_toggle = section_widgets.debug_log_toggle
         self.additional_settings_card = section_widgets.additional_settings_card
         self.additional_settings_notice = section_widgets.additional_settings_notice
+        self.fakes_card = section_widgets.fakes_card
         self.add_spacing(16)
         self.add_widget(self.additional_settings_card)
 
@@ -975,6 +980,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             folder_card=self.folder_card,
             docs_card=self.docs_card,
             additional_settings_notice=self.additional_settings_notice,
+            fakes_card=self.fakes_card,
             program_settings_card=self.program_settings_card,
             auto_dpi_toggle=self.auto_dpi_toggle,
             gui_autostart_toggle=self.gui_autostart_toggle,
@@ -988,6 +994,11 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             debug_log_toggle=self.debug_log_toggle,
             update_stop_button_text=self._update_stop_winws_button_text,
         )
+
+    def _open_fakes(self) -> None:
+        handler = self._open_fakes_callback
+        if callable(handler):
+            handler()
 
     def _open_docs(self) -> None:
         from config.urls import DOCS_URL

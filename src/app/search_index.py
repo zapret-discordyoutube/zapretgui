@@ -82,6 +82,7 @@ SEARCH_ENTRIES: tuple[SearchEntry, ...] = (
     SearchEntry("logs.title", PageName.LOGS, "page.logs.title"),
     SearchEntry("logs.controls", PageName.LOGS, "page.logs.controls", section_key="page.logs.controls"),
     SearchEntry("servers.title", PageName.SERVERS, "page.servers.title"),
+    SearchEntry("fakes.title", PageName.FAKES, "page.fakes.title", keywords=("фейк", "fake", "blob", "bin", "winws2")),
     SearchEntry("about.title", PageName.ABOUT, "page.about.title"),
     SearchEntry("about.version", PageName.ABOUT, "page.about.version", section_key="page.about.version"),
     SearchEntry("about.support", PageName.ABOUT, "page.about.support", section_key="page.about.support", tab_key="about", text_prefixes=("page.about.support.",)),

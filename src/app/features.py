@@ -11,6 +11,7 @@ if TYPE_CHECKING:
         DnsFeature,
         DpiSettingsFeature,
         ExternalActionsFeature,
+        FakesFeature,
         HostsFeature,
         ListsFeature,
         LogsFeature,
@@ -37,6 +38,7 @@ class AppFeatures:
     blockcheck: BlockcheckFeature
     diagnostics: DiagnosticsFeature
     dns: DnsFeature
+    fakes: FakesFeature
     hosts: HostsFeature
     lists: ListsFeature
     logs: LogsFeature

@@ -21,6 +21,7 @@ class PageName(Enum):
     ZAPRET2_PRESET_SETUP = auto()
     ZAPRET2_PROFILE_SETUP = auto()
     ZAPRET2_PROFILE_ORDER = auto()
+    FAKES = auto()                   # Фейки winws2: реестр и свои фейки (вложена в управление Zapret 2)
 
     # Zapret 1: зеркальный путь, отличается только strategy внутри profile
     ZAPRET1_MODE_CONTROL = auto()

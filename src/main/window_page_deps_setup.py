@@ -12,6 +12,7 @@ def build_window_page_deps_sources(*, features, state, page_actions) -> PageDeps
             "dns": features.dns,
             "dpi_settings": features.dpi_settings,
             "external_actions": features.external_actions,
+            "fakes": features.fakes,
             "hosts": features.hosts,
             "logs": features.logs,
             "orchestra": features.orchestra,

@@ -78,11 +78,12 @@ def build_preset_profile_features(paths: Any) -> PresetProfileFeatures:
 
 
 def load_installed_fakes_catalog():
-    """Реестр фейков winws2, который кладёт установщик (system/fakes_catalog.sqlite3)."""
+    """Фейки winws2 для явного выбора стратегии: реестр установки
+    (system/fakes_catalog.sqlite3) и свои фейки пользователя (user/fakes)."""
     from config.runtime_layout import APPLICATION_PATHS
-    from fakes.public import load_fakes_catalog
+    from fakes.public import load_effective_fakes_catalog
 
-    return load_fakes_catalog(APPLICATION_PATHS.fakes_catalog_database)
+    return load_effective_fakes_catalog(APPLICATION_PATHS)
 
 
 def _timed_facade_import(facade_name: str):
@@ -109,6 +110,7 @@ def build_app_features(*, deps: AppFeatureAssemblyDeps, paths: Any, state: Any) 
             "dns",
             "dpi_settings",
             "external",
+            "fakes",
             "hosts",
             "lists",
             "logs",
@@ -128,6 +130,7 @@ def build_app_features(*, deps: AppFeatureAssemblyDeps, paths: Any, state: Any) 
     build_dns_feature = facades["dns"].build_dns_feature
     build_dpi_settings_feature = facades["dpi_settings"].build_dpi_settings_feature
     build_external_actions_feature = facades["external"].build_external_actions_feature
+    build_fakes_feature = facades["fakes"].build_fakes_feature
     build_hosts_feature = facades["hosts"].build_hosts_feature
     build_lists_feature = facades["lists"].build_lists_feature
     build_logs_feature = facades["logs"].build_logs_feature
@@ -206,6 +209,7 @@ def build_app_features(*, deps: AppFeatureAssemblyDeps, paths: Any, state: Any) 
         ),
         diagnostics=build_diagnostics_feature(),
         dns=build_dns_feature(),
+        fakes=build_fakes_feature(paths),
         hosts=build_hosts_feature(),
         lists=build_lists_feature(),
         logs=build_logs_feature(),

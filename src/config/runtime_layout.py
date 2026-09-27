@@ -117,6 +117,11 @@ class ApplicationPaths:
         return self.user_dir / "lua"
 
     @property
+    def user_fakes_dir(self) -> Path:
+        """Свои фейки пользователя (--blob=ИМЯ:@user/fakes/<файл>); установщик не трогает."""
+        return self.user_dir / "fakes"
+
+    @property
     def hosts_catalog_database(self) -> Path:
         return self.system_dir / "hosts_catalog.sqlite3"
 

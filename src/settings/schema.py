@@ -173,6 +173,14 @@ def default_user_profiles() -> dict[str, Any]:
     }
 
 
+def default_user_fakes() -> dict[str, Any]:
+    # Свои фейки пользователя: имя blob-а -> файл в user/fakes/ и описание.
+    return {
+        "version": 1,
+        "fakes": {},
+    }
+
+
 def default_orchestra_settings() -> dict[str, Any]:
     return {
         "strict_detection": True,
@@ -266,6 +274,7 @@ def build_default_settings() -> dict[str, Any]:
         "ui_state": default_ui_state(),
         "profile_strategy_state": default_profile_strategy_state(),
         "user_profiles": default_user_profiles(),
+        "user_fakes": default_user_fakes(),
         "orchestra": default_orchestra(),
         "updater": default_updater(),
         "blockcheck": default_blockcheck(),

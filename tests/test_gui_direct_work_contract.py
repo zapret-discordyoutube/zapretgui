@@ -14,6 +14,7 @@ GUI_ROOTS = (
     SRC_ROOT / "diagnostics" / "ui",
     SRC_ROOT / "dns" / "ui",
     SRC_ROOT / "donater" / "ui",
+    SRC_ROOT / "fakes" / "ui",
     SRC_ROOT / "hosts" / "ui",
     SRC_ROOT / "log" / "ui",
     SRC_ROOT / "orchestra" / "ui",

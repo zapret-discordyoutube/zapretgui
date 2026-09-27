@@ -4,6 +4,7 @@ from app.page_names import PageName
 from ui.page_deps.types import (
     DnsPageDeps,
     DpiRuntimeActions,
+    FakesPageDeps,
     HostsPageDeps,
     PremiumPageDeps,
     UpdateRuntimeActions,
@@ -42,6 +43,28 @@ def build_hosts_page_kwargs(*, page_name: PageName, hosts_feature) -> dict:
     _ = page_name
     return {
         "deps": HostsPageDeps(hosts_feature=hosts_feature),
+    }
+
+
+def build_fakes_page_kwargs(*, page_name: PageName, fakes_feature, external_actions_feature, show_page) -> dict:
+    _ = page_name
+
+    def _create_open_folder_worker(request_id: int, *, parent=None):
+        return external_actions_feature.create_external_action_worker(
+            request_id,
+            action_name="open_user_fakes_folder",
+            action_fn=fakes_feature.open_user_fakes_folder,
+            parent=parent,
+        )
+
+    return {
+        "deps": FakesPageDeps(
+            create_snapshot_worker=fakes_feature.create_snapshot_worker,
+            create_import_worker=fakes_feature.create_import_worker,
+            create_delete_worker=fakes_feature.create_delete_worker,
+            create_open_folder_worker=_create_open_folder_worker,
+            open_control_page=lambda: show_page(PageName.ZAPRET2_MODE_CONTROL),
+        ),
     }
 
 
@@ -280,6 +303,7 @@ __all__ = [
     "build_autostart_page_kwargs",
     "build_blockcheck_page_kwargs",
     "build_dpi_settings_page_kwargs",
+    "build_fakes_page_kwargs",
     "build_hosts_page_kwargs",
     "build_logs_page_kwargs",
     "build_network_page_kwargs",

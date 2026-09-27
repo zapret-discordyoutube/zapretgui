@@ -26,6 +26,7 @@ _WINDOWS11_SIDEBAR_ICON_FILES: dict[PageName, str] = {
     PageName.ABOUT: "info.svg",
     PageName.SERVERS: "cloud-download.svg",
     PageName.SUPPORT: "share.svg",
+    PageName.FAKES: "document.svg",
     PageName.ORCHESTRA_SETTINGS: "settings.svg",
 }
 
@@ -68,6 +69,7 @@ def build_standard_nav_icons() -> dict[PageName, Any]:
         PageName.ZAPRET2_USER_PRESETS: FluentIcon.FOLDER,
         PageName.SERVERS: FluentIcon.UPDATE,
         PageName.SUPPORT: FluentIcon.CHAT,
+        PageName.FAKES: FluentIcon.DOCUMENT,
         PageName.ORCHESTRA: FluentIcon.MUSIC,
         PageName.ORCHESTRA_SETTINGS: FluentIcon.SETTING,
         PageName.ZAPRET2_PRESET_SETUP: FluentIcon.PLAY,

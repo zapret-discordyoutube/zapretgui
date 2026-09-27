@@ -639,6 +639,27 @@ def get_user_profiles_revision() -> str:
         return json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
 
 
+def get_user_fakes_settings() -> dict[str, Any]:
+    return _read_section("user_fakes")
+
+
+def update_user_fakes_settings(mutator) -> dict[str, Any]:
+    """Read-modify-write секции user_fakes одной транзакцией.
+
+    `mutator` получает копию секции, прочитанную внутри BEGIN IMMEDIATE, и
+    меняет её на месте: проверка занятости имени, запись файла фейка и строка
+    в базе не разрываются чтением «снаружи». Исключение откатывает транзакцию.
+    """
+
+    def _mutate(data: dict[str, Any]) -> None:
+        section = copy.deepcopy(_as_dict(data.get("user_fakes")))
+        mutator(section)
+        _set_path_value(data, ("user_fakes",), section)
+
+    updated = _update_settings(_mutate)
+    return copy.deepcopy(updated["user_fakes"])
+
+
 def get_updater_settings() -> dict[str, Any]:
     return _read_section("updater")
 

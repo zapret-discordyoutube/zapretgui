@@ -20,6 +20,7 @@ class Zapret2SettingsBuildWidgets:
     max_block_toggle: object
     additional_settings_card: object
     additional_settings_notice: object
+    fakes_card: object
     discord_restart_toggle: object | None
     wssize_toggle: object | None
     debug_log_toggle: object | None
@@ -54,6 +55,7 @@ def build_winws2_pages_settings_sections(
     on_open_internet_cleanup,
     on_open_folder,
     on_open_docs,
+    on_open_fakes,
 ) -> Zapret2SettingsBuildWidgets:
     program_settings_title = tr_fn("page.winws2_control.section.program_settings", "Настройки программы")
     program_settings_section_label = None
@@ -140,12 +142,30 @@ def build_winws2_pages_settings_sections(
     if debug_log_toggle:
         debug_log_toggle.toggled.connect(on_debug_log_toggled)
 
+    fakes_card = build_deferred_themed_push_setting_card_common(
+        push_setting_card_cls=push_setting_card_cls,
+        button_text=tr_fn("page.winws2_control.button.open", "Открыть"),
+        icon_name="fa5s.file-code",
+        icon_color="#b48ead",
+        title_text=tr_fn("page.winws2_control.button.fakes", "Фейки"),
+        content_text=tr_fn(
+            "page.winws2_control.button.fakes.desc",
+            "Встроенные фейки winws2 и свои .bin-файлы для стратегий",
+        ),
+        on_click=on_open_fakes,
+        button_accessible_name=tr_fn(
+            "page.winws2_control.button.fakes.accessible_name",
+            "Открыть страницу фейков",
+        ),
+        parent=content_parent,
+    )
+
     additional_settings_card, additional_settings_notice = build_additional_settings_section(
         title=tr_fn("page.winws2_control.card.advanced", "Дополнительные настройки"),
         warning_text=tr_fn("page.winws2_control.advanced.warning", "Изменяйте только если знаете что делаете"),
         parent=content_parent,
         toggle_rows=[discord_restart_toggle, wssize_toggle, debug_log_toggle],
-        action_rows=[],
+        action_rows=[fakes_card],
     )
 
     extra_section_label = None
@@ -222,6 +242,7 @@ def build_winws2_pages_settings_sections(
         max_block_toggle=windows_feature_toggles.max_block_toggle,
         additional_settings_card=additional_settings_card,
         additional_settings_notice=additional_settings_notice,
+        fakes_card=fakes_card,
         discord_restart_toggle=discord_restart_toggle,
         wssize_toggle=wssize_toggle,
         debug_log_toggle=debug_log_toggle,

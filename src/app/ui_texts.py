@@ -85,6 +85,34 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Разбор debug-лога: соединения, протоколы, профили и вердикты",
         "en": "Debug log breakdown: connections, protocols, profiles and verdicts",
     },
+    "nav.page.fakes": {
+        "ru": "Фейки",
+        "en": "Fakes",
+    },
+    "page.fakes.title": {
+        "ru": "Фейки",
+        "en": "Fakes",
+    },
+    "page.fakes.subtitle": {
+        "ru": "Фейки winws2: пакеты, которые стратегия отправляет вместо настоящих. Здесь можно посмотреть встроенные и добавить свои",
+        "en": "winws2 fakes: packets a strategy sends instead of real ones. Browse built-in fakes and add your own",
+    },
+    "page.fakes.breadcrumb.control": {
+        "ru": "Управление",
+        "en": "Control",
+    },
+    "page.winws2_control.button.fakes": {
+        "ru": "Фейки",
+        "en": "Fakes",
+    },
+    "page.winws2_control.button.fakes.desc": {
+        "ru": "Встроенные фейки winws2 и свои .bin-файлы для стратегий",
+        "en": "Built-in winws2 fakes and your own .bin files for strategies",
+    },
+    "page.winws2_control.button.fakes.accessible_name": {
+        "ru": "Открыть страницу фейков",
+        "en": "Open fakes page",
+    },
     "nav.page.appearance": {
         "ru": "Оформление",
         "en": "Appearance",
@@ -4774,6 +4802,7 @@ NAV_PAGE_TEXT_KEYS: dict[PageName, str] = {
     PageName.SERVERS: "page.servers.title",
     PageName.ABOUT: "nav.page.about",
     PageName.SUPPORT: "page.support.title",
+    PageName.FAKES: "nav.page.fakes",
     PageName.ZAPRET2_PRESET_SETUP: "nav.page.zapret2_mode",
     PageName.ZAPRET2_USER_PRESETS: "nav.page.zapret2_user_presets",
     PageName.ZAPRET2_PROFILE_SETUP: "page.winws2_profile_setup.title",

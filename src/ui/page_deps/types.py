@@ -15,6 +15,17 @@ class HostsPageDeps:
 
 
 @dataclass(frozen=True, slots=True)
+class FakesPageDeps:
+    """Узкие действия страницы «Фейки»: только фабрики фоновых worker-ов и навигация."""
+
+    create_snapshot_worker: Callable[..., object]
+    create_import_worker: Callable[..., object]
+    create_delete_worker: Callable[..., object]
+    create_open_folder_worker: Callable[..., object]
+    open_control_page: Callable[[], object]
+
+
+@dataclass(frozen=True, slots=True)
 class PremiumPageDeps:
     premium_feature: object
     subscription_state_store: object
@@ -38,6 +49,7 @@ class UpdateRuntimeActions:
 __all__ = [
     "DpiRuntimeActions",
     "DnsPageDeps",
+    "FakesPageDeps",
     "HostsPageDeps",
     "PremiumPageDeps",
     "UpdateRuntimeActions",

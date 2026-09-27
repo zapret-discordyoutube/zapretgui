@@ -69,7 +69,7 @@ def build_control_page_kwargs(
             parent=parent,
         )
 
-    return {
+    kwargs = {
         "create_top_summary_worker": _create_top_summary_worker,
         "create_additional_settings_load_worker": profile_feature.create_additional_settings_load_worker,
         "create_additional_settings_save_worker": _create_additional_settings_save_worker,
@@ -95,6 +95,10 @@ def build_control_page_kwargs(
         "create_external_open_url_worker": external_actions_feature.create_open_url_worker,
         "ui_state_store": ui_state_store,
     }
+    if page_name == PageName.ZAPRET2_MODE_CONTROL:
+        # Фейки winws2 есть только в Zapret 2: страница вложена в его управление.
+        kwargs["open_fakes"] = lambda: show_page(PageName.FAKES, allow_internal=True)
+    return kwargs
 
 
 def build_preset_setup_page_kwargs(
