@@ -226,6 +226,7 @@ class PresetLaunchService:
             include_cleanup=False,
             cleanup_services=False,
             update_runtime_state=False,
+            keep_runner=True,
         )
         if not shutdown_result.still_running:
             time.sleep(0.5)

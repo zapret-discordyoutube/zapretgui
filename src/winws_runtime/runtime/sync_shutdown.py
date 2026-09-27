@@ -71,7 +71,13 @@ def shutdown_runtime_sync(
     include_cleanup: bool = True,
     cleanup_services: bool = True,
     update_runtime_state: bool = True,
+    keep_runner: bool = False,
 ) -> RuntimeShutdownResult:
+    """Синхронно останавливает DPI.
+
+    `keep_runner=True` — для остановки прямо перед новым запуском: runner
+    остаётся тем же, и следующий запуск берёт уже собранный им @config.
+    """
     launch_method = _resolve_launch_method(runtime_feature)
     runtime_api = _resolve_runtime_api(runtime_feature, launch_method)
     runtime_service = runtime_feature.objects.runtime_service
@@ -94,10 +100,11 @@ def shutdown_runtime_sync(
                 stop_ok = False
                 log(f"Ошибка остановки текущего runner в sync shutdown: {e}", "DEBUG")
             finally:
-                try:
-                    invalidate_strategy_runner()
-                except Exception:
-                    pass
+                if not keep_runner:
+                    try:
+                        invalidate_strategy_runner()
+                    except Exception:
+                        pass
     except Exception as e:
         stop_ok = False
         log(f"Ошибка доступа к runner в sync shutdown: {e}", "DEBUG")
@@ -114,7 +121,10 @@ def shutdown_runtime_sync(
         pass
 
     try:
-        stop_ok = bool(runtime_api.stop_all_processes()) and stop_ok
+        # Runner обычно уже добил все winws; второй круг с паузами нужен,
+        # только если что-то осталось (или runner-а не было вовсе).
+        if runtime_api.has_residual_processes(silent=True):
+            stop_ok = bool(runtime_api.stop_all_processes()) and stop_ok
     except Exception as e:
         stop_ok = False
         log(f"Ошибка stop_all_processes в sync shutdown: {e}", "DEBUG")

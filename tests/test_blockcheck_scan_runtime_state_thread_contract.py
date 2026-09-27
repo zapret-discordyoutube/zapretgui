@@ -220,10 +220,13 @@ class ShutdownSyncFromWorkerThreadContractTests(unittest.TestCase):
         _app, _store, feature, _runtime_service = _build_runtime_feature()
         observed: dict[str, object] = {}
         api = feature.objects.launch_runtime_api
+        # Runner-а нет, остаток процессов есть: остановка делает полный круг.
+        api._still_running = True
         original_stop = api.stop_all_processes
 
         def _stop_all_processes():
             observed["stop_thread_id"] = threading.get_ident()
+            api._still_running = False
             return original_stop()
 
         api.stop_all_processes = _stop_all_processes
