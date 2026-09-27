@@ -78,11 +78,10 @@ def create_dns_quick_check_worker(request_id: int, *, parent=None):
 
 
 def run_dns_poisoning_check(*, log_callback=None, should_stop=None) -> dict:
-    from dns_checker import DNSChecker
+    from diagnostics.engine import run_dns_check
 
-    checker = DNSChecker()
-    results = checker.check_dns_poisoning(
-        log_callback=log_callback,
+    results = run_dns_check(
+        emit=log_callback or (lambda _line: None),
         should_stop=should_stop,
     )
     return dict(results or {})

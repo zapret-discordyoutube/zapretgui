@@ -55,7 +55,7 @@ def normalize_googlevideo_host(value: str | None) -> str:
     return host
 
 
-def _extract_googlevideo_hosts(page: str) -> tuple[str, ...]:
+def extract_googlevideo_hosts(page: str) -> tuple[str, ...]:
     """Извлекает CDN-имена из обычных и URL-кодированных данных YouTube."""
     decoded = html.unescape(str(page or ""))
     for _ in range(3):
@@ -116,7 +116,7 @@ def _fetch_watch_page(
                 # после 600-800 КБ. Не скачиваем оставшуюся разметку без нужды.
                 if b"googlevideo" in payload.lower():
                     page = payload.decode("utf-8", errors="ignore")
-                    if _extract_googlevideo_hosts(page):
+                    if extract_googlevideo_hosts(page):
                         return page
 
     return payload.decode("utf-8", errors="ignore")
@@ -154,7 +154,7 @@ def discover_googlevideo_host(
             errors.append(str(exc).strip()[:120] or type(exc).__name__)
             continue
 
-        hosts = _extract_googlevideo_hosts(page)
+        hosts = extract_googlevideo_hosts(page)
         if hosts:
             return GoogleVideoDiscoveryResult(
                 host=hosts[0],

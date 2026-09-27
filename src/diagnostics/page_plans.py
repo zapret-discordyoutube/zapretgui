@@ -89,14 +89,6 @@ def build_start_plan(*, selection: str, test_type: str) -> ConnectionTestStartPl
         progress_visible=True,
     )
 
-def build_worker_update_lines(message: str) -> tuple[str, ...]:
-    if "DNS" in message and "подмен" in message:
-        return (
-            message,
-            "💡 Совет: откройте вкладку «DNS подмена» для детального анализа",
-        )
-    return (message,)
-
 def build_finish_plan() -> ConnectionTestFinishPlan:
     return ConnectionTestFinishPlan(
         status_text="✅ Тестирование завершено",

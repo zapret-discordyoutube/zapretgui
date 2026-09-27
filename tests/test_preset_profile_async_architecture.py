@@ -2876,7 +2876,8 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertIn("_run_dns_poisoning_check", worker_source)
         self.assertNotIn("dns_commands", worker_source)
         self.assertNotIn("dns_checker", worker_source)
-        self.assertIn("DNSChecker", commands_source)
+        self.assertNotIn("diagnostics.engine", worker_source)
+        self.assertIn("run_dns_check", commands_source)
 
     def test_dns_quick_check_runs_through_worker(self) -> None:
         page_source = inspect.getsource(dns_check_page.DNSCheckPage)

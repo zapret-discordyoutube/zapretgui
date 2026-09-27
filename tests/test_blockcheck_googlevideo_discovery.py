@@ -14,7 +14,7 @@ if str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
 
 from blockcheck.googlevideo_discovery import (  # noqa: E402
-    _extract_googlevideo_hosts,
+    extract_googlevideo_hosts,
     discover_googlevideo_host,
 )
 
@@ -28,7 +28,7 @@ class GoogleVideoDiscoveryTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            _extract_googlevideo_hosts(page),
+            extract_googlevideo_hosts(page),
             (
                 "rr8---sn-user-a.googlevideo.com",
                 "rr3---sn-user-b.googlevideo.com",

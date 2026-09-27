@@ -156,7 +156,7 @@ PREFLIGHT_HTTP_TIMEOUT = 2
 PREFLIGHT_PING_COUNT = 1
 PREFLIGHT_PING_TIMEOUT = 2
 
-# Known ISP block IPs (shared — also used by dns_checker.py)
+# Known ISP block IPs (shared — also used by diagnostics.verdict)
 KNOWN_BLOCK_IPS: set[str] = {
     "127.0.0.1",
     "0.0.0.0",

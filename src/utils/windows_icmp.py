@@ -116,7 +116,13 @@ def _resolve_ipv4(host: str, timeout: float) -> tuple[str | None, str | None]:
 
 
 def _ipv4_to_dword(ip: str) -> int:
-    return int(struct.unpack("!I", socket.inet_aton(ip))[0])
+    """IPAddr для IcmpSendEcho: байты адреса в памяти идут в сетевом порядке.
+
+    Поэтому число собирается в порядке байтов процессора (little-endian), а не
+    как big-endian: иначе пинговался адрес задом наперёд (142.251.150.4 →
+    4.150.251.142), и проверка честно писала «таймаут» у живого сервера.
+    """
+    return int(struct.unpack("<I", socket.inet_aton(ip))[0])
 
 
 def ping_ipv4_host_winapi(

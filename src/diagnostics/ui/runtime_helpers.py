@@ -223,8 +223,7 @@ def stop_connection_test(
 
 
 def apply_worker_update(*, message: str, append_callback, result_text) -> None:
-    for line in connection_page_plans.build_worker_update_lines(message):
-        append_callback(line)
+    append_callback(message)
 
     scrollbar = result_text.verticalScrollBar()
     scrollbar.setValue(scrollbar.maximum())
