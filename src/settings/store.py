@@ -1341,6 +1341,14 @@ def set_tg_proxy_deeplink_done(value: bool) -> bool:
     return _set_bool(("warnings", "tg_proxy_deeplink_done"), value)
 
 
+def get_onboarding_tour_done() -> bool:
+    return _get_bool(("warnings", "onboarding_tour_done"), False)
+
+
+def set_onboarding_tour_done(value: bool) -> bool:
+    return _set_bool(("warnings", "onboarding_tour_done"), value)
+
+
 def get_force_dns_enabled() -> bool:
     return _get_bool(("dns", "force_dns_enabled"), False)
 
@@ -1889,6 +1897,7 @@ __all__ = [
     "get_gui_autostart_enabled",
     "get_hosts_selection",
     "get_isp_dns_info_shown",
+    "get_onboarding_tour_done",
     "get_kaspersky_warning_disabled",
     "get_last_seen_version",
     "get_max_blocked",
@@ -1984,6 +1993,7 @@ __all__ = [
     "set_gui_autostart_enabled",
     "set_hosts_selection",
     "set_isp_dns_info_shown",
+    "set_onboarding_tour_done",
     "set_kaspersky_warning_disabled",
     "set_last_seen_version",
     "set_max_blocked",

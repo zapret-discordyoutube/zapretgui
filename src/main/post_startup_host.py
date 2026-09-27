@@ -59,6 +59,12 @@ class PostStartupHost:
 
         return ensure_page(self._window, page_name)
 
+    def start_onboarding_tour(self) -> bool:
+        """Пробует показать обучающий тур. False — окно пока не готово."""
+        from ui.onboarding import start_onboarding_tour
+
+        return bool(start_onboarding_tour(self._window, automatic=True))
+
     def get_loaded_page(self, page_name):
         from ui.window_adapter import get_loaded_page
 

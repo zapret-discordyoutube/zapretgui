@@ -59,6 +59,7 @@ class ControlPageDependencyBoundaryTests(unittest.TestCase):
         presets = Mock()
         profile = Mock()
         runtime = Mock()
+        start_onboarding_tour = Mock()
         kwargs = build_control_page_kwargs(
             page_name=PageName.ZAPRET2_MODE_CONTROL,
             presets_feature=presets,
@@ -71,9 +72,11 @@ class ControlPageDependencyBoundaryTests(unittest.TestCase):
             open_connection_test=Mock(),
             open_folder=Mock(),
             show_page=Mock(),
+            start_onboarding_tour=start_onboarding_tour,
             ui_state_store=Mock(),
         )
 
+        self.assertIs(kwargs["start_onboarding_tour"], start_onboarding_tour)
         self.assertIn("create_top_summary_worker", kwargs)
         self.assertNotIn("get_selected_source_preset_display", kwargs)
         self.assertNotIn("get_enabled_profile_count_snapshot", kwargs)

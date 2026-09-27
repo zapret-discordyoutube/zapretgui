@@ -35,13 +35,27 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
     PageName.ZAPRET2_MODE_CONTROL: PageDepsSpec(
         build_control_page_kwargs,
         features=("presets", "profile", "runtime", "program_settings", "external_actions"),
-        actions=("set_status", "request_exit", "open_connection_test", "open_folder", "show_page"),
+        actions=(
+            "set_status",
+            "request_exit",
+            "open_connection_test",
+            "open_folder",
+            "show_page",
+            "start_onboarding_tour",
+        ),
         include_ui_state_store=True,
     ),
     PageName.ZAPRET1_MODE_CONTROL: PageDepsSpec(
         build_control_page_kwargs,
         features=("presets", "profile", "runtime", "program_settings", "external_actions"),
-        actions=("set_status", "request_exit", "open_connection_test", "open_folder", "show_page"),
+        actions=(
+            "set_status",
+            "request_exit",
+            "open_connection_test",
+            "open_folder",
+            "show_page",
+            "start_onboarding_tour",
+        ),
         include_ui_state_store=True,
     ),
     PageName.ZAPRET2_PRESET_SETUP: PageDepsSpec(

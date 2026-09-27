@@ -72,6 +72,7 @@ def test_only_zapret2_control_page_gets_open_fakes():
             open_connection_test=Mock(),
             open_folder=Mock(),
             show_page=show_page,
+            start_onboarding_tour=Mock(),
             ui_state_store=Mock(),
         )
 

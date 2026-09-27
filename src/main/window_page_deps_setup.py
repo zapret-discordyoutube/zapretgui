@@ -47,6 +47,7 @@ def build_window_page_deps_sources(*, features, state, page_actions) -> PageDeps
             "set_status": page_actions.set_status,
             "show_active_mode_control_page": page_actions.show_active_mode_control_page,
             "show_page": page_actions.show_page,
+            "start_onboarding_tour": page_actions.start_onboarding_tour,
         },
     )
 

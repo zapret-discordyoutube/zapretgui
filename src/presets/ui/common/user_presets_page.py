@@ -524,6 +524,14 @@ class UserPresetsPageBase(BasePage):
     def _start_watching_presets(self):
         self._runtime_service.start_watching_presets()
 
+    def onboarding_target(self, name: str):
+        if name == "presets_list":
+            return self.__dict__.get("presets_list")
+        if name == "presets_toolbar":
+            toolbar = self.__dict__.get("_toolbar_layout")
+            return getattr(toolbar, "container", None)
+        return None
+
     def _build_ui(self):
         tokens = get_theme_tokens()
 

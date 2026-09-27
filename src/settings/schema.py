@@ -111,6 +111,7 @@ def default_warnings() -> dict[str, Any]:
         "disable_kaspersky_warning": False,
         "isp_dns_info_shown": False,
         "tg_proxy_deeplink_done": False,
+        "onboarding_tour_done": False,
     }
 
 

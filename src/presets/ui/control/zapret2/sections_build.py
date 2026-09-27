@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from presets.ui.control.shared_builders import build_deferred_themed_push_setting_card_common
+from presets.ui.control.shared_builders import (
+    build_deferred_themed_push_setting_card_common,
+    build_onboarding_tour_card_common,
+)
 from presets.ui.control.windows_features.build import build_state_media_block_toggle, build_windows_feature_toggles
 from ui.fluent_widgets import build_additional_settings_section, enable_setting_card_group_auto_height
 
@@ -30,6 +33,7 @@ class Zapret2SettingsBuildWidgets:
     internet_cleanup_card: object
     folder_card: object
     docs_card: object
+    tour_card: object
     state_media_block_toggle: object
 
 
@@ -55,6 +59,7 @@ def build_winws2_pages_settings_sections(
     on_open_internet_cleanup,
     on_open_folder,
     on_open_docs,
+    on_open_onboarding_tour,
     on_open_fakes,
 ) -> Zapret2SettingsBuildWidgets:
     program_settings_title = tr_fn("page.winws2_control.section.program_settings", "Настройки программы")
@@ -220,11 +225,18 @@ def build_winws2_pages_settings_sections(
         button_accessible_name=tr_fn("page.winws2_control.button.documentation.accessible_name", "Открыть документацию"),
         parent=content_parent,
     )
+    tour_card = build_onboarding_tour_card_common(
+        push_setting_card_cls=push_setting_card_cls,
+        tr_fn=tr_fn,
+        on_click=on_open_onboarding_tour,
+        parent=content_parent,
+    )
     state_media_block_toggle = build_state_media_block_toggle(
         tr_fn=tr_fn,
         win11_toggle_row_cls=win11_toggle_row_cls,
         on_state_media_block_toggled=on_state_media_block_toggled,
     )
+    extra_card.addSettingCard(tour_card)
     extra_card.addSettingCard(test_card)
     extra_card.addSettingCard(internet_cleanup_card)
     extra_card.addSettingCard(folder_card)
@@ -252,5 +264,6 @@ def build_winws2_pages_settings_sections(
         internet_cleanup_card=internet_cleanup_card,
         folder_card=folder_card,
         docs_card=docs_card,
+        tour_card=tour_card,
         state_media_block_toggle=state_media_block_toggle,
     )

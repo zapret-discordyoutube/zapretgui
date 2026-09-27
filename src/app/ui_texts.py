@@ -4798,6 +4798,385 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
 TEXTS.update(TEXTS_PAGES_FINAL)
 
 
+# Обучающий тур первого запуска (ui/onboarding) и карточка его повтора.
+TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
+    "onboarding.accessible_name": {
+        "ru": "Обучающий тур по программе",
+        "en": "Guided tour of the app",
+    },
+    "onboarding.counter": {
+        "ru": "Шаг {current} из {total}",
+        "en": "Step {current} of {total}",
+    },
+    "onboarding.button.start": {"ru": "Начнём", "en": "Let's go"},
+    "onboarding.button.next": {"ru": "Далее", "en": "Next"},
+    "onboarding.button.back": {"ru": "Назад", "en": "Back"},
+    "onboarding.button.skip": {"ru": "Пропустить", "en": "Skip"},
+    "onboarding.button.done": {"ru": "Готово", "en": "Done"},
+    "onboarding.step.welcome.title": {
+        "ru": "Добро пожаловать в Zapret!",
+        "en": "Welcome to Zapret!",
+    },
+    "onboarding.step.welcome.body": {
+        "ru": (
+            "Zapret помогает открыть сайты и приложения, которые провайдер блокирует или замедляет: "
+            "YouTube, Discord и многие другие.\n\n"
+            "За пару минут покажем, как программа устроена и где что находится. Листать можно кнопкой "
+            "«Далее» или стрелками на клавиатуре, закрыть — клавишей Esc."
+        ),
+        "en": (
+            "Zapret helps you open sites and apps that your provider blocks or slows down: "
+            "YouTube, Discord and many others.\n\n"
+            "In a couple of minutes we will show how the app works and where everything is. Use "
+            "Next or the arrow keys to move on, press Esc to close the tour."
+        ),
+    },
+    "onboarding.step.how_it_works.title": {
+        "ru": "Как работает обход",
+        "en": "How the bypass works",
+    },
+    "onboarding.step.how_it_works.body": {
+        "ru": (
+            "Провайдер следит за трафиком с помощью фильтра — DPI. Фильтр читает начало каждого "
+            "соединения, видит в нём адрес сайта и, если сайт в чёрном списке, обрывает соединение "
+            "или замедляет его.\n\n"
+            "Zapret запускает у вас на компьютере движок winws2 (в режиме Zapret 1 — winws). Движок "
+            "пропускает через себя сетевые пакеты и для нужных сайтов слегка их меняет: делит на части, "
+            "переставляет, отправляет перед настоящим пакетом поддельный — фейк. Фильтр путается и "
+            "пропускает соединение, а сайт получает обычный запрос.\n\n"
+            "Это не VPN: трафик идёт напрямую через ваш интернет, без сервера в другой стране."
+        ),
+        "en": (
+            "Your provider watches traffic with a filter called DPI. It reads the start of every "
+            "connection, sees the site address there and, if the site is blacklisted, drops or slows "
+            "the connection.\n\n"
+            "Zapret runs the winws2 engine on your computer (winws in Zapret 1 mode). The engine passes "
+            "network packets through itself and slightly changes them for selected sites: splits them, "
+            "reorders them, sends a fake packet before the real one. The filter gets confused and lets "
+            "the connection through, while the site receives a normal request.\n\n"
+            "This is not a VPN: traffic goes directly through your own connection, with no server abroad."
+        ),
+    },
+    "onboarding.step.building_blocks.title": {
+        "ru": "Пресет, профиль, стратегия",
+        "en": "Preset, profile, strategy",
+    },
+    "onboarding.step.building_blocks.body": {
+        "ru": (
+            "Три главных слова в программе:\n\n"
+            "• Пресет — вся настройка целиком. Это обычный текстовый файл, и запускается ровно то, "
+            "что в нём записано.\n"
+            "• Профиль — правило внутри пресета: какой трафик обрабатывать. Например, YouTube, "
+            "Discord или игры.\n"
+            "• Стратегия — способ обхода для профиля: как именно менять пакеты, чтобы фильтр "
+            "не узнал сайт.\n\n"
+            "Пресет состоит из профилей, у каждого профиля своя стратегия. Дальше покажем всё это "
+            "прямо в программе."
+        ),
+        "en": (
+            "Three key words in the app:\n\n"
+            "• Preset — the whole configuration. It is a plain text file, and exactly what is written "
+            "in it is what runs.\n"
+            "• Profile — a rule inside the preset: which traffic to handle. For example YouTube, "
+            "Discord or games.\n"
+            "• Strategy — the bypass method for a profile: how exactly to change packets so the filter "
+            "does not recognize the site.\n\n"
+            "A preset is made of profiles, and each profile has its own strategy. Next we will show all "
+            "of this right in the app."
+        ),
+    },
+    "onboarding.step.control_nav.title": {
+        "ru": "Главная страница",
+        "en": "Main page",
+    },
+    "onboarding.step.control_nav.body": {
+        "ru": (
+            "«Управление» — главная страница программы: запуск, текущее состояние и основные "
+            "настройки. Если запутались в разделах, возвращайтесь сюда."
+        ),
+        "en": (
+            "Control is the main page of the app: start button, current state and basic settings. "
+            "If you get lost, come back here."
+        ),
+    },
+    "onboarding.step.start.title": {
+        "ru": "Кнопка запуска",
+        "en": "Start button",
+    },
+    "onboarding.step.start.body": {
+        "ru": (
+            "Включает обход: программа запускает движок с выбранным пресетом. Пока движок работает, "
+            "обход действует не только в браузере, а во всей системе — в Discord, играх и других "
+            "программах, но только для того трафика, который описан в профилях пресета.\n\n"
+            "Когда обход включён, здесь появятся кнопки, чтобы остановить только движок или "
+            "остановить его и закрыть программу."
+        ),
+        "en": (
+            "Turns the bypass on: the app starts the engine with the selected preset. While the engine "
+            "runs, the bypass works system-wide, not only in the browser — in Discord, games and other "
+            "programs, but only for the traffic described in the preset profiles.\n\n"
+            "When the bypass is on, buttons appear here to stop only the engine or to stop it and "
+            "close the app."
+        ),
+    },
+    "onboarding.step.status.title": {
+        "ru": "Статус работы",
+        "en": "Status",
+    },
+    "onboarding.step.status.body": {
+        "ru": "Показывает, запущен ли обход прямо сейчас. Если что-то пошло не так, здесь появится подсказка.",
+        "en": "Shows whether the bypass is running right now. If something goes wrong, a hint appears here.",
+    },
+    "onboarding.step.preset.title": {
+        "ru": "Какой пресет выбран",
+        "en": "Selected preset",
+    },
+    "onboarding.step.preset.body": {
+        "ru": "Здесь видно, какой пресет сейчас выбран. Нажмите на плашку — откроется список пресетов.",
+        "en": "Shows which preset is selected now. Click it to open the list of presets.",
+    },
+    "onboarding.step.presets_list.title": {
+        "ru": "Что такое пресеты",
+        "en": "What presets are",
+    },
+    "onboarding.step.presets_list.body": {
+        "ru": (
+            "Это страница «Мои пресеты». Пресет — текстовый файл (.txt) с настройками движка: в нём "
+            "перечислены профили и их стратегии. Программа запускает его как есть, ничего не "
+            "добавляя от себя.\n\n"
+            "Готовые пресеты уже есть в программе. Выбранный отмечен в списке, чтобы сменить его, "
+            "просто нажмите на другой. Провайдеры блокируют по-разному, поэтому, если сайт не открывается, "
+            "первым делом попробуйте другой пресет."
+        ),
+        "en": (
+            "This is the My presets page. A preset is a text file (.txt) with engine settings: it lists "
+            "profiles and their strategies. The app runs it as is and adds nothing on its own.\n\n"
+            "Ready presets are already included. The selected one is marked in the list; click another "
+            "one to switch. Providers block in different ways, so if a site does not open, try another "
+            "preset first."
+        ),
+    },
+    "onboarding.step.presets_toolbar.title": {
+        "ru": "Свои пресеты",
+        "en": "Your own presets",
+    },
+    "onboarding.step.presets_toolbar.body": {
+        "ru": (
+            "Кнопки над списком: создать свой пресет, импортировать его из файла или по ссылке и "
+            "открыть папку с файлами пресетов. Пресет по ссылке может обновляться сам, когда автор "
+            "его поменяет."
+        ),
+        "en": (
+            "Buttons above the list: create your own preset, import one from a file or a link, and open "
+            "the preset folder. A preset imported from a link can update itself when its author "
+            "changes it."
+        ),
+    },
+    "onboarding.step.profiles_list.title": {
+        "ru": "Что такое профили",
+        "en": "What profiles are",
+    },
+    "onboarding.step.profiles_list.body": {
+        "ru": (
+            "Это «Профили пресета» — из чего состоит выбранный пресет. Профиль — правило: какой трафик "
+            "обрабатывать и какой стратегией.\n\n"
+            "Какой трафик, задают списки. Hostlist — список адресов сайтов, например youtube.com. "
+            "IPset — список IP-адресов: он нужен там, где адреса сайта в трафике не видно, например "
+            "у игр и голосовых звонков."
+        ),
+        "en": (
+            "This is Preset profiles — what the selected preset is made of. A profile is a rule: which "
+            "traffic to handle and with which strategy.\n\n"
+            "Lists define the traffic. A hostlist is a list of site names such as youtube.com. An IPset "
+            "is a list of IP addresses; it is used where the site name is not visible in the traffic, "
+            "for example in games and voice calls."
+        ),
+    },
+    "onboarding.step.profile_row.title": {
+        "ru": "Профиль и его стратегия",
+        "en": "A profile and its strategy",
+    },
+    "onboarding.step.profile_row.body": {
+        "ru": (
+            "Слева — название профиля и тип списка (Hostlist или IPset), справа — выбранная стратегия. "
+            "Горящая точка значит, что стратегия выбрана и профиль работает.\n\n"
+            "Нажмите на профиль, чтобы выбрать для него другую готовую стратегию. Если сервис не "
+            "открывается, попробуйте несколько стратегий по очереди — какая-то подойдёт вашему "
+            "провайдеру. Правой кнопкой мыши профиль можно выключить."
+        ),
+        "en": (
+            "On the left are the profile name and list type (Hostlist or IPset), on the right is the "
+            "selected strategy. A lit dot means a strategy is selected and the profile works.\n\n"
+            "Click a profile to choose another ready strategy for it. If a service does not open, try "
+            "several strategies one by one — one of them will suit your provider. Right-click a profile "
+            "to turn it off."
+        ),
+    },
+    "onboarding.step.profiles_toolbar.title": {
+        "ru": "Новые профили",
+        "en": "More profiles",
+    },
+    "onboarding.step.profiles_toolbar.body": {
+        "ru": (
+            "Здесь можно добавить в пресет ещё профиль, найти нужный поиском и поменять вид списка. "
+            "Если нужного сервиса нет, отправьте запрос на новый профиль."
+        ),
+        "en": (
+            "Here you can add another profile to the preset, search for one and change the list view. "
+            "If the service you need is missing, send a request for a new profile."
+        ),
+    },
+    "onboarding.step.fakes.title": {
+        "ru": "Фейки",
+        "en": "Fakes",
+    },
+    "onboarding.step.fakes.body": {
+        "ru": (
+            "Фейк — пакет-обманка, который движок отправляет перед настоящим. Фильтр провайдера "
+            "принимает его за начало соединения и пропускает остальное, а сам сайт такой пакет "
+            "не получает или отбрасывает.\n\n"
+            "Содержимое фейков лежит в .bin-файлах — встроенных и ваших. Здесь их можно посмотреть, "
+            "а какие фейки использовать, указано в стратегиях."
+        ),
+        "en": (
+            "A fake is a decoy packet the engine sends before the real one. The provider filter takes it "
+            "for the start of the connection and lets the rest through, while the site itself never "
+            "gets that packet or drops it.\n\n"
+            "Fake contents live in .bin files — built-in and your own. You can view them here; which "
+            "fakes to use is set in the strategies."
+        ),
+    },
+    "onboarding.step.dpi_mode.title": {
+        "ru": "Режим работы",
+        "en": "Operating mode",
+    },
+    "onboarding.step.dpi_mode.body": {
+        "ru": (
+            "Здесь выбирается движок:\n"
+            "• Zapret 2 (winws2) — основной режим с готовыми пресетами, поддерживает свои стратегии "
+            "на Lua;\n"
+            "• Zapret 1 (winws) — более старый и простой движок;\n"
+            "• Оркестратор — сам подбирает рабочие стратегии для каждого сайта и запоминает удачные.\n\n"
+            "Если не знаете, что выбрать, оставьте Zapret 2."
+        ),
+        "en": (
+            "Choose the engine here:\n"
+            "• Zapret 2 (winws2) — the main mode with ready presets, supports custom Lua strategies;\n"
+            "• Zapret 1 (winws) — an older and simpler engine;\n"
+            "• Orchestra — picks working strategies for each site by itself and remembers good ones.\n\n"
+            "If unsure, keep Zapret 2."
+        ),
+    },
+    "onboarding.step.program_settings.title": {
+        "ru": "Настройки программы",
+        "en": "App settings",
+    },
+    "onboarding.step.program_settings.body": {
+        "ru": (
+            "Можно запускать программу вместе с Windows, сразу включать обход после её старта и прятать "
+            "окно в трей — к значку возле часов. Так обход будет работать сам, без лишних нажатий."
+        ),
+        "en": (
+            "Start the app with Windows, turn the bypass on right after it starts and hide the window to "
+            "the tray next to the clock. This way the bypass works on its own."
+        ),
+    },
+    "onboarding.step.tools.title": {
+        "ru": "Инструменты",
+        "en": "Tools",
+    },
+    "onboarding.step.tools.body": {
+        "ru": (
+            "Помощь в особых случаях:\n"
+            "• Настройка DNS — сменить DNS-серверы, если провайдер подменяет адреса сайтов;\n"
+            "• Редактор hosts — открыть отдельные сервисы через системный файл hosts;\n"
+            "• Telegram Proxy — прокси прямо на компьютере, чтобы Telegram работал, когда его замедляют."
+        ),
+        "en": (
+            "Help for special cases:\n"
+            "• DNS settings — change DNS servers if your provider spoofs site addresses;\n"
+            "• Hosts editor — unblock individual services through the system hosts file;\n"
+            "• Telegram Proxy — a proxy right on your computer so Telegram works when it is throttled."
+        ),
+    },
+    "onboarding.step.diagnostics.title": {
+        "ru": "Диагностика",
+        "en": "Diagnostics",
+    },
+    "onboarding.step.diagnostics.body": {
+        "ru": (
+            "BlockCheck в один клик проверит, какие сайты блокируются и каким способом, — так проще "
+            "понять, что происходит с вашим интернетом. В режиме Zapret 2 здесь же есть разбор "
+            "подробного журнала движка."
+        ),
+        "en": (
+            "BlockCheck checks in one click which sites are blocked and how, so it is easier to see what "
+            "is happening with your connection. In Zapret 2 mode there is also a detailed engine log "
+            "analyzer here."
+        ),
+    },
+    "onboarding.step.appearance.title": {
+        "ru": "Оформление и помощь",
+        "en": "Appearance and help",
+    },
+    "onboarding.step.appearance.body": {
+        "ru": (
+            "Темы и цвета окна, поддержка проекта, логи программы и страница «О программе» с версией и "
+            "обновлениями. Если пишете в поддержку, приложите логи — так проблему найдут быстрее."
+        ),
+        "en": (
+            "Window themes and colors, project support, app logs and the About page with version and "
+            "updates. If you contact support, attach the logs so the problem is found faster."
+        ),
+    },
+    "onboarding.step.finish.title": {
+        "ru": "Всё готово!",
+        "en": "All set!",
+    },
+    "onboarding.step.finish.body": {
+        "ru": (
+            "Нажмите «Запустить Zapret» и откройте нужный сайт. Не открылся — попробуйте другой пресет "
+            "или другую стратегию в профилях.\n\n"
+            "Эту экскурсию можно пройти ещё раз кнопкой «Показать» на этой карточке."
+        ),
+        "en": (
+            "Press Start Zapret and open the site you need. If it does not open, try another preset or "
+            "another strategy in the profiles.\n\n"
+            "You can take this tour again with the Show button on this card."
+        ),
+    },
+    "onboarding.step.finish.body_no_target": {
+        "ru": (
+            "Запустите обход и откройте нужный сайт. Не открылся — попробуйте другой пресет или другую "
+            "стратегию в профилях.\n\n"
+            "Эту экскурсию можно пройти ещё раз кнопкой «Показать» на главной странице режимов "
+            "Zapret 1 и Zapret 2."
+        ),
+        "en": (
+            "Start the bypass and open the site you need. If it does not open, try another preset or "
+            "another strategy in the profiles.\n\n"
+            "You can take this tour again with the Show button on the main page in Zapret 1 and "
+            "Zapret 2 modes."
+        ),
+    },
+    "page.control.onboarding_tour.title": {
+        "ru": "Как пользоваться программой",
+        "en": "How to use the app",
+    },
+    "page.control.onboarding_tour.desc": {
+        "ru": "Пошаговая экскурсия: как устроен Zapret, что такое пресеты, профили и стратегии и где что находится",
+        "en": "A step-by-step tour: how Zapret works, what presets, profiles and strategies are and where everything is",
+    },
+    "page.control.onboarding_tour.button": {"ru": "Показать", "en": "Show"},
+    "page.control.onboarding_tour.accessible_name": {
+        "ru": "Показать обучающий тур",
+        "en": "Show the guided tour",
+    },
+}
+
+TEXTS.update(TEXTS_ONBOARDING)
+
+
 NAV_PAGE_TEXT_KEYS: dict[PageName, str] = {
     PageName.ZAPRET2_MODE_CONTROL: "nav.page.zapret2_mode_control",
     PageName.ZAPRET1_MODE_CONTROL: "nav.page.zapret1_mode_control",

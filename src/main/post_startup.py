@@ -94,6 +94,12 @@ def install_remote_presets_sync(*args, **kwargs):
     return install(*args, **kwargs)
 
 
+def install_onboarding_tour(*args, **kwargs):
+    from main.post_startup_onboarding import install_onboarding_tour as install
+
+    return install(*args, **kwargs)
+
+
 def install_telegram_proxy_startup(*args, **kwargs):
     from main.post_startup_proxy import install_telegram_proxy_startup as install
 
@@ -258,6 +264,10 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
             request_repair=request_installation_repair,
             log_startup_metric=deps.log_startup_metric,
         )
+    install_onboarding_tour(
+        startup_host,
+        log_startup_metric=deps.log_startup_metric,
+    )
     install_cpu_diagnostic()
     install_qt_event_diagnostic_probe()
     install_startup_audit()

@@ -27,6 +27,7 @@ class WindowPageActions:
     on_editor_smooth_scroll_changed: Callable[..., Any]
     on_ui_language_changed: Callable[..., Any]
     on_sidebar_icon_style_changed: Callable[..., Any]
+    start_onboarding_tour: Callable[..., Any]
 
 
 def show_page(window, page_name, *, allow_internal: bool = False) -> bool:
@@ -118,6 +119,12 @@ def on_sidebar_icon_style_changed(window, style) -> None:
     apply_sidebar_icon_style(window, style)
 
 
+def start_onboarding_tour(window) -> bool:
+    from ui.onboarding import start_onboarding_tour as _start_onboarding_tour
+
+    return bool(_start_onboarding_tour(window))
+
+
 def build_window_page_actions(*, window, appearance_actions) -> WindowPageActions:
     return WindowPageActions(
         set_status=window.set_status,
@@ -165,6 +172,7 @@ def build_window_page_actions(*, window, appearance_actions) -> WindowPageAction
         on_editor_smooth_scroll_changed=lambda enabled: on_editor_smooth_scroll_changed(window, enabled),
         on_ui_language_changed=lambda language: on_ui_language_changed(window, language),
         on_sidebar_icon_style_changed=lambda style: on_sidebar_icon_style_changed(window, style),
+        start_onboarding_tour=lambda: start_onboarding_tour(window),
     )
 
 

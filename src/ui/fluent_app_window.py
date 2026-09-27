@@ -278,3 +278,7 @@ class ZapretFluentWindow(FluentWindow):
         sync_geometry = getattr(overlay, "sync_geometry", None)
         if callable(sync_geometry):
             sync_geometry()
+        if self.findChild(QWidget, "onboardingTourOverlay", Qt.FindChildOption.FindDirectChildrenOnly) is not None:
+            from ui.onboarding import sync_onboarding_overlay_geometry
+
+            sync_onboarding_overlay_geometry(self)

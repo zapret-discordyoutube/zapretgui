@@ -111,6 +111,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         open_fakes,
         create_external_open_url_worker,
         ui_state_store,
+        start_onboarding_tour,
     ):
         _t_init = _time.perf_counter()
         _t_base = _time.perf_counter()
@@ -143,6 +144,8 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self._open_premium_callback = open_premium
         self._open_fakes_callback = open_fakes
         self._create_external_open_url_worker = create_external_open_url_worker
+        self._start_onboarding_tour_callback = start_onboarding_tour
+        self.onboarding_tour_card = None
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._program_settings_runtime_unsubscribe = None
@@ -490,6 +493,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             on_open_internet_cleanup=self._on_internet_cleanup_clicked,
             on_open_folder=self._open_folder,
             on_open_docs=self._open_docs,
+            on_open_onboarding_tour=self._start_onboarding_tour,
             on_open_fakes=self._open_fakes,
         )
         _log_startup_winws2_control_metric(
@@ -537,6 +541,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.internet_cleanup_card = section_widgets.internet_cleanup_card
         self.folder_card = section_widgets.folder_card
         self.docs_card = section_widgets.docs_card
+        self.onboarding_tour_card = section_widgets.tour_card
         self.state_media_block_toggle = section_widgets.state_media_block_toggle
         self.test_btn = self.test_card.button
         self.internet_cleanup_btn = self.internet_cleanup_card.button

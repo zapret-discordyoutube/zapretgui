@@ -477,6 +477,24 @@ class ProfilesList(QWidget):
     def clear(self) -> None:
         self._model.set_profiles(())
 
+    def first_visible_profile_row(self):
+        """Первая видимая строка профиля: (viewport, прямоугольник строки).
+
+        Строки рисует делегат, отдельных виджетов у них нет, поэтому
+        обучающий тур подсвечивает прямоугольник внутри viewport.
+        """
+        view = self._view
+        viewport = view.viewport()
+        visible = viewport.rect()
+        for row in range(self._model.rowCount()):
+            index = self._model.index(row, 0)
+            if str(index.data(ProfileListModel.KindRole) or "") != "profile":
+                continue
+            rect = view.visualRect(index).intersected(visible)
+            if rect.isValid() and rect.height() >= 8:
+                return viewport, rect
+        return None
+
     def expand_all(self) -> None:
         self._request_all_groups_expanded(True)
 

@@ -196,6 +196,11 @@ class BasePage(_FluentScrollArea):
     def cancel_page_loads(self, *, reason: str = "") -> None:
         self._cancel_page_loads(reason=reason)
 
+    def onboarding_target(self, name: str):
+        """Виджет, который подсвечивает обучающий тур. None — такой цели нет."""
+        _ = name
+        return None
+
     def is_page_ready(self) -> bool:
         return bool(self.isVisible()) and not bool(getattr(self, "_cleanup_in_progress", False))
 

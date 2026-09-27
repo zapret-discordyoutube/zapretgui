@@ -334,6 +334,20 @@ class PresetSetupPageBase(BasePage):
         """Cleanup-флаг; чтение устойчиво к duck-typed стабам из тестов."""
         return bool(self.__dict__.get("_cleanup_in_progress", False))
 
+    def onboarding_target(self, name: str):
+        if name == "profiles_list":
+            profiles_list = self._profiles_list_widget()
+            if profiles_list is not None:
+                return profiles_list
+            return self.__dict__.get("_empty_state_label")
+        if name == "first_profile":
+            profiles_list = self._profiles_list_widget()
+            return profiles_list.first_visible_profile_row() if profiles_list is not None else None
+        if name == "profiles_toolbar":
+            toolbar = self.__dict__.get("_toolbar_actions_bar")
+            return getattr(toolbar, "container", None)
+        return None
+
     def _profiles_list_widget(self) -> ProfilesList | None:
         """Виджет списка; чтение устойчиво к duck-typed стабам из тестов."""
         return self.__dict__.get("_profiles_list")

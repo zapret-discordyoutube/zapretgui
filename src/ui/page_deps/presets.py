@@ -27,6 +27,7 @@ def build_control_page_kwargs(
     open_connection_test,
     open_folder,
     show_page,
+    start_onboarding_tour,
     ui_state_store,
 ) -> dict:
     from presets.ui.control.additional_settings_runtime import (
@@ -94,6 +95,7 @@ def build_control_page_kwargs(
         "open_premium": lambda: show_page(PageName.PREMIUM, allow_internal=True),
         "create_external_open_url_worker": external_actions_feature.create_open_url_worker,
         "ui_state_store": ui_state_store,
+        "start_onboarding_tour": start_onboarding_tour,
     }
     if page_name == PageName.ZAPRET2_MODE_CONTROL:
         # Фейки winws2 есть только в Zapret 2: страница вложена в его управление.
