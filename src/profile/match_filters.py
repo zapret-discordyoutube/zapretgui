@@ -1,16 +1,40 @@
 from __future__ import annotations
 
+from typing import Iterable, Literal
+
+
+# Протоколы из --filter-l7, которые ходят только поверх TCP. Всё остальное
+# (quic, stun, discord, wireguard, dht, dtls, неизвестные имена) считаем UDP.
+_TCP_L7: frozenset[str] = frozenset({"http", "tls", "xmpp", "mtproto", "bt"})
+
+
+def l7_transport(values: Iterable[str]) -> Literal["tcp", "udp"] | None:
+    """Транспорт для значений --filter-l7: "tcp", если все имена TCP-протоколы.
+
+    Значения можно передавать как есть из строк фильтра ("http,tls").
+    Без имён возвращает None; хотя бы одно не-TCP имя даёт "udp".
+    """
+    names = {
+        token.strip().lower()
+        for value in values
+        for token in str(value or "").split(",")
+        if token.strip()
+    }
+    if not names:
+        return None
+    return "tcp" if names <= _TCP_L7 else "udp"
+
 
 def strategy_catalog_from_match_lines(match_lines: tuple[str, ...]) -> str:
     if is_voice_match(match_lines):
         return "voice"
-    if filter_values(match_lines, "--filter-l7"):
+    has_tcp = bool(filter_values(match_lines, "--filter-tcp"))
+    has_udp = bool(filter_values(match_lines, "--filter-udp"))
+    if has_udp and not has_tcp:
         return "udp"
-    if filter_values(match_lines, "--filter-udp") and not filter_values(match_lines, "--filter-tcp"):
-        return "udp"
-    if is_http80_match(match_lines):
-        return "http80"
-    return "tcp"
+    if has_tcp and not has_udp:
+        return "http80" if is_http80_match(match_lines) else "tcp"
+    return l7_transport(filter_values(match_lines, "--filter-l7")) or "tcp"
 
 
 def protocol_label_from_match_lines(match_lines: tuple[str, ...]) -> str:
@@ -61,7 +85,9 @@ def is_voice_match(match_lines: tuple[str, ...]) -> bool:
 
 def is_http80_match(match_lines: tuple[str, ...]) -> bool:
     tcp_values = filter_values(match_lines, "--filter-tcp")
-    if not tcp_values or filter_values(match_lines, "--filter-udp") or filter_values(match_lines, "--filter-l7"):
+    if not tcp_values or filter_values(match_lines, "--filter-udp"):
+        return False
+    if l7_transport(filter_values(match_lines, "--filter-l7")) == "udp":
         return False
     ports = _parse_ports(",".join(tcp_values))
     return bool(ports) and ports == {80}

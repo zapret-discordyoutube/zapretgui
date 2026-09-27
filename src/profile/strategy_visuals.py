@@ -109,6 +109,98 @@ _TECHNIQUES: dict[str, StrategyTechniqueVisual] = {
         color="#8f9aa6",
         description="строка без активного desync-действия",
     ),
+    "hostfakesplit": StrategyTechniqueVisual(
+        key="hostfakesplit",
+        label="HostFakeSplit",
+        icon_name="fa5s.user-secret",
+        color="#ff8f5a",
+        description="разделение по имени сайта с поддельным именем между частями",
+    ),
+    "fakedsplit": StrategyTechniqueVisual(
+        key="fakedsplit",
+        label="FakedSplit",
+        icon_name="fa5s.clone",
+        color="#ffa94d",
+        description="разделение данных с поддельными копиями частей",
+    ),
+    "fakeddisorder": StrategyTechniqueVisual(
+        key="fakeddisorder",
+        label="FakedDisorder",
+        icon_name="fa5s.random",
+        color="#8bd450",
+        description="перестановка частей данных с поддельными копиями",
+    ),
+    "fakemultisplit": StrategyTechniqueVisual(
+        key="fakemultisplit",
+        label="FakeMultiSplit",
+        icon_name="fa5s.layer-group",
+        color="#6fb8ff",
+        description="несколько точек разделения с поддельными частями",
+    ),
+    "fakemultidisorder": StrategyTechniqueVisual(
+        key="fakemultidisorder",
+        label="FakeMultiDisorder",
+        icon_name="fa5s.random",
+        color="#7fd99a",
+        description="перестановка нескольких частей с поддельными частями",
+    ),
+    "drop": StrategyTechniqueVisual(
+        key="drop",
+        label="Drop",
+        icon_name="fa5s.ban",
+        color="#e5484d",
+        description="отбрасывание пакета",
+    ),
+    "wssize": StrategyTechniqueVisual(
+        key="wssize",
+        label="WSSize",
+        icon_name="fa5s.compress-arrows-alt",
+        color="#5eead4",
+        description="уменьшение TCP-окна, чтобы сервер отвечал мелкими частями",
+    ),
+    "pktmod": StrategyTechniqueVisual(
+        key="pktmod",
+        label="PktMod",
+        icon_name="fa5s.sliders-h",
+        color="#c4a7ff",
+        description="изменение полей текущего пакета",
+    ),
+    "tamper": StrategyTechniqueVisual(
+        key="tamper",
+        label="Tamper",
+        icon_name="fa5s.pen",
+        color="#e0b86b",
+        description="изменение содержимого пакета без разделения",
+    ),
+}
+
+# Точные имена стандартных функций --lua-desync (zapret-lib.lua / zapret-antidpi.lua
+# и расширения из lua-init). Проверяются раньше поиска по подстроке, иначе,
+# например, hostfakesplit попадал в Split, а fakeddisorder — в MultiDisorder.
+_EXACT_LUA_DESYNC_TECHNIQUES: dict[str, str] = {
+    "pass": "pass",
+    "send": "send",
+    "syndata": "syndata",
+    "udplen": "udplen",
+    "oob": "oob",
+    "tcpseg": "tcpseg",
+    "fake": "fake",
+    "multisplit": "multisplit",
+    "multidisorder": "multidisorder",
+    "multidisorder_legacy": "multidisorder",
+    "hostfakesplit": "hostfakesplit",
+    "fakedsplit": "fakedsplit",
+    "fakeddisorder": "fakeddisorder",
+    "fakemultisplit": "fakemultisplit",
+    "fakemultidisorder": "fakemultidisorder",
+    "drop": "drop",
+    "wssize": "wssize",
+    "pktmod": "pktmod",
+    "dht_dn": "tamper",
+    "http_domcase": "tamper",
+    "http_hostcase": "tamper",
+    "http_methodeol": "tamper",
+    "http_unixeol": "tamper",
 }
 
 
@@ -157,12 +249,13 @@ def _map_lua_desync_value(value: str) -> str | None:
     raw = str(value or "").strip().lower()
     if not raw:
         return None
-    if raw == "pass":
-        return "pass"
+    exact = _EXACT_LUA_DESYNC_TECHNIQUES.get(raw)
+    if exact:
+        return exact
+    if raw.startswith("hostfakesplit"):
+        return "hostfakesplit"
     if "syndata" in raw:
         return "syndata"
-    if raw == "send":
-        return "send"
     if "udplen" in raw:
         return "udplen"
     if "oob" in raw:
@@ -177,6 +270,6 @@ def _map_lua_desync_value(value: str) -> str | None:
         return "split"
     if "tcpseg" in raw:
         return "tcpseg"
-    if "fake" in raw or "hostfakesplit" in raw:
+    if "fake" in raw:
         return "fake"
     return None

@@ -219,6 +219,35 @@ class UserProfilesTests(unittest.TestCase):
         self.assertIn("--dup=2", texts)
         self.assertNotIn("--dpi-desync=split2", texts)
 
+    def test_winws1_l7_user_profile_takes_first_strategy_by_l7_transport(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            catalog_dir = root / "system" / "strategy_catalogs" / "winws1"
+            catalog_dir.mkdir(parents=True)
+            (catalog_dir / "tcp.txt").write_text(
+                "[first_tcp]\n--dpi-desync=fake\n--dpi-desync-fake-tls=tls_clienthello_4.bin\n",
+                encoding="utf-8",
+            )
+            (catalog_dir / "udp.txt").write_text(
+                "[first_udp]\n--dpi-desync=fake\n--dpi-desync-fake-quic=quic_1.bin\n",
+                encoding="utf-8",
+            )
+            paths = AppPaths(user_root=root, local_root=root)
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                tls_id = create_user_profile(paths, name="My TLS", protocol="l7", ports="tls")
+                voice_id = create_user_profile(paths, name="My Voice", protocol="l7", ports="stun,discord")
+                templates = load_user_profile_templates(paths, "winws1")
+
+        tls_texts = [segment.text for segment in templates[f"user:{tls_id}"].segments]
+        self.assertIn("--filter-l7=tls", templates[f"user:{tls_id}"].match.filter_lines)
+        self.assertIn("--dpi-desync-fake-tls=tls_clienthello_4.bin", tls_texts)
+        self.assertNotIn("--dpi-desync-fake-quic=quic_1.bin", tls_texts)
+
+        voice_texts = [segment.text for segment in templates[f"user:{voice_id}"].segments]
+        self.assertIn("--filter-l7=stun,discord", templates[f"user:{voice_id}"].match.filter_lines)
+        self.assertIn("--dpi-desync-fake-quic=quic_1.bin", voice_texts)
+        self.assertNotIn("--dpi-desync-fake-tls=tls_clienthello_4.bin", voice_texts)
+
     def test_list_profiles_includes_user_profile_and_enabling_adds_it_to_preset(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

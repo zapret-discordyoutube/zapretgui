@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from core.paths import AppPaths
+from log.log import log
 from .strategy_visuals import StrategyVisual, describe_strategy_visual
 
 
@@ -45,6 +46,7 @@ def _tree_signature(root: Path, pattern: str = "*.txt") -> tuple[tuple[str, int,
 
 def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntry]:
     strategies: dict[str, StrategyEntry] = {}
+    seen_ids: set[str] = set()
     current_id: Optional[str] = None
     current_name = ""
     current_args: list[str] = []
@@ -54,7 +56,13 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
         if not current_id:
             return
         args = "\n".join(line for line in current_args if line).strip()
-        if _has_profile_scoped_lines(args.splitlines()):
+        scoped_lines = _profile_scoped_lines(args.splitlines())
+        if scoped_lines:
+            log(
+                f"StrategyCatalog: {path.name} [{current_id}] пропущена — "
+                f"строки профиля не допускаются в готовой стратегии: {', '.join(scoped_lines)}",
+                "WARNING",
+            )
             return
         strategies[current_id] = StrategyEntry(
             strategy_id=current_id,
@@ -72,6 +80,13 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
         if stripped.startswith("[") and stripped.endswith("]"):
             _flush()
             current_id = stripped[1:-1].strip()
+            if current_id in seen_ids:
+                log(
+                    f"StrategyCatalog: {path.name} [{current_id}] повторяется — "
+                    "будет использована последняя копия",
+                    "WARNING",
+                )
+            seen_ids.add(current_id)
             current_name = current_id
             current_args = []
             continue
@@ -92,15 +107,24 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
     return strategies
 
 
-def _has_profile_scoped_lines(lines: list[str]) -> bool:
+def _profile_scoped_lines(lines: list[str]) -> list[str]:
+    """Строки, которые относятся к профилю, а не к готовой стратегии.
+
+    Такие строки (`--new`, `--filter-*`, `--hostlist=` и т.п.) нельзя держать
+    в каталоге готовых стратегий: они меняют область действия профиля.
+    """
+    found: list[str] = []
     for raw in lines:
-        lowered = str(raw or "").strip().lower()
+        stripped = str(raw or "").strip()
+        lowered = stripped.lower()
         if not lowered:
             continue
         if lowered == "--new" or lowered.startswith("--new="):
-            return True
+            found.append(stripped)
+            continue
         if lowered.startswith("--filter-"):
-            return True
+            found.append(stripped)
+            continue
         if lowered.startswith((
             "--name",
             "--template",
@@ -116,8 +140,8 @@ def _has_profile_scoped_lines(lines: list[str]) -> bool:
             "--ipset-exclude-ip=",
             "--ipset-ip=",
         )):
-            return True
-    return False
+            found.append(stripped)
+    return found
 
 
 def load_strategy_catalogs(paths: AppPaths, engine: str) -> dict[str, dict[str, StrategyEntry]]:

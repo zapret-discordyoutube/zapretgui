@@ -15,6 +15,7 @@ from lists.core.layered_files import (
     write_profile_user_list_text,
 )
 
+from ..match_filters import l7_transport
 from ..models import EngineName, Profile
 from ..parser import parse_preset_text
 from ..strategy_catalog import load_strategy_catalogs
@@ -157,14 +158,15 @@ def _profile_text(row: object, *, paths: AppPaths, engine: str) -> str:
     if engine == ENGINE_WINWS2:
         lines.append("--lua-desync=pass")
     elif engine == ENGINE_WINWS1:
-        lines.extend(_first_strategy_lines(paths, engine=engine, protocol=protocol))
+        lines.extend(_first_strategy_lines(paths, engine=engine, protocol=protocol, filter_value=ports))
     return "\n".join(lines) + "\n"
 
 
-def _first_strategy_lines(paths: AppPaths, *, engine: str, protocol: str) -> list[str]:
+def _first_strategy_lines(paths: AppPaths, *, engine: str, protocol: str, filter_value: str) -> list[str]:
+    catalog_name = protocol
     if protocol == "l7":
-        protocol = "udp"
-    catalog = load_strategy_catalogs(paths, engine).get(protocol) or {}
+        catalog_name = l7_transport((filter_value,)) or "udp"
+    catalog = load_strategy_catalogs(paths, engine).get(catalog_name) or {}
     for entry in catalog.values():
         lines = [line.strip() for line in str(entry.args or "").splitlines() if line.strip()]
         if lines:

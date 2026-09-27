@@ -7,18 +7,12 @@ description = Отключить обработку голосовых чато�
 name = IPv4 & IPv6 DUP, AutoTTL, Cutoff n3
 author = Community
 label = recommended
-description = Стратегия для IPv4 с дублированием пакетов, автоматическим TTL и обрезкой n3.
---filter-l3=ipv4
+description = Стратегия для IPv4 и IPv6 с дублированием пакетов, автоматическим TTL и обрезкой n3.
 --dpi-desync=fake
 --dpi-desync-autottl
---dup=2
---dup-autottl
---dup-cutoff=n3
---new
---filter-l3=ipv6
---dpi-desync=fake
 --dpi-desync-autottl6
 --dup=2
+--dup-autottl
 --dup-autottl6
 --dup-cutoff=n3
 
