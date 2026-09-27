@@ -184,26 +184,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
         widget.setCurrentItem.assert_not_called()
 
-    def test_preset_setup_page_shows_normalization_infobar(self) -> None:
-        apply_payload = inspect.getsource(PresetSetupPageBase._apply_payload)
-        notify = inspect.getsource(PresetSetupPageBase._show_profile_normalization_info)
-
-        self.assertIn("_show_profile_normalization_info(payload)", apply_payload)
-        self.assertIn("normalized_split_profiles", notify)
-        self.assertIn("normalized_created_profiles", notify)
-        self.assertIn("InfoBar.info", notify)
-
-    def test_preset_setup_page_skips_normalization_infobar_while_hidden(self) -> None:
-        page = PresetSetupPageBase.__new__(PresetSetupPageBase)
-        page.isVisible = Mock(return_value=False)
-        page.window = Mock(return_value=None)
-        payload = SimpleNamespace(normalized_split_profiles=1, normalized_created_profiles=1)
-
-        with patch("profile.ui.preset_setup_page.InfoBar.info") as info:
-            PresetSetupPageBase._show_profile_normalization_info(page, payload)
-
-        info.assert_not_called()
-
     def test_preset_setup_page_has_add_user_profile_action(self) -> None:
         apply_payload = inspect.getsource(PresetSetupPageBase._apply_payload)
         build_content = inspect.getsource(PresetSetupPageBase._build_content)
@@ -573,8 +553,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             items=(item,),
             selected_preset_name="",
             selected_preset_file_name="custom.txt",
-            normalized_split_profiles=0,
-            normalized_created_profiles=0,
         )
         profiles_list = SimpleNamespace(
             update_profiles=Mock(),
@@ -589,20 +567,17 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page.title_key = "page.winws2_pages.title"
         page.page_title = "Настройка пресета"
         page._ui_language = "ru"
-        page._show_profile_normalization_info = Mock()
         page._show_empty_state = Mock()
         page._log_ui_timing = Mock()
 
         PresetSetupPageBase._apply_payload(page, payload)
         profiles_list.update_profiles.reset_mock()
         profiles_list.set_search_query.reset_mock()
-        page._show_profile_normalization_info.reset_mock()
 
         PresetSetupPageBase._apply_payload(page, payload)
 
         profiles_list.update_profiles.assert_not_called()
         profiles_list.set_search_query.assert_not_called()
-        page._show_profile_normalization_info.assert_not_called()
 
     def test_preset_setup_skips_duplicate_loaded_view_state_for_existing_list(self) -> None:
         item = ProfileListItem(
@@ -626,8 +601,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             items=(item,),
             selected_preset_name="",
             selected_preset_file_name="custom.txt",
-            normalized_split_profiles=0,
-            normalized_created_profiles=0,
         )
         view_state = SimpleNamespace(rows=[{"kind": "profile", "key": "profile:1"}])
         profiles_list = SimpleNamespace(
@@ -643,18 +616,15 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page.title_key = "page.winws2_pages.title"
         page.page_title = "Настройка пресета"
         page._ui_language = "ru"
-        page._show_profile_normalization_info = Mock()
         page._show_empty_state = Mock()
         page._log_ui_timing = Mock()
 
         PresetSetupPageBase._apply_payload(page, payload, view_state=view_state)
         profiles_list.apply_view_state.reset_mock()
-        page._show_profile_normalization_info.reset_mock()
 
         PresetSetupPageBase._apply_payload(page, payload, view_state=view_state)
 
         profiles_list.apply_view_state.assert_not_called()
-        page._show_profile_normalization_info.assert_not_called()
 
     def test_loaded_view_state_keeps_current_page_search_and_added_filter(self) -> None:
         item = ProfileListItem(
@@ -678,8 +648,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             items=(item,),
             selected_preset_name="",
             selected_preset_file_name="custom.txt",
-            normalized_split_profiles=0,
-            normalized_created_profiles=0,
         )
         view_state = SimpleNamespace(
             rows=[{"kind": "profile", "key": "profile:1"}],
@@ -701,7 +669,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page.title_key = "page.winws2_pages.title"
         page.page_title = "Настройка пресета"
         page._ui_language = "ru"
-        page._show_profile_normalization_info = Mock()
         page._show_empty_state = Mock()
         page._log_ui_timing = Mock()
 
@@ -3697,15 +3664,13 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             items=("profile-1", "profile-2"),
             selected_preset_file_name="Default.txt",
             selected_preset_name="Default",
-            normalized_split_profiles=1,
-            normalized_created_profiles=2,
         )
 
         result = ProfileListLoadResult(payload=payload, view_state="state")
 
         self.assertEqual(
             result.apply_signature_base,
-            (("profile-1", "profile-2"), "Default.txt", "Default", 1, 2, "state"),
+            (("profile-1", "profile-2"), "Default.txt", "Default", "state"),
         )
 
     def test_profile_list_load_result_signature_does_not_keep_profile_objects(self) -> None:

@@ -54,8 +54,6 @@ class ProfileListPayload:
     items: tuple[ProfileListItem, ...]
     selected_preset_file_name: str
     selected_preset_name: str
-    normalized_split_profiles: int = 0
-    normalized_created_profiles: int = 0
 
 
 @dataclass(frozen=True)

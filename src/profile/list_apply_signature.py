@@ -6,8 +6,6 @@ def profile_payload_apply_signature_base(payload, *, view_state=None) -> tuple[o
         tuple(_profile_item_signature(item) for item in tuple(getattr(payload, "items", ()) or ())),
         str(getattr(payload, "selected_preset_file_name", "") or ""),
         str(getattr(payload, "selected_preset_name", "") or ""),
-        int(getattr(payload, "normalized_split_profiles", 0) or 0),
-        int(getattr(payload, "normalized_created_profiles", 0) or 0),
         _freeze_signature_value(view_state),
     )
 

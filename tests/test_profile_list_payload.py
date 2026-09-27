@@ -229,8 +229,6 @@ class ProfileListPayloadTests(unittest.TestCase):
                 payload = ProfilePresetService(feature, "zapret2_mode").list_profiles()
 
         # Список не разрезает profile: то, что видно в GUI, совпадает с файлом.
-        self.assertEqual(payload.normalized_split_profiles, 0)
-        self.assertEqual(payload.normalized_created_profiles, 0)
         self.assertEqual(len(payload.items), 1)
         self.assertEqual(store.save_count, 0)
         self.assertEqual(store.text, original_text)
@@ -298,7 +296,6 @@ class ProfileListPayloadTests(unittest.TestCase):
                 payload = service.list_profiles()
                 order_payload = service.list_preset_order_profiles()
 
-        self.assertEqual(payload.normalized_split_profiles, 0)
         self.assertEqual([item.profile_name for item in payload.items], ["Каталожный набор IP", "YouTube"])
         self.assertEqual([item.profile_name for item in order_payload.items], ["Каталожный набор IP", "YouTube"])
         catalog_item = payload.items[0]

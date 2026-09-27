@@ -555,7 +555,6 @@ class PresetSetupPageBase(BasePage):
             return
         self._last_profile_payload_apply_signature = apply_signature
         self._apply_selected_preset_title(payload)
-        self._show_profile_normalization_info(payload)
         if not payload.items:
             self._show_empty_state(
                 "В выбранном пресете нет профилей, которые можно показать на этой странице. "
@@ -660,32 +659,6 @@ class PresetSetupPageBase(BasePage):
             extra=extra,
             important=label in {"profile_ui.apply_payload.total", "profile_ui.profile_list.build"},
         )
-
-    def _show_profile_normalization_info(self, payload) -> None:
-        split_count = int(getattr(payload, "normalized_split_profiles", 0) or 0)
-        created_count = int(getattr(payload, "normalized_created_profiles", 0) or 0)
-        if split_count <= 0 or created_count <= 0:
-            return
-        is_visible = getattr(self, "isVisible", None)
-        if callable(is_visible):
-            try:
-                if not bool(is_visible()):
-                    return
-            except RuntimeError:
-                return
-        try:
-            InfoBar.info(
-                title="Profile-ы разделены",
-                content=(
-                    f"Найдено сложных profile-ов: {split_count}. "
-                    f"Создано отдельных profile-ов: {created_count}. "
-                    "Теперь каждому списку можно менять стратегию отдельно."
-                ),
-                parent=self.window(),
-                duration=6500,
-            )
-        except Exception as exc:
-            log(f"{self.__class__.__name__}: не удалось показать уведомление о разделении profile-ов: {exc}", "DEBUG")
 
     def _apply_selected_preset_title(self, payload) -> None:
         self._displayed_preset_file_name = str(
