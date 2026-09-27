@@ -121,6 +121,11 @@ class ApplicationPaths:
         return self.system_dir / "hosts_catalog.sqlite3"
 
     @property
+    def fakes_catalog_database(self) -> Path:
+        """Реестр фейков winws2: только чтение, кладёт установщик."""
+        return self.system_dir / "fakes_catalog.sqlite3"
+
+    @property
     def strategy_catalogs_dir(self) -> Path:
         return self.system_dir / "strategy_catalogs"
 

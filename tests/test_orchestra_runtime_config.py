@@ -22,6 +22,8 @@ PROJECT_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
 
+from fakes.names import BLOB_REFERENCE_ARG_NAMES, NFQWS2_BUILTIN_BLOBS  # noqa: E402
+
 PUBLIC_ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_LUA_DIR = PUBLIC_ROOT.parent / "private_zapretgui" / "dist" / "lua"
 
@@ -203,11 +205,11 @@ class OrchestraRunnerLaunchTests(unittest.TestCase):
             self.assertFalse(hasattr(runner, "blobs_path"))
 
 
-_BLOB_ARG_RE = re.compile(r":(?:blob|fake_blob|pattern|seqovl_pattern|fallback)=([^:\s]+)")
+_BLOB_ARG_RE = re.compile(
+    r":(?:" + "|".join(sorted(BLOB_REFERENCE_ARG_NAMES)) + r")=([^:\s]+)"
+)
 _BLOB_DECL_RE = re.compile(r"^--blob=([A-Za-z_][A-Za-z0-9_]*):", re.MULTILINE)
 _LUA_GLOBAL_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=", re.MULTILINE)
-# Блобы, которые nfqws2 объявляет сам (ApplyDefaultBlobs в nfq2/nfqws.c).
-_NFQWS2_BUILTIN_BLOBS = {"fake_default_tls", "fake_default_http", "fake_default_quic"}
 
 
 @unittest.skipUnless((PRIVATE_LUA_DIR / "circular-config.txt").is_file(), "private_zapretgui не найден")
@@ -217,7 +219,7 @@ class ShippedCircularConfigBlobTests(unittest.TestCase):
         declared = set(_BLOB_DECL_RE.findall(text))
         custom_funcs = PRIVATE_LUA_DIR / "custom_funcs.lua"
         lua_globals = set(_LUA_GLOBAL_RE.findall(custom_funcs.read_text(encoding="utf-8"))) if custom_funcs.is_file() else set()
-        known = declared | _NFQWS2_BUILTIN_BLOBS | lua_globals
+        known = declared | NFQWS2_BUILTIN_BLOBS | lua_globals
 
         missing: dict[str, int] = {}
         for line_no, raw in enumerate(text.splitlines(), start=1):

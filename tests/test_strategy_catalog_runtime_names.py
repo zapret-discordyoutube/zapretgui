@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import unittest
 
+from fakes.names import BLOB_REFERENCE_ARG_NAMES, NFQWS2_BUILTIN_BLOBS
 from profile.winws2_preset_source import WINWS2_LUA_INIT_PATHS
 
 PUBLIC_ROOT = Path(__file__).resolve().parents[1]
@@ -22,9 +23,6 @@ PRIVATE_BIN_DIR = PRIVATE_DIST / "bin"
 CATALOGS_ROOT = PUBLIC_ROOT / "src" / "system" / "strategy_catalogs"
 BUILTIN_PRESETS_ROOT = PUBLIC_ROOT / "src" / "presets" / "builtin"
 
-# Blob-ы, которые nfqws2 содержит сам (не из lua и не из --blob=).
-NFQWS2_BUILTIN_BLOBS = frozenset({"fake_default_tls", "fake_default_http", "fake_default_quic"})
-BLOB_ARG_NAMES = frozenset({"blob", "fake_blob", "pattern", "seqovl_pattern", "fallback"})
 
 _LUA_FUNCTION_RE = re.compile(r"^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", re.MULTILINE)
 _LUA_TOP_LEVEL_GLOBAL_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)", re.MULTILINE)
@@ -148,7 +146,7 @@ class Winws2BlobNamesTest(_PrivateDistTestCase):
                     continue
                 for part in match.group(2).split(":"):
                     key, sep, value = part.partition("=")
-                    if not sep or key not in BLOB_ARG_NAMES:
+                    if not sep or key not in BLOB_REFERENCE_ARG_NAMES:
                         continue
                     if value.lower().startswith("0x") or not _BLOB_NAME_RE.match(value):
                         continue

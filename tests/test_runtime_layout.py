@@ -38,6 +38,7 @@ class RuntimeLayoutTests(unittest.TestCase):
             "user_dir": root / "user",
             "user_lua_dir": root / "user" / "lua",
             "hosts_catalog_database": root / "system" / "hosts_catalog.sqlite3",
+            "fakes_catalog_database": root / "system" / "fakes_catalog.sqlite3",
             "strategy_catalogs_dir": root / "system" / "strategy_catalogs",
             "profile_templates_dir": root / "system" / "templates",
             "lists_dir": root / "lists",

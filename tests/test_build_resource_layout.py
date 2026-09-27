@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1183,6 +1184,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
                 ):
                     self.assertTrue((stage_root / "lists" / service_list).is_file(), service_list)
                 self.assertTrue((stage_root / "system" / "hosts_catalog.sqlite3").is_file())
+                self.assertTrue((stage_root / "system" / "fakes_catalog.sqlite3").is_file())
                 # json и sos выведены из поставки целиком
                 self.assertFalse((stage_root / "json").exists())
                 self.assertFalse((stage_root / "sos").exists())
@@ -1233,6 +1235,38 @@ class BuildResourceLayoutTests(unittest.TestCase):
                     self.assertRaisesRegex(RuntimeError, "база каталога Hosts повреждена"),
                 ):
                     builder.prepare_installer_stage()
+        finally:
+            sys.modules.pop("build_zapret.release_pipeline", None)
+            sys.path[:] = old_path
+
+    def test_installer_stage_rejects_damaged_fakes_catalog_before_copy(self) -> None:
+        old_path = list(sys.path)
+        sys.path.insert(0, str(PRIVATE_ROOT))
+        try:
+            sys.modules.pop("build_zapret.release_pipeline", None)
+            from build_zapret import release_model, release_pipeline
+
+            builder = release_pipeline.ReleasePipeline(
+                self._release_request(release_model),
+                log=Mock(),
+            )
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_root = Path(temp_dir)
+                system_dir = temp_root / "private" / "resources" / "system"
+                system_dir.mkdir(parents=True)
+                # Настоящая база Hosts, чтобы проверка дошла до реестра фейков.
+                shutil.copyfile(
+                    PRIVATE_ROOT / "resources" / "system" / "hosts_catalog.sqlite3",
+                    system_dir / "hosts_catalog.sqlite3",
+                )
+                (system_dir / "fakes_catalog.sqlite3").write_bytes(b"not a sqlite database")
+                with (
+                    patch.object(release_pipeline, "PRIVATE_ROOT", temp_root / "private"),
+                    patch.object(release_pipeline, "STAGE_DIR", temp_root / "stage"),
+                    self.assertRaisesRegex(RuntimeError, "база реестра фейков повреждена"),
+                ):
+                    builder.prepare_installer_stage()
+                self.assertFalse((temp_root / "stage" / "installer_root" / "system").exists())
         finally:
             sys.modules.pop("build_zapret.release_pipeline", None)
             sys.path[:] = old_path
@@ -1737,6 +1771,10 @@ class BuildResourceLayoutTests(unittest.TestCase):
             r'Source: "{#SOURCEPATH}\system\hosts_catalog.sqlite3"; DestDir: "{app}\system"',
             iss,
         )
+        self.assertIn(
+            r'Source: "{#SOURCEPATH}\system\fakes_catalog.sqlite3"; DestDir: "{app}\system"',
+            iss,
+        )
         self.assertNotIn(r'Source: "{#SOURCEPATH}\json\hosts_catalog\*"', iss)
         self.assertIn(
             r'Type: filesandordirs; Name: "{app}\system\strategy_catalogs"',
@@ -1748,6 +1786,10 @@ class BuildResourceLayoutTests(unittest.TestCase):
         )
         self.assertIn(
             r'Type: files; Name: "{app}\system\hosts_catalog.sqlite3"',
+            install_delete,
+        )
+        self.assertIn(
+            r'Type: files; Name: "{app}\system\fakes_catalog.sqlite3"',
             install_delete,
         )
         # system\ целиком в [InstallDelete] нельзя: там уже лежит
@@ -1940,6 +1982,7 @@ class BuildResourceLayoutTests(unittest.TestCase):
             r'{#SOURCEPATH}\presets\winws2_builtin\*.txt',
             r'{#SOURCEPATH}\presets\winws1_builtin\*.txt',
             r'{#SOURCEPATH}\system\hosts_catalog.sqlite3',
+            r'{#SOURCEPATH}\system\fakes_catalog.sqlite3',
             r'{#SOURCEPATH}\ico\windows11_fluent\sidebar\*.svg',
         )
         for source in expected_sources:
