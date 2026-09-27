@@ -15,8 +15,8 @@ def on_background_refresh_needed(window) -> None:
         from ui.theme import apply_window_background
 
         apply_window_background(window.window())
-    except Exception:
-        pass
+    except Exception as exc:
+        log(f"❌ Не удалось обновить фон окна: {exc}", "ERROR")
 
 
 def on_background_preset_changed(window, preset: str) -> None:
@@ -25,8 +25,8 @@ def on_background_preset_changed(window, preset: str) -> None:
         from ui.theme import apply_window_background
 
         apply_window_background(window.window(), preset=preset)
-    except Exception:
-        pass
+    except Exception as exc:
+        log(f"❌ Не удалось применить фон окна «{preset}»: {exc}", "ERROR")
 
 
 def on_opacity_changed(window, value: int) -> None:
@@ -36,16 +36,12 @@ def on_opacity_changed(window, value: int) -> None:
         win.set_window_opacity(value)
 
 
-def on_mica_changed(window, enabled: bool) -> None:
-    """Заново применяет фон окна после изменения Mica."""
-    _ = enabled
-    on_background_refresh_needed(window)
-
-
 def on_animations_changed(window, enabled: bool) -> None:
-    """Включает или отключает оконные анимации."""
+    """Включает или отключает оконные анимации.
+
+    Праздничные эффекты при этом пересчитывает WindowPremiumAppearance.
+    """
     apply_window_animation_policy(window, enabled)
-    _sync_holiday_effects_for_animation_policy(window, bool(enabled))
 
 
 def on_smooth_scroll_changed(window, enabled: bool) -> None:
@@ -82,27 +78,6 @@ def _existing_holiday_effects_manager(window):
         return None
 
 
-def _sync_holiday_effects_for_animation_policy(window, animations_enabled: bool) -> None:
-    effects = _existing_holiday_effects_manager(window)
-    if effects is None:
-        return
-    if not bool(animations_enabled):
-        effects.set_garland_enabled(False)
-        effects.set_snowflakes_enabled(False)
-        effects.set_animation_active(False)
-        return
-    try:
-        from settings.appearance import peek_warmed_premium_effects
-
-        premium_effects = peek_warmed_premium_effects()
-        if premium_effects is None:
-            return
-        effects.set_garland_enabled(bool(premium_effects.garland_enabled))
-        effects.set_snowflakes_enabled(bool(premium_effects.snowflakes_enabled))
-    except Exception:
-        pass
-
-
 def apply_garland_enabled(window, enabled: bool) -> None:
     """Применяет готовое состояние гирлянды к окну."""
     effects = ensure_holiday_effects_manager(window) if enabled else _existing_holiday_effects_manager(window)
@@ -119,17 +94,13 @@ def apply_snowflakes_enabled(window, enabled: bool) -> None:
 
 def apply_window_opacity_value(window, value: int) -> None:
     """Применяет готовое значение прозрачности к окну."""
-    from settings.appearance import peek_warmed_background_preset, peek_warmed_mica_enabled
+    from settings.appearance import peek_warmed_background_preset
 
     if (peek_warmed_background_preset() or "standard") != "standard":
         log("Transparent effect проигнорирован (не standard пресет)", "DEBUG")
         return
 
-    from ui.theme import apply_aero_effect, apply_window_background
+    from ui.theme import apply_aero_effect
 
-    mica_enabled = peek_warmed_mica_enabled()
-    if mica_enabled is None or bool(mica_enabled):
-        apply_aero_effect(window, value)
-    else:
-        apply_window_background(window)
+    apply_aero_effect(window, value)
     log(f"Прозрачность обновлена: {value}%", "DEBUG")

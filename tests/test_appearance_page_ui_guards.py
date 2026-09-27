@@ -16,130 +16,38 @@ class AppearancePageUiGuardTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
-    def test_opacity_state_change_skips_premium_and_holiday_repaint(self) -> None:
+    def test_opacity_state_change_skips_premium_repaint(self) -> None:
         from ui.pages.appearance_page import AppearancePage
 
         page = AppearancePage.__new__(AppearancePage)
         page._cleanup_in_progress = False
         page.set_opacity_value = Mock()
-        page.set_premium_status = Mock(
+        page._apply_premium_access = Mock(
             side_effect=AssertionError("opacity-only change must not repaint premium controls")
-        )
-        page.set_garland_state = Mock(
-            side_effect=AssertionError("opacity-only change must not repaint garland checkbox")
-        )
-        page.set_snowflakes_state = Mock(
-            side_effect=AssertionError("opacity-only change must not repaint snowflakes checkbox")
-        )
-        page._current_bg_preset_from_ui = Mock(
-            side_effect=AssertionError("opacity-only change must not read background preset UI")
         )
 
         AppearancePage._on_ui_state_changed(
             page,
-            AppUiState(
-                subscription_is_premium=True,
-                garland_enabled=True,
-                snowflakes_enabled=True,
-                window_opacity=72,
-            ),
+            AppUiState(subscription_known=True, subscription_is_premium=True, window_opacity=72),
             frozenset({"window_opacity"}),
         )
 
         page.set_opacity_value.assert_called_once_with(72)
-        page.set_premium_status.assert_not_called()
-        page.set_garland_state.assert_not_called()
-        page.set_snowflakes_state.assert_not_called()
+        page._apply_premium_access.assert_not_called()
 
-    def test_subscription_check_result_passes_known_status_to_premium_gating(self) -> None:
+    def test_subscription_change_repaints_premium_controls_from_store_state(self) -> None:
         from ui.pages.appearance_page import AppearancePage
 
         page = AppearancePage.__new__(AppearancePage)
         page._cleanup_in_progress = False
         page.set_opacity_value = Mock()
-        page.set_premium_status = Mock()
-        page.set_garland_state = Mock()
-        page.set_snowflakes_state = Mock()
-        page._current_bg_preset_from_ui = Mock(return_value="amoled")
+        page._apply_premium_access = Mock()
 
         for known in (False, True):
-            page.set_premium_status.reset_mock()
-            AppearancePage._on_ui_state_changed(
-                page,
-                AppUiState(subscription_known=known, subscription_is_premium=False),
-                frozenset({"subscription_known"}),
-            )
-            self.assertEqual(page.set_premium_status.call_args.kwargs["status_known"], known)
-
-    def test_garland_state_change_skips_unrelated_appearance_repaint_for_premium(self) -> None:
-        from ui.pages.appearance_page import AppearancePage
-
-        page = AppearancePage.__new__(AppearancePage)
-        page._cleanup_in_progress = False
-        page.set_garland_state = Mock()
-        page.set_snowflakes_state = Mock(
-            side_effect=AssertionError("garland-only change must not repaint snowflakes checkbox")
-        )
-        page.set_opacity_value = Mock(
-            side_effect=AssertionError("garland-only change must not repaint opacity")
-        )
-        page.set_premium_status = Mock(
-            side_effect=AssertionError("garland-only change must not repaint premium controls")
-        )
-        page._current_bg_preset_from_ui = Mock(
-            side_effect=AssertionError("garland-only change must not read background preset UI")
-        )
-
-        AppearancePage._on_ui_state_changed(
-            page,
-            AppUiState(
-                subscription_is_premium=True,
-                garland_enabled=True,
-                snowflakes_enabled=False,
-                window_opacity=100,
-            ),
-            frozenset({"garland_enabled"}),
-        )
-
-        page.set_garland_state.assert_called_once_with(True)
-        page.set_snowflakes_state.assert_not_called()
-        page.set_opacity_value.assert_not_called()
-        page.set_premium_status.assert_not_called()
-
-    def test_snowflakes_state_change_skips_unrelated_appearance_repaint_for_premium(self) -> None:
-        from ui.pages.appearance_page import AppearancePage
-
-        page = AppearancePage.__new__(AppearancePage)
-        page._cleanup_in_progress = False
-        page.set_snowflakes_state = Mock()
-        page.set_garland_state = Mock(
-            side_effect=AssertionError("snowflakes-only change must not repaint garland checkbox")
-        )
-        page.set_opacity_value = Mock(
-            side_effect=AssertionError("snowflakes-only change must not repaint opacity")
-        )
-        page.set_premium_status = Mock(
-            side_effect=AssertionError("snowflakes-only change must not repaint premium controls")
-        )
-        page._current_bg_preset_from_ui = Mock(
-            side_effect=AssertionError("snowflakes-only change must not read background preset UI")
-        )
-
-        AppearancePage._on_ui_state_changed(
-            page,
-            AppUiState(
-                subscription_is_premium=True,
-                garland_enabled=False,
-                snowflakes_enabled=True,
-                window_opacity=100,
-            ),
-            frozenset({"snowflakes_enabled"}),
-        )
-
-        page.set_snowflakes_state.assert_called_once_with(True)
-        page.set_garland_state.assert_not_called()
-        page.set_opacity_value.assert_not_called()
-        page.set_premium_status.assert_not_called()
+            page._apply_premium_access.reset_mock()
+            state = AppUiState(subscription_known=known, subscription_is_premium=False)
+            AppearancePage._on_ui_state_changed(page, state, frozenset({"subscription_known"}))
+            page._apply_premium_access.assert_called_once_with(state)
 
 
 if __name__ == "__main__":

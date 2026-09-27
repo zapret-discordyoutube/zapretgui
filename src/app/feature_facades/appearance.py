@@ -37,7 +37,6 @@ class AppearanceFeature:
             save_display_mode=appearance.save_display_mode,
             save_ui_language=appearance.save_ui_language,
             save_background_preset=appearance.save_background_preset,
-            save_mica_enabled=appearance.save_mica_enabled,
             save_rkn_background=appearance.save_rkn_background,
             save_window_opacity=appearance.save_window_opacity,
             save_snowflakes_enabled=appearance.save_snowflakes_enabled,
@@ -52,6 +51,14 @@ class AppearanceFeature:
             save_sidebar_icon_style=appearance.save_sidebar_icon_style,
             load_tinted_settings=appearance.load_tinted_settings,
             load_editor_smooth_scroll_enabled=appearance.load_editor_smooth_scroll_enabled,
+            parent=parent,
+        )
+
+    def create_premium_reset_worker(self, *, parent=None):
+        from settings.appearance_workers import AppearancePremiumResetWorker
+
+        return AppearancePremiumResetWorker(
+            reset_premium_appearance=self._appearance().reset_premium_appearance,
             parent=parent,
         )
 

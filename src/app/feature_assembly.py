@@ -25,7 +25,6 @@ class RuntimeFeatureDeps:
 class PremiumFeatureDeps:
     thread_parent: Any
     set_status: Any
-    init_holiday_effects: Any
     mark_startup_ready: Any
 
 

@@ -1109,14 +1109,6 @@ def set_ui_language(value: str) -> bool:
     return _set_str(("appearance", "ui_language"), value)
 
 
-def get_mica_enabled() -> bool:
-    return _get_bool(("appearance", "mica_enabled"), True)
-
-
-def set_mica_enabled(value: bool) -> bool:
-    return _set_bool(("appearance", "mica_enabled"), value)
-
-
 def get_background_preset() -> str:
     return _get_str(("appearance", "background_preset"), "standard")
 
@@ -1211,6 +1203,28 @@ def get_snowflakes_enabled() -> bool:
 
 def set_snowflakes_enabled(value: bool) -> bool:
     return _set_bool(("appearance", "snowflakes_enabled"), value)
+
+
+_PREMIUM_BACKGROUND_PRESETS = ("amoled", "rkn_chan")
+
+
+def reset_premium_appearance() -> dict[str, Any]:
+    """Одной транзакцией снимает Premium-фон и праздничные эффекты.
+
+    Возвращает итоговый раздел appearance.
+    """
+
+    def _mutate(data: dict[str, Any]) -> None:
+        appearance = data.get("appearance")
+        if not isinstance(appearance, dict):
+            appearance = {}
+            data["appearance"] = appearance
+        if appearance.get("background_preset") in _PREMIUM_BACKGROUND_PRESETS:
+            appearance["background_preset"] = "standard"
+        appearance["garland_enabled"] = False
+        appearance["snowflakes_enabled"] = False
+
+    return dict(_update_settings(_mutate).get("appearance") or {})
 
 
 def get_selected_theme() -> str:
@@ -1822,7 +1836,6 @@ __all__ = [
     "get_kaspersky_warning_disabled",
     "get_last_seen_version",
     "get_max_blocked",
-    "get_mica_enabled",
     "get_orchestra_auto_restart_on_discord_fail",
     "get_orchestra_discord_fails_for_restart",
     "get_orchestra_history",
@@ -1891,6 +1904,7 @@ __all__ = [
     "remove_orchestra_user_locked",
     "remove_orchestra_whitelist_domain",
     "reset_dns_crash_count",
+    "reset_premium_appearance",
     "reset_self_repair_attempts",
     "reset_settings",
     "set_accent_color",
@@ -1915,7 +1929,6 @@ __all__ = [
     "set_kaspersky_warning_disabled",
     "set_last_seen_version",
     "set_max_blocked",
-    "set_mica_enabled",
     "set_orchestra_auto_restart_on_discord_fail",
     "set_orchestra_discord_fails_for_restart",
     "set_orchestra_history",

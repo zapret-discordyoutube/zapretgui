@@ -25,7 +25,6 @@ def build_initial_ui_state() -> AppUiState:
             store_warmed_animations_enabled,
             store_warmed_background_preset,
             store_warmed_editor_smooth_scroll_enabled,
-            store_warmed_mica_enabled,
             store_warmed_premium_effects,
             store_warmed_rkn_background,
             store_warmed_sidebar_icon_style,
@@ -37,7 +36,6 @@ def build_initial_ui_state() -> AppUiState:
 
         store_warmed_ui_language(appearance.get("ui_language"))
         store_warmed_background_preset(appearance.get("background_preset"))
-        store_warmed_mica_enabled(appearance.get("mica_enabled"))
         store_warmed_window_opacity(window.get("opacity"))
         store_warmed_accent_color(appearance.get("accent_color"))
         store_warmed_tinted_settings(

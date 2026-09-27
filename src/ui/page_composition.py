@@ -122,7 +122,6 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
             "on_background_refresh_needed",
             "on_background_preset_changed",
             "on_opacity_changed",
-            "on_mica_changed",
             "on_animations_changed",
             "on_smooth_scroll_changed",
             "on_editor_smooth_scroll_changed",

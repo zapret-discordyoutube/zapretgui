@@ -76,7 +76,6 @@ class SidebarIconStyleSettingsTests(unittest.TestCase):
             ui_language="ru",
             background_preset="standard",
             rkn_background=None,
-            mica_enabled=False,
             window_opacity=100,
             accent_color=None,
             follow_windows_accent=True,

@@ -12,6 +12,7 @@ from main.window_feature_deps import build_window_feature_deps
 from main.window_page_actions import build_window_page_actions
 from main.window_runtime_setup import attach_app_runtime_to_window
 from main.window_state_actions import WindowStateActions
+from ui.window_premium_appearance import WindowPremiumAppearance
 from ui.app_window_locator import register_app_window
 
 
@@ -75,9 +76,22 @@ class ApplicationController:
             f"{(_time.perf_counter() - t_feature_window_deps) * 1000:.0f}ms",
         )
 
+        def _create_premium_reset_worker():
+            # Фасад оформления появляется вместе с AppRuntime ниже; поток сброса
+            # нужен только после ответа сервера, когда runtime уже собран.
+            return app_runtime.features.appearance.create_premium_reset_worker(parent=window)
+
         def _build_feature_deps(state):
             t_state_actions = _time.perf_counter()
-            appearance_actions = WindowStateActions(window=window, ui_state_store=state.ui)
+            appearance_actions = WindowStateActions(
+                window=window,
+                ui_state_store=state.ui,
+                premium_appearance=WindowPremiumAppearance(
+                    window=window,
+                    ui_state_store=state.ui,
+                    create_reset_worker=_create_premium_reset_worker,
+                ),
+            )
             self._window_state_actions = appearance_actions
             emit_startup_metric(
                 "StartupWindowStateActions",

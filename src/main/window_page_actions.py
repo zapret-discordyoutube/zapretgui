@@ -22,7 +22,6 @@ class WindowPageActions:
     on_background_refresh_needed: Callable[..., Any]
     on_background_preset_changed: Callable[..., Any]
     on_opacity_changed: Callable[..., Any]
-    on_mica_changed: Callable[..., Any]
     on_animations_changed: Callable[..., Any]
     on_smooth_scroll_changed: Callable[..., Any]
     on_editor_smooth_scroll_changed: Callable[..., Any]
@@ -95,18 +94,6 @@ def on_background_preset_changed(window, preset) -> None:
     _on_background_preset_changed(window, preset)
 
 
-def on_mica_changed(window, enabled) -> None:
-    from ui.window_appearance_state import on_mica_changed as _on_mica_changed
-
-    _on_mica_changed(window, enabled)
-
-
-def on_animations_changed(window, enabled) -> None:
-    from ui.window_appearance_state import on_animations_changed as _on_animations_changed
-
-    _on_animations_changed(window, enabled)
-
-
 def on_smooth_scroll_changed(window, enabled) -> None:
     from ui.window_appearance_state import on_smooth_scroll_changed as _on_smooth_scroll_changed
 
@@ -173,8 +160,7 @@ def build_window_page_actions(*, window, appearance_actions) -> WindowPageAction
         on_background_refresh_needed=lambda: on_background_refresh_needed(window),
         on_background_preset_changed=lambda preset: on_background_preset_changed(window, preset),
         on_opacity_changed=appearance_actions.set_window_opacity,
-        on_mica_changed=lambda enabled: on_mica_changed(window, enabled),
-        on_animations_changed=lambda enabled: on_animations_changed(window, enabled),
+        on_animations_changed=appearance_actions.set_animations_enabled,
         on_smooth_scroll_changed=lambda enabled: on_smooth_scroll_changed(window, enabled),
         on_editor_smooth_scroll_changed=lambda enabled: on_editor_smooth_scroll_changed(window, enabled),
         on_ui_language_changed=lambda language: on_ui_language_changed(window, language),

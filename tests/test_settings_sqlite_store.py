@@ -22,8 +22,8 @@ def _write_setting_from_process(
     start_event.wait(10)
     if setting == "display_mode":
         settings_store.set_display_mode("light")
-    elif setting == "mica_enabled":
-        settings_store.set_mica_enabled(False)
+    elif setting == "tinted_background":
+        settings_store.set_tinted_background(True)
     else:  # pragma: no cover - test helper contract
         raise ValueError(setting)
     settings_store.close_settings_database()
@@ -118,7 +118,7 @@ class SettingsSqliteStoreTests(unittest.TestCase):
                         target=_write_setting_from_process,
                         args=(str(root), start_event, setting),
                     )
-                    for setting in ("display_mode", "mica_enabled")
+                    for setting in ("display_mode", "tinted_background")
                 ]
                 for process in processes:
                     process.start()
@@ -128,7 +128,42 @@ class SettingsSqliteStoreTests(unittest.TestCase):
                     self.assertEqual(process.exitcode, 0)
 
                 self.assertEqual(settings_store.get_display_mode(), "light")
-                self.assertFalse(settings_store.get_mica_enabled())
+                self.assertTrue(settings_store.get_tinted_background())
+
+    def test_reset_premium_appearance_clears_premium_background_and_effects_in_one_write(self) -> None:
+        from settings import store as settings_store
+
+        with TemporaryDirectory() as temp_dir:
+            with patch("settings.store.MAIN_DIRECTORY", str(Path(temp_dir))):
+                settings_store.reset_settings()
+                settings_store.set_background_preset("rkn_chan")
+                settings_store.set_garland_enabled(True)
+                settings_store.set_snowflakes_enabled(True)
+                settings_store.set_rkn_background("rkn_tyan/bg.jpg")
+                revision_before = settings_store.get_settings_revision()
+
+                appearance = settings_store.reset_premium_appearance()
+
+                self.assertEqual(appearance["background_preset"], "standard")
+                self.assertFalse(appearance["garland_enabled"])
+                self.assertFalse(appearance["snowflakes_enabled"])
+                self.assertEqual(settings_store.get_background_preset(), "standard")
+                self.assertEqual(settings_store.get_rkn_background(), "rkn_tyan/bg.jpg")
+                self.assertEqual(settings_store.get_settings_revision(), revision_before + 1)
+                settings_store.close_settings_database()
+
+    def test_reset_premium_appearance_keeps_free_background(self) -> None:
+        from settings import store as settings_store
+
+        with TemporaryDirectory() as temp_dir:
+            with patch("settings.store.MAIN_DIRECTORY", str(Path(temp_dir))):
+                settings_store.reset_settings()
+                settings_store.set_background_preset("standard")
+
+                appearance = settings_store.reset_premium_appearance()
+
+                self.assertEqual(appearance["background_preset"], "standard")
+                settings_store.close_settings_database()
 
 
 if __name__ == "__main__":

@@ -169,13 +169,9 @@ def _install_post_startup_tasks_after_interactive(window, deps_or_factory) -> No
 
 def _configure_window_appearance(window, appearance_actions) -> None:
     try:
-        from settings.appearance import peek_warmed_background_preset
-        from ui.theme import apply_window_background
-
-        background_preset = peek_warmed_background_preset() or "standard"
-        apply_window_background(window, preset=background_preset)
-    except Exception:
-        pass
+        appearance_actions.start_premium_appearance()
+    except Exception as exc:
+        log(f"❌ Не удалось применить оформление окна: {exc}", "ERROR")
 
     try:
         from qfluentwidgets.common.config import qconfig

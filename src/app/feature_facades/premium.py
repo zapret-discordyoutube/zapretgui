@@ -35,7 +35,6 @@ class PremiumFeature:
             self._ui_actions = SubscriptionUiActions(
                 set_status=deps.set_status,
                 ui_state_store=self._ui_state_store,
-                init_holiday_effects=deps.init_holiday_effects,
                 mark_startup_ready=deps.mark_startup_ready,
             )
         return self._ui_actions

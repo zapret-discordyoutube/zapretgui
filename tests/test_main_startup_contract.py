@@ -1066,8 +1066,8 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         self.assertNotIn("from main.window_page_presenters import", top_level)
         self.assertIn("from ui.window_adapter import show_page", inspect.getsource(window_page_actions.show_page))
         self.assertIn(
-            "from ui.window_appearance_state import on_mica_changed",
-            inspect.getsource(window_page_actions.on_mica_changed),
+            "from ui.window_appearance_state import on_background_preset_changed",
+            inspect.getsource(window_page_actions.on_background_preset_changed),
         )
 
     def test_window_lifecycle_defers_close_cleanup_and_adapter_helpers(self) -> None:
@@ -1164,18 +1164,16 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         self.assertIn("WindowOpenFolderWorker", factory_source)
         self.assertIn("open_program_folder", factory_source)
 
-    def test_window_feature_deps_defers_appearance_bindings(self) -> None:
+    def test_window_feature_deps_do_not_import_appearance_bindings(self) -> None:
         import inspect
         import main.window_feature_deps as window_feature_deps
 
         source = inspect.getsource(window_feature_deps)
-        top_level = source.split("def initialize_window_holiday_effects", 1)[0]
 
-        self.assertNotIn("from ui.window_appearance_bindings import", top_level)
-        self.assertIn(
-            "from ui.window_appearance_bindings import initialize_window_holiday_effects",
-            inspect.getsource(window_feature_deps.initialize_window_holiday_effects),
-        )
+        # Праздничные эффекты окно применяет само по статусу подписки
+        # (ui/window_premium_appearance.py), а не через Premium-зависимости.
+        self.assertNotIn("window_appearance_bindings", source)
+        self.assertNotIn("init_holiday_effects", source)
 
     def test_feature_assembly_defers_feature_facades_import(self) -> None:
         import inspect
@@ -1413,7 +1411,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         premium_deps = SimpleNamespace(
             thread_parent=object(),
             set_status=Mock(),
-            init_holiday_effects=Mock(),
             mark_startup_ready=Mock(),
         )
         with patch.object(builtins, "__import__", side_effect=tracking_import):
@@ -1468,7 +1465,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         deps = SimpleNamespace(
             thread_parent="thread-parent",
             set_status=Mock(),
-            init_holiday_effects=Mock(),
             mark_startup_ready=Mock(),
         )
         ui_state_store = object()
@@ -1825,7 +1821,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             "appearance": {
                 "ui_language": "en",
                 "background_preset": "rkn_chan",
-                "mica_enabled": False,
                 "rkn_background": "rkn_tyan/rkn_background.jpg",
                 "animations_enabled": True,
                 "smooth_scroll_enabled": True,
@@ -1857,7 +1852,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             appearance_settings.clear_warmed_ui_language_cache()
             appearance_settings.clear_warmed_rkn_background_cache()
             appearance_settings.clear_warmed_background_preset_cache()
-            appearance_settings.clear_warmed_mica_enabled_cache()
             appearance_settings.clear_warmed_window_opacity_cache()
             appearance_settings.clear_warmed_animations_enabled_cache()
             appearance_settings.clear_warmed_smooth_scroll_enabled_cache()
@@ -1876,7 +1870,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         self.assertEqual(state.launch_method, "zapret2_mode")
         self.assertEqual(appearance_settings.peek_warmed_ui_language(), "en")
         self.assertEqual(appearance_settings.peek_warmed_background_preset(), "rkn_chan")
-        self.assertEqual(appearance_settings.peek_warmed_mica_enabled(), False)
         self.assertEqual(appearance_settings.peek_warmed_window_opacity(), 72)
         self.assertEqual(appearance_settings.peek_warmed_rkn_background(), "rkn_tyan/rkn_background.jpg")
         self.assertEqual(appearance_settings.peek_warmed_animations_enabled(), True)
@@ -2170,6 +2163,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         appearance_actions = SimpleNamespace(
             set_garland_enabled=Mock(),
             set_snowflakes_enabled=Mock(),
+            set_animations_enabled=Mock(),
             set_window_opacity=Mock(),
         )
 

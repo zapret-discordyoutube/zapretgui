@@ -149,7 +149,6 @@ class AppearancePage(BasePage):
         on_background_refresh_needed,
         on_background_preset_changed,
         on_opacity_changed,
-        on_mica_changed,
         on_animations_changed,
         on_smooth_scroll_changed,
         on_editor_smooth_scroll_changed,
@@ -170,7 +169,6 @@ class AppearancePage(BasePage):
         self._on_background_refresh_needed_callback = on_background_refresh_needed
         self._on_background_preset_changed_callback = on_background_preset_changed
         self._on_opacity_changed_callback = on_opacity_changed
-        self._on_mica_changed_callback = on_mica_changed
         self._on_animations_changed_callback = on_animations_changed
         self._on_smooth_scroll_changed_callback = on_smooth_scroll_changed
         self._on_editor_smooth_scroll_changed_callback = on_editor_smooth_scroll_changed
@@ -211,7 +209,6 @@ class AppearancePage(BasePage):
         self._tinted_intensity_slider = None
         self._tinted_intensity_value_label = None
         self._tinted_intensity_row = None
-        self._mica_switch = None
         self._animations_switch = None
         self._smooth_scroll_switch = None
         self._editor_smooth_scroll_switch = None
@@ -240,11 +237,15 @@ class AppearancePage(BasePage):
         )
         self._windows_accent_load_runtime = OneShotWorkerRuntime()
         self._windows_accent_load_state = LatestValueWorkerState(self._windows_accent_load_runtime, empty_value=False)
+        self._premium_access_shown = None
+        # Store нужен уже при построении: страница сразу показывает фон по
+        # правилу Premium, а не читает статус из собственных переключателей.
+        self._ui_state_store = ui_state_store
         self._build_ui()
         self.bind_ui_state_store(ui_state_store)
 
     def bind_ui_state_store(self, store: MainWindowStateStore) -> None:
-        if self._ui_state_store is store:
+        if self._ui_state_store is store and self._ui_state_unsubscribe is not None:
             return
 
         unsubscribe = getattr(self, "_ui_state_unsubscribe", None)
@@ -260,8 +261,6 @@ class AppearancePage(BasePage):
             fields={
                 "subscription_known",
                 "subscription_is_premium",
-                "garland_enabled",
-                "snowflakes_enabled",
                 "window_opacity",
             },
             emit_initial=True,
@@ -271,27 +270,8 @@ class AppearancePage(BasePage):
         if self._cleanup_in_progress:
             return
         changed = set(changed_fields or ())
-        if changed == {"window_opacity"}:
-            self.set_opacity_value(state.window_opacity)
-            return
-        if changed == {"garland_enabled"} and bool(state.subscription_is_premium):
-            self.set_garland_state(state.garland_enabled)
-            return
-        if changed == {"snowflakes_enabled"} and bool(state.subscription_is_premium):
-            self.set_snowflakes_state(state.snowflakes_enabled)
-            return
-        premium_effects = appearance_settings.AppearancePremiumEffectsPlan(
-            garland_enabled=bool(state.garland_enabled),
-            snowflakes_enabled=bool(state.snowflakes_enabled),
-        )
-        self.set_premium_status(
-            state.subscription_is_premium,
-            status_known=state.subscription_known,
-            current_preset=self._current_bg_preset_from_ui(),
-            premium_effects=premium_effects,
-        )
-        self.set_garland_state(state.garland_enabled)
-        self.set_snowflakes_state(state.snowflakes_enabled)
+        if changed != {"window_opacity"}:
+            self._apply_premium_access(state)
         self.set_opacity_value(state.window_opacity)
 
     def _begin_ui_sync(self) -> None:
@@ -724,23 +704,14 @@ class AppearancePage(BasePage):
         self._apply_initial_performance_state(initial_state)
         self._log_ui_timing("appearance_ui.performance_section.build", section_started_at)
 
-        self.set_mica_state(initial_state.mica_enabled)
+        self.set_garland_state(initial_state.garland_enabled)
+        self.set_snowflakes_state(initial_state.snowflakes_enabled)
         try:
-            is_premium, status_known, garland_enabled, snowflakes_enabled, window_opacity = (
-                self._current_appearance_state()
-            )
-            self.set_premium_status(
-                is_premium,
-                status_known=status_known,
-                current_preset=self._current_bg_preset_from_ui(),
-                premium_effects=appearance_settings.AppearancePremiumEffectsPlan(
-                    garland_enabled=garland_enabled,
-                    snowflakes_enabled=snowflakes_enabled,
-                ),
-            )
-            self.set_opacity_value(window_opacity)
-        except Exception:
-            pass
+            self._apply_premium_access(force=True)
+            if self._ui_state_store is not None:
+                self.set_opacity_value(self._ui_state_store.snapshot().window_opacity)
+        except Exception as exc:
+            log(f"❌ Оформление: не удалось показать Premium-статус и прозрачность: {exc}", "ERROR")
         self._lower_sections_built = True
         self._log_ui_timing("appearance_ui.lower_sections.build", lower_started_at)
         return True
@@ -781,9 +752,10 @@ class AppearancePage(BasePage):
     def _apply_initial_display_state(self, plan: appearance_settings.AppearancePageInitialStatePlan) -> None:
         self._apply_display_mode_value(plan.display_mode)
         self._apply_sidebar_icon_style_value(plan.sidebar_icon_style)
-        self._apply_bg_preset_ui(plan.background_preset)
+        self._apply_bg_preset_ui(
+            appearance_settings.effective_background_preset(plan.background_preset, self._premium_access())
+        )
         self.set_ui_language(plan.ui_language)
-        self.set_mica_state(plan.mica_enabled)
 
     def _apply_display_mode_value(self, mode: str) -> None:
         if self._display_mode_seg is not None:
@@ -1049,6 +1021,10 @@ class AppearancePage(BasePage):
         elif action == "animations_enabled":
             editor_plan = dict(result or {}).get("editor_smooth_scroll") if isinstance(result, dict) else None
             self._on_editor_smooth_scroll_changed_callback(bool(getattr(editor_plan, "enabled", False)))
+        elif action == "background_preset":
+            # Кэш настроек обновлён только сейчас: перерисовываем фон по нему,
+            # чтобы смена темы во время сохранения не оставила старый фон.
+            self._schedule_background_refresh()
         elif action == "sidebar_icon_style":
             style = appearance_settings.normalize_sidebar_icon_style(
                 str(getattr(result, "style", context.get("value") or "standard") or "standard")
@@ -1163,7 +1139,6 @@ class AppearancePage(BasePage):
                 self._set_checked_silently(radio, key == preset)
         self._update_rkn_background_control_state()
         self._update_display_mode_section_state(preset)
-        self._on_background_preset_changed_callback(preset)
 
     def _current_bg_preset_from_ui(self) -> str:
         if self._bg_radio_rkn_chan is not None and self._bg_radio_rkn_chan.isChecked():
@@ -1347,8 +1322,8 @@ class AppearancePage(BasePage):
             has_options = False
 
         is_rkn_selected = bool(self._bg_radio_rkn_chan and self._bg_radio_rkn_chan.isChecked())
-        is_premium, _garland_enabled, _snowflakes_enabled, _window_opacity = self._current_appearance_state()
-        self._rkn_background_combo.setEnabled(bool(is_premium and is_rkn_selected and has_options))
+        premium_allowed = self._premium_access().premium_allowed
+        self._rkn_background_combo.setEnabled(bool(premium_allowed and is_rkn_selected and has_options))
         update_rkn_background_combo_accessibility(self._rkn_background_combo)
 
     def _on_rkn_background_changed(self, index: int):
@@ -1377,8 +1352,6 @@ class AppearancePage(BasePage):
         if not checked:
             return
         self._request_appearance_save("background_preset", preset)
-        if self._mica_switch:
-            self._mica_switch.setEnabled(preset == "standard")
         # AMOLED and РКН Тян require dark mode — force it automatically
         if preset in ("amoled", "rkn_chan"):
             self._on_display_mode_changed("dark")
@@ -1394,18 +1367,7 @@ class AppearancePage(BasePage):
             self._reload_rkn_background_options()
         self._update_rkn_background_control_state()
         self._update_display_mode_section_state(preset)
-
-    def _on_mica_changed(self, checked: bool):
-        """Handle Mica SwitchButton toggle."""
-        if self._is_ui_syncing():
-            return
-        self._request_appearance_save("mica_enabled", bool(checked))
-        self._on_mica_changed_callback(checked)
-
-    def set_mica_state(self, enabled: bool):
-        """Set Mica SwitchButton state without triggering signal."""
-        if self._mica_switch:
-            self._set_checked_silently(self._mica_switch, enabled)
+        self._on_background_preset_changed_callback(preset)
 
     def _apply_theme_tokens(self, theme_name: str) -> None:
         """Refresh qtawesome icon labels on theme change."""
@@ -1685,58 +1647,56 @@ class AppearancePage(BasePage):
         self._update_tinted_intensity_slider_accessibility(normalized)
         self._schedule_background_refresh()
 
-    def set_premium_status(
-        self,
-        is_premium: bool,
-        *,
-        status_known: bool,
-        current_preset: str,
-        premium_effects: appearance_settings.AppearancePremiumEffectsPlan,
-    ):
-        """Update premium status — unlocks AMOLED/РКН Тян bg presets."""
-        was_garland_enabled = bool(self._garland_checkbox and self._garland_checkbox.isChecked())
-        was_snowflakes_enabled = bool(self._snowflakes_checkbox and self._snowflakes_checkbox.isChecked())
-
-        # Unlock/lock premium bg preset radio buttons
-        if self._bg_radio_amoled is not None:
-            self._bg_radio_amoled.setEnabled(is_premium)
-        if self._bg_radio_rkn_chan is not None:
-            self._bg_radio_rkn_chan.setEnabled(is_premium)
-        self._update_rkn_background_control_state()
-
-        premium_plan = appearance_settings.build_premium_status_plan(
-            is_premium=is_premium,
-            status_known=status_known,
-            current_preset=current_preset,
-            was_garland_enabled=was_garland_enabled,
-            was_snowflakes_enabled=was_snowflakes_enabled,
-            premium_effects=premium_effects,
+    def _premium_access(self, state: AppUiState | None = None) -> appearance_settings.AppearancePremiumAccess:
+        if state is None and self._ui_state_store is not None:
+            state = self._ui_state_store.snapshot()
+        if state is None:
+            return appearance_settings.resolve_premium_access(subscription_known=False, is_premium=False)
+        return appearance_settings.resolve_premium_access(
+            subscription_known=state.subscription_known,
+            is_premium=state.subscription_is_premium,
         )
 
-        if premium_plan.effective_preset is not None:
-            self._request_appearance_save("background_preset", premium_plan.effective_preset)
-            self._apply_bg_preset_ui(premium_plan.effective_preset)
-            self._on_background_preset_changed_callback(premium_plan.effective_preset)
+    def _apply_premium_access(self, state: AppUiState | None = None, *, force: bool = False) -> None:
+        """Показывает, что доступно при текущей подписке.
 
-        if self._garland_checkbox:
-            self._garland_checkbox.setEnabled(is_premium)
-            self._set_checked_silently(self._garland_checkbox, premium_plan.garland_checked)
-            self._update_garland_checkbox_accessibility()
+        Страница ничего не сохраняет и не применяет к окну: сброс настроек
+        Free-версии и фон окна — забота ui/window_premium_appearance.py.
+        """
+        access = self._premium_access(state)
+        if not force and access == self._premium_access_shown:
+            return
+        self._premium_access_shown = access
+        allowed = access.premium_allowed
 
-        if self._snowflakes_checkbox:
-            self._snowflakes_checkbox.setEnabled(is_premium)
-            self._set_checked_silently(self._snowflakes_checkbox, premium_plan.snowflakes_checked)
-            self._update_snowflakes_checkbox_accessibility()
+        for radio in (self._bg_radio_amoled, self._bg_radio_rkn_chan):
+            if radio is not None:
+                radio.setEnabled(allowed)
+        if not allowed and self._current_bg_preset_from_ui() in appearance_settings.PREMIUM_BACKGROUND_PRESETS:
+            self._apply_bg_preset_ui("standard")
+        self._update_rkn_background_control_state()
 
-        if premium_plan.disable_garland:
-            self._request_appearance_save("garland_enabled", False)
-            self._on_garland_changed_callback(False)
+        if self._garland_checkbox is None and self._snowflakes_checkbox is None:
+            return
+        if allowed:
+            saved = appearance_settings.peek_warmed_premium_effects()
+            if saved is None:
+                garland = self._is_checked(self._garland_checkbox)
+                snowflakes = self._is_checked(self._snowflakes_checkbox)
+            else:
+                garland = saved.garland_enabled
+                snowflakes = saved.snowflakes_enabled
+        else:
+            garland = snowflakes = False
+        for checkbox in (self._garland_checkbox, self._snowflakes_checkbox):
+            if checkbox is not None:
+                checkbox.setEnabled(allowed)
+        self.set_garland_state(garland)
+        self.set_snowflakes_state(snowflakes)
 
-        if premium_plan.disable_snowflakes:
-            self._request_appearance_save("snowflakes_enabled", False)
-            self._on_snowflakes_changed_callback(False)
-
-        self._update_display_mode_section_state(premium_plan.effective_preset or current_preset)
+    @staticmethod
+    def _is_checked(widget) -> bool:
+        return bool(widget is not None and widget.isChecked())
 
     def set_garland_state(self, enabled: bool):
         """Устанавливает состояние чекбокса гирлянды (без эмита сигнала)"""
@@ -1792,26 +1752,6 @@ class AppearancePage(BasePage):
         if self._opacity_label:
             self._opacity_label.setText(f"{value}%")
             update_opacity_value_label_accessibility(self._opacity_label, value)
-
-    def _current_appearance_state(self) -> tuple[bool, bool, bool, bool, int]:
-        store = self._ui_state_store
-        if store is not None:
-            try:
-                snapshot = store.snapshot()
-                return (
-                    bool(snapshot.subscription_is_premium),
-                    bool(snapshot.subscription_known),
-                    bool(snapshot.garland_enabled),
-                    bool(snapshot.snowflakes_enabled),
-                    int(snapshot.window_opacity),
-                )
-            except Exception:
-                pass
-
-        garland_enabled = bool(self._garland_checkbox and self._garland_checkbox.isChecked())
-        snowflakes_enabled = bool(self._snowflakes_checkbox and self._snowflakes_checkbox.isChecked())
-        window_opacity = int(self._opacity_slider.value()) if self._opacity_slider is not None else 100
-        return False, False, garland_enabled, snowflakes_enabled, window_opacity
 
     def _on_animations_changed(self, enabled: bool):
         """Handle animations SwitchButton toggle."""

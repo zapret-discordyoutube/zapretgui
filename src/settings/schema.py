@@ -85,7 +85,6 @@ def default_appearance() -> dict[str, Any]:
     return {
         "display_mode": "dark",
         "ui_language": "ru",
-        "mica_enabled": True,
         "accent_color": None,
         "follow_windows_accent": False,
         "tinted_background": False,

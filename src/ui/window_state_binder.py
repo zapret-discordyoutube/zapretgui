@@ -103,13 +103,30 @@ def retranslate_subscription_title_badge(window) -> None:
         sync_titlebar_search_width(window)
 
 
+PREMIUM_APPEARANCE_FIELDS = frozenset({"subscription_known", "subscription_is_premium"})
+
+
+def bind_premium_appearance(premium_appearance, ui_state_store):
+    """Подписывает применение Premium-оформления окна на статус подписки.
+
+    Сразу применяет текущее состояние и возвращает функцию отписки.
+    """
+    return ui_state_store.subscribe(
+        premium_appearance.on_subscription_changed,
+        fields=PREMIUM_APPEARANCE_FIELDS,
+        emit_initial=True,
+    )
+
+
 def bind_window_ui_state(window, ui_state_store) -> None:
     """Все подписки окна на store (сейчас — только метка подписки в titleBar)."""
     bind_subscription_title_badge(window, ui_state_store)
 
 
 __all__ = [
+    "PREMIUM_APPEARANCE_FIELDS",
     "SUBSCRIPTION_BADGE_FIELDS",
+    "bind_premium_appearance",
     "bind_subscription_title_badge",
     "bind_window_ui_state",
     "retranslate_subscription_title_badge",

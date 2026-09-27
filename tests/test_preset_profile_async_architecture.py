@@ -2193,7 +2193,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
             "_on_ui_language_changed",
             "_on_rkn_background_changed",
             "_on_bg_preset_toggled",
-            "_on_mica_changed",
             "_on_opacity_changed",
             "_on_snowflakes_changed",
             "_on_garland_changed",
@@ -2201,7 +2200,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
             "_on_follow_windows_accent_changed",
             "_on_tinted_bg_changed",
             "_on_tinted_intensity_changed",
-            "set_premium_status",
             "_on_animations_changed",
             "_on_smooth_scroll_changed",
             "_on_editor_smooth_scroll_changed",
@@ -2209,6 +2207,11 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
             source = inspect.getsource(getattr(AppearancePage, method_name))
             self.assertIn("_request_appearance_save", source)
             self.assertNotIn("appearance_settings.save_", source)
+
+        # Сброс Premium-настроек Free-версии сохраняет окно, а не страница.
+        premium_access_source = inspect.getsource(AppearancePage._apply_premium_access)
+        self.assertNotIn("_request_appearance_save", premium_access_source)
+        self.assertNotIn("_callback", premium_access_source)
 
         self.assertIn("create_appearance_save_worker", page_source)
         self.assertIn("create_appearance_save_worker", feature_source)
@@ -2228,14 +2231,14 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertIn("save_display_mode", worker_init_source)
         self.assertIn("save_ui_language", worker_init_source)
         self.assertIn("save_background_preset", worker_init_source)
-        self.assertIn("save_mica_enabled", worker_init_source)
+        self.assertNotIn("mica", worker_init_source)
         self.assertIn("save_window_opacity", worker_init_source)
         self.assertIn("save_accent_color", worker_init_source)
         self.assertIn("save_animations_enabled", worker_init_source)
         self.assertIn("save_display_mode", worker_source)
         self.assertIn("save_ui_language", worker_source)
         self.assertIn("save_background_preset", worker_source)
-        self.assertIn("save_mica_enabled", worker_source)
+        self.assertNotIn("mica", worker_source)
         self.assertIn("save_window_opacity", worker_source)
         self.assertIn("save_accent_color", worker_source)
         self.assertIn("save_animations_enabled", worker_source)
@@ -2311,15 +2314,16 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
 
         combined = "\n".join((background_source, opacity_source, startup_source))
         self.assertIn("peek_warmed_background_preset", combined)
-        self.assertIn("peek_warmed_mica_enabled", combined)
         self.assertIn("peek_warmed_window_opacity", combined)
         self.assertNotIn("load_background_preset", combined)
-        self.assertNotIn("load_mica_enabled", combined)
+        self.assertNotIn("mica_enabled", combined)
         self.assertNotIn("load_window_opacity", combined)
 
     def test_window_appearance_bindings_use_warmed_state_without_settings_reads(self) -> None:
         bindings_source = inspect.getsource(window_appearance_bindings.initialize_window_appearance_bindings)
-        holiday_source = inspect.getsource(window_appearance_bindings.initialize_window_holiday_effects)
+        holiday_source = inspect.getsource(
+            importlib.import_module("ui.window_premium_appearance").WindowPremiumAppearance
+        )
         smooth_source = "\n".join(
             (
                 inspect.getsource(smooth_scroll.get_page_smooth_scroll_enabled),
@@ -2655,7 +2659,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
                 "ui_language": "en",
                 "background_preset": "rkn_chan",
                 "rkn_background": "rkn_tyan/bg.webp",
-                "mica_enabled": False,
                 "accent_color": "#112233",
                 "follow_windows_accent": True,
                 "tinted_background": True,
@@ -2679,7 +2682,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertEqual(plan.ui_language, "en")
         self.assertEqual(plan.background_preset, "rkn_chan")
         self.assertEqual(plan.rkn_background, "rkn_tyan/bg.webp")
-        self.assertFalse(plan.mica_enabled)
         self.assertEqual(plan.window_opacity, 73)
         self.assertEqual(plan.accent_color, "#112233")
         self.assertTrue(plan.follow_windows_accent)

@@ -96,8 +96,6 @@ class SubscriptionManager:
             state=state,
         )
         apply_subscription_ready_to_ui(
-            init_holiday_effects=self.ui_actions.init_holiday_effects,
-            effects_allowed=state.is_premium,
             set_status=self.ui_actions.set_status,
             mark_startup_ready=self.ui_actions.mark_startup_ready,
         )

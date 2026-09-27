@@ -37,11 +37,6 @@ class AppearanceBackgroundPresetPlan:
 
 
 @dataclass(slots=True)
-class AppearanceMicaPlan:
-    enabled: bool
-
-
-@dataclass(slots=True)
 class AppearanceOpacityPlan:
     value: int
 
@@ -79,13 +74,21 @@ class AppearancePremiumEffectsPlan:
     snowflakes_enabled: bool
 
 
-@dataclass(slots=True)
-class AppearancePremiumStatusPlan:
-    effective_preset: str | None
-    garland_checked: bool
-    snowflakes_checked: bool
-    disable_garland: bool
-    disable_snowflakes: bool
+# Фоны, доступные только с Premium.
+PREMIUM_BACKGROUND_PRESETS = frozenset({"amoled", "rkn_chan"})
+
+
+@dataclass(frozen=True, slots=True)
+class AppearancePremiumAccess:
+    """Что разрешено в оформлении при текущем статусе подписки.
+
+    premium_allowed — можно показывать и применять Premium-фон и эффекты.
+    reset_saved_premium — сохранённые Premium-настройки нужно сбросить
+    (только когда сервер уже подтвердил бесплатную версию).
+    """
+
+    premium_allowed: bool
+    reset_saved_premium: bool
 
 
 @dataclass(slots=True)
@@ -94,7 +97,6 @@ class AppearancePageInitialStatePlan:
     ui_language: str
     background_preset: str
     rkn_background: str | None
-    mica_enabled: bool
     window_opacity: int
     accent_color: str | None
     follow_windows_accent: bool
@@ -116,8 +118,6 @@ _warmed_rkn_background_lock = threading.Lock()
 _warmed_rkn_background_cache: str | None = None
 _warmed_background_preset_lock = threading.Lock()
 _warmed_background_preset_cache: str | None = None
-_warmed_mica_enabled_lock = threading.Lock()
-_warmed_mica_enabled_cache: bool | None = None
 _warmed_window_opacity_lock = threading.Lock()
 _warmed_window_opacity_cache: int | None = None
 _warmed_accent_color_lock = threading.Lock()
@@ -190,24 +190,6 @@ def clear_warmed_background_preset_cache() -> None:
     global _warmed_background_preset_cache
     with _warmed_background_preset_lock:
         _warmed_background_preset_cache = None
-
-
-def store_warmed_mica_enabled(enabled: bool | None) -> None:
-    global _warmed_mica_enabled_cache
-    normalized = bool(schema.default_appearance()["mica_enabled"]) if enabled is None else bool(enabled)
-    with _warmed_mica_enabled_lock:
-        _warmed_mica_enabled_cache = normalized
-
-
-def peek_warmed_mica_enabled() -> bool | None:
-    with _warmed_mica_enabled_lock:
-        return _warmed_mica_enabled_cache
-
-
-def clear_warmed_mica_enabled_cache() -> None:
-    global _warmed_mica_enabled_cache
-    with _warmed_mica_enabled_lock:
-        _warmed_mica_enabled_cache = None
 
 
 def store_warmed_window_opacity(value: int | None) -> None:
@@ -389,7 +371,6 @@ def store_warmed_page_initial_state(state: AppearancePageInitialStatePlan) -> No
         _warmed_page_initial_state_cache = state
     store_warmed_ui_language(state.ui_language)
     store_warmed_background_preset(state.background_preset)
-    store_warmed_mica_enabled(state.mica_enabled)
     store_warmed_window_opacity(state.window_opacity)
     store_warmed_accent_color(state.accent_color)
     store_warmed_tinted_settings(state.follow_windows_accent, state.tinted_background, state.tinted_intensity)
@@ -423,7 +404,6 @@ def build_default_page_initial_state() -> AppearancePageInitialStatePlan:
         ui_language=normalize_language(str(appearance_defaults["ui_language"])),
         background_preset=str(appearance_defaults["background_preset"]),
         rkn_background=None,
-        mica_enabled=bool(appearance_defaults["mica_enabled"]),
         window_opacity=int(window_defaults["opacity"]),
         accent_color=None,
         follow_windows_accent=bool(appearance_defaults["follow_windows_accent"]),
@@ -479,7 +459,6 @@ def load_page_initial_state() -> AppearancePageInitialStatePlan:
         ui_language=normalize_language(_plan_str(appearance, "ui_language", appearance_defaults["ui_language"])),
         background_preset=_plan_str(appearance, "background_preset", appearance_defaults["background_preset"]),
         rkn_background=_plan_nullable_str(appearance, "rkn_background"),
-        mica_enabled=_plan_bool(appearance, "mica_enabled", bool(appearance_defaults["mica_enabled"])),
         window_opacity=_plan_int(window, "opacity", int(window_defaults["opacity"])),
         accent_color=_plan_nullable_str(appearance, "accent_color"),
         follow_windows_accent=_plan_bool(appearance, "follow_windows_accent", bool(appearance_defaults["follow_windows_accent"])),
@@ -512,13 +491,10 @@ def load_display_mode() -> str:
 
 def save_display_mode(mode: str) -> AppearanceDisplayModePlan:
     effective_mode = str(mode or "dark")
-    try:
-        from settings.store import get_display_mode, set_display_mode
+    from settings.store import get_display_mode, set_display_mode
 
-        set_display_mode(mode)
-        effective_mode = str(get_display_mode() or effective_mode)
-    except Exception:
-        pass
+    set_display_mode(mode)
+    effective_mode = str(get_display_mode() or effective_mode)
     return AppearanceDisplayModePlan(
         requested_mode=str(mode or "dark"),
         effective_mode=effective_mode,
@@ -535,12 +511,9 @@ def load_ui_language() -> AppearanceUiLanguagePlan:
 
 def save_ui_language(language: str) -> AppearanceUiLanguagePlan:
     lang = normalize_language(language)
-    try:
-        from settings.store import set_ui_language
+    from settings.store import set_ui_language
 
-        set_ui_language(lang)
-    except Exception:
-        pass
+    set_ui_language(lang)
     store_warmed_ui_language(lang)
     return AppearanceUiLanguagePlan(language=lang)
 
@@ -555,33 +528,11 @@ def load_background_preset() -> AppearanceBackgroundPresetPlan:
 
 def save_background_preset(preset: str) -> AppearanceBackgroundPresetPlan:
     normalized = str(preset or "standard")
-    try:
-        from settings.store import set_background_preset
+    from settings.store import set_background_preset
 
-        set_background_preset(normalized)
-    except Exception:
-        pass
+    set_background_preset(normalized)
     store_warmed_background_preset(normalized)
     return AppearanceBackgroundPresetPlan(preset=normalized)
-
-def load_mica_enabled() -> AppearanceMicaPlan:
-    try:
-        from settings.store import get_mica_enabled
-
-        enabled = bool(get_mica_enabled())
-    except Exception:
-        enabled = True
-    return AppearanceMicaPlan(enabled=enabled)
-
-def save_mica_enabled(enabled: bool) -> AppearanceMicaPlan:
-    try:
-        from settings.store import set_mica_enabled
-
-        set_mica_enabled(bool(enabled))
-    except Exception:
-        pass
-    store_warmed_mica_enabled(bool(enabled))
-    return AppearanceMicaPlan(enabled=bool(enabled))
 
 def load_window_opacity() -> AppearanceOpacityPlan:
     try:
@@ -594,12 +545,9 @@ def load_window_opacity() -> AppearanceOpacityPlan:
 
 def save_window_opacity(value: int) -> AppearanceOpacityPlan:
     normalized = int(value)
-    try:
-        from settings.store import set_window_opacity
+    from settings.store import set_window_opacity
 
-        set_window_opacity(normalized)
-    except Exception:
-        pass
+    set_window_opacity(normalized)
     store_warmed_window_opacity(normalized)
     return AppearanceOpacityPlan(value=normalized)
 
@@ -613,12 +561,9 @@ def load_animations_enabled() -> AppearanceTogglePlan:
     return AppearanceTogglePlan(enabled=enabled)
 
 def save_animations_enabled(enabled: bool) -> AppearanceTogglePlan:
-    try:
-        from settings.store import set_animations_enabled
+    from settings.store import set_animations_enabled
 
-        set_animations_enabled(bool(enabled))
-    except Exception:
-        pass
+    set_animations_enabled(bool(enabled))
     store_warmed_animations_enabled(bool(enabled))
     return AppearanceTogglePlan(enabled=bool(enabled))
 
@@ -632,12 +577,9 @@ def load_smooth_scroll_enabled() -> AppearanceTogglePlan:
     return AppearanceTogglePlan(enabled=enabled)
 
 def save_smooth_scroll_enabled(enabled: bool) -> AppearanceTogglePlan:
-    try:
-        from settings.store import set_smooth_scroll_enabled
+    from settings.store import set_smooth_scroll_enabled
 
-        set_smooth_scroll_enabled(bool(enabled))
-    except Exception:
-        pass
+    set_smooth_scroll_enabled(bool(enabled))
     store_warmed_smooth_scroll_enabled(bool(enabled))
     return AppearanceTogglePlan(enabled=bool(enabled))
 
@@ -651,12 +593,9 @@ def load_editor_smooth_scroll_enabled() -> AppearanceTogglePlan:
     return AppearanceTogglePlan(enabled=enabled)
 
 def save_editor_smooth_scroll_enabled(enabled: bool) -> AppearanceTogglePlan:
-    try:
-        from settings.store import set_editor_smooth_scroll_enabled
+    from settings.store import set_editor_smooth_scroll_enabled
 
-        set_editor_smooth_scroll_enabled(bool(enabled))
-    except Exception:
-        pass
+    set_editor_smooth_scroll_enabled(bool(enabled))
     store_warmed_editor_smooth_scroll_enabled(bool(enabled))
     return AppearanceTogglePlan(enabled=bool(enabled))
 
@@ -673,12 +612,9 @@ def load_sidebar_icon_style() -> AppearanceSidebarIconStylePlan:
 
 def save_sidebar_icon_style(style: str) -> AppearanceSidebarIconStylePlan:
     normalized = normalize_sidebar_icon_style(style)
-    try:
-        from settings.store import set_sidebar_icon_style
+    from settings.store import set_sidebar_icon_style
 
-        set_sidebar_icon_style(normalized)
-    except Exception:
-        pass
+    set_sidebar_icon_style(normalized)
     store_warmed_sidebar_icon_style(normalized)
     return AppearanceSidebarIconStylePlan(style=normalized)
 
@@ -694,13 +630,10 @@ def load_accent_color() -> AppearanceAccentColorPlan:
 
 def save_accent_color(hex_color: str) -> AppearanceAccentColorPlan:
     normalized = str(hex_color or "").strip()
-    try:
-        from settings.store import set_accent_color
+    from settings.store import set_accent_color
 
-        if normalized:
-            set_accent_color(normalized)
-    except Exception:
-        pass
+    if normalized:
+        set_accent_color(normalized)
     store_warmed_accent_color(normalized or None)
     return AppearanceAccentColorPlan(hex_color=normalized or None)
 
@@ -726,12 +659,9 @@ def load_tinted_settings() -> AppearanceTintedSettingsPlan:
     )
 
 def save_follow_windows_accent(enabled: bool) -> AppearanceTogglePlan:
-    try:
-        from settings.store import set_follow_windows_accent
+    from settings.store import set_follow_windows_accent
 
-        set_follow_windows_accent(bool(enabled))
-    except Exception:
-        pass
+    set_follow_windows_accent(bool(enabled))
     current = peek_warmed_tinted_settings()
     store_warmed_tinted_settings(
         bool(enabled),
@@ -741,12 +671,9 @@ def save_follow_windows_accent(enabled: bool) -> AppearanceTogglePlan:
     return AppearanceTogglePlan(enabled=bool(enabled))
 
 def save_tinted_background(enabled: bool) -> AppearanceTogglePlan:
-    try:
-        from settings.store import set_tinted_background
+    from settings.store import set_tinted_background
 
-        set_tinted_background(bool(enabled))
-    except Exception:
-        pass
+    set_tinted_background(bool(enabled))
     current = peek_warmed_tinted_settings()
     store_warmed_tinted_settings(
         None if current is None else current.follow_windows_accent,
@@ -757,12 +684,9 @@ def save_tinted_background(enabled: bool) -> AppearanceTogglePlan:
 
 def save_tinted_background_intensity(value: int) -> AppearanceOpacityPlan:
     normalized = max(0, min(schema.MAX_TINTED_INTENSITY, int(value)))
-    try:
-        from settings.store import set_tinted_background_intensity
+    from settings.store import set_tinted_background_intensity
 
-        set_tinted_background_intensity(normalized)
-    except Exception:
-        pass
+    set_tinted_background_intensity(normalized)
     current = peek_warmed_tinted_settings()
     store_warmed_tinted_settings(
         None if current is None else current.follow_windows_accent,
@@ -791,12 +715,9 @@ def load_rkn_background() -> AppearanceRknBackgroundPlan:
 
 def save_rkn_background(value: str | None) -> AppearanceRknBackgroundPlan:
     normalized = str(value).strip().replace("\\", "/") if value is not None else None
-    try:
-        from settings.store import set_rkn_background
+    from settings.store import set_rkn_background
 
-        set_rkn_background(normalized)
-    except Exception:
-        pass
+    set_rkn_background(normalized)
     store_warmed_rkn_background(normalized)
     return AppearanceRknBackgroundPlan(value=normalized or None)
 
@@ -815,23 +736,17 @@ def load_premium_effects() -> AppearancePremiumEffectsPlan:
     )
 
 def save_garland_enabled(enabled: bool) -> AppearanceTogglePlan:
-    try:
-        from settings.store import set_garland_enabled
+    from settings.store import set_garland_enabled
 
-        set_garland_enabled(bool(enabled))
-    except Exception:
-        pass
+    set_garland_enabled(bool(enabled))
     current = peek_warmed_premium_effects()
     store_warmed_premium_effects(bool(enabled), None if current is None else current.snowflakes_enabled)
     return AppearanceTogglePlan(enabled=bool(enabled))
 
 def save_snowflakes_enabled(enabled: bool) -> AppearanceTogglePlan:
-    try:
-        from settings.store import set_snowflakes_enabled
+    from settings.store import set_snowflakes_enabled
 
-        set_snowflakes_enabled(bool(enabled))
-    except Exception:
-        pass
+    set_snowflakes_enabled(bool(enabled))
     current = peek_warmed_premium_effects()
     store_warmed_premium_effects(None if current is None else current.garland_enabled, bool(enabled))
     return AppearanceTogglePlan(enabled=bool(enabled))
@@ -841,34 +756,49 @@ def save_selected_theme(theme_name: str) -> bool:
 
     return bool(set_selected_theme(str(theme_name or "").strip()))
 
-def build_premium_status_plan(
+def resolve_premium_access(*, subscription_known: bool, is_premium: bool) -> AppearancePremiumAccess:
+    """Единое правило Premium для оформления: его используют и окно, и страница."""
+    if not subscription_known:
+        # Первая проверка ещё не завершилась: показываем последнее сохранённое
+        # и ничего не сбрасываем, иначе у Premium-пользователя пропали бы фон и эффекты.
+        return AppearancePremiumAccess(premium_allowed=True, reset_saved_premium=False)
+    if is_premium:
+        return AppearancePremiumAccess(premium_allowed=True, reset_saved_premium=False)
+    return AppearancePremiumAccess(premium_allowed=False, reset_saved_premium=True)
+
+
+def effective_background_preset(saved_preset: str | None, access: AppearancePremiumAccess) -> str:
+    preset = str(saved_preset or "standard")
+    if preset in PREMIUM_BACKGROUND_PRESETS and not access.premium_allowed:
+        return "standard"
+    return preset
+
+
+def effective_holiday_effects(
+    saved: AppearancePremiumEffectsPlan,
     *,
-    is_premium: bool,
-    status_known: bool,
-    current_preset: str,
-    was_garland_enabled: bool,
-    was_snowflakes_enabled: bool,
-    premium_effects: AppearancePremiumEffectsPlan,
-) -> AppearancePremiumStatusPlan:
-    if not status_known:
-        # Статус подписки ещё не проверен: ничего не сбрасываем и не сохраняем,
-        # иначе у Premium-пользователя при запуске пропали бы фон и эффекты.
-        return AppearancePremiumStatusPlan(
-            effective_preset=None,
-            garland_checked=bool(premium_effects.garland_enabled),
-            snowflakes_checked=bool(premium_effects.snowflakes_enabled),
-            disable_garland=False,
-            disable_snowflakes=False,
-        )
+    animations_enabled: bool,
+    access: AppearancePremiumAccess,
+) -> AppearancePremiumEffectsPlan:
+    """Какие праздничные эффекты реально показывать в окне."""
+    allowed = bool(access.premium_allowed) and bool(animations_enabled)
+    return AppearancePremiumEffectsPlan(
+        garland_enabled=allowed and bool(saved.garland_enabled),
+        snowflakes_enabled=allowed and bool(saved.snowflakes_enabled),
+    )
 
-    effective_preset = None
-    if not is_premium and current_preset in ("amoled", "rkn_chan"):
-        effective_preset = "standard"
 
-    return AppearancePremiumStatusPlan(
-        effective_preset=effective_preset,
-        garland_checked=premium_effects.garland_enabled if is_premium else False,
-        snowflakes_checked=premium_effects.snowflakes_enabled if is_premium else False,
-        disable_garland=bool((not is_premium) and was_garland_enabled),
-        disable_snowflakes=bool((not is_premium) and was_snowflakes_enabled),
+def reset_premium_appearance() -> AppearancePremiumEffectsPlan:
+    """Сбрасывает в базе Premium-фон и эффекты у бесплатной версии.
+
+    Кэш обновляется только после успешной записи. Возвращает итоговые эффекты.
+    """
+    from settings.store import reset_premium_appearance as _reset_in_store
+
+    appearance = _reset_in_store()
+    store_warmed_background_preset(appearance.get("background_preset"))
+    store_warmed_premium_effects(appearance.get("garland_enabled"), appearance.get("snowflakes_enabled"))
+    return AppearancePremiumEffectsPlan(
+        garland_enabled=bool(appearance.get("garland_enabled")),
+        snowflakes_enabled=bool(appearance.get("snowflakes_enabled")),
     )

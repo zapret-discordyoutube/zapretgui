@@ -30,7 +30,12 @@ from donater.ui.page_plans import (  # noqa: E402
 )
 from donater.ui.status_workflow import apply_reset_plan_ui, apply_status_check_success  # noqa: E402
 from presets.ui.control.top_summary_plan import build_premium_summary  # noqa: E402
-from settings.appearance import AppearancePremiumEffectsPlan, build_premium_status_plan  # noqa: E402
+from settings.appearance import (  # noqa: E402
+    AppearancePremiumEffectsPlan,
+    effective_background_preset,
+    effective_holiday_effects,
+    resolve_premium_access,
+)
 
 
 def _tr(_key, default, **kwargs):
@@ -246,47 +251,41 @@ class AppearancePremiumGatingTests(unittest.TestCase):
     _effects = AppearancePremiumEffectsPlan(garland_enabled=True, snowflakes_enabled=True)
 
     def test_unknown_status_keeps_premium_settings(self) -> None:
-        plan = build_premium_status_plan(
-            is_premium=False,
-            status_known=False,
-            current_preset="amoled",
-            was_garland_enabled=True,
-            was_snowflakes_enabled=True,
-            premium_effects=self._effects,
-        )
+        access = resolve_premium_access(subscription_known=False, is_premium=False)
 
-        self.assertIsNone(plan.effective_preset)
-        self.assertFalse(plan.disable_garland)
-        self.assertFalse(plan.disable_snowflakes)
-        self.assertTrue(plan.garland_checked)
-        self.assertTrue(plan.snowflakes_checked)
+        self.assertTrue(access.premium_allowed)
+        self.assertFalse(access.reset_saved_premium)
+        self.assertEqual(effective_background_preset("amoled", access), "amoled")
+        effects = effective_holiday_effects(self._effects, animations_enabled=True, access=access)
+        self.assertTrue(effects.garland_enabled)
+        self.assertTrue(effects.snowflakes_enabled)
 
     def test_known_free_status_resets_premium_settings(self) -> None:
-        plan = build_premium_status_plan(
-            is_premium=False,
-            status_known=True,
-            current_preset="amoled",
-            was_garland_enabled=True,
-            was_snowflakes_enabled=True,
-            premium_effects=self._effects,
-        )
+        access = resolve_premium_access(subscription_known=True, is_premium=False)
 
-        self.assertEqual(plan.effective_preset, "standard")
-        self.assertTrue(plan.disable_garland)
-        self.assertTrue(plan.disable_snowflakes)
+        self.assertFalse(access.premium_allowed)
+        self.assertTrue(access.reset_saved_premium)
+        self.assertEqual(effective_background_preset("amoled", access), "standard")
+        self.assertEqual(effective_background_preset("rkn_chan", access), "standard")
+        self.assertEqual(effective_background_preset("standard", access), "standard")
+        effects = effective_holiday_effects(self._effects, animations_enabled=True, access=access)
+        self.assertFalse(effects.garland_enabled)
+        self.assertFalse(effects.snowflakes_enabled)
 
     def test_known_premium_keeps_settings(self) -> None:
-        plan = build_premium_status_plan(
-            is_premium=True,
-            status_known=True,
-            current_preset="amoled",
-            was_garland_enabled=True,
-            was_snowflakes_enabled=True,
-            premium_effects=self._effects,
-        )
+        access = resolve_premium_access(subscription_known=True, is_premium=True)
 
-        self.assertIsNone(plan.effective_preset)
-        self.assertFalse(plan.disable_garland)
+        self.assertTrue(access.premium_allowed)
+        self.assertFalse(access.reset_saved_premium)
+        self.assertEqual(effective_background_preset("rkn_chan", access), "rkn_chan")
+
+    def test_disabled_animations_turn_effects_off_even_for_premium(self) -> None:
+        access = resolve_premium_access(subscription_known=True, is_premium=True)
+
+        effects = effective_holiday_effects(self._effects, animations_enabled=False, access=access)
+
+        self.assertFalse(effects.garland_enabled)
+        self.assertFalse(effects.snowflakes_enabled)
 
 
 if __name__ == "__main__":

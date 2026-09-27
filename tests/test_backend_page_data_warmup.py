@@ -340,7 +340,6 @@ class BackendPageDataWarmupTests(unittest.TestCase):
             ui_language="ru",
             background_preset="standard",
             rkn_background=None,
-            mica_enabled=True,
             window_opacity=100,
             accent_color=None,
             follow_windows_accent=False,

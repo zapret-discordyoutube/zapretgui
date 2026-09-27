@@ -12,7 +12,9 @@ from PyQt6.QtWidgets import QApplication, QWidget
 from app.state_store import AppUiState, MainWindowStateStore
 from main.window_state_actions import WindowStateActions
 from ui.holiday_effects import _Snowflake, GarlandOverlay, HolidayEffectsManager, SnowflakesOverlay
-from ui.window_appearance_state import apply_garland_enabled, apply_snowflakes_enabled, on_animations_changed
+from settings import appearance as appearance_settings
+from ui.window_appearance_state import apply_garland_enabled, apply_snowflakes_enabled
+from ui.window_premium_appearance import WindowPremiumAppearance
 
 
 class _CountingSnowflakesOverlay(SnowflakesOverlay):
@@ -121,36 +123,40 @@ class HolidayEffectsPerformanceTests(unittest.TestCase):
 
         self.assertIsNone(host.visual_state.holiday_effects)
 
-    def test_animation_master_disables_existing_holiday_overlays(self) -> None:
-        effects = SimpleNamespace(
-            set_garland_enabled=Mock(),
-            set_snowflakes_enabled=Mock(),
-            set_animation_active=Mock(),
+    def _window_actions(self, host, *, animations_enabled: bool) -> WindowStateActions:
+        appearance_settings.store_warmed_animations_enabled(animations_enabled)
+        appearance_settings.store_warmed_premium_effects(True, True)
+        self.addCleanup(appearance_settings.clear_warmed_animations_enabled_cache)
+        self.addCleanup(appearance_settings.clear_warmed_premium_effects_cache)
+        store = MainWindowStateStore(AppUiState(subscription_known=True, subscription_is_premium=True))
+        return WindowStateActions(
+            host,
+            store,
+            WindowPremiumAppearance(window=host, ui_state_store=store, create_reset_worker=Mock()),
         )
+
+    def test_animation_master_disables_existing_holiday_overlays(self) -> None:
+        effects = SimpleNamespace(set_garland_enabled=Mock(), set_snowflakes_enabled=Mock())
         host = QWidget()
         host.visual_state = SimpleNamespace(holiday_effects=effects)
+        actions = self._window_actions(host, animations_enabled=True)
 
         with patch("ui.window_appearance_state.apply_window_animation_policy"):
-            on_animations_changed(host, False)
+            actions.set_animations_enabled(False)
 
         effects.set_garland_enabled.assert_called_once_with(False)
         effects.set_snowflakes_enabled.assert_called_once_with(False)
-        effects.set_animation_active.assert_called_once_with(False)
 
     def test_window_actions_keep_holiday_overlays_off_when_animation_master_is_off(self) -> None:
-        effects = SimpleNamespace(set_snowflakes_enabled=Mock())
+        effects = SimpleNamespace(set_garland_enabled=Mock(), set_snowflakes_enabled=Mock())
         host = QWidget()
         host.visual_state = SimpleNamespace(holiday_effects=effects)
-        store = MainWindowStateStore(AppUiState(garland_enabled=True, snowflakes_enabled=True))
-        actions = WindowStateActions(host, store)
+        actions = self._window_actions(host, animations_enabled=False)
 
-        with patch("main.window_state_actions._holiday_effects_allowed", return_value=False):
-            actions.set_snowflakes_enabled(True)
+        actions.set_snowflakes_enabled(True)
 
-        snapshot = store.snapshot()
-        self.assertFalse(snapshot.garland_enabled)
-        self.assertFalse(snapshot.snowflakes_enabled)
         effects.set_snowflakes_enabled.assert_called_once_with(False)
+        effects.set_garland_enabled.assert_called_once_with(False)
 
 
 if __name__ == "__main__":

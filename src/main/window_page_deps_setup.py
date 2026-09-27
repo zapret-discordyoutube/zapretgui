@@ -31,7 +31,6 @@ def build_window_page_deps_sources(*, features, state, page_actions) -> PageDeps
             "on_background_preset_changed": page_actions.on_background_preset_changed,
             "on_background_refresh_needed": page_actions.on_background_refresh_needed,
             "on_editor_smooth_scroll_changed": page_actions.on_editor_smooth_scroll_changed,
-            "on_mica_changed": page_actions.on_mica_changed,
             "on_opacity_changed": page_actions.on_opacity_changed,
             "on_profile_setup_changed": page_actions.on_profile_setup_changed,
             "on_sidebar_icon_style_changed": page_actions.on_sidebar_icon_style_changed,

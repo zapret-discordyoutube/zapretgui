@@ -32,8 +32,7 @@ src/ui/state/app_runtime_state.py
 | `launch_busy` / `launch_busy_text` | `LaunchRuntimeService.set_busy` | control pages | Оставить. Это состояние кнопок и загрузки UI. |
 | `launch_last_error` | `LaunchRuntimeService` | control pages, runtime snapshot | Оставить. Это короткая ошибка для UI, не лог runtime. |
 | `current_strategy_summary` | `presets.display_state` | control pages | Оставить. Текст готовит presets feature, UI только показывает. |
-| `subscription_is_premium` / `subscription_days_remaining` | `donater.subscription_ui` | Premium page, About page, Appearance page, title badge | Оставить только как UI-сводку. Подробности Premium живут в `donater.state.PremiumState`. |
-| `garland_enabled` / `snowflakes_enabled` | `main.window_state_actions` | Appearance page | Оставить. Это состояние общей оболочки окна. |
+| `subscription_known` / `subscription_is_premium` / `subscription_days_remaining` | `donater.subscription_ui` | Premium page, About page, Appearance page, `ui.window_premium_appearance`, title badge | Оставить только как UI-сводку. Подробности Premium живут в `donater.state.PremiumState`. |
 | `window_opacity` | `main.window_state_actions` | Appearance page | Оставить. Это состояние общей оболочки окна. |
 | `active_preset_revision` | `core.runtime.preset_runtime_coordinator` | control pages | Оставить. Это сигнал обновления UI после смены активного preset-а. |
 | `preset_content_revision` | `core.runtime.preset_runtime_coordinator`, `RuntimeUiBridge` setup | page refresh flow | Оставить. Это счётчик изменения содержимого, не данные preset-а. |
@@ -47,7 +46,7 @@ src/ui/state/app_runtime_state.py
 | Feature | State | Где живёт | Что можно класть в MainWindowStateStore |
 | --- | --- | --- | --- |
 | Runtime | public snapshot + private tracking state | `winws_runtime/state/launch_runtime_service.py` | Только `launch_*` UI-сводку. `pid`, expected process и счётчики проверок остаются внутри runtime. |
-| Premium | `PremiumState` | `src/donater/state.py` | Только `subscription_known`, `subscription_is_premium` и `subscription_days_remaining` для глобального UI (`subscription_known=False` — первая проверка ещё не завершилась, это не Free). Пишет только `donater/subscription_ui.py`, показывает всё через правила `donater/premium_display.py`. Pairing, status, level, source остаются в Premium layer. |
+| Premium | `PremiumState` | `src/donater/state.py` | Только `subscription_known`, `subscription_is_premium` и `subscription_days_remaining` для глобального UI (`subscription_known=False` — первая проверка ещё не завершилась, это не Free). Что разрешено в оформлении, решает `settings.appearance.resolve_premium_access`; применяет к окну и сбрасывает настройки Free-версии только `ui/window_premium_appearance.py`, страница «Оформление» лишь показывает. Гирлянда и снежинки в store не копируются: источник — настройки. Пишет только `donater/subscription_ui.py`, показывает всё через правила `donater/premium_display.py`. Pairing, status, level, source остаются в Premium layer. |
 | Presets/Profile | `PresetSelectionState`, profile payload/state | `src/presets/state.py`, `src/profile/state.py` | Только `current_strategy_summary` и revision-счётчики. Имена файлов, profile details и selected source path остаются в presets/profile. |
 | DNS | `DnsState`, `DnsCommandResult` | `src/dns/state.py` | Ничего. DNS details нужны DNS-странице и DNS feature. |
 | Hosts | `HostsState`, `HostsCommandResult` | `src/hosts/state.py` | Ничего. Hosts details нужны Hosts-странице и Hosts feature. |

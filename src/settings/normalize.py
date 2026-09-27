@@ -317,7 +317,6 @@ def normalize_appearance(data: object) -> dict[str, Any]:
     return {
         "display_mode": as_str_in(raw.get("display_mode"), schema.VALID_DISPLAY_MODES, defaults["display_mode"]),
         "ui_language": as_str_in(raw.get("ui_language"), schema.VALID_UI_LANGUAGES, defaults["ui_language"]),
-        "mica_enabled": as_bool(raw.get("mica_enabled"), defaults["mica_enabled"]),
         "accent_color": as_nullable_str(raw.get("accent_color")),
         "follow_windows_accent": as_bool(raw.get("follow_windows_accent"), defaults["follow_windows_accent"]),
         "tinted_background": as_bool(raw.get("tinted_background"), defaults["tinted_background"]),

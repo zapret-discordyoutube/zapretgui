@@ -228,7 +228,7 @@ def check_window_state_sync_is_window_only() -> list[Problem]:
         re.compile(
             r"\b(?:app_runtime\.features|features\.|get_premium_state|subscription_manager|"
             r"load_premium_effects|init_holiday_effects_from_settings|load_background_preset|"
-            r"load_mica_enabled|HolidayEffectsManager|apply_aero_effect|apply_window_background)\b"
+            r"HolidayEffectsManager|apply_aero_effect|apply_window_background)\b"
         ),
         "window_state_sync.py должен применять состояние окна, а не ходить в feature-сервисы",
     )
@@ -774,11 +774,6 @@ def check_ui_state_store_writer_ownership(files: list[Path]) -> list[Problem]:
             re.compile(r"\.set_current_strategy_summary\s*\("),
             "current strategy summary должен писать только presets/display_state.py",
             {"src/presets/display_state.py"},
-        ),
-        (
-            re.compile(r"\.set_holiday_overlays\s*\("),
-            "holiday overlay state должен писать только window_state_actions.py",
-            {"src/main/window_state_actions.py"},
         ),
         (
             re.compile(r"\.set_window_opacity_value\s*\("),

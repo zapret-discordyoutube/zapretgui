@@ -19,7 +19,6 @@ class Win10TintedBackgroundTests(unittest.TestCase):
                 raise AssertionError("Win10 standard background must use the aero path")
 
         appearance_settings.store_warmed_background_preset("standard")
-        appearance_settings.store_warmed_mica_enabled(True)
         appearance_settings.store_warmed_window_opacity(37)
 
         window = _Window()

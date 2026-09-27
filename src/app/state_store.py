@@ -22,8 +22,6 @@ class AppUiState:
     subscription_known: bool = False
     subscription_is_premium: bool = False
     subscription_days_remaining: int | None = None
-    garland_enabled: bool = False
-    snowflakes_enabled: bool = False
     window_opacity: int = 100
     active_preset_revision: int = 0
     active_preset_file_name: str = ""
@@ -187,12 +185,6 @@ class MainWindowStateStore:
             subscription_known=True,
             subscription_is_premium=bool(is_premium),
             subscription_days_remaining=normalized_days,
-        )
-
-    def set_holiday_overlays(self, garland_enabled: bool, snowflakes_enabled: bool) -> bool:
-        return self.update(
-            garland_enabled=bool(garland_enabled),
-            snowflakes_enabled=bool(snowflakes_enabled),
         )
 
     def set_window_opacity_value(self, value: int) -> bool:

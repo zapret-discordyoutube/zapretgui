@@ -42,7 +42,6 @@ class AppearanceSettingsSaveWorker(QThread):
         save_display_mode,
         save_ui_language,
         save_background_preset,
-        save_mica_enabled,
         save_rkn_background,
         save_window_opacity,
         save_snowflakes_enabled,
@@ -67,7 +66,6 @@ class AppearanceSettingsSaveWorker(QThread):
         self._save_display_mode = save_display_mode
         self._save_ui_language = save_ui_language
         self._save_background_preset = save_background_preset
-        self._save_mica_enabled = save_mica_enabled
         self._save_rkn_background = save_rkn_background
         self._save_window_opacity = save_window_opacity
         self._save_snowflakes_enabled = save_snowflakes_enabled
@@ -93,8 +91,6 @@ class AppearanceSettingsSaveWorker(QThread):
                 result = self._save_ui_language(str(self._value or ""))
             elif self._action == "background_preset":
                 result = self._save_background_preset(str(self._value or "standard"))
-            elif self._action == "mica_enabled":
-                result = self._save_mica_enabled(bool(self._value))
             elif self._action == "rkn_background":
                 result = self._save_rkn_background(self._value)
             elif self._action == "window_opacity":
@@ -132,6 +128,26 @@ class AppearanceSettingsSaveWorker(QThread):
             self.failed.emit(self._request_id, self._action, str(exc), context)
             return
         self.completed.emit(self._request_id, self._action, result, context)
+
+
+class AppearancePremiumResetWorker(QThread):
+    """Сбрасывает Premium-фон и эффекты в настройках вне UI-потока."""
+
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, *, reset_premium_appearance, parent=None):
+        super().__init__(parent)
+        self._reset_premium_appearance = reset_premium_appearance
+
+    def run(self) -> None:
+        try:
+            result = self._reset_premium_appearance()
+        except Exception as exc:
+            log(f"AppearancePremiumResetWorker: не удалось сбросить Premium-оформление: {exc}", "WARNING")
+            self.failed.emit(str(exc))
+            return
+        self.completed.emit(result)
 
 
 class AppearanceRknBackgroundOptionsLoadWorker(QThread):
