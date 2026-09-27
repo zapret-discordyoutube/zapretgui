@@ -12,18 +12,6 @@ def startup_elapsed_ms() -> int:
     return int((_startup_clock.perf_counter() - _STARTUP_T0) * 1000)
 
 
-def is_startup_debug_enabled() -> bool:
-    raw = os.environ.get("ZAPRET_STARTUP_DEBUG")
-    if raw is not None and str(raw).strip() != "":
-        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-    for arg in sys.argv[1:]:
-        if str(arg).strip().lower() in {"--startup-debug", "--verbose-log"}:
-            return True
-
-    return False
-
-
 def is_cpu_diagnostic_enabled() -> bool:
     raw = os.environ.get("ZAPRET_CPU_DIAGNOSTIC")
     if raw is not None and str(raw).strip() != "":

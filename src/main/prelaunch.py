@@ -1,49 +1,39 @@
 from __future__ import annotations
 
 import os
-import sys
 
 from config.runtime_layout import APPLICATION_PATHS
 from main.pyinstaller_archive_import_lock import install_pyinstaller_archive_import_lock
-from main.runtime_state import is_startup_debug_enabled
 from main.win32_shellcon_compat import install_win32_shellcon_compat
 
 
 _PRELAUNCH_DONE = False
 
 
-def _set_workdir_to_app() -> None:
-    """Устанавливает рабочую директорию в единый корень приложения."""
+def _show_fatal_startup_error(message: str) -> None:
     try:
-        app_dir = str(APPLICATION_PATHS.root)
+        import ctypes
 
+        ctypes.windll.user32.MessageBoxW(0, message, "Zapret — ошибка запуска", 0x10)
+    except Exception:
+        print(message)
+
+
+def _set_workdir_to_app() -> None:
+    """Делает папку установки рабочей: от неё winws2 ищет @bin/, @lua/, =lists/."""
+    app_dir = APPLICATION_PATHS.root
+    try:
         os.chdir(app_dir)
-
-        if is_startup_debug_enabled():
-            debug_info = f"""
-=== ZAPRET STARTUP DEBUG ===
-Compiled mode: {'__compiled__' in globals()}
-Frozen mode: {getattr(sys, 'frozen', False)}
-sys.executable: {sys.executable}
-sys.argv[0]: {sys.argv[0]}
-Working directory: {app_dir}
-Directory exists: {os.path.exists(app_dir)}
-Directory contents: {os.listdir(app_dir) if os.path.exists(app_dir) else 'N/A'}
-========================
-"""
-            APPLICATION_PATHS.logs_dir.mkdir(parents=True, exist_ok=True)
-            with open(APPLICATION_PATHS.logs_dir / "zapret_startup.log", "w", encoding="utf-8") as handle:
-                handle.write(debug_info)
-    except Exception as exc:
-        try:
-            APPLICATION_PATHS.logs_dir.mkdir(parents=True, exist_ok=True)
-            with open(APPLICATION_PATHS.logs_dir / "zapret_startup_error.log", "w", encoding="utf-8") as handle:
-                handle.write(f"Error setting workdir: {exc}\n")
-                import traceback
-
-                handle.write(traceback.format_exc())
-        except OSError:
-            pass
+    except OSError as exc:
+        _show_fatal_startup_error(
+            "Zapret не может открыть свою папку установки:\n"
+            f"{app_dir}\n\n"
+            f"Причина: {exc}\n\n"
+            "Проверьте, что у вашей учётной записи есть доступ к этой папке. "
+            "Если путь очень длинный, переустановите Zapret в короткую папку, "
+            "например C:\\Zapret."
+        )
+        raise SystemExit(1) from exc
 
 
 def _install_crash_handler() -> None:
