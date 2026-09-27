@@ -874,33 +874,12 @@ class OrchestraRunner:
                 f.write('    DLOG("learned-strategies: DEBUG wrapper installed")\n')
                 f.write('end\n')
 
-                # Wrap circular to skip blocked strategies during rotation
-                # slm_is_blocked() is now defined in strategy-lock-manager.lua
-                if blocked_strategies:
-                    f.write('\n-- Install blocked strategies filter for circular rotation\n')
-                    f.write('-- slm_is_blocked() is defined in strategy-lock-manager.lua\n')
-                    f.write('local _blocked_wrap_installed = false\n')
-                    f.write('local function install_blocked_filter()\n')
-                    f.write('    if _blocked_wrap_installed then return end\n')
-                    f.write('    _blocked_wrap_installed = true\n')
-                    f.write('    if circular and type(circular) == "function" then\n')
-                    f.write('        local original_circular = circular\n')
-                    f.write('        circular = function(t, hostname, ...)\n')
-                    f.write('            local result = original_circular(t, hostname, ...)\n')
-                    f.write('            if result and hostname and slm_is_blocked(hostname, result) then\n')
-                    f.write('                local max_skip = 10\n')
-                    f.write('                for i = 1, max_skip do\n')
-                    f.write('                    result = original_circular(t, hostname, ...)\n')
-                    f.write('                    if not result or not slm_is_blocked(hostname, result) then break end\n')
-                    f.write('                    DLOG("BLOCKED: skip strategy " .. result .. " for " .. hostname)\n')
-                    f.write('                end\n')
-                    f.write('            end\n')
-                    f.write('            return result\n')
-                    f.write('        end\n')
-                    f.write('        DLOG("Blocked strategies filter installed for circular")\n')
-                    f.write('    end\n')
-                    f.write('end\n')
-                    f.write('install_blocked_filter()\n')
+                # Заблокированные стратегии пропускает сам circular_quality
+                # (combined-detector.lua / strategy-lock-manager.lua зовут
+                # slm_is_blocked(askey, hostname, strategy) по данным
+                # slm_preload_blocked выше). Отдельная обёртка над circular не нужна:
+                # конфиг его не использует, а circular(ctx, desync) возвращает
+                # вердикт, а не номер стратегии.
 
             block_info = f", заблокировано {total_blocked}" if total_blocked > 0 else ""
             log(f"Сгенерирован learned-strategies.lua ({total_locked} locked + {total_history} history{block_info})", "DEBUG")

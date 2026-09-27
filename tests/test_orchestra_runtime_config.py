@@ -205,6 +205,49 @@ class OrchestraRunnerLaunchTests(unittest.TestCase):
             self.assertFalse(hasattr(runner, "blobs_path"))
 
 
+class LearnedStrategiesLuaTests(unittest.TestCase):
+    """learned-strategies.lua: заблокированные стратегии передаются только данными.
+
+    Пропуск заблокированных стратегий делает сам circular_quality через
+    slm_is_blocked(askey, hostname, strategy). Раньше генератор ещё оборачивал
+    circular и звал slm_is_blocked(hostname, result) — не тот порядок и не то
+    число аргументов, а circular(ctx, desync) возвращает вердикт, а не номер
+    стратегии.
+    """
+
+    def test_blocked_strategies_are_preloaded_without_circular_filter(self) -> None:
+        from types import SimpleNamespace
+
+        from orchestra import orchestra_runner as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(module, "get_orchestra_keep_debug_file", return_value=False), \
+                    patch.object(module, "get_orchestra_auto_restart_on_discord_fail", return_value=False), \
+                    patch.object(module, "get_orchestra_discord_fails_for_restart", return_value=3):
+                runner = module.OrchestraRunner(zapret_path=str(Path(tmp)))
+            runner.blocked_manager = SimpleNamespace(
+                blocked_strategies={"example.com": [3, 5]},
+                is_blocked=lambda _host, _strategy: False,
+            )
+            runner.locked_manager = SimpleNamespace(
+                locked_by_askey={askey: {} for askey in module.ASKEY_ALL},
+                user_locked_by_askey={askey: {} for askey in module.ASKEY_ALL},
+                strategy_history={},
+                get_best_strategy_from_history=lambda *_args, **_kwargs: None,
+            )
+
+            lua_path = runner._generate_learned_lua()
+            self.assertIsNotNone(lua_path)
+            text = Path(lua_path).read_text(encoding="utf-8")
+
+        self.assertIn('slm_preload_blocked("tls", "example.com", {3, 5})', text)
+        code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("--"))
+        for call in re.findall(r"slm_is_blocked\(([^()]*)\)", code):
+            with self.subTest(call=call):
+                self.assertEqual(len(call.split(",")), 3, "slm_is_blocked(askey, hostname, strategy)")
+        self.assertNotIn("install_blocked_filter", code)
+
+
 _BLOB_ARG_RE = re.compile(
     r":(?:" + "|".join(sorted(BLOB_REFERENCE_ARG_NAMES)) + r")=([^:\s]+)"
 )
