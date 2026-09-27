@@ -25,7 +25,7 @@ from qfluentwidgets import (
     FluentIcon, HeaderCardWidget, IndeterminateProgressBar, InfoBar,
     InfoBarPosition, LineEdit, PrimaryPushButton, ProgressBar, PushButton,
     SettingCard as FluentSettingCard, SimpleCardWidget, StrongBodyLabel,
-    SubtitleLabel, SwitchButton, TitleLabel, ToolTipFilter, ToolTipPosition,
+    SubtitleLabel, TitleLabel, ToolTipFilter, ToolTipPosition,
     TransparentPushButton, isDarkTheme, themeColor,
 )
 

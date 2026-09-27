@@ -69,9 +69,10 @@ from ui.theme_semantic import get_semantic_palette
 
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, ComboBox, InfoBar, PushButton,
-    StrongBodyLabel, SwitchButton,
+    StrongBodyLabel,
 )
 from ui.fluent_dialog import MessageBox
+from ui.widgets.aligned_switch import AlignedSwitchButton
 
 
 _FLUENT_CHIP_STYLE_TEMPLATE = Template(
@@ -1093,7 +1094,7 @@ class HostsPage(BasePage):
             row_plan,
             body_label_cls=BodyLabel,
             combo_cls=ComboBox,
-            toggle_cls=SwitchButton,
+            toggle_cls=AlignedSwitchButton,
             off_label=off_label,
             on_direct_toggle=self._on_direct_toggle_changed,
             on_profile_changed=self._on_profile_changed,
@@ -1123,7 +1124,7 @@ class HostsPage(BasePage):
             plan=plan,
             service_name=service_name,
             service_combos=self.service_combos,
-            toggle_cls=SwitchButton,
+            toggle_cls=AlignedSwitchButton,
             get_building_state=self._get_building_services_ui,
             set_building_state=self._set_building_services_ui,
             update_profile_visual=self._update_profile_row_visual,
@@ -1138,7 +1139,7 @@ class HostsPage(BasePage):
             tr_fn=self._tr,
             adobe_active=bool(self.__dict__.get("_adobe_active", False)),
             on_toggle_adobe=self._toggle_adobe,
-            switch_button_cls=SwitchButton,
+            switch_button_cls=AlignedSwitchButton,
         )
         self._adobe_desc_label = widgets.description_label
         self._adobe_title_label = widgets.title_label
@@ -1235,7 +1236,7 @@ class HostsPage(BasePage):
                             control.blockSignals(True)
                             control.setCurrentIndex(target_idx)
                             control.blockSignals(False)
-                    elif isinstance(control, SwitchButton):
+                    elif isinstance(control, AlignedSwitchButton):
                         control.blockSignals(True)
                         control.setEnabled(bool(row_plan.toggle_enabled))
                         control.setChecked(bool(row_plan.toggle_checked))
@@ -1258,7 +1259,7 @@ class HostsPage(BasePage):
         enabled = False
         if _is_fluent_combo(combo):
             enabled = combo.currentData() is not None
-        elif isinstance(combo, SwitchButton):
+        elif isinstance(combo, AlignedSwitchButton):
             enabled = bool(combo.isChecked())
         color = base_color if enabled else tokens.fg_faint
         icon_name = self.service_icon_names.get(service_name)
@@ -1555,7 +1556,7 @@ class HostsPage(BasePage):
         self._service_dns_selection = reset_all_service_profiles_ui(
             service_combos=self.service_combos,
             is_fluent_combo=_is_fluent_combo,
-            toggle_cls=SwitchButton,
+            toggle_cls=AlignedSwitchButton,
             get_building_state=self._get_building_services_ui,
             set_building_state=self._set_building_services_ui,
             update_profile_visual=self._update_profile_row_visual,

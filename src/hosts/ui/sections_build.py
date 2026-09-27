@@ -11,7 +11,9 @@ from ui.accessibility import enable_keyboard_toggle, set_control_accessibility, 
 from ui.fluent_widgets import SettingsCard, SemanticNotice
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.theme_semantic import get_semantic_palette
-from qfluentwidgets import BodyLabel, CaptionLabel, FluentIcon, PushButton, StrongBodyLabel, SwitchButton
+from qfluentwidgets import BodyLabel, CaptionLabel, FluentIcon, PushButton, StrongBodyLabel
+
+from ui.widgets.aligned_switch import AlignedSwitchButton
 
 
 @dataclass(slots=True)
@@ -201,7 +203,7 @@ def build_hosts_adobe_section(
     tr_fn,
     adobe_active: bool,
     on_toggle_adobe,
-    switch_button_cls=SwitchButton,
+    switch_button_cls=AlignedSwitchButton,
 ) -> HostsAdobeWidgets:
     adobe_card = SettingsCard()
 

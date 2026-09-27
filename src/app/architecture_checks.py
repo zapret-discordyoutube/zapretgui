@@ -154,6 +154,24 @@ def check_no_page_signal_layer(files: list[Path]) -> list[Problem]:
     )
 
 
+def check_switches_use_aligned_switch_button(files: list[Path]) -> list[Problem]:
+    """Переключатели создаются только через ui.widgets.aligned_switch.
+
+    У стандартного SwitchButton ширина зависит от подписи «Вкл.»/«Выкл.»,
+    и ползунок сдвигается при смене состояния.
+    """
+    return _scan_lines(
+        files,
+        re.compile(
+            r"(?<![\w.\"'])SwitchButton\s*[(,)]"
+            r"|=\s*SwitchButton\b"
+            r"|\bimport\b.*(?<![\w.\"'])SwitchButton\b"
+        ),
+        "используйте AlignedSwitchButton из ui/widgets/aligned_switch.py вместо SwitchButton",
+        allowed_paths={"src/ui/widgets/aligned_switch.py"},
+    )
+
+
 def check_no_window_level_state_subscriptions(files: list[Path]) -> list[Problem]:
     scopes = []
     for path in files:
@@ -1520,6 +1538,7 @@ def run_checks() -> list[Problem]:
     problems.extend(check_app_features_is_registry_only())
     problems.extend(check_no_page_signal_layer(files))
     problems.extend(check_no_window_level_state_subscriptions(files))
+    problems.extend(check_switches_use_aligned_switch_button(files))
     problems.extend(check_runtime_feedback_uses_ui_bridge(files))
     problems.extend(check_runtime_ui_bridge_is_feature_neutral())
     problems.extend(check_preset_display_state_not_in_window_layer(files))
