@@ -2919,3 +2919,9 @@ label = game
 blobs = fake_unknown_256,tls_max
 --lua-desync=fake:blob=fake_unknown_256:tcp_ts=-600000:tcp_ts_up:repeats=8:payload=~empty,tls_client_hello,http_req
 --lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max:payload=~empty
+
+[multisplit_fake_tls_hostfakesplit_rzd]
+name = multisplit fake_default_tls + hostfakesplit rzd.ru
+label = experimental
+--lua-desync=multisplit:blob=fake_default_tls:tcp_ts=-1000:pos=2:nodrop:repeats=4
+--lua-desync=hostfakesplit:host=rzd.ru:midhost=host-2:badsum:tcp_ack=-66000:tcp_ts_up
