@@ -18,8 +18,9 @@ from pathlib import Path
 from config.build_info import APP_VERSION
 from log.log import log
 
-from .handoff_state import HandoffState, UpdateHandoffRecord, clear_record, read_record
-from .update import compare_versions
+from ..versions import compare_versions
+from .handoff import HandoffState, UpdateHandoffRecord, clear_record, read_record
+from .recovery_hook import clear_recovery_hook
 
 
 UPDATE_LOG_LEVEL = "🔁 UPDATE"
@@ -44,6 +45,16 @@ def _installer_exists(installer_path: str) -> bool:
         return False
 
 
+def _forget(state_path: str | Path | None) -> None:
+    """Закрывает вопрос о прошлом обновлении: запись и страховка больше не нужны.
+
+    Страховку снимаем и здесь: наблюдатель прежних версий зависал и не успевал
+    убрать её сам.
+    """
+    clear_record(state_path)
+    clear_recovery_hook()
+
+
 def detect_interrupted_update(
     *,
     current_version: str = APP_VERSION,
@@ -66,15 +77,22 @@ def detect_interrupted_update(
         # пользователь закрыл приложение до передачи управления.
         return None
 
-    if known.state is HandoffState.SUCCEEDED or compare_versions(
-        current_version, known.version
-    ) >= 0:
+    try:
+        settled = known.state is HandoffState.SUCCEEDED or compare_versions(
+            current_version, known.version
+        ) >= 0
+    except ValueError:
+        # Запись с неверной версией ничего не расскажет пользователю, а
+        # оставленная на диске, ломала бы разбор при каждом запуске.
+        log(f"В записи обновления неверная версия: {known.version!r}", "WARNING")
+        settled = True
+    if settled:
         if forget:
-            clear_record(state_path)
+            _forget(state_path)
         return None
 
     if forget:
-        clear_record(state_path)
+        _forget(state_path)
 
     reason = known.error.strip() or "установка прервалась без объяснения"
     log(

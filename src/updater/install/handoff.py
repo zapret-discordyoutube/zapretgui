@@ -13,17 +13,18 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
 from log.log import log
 
-from . import update_paths
+from . import paths
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class HandoffState(StrEnum):
@@ -31,34 +32,6 @@ class HandoffState(StrEnum):
     LAUNCHED = "launched"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
-
-
-# Обновление идёт только вперёд, кроме повторной подготовки после провала:
-# пользователь вправе попробовать ещё раз, и это единственный путь назад.
-ALLOWED_TRANSITIONS: dict[HandoffState, frozenset[HandoffState]] = {
-    HandoffState.PREPARED: frozenset({HandoffState.LAUNCHED, HandoffState.FAILED}),
-    HandoffState.LAUNCHED: frozenset({HandoffState.SUCCEEDED, HandoffState.FAILED}),
-    HandoffState.SUCCEEDED: frozenset({HandoffState.PREPARED}),
-    HandoffState.FAILED: frozenset({HandoffState.PREPARED}),
-}
-
-
-def can_transition(current: HandoffState | str | None, target: HandoffState | str) -> bool:
-    """Разрешён ли переход состояния. Из пустого состояния можно только готовить."""
-    try:
-        target_state = HandoffState(str(target))
-    except ValueError:
-        return False
-
-    if current is None or str(current).strip() == "":
-        return target_state is HandoffState.PREPARED
-
-    try:
-        current_state = HandoffState(str(current))
-    except ValueError:
-        return False
-
-    return target_state in ALLOWED_TRANSITIONS[current_state]
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +42,7 @@ class UpdateHandoffRecord:
     version: str
     target_root: str
     installer_path: str
+    installer_sha256: str = ""
     arguments: tuple[str, ...] = ()
     gui_pid: int = 0
     installer_exit_code: int | None = None
@@ -84,6 +58,7 @@ class UpdateHandoffRecord:
             "version": str(self.version),
             "target_root": str(self.target_root),
             "installer_path": str(self.installer_path),
+            "installer_sha256": str(self.installer_sha256),
             "arguments": [str(argument) for argument in self.arguments],
             "gui_pid": int(self.gui_pid),
             "installer_exit_code": self.installer_exit_code,
@@ -101,12 +76,6 @@ class UpdateHandoffRecord:
         except ValueError:
             return None
 
-        exit_code = payload.get("installer_exit_code")
-        try:
-            normalized_exit_code = None if exit_code is None else int(exit_code)
-        except (TypeError, ValueError):
-            normalized_exit_code = None
-
         raw_arguments = payload.get("arguments")
         arguments = (
             tuple(str(argument) for argument in raw_arguments)
@@ -114,45 +83,62 @@ class UpdateHandoffRecord:
             else ()
         )
 
-        try:
-            gui_pid = int(payload.get("gui_pid") or 0)
-        except (TypeError, ValueError):
-            gui_pid = 0
-        try:
-            updated_at = float(payload.get("updated_at") or 0.0)
-        except (TypeError, ValueError):
-            updated_at = 0.0
-
         return cls(
             state=state,
             version=str(payload.get("version") or ""),
             target_root=str(payload.get("target_root") or ""),
             installer_path=str(payload.get("installer_path") or ""),
+            installer_sha256=str(payload.get("installer_sha256") or ""),
             arguments=arguments,
-            gui_pid=gui_pid,
-            installer_exit_code=normalized_exit_code,
+            gui_pid=_as_int(payload.get("gui_pid")) or 0,
+            installer_exit_code=_as_int(payload.get("installer_exit_code")),
             installed_version=str(payload.get("installed_version") or ""),
             error=str(payload.get("error") or ""),
-            updated_at=updated_at,
+            updated_at=_as_float(payload.get("updated_at")),
+            schema_version=_as_int(payload.get("schema_version")) or 1,
         )
 
 
+def _as_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_float(value: object) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _state_path(path: str | Path | None = None) -> Path:
-    return Path(path) if path is not None else update_paths.handoff_state_path()
+    return Path(path) if path is not None else paths.handoff_state_path()
 
 
 def read_record(path: str | Path | None = None) -> UpdateHandoffRecord | None:
-    """Последнее записанное состояние или None, если его нет либо оно битое."""
+    """Последнее записанное состояние или None, если его нет либо оно битое.
+
+    Читается как ``utf-8-sig``: Windows PowerShell 5.1 пишет UTF-8 с BOM, а
+    наблюдатель прежних версий писал запись именно так.
+    """
     state_path = _state_path(path)
     try:
-        raw = state_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+        raw = state_path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        log(f"Состояние обновления не читается ({state_path}): {exc}", "WARNING")
         return None
 
     try:
         payload = json.loads(raw)
     except (ValueError, TypeError):
-        log(f"Состояние обновления повреждено и будет проигнорировано: {state_path}", "WARNING")
+        log(f"Состояние обновления повреждено и будет удалено: {state_path}", "WARNING")
+        clear_record(state_path)
         return None
 
     return UpdateHandoffRecord.from_payload(payload)
@@ -164,37 +150,38 @@ def write_record(
     *,
     now: float | None = None,
 ) -> bool:
-    """Атомарно сохраняет состояние: наблюдатель не должен прочитать полуфайл."""
+    """Атомарно сохраняет состояние: наблюдатель не должен прочитать полуфайл.
+
+    Временный файл создаётся со случайным именем и флагом «только новый»:
+    заранее подложенный файл с предсказуемым именем не перехватит запись.
+    """
     state_path = _state_path(path)
-    stamped = UpdateHandoffRecord(
-        state=record.state,
-        version=record.version,
-        target_root=record.target_root,
-        installer_path=record.installer_path,
-        arguments=tuple(record.arguments),
-        gui_pid=record.gui_pid,
-        installer_exit_code=record.installer_exit_code,
-        installed_version=record.installed_version,
-        error=record.error,
+    stamped = replace(
+        record,
         updated_at=float(now if now is not None else time.time()),
         schema_version=SCHEMA_VERSION,
     )
+    data = json.dumps(stamped.to_payload(), ensure_ascii=False, indent=2).encode("utf-8")
 
-    temporary_path = state_path.with_suffix(".json.new")
+    temporary_path: str | None = None
     try:
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary_path.write_text(
-            json.dumps(stamped.to_payload(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        descriptor, temporary_path = tempfile.mkstemp(
+            prefix=f"{state_path.name}.",
+            suffix=".tmp",
+            dir=str(state_path.parent),
         )
+        with os.fdopen(descriptor, "wb") as file_obj:
+            file_obj.write(data)
         os.replace(temporary_path, state_path)
         return True
     except OSError as exc:
         log(f"Не удалось сохранить состояние обновления: {exc}", "🔁❌ ERROR")
-        try:
-            temporary_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if temporary_path is not None:
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                pass
         return False
 
 
@@ -207,11 +194,9 @@ def clear_record(path: str | Path | None = None) -> None:
 
 
 __all__ = [
-    "ALLOWED_TRANSITIONS",
     "HandoffState",
     "SCHEMA_VERSION",
     "UpdateHandoffRecord",
-    "can_transition",
     "clear_record",
     "read_record",
     "write_record",

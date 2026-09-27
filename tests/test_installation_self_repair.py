@@ -80,10 +80,16 @@ class SelfRepairAttemptLimitTests(unittest.TestCase):
 
 class RepairInstallationTests(unittest.TestCase):
     def setUp(self) -> None:
-        from updater.self_repair import reset_repair_process_guard
+        from updater.install import repair
+        from updater.install.repair import reset_repair_process_guard
 
         reset_repair_process_guard()
         self.addCleanup(reset_repair_process_guard)
+        # На Windows настоящая функция поменяла бы права живого каталога
+        # обновления в %ProgramData%.
+        hardening = patch.object(repair, "ensure_private_state_dir")
+        hardening.start()
+        self.addCleanup(hardening.stop)
 
     def _cached_installer(self, root: Path, *, version: str) -> tuple[Path, dict]:
         installer = root / "Zapret2Setup.exe"
@@ -96,7 +102,7 @@ class RepairInstallationTests(unittest.TestCase):
         return installer, meta
 
     def test_source_run_is_not_repairable(self) -> None:
-        from updater import self_repair
+        from updater.install import repair as self_repair
 
         with patch.object(self_repair, "PACKAGED_RUNTIME", False):
             outcome = self_repair.repair_installation(_damaged_report())
@@ -105,7 +111,7 @@ class RepairInstallationTests(unittest.TestCase):
         self.assertIn("установленной", outcome.reason)
 
     def test_intact_installation_is_not_repaired(self) -> None:
-        from updater import self_repair
+        from updater.install import repair as self_repair
 
         intact = IntegrityReport(cause=IntegrityCause.OK, manifest_version="21.1.1.4")
         with patch.object(self_repair, "PACKAGED_RUNTIME", True):
@@ -115,7 +121,7 @@ class RepairInstallationTests(unittest.TestCase):
         self.assertIn("не повреждена", outcome.reason)
 
     def test_missing_manifest_is_not_repaired(self) -> None:
-        from updater import self_repair
+        from updater.install import repair as self_repair
 
         absent = IntegrityReport(cause=IntegrityCause.MANIFEST_ABSENT)
         with patch.object(self_repair, "PACKAGED_RUNTIME", True):
@@ -124,7 +130,7 @@ class RepairInstallationTests(unittest.TestCase):
         self.assertFalse(outcome.started)
 
     def test_cached_installer_of_current_version_repairs_without_network(self) -> None:
-        from updater import self_repair
+        from updater.install import repair as self_repair
 
         with tempfile.TemporaryDirectory() as tmp:
             installer, meta = self._cached_installer(Path(tmp), version="21.1.1.4")
@@ -132,11 +138,11 @@ class RepairInstallationTests(unittest.TestCase):
             with (
                 patch.object(self_repair, "PACKAGED_RUNTIME", True),
                 patch.object(self_repair, "APP_VERSION", "21.1.1.4"),
-                patch.object(self_repair, "cached_installer_path", return_value=installer),
+                patch.object(self_repair.paths, "cached_installer_path", return_value=installer),
                 patch.object(self_repair, "read_cached_installer_meta", return_value=meta),
                 patch.object(self_repair, "installer_arguments", return_value=("/AUTOUPDATE",)),
                 patch.object(self_repair, "UpdatePipeline") as pipeline_cls,
-                patch.object(self_repair, "launch_installer_winapi", return_value=True) as launch,
+                patch.object(self_repair, "start_supervised_installation", return_value=True) as launch,
                 patch("settings.store.append_self_repair_attempt", return_value=(True, 1)),
             ):
                 outcome = self_repair.repair_installation(_damaged_report())
@@ -144,11 +150,15 @@ class RepairInstallationTests(unittest.TestCase):
             self.assertTrue(outcome.started)
             self.assertTrue(outcome.used_cache)
             launch.assert_called_once()
-            self.assertEqual(launch.call_args.args[0], str(installer))
+            handoff = launch.call_args.args[0]
+            self.assertEqual(handoff.installer_path, str(installer))
+            self.assertEqual(handoff.installer_sha256, meta["sha256"])
+            # Починка не ждёт закрытия программы: её закроет установщик.
+            self.assertEqual(launch.call_args.kwargs["gui_pid"], 0)
             pipeline_cls.assert_not_called()
 
     def test_cached_installer_of_other_version_is_rejected_offline(self) -> None:
-        from updater import self_repair
+        from updater.install import repair as self_repair
 
         with tempfile.TemporaryDirectory() as tmp:
             installer, meta = self._cached_installer(Path(tmp), version="20.0.0.0")
@@ -156,9 +166,9 @@ class RepairInstallationTests(unittest.TestCase):
             with (
                 patch.object(self_repair, "PACKAGED_RUNTIME", True),
                 patch.object(self_repair, "APP_VERSION", "21.1.1.4"),
-                patch.object(self_repair, "cached_installer_path", return_value=installer),
+                patch.object(self_repair.paths, "cached_installer_path", return_value=installer),
                 patch.object(self_repair, "read_cached_installer_meta", return_value=meta),
-                patch.object(self_repair, "launch_installer_winapi", return_value=True) as launch,
+                patch.object(self_repair, "start_supervised_installation", return_value=True) as launch,
                 patch("settings.store.append_self_repair_attempt", return_value=(True, 1)),
             ):
                 outcome = self_repair.repair_installation(
@@ -170,7 +180,7 @@ class RepairInstallationTests(unittest.TestCase):
             launch.assert_not_called()
 
     def test_tampered_cached_installer_is_rejected(self) -> None:
-        from updater import self_repair
+        from updater.install import repair as self_repair
 
         with tempfile.TemporaryDirectory() as tmp:
             installer, meta = self._cached_installer(Path(tmp), version="21.1.1.4")
@@ -179,9 +189,9 @@ class RepairInstallationTests(unittest.TestCase):
             with (
                 patch.object(self_repair, "PACKAGED_RUNTIME", True),
                 patch.object(self_repair, "APP_VERSION", "21.1.1.4"),
-                patch.object(self_repair, "cached_installer_path", return_value=installer),
+                patch.object(self_repair.paths, "cached_installer_path", return_value=installer),
                 patch.object(self_repair, "read_cached_installer_meta", return_value=meta),
-                patch.object(self_repair, "launch_installer_winapi", return_value=True) as launch,
+                patch.object(self_repair, "start_supervised_installation", return_value=True) as launch,
                 patch("settings.store.append_self_repair_attempt", return_value=(True, 1)),
             ):
                 outcome = self_repair.repair_installation(
@@ -193,11 +203,11 @@ class RepairInstallationTests(unittest.TestCase):
             launch.assert_not_called()
 
     def test_exhausted_limit_stops_repair_loop(self) -> None:
-        from updater import self_repair
+        from updater.install import repair as self_repair
 
         with (
             patch.object(self_repair, "PACKAGED_RUNTIME", True),
-            patch.object(self_repair, "launch_installer_winapi", return_value=True) as launch,
+            patch.object(self_repair, "start_supervised_installation", return_value=True) as launch,
             patch("settings.store.append_self_repair_attempt", return_value=(False, 3)),
         ):
             outcome = self_repair.repair_installation(_damaged_report())
@@ -207,7 +217,7 @@ class RepairInstallationTests(unittest.TestCase):
         launch.assert_not_called()
 
     def test_second_repair_in_same_process_is_refused(self) -> None:
-        from updater import self_repair
+        from updater.install import repair as self_repair
 
         with tempfile.TemporaryDirectory() as tmp:
             installer, meta = self._cached_installer(Path(tmp), version="21.1.1.4")
@@ -215,10 +225,10 @@ class RepairInstallationTests(unittest.TestCase):
             with (
                 patch.object(self_repair, "PACKAGED_RUNTIME", True),
                 patch.object(self_repair, "APP_VERSION", "21.1.1.4"),
-                patch.object(self_repair, "cached_installer_path", return_value=installer),
+                patch.object(self_repair.paths, "cached_installer_path", return_value=installer),
                 patch.object(self_repair, "read_cached_installer_meta", return_value=meta),
                 patch.object(self_repair, "installer_arguments", return_value=("/AUTOUPDATE",)),
-                patch.object(self_repair, "launch_installer_winapi", return_value=True) as launch,
+                patch.object(self_repair, "start_supervised_installation", return_value=True) as launch,
                 patch("settings.store.append_self_repair_attempt", return_value=(True, 1)),
             ):
                 first = self_repair.repair_installation(_damaged_report())

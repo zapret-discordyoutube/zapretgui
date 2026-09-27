@@ -1784,8 +1784,12 @@ class BuildResourceLayoutTests(unittest.TestCase):
 
     def test_inno_auto_update_has_an_explicit_success_only_flow(self) -> None:
         iss = self._read_inno_script()
-        installer_launcher = (PUBLIC_ROOT / "src" / "updater" / "update.py").read_text(encoding="utf-8")
-        update_pipeline = (PUBLIC_ROOT / "src" / "updater" / "update_pipeline.py").read_text(encoding="utf-8")
+        update_pipeline = (
+            PUBLIC_ROOT / "src" / "updater" / "install" / "launcher.py"
+        ).read_text(encoding="utf-8")
+        watchdog_script = (
+            PUBLIC_ROOT / "src" / "updater" / "install" / "watchdog_script.py"
+        ).read_text(encoding="utf-8")
 
         auto_update_start = iss.index("function IsAutoUpdate: Boolean;")
         auto_update_end = iss.index("function ReadPreviousInstallRoot", auto_update_start)
@@ -1803,10 +1807,10 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertNotIn('"/RESTARTAPPLICATIONS",', update_pipeline)
         self.assertIn('f"/DIR={APPLICATION_PATHS.root}"', update_pipeline)
         self.assertIn('f"/LOG={setup_log}"', update_pipeline)
-        self.assertNotIn("arguments.split()", installer_launcher)
-        self.assertIn("subprocess.list2cmdline(argument_list)", installer_launcher)
-        self.assertIn('"-EncodedCommand",', installer_launcher)
-        self.assertIn("process.communicate(timeout=120)", installer_launcher)
+        # Установщик запускает только наблюдатель: строка аргументов с
+        # кавычками вокруг путей с пробелами и ожидание без потомков.
+        self.assertIn("function Join-InstallerArguments", watchdog_script)
+        self.assertIn("$process.WaitForExit()", watchdog_script)
         self.assertNotIn("procedure DeinitializeSetup;", iss)
         self.assertIn("if (CurStep = ssDone) and IsAutoUpdate() then", iss)
         self.assertIn(

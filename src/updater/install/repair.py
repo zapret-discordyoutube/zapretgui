@@ -3,8 +3,8 @@ from __future__ import annotations
 """Восстановление поставки той же версией.
 
 Программа обнаружила, что её собственные файлы не соответствуют манифесту, и
-чинит себя тем же установщиком, которым обновляется. Сначала — сохранённый
-установщик из ``user\\update_cache`` (без сети: без движка сеть у пользователя как
+чинит себя тем же установщиком и тем же наблюдателем, которыми обновляется.
+Сначала — сохранённый установщик из каталога состояния обновления (без сети: без движка сеть у пользователя как
 раз может не работать), и только потом загрузка.
 
 Здесь нет ни Qt, ни окна: модуль запускается из фонового worker-а.
@@ -20,14 +20,15 @@ from install_integrity import IntegrityCause, IntegrityReport, verify_fast
 from log.log import log
 from utils.file_digest import sha256_file
 
-from .update import launch_installer_winapi
-from .release_contract import normalize_sha256
-from .update_pipeline import (
-    CancellationToken,
-    UpdatePipeline,
-    cached_installer_path,
+from ..release_contract import normalize_sha256
+from ..update_pipeline import CancellationToken, UpdatePipeline
+from . import paths
+from .launcher import (
+    InstallerHandoff,
+    ensure_private_state_dir,
     installer_arguments,
     read_cached_installer_meta,
+    start_supervised_installation,
 )
 
 
@@ -77,9 +78,12 @@ def _reserve_attempt(*, now: float | None = None) -> tuple[bool, str]:
     return True, ""
 
 
-def _cached_installer_ready(*, expected_sha256: str = "") -> Path | None:
-    """Путь к сохранённому установщику, если он годится для починки."""
-    path = cached_installer_path()
+def _cached_installer_ready(*, expected_sha256: str = "") -> tuple[Path, str] | None:
+    """Сохранённый установщик и его SHA-256, если он годится для починки."""
+    # Сначала закрываем каталог: иначе можно доверить права администратора
+    # файлу, который туда подложил обычный пользователь.
+    ensure_private_state_dir()
+    path = paths.cached_installer_path()
     if not path.is_file():
         return None
 
@@ -104,11 +108,23 @@ def _cached_installer_ready(*, expected_sha256: str = "") -> Path | None:
     if actual != wanted:
         log("Сохранённый установщик не совпал по SHA-256, он не будет использован", REPAIR_LOG_LEVEL)
         return None
-    return path
+    return path, actual
 
 
-def _launch(installer_path: Path) -> bool:
-    return bool(launch_installer_winapi(str(installer_path), installer_arguments(log_name="repair.log")))
+def _launch(installer_path: Path, sha256: str) -> bool:
+    """Запускает установщик через наблюдателя, не дожидаясь закрытия программы.
+
+    Программа при починке остаётся открытой: её закроет сам установщик.
+    """
+    return start_supervised_installation(
+        InstallerHandoff(
+            version=str(APP_VERSION),
+            installer_path=str(installer_path),
+            installer_sha256=str(sha256),
+            arguments=installer_arguments(log_name="repair.log"),
+        ),
+        gui_pid=0,
+    )
 
 
 def repair_installation(
@@ -119,9 +135,9 @@ def repair_installation(
 ) -> RepairOutcome:
     """Чинит установку и возвращает, был ли запущен установщик.
 
-    Приложение уже работает с правами администратора, поэтому установщик
-    стартует без второго запроса UAC. После запуска установщик сам закрывает
-    приложение и поднимает его обратно.
+    Приложение уже работает с правами администратора, поэтому наблюдатель и
+    установщик стартуют без второго запроса UAC. Установщик сам закрывает
+    приложение и поднимает его обратно, а наблюдатель записывает исход.
     """
     if not PACKAGED_RUNTIME:
         return RepairOutcome(False, "Восстановление доступно только для установленной программы")
@@ -146,8 +162,8 @@ def repair_installation(
 
     cached = _cached_installer_ready()
     if cached is not None:
-        log(f"Восстановление из сохранённого установщика: {cached}", REPAIR_LOG_LEVEL)
-        if _launch(cached):
+        log(f"Восстановление из сохранённого установщика: {cached[0]}", REPAIR_LOG_LEVEL)
+        if _launch(*cached):
             return RepairOutcome(True, "Установщик запущен", "cache")
         log("Не удалось запустить сохранённый установщик", REPAIR_LOG_LEVEL)
 
@@ -166,7 +182,7 @@ def repair_installation(
     cached = _cached_installer_ready(expected_sha256=artifact.expected_sha256)
     if cached is not None:
         log("Сохранённый установщик совпал с выпуском, загрузка не нужна", REPAIR_LOG_LEVEL)
-        if _launch(cached):
+        if _launch(*cached):
             return RepairOutcome(True, "Установщик запущен", "cache")
 
     try:
@@ -175,7 +191,7 @@ def repair_installation(
         log(f"Не удалось скачать установщик для восстановления: {exc}", REPAIR_LOG_LEVEL)
         return RepairOutcome(False, f"Не удалось скачать установщик: {exc}")
 
-    if _launch(Path(handoff.installer_path)):
+    if _launch(Path(handoff.installer_path), handoff.installer_sha256):
         return RepairOutcome(True, "Установщик запущен", "download")
     return RepairOutcome(False, "Не удалось запустить установщик")
 

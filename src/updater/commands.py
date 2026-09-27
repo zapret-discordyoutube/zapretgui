@@ -41,7 +41,7 @@ def check_installation_integrity(*, deep: bool = False):
 
 
 def repair_installation(report=None, *, allow_download: bool = True):
-    from updater.self_repair import repair_installation as _repair_installation
+    from updater.install.repair import repair_installation as _repair_installation
 
     return _repair_installation(report, allow_download=bool(allow_download))
 

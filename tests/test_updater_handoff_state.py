@@ -12,12 +12,10 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from updater.handoff_state import (
-    ALLOWED_TRANSITIONS,
+from updater.install.handoff import (
     HandoffState,
     SCHEMA_VERSION,
     UpdateHandoffRecord,
-    can_transition,
     clear_record,
     read_record,
     write_record,
@@ -63,12 +61,62 @@ class HandoffRecordRoundTripTests(unittest.TestCase):
 
         self.assertEqual(leftovers, ["handoff.json"])
 
-    def test_partial_file_is_not_mistaken_for_state(self) -> None:
+    def test_partial_file_is_not_mistaken_for_state_and_is_removed(self) -> None:
+        """Битая запись удаляется, иначе предупреждение повторялось бы вечно."""
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "handoff.json"
             path.write_text('{"state": "launc', encoding="utf-8")
 
             self.assertIsNone(read_record(path))
+            self.assertFalse(path.exists())
+
+    def test_record_written_by_windows_powershell_with_bom_is_read(self) -> None:
+        """Windows PowerShell 5.1 пишет UTF-8 с BOM — так выглядела живая запись."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "handoff.json"
+            payload = {
+                "schema_version": 1,
+                "state": "succeeded",
+                "version": "21.1.5.67",
+                "target_root": "C:\\Zapret\\Dev",
+                "installer_path": "C:\\ProgramData\\Zapret\\update\\dev\\Zapret2Setup.exe",
+                "arguments": ["/AUTOUPDATE", "/SILENT"],
+                "gui_pid": 23544,
+                "installer_exit_code": None,
+                "installed_version": "21.1.5.67",
+                "error": "",
+                "updated_at": 1787348465.317,
+            }
+            path.write_bytes(b"\xef\xbb\xbf" + json.dumps(payload, indent=4).encode("utf-8"))
+
+            restored = read_record(path)
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.state, HandoffState.SUCCEEDED)
+        self.assertEqual(restored.installed_version, "21.1.5.67")
+        self.assertEqual(restored.schema_version, 1)
+        self.assertEqual(restored.installer_sha256, "")
+
+    def test_installer_checksum_travels_with_the_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "handoff.json"
+            write_record(_record(installer_sha256="ab" * 32), path)
+
+            restored = read_record(path)
+
+        self.assertEqual(restored.installer_sha256, "ab" * 32)
+
+    def test_planted_temporary_file_does_not_capture_the_write(self) -> None:
+        """Временный файл с предсказуемым именем мог подложить обычный пользователь."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "handoff.json"
+            planted = Path(temp_dir) / "handoff.json.new"
+            planted.write_text("planted", encoding="utf-8")
+
+            self.assertTrue(write_record(_record(), path))
+
+            self.assertEqual(planted.read_text(encoding="utf-8"), "planted")
+            self.assertEqual(read_record(path).version, "21.1.1.4")
 
     def test_unknown_state_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -112,34 +160,6 @@ class HandoffRecordRoundTripTests(unittest.TestCase):
             clear_record(path)
 
             self.assertFalse(path.exists())
-
-
-class HandoffTransitionTests(unittest.TestCase):
-    def test_first_state_can_only_be_prepared(self) -> None:
-        self.assertTrue(can_transition(None, HandoffState.PREPARED))
-        self.assertFalse(can_transition(None, HandoffState.LAUNCHED))
-        self.assertFalse(can_transition("", HandoffState.SUCCEEDED))
-
-    def test_update_runs_forward(self) -> None:
-        self.assertTrue(can_transition(HandoffState.PREPARED, HandoffState.LAUNCHED))
-        self.assertTrue(can_transition(HandoffState.LAUNCHED, HandoffState.SUCCEEDED))
-        self.assertTrue(can_transition(HandoffState.LAUNCHED, HandoffState.FAILED))
-
-    def test_finished_update_cannot_silently_reopen(self) -> None:
-        self.assertFalse(can_transition(HandoffState.SUCCEEDED, HandoffState.LAUNCHED))
-        self.assertFalse(can_transition(HandoffState.FAILED, HandoffState.SUCCEEDED))
-        self.assertFalse(can_transition(HandoffState.PREPARED, HandoffState.SUCCEEDED))
-
-    def test_retry_starts_from_preparation(self) -> None:
-        self.assertTrue(can_transition(HandoffState.FAILED, HandoffState.PREPARED))
-        self.assertTrue(can_transition(HandoffState.SUCCEEDED, HandoffState.PREPARED))
-
-    def test_unknown_states_are_never_allowed(self) -> None:
-        self.assertFalse(can_transition("installing", HandoffState.LAUNCHED))
-        self.assertFalse(can_transition(HandoffState.PREPARED, "installing"))
-
-    def test_every_state_has_a_declared_transition_set(self) -> None:
-        self.assertEqual(set(ALLOWED_TRANSITIONS), set(HandoffState))
 
 
 if __name__ == "__main__":

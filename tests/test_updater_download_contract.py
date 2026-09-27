@@ -7,7 +7,6 @@ import unittest
 
 from updater.update_pipeline import (
     CancellationToken,
-    InstallerHandoff,
     ThrottledProgress,
     UpdateArtifact,
     UpdateCancelled,
@@ -70,14 +69,6 @@ class UpdaterDownloadContractTests(unittest.TestCase):
             )
             with self.assertRaises(UpdateIntegrityError):
                 verify_artifact(wrong, str(path), CancellationToken())
-
-    def test_handoff_is_an_explicit_pipeline_value(self) -> None:
-        handoff = InstallerHandoff(
-            version="21.1.5.1",
-            installer_path=r"C:\Zapret\Dev\update\Zapret2Setup.exe",
-            arguments=("/AUTOUPDATE",),
-        )
-        self.assertEqual(handoff.arguments, ("/AUTOUPDATE",))
 
     def test_cancellation_token_stops_at_checkpoint(self) -> None:
         token = CancellationToken()

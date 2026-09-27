@@ -18,20 +18,25 @@ import time
 import unittest
 from unittest.mock import patch
 
-from updater import update_watchdog
+from updater.install import watchdog as update_watchdog
 
 
 REFERENCE_EXE = Path(r"C:\Windows\System32\notepad.exe")
 
 
-def _reference_product_version() -> str:
+def _product_version(path: Path) -> str:
+    """Версия именно этого файла.
+
+    У системных exe версия берётся из языкового ``.mui`` рядом с файлом, поэтому
+    у копии без него она другая: сверять нужно с самой копией.
+    """
     completed = subprocess.run(
         [
             "powershell",
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            f"(Get-Item -LiteralPath '{REFERENCE_EXE}').VersionInfo.ProductVersion",
+            f"(Get-Item -LiteralPath '{path}').VersionInfo.ProductVersion",
         ],
         capture_output=True,
         text=True,
@@ -52,22 +57,32 @@ class WatchdogExecutionTests(unittest.TestCase):
         (self.install_root / "_internal").mkdir(parents=True)
         # Копия системного файла подменяет приложение: у неё есть настоящая
         # ProductVersion, а значит наблюдатель может её сверить.
-        shutil.copy2(REFERENCE_EXE, self.install_root / "_internal" / "Zapret.exe")
-        self.installed_version = _reference_product_version()
+        application = self.install_root / "_internal" / "Zapret.exe"
+        shutil.copy2(REFERENCE_EXE, application)
+        self.installed_version = _product_version(application)
         self.script_path = update_watchdog.install_watchdog_script(
-            self.state_dir / "update_watchdog.ps1"
+            self.state_dir / "watchdog.ps1"
         )
         self.state_path = self.state_dir / "handoff.json"
 
-    def _write_state(self, *, version: str, installer_arguments: list[str]) -> None:
+    def _write_state(
+        self,
+        *,
+        version: str,
+        installer_arguments: list[str],
+        installer_path: str = r"C:\Windows\System32\cmd.exe",
+        installer_sha256: str = "",
+        state: str = "prepared",
+    ) -> None:
         self.state_path.write_text(
             json.dumps(
                 {
-                    "schema_version": 1,
-                    "state": "prepared",
+                    "schema_version": 2,
+                    "state": state,
                     "version": version,
                     "target_root": str(self.install_root),
-                    "installer_path": r"C:\Windows\System32\cmd.exe",
+                    "installer_path": installer_path,
+                    "installer_sha256": installer_sha256,
                     "arguments": installer_arguments,
                     "gui_pid": 0,
                     "installer_exit_code": None,
@@ -80,10 +95,11 @@ class WatchdogExecutionTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _run_watchdog(self) -> int:
+    def _run_watchdog(self, *, recovery: bool = False) -> int:
         command = update_watchdog.build_watchdog_command(
             script_path=self.script_path,
             state_path=self.state_path,
+            recovery=recovery,
         )
         # Без -Unattended наблюдатель показал бы модальное сообщение и открыл
         # установщик: тест ждал бы человека у экрана.
@@ -128,7 +144,7 @@ class WatchdogExecutionTests(unittest.TestCase):
             return process
 
         with patch.object(update_watchdog.subprocess, "Popen", side_effect=capture_process):
-            self.assertTrue(update_watchdog._spawn_background(command))
+            self.assertTrue(update_watchdog.spawn_background(command))
             deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline and not ready_path.exists():
                 time.sleep(0.05)
@@ -177,6 +193,121 @@ class WatchdogExecutionTests(unittest.TestCase):
         stored = self._stored_state()
         self.assertEqual(stored["state"], "failed")
         self.assertIn("версия на диске не изменилась", stored["error"])
+
+
+    def test_installer_child_process_does_not_hold_the_watchdog(self) -> None:
+        """Установщик в конце запускает новую программу и выходит.
+
+        ``Start-Process -Wait`` ждал бы и этого потомка, то есть до закрытия
+        программы пользователем, и итог обновления так и не записывался.
+        """
+        powershell = shutil.which("powershell") or "powershell"
+        self._write_state(
+            version=self.installed_version,
+            installer_path=powershell,
+            installer_arguments=[
+                "-NoProfile",
+                "-Command",
+                "Start-Process ping -ArgumentList '-n','40','127.0.0.1' -WindowStyle Hidden; exit 0",
+            ],
+        )
+
+        started = time.monotonic()
+        self.assertEqual(self._run_watchdog(), 0)
+        elapsed = time.monotonic() - started
+
+        self.assertLess(elapsed, 30.0, "наблюдатель ждал потомка установщика")
+        self.assertEqual(self._stored_state()["state"], "succeeded")
+
+    def test_directory_with_spaces_reaches_installer_as_one_argument(self) -> None:
+        probe = self.state_dir / "args-probe.ps1"
+        probe.write_text(
+            "param([string]$Out)\n"
+            "[System.IO.File]::WriteAllText($Out, ($args -join '|'))\n",
+            encoding="utf-8-sig",
+        )
+        output = self.state_dir / "args.txt"
+        target = r"/DIR=C:\Program Files\Zapret"
+        self._write_state(
+            version=self.installed_version,
+            installer_path=shutil.which("powershell") or "powershell",
+            installer_arguments=[
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(probe),
+                "-Out",
+                str(output),
+                target,
+            ],
+        )
+
+        self.assertEqual(self._run_watchdog(), 0)
+        self.assertEqual(output.read_text(encoding="utf-8"), target)
+
+    def test_state_is_written_without_bom(self) -> None:
+        self._write_state(
+            version=self.installed_version,
+            installer_arguments=["/c", "exit", "0"],
+        )
+
+        self._run_watchdog()
+
+        self.assertFalse(self.state_path.read_bytes().startswith(b"\xef\xbb\xbf"))
+
+    def test_cancelled_update_does_not_start_installer(self) -> None:
+        """Приложение отменило обновление, пока наблюдатель запускался."""
+        marker = self.state_dir / "installer-ran.txt"
+        self._write_state(
+            version=self.installed_version,
+            installer_arguments=["/c", "echo", "ran", ">", str(marker)],
+            state="failed",
+        )
+
+        self.assertEqual(self._run_watchdog(), 0)
+
+        self.assertFalse(marker.exists())
+        self.assertEqual(self._stored_state()["state"], "failed")
+
+    def test_changed_installer_is_not_started(self) -> None:
+        marker = self.state_dir / "installer-ran.txt"
+        self._write_state(
+            version=self.installed_version,
+            installer_arguments=["/c", "echo", "ran", ">", str(marker)],
+            installer_sha256="00" * 32,
+        )
+
+        self.assertEqual(self._run_watchdog(), 1)
+
+        self.assertFalse(marker.exists())
+        self.assertIn("изменён", self._stored_state()["error"])
+
+    def test_recovery_never_downgrades_newer_installation(self) -> None:
+        """Пользователь уже обновился дальше: старый установщик ставить нельзя."""
+        marker = self.state_dir / "installer-ran.txt"
+        self._write_state(
+            version="1.0.0.0",
+            installer_arguments=["/c", "echo", "ran", ">", str(marker)],
+            state="launched",
+        )
+
+        self.assertEqual(self._run_watchdog(recovery=True), 0)
+
+        self.assertFalse(marker.exists())
+        self.assertEqual(self._stored_state()["state"], "succeeded")
+
+    def test_recovery_ignores_settled_update(self) -> None:
+        marker = self.state_dir / "installer-ran.txt"
+        self._write_state(
+            version="99.99.99.99",
+            installer_arguments=["/c", "echo", "ran", ">", str(marker)],
+            state="failed",
+        )
+
+        self.assertEqual(self._run_watchdog(recovery=True), 0)
+
+        self.assertFalse(marker.exists())
 
 
 if __name__ == "__main__":

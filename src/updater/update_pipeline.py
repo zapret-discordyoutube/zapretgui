@@ -7,7 +7,6 @@ QObject-ы приложения. Они выполняют только сеть
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import tempfile
@@ -16,33 +15,25 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
 from typing import Callable
 
 import requests
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from config.build_info import APP_VERSION, CHANNEL
-from config.runtime_layout import APPLICATION_PATHS
 from log.log import log
 from utils.file_digest import sha256_file
 
-from . import update_paths
-from .forgejo_release import normalize_version
-from .handoff_state import HandoffState, UpdateHandoffRecord
+from .install.launcher import InstallerHandoff, stage_installer, start_supervised_installation
 from .network_hints import maybe_log_disable_dpi_for_update
-from .recovery_hook import build_recovery_command, clear_recovery_hook, set_recovery_hook
 from .release_contract import ReleaseArtifactMetadata
 from .release_manager import get_latest_release
-from .update import compare_versions
-from .update_watchdog import build_watchdog_command, launch_update_watchdog
+from .versions import compare_versions, normalize_version
 
 
 NUM_SEGMENTS = 4
 CHUNK_SIZE = 1024 * 1024
 PROGRESS_INTERVAL_SECONDS = 0.25
-CACHED_INSTALLER_NAME = update_paths.CACHED_INSTALLER_NAME
-CACHED_INSTALLER_META_NAME = update_paths.CACHED_INSTALLER_META_NAME
 
 
 class UpdateStage(StrEnum):
@@ -86,13 +77,6 @@ class UpdateArtifact:
 class UpdatePreflightResult:
     artifact: UpdateArtifact
     connectivity_ok: bool
-
-
-@dataclass(frozen=True, slots=True)
-class InstallerHandoff:
-    version: str
-    installer_path: str
-    arguments: tuple[str, ...]
 
 
 class CancellationToken:
@@ -502,128 +486,6 @@ def verify_artifact(
     log(f"✅ SHA-256 установщика проверен: {actual_sha256}", "🔁 UPDATE")
 
 
-def cached_installer_path() -> Path:
-    return update_paths.cached_installer_path()
-
-
-def cached_installer_meta_path() -> Path:
-    return update_paths.cached_installer_meta_path()
-
-
-def read_cached_installer_meta() -> dict:
-    """Метаданные последнего сохранённого установщика.
-
-    Нужны восстановлению поставки: по ним видно, какой версии лежит файл и
-    какой у него SHA-256, поэтому починка возможна без сети — а без движка
-    сеть у пользователя как раз может не работать.
-    """
-    try:
-        raw = cached_installer_meta_path().read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return {}
-    try:
-        payload = json.loads(raw)
-    except (ValueError, TypeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def installer_arguments(*, log_name: str = update_paths.SETUP_LOG_NAME) -> tuple[str, ...]:
-    """Единственный набор аргументов Inno Setup для установки без вопросов.
-
-    ``/SUPPRESSMSGBOXES`` здесь недопустим: в Inno он означает ответ Abort в
-    ситуациях Abort/Retry, то есть превращает сбой распаковки в молчаливый
-    выход без единого сообщения. ``/SILENT`` вместо ``/VERYSILENT`` оставляет
-    пользователю полосу прогресса и текст любой ошибки установщика.
-    """
-    setup_log = update_paths.setup_log_path(log_name)
-    return (
-        "/AUTOUPDATE",
-        "/SILENT",
-        "/NORESTART",
-        "/NOCANCEL",
-        "/CLOSEAPPLICATIONS",
-        f"/DIR={APPLICATION_PATHS.root}",
-        f"/LOG={setup_log}",
-    )
-
-
-def prepare_handoff(
-    artifact: UpdateArtifact,
-    downloaded_path: str,
-    token: CancellationToken,
-) -> InstallerHandoff:
-    """Копирует уже проверенный файл в каталог, переживающий переустановку."""
-    token.checkpoint()
-    persistent_dir = update_paths.update_state_dir()
-    persistent_path = persistent_dir / update_paths.CACHED_INSTALLER_NAME
-    temporary_path = persistent_path.with_suffix(".exe.new")
-
-    try:
-        temporary_path.unlink(missing_ok=True)
-        shutil.copy2(downloaded_path, temporary_path)
-        token.checkpoint()
-        os.replace(temporary_path, persistent_path)
-    finally:
-        temporary_path.unlink(missing_ok=True)
-
-    try:
-        cached_installer_meta_path().write_text(
-            json.dumps(
-                {
-                    "version": artifact.version,
-                    "sha256": artifact.expected_sha256,
-                    "size": int(artifact.expected_size),
-                },
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        log(f"Не удалось сохранить метаданные установщика: {exc}", "WARNING")
-
-    return InstallerHandoff(
-        version=artifact.version,
-        installer_path=str(persistent_path),
-        arguments=installer_arguments(),
-    )
-
-
-def start_supervised_installation(handoff: InstallerHandoff) -> bool:
-    """Передаёт установку наблюдателю и ставит системную страховку.
-
-    Приложение закрывается сразу после этого вызова, поэтому исход установки
-    больше некому увидеть: наблюдатель — единственный участник, который
-    дождётся кода возврата установщика и сверит версию на диске. Страховка в
-    ``RunOnce`` покрывает случай, когда не выживет и он.
-    """
-    record = UpdateHandoffRecord(
-        state=HandoffState.PREPARED,
-        version=handoff.version,
-        target_root=str(APPLICATION_PATHS.root),
-        installer_path=handoff.installer_path,
-        arguments=tuple(handoff.arguments),
-    )
-
-    hook_command = build_recovery_command(
-        build_watchdog_command(
-            script_path=update_paths.watchdog_script_path(),
-            state_path=update_paths.handoff_state_path(),
-            recovery=True,
-        )
-    )
-    hook_set = set_recovery_hook(hook_command)
-
-    if launch_update_watchdog(record):
-        return True
-
-    # Наблюдатель не поднялся, установка не начнётся — страховка стала бы
-    # обещанием восстановить то, чего никто не ломал.
-    if hook_set:
-        clear_recovery_hook()
-    return False
-
-
 class UpdatePipeline:
     """Единый сетевой/файловый конвейер без зависимостей от GUI и runtime."""
 
@@ -667,7 +529,13 @@ class UpdatePipeline:
 
             self._token.checkpoint()
             _emit_stage(self._on_stage, UpdateStage.HANDOFF, "Подготовка установщика…")
-            return prepare_handoff(artifact, destination, self._token)
+            return stage_installer(
+                destination,
+                version=artifact.version,
+                sha256=artifact.expected_sha256,
+                size=artifact.expected_size,
+                checkpoint=self._token.checkpoint,
+            )
         finally:
             shutil.rmtree(temporary_dir, ignore_errors=True)
 
@@ -821,15 +689,9 @@ __all__ = [
     "UpdatePreflightWorker",
     "UpdateStage",
     "build_download_sources",
-    "cached_installer_meta_path",
-    "cached_installer_path",
     "download_source",
     "file_sha256",
-    "installer_arguments",
-    "read_cached_installer_meta",
-    "prepare_handoff",
     "prepare_update",
-    "start_supervised_installation",
     "test_connectivity",
     "verify_artifact",
 ]

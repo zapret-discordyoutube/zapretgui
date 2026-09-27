@@ -15,7 +15,6 @@ import re
 import time
 
 import requests
-from packaging import version
 
 from log.log import log
 
@@ -23,6 +22,7 @@ from .channel_utils import is_dev_release_asset_name, normalize_update_channel
 from .forgejo_cache_storage import load_forgejo_cache, save_forgejo_cache
 from .network_hints import maybe_log_disable_dpi_for_update
 from .proxy_bypass import request_get_bypass_proxy
+from .versions import normalize_version, version_key
 
 
 FORGEJO_ORIGIN = "https://git.zapret.moe"
@@ -39,25 +39,6 @@ MAX_SIDECAR_BYTES = 4096
 _SHA256_LINE_RE = re.compile(r"\A([0-9a-fA-F]{64})  ([^\r\n]+)\r?\n?\Z")
 _forgejo_cache: Dict[str, Tuple[Any, float]] = {}
 _all_releases_cache: Tuple[List[Dict[str, Any]], float] = ([], 0)
-
-
-def normalize_version(ver_str: str) -> str:
-    value = str(ver_str or "").strip()
-    if value.startswith(("v", "V")):
-        value = value[1:]
-    parts = value.split(".")
-    if len(parts) < 2 or any(not part.isdigit() for part in parts):
-        raise ValueError(f"Invalid version format: {value}")
-    return value
-
-
-def compare_versions(v1: str, v2: str) -> int:
-    try:
-        first = version.parse(v1)
-        second = version.parse(v2)
-        return -1 if first < second else (1 if first > second else 0)
-    except Exception:
-        return -1 if v1 < v2 else (1 if v1 > v2 else 0)
 
 
 def _load_persistent_cache() -> None:
@@ -246,7 +227,7 @@ def get_latest_release(channel: str) -> Optional[dict]:
         for item in get_all_releases_with_exe()
         if item.get("prerelease") or is_dev_release_asset_name(item.get("file_name", ""))
     ]
-    releases.sort(key=lambda item: version.parse(item["version"]), reverse=True)
+    releases.sort(key=lambda item: version_key(item["version"]), reverse=True)
     return releases[0] if releases else None
 
 
@@ -261,8 +242,6 @@ def check_api() -> Dict[str, Any]:
 __all__ = [
     "FORGEJO_API_URL",
     "check_api",
-    "compare_versions",
     "get_all_releases_with_exe",
     "get_latest_release",
-    "normalize_version",
 ]

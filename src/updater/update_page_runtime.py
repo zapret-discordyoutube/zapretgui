@@ -1612,7 +1612,7 @@ class UpdatePageRuntime(QObject):
 
         version = version_info.get("version", "")
         try:
-            from updater.update import compare_versions
+            from updater.versions import compare_versions
 
             if compare_versions(self._app_version(), version) < 0:
                 self._set_found_update_state(

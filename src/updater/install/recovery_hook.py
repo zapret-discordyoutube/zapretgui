@@ -8,13 +8,17 @@ from __future__ import annotations
 следующем входе в систему восстановление проверит, стоит ли ожидаемая версия,
 и при необходимости доведёт установку.
 
-Запись ставится до начала установки и снимается наблюдателем только после
-подтверждённого успеха.
+Запись ставится до начала установки. Снимает её наблюдатель, как только
+исход известен, либо приложение при следующем запуске.
 """
 
 import subprocess
-import winreg
 from collections.abc import Sequence
+
+try:
+    import winreg
+except ImportError:  # не Windows: реестра нет, страховка просто не ставится
+    winreg = None
 
 from log.log import log
 
@@ -34,6 +38,8 @@ def set_recovery_hook(command: Sequence[str] | str) -> bool:
     if not str(command_line).strip():
         return False
 
+    if winreg is None:
+        return False
     try:
         with winreg.CreateKeyEx(
             winreg.HKEY_LOCAL_MACHINE,
@@ -52,6 +58,8 @@ def set_recovery_hook(command: Sequence[str] | str) -> bool:
 
 def clear_recovery_hook() -> bool:
     """Снимает запись восстановления. True, если её больше нет."""
+    if winreg is None:
+        return True
     try:
         with winreg.CreateKeyEx(
             winreg.HKEY_LOCAL_MACHINE,

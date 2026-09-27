@@ -18,10 +18,8 @@ from .server_config import (
 )
 from .server_pool import get_server_pool  # ✅ НОВЫЙ ИМПОРТ
 
-from .forgejo_release import (
-    get_latest_release as forgejo_get_latest_release,
-    normalize_version,
-)
+from .forgejo_release import get_latest_release as forgejo_get_latest_release
+from .versions import normalize_version
 from .channel_utils import (
     normalize_update_channel,
     is_dev_update_channel,

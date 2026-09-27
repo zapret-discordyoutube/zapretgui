@@ -169,7 +169,7 @@ def install_update_check(
         if not is_startup_host_alive(startup_host):
             return
         try:
-            from updater.interrupted_update import (
+            from updater.install.interrupted import (
                 describe_interrupted_update,
                 detect_interrupted_update,
             )
@@ -195,10 +195,23 @@ def install_update_check(
         except Exception as exc:
             log(f"Не удалось разобрать состояние прошлого обновления: {exc}", "❌ ERROR")
 
+    def _retire_legacy_update_watchdog() -> None:
+        try:
+            from updater.install.watchdog import retire_legacy_watchdog
+
+            retire_legacy_watchdog()
+        except Exception as exc:
+            log(f"Не удалось убрать прежний наблюдатель обновления: {exc}", "WARNING")
+
     def _schedule_startup_update_check_deferred() -> None:
         if not is_startup_host_alive(startup_host):
             return
         _report_interrupted_update()
+        enqueue_subsystem_task(
+            "update",
+            "LegacyUpdateWatchdogCleanup",
+            _retire_legacy_update_watchdog,
+        )
         delay_ms = 12000
         log(f"Автопроверка обновлений отложена на {delay_ms}ms после готовности UI", "DEBUG")
         schedule_after(

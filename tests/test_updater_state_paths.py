@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 
 from config.runtime_layout import paths_overlap, resolve_update_state_dir
-from updater import update_paths
+from updater.install import paths as update_paths
 
 
 class UpdateStateDirectoryTests(unittest.TestCase):
@@ -115,10 +115,55 @@ class ResolvedStateDirectoryTests(unittest.TestCase):
                     update_paths.setup_log_path(),
                     update_paths.watchdog_script_path(),
                     update_paths.watchdog_log_path(),
+                    update_paths.legacy_watchdog_script_path(),
                 )
 
             self.assertEqual({path.parent for path in paths}, {preferred})
             self.assertEqual(len({path.name for path in paths}), len(paths))
+
+
+class StateDirectoryHardeningTests(unittest.TestCase):
+    """Каталог в %ProgramData% закрывается от записи обычными пользователями.
+
+    Иначе пользователь мог подложить туда файл, который приложение затем
+    запустило бы или перезаписало с правами администратора.
+    """
+
+    def test_owner_is_taken_before_access_list_is_replaced(self) -> None:
+        commands = update_paths.build_harden_commands(r"C:\ProgramData\Zapret\update\dev")
+
+        self.assertEqual(len(commands), 3)
+        # Сначала закрывается сам каталог: новые файлы подложить уже нельзя.
+        self.assertIn("/inheritance:r", commands[0])
+        self.assertIn("/setowner", commands[1])
+        self.assertIn("*S-1-5-32-544", commands[1])
+        self.assertIn("/reset", commands[2])
+        self.assertTrue(commands[2][1].endswith("*"), "сбрасывать нужно содержимое, не сам каталог")
+
+    def test_explicit_grants_are_not_forced_onto_files(self) -> None:
+        """С ``/T`` файлы получали пустой список прав и становились нечитаемыми."""
+        grants = update_paths.build_harden_commands("state")[0]
+
+        self.assertNotIn("/T", grants)
+
+    def test_users_only_read_while_system_and_administrators_write(self) -> None:
+        grants = update_paths.build_harden_commands("state")[0]
+
+        self.assertIn("*S-1-5-18:(OI)(CI)F", grants)
+        self.assertIn("*S-1-5-32-544:(OI)(CI)F", grants)
+        self.assertIn("*S-1-5-32-545:(OI)(CI)RX", grants)
+        self.assertFalse(any("S-1-5-32-545:(OI)(CI)F" in item for item in grants))
+
+    def test_only_program_data_is_hardened(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            program_data = Path(temp_dir) / "ProgramData"
+            with patch.dict("os.environ", {"ProgramData": str(program_data)}):
+                self.assertTrue(
+                    update_paths._is_inside_program_data(program_data / "Zapret" / "update")
+                )
+                self.assertFalse(
+                    update_paths._is_inside_program_data(Path(temp_dir) / "LocalAppData")
+                )
 
 
 class InstallerArgumentsTests(unittest.TestCase):
@@ -127,7 +172,7 @@ class InstallerArgumentsTests(unittest.TestCase):
         self.addCleanup(update_paths.reset_update_state_dir_cache)
 
     def _arguments(self, state_dir: Path) -> tuple[str, ...]:
-        from updater.update_pipeline import installer_arguments
+        from updater.install.launcher import installer_arguments
 
         with patch.object(update_paths, "preferred_update_state_dir", return_value=state_dir):
             return installer_arguments()

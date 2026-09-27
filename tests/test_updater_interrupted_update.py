@@ -7,11 +7,14 @@ from __future__ import annotations
 """
 
 from pathlib import Path
+import json
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from updater.handoff_state import HandoffState, UpdateHandoffRecord, write_record
-from updater.interrupted_update import (
+from updater.install import interrupted
+from updater.install.handoff import HandoffState, UpdateHandoffRecord, write_record
+from updater.install.interrupted import (
     describe_interrupted_update,
     detect_interrupted_update,
 )
@@ -103,6 +106,52 @@ class InterruptedUpdateDetectionTests(unittest.TestCase):
 
 
 class InterruptedUpdateStateCleanupTests(unittest.TestCase):
+    def setUp(self) -> None:
+        hook_patch = patch.object(interrupted, "clear_recovery_hook", return_value=True)
+        self.clear_hook = hook_patch.start()
+        self.addCleanup(hook_patch.stop)
+
+    def test_failure_written_by_watchdog_with_bom_is_reported(self) -> None:
+        """Так пишет наблюдатель под Windows PowerShell 5.1.
+
+        Раньше BOM ломал чтение, и о сорвавшемся обновлении программа молчала.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "handoff.json"
+            payload = _record().to_payload()
+            state_path.write_bytes(b"\xef\xbb\xbf" + json.dumps(payload).encode("utf-8"))
+
+            detected = detect_interrupted_update(
+                current_version="21.1.1.3",
+                state_path=state_path,
+            )
+
+        self.assertIsNotNone(detected)
+        self.assertEqual(detected.reason, "установщик вернул код 5")
+
+    def test_record_with_broken_version_is_dropped_not_repeated(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "handoff.json"
+            write_record(_record(version=""), state_path)
+
+            detected = detect_interrupted_update(
+                current_version="21.1.1.3",
+                state_path=state_path,
+            )
+
+            self.assertIsNone(detected)
+            self.assertFalse(state_path.exists())
+
+    def test_settled_update_releases_recovery_hook(self) -> None:
+        """Зависший прежний наблюдатель не снимал страховку сам."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "handoff.json"
+            write_record(_record(state=HandoffState.LAUNCHED), state_path)
+
+            detect_interrupted_update(current_version="21.1.1.4", state_path=state_path)
+
+        self.clear_hook.assert_called_once()
+
     def test_reported_failure_is_not_repeated_next_time(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             state_path = Path(temp_dir) / "handoff.json"
