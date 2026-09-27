@@ -41,7 +41,7 @@ from app.ui_texts import tr as tr_catalog
 from presets.ui.control.top_summary_widget import ControlTopSummaryWidget
 from log.log import log
 
-from ui.widgets.gesture_buttons import GesturePrimaryPushButton, GesturePushButton
+from ui.widgets.soft_visibility import set_visible_softly
 from qfluentwidgets import (
     CaptionLabel, StrongBodyLabel,
     IndeterminateProgressBar, InfoBar,
@@ -200,8 +200,8 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
             caption_label_cls=CaptionLabel,
             indeterminate_progress_bar_cls=IndeterminateProgressBar,
-            big_action_button_cls=GesturePrimaryPushButton,
-            stop_button_cls=GesturePushButton,
+            big_action_button_cls=PrimaryPushButton,
+            stop_button_cls=PushButton,
             on_start=self._start_dpi,
             on_stop=self._stop_dpi,
             on_stop_and_exit=self._stop_and_exit,
@@ -735,8 +735,8 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
 
     def set_loading(self, loading: bool, text: str = ""):
         set_progress_active_if_changed(self.progress_bar, loading)
-        set_visible_if_changed(self.progress_bar, loading)
-        set_visible_if_changed(self.loading_label, loading and bool(text))
+        set_visible_softly(self.progress_bar, loading)
+        set_visible_softly(self.loading_label, loading and bool(text))
         set_text_if_changed(self.loading_label, text)
         set_loading_status_accessibility(self.loading_label, active=loading, text=text)
         set_enabled_if_changed(self.start_btn, not loading)

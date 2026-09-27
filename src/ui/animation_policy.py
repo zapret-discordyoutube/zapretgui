@@ -13,6 +13,23 @@ def are_animations_enabled() -> bool:
         return False
 
 
+def are_live_animations_enabled() -> bool:
+    """Наши лёгкие анимации: логотип, точка статуса, сводка, жесты кнопок.
+
+    Это отдельный от анимаций WinUI переключатель, по умолчанию включён.
+    """
+    try:
+        from settings.appearance import peek_warmed_live_animations_enabled
+        from settings.schema import default_appearance
+
+        value = peek_warmed_live_animations_enabled()
+        if value is None:
+            return bool(default_appearance()["live_animations_enabled"])
+        return bool(value)
+    except Exception:
+        return True
+
+
 def register_managed_animation(animation, duration_ms: int | None = None):
     """Запоминает базовую длительность анимации и сразу применяет текущую policy."""
     try:

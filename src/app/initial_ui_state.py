@@ -25,6 +25,7 @@ def build_initial_ui_state() -> AppUiState:
             store_warmed_animations_enabled,
             store_warmed_background_preset,
             store_warmed_editor_smooth_scroll_enabled,
+            store_warmed_live_animations_enabled,
             store_warmed_premium_effects,
             store_warmed_rkn_background,
             store_warmed_sidebar_icon_style,
@@ -47,6 +48,7 @@ def build_initial_ui_state() -> AppUiState:
         store_warmed_animations_enabled(appearance.get("animations_enabled"))
         store_warmed_smooth_scroll_enabled(appearance.get("smooth_scroll_enabled"))
         store_warmed_editor_smooth_scroll_enabled(appearance.get("editor_smooth_scroll_enabled"))
+        store_warmed_live_animations_enabled(appearance.get("live_animations_enabled"))
         store_warmed_sidebar_icon_style(appearance.get("sidebar_icon_style"))
         store_warmed_premium_effects(appearance.get("garland_enabled"), appearance.get("snowflakes_enabled"))
         from core.runtime.program_settings_runtime_service import store_warmed_tray_close_mode

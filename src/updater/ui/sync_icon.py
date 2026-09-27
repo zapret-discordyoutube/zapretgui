@@ -13,7 +13,7 @@ from PyQt6.QtCore import QEasingCurve, QEvent, QPointF, QRectF, Qt, QTimer, QVar
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import QWidget
 
-from ui.animation_policy import are_animations_enabled
+from ui.animation_policy import are_live_animations_enabled
 
 
 ICON_MODE_IDLE = "idle"
@@ -136,7 +136,7 @@ class UpdateSyncIcon(QWidget):
     def _start_spin_after_show(self) -> None:
         if not self._running_requested or not self.isVisible():
             return
-        if not are_animations_enabled():
+        if not are_live_animations_enabled():
             return
         if not self.is_spinning():
             self._spin.start()

@@ -212,6 +212,7 @@ class AppearancePage(BasePage):
         self._animations_switch = None
         self._smooth_scroll_switch = None
         self._editor_smooth_scroll_switch = None
+        self._live_animations_switch = None
         self._performance_card = None
         self._performance_section_title = None
         self._performance_group = None
@@ -695,12 +696,14 @@ class AppearancePage(BasePage):
             on_animations_changed=self._on_animations_changed,
             on_smooth_scroll_changed=self._on_smooth_scroll_changed,
             on_editor_smooth_scroll_changed=self._on_editor_smooth_scroll_changed,
+            on_live_animations_changed=self._on_live_animations_changed,
         )
         self._performance_card = performance_widgets.performance_card
         self._performance_group = performance_widgets.performance_group
         self._animations_switch = performance_widgets.animations_switch
         self._smooth_scroll_switch = performance_widgets.smooth_scroll_switch
         self._editor_smooth_scroll_switch = performance_widgets.editor_smooth_scroll_switch
+        self._live_animations_switch = performance_widgets.live_animations_switch
         self._apply_initial_performance_state(initial_state)
         self._log_ui_timing("appearance_ui.performance_section.build", section_started_at)
 
@@ -1121,6 +1124,7 @@ class AppearancePage(BasePage):
             animations_switch=self._animations_switch,
             smooth_scroll_switch=self._smooth_scroll_switch,
             editor_smooth_scroll_switch=self._editor_smooth_scroll_switch,
+            live_animations_switch=self._live_animations_switch,
         )
         update_language_combo_accessibility(self._language_combo)
         self._update_accent_color_button_accessibility()
@@ -1775,6 +1779,16 @@ class AppearancePage(BasePage):
         self._request_appearance_save("editor_smooth_scroll_enabled", enabled)
         self._on_editor_smooth_scroll_changed_callback(bool(enabled))
 
+    def _on_live_animations_changed(self, enabled: bool):
+        """Наши лёгкие анимации: сохраняем в фоне, виджеты читают значение сами."""
+        if self._is_ui_syncing():
+            return
+        from settings.appearance import store_warmed_live_animations_enabled
+
+        # Кэш обновляем сразу, чтобы выключение подействовало до конца записи.
+        store_warmed_live_animations_enabled(bool(enabled))
+        self._request_appearance_save("live_animations_enabled", enabled)
+
     def _sync_performance_dependencies(self, animations_enabled: bool) -> None:
         """Редакторская плавность зависит от мастер-переключателя анимаций."""
         if self._editor_smooth_scroll_switch is not None:
@@ -1787,6 +1801,8 @@ class AppearancePage(BasePage):
             self._set_checked_silently(self._smooth_scroll_switch, plan.smooth_scroll_enabled)
         if self._editor_smooth_scroll_switch is not None:
             self._set_checked_silently(self._editor_smooth_scroll_switch, plan.editor_smooth_scroll_enabled)
+        if self._live_animations_switch is not None:
+            self._set_checked_silently(self._live_animations_switch, plan.live_animations_enabled)
         self._sync_performance_dependencies(plan.animations_enabled)
 
     def _is_current_worker_finish(self, runtime, worker) -> bool:

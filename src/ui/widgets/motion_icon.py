@@ -13,7 +13,7 @@ from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, QVariantAnimation
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPixmap, QRadialGradient
 from PyQt6.QtWidgets import QWidget
 
-from ui.animation_policy import are_animations_enabled
+from ui.animation_policy import are_live_animations_enabled
 
 
 BOUNCE_DURATION_MS = 560
@@ -95,7 +95,7 @@ class MotionIcon(QWidget):
         window = self.window()
         if window is not None and window.isMinimized():
             return False
-        return are_animations_enabled()
+        return are_live_animations_enabled()
 
     def _play(self, gesture: str, duration_ms: int) -> None:
         if not self._can_animate():
@@ -165,8 +165,8 @@ class MotionIcon(QWidget):
         if self._gesture == GESTURE_TWINKLE:
             # Звезда чуть подрастает, покачивается и по ней проходит блик.
             wave = math.sin(math.pi * t)
-            tilt = 14.0 * math.sin(2.0 * math.pi * t) * (1.0 - t)
-            return 0.0, 1.0 + 0.14 * wave, tilt, wave
+            tilt = 20.0 * math.sin(2.0 * math.pi * t) * (1.0 - t)
+            return 0.0, 1.0 + 0.24 * wave, tilt, wave
         return 0.0, 1.0, 0.0, 0.0
 
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -183,7 +183,7 @@ class MotionIcon(QWidget):
             radius = side / 2
             gradient = QRadialGradient(center, radius)
             inner = QColor(self._glow)
-            inner.setAlphaF(0.5 + 0.25 * sparkle)
+            inner.setAlphaF(0.45 + 0.45 * sparkle)
             outer = QColor(self._glow)
             outer.setAlphaF(0.0)
             gradient.setColorAt(0.0, inner)
@@ -207,7 +207,7 @@ class MotionIcon(QWidget):
             # Маленькая четырёхлучевая искра у правого верхнего кончика.
             spark = QColor(255, 255, 255)
             spark.setAlphaF(min(1.0, sparkle))
-            r = side * 0.2 * sparkle
+            r = side * 0.28 * sparkle
             cx, cy = center.x() + side * 0.3, center.y() - side * 0.3
             path = QPainterPath()
             path.moveTo(cx, cy - r)

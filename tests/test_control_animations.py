@@ -11,12 +11,12 @@ from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 import presets.ui.control.top_summary_widget as summary_module
 import ui.pulsing_dot as dot_module
-import ui.widgets.gesture_buttons as buttons_module
 import ui.widgets.motion_icon as motion_module
+import ui.widgets.soft_visibility as soft_module
+from ui.widgets.soft_visibility import set_visible_softly, soft_visibility_target
 from donater.premium_display import TIER_ACTIVE, TIER_FREE, PremiumDisplay
 from presets.ui.control.top_summary_widget import ControlTopSummaryWidget
 from ui.pulsing_dot import PulsingDot
-from ui.widgets.gesture_buttons import ICON_GESTURE_SQUEEZE, GesturePushButton
 from ui.widgets.motion_icon import GESTURE_BOUNCE, MotionIcon
 
 
@@ -28,7 +28,7 @@ def _host(test: unittest.TestCase, child: QWidget) -> QWidget:
 
 
 def _animations(enabled: bool, *modules):
-    patches = [mock.patch.object(module, "are_animations_enabled", return_value=enabled) for module in modules]
+    patches = [mock.patch.object(module, "are_live_animations_enabled", return_value=enabled) for module in modules]
     for patcher in patches:
         patcher.start()
     return patches
@@ -105,8 +105,10 @@ class PulsingDotTests(unittest.TestCase):
         host.show()
         dot.set_color("#4caf50")
         self.assertEqual(dot._fade.state(), dot._fade.State.Running)
-        dot._fade.setCurrentTime(dot._fade.duration())
         self.assertEqual(dot._color, QColor("#4caf50"))
+        self.assertNotEqual(dot._shown_color, QColor("#4caf50"))
+        dot._fade.setCurrentTime(dot._fade.duration())
+        self.assertEqual(dot._shown_color, QColor("#4caf50"))
 
 
 class MotionIconTests(unittest.TestCase):
@@ -184,36 +186,151 @@ class ControlTopSummaryAnimationTests(unittest.TestCase):
         self.assertEqual(star.gesture(), GESTURE_BOUNCE)
 
 
-class GestureButtonTests(unittest.TestCase):
+class ControlTopSummaryPendingChangeTests(unittest.TestCase):
+    """Пресет переключили на другой странице — изменение видно при возврате."""
+
     @classmethod
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
-    def test_click_plays_icon_gesture(self) -> None:
-        patches = _animations(True, buttons_module)
+    def setUp(self) -> None:
+        self._patches = _animations(True, summary_module, motion_module)
+        self.addCleanup(lambda: [p.stop() for p in self._patches])
+        self.summary = ControlTopSummaryWidget(language="ru", mode_value="Zapret 2")
+        self.host = _host(self, self.summary)
+        self.host.show()
+        self.summary.set_preset("Default v1")
+        self.summary.set_profile_count(70)
+
+    def test_change_while_hidden_plays_after_return(self) -> None:
+        self.host.hide()
+        self.summary.set_preset("general ALT3")
+        self.summary.set_profile_count(None)
+        self.summary.set_profile_count(64)
+
+        self.assertTrue(self.summary.has_pending_changes())
+        self.assertFalse(self.summary.preset_item.is_change_playing())
+
+        self.host.show()
+        self.assertTrue(self.summary._pending_timer.isActive())
+        self.summary._pending_timer.stop()
+        self.summary._play_pending_changes()
+
+        self.assertFalse(self.summary.has_pending_changes())
+        self.assertTrue(self.summary.preset_item.is_change_playing())
+        self.assertTrue(self.summary.profiles_item.is_change_playing())
+        roll = self.summary._profile_roll
+        # Счёт идёт от числа, которое было до переключения, а не от «Проверяем...».
+        self.assertEqual(roll.startValue(), 70.0)
+        self.assertEqual(roll.endValue(), 64.0)
+
+    def test_visible_change_plays_immediately_and_cleans_up(self) -> None:
+        self.summary.set_preset("general ALT3")
+
+        item = self.summary.preset_item
+        self.assertTrue(item.is_change_playing())
+        self.assertIsNotNone(item._value_label.graphicsEffect())
+
+        pop = item._change_pop
+        pop.setCurrentTime(pop.duration())
+        self.assertFalse(item.is_change_playing())
+        self.assertIsNone(item._value_label.graphicsEffect())
+
+    def test_nothing_is_remembered_when_live_animations_are_off(self) -> None:
+        for patcher in self._patches:
+            patcher.stop()
+        self._patches = _animations(False, summary_module, motion_module)
+        self.host.hide()
+        self.summary.set_preset("general ALT3")
+        self.summary.set_profile_count(64)
+
+        self.assertFalse(self.summary.has_pending_changes())
+
+
+class LiveAnimationsSettingTests(unittest.TestCase):
+    def test_live_animations_are_on_by_default_and_separate_from_winui(self) -> None:
+        from settings import schema
+        from settings.normalize import normalize_settings
+
+        defaults = schema.default_appearance()
+        self.assertTrue(defaults["live_animations_enabled"])
+        self.assertFalse(defaults["animations_enabled"])
+        normalized = normalize_settings({"appearance": {}})
+        self.assertTrue(normalized["appearance"]["live_animations_enabled"])
+        normalized = normalize_settings({"appearance": {"live_animations_enabled": False}})
+        self.assertFalse(normalized["appearance"]["live_animations_enabled"])
+
+    def test_policy_reads_warmed_value_and_defaults_to_on(self) -> None:
+        from settings import appearance
+        from ui.animation_policy import are_live_animations_enabled
+
+        self.addCleanup(appearance.clear_warmed_live_animations_enabled_cache)
+        appearance.clear_warmed_live_animations_enabled_cache()
+        self.assertTrue(are_live_animations_enabled())
+        appearance.store_warmed_live_animations_enabled(False)
+        self.assertFalse(are_live_animations_enabled())
+
+
+class SoftVisibilityTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def _make(self, enabled: bool = True):
+        patches = _animations(enabled, soft_module)
         self.addCleanup(lambda: [p.stop() for p in patches])
-        button = GesturePushButton("Стоп")
-        _host(self, button).show()
-        button.set_icon_gesture(ICON_GESTURE_SQUEEZE)
+        button = QWidget()
+        host = _host(self, button)
+        host.show()
+        return button
 
-        button.click()
+    def test_hide_fades_out_before_hiding(self) -> None:
+        button = self._make()
 
-        self.assertTrue(button.is_icon_gesture_running())
-        anim = button._icon_gesture_anim
-        anim.setCurrentTime(anim.duration() // 5)
-        _dx, scale, _angle = button._icon_gesture_transform()
-        self.assertLess(scale, 1.0)
+        self.assertTrue(set_visible_softly(button, False))
 
-    def test_no_gesture_when_animations_are_disabled(self) -> None:
-        patches = _animations(False, buttons_module)
-        self.addCleanup(lambda: [p.stop() for p in patches])
-        button = GesturePushButton("Стоп")
-        _host(self, button).show()
-        button.set_icon_gesture(ICON_GESTURE_SQUEEZE)
+        # Пока затухает, кнопка ещё на экране, но цель уже «скрыта».
+        self.assertFalse(button.isHidden())
+        self.assertFalse(soft_visibility_target(button))
+        self.assertFalse(set_visible_softly(button, False))
 
-        button.click()
+        anim = button._zapret_soft_visibility.anim
+        anim.setCurrentTime(anim.duration())
+        self.assertTrue(button.isHidden())
+        self.assertIsNone(button.graphicsEffect())
 
-        self.assertFalse(button.is_icon_gesture_running())
+    def test_show_waits_for_neighbour_then_fades_in(self) -> None:
+        button = self._make()
+        button.hide()
+
+        self.assertTrue(set_visible_softly(button, True))
+        state = button._zapret_soft_visibility
+        self.assertTrue(button.isHidden())
+        self.assertTrue(state.delay.isActive())
+
+        state.delay.stop()
+        soft_module._begin_fade_in(button)
+        self.assertFalse(button.isHidden())
+        self.assertIsNotNone(button.graphicsEffect())
+        state.anim.setCurrentTime(state.anim.duration())
+        self.assertIsNone(button.graphicsEffect())
+
+    def test_switching_back_during_fade_out_keeps_widget(self) -> None:
+        button = self._make()
+        set_visible_softly(button, False)
+        set_visible_softly(button, True)
+
+        anim = button._zapret_soft_visibility.anim
+        anim.setCurrentTime(anim.duration())
+        self.assertFalse(button.isHidden())
+
+    def test_immediate_when_live_animations_are_off(self) -> None:
+        button = self._make(enabled=False)
+
+        set_visible_softly(button, False)
+
+        self.assertTrue(button.isHidden())
+        self.assertIsNone(button.graphicsEffect())
 
 
 if __name__ == "__main__":

@@ -331,6 +331,7 @@ def normalize_appearance(data: object) -> dict[str, Any]:
         "animations_enabled": as_bool(raw.get("animations_enabled"), defaults["animations_enabled"]),
         "smooth_scroll_enabled": as_bool(raw.get("smooth_scroll_enabled"), defaults["smooth_scroll_enabled"]),
         "editor_smooth_scroll_enabled": as_bool(raw.get("editor_smooth_scroll_enabled"), defaults["editor_smooth_scroll_enabled"]),
+        "live_animations_enabled": as_bool(raw.get("live_animations_enabled"), defaults["live_animations_enabled"]),
         "sidebar_icon_style": as_str_in(
             raw.get("sidebar_icon_style"),
             schema.VALID_SIDEBAR_ICON_STYLES,

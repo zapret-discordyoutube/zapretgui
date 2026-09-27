@@ -53,6 +53,7 @@ class AppearanceSettingsSaveWorker(QThread):
         save_animations_enabled,
         save_smooth_scroll_enabled,
         save_editor_smooth_scroll_enabled,
+        save_live_animations_enabled,
         save_sidebar_icon_style,
         load_tinted_settings,
         load_editor_smooth_scroll_enabled,
@@ -77,6 +78,7 @@ class AppearanceSettingsSaveWorker(QThread):
         self._save_animations_enabled = save_animations_enabled
         self._save_smooth_scroll_enabled = save_smooth_scroll_enabled
         self._save_editor_smooth_scroll_enabled = save_editor_smooth_scroll_enabled
+        self._save_live_animations_enabled = save_live_animations_enabled
         self._save_sidebar_icon_style = save_sidebar_icon_style
         self._load_tinted_settings = load_tinted_settings
         self._load_editor_smooth_scroll_enabled = load_editor_smooth_scroll_enabled
@@ -119,6 +121,8 @@ class AppearanceSettingsSaveWorker(QThread):
                 result = self._save_smooth_scroll_enabled(bool(self._value))
             elif self._action == "editor_smooth_scroll_enabled":
                 result = self._save_editor_smooth_scroll_enabled(bool(self._value))
+            elif self._action == "live_animations_enabled":
+                result = self._save_live_animations_enabled(bool(self._value))
             elif self._action == "sidebar_icon_style":
                 result = self._save_sidebar_icon_style(str(self._value or "standard"))
             else:

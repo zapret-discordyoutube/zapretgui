@@ -35,6 +35,7 @@ class AppearancePerformanceWidgets:
     animations_switch: object
     smooth_scroll_switch: object
     editor_smooth_scroll_switch: object
+    live_animations_switch: object = None
 
 
 def update_holiday_checkbox_accessibility(checkbox, *, title: str) -> None:
@@ -284,12 +285,26 @@ def build_performance_section(
     on_animations_changed,
     on_smooth_scroll_changed,
     on_editor_smooth_scroll_changed,
+    on_live_animations_changed=None,
 ):
     performance_group = settings_card_group_cls(
         tr_catalog("page.appearance.section.performance", language=tr_language, default="Производительность"),
         page.content,
     )
     perf_card = performance_group
+
+    live_animations_switch = toggle_row_cls(
+        "fa5s.magic",
+        tr_catalog("page.appearance.performance.live_animations.title", language=tr_language, default="Живые анимации"),
+        tr_catalog(
+            "page.appearance.performance.live_animations.description",
+            language=tr_language,
+            default="Логотип, точка статуса, сводка на главной и кнопки запуска коротко оживают при изменениях. Почти не нагружает процессор",
+        ),
+    )
+    if on_live_animations_changed is not None:
+        live_animations_switch.toggled.connect(on_live_animations_changed)
+    perf_card.addSettingCard(live_animations_switch)
 
     animations_switch = toggle_row_cls(
         "fa5s.film",
@@ -340,6 +355,7 @@ def build_performance_section(
         animations_switch=animations_switch,
         smooth_scroll_switch=smooth_scroll_switch,
         editor_smooth_scroll_switch=editor_smooth_scroll_switch,
+        live_animations_switch=live_animations_switch,
     )
 
 

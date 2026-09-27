@@ -6,7 +6,7 @@ from PyQt6.QtCore import QElapsedTimer, QEasingCurve, QEvent, QPointF, Qt, QTime
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QWidget
 
-from ui.animation_policy import are_animations_enabled
+from ui.animation_policy import are_live_animations_enabled
 
 
 # Один «удар сердца»: двойной толчок точки (тук-тук) и расходящееся кольцо.
@@ -45,9 +45,11 @@ class PulsingDot(QWidget):
 
     def __init__(self, parent=None, *, size: int = 32):
         super().__init__(parent)
+        # _color — цвет, который точка показывает по смыслу (итоговый);
+        # _shown_color — цвет на экране прямо сейчас, пока идёт перетекание.
         self._color = QColor("#aeb5c1")
+        self._shown_color = QColor(self._color)
         self._color_from = QColor(self._color)
-        self._color_to = QColor(self._color)
         self._pulse_phase = 0.0
         self._is_pulsing = False
 
@@ -76,17 +78,17 @@ class PulsingDot(QWidget):
 
     def set_color(self, color: str) -> None:
         c = QColor(color)
-        if not c.isValid() or c == self._color_to:
+        if not c.isValid() or c == self._color:
             return
-        self._color_to = c
-        if self.isVisible() and are_animations_enabled():
+        self._color = c
+        if self.isVisible() and are_live_animations_enabled():
             # Цвет перетекает, а не переключается скачком: серый → зелёный.
-            self._color_from = QColor(self._color)
+            self._color_from = QColor(self._shown_color)
             self._fade.stop()
             self._fade.start()
         else:
             self._fade.stop()
-            self._color = QColor(c)
+            self._shown_color = QColor(c)
             self.update()
 
     def start_pulse(self) -> None:
@@ -111,7 +113,7 @@ class PulsingDot(QWidget):
         window = self.window()
         if window is not None and window.isMinimized():
             return False
-        return are_animations_enabled()
+        return are_live_animations_enabled()
 
     def _resume(self) -> None:
         if self._can_animate() and not self.is_beating() and not self._rest_timer.isActive():
@@ -151,7 +153,7 @@ class PulsingDot(QWidget):
             t = float(value)
         except (TypeError, ValueError):
             return
-        self._color = _mix(self._color_from, self._color_to, t)
+        self._shown_color = _mix(self._color_from, self._color, t)
         self.update()
 
     def showEvent(self, event) -> None:  # noqa: N802
@@ -162,7 +164,7 @@ class PulsingDot(QWidget):
         super().hideEvent(event)
         self._halt()
         self._fade.stop()
-        self._color = QColor(self._color_to)
+        self._shown_color = QColor(self._color)
 
     def changeEvent(self, event) -> None:  # noqa: N802
         super().changeEvent(event)
@@ -193,20 +195,20 @@ class PulsingDot(QWidget):
         if phase > 0.0:
             # Кольцо стартует от точки и растворяется к краю.
             spread = 1.0 - (1.0 - phase) ** 2
-            ring = QColor(self._color)
+            ring = QColor(self._shown_color)
             ring.setAlphaF(max(0.0, 0.55 * (1.0 - spread)))
             painter.setBrush(ring)
             radius = base_r + ring_room * spread
             painter.drawEllipse(center, radius, radius)
 
-        glow = QColor(self._color)
+        glow = QColor(self._shown_color)
         glow.setAlphaF(0.42 + 0.2 * beat)
         painter.setBrush(glow)
         glow_r = base_r + glow_extra * (1.0 + 0.6 * beat)
         painter.drawEllipse(center, glow_r, glow_r)
 
         core_r = base_r * (1.0 + BEAT_SCALE * beat)
-        painter.setBrush(self._color)
+        painter.setBrush(self._shown_color)
         painter.drawEllipse(center, core_r, core_r)
 
         painter.setBrush(QColor(255, 255, 255, 90))

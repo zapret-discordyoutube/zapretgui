@@ -108,6 +108,7 @@ class AppearancePageInitialStatePlan:
     sidebar_icon_style: str
     garland_enabled: bool
     snowflakes_enabled: bool
+    live_animations_enabled: bool = True
 
 
 _warmed_page_initial_state_lock = threading.Lock()
@@ -130,6 +131,8 @@ _warmed_smooth_scroll_enabled_lock = threading.Lock()
 _warmed_smooth_scroll_enabled_cache: bool | None = None
 _warmed_editor_smooth_scroll_enabled_lock = threading.Lock()
 _warmed_editor_smooth_scroll_enabled_cache: bool | None = None
+_warmed_live_animations_enabled_lock = threading.Lock()
+_warmed_live_animations_enabled_cache: bool | None = None
 _warmed_sidebar_icon_style_lock = threading.Lock()
 _warmed_sidebar_icon_style_cache: str | None = None
 _warmed_premium_effects_lock = threading.Lock()
@@ -326,6 +329,24 @@ def clear_warmed_editor_smooth_scroll_enabled_cache() -> None:
         _warmed_editor_smooth_scroll_enabled_cache = None
 
 
+def store_warmed_live_animations_enabled(enabled: bool | None) -> None:
+    global _warmed_live_animations_enabled_cache
+    normalized = bool(schema.default_appearance()["live_animations_enabled"]) if enabled is None else bool(enabled)
+    with _warmed_live_animations_enabled_lock:
+        _warmed_live_animations_enabled_cache = normalized
+
+
+def peek_warmed_live_animations_enabled() -> bool | None:
+    with _warmed_live_animations_enabled_lock:
+        return _warmed_live_animations_enabled_cache
+
+
+def clear_warmed_live_animations_enabled_cache() -> None:
+    global _warmed_live_animations_enabled_cache
+    with _warmed_live_animations_enabled_lock:
+        _warmed_live_animations_enabled_cache = None
+
+
 def store_warmed_sidebar_icon_style(style: str | None) -> None:
     global _warmed_sidebar_icon_style_cache
     with _warmed_sidebar_icon_style_lock:
@@ -378,6 +399,7 @@ def store_warmed_page_initial_state(state: AppearancePageInitialStatePlan) -> No
     store_warmed_animations_enabled(state.animations_enabled)
     store_warmed_smooth_scroll_enabled(state.smooth_scroll_enabled)
     store_warmed_editor_smooth_scroll_enabled(state.editor_smooth_scroll_enabled)
+    store_warmed_live_animations_enabled(state.live_animations_enabled)
     store_warmed_sidebar_icon_style(state.sidebar_icon_style)
     store_warmed_premium_effects(state.garland_enabled, state.snowflakes_enabled)
 
@@ -412,6 +434,7 @@ def build_default_page_initial_state() -> AppearancePageInitialStatePlan:
         animations_enabled=bool(appearance_defaults["animations_enabled"]),
         smooth_scroll_enabled=bool(appearance_defaults["smooth_scroll_enabled"]),
         editor_smooth_scroll_enabled=bool(appearance_defaults["editor_smooth_scroll_enabled"]),
+        live_animations_enabled=bool(appearance_defaults["live_animations_enabled"]),
         sidebar_icon_style=normalize_sidebar_icon_style(str(appearance_defaults["sidebar_icon_style"])),
         garland_enabled=bool(appearance_defaults["garland_enabled"]),
         snowflakes_enabled=bool(appearance_defaults["snowflakes_enabled"]),
@@ -467,6 +490,7 @@ def load_page_initial_state() -> AppearancePageInitialStatePlan:
         animations_enabled=_plan_bool(appearance, "animations_enabled", bool(appearance_defaults["animations_enabled"])),
         smooth_scroll_enabled=_plan_bool(appearance, "smooth_scroll_enabled", bool(appearance_defaults["smooth_scroll_enabled"])),
         editor_smooth_scroll_enabled=_plan_bool(appearance, "editor_smooth_scroll_enabled", bool(appearance_defaults["editor_smooth_scroll_enabled"])),
+        live_animations_enabled=_plan_bool(appearance, "live_animations_enabled", bool(appearance_defaults["live_animations_enabled"])),
         sidebar_icon_style=normalize_sidebar_icon_style(
             _plan_str(appearance, "sidebar_icon_style", appearance_defaults["sidebar_icon_style"])
         ),
@@ -597,6 +621,13 @@ def save_editor_smooth_scroll_enabled(enabled: bool) -> AppearanceTogglePlan:
 
     set_editor_smooth_scroll_enabled(bool(enabled))
     store_warmed_editor_smooth_scroll_enabled(bool(enabled))
+    return AppearanceTogglePlan(enabled=bool(enabled))
+
+def save_live_animations_enabled(enabled: bool) -> AppearanceTogglePlan:
+    from settings.store import set_live_animations_enabled
+
+    set_live_animations_enabled(bool(enabled))
+    store_warmed_live_animations_enabled(bool(enabled))
     return AppearanceTogglePlan(enabled=bool(enabled))
 
 

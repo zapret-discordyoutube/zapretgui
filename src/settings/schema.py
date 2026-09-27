@@ -94,6 +94,9 @@ def default_appearance() -> dict[str, Any]:
         "animations_enabled": False,
         "smooth_scroll_enabled": False,
         "editor_smooth_scroll_enabled": False,
+        # Наши лёгкие анимации (логотип, точка статуса, сводка, кнопки)
+        # включены по умолчанию и не зависят от анимаций WinUI.
+        "live_animations_enabled": True,
         "sidebar_icon_style": "standard",
         "garland_enabled": False,
         "snowflakes_enabled": False,

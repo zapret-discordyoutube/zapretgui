@@ -11,7 +11,7 @@ from PyQt6.QtGui import QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import QWidget
 
 from ui.accessibility import set_control_accessibility
-from ui.animation_policy import are_animations_enabled
+from ui.animation_policy import are_live_animations_enabled
 
 
 # Непрозрачные края логотипа (ухо, хвост) выходят за вписанный круг
@@ -85,7 +85,7 @@ class SpinningLogo(QWidget):
 
     def spin(self) -> None:
         """Добавляет один оборот к текущему вращению."""
-        if not are_animations_enabled():
+        if not are_live_animations_enabled():
             return
 
         was_running = self.is_spinning()

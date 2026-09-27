@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import QSizePolicy
 from qfluentwidgets import TransparentPushButton, setCustomStyleSheet
 
@@ -18,9 +19,13 @@ from donater.premium_display import TIER_UNKNOWN, PremiumDisplay, format_days_le
 from ui.accessibility import set_control_accessibility
 from ui.fluent_widgets import set_tooltip
 from ui.theme_semantic import get_semantic_palette
+from ui.widgets.star_glyph import paint_star
 
 
 SUBSCRIPTION_TITLE_BADGE_OBJECT_NAME = "subscriptionTitleBadge"
+# Звезда у PREMIUM рисуется кодом (не эмодзи), см. ui/widgets/star_glyph.py.
+PREMIUM_STAR_SIZE = 12
+PREMIUM_STAR_LEFT = 7
 
 
 def build_title_badge_texts(display: PremiumDisplay, *, language: str | None) -> tuple[str, str]:
@@ -71,7 +76,8 @@ def _badge_qss(*, is_premium: bool, theme_name: str) -> str:
     selector = f"#{SUBSCRIPTION_TITLE_BADGE_OBJECT_NAME}"
     return (
         f"{selector} {{ color: {fg}; background: {bg}; border: none; border-radius: 4px; "
-        "padding: 0px 8px; font-size: 10px; font-weight: 600; }"
+        f"padding: 0px 8px 0px {PREMIUM_STAR_LEFT + PREMIUM_STAR_SIZE + 4 if is_premium else 8}px; "
+        "font-size: 10px; font-weight: 600; }"
         f"{selector}:hover {{ background: {bg_hover}; }}"
         f"{selector}:pressed {{ background: {bg}; }}"
     )
@@ -129,6 +135,15 @@ class SubscriptionTitleBadge(TransparentPushButton):
         if was_hidden:
             self.show()
         return was_hidden or old_text != text
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        if not self._display.is_premium:
+            return
+        painter = QPainter(self)
+        center = QPointF(PREMIUM_STAR_LEFT + PREMIUM_STAR_SIZE / 2, self.height() / 2)
+        paint_star(painter, center, PREMIUM_STAR_SIZE / 2)
+        painter.end()
 
     def _apply_style(self, *, is_premium: bool) -> None:
         if self._styled_as_premium is is_premium:

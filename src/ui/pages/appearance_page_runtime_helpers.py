@@ -24,6 +24,7 @@ def apply_appearance_language(
     animations_switch,
     smooth_scroll_switch,
     editor_smooth_scroll_switch,
+    live_animations_switch=None,
 ) -> None:
     if language_desc_label is not None:
         try:
@@ -134,6 +135,16 @@ def apply_appearance_language(
                 "page.appearance.performance.scroll.description",
                 language=language,
                 default="Инерционная прокрутка страниц настроек",
+            ),
+        )
+
+    if live_animations_switch is not None:
+        live_animations_switch.set_texts(
+            tr_catalog("page.appearance.performance.live_animations.title", language=language, default="Живые анимации"),
+            tr_catalog(
+                "page.appearance.performance.live_animations.description",
+                language=language,
+                default="Логотип, точка статуса, сводка на главной и кнопки запуска коротко оживают при изменениях. Почти не нагружает процессор",
             ),
         )
 

@@ -61,7 +61,7 @@ class SpinningLogoTests(unittest.TestCase):
         clicks: list[bool] = []
         logo.clicked.connect(lambda: clicks.append(True))
 
-        with mock.patch.object(spinning_logo_module, "are_animations_enabled", return_value=True):
+        with mock.patch.object(spinning_logo_module, "are_live_animations_enabled", return_value=True):
             _click(logo)
 
         self.assertEqual(clicks, [True])
@@ -71,7 +71,7 @@ class SpinningLogoTests(unittest.TestCase):
     def test_repeated_clicks_add_turns(self) -> None:
         logo = self._make_logo()
 
-        with mock.patch.object(spinning_logo_module, "are_animations_enabled", return_value=True):
+        with mock.patch.object(spinning_logo_module, "are_live_animations_enabled", return_value=True):
             _click(logo)
             _click(logo)
             _click(logo)
@@ -81,7 +81,7 @@ class SpinningLogoTests(unittest.TestCase):
     def test_no_spin_when_animations_are_disabled(self) -> None:
         logo = self._make_logo()
 
-        with mock.patch.object(spinning_logo_module, "are_animations_enabled", return_value=False):
+        with mock.patch.object(spinning_logo_module, "are_live_animations_enabled", return_value=False):
             _click(logo)
 
         self.assertFalse(logo.is_spinning())
@@ -104,7 +104,7 @@ class SpinningLogoTests(unittest.TestCase):
 
     def test_hiding_stops_spin_and_resets_angle(self) -> None:
         logo = self._make_logo()
-        with mock.patch.object(spinning_logo_module, "are_animations_enabled", return_value=True):
+        with mock.patch.object(spinning_logo_module, "are_live_animations_enabled", return_value=True):
             logo.spin()
         logo._on_spin_value(123.0)
 
@@ -128,7 +128,7 @@ class UpdateSyncIconTests(unittest.TestCase):
         host = _Host(icon)
         self.addCleanup(host.deleteLater)
 
-        with mock.patch.object(sync_icon_module, "are_animations_enabled", return_value=True):
+        with mock.patch.object(sync_icon_module, "are_live_animations_enabled", return_value=True):
             icon.set_mode(ICON_MODE_CHECKING)
             self._drain()
             self.assertFalse(icon.is_spinning())
@@ -143,7 +143,7 @@ class UpdateSyncIconTests(unittest.TestCase):
         self.addCleanup(host.deleteLater)
         host.show()
 
-        with mock.patch.object(sync_icon_module, "are_animations_enabled", return_value=False):
+        with mock.patch.object(sync_icon_module, "are_live_animations_enabled", return_value=False):
             icon.set_mode(ICON_MODE_CHECKING)
             self._drain()
 
@@ -156,7 +156,7 @@ class UpdateSyncIconTests(unittest.TestCase):
         self.addCleanup(host.deleteLater)
         host.show()
 
-        with mock.patch.object(sync_icon_module, "are_animations_enabled", return_value=True):
+        with mock.patch.object(sync_icon_module, "are_live_animations_enabled", return_value=True):
             icon.set_mode(ICON_MODE_CHECKING)
             self._drain()
         icon._on_spin_value(0.37)

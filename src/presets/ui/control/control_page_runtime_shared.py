@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ui.accessibility import set_accessible_description, set_control_accessibility, set_state_text
+from ui.widgets.soft_visibility import set_visible_softly
 
 BUTTON_ICON_TEXT_GAP_PROPERTY = "controlIconTextGap"
 BUTTON_ICON_TEXT_GAP = "  "
@@ -193,10 +194,11 @@ def apply_status_plan(
         status_dot.start_pulse()
     else:
         status_dot.stop_pulse()
-    set_visible_if_changed(start_btn, plan.show_start)
+    # Кнопки меняются местами мягко: уходящая затухает, новая проявляется.
+    set_visible_softly(start_btn, plan.show_start)
     update_stop_button_text()
-    set_visible_if_changed(stop_winws_btn, plan.show_stop_only)
-    set_visible_if_changed(stop_and_exit_btn, plan.show_stop_and_exit)
+    set_visible_softly(stop_winws_btn, plan.show_stop_only)
+    set_visible_softly(stop_and_exit_btn, plan.show_stop_and_exit)
     return plan.phase == "running"
 
 

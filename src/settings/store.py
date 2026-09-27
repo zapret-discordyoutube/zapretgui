@@ -1188,6 +1188,14 @@ def set_editor_smooth_scroll_enabled(value: bool) -> bool:
     return _set_bool(("appearance", "editor_smooth_scroll_enabled"), value)
 
 
+def get_live_animations_enabled() -> bool:
+    return _get_bool(("appearance", "live_animations_enabled"), True)
+
+
+def set_live_animations_enabled(value: bool) -> bool:
+    return _set_bool(("appearance", "live_animations_enabled"), value)
+
+
 def get_sidebar_icon_style() -> str:
     return _get_str(("appearance", "sidebar_icon_style"), "standard")
 
@@ -1872,6 +1880,7 @@ __all__ = [
     "get_custom_dns_servers",
     "get_dpi_autostart",
     "get_editor_smooth_scroll_enabled",
+    "get_live_animations_enabled",
     "get_defender_disabled_memory",
     "get_follow_windows_accent",
     "get_force_dns_enabled",
@@ -1967,6 +1976,7 @@ __all__ = [
     "set_custom_dns_servers",
     "set_dpi_autostart",
     "set_editor_smooth_scroll_enabled",
+    "set_live_animations_enabled",
     "set_follow_windows_accent",
     "set_force_dns_enabled",
     "set_folders_settings",

@@ -4725,6 +4725,14 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
         "ru": "Инерционная прокрутка страниц настроек",
         "en": "Inertial scrolling on settings pages",
     },
+    "page.appearance.performance.live_animations.title": {
+        "ru": "Живые анимации",
+        "en": "Live animations",
+    },
+    "page.appearance.performance.live_animations.description": {
+        "ru": "Логотип, точка статуса, сводка на главной и кнопки запуска коротко оживают при изменениях. Почти не нагружает процессор",
+        "en": "The logo, status dot, home summary and start buttons briefly come alive on changes. Almost no CPU load",
+    },
     "page.appearance.performance.editor_scroll.title": {
         "ru": "Плавная прокрутка редакторов",
         "en": "Editor Smooth Scrolling",
