@@ -1226,6 +1226,13 @@ class PresetsFeature:
             content_change_kind=content_change_kind,
         )
 
+    def migrate_user_presets_to_save_contract(self, launch_method: str):
+        """Разовый перевод пресетов пользователя в формат сохранения (preset_contract, пункт 6)."""
+        return self._commands().migrate_user_presets_to_save_contract(
+            launch_method,
+            preset_services=self._preset_services(),
+        )
+
     def publish_preset_content_changed(self, launch_method: str, file_name: str, *, content_change_kind: str = ""):
         return self._commands().publish_preset_content_changed(
             launch_method,

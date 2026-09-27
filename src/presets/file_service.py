@@ -15,7 +15,7 @@ from presets.preset_file_ops import (
     reset_all_to_builtin as _reset_all_to_builtin,
     reset_to_builtin_by_file_name as _reset_to_builtin_by_file_name,
 )
-from presets.preset_contract import normalize_preset_source_for_save
+from presets.preset_contract import CONTRACT_MIGRATION_CHANGE_KIND, normalize_preset_source_for_save
 from settings.mode import (
     ENGINE_WINWS1,
     ENGINE_WINWS2,
@@ -36,6 +36,19 @@ _ENGINE_TO_HIERARCHY_SCOPE = {
     ENGINE_WINWS2: PRESETS_SCOPE_WINWS2,
     ENGINE_WINWS1: PRESETS_SCOPE_WINWS1,
 }
+
+
+def _with_final_newline(text: str) -> str:
+    """Текст так, как его запишет хранилище: с переводом строки в конце."""
+    return text if text.endswith("\n") else f"{text}\n"
+
+
+@dataclass(frozen=True)
+class PresetContractMigrationResult:
+    """Итог разового перевода пресетов пользователя (preset_contract, пункт 6)."""
+
+    migrated: tuple[str, ...] = ()
+    failed: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -131,6 +144,25 @@ class PresetFileService:
             from presets.remote_bindings import delete_preset_identity
 
             delete_preset_identity(self.engine, preset_file_name)
+        except Exception:
+            pass
+
+    def _carry_remote_sync_hash(self, file_name: str, old_text: str, new_text: str) -> None:
+        """Разовый перевод — действие программы, а не правка пользователя.
+
+        Если пресет привязан к источнику и до перевода совпадал с последней
+        синхронизацией, запомненный хэш переносится на новый текст. Иначе
+        автосинк принял бы добавленные строки за локальную правку и отвязал
+        пресет от источника.
+        """
+        try:
+            from presets.remote_bindings import get_remote_preset_binding, update_remote_preset_binding
+            from presets.remote_sync import comparison_hash
+
+            binding = get_remote_preset_binding(self.engine, file_name)
+            if not binding or str(binding.get("synced_hash") or "") != comparison_hash(old_text):
+                return
+            update_remote_preset_binding(self.engine, file_name, synced_hash=comparison_hash(new_text))
         except Exception:
             pass
 
@@ -257,6 +289,57 @@ class PresetFileService:
                 content_change_kind=content_change_kind,
             )
         return updated
+
+    def migrate_user_presets_to_save_contract(self) -> PresetContractMigrationResult:
+        """Разовый перевод пресетов из папки пользователя в формат сохранения.
+
+        Пункт 6 договора ``presets.preset_contract``: каждый пресет пользователя
+        проходит ту же нормализацию, что и при сохранении (для winws2 — полный
+        блок ``--lua-init``), и записывается, только если текст на диске от
+        этого изменится. Встроенные пресеты не трогаются: запись в хранилище
+        создала бы для них скрытую копию в папке пользователя.
+
+        Обычное ``save_source_text_by_file_name`` здесь не подходит: оно
+        сравнивает нормализованный текст с нормализованным текущим, и файл без
+        блока с его точки зрения «не изменился».
+
+        Если меняются аргументы запуска, программа узнаёт об изменении тем же
+        путём, что и при обычном сохранении: у активного пресета при работающем
+        winws2 это один перезапуск, после которого запущено ровно то, что
+        записано в файле. Если аргументы те же (ушли только служебные строки
+        шапки), файл пишется без оповещения, и winws2 не перезапускается.
+        Привязка к источнику (автосинк) после перевода не отвязывается.
+        Файл, который не удалось прочитать или записать, пропускается.
+        """
+        from winws_runtime.runners.preset_runner_support import launch_args_from_preset_text
+
+        migrated: list[str] = []
+        failed: list[tuple[str, str]] = []
+        for manifest in self.list_manifests():
+            if str(manifest.storage_scope or "").strip().lower() != "user":
+                continue
+            file_name = manifest.file_name
+            try:
+                current_text = self.preset_file_store.read_source_text(self.engine, file_name)
+                normalized = self.normalize_source_text(current_text)
+                if normalized == _with_final_newline(current_text):
+                    continue
+                self.preset_file_store.update_preset(self.engine, file_name, normalized, None)
+            except Exception as exc:
+                failed.append((file_name, str(exc) or type(exc).__name__))
+                continue
+            migrated.append(file_name)
+            self._carry_remote_sync_hash(file_name, current_text, normalized)
+            if launch_args_from_preset_text(normalized) == launch_args_from_preset_text(current_text):
+                continue
+            try:
+                self.publish_preset_content_changed_by_file_name(
+                    file_name,
+                    content_change_kind=CONTRACT_MIGRATION_CHANGE_KIND,
+                )
+            except Exception as exc:
+                failed.append((file_name, f"файл записан, но программа не узнала об изменении: {exc}"))
+        return PresetContractMigrationResult(migrated=tuple(migrated), failed=tuple(failed))
 
     def save_selected_source_text(self, source_text: str, *, content_change_kind: str = "") -> PresetManifest:
         selected_file_name = self.get_selected_file_name()

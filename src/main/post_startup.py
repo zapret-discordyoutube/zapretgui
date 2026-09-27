@@ -82,6 +82,12 @@ def install_user_presets_warmup(*args, **kwargs):
     return install(*args, **kwargs)
 
 
+def install_user_preset_contract_migration(*args, **kwargs):
+    from main.post_startup_preset_contract_migration import install_user_preset_contract_migration as install
+
+    return install(*args, **kwargs)
+
+
 def install_remote_presets_sync(*args, **kwargs):
     from main.post_startup_remote_presets import install_remote_presets_sync as install
 
@@ -210,6 +216,11 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
         on_profile_warmup_ready=on_profile_warmup_ready,
     )
     if deps.presets_feature is not None:
+        install_user_preset_contract_migration(
+            startup_host,
+            presets_feature=deps.presets_feature,
+            log_startup_metric=deps.log_startup_metric,
+        )
         install_user_presets_warmup(
             startup_host,
             presets_feature=deps.presets_feature,

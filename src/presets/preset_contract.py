@@ -69,6 +69,22 @@ tests/test_preset_contract_architecture_checks.py — структура) и а�
    отвергает. Встроенные фейки winws2 и фейки из lua-кода блока
    ``--lua-init`` не объявляются. При запуске ничего не подставляется.
 
+6. Разовый перевод пресетов пользователя при запуске программы
+   (``ONE_TIME_MIGRATIONS``). Пресеты winws2 из папки пользователя, сохранённые
+   старыми версиями, могут не содержать полный обязательный блок ``--lua-init``.
+   После запуска программа один раз в фоне пропускает каждый такой файл через
+   ту же нормализацию сохранения, что и пункт 1
+   (``PresetFileService.migrate_user_presets_to_save_contract``) и записывает
+   файл через хранилище пресетов, только если текст изменился. Каждый
+   переведённый файл пишется одной строкой в лог. Флаг «уже сделано» не нужен:
+   повторный проход ничего не находит. Встроенные пресеты не трогаются,
+   привязка пресета к источнику (автосинк) не отвязывается.
+   Если меняются аргументы запуска, программа узнаёт об изменении так же, как
+   при обычном сохранении: для активного пресета при работающем winws2 это
+   один перезапуск — после него работает ровно то, что записано в файле.
+   Если аргументы запуска те же (убраны только служебные строки шапки),
+   файл пишется без оповещения и без перезапуска.
+
 Модуль намеренно не импортирует ничего, кроме стандартной библиотеки, на уровне
 модуля: его константы читает ``app.architecture_checks`` в CI без зависимостей.
 """
@@ -151,6 +167,18 @@ EXPLICIT_ACTION_TRANSFORMATIONS: dict[str, str] = {
     "дописывает в преамбулу --blob= для фейков стратегии, которых в пресете ещё нет",
 }
 
+# --- 6. Разовый перевод при запуске ---------------------------------------
+
+USER_WINWS2_PRESETS_SAVE_FORMAT_MIGRATION = "user_winws2_presets_save_format_migration"
+
+ONE_TIME_MIGRATIONS: dict[str, str] = {
+    USER_WINWS2_PRESETS_SAVE_FORMAT_MIGRATION: "после запуска пресеты winws2 из папки пользователя один раз "
+    "проходят нормализацию сохранения (полный блок --lua-init) и записываются, только если текст изменился",
+}
+
+# Причина изменения пресета, с которой программа узнаёт о разовом переводе.
+CONTRACT_MIGRATION_CHANGE_KIND = "contract_migration"
+
 # --- Кто пишет файлы пресетов ----------------------------------------------
 
 # Единственные модули, которые вызывают запись файла пресета
@@ -159,7 +187,7 @@ EXPLICIT_ACTION_TRANSFORMATIONS: dict[str, str] = {
 PRESET_FILE_STORE_MODULE = "src/presets/file_store.py"
 PRESET_FILE_WRITE_OWNERS: dict[str, str] = {
     PRESET_FILE_STORE_MODULE: "хранилище: единственная запись файла пресета на диск",
-    "src/presets/file_service.py": "сохранение текста пресета",
+    "src/presets/file_service.py": "сохранение текста пресета и разовый перевод пресетов пользователя",
     "src/presets/preset_file_ops.py": "переименование, дублирование, создание, импорт TXT",
     "src/presets/portable_archive.py": "импорт ZIP-архива со списками",
 }
@@ -250,12 +278,14 @@ def normalize_preset_source_for_save(source_text: str, engine: str) -> str:
 __all__ = [
     "ARCHIVE_IMPORT_LIST_RENAME",
     "ARCHIVE_IMPORT_TRANSFORMATIONS",
+    "CONTRACT_MIGRATION_CHANGE_KIND",
     "DEBUG_LOG_DIR",
     "DRY_RUN_FUNCTION_MARKER",
     "EXPLICIT_ACTION_TRANSFORMATIONS",
     "FAST_SWITCH_HANDOFF_EXTRA_ARGS",
     "GENERATED_CONFIG_EXEMPTIONS",
     "LAUNCH_TIME_TRANSFORMATIONS",
+    "ONE_TIME_MIGRATIONS",
     "PRESET_CONTRACT_SCOPE",
     "PRESET_FILE_STORE_MODULE",
     "PRESET_FILE_WRITE_METHODS",
@@ -264,6 +294,7 @@ __all__ = [
     "SAVE_TIME_NORMALIZATIONS",
     "SERVICE_HEADER_PREFIXES",
     "STRATEGY_CHOICE_BLOB_DECLARATIONS",
+    "USER_WINWS2_PRESETS_SAVE_FORMAT_MIGRATION",
     "WINWS1_DRY_RUN_EXTRA_ARGS",
     "WINWS2_DRY_RUN_EXTRA_ARGS",
     "normalize_preset_source_for_save",

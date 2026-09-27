@@ -2463,6 +2463,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_dns_page_data_warmup"),
             patch.object(post_startup, "install_hosts_page_warmup"),
             patch.object(post_startup, "install_profile_warmup") as install_profile_warmup,
+            patch.object(post_startup, "install_user_preset_contract_migration"),
             patch.object(post_startup, "install_user_presets_warmup"),
             patch.object(post_startup, "install_remote_presets_sync"),
             patch.object(post_startup, "install_update_check"),
@@ -2517,6 +2518,9 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_dns_page_data_warmup"),
             patch.object(post_startup, "install_hosts_page_warmup"),
             patch.object(post_startup, "install_profile_warmup"),
+            patch.object(
+                post_startup, "install_user_preset_contract_migration"
+            ) as install_user_preset_contract_migration,
             patch.object(post_startup, "install_user_presets_warmup") as install_user_presets_warmup,
             patch.object(post_startup, "install_remote_presets_sync") as install_remote_presets_sync,
             patch.object(post_startup, "install_update_check"),
@@ -2526,6 +2530,11 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         ):
             install_post_startup_tasks(deps)
 
+        install_user_preset_contract_migration.assert_called_once_with(
+            startup_host,
+            presets_feature=presets_feature,
+            log_startup_metric=log_startup_metric,
+        )
         install_user_presets_warmup.assert_called_once_with(
             startup_host,
             presets_feature=presets_feature,

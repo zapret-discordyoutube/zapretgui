@@ -225,6 +225,13 @@ def save_preset_source_by_file_name(
     )
 
 
+def migrate_user_presets_to_save_contract(launch_method: str, *, preset_services):
+    return _create_preset_file_service(
+        launch_method,
+        preset_services=preset_services,
+    ).migrate_user_presets_to_save_contract()
+
+
 def publish_preset_content_changed(
     launch_method: str,
     file_name: str,
