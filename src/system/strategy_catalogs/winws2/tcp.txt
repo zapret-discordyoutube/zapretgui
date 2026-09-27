@@ -1912,7 +1912,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1
 
 [stock_general_alt_game_filter_27]
-name = fake tls_google x6 ts-600000 + fakedsplit x6 ts-600000
+name = fake tls_google x6 ts-600000 ip_id=zero + fakedsplit x6 ts-600000 ip_id=zero
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT (game filter).txt (googlevideo_tcp)
@@ -1920,7 +1920,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000:ip_id=zero
 
 [stock_general_alt3_game_filter_30]
-name = payload tls_client_hello + payload http_req + fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000 + fake fake_default_http ts-600000 +
+name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000 + fake fake_default_http ts-600000 + hostfakesplit ya.ru ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT3 (game filter).txt (list_general_tcp)
@@ -1930,7 +1930,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-600000
 
 [stock_general_alt3_31]
-name = payload http_req + fake tls_google ts-600000 + hostfakesplit www.google.com ts-600000 + fake fake_default_http ts-600000 + hostfakesplit www
+name = fake tls_google ts-600000 + hostfakesplit www.google.com ts-600000 + fake fake_default_http ts-600000 + hostfakesplit www.google.com ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT3.txt (discord_tcp)
@@ -1940,7 +1940,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000
 
 [stock_general_alt8_game_filter_35]
-name = payload http_req + fake tls_google x6 seq2 + fake fake_default_http x6 seq2
+name = fake tls_google x6 seq2 + fake fake_default_http x6 seq2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT8 (game filter).txt (discord_tcp)
@@ -1980,7 +1980,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1,midsld:tcp_ack=-66000:repeats=11
 
 [stock_general_simple_fake_game_filter_40]
-name = payload http_req + fake tls_google x6 ts-600000 + fake fake_default_http x6 ts-600000
+name = fake tls_google x6 ts-600000 + fake fake_default_http x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general SIMPLE FAKE (game filter).txt (discord_tcp)
@@ -2025,7 +2025,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=1:seqovl=740:seqovl_pattern=stun_pat
 
 [stock_general_alt_game_filter_04]
-name = payload tls_client_hello + fake tls_google x6 ts-600000 + fakedsplit x6 ts-600000
+name = fake tls_google x6 ts-600000 + fakedsplit x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT (game filter).txt (list_general_tcp)
@@ -2041,7 +2041,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=tls_4pda:repeats=3:tcp_ts=-600000
 
 [stock_general_alt11_06]
-name = payload tls_client_hello,http_req + fake tls_google x8 ts-600000 + multisplit 2 tls_google s681 x8 ts-600000
+name = fake tls_google x8 ts-600000 + multisplit 2 tls_google s681 x8 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT11.txt (googlevideo_tcp)
@@ -2057,7 +2057,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-600000
 
 [stock_general_alt4_game_filter_11]
-name = payload tls_client_hello,http_req + fake tls_google x6 seq1000 + multisplit 2
+name = fake tls_google x6 seq1000 + multisplit 2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT4 (game filter).txt (discord_tcp)
@@ -2132,7 +2132,7 @@ author = community
 --lua-desync=multidisorder_legacy:pos=6,midsld+2
 
 [fake_tls_google_ts_http_ts_fakedsplit_all_payload]
-name = Fake TLS google TS + HTTP TS + FakedSplit all payloads
+name = Fake TLS google TS + HTTP TS + FakedSplit
 author = community
 blobs = tls_google,fake_default_http
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000
@@ -2169,13 +2169,13 @@ blobs = quic_google
 --lua-desync=fake:blob=quic_google:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:repeats=10:payload=all
 
 [fake_quic_google_12_all_tcp]
-name = Fake QUIC Google x12 payload=all (ipset_zapretkvn TCP catalog)
+name = Fake QUIC Google x12 (ipset_zapretkvn TCP catalog)
 author = community
 blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=12
 
 [fake_quic_google_10_all_tcp]
-name = Fake QUIC Google x10 payload=all (ipset_zapretkvn TCP catalog)
+name = Fake QUIC Google x10 (ipset_zapretkvn TCP catalog)
 author = community
 blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=10
@@ -2187,7 +2187,7 @@ blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=12:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all
 
 [fake_quic_google_2_all_tcp]
-name = Fake QUIC Google x2 payload=all (ipset_zapretkvn TCP catalog)
+name = Fake QUIC Google x2 (ipset_zapretkvn TCP catalog)
 author = community
 blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=2

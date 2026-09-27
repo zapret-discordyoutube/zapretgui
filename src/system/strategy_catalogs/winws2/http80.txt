@@ -889,7 +889,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=sld+1:tcp_ack=-66000:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [stock_dead_by_daylight_v2_game_filter_02]
-name = payload tls_client_hello + fake fake_default_tls x3 ts-600000 + fake tls_4pda x3 ts-600000
+name = fake fake_default_tls x3 ts-600000 + fake tls_4pda x3 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Dead by Daylight v2 (game filter).txt (all_tcp) в basic-режиме.
@@ -959,7 +959,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=midsld
 
 [stock_general_alt_10]
-name = payload tls_client_hello + payload http_req + payload tls_client_hello,http_req + fake tls_google x6 ts-600000 + fake fake_default_http x6 t
+name = fake tls_google x6 ts-600000 + fake fake_default_http x6 ts-600000 + fakedsplit x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT.txt (all_tcp) в basic-режиме.
@@ -1007,7 +1007,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2
 
 [stock_general_alt3_16_v2]
-name = payload tls_client_hello + payload http_req + fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000 + fake fake_default_http
+name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000 + fake fake_default_http ts-600000 + hostfakesplit ya.ru ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT3.txt (all_tcp) в basic-режиме.
@@ -1046,7 +1046,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_seq=2
 
 [stock_general_alt8_22]
-name = payload tls_client_hello + payload http_req + fake tls_google x6 seq2 + fake fake_default_http x6 seq2
+name = fake tls_google x6 seq2 + fake fake_default_http x6 seq2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT8.txt (all_tcp) в basic-режиме.
@@ -1084,7 +1084,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=tls_max:repeats=6:tcp_ts=-600000
 
 [stock_general_simple_fake_alt2_27]
-name = payload tls_client_hello + payload http_req + fake tls_max x6 ts-600000 + fake fake_default_http x6 ts-600000
+name = fake tls_max x6 ts-600000 + fake fake_default_http x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general SIMPLE FAKE ALT2.txt (all_tcp) в basic-режиме.
