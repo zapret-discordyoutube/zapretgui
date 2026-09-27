@@ -102,6 +102,17 @@ class SpinningLogoTests(unittest.TestCase):
         QApplication.sendEvent(logo, event)
         self.assertTrue(event.isAccepted())
 
+    def test_keyboard_enter_spins(self) -> None:
+        from PyQt6.QtCore import QEvent
+        from PyQt6.QtGui import QKeyEvent
+
+        logo = self._make_logo()
+        with mock.patch.object(spinning_logo_module, "are_live_animations_enabled", return_value=True):
+            event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+            QApplication.sendEvent(logo, event)
+        self.assertTrue(event.isAccepted())
+        self.assertTrue(logo.is_spinning())
+
     def test_hiding_stops_spin_and_resets_angle(self) -> None:
         logo = self._make_logo()
         with mock.patch.object(spinning_logo_module, "are_live_animations_enabled", return_value=True):

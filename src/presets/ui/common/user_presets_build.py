@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListView, QSizePolicy
 from qfluentwidgets import FluentIcon, PrimaryPushButton
 
 from ui.fluent_widgets import SettingsCard, set_tooltip
+from ui.widgets.active_row_motion import attach_active_row_motion
+from ui.widgets.hover_row import profile_hover_row_rect
 from presets.ui.common.user_presets_accessibility import apply_user_presets_accessibility
 from ui.presets_menu.delegate import PresetListDelegate
 from ui.presets_menu.model import PresetListModel
@@ -250,6 +252,8 @@ def build_user_presets_page_shell(
     presets_delegate.set_ui_language(ui_language)
     presets_delegate.action_triggered.connect(on_preset_list_action)
     presets_list.setModel(presets_model)
+    # При смене активного пресета полоска акцента переезжает к новой строке.
+    attach_active_row_motion(presets_list, PresetListModel.ActiveRole, row_rect_fn=profile_hover_row_rect)
     wire_preset_search_keyboard_activation(preset_search_input, presets_list)
     apply_user_presets_accessibility(
         tr_fn=tr_fn,

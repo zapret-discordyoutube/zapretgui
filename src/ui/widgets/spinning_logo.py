@@ -10,7 +10,7 @@ from PyQt6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QVariantAnimation, p
 from PyQt6.QtGui import QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import QWidget
 
-from ui.accessibility import set_control_accessibility
+from ui.accessibility import enable_keyboard_click, set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
 
 
@@ -52,6 +52,7 @@ class SpinningLogo(QWidget):
         self.setFixedSize(side, side)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
         # QVariantAnimation, а не QPropertyAnimation: при выключенных
         # анимациях общий fallback подменяет QPropertyAnimation.start.
@@ -60,10 +61,13 @@ class SpinningLogo(QWidget):
         self._spin.valueChanged.connect(self._on_spin_value)
         self._spin.finished.connect(self._on_spin_finished)
 
+        # Оборот запускается от clicked: и мышью, и клавишей Enter/Пробел.
+        self.clicked.connect(self.spin)
+        enable_keyboard_click(self)
         set_control_accessibility(
             self,
             name="Логотип Zapret 2",
-            description="Нажмите, чтобы покрутить логотип.",
+            description="Нажмите или нажмите Enter, чтобы покрутить логотип.",
         )
 
     # ---- публичное API -------------------------------------------------
@@ -112,7 +116,6 @@ class SpinningLogo(QWidget):
         self.update()
         event.accept()
         if was_pressed and event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
-            self.spin()
             self.clicked.emit()
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802

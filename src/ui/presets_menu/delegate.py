@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QListView, QStyledItemDelegate, QStyle, QStyleOption
 from ui.theme import get_theme_tokens
 from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.folder_header import FOLDER_HEADER_HEIGHT, is_folder_toggle_click, paint_folder_header_row
+from ui.widgets.active_row_motion import active_row_motion
 from ui.widgets.hover_row import paint_profile_hover_row, profile_hover_row_rect
 
 from .common import (
@@ -439,6 +440,10 @@ class PresetListDelegate(QStyledItemDelegate):
         bg = row_paint.background
 
         icon_rect = self._icon_rect_for_row(rect, depth)
+        motion = active_row_motion(self._view)
+        if motion is not None:
+            # После переезда полоски значок нового активного пресета подпрыгивает.
+            icon_rect = icon_rect.translated(0, round(motion.icon_offset(index)))
         icon_color = pick_contrast_color(
             normalize_preset_icon_color(str(index.data(PresetListModel.IconColorRole) or "")),
             bg,

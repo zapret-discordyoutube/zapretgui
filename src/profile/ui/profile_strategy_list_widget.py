@@ -42,6 +42,7 @@ from qfluentwidgets import (
     SearchLineEdit,
     TransparentToolButton,
 )
+from ui.widgets.active_row_motion import active_row_motion, attach_active_row_motion
 from ui.accessibility import (
     remove_line_edit_buttons_from_tab_order,
     set_control_accessibility,
@@ -86,13 +87,16 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
             option.state & QStyle.StateFlag.State_HasFocus
         )
 
+        motion = active_row_motion(self.parent())
         paint_profile_hover_row(
             painter,
             rect,
             active=is_active,
             hovered=hovered,
             selected=selected,
+            show_active_marker=not (motion is not None and motion.hides_static_marker(index)),
         )
+        icon_dy = round(motion.icon_offset(index)) if motion is not None else 0
 
         left = rect.left() + (24 if is_active else 18)
         right = rect.right() - 16
@@ -114,7 +118,7 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
 
         icon_size = 14
         if icon_name:
-            icon_rect = QRect(left, rect.center().y() - icon_size // 2, icon_size, icon_size)
+            icon_rect = QRect(left, rect.center().y() - icon_size // 2 + icon_dy, icon_size, icon_size)
             pixmap = get_cached_qta_pixmap(icon_name, color=visual_color or tokens.fg_faint, size=icon_size)
             if not pixmap.isNull():
                 painter.drawPixmap(icon_rect, pixmap)
@@ -476,6 +480,8 @@ class ProfileStrategyListWidget(QWidget):
 
         self._list = ProfileStrategyListView(self)
         self._list.setItemDelegate(ProfileStrategyListDelegate(self._list))
+        # При выборе другой стратегии полоска акцента переезжает к новой строке.
+        attach_active_row_motion(self._list, self._ROLE_IS_ACTIVE, row_rect_fn=profile_hover_row_rect)
         self._list.setUniformItemSizes(True)
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self._list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
