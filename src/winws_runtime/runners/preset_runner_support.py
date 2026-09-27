@@ -52,9 +52,15 @@ def _split_launch_line(raw_line: str) -> list[str]:
 
 
 def launch_args_from_preset_text(content: str) -> list[str]:
-    """Собирает argv из текста выбранного preset-файла."""
+    """Собирает argv из текста выбранного preset-файла.
+
+    Ведущий BOM (U+FEFF от «UTF-8 с BOM» в Блокноте) — это часть кодировки
+    файла, а не текста пресета: str.strip() его не убирает, и без явного
+    снятия он прилипал бы к первой опции. Проверка пресета снимает его так же.
+    """
+    text = str(content or "").lstrip("\ufeff")
     args: list[str] = []
-    for raw in str(content or "").splitlines():
+    for raw in text.splitlines():
         stripped = raw.strip()
         if not stripped:
             continue

@@ -11,6 +11,7 @@ Circular Orchestra Runner - автоматическое обучение стр
 """
 
 import os
+import shlex
 import subprocess
 import threading
 import json
@@ -23,10 +24,7 @@ from datetime import datetime
 
 from log.log import log
 
-from utils.circular_strategy_numbering import (
-    renumber_circular_strategies,
-    strip_strategy_tags,
-)
+from orchestra.runtime_config import build_orchestra_runtime_config
 from config.runtime_layout import APPLICATION_PATHS, ApplicationPaths
 from settings.mode import ENGINE_WINWS2, EXE_NAME_WINWS2
 from lists.core.paths import get_lists_dir
@@ -206,12 +204,11 @@ class OrchestraRunner:
         # lua\ остаётся неизменяемым (только поставка).
         self.user_lua_path = str(paths.user_lua_dir)
 
-        # ВАЖНО: circular-config.txt — СТАТИЧЕСКИЙ файл поставки в lua\.
-        # Стратегии встроены напрямую в circular-config.txt, отдельные strategies-*.txt не нужны.
+        # ВАЖНО: circular-config.txt — СТАТИЧЕСКИЙ файл поставки в lua\. Он входит
+        # в манифест целостности установки и только читается. winws2 всегда
+        # запускается с рабочей копией из user\lua (см. orchestra.runtime_config).
         self.config_path = os.path.join(self.lua_path, "circular-config.txt")
         self.runtime_config_path = os.path.join(self.user_lua_path, "circular-config.runtime.txt")
-        self.launch_config_path = self.config_path
-        self.blobs_path = os.path.join(self.user_lua_path, "blobs.txt")
 
         # Белый список (exclude hostlist); путь user/lua/whitelist.txt прописан
         # в circular-config.txt относительно корня установки (cwd запуска winws2)
@@ -1379,8 +1376,6 @@ class OrchestraRunner:
             log(f"Конфиг не найден: {self.config_path}", "ERROR")
             return False
 
-        self._prepare_launch_config_path()
-
         # Генерируем whitelist.txt (динамический - пользователь добавляет домены)
         self._generate_whitelist_file()
 
@@ -1391,39 +1386,39 @@ class OrchestraRunner:
         log("   • Принудительная перезагрузка (Ctrl+F5)", "INFO")
         return True
 
-    def _prepare_launch_config_path(self) -> str:
-        """Prepares runtime config with strategy tags while keeping source clean."""
-        self.launch_config_path = self.config_path
+    def _learned_lua_config_arg(self, learned_lua: str) -> str:
+        """Путь к learned-strategies.lua в виде значения для @config.
 
+        winws2 запускается с cwd = корень установки, поэтому путь пишется
+        относительно него прямым слешем (как user/lua/whitelist.txt в поставке).
+        Значение экранируется для wordexp, которым winws2 разбирает @config.
+        """
+        path = os.path.abspath(learned_lua)
         try:
-            with open(self.config_path, "r", encoding="utf-8", errors="replace") as f:
-                source_content = f.read()
-        except Exception:
-            return self.launch_config_path
+            rel = os.path.relpath(path, os.path.abspath(self.zapret_path))
+        except ValueError:
+            rel = ""
+        if rel and not rel.startswith(".."):
+            path = rel.replace("\\", "/")
+        return shlex.quote(path)
 
-        cleaned_source = strip_strategy_tags(source_content)
-        if cleaned_source != source_content:
-            try:
-                with open(self.config_path, "w", encoding="utf-8", newline="\n") as f:
-                    f.write(cleaned_source)
-                log("circular-config.txt очищен от служебных :strategy=N тегов", "DEBUG")
-            except Exception as e:
-                log(f"Не удалось очистить {self.config_path}: {e}", "DEBUG")
+    def _write_runtime_config(self, learned_lua: Optional[str]) -> str:
+        """Пишет рабочую копию конфига в user\\lua и возвращает её путь.
 
-        runtime_content = renumber_circular_strategies(cleaned_source)
-        if runtime_content == cleaned_source:
-            return self.launch_config_path
+        Файл поставки не изменяется. Ошибка чтения или записи пробрасывается:
+        запуск с голой поставкой потерял бы нумерацию стратегий, предзагрузку
+        и отладочный вывод, который разбирает оркестратор.
+        """
+        with open(self.config_path, "r", encoding="utf-8", errors="replace") as f:
+            source_content = f.read()
 
-        try:
-            os.makedirs(self.user_lua_path, exist_ok=True)
-            with open(self.runtime_config_path, "w", encoding="utf-8", newline="\n") as f:
-                f.write(runtime_content)
-            self.launch_config_path = self.runtime_config_path
-        except Exception as e:
-            log(f"Не удалось создать runtime-конфиг {self.runtime_config_path}: {e}", "WARNING")
-            self.launch_config_path = self.config_path
+        learned_arg = self._learned_lua_config_arg(learned_lua) if learned_lua else None
+        runtime_content = build_orchestra_runtime_config(source_content, learned_lua_arg=learned_arg)
 
-        return self.launch_config_path
+        os.makedirs(self.user_lua_path, exist_ok=True)
+        with open(self.runtime_config_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(runtime_content)
+        return self.runtime_config_path
 
     def start(self) -> bool:
         """
@@ -1485,17 +1480,17 @@ class OrchestraRunner:
         learned_lua = self._generate_learned_lua()
 
         try:
-            launch_config_path = self.launch_config_path or self.config_path
+            launch_config_path = self._write_runtime_config(learned_lua)
+        except Exception as e:
+            self.last_start_error = f"Не удалось подготовить рабочий конфиг оркестратора: {e}"
+            log(self.last_start_error, "ERROR")
+            return False
 
-            # Запускаем winws2 с @config_file
+        try:
+            # winws2 @file читает опции только из файла: всё остальное в argv
+            # игнорируется. Предзагрузка стратегий (--lua-init) и --debug=1
+            # уже записаны внутрь рабочего конфига.
             cmd = [self.winws_exe, f"@{launch_config_path}"]
-
-            # Добавляем предзагрузку стратегий из settings.sqlite3
-            if learned_lua:
-                cmd.append(f"--lua-init=@{learned_lua}")
-
-            # Debug: выводим в stdout для парсинга, записываем в файл вручную в _read_output
-            cmd.append("--debug=1")
 
             log_msg = f"Запуск: {EXE_NAME_WINWS2} @{os.path.basename(launch_config_path)}"
             if total_locked:

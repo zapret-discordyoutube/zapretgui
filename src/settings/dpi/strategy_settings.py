@@ -34,47 +34,7 @@ def set_strategy_launch_method(method: str) -> bool:
         return False
 
 
-def get_wssize_enabled(*, launch_method: str | None = None) -> bool:
-    _ = launch_method
-    return False
-
-
-def set_wssize_enabled(
-    enabled: bool,
-    *,
-    launch_method: str | None = None,
-    runtime_reload_callback=None,
-) -> bool:
-    _ = enabled, launch_method, runtime_reload_callback
-    return False
-
-
-def get_debug_log_enabled(*, launch_method: str | None = None) -> bool:
-    _ = launch_method
-    return False
-
-
-def set_debug_log_enabled(
-    enabled: bool,
-    *,
-    launch_method: str | None = None,
-    runtime_reload_callback=None,
-) -> bool:
-    _ = enabled, launch_method, runtime_reload_callback
-    return False
-
-
-def get_debug_log_file(*, launch_method: str | None = None) -> str:
-    _ = launch_method
-    return ""
-
-
 __all__ = [
     "get_strategy_launch_method",
     "set_strategy_launch_method",
-    "get_wssize_enabled",
-    "set_wssize_enabled",
-    "get_debug_log_enabled",
-    "get_debug_log_file",
-    "set_debug_log_enabled",
 ]

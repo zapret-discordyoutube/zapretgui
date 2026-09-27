@@ -9,9 +9,8 @@ from typing import Optional, List, Dict
 
 from log.log import log
 
-from .args_filters import apply_all_filters
 from .constants import SW_HIDE, CREATE_NO_WINDOW, STARTF_USESHOWWINDOW
-from .preset_runner_support import launch_args_from_preset_text, wait_for_process_exit
+from .preset_runner_support import wait_for_process_exit
 from .spawn_failure import classify_spawn_failure
 from winws_runtime.health.process_health_check import (
     check_process_health, get_last_crash_info, check_common_crash_causes,
@@ -328,10 +327,6 @@ class StrategyRunnerBase(ABC):
         """Resolves relative file paths"""
         filter_dir = os.path.join(self.work_dir, "windivert.filter")
         return resolve_args_paths(args, self.lists_dir, self.bin_dir, filter_dir)
-
-    def _build_launch_args_from_preset_text(self, content: str) -> tuple[str, ...]:
-        """Собирает аргументы запуска и приводит пути к файлам к рабочим путям."""
-        return tuple(self._resolve_file_paths(launch_args_from_preset_text(content)))
 
     def _read_process_startup_output(self, process: subprocess.Popen) -> str:
         """Read winws output after an immediate startup failure."""
