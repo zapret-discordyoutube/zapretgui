@@ -21,7 +21,8 @@ from log.log import log
 from utils.file_digest import sha256_file
 
 from ..release_contract import normalize_sha256
-from ..update_pipeline import CancellationToken, UpdatePipeline
+from ..download.downloader import CancellationToken
+from ..download.flow import download_and_stage, resolve_artifact
 from . import paths
 from .launcher import (
     InstallerHandoff,
@@ -171,14 +172,12 @@ def repair_installation(
         return RepairOutcome(False, "Нет пригодного установщика в кэше")
 
     active_token = token or CancellationToken()
-    pipeline = UpdatePipeline(token=active_token, silent=True)
     try:
-        preflight = pipeline.preflight(requested_version=APP_VERSION, allow_same_version=True)
+        artifact = resolve_artifact(requested_version=APP_VERSION, allow_same_version=True)
     except Exception as exc:
         log(f"Не удалось получить данные выпуска для восстановления: {exc}", REPAIR_LOG_LEVEL)
         return RepairOutcome(False, f"Не удалось получить установщик: {exc}")
 
-    artifact = preflight.artifact
     cached = _cached_installer_ready(expected_sha256=artifact.expected_sha256)
     if cached is not None:
         log("Сохранённый установщик совпал с выпуском, загрузка не нужна", REPAIR_LOG_LEVEL)
@@ -186,7 +185,7 @@ def repair_installation(
             return RepairOutcome(True, "Установщик запущен", "cache")
 
     try:
-        handoff = pipeline.download_and_prepare(artifact)
+        handoff = download_and_stage(artifact, token=active_token)
     except Exception as exc:
         log(f"Не удалось скачать установщик для восстановления: {exc}", REPAIR_LOG_LEVEL)
         return RepairOutcome(False, f"Не удалось скачать установщик: {exc}")

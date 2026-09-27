@@ -142,14 +142,22 @@ def stage_installer(
     sha256: str,
     size: int,
     checkpoint: Callable[[], None] = lambda: None,
+    move: bool = False,
 ) -> InstallerHandoff:
-    """Кладёт уже проверенный установщик в каталог, переживающий переустановку."""
+    """Кладёт уже проверенный установщик в каталог, переживающий переустановку.
+
+    ``move=True`` — файл уже скачан в этот же каталог: достаточно переименовать
+    его, без второй записи на диск.
+    """
     ensure_private_state_dir()
     checkpoint()
     source = Path(downloaded_path)
     target = paths.cached_installer_path()
     if os.path.normcase(os.path.abspath(source)) != os.path.normcase(os.path.abspath(target)):
-        _atomic_copy(source, target, checkpoint)
+        if move:
+            os.replace(source, target)
+        else:
+            _atomic_copy(source, target, checkpoint)
 
     try:
         _atomic_write_bytes(

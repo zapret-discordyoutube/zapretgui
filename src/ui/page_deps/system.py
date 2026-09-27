@@ -169,6 +169,8 @@ def build_servers_page_kwargs(
     request_exit,
 ) -> dict:
     _ = page_name
+    from updater.check.service import UpdateCheckService
+    from updater.download.service import UpdateInstallService
 
     def _mark_runtime_stopped_after_update() -> None:
         runtime_service = runtime_feature.objects.runtime_service
@@ -182,18 +184,25 @@ def build_servers_page_kwargs(
             parent=parent,
         )
 
+    runtime_actions = UpdateRuntimeActions(
+        is_any_running=runtime_feature.is_any_running,
+        # Остановки обновлятора идут из фоновых потоков, поэтому runtime-state
+        # (и UI-подписчиков) обновляет GUI-поток, а не фоновый поток.
+        shutdown_sync=runtime_feature.shutdown_sync_from_worker,
+        is_available=runtime_feature.is_available,
+        restart=runtime_feature.restart,
+        mark_stopped=_mark_runtime_stopped_after_update,
+        request_exit=request_exit,
+    )
+
     return {
-        "runtime_actions": UpdateRuntimeActions(
-            is_any_running=runtime_feature.is_any_running,
-            # Остановки updater'а идут из QThread-воркеров, поэтому runtime-state
-            # (и UI-подписчиков) обновляет GUI-поток, а не поток воркера.
-            shutdown_sync=runtime_feature.shutdown_sync_from_worker,
-            is_available=runtime_feature.is_available,
-            restart=runtime_feature.restart,
-            mark_stopped=_mark_runtime_stopped_after_update,
-            request_exit=request_exit,
-        ),
         "updater_feature": updater_feature,
+        # Сервисы получают только действия с DPI, а не весь runtime_feature.
+        "check_service": UpdateCheckService(
+            updater_feature=updater_feature,
+            runtime_actions=runtime_actions,
+        ),
+        "install_service": UpdateInstallService(runtime_actions=runtime_actions),
         "open_about": lambda: show_page(PageName.ABOUT),
         "create_changelog_link_open_worker": _create_changelog_link_open_worker,
     }

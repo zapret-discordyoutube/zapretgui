@@ -141,7 +141,7 @@ class RepairInstallationTests(unittest.TestCase):
                 patch.object(self_repair.paths, "cached_installer_path", return_value=installer),
                 patch.object(self_repair, "read_cached_installer_meta", return_value=meta),
                 patch.object(self_repair, "installer_arguments", return_value=("/AUTOUPDATE",)),
-                patch.object(self_repair, "UpdatePipeline") as pipeline_cls,
+                patch.object(self_repair, "resolve_artifact") as resolve_artifact,
                 patch.object(self_repair, "start_supervised_installation", return_value=True) as launch,
                 patch("settings.store.append_self_repair_attempt", return_value=(True, 1)),
             ):
@@ -155,7 +155,7 @@ class RepairInstallationTests(unittest.TestCase):
             self.assertEqual(handoff.installer_sha256, meta["sha256"])
             # Починка не ждёт закрытия программы: её закроет установщик.
             self.assertEqual(launch.call_args.kwargs["gui_pid"], 0)
-            pipeline_cls.assert_not_called()
+            resolve_artifact.assert_not_called()
 
     def test_cached_installer_of_other_version_is_rejected_offline(self) -> None:
         from updater.install import repair as self_repair

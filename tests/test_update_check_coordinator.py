@@ -6,13 +6,12 @@ from unittest.mock import Mock, patch
 
 from app.feature_facades.updater import UpdaterFeature
 from core.runtime.update_check_coordinator import UpdateCheckCoordinator
-from ui.page_deps.types import UpdateRuntimeActions
-from updater.update_page_runtime import UpdatePageRuntime
+from updater.ui.page import ServersPage
 
 
 class UpdateCheckCoordinatorTests(unittest.TestCase):
-    def test_page_runtime_does_not_keep_a_second_check_state(self) -> None:
-        source = inspect.getsource(UpdatePageRuntime)
+    def test_page_does_not_keep_a_second_check_state(self) -> None:
+        source = inspect.getsource(ServersPage)
 
         self.assertNotIn("self._check_state", source)
         self.assertIn("current_update_check_snapshot", source)
@@ -123,109 +122,71 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
         self.assertEqual(snapshot.completed_at, 123.0)
         self.assertEqual(snapshot.message, "Лимит частоты")
 
+    def _page(self, feature: UpdaterFeature) -> ServersPage:
+        """Страница без виджетов: карточки и сервисы — заглушки."""
+        page = ServersPage.__new__(ServersPage)
+        page._ui_language = "ru"
+        page._cleanup_in_progress = False
+        page._updater_feature = feature
+        page._install_service = Mock(is_busy=False)
+        page._check_service = Mock(is_busy=False)
+        page._auto_check_enabled = False
+        page._idle_view_applied = False
+        page._found_version = ""
+        page._found_notes = ""
+        page._found_source = ""
+        page.update_card = Mock()
+        page.changelog_card = Mock()
+        return page
+
+    def _finish_startup(self, feature: UpdaterFeature, result: dict) -> None:
+        token = feature.begin_update_check(source="startup")
+        feature.finish_update_check(result, source="startup", token=token)
+
     def test_page_opened_after_startup_uses_coordinator_result(self) -> None:
         feature = UpdaterFeature()
-        token = feature.begin_update_check(source="startup")
-        feature.finish_update_check(
-            {
-                "has_update": False,
-                "version": "21.1.5.5",
-                "release_notes": "",
-                "error": None,
-            },
-            source="startup",
-            token=token,
+        self._finish_startup(
+            feature,
+            {"has_update": False, "version": "21.1.5.5", "release_notes": "", "error": None},
         )
-        view = Mock()
-        view.is_update_download_in_progress.return_value = False
-        runtime = UpdatePageRuntime(
-            view,
-            runtime_actions=UpdateRuntimeActions(
-                is_any_running=Mock(return_value=False),
-                shutdown_sync=Mock(),
-                is_available=Mock(return_value=True),
-                restart=Mock(),
-                mark_stopped=Mock(),
-                request_exit=Mock(),
-            ),
-            updater_feature=feature,
-        )
+        page = self._page(feature)
 
-        runtime.attach_update_check_coordinator()
+        feature.subscribe_update_check(page._apply_check_snapshot, emit_initial=True)
+        page.on_page_activated()
 
-        view.finish_checking.assert_called_once_with(False, "21.1.5.5")
-        self.assertEqual(runtime._resolve_idle_view_decision().action, "checked_ago")
+        page.update_card.stop_checking.assert_called_once_with(False, "21.1.5.5")
+        page.update_card.show_checked_ago.assert_called_once()
 
     def test_open_page_receives_live_startup_progress_and_result(self) -> None:
         feature = UpdaterFeature()
-        view = Mock()
-        view.is_update_download_in_progress.return_value = False
-        runtime = UpdatePageRuntime(
-            view,
-            runtime_actions=UpdateRuntimeActions(
-                is_any_running=Mock(return_value=False),
-                shutdown_sync=Mock(),
-                is_available=Mock(return_value=True),
-                restart=Mock(),
-                mark_stopped=Mock(),
-                request_exit=Mock(),
-            ),
-            updater_feature=feature,
-        )
-        runtime.attach_update_check_coordinator()
+        page = self._page(feature)
+        feature.subscribe_update_check(page._apply_check_snapshot)
 
-        token = feature.begin_update_check(source="startup")
-        feature.finish_update_check(
-            {
-                "has_update": False,
-                "version": "21.1.5.5",
-                "release_notes": "",
-                "error": None,
-            },
-            source="startup",
-            token=token,
+        self._finish_startup(
+            feature,
+            {"has_update": False, "version": "21.1.5.5", "release_notes": "", "error": None},
         )
 
-        view.start_checking.assert_called_once_with()
-        view.finish_checking.assert_called_once_with(False, "21.1.5.5")
+        page.update_card.start_checking.assert_called_once_with()
+        page.update_card.stop_checking.assert_called_once_with(False, "21.1.5.5")
 
     def test_open_page_receives_startup_check_error(self) -> None:
         feature = UpdaterFeature()
-        view = Mock()
-        view.is_update_download_in_progress.return_value = False
-        runtime = UpdatePageRuntime(
-            view,
-            runtime_actions=UpdateRuntimeActions(
-                is_any_running=Mock(return_value=False),
-                shutdown_sync=Mock(),
-                is_available=Mock(return_value=True),
-                restart=Mock(),
-                mark_stopped=Mock(),
-                request_exit=Mock(),
-            ),
-            updater_feature=feature,
-        )
-        runtime.attach_update_check_coordinator()
+        page = self._page(feature)
+        feature.subscribe_update_check(page._apply_check_snapshot)
 
-        token = feature.begin_update_check(source="startup")
-        feature.finish_update_check(
-            {
-                "has_update": False,
-                "version": "",
-                "release_notes": "",
-                "error": "Сервер обновлений недоступен",
-            },
-            source="startup",
-            token=token,
+        self._finish_startup(
+            feature,
+            {"has_update": False, "version": "", "release_notes": "", "error": "Сервер обновлений недоступен"},
         )
 
-        view.show_update_check_error.assert_called_once_with("Сервер обновлений недоступен")
-        view.finish_checking.assert_not_called()
+        page.update_card.set_error.assert_called_once_with("Сервер обновлений недоступен")
+        page.update_card.stop_checking.assert_not_called()
 
     def test_page_uses_last_real_check_time_when_startup_check_is_skipped(self) -> None:
         feature = UpdaterFeature()
-        token = feature.begin_update_check(source="startup")
-        feature.finish_update_check(
+        self._finish_startup(
+            feature,
             {
                 "has_update": False,
                 "version": "21.1.5.5",
@@ -233,29 +194,80 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
                 "skip_reason": "Проверка недавно выполнялась",
                 "checked_at": 123.0,
             },
-            source="startup",
-            token=token,
         )
-        view = Mock()
-        view.is_update_download_in_progress.return_value = False
-        runtime = UpdatePageRuntime(
-            view,
-            runtime_actions=UpdateRuntimeActions(
-                is_any_running=Mock(return_value=False),
-                shutdown_sync=Mock(),
-                is_available=Mock(return_value=True),
-                restart=Mock(),
-                mark_stopped=Mock(),
-                request_exit=Mock(),
-            ),
-            updater_feature=feature,
+        page = self._page(feature)
+
+        with patch("updater.ui.page.time.time", return_value=200.0):
+            feature.subscribe_update_check(page._apply_check_snapshot, emit_initial=True)
+
+        page.update_card.show_checked_ago.assert_called_once_with(77.0)
+
+    def test_update_found_at_startup_offers_install_on_page_after_later(self) -> None:
+        """Раньше после «Позже» на странице не было кнопки установки."""
+        feature = UpdaterFeature()
+        self._finish_startup(
+            feature,
+            {
+                "has_update": True,
+                "version": "21.1.5.80",
+                "release_notes": "новое",
+                "release_source": "Forgejo",
+                "error": None,
+            },
         )
+        page = self._page(feature)
 
-        with patch("updater.update_page_runtime.time.time", return_value=200.0):
-            runtime.attach_update_check_coordinator()
+        feature.subscribe_update_check(page._apply_check_snapshot, emit_initial=True)
 
-        view.show_checked_ago.assert_called_once_with(77.0)
+        page.changelog_card.show_update.assert_called_once_with("21.1.5.80", "новое")
+        # Источник выпуска теперь доходит до карточки.
+        page.update_card.show_found_update.assert_called_once_with("21.1.5.80", "Forgejo")
 
+    def test_confirmed_startup_update_installs_immediately_without_timer(self) -> None:
+        page = self._page(UpdaterFeature())
+        page._install_service.start.return_value = True
+
+        self.assertTrue(page.present_startup_update("21.1.5.80", "новое", install_after_show=True))
+
+        page._install_service.start.assert_called_once_with("21.1.5.80")
+        page.changelog_card.start_download.assert_called_once_with("21.1.5.80")
+
+    def test_no_install_while_check_is_running(self) -> None:
+        page = self._page(UpdaterFeature())
+        page._check_service.is_busy = True
+        page._found_version = "21.1.5.80"
+
+        page._request_install_update()
+
+        page._install_service.start.assert_not_called()
+
+    def test_no_check_while_installing(self) -> None:
+        page = self._page(UpdaterFeature())
+        page._install_service.is_busy = True
+
+        page._request_check_updates()
+
+        page._check_service.start.assert_not_called()
+
+    def test_install_failure_returns_check_button(self) -> None:
+        page = self._page(UpdaterFeature())
+
+        page._on_install_failed("Не удалось скачать обновление")
+
+        page.changelog_card.download_failed.assert_called_once_with("Не удалось скачать обновление")
+        page.update_card.set_check_enabled.assert_called_once_with(True)
+
+    def test_page_cleanup_stops_services_and_unsubscribes(self) -> None:
+        page = self._page(UpdaterFeature())
+        unsubscribe = Mock()
+        page._unsubscribe_check = unsubscribe
+        page._stop_changelog_link_open_worker = Mock()
+
+        page.cleanup()
+
+        unsubscribe.assert_called_once_with()
+        page._check_service.shutdown.assert_called_once_with()
+        page._install_service.shutdown.assert_called_once_with()
 
 if __name__ == "__main__":
     unittest.main()

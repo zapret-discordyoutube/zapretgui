@@ -1,137 +1,105 @@
 from __future__ import annotations
 
-import sys
-import unittest
+"""Таблица источников на странице «Серверы» и то, что получает страница.
+
+Таблица только показывает, кто отвечает: Telegram никого не задерживает и
+не создаёт предложение обновиться, строка Forgejo отражает текущее
+состояние, а страница и её сервисы получают действия с DPI, а не весь
+runtime.
+"""
+
 import inspect
-from pathlib import Path
+import time
+import unittest
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from updater.check import sources
+from updater.release.mirrors import MirrorReleaseError
 
-PROJECT_SRC = Path(__file__).resolve().parents[1] / "src"
-if str(PROJECT_SRC) not in sys.path:
-    sys.path.insert(0, str(PROJECT_SRC))
+SERVER = {
+    "id": "primary",
+    "name": "Primary",
+    "host": "updates.example",
+    "https_port": 888,
+    "http_port": 887,
+}
+VERSIONS = {"stable": {"version": "21.1.1.5"}, "dev": {"version": "21.1.5.45"}}
 
 
-class ServerStatusWorkerContractTests(unittest.TestCase):
-    SERVER = {
-        "id": "primary",
-        "name": "Primary",
-        "host": "updates.example",
-        "https_port": 888,
-        "http_port": 887,
-    }
-
-    def test_background_server_check_does_not_stop_running_dpi_on_network_error(self) -> None:
-        from updater import server_status_workers
-        from updater.release.mirrors import MirrorReleaseError
-
-        runtime_feature = SimpleNamespace(
-            is_any_running=Mock(return_value=True),
-            shutdown_sync=Mock(),
-        )
-        worker = server_status_workers.ServerCheckWorker(telegram_only=False)
-        statuses: dict[str, dict] = {}
-        worker.server_checked.connect(lambda name, status: statuses.__setitem__(name, status))
-
+class SourceRowsTests(unittest.TestCase):
+    def _probe(self, **patches) -> tuple[bool, dict[str, dict]]:
+        rows: dict[str, dict] = {}
         with (
-            patch("updater.release.mirrors.mirror_servers", return_value=[self.SERVER]),
-            patch(
-                "updater.release.mirrors.fetch_versions",
-                side_effect=MirrorReleaseError("HTTPS: нет ответа (тайм-аут)"),
-            ),
-            patch("updater.release.telegram.get_telegram_version_info", return_value=None),
-            patch("updater.release.forgejo.probe_forgejo", return_value=0.01),
+            patch("updater.release.forgejo.probe_forgejo", **patches.get("forgejo", {"return_value": 0.01})),
+            patch("updater.release.mirrors.fetch_versions", **patches.get("mirror", {"return_value": (VERSIONS, "HTTPS", "https://x", False, 0.02)})),
         ):
-            worker.run()
+            online = sources.probe_update_sources(
+                language="ru",
+                emit_row=lambda name, status: rows.__setitem__(name, status),
+                servers=[SERVER],
+            )
+        return online, rows
 
-        runtime_feature.shutdown_sync.assert_not_called()
-        self.assertEqual(statuses["Primary"]["status"], "error")
-        self.assertIn("тайм-аут", statuses["Primary"]["error"])
+    def test_mirror_network_error_becomes_error_row(self) -> None:
+        online, rows = self._probe(mirror={"side_effect": MirrorReleaseError("HTTPS: нет ответа (тайм-аут)")})
+
+        self.assertTrue(online, "Forgejo ответил")
+        self.assertEqual(rows["Primary"]["status"], "error")
+        self.assertIn("тайм-аут", rows["Primary"]["error"])
 
     def test_forgejo_row_reflects_current_failure(self) -> None:
         """Раньше старый ответ из памяти показывал «online» при недоступном Forgejo."""
-        from updater import server_status_workers
+        online, rows = self._probe(
+            forgejo={"side_effect": ConnectionError("обрыв")},
+            mirror={"side_effect": MirrorReleaseError("нет ответа")},
+        )
 
-        worker = server_status_workers.ServerCheckWorker(telegram_only=False)
-        statuses: dict[str, dict] = {}
-        worker.server_checked.connect(lambda name, status: statuses.__setitem__(name, status))
+        self.assertFalse(online)
+        self.assertEqual(rows["Forgejo API"]["status"], "error")
 
-        with (
-            patch("updater.release.mirrors.mirror_servers", return_value=[]),
-            patch("updater.release.telegram.get_telegram_version_info", return_value=None),
-            patch("updater.release.forgejo.probe_forgejo", side_effect=ConnectionError("обрыв")),
-        ):
-            worker.run()
+    def test_first_online_mirror_is_marked_current(self) -> None:
+        _online, rows = self._probe()
 
-        self.assertEqual(statuses["Forgejo API"]["status"], "error")
-
-    def test_background_server_worker_has_no_runtime_shutdown_dependency(self) -> None:
-        from updater import server_status_workers
-
-        init_signature = inspect.signature(server_status_workers.ServerCheckWorker.__init__)
-        worker_source = inspect.getsource(server_status_workers.ServerCheckWorker)
-
-        self.assertNotIn("runtime_feature", init_signature.parameters)
-        self.assertNotIn("shutdown_sync", worker_source)
-        self.assertNotIn("is_any_running", worker_source)
+        self.assertTrue(rows["Primary"]["is_current"])
+        self.assertEqual(rows["Primary"]["dev_version"], "21.1.5.45")
 
     def test_telegram_row_is_diagnostic_and_cannot_announce_an_update(self) -> None:
-        from updater import server_status_workers
+        rows: list[tuple[str, dict]] = []
+        with patch("updater.release.telegram.get_telegram_version_info", return_value={"version": "99.1.2.3"}):
+            sources.start_telegram_probe(language="ru", emit_row=lambda *row: rows.append(row)).join(5)
 
-        worker = server_status_workers.ServerCheckWorker(telegram_only=False)
-        statuses: list[tuple[str, dict]] = []
-        worker.server_checked.connect(lambda name, status: statuses.append((name, status)))
+        name, status = rows[0]
+        self.assertEqual(name, "Telegram")
+        self.assertEqual(status["status"], "online")
+        self.assertFalse(status["is_current"])
+        self.assertFalse(status["update_source"])
 
-        with (
-            patch("updater.release.mirrors.mirror_servers", return_value=[]),
-            patch(
-                "updater.release.telegram.get_telegram_version_info",
-                return_value={"version": "99.1.2.3"},
-            ),
-            patch("updater.release.forgejo.probe_forgejo", return_value=0.01),
-        ):
-            worker.run()
+    def test_update_check_does_not_wait_for_telegram(self) -> None:
+        from updater.check.flow import run_update_check
+        from updater.release.resolver import ReleaseLookup
 
-        telegram_status = next(status for name, status in statuses if name == "Telegram")
-        self.assertEqual(telegram_status["status"], "online")
-        self.assertFalse(telegram_status["is_current"])
-        self.assertFalse(telegram_status["update_source"])
+        telegram_released = Event()
+        self.addCleanup(telegram_released.set)
 
-    def test_update_sources_finish_while_telegram_is_still_waiting(self) -> None:
-        from updater import server_status_workers
+        def slow_telegram(_channel):
+            telegram_released.wait(5)
+            return None
 
-        worker = server_status_workers.ServerCheckWorker(telegram_only=False)
-        sources_complete = Event()
-        telegram_saw_sources_complete: list[bool] = []
-        emitted_names: list[str] = []
-        worker.update_sources_complete.connect(sources_complete.set)
-        worker.server_checked.connect(lambda name, _status: emitted_names.append(name))
+        started = time.monotonic()
+        with patch("updater.release.telegram.get_telegram_version_info", side_effect=slow_telegram):
+            outcome = run_update_check(
+                "dev",
+                language="ru",
+                emit_row=lambda *_row: None,
+                dpi=None,
+                lookup=lambda _channel: ReleaseLookup({"version": "1.0.0.1"}),
+                probe=lambda **_kwargs: True,
+            )
 
-        def delayed_telegram(_channel):
-            telegram_saw_sources_complete.append(sources_complete.wait(1.0))
-            return {"version": "99.1.2.3"}
-
-        versions = {
-            "stable": {"version": "21.1.1.5"},
-            "dev": {"version": "21.1.5.45"},
-        }
-        with (
-            patch("updater.release.mirrors.mirror_servers", return_value=[self.SERVER]),
-            patch("updater.release.telegram.get_telegram_version_info", side_effect=delayed_telegram),
-            patch(
-                "updater.release.mirrors.fetch_versions",
-                return_value=(versions, "HTTPS", "https://updates.example:888", False, 0.02),
-            ),
-            patch("updater.release.forgejo.probe_forgejo", return_value=0.01),
-        ):
-            worker.run()
-
-        self.assertEqual(telegram_saw_sources_complete, [True])
-        self.assertIn("Primary", emitted_names)
-        self.assertIn("Forgejo API", emitted_names)
-        self.assertIn("Telegram", emitted_names)
+        self.assertEqual(outcome.release["version"], "1.0.0.1")
+        self.assertLess(time.monotonic() - started, 2.0)
 
     def test_client_telegram_diagnostic_has_no_bot_api_secret(self) -> None:
         from updater.release import telegram
@@ -146,43 +114,32 @@ class ServerStatusWorkerContractTests(unittest.TestCase):
         from updater.release import telegram
 
         html = "<p>Сервер 10.20.30.40</p><a>Zapret2Setup_DEV_21_1_5_78.exe</a><p>1.2.3.4</p>"
-        response = SimpleNamespace(status_code=200, text=html)
-        session = SimpleNamespace(get=Mock(return_value=response), close=Mock())
+        session = SimpleNamespace(get=Mock(return_value=SimpleNamespace(status_code=200, text=html)), close=Mock())
         with patch.object(telegram, "new_session", return_value=session):
-            info = telegram.get_telegram_version_info("dev")
-
-        self.assertEqual(info["version"], "21.1.5.78")
+            self.assertEqual(telegram.get_telegram_version_info("dev")["version"], "21.1.5.78")
 
         session.get.return_value = SimpleNamespace(status_code=200, text="<p>10.20.30.40</p>")
         with patch.object(telegram, "new_session", return_value=session):
             self.assertIsNone(telegram.get_telegram_version_info("dev"))
 
-    def test_page_runtime_waits_only_for_update_sources(self) -> None:
-        from updater.update_page_runtime import UpdatePageRuntime
 
-        source = inspect.getsource(UpdatePageRuntime._bind_server_worker_signals)
-        self.assertIn("worker.update_sources_complete.connect", source)
-        self.assertNotIn("worker.all_complete.connect", source)
+class ServersPageDependenciesTests(unittest.TestCase):
+    def test_services_receive_runtime_actions_instead_of_full_runtime_feature(self) -> None:
+        from PyQt6.QtWidgets import QApplication
 
-
-class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
-    def test_page_runtime_receives_runtime_actions_instead_of_full_runtime_feature(self) -> None:
         from app.page_names import PageName
         from ui.page_deps.system import build_servers_page_kwargs
-        from updater.update_page_runtime import UpdatePageRuntime
         from updater.ui.page import ServersPage
 
+        QApplication.instance() or QApplication([])
         runtime_feature = SimpleNamespace(
             is_any_running=Mock(),
             shutdown_sync=Mock(),
             shutdown_sync_from_worker=Mock(),
             is_available=Mock(),
             restart=Mock(),
-            objects=SimpleNamespace(
-                runtime_service=SimpleNamespace(mark_stopped=Mock()),
-            ),
+            objects=SimpleNamespace(runtime_service=SimpleNamespace(mark_stopped=Mock())),
         )
-
         request_exit = Mock()
         kwargs = build_servers_page_kwargs(
             page_name=PageName.SERVERS,
@@ -194,252 +151,17 @@ class UpdatePageRuntimeServerRecoveryTests(unittest.TestCase):
         )
 
         self.assertNotIn("runtime_feature", inspect.signature(ServersPage.__init__).parameters)
-        self.assertNotIn("runtime_feature", inspect.signature(UpdatePageRuntime.__init__).parameters)
-        self.assertNotIn("_runtime_feature", inspect.getsource(UpdatePageRuntime))
-        self.assertIn("runtime_actions", kwargs)
         self.assertNotIn("runtime_feature", kwargs)
-        self.assertIs(kwargs["runtime_actions"].is_any_running, runtime_feature.is_any_running)
-        # Остановки updater'а идут из QThread-воркеров, поэтому здесь worker-вариант:
-        # runtime-state и UI-подписчиков обновляет GUI-поток.
-        self.assertIs(
-            kwargs["runtime_actions"].shutdown_sync,
-            runtime_feature.shutdown_sync_from_worker,
-        )
-        self.assertIs(kwargs["runtime_actions"].is_available, runtime_feature.is_available)
-        self.assertIs(kwargs["runtime_actions"].restart, runtime_feature.restart)
-        kwargs["runtime_actions"].mark_stopped()
-        runtime_feature.objects.runtime_service.mark_stopped.assert_called_once_with(
-            clear_error=True
-        )
-        self.assertIs(kwargs["runtime_actions"].request_exit, request_exit)
-
-    def _make_runtime(self):
-        from ui.page_deps.types import UpdateRuntimeActions
-        from updater.update_page_runtime import UpdatePageRuntime
-
-        view = SimpleNamespace(
-            get_ui_language=Mock(return_value="ru"),
-            window=Mock(return_value=None),
-            is_update_download_in_progress=Mock(return_value=False),
-            reset_server_rows=Mock(),
-            upsert_server_status=Mock(),
-            start_checking=Mock(),
-            finish_checking=Mock(),
-            show_update_check_error=Mock(),
-            show_found_update_source=Mock(),
-            show_update_offer=Mock(),
-            hide_update_offer=Mock(),
-            start_update_download=Mock(),
-            update_download_progress=Mock(),
-            mark_update_download_complete=Mock(),
-            mark_update_download_failed=Mock(),
-            show_update_download_error=Mock(),
-            show_update_deferred=Mock(),
-            show_checked_ago=Mock(),
-            show_manual_hint=Mock(),
-            show_auto_enabled_hint=Mock(),
-            hide_update_status_card=Mock(),
-            show_update_status_card=Mock(),
-            set_update_check_enabled=Mock(),
-            set_auto_check_toggle_checked=Mock(),
-        )
-        runtime_feature = SimpleNamespace(
-            is_any_running=Mock(return_value=True),
-            shutdown_sync=Mock(return_value=SimpleNamespace(still_running=False)),
-            is_available=Mock(return_value=True),
-            restart=Mock(),
-            objects=SimpleNamespace(
-                runtime_service=SimpleNamespace(mark_stopped=Mock()),
-            ),
-        )
-        from app.feature_facades.updater import UpdaterFeature
-
-        runtime = UpdatePageRuntime(
-            view,
-            runtime_actions=UpdateRuntimeActions(
-                is_any_running=runtime_feature.is_any_running,
-                shutdown_sync=runtime_feature.shutdown_sync,
-                is_available=runtime_feature.is_available,
-                restart=runtime_feature.restart,
-                mark_stopped=runtime_feature.objects.runtime_service.mark_stopped,
-                request_exit=Mock(),
-            ),
-            updater_feature=UpdaterFeature(),
-        )
-        return runtime, view, runtime_feature
-
-    def _stub_retry_worker_start(self, runtime):
-        retry_runtime = runtime._server_retry_without_dpi_runtime
-
-        def _start_qthread_worker(**_kwargs):
-            request_id = retry_runtime.next_request_id()
-            retry_runtime.worker = object()
-            return request_id, retry_runtime.worker
-
-        return patch.object(retry_runtime, "start_qthread_worker", side_effect=_start_qthread_worker)
-
-    def _stub_dpi_restart_worker_start(self, runtime):
-        restart_runtime = runtime._dpi_restart_runtime
-
-        def _start_qthread_worker(**_kwargs):
-            request_id = restart_runtime.next_request_id()
-            restart_runtime.worker = object()
-            return request_id, restart_runtime.worker
-
-        return patch.object(restart_runtime, "start_qthread_worker", side_effect=_start_qthread_worker)
-
-    def test_retry_without_dpi_worker_stops_dpi_in_background(self) -> None:
-        import updater.commands as updater_commands
-        from updater.retry_workers import UpdaterServerRetryWithoutDpiWorker
-
-        worker_source = inspect.getsource(UpdaterServerRetryWithoutDpiWorker.run)
-        init_signature = inspect.signature(UpdaterServerRetryWithoutDpiWorker.__init__)
-        self.assertTrue(hasattr(updater_commands, "retry_server_check_without_dpi"))
-        command_signature = inspect.signature(updater_commands.retry_server_check_without_dpi)
-        command_source = inspect.getsource(updater_commands.retry_server_check_without_dpi)
-
-        self.assertIn("_retry_server_check_without_dpi", worker_source)
-        self.assertNotIn("updater_commands.retry_server_check_without_dpi", worker_source)
-        self.assertNotIn("runtime_feature", init_signature.parameters)
-        self.assertNotIn("runtime_feature", command_signature.parameters)
-        self.assertNotIn("_runtime_feature", inspect.getsource(UpdaterServerRetryWithoutDpiWorker))
-        self.assertNotIn("self._shutdown_sync(", worker_source)
-        self.assertNotIn("self._is_any_running(", worker_source)
-        self.assertIn("shutdown_sync", command_source)
-        self.assertIn("is_any_running", command_source)
-
-        runtime_feature = SimpleNamespace(
-            is_any_running=Mock(return_value=True),
-            shutdown_sync=Mock(return_value=SimpleNamespace(still_running=False)),
-        )
-        worker = UpdaterServerRetryWithoutDpiWorker(
-            7,
-            is_any_running=runtime_feature.is_any_running,
-            shutdown_sync=runtime_feature.shutdown_sync,
-            retry_server_check_without_dpi=updater_commands.retry_server_check_without_dpi,
-        )
-        results = []
-        worker.loaded.connect(lambda *args: results.append(args))
-
-        worker.run()
-
-        runtime_feature.shutdown_sync.assert_called_once_with(
-            reason="server_status_probe_retry",
-            include_cleanup=True,
-        )
-        self.assertEqual(results, [(7, True, True, "")])
-
-    def test_dpi_restart_worker_restarts_runtime_in_background(self) -> None:
-        import updater.commands as updater_commands
-        from updater.retry_workers import UpdaterDpiRestartWorker
-
-        worker_source = inspect.getsource(UpdaterDpiRestartWorker.run)
-        init_signature = inspect.signature(UpdaterDpiRestartWorker.__init__)
-        self.assertTrue(hasattr(updater_commands, "restart_dpi_after_update"))
-        command_signature = inspect.signature(updater_commands.restart_dpi_after_update)
-        command_source = inspect.getsource(updater_commands.restart_dpi_after_update)
-
-        self.assertIn("_restart_dpi_after_update", worker_source)
-        self.assertNotIn("updater_commands.restart_dpi_after_update", worker_source)
-        self.assertNotIn("runtime_feature", init_signature.parameters)
-        self.assertNotIn("runtime_feature", command_signature.parameters)
-        self.assertNotIn("_runtime_feature", inspect.getsource(UpdaterDpiRestartWorker))
-        self.assertNotIn("self._restart()", worker_source)
-        self.assertNotIn("self._is_available()", worker_source)
-        self.assertIn("restart", command_source)
-        self.assertIn("is_available", command_source)
-
-        runtime_feature = SimpleNamespace(
-            is_available=Mock(return_value=True),
-            restart=Mock(return_value=True),
-        )
-        worker = UpdaterDpiRestartWorker(
-            9,
-            is_available=runtime_feature.is_available,
-            restart=runtime_feature.restart,
-            restart_dpi_after_update=updater_commands.restart_dpi_after_update,
-            context="test",
-        )
-        results = []
-        worker.loaded.connect(lambda *args: results.append(args))
-
-        worker.run()
-
-        runtime_feature.restart.assert_called_once_with()
-        self.assertEqual(results, [(9, True)])
-
-    def test_page_runtime_retries_server_check_without_dpi_after_full_source_failure(self) -> None:
-        runtime, _view, runtime_feature = self._make_runtime()
-
-        with (
-            patch.object(runtime, "_start_server_check_workflow") as start_server_check,
-            patch.object(runtime, "_start_version_check_workflow") as start_version_check,
-            self._stub_retry_worker_start(runtime),
-        ):
-            runtime._continue_start_checks(telegram_only=False, keep_existing_rows=False)
-            # Версионная фаза стартует параллельно с обходом серверов.
-            start_version_check.assert_called_once()
-            runtime._on_server_checked("Telegram Bot", {"status": "offline"})
-            runtime._on_server_checked("Primary", {"status": "error"})
-            runtime._on_server_checked("Forgejo API", {"status": "error"})
-            runtime._on_servers_complete()
-            retry_request_id = runtime._server_retry_without_dpi_runtime.request_id
-            runtime._on_server_retry_without_dpi_finished(retry_request_id, True, True, "")
-
-        runtime_feature.shutdown_sync.assert_not_called()
-        self.assertEqual(start_server_check.call_count, 2)
-        start_server_check.assert_called_with(telegram_only=False)
-        # Во время повторного обхода без DPI версия повторно не запрашивается.
-        self.assertEqual(start_version_check.call_count, 1)
-
-    def test_page_runtime_restarts_dpi_after_retry_before_version_check(self) -> None:
-        runtime, _view, runtime_feature = self._make_runtime()
-
-        with (
-            patch.object(runtime, "_start_server_check_workflow"),
-            patch.object(runtime, "_start_version_check_workflow") as start_version_check,
-            self._stub_retry_worker_start(runtime),
-            self._stub_dpi_restart_worker_start(runtime),
-        ):
-            runtime._continue_start_checks(telegram_only=False, keep_existing_rows=False)
-            # Параллельный запуск при старте проверки.
-            start_version_check.assert_called_once()
-            runtime._on_server_checked("Forgejo API", {"status": "error"})
-            runtime._on_servers_complete()
-            retry_request_id = runtime._server_retry_without_dpi_runtime.request_id
-            runtime._on_server_retry_without_dpi_finished(retry_request_id, True, True, "")
-            runtime._on_server_checked("Primary", {"status": "online", "is_current": True})
-            runtime._on_servers_complete()
-            # Пока DPI не перезапущен, повторная версионная фаза не начинается.
-            self.assertEqual(start_version_check.call_count, 1)
-            restart_request_id = runtime._dpi_restart_runtime.request_id
-            runtime._on_dpi_restart_finished(restart_request_id, True)
-
-        runtime_feature.shutdown_sync.assert_not_called()
-        runtime_feature.restart.assert_not_called()
-        # Первая попытка шла при сломанной сети — после рестарта DPI версия
-        # запрашивается заново.
-        self.assertEqual(start_version_check.call_count, 2)
-
-    def test_page_runtime_does_not_retry_without_dpi_when_any_source_is_online(self) -> None:
-        runtime, _view, runtime_feature = self._make_runtime()
-
-        with (
-            patch.object(runtime, "_start_server_check_workflow"),
-            patch.object(runtime, "_start_version_check_workflow") as start_version_check,
-        ):
-            runtime._continue_start_checks(telegram_only=False, keep_existing_rows=False)
-            # Параллельный запуск при старте проверки.
-            start_version_check.assert_called_once()
-            runtime._on_server_checked("Telegram Bot", {"status": "offline"})
-            runtime._on_server_checked("Primary", {"status": "online", "is_current": True})
-            runtime._on_servers_complete()
-
-        runtime_feature.shutdown_sync.assert_not_called()
-        runtime_feature.restart.assert_not_called()
-        # Воркер версии в тесте подменён и не завершался — после серверов
-        # выполняется страховочный повторный запуск.
-        self.assertEqual(start_version_check.call_count, 2)
+        for service in (kwargs["check_service"], kwargs["install_service"]):
+            actions = service._runtime_actions
+            self.assertIs(actions.is_any_running, runtime_feature.is_any_running)
+            # Остановки обновлятора идут из фоновых потоков: runtime-state и
+            # UI-подписчиков обновляет GUI-поток.
+            self.assertIs(actions.shutdown_sync, runtime_feature.shutdown_sync_from_worker)
+            self.assertIs(actions.restart, runtime_feature.restart)
+            self.assertIs(actions.request_exit, request_exit)
+        kwargs["install_service"]._runtime_actions.mark_stopped()
+        runtime_feature.objects.runtime_service.mark_stopped.assert_called_once_with(clear_error=True)
 
 
 if __name__ == "__main__":

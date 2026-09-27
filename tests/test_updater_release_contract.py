@@ -9,8 +9,9 @@ from updater.release_contract import (
     ReleaseMetadataError,
     is_installable_release,
 )
+from updater.download.downloader import UpdatePipelineError
+from updater.download.flow import resolve_artifact
 from updater.release.resolver import ReleaseLookup
-from updater.update_pipeline import CancellationToken, prepare_update
 
 
 def _release(version: str = "99.1.2.3") -> dict:
@@ -53,53 +54,46 @@ class ReleaseArtifactMetadataTests(unittest.TestCase):
 
 
 class UpdateReleaseResolutionTests(unittest.TestCase):
-    def test_preflight_uses_one_release_without_refetching_forgejo_integrity(self) -> None:
-        release = _release()
-
+    def _resolve(self, lookup: ReleaseLookup, **kwargs):
         with (
-            patch("updater.update_pipeline.lookup_latest_release", return_value=ReleaseLookup(release)),
-            patch("updater.update_pipeline.test_connectivity", return_value=True),
+            patch("updater.download.flow.lookup_latest_release", return_value=lookup),
+            patch("updater.download.flow.APP_VERSION", "21.1.5.79"),
             patch("updater.release.forgejo.fetch_latest_release") as forgejo_refetch,
         ):
-            result = prepare_update(
-                requested_version=release["version"],
-                token=CancellationToken(),
-            )
+            try:
+                return resolve_artifact(**kwargs), forgejo_refetch
+            finally:
+                forgejo_refetch.assert_not_called()
 
-        forgejo_refetch.assert_not_called()
-        self.assertEqual(result.artifact.version, release["version"])
-        self.assertEqual(result.artifact.expected_sha256, release["sha256"])
-        self.assertEqual(result.artifact.expected_size, release["file_size"])
-        self.assertEqual(result.artifact.sources[0].url, release["update_url"])
+    def test_install_uses_one_release_without_refetching_forgejo_integrity(self) -> None:
+        release = _release()
 
-    def test_preflight_does_not_mix_telegram_version_with_forgejo_hash(self) -> None:
+        artifact, _ = self._resolve(ReleaseLookup(release), requested_version=release["version"])
+
+        self.assertEqual(artifact.version, release["version"])
+        self.assertEqual(artifact.expected_sha256, release["sha256"])
+        self.assertEqual(artifact.expected_size, release["file_size"])
+        self.assertEqual(artifact.sources[0].url, release["update_url"])
+
+    def test_install_does_not_mix_telegram_version_with_forgejo_hash(self) -> None:
         announcement = _release()
         announcement["update_url"] = "telegram://zapretguidev"
         announcement.pop("sha256")
 
-        with (
-            patch("updater.update_pipeline.lookup_latest_release", return_value=ReleaseLookup(announcement)),
-            patch("updater.release.forgejo.fetch_latest_release") as forgejo_refetch,
-            self.assertRaisesRegex(ReleaseMetadataError, "некорректная ссылка"),
-        ):
-            prepare_update(
-                requested_version=announcement["version"],
-                token=CancellationToken(),
-            )
+        with self.assertRaisesRegex(ReleaseMetadataError, "некорректная ссылка"):
+            self._resolve(ReleaseLookup(announcement), requested_version=announcement["version"])
 
-        forgejo_refetch.assert_not_called()
+    def test_install_reports_lookup_error_instead_of_generic_failure(self) -> None:
+        with self.assertRaisesRegex(UpdatePipelineError, "Forgejo: нет ответа"):
+            self._resolve(ReleaseLookup(None, "Forgejo: нет ответа. Зеркала: нет ответа"), requested_version="99.1.2.3")
 
-    def test_preflight_reports_lookup_error_instead_of_generic_failure(self) -> None:
-        from updater.update_pipeline import UpdatePipelineError
+    def test_same_version_is_refused_for_update_but_allowed_for_repair(self) -> None:
+        release = _release("21.1.5.79")
 
-        with (
-            patch(
-                "updater.update_pipeline.lookup_latest_release",
-                return_value=ReleaseLookup(None, "Forgejo: нет ответа. Зеркала: нет ответа"),
-            ),
-            self.assertRaisesRegex(UpdatePipelineError, "Forgejo: нет ответа"),
-        ):
-            prepare_update(requested_version="99.1.2.3", token=CancellationToken())
+        with self.assertRaisesRegex(UpdatePipelineError, "уже не требуется"):
+            self._resolve(ReleaseLookup(release))
+        artifact, _ = self._resolve(ReleaseLookup(release), allow_same_version=True)
+        self.assertEqual(artifact.version, "21.1.5.79")
 
     def test_release_lookup_has_no_telegram_source(self) -> None:
         from updater.release import resolver
@@ -107,64 +101,35 @@ class UpdateReleaseResolutionTests(unittest.TestCase):
         source = inspect.getsource(resolver)
         self.assertNotIn("telegram", source.lower())
 
-    def test_version_worker_asks_only_its_own_channel(self) -> None:
+    def test_check_asks_only_its_own_channel(self) -> None:
         """Раньше проверялись оба канала подряд, и предложение ждало лишний запрос."""
-        from updater.server_status_workers import VersionCheckWorker
+        from updater.check.flow import run_update_check
 
-        worker = VersionCheckWorker("dev")
-        found: list[tuple[str, dict]] = []
-        worker.version_found.connect(lambda channel, release: found.append((channel, release)))
+        asked: list[str] = []
 
-        with patch(
-            "updater.release.resolver.lookup_latest_release",
-            return_value=ReleaseLookup(_release("99.1.2.4")),
-        ) as resolve:
-            worker.run()
-
-        resolve.assert_called_once_with("dev")
-        self.assertEqual([channel for channel, _release_info in found], ["dev"])
-
-    def test_version_worker_reports_lookup_error(self) -> None:
-        from updater.server_status_workers import VersionCheckWorker
-
-        worker = VersionCheckWorker("dev")
-        found: list[dict] = []
-        worker.version_found.connect(lambda _channel, info: found.append(info))
-
-        with patch(
-            "updater.release.resolver.lookup_latest_release",
-            return_value=ReleaseLookup(None, "Не удалось узнать новейшую версию"),
-        ):
-            worker.run()
-
-        self.assertEqual(found, [{"error": "Не удалось узнать новейшую версию"}])
-
-    def test_stopped_version_worker_stays_silent(self) -> None:
-        """Результат остановленной проверки не должен перебить новую."""
-        from updater.server_status_workers import VersionCheckWorker
-
-        worker = VersionCheckWorker("dev")
-        events: list[str] = []
-        worker.version_found.connect(lambda *_args: events.append("found"))
-        worker.complete.connect(lambda: events.append("complete"))
-
-        def stopped_lookup(_channel: str) -> ReleaseLookup:
-            worker.stop()
+        def lookup(channel: str) -> ReleaseLookup:
+            asked.append(channel)
             return ReleaseLookup(_release("99.1.2.4"))
 
-        with patch("updater.release.resolver.lookup_latest_release", side_effect=stopped_lookup):
-            worker.run()
+        outcome = run_update_check(
+            "dev",
+            language="ru",
+            emit_row=lambda *_args: None,
+            dpi=None,
+            lookup=lookup,
+            probe=lambda **_kwargs: True,
+            probe_telegram=lambda **_kwargs: None,
+        )
 
-        self.assertEqual(events, [])
+        self.assertEqual(asked, ["dev"])
+        self.assertEqual(outcome.release["version"], "99.1.2.4")
 
     def test_server_status_rows_cannot_offer_an_update_directly(self) -> None:
-        from updater.update_page_runtime import UpdatePageRuntime
+        from updater.ui.page import ServersPage
 
-        handler_source = inspect.getsource(UpdatePageRuntime._on_server_checked)
-        self.assertFalse(hasattr(UpdatePageRuntime, "_maybe_offer_update_from_server"))
-        self.assertNotIn("_offer_current_update", handler_source)
-        self.assertNotIn("_set_found_update_state", handler_source)
-
+        handler_source = inspect.getsource(ServersPage._on_server_status)
+        self.assertNotIn("show_update", handler_source)
+        self.assertNotIn("_found_version", handler_source)
 
 if __name__ == "__main__":
     unittest.main()

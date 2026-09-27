@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from updater import update_page_plans
+from updater.ui import plans as update_page_plans
 
 
 class UpdaterChangelogProgressPlanTests(unittest.TestCase):

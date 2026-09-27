@@ -3413,7 +3413,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         blocked_source = inspect.getsource(OrchestraBlockedPage)
         ratings_source = inspect.getsource(OrchestraRatingsPage)
         updater_source = inspect.getsource(ServersPage)
-        update_runtime_source = inspect.getsource(__import__("updater.update_page_runtime", fromlist=["UpdatePageRuntime"]).UpdatePageRuntime)
 
         self.assertIn("class OneShotWorkerRuntime", runtime_source)
         self.assertIn("start_qobject_worker", runtime_source)
@@ -3424,72 +3423,40 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
             locked_source,
             blocked_source,
             ratings_source,
-            updater_source + update_runtime_source,
+            updater_source,
         ):
             self.assertIn("OneShotWorkerRuntime", source)
 
-    def test_updater_auto_check_save_runs_through_worker(self) -> None:
-        settings_workers = importlib.import_module("updater.settings_workers")
-        update_runtime_cls = __import__("updater.update_page_runtime", fromlist=["UpdatePageRuntime"]).UpdatePageRuntime
-        updater_feature_cls = __import__("app.feature_facades.updater", fromlist=["UpdaterFeature"]).UpdaterFeature
-
-        handler_source = inspect.getsource(update_runtime_cls.set_auto_check_enabled)
-        runtime_source = inspect.getsource(update_runtime_cls)
-        feature_source = inspect.getsource(updater_feature_cls)
-
-        self.assertTrue(hasattr(settings_workers, "UpdaterAutoCheckSaveWorker"))
-        worker_source = inspect.getsource(settings_workers.UpdaterAutoCheckSaveWorker.run)
-
-        self.assertIn("_request_auto_check_save", handler_source)
-        self.assertNotIn("set_auto_update_enabled", handler_source)
-        self.assertIn("_auto_check_save_pending", runtime_source)
-        self.assertIn("create_auto_check_save_worker", feature_source)
-        self.assertIn("set_auto_update_enabled=self.set_auto_update_enabled", feature_source)
-        self.assertIn("_set_auto_update_enabled", worker_source)
-        self.assertNotIn("updater_commands", worker_source)
-
-    def test_updater_auto_check_initial_read_runs_through_worker(self) -> None:
-        settings_workers = importlib.import_module("updater.settings_workers")
-        update_runtime_cls = __import__("updater.update_page_runtime", fromlist=["UpdatePageRuntime"]).UpdatePageRuntime
-        updater_feature_cls = __import__("app.feature_facades.updater", fromlist=["UpdaterFeature"]).UpdaterFeature
-
-        init_source = inspect.getsource(update_runtime_cls.__init__)
-        runtime_source = inspect.getsource(update_runtime_cls)
+    def test_updater_settings_and_channel_open_run_off_gui_thread(self) -> None:
+        page_actions = importlib.import_module("updater.page_actions")
         page_source = inspect.getsource(ServersPage)
-        feature_source = inspect.getsource(updater_feature_cls)
+        actions_source = inspect.getsource(page_actions)
 
-        self.assertTrue(hasattr(settings_workers, "UpdaterAutoCheckLoadWorker"))
-        worker_source = inspect.getsource(settings_workers.UpdaterAutoCheckLoadWorker.run)
+        # Страница не читает и не пишет настройки сама: только через действия.
+        self.assertNotIn("settings.store", page_source)
+        self.assertIn("AutoCheckSetting", page_source)
+        self.assertIn("ChannelOpener", page_source)
+        for call in (
+            "self._updater_feature.is_auto_update_enabled()",
+            "self._updater_feature.set_auto_update_enabled(value)",
+            "self._updater_feature.open_update_channel(",
+        ):
+            self.assertIn(call, actions_source)
+        self.assertIn("threading.Thread(", actions_source)
+        self.assertNotIn("updater_commands", actions_source)
 
-        self.assertNotIn("is_auto_update_enabled", init_source)
-        self.assertIn("_request_auto_check_load", runtime_source)
-        self.assertIn("_auto_check_load_runtime", runtime_source)
-        self.assertIn("set_auto_check_toggle_checked", runtime_source)
-        self.assertIn("start_auto_check_load", page_source)
-        self.assertIn("create_auto_check_load_worker", feature_source)
-        self.assertIn("is_auto_update_enabled=self.is_auto_update_enabled", feature_source)
-        self.assertIn("_is_auto_update_enabled", worker_source)
-        self.assertNotIn("updater_commands", worker_source)
+    def test_updater_dpi_and_network_work_belongs_to_services(self) -> None:
+        check_service = importlib.import_module("updater.check.service")
+        install_service = importlib.import_module("updater.download.service")
+        page_source = inspect.getsource(ServersPage)
 
-    def test_updater_open_channel_runs_through_worker(self) -> None:
-        settings_workers = importlib.import_module("updater.settings_workers")
-        update_runtime_cls = __import__("updater.update_page_runtime", fromlist=["UpdatePageRuntime"]).UpdatePageRuntime
-        updater_feature_cls = __import__("app.feature_facades.updater", fromlist=["UpdaterFeature"]).UpdaterFeature
-
-        page_handler_source = inspect.getsource(ServersPage._open_telegram_channel)
-        runtime_source = inspect.getsource(update_runtime_cls)
-        feature_source = inspect.getsource(updater_feature_cls)
-
-        self.assertTrue(hasattr(settings_workers, "UpdaterChannelOpenWorker"))
-        worker_source = inspect.getsource(settings_workers.UpdaterChannelOpenWorker.run)
-
-        self.assertIn("request_open_update_channel", page_handler_source)
-        self.assertNotIn("self._update_runtime.open_update_channel", page_handler_source)
-        self.assertIn("_update_channel_open_runtime", runtime_source)
-        self.assertIn("create_update_channel_open_worker", feature_source)
-        self.assertIn("open_update_channel=self.open_update_channel", feature_source)
-        self.assertIn("_open_update_channel", worker_source)
-        self.assertNotIn("updater_commands", worker_source)
+        for forbidden in ("shutdown_sync", "is_any_running", "lookup_latest_release", "download_artifact"):
+            self.assertNotIn(forbidden, page_source)
+        for module in (check_service, install_service):
+            source = inspect.getsource(module)
+            self.assertIn("DpiGuard(", source)
+            self.assertIn("threading.Thread(", source)
+            self.assertIn("daemon=True", source)
 
     def test_updater_changelog_links_open_through_worker(self) -> None:
         from app.page_names import PageName
@@ -3534,103 +3501,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
             url="https://example.org",
             parent=parent,
         )
-
-    def test_updater_pipeline_workers_are_created_through_feature(self) -> None:
-        update_runtime_cls = __import__("updater.update_page_runtime", fromlist=["UpdatePageRuntime"]).UpdatePageRuntime
-        updater_feature_cls = __import__("app.feature_facades.updater", fromlist=["UpdaterFeature"]).UpdaterFeature
-
-        preflight_source = inspect.getsource(update_runtime_cls._start_update_download)
-        download_source = inspect.getsource(update_runtime_cls._start_update_download_stage)
-        installer_source = inspect.getsource(update_runtime_cls._start_update_installer_stage)
-        feature_source = inspect.getsource(updater_feature_cls)
-
-        self.assertIn("create_update_preflight_worker", preflight_source)
-        self.assertIn("create_update_download_worker", download_source)
-        self.assertIn("create_update_installer_worker", installer_source)
-        self.assertIn("UpdatePreflightWorker", feature_source)
-        self.assertIn("UpdateDownloadWorker", feature_source)
-        self.assertIn("UpdateInstallerWorker", feature_source)
-        self.assertNotIn("UpdateWorker", feature_source)
-
-    def test_updater_cache_invalidation_runs_through_worker(self) -> None:
-        settings_workers = importlib.import_module("updater.settings_workers")
-        update_runtime_cls = __import__("updater.update_page_runtime", fromlist=["UpdatePageRuntime"]).UpdatePageRuntime
-        updater_feature_cls = __import__("app.feature_facades.updater", fromlist=["UpdaterFeature"]).UpdaterFeature
-
-        manual_check_source = inspect.getsource(update_runtime_cls.request_manual_check)
-        install_source = inspect.getsource(update_runtime_cls.install_update)
-        runtime_source = inspect.getsource(update_runtime_cls)
-        feature_source = inspect.getsource(updater_feature_cls)
-
-        self.assertTrue(hasattr(settings_workers, "UpdaterCacheInvalidateWorker"))
-        worker_source = inspect.getsource(settings_workers.UpdaterCacheInvalidateWorker.run)
-
-        self.assertIn("_request_update_cache_invalidate", manual_check_source)
-        self.assertIn("_request_update_cache_invalidate", install_source)
-        self.assertNotIn("invalidate_cache", manual_check_source)
-        self.assertNotIn("invalidate_cache", install_source)
-        self.assertIn("_cache_invalidate_runtime", runtime_source)
-        self.assertIn("create_cache_invalidate_worker", runtime_source)
-        self.assertIn("create_cache_invalidate_worker", feature_source)
-        self.assertIn("invalidate_update_cache=self.invalidate_update_cache", feature_source)
-        self.assertIn("_invalidate_update_cache", worker_source)
-
-    def test_updater_server_retry_without_dpi_runs_through_worker(self) -> None:
-        retry_workers = importlib.import_module("updater.retry_workers")
-        update_runtime_cls = __import__("updater.update_page_runtime", fromlist=["UpdatePageRuntime"]).UpdatePageRuntime
-        updater_feature_cls = __import__("app.feature_facades.updater", fromlist=["UpdaterFeature"]).UpdaterFeature
-
-        retry_source = inspect.getsource(update_runtime_cls._maybe_retry_server_check_without_dpi)
-        runtime_source = inspect.getsource(update_runtime_cls)
-
-        self.assertTrue(hasattr(retry_workers, "UpdaterServerRetryWithoutDpiWorker"))
-        worker_source = inspect.getsource(retry_workers.UpdaterServerRetryWithoutDpiWorker.run)
-        command_source = inspect.getsource(importlib.import_module("updater.commands").retry_server_check_without_dpi)
-        feature_source = inspect.getsource(updater_feature_cls)
-
-        self.assertIn("_request_server_retry_without_dpi", retry_source)
-        self.assertNotIn("shutdown_sync", retry_source)
-        self.assertNotIn("is_any_running", retry_source)
-        self.assertIn("_server_retry_without_dpi_runtime", runtime_source)
-        self.assertIn("create_server_retry_without_dpi_worker", runtime_source)
-        self.assertIn("_teardown_server_retry_without_dpi_worker", runtime_source)
-        self.assertIn("create_server_retry_without_dpi_worker", feature_source)
-        self.assertIn("retry_server_check_without_dpi=self.retry_server_check_without_dpi", feature_source)
-        self.assertIn("_retry_server_check_without_dpi", worker_source)
-        self.assertNotIn("updater.commands", worker_source)
-        self.assertIn("retry_server_check_without_dpi", worker_source)
-        self.assertNotIn("self._is_any_running(", worker_source)
-        self.assertNotIn("self._shutdown_sync(", worker_source)
-        self.assertIn("is_any_running", command_source)
-        self.assertIn("shutdown_sync", command_source)
-
-    def test_updater_dpi_restart_runs_through_worker(self) -> None:
-        retry_workers = importlib.import_module("updater.retry_workers")
-        update_runtime_cls = __import__("updater.update_page_runtime", fromlist=["UpdatePageRuntime"]).UpdatePageRuntime
-
-        restart_source = inspect.getsource(update_runtime_cls._restart_dpi_after_update)
-        runtime_source = inspect.getsource(update_runtime_cls)
-
-        self.assertTrue(hasattr(retry_workers, "UpdaterDpiRestartWorker"))
-        worker_source = inspect.getsource(retry_workers.UpdaterDpiRestartWorker.run)
-        command_source = inspect.getsource(importlib.import_module("updater.commands").restart_dpi_after_update)
-        feature_source = inspect.getsource(__import__("app.feature_facades.updater", fromlist=["UpdaterFeature"]).UpdaterFeature)
-
-        self.assertIn("_request_dpi_restart", restart_source)
-        self.assertNotIn(".restart(", restart_source)
-        self.assertNotIn(".is_available(", restart_source)
-        self.assertIn("_dpi_restart_runtime", runtime_source)
-        self.assertIn("create_dpi_restart_worker", runtime_source)
-        self.assertIn("_teardown_dpi_restart_worker", runtime_source)
-        self.assertIn("create_dpi_restart_worker", feature_source)
-        self.assertIn("restart_dpi_after_update=self.restart_dpi_after_update", feature_source)
-        self.assertIn("_restart_dpi_after_update", worker_source)
-        self.assertNotIn("updater.commands", worker_source)
-        self.assertIn("restart_dpi_after_update", worker_source)
-        self.assertNotIn(".is_available(", worker_source)
-        self.assertNotIn(".restart(", worker_source)
-        self.assertIn("is_available", command_source)
-        self.assertIn("restart", command_source)
 
     def test_logs_cleanup_stops_overview_worker(self) -> None:
         cleanup_source = inspect.getsource(LogsPage.cleanup)

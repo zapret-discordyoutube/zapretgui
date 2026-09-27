@@ -9,13 +9,6 @@ class UpdateChannelActionResult:
     message: str
 
 
-@dataclass(slots=True)
-class ServerFullCheckGateResult:
-    telegram_only: bool
-    keep_existing_rows: bool
-    message: str = ""
-
-
 def is_auto_update_enabled() -> bool:
     from settings.store import get_auto_update_enabled
 
@@ -56,57 +49,3 @@ def open_update_channel(channel: str) -> UpdateChannelActionResult:
         return UpdateChannelActionResult(True, domain)
     except Exception as exc:
         return UpdateChannelActionResult(False, str(exc))
-
-
-def prepare_server_full_check(*, skip_rate_limit: bool = False) -> ServerFullCheckGateResult:
-    """Полная проверка серверов разрешена всегда.
-
-    Все источники опрашиваются параллельно и недолго, ограничивать частоту
-    больше незачем. Шаг уходит вместе со старой страницей обновлений.
-    """
-    _ = skip_rate_limit
-    return ServerFullCheckGateResult(
-        telegram_only=False,
-        keep_existing_rows=False,
-    )
-
-
-def retry_server_check_without_dpi(*, is_any_running, shutdown_sync) -> tuple[bool, bool, str]:
-    if not is_any_running():
-        return False, False, ""
-
-    shutdown_result = shutdown_sync(
-        reason="server_status_probe_retry",
-        include_cleanup=True,
-    )
-    if bool(getattr(shutdown_result, "still_running", False)):
-        return False, False, "DPI не остановился"
-    return True, True, ""
-
-
-def restart_dpi_after_update(*, is_available, restart) -> bool:
-    if not is_available():
-        return False
-    return bool(restart())
-
-
-def stop_dpi_for_download(*, is_any_running, shutdown_sync) -> bool:
-    if not is_any_running():
-        return False
-    shutdown_sync(reason="updater_download_connectivity", include_cleanup=True)
-    return True
-
-
-def stop_dpi_for_update(*, is_any_running, shutdown_sync, reason: str) -> tuple[bool, bool, str]:
-    """Останавливает DPI в отдельной управляемой стадии обновления."""
-    if not is_any_running():
-        return False, True, ""
-
-    result = shutdown_sync(
-        reason=str(reason or "updater_pipeline"),
-        include_cleanup=True,
-        update_runtime_state=False,
-    )
-    if bool(getattr(result, "still_running", False)):
-        return True, False, "DPI не остановился"
-    return True, True, ""

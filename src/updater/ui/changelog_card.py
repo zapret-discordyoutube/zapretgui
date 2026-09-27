@@ -14,7 +14,7 @@ from app.ui_texts import tr as tr_catalog
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from ui.theme_refresh import ThemeRefreshBinding
-import updater.update_page_plans as update_page_plans
+from updater.ui import plans
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -248,7 +248,7 @@ class ChangelogCard(CardWidget):
         if self._raw_changelog:
             try:
                 self.changelog_text.setText(
-                    update_page_plans.make_links_clickable(self._raw_changelog, tokens.accent_hex)
+                    plans.make_links_clickable(self._raw_changelog, tokens.accent_hex)
                 )
             except Exception:
                 pass
@@ -256,7 +256,7 @@ class ChangelogCard(CardWidget):
     def show_update(self, version: str, changelog: str):
         if self._is_downloading:
             return
-        plan = update_page_plans.build_changelog_update_plan(
+        plan = plans.build_changelog_update_plan(
             version=version,
             changelog=changelog,
             app_version=APP_VERSION,
@@ -282,7 +282,7 @@ class ChangelogCard(CardWidget):
         self._update_accessibility()
 
     def start_download(self, version: str):
-        plan = update_page_plans.build_changelog_download_start_plan(
+        plan = plans.build_changelog_download_start_plan(
             version=version,
             language=self._ui_language,
             now=time.time(),
@@ -320,7 +320,7 @@ class ChangelogCard(CardWidget):
         self._update_accessibility()
 
     def update_progress(self, percent: int, done_bytes: int, total_bytes: int):
-        plan = update_page_plans.build_changelog_progress_plan(
+        plan = plans.build_changelog_progress_plan(
             percent=percent,
             done_bytes=done_bytes,
             total_bytes=total_bytes,
@@ -359,7 +359,9 @@ class ChangelogCard(CardWidget):
         self._update_accessibility()
 
     def set_download_status_text(self, message: str) -> None:
-        if not self._is_downloading:
+        # Этапы после скачивания (остановка DPI, запуск установщика) тоже
+        # показываются: раньше они терялись, как только файл докачивался.
+        if not self._is_downloading and self._mode != "installing":
             return
         text = str(message or "").strip()
         if text:
@@ -367,7 +369,7 @@ class ChangelogCard(CardWidget):
             self._update_accessibility()
 
     def download_complete(self):
-        plan = update_page_plans.build_changelog_terminal_plan(
+        plan = plans.build_changelog_terminal_plan(
             kind="installing",
             language=self._ui_language,
             app_version=APP_VERSION,
@@ -391,7 +393,7 @@ class ChangelogCard(CardWidget):
         self._update_accessibility()
 
     def download_failed(self, error: str):
-        plan = update_page_plans.build_changelog_terminal_plan(
+        plan = plans.build_changelog_terminal_plan(
             kind="failed",
             language=self._ui_language,
             app_version=APP_VERSION,
@@ -422,7 +424,7 @@ class ChangelogCard(CardWidget):
     def set_ui_language(self, language: str) -> None:
         self._ui_language = language
         self.later_btn.setText(self._tr("page.servers.changelog.button.later", "Позже"))
-        plan = update_page_plans.build_changelog_terminal_plan(
+        plan = plans.build_changelog_terminal_plan(
             kind=self._mode if self._mode in {"downloading", "installing", "failed"} else "update",
             language=self._ui_language,
             app_version=APP_VERSION,

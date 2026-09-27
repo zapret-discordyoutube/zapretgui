@@ -11,7 +11,7 @@ from app.ui_texts import tr as tr_catalog
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.theme_refresh import ThemeRefreshBinding
-import updater.update_page_plans as update_page_plans
+from updater.ui import plans
 from qfluentwidgets import (
     CaptionLabel,
     CardWidget,
@@ -151,7 +151,7 @@ class UpdateStatusCard(CardWidget):
         self._icon_label.setPixmap(pixmap)
 
     def _apply_state_text(self) -> None:
-        plan = update_page_plans.build_update_status_card_plan(
+        plan = plans.build_update_status_card_plan(
             state=self._state,
             version=self._state_version,
             source=self._state_source,
@@ -242,14 +242,14 @@ class UpdateStatusCard(CardWidget):
         self._update_accessibility()
 
     def start_checking(self):
-        plan = update_page_plans.build_update_status_transition_plan(
+        plan = plans.build_update_status_transition_plan(
             target_state="checking",
             language=self._ui_language,
         )
         self._apply_transition_plan(plan)
 
     def stop_checking(self, found_update: bool = False, version: str = ""):
-        plan = update_page_plans.build_update_status_transition_plan(
+        plan = plans.build_update_status_transition_plan(
             target_state="result",
             language=self._ui_language,
             version=version,
@@ -258,7 +258,7 @@ class UpdateStatusCard(CardWidget):
         self._apply_transition_plan(plan)
 
     def set_error(self, message: str):
-        plan = update_page_plans.build_update_status_transition_plan(
+        plan = plans.build_update_status_transition_plan(
             target_state="error",
             language=self._ui_language,
             message=message,
@@ -266,7 +266,7 @@ class UpdateStatusCard(CardWidget):
         self._apply_transition_plan(plan)
 
     def show_found_update(self, version: str, source: str) -> None:
-        plan = update_page_plans.build_update_status_transition_plan(
+        plan = plans.build_update_status_transition_plan(
             target_state="found",
             language=self._ui_language,
             version=version,
@@ -275,14 +275,14 @@ class UpdateStatusCard(CardWidget):
         self._apply_transition_plan(plan)
 
     def show_download_error(self) -> None:
-        plan = update_page_plans.build_update_status_transition_plan(
+        plan = plans.build_update_status_transition_plan(
             target_state="download_error",
             language=self._ui_language,
         )
         self._apply_transition_plan(plan)
 
     def show_deferred(self, version: str) -> None:
-        plan = update_page_plans.build_update_status_transition_plan(
+        plan = plans.build_update_status_transition_plan(
             target_state="deferred",
             language=self._ui_language,
             version=version,
@@ -290,7 +290,7 @@ class UpdateStatusCard(CardWidget):
         self._apply_transition_plan(plan)
 
     def show_checked_ago(self, elapsed: float) -> None:
-        plan = update_page_plans.build_update_status_transition_plan(
+        plan = plans.build_update_status_transition_plan(
             target_state="checked_ago",
             language=self._ui_language,
             elapsed=elapsed,
@@ -298,14 +298,14 @@ class UpdateStatusCard(CardWidget):
         self._apply_transition_plan(plan)
 
     def show_manual_hint(self) -> None:
-        plan = update_page_plans.build_update_status_transition_plan(
+        plan = plans.build_update_status_transition_plan(
             target_state="manual",
             language=self._ui_language,
         )
         self._apply_transition_plan(plan)
 
     def show_auto_enabled_hint(self) -> None:
-        plan = update_page_plans.build_update_status_transition_plan(
+        plan = plans.build_update_status_transition_plan(
             target_state="auto_on",
             language=self._ui_language,
         )

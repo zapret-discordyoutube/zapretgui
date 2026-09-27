@@ -6,7 +6,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QTableWidgetItem
 
-import updater.update_page_plans as update_page_plans
+from updater.ui import plans
 from ui.accessibility import set_item_accessible_text, set_state_text
 
 
@@ -33,7 +33,7 @@ def render_server_row(
     accent_hex: str,
 ) -> None:
     ensure_server_table_current_row_accessibility(table)
-    plan = update_page_plans.build_server_row_plan(
+    plan = plans.build_server_row_plan(
         row_server_name=server_name,
         status=status,
         channel=channel,

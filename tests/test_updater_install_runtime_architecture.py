@@ -1,38 +1,27 @@
+from __future__ import annotations
+
+"""Устройство установки: страница только показывает, работой владеют сервисы."""
+
 import inspect
 import unittest
 
-from updater.update_page_runtime import UpdatePageRuntime
-from updater.update_pipeline import UpdatePipeline
+from updater.download import service as install_service
+from updater.ui import page
 
 
-class UpdaterInstallRuntimeArchitectureTest(unittest.TestCase):
-    def test_update_pipeline_uses_separate_stage_runtimes(self) -> None:
-        runtime_source = inspect.getsource(UpdatePageRuntime)
-        init_source = inspect.getsource(UpdatePageRuntime.__init__)
-        start_source = inspect.getsource(UpdatePageRuntime._start_update_download)
-        teardown_source = inspect.getsource(UpdatePageRuntime._teardown_update_runtime)
+class UpdaterInstallArchitectureTest(unittest.TestCase):
+    def test_page_owns_no_download_dpi_or_installer_work(self) -> None:
+        source = inspect.getsource(page)
 
-        for field in (
-            "_update_preflight_runtime",
-            "_update_download_runtime",
-            "_update_installer_runtime",
-            "_update_dpi_stop_runtime",
-        ):
-            self.assertIn(f"{field} = OneShotWorkerRuntime()", init_source)
-            self.assertIn(field, teardown_source)
+        for forbidden in ("shutdown_sync", "restart(", "start_supervised_installation", "download_artifact", "QThread"):
+            self.assertNotIn(forbidden, source)
 
-        self.assertIn("create_update_preflight_worker", start_source)
-        self.assertIn("start_qobject_worker", start_source)
-        self.assertNotIn("UpdateWorker", runtime_source)
-        self.assertNotIn("os._exit", runtime_source)
-        self.assertNotIn("QThread", runtime_source)
-        self.assertIn("download_and_prepare", inspect.getsource(UpdatePipeline))
+    def test_installer_success_requests_exit_on_main_thread(self) -> None:
+        source = inspect.getsource(install_service.UpdateInstallService._on_task_done)
 
-    def test_installer_success_requests_lifecycle_exit_on_main_thread(self) -> None:
-        source = inspect.getsource(UpdatePageRuntime._on_update_installer_launched)
         self.assertIn("QTimer.singleShot", source)
         self.assertIn("request_exit(stop_dpi=False)", source)
-        self.assertNotIn("os._exit", source)
+        self.assertNotIn("os._exit", inspect.getsource(install_service))
 
 
 if __name__ == "__main__":

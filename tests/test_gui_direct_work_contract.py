@@ -37,7 +37,9 @@ GUI_SHELL_PATTERNS = (
     "ui/workflows/**/*.py",
     "main/window_*.py",
     "orchestra/page_runtime.py",
-    "updater/update_page_runtime.py",
+    "updater/check/service.py",
+    "updater/download/service.py",
+    "updater/page_actions.py",
 )
 
 ALLOWED_PROCESS_EVENTS_FILES = {

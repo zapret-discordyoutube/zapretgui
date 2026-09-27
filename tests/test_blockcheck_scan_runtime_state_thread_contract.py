@@ -139,10 +139,11 @@ class BlockcheckScanShutdownWiringTests(unittest.TestCase):
             request_exit=Mock(),
         )
 
-        self.assertIs(
-            kwargs["runtime_actions"].shutdown_sync,
-            runtime_feature.shutdown_sync_from_worker,
-        )
+        for service_name in ("check_service", "install_service"):
+            self.assertIs(
+                kwargs[service_name]._runtime_actions.shutdown_sync,
+                runtime_feature.shutdown_sync_from_worker,
+            )
 
 
 class ApplyRuntimeStateAfterShutdownTests(unittest.TestCase):

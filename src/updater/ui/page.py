@@ -1,6 +1,8 @@
 # updater/ui/page.py
 """Страница мониторинга серверов обновлений"""
 
+import time
+
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
@@ -11,8 +13,8 @@ from ui.pages.base_page import BasePage
 from ui.fluent_widgets import SettingsCard
 from ui.theme import get_theme_tokens
 from app.ui_texts import tr as tr_catalog
-from updater.update_page_runtime import UpdatePageRuntime
-from ui.page_deps.types import UpdateRuntimeActions
+from log.log import log
+from updater.page_actions import AutoCheckSetting, ChannelOpener
 from updater.server_status_table_state import ServerStatusTableState
 from updater.ui.main_build import (
     build_servers_header_widgets,
@@ -21,7 +23,6 @@ from updater.ui.main_build import (
 from updater.ui.language import apply_servers_page_language
 from updater.ui.table_view import (
     refresh_server_rows,
-    render_server_row,
     reset_server_rows as reset_servers_table_rows,
     upsert_server_status as upsert_server_table_status,
 )
@@ -43,19 +44,21 @@ from updater.ui.changelog_card import ChangelogCard
 
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ИНДЕТЕРМИНИРОВАННАЯ КНОПКА С ПРОГРЕСС-КОЛЬЦОМ (аналог IndeterminateProgressPushButton Pro)
-# ═══════════════════════════════════════════════════════════════════════════════
-
 class ServersPage(BasePage):
-    """Страница мониторинга серверов обновлений"""
+    """Страница «Серверы»: статус обновления, таблица источников, установка.
+
+    Страница только показывает. Проверкой владеет ``UpdateCheckService``,
+    установкой — ``UpdateInstallService``, общий итог проверки — координатор
+    ``UpdaterFeature``: его видят и страница, и проверка при запуске.
+    """
 
     def __init__(
         self,
         parent=None,
         *,
-        runtime_actions: UpdateRuntimeActions,
         updater_feature,
+        check_service,
+        install_service,
         open_about,
         create_changelog_link_open_worker,
     ):
@@ -69,15 +72,19 @@ class ServersPage(BasePage):
 
         self._tokens = get_theme_tokens()
         self._server_table_state = ServerStatusTableState()
-        self._update_runtime = UpdatePageRuntime(
-            self,
-            runtime_actions=runtime_actions,
-            updater_feature=updater_feature,
-        )
+        self._updater_feature = updater_feature
+        self._check_service = check_service
+        self._install_service = install_service
+        self._auto_check = AutoCheckSetting(updater_feature=updater_feature, parent=self)
+        self._channel_opener = ChannelOpener(updater_feature=updater_feature, parent=self)
         self._create_changelog_link_open_worker = create_changelog_link_open_worker
         self._open_about = open_about
-        self._runtime_initialized = False
+        self._idle_view_applied = False
         self._cleanup_in_progress = False
+        self._auto_check_enabled = False
+        self._found_version = ""
+        self._found_notes = ""
+        self._found_source = ""
         self._changelog_link_open_runtime = OneShotWorkerRuntime()
         self._changelog_link_open_runtime_worker = None
         self._changelog_link_open_state = LatestValueWorkerState(
@@ -87,29 +94,194 @@ class ServersPage(BasePage):
 
         self._build_ui()
         self._apply_page_theme(force=True)
-        self._update_runtime.attach_update_check_coordinator()
-        self._update_runtime.start_auto_check_load()
+        self._connect_services()
+        self._unsubscribe_check = self._updater_feature.subscribe_update_check(
+            self._apply_check_snapshot,
+            emit_initial=True,
+        )
+        self._auto_check.load()
 
     def _tr(self, key: str, default: str) -> str:
         return tr_catalog(key, language=self._ui_language, default=default)
 
-    def _run_runtime_init_once(self) -> None:
-        plan = self._update_runtime.build_page_init_plan(
-            runtime_initialized=self._runtime_initialized,
-        )
-        if not plan.should_apply_idle_view_state:
+    def _connect_services(self) -> None:
+        self._check_service.server_status.connect(self._on_server_status)
+        self._install_service.stage_changed.connect(self.changelog_card.set_download_status_text)
+        self._install_service.progress.connect(self.changelog_card.update_progress)
+        self._install_service.downloaded.connect(self.changelog_card.download_complete)
+        self._install_service.failed.connect(self._on_install_failed)
+        self._auto_check.loaded.connect(self._on_auto_check_loaded)
+        self._channel_opener.failed.connect(self.show_update_channel_open_error)
+
+    # ── Проверка ────────────────────────────────────────────────────────
+
+    def _request_check_updates(self) -> None:
+        if self._install_service.is_busy:
             return
-        self._runtime_initialized = True
-        QTimer.singleShot(
-            0,
-            lambda action=plan.view_action, elapsed=plan.elapsed_seconds: (not self._cleanup_in_progress) and self._update_runtime.apply_idle_view_state(
-                view_action=action,
-                elapsed_seconds=elapsed,
-                ),
+        if not self._check_service.start(language=self._ui_language):
+            return
+        # Строки новой проверки приходят очередью Qt уже после этого места.
+        self.changelog_card.hide()
+        self.reset_server_rows()
+
+    def _on_server_status(self, server_name: str, status: dict) -> None:
+        if self._cleanup_in_progress:
+            return
+        upsert_server_table_status(
+            self.servers_table,
+            table_state=self._server_table_state,
+            server_name=server_name,
+            status=status,
+            channel=CHANNEL,
+            language=self._ui_language,
+            accent_hex=self._tokens.accent_hex,
         )
 
+    def _apply_check_snapshot(self, snapshot) -> None:
+        """Общий итог проверки: и ручной, и при запуске программы."""
+        if self._cleanup_in_progress:
+            return
+        phase = str(getattr(snapshot, "phase", "") or "")
+        if phase == "checking":
+            self.update_card.start_checking()
+            return
+        if phase == "skipped":
+            self._show_idle_hint(snapshot)
+            return
+        if phase == "error":
+            message = str(getattr(snapshot, "error", "") or "").strip() or self._tr(
+                "page.servers.update.error.check_failed",
+                "Не удалось проверить обновления",
+            )
+            self.update_card.set_error(message)
+            return
+        if phase != "completed":
+            return
+
+        version = str(getattr(snapshot, "version", "") or "")
+        if not bool(getattr(snapshot, "has_update", False)):
+            self._found_version = ""
+            self.update_card.stop_checking(False, version)
+            return
+
+        self._found_version = version
+        self._found_notes = str(getattr(snapshot, "release_notes", "") or "")
+        self._found_source = str(getattr(snapshot, "release_source", "") or "")
+        if self._found_source:
+            self.update_card.show_found_update(version, self._found_source)
+        else:
+            self.update_card.stop_checking(True, version)
+        # Карточка установки видна при любом найденном обновлении — в том
+        # числе если при запуске нажали «Позже».
+        if not self._install_service.is_busy:
+            self.changelog_card.show_update(self._found_version, self._found_notes)
+
+    def _show_idle_hint(self, snapshot=None) -> None:
+        if snapshot is None:
+            snapshot = self._updater_feature.current_update_check_snapshot()
+        phase = str(getattr(snapshot, "phase", "") or "")
+        completed_at = float(getattr(snapshot, "completed_at", 0.0) or 0.0)
+        if phase in {"completed", "skipped"} and completed_at > 0:
+            self.update_card.show_checked_ago(max(time.time() - completed_at, 0.0))
+        elif self._auto_check_enabled:
+            self.update_card.show_auto_enabled_hint()
+        else:
+            self.update_card.show_manual_hint()
+
     def on_page_activated(self) -> None:
-        self._run_runtime_init_once()
+        if self._idle_view_applied:
+            return
+        self._idle_view_applied = True
+        snapshot = self._updater_feature.current_update_check_snapshot()
+        phase = str(getattr(snapshot, "phase", "") or "")
+        if self._found_version or self._install_service.is_busy or phase in {"checking", "error"}:
+            return
+        self._show_idle_hint(snapshot)
+
+    # ── Установка ───────────────────────────────────────────────────────
+
+    def present_startup_update(self, version: str, release_notes: str, *, install_after_show: bool = True) -> bool:
+        """Обновление, найденное при запуске и подтверждённое пользователем."""
+        if self._cleanup_in_progress or self._install_service.is_busy or not version:
+            return False
+        self._found_version = str(version)
+        self._found_notes = str(release_notes or "")
+        self.changelog_card.show_update(self._found_version, self._found_notes)
+        if install_after_show:
+            self._request_install_update()
+        return True
+
+    def _request_install_update(self) -> None:
+        if self._cleanup_in_progress or not self._found_version:
+            return
+        if self._check_service.is_busy or not self._install_service.start(self._found_version):
+            return
+        self.changelog_card.start_download(self._found_version)
+        self.update_card.hide()
+        self.update_card.set_check_enabled(False)
+
+    def _on_install_failed(self, error: str) -> None:
+        if self._cleanup_in_progress:
+            return
+        self.changelog_card.download_failed(error)
+        self.update_card.show()
+        self.update_card.show_download_error()
+        self.update_card.set_check_enabled(True)
+
+    def _request_dismiss_update(self) -> None:
+        if not self._found_version:
+            return
+        log("Обновление отложено пользователем", "🔄 UPDATE")
+        self.update_card.show_deferred(self._found_version)
+
+    # ── Настройки и Telegram ────────────────────────────────────────────
+
+    def _on_auto_check_loaded(self, enabled: bool) -> None:
+        if self._cleanup_in_progress or self._auto_check.user_changed:
+            return
+        self._auto_check_enabled = bool(enabled)
+        self._set_auto_check_toggle_checked(bool(enabled))
+        if self._idle_view_applied and not self._found_version:
+            snapshot = self._updater_feature.current_update_check_snapshot()
+            if str(getattr(snapshot, "phase", "") or "") not in {"checking", "error"}:
+                self._show_idle_hint(snapshot)
+
+    def _on_auto_check_toggled(self, enabled: bool):
+        self._auto_check_enabled = bool(enabled)
+        self._auto_check.save(bool(enabled))
+        if enabled:
+            self.update_card.show_auto_enabled_hint()
+        else:
+            self.update_card.show_manual_hint()
+        log(f"Автопроверка при запуске: {'включена' if enabled else 'отключена'}", "🔄 UPDATE")
+
+    def _set_auto_check_toggle_checked(self, enabled: bool) -> None:
+        toggle = getattr(self, "auto_check_toggle", None)
+        if toggle is None:
+            return
+        try:
+            toggle.setChecked(bool(enabled), block_signals=True)
+        except TypeError:
+            previous = toggle.blockSignals(True)
+            try:
+                toggle.setChecked(bool(enabled))
+            finally:
+                toggle.blockSignals(previous)
+
+    def _open_telegram_channel(self):
+        self._channel_opener.open(CHANNEL)
+
+    def show_update_channel_open_error(self, error: str) -> None:
+        InfoBar.warning(
+            title=self._tr("page.servers.telegram.error.title", "Ошибка"),
+            content=self._tr(
+                "page.servers.telegram.error.open_channel",
+                "Не удалось открыть Telegram канал:\n{error}",
+            ).format(error=str(error or "")),
+            parent=self.window(),
+        )
+
+    # ── Вид ─────────────────────────────────────────────────────────────
 
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
@@ -126,17 +298,6 @@ class ServersPage(BasePage):
             except Exception:
                 pass
 
-    def _render_server_row(self, row: int, server_name: str, status: dict) -> None:
-        render_server_row(
-            self.servers_table,
-            row=row,
-            server_name=server_name,
-            status=status,
-            channel=CHANNEL,
-            language=self._ui_language,
-            accent_hex=self._tokens.accent_hex,
-        )
-
     def _refresh_server_rows(self) -> None:
         refresh_server_rows(
             self.servers_table,
@@ -144,6 +305,12 @@ class ServersPage(BasePage):
             channel=CHANNEL,
             language=self._ui_language,
             accent_hex=self._tokens.accent_hex,
+        )
+
+    def reset_server_rows(self) -> None:
+        reset_servers_table_rows(
+            self.servers_table,
+            table_state=self._server_table_state,
         )
 
     def set_ui_language(self, language: str) -> None:
@@ -167,6 +334,9 @@ class ServersPage(BasePage):
             telegram_button=self._tg_btn,
             refresh_server_rows=self._refresh_server_rows,
         )
+
+    def get_ui_language(self) -> str:
+        return self._ui_language
 
     def _build_ui(self):
         # ── Custom header (back link + title) ───────────────────────────
@@ -219,7 +389,7 @@ class ServersPage(BasePage):
             content_parent=self.content,
             tr_fn=self._tr,
             accent_hex=get_theme_tokens().accent_hex,
-            auto_check_enabled=self._update_runtime.auto_check_enabled,
+            auto_check_enabled=self._auto_check_enabled,
             app_version=APP_VERSION,
             channel=CHANNEL,
             setting_card_group_cls=SettingCardGroup,
@@ -250,119 +420,6 @@ class ServersPage(BasePage):
         self.add_widget(self._tg_card)
 
         self._apply_page_theme(force=True)
-
-    def get_ui_language(self) -> str:
-        return self._ui_language
-
-    def reset_server_rows(self) -> None:
-        reset_servers_table_rows(
-            self.servers_table,
-            table_state=self._server_table_state,
-        )
-
-    def upsert_server_status(self, server_name: str, status: dict) -> None:
-        upsert_server_table_status(
-            self.servers_table,
-            table_state=self._server_table_state,
-            server_name=server_name,
-            status=status,
-            channel=CHANNEL,
-            language=self._ui_language,
-            accent_hex=self._tokens.accent_hex,
-        )
-
-    def start_checking(self) -> None:
-        self.update_card.start_checking()
-
-    def finish_checking(self, found_update: bool, version: str) -> None:
-        self.update_card.stop_checking(found_update, version)
-
-    def show_update_check_error(self, error: str) -> None:
-        message = str(error or "").strip() or self._tr(
-            "page.servers.update.error.check_failed",
-            "Не удалось проверить обновления",
-        )
-        self.update_card.set_error(message)
-
-    def show_found_update_source(self, version: str, source: str) -> None:
-        self.update_card.show_found_update(version, source)
-
-    def show_update_offer(self, version: str, release_notes: str) -> None:
-        self.changelog_card.show_update(version, release_notes)
-
-    def hide_update_offer(self) -> None:
-        self.changelog_card.hide()
-
-    def is_update_download_in_progress(self) -> bool:
-        return bool(getattr(self.changelog_card, "_is_downloading", False))
-
-    def start_update_download(self, version: str) -> None:
-        self.changelog_card.start_download(version)
-
-    def update_download_progress(self, percent: int, done_bytes: int, total_bytes: int) -> None:
-        self.changelog_card.update_progress(percent, done_bytes, total_bytes)
-
-    def update_download_status_text(self, message: str) -> None:
-        self.changelog_card.set_download_status_text(message)
-
-    def mark_update_download_complete(self) -> None:
-        self.changelog_card.download_complete()
-
-    def mark_update_download_failed(self, error: str) -> None:
-        self.changelog_card.download_failed(error)
-
-    def show_update_download_error(self) -> None:
-        self.update_card.show_download_error()
-
-    def show_update_deferred(self, version: str) -> None:
-        self.update_card.show_deferred(version)
-
-    def show_checked_ago(self, elapsed: float) -> None:
-        self.update_card.show_checked_ago(elapsed)
-
-    def show_manual_hint(self) -> None:
-        self.update_card.show_manual_hint()
-
-    def show_auto_enabled_hint(self) -> None:
-        self.update_card.show_auto_enabled_hint()
-
-    def hide_update_status_card(self) -> None:
-        self.update_card.hide()
-
-    def show_update_status_card(self) -> None:
-        self.update_card.show()
-
-    def set_update_check_enabled(self, enabled: bool) -> None:
-        self.update_card.set_check_enabled(bool(enabled))
-
-    def set_auto_check_toggle_checked(self, enabled: bool) -> None:
-        toggle = getattr(self, "auto_check_toggle", None)
-        if toggle is None:
-            return
-        try:
-            toggle.setChecked(bool(enabled), block_signals=True)
-        except TypeError:
-            previous = toggle.blockSignals(True)
-            try:
-                toggle.setChecked(bool(enabled))
-            finally:
-                toggle.blockSignals(previous)
-
-    def present_startup_update(self, version: str, release_notes: str, *, install_after_show: bool = True) -> bool:
-        return self._update_runtime.present_startup_update(
-            version,
-            release_notes,
-            install_after_show=install_after_show,
-        )
-
-    def _request_check_updates(self) -> None:
-        self._update_runtime.request_manual_check()
-
-    def _request_install_update(self) -> None:
-        self._update_runtime.install_update()
-
-    def _request_dismiss_update(self) -> None:
-        self._update_runtime.dismiss_update()
 
     def create_changelog_link_open_worker(self, request_id: int, *, url: str):
         return self._create_changelog_link_open_worker(
@@ -495,29 +552,17 @@ class ServersPage(BasePage):
         )
         self._changelog_link_open_runtime.cancel()
 
-    def _open_telegram_channel(self):
-        self._update_runtime.request_open_update_channel(CHANNEL)
-
-    def show_update_channel_open_error(self, error: str) -> None:
-        InfoBar.warning(
-            title=self._tr("page.servers.telegram.error.title", "Ошибка"),
-            content=self._tr(
-                "page.servers.telegram.error.open_channel",
-                "Не удалось открыть Telegram канал:\n{error}",
-            ).format(error=str(error or "")),
-            parent=self.window(),
-        )
-
     def _on_back_to_about(self):
         try:
             self._open_about()
         except Exception:
             pass
 
-    def _on_auto_check_toggled(self, enabled: bool):
-        self._update_runtime.set_auto_check_enabled(bool(enabled))
-
     def cleanup(self):
         self._cleanup_in_progress = True
         self._stop_changelog_link_open_worker()
-        self._update_runtime.cleanup()
+        unsubscribe, self._unsubscribe_check = self._unsubscribe_check, None
+        if callable(unsubscribe):
+            unsubscribe()
+        self._check_service.shutdown()
+        self._install_service.shutdown()

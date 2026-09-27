@@ -109,6 +109,7 @@ def check_for_update_sync(*, now: float | None = None) -> dict:
             "has_update": True,
             "version": new_version,
             "release_notes": str(release.get("release_notes") or ""),
+            "release_source": str(release.get("source") or ""),
             "error": None,
             "release_info": release,
         }

@@ -19,6 +19,8 @@ class UpdateCheckSnapshot:
     error: str
     skipped: bool
     message: str
+    # Откуда пришёл найденный выпуск: Forgejo или конкретное зеркало.
+    release_source: str = ""
 
 
 class UpdateCheckCoordinator:
@@ -137,6 +139,7 @@ class UpdateCheckCoordinator:
                 error=error,
                 skipped=skipped,
                 message=str(payload.get("skip_reason") or payload.get("message") or ""),
+                release_source=str(payload.get("release_source") or "") if not error else "",
             )
             self._snapshot = snapshot
 
