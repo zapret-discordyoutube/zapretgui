@@ -608,6 +608,24 @@ def set_user_profiles_settings(values: dict[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(updated["user_profiles"])
 
 
+def update_user_profiles_settings(mutator) -> dict[str, Any]:
+    """Read-modify-write секции user_profiles одной транзакцией.
+
+    `mutator` получает копию секции, прочитанную внутри BEGIN IMMEDIATE, и
+    меняет её на месте. Так проверка уникальности, выбор id и запись не
+    разрываются чтением «снаружи», и параллельная правка не теряется.
+    Исключение из `mutator` откатывает транзакцию.
+    """
+
+    def _mutate(data: dict[str, Any]) -> None:
+        section = copy.deepcopy(_as_dict(data.get("user_profiles")))
+        mutator(section)
+        _set_path_value(data, ("user_profiles",), section)
+
+    updated = _update_settings(_mutate)
+    return copy.deepcopy(updated["user_profiles"])
+
+
 def get_user_profiles_revision() -> str:
     """Детерминированный токен состояния user_profiles для ключей кэшей.
 

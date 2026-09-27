@@ -6244,6 +6244,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             filter_value="lists/youtube.txt",
             in_range="x",
             out_range="x",
+            strategy_branch_id="",
             parent=page,
         )
         worker.start.assert_called_once()
@@ -6336,6 +6337,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             filter_value="lists/youtube.txt",
             in_range="x",
             out_range="a",
+            strategy_branch_id="",
         )
         load_profile.assert_called_once_with("profile-2")
         self.assertEqual(len(saved), 1)

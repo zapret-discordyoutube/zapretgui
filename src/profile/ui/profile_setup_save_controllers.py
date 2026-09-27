@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from profile.profile_setup_loader import profile_save_result_keys
 from profile.ui.profile_setup_controls import range_expression_from_controls
+from profile.ui.profile_strategy_list_widget import _current_strategy_branch_id
 from settings.mode import is_preset_launch_method
 from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.queued_worker_state import QueuedWorkerState
@@ -243,6 +244,9 @@ class ProfileSetupSaveController:
             "filter_value": filter_value,
             "in_range": range_expression_from_controls(page._in_range_mode, page._in_range_value, default="x"),
             "out_range": range_expression_from_controls(page._out_range_mode, page._out_range_value, default="a"),
+            # Диапазоны на странице показаны для выбранной ветки стратегии —
+            # сервис обязан править именно её, а не первую/все ветки.
+            "strategy_branch_id": _current_strategy_branch_id(page.__dict__.get("_payload")),
         }
         payload = page.__dict__.get("_payload")
         if payload is not None and (
@@ -279,6 +283,7 @@ class ProfileSetupSaveController:
                 filter_value=str(request.get("filter_value") or ""),
                 in_range=str(request.get("in_range") or ""),
                 out_range=str(request.get("out_range") or ""),
+                strategy_branch_id=str(request.get("strategy_branch_id") or ""),
                 parent=page,
             ),
             on_loaded=page._on_settings_save_finished,

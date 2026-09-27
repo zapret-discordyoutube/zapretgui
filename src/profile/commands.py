@@ -60,8 +60,11 @@ def get_profile_selection_details(
     )
 
 
-def get_profile_setup(profile_services, launch_method: str, profile_key: str):
-    return _profile_preset_service(profile_services, launch_method).get_profile_setup(profile_key)
+def get_profile_setup(profile_services, launch_method: str, profile_key: str, *, strategy_branch_id: str = ""):
+    return _profile_preset_service(profile_services, launch_method).get_profile_setup(
+        profile_key,
+        strategy_branch_id=strategy_branch_id,
+    )
 
 
 def get_profile_list_file_editor_state(
@@ -120,6 +123,7 @@ def update_winws2_profile_settings(
     filter_value: str,
     in_range: str,
     out_range: str,
+    strategy_branch_id: str = "",
 ) -> tuple[str, str] | None:
     return _profile_preset_service(profile_services, launch_method).update_winws2_editable_settings(
         profile_key,
@@ -127,7 +131,12 @@ def update_winws2_profile_settings(
         filter_value=filter_value,
         in_range=in_range,
         out_range=out_range,
+        strategy_branch_id=strategy_branch_id,
     )
+
+
+def edit_selected_preset(profile_services, launch_method: str, edit):
+    return _profile_preset_service(profile_services, launch_method).edit_selected_preset(edit)
 
 
 def update_profile_raw_text(

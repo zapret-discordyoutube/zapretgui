@@ -6,25 +6,49 @@ from unittest.mock import patch
 
 
 class _PresetFeature:
+    """Выбранный пресет в памяти: запись идёт через ProfilePresetService."""
+
     def __init__(self, text: str):
         self.text = text
         self.saved_text = ""
-        self.saved_args = None
+        self.save_count = 0
 
     def get_selected_source_preset_manifest(self, _mode):
-        return SimpleNamespace(file_name="Selected.txt")
+        return SimpleNamespace(file_name="Selected.txt", name="Selected")
 
-    def read_preset_source_by_file_name(self, _mode, _file_name):
-        return self.text
+    def read_selected_preset_source(self, _mode):
+        return self.text, self.get_selected_source_preset_manifest(_mode)
 
-    def save_preset_source_by_file_name(self, *args):
-        self.saved_args = args
-        self.saved_text = args[-1]
+    def save_selected_preset_source(self, _mode, text: str, **_kwargs):
+        self.text = text
+        self.saved_text = text
+        self.save_count += 1
+
+
+def _apply(feature, root: str, **kwargs):
+    """apply_strategy через настоящий ProfileFeature (общий путь записи сервиса)."""
+    from app.feature_facades.profile import ProfileFeature
+    from blockcheck import strategy_scan_apply
+    from core.paths import AppPaths
+
+    profile_feature = ProfileFeature(
+        _presets_feature=feature,
+        _app_paths=AppPaths(user_root=Path(root), local_root=Path(root)),
+    )
+    params = {
+        "strategy_args": "--lua-desync=fake:blob=tls_google",
+        "strategy_name": "found strategy",
+        "scan_target": "www.youtube.com",
+        "scan_protocol": "tcp_https",
+        "scan_udp_games_scope": "all",
+    }
+    params.update(kwargs)
+    with patch("settings.store.MAIN_DIRECTORY", str(root)):
+        return strategy_scan_apply.apply_strategy(profile_feature=profile_feature, **params)
 
 
 class StrategyScanApplyTests(unittest.TestCase):
     def test_apply_creates_profile_when_selected_preset_has_no_matching_profile(self) -> None:
-        from blockcheck.strategy_scan_apply import apply_strategy
         from profile.parser import parse_preset_text
         from settings.mode import ENGINE_WINWS2
 
@@ -42,15 +66,8 @@ class StrategyScanApplyTests(unittest.TestCase):
             )
         )
 
-        result = apply_strategy(
-            presets_feature=feature,
-            profile_feature=None,
-            strategy_args="--lua-desync=fake:blob=tls_google",
-            strategy_name="found strategy",
-            scan_target="www.youtube.com",
-            scan_protocol="tcp_https",
-            scan_udp_games_scope="all",
-        )
+        with TemporaryDirectory() as temp_dir:
+            result = _apply(feature, temp_dir)
 
         self.assertEqual(result.operation, "created")
         self.assertIn("--hostlist-domains=www.youtube.com", feature.saved_text)
@@ -61,7 +78,6 @@ class StrategyScanApplyTests(unittest.TestCase):
         self.assertIn("www.youtube.com", preset.profiles[0].match_signature)
 
     def test_apply_updates_existing_matching_profile(self) -> None:
-        from blockcheck.strategy_scan_apply import apply_strategy
         from profile.parser import parse_preset_text
         from settings.mode import ENGINE_WINWS2
 
@@ -78,15 +94,8 @@ class StrategyScanApplyTests(unittest.TestCase):
             )
         )
 
-        result = apply_strategy(
-            presets_feature=feature,
-            profile_feature=None,
-            strategy_args="--lua-desync=fake:blob=tls_google",
-            strategy_name="found strategy",
-            scan_target="www.youtube.com",
-            scan_protocol="tcp_https",
-            scan_udp_games_scope="all",
-        )
+        with TemporaryDirectory() as temp_dir:
+            result = _apply(feature, temp_dir)
 
         self.assertEqual(result.operation, "updated")
         preset = parse_preset_text(feature.saved_text, engine=ENGINE_WINWS2, source_name="Selected.txt")
@@ -126,15 +135,7 @@ class StrategyScanApplyTests(unittest.TestCase):
                 "APPLICATION_PATHS",
                 ApplicationPaths.from_root(temp_dir),
             ):
-                result = strategy_scan_apply.apply_strategy(
-                    presets_feature=feature,
-                    profile_feature=None,
-                    strategy_args="--lua-desync=fake:blob=tls_google",
-                    strategy_name="found strategy",
-                    scan_target="www.youtube.com",
-                    scan_protocol="tcp_https",
-                    scan_udp_games_scope="all",
-                )
+                result = _apply(feature, temp_dir)
 
         self.assertEqual(result.operation, "updated")
         preset = parse_preset_text(feature.saved_text, engine=ENGINE_WINWS2, source_name="Selected.txt")

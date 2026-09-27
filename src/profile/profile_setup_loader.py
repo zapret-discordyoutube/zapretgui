@@ -194,6 +194,7 @@ class ProfileSettingsSaveWorker(QThread):
         filter_value: str,
         in_range: str,
         out_range: str,
+        strategy_branch_id: str = "",
         parent=None,
     ):
         super().__init__(parent)
@@ -205,6 +206,7 @@ class ProfileSettingsSaveWorker(QThread):
         self._filter_value = str(filter_value or "").strip()
         self._in_range = str(in_range or "").strip()
         self._out_range = str(out_range or "").strip()
+        self._strategy_branch_id = str(strategy_branch_id or "").strip()
 
     def run(self) -> None:
         try:
@@ -215,6 +217,7 @@ class ProfileSettingsSaveWorker(QThread):
                     filter_value=self._filter_value,
                     in_range=self._in_range,
                     out_range=self._out_range,
+                    strategy_branch_id=self._strategy_branch_id,
                 )
             )
             payload = self._load_profile(str(new_profile_key or self._profile_key))

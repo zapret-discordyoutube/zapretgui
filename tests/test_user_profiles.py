@@ -185,7 +185,7 @@ class UserProfilesTests(unittest.TestCase):
         self.assertIn("--filter-l7=stun,discord", profile.match.filter_lines)
         self.assertNotIn("--filter-tcp=stun,discord", profile.match.filter_lines)
 
-    def test_winws1_user_profile_uses_first_strategy_from_protocol_catalog(self) -> None:
+    def test_winws1_user_profile_has_no_desync_until_user_picks_strategy(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             catalog_dir = root / "system" / "strategy_catalogs" / "winws1"
@@ -215,11 +215,13 @@ class UserProfilesTests(unittest.TestCase):
         texts = [segment.text for segment in profile.segments]
         self.assertIn("--filter-tcp=80,443", profile.match.filter_lines)
         self.assertIn("--hostlist=lists/my-tcp.txt", profile.match.hostlist_lines)
-        self.assertIn("--dpi-desync=fake", texts)
-        self.assertIn("--dup=2", texts)
-        self.assertNotIn("--dpi-desync=split2", texts)
+        # winws1 без --dpi-desync = DESYNC_NONE (аналог --lua-desync=pass):
+        # первая стратегия каталога молча не выбирается.
+        self.assertFalse(any(text.startswith("--dpi-desync") for text in texts))
+        self.assertNotIn("--dup=2", texts)
+        self.assertEqual(profile.strategy.strategy_lines, [])
 
-    def test_winws1_l7_user_profile_takes_first_strategy_by_l7_transport(self) -> None:
+    def test_winws1_l7_user_profiles_have_no_desync_by_default(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             catalog_dir = root / "system" / "strategy_catalogs" / "winws1"
@@ -238,15 +240,11 @@ class UserProfilesTests(unittest.TestCase):
                 voice_id = create_user_profile(paths, name="My Voice", protocol="l7", ports="stun,discord")
                 templates = load_user_profile_templates(paths, "winws1")
 
-        tls_texts = [segment.text for segment in templates[f"user:{tls_id}"].segments]
         self.assertIn("--filter-l7=tls", templates[f"user:{tls_id}"].match.filter_lines)
-        self.assertIn("--dpi-desync-fake-tls=tls_clienthello_4.bin", tls_texts)
-        self.assertNotIn("--dpi-desync-fake-quic=quic_1.bin", tls_texts)
-
-        voice_texts = [segment.text for segment in templates[f"user:{voice_id}"].segments]
         self.assertIn("--filter-l7=stun,discord", templates[f"user:{voice_id}"].match.filter_lines)
-        self.assertIn("--dpi-desync-fake-quic=quic_1.bin", voice_texts)
-        self.assertNotIn("--dpi-desync-fake-tls=tls_clienthello_4.bin", voice_texts)
+        for profile_id in (tls_id, voice_id):
+            texts = [segment.text for segment in templates[f"user:{profile_id}"].segments]
+            self.assertFalse(any(text.startswith("--dpi-desync") for text in texts), texts)
 
     def test_list_profiles_includes_user_profile_and_enabling_adds_it_to_preset(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -633,11 +631,12 @@ class UserProfilesTests(unittest.TestCase):
                 new_key = service.apply_strategy("template:all_profiles:0", "tcp_md5")
 
         self.assertEqual(new_key.status, "applied")
-        self.assertEqual(new_key.profile_key, "profile:0")
+        self.assertEqual(new_key.profile_key, "profile:1")
         self.assertIn("--hostlist=lists/speedtest.txt\n--out-range=-d8", store.text)
         self.assertNotIn("--hostlist=lists/speedtest.txt\n\n--out-range=-d8", store.text)
         self.assertNotIn("--lua-desync=pass", store.text)
-        self.assertIn("\n--new\n\n--name=youtube.com (интерфейс)", store.text)
+        self.assertTrue(store.text.startswith("--name=youtube.com (интерфейс)\n"))
+        self.assertIn("\n--new\n\n--name=SpeedTest", store.text)
 
     def test_enabling_stock_template_adds_safe_pass_without_internal_blanks(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -678,12 +677,12 @@ class UserProfilesTests(unittest.TestCase):
                 service = ProfilePresetService(feature, "zapret2_mode")
                 new_key = service.set_profile_enabled("template:all_profiles:0", True)
 
-        self.assertEqual(new_key, "profile:0")
+        self.assertEqual(new_key, "profile:1")
         self.assertIn("--hostlist=lists/speedtest.txt\n--out-range=-d8\n--lua-desync=pass", store.text)
         self.assertNotIn("--hostlist=lists/speedtest.txt\n\n--out-range=-d8", store.text)
         self.assertNotIn("--hostlist=lists/youtube.txt\n\n--payload=tls_client_hello", store.text)
 
-    def test_enabling_missing_profile_adds_it_to_top_of_preset(self) -> None:
+    def test_enabling_missing_profile_appends_it_after_existing_site_profiles(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / "system" / "templates").mkdir(parents=True)
@@ -709,15 +708,15 @@ class UserProfilesTests(unittest.TestCase):
                 service = ProfilePresetService(feature, "zapret2_mode")
                 new_key = service.set_profile_enabled(f"template:user:{profile_id}", True)
 
-        self.assertEqual(new_key, "profile:0")
+        self.assertEqual(new_key, "profile:1")
         preset = parse_preset_text(store.text, engine="winws2")
         self.assertEqual(len(preset.profiles), 2)
-        self.assertEqual(preset.profiles[0].name, "My Site")
-        self.assertEqual(preset.profiles[1].name, "All TCP")
-        self.assertIn("--hostlist=lists/my-site.txt", preset.profiles[0].match.hostlist_lines)
-        self.assertIn("--hostlist=lists/all.txt", preset.profiles[1].match.hostlist_lines)
-        self.assertTrue(store.text.startswith("--name=My Site\n"))
-        self.assertIn("\n--new\n\n--name=All TCP\n", store.text)
+        self.assertEqual(preset.profiles[0].name, "All TCP")
+        self.assertEqual(preset.profiles[1].name, "My Site")
+        self.assertIn("--hostlist=lists/all.txt", preset.profiles[0].match.hostlist_lines)
+        self.assertIn("--hostlist=lists/my-site.txt", preset.profiles[1].match.hostlist_lines)
+        self.assertTrue(store.text.startswith("--name=All TCP\n"))
+        self.assertIn("\n--new\n\n--name=My Site\n", store.text)
 
     def test_template_profile_bare_hostlist_is_saved_as_lists_relative_path(self) -> None:
         from profile.serializer import append_profile_from_template, serialize_preset
@@ -778,7 +777,8 @@ class UserProfilesTests(unittest.TestCase):
                 service.set_profile_enabled(f"template:user:{profile_id}", True)
                 after_add_again = store.text
 
-        self.assertIn("\n--new\n\n--name=Tanki X\n", after_add)
+        self.assertTrue(after_add.startswith("--name=Tanki X\n"))
+        self.assertIn("\n--new\n\n--name=youtube.com (интерфейс)\n", after_add)
         self.assertNotIn("--new=Tanki X", after_add)
         self.assertNotIn("--new=youtube.com (интерфейс)", after_add)
         self.assertTrue(after_delete.startswith("--name=Tanki X\n"))

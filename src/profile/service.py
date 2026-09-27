@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from copy import deepcopy
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
@@ -55,17 +54,18 @@ from .filter_switch import (
     filter_kinds_without_preset_duplicates,
     resolve_filter_kind_switch,
 )
-from .models import EngineName, Preset, Profile, ProfileSegment, build_profile_logical_key
-from .normalizer import normalize_preset_profiles
+from .models import EngineName, Preset, Profile, build_profile_logical_key
 from .parser import parse_preset_text
 from .serializer import (
     append_profile_from_template,
     serialize_preset,
+    strategy_branch_spans,
     with_profile_deleted,
     with_profile_duplicated,
     with_profile_enabled,
     with_profile_moved,
     with_profile_raw_text,
+    with_profile_strategy_branch_lines,
     with_profile_strategy_lines,
     with_profile_user_match,
 )
@@ -84,8 +84,11 @@ from .user_profiles import create_user_profile, delete_user_profile, update_user
 from .editable_settings import (
     EditableProfileSettings,
     filter_value_is_file_reference,
+    has_strategy_branch,
+    new_profile_insert_index,
     normalize_filter_value,
     read_editable_profile_settings,
+    read_strategy_branch_ranges,
     with_editable_profile,
     with_editable_profile_settings,
 )
@@ -259,6 +262,22 @@ class ProfilePresetService:
             log(f"ProfilePresetService: запись пресета не подтверждена: {reason}", "ERROR")
         return reason
 
+    def edit_selected_preset(self, edit, *, content_change_kind: str = "preset_structure") -> tuple[str, Any]:
+        """Правка выбранного пресета внешней фичей через общий путь записи.
+
+        `edit(preset)` получает текущий пресет (его нельзя менять на месте) и
+        возвращает `(новый_пресет, результат, expect)`. Запись идёт через
+        `_commit_preset`: проверка перечитыванием файла и сброс снапшотов —
+        как у правок со страницы profile-ов. Неподтверждённая запись —
+        исключение, а не молчаливый «успех».
+        """
+        preset, manifest = self.load_selected_preset()
+        updated, result, expect = edit(preset)
+        failure = self._commit_preset(updated, content_change_kind=content_change_kind, expect=expect)
+        if failure:
+            raise RuntimeError(f"Пресет не сохранён: {failure}")
+        return str(getattr(manifest, "file_name", "") or ""), result
+
     def _read_stored_preset(self) -> Preset:
         """Пресет прямо из файла, без кэшей и перештамповки идентичностей.
 
@@ -413,23 +432,10 @@ class ProfilePresetService:
         templates = self._load_profile_templates()
         self._log_timing("profile_feature.templates.load", templates_started_at)
 
-        normalize_started_at = time.perf_counter()
-        normalization = normalize_preset_profiles(
-            preset,
-            preserved_match_signatures=tuple(profile.match_signature for profile in templates.values()),
-        )
-        self._log_timing("profile_feature.profiles.normalize", normalize_started_at)
-        if normalization.changed:
-            preset = normalization.preset
-            # Нормализация пере-парсит пресет и возвращает контентные ключи —
-            # возвращаем профилям стабильные uid из реестра.
-            self._restamp_profile_identities(preset)
-            self._selected_preset_snapshot = _SelectedPresetSnapshot(
-                revision=preset_revision,
-                preset=preset,
-                manifest=manifest,
-            )
-
+        # Список показывает profile-ы ровно такими, как они записаны в файле.
+        # Раньше profile с несколькими hostlist/ipset здесь молча разрезался,
+        # разрез попадал в снапшот под неизменной ревизией файла и первая же
+        # посторонняя правка записывала его на диск (теряя --name и *-exclude*).
         catalogs_started_at = time.perf_counter()
         catalogs_signature, catalogs = load_strategy_catalogs_with_signature(self._app_paths, self._engine)
         self._log_timing("profile_feature.strategy_catalogs.load", catalogs_started_at)
@@ -465,8 +471,6 @@ class ProfilePresetService:
             items=tuple(items),
             selected_preset_file_name=str(getattr(manifest, "file_name", "") or ""),
             selected_preset_name=str(getattr(manifest, "name", "") or ""),
-            normalized_split_profiles=normalization.split_profile_count,
-            normalized_created_profiles=normalization.created_profile_count,
         )
         self._profile_list_snapshot = payload
         self._profile_list_snapshot_revision = list_revision
@@ -565,11 +569,14 @@ class ProfilePresetService:
             "active_strategy_count": len(active_items),
         }
 
-    def get_profile_setup(self, profile_key: str) -> ProfileSetupPayload | None:
+    def get_profile_setup(self, profile_key: str, *, strategy_branch_id: str = "") -> ProfileSetupPayload | None:
+        """Данные страницы profile-а; `strategy_branch_id` — какую ветку
+        стратегии показать текущей (по умолчанию первую). Нужен, чтобы после
+        сохранения диапазонов ветки страница осталась на этой же ветке."""
         with self._profile_list_lock:
-            return self._get_profile_setup_locked(profile_key)
+            return self._get_profile_setup_locked(profile_key, strategy_branch_id=strategy_branch_id)
 
-    def _get_profile_setup_locked(self, profile_key: str) -> ProfileSetupPayload | None:
+    def _get_profile_setup_locked(self, profile_key: str, *, strategy_branch_id: str = "") -> ProfileSetupPayload | None:
         key = str(profile_key or "").strip()
         if not key:
             return None
@@ -602,7 +609,11 @@ class ProfilePresetService:
             resolved_display_name=getattr(source, "resolved_display_name", ""),
         )
         strategy_branches = core.strategy_branches_with_match
-        current_branch = strategy_branches[0] if strategy_branches else None
+        wanted_branch_id = str(strategy_branch_id or "").strip()
+        current_branch = next(
+            (branch for branch in strategy_branches if wanted_branch_id and branch.branch_id == wanted_branch_id),
+            strategy_branches[0] if strategy_branches else None,
+        )
         current_strategy_id = (
             str(current_branch.strategy_id or "").strip()
             if current_branch is not None
@@ -650,8 +661,8 @@ class ProfilePresetService:
                 core.editable_filter_kinds,
                 self._app_paths,
             ),
-            in_range=editable.in_range,
-            out_range=editable.out_range,
+            in_range=str(current_branch.in_range) if current_branch is not None else editable.in_range,
+            out_range=str(current_branch.out_range) if current_branch is not None else editable.out_range,
             current_strategy_state=strategy_states.get(current_strategy_id, ProfileStrategyState()),
         )
 
@@ -775,7 +786,7 @@ class ProfilePresetService:
                     should_reload=True,
                     message="profile_index_missing",
                 )
-            updated_preset = _with_profile_strategy_branch_lines(preset, index, branch_id, entry.args.splitlines())
+            updated_preset = with_profile_strategy_branch_lines(preset, index, branch_id, entry.args.splitlines())
             if updated_preset is None:
                 return _strategy_apply_result(
                     "stale_reloaded",
@@ -942,13 +953,25 @@ class ProfilePresetService:
         filter_value: str,
         in_range: str,
         out_range: str,
+        strategy_branch_id: str = "",
     ) -> tuple[str, str] | None:
+        """Правит только изменённые настройки profile.
+
+        Диапазоны относятся к ветке стратегии `strategy_branch_id` (как её
+        показывает UI; пусто — первая ветка), поэтому и сравнение «ничего не
+        изменилось», и проверка после записи идут по этой ветке.
+        """
         preset, _manifest = self.load_selected_preset()
         index = resolve_preset_profile_reference_index(preset, profile_key)
         if index is None:
             return None
+        branch_id = str(strategy_branch_id or "").strip()
+        if not has_strategy_branch(preset.profiles[index], branch_id):
+            return None
         old_persistent_key = str(preset.profiles[index].persistent_key or "").strip()
         current = read_editable_profile_settings(preset.profiles[index])
+        current_in_range, current_out_range = read_strategy_branch_ranges(preset.profiles[index], branch_id)
+        current = replace(current, in_range=current_in_range, out_range=current_out_range)
         next_filter_kind = str(filter_kind or "").strip().lower()
         if next_filter_kind != current.filter_kind:
             resolved = resolve_filter_kind_switch(current, next_filter_kind, self._app_paths)
@@ -986,8 +1009,9 @@ class ProfilePresetService:
             preset,
             index,
             next_settings,
+            strategy_branch_id=branch_id,
         )
-        if self._commit_preset(preset, expect=_expect_editable_settings(index, next_settings)):
+        if self._commit_preset(preset, expect=_expect_editable_settings(index, next_settings, branch_id)):
             return None
         return self._profile_edit_result(preset, index, old_persistent_key)
 
@@ -1265,93 +1289,77 @@ class ProfilePresetService:
         return PresetProfileMoveResult(profile_key=key_map.get(moved_key, moved_key), key_map=key_map)
 
     def update_user_profile(self, profile_id: str, *, name: str, protocol: str, ports: str) -> int:
-        old_name, row = update_user_profile(self._app_paths, profile_id, name=name, protocol=protocol, ports=ports)
+        old_row, new_row = update_user_profile(self._app_paths, profile_id, name=name, protocol=protocol, ports=ports)
         # Сброс нужен не из-за user_profiles (их ревизия в ключах кэшей),
         # а потому что ниже переписываются файлы пресетов в обход save_selected_preset.
         self._invalidate_profile_list_snapshot()
-        if not old_name:
-            return 0
-        return self._update_user_profile_in_all_presets(old_name, row)
+
+        def _update(preset: Preset, indexes: list[int]) -> Preset:
+            for index in indexes:
+                preset = with_profile_user_match(
+                    preset,
+                    index,
+                    name=new_row["name"],
+                    protocol=new_row["protocol"],
+                    ports=new_row["ports"],
+                    hostlist=new_row["hostlist"],
+                    ipset=new_row["ipset"],
+                )
+            return preset
+
+        return self._edit_profiles_created_from_user_profile(old_row, _update)
 
     def delete_user_profile(self, profile_id: str) -> int:
-        old_name, _row = delete_user_profile(self._app_paths, profile_id)
+        old_row = delete_user_profile(self._app_paths, profile_id)
         self._invalidate_profile_list_snapshot()
-        if not old_name:
-            return 0
-        return self._delete_user_profile_from_all_presets(old_name)
 
-    def _update_user_profile_in_all_presets(self, old_name: str, row: dict[str, str]) -> int:
-        changed_profiles = 0
-        old_key = str(old_name or "").strip().casefold()
-        if not old_key:
+        def _delete(preset: Preset, indexes: list[int]) -> Preset:
+            for index in sorted(indexes, reverse=True):
+                preset = with_profile_deleted(preset, index)
+            return preset
+
+        return self._edit_profiles_created_from_user_profile(old_row, _delete)
+
+    def _edit_profiles_created_from_user_profile(self, row: dict[str, str], edit) -> int:
+        """Правит во всех пользовательских пресетах только profile-ы, созданные
+        из этого пользовательского profile.
+
+        Такой profile узнаётся по двум признакам сразу: имя (`--name` /
+        `--comment`) совпадает с именем пользовательского profile, и его
+        hostlist/ipset — это собственные файлы этого profile
+        (`lists/<id>.txt` / `lists/ipset-<id>.txt`). Одноимённые profile-ы с
+        другими списками — чужие, их не трогаем. Встроенные пресеты не
+        меняются вовсе: правка создала бы их пользовательскую копию.
+        """
+        if not str(row.get("name") or "").strip():
             return 0
+        list_manifests = getattr(self._presets, "list_preset_manifests", None)
+        read_source = getattr(self._presets, "read_preset_source_by_file_name", None)
+        save_source = getattr(self._presets, "save_preset_source_by_file_name", None)
+        if not callable(list_manifests) or not callable(read_source) or not callable(save_source):
+            return 0
+        changed_profiles = 0
         for launch_method in sorted(PRESET_LAUNCH_METHODS):
-            list_manifests = getattr(self._presets, "list_preset_manifests", None)
-            read_source = getattr(self._presets, "read_preset_source_by_file_name", None)
-            save_source = getattr(self._presets, "save_preset_source_by_file_name", None)
-            if not callable(list_manifests) or not callable(read_source) or not callable(save_source):
-                continue
             engine = _engine_for_method(launch_method)
             for manifest in list_manifests(launch_method):
                 file_name = str(getattr(manifest, "file_name", "") or "").strip()
-                if not file_name:
+                if not file_name or _is_builtin_preset_manifest(manifest):
                     continue
                 source_text = str(read_source(launch_method, file_name) or "")
-                if old_name not in source_text:
+                if str(row["name"]).casefold() not in source_text.casefold():
                     continue
                 preset = parse_preset_text(source_text, engine=engine, source_name=file_name)
-                changed_indexes = [
+                indexes = [
                     profile.index
                     for profile in preset.profiles
-                    if str(getattr(profile, "name", "") or "").strip().casefold() == old_key
+                    if _profile_created_from_user_profile(profile, row)
                 ]
-                if not changed_indexes:
+                if not indexes:
                     continue
-                for index in changed_indexes:
-                    preset = with_profile_user_match(
-                        preset,
-                        index,
-                        name=str(row.get("name") or ""),
-                        protocol=str(row.get("protocol") or ""),
-                        ports=str(row.get("ports") or ""),
-                        hostlist=str(row.get("hostlist") or ""),
-                        ipset=str(row.get("ipset") or ""),
-                    )
-                save_source(launch_method, file_name, serialize_preset(preset))
-                changed_profiles += len(changed_indexes)
-        return changed_profiles
-
-    def _delete_user_profile_from_all_presets(self, old_name: str) -> int:
-        changed_profiles = 0
-        old_key = str(old_name or "").strip().casefold()
-        if not old_key:
-            return 0
-        for launch_method in sorted(PRESET_LAUNCH_METHODS):
-            list_manifests = getattr(self._presets, "list_preset_manifests", None)
-            read_source = getattr(self._presets, "read_preset_source_by_file_name", None)
-            save_source = getattr(self._presets, "save_preset_source_by_file_name", None)
-            if not callable(list_manifests) or not callable(read_source) or not callable(save_source):
-                continue
-            engine = _engine_for_method(launch_method)
-            for manifest in list_manifests(launch_method):
-                file_name = str(getattr(manifest, "file_name", "") or "").strip()
-                if not file_name:
-                    continue
-                source_text = str(read_source(launch_method, file_name) or "")
-                if old_name not in source_text:
-                    continue
-                preset = parse_preset_text(source_text, engine=engine, source_name=file_name)
-                changed_indexes = [
-                    profile.index
-                    for profile in preset.profiles
-                    if str(getattr(profile, "name", "") or "").strip().casefold() == old_key
-                ]
-                if not changed_indexes:
-                    continue
-                for index in sorted(changed_indexes, reverse=True):
-                    preset = with_profile_deleted(preset, index)
-                save_source(launch_method, file_name, serialize_preset(preset))
-                changed_profiles += len(changed_indexes)
+                save_source(launch_method, file_name, serialize_preset(edit(preset, indexes)))
+                changed_profiles += len(indexes)
+        if changed_profiles:
+            self._invalidate_selected_preset_snapshot()
         return changed_profiles
 
     def profile_folder_reset_assignments(self) -> dict[str, str]:
@@ -1436,8 +1444,9 @@ class ProfilePresetService:
             filter_value=filter_value or current.filter_value,
             out_range="-d8",
         )
-        updated = append_profile_from_template(preset, template, enabled=True, position="top")
-        return updated, updated.profiles[0].key if updated.profiles else ""
+        insert_at = new_profile_insert_index(preset)
+        updated = append_profile_from_template(preset, template, enabled=True, position=insert_at)
+        return updated, updated.profiles[insert_at].key if 0 <= insert_at < len(updated.profiles) else ""
 
     def _profile_with_filter_override(
         self,
@@ -1780,36 +1789,6 @@ def _profile_folder_state_revision(folder_state: dict[str, Any]) -> tuple[object
     return tuple(folder_rows), tuple(item_rows)
 
 
-def _with_profile_strategy_branch_lines(
-    preset: Preset,
-    profile_index: int,
-    branch_id: str,
-    strategy_lines,
-) -> Preset | None:
-    """Пресет с заменёнными строками ветки или None, если ветки нет.
-
-    None вместо исходного пресета: возврат неизменённого пресета выглядел для
-    вызывающего как успешная замена и превращался в статус `applied` при
-    фактическом no-op — UI закреплял выбор, которого нет в файле.
-    """
-    updated = deepcopy(preset)
-    profile = updated.profiles[int(profile_index)]
-    groups = _strategy_branch_segment_groups(profile)
-    target = groups.get(str(branch_id or "").strip())
-    if not target:
-        return None
-
-    normalized_lines = [str(line or "").strip() for line in strategy_lines or () if str(line or "").strip()]
-    replacement = [_strategy_segment(line) for line in normalized_lines]
-    start, end = target
-    profile.segments = [*profile.segments[:start], *replacement, *profile.segments[end + 1 :]]
-    return parse_preset_text(
-        serialize_preset(updated),
-        engine=updated.engine,
-        source_name=updated.source_name,
-    )
-
-
 def _expect_profile(profile_index: int, check):
     """Ожидание к профилю по индексу в перечитанном пресете."""
 
@@ -1860,9 +1839,13 @@ def _expect_profile_enabled(profile_index: int, enabled: bool):
     return _expect_profile(profile_index, _check)
 
 
-def _expect_editable_settings(profile_index: int, settings: EditableProfileSettings):
+def _expect_editable_settings(profile_index: int, settings: EditableProfileSettings, strategy_branch_id: str = ""):
     def _check(profile: Profile) -> str:
         actual = read_editable_profile_settings(profile)
+        if not has_strategy_branch(profile, strategy_branch_id):
+            return f"branch_missing_after_write: branch={strategy_branch_id}"
+        in_range, out_range = read_strategy_branch_ranges(profile, strategy_branch_id)
+        actual = replace(actual, in_range=in_range, out_range=out_range)
         if (
             actual.filter_kind == settings.filter_kind
             and actual.filter_value == settings.filter_value
@@ -1889,38 +1872,33 @@ def _expect_profile_raw_text(profile_index: int, raw_text: str):
 
 
 def _strategy_branch_segment_groups(profile: Profile) -> dict[str, tuple[int, int]]:
-    groups: dict[str, tuple[int, int]] = {}
-    current: list[int] = []
-
-    def flush() -> None:
-        nonlocal current
-        if not current:
-            return
-        groups[f"branch:{len(groups)}"] = (current[0], current[-1])
-        current = []
-
-    for index, segment in enumerate(tuple(getattr(profile, "segments", ()) or ())):
-        if segment.kind == "strategy_filter":
-            flush()
-            continue
-        if segment.kind == "strategy":
-            current.append(index)
-
-    flush()
-    return groups
+    return strategy_branch_spans(getattr(profile, "segments", ()) or ())
 
 
-def _strategy_segment(line: str) -> ProfileSegment:
-    name, value = _split_profile_option(line)
-    return ProfileSegment(kind="strategy", text=str(line or "").strip(), name=name, value=value)
+def _is_builtin_preset_manifest(manifest) -> bool:
+    for attribute in ("storage_scope", "kind"):
+        if str(getattr(manifest, attribute, "") or "").strip().lower() == "builtin":
+            return True
+    return False
 
 
-def _split_profile_option(line: str) -> tuple[str, str]:
-    text = str(line or "").strip()
-    if "=" not in text:
-        return text, ""
-    name, _sep, value = text.partition("=")
-    return name.strip(), value.strip()
+def _profile_created_from_user_profile(profile: Profile, row: dict[str, str]) -> bool:
+    wanted_name = str(row.get("name") or "").strip().casefold()
+    if not wanted_name or str(profile.name or "").strip().casefold() != wanted_name:
+        return False
+    own_lists = {_list_file_key(row.get("hostlist", "")), _list_file_key(row.get("ipset", ""))} - {""}
+    values = [
+        part
+        for line in (*profile.match.hostlist_lines, *profile.match.ipset_lines)
+        for part in str(line or "").partition("=")[2].split(",")
+        if part.strip()
+    ]
+    return bool(values) and all(_list_file_key(value) in own_lists for value in values)
+
+
+def _list_file_key(value: str) -> str:
+    clean = str(value or "").strip().strip('"').strip("'").lstrip("@").replace("\\", "/")
+    return clean.rsplit("/", 1)[-1].lower()
 
 
 def _profile_status_name(*, in_preset: bool, enabled: bool, strategy_name: str) -> str:

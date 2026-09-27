@@ -5,7 +5,7 @@ from pathlib import Path
 
 from core.paths import AppPaths
 from settings.mode import ENGINE_WINWS1, ENGINE_WINWS2
-from settings.store import get_user_profiles_settings, set_user_profiles_settings
+from settings.store import get_user_profiles_settings, update_user_profiles_settings
 
 from lists.core.layered_files import (
     create_profile_user_list_file,
@@ -15,10 +15,8 @@ from lists.core.layered_files import (
     write_profile_user_list_text,
 )
 
-from ..match_filters import l7_transport
 from ..models import EngineName, Profile
 from ..parser import parse_preset_text
-from ..strategy_catalog import load_strategy_catalogs
 from ..template_catalog import load_profile_templates
 
 
@@ -36,90 +34,108 @@ _RU_TRANSLIT = str.maketrans({
 
 def create_user_profile(paths: AppPaths, *, name: str, protocol: str, ports: str) -> str:
     clean_name = _clean_name(name)
-    _validate_unique_profile_name(paths, clean_name)
     clean_protocol = _clean_protocol(protocol)
     clean_ports = _clean_ports(ports, clean_protocol)
-    profile_id = _unique_profile_id(_slugify(clean_name))
-    hostlist = f"lists/{profile_id}.txt"
-    ipset = f"lists/ipset-{profile_id}.txt"
-
+    system_names = _system_profile_names(paths)
     lists_root = Path(paths.user_root) / "lists"
-    hostlist_had_entries = _user_list_file_has_entries(lists_root, f"{profile_id}.txt")
-    create_profile_user_list_file(lists_root, f"{profile_id}.txt")
-    create_profile_user_list_file(lists_root, f"ipset-{profile_id}.txt")
-    if not hostlist_had_entries:
-        write_profile_user_list_text(lists_root, f"{profile_id}.txt", _DEFAULT_HOSTLIST_TEXT)
+    created: dict[str, str] = {}
 
-    settings = get_user_profiles_settings()
-    profiles = dict(settings.get("profiles") or {})
-    profiles[profile_id] = {
-        "name": clean_name,
-        "protocol": clean_protocol,
-        "ports": clean_ports,
-        "hostlist": hostlist,
-        "ipset": ipset,
-    }
-    set_user_profiles_settings({"version": 1, "profiles": profiles})
-    return profile_id
+    def _mutate(section: dict) -> None:
+        profiles = dict(section.get("profiles") or {})
+        _validate_unique_profile_name(profiles, system_names, clean_name)
+        profile_id = _unique_profile_id(profiles, _slugify(clean_name))
+        hostlist_had_entries = _user_list_file_has_entries(lists_root, f"{profile_id}.txt")
+        create_profile_user_list_file(lists_root, f"{profile_id}.txt")
+        create_profile_user_list_file(lists_root, f"ipset-{profile_id}.txt")
+        if not hostlist_had_entries:
+            write_profile_user_list_text(lists_root, f"{profile_id}.txt", _DEFAULT_HOSTLIST_TEXT)
+        profiles[profile_id] = {
+            "name": clean_name,
+            "protocol": clean_protocol,
+            "ports": clean_ports,
+            "hostlist": f"lists/{profile_id}.txt",
+            "ipset": f"lists/ipset-{profile_id}.txt",
+        }
+        section["version"] = 1
+        section["profiles"] = profiles
+        created["profile_id"] = profile_id
+
+    update_user_profiles_settings(_mutate)
+    return created["profile_id"]
 
 
-def update_user_profile(paths: AppPaths, profile_id: str, *, name: str, protocol: str, ports: str) -> tuple[str, dict[str, str]]:
+def update_user_profile(
+    paths: AppPaths,
+    profile_id: str,
+    *,
+    name: str,
+    protocol: str,
+    ports: str,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Возвращает (строка до правки, строка после правки)."""
     clean_profile_id = str(profile_id or "").strip()
     if not clean_profile_id:
         raise ValueError("Profile id не должен быть пустым")
-    settings = get_user_profiles_settings()
-    profiles = dict(settings.get("profiles") or {})
-    row = profiles.get(clean_profile_id)
-    if not isinstance(row, dict):
-        raise ValueError("Пользовательский profile не найден")
-
-    old_name = str(row.get("name") or "").strip()
     clean_name = _clean_name(name)
-    _validate_unique_profile_name(paths, clean_name, exclude_profile_id=clean_profile_id)
     clean_protocol = _clean_protocol(protocol)
     clean_ports = _clean_ports(ports, clean_protocol)
+    system_names = _system_profile_names(paths)
+    rows: dict[str, dict[str, str]] = {}
 
-    old_hostlist = str(row.get("hostlist") or "").strip()
-    old_ipset = str(row.get("ipset") or "").strip()
-    new_stem = _unique_file_stem(_slugify(clean_name), exclude_profile_id=clean_profile_id)
-    new_hostlist = f"lists/{new_stem}.txt"
-    new_ipset = f"lists/ipset-{new_stem}.txt"
-    _rename_user_list_file(paths, old_hostlist, new_hostlist)
-    _rename_user_list_file(paths, old_ipset, new_ipset)
+    def _mutate(section: dict) -> None:
+        profiles = dict(section.get("profiles") or {})
+        row = profiles.get(clean_profile_id)
+        if not isinstance(row, dict):
+            raise ValueError("Пользовательский profile не найден")
+        _validate_unique_profile_name(profiles, system_names, clean_name, exclude_profile_id=clean_profile_id)
+        old_row = _row_fields(row)
+        new_stem = _unique_file_stem(profiles, _slugify(clean_name), exclude_profile_id=clean_profile_id)
+        updated_row = {
+            "name": clean_name,
+            "protocol": clean_protocol,
+            "ports": clean_ports,
+            "hostlist": f"lists/{new_stem}.txt",
+            "ipset": f"lists/ipset-{new_stem}.txt",
+        }
+        _rename_user_list_file(paths, old_row["hostlist"], updated_row["hostlist"])
+        _rename_user_list_file(paths, old_row["ipset"], updated_row["ipset"])
+        profiles[clean_profile_id] = updated_row
+        section["version"] = 1
+        section["profiles"] = profiles
+        rows["old"] = old_row
+        rows["new"] = dict(updated_row)
 
-    updated_row = {
-        "name": clean_name,
-        "protocol": clean_protocol,
-        "ports": clean_ports,
-        "hostlist": new_hostlist,
-        "ipset": new_ipset,
-    }
-    profiles[clean_profile_id] = updated_row
-    set_user_profiles_settings({"version": 1, "profiles": profiles})
-    return old_name, updated_row
+    update_user_profiles_settings(_mutate)
+    return rows["old"], rows["new"]
 
 
-def delete_user_profile(paths: AppPaths, profile_id: str) -> tuple[str, dict[str, str]]:
+def delete_user_profile(paths: AppPaths, profile_id: str) -> dict[str, str]:
+    """Удаляет пользовательский profile и его файлы; возвращает удалённую строку."""
     clean_profile_id = str(profile_id or "").strip()
     if not clean_profile_id:
         raise ValueError("Profile id не должен быть пустым")
-    settings = get_user_profiles_settings()
-    profiles = dict(settings.get("profiles") or {})
-    row = profiles.get(clean_profile_id)
-    if not isinstance(row, dict):
-        raise ValueError("Пользовательский profile не найден")
+    removed: dict[str, dict[str, str]] = {}
 
-    old_name = str(row.get("name") or "").strip()
-    del profiles[clean_profile_id]
-    set_user_profiles_settings({"version": 1, "profiles": profiles})
-    _delete_user_list_file(paths, str(row.get("hostlist") or ""))
-    _delete_user_list_file(paths, str(row.get("ipset") or ""))
-    return old_name, {
-        "name": old_name,
-        "protocol": str(row.get("protocol") or ""),
-        "ports": str(row.get("ports") or ""),
-        "hostlist": str(row.get("hostlist") or ""),
-        "ipset": str(row.get("ipset") or ""),
+    def _mutate(section: dict) -> None:
+        profiles = dict(section.get("profiles") or {})
+        row = profiles.pop(clean_profile_id, None)
+        if not isinstance(row, dict):
+            raise ValueError("Пользовательский profile не найден")
+        section["version"] = 1
+        section["profiles"] = profiles
+        removed["row"] = _row_fields(row)
+
+    update_user_profiles_settings(_mutate)
+    row = removed["row"]
+    _delete_user_list_file(paths, row["hostlist"])
+    _delete_user_list_file(paths, row["ipset"])
+    return row
+
+
+def _row_fields(row: dict) -> dict[str, str]:
+    return {
+        field: str(row.get(field) or "").strip()
+        for field in ("name", "protocol", "ports", "hostlist", "ipset")
     }
 
 
@@ -128,7 +144,7 @@ def load_user_profile_templates(paths: AppPaths, engine: EngineName | str) -> di
     profiles = get_user_profiles_settings().get("profiles") or {}
     result: dict[str, Profile] = {}
     for profile_id, row in sorted(profiles.items()):
-        text = _profile_text(row, paths=paths, engine=normalized_engine)
+        text = _profile_text(row, engine=normalized_engine)
         if not text:
             continue
         try:
@@ -140,7 +156,7 @@ def load_user_profile_templates(paths: AppPaths, engine: EngineName | str) -> di
     return result
 
 
-def _profile_text(row: object, *, paths: AppPaths, engine: str) -> str:
+def _profile_text(row: object, *, engine: str) -> str:
     if not isinstance(row, dict):
         return ""
     name = _clean_name(row.get("name"))
@@ -155,23 +171,14 @@ def _profile_text(row: object, *, paths: AppPaths, engine: str) -> str:
         f"--filter-{protocol}={ports}",
         f"--hostlist={hostlist}",
     ]
+    # Новый profile ничего не делает с трафиком, пока пользователь сам не
+    # выберет стратегию. winws2: явный `--lua-desync=pass`. winws1: profile
+    # без `--dpi-desync` — в nfqws1 режим по умолчанию DESYNC_NONE, пакет
+    # уходит как есть (тот же pass); подставлять «первую стратегию каталога»
+    # значило бы молча выбрать её за пользователя.
     if engine == ENGINE_WINWS2:
         lines.append("--lua-desync=pass")
-    elif engine == ENGINE_WINWS1:
-        lines.extend(_first_strategy_lines(paths, engine=engine, protocol=protocol, filter_value=ports))
     return "\n".join(lines) + "\n"
-
-
-def _first_strategy_lines(paths: AppPaths, *, engine: str, protocol: str, filter_value: str) -> list[str]:
-    catalog_name = protocol
-    if protocol == "l7":
-        catalog_name = l7_transport((filter_value,)) or "udp"
-    catalog = load_strategy_catalogs(paths, engine).get(catalog_name) or {}
-    for entry in catalog.values():
-        lines = [line.strip() for line in str(entry.args or "").splitlines() if line.strip()]
-        if lines:
-            return lines
-    return []
 
 
 def _clean_name(value: object) -> str:
@@ -258,8 +265,7 @@ def _slugify(value: str) -> str:
     return text or "profile"
 
 
-def _unique_profile_id(base: str) -> str:
-    profiles = get_user_profiles_settings().get("profiles") or {}
+def _unique_profile_id(profiles: dict, base: str) -> str:
     candidate = base
     counter = 2
     while candidate in profiles:
@@ -268,8 +274,7 @@ def _unique_profile_id(base: str) -> str:
     return candidate
 
 
-def _unique_file_stem(base: str, *, exclude_profile_id: str = "") -> str:
-    profiles = get_user_profiles_settings().get("profiles") or {}
+def _unique_file_stem(profiles: dict, base: str, *, exclude_profile_id: str = "") -> str:
     used: set[str] = set()
     excluded = str(exclude_profile_id or "").strip()
     for profile_id, row in profiles.items():
@@ -293,12 +298,17 @@ def _unique_file_stem(base: str, *, exclude_profile_id: str = "") -> str:
     return candidate
 
 
-def _validate_unique_profile_name(paths: AppPaths, name: str, *, exclude_profile_id: str = "") -> None:
+def _validate_unique_profile_name(
+    profiles: dict,
+    system_names: set[str],
+    name: str,
+    *,
+    exclude_profile_id: str = "",
+) -> None:
     wanted = _name_key(name)
     if not wanted:
         return
 
-    profiles = get_user_profiles_settings().get("profiles") or {}
     excluded = str(exclude_profile_id or "").strip()
     for profile_id, row in profiles.items():
         if str(profile_id or "").strip() == excluded:
@@ -306,7 +316,7 @@ def _validate_unique_profile_name(paths: AppPaths, name: str, *, exclude_profile
         if isinstance(row, dict) and _name_key(row.get("name")) == wanted:
             raise ValueError("Пользовательский profile с таким названием уже есть")
 
-    for system_name in _system_profile_names(paths):
+    for system_name in system_names:
         if _name_key(system_name) == wanted:
             raise ValueError("Такое название уже занято системным profile-ом")
 

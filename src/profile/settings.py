@@ -12,8 +12,9 @@ from settings.mode import (
     normalize_launch_method,
 )
 
+from .models import ProfileSegment
 from .parser import parse_preset_text
-from .serializer import serialize_preset, with_profile_strategy_lines
+from .serializer import serialize_preset
 
 
 _WINWS2_WSSIZE_LINE = "--lua-desync=wssize:wsize=1:scale=6"
@@ -38,39 +39,83 @@ def get_additional_settings_state(profile_services, launch_method: str = DEFAULT
 
 def get_wssize_enabled(profile_services, *, launch_method: str = DEFAULT_LAUNCH_METHOD) -> bool:
     preset, _manifest = _load_selected_profile_preset(profile_services, launch_method)
-    for profile in preset.profiles:
-        if not _profile_tcp_includes_443(profile):
-            continue
-        if _profile_has_wssize(profile):
-            return True
-    return False
+    return any(_profile_has_wssize(profile) for profile in _wssize_target_profiles(preset))
 
 
 def set_wssize_enabled(profile_services, enabled: bool, *, launch_method: str = DEFAULT_LAUNCH_METHOD) -> bool:
-    preset, _manifest = _load_selected_profile_preset(profile_services, launch_method)
-    changed = False
-    touched_any_tcp_443 = False
+    """Включает/выключает wssize во включённых TCP/443 profile-ах.
 
-    for profile in list(preset.profiles):
-        if not _profile_tcp_includes_443(profile):
-            continue
-        touched_any_tcp_443 = True
-        current_lines = [str(line or "").strip() for line in profile.strategy.strategy_lines if str(line or "").strip()]
-        cleaned = _remove_wssize_lines(preset.engine, current_lines)
+    Меняется только строка wssize: остальные строки стратегии, их порядок и
+    ветки profile остаются как в файле. Выключенные (`--skip`) profile-ы не
+    трогаются — пользователь управляет работающим трафиком.
+
+    winws2: wssize ставится перед первой строкой стратегии profile. Это его
+    место по семантике zapret2: техника нулевой фазы меняет окно уже в SYN,
+    а у SYN пейлоад `empty`, поэтому инстанс после ограничивающего
+    `--payload=tls_client_hello` его бы не увидел. Диапазон по умолчанию
+    (`--out-range=a`) ему не вреден — wssize сам отключается (cutoff) на
+    первом пакете с данными.
+    """
+    preset, _manifest = _load_selected_profile_preset(profile_services, launch_method)
+    targets = _wssize_target_profiles(preset)
+    if not targets:
+        return False if enabled else True
+
+    changed = False
+    for profile in targets:
+        segments = _segments_without_wssize(preset.engine, profile.segments)
         if enabled:
-            next_lines = [*_wssize_lines_for_engine(preset.engine), *cleaned]
-        else:
-            next_lines = cleaned
-        if next_lines == current_lines:
+            segments = _segments_with_wssize(preset.engine, segments)
+        if [segment.text for segment in segments] == [segment.text for segment in profile.segments]:
             continue
-        preset = with_profile_strategy_lines(preset, profile.index, next_lines)
+        profile.segments = segments
         changed = True
 
-    if not touched_any_tcp_443:
-        return False if enabled else True
     if changed:
         _save_selected_profile_preset(profile_services, preset, launch_method)
     return True
+
+
+def _wssize_target_profiles(preset) -> list:
+    return [
+        profile
+        for profile in preset.profiles
+        if bool(getattr(profile, "enabled", False)) and _profile_tcp_includes_443(profile)
+    ]
+
+
+def _segments_with_wssize(engine: str, segments: list) -> list:
+    insert_at = next(
+        (index for index, segment in enumerate(segments) if segment.kind in {"strategy", "strategy_filter"}),
+        None,
+    )
+    if insert_at is None:
+        insert_at = len(segments)
+        while insert_at > 0 and segments[insert_at - 1].kind == "blank":
+            insert_at -= 1
+    wssize_segments = [
+        ProfileSegment(kind="strategy", text=line, name=name, value=value)
+        for line in _wssize_lines_for_engine(engine)
+        for name, _separator, value in (line.partition("="),)
+    ]
+    return [*segments[:insert_at], *wssize_segments, *segments[insert_at:]]
+
+
+def _segments_without_wssize(engine: str, segments: list) -> list:
+    strategy_positions = [index for index, segment in enumerate(segments) if segment.kind == "strategy"]
+    strategy_texts = [str(segments[index].text or "").strip() for index in strategy_positions]
+    kept_texts = _remove_wssize_lines(engine, strategy_texts)
+    if len(kept_texts) == len(strategy_texts):
+        return list(segments)
+    dropped: set[int] = set()
+    kept_iter = iter(kept_texts)
+    next_kept = next(kept_iter, None)
+    for index, text in zip(strategy_positions, strategy_texts):
+        if next_kept is not None and text == next_kept:
+            next_kept = next(kept_iter, None)
+            continue
+        dropped.add(index)
+    return [segment for index, segment in enumerate(segments) if index not in dropped]
 
 
 def get_debug_log_enabled(profile_services, *, launch_method: str = DEFAULT_LAUNCH_METHOD) -> bool:

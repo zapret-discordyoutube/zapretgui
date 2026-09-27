@@ -161,6 +161,60 @@ def with_profile_user_match(
     return _reparse(updated)
 
 
+def strategy_branch_spans(segments) -> dict[str, tuple[int, int]]:
+    """Ветки стратегии profile: `branch:N` -> (индекс первой, индекс последней strategy-строки).
+
+    Ветка — подряд идущие strategy-строки (`--lua-desync` / строки winws1),
+    которые разделяет любая strategy_filter-строка (`--payload`, `--in-range`,
+    `--out-range`). Нумерация совпадает с `strategy_branches_for_profile`, по
+    ней UI выбирает ветку, поэтому источник у неё один.
+    """
+    spans: dict[str, tuple[int, int]] = {}
+    current: list[int] = []
+
+    def flush() -> None:
+        nonlocal current
+        if current:
+            spans[f"branch:{len(spans)}"] = (current[0], current[-1])
+            current = []
+
+    for index, segment in enumerate(tuple(segments or ())):
+        if segment.kind == "strategy_filter":
+            flush()
+            continue
+        if segment.kind == "strategy":
+            current.append(index)
+    flush()
+    return spans
+
+
+def with_profile_strategy_branch_lines(
+    preset: Preset,
+    profile_index: int,
+    branch_id: str,
+    strategy_lines,
+) -> Preset | None:
+    """Пресет с заменёнными строками одной ветки стратегии или None, если ветки нет.
+
+    Фильтры `--payload`/`--in-range`/`--out-range` и остальные ветки profile
+    не меняются. None вместо исходного пресета: возврат неизменённого пресета
+    выглядел бы для вызывающего как успешная замена.
+    """
+    updated = deepcopy(preset)
+    profile = updated.profiles[int(profile_index)]
+    target = strategy_branch_spans(profile.segments).get(str(branch_id or "").strip())
+    if not target:
+        return None
+    replacement = [
+        _segment_for_strategy_line(updated.engine, line)
+        for line in (str(raw or "").strip() for raw in strategy_lines or ())
+        if line
+    ]
+    start, end = target
+    profile.segments = [*profile.segments[:start], *replacement, *profile.segments[end + 1 :]]
+    return _reparse(updated)
+
+
 def _preserve_missing_winws2_strategy_filters(engine: EngineName, profile: Profile, strategy_lines: list[str]) -> list[str]:
     if engine != ENGINE_WINWS2:
         return strategy_lines
@@ -189,12 +243,14 @@ def append_profile_from_template(
     template: Profile,
     *,
     enabled: bool = True,
-    position: str = "bottom",
+    position: str | int = "bottom",
 ) -> Preset:
+    """Вставляет profile из шаблона: "top", "bottom" или индекс profile-а.
+
+    Хвост пресета (`footer_lines`) принадлежит файлу и не удаляется.
+    """
     updated = deepcopy(preset)
-    if getattr(updated, "footer_lines", None):
-        updated.footer_lines = []
-    insert_at = 0 if str(position or "").strip().lower() == "top" else len(updated.profiles)
+    insert_at = _template_insert_index(position, len(updated.profiles))
     if (
         updated.profiles
         and insert_at == len(updated.profiles)
@@ -218,6 +274,17 @@ def append_profile_from_template(
     updated.profiles.insert(insert_at, profile)
     _ensure_profile_boundaries(updated)
     return _reparse(updated)
+
+
+def _template_insert_index(position: str | int, profile_count: int) -> int:
+    if isinstance(position, int) and not isinstance(position, bool):
+        return max(0, min(int(position), profile_count))
+    clean = str(position or "").strip().lower()
+    if clean == "top":
+        return 0
+    if clean == "bottom":
+        return profile_count
+    raise ValueError(f"Unsupported template profile position: {position}")
 
 
 def with_profile_deleted(preset: Preset, profile_index: int) -> Preset:

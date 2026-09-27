@@ -151,7 +151,6 @@ class BlockcheckFeature:
 
     def apply_strategy(self, **kwargs):
         return self._commands().apply_strategy(
-            presets_feature=self.presets_feature,
             profile_feature=self.profile_feature,
             **kwargs,
         )

@@ -199,7 +199,7 @@ class ProfileListPayloadTests(unittest.TestCase):
         self.assertFalse(discord.in_preset)
         self.assertTrue(discord.key.startswith("template:"))
 
-    def test_list_profiles_normalizes_multi_list_profile_without_saving_preset(self) -> None:
+    def test_list_profiles_shows_multi_list_profile_as_written_in_file(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             lists_dir = root / "lists"
@@ -228,13 +228,15 @@ class ProfileListPayloadTests(unittest.TestCase):
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
                 payload = ProfilePresetService(feature, "zapret2_mode").list_profiles()
 
-        self.assertEqual(payload.normalized_split_profiles, 1)
-        self.assertEqual(payload.normalized_created_profiles, 1)
-        self.assertEqual(len(payload.items), 2)
+        # Список не разрезает profile: то, что видно в GUI, совпадает с файлом.
+        self.assertEqual(payload.normalized_split_profiles, 0)
+        self.assertEqual(payload.normalized_created_profiles, 0)
+        self.assertEqual(len(payload.items), 1)
         self.assertEqual(store.save_count, 0)
         self.assertEqual(store.text, original_text)
-        self.assertTrue(any("--hostlist=lists/discord.txt" in item.match_lines for item in payload.items))
-        self.assertTrue(any("--hostlist=lists/other.txt" in item.match_lines for item in payload.items))
+        self.assertIn("--hostlist=lists/discord.txt", payload.items[0].match_lines)
+        self.assertIn("--hostlist=lists/other.txt", payload.items[0].match_lines)
+        self.assertIn("--hostlist-exclude=lists/list-exclude.txt", payload.items[0].match_lines)
 
     def test_catalog_profile_with_multiple_ipsets_is_visible_and_not_split(self) -> None:
         with TemporaryDirectory() as temp_dir:

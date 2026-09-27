@@ -441,6 +441,7 @@ class ProfileSetupWriteSerializationTests(unittest.TestCase):
             filter_value="example.com",
             in_range="x",
             out_range="a",
+            strategy_branch_id="",
             parent=page,
         )
 

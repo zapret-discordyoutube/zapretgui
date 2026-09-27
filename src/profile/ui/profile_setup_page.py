@@ -1681,9 +1681,10 @@ class ProfileSetupPageBase(BasePage):
         filter_value: str,
         in_range: str,
         out_range: str,
+        strategy_branch_id: str = "",
         parent=None,
     ):
-        return self._create_profile_settings_save_worker_fn(request_id, self.launch_method, profile_key=profile_key, filter_kind=filter_kind, filter_value=filter_value, in_range=in_range, out_range=out_range, parent=parent)
+        return self._create_profile_settings_save_worker_fn(request_id, self.launch_method, profile_key=profile_key, filter_kind=filter_kind, filter_value=filter_value, in_range=in_range, out_range=out_range, strategy_branch_id=strategy_branch_id, parent=parent)
 
     def create_profile_raw_text_save_worker(self, request_id: int, profile_key: str, raw_text: str, parent=None):
         return self._create_profile_raw_text_save_worker_fn(request_id, self.launch_method, profile_key=profile_key, raw_text=raw_text, parent=parent)
