@@ -204,7 +204,8 @@ def read_raw_preset_text(path: str | Path | None) -> tuple[str, bool]:
     source_path = Path(path)
     if not source_path.exists():
         return "", False
-    return source_path.read_text(encoding="utf-8", errors="replace"), True
+    # utf-8-sig: метка BOM — часть кодировки файла, а не текста пресета.
+    return source_path.read_text(encoding="utf-8-sig", errors="replace"), True
 
 
 def save_preset_source_by_file_name(

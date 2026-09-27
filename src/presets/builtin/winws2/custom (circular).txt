@@ -1,7 +1,5 @@
 # Preset: custom (circular)
-# ActivePreset: custom (circular)
-# BuiltinVersion: 2.41
-# Modified: 2026-01-21T17:52:34.648239
+# BuiltinVersion: 2.42
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua

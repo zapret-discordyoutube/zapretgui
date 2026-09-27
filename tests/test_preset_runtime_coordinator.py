@@ -314,8 +314,13 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
             captured["publish"] = publish_content_changed
             return updated
 
+        def publish_preset_content_changed(method, file_name, *, content_change_kind=""):
+            captured["published"] = (file_name, content_change_kind)
+
         presets_feature = SimpleNamespace(
             save_preset_source_by_file_name=save_preset_source_by_file_name,
+            publish_preset_content_changed=publish_preset_content_changed,
+            read_preset_source_by_file_name=lambda method, file_name: "--new\n--filter-tcp=443\n",
             get_preset_source_path_by_file_name=lambda method, file_name: Path(
                 "C:/Zapret/presets"
             )
@@ -331,7 +336,10 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
         )
 
         self.assertEqual(captured["kind"], "editor_save")
-        self.assertTrue(captured["publish"])
+        # Запись и публикация разделены: фиксация правки публикует всегда, даже
+        # если текст уже записало автосохранение и сама запись ничего не меняет.
+        self.assertFalse(captured["publish"])
+        self.assertEqual(captured["published"], ("Default v5.txt", "editor_save"))
 
     def test_rapid_active_preset_content_changes_coalesce_to_one_apply(self) -> None:
         from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
@@ -845,6 +853,9 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
 
             def publish_preset_content_changed(self, launch_method, file_name, *, content_change_kind=""):
                 publish_calls.append((launch_method, file_name, content_change_kind))
+
+            def read_preset_source_by_file_name(self, _launch_method, _file_name):
+                return save_calls[-1][2]
 
         feature = _PresetsFeature()
 

@@ -23,6 +23,7 @@ from profile.derived_cache import (
 from profile.models import build_profile_logical_key
 from profile.parser import parse_preset_text
 from profile.strategy_catalog import load_strategy_catalogs
+from profile.winws2_preset_source import WINWS2_LUA_INIT_LINES, canonical_winws2_lua_init_path
 
 
 PUBLIC_ROOT = Path(__file__).resolve().parents[1]
@@ -78,30 +79,44 @@ IPSET_TCP_HYBRID = "OVH TCP"
 IPSET_UDP_HYBRID = "Cloudflare UDP"
 
 # sha256 of the old Flowseal ports as committed before the 1.10.3 set was added; the new
-# ports must be added next to them, never by editing them.
+# ports must be added next to them, never by editing them. The only allowed edits of the old
+# ports are format-wide ones that every builtin winws2 preset gets: the mandatory lua-init block
+# (presets.preset_contract, WINWS2_LUA_INIT_LINES) and the `# BuiltinVersion:` line. The hash is
+# therefore taken over the text with exactly those lines masked out (_masked_sha256), so any other
+# change to an old port still fails this pin.
 OLD_PORT_SHA256 = {
-    "general 1.9.9 (game filter).txt": "f6c3a1a2db57590a80006c7bd98ad1cfe4cc76ad33205b202bfeca9cc292594d",
-    "general ALT10 1.9.9 (game filter).txt": "17b30c0e028c8089041379dfb04f9ff0787c1d1a38ce3564df07164f9ddab2ae",
-    "general ALT11 1.9.9 (game filter).txt": "92e1c2b64a15b181573f7e94f7cd9f2a88aca8eefc3a3e6b62da06394ce9b1e7",
-    "general ALT1 1.9.9 (game filter).txt": "d2bb9dde956752c75839ebc8f071527ecc5486ad24cc50e268d2696cd2a3be50",
-    "general ALT12 1.9.9 (game filter).txt": "24fff37d9b94810191bf441382f47f0e21297e60011d60e18a4c56d782a09efb",
-    "general ALT2 1.9.9 (game filter).txt": "73a0c70a77353bba603b24c68ec4d9396eb548ec1ae6dcbd9c282a77b347ff37",
-    "general ALT3 1.9.9 (game filter).txt": "9e48e74c1442dffdbd85b1cbb4aa3bae5a57feae97cee3156419112f6ffe813a",
-    "general ALT4 1.9.9 (game filter).txt": "857de94430e699f6840cffc330bd0d4a6d5e93381ec1c69b3da3faeede082f35",
-    "general ALT6 1.9.9 (game filter).txt": "784eb522ddb505eb25e414d6aee79aaf69cded6506cafde786f5145cd531ea5e",
-    "general ALT7 1.9.9 (game filter).txt": "fd1c58e61ba4a17e7a9a3387d5654e41a32b49b1849782967c85f170d4f8783c",
-    "general ALT8 1.9.9 (game filter).txt": "631bc34e7c731bb239a2aeb61efdae6e631eafe0c259b726c6682c8a8b0f4816",
-    "general ALT9 1.9.9 (game filter).txt": "70597cf3230f60df7e8284c6a1dff1803934f4dde602b7713997acbc1963ac80",
-    "general EXP 1.10.0 (game filter).txt": "36ba4374299bb81b6d6bc28560fc3759518c4187c7f118d5314f2ff44a93a404",
-    "general FAKE TLS AUTO 1.9.9 (game filter).txt": "be2d367edb84ba00d077ae09e01be48bdb50ceb7b811d080e936cc93dd7d2660",
-    "general FAKE TLS AUTO ALT 1.9.9 (game filter).txt": "ea9506605daa22845936fd85fd24b7474e9d952d2bdca7ae9de1d0181cbcaa0d",
-    "general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt": "55015fc48806a9075bf6333d89cb9651bace3c4247bda2315497cb78bc46141e",
-    "general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt": "cb0ffec9e441f43e6338268b0a0bb4537483ce23a11cf7d5dd2adc50de17d4cb",
-    "general SIMPLE FAKE 1.9.9 (game filter).txt": "59936a1bfbd260d04a637f9775cbf87ef4aea32f3088336622edd74e7d6da136",
-    "general SIMPLE FAKE ALT 1.9.9 (game filter).txt": "f209f44892e29d6a5a64c9afe48169c7099bd4fb5ab8d70d65368763c588b7aa",
-    "general SIMPLE FAKE ALT2 1.9.9 (game filter).txt": "c0a9193092eaa62a7544a6512f5206e547fa8cbcfb3c239dc65a90896f764dd7",
+    "general 1.9.9 (game filter).txt": "2a719810906ad3f2c721d2126aee745ba9ce5e5467da86a982e1eb1b731904f0",
+    "general ALT10 1.9.9 (game filter).txt": "68d66d9c9eaf093f4abfea11dd8c85ea1b819367f7f073f6043445cb6dacd6b4",
+    "general ALT11 1.9.9 (game filter).txt": "5c66343f31745943a131b40831353d3107e9a4855908807dc8dcc15428a79ee6",
+    "general ALT1 1.9.9 (game filter).txt": "f8d8aae3496911f917c2dcb488e310fa69d20521de92b600985cf47a8b47d58e",
+    "general ALT12 1.9.9 (game filter).txt": "661dafd145e65d471d00e94b283d435a0e3de3709dee40d7faf951b9596e646a",
+    "general ALT2 1.9.9 (game filter).txt": "e93feb90d20bd8d4177f8421a53518c76e455f7d27e623560a3299957c364bc3",
+    "general ALT3 1.9.9 (game filter).txt": "5f9b5166da3e4b7ce15d8339a994a707cd954b68563fb48265d639813b17ab2c",
+    "general ALT4 1.9.9 (game filter).txt": "70741fd8a003901f836be6e393c47e9687cf9c14e0b752005a350fd7d76c2350",
+    "general ALT6 1.9.9 (game filter).txt": "f1b45c5e1cb44471a5610ed4d7b02ef7ec0d0d9b1ef3abee3afd659e6be6ef9c",
+    "general ALT7 1.9.9 (game filter).txt": "3748933ba3661fdc091c7fdfe163ce893e176337112d580d7a9650dadbfa5ebd",
+    "general ALT8 1.9.9 (game filter).txt": "d939523e47f0dff0c8d2e286c10e4146cf2a7ca2a9e8eac3206b82349f1e2e54",
+    "general ALT9 1.9.9 (game filter).txt": "441d4f8e820e677034a77b019e4f0d28c451c9087c1a0f4ced40242ce8640563",
+    "general EXP 1.10.0 (game filter).txt": "7b4f4ba3e7296e599dcafde3a7e8f86500f108be8a980e05afe81fee4682b663",
+    "general FAKE TLS AUTO 1.9.9 (game filter).txt": "7b6b3b08f425941f154871276984aa938c3e16d8ed7356791d1729b23e14a875",
+    "general FAKE TLS AUTO ALT 1.9.9 (game filter).txt": "a2f3a01cd8dd275056813c7caafc7c6e56dbd4232cb1750daf7de11fb6df3edc",
+    "general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt": "5e56662a0738f89cf42f4aeb58f57dd0d70cca3574fdf0d54bd15973dd004200",
+    "general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt": "c76d54236c9299bea6337438aa155b8796d9704462198645443b6224d4dcb741",
+    "general SIMPLE FAKE 1.9.9 (game filter).txt": "865e6f5fbef275e49ca9d0c3c7cabb01fc0d9581bbd77019adb2df43e6161031",
+    "general SIMPLE FAKE ALT 1.9.9 (game filter).txt": "c7317151907218c59dca9b2f6b10120d00deb0eee5db5d24c2678c3c978ba89f",
+    "general SIMPLE FAKE ALT2 1.9.9 (game filter).txt": "fc37f5fbe161dd40bb87eda905188006c6ecb45c51309bb8833a2fd2eac86188",
 }
 _BATCH_SYNTAX = re.compile(r"%[A-Za-z_]+%|\^|\"|(?:^|\s)start(?:\s|$)|call service\.bat|winws\.exe", re.MULTILINE)
+
+
+def _masked_sha256(data: bytes) -> str:
+    """sha256 of a preset without its canonical lua-init block lines and BuiltinVersion line."""
+    lines = [
+        line
+        for line in data.decode("utf-8").split("\n")
+        if canonical_winws2_lua_init_path(line) is None and not line.startswith("# BuiltinVersion: ")
+    ]
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 def _name(variant: str) -> str:
@@ -159,7 +174,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
             with self.subTest(name=name):
                 lines = _read(name).splitlines()
                 self.assertEqual(lines[0], f"# Preset: {name[:-4]}")
-                self.assertEqual(lines[1], "# BuiltinVersion: 2.41")
+                self.assertEqual(lines[1], "# BuiltinVersion: 2.42")
                 self.assertRegex(lines[2], r"^# IconColor: #[0-9a-f]{6}([0-9a-f]{2})?$")
                 self.assertTrue(lines[3].startswith(f"# Description: Flowseal {_V} "))
                 self.assertTrue(lines[3].endswith(", adapted to ZapretGUI profiles"))
@@ -231,16 +246,11 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
                 self.assertIn("tls_google", declared)
                 for blob_name, source in declared.items():
                     self.assertEqual(source, f"@bin/{BLOB_FILES[blob_name]}")
-                # fake_unknown_256 / fake_zero64 come from the core lua custom_funcs.lua
+                # fake_unknown_256 / fake_zero64 come from the core lua custom_funcs.lua;
+                # the mandatory block is the only lua-init content of these ports.
                 self.assertEqual(
                     [line for line in text.splitlines() if line.startswith("--lua-init=")],
-                    [
-                        "--lua-init=@lua/zapret-lib.lua",
-                        "--lua-init=@lua/zapret-antidpi.lua",
-                        "--lua-init=@lua/zapret-auto.lua",
-                        "--lua-init=@lua/custom_funcs.lua",
-                        "--lua-init=@lua/custom_diag.lua",
-                    ],
+                    list(WINWS2_LUA_INIT_LINES),
                 )
 
     def test_declared_bins_are_shipped(self) -> None:
@@ -557,7 +567,11 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
             with self.subTest(name=name):
                 path = WINWS2_DIR / name
                 self.assertTrue(path.is_file())
-                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest)
+                self.assertEqual(_masked_sha256(path.read_bytes()), digest)
+                self.assertEqual(
+                    [line for line in path.read_text(encoding="utf-8").splitlines() if canonical_winws2_lua_init_path(line)],
+                    list(WINWS2_LUA_INIT_LINES),
+                )
 
 
 if __name__ == "__main__":

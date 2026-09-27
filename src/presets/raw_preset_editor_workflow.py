@@ -26,6 +26,11 @@ class RawPresetSaveResult:
     path: Path
     footer_text: str
     can_reset_to_builtin: bool = False
+    # Текст, который редактор отдал на сохранение, и текст файла после
+    # сохранения. Они различаются, когда сохранение нормализовало текст
+    # (presets.preset_contract) — тогда редактор показывает сохранённый текст.
+    requested_text: str = ""
+    saved_text: str = ""
 
 
 def load_raw_preset_text(path: Path | None) -> RawPresetLoadResult:
@@ -50,20 +55,34 @@ def save_raw_preset_text(
     source_text: str,
     publish_content_changed: bool = True,
 ) -> RawPresetSaveResult:
-    """Сохраняет текст preset-файла через presets feature."""
+    """Сохраняет текст preset-файла через presets feature.
+
+    Автосохранение (``publish_content_changed=False``) только пишет файл.
+    Фиксация правки (``publish_content_changed=True``) пишет файл и всегда
+    сообщает запуску об изменении: текст мог быть записан ещё автосохранением,
+    и тогда само сохранение уже ничего не меняет и ничего не публикует.
+    """
     if not file_name:
         raise ValueError("Не удалось определить имя файла пресета для сохранения.")
+    requested_text = str(source_text or "")
     updated = presets_feature.save_preset_source_by_file_name(
         launch_method,
         file_name,
-        source_text,
-        publish_content_changed=publish_content_changed,
+        requested_text,
+        publish_content_changed=False,
         content_change_kind="editor_save",
     )
+    if publish_content_changed:
+        publish_raw_preset_content_changed(
+            presets_feature=presets_feature,
+            launch_method=launch_method,
+            file_name=updated.file_name,
+        )
     path = presets_feature.get_preset_source_path_by_file_name(
         launch_method,
         updated.file_name,
     )
+    saved_text = presets_feature.read_preset_source_by_file_name(launch_method, updated.file_name)
     return RawPresetSaveResult(
         updated=updated,
         path=path,
@@ -73,6 +92,8 @@ def save_raw_preset_text(
             launch_method=launch_method,
             file_name=updated.file_name,
         ),
+        requested_text=requested_text,
+        saved_text=str(saved_text or ""),
     )
 
 
@@ -236,6 +257,4 @@ def activate_raw_preset(*, presets_feature, launch_method: str | None, file_name
 def publish_raw_preset_content_changed(*, presets_feature, launch_method: str | None, file_name: str) -> None:
     if not file_name:
         return
-    publish = getattr(presets_feature, "publish_preset_content_changed", None)
-    if callable(publish):
-        publish(launch_method, file_name, content_change_kind="editor_save")
+    presets_feature.publish_preset_content_changed(launch_method, file_name, content_change_kind="editor_save")

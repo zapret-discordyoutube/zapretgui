@@ -22,6 +22,7 @@ jobs:
           set -euo pipefail
           git diff --check
           python3 -m compileall -q src
+          PYTHONPATH=src python3 -m app.architecture_checks
           while IFS= read -r -d '' json_file; do
             python3 -m json.tool "$json_file" >/dev/null
           done < <(git ls-files -z '*.json')

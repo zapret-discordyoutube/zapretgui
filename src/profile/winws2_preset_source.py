@@ -14,29 +14,14 @@ WINWS2_LUA_INIT_PATHS: tuple[str, ...] = (
     "lua/fakemultidisorder.lua",
 )
 
-CORE_LUA_INITS: tuple[str, ...] = WINWS2_LUA_INIT_PATHS[:5]
 WINWS2_LUA_INIT_LINES: tuple[str, ...] = tuple(
     f"--lua-init=@{lua_path}" for lua_path in WINWS2_LUA_INIT_PATHS
 )
 
-EXTENSION_LUA_INITS: dict[str, set[str]] = {
-    WINWS2_LUA_INIT_PATHS[5]: {
-        "hostfakesplit_stealth",
-        "hostfakesplit_chaos",
-        "hostfakesplit_multi",
-        "hostfakesplit_gradual",
-        "hostfakesplit_decoy",
-    },
-    WINWS2_LUA_INIT_PATHS[6]: {
-        "fakemultisplit",
-    },
-    WINWS2_LUA_INIT_PATHS[7]: {
-        "fakemultidisorder",
-    },
-}
-
-_LUA_DESYNC_FUNC_RE = re.compile(r"--lua-desync=([a-z0-9_]+)", re.IGNORECASE)
-_LUA_INIT_RE = re.compile(r"--lua-init=@?(.+)", re.IGNORECASE)
+_LUA_INIT_OPTION = "--lua-init="
+# Та же граница, по которой запуск делит строку «--a --b» на отдельные аргументы
+# (winws_runtime.runners.preset_runner_support._INLINE_ARG_SPLIT_RE).
+_INLINE_OPTION_SPLIT_RE = re.compile(r"(?<=\S)\s+(?=--)")
 _STRATEGY_TAG_RE = re.compile(r":strategy=\d+", re.IGNORECASE)
 _CIRCULAR_LUA_DESYNC_RE = re.compile(r"(?<!\S)--lua-desync=circular(?::\S*)?(?=\s|$)", re.IGNORECASE)
 
@@ -61,56 +46,94 @@ def has_winws2_strategy_tags(source_text: str) -> bool:
     return False
 
 
-def ensure_winws2_lua_init_lines(source_text: str) -> str:
-    text = str(source_text or "").replace("\r\n", "\n").replace("\r", "\n")
+def _strip_wrapping_quotes(value: str) -> str:
+    text = value.strip()
+    while len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        text = text[1:-1].strip()
+    return text
+
+
+def canonical_winws2_lua_init_path(option: str) -> str | None:
+    """Какой файл обязательного блока подключает опция ``--lua-init=...``.
+
+    Возвращает путь из ``WINWS2_LUA_INIT_PATHS`` или ``None``, если опция
+    подключает что-то другое. Равнозначными считаются написания, которые winws2
+    откроет как тот же файл: любой регистр, обратные слэши, кавычки вокруг
+    значения и ``@lua/<файл>`` против абсолютного ``@C:/.../lua/<файл>``.
+    ``--lua-init=`` без ``@`` — это lua-код прямо в пресете, а не файл, поэтому
+    такая опция никогда не считается частью блока.
+    """
+    text = str(option or "").strip()
+    if not text.lower().startswith(_LUA_INIT_OPTION):
+        return None
+    value = _strip_wrapping_quotes(text[len(_LUA_INIT_OPTION):])
+    if not value.startswith("@"):
+        return None
+    path = _strip_wrapping_quotes(value[1:]).replace("\\", "/").lower()
+    for lua_path in WINWS2_LUA_INIT_PATHS:
+        if path == lua_path or path.endswith(f"/{lua_path}"):
+            return lua_path
+    return None
+
+
+def _drop_block_options(stripped_line: str) -> tuple[bool, str]:
+    """Убирает из строки опции, которые подключают файлы обязательного блока.
+
+    Возвращает (строка менялась, что от неё осталось). Строка с несколькими
+    опциями («--a --b») делится так же, как её делит запуск.
+    """
+    parts = [part for part in _INLINE_OPTION_SPLIT_RE.split(stripped_line) if part.strip()]
+    kept = [part for part in parts if canonical_winws2_lua_init_path(part) is None]
+    if len(kept) == len(parts):
+        return False, stripped_line
+    return True, " ".join(kept)
+
+
+def ensure_winws2_lua_init_block(source_text: str) -> str:
+    """Гарантирует обязательный блок ``--lua-init`` в тексте пресета winws2.
+
+    Формат пресета winws2 требует полный блок ``WINWS2_LUA_INIT_LINES`` в этом
+    порядке. Блок ставится в начало преамбулы — сразу после ведущих строк-
+    комментариев шапки (граница шапки та же, что у ``profile.parser``), то есть
+    никогда не внутрь profile. Строки, которые подключают те же файлы в другом
+    написании или в другом месте текста, убираются, чтобы файл не грузился
+    дважды. Остальные ``--lua-init`` пользователя (другие файлы, lua-код прямо
+    в пресете) остаются на своих местах, после блока. Функция идемпотентна.
+    """
+    from profile.parser import normalize_text, parse_preset_text
+    from settings.mode import ENGINE_WINWS2
+
+    text = normalize_text(source_text)
     lines = text.split("\n")
+    header_end = len(parse_preset_text(text, engine=ENGINE_WINWS2).header_lines)
 
-    existing_inits: set[str] = set()
-    used_funcs: set[str] = set()
-    for raw in lines:
+    body: list[str] = []
+    for raw in lines[header_end:]:
         stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        init_match = _LUA_INIT_RE.match(stripped)
-        if init_match:
-            existing_inits.add(init_match.group(1).strip().replace("\\", "/").lower())
-        for func_match in _LUA_DESYNC_FUNC_RE.finditer(stripped):
-            used_funcs.add(func_match.group(1).strip().lower())
+        if stripped.startswith("--"):
+            changed, remainder = _drop_block_options(stripped)
+            if changed:
+                if remainder:
+                    body.append(remainder)
+                continue
+        body.append(raw)
 
-    if not used_funcs:
-        return text
+    insert_at = header_end
+    if not any(line.strip() for line in body):
+        # В тексте одна шапка: блок идёт сразу после последнего комментария,
+        # а не после хвостовых пустых строк.
+        while insert_at > 0 and not lines[insert_at - 1].strip():
+            insert_at -= 1
+        body = [*lines[insert_at:header_end], *body]
 
-    needed: list[str] = []
-    for lua_path in CORE_LUA_INITS:
-        if lua_path.lower() not in existing_inits:
-            needed.append(lua_path)
-
-    for lua_path, funcs in EXTENSION_LUA_INITS.items():
-        if lua_path.lower() not in existing_inits and used_funcs & funcs:
-            needed.append(lua_path)
-
-    if not needed:
-        return text
-
-    insert_idx = 0
-    for idx, raw in enumerate(lines):
-        stripped = raw.strip()
-        if stripped.lower().startswith("--lua-init="):
-            insert_idx = idx + 1
-        elif insert_idx == 0 and (stripped.startswith("#") or stripped == ""):
-            insert_idx = idx + 1
-
-    new_lines = [f"--lua-init=@{lua_path}" for lua_path in needed]
-    lines = [*lines[:insert_idx], *new_lines, *lines[insert_idx:]]
-    return "\n".join(lines)
+    return "\n".join([*lines[:insert_at], *WINWS2_LUA_INIT_LINES, *body])
 
 
 __all__ = [
-    "CORE_LUA_INITS",
-    "EXTENSION_LUA_INITS",
     "WINWS2_LUA_INIT_LINES",
     "WINWS2_LUA_INIT_PATHS",
-    "ensure_winws2_lua_init_lines",
+    "canonical_winws2_lua_init_path",
+    "ensure_winws2_lua_init_block",
     "has_winws2_strategy_tags",
     "is_winws2_circular_preset_source",
 ]

@@ -1436,6 +1436,14 @@ class PresetRawEditorPage(BasePage):
         if publish_content_changed:
             self._content_publish_pending = False
         self._set_footer(result.footer_text)
+        self._show_saved_raw_preset_text(result)
+
+    def _show_saved_raw_preset_text(self, result) -> None:
+        """Сохранение могло нормализовать текст — редактор показывает файл."""
+        text_editor = self.__dict__.get("_raw_text_editor")
+        if text_editor is None:
+            return
+        text_editor.show_saved_text(result.requested_text, result.saved_text)
 
     def _on_raw_preset_save_failed(self, request_id: int, error: str) -> None:
         if request_id != self._raw_save_request_id:

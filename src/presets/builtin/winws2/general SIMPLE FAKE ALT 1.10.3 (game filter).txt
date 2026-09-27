@@ -1,5 +1,5 @@
 # Preset: general SIMPLE FAKE ALT 1.10.3 (game filter)
-# BuiltinVersion: 2.41
+# BuiltinVersion: 2.42
 # IconColor: #60cdff
 # Description: Flowseal 1.10.3 SIMPLE FAKE ALT, adapted to ZapretGUI profiles
 
@@ -8,6 +8,9 @@
 --lua-init=@lua/zapret-auto.lua
 --lua-init=@lua/custom_funcs.lua
 --lua-init=@lua/custom_diag.lua
+--lua-init=@lua/zapret-multishake.lua
+--lua-init=@lua/fakemultisplit.lua
+--lua-init=@lua/fakemultidisorder.lua
 
 --blob=quic_google:@bin/quic_initial_www_google_com.bin
 --blob=discord_active:@bin/ACTIVE_DISCORD_UDP.bin

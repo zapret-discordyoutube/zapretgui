@@ -7,12 +7,14 @@ from settings.mode import ENGINE_WINWS2
 
 @dataclass(frozen=True, slots=True)
 class PreparedLaunchPresetText:
+    """Текст пресета, проверенный перед запуском.
+
+    Подготовка только проверяет текст и никогда его не меняет: ``text`` — это
+    ровно исходный текст пресета (см. presets.preset_contract).
+    """
+
     text: str
     warnings: tuple[str, ...] = ()
-
-    @property
-    def changed(self) -> bool:
-        return False
 
 
 def is_winws2_circular_preset_text(source_content: str) -> bool:

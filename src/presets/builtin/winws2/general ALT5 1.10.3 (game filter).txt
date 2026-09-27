@@ -1,5 +1,5 @@
 # Preset: general ALT5 1.10.3 (game filter)
-# BuiltinVersion: 2.41
+# BuiltinVersion: 2.42
 # IconColor: #60cdff
 # Description: Flowseal 1.10.3 ALT5, adapted to ZapretGUI profiles
 # Note: deviation: the bat main TCP block is --filter-l3=ipv4 for all TCP 80,443,2053,2083,2087,2096,8443 without lists; here syndata+multidisorder is applied to the listed canonical TCP profiles for IPv4 AND IPv6 (--filter-l3 would change the canonical profile identity); --ipcache-hostname=1 caches the host name seen in SNI/Host per IP, so syndata on hostlist profiles works from the second connection to the same IP (no DNS capture); no other functional change
@@ -9,6 +9,9 @@
 --lua-init=@lua/zapret-auto.lua
 --lua-init=@lua/custom_funcs.lua
 --lua-init=@lua/custom_diag.lua
+--lua-init=@lua/zapret-multishake.lua
+--lua-init=@lua/fakemultisplit.lua
+--lua-init=@lua/fakemultidisorder.lua
 
 --blob=quic_google:@bin/quic_initial_www_google_com.bin
 --blob=discord_active:@bin/ACTIVE_DISCORD_UDP.bin

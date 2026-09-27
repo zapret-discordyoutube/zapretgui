@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 from pathlib import Path
 import re
-import zipfile
 
 from core.paths import AppPaths
 
@@ -28,13 +26,14 @@ def _sanitize_file_stem(value: str) -> str:
     return sanitized[:100] or "Preset"
 
 
+# utf-8-sig: метка BOM — часть кодировки файла, а не текста пресета.
 def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")
+    return path.read_text(encoding="utf-8-sig", errors="replace")
 
 
 def _read_header_text(path: Path) -> str:
     lines: list[str] = []
-    with path.open("r", encoding="utf-8", errors="replace") as handle:
+    with path.open("r", encoding="utf-8-sig", errors="replace") as handle:
         for raw in handle:
             stripped = raw.strip()
             if stripped and not stripped.startswith("#"):
@@ -232,32 +231,6 @@ class PresetFileStore:
         except FileNotFoundError:
             pass
         self._invalidate_manifest_cache(engine)
-
-    def export_preset(self, engine: str, file_name: str, dest_path: Path) -> None:
-        manifest = self.get_manifest(engine, file_name)
-        if manifest is None:
-            raise ValueError(f"Preset not found: {file_name}")
-        dest_path = Path(dest_path)
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "file_name": manifest.file_name,
-            "name": manifest.name,
-            "updated_at": manifest.updated_at,
-            "kind": manifest.kind,
-        }
-        with zipfile.ZipFile(dest_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("manifest.json", json.dumps(payload, ensure_ascii=False, indent=2))
-            zf.writestr("preset.txt", self.read_source_text(engine, manifest.file_name))
-
-    def import_preset(self, engine: str, src_path: Path) -> PresetManifest:
-        src_path = Path(src_path)
-        with zipfile.ZipFile(src_path, "r") as zf:
-            manifest_data = json.loads(zf.read("manifest.json").decode("utf-8"))
-            source_text = zf.read("preset.txt").decode("utf-8")
-
-        requested_file_stem = Path(str(manifest_data.get("file_name") or "").strip()).stem
-        requested_name = requested_file_stem or str(manifest_data.get("name") or "Imported").strip() or "Imported"
-        return self.create_preset(engine, requested_name, source_text, kind="imported")
 
     def _engine_paths(self, engine: str):
         return self._paths.engine_paths(engine).ensure_directories()

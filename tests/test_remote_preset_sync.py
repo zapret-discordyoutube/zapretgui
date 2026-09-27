@@ -22,6 +22,7 @@ from presets.remote_sync import (
     fetch_remote_preset_text,
     should_auto_check,
     sync_remote_preset,
+    upstream_matches_local,
 )
 
 NOW_ISO = "2026-08-14T12:00:00Z"
@@ -205,6 +206,48 @@ class SyncRemotePresetTests(unittest.TestCase):
         self.assertEqual(outcome.status, STATUS_ERROR)
 
 
+class NormalizedUpstreamComparisonTests(unittest.TestCase):
+    """Локальный файл сохранён с нормализацией (обязательный блок --lua-init),
+    текст источника — без неё. Неизменный источник не должен выглядеть
+    «обновлённым» при каждой проверке."""
+
+    def _local_saved_text(self, text: str) -> str:
+        from presets.preset_contract import normalize_preset_source_for_save
+
+        return normalize_preset_source_for_save(text, "winws2")
+
+    def test_upstream_matches_its_own_saved_form(self):
+        local = self._local_saved_text(VALID_WINWS2_TEXT)
+        self.assertNotEqual(comparison_hash(local), comparison_hash(VALID_WINWS2_TEXT))
+        self.assertTrue(upstream_matches_local(VALID_WINWS2_TEXT, local, engine="winws2"))
+        self.assertTrue(upstream_matches_local(VALID_WINWS2_TEXT.replace("\n", "\r\n"), local, engine="winws2"))
+        self.assertFalse(upstream_matches_local(UPDATED_WINWS2_TEXT, local, engine="winws2"))
+
+    def test_unchanged_upstream_is_unchanged_on_every_check(self):
+        local = self._local_saved_text(VALID_WINWS2_TEXT)
+        binding = _binding(synced_hash=comparison_hash(local))
+        for attempt in range(2):
+            with self.subTest(attempt=attempt):
+                fetch = Mock(return_value=RemoteFetchResult(status_code=200, text=VALID_WINWS2_TEXT))
+                outcome, save = _sync(binding, current_text=local, fetch=fetch)
+                self.assertEqual(outcome.status, STATUS_UNCHANGED)
+                save.assert_not_called()
+                # synced_hash — от файла на диске: следующая проверка не примет
+                # его за локальную правку и не отвяжет пресет.
+                self.assertEqual(outcome.binding_updates["synced_hash"], comparison_hash(local))
+                self.assertFalse(outcome.binding_updates["detached"])
+                binding = {**binding, **outcome.binding_updates}
+
+    def test_old_local_file_without_block_is_not_detached_by_upgrade(self):
+        # Файл сохранён до обязательного блока, synced_hash посчитан от него.
+        binding = _binding(synced_hash=comparison_hash(VALID_WINWS2_TEXT))
+        fetch = Mock(return_value=RemoteFetchResult(status_code=200, text=VALID_WINWS2_TEXT))
+        outcome, save = _sync(binding, current_text=VALID_WINWS2_TEXT, fetch=fetch)
+        self.assertEqual(outcome.status, STATUS_UNCHANGED)
+        save.assert_not_called()
+        self.assertEqual(outcome.binding_updates["synced_hash"], comparison_hash(VALID_WINWS2_TEXT))
+
+
 class _FakeResponse:
     def __init__(self, *, status_code=200, headers=None, chunks=None):
         self.status_code = status_code
@@ -255,6 +298,12 @@ class FetchRemotePresetTextTests(unittest.TestCase):
         self.assertEqual(result.etag, 'W/"5"')
         self.assertEqual(result.last_modified, "Fri, 02 Jan 2026")
         self.assertTrue(response.closed)
+
+    def test_utf8_bom_is_decoded_as_encoding(self):
+        response = _FakeResponse(chunks=[b"\xef\xbb\xbf" + VALID_WINWS2_TEXT.encode("utf-8")])
+        with self._patch(response):
+            result = fetch_remote_preset_text("https://example.com/p.txt")
+        self.assertEqual(result.text, VALID_WINWS2_TEXT)
 
     def test_size_limit(self):
         big = b"x" * (MAX_REMOTE_PRESET_BYTES + 1)

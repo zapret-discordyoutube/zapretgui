@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 import requests
 
+from presets.preset_contract import normalize_preset_source_for_save
 from presets.preset_text_ops import validate_preset_source_text
 from updater.proxy_bypass import request_get_bypass_proxy
 from updater.server_config import CONNECT_TIMEOUT, READ_TIMEOUT
@@ -82,6 +83,19 @@ def comparison_hash(source_text: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def upstream_matches_local(remote_text: str, local_text: str, *, engine: str) -> bool:
+    """Совпадает ли текст источника с локальным пресетом по смыслу.
+
+    Обе стороны сначала проходят ту же нормализацию, что и сохранение
+    (normalize_preset_source_for_save): локальный файл уже сохранён через неё
+    (например, с обязательным блоком --lua-init), а текст источника — нет.
+    Без этого неизменный источник каждый раз выглядел бы «обновлённым».
+    """
+    return comparison_hash(normalize_preset_source_for_save(remote_text, engine)) == comparison_hash(
+        normalize_preset_source_for_save(local_text, engine)
+    )
+
+
 def fetch_remote_preset_text(url: str, *, etag: str = "", last_modified: str = "") -> RemoteFetchResult:
     """Скачивает текст пресета; https-only, условные запросы, лимит размера.
 
@@ -132,7 +146,8 @@ def fetch_remote_preset_text(url: str, *, etag: str = "", last_modified: str = "
         payload = b"".join(chunks)
         if payload.startswith(b"PK\x03\x04"):
             raise RemoteSyncFetchError("Архивы не автообновляются")
-        text = payload.decode("utf-8", errors="replace")
+        # utf-8-sig: метка BOM — часть кодировки файла, а не текста пресета.
+        text = payload.decode("utf-8-sig", errors="replace")
         return RemoteFetchResult(
             status_code=int(response.status_code),
             text=text,
@@ -234,23 +249,25 @@ def sync_remote_preset(
             binding_updates={"error": detail, "checked_at": now_iso},
         )
 
-    remote_hash = comparison_hash(fetched.text)
     common_updates = {
         "error": "",
         "checked_at": now_iso,
         "etag": fetched.etag,
         "last_modified": fetched.last_modified,
     }
-    if remote_hash == comparison_hash(current_text):
+    if upstream_matches_local(fetched.text, current_text, engine=engine):
+        # synced_hash — от текста на диске: следующая проверка сравнит с ним
+        # тот же файл и не примет его за локальную правку.
         return RemoteSyncOutcome(
             status=STATUS_UNCHANGED,
             binding_updates={
                 **common_updates,
-                "synced_hash": remote_hash,
+                "synced_hash": comparison_hash(current_text),
                 "detached": False if force else bool(binding.get("detached", False)),
             },
         )
 
+    remote_hash = comparison_hash(fetched.text)
     saved_text = save_text(fetched.text)
     # Запись могла нормализовать текст (normalize_source_text) — хэш считаем
     # от фактически сохранённого содержимого, иначе следующая проверка

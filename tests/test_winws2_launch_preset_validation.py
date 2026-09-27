@@ -29,7 +29,6 @@ class Winws2LaunchPresetValidationTests(unittest.TestCase):
         prepared = prepare_winws2_preset_text_for_launch(source, source_name="valid.txt")
 
         self.assertEqual(prepared.text, source)
-        self.assertFalse(prepared.changed)
         self.assertNotIn("--out-range=-d8", prepared.text)
 
     def test_launch_filter_check_ignores_only_skipped_profiles(self) -> None:

@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 import unittest
 
-from profile.winws2_preset_source import CORE_LUA_INITS, EXTENSION_LUA_INITS, WINWS2_LUA_INIT_PATHS
+from profile.winws2_preset_source import WINWS2_LUA_INIT_PATHS
 
 PUBLIC_ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_DIST = PUBLIC_ROOT.parent / "private_zapretgui" / "dist"
@@ -81,15 +81,22 @@ class _PrivateDistTestCase(unittest.TestCase):
 
 class LuaDesyncFunctionsTest(_PrivateDistTestCase):
     def _available_functions(self) -> set[str]:
+        # Каждый preset winws2 подключает полный обязательный блок --lua-init,
+        # поэтому доступны функции всех его файлов.
         functions: set[str] = set()
-        for init_path in CORE_LUA_INITS:
+        for init_path in WINWS2_LUA_INIT_PATHS:
             functions |= set(_LUA_FUNCTION_RE.findall(_read(_lua_file(init_path))))
-        # Файл-расширение подключается к preset-у только ради функций из
-        # EXTENSION_LUA_INITS, поэтому засчитываются только они.
-        for init_path, registered in EXTENSION_LUA_INITS.items():
-            defined = set(_LUA_FUNCTION_RE.findall(_read(_lua_file(init_path))))
-            functions |= defined & set(registered)
         return functions
+
+    def test_full_lua_init_block_defines_each_function_once(self) -> None:
+        # Блок грузится целиком: одно имя в двух файлах молча перетёрло бы
+        # функцию из файла, подключённого раньше.
+        owners: dict[str, list[str]] = {}
+        for init_path in WINWS2_LUA_INIT_PATHS:
+            for name in set(_LUA_FUNCTION_RE.findall(_read(_lua_file(init_path)))):
+                owners.setdefault(name, []).append(init_path)
+        duplicates = {name: paths for name, paths in owners.items() if len(paths) > 1}
+        self.assertEqual(duplicates, {})
 
     def test_lua_init_files_define_each_function_once(self) -> None:
         # Повторное `function name(` молча перетирает первое определение.

@@ -15,7 +15,7 @@ from presets.preset_file_ops import (
     reset_all_to_builtin as _reset_all_to_builtin,
     reset_to_builtin_by_file_name as _reset_to_builtin_by_file_name,
 )
-from presets.preset_text_ops import normalize_preset_source_text_for_engine
+from presets.preset_contract import normalize_preset_source_for_save
 from settings.mode import (
     ENGINE_WINWS1,
     ENGINE_WINWS2,
@@ -216,7 +216,7 @@ class PresetFileService:
         return self.read_source_text_by_file_name(selected_file_name)
 
     def normalize_source_text(self, source_text: str) -> str:
-        return normalize_preset_source_text_for_engine(source_text, self.engine)
+        return normalize_preset_source_for_save(source_text, self.engine)
 
     def publish_preset_content_changed_by_file_name(
         self,

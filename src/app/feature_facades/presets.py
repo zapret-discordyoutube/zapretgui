@@ -1308,7 +1308,7 @@ class PresetsFeature:
         """
         from presets.preset_url_import import is_https_preset_import_url
         from presets.remote_bindings import make_remote_preset_binding, set_remote_preset_binding
-        from presets.remote_sync import comparison_hash, utc_now_iso
+        from presets.remote_sync import comparison_hash, upstream_matches_local, utc_now_iso
 
         if not is_https_preset_import_url(url):
             return False
@@ -1387,7 +1387,7 @@ class PresetsFeature:
 
         from presets.preset_text_ops import _rewrite_preset_headers, validate_preset_source_text
         from presets.remote_bindings import load_remote_preset_bindings, set_remote_preset_binding
-        from presets.remote_sync import comparison_hash, utc_now_iso
+        from presets.remote_sync import comparison_hash, upstream_matches_local, utc_now_iso
         from presets.user_presets_action_results import UserPresetImportResult
 
         scope = self._remote_scope_for_launch_method(launch_method)
@@ -1407,7 +1407,7 @@ class PresetsFeature:
             # Привязка осталась от удалённого файла — обычный импорт пересоздаст пресет.
             return None
 
-        new_text = Path(file_path).read_text(encoding="utf-8", errors="replace")
+        new_text = Path(file_path).read_text(encoding="utf-8-sig", errors="replace")
         validation_error = validate_preset_source_text(new_text, engine=scope)
         if validation_error:
             raise ValueError(f"Файл не похож на пресет: {validation_error}")
@@ -1415,7 +1415,7 @@ class PresetsFeature:
         manifest = self.get_preset_manifest_by_file_name(launch_method, bound_file_name)
         display_name = str(getattr(manifest, "name", "") or Path(bound_file_name).stem)
         now_iso = utc_now_iso()
-        if comparison_hash(new_text) == comparison_hash(current_text):
+        if upstream_matches_local(new_text, current_text, engine=scope):
             # Повторный импорт ссылки возобновляет привязку, даже если
             # содержимое не изменилось (например, после «Отвязать»).
             bound_binding.update({"checked_at": now_iso, "error": "", "auto": bool(auto), "detached": False})

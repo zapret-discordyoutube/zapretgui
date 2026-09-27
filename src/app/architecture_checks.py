@@ -1136,17 +1136,6 @@ def check_ui_workflows_do_not_call_page_methods(files: list[Path]) -> list[Probl
     )
 
 
-def check_launch_preparation_does_not_mutate_source_preset() -> list[Problem]:
-    path = SRC_ROOT / "winws_runtime" / "flow" / "start_preparation.py"
-    if not path.exists():
-        return [Problem(path, 1, "start_preparation.py не найден")]
-    return _scan_lines(
-        [path],
-        re.compile(r"\bpreset_path\.write_text\s*\("),
-        "подготовка запуска не должна менять source preset; готовьте текст запуска в памяти",
-    )
-
-
 def check_no_runtime_launch_preset_files(files: list[Path]) -> list[Problem]:
     return _scan_lines(
         files,
@@ -1155,21 +1144,304 @@ def check_no_runtime_launch_preset_files(files: list[Path]) -> list[Problem]:
     )
 
 
-def check_no_hidden_winws2_launch_normalization(files: list[Path]) -> list[Problem]:
-    scopes = [
-        path for path in files
-        if _under(path, "src/winws_runtime/", "src/profile/")
+# --- Пресет — точка истины (presets.preset_contract) ------------------------
+#
+# Проверки ниже работают по AST и принимают пары (путь, исходник), чтобы
+# тесты могли подать им синтетическое нарушение и убедиться, что оно ловится.
+
+SourceFile = tuple[Path, str]
+
+_WINWS_EXE_EXPR_RE = re.compile(r"winws\w*_exe\b")
+_PRESET_NAMED_TARGET_RE = re.compile(r"preset", re.IGNORECASE)
+_RAW_WRITE_ATTRS = frozenset({"write_text", "write_bytes"})
+_RAW_COPY_FUNCS = frozenset({"replace", "rename", "copy", "copy2", "copyfile", "move"})
+
+
+def _rel(path: Path) -> str:
+    return path.relative_to(REPO_ROOT).as_posix()
+
+
+def _contract_scope_sources(files: list[Path]) -> list[SourceFile]:
+    from presets.preset_contract import PRESET_CONTRACT_SCOPE
+
+    return [
+        (path, path.read_text(encoding="utf-8", errors="replace"))
+        for path in files
+        if _under(path, *PRESET_CONTRACT_SCOPE)
     ]
-    return _scan_lines(
-        scopes,
-        re.compile(
-            r"\b(?:normalize_winws2_action_lines|normalize_out_range_action_lines|"
-            r"applied_default_out_range|defaulted_profiles|repaired_profiles|"
-            r"removed_placeholder_profiles|_OUT_RANGE_UNSIGNED_SIMPLE_RE|"
-            r"sanitize_presets_before_launch|_ensure_lua_init_lines|strip_strategy_tags)\b"
-        ),
-        "winws2 preset перед запуском нельзя скрыто нормализовать; только проверка и явная ошибка",
+
+
+def _parse(path: Path, source: str) -> ast.Module | None:
+    try:
+        return ast.parse(source, filename=str(path))
+    except SyntaxError:
+        return None
+
+
+def _functions_with_nodes(tree: ast.AST):
+    """(имя ближайшей функции, узел) для каждого узла дерева."""
+
+    def _walk(node: ast.AST, function_name: str):
+        for child in ast.iter_child_nodes(node):
+            name = child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else function_name
+            yield name, child
+            yield from _walk(child, name)
+
+    yield from _walk(tree, "")
+
+
+def _is_at_config_fstring(node: ast.AST) -> bool:
+    if not isinstance(node, ast.JoinedStr) or not node.values:
+        return False
+    first = node.values[0]
+    return isinstance(first, ast.Constant) and isinstance(first.value, str) and first.value.startswith("@")
+
+
+def check_winws_launch_command_is_exe_plus_at_config(sources: list[SourceFile]) -> list[Problem]:
+    """Команда запуска winws — ровно [exe, @config], и @config — из артефакта пресета.
+
+    Допустимо: ``[exe, *artifact.launch_args]``; ``[exe, f"@..."]`` — только в
+    функции процесса проверки (``DRY_RUN_FUNCTION_MARKER`` в имени) или в модуле
+    из ``GENERATED_CONFIG_EXEMPTIONS``. ``PreparedPresetArtifact.launch_args`` —
+    пусто или ровно один ``f"@..."``: всё, что запускается, лежит в @config.
+    """
+    from presets.preset_contract import DRY_RUN_FUNCTION_MARKER, GENERATED_CONFIG_EXEMPTIONS
+
+    problems: list[Problem] = []
+    for path, source in sources:
+        tree = _parse(path, source)
+        if tree is None:
+            continue
+        rel = _rel(path)
+        generated_config_module = rel in GENERATED_CONFIG_EXEMPTIONS
+        for function_name, node in _functions_with_nodes(tree):
+            if isinstance(node, ast.List) and node.elts and _WINWS_EXE_EXPR_RE.search(ast.unparse(node.elts[0])):
+                second = node.elts[1] if len(node.elts) == 2 else None
+                from_artifact = (
+                    isinstance(second, ast.Starred)
+                    and isinstance(second.value, ast.Attribute)
+                    and second.value.attr == "launch_args"
+                )
+                generated_at_config = _is_at_config_fstring(second) and (
+                    generated_config_module or DRY_RUN_FUNCTION_MARKER in function_name
+                )
+                if not (from_artifact or generated_at_config):
+                    problems.append(
+                        Problem(
+                            path,
+                            node.lineno,
+                            "команда winws должна быть ровно [exe, *artifact.launch_args] — всё, что запускается, "
+                            "видно в пресете (presets.preset_contract)",
+                            ast.unparse(node),
+                        )
+                    )
+            if isinstance(node, ast.Call) and ast.unparse(node.func).endswith("PreparedPresetArtifact"):
+                launch_args = next((kw.value for kw in node.keywords if kw.arg == "launch_args"), None)
+                if launch_args is None and len(node.args) > 3:
+                    launch_args = node.args[3]
+                if launch_args is None:
+                    continue
+                empty = (
+                    isinstance(launch_args, ast.Tuple) and not launch_args.elts
+                ) or (
+                    isinstance(launch_args, ast.Call)
+                    and ast.unparse(launch_args.func) == "tuple"
+                    and not launch_args.args
+                )
+                single_at_config = (
+                    isinstance(launch_args, ast.Tuple)
+                    and len(launch_args.elts) == 1
+                    and _is_at_config_fstring(launch_args.elts[0])
+                )
+                if not (empty or single_at_config):
+                    problems.append(
+                        Problem(
+                            path,
+                            node.lineno,
+                            "launch_args артефакта — пусто или ровно один @config, собранный из текста пресета",
+                            ast.unparse(launch_args),
+                        )
+                    )
+    return problems
+
+
+def check_preset_files_written_only_by_owners(sources: list[SourceFile]) -> list[Problem]:
+    """Файл пресета пишут только модули-владельцы, и только нормализованный текст.
+
+    - ``create_preset`` / ``update_preset`` зовут только ``PRESET_FILE_WRITE_OWNERS``,
+      ``_write_source`` — только само хранилище;
+    - владелец (кроме хранилища) перед записью в той же функции пропускает
+      текст через нормализацию сохранения (``PRESET_SAVE_NORMALIZER_NAMES``);
+    - прямая запись на диск (write_text/write_bytes/open на запись/копирование)
+      в файл, названный как пресет, — только у хранилища и у
+      ``GENERATED_CONFIG_EXEMPTIONS``.
+    """
+    from presets.preset_contract import (
+        GENERATED_CONFIG_EXEMPTIONS,
+        PRESET_FILE_STORE_MODULE,
+        PRESET_FILE_WRITE_METHODS,
+        PRESET_FILE_WRITE_OWNERS,
+        PRESET_SAVE_NORMALIZER_NAMES,
     )
+
+    problems: list[Problem] = []
+    for path, source in sources:
+        tree = _parse(path, source)
+        if tree is None:
+            continue
+        rel = _rel(path)
+        is_store = rel == PRESET_FILE_STORE_MODULE
+        is_owner = rel in PRESET_FILE_WRITE_OWNERS
+        functions = [
+            node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        for function in functions:
+            normalizer_lines = [
+                node.lineno
+                for node in ast.walk(function)
+                if isinstance(node, ast.Call)
+                and (
+                    (isinstance(node.func, ast.Attribute) and node.func.attr in PRESET_SAVE_NORMALIZER_NAMES)
+                    or (isinstance(node.func, ast.Name) and node.func.id in PRESET_SAVE_NORMALIZER_NAMES)
+                )
+            ]
+            for node in ast.walk(function):
+                if not (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in PRESET_FILE_WRITE_METHODS
+                ):
+                    continue
+                if node.func.attr == "_write_source" and not is_store:
+                    problems.append(
+                        Problem(path, node.lineno, "_write_source вызывает только хранилище пресетов", ast.unparse(node.func))
+                    )
+                elif is_store and node.func.attr != "_write_source":
+                    # Хранилище — примитив записи: текст для create/update приходит
+                    # только от владельцев, которые его уже нормализовали.
+                    problems.append(
+                        Problem(
+                            path,
+                            node.lineno,
+                            "хранилище не создаёт и не обновляет пресеты само — только по вызову владельца",
+                            ast.unparse(node.func),
+                        )
+                    )
+                elif not is_owner:
+                    problems.append(
+                        Problem(
+                            path,
+                            node.lineno,
+                            "файл пресета пишут только PRESET_FILE_WRITE_OWNERS (presets.preset_contract)",
+                            ast.unparse(node.func),
+                        )
+                    )
+                elif not is_store and not any(line <= node.lineno for line in normalizer_lines):
+                    problems.append(
+                        Problem(
+                            path,
+                            node.lineno,
+                            "перед записью файла пресета текст должен пройти normalize_preset_source_for_save",
+                            ast.unparse(node.func),
+                        )
+                    )
+        if is_store or rel in GENERATED_CONFIG_EXEMPTIONS:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            target: ast.AST | None = None
+            if isinstance(func, ast.Attribute) and func.attr in _RAW_WRITE_ATTRS:
+                target = func.value
+            elif isinstance(func, ast.Name) and func.id == "open" and node.args:
+                mode = node.args[1] if len(node.args) > 1 else next(
+                    (kw.value for kw in node.keywords if kw.arg == "mode"), None
+                )
+                if isinstance(mode, ast.Constant) and isinstance(mode.value, str) and set(mode.value) & set("wax+"):
+                    target = node.args[0]
+            elif (
+                isinstance(func, ast.Attribute)
+                and func.attr in _RAW_COPY_FUNCS
+                and isinstance(func.value, ast.Name)
+                and func.value.id in {"os", "shutil"}
+                and len(node.args) > 1
+            ):
+                target = node.args[1]
+            if target is not None and _PRESET_NAMED_TARGET_RE.search(ast.unparse(target)):
+                problems.append(
+                    Problem(
+                        path,
+                        node.lineno,
+                        "файл пресета пишется только через PresetFileService/PresetFileStore; "
+                        "подготовка запуска готовит текст в памяти и не меняет пресет",
+                        ast.unparse(node),
+                    )
+                )
+    return problems
+
+
+def check_launch_preparation_returns_source_text(sources: list[SourceFile]) -> list[Problem]:
+    """Подготовка winws2 к запуску только проверяет текст и возвращает его как есть.
+
+    В ``winws_runtime/preset_launch_text.py`` каждое ``PreparedLaunchPresetText(text=...)``
+    получает имя, которое в функции присвоено ровно один раз из
+    ``str(<параметр> or "")`` (или сам параметр): никакой скрытой нормализации.
+    """
+    problems: list[Problem] = []
+    for path, source in sources:
+        if _rel(path) != "src/winws_runtime/preset_launch_text.py":
+            continue
+        tree = _parse(path, source)
+        if tree is None:
+            continue
+        for function in ast.walk(tree):
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            params = {arg.arg for arg in (*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs)}
+            assignments: dict[str, list[ast.AST]] = {}
+            for node in ast.walk(function):
+                targets: list[ast.AST] = []
+                if isinstance(node, ast.Assign):
+                    targets = list(node.targets)
+                elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+                    targets = [node.target]
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        assignments.setdefault(target.id, []).append(node)
+            for node in ast.walk(function):
+                if not (isinstance(node, ast.Call) and ast.unparse(node.func) == "PreparedLaunchPresetText"):
+                    continue
+                text_arg = next((kw.value for kw in node.keywords if kw.arg == "text"), None)
+                if text_arg is None and node.args:
+                    text_arg = node.args[0]
+                ok = False
+                if isinstance(text_arg, ast.Name):
+                    bound = assignments.get(text_arg.id, [])
+                    if not bound and text_arg.id in params:
+                        ok = True
+                    elif len(bound) == 1 and isinstance(bound[0], ast.Assign):
+                        value = ast.unparse(bound[0].value)
+                        ok = any(value in {f'str({param} or "")', f"str({param} or '')"} for param in params)
+                if not ok:
+                    problems.append(
+                        Problem(
+                            path,
+                            node.lineno,
+                            "подготовка запуска не должна менять текст пресета: text= только исходный текст",
+                            ast.unparse(node),
+                        )
+                    )
+    return problems
+
+
+def check_preset_source_of_truth_contract(files: list[Path]) -> list[Problem]:
+    sources = _contract_scope_sources(files)
+    problems: list[Problem] = []
+    problems.extend(check_winws_launch_command_is_exe_plus_at_config(sources))
+    problems.extend(check_preset_files_written_only_by_owners(sources))
+    problems.extend(check_launch_preparation_returns_source_text(sources))
+    return problems
 
 
 def check_preset_source_changes_have_single_runtime_owner(files: list[Path]) -> list[Problem]:
@@ -1296,9 +1568,8 @@ def run_checks() -> list[Problem]:
     problems.extend(check_fast_switch_runners_do_not_call_full_start_pipeline())
     problems.extend(check_no_running_preset_pid_probe(files))
     problems.extend(check_ui_workflows_do_not_call_page_methods(files))
-    problems.extend(check_launch_preparation_does_not_mutate_source_preset())
     problems.extend(check_no_runtime_launch_preset_files(files))
-    problems.extend(check_no_hidden_winws2_launch_normalization(files))
+    problems.extend(check_preset_source_of_truth_contract(files))
     problems.extend(check_preset_source_changes_have_single_runtime_owner(files))
     return problems
 

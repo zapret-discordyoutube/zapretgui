@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import difflib
 from typing import Callable
 
 from PyQt6.QtCore import QEvent, QObject, QTimer
+from PyQt6.QtGui import QTextCursor
 
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.code_editor.editor import CodeEditor, build_cursor_status_text
@@ -10,6 +12,24 @@ from ui.code_editor.find_bar import FindReplaceBar
 from ui.code_editor.find_controller import FindController
 from ui.code_editor.syntax import PresetSyntaxHighlighter
 from ui.fluent_widgets import set_tooltip
+
+
+def map_line_after_rewrite(old_text: str, new_text: str, line: int) -> int:
+    """Номер строки в new_text, на которую попадает строка ``line`` из old_text.
+
+    Нужен, чтобы курсор остался на той же строке пресета, когда сохранение
+    вставило строки выше (например, обязательный блок --lua-init).
+    """
+    old_lines = str(old_text or "").split("\n")
+    new_lines = str(new_text or "").split("\n")
+    last_line = max(len(new_lines) - 1, 0)
+    matcher = difflib.SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)
+    for tag, old_start, old_end, new_start, _new_end in matcher.get_opcodes():
+        if old_start <= line < old_end:
+            if tag == "equal":
+                return min(new_start + (line - old_start), last_line)
+            return min(new_start, last_line)
+    return last_line
 
 
 class RawPresetTextEditor(QObject):
@@ -119,6 +139,49 @@ class RawPresetTextEditor(QObject):
         finally:
             self.cache_update_suspended = False
         self.text_snapshot = value
+        return True
+
+    def show_saved_text(self, requested_text: str, saved_text: str) -> bool:
+        """Показывает текст файла после сохранения, если сохранение его изменило.
+
+        Сохранение нормализует пресет (presets.preset_contract): например,
+        дописывает обязательный блок --lua-init. Редактор должен показывать то,
+        что реально лежит в файле. Текст не трогается, если пользователь уже
+        печатает дальше (в редакторе не тот текст, что ушёл на сохранение, или
+        запланировано новое сохранение), а разница только в переводе строки в
+        конце файла не стоит перерисовки документа.
+        """
+        requested = str(requested_text or "")
+        saved = str(saved_text or "")
+        if requested.rstrip("\n") == saved.rstrip("\n"):
+            return False
+        if self.current_text() != requested:
+            return False
+        try:
+            if self.save_timer.isActive() or self.commit_timer.isActive():
+                return False
+        except Exception:
+            pass
+
+        cursor = self.editor.textCursor()
+        line = cursor.blockNumber()
+        column = cursor.positionInBlock()
+        scroll_bar = self.editor.verticalScrollBar()
+        scroll_value = scroll_bar.value()
+        new_line = map_line_after_rewrite(requested, saved, line)
+
+        self.apply_loaded_text(saved)
+
+        block = self.editor.document().findBlockByNumber(new_line)
+        if block.isValid():
+            restored = QTextCursor(block)
+            restored.movePosition(
+                QTextCursor.MoveOperation.Right,
+                QTextCursor.MoveMode.MoveAnchor,
+                min(column, max(block.length() - 1, 0)),
+            )
+            self.editor.setTextCursor(restored)
+        scroll_bar.setValue(scroll_value + (new_line - line))
         return True
 
     def apply_external_text_update(self, text: str) -> bool:

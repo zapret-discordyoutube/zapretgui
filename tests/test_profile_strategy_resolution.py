@@ -199,7 +199,7 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                     list(expected_profiles),
                 )
                 self.assertNotIn("--name=Исключения (RU сайты)", text)
-                self.assertIn("# BuiltinVersion: 2.41", text.splitlines()[:5])
+                self.assertIn("# BuiltinVersion: 2.42", text.splitlines()[:5])
 
                 for profile in exclusion_profiles:
                     self.assertEqual(
@@ -276,8 +276,8 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                 ),
                 "",
             )
-            if version_line != "# BuiltinVersion: 2.41":
-                offenders.append(f"{path.name}: версия набора не 2.41")
+            if version_line != "# BuiltinVersion: 2.42":
+                offenders.append(f"{path.name}: версия набора не 2.42")
 
         self.assertGreater(checked_presets, 0)
         self.assertEqual(offenders, [])

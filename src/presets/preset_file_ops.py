@@ -151,7 +151,8 @@ def import_from_file(backend, src_path: Path, name: str | None = None):
     preset_name = str(name or src.stem or "Imported").strip() or "Imported"
     if src.suffix.lower() == ".zip":
         return import_portable_preset(backend, src, name=preset_name)
-    source_text = src.read_text(encoding="utf-8", errors="replace")
+    # utf-8-sig: метка BOM — часть кодировки файла, а не текста пресета.
+    source_text = src.read_text(encoding="utf-8-sig", errors="replace")
     validation_error = validate_preset_source_text(source_text, engine=backend.engine)
     if validation_error:
         raise ValueError(f"Файл не похож на пресет: {validation_error}")
