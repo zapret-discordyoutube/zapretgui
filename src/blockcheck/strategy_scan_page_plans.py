@@ -199,8 +199,11 @@ def build_apply_success_plan(result: StrategyApplyResult) -> StrategyScanUiMessa
     else:
         title_default = "Стратегия применена"
         body_text = f"{result.strategy_name} применена к profile: {result.applied_profile}"
+    blob_warnings = tuple(getattr(result, "blob_warnings", ()) or ())
+    if blob_warnings:
+        body_text = "\n".join((body_text, *blob_warnings))
     return StrategyScanUiMessagePlan(
-        kind="success",
+        kind="warning" if blob_warnings else "success",
         title_key="page.strategy_scan.applied",
         title_default=title_default,
         body_text=body_text,

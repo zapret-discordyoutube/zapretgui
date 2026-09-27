@@ -48,11 +48,26 @@ tests/test_preset_contract_architecture_checks.py — структура) и а�
 3. Сгенерированные конфиги, которые не являются пресетами пользователя, и
    поэтому не подчиняются пунктам 1–2 (``GENERATED_CONFIG_EXEMPTIONS``):
    временный пресет пробы blockcheck и рабочий конфиг circular-оркестратора.
+   Временный пресет пробы сам объявляет ``--blob=`` для фейков проверяемой
+   стратегии (строки берутся из реестра фейков, как в пункте 5), иначе
+   стратегия с фейком работала бы в пробе как ``pass``.
 
 4. Импорт ZIP-архива с пресетом и списками (``ARCHIVE_IMPORT_TRANSFORMATIONS``):
    если в папке lists уже есть другой файл с тем же именем, список из архива
    сохраняется под новым именем и ссылка в пресете меняется на него. Результат
    виден в сохранённом тексте пресета.
+
+5. Явные действия пользователя (``EXPLICIT_ACTION_TRANSFORMATIONS``): когда
+   пользователь сам выбирает стратегию — готовую стратегию на странице
+   profile-а или «Применить» найденную стратегию в blockcheck, — программа,
+   кроме самой стратегии, дописывает в преамбулу пресета объявления
+   ``--blob=ИМЯ:...`` для фейков этой стратегии, которых в пресете ещё нет
+   (``profile.preset_blob_declarations``). Строки берутся из реестра фейков,
+   пресет сохраняется обычным путём, и пользователь видит их в тексте.
+   Имя, уже объявленное в пресете (любым файлом или hex), не добавляется
+   повторно: объявление в пресете главнее реестра, а дубль имени winws2
+   отвергает. Встроенные фейки winws2 и фейки из lua-кода блока
+   ``--lua-init`` не объявляются. При запуске ничего не подставляется.
 
 Модуль намеренно не импортирует ничего, кроме стандартной библиотеки, на уровне
 модуля: его константы читает ``app.architecture_checks`` в CI без зависимостей.
@@ -125,6 +140,15 @@ ARCHIVE_IMPORT_LIST_RENAME = "portable_archive_list_rename_on_name_collision"
 ARCHIVE_IMPORT_TRANSFORMATIONS: dict[str, str] = {
     ARCHIVE_IMPORT_LIST_RENAME: "список из ZIP с именем, которое уже занято другим файлом, "
     "сохраняется под новым именем, и ссылка в пресете меняется на него",
+}
+
+# --- 5. Явные действия пользователя ---------------------------------------
+
+STRATEGY_CHOICE_BLOB_DECLARATIONS = "strategy_choice_blob_declarations"
+
+EXPLICIT_ACTION_TRANSFORMATIONS: dict[str, str] = {
+    STRATEGY_CHOICE_BLOB_DECLARATIONS: "выбор готовой стратегии или применение найденной в blockcheck "
+    "дописывает в преамбулу --blob= для фейков стратегии, которых в пресете ещё нет",
 }
 
 # --- Кто пишет файлы пресетов ----------------------------------------------
@@ -228,6 +252,7 @@ __all__ = [
     "ARCHIVE_IMPORT_TRANSFORMATIONS",
     "DEBUG_LOG_DIR",
     "DRY_RUN_FUNCTION_MARKER",
+    "EXPLICIT_ACTION_TRANSFORMATIONS",
     "FAST_SWITCH_HANDOFF_EXTRA_ARGS",
     "GENERATED_CONFIG_EXEMPTIONS",
     "LAUNCH_TIME_TRANSFORMATIONS",
@@ -238,6 +263,7 @@ __all__ = [
     "PRESET_SAVE_NORMALIZER_NAMES",
     "SAVE_TIME_NORMALIZATIONS",
     "SERVICE_HEADER_PREFIXES",
+    "STRATEGY_CHOICE_BLOB_DECLARATIONS",
     "WINWS1_DRY_RUN_EXTRA_ARGS",
     "WINWS2_DRY_RUN_EXTRA_ARGS",
     "normalize_preset_source_for_save",

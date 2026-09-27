@@ -379,21 +379,45 @@ def apply_profile_to_selected_preset(
     strategy_lines: list[str],
     match_target: str = "",
     scan_protocol: str = "",
-) -> tuple[str, str]:
+) -> tuple[str, str, tuple[str, ...]]:
+    """Пишет найденную стратегию в выбранный пресет.
+
+    Пользователь явно применяет найденную стратегию, поэтому в преамбулу
+    пресета дописываются объявления ``--blob=`` для её фейков, которых в
+    пресете ещё нет (``profile.preset_blob_declarations``). Возвращает
+    (файл пресета, "created"/"updated", предупреждения про фейки).
+    """
+    from log.log import log
+    from profile.preset_blob_declarations import with_declared_blobs
     from settings.mode import ZAPRET2_MODE
 
+    load_catalog = getattr(profile_feature, "load_fakes_catalog", None)
+
     def _edit(source):
-        return plan_selected_preset_strategy_apply(
+        planned, operation, expect = plan_selected_preset_strategy_apply(
             source,
             strategy_lines=strategy_lines,
             match_target=match_target,
             scan_protocol=scan_protocol,
         )
+        planned, report = with_declared_blobs(planned, strategy_lines, load_catalog)
+        return planned, (operation, report), expect
 
-    selected_file_name, operation = profile_feature.edit_selected_preset(ZAPRET2_MODE, _edit)
+    selected_file_name, (operation, report) = profile_feature.edit_selected_preset(ZAPRET2_MODE, _edit)
     if not selected_file_name:
         raise RuntimeError("Не удалось определить выбранный пресет")
-    return selected_file_name, operation
+    if report.added:
+        log(f"Blockcheck: в пресет добавлены фейки стратегии: {', '.join(report.added)}", "INFO")
+    if report.conflicts:
+        log(
+            "Blockcheck: пресет объявляет фейки иначе, чем реестр (оставлено как в пресете): "
+            + ", ".join(report.conflicts),
+            "INFO",
+        )
+    warnings = report.user_warnings()
+    for warning in warnings:
+        log(f"Blockcheck: {warning}", "WARNING")
+    return selected_file_name, operation, warnings
 
 
 def apply_strategy(
@@ -450,7 +474,7 @@ def apply_strategy(
         ]
         applied_profile = normalized_target
 
-    selected_file_name, operation = apply_profile_to_selected_preset(
+    selected_file_name, operation, blob_warnings = apply_profile_to_selected_preset(
         profile_feature=profile_feature,
         strategy_lines=new_strategy_lines,
         match_target=target,
@@ -462,4 +486,5 @@ def apply_strategy(
         applied_profile=applied_profile,
         selected_file_name=selected_file_name,
         operation=operation,
+        blob_warnings=blob_warnings,
     )

@@ -64,6 +64,7 @@ def build_preset_profile_features(paths: Any) -> PresetProfileFeatures:
     profile_feature = ProfileFeature(
         _presets_feature=presets_feature,
         _app_paths=paths,
+        _fakes_catalog_loader=load_installed_fakes_catalog,
     )
     presets_feature.attach_profile_feature(profile_feature)
     emit_startup_metric(
@@ -74,6 +75,14 @@ def build_preset_profile_features(paths: Any) -> PresetProfileFeatures:
         presets=presets_feature,
         profile=profile_feature,
     )
+
+
+def load_installed_fakes_catalog():
+    """Реестр фейков winws2, который кладёт установщик (system/fakes_catalog.sqlite3)."""
+    from config.runtime_layout import APPLICATION_PATHS
+    from fakes.public import load_fakes_catalog
+
+    return load_fakes_catalog(APPLICATION_PATHS.fakes_catalog_database)
 
 
 def _timed_facade_import(facade_name: str):

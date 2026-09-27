@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .strategy_catalog import StrategyEntry
 from .strategy_state import ProfileStrategyState
@@ -103,3 +103,6 @@ class StrategyApplyResult:
     profile_list_item_changed: bool = False
     summary_changed: bool = False
     runtime_apply_needed: bool = False
+    # Предупреждения про фейки (--blob=) выбранной стратегии: реестр
+    # недоступен или стратегия ссылается на фейк, которого нет нигде.
+    blob_warnings: tuple[str, ...] = field(default=(), compare=False)

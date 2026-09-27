@@ -14,6 +14,17 @@ class ProfileFeature:
     _presets_feature: Any
     _app_paths: Any
     _preset_service_cache: dict[str, Any] = field(default_factory=dict, init=False, repr=False, compare=False)
+    # Загрузка реестра фейков для явного выбора стратегии (дописать --blob=
+    # в пресет). None — реестр не подключён: стратегия применяется без фейков,
+    # а в результате приходит предупреждение.
+    _fakes_catalog_loader: Any = None
+
+    def load_fakes_catalog(self):
+        """Реестр фейков winws2; исключение — реестр не подключён или не прочитан."""
+        loader = self._fakes_catalog_loader
+        if loader is None:
+            raise RuntimeError("реестр не подключён")
+        return loader()
 
     @staticmethod
     def _commands():

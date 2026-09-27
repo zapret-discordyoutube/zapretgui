@@ -11,7 +11,7 @@ import time
 from folders.defaults import classify_profile_folder
 from log.log import log
 from presets.cache_signatures import path_cache_signature
-from settings.mode import DEFAULT_LAUNCH_METHOD, PRESET_LAUNCH_METHODS, engine_for_launch_method, normalize_launch_method
+from settings.mode import DEFAULT_LAUNCH_METHOD, ENGINE_WINWS2, PRESET_LAUNCH_METHODS, engine_for_launch_method, normalize_launch_method
 from settings.store import (
     get_profile_identity_registry,
     get_user_profiles_revision,
@@ -771,11 +771,7 @@ class ProfilePresetService:
                 and setup.item.enabled
                 and str(branch.strategy_id or "").strip() == strategy_id
             ):
-                return _strategy_apply_result(
-                    "already_applied",
-                    profile_key=setup.item.key,
-                    strategy_id=strategy_id,
-                )
+                return self._declare_blobs_of_applied_strategy(setup.item.key, strategy_id, entry.args.splitlines())
             preset, _manifest = self.load_selected_preset()
             index = resolve_preset_profile_reference_index(preset, profile_key)
             if index is None:
@@ -795,31 +791,14 @@ class ProfilePresetService:
                     should_reload=True,
                     message="strategy_branch_segments_missing",
                 )
-            preset = with_profile_enabled(updated_preset, index, True)
-            write_failure = self._commit_preset(
-                preset,
-                content_change_kind="strategy_only",
-                changed_profile_key=profile_key,
-                expect=_expect_strategy_lines(index, branch_id, entry.args.splitlines()),
-            )
-            applied_key = preset.profiles[index].key if 0 <= index < len(preset.profiles) else ""
-            if write_failure:
-                return _strategy_apply_result(
-                    "write_failed",
-                    profile_key=applied_key or setup.item.key,
-                    strategy_id=strategy_id,
-                    should_reload=True,
-                    message=write_failure,
-                )
-            return _strategy_apply_result(
-                "applied",
-                profile_key=applied_key,
+            return self._commit_applied_strategy(
+                with_profile_enabled(updated_preset, index, True),
+                index=index,
+                branch_id=branch_id,
+                strategy_lines=entry.args.splitlines(),
                 strategy_id=strategy_id,
-                change_kind="strategy_only",
-                profile_payload_changed=True,
-                profile_list_item_changed=True,
-                summary_changed=True,
-                runtime_apply_needed=True,
+                changed_profile_key=profile_key,
+                fallback_profile_key=setup.item.key,
             )
         if setup.item.in_preset and strategy_branches and len(strategy_branches) > 1:
             return _strategy_apply_result(
@@ -834,11 +813,7 @@ class ProfilePresetService:
             and setup.item.enabled
             and str(setup.item.strategy_id or "").strip() == strategy_id
         ):
-            return _strategy_apply_result(
-                "already_applied",
-                profile_key=setup.item.key,
-                strategy_id=strategy_id,
-            )
+            return self._declare_blobs_of_applied_strategy(setup.item.key, strategy_id, entry.args.splitlines())
 
         preset, _manifest = self.load_selected_preset()
         resolved_key = profile_key
@@ -863,33 +838,130 @@ class ProfilePresetService:
                 message="profile_index_missing",
             )
         preset = with_profile_strategy_lines(preset, index, entry.args.splitlines())
-        preset = with_profile_enabled(preset, index, True)
+        return self._commit_applied_strategy(
+            with_profile_enabled(preset, index, True),
+            index=index,
+            branch_id="",
+            strategy_lines=entry.args.splitlines(),
+            strategy_id=strategy_id,
+            changed_profile_key="" if list_structure_changed else resolved_key,
+            fallback_profile_key=resolved_key,
+            list_structure_changed=list_structure_changed,
+        )
+
+    def _commit_applied_strategy(
+        self,
+        preset: Preset,
+        *,
+        index: int,
+        branch_id: str,
+        strategy_lines: list[str],
+        strategy_id: str,
+        changed_profile_key: str,
+        fallback_profile_key: str,
+        list_structure_changed: bool = False,
+    ) -> StrategyApplyResult:
+        """Общий конец явного выбора готовой стратегии: фейки, запись, результат.
+
+        Пользователь выбрал стратегию — в преамбулу пресета дописываются
+        объявления ``--blob=`` для её фейков, которых в пресете ещё нет
+        (см. ``profile.preset_blob_declarations``). Пресет сохраняется обычным
+        путём, поэтому эти строки видны в тексте пресета.
+        """
+        preset, blob_report = self._with_strategy_blob_declarations(preset, strategy_lines)
+        blob_warnings = blob_report.user_warnings()
+        change_kind = "preset_structure" if list_structure_changed else "strategy_only"
         write_failure = self._commit_preset(
             preset,
-            content_change_kind="preset_structure" if list_structure_changed else "strategy_only",
-            changed_profile_key="" if list_structure_changed else resolved_key,
-            expect=_expect_strategy_lines(index, "", entry.args.splitlines()),
+            content_change_kind=change_kind,
+            changed_profile_key=changed_profile_key,
+            expect=_expect_strategy_lines(index, branch_id, strategy_lines),
         )
         applied_key = preset.profiles[index].key if 0 <= index < len(preset.profiles) else ""
         if write_failure:
             return _strategy_apply_result(
                 "write_failed",
-                profile_key=applied_key or resolved_key,
+                profile_key=applied_key or fallback_profile_key,
                 strategy_id=strategy_id,
                 should_reload=True,
                 message=write_failure,
             )
-        return _strategy_apply_result(
+        result = _strategy_apply_result(
             "applied",
             profile_key=applied_key,
             strategy_id=strategy_id,
-            change_kind="preset_structure" if list_structure_changed else "strategy_only",
+            change_kind=change_kind,
             list_structure_changed=list_structure_changed,
             profile_payload_changed=True,
             profile_list_item_changed=True,
             summary_changed=True,
             runtime_apply_needed=True,
         )
+        return replace(result, blob_warnings=blob_warnings) if blob_warnings else result
+
+    def _declare_blobs_of_applied_strategy(
+        self,
+        profile_key: str,
+        strategy_id: str,
+        strategy_lines: list[str],
+    ) -> StrategyApplyResult:
+        """Повторный явный выбор уже стоящей стратегии.
+
+        Стратегия в пресете уже есть, но пользователь снова её выбрал — это
+        явное действие, поэтому недостающие объявления её фейков (``--blob=``)
+        дописываются в пресет. Больше ничего не меняется; если всё объявлено,
+        запись не делается.
+        """
+        preset, _manifest = self.load_selected_preset()
+        updated, blob_report = self._with_strategy_blob_declarations(preset, strategy_lines)
+        blob_warnings = blob_report.user_warnings()
+        if updated is preset:
+            result = _strategy_apply_result("already_applied", profile_key=profile_key, strategy_id=strategy_id)
+            return replace(result, blob_warnings=blob_warnings) if blob_warnings else result
+        write_failure = self._commit_preset(
+            updated,
+            content_change_kind="strategy_only",
+            changed_profile_key=profile_key,
+            expect=_expect_blobs_declared(blob_report.added),
+        )
+        if write_failure:
+            return _strategy_apply_result(
+                "write_failed",
+                profile_key=profile_key,
+                strategy_id=strategy_id,
+                should_reload=True,
+                message=write_failure,
+            )
+        result = _strategy_apply_result(
+            "already_applied",
+            profile_key=profile_key,
+            strategy_id=strategy_id,
+            runtime_apply_needed=True,
+        )
+        return replace(result, blob_warnings=blob_warnings) if blob_warnings else result
+
+    def _with_strategy_blob_declarations(self, preset: Preset, strategy_lines):
+        from .preset_blob_declarations import BlobDeclarationReport, with_declared_blobs
+
+        if self._engine != ENGINE_WINWS2:
+            return preset, BlobDeclarationReport()
+
+        updated, report = with_declared_blobs(
+            preset,
+            strategy_lines,
+            getattr(self._profile_services, "load_fakes_catalog", None),
+        )
+        if report.added:
+            log(f"ProfilePresetService: в пресет добавлены фейки стратегии: {', '.join(report.added)}", "INFO")
+        if report.conflicts:
+            log(
+                "ProfilePresetService: пресет объявляет фейки иначе, чем реестр (оставлено как в пресете): "
+                + ", ".join(report.conflicts),
+                "INFO",
+            )
+        for warning in report.user_warnings():
+            log(f"ProfilePresetService: {warning}", "WARNING")
+        return updated, report
 
     def set_current_strategy_state(
         self,
@@ -1828,6 +1900,19 @@ def _expect_strategy_lines(profile_index: int, branch_id: str, strategy_lines):
         )
 
     return _expect_profile(profile_index, _check)
+
+
+def _expect_blobs_declared(names):
+    """Ожидание: в перечитанном пресете объявлены все дописанные фейки."""
+    wanted = {str(name) for name in names or ()}
+
+    def _expect(stored: Preset) -> str:
+        from .preset_blob_declarations import declared_blob_names
+
+        missing = sorted(wanted - declared_blob_names(serialize_preset(stored)))
+        return f"blob_missing_after_write: {missing}" if missing else ""
+
+    return _expect
 
 
 def _expect_profile_enabled(profile_index: int, enabled: bool):

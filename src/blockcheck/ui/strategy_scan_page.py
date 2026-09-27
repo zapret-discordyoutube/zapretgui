@@ -1079,7 +1079,8 @@ class StrategyScanPage(BasePage):
             return
         message_plan = self._blockcheck.build_apply_success_plan(result)
 
-        InfoBarHelper.success(
+        show = InfoBarHelper.warning if message_plan.kind == "warning" else InfoBarHelper.success
+        show(
             self.window(),
             tr_catalog(message_plan.title_key, default=message_plan.title_default),
             message_plan.body_text,

@@ -39,6 +39,7 @@ class BlockcheckFeature:
             start_run_log=self.start_strategy_scan_run_log,
             append_run_log=self.append_strategy_scan_run_log,
             close_run_log=self.close_strategy_scan_run_log,
+            load_fakes_catalog=self.profile_feature.load_fakes_catalog,
             **kwargs,
         )
 

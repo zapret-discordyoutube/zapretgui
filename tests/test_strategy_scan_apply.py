@@ -25,7 +25,29 @@ class _PresetFeature:
         self.save_count += 1
 
 
-def _apply(feature, root: str, **kwargs):
+TLS_GOOGLE_BLOB_LINE = "--blob=tls_google:@bin/tls_clienthello_www_google_com.bin"
+
+
+def _fakes_catalog():
+    from fakes.public import FakeEntry, FakesCatalog
+
+    return FakesCatalog(
+        entries={
+            "tls_google": FakeEntry(
+                name="tls_google",
+                source_kind="file",
+                file_name="tls_clienthello_www_google_com.bin",
+                hex_value=None,
+                kind="tls",
+                sni="www.google.com",
+                description="",
+                same_bytes_as=None,
+            )
+        }
+    )
+
+
+def _apply(feature, root: str, *, fakes_catalog_loader=_fakes_catalog, **kwargs):
     """apply_strategy через настоящий ProfileFeature (общий путь записи сервиса)."""
     from app.feature_facades.profile import ProfileFeature
     from blockcheck import strategy_scan_apply
@@ -34,6 +56,7 @@ def _apply(feature, root: str, **kwargs):
     profile_feature = ProfileFeature(
         _presets_feature=feature,
         _app_paths=AppPaths(user_root=Path(root), local_root=Path(root)),
+        _fakes_catalog_loader=fakes_catalog_loader,
     )
     params = {
         "strategy_args": "--lua-desync=fake:blob=tls_google",
@@ -72,10 +95,54 @@ class StrategyScanApplyTests(unittest.TestCase):
         self.assertEqual(result.operation, "created")
         self.assertIn("--hostlist-domains=www.youtube.com", feature.saved_text)
         self.assertIn("--lua-desync=fake:blob=tls_google", feature.saved_text)
-        self.assertNotIn("--blob=tls_google:", feature.saved_text)
+        # Явное применение объявляет фейк стратегии в пресете ровно один раз.
+        self.assertEqual(feature.saved_text.count("--blob=tls_google:"), 1)
         preset = parse_preset_text(feature.saved_text, engine=ENGINE_WINWS2, source_name="Selected.txt")
+        self.assertIn(TLS_GOOGLE_BLOB_LINE, preset.preamble_lines)
+        self.assertEqual(result.blob_warnings, ())
         self.assertEqual(len(preset.profiles), 2)
         self.assertIn("www.youtube.com", preset.profiles[0].match_signature)
+
+        with TemporaryDirectory() as temp_dir:
+            _apply(feature, temp_dir)
+        self.assertEqual(feature.saved_text.count("--blob=tls_google:"), 1)
+
+    def test_apply_keeps_preset_declaration_of_same_fake_name(self) -> None:
+        text = "\n".join(
+            [
+                "--blob=tls_google:@bin/my_google.bin",
+                "",
+                "--new",
+                "--name=Discord",
+                "--filter-tcp=443",
+                "--hostlist-domains=discord.com",
+                "--lua-desync=pass",
+                "",
+            ]
+        )
+        feature = _PresetFeature(text)
+
+        with TemporaryDirectory() as temp_dir:
+            result = _apply(feature, temp_dir)
+
+        self.assertEqual(result.operation, "created")
+        blob_lines = [line for line in feature.saved_text.splitlines() if line.startswith("--blob=")]
+        self.assertEqual(blob_lines, ["--blob=tls_google:@bin/my_google.bin"])
+        self.assertEqual(result.blob_warnings, ())
+
+    def test_apply_without_fakes_registry_writes_strategy_and_warns(self) -> None:
+        def _missing_registry():
+            raise RuntimeError("файл не найден")
+
+        feature = _PresetFeature("--new\n--name=Discord\n--filter-tcp=443\n--hostlist-domains=discord.com\n--lua-desync=pass\n")
+
+        with TemporaryDirectory() as temp_dir:
+            result = _apply(feature, temp_dir, fakes_catalog_loader=_missing_registry)
+
+        self.assertIn("--lua-desync=fake:blob=tls_google", feature.saved_text)
+        self.assertNotIn("--blob=", feature.saved_text)
+        self.assertEqual(len(result.blob_warnings), 1)
+        self.assertIn("tls_google", result.blob_warnings[0])
 
     def test_apply_updates_existing_matching_profile(self) -> None:
         from profile.parser import parse_preset_text

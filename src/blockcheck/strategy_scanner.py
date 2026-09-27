@@ -150,8 +150,13 @@ class StrategyScanner:
         udp_games_scope: str = _UDP_GAMES_SCOPE_ALL,
         *,
         shutdown_sync,
+        load_fakes_catalog=None,
     ):
         self._shutdown_sync = shutdown_sync
+        # Реестр фейков: временный пресет пробы объявляет --blob= для фейков
+        # проверяемой стратегии, иначе стратегия с фейком работала бы как pass.
+        self._load_fakes_catalog = load_fakes_catalog
+        self._fakes_catalog = None
         self._scan_protocol = self._normalize_scan_protocol(scan_protocol)
         self._udp_games_scope = self._normalize_udp_games_scope(udp_games_scope)
         if self._scan_protocol != _PROTOCOL_UDP_GAMES:
@@ -307,6 +312,8 @@ class StrategyScanner:
 
         working: list[StrategyProbeResult] = []
         failed: list[StrategyProbeResult] = []
+
+        self._prepare_fakes_catalog()
 
         # Pre-scan: kill any running winws and clean WinDivert
         self._pre_scan_cleanup()
@@ -1462,6 +1469,39 @@ class StrategyScanner:
             self._games_ipset_entries_count = 0
             return sources[0]
 
+    def _prepare_fakes_catalog(self) -> None:
+        """Читает реестр фейков один раз на весь скан."""
+        self._fakes_catalog = None
+        self._fakes_catalog_error = ""
+        loader = getattr(self, "_load_fakes_catalog", None)
+        if loader is None:
+            self._fakes_catalog_error = "реестр не подключён"
+            return
+        try:
+            self._fakes_catalog = loader()
+        except Exception as exc:
+            self._fakes_catalog_error = str(exc) or type(exc).__name__
+            self._cb.on_log(f"Реестр фейков недоступен: {self._fakes_catalog_error}")
+
+    def _probe_blob_lines(self, strategy_args: str) -> list[str]:
+        """Строки --blob= для фейков стратегии во временном пресете пробы."""
+        from profile.preset_blob_declarations import plan_blob_declaration_lines
+
+        catalog = getattr(self, "_fakes_catalog", None)
+        error = getattr(self, "_fakes_catalog_error", "") or "реестр не подключён"
+
+        def _load_catalog():
+            if catalog is None:
+                raise RuntimeError(error)
+            return catalog
+
+        blob_lines, report = plan_blob_declaration_lines(strategy_args.split("\n"), {}, _load_catalog)
+        if report.unknown and not report.catalog_error:
+            callback = getattr(self, "_cb", None)
+            if callback is not None:
+                callback.on_log(f"  фейки без объявления: {', '.join(report.unknown)}")
+        return blob_lines
+
     def _write_temp_preset(self, strategy_args: str, target_domain: str) -> str:
         """Generate a minimal preset file for probing one strategy."""
         preset_path = os.path.join(self._work_dir, PROBE_TEMP_PRESET)
@@ -1476,6 +1516,12 @@ class StrategyScanner:
         # Lua inits
         lines.extend(WINWS2_LUA_INIT_LINES)
         lines.append("")
+
+        # Фейки стратегии: пресет пробы объявляет их сам, как обычный пресет.
+        blob_lines = self._probe_blob_lines(strategy_args)
+        if blob_lines:
+            lines.extend(blob_lines)
+            lines.append("")
 
         if self._scan_protocol == _PROTOCOL_STUN_VOICE:
             lines.append("--wf-udp-out=443-65535")

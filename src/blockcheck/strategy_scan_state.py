@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 @dataclass(slots=True)
@@ -15,6 +15,8 @@ class StrategyApplyResult:
     applied_profile: str
     selected_file_name: str
     operation: str
+    # Предупреждения про фейки (--blob=) найденной стратегии.
+    blob_warnings: tuple[str, ...] = field(default=(), compare=False)
 
 
 @dataclass(slots=True)

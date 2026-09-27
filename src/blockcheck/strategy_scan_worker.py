@@ -36,6 +36,7 @@ class StrategyScanWorker(QObject):
         start_run_log: Callable[..., object],
         append_run_log: Callable[[object, str], None],
         close_run_log: Callable[[object], None],
+        load_fakes_catalog: Callable[[], object] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -47,6 +48,7 @@ class StrategyScanWorker(QObject):
         self._start_run_log_action = start_run_log
         self._append_run_log_action = append_run_log
         self._close_run_log_action = close_run_log
+        self._load_fakes_catalog = load_fakes_catalog
         try:
             self._start_index = max(0, int(start_index))
         except Exception:
@@ -78,6 +80,7 @@ class StrategyScanWorker(QObject):
                     scan_protocol=self._scan_protocol,
                     udp_games_scope=self._udp_games_scope,
                     shutdown_sync=self._shutdown_sync,
+                    load_fakes_catalog=self._load_fakes_catalog,
                 )
                 report = self._scanner.run()
             self._drain_pending_log_messages()

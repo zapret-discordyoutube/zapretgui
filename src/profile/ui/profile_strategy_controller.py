@@ -144,6 +144,7 @@ class ProfileStrategyController:
         if new_key:
             page._profile_key = new_key
         self._report_strategy_write_rejected(apply_result)
+        self._report_strategy_blob_warnings(apply_result)
         if apply_result is not None and bool(getattr(apply_result, "should_reload", False)):
             if result_payload is not None:
                 branch_id = str(getattr(page, "_strategy_apply_runtime_branch_id", "") or "").strip()
@@ -208,6 +209,17 @@ class ProfileStrategyController:
             title="Стратегия не применена",
             content="Выбор не записан в пресет — показано состояние из файла.",
             parent=page.window(),
+        )
+
+    def _report_strategy_blob_warnings(self, apply_result) -> None:
+        """Стратегия записана, но часть её фейков (--blob=) не объявлена в пресете."""
+        warnings = tuple(getattr(apply_result, "blob_warnings", ()) or ())
+        if not warnings:
+            return
+        _page_module().InfoBar.warning(
+            title="Фейки стратегии не объявлены",
+            content="\n".join(warnings),
+            parent=self._page.window(),
         )
 
     def _on_strategy_apply_failed(self, request_id: int, error: str) -> None:
