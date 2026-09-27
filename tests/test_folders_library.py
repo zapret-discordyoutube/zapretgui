@@ -20,7 +20,7 @@ class FolderDefaultsTests(unittest.TestCase):
 
         self.assertEqual(
             [folder["name"] for folder in state["folders"].values()],
-            ["ALL TCP & UDP", "Общие", "1.10.0", "1.9.9", "Game filter", "Circular"],
+            ["ALL TCP & UDP", "Общие", "1.10.3", "1.10.0", "1.9.9", "Game filter", "Circular"],
         )
         self.assertEqual(state["folders"][COMMON_FOLDER_KEY]["system"], True)
 
@@ -31,6 +31,7 @@ class FolderDefaultsTests(unittest.TestCase):
             [folder["name"] for folder in state["folders"].values()],
             [
                 "Все сайты",
+                "1.10.3",
                 "1.10.0",
                 "1.9.9a",
                 "ALT",
@@ -73,6 +74,8 @@ class FolderDefaultsTests(unittest.TestCase):
         self.assertEqual(classify_preset_folder("ALL TCP & UDP v3_2.txt"), "all-tcp-udp")
         self.assertEqual(classify_preset_folder("Default (circular).txt"), "circular")
         self.assertEqual(classify_preset_folder("general EXP 1.10.0 (game filter).txt"), "1-10-0")
+        self.assertEqual(classify_preset_folder("general EXP 1.10.3 (game filter).txt"), "1-10-3")
+        self.assertEqual(classify_preset_folder("general ALT13 1.10.3 (game filter).txt"), "1-10-3")
         self.assertEqual(classify_preset_folder("general ALT10 1.9.9 (game filter).txt"), "1-9-9")
         self.assertEqual(classify_preset_folder("Preset X (game filter).txt"), "game-filter")
         self.assertEqual(classify_preset_folder("Unknown custom.txt"), COMMON_FOLDER_KEY)
@@ -87,6 +90,23 @@ class FolderDefaultsTests(unittest.TestCase):
         self.assertEqual(
             classify_preset_folder("general EXP 1.10.0 (game filter).txt", "winws1"),
             "1-10-0",
+        )
+
+    def test_winws1_1103_preset_wins_over_alt_exp_game_filter_and_all_sites(self) -> None:
+        for name in (
+            "general 1.10.3 (game filter).txt",
+            "general ALT1 1.10.3 (game filter).txt",
+            "general ALT13 1.10.3 (game filter).txt",
+            "general EXP 1.10.3 (game filter).txt",
+            "general FAKE TLS AUTO ALT3 1.10.3 (game filter).txt",
+            "general SIMPLE FAKE ALT2 1.10.3 (game filter).txt",
+            "allsites 1.10.3.txt",
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(classify_preset_folder(name, "winws1"), "1-10-3")
+        self.assertEqual(
+            classify_preset_folder("general ALT12 1.9.9a (game filter).txt", "winws1"),
+            "1-9-9a",
         )
 
     def test_profile_default_folder_is_classified_from_profile_text(self) -> None:
@@ -307,7 +327,7 @@ class FolderStoreTests(unittest.TestCase):
         self.assertEqual(folder_key, "моя-папка")
         self.assertEqual(
             ordered_names,
-            ["ALL TCP & UDP", "Общие", "Моя папка", "1.10.0", "1.9.9", "Game filter", "Circular"],
+            ["ALL TCP & UDP", "Общие", "Моя папка", "1.10.3", "1.10.0", "1.9.9", "Game filter", "Circular"],
         )
 
     def test_system_folder_cannot_be_renamed(self) -> None:
@@ -328,7 +348,7 @@ class FolderStoreTests(unittest.TestCase):
         ]
         self.assertEqual(
             ordered_names,
-            ["ALL TCP & UDP", "Общие", "1.10.0", "Моя папка", "1.9.9", "Game filter", "Circular"],
+            ["ALL TCP & UDP", "Общие", "1.10.3", "Моя папка", "1.10.0", "1.9.9", "Game filter", "Circular"],
         )
 
 

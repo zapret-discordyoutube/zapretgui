@@ -12,6 +12,7 @@ PINNED_FOLDER_KEY = "pinned"
 _WINWS2_PRESET_FOLDERS: tuple[tuple[str, str, bool], ...] = (
     ("all-tcp-udp", "ALL TCP & UDP", False),
     (COMMON_FOLDER_KEY, "Общие", True),
+    ("1-10-3", "1.10.3", False),
     ("1-10-0", "1.10.0", False),
     ("1-9-9", "1.9.9", False),
     ("game-filter", "Game filter", False),
@@ -20,6 +21,7 @@ _WINWS2_PRESET_FOLDERS: tuple[tuple[str, str, bool], ...] = (
 
 _WINWS1_PRESET_FOLDERS: tuple[tuple[str, str, bool], ...] = (
     ("all-sites", "Все сайты", False),
+    ("1-10-3", "1.10.3", False),
     ("1-10-0", "1.10.0", False),
     ("1-9-9a", "1.9.9a", False),
     ("alt", "ALT", False),
@@ -64,6 +66,8 @@ def classify_preset_folder(name: object, scope_key: object = "winws2") -> str:
         return _classify_winws1_preset_folder(text)
     if "all tcp" in text and "udp" in text:
         return "all-tcp-udp"
+    if "1.10.3" in text:
+        return "1-10-3"
     if "1.10.0" in text:
         return "1-10-0"
     if "1.9.9" in text:
@@ -188,6 +192,8 @@ def _is_winws1_scope(scope_key: object) -> bool:
 def _classify_winws1_preset_folder(text: str) -> str:
     if not text:
         return COMMON_FOLDER_KEY
+    if "1.10.3" in text:
+        return "1-10-3"
     if "1.10.0" in text:
         return "1-10-0"
     if "1.9.9a" in text:
