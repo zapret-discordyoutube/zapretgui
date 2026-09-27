@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ctypes
 import sys
 from dataclasses import dataclass
 from typing import Callable
@@ -96,31 +95,3 @@ def current_windows_support(
         return WindowsSupportResult(supported=True)
 
     return evaluate_windows_support(version, platform_name=platform_value)
-
-
-def _show_plain_windows_message(title: str, message: str) -> None:
-    try:
-        ctypes.windll.user32.MessageBoxW(None, message, title, 0x10)
-    except Exception:
-        print(f"{title}\n\n{message}", file=sys.stderr)
-
-
-def enforce_early_windows_version_guard(
-    *,
-    version_getter: Callable[[], object] | None = None,
-    platform_name: str | None = None,
-    show_message: Callable[[str, str], None] | None = None,
-    exit_app: Callable[[int], None] | None = None,
-) -> None:
-    result = current_windows_support(
-        platform_name=platform_name,
-        version_getter=version_getter,
-    )
-    if result.supported:
-        return
-
-    notify = show_message or _show_plain_windows_message
-    notify(WINDOWS_VERSION_ERROR_TITLE, result.message)
-
-    exit_fn = exit_app or sys.exit
-    exit_fn(1)

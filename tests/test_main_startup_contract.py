@@ -2949,31 +2949,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         signal.emit.assert_called_once()
 
 
-class EarlyStartupCrashTests(unittest.TestCase):
-    def test_early_startup_exception_hook_writes_crash_file_under_application_root(self) -> None:
-        from config.runtime_layout import ApplicationPaths
-        from main import early_startup_crash
-
-        with tempfile.TemporaryDirectory() as tmp:
-            app_dir = Path(tmp)
-            app_paths = ApplicationPaths.from_root(app_dir)
-
-            with patch.object(early_startup_crash, "APPLICATION_PATHS", app_paths):
-                try:
-                    raise RuntimeError("boom")
-                except RuntimeError:
-                    exc_type, exc, tb = sys.exc_info()
-                    assert exc_type is not None
-                    assert exc is not None
-                    early_startup_crash.write_early_startup_crash(exc_type, exc, tb)
-
-            crash_path = app_dir / "user" / "logs" / "crashes" / "early_startup_crash.log"
-            text = crash_path.read_text(encoding="utf-8")
-
-        self.assertIn("RuntimeError: boom", text)
-        self.assertIn("early startup crash", text.lower())
-
-
 class _BaseWindowEvents:
     def nativeEvent(self, event_type, message):
         self.calls.append("base_native")

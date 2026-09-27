@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 import sys
 import unittest
 
@@ -80,8 +81,7 @@ class RuntimeLayoutTests(unittest.TestCase):
                 self.assertNotIn(name, config_source)
 
         critical_sources = (
-            SRC_ROOT / "main" / "early_startup_crash.py",
-            SRC_ROOT / "main" / "prelaunch.py",
+            SRC_ROOT / "main" / "launch_gate.py",
             SRC_ROOT / "autostart" / "nssm_service.py",
             SRC_ROOT / "app" / "navigation_icon_resources.py",
         )
@@ -176,15 +176,40 @@ class RuntimeLayoutTests(unittest.TestCase):
         with self.assertRaisesRegex(SourceApplicationLaunchForbidden, "запрещён"):
             require_packaged_application()
 
-    def test_main_checks_packaged_runtime_before_application_imports(self) -> None:
+    def test_main_passes_launch_gate_before_application_imports(self) -> None:
         main_source = (SRC_ROOT / "main.py").read_text(encoding="utf-8")
 
-        gate = main_source.index("require_packaged_application()")
+        gate = main_source.index("pass_launch_gate()")
         process_start = main_source.index("import main.process_start_time")
-        crash_handler = main_source.index("from main.early_startup_crash")
+        prelaunch = main_source.index("from main.prelaunch")
+        entry = main_source.index("from main.entry")
 
         self.assertLess(gate, process_start)
-        self.assertLess(gate, crash_handler)
+        self.assertLess(gate, prelaunch)
+        self.assertLess(gate, entry)
+        self.assertIn("run_guarded(_run)", main_source)
+
+    def test_flat_packaged_runtime_does_not_break_module_import(self) -> None:
+        # Импорт runtime_layout не должен падать при неверной раскладке,
+        # иначе проверка запуска не успеет показать окно.
+        code = (
+            "import sys; sys.frozen = True; "
+            "sys.executable = r'C:/Zapret/Dev/Zapret.exe'; "
+            "from config import runtime_layout as r; "
+            "print(type(r.INSTALL_LAYOUT_ERROR).__name__); "
+            "r.require_valid_install_layout()"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=SRC_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+        self.assertTrue(result.stdout.startswith("InvalidInstallLayout"), result.stderr)
+        self.assertIn("InvalidInstallLayout", result.stderr)
+        self.assertIn("Некорректная структура", result.stderr)
 
     def test_internal_application_entrypoint_repeats_packaged_runtime_gate(self) -> None:
         entry_source = (SRC_ROOT / "main" / "entry.py").read_text(encoding="utf-8")

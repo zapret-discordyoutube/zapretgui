@@ -34,7 +34,6 @@ def test_prelaunch_installs_shell_constants_before_module_preload() -> None:
     calls: list[str] = []
     prelaunch._PRELAUNCH_DONE = False
     with (
-        patch.object(prelaunch, "_set_workdir_to_app", side_effect=lambda: calls.append("workdir")),
         patch.object(prelaunch, "_install_crash_handler", side_effect=lambda: calls.append("crash")),
         patch.object(
             prelaunch,
@@ -50,4 +49,4 @@ def test_prelaunch_installs_shell_constants_before_module_preload() -> None:
     ):
         prelaunch.prepare_prelaunch()
 
-    assert calls == ["workdir", "crash", "archive-lock", "shellcon", "preload"]
+    assert calls == ["crash", "archive-lock", "shellcon", "preload"]

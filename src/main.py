@@ -1,35 +1,15 @@
-import sys
+"""Точка входа Zapret.exe.
 
-from config.runtime_layout import SourceApplicationLaunchForbidden, require_packaged_application
+Сначала проверка запуска (main.launch_gate): пока она не пройдена, из
+программы не импортируется ничего. Затем сама программа; если она упадёт
+ещё до своего окна, пользователь увидит понятное окно, а не тишину.
+"""
 
+from main.launch_gate import pass_launch_gate, run_guarded
 
-try:
-    require_packaged_application()
-except SourceApplicationLaunchForbidden as exc:
-    try:
-        import ctypes
+pass_launch_gate()
 
-        ctypes.windll.user32.MessageBoxW(
-            0,
-            str(exc),
-            "Zapret — запуск запрещён",
-            0x10,
-        )
-    except Exception:
-        print(str(exc))
-    raise SystemExit(1)
-
-
-import main.process_start_time  # noqa: E402,F401  # первым после проверки packaged runtime
-
-from main.early_startup_crash import install_early_startup_crash_handler  # noqa: E402
-
-
-install_early_startup_crash_handler()
-
-from startup.windows_version_guard import enforce_early_windows_version_guard  # noqa: E402
-
-enforce_early_windows_version_guard()
+import main.process_start_time  # noqa: E402,F401  # первым после проверки запуска
 
 
 def _run() -> None:
@@ -42,4 +22,4 @@ def _run() -> None:
 
 
 if __name__ == "__main__":
-    _run()
+    run_guarded(_run)

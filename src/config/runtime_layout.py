@@ -15,6 +15,10 @@ class SourceApplicationLaunchForbidden(RuntimeError):
     pass
 
 
+class InvalidInstallLayout(RuntimeError):
+    """Собранный Zapret.exe лежит не в папке _internal внутри папки установки."""
+
+
 def paths_overlap(first: str | Path, second: str | Path) -> bool:
     """True, если один путь содержит другой или пути совпадают."""
     try:
@@ -223,7 +227,7 @@ def resolve_application_root(
     if packaged:
         runtime_root = Path(executable).resolve().parent
         if runtime_root.name.casefold() != RUNTIME_DIR_NAME.casefold():
-            raise RuntimeError(
+            raise InvalidInstallLayout(
                 "Некорректная структура установленного Zapret: "
                 f"ожидался запуск из папки {RUNTIME_DIR_NAME}, получено {runtime_root}"
             )
@@ -238,23 +242,38 @@ def resolve_runtime_root(*, executable: str | Path, packaged: bool) -> Path | No
         return None
     runtime_root = Path(executable).resolve().parent
     if runtime_root.name.casefold() != RUNTIME_DIR_NAME.casefold():
-        raise RuntimeError(
+        raise InvalidInstallLayout(
             "Некорректная структура среды Zapret: "
             f"ожидалась папка {RUNTIME_DIR_NAME}, получено {runtime_root}"
         )
     return runtime_root
 
 
+def require_valid_install_layout() -> None:
+    """Останавливает запуск, если Zapret.exe лежит не в папке _internal."""
+    if INSTALL_LAYOUT_ERROR is not None:
+        raise INSTALL_LAYOUT_ERROR
+
+
 PACKAGED_RUNTIME = is_packaged_runtime()
-APPLICATION_ROOT = resolve_application_root(
-    executable=sys.executable,
-    module_file=__file__,
-    packaged=PACKAGED_RUNTIME,
-)
-RUNTIME_ROOT = resolve_runtime_root(
-    executable=sys.executable,
-    packaged=PACKAGED_RUNTIME,
-)
+INSTALL_LAYOUT_ERROR: InvalidInstallLayout | None = None
+try:
+    APPLICATION_ROOT = resolve_application_root(
+        executable=sys.executable,
+        module_file=__file__,
+        packaged=PACKAGED_RUNTIME,
+    )
+    RUNTIME_ROOT = resolve_runtime_root(
+        executable=sys.executable,
+        packaged=PACKAGED_RUNTIME,
+    )
+except InvalidInstallLayout as exc:
+    # Импорт этого модуля не должен падать: иначе main.launch_gate не успеет
+    # показать пользователю окно. Эти пути в работе не используются —
+    # проверка запуска останавливает программу раньше.
+    INSTALL_LAYOUT_ERROR = exc
+    APPLICATION_ROOT = Path(sys.executable).resolve().parent
+    RUNTIME_ROOT = None
 APPLICATION_PATHS = ApplicationPaths.from_root(APPLICATION_ROOT)
 # Импортируемые тесты и сборочные инструменты читают ресурсы из src. Само приложение
 # из исходников всё равно останавливается require_packaged_application().
@@ -270,6 +289,8 @@ __all__ = [
     "APPLICATION_PATHS",
     "APPLICATION_RESOURCE_PATHS",
     "ApplicationPaths",
+    "INSTALL_LAYOUT_ERROR",
+    "InvalidInstallLayout",
     "PACKAGED_RUNTIME",
     "RUNTIME_DIR_NAME",
     "RUNTIME_EXE_NAME",
@@ -277,6 +298,7 @@ __all__ = [
     "SourceApplicationLaunchForbidden",
     "is_packaged_runtime",
     "require_packaged_application",
+    "require_valid_install_layout",
     "resolve_application_root",
     "resolve_runtime_root",
 ]
