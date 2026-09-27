@@ -1323,6 +1323,7 @@ class UserPresetsPageBase(BasePage):
         model = getattr(self, "_presets_model", None)
         folder_key_role = getattr(type(model), "FolderKeyRole", None)
         collapsed_role = getattr(type(model), "CollapsedRole", None)
+        kind_role = getattr(type(model), "KindRole", None)
         if model is None or folder_key_role is None or collapsed_role is None:
             return None
         try:
@@ -1330,6 +1331,11 @@ class UserPresetsPageBase(BasePage):
             for row in range(row_count):
                 index = model.index(row, 0)
                 if not index.isValid():
+                    continue
+                # FolderKeyRole есть и у строк preset-ов. Закреплённый preset
+                # стоит выше заголовка своей папки, и без проверки вида строки
+                # клик читал его «не свёрнут» вместо состояния самой папки.
+                if kind_role is not None and str(index.data(kind_role) or "") != "folder":
                     continue
                 if str(index.data(folder_key_role) or "").strip() == key:
                     return bool(index.data(collapsed_role))

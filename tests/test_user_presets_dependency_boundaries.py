@@ -779,6 +779,31 @@ class UserPresetsDependencyBoundaryTests(unittest.TestCase):
             collapsed=False,
         )
 
+    def test_user_presets_folder_click_ignores_pinned_preset_rows_of_same_folder(self) -> None:
+        from presets.ui.common.user_presets_page import UserPresetsPageBase
+        from ui.presets_menu.model import PresetListModel
+
+        model = PresetListModel()
+        model.set_rows(
+            [
+                {"kind": "folder", "folder_key": "pinned", "name": "Закрепленные", "is_collapsed": False, "count": 1},
+                {"kind": "preset", "file_name": "Default v1.txt", "name": "Default v1", "folder_key": "all-tcp-udp"},
+                {"kind": "folder", "folder_key": "all-tcp-udp", "name": "ALL TCP & UDP", "is_collapsed": True, "count": 12},
+                {"kind": "folder", "folder_key": "common", "name": "Общие", "is_collapsed": False, "count": 0},
+            ]
+        )
+        page = UserPresetsPageBase.__new__(UserPresetsPageBase)
+        page._presets_model = model
+        page._request_preset_folder_action = Mock()
+
+        UserPresetsPageBase._on_toggle_folder(page, "all-tcp-udp")
+
+        page._request_preset_folder_action.assert_called_once_with(
+            "set_collapsed",
+            folder_key="all-tcp-udp",
+            collapsed=False,
+        )
+
     def test_user_presets_runtime_actions_do_not_expose_mutating_preset_commands(self) -> None:
         from dataclasses import fields
 
