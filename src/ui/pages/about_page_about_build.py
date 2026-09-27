@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections.abc import Callable
 
-from PyQt6.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout
+from PyQt6.QtGui import QIcon
+from PyQt6.QtWidgets import QApplication, QLabel, QHBoxLayout, QVBoxLayout
 
 from ui.accessibility import set_state_text
 from ui.pages.about_page_accessibility import apply_about_buttons_accessibility
@@ -22,6 +23,7 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 from ui.theme import get_cached_qta_pixmap
+from ui.widgets.spinning_logo import SpinningLogo
 
 
 @dataclass(slots=True)
@@ -64,6 +66,19 @@ def set_about_version_accessibility(app_name_label, version_label, *, app_name: 
         set_state_text(version_label, f"Версия программы: {app_version_value}")
 
 
+def _build_about_logo(tokens) -> SpinningLogo:
+    """Логотип программы рядом с версией; по клику делает оборот.
+
+    Значок берём тот же, что в верхней панели окна. Если общий значок не
+    задан (например, в тестах без файла .ico), показываем прежний щит.
+    """
+    app = QApplication.instance()
+    icon = app.windowIcon() if app is not None else QIcon()
+    if icon.isNull():
+        icon = QIcon(get_cached_qta_pixmap('fa5s.shield-alt', color=tokens.accent_hex, size=40))
+    return SpinningLogo(icon, box_size=48)
+
+
 def build_about_page_about_content(
     layout: QVBoxLayout,
     *,
@@ -85,10 +100,7 @@ def build_about_page_about_content(
     version_layout = QHBoxLayout()
     version_layout.setSpacing(16)
 
-    icon_label = QLabel()
-    icon_label.setPixmap(get_cached_qta_pixmap('fa5s.shield-alt', color=tokens.accent_hex, size=40))
-    icon_label.setFixedSize(48, 48)
-    version_layout.addWidget(icon_label)
+    version_layout.addWidget(_build_about_logo(tokens))
 
     text_layout = QVBoxLayout()
     text_layout.setSpacing(2)

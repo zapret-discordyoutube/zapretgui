@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from config.build_info import APP_VERSION
 
@@ -12,6 +12,7 @@ from ui.accessibility import set_control_accessibility, set_state_text
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.theme_refresh import ThemeRefreshBinding
 from updater.ui import plans
+from updater.ui.sync_icon import ICON_MODE_CHECKING, ICON_MODE_ERROR, ICON_MODE_IDLE, UpdateSyncIcon
 from qfluentwidgets import (
     CaptionLabel,
     CardWidget,
@@ -89,9 +90,7 @@ class UpdateStatusCard(CardWidget):
         content_layout.setContentsMargins(20, 16, 20, 16)
         content_layout.setSpacing(16)
 
-        self._icon_label = QLabel()
-        self._icon_label.setFixedSize(40, 40)
-        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon_label = UpdateSyncIcon(size=40)
         content_layout.addWidget(self._icon_label)
 
         text_layout = QVBoxLayout()
@@ -131,24 +130,29 @@ class UpdateStatusCard(CardWidget):
     def _apply_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
         self._tokens = tokens or get_theme_tokens()
-        if not self._is_checking:
-            try:
-                self._set_icon_idle()
-            except Exception:
-                pass
+        try:
+            self._icon_label.set_colors(
+                accent=self._tokens.accent_hex,
+                error=self._error_hex(),
+                is_light=self._tokens.is_light,
+            )
+            self._icon_label.set_error_glyph(
+                get_cached_qta_pixmap('fa5s.exclamation-triangle', color=self._error_hex(), size=20)
+            )
+        except Exception:
+            pass
+
+    def _error_hex(self) -> str:
+        return "#dc2626" if self._tokens.is_light else "#f87171"
 
     def _set_icon_idle(self):
-        pixmap = get_cached_qta_pixmap('fa5s.sync-alt', color=self._tokens.accent_hex, size=32)
-        self._icon_label.setPixmap(pixmap)
+        self._icon_label.set_mode(ICON_MODE_IDLE)
 
     def _on_check_clicked(self):
         self.check_clicked.emit()
 
     def _set_error_icon(self) -> None:
-        tokens = self._tokens
-        error_hex = "#dc2626" if tokens.is_light else "#f87171"
-        pixmap = get_cached_qta_pixmap('fa5s.exclamation-triangle', color=error_hex, size=32)
-        self._icon_label.setPixmap(pixmap)
+        self._icon_label.set_mode(ICON_MODE_ERROR)
 
     def _apply_state_text(self) -> None:
         plan = plans.build_update_status_card_plan(
@@ -223,6 +227,8 @@ class UpdateStatusCard(CardWidget):
 
         if plan.icon_mode == "error":
             self._set_error_icon()
+        elif plan.icon_mode == "checking":
+            self._icon_label.set_mode(ICON_MODE_CHECKING)
         elif plan.icon_mode == "idle":
             self._set_icon_idle()
 

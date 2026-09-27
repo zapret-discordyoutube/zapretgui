@@ -334,7 +334,7 @@ def build_update_status_transition_plan(
             state_source="",
             state_message="",
             state_elapsed=0.0,
-            icon_mode="idle",
+            icon_mode="checking",
             loading_mode="start",
             stop_loading_text="",
             check_enabled=None,

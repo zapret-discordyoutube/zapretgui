@@ -17,10 +17,15 @@ from config.build_info import APP_VERSION
 
 from log.log import log
 from main.runtime_state import log_startup_metric as emit_startup_metric
+from ui.widgets.spinning_logo import SpinningLogo
 from ui.window_preset_file_drop import WindowPresetFileDropFilter
 from ui.windows_drag_hover_detector import WindowsDragHoverDetector
 from ui.windows_file_drop import enable_windows_file_drop, use_qt_file_drop
 
+
+# Логотип рисуется на 18 px, как стандартный значок qfluentwidgets; коробка
+# чуть больше, чтобы края логотипа не обрезались при повороте.
+TITLEBAR_LOGO_BOX_SIZE = 20
 
 
 class ZapretFluentWindow(FluentWindow):
@@ -59,7 +64,12 @@ class ZapretFluentWindow(FluentWindow):
         super().setTitleBar(title_bar)
 
     def _sync_titlebar_icon_from_application(self) -> None:
-        """Показывает уже готовый общий значок в окончательной верхней панели."""
+        """Показывает уже готовый общий значок в окончательной верхней панели.
+
+        Вместо стандартной картинки qfluentwidgets ставим логотип, который по
+        клику делает оборот. Стандартный iconLabel только прячем: TitleBar
+        продолжает писать в него при windowIconChanged.
+        """
         app = QApplication.instance()
         title_bar = getattr(self, "titleBar", None)
         set_icon = getattr(title_bar, "setIcon", None)
@@ -67,8 +77,28 @@ class ZapretFluentWindow(FluentWindow):
             return
 
         icon = app.windowIcon()
-        if not icon.isNull():
-            set_icon(icon)
+        if icon.isNull():
+            return
+        set_icon(icon)
+
+        icon_label = getattr(title_bar, "iconLabel", None)
+        layout = getattr(title_bar, "hBoxLayout", None)
+        if icon_label is None or layout is None:
+            return
+
+        logo = title_bar.findChild(SpinningLogo)
+        if logo is None:
+            logo = SpinningLogo(icon, box_size=TITLEBAR_LOGO_BOX_SIZE, parent=title_bar)
+            index = layout.indexOf(icon_label)
+            layout.insertWidget(
+                max(0, index),
+                logo,
+                0,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            icon_label.hide()
+        else:
+            logo.set_icon(icon)
 
     def _install_preset_file_drop_filter(self) -> None:
         """Принимает TXT над всем окном, пока открыта страница preset-ов."""
