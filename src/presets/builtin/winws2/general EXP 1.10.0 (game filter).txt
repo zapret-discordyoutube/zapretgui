@@ -1,5 +1,5 @@
 # Preset: general EXP 1.10.0 (game filter)
-# BuiltinVersion: 2.40
+# BuiltinVersion: 2.41
 # IconColor: #60cdff
 # Description: Flowseal 1.10.0 EXP, adapted to ZapretGUI profiles
 
@@ -55,6 +55,14 @@
 --ipset=lists/ipset-youtube.txt
 --payload=quic_initial
 --lua-desync=fake:blob=quic_google:repeats=11
+
+--new
+
+--name=Бэкенд Google
+--filter-tcp=80,443
+--hostlist=lists/google-backend.txt
+--payload=tls_client_hello,http_req
+--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:tcp_ts_up:ip_id=zero
 
 --new
 

@@ -1,5 +1,5 @@
 # Preset: general FAKE TLS AUTO ALT3 1.9.9 (game filter)
-# BuiltinVersion: 2.40
+# BuiltinVersion: 2.41
 # IconColor: #60cdff
 
 --lua-init=@lua/zapret-lib.lua
@@ -58,6 +58,16 @@
 --ipset=lists/ipset-youtube.txt
 --payload=all
 --lua-desync=fake:blob=quic_google:repeats=11
+
+--new
+
+--name=Бэкенд Google
+--filter-tcp=80,443
+--hostlist=lists/google-backend.txt
+--payload=all
+--lua-desync=fake:blob=fake_default_tls:tcp_ts=-600000:repeats=8:tls_mod=rnd,dupsid,sni=www.google.com:ip_id=zero
+--lua-desync=fake:blob=fake_default_http:tcp_ts=-600000:repeats=8:ip_id=zero
+--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:ip_id=zero
 
 --new
 

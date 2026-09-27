@@ -1,5 +1,5 @@
 # Preset: general SIMPLE FAKE ALT2
-# BuiltinVersion: 2.40
+# BuiltinVersion: 2.41
 
 --lua-init=@lua/zapret-lib.lua
 --lua-init=@lua/zapret-antidpi.lua
@@ -102,6 +102,16 @@
 --name=youtube.com (интерфейс)
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
+--out-range=-d8
+--lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000
+--payload=http_req
+--lua-desync=fake:blob=fake_default_http:repeats=6:tcp_ts=-600000
+
+--new
+
+--name=Бэкенд Google
+--filter-tcp=80,443
+--hostlist=lists/google-backend.txt
 --out-range=-d8
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000
 --payload=http_req

@@ -1,5 +1,5 @@
 # Preset: Preset X v2 (game filter)
-# BuiltinVersion: 2.40
+# BuiltinVersion: 2.41
 # Created: 2026-03-01T22:21:19.070430
 # Modified: 2026-03-01T22:21:19.072594
 # IconColor: #60cdff
@@ -110,6 +110,14 @@
 --lua-desync=send:repeats=2
 --lua-desync=syndata:blob=tls_google
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
+
+--new
+
+--name=Бэкенд Google
+--filter-tcp=80,443
+--hostlist=lists/google-backend.txt
+--out-range=-d8
+--lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
 
 --new
 

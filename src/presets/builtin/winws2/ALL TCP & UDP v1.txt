@@ -1,5 +1,5 @@
 # Preset: ALL TCP & UDP v1
-# BuiltinVersion: 2.40
+# BuiltinVersion: 2.41
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -18,6 +18,7 @@
 --wf-tcp-out=80,443-65535
 --wf-udp-out=444-65535
 
+--blob=tls_google:@bin/tls_clienthello_www_google_com.bin
 --blob=quic_google:@bin/quic_initial_www_google_com.bin
 --blob=tls7:@bin/tls_clienthello_7.bin
 --blob=fake_default_udp:0x00000000000000000000000000000000

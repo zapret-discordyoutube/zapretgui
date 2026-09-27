@@ -1,5 +1,5 @@
 # Preset: Universal V5
-# BuiltinVersion: 2.40
+# BuiltinVersion: 2.41
 # IconColor: #a371f7
 # Description: Основной пресет. Десинк применяется точечно и только к реально заблокированным сервисам; работающие сайты, RU-трафик и личный прокси проходят нетронутыми. Покрытие: YouTube, Discord, Telegram, соцсети, Google, AI, LinkedIn, торренты, Twitch, EpicGames/Fortnite, Amazon.
 
@@ -122,6 +122,14 @@
 --ipset=lists/ipset-russia-youtube-rtmps.txt
 --out-range=-d8
 --lua-desync=fake:blob=tls_google:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:repeats=6:tcp_ack=-66000
+--lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
+
+--new
+
+--name=Бэкенд Google
+--filter-tcp=80,443
+--hostlist=lists/google-backend.txt
+--out-range=-d8
 --lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
 
 --new

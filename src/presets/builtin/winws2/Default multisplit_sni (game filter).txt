@@ -1,5 +1,5 @@
 # Preset: Default multisplit_sni (game filter)
-# BuiltinVersion: 2.40
+# BuiltinVersion: 2.41
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -117,6 +117,16 @@
 --out-range=-n8
 --payload=all
 --lua-desync=fake:repeats=6:blob=fake_default_quic
+
+--new
+
+--name=Бэкенд Google
+--filter-tcp=80,443
+--hostlist=lists/google-backend.txt
+--out-range=-n4
+--lua-desync=send:repeats=1
+--lua-desync=syndata:blob=tls_max
+--lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google
 
 --new
 

@@ -1,5 +1,5 @@
 # Preset: RABOTAUSHIY by SSB
-# BuiltinVersion: 2.40
+# BuiltinVersion: 2.41
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -111,6 +111,14 @@
 --hostlist=lists/googlevideo.txt
 --out-range=-d8
 --lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
+
+--new
+
+--name=Бэкенд Google
+--filter-tcp=80,443
+--hostlist=lists/google-backend.txt
+--out-range=-d8
+--lua-desync=multisplit:pos=2,midsld-2:seqovl=1:seqovl_pattern=tls7
 
 --new
 

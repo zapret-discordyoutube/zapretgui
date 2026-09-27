@@ -1,5 +1,5 @@
 # Preset: general ALT3 (game filter)
-# BuiltinVersion: 2.40
+# BuiltinVersion: 2.41
 # IconColor: #e6c300ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -102,6 +102,15 @@
 --name=youtube.com (интерфейс)
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
+--out-range=-d8
+--lua-desync=fake:blob=tls_google:tls_mod=rnd,dupsid,sni=www.google.com:tcp_ts=-600000
+--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000
+
+--new
+
+--name=Бэкенд Google
+--filter-tcp=80,443
+--hostlist=lists/google-backend.txt
 --out-range=-d8
 --lua-desync=fake:blob=tls_google:tls_mod=rnd,dupsid,sni=www.google.com:tcp_ts=-600000
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000

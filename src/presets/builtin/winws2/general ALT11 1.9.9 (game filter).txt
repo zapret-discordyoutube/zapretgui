@@ -1,5 +1,5 @@
 # Preset: general ALT11 1.9.9 (game filter)
-# BuiltinVersion: 2.40
+# BuiltinVersion: 2.41
 # IconColor: #67d1e4ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -57,6 +57,15 @@
 --ipset=lists/ipset-youtube.txt
 --payload=all
 --lua-desync=fake:blob=quic_google:repeats=11
+
+--new
+
+--name=Бэкенд Google
+--filter-tcp=80,443
+--hostlist=lists/google-backend.txt
+--payload=all
+--lua-desync=fake:blob=tls_google:tcp_ts=-600000:ip_id=zero:repeats=8
+--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:ip_id=zero
 
 --new
 

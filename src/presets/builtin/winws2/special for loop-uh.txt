@@ -1,5 +1,5 @@
 # Preset: special for loop-uh
-# BuiltinVersion: 2.40
+# BuiltinVersion: 2.41
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -105,6 +105,14 @@
 --out-range=-n8
 --payload=all
 --lua-desync=fake:repeats=6:blob=fake_default_quic
+
+--new
+
+--name=Бэкенд Google
+--filter-tcp=80,443
+--hostlist=lists/google-backend.txt
+--out-range=-d8
+--lua-desync=multisplit:pos=2,midsld-2:seqovl=1:seqovl_pattern=tls7
 
 --new
 

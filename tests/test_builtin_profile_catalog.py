@@ -1960,7 +1960,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             not in catalog_pairs
         ]
 
-        self.assertEqual(len(preset.profiles), 98)
+        self.assertEqual(len(preset.profiles), 99)
         self.assertEqual(offenders, [])
         self.assertIn(
             "--lua-init=fake_unknown_256=string.rep(string.char(0),256);"
