@@ -184,7 +184,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         def _norm_slashes(s: str) -> str:
             return str(s or "").replace("\\", "/")
 
-        def _resolve_candidates(raw_value: str, default_dir: Optional[str] = None) -> list[str]:
+        def _resolve_candidates(raw_value: str) -> list[str]:
             v = str(raw_value or "").strip()
             if not v:
                 return []
@@ -205,7 +205,8 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             if "/" in v or "\\" in v:
                 return [os.path.normpath(os.path.join(self.work_dir, v))]
 
-            # Bare filename: try default_dir first (lists/bin/lua), then work_dir.
+            # Bare filename: winws2 opens it relative to work_dir, like any
+            # other relative path (no per-option default folder).
             return [os.path.normpath(os.path.join(self.work_dir, v))]
 
         def _exists_any(paths: list[str]) -> bool:
@@ -219,11 +220,6 @@ class Winws2StrategyRunner(StrategyRunnerBase):
 
         missing: list[tuple[str, str]] = []
         seen: set[str] = set()
-
-        lists_dir = self.lists_dir
-        bin_dir = self.bin_dir
-        lua_dir = os.path.join(self.work_dir, "lua")
-        filter_dir = os.path.join(self.work_dir, "windivert.filter")
 
         try:
             for raw in str(content or "").splitlines():
@@ -239,7 +235,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
 
                 # lists/*.txt
                 if key_l in ("--hostlist", "--ipset", "--hostlist-exclude", "--ipset-exclude"):
-                    candidates = _resolve_candidates(value_s, default_dir=lists_dir)
+                    candidates = _resolve_candidates(value_s)
                     if candidates and (not _exists_any(candidates)):
                         ref = f"{key.strip()}={_norm_slashes(_strip_outer_quotes(value_s).lstrip('@'))}"
                         expected = candidates[0] if candidates else ""
@@ -261,7 +257,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                     )
                     if looks_like_lua_source:
                         continue
-                    candidates = _resolve_candidates(value_s, default_dir=lua_dir)
+                    candidates = _resolve_candidates(value_s)
                     if candidates and (not _exists_any(candidates)):
                         ref = f"{key.strip()}={_norm_slashes(_strip_outer_quotes(value_s).lstrip('@'))}"
                         expected = candidates[0] if candidates else ""
@@ -273,7 +269,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
 
                 # windivert.filter/*
                 if key_l == "--wf-raw-part":
-                    candidates = _resolve_candidates(value_s, default_dir=filter_dir)
+                    candidates = _resolve_candidates(value_s)
                     if candidates and (not _exists_any(candidates)):
                         ref = f"{key.strip()}={_norm_slashes(_strip_outer_quotes(value_s).lstrip('@'))}"
                         expected = candidates[0] if candidates else ""
@@ -309,7 +305,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                     if not special.endswith(".bin"):
                         continue
 
-                    candidates = _resolve_candidates(value_s, default_dir=bin_dir)
+                    candidates = _resolve_candidates(value_s)
                     if candidates and (not _exists_any(candidates)):
                         ref = f"{key.strip()}={_norm_slashes(_strip_outer_quotes(value_s).lstrip('@'))}"
                         expected = candidates[0] if candidates else ""
@@ -345,7 +341,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                     if not file_part:
                         continue
 
-                    candidates = _resolve_candidates(file_part, default_dir=bin_dir)
+                    candidates = _resolve_candidates(file_part)
                     if candidates and (not _exists_any(candidates)):
                         ref = f"{key.strip()}={_norm_slashes(blob_value)}"
                         expected = candidates[0] if candidates else ""
