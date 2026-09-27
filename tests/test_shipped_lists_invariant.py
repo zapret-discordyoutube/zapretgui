@@ -85,6 +85,36 @@ class ShippedListsInvariantTest(unittest.TestCase):
         overlap = sorted(shipped & {name.lower() for name in RUNTIME_GENERATED_LIST_NAMES})
         self.assertEqual(overlap, [])
 
+    def test_flowseal_synced_lists_keep_local_decisions(self) -> None:
+        """Сверка с Flowseal: записи из апстрима добавлены, но без DoH-строк с ^
+        (им мешает исключение ipset-dns), без переноса Twitch в list-general и без
+        Google-бэкенда в list-google; свои исключения Twitch остаются."""
+
+        def entries(name: str) -> list[str]:
+            text = (SHIPPED_LISTS_DIR / name).read_text(encoding="utf-8")
+            return [line.strip() for line in text.splitlines() if line.strip()]
+
+        general = entries("list-general.txt")
+        self.assertEqual(len(general), 50)
+        self.assertEqual(len(set(general)), len(general))
+        for domain in ("cloudfront.net", "zendesk.com", "klipy.com"):
+            self.assertIn(domain, general)
+        self.assertEqual([line for line in general if line.startswith("^")], [])
+        self.assertNotIn("live-video.net", general)
+
+        google = entries("list-google.txt")
+        self.assertEqual(len(google), 20)
+        for domain in ("play.google.com", "youtube.googleapis.com", "google.ru"):
+            self.assertIn(domain, google)
+        for domain in ("fonts.googleapis.com", "www.gstatic.com"):
+            self.assertNotIn(domain, google)
+
+        exclude = entries("list-exclude.txt")
+        self.assertEqual(len(exclude), 130)
+        self.assertEqual(len(set(exclude)), len(exclude))
+        for domain in ("live-video.net", "ttvnw.net", "gosuslugi.ru", "steampowered.com", "battlepass.ru"):
+            self.assertIn(domain, exclude)
+
 
 if __name__ == "__main__":
     unittest.main()

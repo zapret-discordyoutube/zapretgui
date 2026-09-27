@@ -9,6 +9,26 @@ from unittest.mock import patch
 
 
 class ListsStartupContractTests(unittest.TestCase):
+    def test_embedded_ipset_all_is_flowseal_full_list(self) -> None:
+        """Встроенная основа ipset-all = полный список Flowseal (.service/ipset-service.txt):
+        без повторов, с нормализованными сетями, отсортирована: сначала IPv4, потом IPv6."""
+        from lists.core.embedded_defaults import get_ipset_all_base_text
+
+        text = get_ipset_all_base_text()
+        self.assertFalse(text.endswith("\n"))
+        lines = text.split("\n")
+        networks = [ipaddress.ip_network(line, strict=True) for line in lines]
+
+        self.assertEqual(len(lines), 33048)
+        self.assertEqual(len(set(lines)), len(lines))
+        self.assertEqual([str(network) for network in networks], lines)
+        self.assertEqual(
+            networks,
+            sorted(networks, key=lambda net: (net.version, net.network_address, net.prefixlen)),
+        )
+        for expected_network in ("1.118.3.0/24", "1.178.24.0/21", "2001:218::/32", "2c0f:fc00:b011::/48"):
+            self.assertIn(expected_network, lines)
+
     def test_embedded_ipset_ru_keeps_as12389_rostelecom_networks(self) -> None:
         from lists.core.embedded_defaults import get_ipset_ru_base_text
 
