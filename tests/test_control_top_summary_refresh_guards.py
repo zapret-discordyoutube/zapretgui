@@ -6,6 +6,7 @@ from unittest.mock import Mock
 from unittest.mock import patch
 
 from app.state_store import AppUiState
+from donater.premium_display import TIER_FREE, TIER_WARNING, PremiumDisplay
 
 
 class _FakePresetSwitchTimer:
@@ -46,15 +47,38 @@ class ControlTopSummaryRefreshGuardTests(unittest.TestCase):
 
         page_cls._on_ui_state_changed(
             page,
-            AppUiState(subscription_is_premium=True, subscription_days_remaining=14),
+            AppUiState(subscription_known=True, subscription_is_premium=True, subscription_days_remaining=14),
             frozenset({"subscription_is_premium", "subscription_days_remaining"}),
         )
 
-        page.top_summary.set_premium.assert_called_once_with(
-            is_premium=True,
-            days_remaining=14,
-        )
+        page.top_summary.set_premium.assert_called_once_with(PremiumDisplay(tier=TIER_WARNING, days=14))
         page._request_top_summary_worker.assert_not_called()
+
+    def _assert_free_answer_repaints_premium_summary(self, page_cls) -> None:
+        # Ответ «Free» меняет в store только subscription_known: is_premium и так False.
+        page = page_cls.__new__(page_cls)
+        page._cleanup_in_progress = False
+        page.top_summary = Mock()
+        page._request_top_summary_worker = Mock()
+        page.set_loading = Mock()
+        page.update_status = Mock()
+        page.update_strategy = Mock()
+
+        page_cls._on_ui_state_changed(
+            page,
+            AppUiState(subscription_known=True, subscription_is_premium=False),
+            frozenset({"subscription_known"}),
+        )
+
+        page.top_summary.set_premium.assert_called_once_with(PremiumDisplay(tier=TIER_FREE))
+
+    def test_free_answer_repaints_premium_summary_on_both_control_pages(self) -> None:
+        from presets.ui.control.zapret1.page import Zapret1ModeControlPage
+        from presets.ui.control.zapret2.page import Zapret2ModeControlPage
+
+        for page_cls in (Zapret1ModeControlPage, Zapret2ModeControlPage):
+            with self.subTest(page_cls=page_cls.__name__):
+                self._assert_free_answer_repaints_premium_summary(page_cls)
 
     def _assert_subscription_change_skips_runtime_repaint(self, page_cls) -> None:
         page = page_cls.__new__(page_cls)

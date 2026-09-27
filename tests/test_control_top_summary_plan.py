@@ -28,11 +28,34 @@ class ControlTopSummaryPlanTests(unittest.TestCase):
         self.assertEqual(build_profiles_value(None, language="en"), "Checking...")
 
     def test_premium_summary_keeps_free_and_premium_labels_as_is(self) -> None:
+        from donater.premium_display import TIER_UNKNOWN, PremiumDisplay, build_premium_display
         from presets.ui.control.top_summary_plan import build_premium_summary
 
-        self.assertEqual(build_premium_summary(False, None, language="ru"), ("Free", "Базовые функции"))
-        self.assertEqual(build_premium_summary(True, 12, language="ru"), ("Premium", "Осталось 12 дней"))
-        self.assertEqual(build_premium_summary(True, 12, language="en"), ("Premium", "12 days left"))
+        def summary(is_premium, days, language="ru"):
+            return build_premium_summary(
+                build_premium_display(is_premium=is_premium, days_remaining=days),
+                language=language,
+            )
+
+        self.assertEqual(summary(False, None), ("Free", "Базовые функции"))
+        self.assertEqual(summary(True, 12), ("Premium", "Осталось 12 дней"))
+        self.assertEqual(summary(True, 12, "en"), ("Premium", "12 days left"))
+        self.assertEqual(
+            build_premium_summary(PremiumDisplay(tier=TIER_UNKNOWN), language="ru"),
+            ("Проверка...", "Узнаём статус подписки"),
+        )
+
+    def test_top_summary_widget_starts_as_checking_not_free(self) -> None:
+        with patch.dict("os.environ", {"QT_QPA_PLATFORM": "offscreen"}):
+            from PyQt6.QtWidgets import QApplication
+            from presets.ui.control.top_summary_widget import ControlTopSummaryWidget
+
+            _app = QApplication.instance() or QApplication([])
+            widget = ControlTopSummaryWidget(language="ru", mode_value="")
+            self.addCleanup(widget.deleteLater)
+            widget.retranslate()
+
+            self.assertEqual(widget.premium_item._value_label.text(), "Проверка...")
 
     def test_top_summary_items_have_accent_icons(self) -> None:
         with patch.dict("os.environ", {"QT_QPA_PLATFORM": "offscreen"}):

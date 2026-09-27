@@ -23,6 +23,7 @@ from ui.pages.about_page_kvn_build import build_about_page_kvn_content
 from ui.pages.about_page_support_build import build_about_page_support_content
 from ui.pages.about_page_tabs_build import build_about_page_tabs
 from app.state_store import AppUiState, MainWindowStateStore
+from donater.premium_display import TIER_UNKNOWN, PremiumDisplay, premium_display_from_ui_state
 from app.ui_texts import tr as tr_catalog
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.queued_worker_state import QueuedWorkerState
@@ -104,17 +105,14 @@ class AboutPage(BasePage):
         self._ui_state_store = store
         self._ui_state_unsubscribe = store.subscribe(
             self._on_ui_state_changed,
-            fields={"subscription_is_premium", "subscription_days_remaining"},
+            fields={"subscription_known", "subscription_is_premium", "subscription_days_remaining"},
             emit_initial=True,
         )
 
     def _on_ui_state_changed(self, state: AppUiState, _changed_fields: frozenset[str]) -> None:
         if self._cleanup_in_progress:
             return
-        self.update_subscription_status(
-            state.subscription_is_premium,
-            state.subscription_days_remaining,
-        )
+        self.update_subscription_status(premium_display_from_ui_state(state))
 
     # ─────────────────────────────────────────────────────────────────────────
     # UI building
@@ -287,7 +285,7 @@ class AboutPage(BasePage):
             pass
 
         try:
-            self.update_subscription_status(*self._current_subscription_state())
+            self.update_subscription_status(self._current_subscription_display())
         except Exception:
             pass
 
@@ -295,7 +293,7 @@ class AboutPage(BasePage):
         self._clear_layout(self._about_layout)
         self._build_about_content(self._about_layout)
         try:
-            self.update_subscription_status(*self._current_subscription_state())
+            self.update_subscription_status(self._current_subscription_display())
         except Exception:
             pass
 
@@ -335,12 +333,11 @@ class AboutPage(BasePage):
         layout.addSpacing(16)
         self._build_support_content(layout)
 
-    def update_subscription_status(self, is_premium: bool, days: int | None = None):
+    def update_subscription_status(self, display: PremiumDisplay):
         """Обновляет отображение статуса подписки"""
         tokens = get_theme_tokens()
         plan = about_page_plans.build_subscription_status_plan(
-            is_premium=is_premium,
-            days=days,
+            display,
             language=self._ui_language,
             free_icon_color=tokens.fg_faint,
             premium_icon_color="#ffc107",
@@ -349,15 +346,11 @@ class AboutPage(BasePage):
         self.sub_status_label.setText(plan.label_text)
         set_subscription_status_accessibility(self.sub_status_label, plan.label_text)
 
-    def _current_subscription_state(self) -> tuple[bool, int | None]:
+    def _current_subscription_display(self) -> PremiumDisplay:
         store = self._ui_state_store
-        if store is not None:
-            try:
-                snapshot = store.snapshot()
-                return bool(snapshot.subscription_is_premium), snapshot.subscription_days_remaining
-            except Exception:
-                pass
-        return False, None
+        if store is None:
+            return PremiumDisplay(tier=TIER_UNKNOWN)
+        return premium_display_from_ui_state(store.snapshot())
 
     # ─────────────────────────────────────────────────────────────────────────
     # Блоки поддержки внутри вкладки «О программе»

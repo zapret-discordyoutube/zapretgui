@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from app.state_store import MainWindowStateStore
+from donater.premium_display import build_premium_display
 from ui.pages.about_page_about_build import build_about_page_about_content
 from ui.pages.about_page import AboutPage
 from ui.pages.about_page_tabs_build import build_about_page_tabs
@@ -93,7 +94,7 @@ class AboutPageAccessibilityTests(unittest.TestCase):
         page.sub_status_icon = _IconWidget()
         page.sub_status_label = _TextWidget()
 
-        AboutPage.update_subscription_status(page, True, 5)
+        AboutPage.update_subscription_status(page, build_premium_display(is_premium=True, days_remaining=5))
 
         self.assertEqual(page.sub_status_label.text(), "Premium (осталось 5 дней)")
         self.assertEqual(page.sub_status_label.accessible_name, "Статус подписки: Premium (осталось 5 дней)")

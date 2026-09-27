@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.ui_texts import tr as tr_catalog
-from donater.premium_display import build_premium_display, format_days_left
+from donater.premium_display import PremiumDisplay, format_days_left
 
 
 def build_profiles_value(enabled_count: int | None, *, language: str) -> str:
@@ -18,13 +18,17 @@ def build_profiles_value(enabled_count: int | None, *, language: str) -> str:
     ).format(count=max(0, int(enabled_count)))
 
 
-def build_premium_summary(
-    is_premium: bool,
-    days_remaining: int | None,
-    *,
-    language: str,
-) -> tuple[str, str]:
-    display = build_premium_display(is_premium=is_premium, days_remaining=days_remaining)
+def build_premium_summary(display: PremiumDisplay, *, language: str) -> tuple[str, str]:
+    if not display.is_known:
+        # Первая проверка ещё идёт: это не Free, а «пока не знаем».
+        return (
+            tr_catalog("page.control.summary.premium.checking", language=language, default="Проверка..."),
+            tr_catalog(
+                "page.control.summary.premium.checking_details",
+                language=language,
+                default="Узнаём статус подписки",
+            ),
+        )
     if not display.is_premium:
         return (
             tr_catalog("common.premium.tier.free", language=language, default="Free"),

@@ -31,6 +31,7 @@ from presets.ui.control.control_page_runtime_shared import (
 )
 from presets.ui.control.windows_features.runtime import ControlPageWindowsFeatureMixin
 from app.state_store import AppUiState, MainWindowStateStore
+from donater.premium_display import premium_display_from_ui_state
 from presets.ui.control.control_page_shared import (
     ControlPageActionMixin,
     bind_control_ui_state_store,
@@ -613,10 +614,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         summary = self.top_summary
         if summary is None:
             return
-        summary.set_premium(
-            is_premium=bool(getattr(state, "subscription_is_premium", False)),
-            days_remaining=getattr(state, "subscription_days_remaining", None),
-        )
+        summary.set_premium(premium_display_from_ui_state(state))
 
     def _on_discord_restart_changed(self, enabled: bool) -> None:
         self._request_additional_settings_save("discord_restart", bool(enabled), launch_method=ZAPRET1_MODE)
@@ -759,6 +757,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
                 "current_strategy_summary",
                 "active_preset_revision",
                 "preset_content_revision",
+                "subscription_known",
                 "subscription_is_premium",
                 "subscription_days_remaining",
             },
@@ -789,9 +788,8 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             or "current_strategy_summary" in changed
             or "preset_content_revision" in changed
         )
-        top_summary_premium_changed = (
-            "subscription_is_premium" in changed
-            or "subscription_days_remaining" in changed
+        top_summary_premium_changed = bool(
+            changed & {"subscription_known", "subscription_is_premium", "subscription_days_remaining"}
         )
         runtime_status_changed = (
             not changed

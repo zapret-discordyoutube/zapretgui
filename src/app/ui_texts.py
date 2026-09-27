@@ -181,6 +181,14 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Текущий режим",
         "en": "Current mode",
     },
+    "page.control.summary.premium.checking": {
+        "ru": "Проверка...",
+        "en": "Checking...",
+    },
+    "page.control.summary.premium.checking_details": {
+        "ru": "Узнаём статус подписки",
+        "en": "Checking subscription status",
+    },
     "page.control.summary.premium.free_details": {
         "ru": "Базовые функции",
         "en": "Basic features",
@@ -688,6 +696,10 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.about.subscription.free": {
         "ru": "Free версия",
         "en": "Free version",
+    },
+    "page.about.subscription.checking": {
+        "ru": "Проверка подписки...",
+        "en": "Checking subscription...",
     },
     "page.about.subscription.premium_active": {
         "ru": "Premium активен",

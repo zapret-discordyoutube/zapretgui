@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.ui_texts import tr as tr_catalog
-from donater.premium_display import build_premium_display, days_unit
+from donater.premium_display import PremiumDisplay, days_unit
 
 
 @dataclass(slots=True)
@@ -46,14 +46,23 @@ def resolve_tab_index(key: str) -> int | None:
     return None
 
 def build_subscription_status_plan(
+    display: PremiumDisplay,
     *,
-    is_premium: bool,
-    days: int | None,
     language: str,
     free_icon_color: str,
     premium_icon_color: str,
 ) -> AboutSubscriptionPlan:
-    display = build_premium_display(is_premium=is_premium, days_remaining=days)
+    if not display.is_known:
+        # Первая проверка ещё идёт: это не Free, а «пока не знаем».
+        return AboutSubscriptionPlan(
+            icon_name="fa5s.hourglass-half",
+            icon_color=free_icon_color,
+            label_text=tr_catalog(
+                "page.about.subscription.checking",
+                language=language,
+                default="Проверка подписки...",
+            ),
+        )
     if not display.is_premium:
         return AboutSubscriptionPlan(
             icon_name="fa5s.user",

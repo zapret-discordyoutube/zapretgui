@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QLabel, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidg
 from qfluentwidgets import CaptionLabel, FlowLayout, StrongBodyLabel, SubtitleLabel
 
 from app.ui_texts import tr as tr_catalog
+from donater.premium_display import TIER_UNKNOWN, PremiumDisplay
 from presets.ui.control.top_summary_plan import build_premium_summary, build_profiles_value
 from ui.accessibility import set_control_accessibility, set_state_text
 
@@ -167,8 +168,8 @@ class ControlTopSummaryWidget(QWidget):
         self._preset_value = ""
         self._profile_count: int | None = None
         self._profiles_visible = True
-        self._is_premium = False
-        self._premium_days: int | None = None
+        # До ответа сервера статус неизвестен — это не Free.
+        self._premium_display = PremiumDisplay(tier=TIER_UNKNOWN)
 
         self.preset_item = ControlTopSummaryItem(
             icon_name="fa5s.folder-open",
@@ -241,12 +242,10 @@ class ControlTopSummaryWidget(QWidget):
         self._profiles_visible = value
         set_visible_if_changed(self.profiles_item, value)
 
-    def set_premium(self, *, is_premium: bool, days_remaining: int | None) -> None:
-        next_is_premium = bool(is_premium)
-        if self._is_premium == next_is_premium and self._premium_days == days_remaining:
+    def set_premium(self, display: PremiumDisplay) -> None:
+        if self._premium_display == display:
             return
-        self._is_premium = next_is_premium
-        self._premium_days = days_remaining
+        self._premium_display = display
         self.retranslate()
 
     def retranslate(self) -> None:
@@ -264,9 +263,5 @@ class ControlTopSummaryWidget(QWidget):
             caption=tr_catalog("page.control.summary.mode.caption", language=language, default="Текущий режим"),
             value=self._mode_value,
         )
-        premium_title, premium_details = build_premium_summary(
-            self._is_premium,
-            self._premium_days,
-            language=language,
-        )
+        premium_title, premium_details = build_premium_summary(self._premium_display, language=language)
         self.premium_item.set_texts(caption="", value=premium_title, details=premium_details)

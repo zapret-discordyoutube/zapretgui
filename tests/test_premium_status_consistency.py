@@ -21,7 +21,11 @@ from PyQt6.QtWidgets import QApplication, QLineEdit  # noqa: E402
 from about.plans import build_subscription_status_plan  # noqa: E402
 from app.feature_facades.premium import PremiumFeature  # noqa: E402
 from app.state_store import AppUiState, MainWindowStateStore  # noqa: E402
-from donater.premium_display import PremiumDisplay, build_premium_display  # noqa: E402
+from donater.premium_display import (  # noqa: E402
+    PremiumDisplay,
+    build_premium_display,
+    premium_display_from_ui_state,
+)
 from donater.ui.page_lifecycle import handle_premium_ui_state_changed  # noqa: E402
 from donater.ui.page_plans import (  # noqa: E402
     build_premium_display_plans,
@@ -226,8 +230,7 @@ class OtherSurfacesTests(unittest.TestCase):
     def test_about_uses_plural_and_never_zero_for_unknown_days(self) -> None:
         def label(is_premium, days, language="ru"):
             return build_subscription_status_plan(
-                is_premium=is_premium,
-                days=days,
+                build_premium_display(is_premium=is_premium, days_remaining=days),
                 language=language,
                 free_icon_color="#888",
                 premium_icon_color="#ffc107",
@@ -242,9 +245,38 @@ class OtherSurfacesTests(unittest.TestCase):
         self.assertEqual(label(False, 10), "Free версия")
 
     def test_control_summary_uses_plural(self) -> None:
-        self.assertEqual(build_premium_summary(True, 21, language="ru"), ("Premium", "Осталось 21 день"))
-        self.assertEqual(build_premium_summary(True, 2, language="ru"), ("Premium", "Осталось 2 дня"))
-        self.assertEqual(build_premium_summary(True, None, language="ru"), ("Premium", "Активен"))
+        def summary(is_premium, days):
+            return build_premium_summary(
+                build_premium_display(is_premium=is_premium, days_remaining=days),
+                language="ru",
+            )
+
+        self.assertEqual(summary(True, 21), ("Premium", "Осталось 21 день"))
+        self.assertEqual(summary(True, 2), ("Premium", "Осталось 2 дня"))
+        self.assertEqual(summary(True, None), ("Premium", "Активен"))
+
+    def test_unknown_status_is_checking_not_free_everywhere(self) -> None:
+        unknown = premium_display_from_ui_state(AppUiState(subscription_known=False))
+
+        about = build_subscription_status_plan(
+            unknown,
+            language="ru",
+            free_icon_color="#888",
+            premium_icon_color="#ffc107",
+        )
+        self.assertEqual(about.label_text, "Проверка подписки...")
+        self.assertEqual(about.icon_color, "#888")
+        self.assertEqual(
+            build_premium_summary(unknown, language="ru"),
+            ("Проверка...", "Узнаём статус подписки"),
+        )
+        self.assertEqual(
+            build_premium_summary(unknown, language="en"),
+            ("Checking...", "Checking subscription status"),
+        )
+
+        known_free = premium_display_from_ui_state(AppUiState(subscription_known=True))
+        self.assertEqual(build_premium_summary(known_free, language="ru")[0], "Free")
 
 
 class AppearancePremiumGatingTests(unittest.TestCase):

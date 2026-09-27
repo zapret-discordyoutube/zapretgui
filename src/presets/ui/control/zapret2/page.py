@@ -371,10 +371,9 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         summary = self.top_summary
         if summary is None:
             return
-        summary.set_premium(
-            is_premium=bool(getattr(state, "subscription_is_premium", False)),
-            days_remaining=getattr(state, "subscription_days_remaining", None),
-        )
+        from donater.premium_display import premium_display_from_ui_state
+
+        summary.set_premium(premium_display_from_ui_state(state))
 
     def _open_preset_setup_page(self) -> None:
         self._open_preset_setup_callback()
@@ -838,6 +837,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
                 "active_preset_revision",
                 "preset_content_revision",
                 "mode_revision",
+                "subscription_known",
                 "subscription_is_premium",
                 "subscription_days_remaining",
             },
@@ -858,9 +858,8 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             or "current_strategy_summary" in changed
             or "preset_content_revision" in changed
         )
-        top_summary_premium_changed = (
-            "subscription_is_premium" in changed
-            or "subscription_days_remaining" in changed
+        top_summary_premium_changed = bool(
+            changed & {"subscription_known", "subscription_is_premium", "subscription_days_remaining"}
         )
         runtime_status_changed = (
             not changed
