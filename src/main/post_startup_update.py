@@ -212,7 +212,9 @@ def install_update_check(
             "LegacyUpdateWatchdogCleanup",
             _retire_legacy_update_watchdog,
         )
-        delay_ms = 12000
+        # Короткая пауза, чтобы первые секунды после показа окна достались
+        # самому интерфейсу. Сама проверка идёт в фоне и стоит около секунды.
+        delay_ms = 2000
         log(f"Автопроверка обновлений отложена на {delay_ms}ms после готовности UI", "DEBUG")
         schedule_after(
             delay_ms,

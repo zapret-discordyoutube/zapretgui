@@ -606,16 +606,6 @@ def normalize_orchestra(data: object) -> dict[str, Any]:
     }
 
 
-def _json_safe(value: object) -> object:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, dict):
-        return {as_clean_str(key): _json_safe(item) for key, item in value.items() if as_clean_str(key)}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    return as_str(value)
-
-
 SELF_REPAIR_ATTEMPTS_KEPT = 20
 
 
@@ -632,27 +622,14 @@ def normalize_self_repair(data: object) -> dict[str, Any]:
 
 def normalize_updater(data: object) -> dict[str, Any]:
     raw = as_dict(data)
-    defaults = schema.default_updater()
-
-    server_pool_raw = as_dict(raw.get("server_pool"))
-    release_manager_raw = as_dict(raw.get("release_manager"))
+    auto_check_raw = as_dict(raw.get("auto_check"))
+    try:
+        last_success_at = max(float(auto_check_raw.get("last_success_at") or 0.0), 0.0)
+    except (TypeError, ValueError):
+        last_success_at = 0.0
 
     return {
-        "release_cache": as_dict(_json_safe(raw.get("release_cache"))),
-        "rate_limit": as_dict(_json_safe(raw.get("rate_limit"))),
-        "server_pool": {
-            "stats": as_dict(_json_safe(server_pool_raw.get("stats"))),
-            "selected_server_id": as_nullable_str(server_pool_raw.get("selected_server_id")),
-            "selected_at": as_nullable_int(server_pool_raw.get("selected_at")),
-        },
-        "release_manager": {
-            "vps_block_until": as_int(
-                release_manager_raw.get("vps_block_until"),
-                defaults["release_manager"]["vps_block_until"],
-                minimum=0,
-            ),
-            "server_stats": as_dict(_json_safe(release_manager_raw.get("server_stats"))),
-        },
+        "auto_check": {"last_success_at": last_success_at},
         "self_repair": normalize_self_repair(raw.get("self_repair")),
     }
 

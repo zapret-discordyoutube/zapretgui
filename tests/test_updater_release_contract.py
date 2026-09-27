@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import inspect
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 from updater.release_contract import (
     ReleaseArtifactMetadata,
     ReleaseMetadataError,
     is_installable_release,
 )
+from updater.release.resolver import ReleaseLookup
 from updater.update_pipeline import CancellationToken, prepare_update
 
 
@@ -56,9 +57,9 @@ class UpdateReleaseResolutionTests(unittest.TestCase):
         release = _release()
 
         with (
-            patch("updater.update_pipeline.get_latest_release", return_value=release),
+            patch("updater.update_pipeline.lookup_latest_release", return_value=ReleaseLookup(release)),
             patch("updater.update_pipeline.test_connectivity", return_value=True),
-            patch("updater.forgejo_release.get_latest_release") as forgejo_refetch,
+            patch("updater.release.forgejo.fetch_latest_release") as forgejo_refetch,
         ):
             result = prepare_update(
                 requested_version=release["version"],
@@ -77,8 +78,8 @@ class UpdateReleaseResolutionTests(unittest.TestCase):
         announcement.pop("sha256")
 
         with (
-            patch("updater.update_pipeline.get_latest_release", return_value=announcement),
-            patch("updater.forgejo_release.get_latest_release") as forgejo_refetch,
+            patch("updater.update_pipeline.lookup_latest_release", return_value=ReleaseLookup(announcement)),
+            patch("updater.release.forgejo.fetch_latest_release") as forgejo_refetch,
             self.assertRaisesRegex(ReleaseMetadataError, "некорректная ссылка"),
         ):
             prepare_update(
@@ -88,54 +89,73 @@ class UpdateReleaseResolutionTests(unittest.TestCase):
 
         forgejo_refetch.assert_not_called()
 
-    def test_invalid_persistent_cache_is_ignored(self) -> None:
-        from updater import release_manager
-        from updater.update_cache import UpdateCache
-
-        incomplete = _release()
-        incomplete.pop("sha256")
-        fresh = _release()
+    def test_preflight_reports_lookup_error_instead_of_generic_failure(self) -> None:
+        from updater.update_pipeline import UpdatePipelineError
 
         with (
-            patch.object(UpdateCache, "get_cached_release", return_value=incomplete),
-            patch.object(UpdateCache, "invalidate") as invalidate,
-            patch.object(UpdateCache, "cache_release") as cache_release,
-            patch.object(release_manager._release_manager, "get_latest_release", return_value=fresh) as resolve,
+            patch(
+                "updater.update_pipeline.lookup_latest_release",
+                return_value=ReleaseLookup(None, "Forgejo: нет ответа. Зеркала: нет ответа"),
+            ),
+            self.assertRaisesRegex(UpdatePipelineError, "Forgejo: нет ответа"),
         ):
-            result = release_manager.get_latest_release("dev", use_cache=True)
+            prepare_update(requested_version="99.1.2.3", token=CancellationToken())
 
-        self.assertEqual(result, fresh)
-        invalidate.assert_called_once_with("dev")
-        resolve.assert_called_once_with("dev")
-        cache_release.assert_called_once_with("dev", fresh)
+    def test_release_lookup_has_no_telegram_source(self) -> None:
+        from updater.release import resolver
 
-    def test_release_manager_has_no_telegram_release_fallback(self) -> None:
-        from updater.release_manager import ReleaseManager
+        source = inspect.getsource(resolver)
+        self.assertNotIn("telegram", source.lower())
 
-        source = inspect.getsource(ReleaseManager)
-        self.assertFalse(hasattr(ReleaseManager, "_try_telegram"))
-        self.assertNotIn("telegram://", source)
-
-    def test_version_worker_resolves_complete_releases_through_release_manager(self) -> None:
+    def test_version_worker_asks_only_its_own_channel(self) -> None:
+        """Раньше проверялись оба канала подряд, и предложение ждало лишний запрос."""
         from updater.server_status_workers import VersionCheckWorker
 
-        worker = VersionCheckWorker()
+        worker = VersionCheckWorker("dev")
         found: list[tuple[str, dict]] = []
         worker.version_found.connect(lambda channel, release: found.append((channel, release)))
 
         with patch(
-            "updater.release_manager.get_latest_release",
-            side_effect=lambda channel, use_cache=False: _release(
-                "99.1.2.3" if channel == "stable" else "99.1.2.4"
-            ),
+            "updater.release.resolver.lookup_latest_release",
+            return_value=ReleaseLookup(_release("99.1.2.4")),
         ) as resolve:
             worker.run()
 
-        self.assertEqual(
-            resolve.call_args_list,
-            [call("stable", use_cache=False), call("dev", use_cache=False)],
-        )
-        self.assertEqual([channel for channel, _release_info in found], ["stable", "dev"])
+        resolve.assert_called_once_with("dev")
+        self.assertEqual([channel for channel, _release_info in found], ["dev"])
+
+    def test_version_worker_reports_lookup_error(self) -> None:
+        from updater.server_status_workers import VersionCheckWorker
+
+        worker = VersionCheckWorker("dev")
+        found: list[dict] = []
+        worker.version_found.connect(lambda _channel, info: found.append(info))
+
+        with patch(
+            "updater.release.resolver.lookup_latest_release",
+            return_value=ReleaseLookup(None, "Не удалось узнать новейшую версию"),
+        ):
+            worker.run()
+
+        self.assertEqual(found, [{"error": "Не удалось узнать новейшую версию"}])
+
+    def test_stopped_version_worker_stays_silent(self) -> None:
+        """Результат остановленной проверки не должен перебить новую."""
+        from updater.server_status_workers import VersionCheckWorker
+
+        worker = VersionCheckWorker("dev")
+        events: list[str] = []
+        worker.version_found.connect(lambda *_args: events.append("found"))
+        worker.complete.connect(lambda: events.append("complete"))
+
+        def stopped_lookup(_channel: str) -> ReleaseLookup:
+            worker.stop()
+            return ReleaseLookup(_release("99.1.2.4"))
+
+        with patch("updater.release.resolver.lookup_latest_release", side_effect=stopped_lookup):
+            worker.run()
+
+        self.assertEqual(events, [])
 
     def test_server_status_rows_cannot_offer_an_update_directly(self) -> None:
         from updater.update_page_runtime import UpdatePageRuntime

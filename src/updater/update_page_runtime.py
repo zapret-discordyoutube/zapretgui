@@ -18,6 +18,9 @@ class UpdateFoundState:
     version: str = ""
     release_notes: str = ""
     source: str = ""
+    # Почему не удалось узнать новейшую версию. Без него сбой сети
+    # показывался бы как «Обновлений нет».
+    check_error: str = ""
 
 
 @dataclass(slots=True)
@@ -1129,7 +1132,6 @@ class UpdatePageRuntime(QObject):
         from updater.server_status_workers import ServerCheckWorker
 
         return ServerCheckWorker(
-            update_pool_stats=False,
             telegram_only=telegram_only,
             language=self._view.get_ui_language(),
         )
@@ -1154,7 +1156,8 @@ class UpdatePageRuntime(QObject):
     def _create_version_worker(self):
         from updater.server_status_workers import VersionCheckWorker
 
-        return VersionCheckWorker()
+        # Тот же канал, по которому _on_version_found отбирает ответ.
+        return VersionCheckWorker(CHANNEL_DEV if self._is_dev_update_channel() else CHANNEL_STABLE)
 
     def create_update_dpi_stop_worker(self, request_id: int, *, reason: str):
         return self._updater_feature.create_dpi_stop_worker(
@@ -1465,11 +1468,12 @@ class UpdatePageRuntime(QObject):
     def _finish_checking_workflow(self) -> None:
         if self._cleanup_in_progress:
             return
+        check_error = "" if self._found_state.is_available else str(self._found_state.check_error or "")
         result = {
             "has_update": bool(self._found_state.is_available),
             "version": str(self._found_state.version or self._app_version()),
             "release_notes": str(self._found_state.release_notes or ""),
-            "error": None,
+            "error": check_error or None,
         }
         manual_check_token = getattr(self, "_manual_check_token", None)
         self._manual_check_token = None
@@ -1484,7 +1488,10 @@ class UpdatePageRuntime(QObject):
             )
         )
         if not published or getattr(self, "_update_check_unsubscribe", None) is None:
-            self._view.finish_checking(self._found_state.is_available, self._found_state.version)
+            if check_error:
+                self._view.show_update_check_error(check_error)
+            else:
+                self._view.finish_checking(self._found_state.is_available, self._found_state.version)
 
     def _on_server_checked(self, server_name: str, status: dict) -> None:
         if self._cleanup_in_progress:
@@ -1607,21 +1614,28 @@ class UpdatePageRuntime(QObject):
         if self._cleanup_in_progress:
             return
         target_channel = CHANNEL_DEV if self._is_dev_update_channel() else CHANNEL_STABLE
-        if channel not in {CHANNEL_STABLE, CHANNEL_DEV} or channel != target_channel or version_info.get("error"):
+        if channel not in {CHANNEL_STABLE, CHANNEL_DEV} or channel != target_channel:
+            return
+        error = str(version_info.get("error") or "")
+        if error:
+            self._found_state.check_error = error
             return
 
         version = version_info.get("version", "")
         try:
             from updater.versions import compare_versions
 
-            if compare_versions(self._app_version(), version) < 0:
-                self._set_found_update_state(
-                    version,
-                    version_info.get("release_notes", ""),
-                    source=version_info.get("source", ""),
-                )
-        except Exception:
-            pass
+            is_newer = compare_versions(self._app_version(), version) < 0
+        except ValueError as exc:
+            self._found_state.check_error = f"Некорректная версия выпуска: {exc}"
+            return
+        self._found_state.check_error = ""
+        if is_newer:
+            self._set_found_update_state(
+                version,
+                version_info.get("release_notes", ""),
+                source=version_info.get("source", ""),
+            )
 
     def _on_versions_complete(self) -> None:
         if self._cleanup_in_progress:

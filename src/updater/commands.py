@@ -59,21 +59,12 @@ def open_update_channel(channel: str) -> UpdateChannelActionResult:
 
 
 def prepare_server_full_check(*, skip_rate_limit: bool = False) -> ServerFullCheckGateResult:
-    from updater.rate_limiter import UpdateRateLimiter
+    """Полная проверка серверов разрешена всегда.
 
-    if not bool(skip_rate_limit):
-        can_full, message = UpdateRateLimiter.can_check_servers_full()
-        if not can_full:
-            return ServerFullCheckGateResult(
-                telegram_only=True,
-                keep_existing_rows=True,
-                message=(
-                    f"⏱️ Полная проверка VPS заблокирована: {message}. "
-                    "fallback=telegram-only"
-                ),
-            )
-
-    UpdateRateLimiter.record_servers_full_check()
+    Все источники опрашиваются параллельно и недолго, ограничивать частоту
+    больше незачем. Шаг уходит вместе со старой страницей обновлений.
+    """
+    _ = skip_rate_limit
     return ServerFullCheckGateResult(
         telegram_only=False,
         keep_existing_rows=False,

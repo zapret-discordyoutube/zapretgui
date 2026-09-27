@@ -200,9 +200,9 @@ class UpdaterFeature:
         return self._commands().prepare_server_full_check(skip_rate_limit=bool(skip_rate_limit))
 
     def invalidate_update_cache(self, channel: str) -> None:
-        from updater import invalidate_cache
-
-        invalidate_cache(channel)
+        # Кэша выпуска больше нет: каждая проверка идёт в сеть заново.
+        # Шаг «очистить кэш» уходит вместе со старой страницей обновлений.
+        _ = channel
 
     def retry_server_check_without_dpi(self, *, is_any_running, shutdown_sync):
         return self._commands().retry_server_check_without_dpi(

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from updater.update_page_runtime import UpdateDownloadState, UpdatePageRuntime
+from updater.update_page_runtime import UpdateDownloadState, UpdateFoundState, UpdatePageRuntime
 
 
 class UpdaterPipelineRuntimeTests(unittest.TestCase):
@@ -106,6 +106,55 @@ class UpdaterPipelineRuntimeTests(unittest.TestCase):
         self.assertIn("class UpdatePageRuntime(QObject)", source)
         self.assertIn("worker.progress_bytes.connect(self._on_update_download_progress)", bind_source)
         self.assertNotIn("lambda p, d, t", bind_source)
+
+
+
+class UpdateCheckErrorPresentationTests(unittest.TestCase):
+    """Сбой проверки показывается как ошибка, а не как «Обновлений нет»."""
+
+    def _runtime(self) -> UpdatePageRuntime:
+        runtime = UpdatePageRuntime.__new__(UpdatePageRuntime)
+        runtime._cleanup_in_progress = False
+        runtime._found_state = UpdateFoundState()
+        runtime._view = Mock()
+        runtime._manual_check_token = 5
+        runtime._update_check_unsubscribe = object()
+        runtime._updater_feature = SimpleNamespace(finish_update_check=Mock(return_value=True))
+        runtime._is_dev_update_channel = lambda: True
+        runtime._app_version = lambda: "21.1.5.79"
+        return runtime
+
+    def test_lookup_error_is_published_as_check_error(self) -> None:
+        runtime = self._runtime()
+
+        UpdatePageRuntime._on_version_found(runtime, "dev", {"error": "Forgejo: нет ответа"})
+        UpdatePageRuntime._finish_checking_workflow(runtime)
+
+        result = runtime._updater_feature.finish_update_check.call_args.args[0]
+        self.assertEqual(result["error"], "Forgejo: нет ответа")
+        self.assertFalse(result["has_update"])
+
+    def test_error_is_shown_directly_when_nobody_listens(self) -> None:
+        runtime = self._runtime()
+        runtime._update_check_unsubscribe = None
+
+        UpdatePageRuntime._on_version_found(runtime, "dev", {"error": "Зеркала: нет ответа"})
+        UpdatePageRuntime._finish_checking_workflow(runtime)
+
+        runtime._view.show_update_check_error.assert_called_once_with("Зеркала: нет ответа")
+        runtime._view.finish_checking.assert_not_called()
+
+    def test_successful_answer_clears_previous_error(self) -> None:
+        runtime = self._runtime()
+
+        UpdatePageRuntime._on_version_found(runtime, "dev", {"error": "временный сбой"})
+        UpdatePageRuntime._on_version_found(runtime, "dev", {"version": "21.1.5.80", "source": "Forgejo"})
+        UpdatePageRuntime._finish_checking_workflow(runtime)
+
+        result = runtime._updater_feature.finish_update_check.call_args.args[0]
+        self.assertIsNone(result["error"])
+        self.assertTrue(result["has_update"])
+        self.assertEqual(result["version"], "21.1.5.80")
 
 
 if __name__ == "__main__":

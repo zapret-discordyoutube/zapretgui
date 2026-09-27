@@ -26,8 +26,9 @@ from utils.file_digest import sha256_file
 
 from .install.launcher import InstallerHandoff, stage_installer, start_supervised_installation
 from .network_hints import maybe_log_disable_dpi_for_update
+from .release import mirrors
+from .release.resolver import lookup_latest_release
 from .release_contract import ReleaseArtifactMetadata
-from .release_manager import get_latest_release
 from .versions import compare_versions, normalize_version
 
 
@@ -170,28 +171,12 @@ def file_sha256(path: str | os.PathLike[str], token: CancellationToken) -> str:
 
 
 def build_download_sources(metadata: ReleaseArtifactMetadata) -> tuple[DownloadSource, ...]:
-    """Добавляет зеркала только для уже проверенного установщика выпуска."""
+    """Источник из ответа выпуска и зеркала того же проверенного файла."""
     candidates = [DownloadSource(metadata.update_url, metadata.verify_ssl)]
-
-    try:
-        from .server_config import VPS_SERVERS, should_verify_ssl
-
-        for server in VPS_SERVERS:
-            candidates.append(
-                DownloadSource(
-                    f"https://{server['host']}:{server['https_port']}/download/{metadata.file_name}",
-                    bool(should_verify_ssl()),
-                )
-            )
-        for server in VPS_SERVERS:
-            candidates.append(
-                DownloadSource(
-                    f"http://{server['host']}:{server['http_port']}/download/{metadata.file_name}",
-                    False,
-                )
-            )
-    except Exception as exc:
-        log(f"Не удалось добавить зеркала VPS: {exc}", "WARNING")
+    candidates.extend(
+        DownloadSource(url, verify_ssl)
+        for url, verify_ssl in mirrors.download_sources(metadata.file_name)
+    )
 
     unique: list[DownloadSource] = []
     seen: set[str] = set()
@@ -235,11 +220,11 @@ def prepare_update(
     """
     token.checkpoint()
     _emit_stage(on_stage, UpdateStage.CHECK, "Проверка выпуска…")
-    release_info = get_latest_release(CHANNEL, use_cache=False)
-    if not release_info:
-        raise UpdatePipelineError("Не удалось получить данные выпуска")
+    lookup = lookup_latest_release(CHANNEL)
+    if not lookup.ok:
+        raise UpdatePipelineError(lookup.error or "Не удалось получить данные выпуска")
 
-    metadata = ReleaseArtifactMetadata.from_mapping(release_info)
+    metadata = ReleaseArtifactMetadata.from_mapping(lookup.release or {})
     remote_version = normalize_version(metadata.version)
     version_gap = compare_versions(APP_VERSION, remote_version)
     if version_gap > 0 or (version_gap == 0 and not allow_same_version):

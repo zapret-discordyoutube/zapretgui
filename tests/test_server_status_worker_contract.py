@@ -15,43 +15,57 @@ if str(PROJECT_SRC) not in sys.path:
 
 
 class ServerStatusWorkerContractTests(unittest.TestCase):
+    SERVER = {
+        "id": "primary",
+        "name": "Primary",
+        "host": "updates.example",
+        "https_port": 888,
+        "http_port": 887,
+    }
+
     def test_background_server_check_does_not_stop_running_dpi_on_network_error(self) -> None:
         from updater import server_status_workers
+        from updater.release.mirrors import MirrorReleaseError
 
         runtime_feature = SimpleNamespace(
             is_any_running=Mock(return_value=True),
             shutdown_sync=Mock(),
         )
-        pool = SimpleNamespace(
-            servers=[
-                {
-                    "id": "primary",
-                    "name": "Primary",
-                    "host": "example.invalid",
-                    "https_port": 443,
-                    "http_port": 80,
-                }
-            ],
-            stats={},
-            record_failure=Mock(),
-            record_success=Mock(),
-        )
-        worker = server_status_workers.ServerCheckWorker(
-            update_pool_stats=True,
-            telegram_only=False,
-        )
+        worker = server_status_workers.ServerCheckWorker(telegram_only=False)
+        statuses: dict[str, dict] = {}
+        worker.server_checked.connect(lambda name, status: statuses.__setitem__(name, status))
 
         with (
-            patch.object(server_status_workers, "should_verify_ssl", return_value=False),
-            patch.object(server_status_workers.ServerCheckWorker, "_request_versions_json", return_value=(None, "timeout", "direct")),
-            patch("updater.server_pool.get_server_pool", return_value=pool),
-            patch("updater.telegram_updater.get_telegram_version_info", return_value=None),
-            patch("updater.forgejo_release.check_api", return_value={"online": True, "response_time": 0.01}),
+            patch("updater.release.mirrors.mirror_servers", return_value=[self.SERVER]),
+            patch(
+                "updater.release.mirrors.fetch_versions",
+                side_effect=MirrorReleaseError("HTTPS: нет ответа (тайм-аут)"),
+            ),
+            patch("updater.release.telegram.get_telegram_version_info", return_value=None),
+            patch("updater.release.forgejo.probe_forgejo", return_value=0.01),
         ):
             worker.run()
 
         runtime_feature.shutdown_sync.assert_not_called()
-        pool.record_failure.assert_called_once()
+        self.assertEqual(statuses["Primary"]["status"], "error")
+        self.assertIn("тайм-аут", statuses["Primary"]["error"])
+
+    def test_forgejo_row_reflects_current_failure(self) -> None:
+        """Раньше старый ответ из памяти показывал «online» при недоступном Forgejo."""
+        from updater import server_status_workers
+
+        worker = server_status_workers.ServerCheckWorker(telegram_only=False)
+        statuses: dict[str, dict] = {}
+        worker.server_checked.connect(lambda name, status: statuses.__setitem__(name, status))
+
+        with (
+            patch("updater.release.mirrors.mirror_servers", return_value=[]),
+            patch("updater.release.telegram.get_telegram_version_info", return_value=None),
+            patch("updater.release.forgejo.probe_forgejo", side_effect=ConnectionError("обрыв")),
+        ):
+            worker.run()
+
+        self.assertEqual(statuses["Forgejo API"]["status"], "error")
 
     def test_background_server_worker_has_no_runtime_shutdown_dependency(self) -> None:
         from updater import server_status_workers
@@ -66,18 +80,17 @@ class ServerStatusWorkerContractTests(unittest.TestCase):
     def test_telegram_row_is_diagnostic_and_cannot_announce_an_update(self) -> None:
         from updater import server_status_workers
 
-        pool = SimpleNamespace(servers=[], stats={})
         worker = server_status_workers.ServerCheckWorker(telegram_only=False)
         statuses: list[tuple[str, dict]] = []
         worker.server_checked.connect(lambda name, status: statuses.append((name, status)))
 
         with (
-            patch("updater.server_pool.get_server_pool", return_value=pool),
+            patch("updater.release.mirrors.mirror_servers", return_value=[]),
             patch(
-                "updater.telegram_updater.get_telegram_version_info",
-                return_value={"version": "99.1.2.3", "release_notes": "announcement"},
+                "updater.release.telegram.get_telegram_version_info",
+                return_value={"version": "99.1.2.3"},
             ),
-            patch("updater.forgejo_release.check_api", return_value={"online": True, "response_time": 0.01}),
+            patch("updater.release.forgejo.probe_forgejo", return_value=0.01),
         ):
             worker.run()
 
@@ -85,27 +98,10 @@ class ServerStatusWorkerContractTests(unittest.TestCase):
         self.assertEqual(telegram_status["status"], "online")
         self.assertFalse(telegram_status["is_current"])
         self.assertFalse(telegram_status["update_source"])
-        worker_source = inspect.getsource(server_status_workers.ServerCheckWorker)
-        self.assertNotIn('self._first_online_server_id = "telegram"', worker_source)
-        self.assertNotIn("set_cached_all_versions", worker_source)
 
     def test_update_sources_finish_while_telegram_is_still_waiting(self) -> None:
         from updater import server_status_workers
 
-        pool = SimpleNamespace(
-            servers=[
-                {
-                    "id": "primary",
-                    "name": "Primary",
-                    "host": "updates.example",
-                    "https_port": 888,
-                    "http_port": 887,
-                }
-            ],
-            stats={},
-            record_failure=Mock(),
-            record_success=Mock(),
-        )
         worker = server_status_workers.ServerCheckWorker(telegram_only=False)
         sources_complete = Event()
         telegram_saw_sources_complete: list[bool] = []
@@ -122,14 +118,13 @@ class ServerStatusWorkerContractTests(unittest.TestCase):
             "dev": {"version": "21.1.5.45"},
         }
         with (
-            patch("updater.server_pool.get_server_pool", return_value=pool),
-            patch("updater.telegram_updater.get_telegram_version_info", side_effect=delayed_telegram),
-            patch.object(
-                server_status_workers.ServerCheckWorker,
-                "_request_versions_json",
-                return_value=(versions, None, "direct"),
+            patch("updater.release.mirrors.mirror_servers", return_value=[self.SERVER]),
+            patch("updater.release.telegram.get_telegram_version_info", side_effect=delayed_telegram),
+            patch(
+                "updater.release.mirrors.fetch_versions",
+                return_value=(versions, "HTTPS", "https://updates.example:888", False, 0.02),
             ),
-            patch("updater.forgejo_release.check_api", return_value={"online": True, "response_time": 0.01}),
+            patch("updater.release.forgejo.probe_forgejo", return_value=0.01),
         ):
             worker.run()
 
@@ -139,13 +134,28 @@ class ServerStatusWorkerContractTests(unittest.TestCase):
         self.assertIn("Telegram", emitted_names)
 
     def test_client_telegram_diagnostic_has_no_bot_api_secret(self) -> None:
-        from updater import telegram_updater
+        from updater.release import telegram
 
-        source = inspect.getsource(telegram_updater)
+        source = inspect.getsource(telegram)
         self.assertNotIn("TG_UPDATE_BOT_TOKEN", source)
         self.assertNotIn("api.telegram.org", source)
         self.assertNotIn("_call_bot_api", source)
-        self.assertFalse(hasattr(telegram_updater, "is_telegram_available"))
+
+    def test_telegram_version_comes_only_from_installer_name(self) -> None:
+        """Числа из текста поста (например, IP-адрес) версией не считаются."""
+        from updater.release import telegram
+
+        html = "<p>Сервер 10.20.30.40</p><a>Zapret2Setup_DEV_21_1_5_78.exe</a><p>1.2.3.4</p>"
+        response = SimpleNamespace(status_code=200, text=html)
+        session = SimpleNamespace(get=Mock(return_value=response), close=Mock())
+        with patch.object(telegram, "new_session", return_value=session):
+            info = telegram.get_telegram_version_info("dev")
+
+        self.assertEqual(info["version"], "21.1.5.78")
+
+        session.get.return_value = SimpleNamespace(status_code=200, text="<p>10.20.30.40</p>")
+        with patch.object(telegram, "new_session", return_value=session):
+            self.assertIsNone(telegram.get_telegram_version_info("dev"))
 
     def test_page_runtime_waits_only_for_update_sources(self) -> None:
         from updater.update_page_runtime import UpdatePageRuntime

@@ -210,17 +210,10 @@ def default_orchestra() -> dict[str, Any]:
 
 def default_updater() -> dict[str, Any]:
     return {
-        "release_cache": {},
-        "rate_limit": {},
-        "server_pool": {
-            "stats": {},
-            "selected_server_id": None,
-            "selected_at": None,
-        },
-        "release_manager": {
-            "vps_block_until": 0,
-            "server_stats": {},
-        },
+        # Время последней автопроверки при запуске, которая не нашла
+        # обновлений. От него отсчитывается короткая пауза против частых
+        # перезапусков подряд.
+        "auto_check": {"last_success_at": 0.0},
         # Отметки времени попыток восстановления поставки. Ограничивают
         # переустановку в петле, когда файлы удаляет антивирус.
         "self_repair": {"attempts": []},
