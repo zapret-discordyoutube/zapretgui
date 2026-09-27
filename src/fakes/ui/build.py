@@ -51,6 +51,8 @@ def _configure_table(table: TableWidget) -> None:
     table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     table.setWordWrap(False)
     table.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    # Длинный текст обрезается многоточием посередине, а не растягивает таблицу.
+    table.setTextElideMode(Qt.TextElideMode.ElideMiddle)
     header = table.horizontalHeader()
     for column in range(len(FAKES_COLUMNS) - 1):
         header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)

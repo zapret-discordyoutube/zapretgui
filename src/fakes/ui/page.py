@@ -37,6 +37,30 @@ _USER_MARK = "свой"
 _USER_COLOR = QColor("#60cdff")
 _MISSING_COLOR = QColor("#e05454")
 
+# Длинное hex-значение (например, 64 байта нулей) растягивало столбец «Файл» на
+# всю таблицу. В ячейке показываем начало и размер; полное значение — в подсказке
+# и в строке для пресета.
+_HEX_PREVIEW_DIGITS = 8
+
+
+def _bytes_word(count: int) -> str:
+    if count % 10 == 1 and count % 100 != 11:
+        return "байт"
+    if count % 10 in (2, 3, 4) and count % 100 not in (12, 13, 14):
+        return "байта"
+    return "байт"
+
+
+def compact_file_label(label: str) -> str:
+    text = str(label or "")
+    if not text.lower().startswith("0x"):
+        return text
+    digits = text[2:]
+    if len(digits) <= _HEX_PREVIEW_DIGITS:
+        return text
+    size = len(digits) // 2
+    return f"0x{digits[:_HEX_PREVIEW_DIGITS]}… ({size} {_bytes_word(size)})"
+
 
 def _strategies_text(count: int) -> str:
     if count % 10 == 1 and count % 100 != 11:
@@ -227,7 +251,8 @@ class FakesPage(BasePage):
             used = "?"
         else:
             used = _strategies_text(row.used_by) if row.used_by else "не используется"
-        file_label = row.file_label
+        full_file_label = row.file_label
+        file_label = compact_file_label(full_file_label)
         if row.file_missing:
             file_label = f"{file_label} (файл не найден)"
         values = [
@@ -247,7 +272,9 @@ class FakesPage(BasePage):
                     item.setForeground(_USER_COLOR)
             if column == 1 and row.file_missing:
                 item.setForeground(_MISSING_COLOR)
-            if column in (1, 5):
+            if column == 1:
+                item.setToolTip(full_file_label)
+            elif column == 5:
                 item.setToolTip(value)
             self._ui.table.setItem(index, column, item)
 

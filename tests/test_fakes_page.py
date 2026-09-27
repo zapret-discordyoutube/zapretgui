@@ -138,6 +138,8 @@ def test_page_fills_table_and_runs_actions_through_workers():
         table = page._ui.table
         assert table.rowCount() == 3
         assert table.item(0, 0).text() == "tls_google"
+        # В подсказке ячейки «Файл» — полное значение.
+        assert table.item(0, 1).toolTip() == table.item(0, 1).text()
         assert table.item(0, 4).text() == "3 стратегии"
         assert table.item(1, 4).text() == "не используется"
         assert table.item(2, 0).text() == "mine  · свой"
@@ -204,3 +206,17 @@ def test_page_fills_table_and_runs_actions_through_workers():
     finally:
         page.cleanup()
         page.deleteLater()
+
+
+def test_long_hex_value_is_shown_compactly_in_file_column():
+    # 64 байта нулей в ячейке растягивали столбец «Файл» на всю таблицу.
+    from fakes.ui.page import compact_file_label
+
+    assert compact_file_label("0x" + "00" * 64) == "0x00000000… (64 байта)"
+    assert compact_file_label("0x" + "00" * 16) == "0x00000000… (16 байт)"
+    assert compact_file_label("0x" + "0F" * 21) == "0x0F0F0F0F… (21 байт)"
+    assert compact_file_label("0x" + "00" * 22) == "0x00000000… (22 байта)"
+    # Короткие значения и имена файлов не меняются.
+    assert compact_file_label("0x0F0E0E0F") == "0x0F0E0E0F"
+    assert compact_file_label("0x00") == "0x00"
+    assert compact_file_label("tls_clienthello_www_google_com.bin") == "tls_clienthello_www_google_com.bin"
