@@ -45,8 +45,7 @@ def test_prelaunch_installs_shell_constants_before_module_preload() -> None:
             "install_win32_shellcon_compat",
             side_effect=lambda: calls.append("shellcon"),
         ),
-        patch.object(prelaunch, "_preload_slow_modules", side_effect=lambda: calls.append("preload")),
     ):
         prelaunch.prepare_prelaunch()
 
-    assert calls == ["crash", "archive-lock", "shellcon", "preload"]
+    assert calls == ["crash", "archive-lock", "shellcon"]

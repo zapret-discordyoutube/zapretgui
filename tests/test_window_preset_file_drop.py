@@ -77,9 +77,17 @@ class WindowPresetFileDropTests(unittest.TestCase):
     def test_windows_window_disables_qt_ole_drop_owner(self) -> None:
         from ui.fluent_app_window import ZapretFluentWindow
 
+        installed_app_filters: list[object] = []
+        real_install = QApplication.installEventFilter
+
+        def _record_install(app, event_filter):
+            installed_app_filters.append(event_filter)
+            return real_install(app, event_filter)
+
         with (
             patch("ui.fluent_app_window.use_qt_file_drop", return_value=False),
             patch("ui.fluent_app_window.enable_windows_file_drop", return_value=True),
+            patch.object(QApplication, "installEventFilter", _record_install),
         ):
             window = ZapretFluentWindow()
         self.addCleanup(window.deleteLater)
@@ -88,6 +96,10 @@ class WindowPresetFileDropTests(unittest.TestCase):
 
         self.assertFalse(window.acceptDrops())
         self.assertTrue(window._windows_file_drop_enabled)
+        # Drag-событий Qt на Windows нет: фильтр на всё приложение не ставится,
+        # а подсказка не создаётся вместе с окном при старте.
+        self.assertNotIn(event_filter, installed_app_filters)
+        self.assertIsNone(event_filter._overlay)
 
     def test_rebinds_native_drop_after_qt_recreates_window_handle(self) -> None:
         from ui.fluent_app_window import ZapretFluentWindow

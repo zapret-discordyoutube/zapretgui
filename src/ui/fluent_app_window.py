@@ -85,7 +85,10 @@ class ZapretFluentWindow(FluentWindow):
             target_resolver=self._current_preset_file_drop_target,
             language_resolver=self._current_ui_language,
         )
-        app.installEventFilter(self._preset_file_drop_filter)
+        if use_qt_file_drop():
+            # На Windows drag-событий Qt нет (см. выше), а фильтр на всё
+            # приложение иначе проверял бы каждое событие каждого объекта.
+            app.installEventFilter(self._preset_file_drop_filter)
         self._register_windows_file_drop()
         # Событий наведения при переносе Windows повышенному окну не даёт,
         # поэтому подсказку включает опрос косвенных признаков переноса.
@@ -221,7 +224,7 @@ class ZapretFluentWindow(FluentWindow):
         super().resizeEvent(event)
         self._rescale_bg()
         event_filter = getattr(self, "_preset_file_drop_filter", None)
-        overlay = getattr(event_filter, "overlay", None)
+        overlay = getattr(event_filter, "_overlay", None)
         sync_geometry = getattr(overlay, "sync_geometry", None)
         if callable(sync_geometry):
             sync_geometry()

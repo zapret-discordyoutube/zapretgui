@@ -261,6 +261,16 @@ class PresetFileDropOverlay(QWidget):
         )
 
 
+_DRAG_EVENT_TYPES = frozenset(
+    {
+        QEvent.Type.DragEnter,
+        QEvent.Type.DragMove,
+        QEvent.Type.DragLeave,
+        QEvent.Type.Drop,
+    }
+)
+
+
 class WindowPresetFileDropFilter(QObject):
     """Направляет TXT/ZIP текущей странице, если она умеет их импортировать."""
 
@@ -276,12 +286,18 @@ class WindowPresetFileDropFilter(QObject):
         self._window = window
         self._target_resolver = target_resolver
         self._drop_delegate_ref = None
-        self.overlay = overlay
-        if self.overlay is None and isinstance(window, QWidget):
-            self.overlay = PresetFileDropOverlay(
-                window,
-                language_resolver=language_resolver,
+        self._language_resolver = language_resolver
+        self._overlay = overlay
+
+    @property
+    def overlay(self):
+        """Оверлей создаётся при первом показе, а не вместе с окном при старте."""
+        if self._overlay is None and isinstance(self._window, QWidget):
+            self._overlay = PresetFileDropOverlay(
+                self._window,
+                language_resolver=self._language_resolver,
             )
+        return self._overlay
 
     def _belongs_to_window(self, watched) -> bool:
         if watched is self._window:
@@ -341,10 +357,10 @@ class WindowPresetFileDropFilter(QObject):
         return imported
 
     def eventFilter(self, watched, event):  # noqa: N802 (Qt override)
-        if not self._belongs_to_window(watched):
+        event_type = event.type()
+        if event_type not in _DRAG_EVENT_TYPES or not self._belongs_to_window(watched):
             return False
 
-        event_type = event.type()
         if event_type == QEvent.Type.DragLeave:
             self._hide_overlay()
             return False
@@ -385,7 +401,7 @@ class WindowPresetFileDropFilter(QObject):
         return True
 
     def hide_hover_hint(self) -> None:
-        action = getattr(self.overlay, "hide_hover_hint", None)
+        action = getattr(self._overlay, "hide_hover_hint", None)
         if callable(action):
             action()
         else:
@@ -410,7 +426,7 @@ class WindowPresetFileDropFilter(QObject):
             self._hide_overlay()
 
     def _hide_overlay(self) -> None:
-        action = getattr(self.overlay, "hide_hint", None)
+        action = getattr(self._overlay, "hide_hint", None)
         if callable(action):
             action()
 

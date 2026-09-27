@@ -40,7 +40,7 @@ class PyInstallerArchiveImportLockTests(unittest.TestCase):
                 sys.frozen = previous_frozen
             pyinstaller_archive_import_lock._reset_for_tests()
 
-    def test_prelaunch_installs_archive_lock_before_background_preload(self) -> None:
+    def test_prelaunch_installs_archive_lock_before_background_imports(self) -> None:
         from main import prelaunch
 
         calls: list[str] = []
@@ -48,11 +48,12 @@ class PyInstallerArchiveImportLockTests(unittest.TestCase):
         with (
             patch.object(prelaunch, "_install_crash_handler", side_effect=lambda: calls.append("crash")),
             patch.object(prelaunch, "install_pyinstaller_archive_import_lock", side_effect=lambda: calls.append("lock")),
-            patch.object(prelaunch, "_preload_slow_modules", side_effect=lambda: calls.append("preload")),
         ):
             prelaunch.prepare_prelaunch()
 
-        self.assertEqual(calls, ["crash", "lock", "preload"])
+        # Фоновые импорты стартуют позже (import-warmup в main.entry и после
+        # готовности окна), к тому моменту блокировка архива уже стоит.
+        self.assertEqual(calls, ["crash", "lock"])
 
 
 if __name__ == "__main__":

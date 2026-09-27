@@ -732,6 +732,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_startup_checks"),
             patch.object(post_startup, "install_deferred_maintenance"),
             patch.object(post_startup, "install_telegram_proxy_startup"),
+            patch.object(post_startup, "install_after_interactive_import_warmup"),
             patch.object(post_startup, "install_telegram_proxy_page_warmup"),
             patch.object(post_startup, "install_secondary_page_warmup"),
             patch.object(post_startup, "install_lists_check"),
@@ -2313,6 +2314,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_startup_checks"),
             patch.object(post_startup, "install_deferred_maintenance"),
             patch.object(post_startup, "install_telegram_proxy_startup"),
+            patch.object(post_startup, "install_after_interactive_import_warmup"),
             patch.object(post_startup, "install_telegram_proxy_page_warmup"),
             patch.object(post_startup, "install_secondary_page_warmup"),
             patch.object(post_startup, "install_lists_check"),
@@ -2359,6 +2361,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_startup_checks"),
             patch.object(post_startup, "install_deferred_maintenance"),
             patch.object(post_startup, "install_telegram_proxy_startup"),
+            patch.object(post_startup, "install_after_interactive_import_warmup"),
             patch.object(post_startup, "install_telegram_proxy_page_warmup") as install_telegram_proxy_page_warmup,
             patch.object(post_startup, "install_secondary_page_warmup"),
             patch.object(post_startup, "install_lists_check"),
@@ -2405,6 +2408,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_startup_checks"),
             patch.object(post_startup, "install_deferred_maintenance"),
             patch.object(post_startup, "install_telegram_proxy_startup"),
+            patch.object(post_startup, "install_after_interactive_import_warmup"),
             patch.object(post_startup, "install_telegram_proxy_page_warmup"),
             patch.object(post_startup, "install_secondary_page_warmup"),
             patch.object(post_startup, "install_lists_check"),
@@ -2456,6 +2460,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_startup_checks"),
             patch.object(post_startup, "install_deferred_maintenance"),
             patch.object(post_startup, "install_telegram_proxy_startup"),
+            patch.object(post_startup, "install_after_interactive_import_warmup"),
             patch.object(post_startup, "install_telegram_proxy_page_warmup"),
             patch.object(post_startup, "install_secondary_page_warmup"),
             patch.object(post_startup, "install_lists_check"),
@@ -2511,6 +2516,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_startup_checks"),
             patch.object(post_startup, "install_deferred_maintenance"),
             patch.object(post_startup, "install_telegram_proxy_startup"),
+            patch.object(post_startup, "install_after_interactive_import_warmup"),
             patch.object(post_startup, "install_telegram_proxy_page_warmup"),
             patch.object(post_startup, "install_secondary_page_warmup"),
             patch.object(post_startup, "install_lists_check"),
@@ -2606,6 +2612,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_startup_checks"),
             patch.object(post_startup, "install_deferred_maintenance"),
             patch.object(post_startup, "install_telegram_proxy_startup"),
+            patch.object(post_startup, "install_after_interactive_import_warmup"),
             patch.object(post_startup, "install_telegram_proxy_page_warmup"),
             patch.object(post_startup, "install_secondary_page_warmup"),
             patch.object(post_startup, "install_lists_check"),
@@ -2655,6 +2662,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_startup_checks"),
             patch.object(post_startup, "install_deferred_maintenance"),
             patch.object(post_startup, "install_telegram_proxy_startup"),
+            patch.object(post_startup, "install_after_interactive_import_warmup"),
             patch.object(post_startup, "install_telegram_proxy_page_warmup"),
             patch.object(post_startup, "install_secondary_page_warmup"),
             patch.object(post_startup, "install_lists_check"),
@@ -2953,6 +2961,9 @@ class StartupRuntimeSetupTests(unittest.TestCase):
 
 
 class _BaseWindowEvents:
+    def installEventFilter(self, event_filter) -> None:
+        self.event_filters = [*getattr(self, "event_filters", []), event_filter]
+
     def nativeEvent(self, event_type, message):
         self.calls.append("base_native")
         return (False, 123)
@@ -2980,6 +2991,35 @@ class _BaseWindowEvents:
 
 
 class WindowLifecycleEarlyEventTests(unittest.TestCase):
+    def test_first_show_logs_first_paint_once(self) -> None:
+        from PyQt6.QtCore import QEvent
+
+        from main.window_lifecycle import WindowLifecycleMixin
+
+        class Window(WindowLifecycleMixin, _BaseWindowEvents):
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+                self.startup_state = SimpleNamespace(ttff_logged=False, ttff_ms=None)
+
+            def findChildren(self, *_args, **_kwargs):
+                return []
+
+        window = Window()
+        watched = SimpleNamespace(removeEventFilter=Mock())
+        with (
+            patch("main.window_lifecycle.QTimer.singleShot", side_effect=lambda *_args, **_kwargs: None),
+            patch("main.window_lifecycle.emit_startup_metric") as emit_metric,
+        ):
+            window.showEvent(object())
+            window.showEvent(object())
+            (probe,) = window.event_filters
+            probe.eventFilter(watched, QEvent(QEvent.Type.Show))
+            probe.eventFilter(watched, QEvent(QEvent.Type.Paint))
+
+        metrics = [call.args[0] for call in emit_metric.call_args_list]
+        self.assertEqual(metrics, ["StartupTTFF", "StartupFirstPaint"])
+        watched.removeEventFilter.assert_called_once_with(probe)
+
     def test_resize_move_and_show_events_do_not_require_attached_runtime(self) -> None:
         from main.window_lifecycle import WindowLifecycleMixin
 

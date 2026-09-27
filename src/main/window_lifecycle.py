@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, QTimer
+from PyQt6.QtCore import QEvent, QObject, QTimer
 from PyQt6.QtWidgets import QWidget
 
 from log.log import log
@@ -14,6 +14,20 @@ from main.runtime_state import (
     startup_elapsed_ms,
 )
 from ui.window_preset_file_drop import handle_native_preset_file_drop
+
+
+class _FirstPaintProbe(QObject):
+    """Один раз отмечает в журнале первое рисование окна.
+
+    StartupTTFF — это только событие показа: окно уже «показано», но пока
+    главный поток собирает страницу, на экране ещё ничего нет.
+    """
+
+    def eventFilter(self, watched, event):  # noqa: N802 (Qt override)
+        if event.type() == QEvent.Type.Paint:
+            watched.removeEventFilter(self)
+            emit_startup_metric("StartupFirstPaint", "first paint")
+        return False
 
 
 class WindowLifecycleMixin:
@@ -201,6 +215,8 @@ class WindowLifecycleMixin:
             startup_state.ttff_logged = True
             startup_state.ttff_ms = startup_elapsed_ms()
             emit_startup_metric("StartupTTFF", "first showEvent")
+            self._first_paint_probe = _FirstPaintProbe()
+            self.installEventFilter(self._first_paint_probe)
 
         geometry_runtime = self._get_window_geometry_runtime()
         if geometry_runtime is not None:

@@ -42,10 +42,39 @@ class ImportWarmupTests(unittest.TestCase):
                 self.assertFalse(qtawesome.icon(icon_name).isNull())
         self.assertIsNotNone(app)
 
-    def test_asyncio_is_warmed_up(self) -> None:
+    def test_asyncio_is_warmed_up_after_window_is_ready(self) -> None:
         # Первое обращение к Telegram Proxy тянет asyncio вместе с
         # asyncio.windows_events — в логе это давало рывок на ~64 мс.
-        self.assertIn("asyncio", entry.IMPORT_WARMUP_MODULES)
+        # Окну он не нужен, поэтому греется уже после готовности интерфейса.
+        from main.post_startup_import_warmup import AFTER_INTERACTIVE_IMPORT_WARMUP_MODULES
+
+        self.assertIn("asyncio", AFTER_INTERACTIVE_IMPORT_WARMUP_MODULES)
+        self.assertNotIn("asyncio", entry.IMPORT_WARMUP_MODULES)
+
+    def test_after_interactive_warmup_starts_only_when_window_is_ready(self) -> None:
+        from main import post_startup_import_warmup as warmup
+
+        class _Signal:
+            def __init__(self) -> None:
+                self.callbacks = []
+
+            def connect(self, callback) -> None:
+                self.callbacks.append(callback)
+
+        signal = _Signal()
+        startup_host = SimpleNamespace(
+            startup_interactive_ready=signal,
+            startup_state=SimpleNamespace(interactive_logged=False),
+            is_alive=lambda: True,
+        )
+        with patch.object(warmup, "start_daemon_thread") as start_thread:
+            warmup.install_after_interactive_import_warmup(startup_host, log_startup_metric=lambda *_a: None)
+            start_thread.assert_not_called()
+
+            signal.callbacks[0]()
+
+        start_thread.assert_called_once()
+        self.assertEqual(start_thread.call_args.args[0], "import-warmup-after-interactive")
 
     def test_failing_import_does_not_stop_the_rest(self) -> None:
         warmed = entry.warm_up_modules(("zapret_no_such_module_xyz", "asyncio"))
