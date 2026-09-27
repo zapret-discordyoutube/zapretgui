@@ -2925,3 +2925,609 @@ name = multisplit fake_default_tls + hostfakesplit rzd.ru
 label = experimental
 --lua-desync=multisplit:blob=fake_default_tls:tcp_ts=-1000:pos=2:nodrop:repeats=4
 --lua-desync=hostfakesplit:host=rzd.ru:midhost=host-2:badsum:tcp_ack=-66000:tcp_ts_up
+
+# --- Flowseal 1.10.3 winws2 ports (generated) ---
+
+[flowseal_1103_general_game_other]
+name = Flowseal 1.10.3 / general / Game other
+author = Flowseal
+label = experimental
+blobs = tls_4pda
+--lua-desync=multisplit:pos=1:seqovl=568:seqovl_pattern=tls_4pda:payload=~empty
+
+[flowseal_1103_alt1_google_tls]
+name = Flowseal 1.10.3 / ALT1 / Google TLS
+author = Flowseal
+label = experimental
+blobs = tls_google
+--lua-desync=fake:blob=tls_google:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=6
+
+[flowseal_1103_alt1_google_http]
+name = Flowseal 1.10.3 / ALT1 / Google HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=6
+
+[flowseal_1103_alt1_google_main]
+name = Flowseal 1.10.3 / ALT1 / Google TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fakedsplit:pos=2:pattern=0x00:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=6
+
+[flowseal_1103_alt1_tcp_tls]
+name = Flowseal 1.10.3 / ALT1 / TCP TLS
+author = Flowseal
+label = experimental
+blobs = stun_pat,tls_google
+--lua-desync=fake:blob=stun_pat:tcp_ts=-600000:tcp_ts_up:repeats=6
+--lua-desync=fake:blob=tls_google:tcp_ts=-600000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt1_tcp_http]
+name = Flowseal 1.10.3 / ALT1 / TCP HTTP
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt1_tcp_main]
+name = Flowseal 1.10.3 / ALT1 / TCP TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fakedsplit:pos=2:pattern=0x00:tcp_ts=-600000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt1_discord_tls]
+name = Flowseal 1.10.3 / ALT1 / Discord media TLS
+author = Flowseal
+label = experimental
+blobs = tls_google
+--lua-desync=fake:blob=tls_google:tcp_ts=-600000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt1_discord_http]
+name = Flowseal 1.10.3 / ALT1 / Discord media HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_ts=-600000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt1_game_other]
+name = Flowseal 1.10.3 / ALT1 / Game other
+author = Flowseal
+label = experimental
+blobs = stun_pat,tls_google
+--lua-desync=fake:blob=stun_pat:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+--lua-desync=fake:blob=tls_google:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+--lua-desync=fakedsplit:pos=2:pattern=0x00:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty
+
+[flowseal_1103_alt2_game_other]
+name = Flowseal 1.10.3 / ALT2 / Game other
+author = Flowseal
+label = experimental
+blobs = tls_google
+--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google:payload=~empty
+
+[flowseal_1103_alt3_google_tls]
+name = Flowseal 1.10.3 / ALT3 / Google TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_ts=-600000:tcp_ts_up:ip_id=zero
+
+[flowseal_1103_alt3_google_http]
+name = Flowseal 1.10.3 / ALT3 / Google HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_ts=-600000:tcp_ts_up:ip_id=zero
+
+[flowseal_1103_alt3_google_main]
+name = Flowseal 1.10.3 / ALT3 / Google TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=hostfakesplit:host=www.google.com:nofake2:tcp_ts=-600000:tcp_ts_up:ip_id=zero
+
+[flowseal_1103_alt3_tcp_tls]
+name = Flowseal 1.10.3 / ALT3 / TCP TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=ya.ru:tcp_ts=-600000:tcp_ts_up
+
+[flowseal_1103_alt3_tcp_http]
+name = Flowseal 1.10.3 / ALT3 / TCP HTTP
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up
+
+[flowseal_1103_alt3_tcp_main]
+name = Flowseal 1.10.3 / ALT3 / TCP TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=hostfakesplit:host=ya.ru:nofake2:tcp_ts=-600000:tcp_ts_up
+
+[flowseal_1103_alt3_discord_tls]
+name = Flowseal 1.10.3 / ALT3 / Discord media TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_ts=-600000:tcp_ts_up
+
+[flowseal_1103_alt3_discord_http]
+name = Flowseal 1.10.3 / ALT3 / Discord media HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_ts=-600000:tcp_ts_up
+
+[flowseal_1103_alt3_discord_main]
+name = Flowseal 1.10.3 / ALT3 / Discord media TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=hostfakesplit:host=www.google.com:nofake2:tcp_ts=-600000:tcp_ts_up
+
+[flowseal_1103_alt3_game_other]
+name = Flowseal 1.10.3 / ALT3 / Game other
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:payload=~empty,tls_client_hello,http_req
+
+[flowseal_1103_alt4_google_tls]
+name = Flowseal 1.10.3 / ALT4 / Google TLS
+author = Flowseal
+label = experimental
+blobs = tls_google
+--lua-desync=fake:blob=tls_google:tcp_seq=1000:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=6
+
+[flowseal_1103_alt4_google_http]
+name = Flowseal 1.10.3 / ALT4 / Google HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_seq=1000:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=6
+
+[flowseal_1103_alt4_google_main]
+name = Flowseal 1.10.3 / ALT4 / Google TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=multisplit:pos=2:ip_id=zero
+
+[flowseal_1103_alt4_tcp_tls]
+name = Flowseal 1.10.3 / ALT4 / TCP TLS
+author = Flowseal
+label = experimental
+blobs = stun_pat,tls_google
+--lua-desync=fake:blob=stun_pat:tcp_seq=1000:tcp_ack=-66000:tcp_ts_up:repeats=6
+--lua-desync=fake:blob=tls_google:tcp_seq=1000:tcp_ack=-66000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt4_tcp_http]
+name = Flowseal 1.10.3 / ALT4 / TCP HTTP
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=fake:blob=tls_max:tcp_seq=1000:tcp_ack=-66000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt4_tcp_main]
+name = Flowseal 1.10.3 / ALT4 / TCP TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=multisplit:pos=2
+
+[flowseal_1103_alt4_discord_tls]
+name = Flowseal 1.10.3 / ALT4 / Discord media TLS
+author = Flowseal
+label = experimental
+blobs = tls_google
+--lua-desync=fake:blob=tls_google:tcp_seq=1000:tcp_ack=-66000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt4_discord_http]
+name = Flowseal 1.10.3 / ALT4 / Discord media HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_seq=1000:tcp_ack=-66000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt4_game_other]
+name = Flowseal 1.10.3 / ALT4 / Game other
+author = Flowseal
+label = experimental
+blobs = stun_pat,tls_google
+--lua-desync=fake:blob=stun_pat:tcp_seq=1000:tcp_ack=-66000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+--lua-desync=fake:blob=tls_google:tcp_seq=1000:tcp_ack=-66000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+--lua-desync=multisplit:pos=2:payload=~empty
+
+[flowseal_1103_alt5_tcp_main]
+name = Flowseal 1.10.3 / ALT5 / TCP TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=multidisorder_legacy:pos=2
+
+[flowseal_1103_alt5_game_other]
+name = Flowseal 1.10.3 / ALT5 / Game other
+author = Flowseal
+label = experimental
+--lua-desync=syndata
+--lua-desync=multidisorder_legacy:pos=2:payload=~empty
+
+[flowseal_1103_alt6_game_other]
+name = Flowseal 1.10.3 / ALT6 / Game other
+author = Flowseal
+label = experimental
+blobs = tls_google
+--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:payload=~empty
+
+[flowseal_1103_alt8_google_tls]
+name = Flowseal 1.10.3 / ALT8 / Google TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_tls:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=6
+
+[flowseal_1103_alt8_google_http]
+name = Flowseal 1.10.3 / ALT8 / Google HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=6
+
+[flowseal_1103_alt8_tcp_tls]
+name = Flowseal 1.10.3 / ALT8 / TCP TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_tls:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt8_tcp_http]
+name = Flowseal 1.10.3 / ALT8 / TCP HTTP
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=fake:blob=tls_max:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt8_discord_http]
+name = Flowseal 1.10.3 / ALT8 / Discord media HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt8_game_other]
+name = Flowseal 1.10.3 / ALT8 / Game other
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=fake:blob=tls_max:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+
+[flowseal_1103_alt9_google_main]
+name = Flowseal 1.10.3 / ALT9 / Google TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=4
+
+[flowseal_1103_alt9_tcp_main]
+name = Flowseal 1.10.3 / ALT9 / TCP TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_ts_up:tcp_md5:repeats=4
+
+[flowseal_1103_alt9_discord_main]
+name = Flowseal 1.10.3 / ALT9 / Discord media TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:tcp_ts_up:repeats=4
+
+[flowseal_1103_alt9_ipset_main]
+name = Flowseal 1.10.3 / ALT9 / IP-set TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_ts_up:repeats=4
+
+[flowseal_1103_alt10_tcp_tls]
+name = Flowseal 1.10.3 / ALT10 / TCP TLS
+author = Flowseal
+label = experimental
+blobs = stun_pat,tls_4pda
+--lua-desync=fake:blob=stun_pat:tcp_ts=-600000:tcp_ts_up:repeats=6
+--lua-desync=fake:blob=tls_4pda:tcp_ts=-600000:tcp_ts_up:repeats=6
+
+[flowseal_1103_alt10_game_other]
+name = Flowseal 1.10.3 / ALT10 / Game other
+author = Flowseal
+label = experimental
+blobs = stun_pat,tls_4pda
+--lua-desync=fake:blob=stun_pat:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+--lua-desync=fake:blob=tls_4pda:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+
+[flowseal_1103_alt11_google_tls]
+name = Flowseal 1.10.3 / ALT11 / Google TLS
+author = Flowseal
+label = experimental
+blobs = tls_google
+--lua-desync=fake:blob=tls_google:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=8
+
+[flowseal_1103_alt11_google_http]
+name = Flowseal 1.10.3 / ALT11 / Google HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=8
+
+[flowseal_1103_alt11_tcp_main]
+name = Flowseal 1.10.3 / ALT11 / TCP TLS+HTTP
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max
+
+[flowseal_1103_alt11_game_other]
+name = Flowseal 1.10.3 / ALT11 / Game other
+author = Flowseal
+label = experimental
+blobs = stun2,tls_max
+--lua-desync=fake:blob=stun2:tcp_ts=-600000:tcp_ts_up:repeats=8:payload=~empty,tls_client_hello,http_req
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=8:payload=~empty,tls_client_hello,http_req
+--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max:payload=~empty
+
+[flowseal_1103_alt12_tcp_tls]
+name = Flowseal 1.10.3 / ALT12 / TCP TLS
+author = Flowseal
+label = experimental
+blobs = stun_pat,tls_max
+--lua-desync=fake:blob=stun_pat:tcp_ts=-600000:tcp_ts_up:repeats=8
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=8
+
+[flowseal_1103_alt12_game_other]
+name = Flowseal 1.10.3 / ALT12 / Game other
+author = Flowseal
+label = experimental
+blobs = stun_pat,tls_max
+--lua-desync=fake:blob=stun_pat:tcp_ts=-600000:tcp_ts_up:repeats=8:payload=~empty,tls_client_hello,http_req
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=8:payload=~empty,tls_client_hello,http_req
+--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max:payload=~empty
+
+[flowseal_1103_alt13_google_main]
+name = Flowseal 1.10.3 / ALT13 / Google TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:tcp_ts_up
+
+[flowseal_1103_alt13_tcp_tls]
+name = Flowseal 1.10.3 / ALT13 / TCP TLS
+author = Flowseal
+label = experimental
+blobs = tls_sochi,stun2
+--lua-desync=fake:blob=tls_sochi:tcp_ts=-600000:tcp_ts_up:repeats=5
+--lua-desync=fake:blob=stun2:tcp_ts=-600000:tcp_ts_up:repeats=5
+
+[flowseal_1103_alt13_tcp_http]
+name = Flowseal 1.10.3 / ALT13 / TCP HTTP
+author = Flowseal
+label = experimental
+blobs = tls_sochi
+--lua-desync=fake:blob=tls_sochi:tcp_ts=-600000:tcp_ts_up:repeats=5
+
+[flowseal_1103_alt13_tcp_main]
+name = Flowseal 1.10.3 / ALT13 / TCP TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=hostfakesplit:host=mail.ru:nofake2:tcp_ts=-600000:tcp_ts_up:repeats=5
+
+[flowseal_1103_alt13_discord_tls]
+name = Flowseal 1.10.3 / ALT13 / Discord media TLS
+author = Flowseal
+label = experimental
+blobs = tls_google
+--lua-desync=fake:blob=tls_google:tcp_ts=-600000:tcp_ts_up:repeats=7
+
+[flowseal_1103_alt13_discord_http]
+name = Flowseal 1.10.3 / ALT13 / Discord media HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_ts=-600000:tcp_ts_up:repeats=7
+
+[flowseal_1103_alt13_game_other]
+name = Flowseal 1.10.3 / ALT13 / Game other
+author = Flowseal
+label = experimental
+blobs = tls_sochi,stun2
+--lua-desync=fake:blob=tls_sochi:tcp_ts=-600000:tcp_ts_up:repeats=5:payload=~empty,tls_client_hello,http_req
+--lua-desync=fake:blob=stun2:tcp_ts=-600000:tcp_ts_up:repeats=5:payload=~empty,tls_client_hello,http_req
+
+[flowseal_1103_fake_tls_auto_google_tls]
+name = Flowseal 1.10.3 / FAKE TLS AUTO / Google TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=11
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=-10000:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=11
+
+[flowseal_1103_fake_tls_auto_google_http]
+name = Flowseal 1.10.3 / FAKE TLS AUTO / Google HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_seq=-10000:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=11
+
+[flowseal_1103_fake_tls_auto_google_main]
+name = Flowseal 1.10.3 / FAKE TLS AUTO / Google TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=multidisorder_legacy:pos=1,midsld:ip_id=zero
+
+[flowseal_1103_fake_tls_auto_tcp_tls]
+name = Flowseal 1.10.3 / FAKE TLS AUTO / TCP TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:tcp_ts_up:repeats=11
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=-10000:tcp_ack=-66000:tcp_ts_up:repeats=11
+
+[flowseal_1103_fake_tls_auto_tcp_http]
+name = Flowseal 1.10.3 / FAKE TLS AUTO / TCP HTTP
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=fake:blob=tls_max:tcp_seq=-10000:tcp_ack=-66000:tcp_ts_up:repeats=11
+
+[flowseal_1103_fake_tls_auto_discord_http]
+name = Flowseal 1.10.3 / FAKE TLS AUTO / Discord media HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_seq=-10000:tcp_ack=-66000:tcp_ts_up:repeats=11
+
+[flowseal_1103_fake_tls_auto_game_other]
+name = Flowseal 1.10.3 / FAKE TLS AUTO / Game other
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:tcp_ts_up:repeats=11:payload=~empty,tls_client_hello,http_req
+--lua-desync=fake:blob=tls_max:tcp_seq=-10000:tcp_ack=-66000:tcp_ts_up:repeats=11:payload=~empty,tls_client_hello,http_req
+--lua-desync=multidisorder_legacy:pos=1,midsld:payload=~empty
+
+[flowseal_1103_fake_tls_auto_alt_google_tls]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / Google TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt_google_http]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / Google HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt_google_main]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / Google TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fakedsplit:pos=1:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt_tcp_tls]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / TCP TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt_tcp_http]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / TCP HTTP
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=fake:blob=tls_max:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt_tcp_main]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / TCP TLS+HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fakedsplit:pos=1:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt_discord_http]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / Discord media HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt_game_other]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / Game other
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=fake:blob=tls_max:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=8:payload=~empty,tls_client_hello,http_req
+--lua-desync=fakedsplit:pos=1:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=8:payload=~empty
+
+[flowseal_1103_fake_tls_auto_alt2_google_tls]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / Google TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=10000000:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt2_google_http]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / Google HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_seq=10000000:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt2_tcp_tls]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / TCP TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=10000000:tcp_ack=-66000:tcp_ts_up:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt2_tcp_http]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / TCP HTTP
+author = Flowseal
+label = experimental
+blobs = tls_max
+--lua-desync=fake:blob=tls_max:tcp_seq=10000000:tcp_ack=-66000:tcp_ts_up:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt2_discord_http]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / Discord media HTTP
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_http:tcp_seq=10000000:tcp_ack=-66000:tcp_ts_up:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt2_game_other]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / Game other
+author = Flowseal
+label = experimental
+blobs = tls_max,tls_google
+--lua-desync=fake:blob=tls_max:tcp_seq=10000000:tcp_ack=-66000:tcp_ts_up:repeats=8:payload=~empty,tls_client_hello,http_req
+--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:payload=~empty
+
+[flowseal_1103_fake_tls_auto_alt3_google_tls]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / Google TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt3_tcp_tls]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / TCP TLS
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_ts=-600000:tcp_ts_up:repeats=8
+
+[flowseal_1103_fake_tls_auto_alt3_game_other]
+name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / Game other
+author = Flowseal
+label = experimental
+blobs = tls_max,tls_google
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=8:payload=~empty,tls_client_hello,http_req
+--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:payload=~empty
+
+[flowseal_1103_simple_fake_game_other]
+name = Flowseal 1.10.3 / SIMPLE FAKE / Game other
+author = Flowseal
+label = experimental
+blobs = stun2,tls_google
+--lua-desync=fake:blob=stun2:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+--lua-desync=fake:blob=tls_google:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+
+[flowseal_1103_simple_fake_alt_google_tls]
+name = Flowseal 1.10.3 / SIMPLE FAKE ALT / Google TLS
+author = Flowseal
+label = experimental
+blobs = tls_google
+--lua-desync=fake:blob=tls_google:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=6
+
+[flowseal_1103_simple_fake_alt_tcp_tls]
+name = Flowseal 1.10.3 / SIMPLE FAKE ALT / TCP TLS
+author = Flowseal
+label = experimental
+blobs = stun2,tls_google
+--lua-desync=fake:blob=stun2:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6
+--lua-desync=fake:blob=tls_google:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6
+
+[flowseal_1103_simple_fake_alt_discord_tls]
+name = Flowseal 1.10.3 / SIMPLE FAKE ALT / Discord media TLS
+author = Flowseal
+label = experimental
+blobs = tls_google
+--lua-desync=fake:blob=tls_google:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6
+
+[flowseal_1103_simple_fake_alt_game_other]
+name = Flowseal 1.10.3 / SIMPLE FAKE ALT / Game other
+author = Flowseal
+label = experimental
+blobs = stun2,tls_google
+--lua-desync=fake:blob=stun2:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+--lua-desync=fake:blob=tls_google:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+
+[flowseal_1103_simple_fake_alt2_tcp_tls]
+name = Flowseal 1.10.3 / SIMPLE FAKE ALT2 / TCP TLS
+author = Flowseal
+label = experimental
+blobs = stun2,tls_max
+--lua-desync=fake:blob=stun2:tcp_ts=-600000:tcp_ts_up:repeats=6
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=6
+
+[flowseal_1103_simple_fake_alt2_game_other]
+name = Flowseal 1.10.3 / SIMPLE FAKE ALT2 / Game other
+author = Flowseal
+label = experimental
+blobs = stun2,tls_max
+--lua-desync=fake:blob=stun2:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
+--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req

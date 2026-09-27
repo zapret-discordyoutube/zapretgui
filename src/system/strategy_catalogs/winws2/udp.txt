@@ -491,3 +491,65 @@ label = experimental
 blobs = quic_google,discord_active
 --lua-desync=fake:blob=quic_google:repeats=4:payload=all
 --lua-desync=fake:blob=discord_active:repeats=4:payload=all
+
+# --- Flowseal 1.10.3 winws2 ports (generated) ---
+
+[flowseal_1103_general_game_quic]
+name = Flowseal 1.10.3 / general / Game QUIC
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_quic:repeats=12
+
+[flowseal_1103_general_game_known_udp]
+name = Flowseal 1.10.3 / general / Game known UDP
+author = Flowseal
+label = experimental
+blobs = fake_zero64
+--lua-desync=fake:blob=fake_zero64:repeats=12
+
+[flowseal_1103_general_game_other_udp]
+name = Flowseal 1.10.3 / general / Game other UDP
+author = Flowseal
+label = experimental
+blobs = game_active
+--lua-desync=fake:blob=game_active:repeats=12:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_1103_alt3_game_quic]
+name = Flowseal 1.10.3 / ALT3 / Game QUIC
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_quic:repeats=10
+
+[flowseal_1103_alt3_game_known_udp]
+name = Flowseal 1.10.3 / ALT3 / Game known UDP
+author = Flowseal
+label = experimental
+blobs = fake_zero64
+--lua-desync=fake:blob=fake_zero64:repeats=10
+
+[flowseal_1103_alt3_game_other_udp]
+name = Flowseal 1.10.3 / ALT3 / Game other UDP
+author = Flowseal
+label = experimental
+blobs = game_active
+--lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
+
+[flowseal_1103_alt5_game_quic]
+name = Flowseal 1.10.3 / ALT5 / Game QUIC
+author = Flowseal
+label = experimental
+--lua-desync=fake:blob=fake_default_quic:repeats=14
+
+[flowseal_1103_alt5_game_known_udp]
+name = Flowseal 1.10.3 / ALT5 / Game known UDP
+author = Flowseal
+label = experimental
+blobs = fake_zero64
+--lua-desync=fake:blob=fake_zero64:repeats=14
+
+[flowseal_1103_alt5_game_other_udp]
+name = Flowseal 1.10.3 / ALT5 / Game other UDP
+author = Flowseal
+label = experimental
+blobs = game_active
+--lua-desync=fake:blob=game_active:repeats=14:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun

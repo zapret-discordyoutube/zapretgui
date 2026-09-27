@@ -548,3 +548,34 @@ label = experimental
 blobs = quic_google,discord_active
 --lua-desync=fake:blob=quic_google:repeats=4:payload=all
 --lua-desync=fake:blob=discord_active:repeats=4:payload=all
+
+# --- Flowseal 1.10.3 winws2 ports (generated) ---
+
+[flowseal_1103_general_voice_discord_stun]
+name = Flowseal 1.10.3 / general / Discord voice Discord+STUN
+author = Flowseal
+label = experimental
+blobs = discord_active
+--lua-desync=fake:blob=discord_active:repeats=6
+
+[flowseal_1103_alt12_voice_discord]
+name = Flowseal 1.10.3 / ALT12 / Discord voice Discord discovery
+author = Flowseal
+label = experimental
+blobs = stun_pat,discord_active
+--lua-desync=fake:blob=stun_pat:repeats=3
+--lua-desync=fake:blob=discord_active:repeats=3
+
+[flowseal_1103_alt12_voice_stun]
+name = Flowseal 1.10.3 / ALT12 / Discord voice STUN
+author = Flowseal
+label = experimental
+blobs = discord_active
+--lua-desync=fake:blob=discord_active:repeats=3
+
+[flowseal_1103_alt13_voice_discord_stun]
+name = Flowseal 1.10.3 / ALT13 / Discord voice Discord+STUN
+author = Flowseal
+label = experimental
+blobs = discord_active
+--lua-desync=fake:blob=discord_active:repeats=5
