@@ -114,12 +114,21 @@ class WindowPageHost:
             return False
 
         try:
+            previous = self.current_page()
             step_started_at = time.perf_counter()
             self._window.switchTo(page)
             self._log_optional_switch_step(page_name, "open.switch.qfluent", step_started_at)
-            return True
         except Exception:
             return False
+        if previous is not page:
+            # Своя анимация перехода вместо стандартного «выезда» qfluentwidgets.
+            try:
+                from ui.page_transition import reveal_page
+
+                reveal_page(page, previous=previous)
+            except Exception:
+                pass
+        return True
 
     def _log_optional_switch_step(
         self,

@@ -43,6 +43,9 @@ class ZapretFluentWindow(FluentWindow):
             f"{(_time.perf_counter() - t_super) * 1000:.0f}ms",
         )
         self.setWindowTitle(f"Zapret2 v{APP_VERSION}")
+        # Стандартный «выезд» страниц снизу отключён: переход рисует
+        # ui/page_transition.py (проявление и раскрытие сверху вниз).
+        self.stackedWidget.setAnimationEnabled(False)
         self._sync_titlebar_icon_from_application()
         self._install_preset_file_drop_filter()
 
