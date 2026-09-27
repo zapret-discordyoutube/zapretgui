@@ -37,6 +37,7 @@ def _get_nav_labels():
         PageName.ZAPRET1_PRESET_SETUP: "Настройка preset-а",
         PageName.ZAPRET1_USER_PRESETS: "Мои пресеты",
         PageName.TELEGRAM_PROXY: "Telegram Proxy",
+        PageName.TELEGRAM_PROXY_ADVANCED: "Продвинутые настройки",
     }
 
 

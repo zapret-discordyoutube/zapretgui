@@ -89,18 +89,6 @@ def build_upstream_config():
     return _build_upstream_config()
 
 
-def build_cloudflare_config():
-    from telegram_proxy.config.settings import build_cloudflare_config as _build_cloudflare_config
-
-    return _build_cloudflare_config()
-
-
-def build_dc_endpoint_overrides():
-    from telegram_proxy.config.settings import build_dc_endpoint_overrides as _build_dc_endpoint_overrides
-
-    return _build_dc_endpoint_overrides()
-
-
 def copy_text(
     text: str,
     *,
@@ -204,6 +192,8 @@ def save_settings_action(
         return telegram_proxy_settings.set_fake_tls_domain(value)
     if action_name == "proxy_protocol":
         return telegram_proxy_settings.set_proxy_protocol(enabled)
+    if action_name == "auto_deeplink":
+        return telegram_proxy_settings.set_auto_deeplink(enabled)
     if action_name == "upstream_enabled":
         return telegram_proxy_settings.set_upstream_enabled(enabled)
     if action_name == "upstream_preset":

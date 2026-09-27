@@ -27,68 +27,34 @@ class TelegramProxyInitialStateWorker(QThread):
 
 
 class TelegramProxyStartWorker(QThread):
+    """Запускает прокси с настройками, прочитанными из хранилища в этом же потоке.
+
+    Страница и трей не передают значения полей: всё, что уйдёт в прокси,
+    берётся из settings.sqlite3 в момент запуска.
+    """
+
     completed = pyqtSignal(bool)
 
-    def __init__(
-        self,
-        *,
-        manager,
-        port: int,
-        mode: str,
-        host: str,
-        build_upstream_config,
-        build_cloudflare_config,
-        build_dc_endpoint_overrides=None,
-        upstream_config=None,
-        cloudflare_config=None,
-        mtproxy_secret: str = "",
-        dc_endpoint_overrides=None,
-        pool_size: int = 4,
-        buffer_kb: int = 256,
-        fake_tls_domain: str = "",
-        proxy_protocol: bool = False,
-        parent=None,
-    ):
+    def __init__(self, *, manager, load_start_config, parent=None):
         super().__init__(parent)
         self._manager = manager
-        self._port = int(port)
-        self._mode = str(mode or "socks5")
-        self._host = str(host or "127.0.0.1")
-        self._build_upstream_config = build_upstream_config
-        self._build_cloudflare_config = build_cloudflare_config
-        self._build_dc_endpoint_overrides = build_dc_endpoint_overrides or (lambda: {})
-        self._upstream_config = upstream_config
-        self._cloudflare_config = cloudflare_config
-        self._mtproxy_secret = str(mtproxy_secret or "")
-        self._dc_endpoint_overrides = dc_endpoint_overrides
-        self._pool_size = int(pool_size)
-        self._buffer_kb = int(buffer_kb)
-        self._fake_tls_domain = str(fake_tls_domain or "")
-        self._proxy_protocol = bool(proxy_protocol)
+        self._load_start_config = load_start_config
 
     def run(self) -> None:
         try:
-            upstream_config = self._upstream_config
-            if upstream_config is None:
-                upstream_config = self._build_upstream_config()
-            cloudflare_config = self._cloudflare_config
-            if cloudflare_config is None:
-                cloudflare_config = self._build_cloudflare_config()
-            dc_endpoint_overrides = self._dc_endpoint_overrides
-            if dc_endpoint_overrides is None:
-                dc_endpoint_overrides = self._build_dc_endpoint_overrides()
+            config = self._load_start_config()
             ok = self._manager.start_proxy(
-                port=self._port,
-                mode=self._mode,
-                host=self._host,
-                upstream_config=upstream_config,
-                cloudflare_config=cloudflare_config,
-                mtproxy_secret=self._mtproxy_secret,
-                dc_endpoint_overrides=dc_endpoint_overrides,
-                pool_size=self._pool_size,
-                buffer_kb=self._buffer_kb,
-                fake_tls_domain=self._fake_tls_domain,
-                proxy_protocol=self._proxy_protocol,
+                port=config.port,
+                mode=config.mode,
+                host=config.host,
+                upstream_config=config.upstream_config,
+                cloudflare_config=config.cloudflare_config,
+                mtproxy_secret=config.mtproxy_secret,
+                dc_endpoint_overrides=config.dc_endpoint_overrides,
+                pool_size=config.pool_size,
+                buffer_kb=config.buffer_kb,
+                fake_tls_domain=config.fake_tls_domain,
+                proxy_protocol=config.proxy_protocol,
             )
         except Exception as exc:
             log(f"TelegramProxyStartWorker: ошибка запуска proxy: {exc}", "WARNING")
@@ -290,6 +256,11 @@ class TelegramProxyRelayCheckWorker(QThread):
 
 
 class TelegramProxyCloudflareCheckWorker(QThread):
+    """Проверяет Cloudflare-домены и сам пишет подробности в лог Telegram Proxy.
+
+    Страница получает только итог для короткого уведомления.
+    """
+
     completed = pyqtSignal(int, object)
     failed = pyqtSignal(int, str)
 
@@ -300,6 +271,7 @@ class TelegramProxyCloudflareCheckWorker(QThread):
         kind: str,
         domains,
         check_cloudflare_connectivity,
+        append_log_line_fn,
         timeout: float = 6.0,
         parent=None,
     ):
@@ -308,17 +280,32 @@ class TelegramProxyCloudflareCheckWorker(QThread):
         self._kind = str(kind or "domain")
         self._domains = domains
         self._check_cloudflare_connectivity = check_cloudflare_connectivity
+        self._append_log_line = append_log_line_fn
         self._timeout = float(timeout)
 
     def run(self) -> None:
         try:
+            self._append_log_line(
+                "Проверяем Cloudflare Worker..." if self._kind == "worker" else "Проверяем Cloudflare-домен..."
+            )
             result = self._check_cloudflare_connectivity(
                 self._kind,
                 self._domains,
                 timeout=self._timeout,
             )
+            summary = result.summary() if hasattr(result, "summary") else str(result or "")
+            self._append_log_line(f"Проверка Cloudflare: {summary}")
+            for entry in tuple(getattr(result, "entries", ()) or ()):
+                status = "OK" if getattr(entry, "ok", False) else "FAIL"
+                error = str(getattr(entry, "error", "") or "")
+                suffix = f" - {error}" if error else ""
+                self._append_log_line(f"Cloudflare {status}: {getattr(entry, 'host', '')}{suffix}")
         except Exception as exc:
             log(f"TelegramProxyCloudflareCheckWorker: ошибка проверки Cloudflare: {exc}", "WARNING")
+            try:
+                self._append_log_line(f"Ошибка проверки Cloudflare: {exc}")
+            except Exception:
+                pass
             self.failed.emit(self._request_id, str(exc))
             return
         self.completed.emit(self._request_id, result)

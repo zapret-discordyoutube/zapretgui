@@ -2245,19 +2245,19 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertNotIn("settings.appearance", worker_source)
 
     def test_telegram_proxy_restart_request_survives_queued_settings_saves(self) -> None:
-        from telegram_proxy.ui.settings_save_flow import merge_restart_request
+        from telegram_proxy.runtime.settings_save_flow import merge_restart_request
 
         self.assertEqual(merge_restart_request("", "schedule"), "schedule")
         self.assertEqual(merge_restart_request("schedule", ""), "schedule")
         self.assertEqual(merge_restart_request("schedule", "now"), "now")
         self.assertEqual(merge_restart_request("now", "schedule"), "now")
 
-        init_source = inspect.getsource(TelegramProxyPage.__init__)
-        finished_source = inspect.getsource(TelegramProxyPage._on_settings_save_finished)
+        completed_source = inspect.getsource(TelegramProxyFeature._on_settings_save_completed)
+        flushed_source = inspect.getsource(TelegramProxyPage._on_settings_flushed)
 
-        self.assertIn("_settings_save_restart_pending", init_source)
-        self.assertIn("merge_restart_request", finished_source)
-        self.assertIn("_settings_save_restart_pending", finished_source)
+        self.assertIn("merge_restart_request", completed_source)
+        self.assertIn("restart_pending", completed_source)
+        self.assertIn("_dispatch_pending_restart(restart)", flushed_source)
 
     def test_appearance_rkn_background_options_load_through_worker(self) -> None:
         appearance_feature = importlib.import_module("app.feature_facades.appearance")
@@ -2814,7 +2814,7 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertIn("append_log_line", worker_source)
 
     def test_telegram_proxy_auto_deeplink_check_runs_through_worker(self) -> None:
-        try_source = inspect.getsource(TelegramProxyPage._try_auto_deeplink)
+        due_source = inspect.getsource(TelegramProxyPage._run_due_auto_deeplink)
         request_source = inspect.getsource(TelegramProxyPage._request_auto_deeplink_check)
         start_source = inspect.getsource(TelegramProxyPage._start_auto_deeplink_worker)
         checked_source = inspect.getsource(TelegramProxyPage._on_auto_deeplink_checked)
@@ -2827,8 +2827,8 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertTrue(hasattr(telegram_proxy_workers, "TelegramProxyAutoDeeplinkWorker"))
         worker_source = inspect.getsource(telegram_proxy_workers.TelegramProxyAutoDeeplinkWorker.run)
 
-        self.assertIn("_request_auto_deeplink_check", try_source)
-        self.assertNotIn("telegram_proxy_settings.consume_auto_deeplink_request", try_source)
+        self.assertIn("_request_auto_deeplink_check", due_source)
+        self.assertNotIn("consume_auto_deeplink_request", due_source)
         self.assertIn("_auto_deeplink_runtime", page_source)
         self.assertIn("_start_auto_deeplink_worker", request_source)
         self.assertIn("start_qthread_worker", start_source)
@@ -2902,56 +2902,55 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertNotIn("socket.gethostbyname", commands_source)
 
     def test_telegram_proxy_settings_save_runs_through_worker(self) -> None:
+        from telegram_proxy.ui.advanced_page import TelegramProxyAdvancedPage
+
         page_source = inspect.getsource(TelegramProxyPage)
         upstream_source = inspect.getsource(telegram_upstream_workflow)
         runtime_source = inspect.getsource(telegram_runtime_workflow)
-        request_source = inspect.getsource(TelegramProxyPage._request_settings_save)
-        start_source = inspect.getsource(TelegramProxyPage._start_settings_save_worker)
-        completed_source = inspect.getsource(TelegramProxyPage._on_settings_save_finished)
-        failed_source = inspect.getsource(TelegramProxyPage._on_settings_save_failed)
-        finished_source = inspect.getsource(TelegramProxyPage._on_settings_save_worker_finished)
-        cleanup_source = inspect.getsource(TelegramProxyPage.cleanup)
+        request_source = inspect.getsource(TelegramProxyFeature.request_settings_save)
+        start_source = inspect.getsource(TelegramProxyFeature._start_settings_save_worker)
+        completed_source = inspect.getsource(TelegramProxyFeature._on_settings_save_completed)
+        failed_source = inspect.getsource(TelegramProxyFeature._on_settings_save_failed)
+        finished_source = inspect.getsource(TelegramProxyFeature._on_settings_save_worker_finished)
+        cleanup_source = inspect.getsource(TelegramProxyFeature.cleanup)
         command_source = inspect.getsource(telegram_proxy_commands)
         queued_state_source = inspect.getsource(TelegramProxyPageQueuedWorkerState)
 
         self.assertTrue(hasattr(telegram_proxy_workers, "TelegramProxySettingsSaveWorker"))
         worker_source = inspect.getsource(telegram_proxy_workers.TelegramProxySettingsSaveWorker.run)
 
-        for handler_name in (
-            "_on_port_changed",
-            "_on_host_changed",
-            "_on_upstream_changed",
-            "_on_upstream_preset_changed",
-            "_on_upstream_host_changed",
-            "_on_upstream_port_changed",
-            "_on_upstream_user_changed",
-            "_on_upstream_pass_changed",
-            "_on_upstream_mode_changed",
+        for page_cls, handler_name in (
+            (TelegramProxyPage, "_on_port_changed"),
+            (TelegramProxyPage, "_on_host_changed"),
+            (TelegramProxyPage, "_on_auto_deeplink_toggled"),
+            (TelegramProxyAdvancedPage, "_on_upstream_changed"),
+            (TelegramProxyAdvancedPage, "_on_upstream_preset_changed"),
+            (TelegramProxyAdvancedPage, "_on_manual_upstream_edited"),
+            (TelegramProxyAdvancedPage, "_on_upstream_port_changed"),
+            (TelegramProxyAdvancedPage, "_on_upstream_mode_changed"),
         ):
-            source = inspect.getsource(getattr(TelegramProxyPage, handler_name))
-            self.assertIn("_request_settings_save", source)
+            source = inspect.getsource(getattr(page_cls, handler_name))
+            self.assertRegex(source, r"_request_(?:manual_upstream|settings)_save")
             self.assertNotIn("telegram_proxy_settings.set_", source)
-            self.assertNotIn("save_upstream_fields(", source)
-            self.assertNotIn("save_upstream_mode(", source)
 
-        self.assertIn("create_settings_save_worker", page_source)
-        self.assertIn("_settings_save_runtime", page_source)
+        for page_cls in (TelegramProxyPage, TelegramProxyAdvancedPage):
+            self.assertIn(
+                "self._telegram_proxy.request_settings_save(",
+                inspect.getsource(page_cls._request_settings_save),
+            )
         self.assertIn("_queue_settings_save_payload", request_source)
-        self.assertIn(
-            '_queued_worker_state("_settings_save_state", "_settings_save_runtime")',
-            inspect.getsource(TelegramProxyPage._queue_settings_save_payload),
-        )
-        self.assertIn("state.start_or_queue", request_source)
+        self.assertIn("has_pending_settings_saves", request_source)
+        self.assertIn("replace_by_key", inspect.getsource(TelegramProxyFeature._queue_settings_save_payload))
         self.assertIn("start_qthread_worker", start_source)
         self.assertIn("bind_worker", start_source)
-        self.assertIn("worker.completed.connect(self._on_settings_save_finished)", start_source)
+        self.assertIn("worker.completed.connect(self._on_settings_save_completed)", start_source)
         self.assertIn("worker.failed.connect(self._on_settings_save_failed)", start_source)
-        self.assertIn("_settings_save_runtime.is_current", completed_source)
-        self.assertIn("_settings_save_runtime.is_current", failed_source)
+        self.assertIn("runtime.is_current", completed_source)
+        self.assertIn("runtime.is_current", failed_source)
         self.assertIn("schedule_next_after_finish", finished_source)
         self.assertIn("pop_next_after_finish", queued_state_source)
-        self.assertIn("_settings_save_runtime.stop", cleanup_source)
-        self.assertNotIn("_settings_save_worker =", page_source)
+        self.assertIn("runtime.stop", cleanup_source)
+        self.assertNotIn("_settings_save_runtime", page_source)
         self.assertNotIn("worker.start()", start_source)
         self.assertNotIn("import telegram_proxy.settings", upstream_source)
         self.assertNotIn("telegram_proxy_settings.set_", upstream_source)
@@ -2964,13 +2963,17 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertNotIn("telegram_proxy.runtime.commands", worker_source)
         self.assertNotIn("telegram_proxy.settings", worker_source)
         self.assertIn("save_settings_action", worker_source)
-        self.assertIn("set_host", command_source)
-        self.assertIn("set_port", command_source)
-        self.assertIn("set_proxy_enabled", command_source)
-        self.assertIn("set_upstream_enabled", command_source)
-        self.assertIn("set_upstream_preset", command_source)
-        self.assertIn("set_manual_upstream", command_source)
-        self.assertIn("set_upstream_mode", command_source)
+        for setter in (
+            "set_host",
+            "set_port",
+            "set_proxy_enabled",
+            "set_upstream_enabled",
+            "set_upstream_preset",
+            "set_manual_upstream",
+            "set_upstream_mode",
+            "set_auto_deeplink",
+        ):
+            self.assertIn(setter, command_source)
 
     def test_telegram_proxy_relay_http_probe_is_command_not_ui_runtime(self) -> None:
         page_runtime_source = inspect.getsource(telegram_page.telegram_proxy_page_runtime)
@@ -3016,19 +3019,25 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertIn("open_log_file", worker_source)
 
     def test_telegram_proxy_external_links_run_through_worker(self) -> None:
+        from telegram_proxy.ui.advanced_page import TelegramProxyAdvancedPage
+
         page_source = inspect.getsource(TelegramProxyPage)
-        mtproxy_source = inspect.getsource(TelegramProxyPage._on_open_mtproxy)
         telegram_source = inspect.getsource(TelegramProxyPage._on_open_in_telegram)
+        mtproxy_source = inspect.getsource(TelegramProxyAdvancedPage._on_open_mtproxy)
         start_source = inspect.getsource(TelegramProxyPage._start_external_link_worker)
         cleanup_source = inspect.getsource(TelegramProxyPage.cleanup)
+        advanced_cleanup_source = inspect.getsource(TelegramProxyAdvancedPage.cleanup)
         feature_source = inspect.getsource(TelegramProxyFeature)
 
         self.assertTrue(hasattr(telegram_proxy_workers, "TelegramProxyExternalLinkWorker"))
         worker_source = inspect.getsource(telegram_proxy_workers.TelegramProxyExternalLinkWorker.run)
 
+        self.assertIn("_start_external_link_worker", telegram_source)
         for source in (mtproxy_source, telegram_source):
-            self.assertIn("_start_external_link_worker", source)
             self.assertNotIn(".open_external_link(", source)
+        self.assertIn("_external_link_runtime.start_qthread_worker", mtproxy_source)
+        self.assertIn("create_external_link_worker", mtproxy_source)
+        self.assertIn("_external_link_runtime", advanced_cleanup_source)
 
         self.assertIn("create_external_link_worker", page_source)
         self.assertIn("_external_link_runtime", page_source)
@@ -4389,44 +4398,22 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertIn("_ensure_panel_built(index)", switch_source)
         self.assertIn("self._stacked.currentIndex() == 1", timer_source)
 
-    def test_telegram_proxy_builds_advanced_settings_lazily(self) -> None:
-        setup_source = inspect.getsource(TelegramProxyPage._setup_ui)
-        settings_build_source = inspect.getsource(telegram_proxy_settings_build.build_telegram_proxy_settings_panel)
-        initial_apply_source = inspect.getsource(TelegramProxyPage._apply_initial_settings_state)
-        advanced_toggle_source = inspect.getsource(TelegramProxyPage._on_advanced_toggled)
-        ensure_method = getattr(TelegramProxyPage, "_ensure_advanced_settings_built", None)
-        advanced_builder = getattr(
-            telegram_proxy_settings_build,
-            "build_telegram_proxy_advanced_settings_panel",
-            None,
-        )
+    def test_telegram_proxy_advanced_settings_live_on_nested_page(self) -> None:
+        from telegram_proxy.ui import advanced_build
+        from telegram_proxy.ui.advanced_page import TelegramProxyAdvancedPage
 
-        self.assertIsNotNone(ensure_method)
-        self.assertIsNotNone(advanced_builder)
-        if ensure_method is None or advanced_builder is None:
-            return
-        ensure_source = inspect.getsource(ensure_method)
-        advanced_build_source = inspect.getsource(advanced_builder)
+        page_source = inspect.getsource(TelegramProxyPage)
+        settings_build_source = inspect.getsource(telegram_proxy_settings_build)
+        advanced_init_source = inspect.getsource(TelegramProxyAdvancedPage.__init__)
+        activated_source = inspect.getsource(TelegramProxyAdvancedPage.on_page_activated)
 
-        self.assertNotIn("build_telegram_proxy_advanced_settings_panel(", setup_source)
-        self.assertNotIn("advanced_card = setting_card_group_cls", settings_build_source)
-        self.assertIn("build_telegram_proxy_advanced_settings_panel", ensure_source)
-        self.assertIn("_schedule_initial_advanced_settings_build", initial_apply_source)
-        self.assertNotIn("_ensure_advanced_settings_built()", initial_apply_source)
-        self.assertIn("_ensure_advanced_settings_built", advanced_toggle_source)
-        self.assertIn("advanced_card = setting_card_group_cls", advanced_build_source)
-
-    def test_telegram_proxy_defers_initial_advanced_settings_build(self) -> None:
-        apply_source = inspect.getsource(TelegramProxyPage._apply_initial_settings_state)
-        schedule_source = inspect.getsource(TelegramProxyPage._schedule_initial_advanced_settings_build)
-        run_source = inspect.getsource(TelegramProxyPage._run_initial_advanced_settings_build)
-
-        self.assertIn("_schedule_initial_advanced_settings_build", apply_source)
-        self.assertNotIn("_ensure_advanced_settings_built()", apply_source)
-        self.assertIn("QTimer.singleShot", schedule_source)
-        self.assertIn("_run_initial_advanced_settings_build", schedule_source)
-        self.assertIn("_ensure_advanced_settings_built()", run_source)
-        self.assertIn("_apply_advanced_settings_state", run_source)
+        self.assertNotIn("advanced_build", page_source)
+        self.assertNotIn("cloudflare", settings_build_source.lower())
+        self.assertIn("build_telegram_proxy_advanced_panel", inspect.getsource(TelegramProxyAdvancedPage))
+        self.assertIn("SettingCardGroup(text.upstream_group_title", inspect.getsource(advanced_build))
+        # Настройки читаются не в конструкторе, а при открытии страницы и в фоне.
+        self.assertNotIn("_request_state_reload", advanced_init_source)
+        self.assertIn("_request_state_reload", activated_source)
 
     def test_user_presets_hide_keeps_clean_cache_clean(self) -> None:
         source = inspect.getsource(UserPresetsPageBase.on_page_hidden)

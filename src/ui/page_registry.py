@@ -70,6 +70,7 @@ PAGE_PERFORMANCE_PROFILE_OVERRIDES: dict[PageName, PagePerformanceProfile] = {
             PageName.SERVERS,
             PageName.ORCHESTRA,
             PageName.TELEGRAM_PROXY,
+            PageName.TELEGRAM_PROXY_ADVANCED,
             # Крупные страницы настроек: первое построение ~120-140ms без единой
             # горячей секции — бюджет как у остальных тяжёлых страниц.
             PageName.APPEARANCE,

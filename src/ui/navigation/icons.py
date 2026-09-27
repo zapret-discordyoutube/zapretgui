@@ -17,6 +17,7 @@ _WINDOWS11_SIDEBAR_ICON_FILES: dict[PageName, str] = {
     PageName.DPI_SETTINGS: "settings.svg",
     PageName.NETWORK: "search.svg",
     PageName.TELEGRAM_PROXY: "share.svg",
+    PageName.TELEGRAM_PROXY_ADVANCED: "settings.svg",
     PageName.HOSTS: "document.svg",
     PageName.BLOCKCHECK: "binoculars.svg",
     PageName.WINWS_LOG_ANALYZER: "search.svg",
@@ -77,6 +78,7 @@ def build_standard_nav_icons() -> dict[PageName, Any]:
         PageName.ZAPRET1_PRESET_SETUP: FluentIcon.PLAY,
         PageName.ZAPRET1_USER_PRESETS: FluentIcon.FOLDER,
         PageName.TELEGRAM_PROXY: FluentIcon.SEND,
+        PageName.TELEGRAM_PROXY_ADVANCED: FluentIcon.SETTING,
     }
 
 

@@ -58,8 +58,6 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
             )),
             set_enabled=Mock(),
             build_upstream_config=Mock(),
-            build_cloudflare_config=Mock(),
-            build_dc_endpoint_overrides=Mock(return_value={}),
             load_page_initial_state=Mock(),
             save_settings_action=Mock(),
             check_relay_reachable=Mock(),
@@ -197,6 +195,7 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
             page_name=PageName.TELEGRAM_PROXY,
             runtime_feature=runtime_feature,
             telegram_proxy_feature=Mock(),
+            show_page=Mock(),
         )
 
         self.assertNotIn("runtime_feature", kwargs)
@@ -232,7 +231,7 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
             inspect.getsource(telegram_proxy_workers.TelegramProxyCloudflareCheckWorker.run),
         )
 
-    def test_start_worker_loads_upstream_config_outside_ui_runtime(self) -> None:
+    def test_start_worker_loads_start_config_outside_ui_thread(self) -> None:
         from telegram_proxy.ui import proxy_runtime_workflow
 
         runtime_source = inspect.getsource(proxy_runtime_workflow.start_proxy_runtime)
@@ -240,20 +239,20 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
         toggle_source = inspect.getsource(TelegramProxyFeature.toggle_async)
         worker_source = inspect.getsource(telegram_proxy_workers.TelegramProxyStartWorker.run)
 
-        self.assertTrue(hasattr(telegram_proxy_commands, "build_upstream_config"))
         self.assertNotIn("telegram_proxy.settings", runtime_source)
         self.assertNotIn("build_upstream_config", runtime_source)
-        self.assertIn("build_upstream_config=self.build_upstream_config", feature_source)
+        self.assertIn("load_start_config=self.get_start_config", feature_source)
+        # Трей не читает настройки в UI-потоке: это делает worker запуска.
+        self.assertNotIn("get_start_config", toggle_source)
         self.assertIn("_tray_start_runtime", feature_source)
-        self.assertIn("create_start_worker", feature_source)
         self.assertIn("_create_tray_start_worker", toggle_source)
         self.assertIn("start_qthread_worker", toggle_source)
         self.assertNotIn("worker.start()", toggle_source)
         self.assertNotIn("_tray_start_worker =", feature_source)
-        self.assertIn("_build_upstream_config", worker_source)
+        self.assertIn("self._load_start_config()", worker_source)
         self.assertNotIn("telegram_proxy.runtime.commands", worker_source)
 
-    def test_page_start_runtime_passes_selected_mode_and_mtproxy_secret(self) -> None:
+    def test_page_start_runtime_passes_only_manager_to_start_worker(self) -> None:
         from telegram_proxy.ui import proxy_runtime_workflow
 
         class _Runtime:
@@ -269,92 +268,57 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
         page = SimpleNamespace(_proxy_start_runtime=_Runtime())
         manager = Mock()
         create_start_worker = Mock(return_value=object())
-        upstream_config = SimpleNamespace(
-            host="upstream.example.com",
-            port=1080,
-            mode="fallback",
-            username="user",
-        )
-        cloudflare_config = object()
-        secret = "aabbccddeeff00112233445566778899"
 
         proxy_runtime_workflow.start_proxy_runtime(
             page=page,
             manager=manager,
             starting=False,
             running=False,
-            host="127.0.0.1",
-            port=1443,
             set_starting=Mock(),
             btn_toggle=Mock(),
             status_label=Mock(),
-            append_log_line=Mock(),
             create_start_worker=create_start_worker,
-            mode="mtproxy",
-            upstream_config=upstream_config,
-            cloudflare_config=cloudflare_config,
-            mtproxy_secret=secret,
-            fake_tls_domain="front.example.com",
-            proxy_protocol=True,
         )
 
         self.assertIsNotNone(page._proxy_start_runtime.started)
-        worker_factory = page._proxy_start_runtime.started["worker_factory"]
-        worker_factory(1)
+        page._proxy_start_runtime.started["worker_factory"](1)
 
-        create_start_worker.assert_called_once_with(
-            manager=manager,
-            port=1443,
-            mode="mtproxy",
-            host="127.0.0.1",
-            upstream_config=upstream_config,
-            cloudflare_config=cloudflare_config,
-            mtproxy_secret=secret,
-            pool_size=4,
-            buffer_kb=256,
-            fake_tls_domain="front.example.com",
-            proxy_protocol=True,
-            parent=page,
-        )
+        # Значения полей страницы не передаются: worker читает хранилище сам.
+        create_start_worker.assert_called_once_with(manager=manager, parent=page)
 
-    def test_page_connects_immutable_runtime_upstream_state_signal(self) -> None:
+    def test_advanced_page_connects_immutable_runtime_upstream_state_signal(self) -> None:
+        from telegram_proxy.ui.advanced_page import TelegramProxyAdvancedPage
         from telegram_proxy.ui.page import TelegramProxyPage
 
-        source = inspect.getsource(TelegramProxyPage._connect_signals)
+        source = inspect.getsource(TelegramProxyAdvancedPage._connect_signals)
+        cleanup_source = inspect.getsource(TelegramProxyAdvancedPage.cleanup)
 
-        self.assertIn("upstream_state_changed.connect", source)
-        self.assertIn("_on_upstream_state_changed", source)
+        self.assertIn("upstream_state_changed.connect(self._on_upstream_state_changed)", source)
+        self.assertIn("upstream_state_changed.disconnect(self._on_upstream_state_changed)", cleanup_source)
+        self.assertNotIn(".cleanup()", cleanup_source.replace("def cleanup(self)", ""))
+        self.assertNotIn("upstream_state", inspect.getsource(TelegramProxyPage))
 
     def test_runtime_working_upstream_does_not_overwrite_saved_preset(self) -> None:
+        from telegram_proxy.config.upstream_catalog import UpstreamCatalog
         from telegram_proxy.proxy.upstream_controller import UpstreamRuntimeSnapshot
-        from telegram_proxy.ui.page import TelegramProxyPage
+        from telegram_proxy.ui.advanced_page import TelegramProxyAdvancedPage
 
-        class _Combo:
-            def __init__(self):
-                self.index = 0
-
-            def currentIndex(self):
-                return self.index
-
-        class _PresetRow:
-            def __init__(self):
-                self.combo = _Combo()
-                self.indexes = []
-
-            def setCurrentIndex(self, index: int, *, block_signals: bool = False):
-                self.combo.index = int(index)
-                self.indexes.append((int(index), bool(block_signals)))
-
-        page = TelegramProxyPage.__new__(TelegramProxyPage)
+        page = TelegramProxyAdvancedPage.__new__(TelegramProxyAdvancedPage)
         page._cleanup_in_progress = False
-        page._advanced_settings_built = True
-        page._upstream_preset_row = _PresetRow()
-        page._upstream_runtime_state_label = Mock()
+        page._upstream_catalog = UpstreamCatalog(
+            [{"id": "uk", "name": "Великобритания", "type": "socks5", "host": "10.0.0.1", "port": 1080}]
+        )
+        page._upstream_catalog_loaded = True
+        page._current_mtproxy_preset_id = ""
+        page._upstream_toggle = SimpleNamespace(isChecked=Mock(return_value=True))
+        page._telegram_proxy = SimpleNamespace(
+            get_proxy_manager=Mock(return_value=SimpleNamespace(is_running=True)),
+        )
+        page._upstream_preset_row = Mock()
         page._apply_upstream_preset_ui = Mock()
         page._request_settings_save = Mock()
-        page._append_log_line = Mock()
 
-        TelegramProxyPage._on_upstream_state_changed(
+        TelegramProxyAdvancedPage._on_upstream_state_changed(
             page,
             UpstreamRuntimeSnapshot(
                 selected_preset_id="uk",
@@ -366,12 +330,13 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(page._upstream_preset_row.indexes, [])
+        page._upstream_preset_row.setCurrentIndex.assert_not_called()
         page._apply_upstream_preset_ui.assert_not_called()
         page._request_settings_save.assert_not_called()
-        page._append_log_line.assert_not_called()
-        page._upstream_runtime_state_label.setText.assert_called_once_with(
-            "Выбрано: Великобритания · Сейчас используется: Норвегия (резерв)"
+        # Фактический сервер показывается в описании строки «Сервер».
+        page._upstream_preset_row.set_texts.assert_called_once_with(
+            "Сервер",
+            "Выбрано: Великобритания · Сейчас используется: Норвегия (резерв)",
         )
 
     def test_tray_toggle_stops_proxy_through_worker_runtime(self) -> None:
@@ -432,8 +397,6 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
             get_start_config=Mock(),
             set_enabled=lambda value: enabled_values.append(bool(value)),
             build_upstream_config=Mock(),
-            build_cloudflare_config=Mock(),
-            build_dc_endpoint_overrides=Mock(return_value={}),
             load_page_initial_state=Mock(),
             save_settings_action=Mock(),
             check_relay_reachable=Mock(),
@@ -581,24 +544,21 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
         )
 
     def test_copy_fake_tls_nginx_config_uses_feature_helper(self) -> None:
-        from telegram_proxy.ui import page as telegram_proxy_page_module
         from telegram_proxy.ui.page import TelegramProxyPage
 
-        copy_text = Mock(return_value=SimpleNamespace(ok=False, log_line="Copied Nginx config"))
+        copy_text = Mock(return_value=SimpleNamespace(ok=False, log_line="", info_title="", info_content=""))
         get_config = Mock(return_value="nginx config")
         page = TelegramProxyPage.__new__(TelegramProxyPage)
         page._telegram_proxy = SimpleNamespace(
             copy_text=copy_text,
             get_fake_tls_nginx_config=get_config,
         )
-        page._append_log_line = Mock()
-        page._show_cloudflare_message = Mock()
+        page._show_success_message = Mock()
         page._local_fake_tls_domain = Mock(return_value="front.example.com")
         page._host_edit = SimpleNamespace(text=Mock(return_value="127.0.0.1"))
         page._port_spin = SimpleNamespace(value=Mock(return_value=8446))
 
-        with patch.object(telegram_proxy_page_module, "InfoBar", None):
-            TelegramProxyPage._on_copy_fake_tls_nginx_config(page)
+        TelegramProxyPage._on_copy_fake_tls_nginx_config(page)
 
         get_config.assert_called_once_with(
             fake_tls_domain="front.example.com",
@@ -609,39 +569,87 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
             "nginx config",
             success_title="Скопировано",
             success_content="Конфиг Nginx для Fake TLS",
-            success_log="Copied Fake TLS Nginx config",
         )
-        page._append_log_line.assert_called_once_with("Copied Nginx config")
+        page._show_success_message.assert_not_called()
 
-    def test_start_worker_passes_command_loaded_upstream_config_to_manager(self) -> None:
+    def test_start_worker_reads_every_start_field_from_store_config(self) -> None:
         manager = Mock()
         manager.start_proxy.return_value = True
         upstream_config = object()
         cloudflare_config = object()
+        load_start_config = Mock(
+            return_value=telegram_proxy_commands.TelegramProxyStartConfig(
+                host="0.0.0.0",
+                port=1443,
+                mode="mtproxy",
+                upstream_config=upstream_config,
+                cloudflare_config=cloudflare_config,
+                mtproxy_secret="aabbccddeeff00112233445566778899",
+                dc_endpoint_overrides={4: "149.154.167.220"},
+                pool_size=6,
+                buffer_kb=512,
+                fake_tls_domain="front.example.com",
+                proxy_protocol=True,
+            )
+        )
         worker = telegram_proxy_workers.TelegramProxyStartWorker(
             manager=manager,
-            port=1353,
-            mode="socks5",
-            host="127.0.0.1",
-            build_upstream_config=Mock(return_value=upstream_config),
-            build_cloudflare_config=Mock(return_value=cloudflare_config),
+            load_start_config=load_start_config,
         )
 
         worker.run()
 
+        load_start_config.assert_called_once_with()
         manager.start_proxy.assert_called_once_with(
-            port=1353,
-            mode="socks5",
-            host="127.0.0.1",
+            port=1443,
+            mode="mtproxy",
+            host="0.0.0.0",
             upstream_config=upstream_config,
             cloudflare_config=cloudflare_config,
-            mtproxy_secret="",
-            dc_endpoint_overrides={},
-            pool_size=4,
-            buffer_kb=256,
-            fake_tls_domain="",
-            proxy_protocol=False,
+            mtproxy_secret="aabbccddeeff00112233445566778899",
+            dc_endpoint_overrides={4: "149.154.167.220"},
+            pool_size=6,
+            buffer_kb=512,
+            fake_tls_domain="front.example.com",
+            proxy_protocol=True,
         )
+
+    def test_tray_start_passes_fake_tls_and_proxy_protocol_from_store(self) -> None:
+        # Раньше трей брал конфиг в UI-потоке и терял fake_tls_domain/proxy_protocol.
+        start_runtime = SimpleNamespace(is_running=Mock(return_value=False), start_qthread_worker=Mock())
+        manager = Mock()
+        manager.is_running = False
+        manager.start_proxy.return_value = True
+        feature = self._make_feature(manager=manager, start_runtime=start_runtime)
+        object.__setattr__(
+            feature,
+            "get_start_config",
+            Mock(
+                return_value=telegram_proxy_commands.TelegramProxyStartConfig(
+                    host="127.0.0.1",
+                    port=1353,
+                    mode="mtproxy",
+                    upstream_config=None,
+                    cloudflare_config=None,
+                    mtproxy_secret="aabbccddeeff00112233445566778899",
+                    dc_endpoint_overrides={},
+                    pool_size=4,
+                    buffer_kb=256,
+                    fake_tls_domain="front.example.com",
+                    proxy_protocol=True,
+                )
+            ),
+        )
+
+        feature.toggle_async()
+
+        feature.get_start_config.assert_not_called()
+        worker = start_runtime.start_qthread_worker.call_args.kwargs["worker_factory"](1)
+        worker.run()
+
+        kwargs = manager.start_proxy.call_args.kwargs
+        self.assertEqual(kwargs["fake_tls_domain"], "front.example.com")
+        self.assertTrue(kwargs["proxy_protocol"])
 
     def test_external_links_are_queued_while_worker_runs(self) -> None:
         from telegram_proxy.ui.page import TelegramProxyPage
@@ -857,7 +865,9 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
         self.assertNotIn(".pop_next_after_finish(", page_source)
         self.assertIn("def schedule_next_after_finish", queued_state_source)
 
-    def test_auto_deeplink_result_ignored_when_new_check_is_pending(self) -> None:
+    def test_auto_deeplink_true_result_opens_link_even_when_new_check_is_pending(self) -> None:
+        # Хранилище уже отметило ссылку открытой: повторная проверка вернёт False,
+        # поэтому первый True нельзя выбрасывать.
         import telegram_proxy.ui.page as telegram_proxy_page
         from telegram_proxy.ui.page import TelegramProxyPage
 
@@ -873,8 +883,7 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
         with patch.object(telegram_proxy_page, "QTimer", SimpleNamespace(singleShot=single_shot), create=True):
             TelegramProxyPage._on_auto_deeplink_checked(page, 6, True)
 
-        single_shot.assert_not_called()
-        page._append_log_line.assert_not_called()
+        single_shot.assert_called_once_with(2000, page._on_open_in_telegram)
 
     def test_auto_deeplink_error_ignored_when_new_check_is_pending(self) -> None:
         import telegram_proxy.ui.page as telegram_proxy_page
@@ -890,32 +899,6 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
             TelegramProxyPage._on_auto_deeplink_failed(page, 6, "old deeplink failed")
 
         log_mock.assert_not_called()
-
-    def test_settings_save_worker_finished_schedules_next_queued_save(self) -> None:
-        import telegram_proxy.ui.page as telegram_proxy_page
-        from telegram_proxy.ui.page import TelegramProxyPage
-
-        page = TelegramProxyPage.__new__(TelegramProxyPage)
-        page._cleanup_in_progress = False
-        _set_queue_state(
-            page,
-            "settings_save",
-            runtime=SimpleNamespace(request_id=1),
-            pending=[{"action": "port", "port": 8080}],
-        )
-        page._start_settings_save_worker = Mock()
-        single_shot = Mock(side_effect=lambda _delay, _callback: None)
-
-        with patch.object(telegram_proxy_page, "QTimer", SimpleNamespace(singleShot=single_shot), create=True):
-            TelegramProxyPage._on_settings_save_worker_finished(page, SimpleNamespace(_request_id=1))
-
-        single_shot.assert_called_once()
-        self.assertEqual(single_shot.call_args.args[0], 0)
-        page._start_settings_save_worker.assert_not_called()
-
-        single_shot.call_args.args[1]()
-
-        page._start_settings_save_worker.assert_called_once_with({"action": "port", "port": 8080})
 
     def test_relay_check_pending_restarts_after_event_loop_turn(self) -> None:
         import telegram_proxy.ui.page as telegram_proxy_page

@@ -641,10 +641,7 @@ class TelegramProxyMTProxyCoreTests(unittest.TestCase):
         )
 
     def test_page_links_follow_selected_local_proxy_mode(self) -> None:
-        from telegram_proxy.config.settings import (
-            build_manual_instruction_text,
-            build_proxy_url,
-        )
+        from telegram_proxy.config.settings import build_proxy_url
 
         secret = "aabbccddeeff00112233445566778899"
 
@@ -655,10 +652,6 @@ class TelegramProxyMTProxyCoreTests(unittest.TestCase):
         self.assertEqual(
             build_proxy_url("127.0.0.1", 1443, mode="mtproxy", mtproxy_secret=secret),
             "tg://proxy?server=127.0.0.1&port=1443&secret=ddaabbccddeeff00112233445566778899",
-        )
-        self.assertEqual(
-            build_manual_instruction_text("127.0.0.1", 1443, mode="mtproxy"),
-            "  Тип: MTProxy  |  Хост: 127.0.0.1  |  Порт: 1443",
         )
 
     def test_wss_proxy_has_separate_mtproxy_runtime_entry(self) -> None:

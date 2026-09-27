@@ -12,7 +12,7 @@ import asyncio
 import unittest
 
 from telegram_proxy import TelegramProxyRuntime
-from telegram_proxy.ui.settings_save_flow import merge_restart_request, normalize_restart_request
+from telegram_proxy.runtime.settings_save_flow import merge_restart_request, normalize_restart_request
 from telegram_proxy.wss_proxy import TelegramWSProxy, UpstreamProxyConfig
 from telegram_proxy.proxy.routing import UpstreamProxyEndpoint
 
@@ -96,30 +96,18 @@ class RestartDispatchTests(unittest.TestCase):
     """
 
     def _run_dispatch(self, restart: str):
-        from types import SimpleNamespace
-        from unittest.mock import Mock, patch
         from telegram_proxy.ui import page as telegram_proxy_page
 
         page = telegram_proxy_page.TelegramProxyPage.__new__(telegram_proxy_page.TelegramProxyPage)
         page._cleanup_in_progress = False
-        page._settings_save_restart_pending = restart
-        runtime = Mock()
-        runtime.is_current.return_value = True
-        page._settings_save_runtime = runtime
-        # очередь пуста → доходим до диспетчеризации restart
-        page._queued_worker_state = Mock(
-            return_value=SimpleNamespace(has_pending=Mock(return_value=False))
-        )
+        page._start_after_settings_flush = False
         calls = []
         page._schedule_restart = lambda: calls.append("schedule")
         page._schedule_upstream_apply = lambda: calls.append("upstream_schedule")
         page._apply_upstream_hot_swap = lambda: calls.append("upstream")
         page._restart_if_running = lambda: calls.append("now")
-        page._update_manual_instructions = lambda: None
-        with patch.object(telegram_proxy_page, "log"):
-            telegram_proxy_page.TelegramProxyPage._on_settings_save_finished(
-                page, 1, "act", None, {"restart": restart}
-            )
+        # Фасад сообщает итоговое действие, когда очередь сохранений опустела.
+        telegram_proxy_page.TelegramProxyPage._on_settings_flushed(page, restart)
         return calls
 
     def test_schedule_triggers_full_restart_not_hot_swap(self) -> None:

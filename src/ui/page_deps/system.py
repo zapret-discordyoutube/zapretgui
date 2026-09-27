@@ -265,7 +265,13 @@ def build_logs_page_kwargs(*, page_name: PageName, logs_feature, orchestra_featu
     }
 
 
-def build_telegram_proxy_page_kwargs(*, page_name: PageName, runtime_feature, telegram_proxy_feature) -> dict:
+def build_telegram_proxy_page_kwargs(
+    *,
+    page_name: PageName,
+    runtime_feature,
+    telegram_proxy_feature,
+    show_page,
+) -> dict:
     _ = page_name
 
     def _get_zapret_running() -> bool:
@@ -274,6 +280,15 @@ def build_telegram_proxy_page_kwargs(*, page_name: PageName, runtime_feature, te
     return {
         "telegram_proxy_feature": telegram_proxy_feature,
         "get_zapret_running": _get_zapret_running,
+        "open_advanced_settings": lambda: show_page(PageName.TELEGRAM_PROXY_ADVANCED, allow_internal=True),
+    }
+
+
+def build_telegram_proxy_advanced_page_kwargs(*, page_name: PageName, telegram_proxy_feature, show_page) -> dict:
+    _ = page_name
+    return {
+        "telegram_proxy_feature": telegram_proxy_feature,
+        "open_telegram_proxy": lambda: show_page(PageName.TELEGRAM_PROXY),
     }
 
 
@@ -313,5 +328,6 @@ __all__ = [
     "build_servers_page_kwargs",
     "build_winws_log_analyzer_page_kwargs",
     "build_support_page_kwargs",
+    "build_telegram_proxy_advanced_page_kwargs",
     "build_telegram_proxy_page_kwargs",
 ]

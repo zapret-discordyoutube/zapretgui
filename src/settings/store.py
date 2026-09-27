@@ -1605,6 +1605,14 @@ def set_tg_proxy_proxy_protocol(value: bool) -> bool:
     return _set_bool(("telegram_proxy", "proxy_protocol"), value)
 
 
+def get_tg_proxy_auto_deeplink() -> bool:
+    return _get_bool(("telegram_proxy", "auto_deeplink"), True)
+
+
+def set_tg_proxy_auto_deeplink(value: bool) -> bool:
+    return _set_bool(("telegram_proxy", "auto_deeplink"), value)
+
+
 def get_orchestra_strict_detection() -> bool:
     return _get_bool(("orchestra", "settings", "strict_detection"), True)
 
@@ -1917,6 +1925,7 @@ __all__ = [
     "get_tg_proxy_pool_size",
     "get_tg_proxy_port",
     "get_tg_proxy_proxy_protocol",
+    "get_tg_proxy_auto_deeplink",
     "get_tg_proxy_upstream_enabled",
     "get_tg_proxy_upstream_host",
     "get_tg_proxy_upstream_mode",
@@ -2009,6 +2018,7 @@ __all__ = [
     "set_tg_proxy_pool_size",
     "set_tg_proxy_port",
     "set_tg_proxy_proxy_protocol",
+    "set_tg_proxy_auto_deeplink",
     "set_tg_proxy_upstream_enabled",
     "set_tg_proxy_upstream_host",
     "set_tg_proxy_upstream_mode",

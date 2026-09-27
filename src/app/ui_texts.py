@@ -2853,6 +2853,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Осталось: {minutes} мин",
         "en": "Remaining: {minutes} min",
     },
+    "page.telegram_proxy_advanced.title": {
+        "ru": "Продвинутые настройки",
+        "en": "Advanced settings",
+    },
     "page.support.title": {
         "ru": "Поддержка",
         "en": "Support",
@@ -4802,6 +4806,7 @@ NAV_PAGE_TEXT_KEYS: dict[PageName, str] = {
     PageName.SERVERS: "page.servers.title",
     PageName.ABOUT: "nav.page.about",
     PageName.SUPPORT: "page.support.title",
+    PageName.TELEGRAM_PROXY_ADVANCED: "page.telegram_proxy_advanced.title",
     PageName.FAKES: "nav.page.fakes",
     PageName.ZAPRET2_PRESET_SETUP: "nav.page.zapret2_mode",
     PageName.ZAPRET2_USER_PRESETS: "nav.page.zapret2_user_presets",

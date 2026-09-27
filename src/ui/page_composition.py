@@ -24,6 +24,7 @@ from ui.page_deps.system import (
     build_premium_page_kwargs,
     build_servers_page_kwargs,
     build_support_page_kwargs,
+    build_telegram_proxy_advanced_page_kwargs,
     build_telegram_proxy_page_kwargs,
     build_winws_log_analyzer_page_kwargs,
 )
@@ -159,6 +160,12 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
     PageName.TELEGRAM_PROXY: PageDepsSpec(
         build_telegram_proxy_page_kwargs,
         features=("runtime", "telegram_proxy"),
+        actions=("show_page",),
+    ),
+    PageName.TELEGRAM_PROXY_ADVANCED: PageDepsSpec(
+        build_telegram_proxy_advanced_page_kwargs,
+        features=("telegram_proxy",),
+        actions=("show_page",),
     ),
     PageName.ORCHESTRA: PageDepsSpec(
         build_orchestra_page_kwargs,

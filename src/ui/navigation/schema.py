@@ -325,6 +325,17 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
         breadcrumb_parent=None,
         sidebar_group="system",
     ),
+    PageName.TELEGRAM_PROXY_ADVANCED: PageRouteSpec(
+        page_name=PageName.TELEGRAM_PROXY_ADVANCED,
+        module_name="telegram_proxy.ui.advanced_page",
+        class_name="TelegramProxyAdvancedPage",
+        route_key="TelegramProxyAdvancedPage",
+        is_top_level=False,
+        is_hidden=True,
+        launch_modes=_COMMON,
+        breadcrumb_parent=PageName.TELEGRAM_PROXY,
+        sidebar_group=None,
+    ),
 }
 
 PAGE_CLEANUP_ORDER: tuple[PageName, ...] = (
@@ -352,6 +363,7 @@ PAGE_CLEANUP_ORDER: tuple[PageName, ...] = (
     PageName.ORCHESTRA_SETTINGS,
     PageName.APPEARANCE,
     PageName.PREMIUM,
+    PageName.TELEGRAM_PROXY_ADVANCED,
     PageName.TELEGRAM_PROXY,
 )
 

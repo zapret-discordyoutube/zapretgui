@@ -135,6 +135,7 @@ def default_telegram_proxy() -> dict[str, Any]:
         "buffer_kb": 256,
         "fake_tls_domain": "",
         "proxy_protocol": False,
+        "auto_deeplink": True,
     }
 
 

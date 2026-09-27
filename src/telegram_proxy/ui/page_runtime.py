@@ -32,7 +32,6 @@ class TelegramProxyStartPlan:
     should_start: bool
     status_text: str
     toggle_enabled: bool
-    upstream_log_line: str
 
 
 @dataclass(slots=True)
@@ -140,28 +139,17 @@ def build_restart_plan(*, running: bool, restarting: bool) -> TelegramProxyResta
         status_text="Перезапуск прокси...",
     )
 
-def build_start_plan(*, starting: bool, running: bool, host: str, port: int, upstream_config) -> TelegramProxyStartPlan:
+def build_start_plan(*, starting: bool, running: bool) -> TelegramProxyStartPlan:
     if starting or running:
         return TelegramProxyStartPlan(
             should_start=False,
             status_text="",
             toggle_enabled=False,
-            upstream_log_line="",
         )
-
-    upstream_log_line = ""
-    if upstream_config:
-        upstream_log_line = (
-            f"Upstream: {upstream_config.host}:{upstream_config.port} "
-            f"(mode={upstream_config.mode}, user={upstream_config.username})"
-        )
-
-    _ = host, port
     return TelegramProxyStartPlan(
         should_start=True,
         status_text="Запуск прокси...",
         toggle_enabled=False,
-        upstream_log_line=upstream_log_line,
     )
 
 def build_finish_start_plan(start_ok: bool) -> TelegramProxyFinishStartPlan:
@@ -238,7 +226,7 @@ def build_relay_result_plan(
                 "перезапустите прокси (нажмите Остановить → Запустить).\n"
                 "Если после перезапуска проблема осталась — "
                 "ваш провайдер блокирует TLS к Telegram. "
-                "Настройте 'Внешний прокси' ниже."
+                "Включите «Внешний прокси» в разделе «Продвинутые настройки»."
             ),
         )
     if zapret_running:
@@ -252,7 +240,7 @@ def build_relay_result_plan(
                 "Что делать: выключите Zapret и перезапустите прокси.\n"
                 "Если без Zapret relay тоже недоступен — "
                 "ваш провайдер блокирует IP Telegram. "
-                "Настройте 'Внешний прокси' ниже."
+                "Включите «Внешний прокси» в разделе «Продвинутые настройки»."
             ),
         )
     return TelegramProxyRelayResultPlan(
@@ -263,7 +251,7 @@ def build_relay_result_plan(
             "Что происходит: relay (149.154.167.220) полностью недоступен — "
             "ваш провайдер блокирует IP Telegram.\n"
             "Прокси не сможет работать напрямую.\n"
-            "Что делать: включите 'Внешний прокси' в настройках ниже "
+            "Что делать: включите «Внешний прокси» в разделе «Продвинутые настройки» "
             "и выберите один из доступных прокси-серверов."
         ),
     )

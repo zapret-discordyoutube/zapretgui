@@ -98,91 +98,6 @@ class TelegramProxyWorkerQueueTests(unittest.TestCase):
         page._schedule_open_log_file_worker_start.assert_not_called()
         self.assertEqual(state.pending, ["next.log"])
 
-    def test_scheduled_settings_save_start_queues_next_payload(self) -> None:
-        page = TelegramProxyPage.__new__(TelegramProxyPage)
-        page._cleanup_in_progress = False
-        state = _set_queue_state(page, "settings_save")
-        page._start_settings_save_worker = Mock()
-        single_shot = Mock(side_effect=lambda _delay, _callback: None)
-
-        old_payload = {"action": "host", "host": "old"}
-        new_payload = {"action": "host", "host": "new"}
-        with patch.object(telegram_proxy_page, "QTimer", SimpleNamespace(singleShot=single_shot), create=True):
-            TelegramProxyPage._schedule_settings_save_worker_start(page, old_payload)
-            TelegramProxyPage._schedule_settings_save_worker_start(page, new_payload)
-
-        single_shot.assert_called_once()
-        self.assertEqual(state.pending, [new_payload])
-
-        single_shot.call_args.args[1]()
-
-        page._start_settings_save_worker.assert_called_once_with(old_payload)
-        self.assertEqual(state.pending, [new_payload])
-
-    def test_settings_save_queue_replaces_pending_payload_for_same_action(self) -> None:
-        page = TelegramProxyPage.__new__(TelegramProxyPage)
-        state = _set_queue_state(
-            page,
-            "settings_save",
-            runtime=SimpleNamespace(is_running=Mock(return_value=True)),
-        )
-        page._start_settings_save_worker = Mock()
-
-        TelegramProxyPage._request_settings_save(page, "host", host="old.local")
-        TelegramProxyPage._request_settings_save(page, "host", host="new.local")
-
-        page._start_settings_save_worker.assert_not_called()
-        self.assertEqual(
-            state.pending,
-            [
-                {
-                    "action": "host",
-                    "host": "new.local",
-                    "port": 0,
-                    "user": "",
-                    "password": "",
-                    "enabled": False,
-                    "value": "",
-                    "context_extra": {
-                        "restart": "",
-                        "update_manual": False,
-                    },
-                }
-            ],
-        )
-
-    def test_settings_save_queue_keeps_payloads_for_different_actions(self) -> None:
-        page = TelegramProxyPage.__new__(TelegramProxyPage)
-        state = _set_queue_state(
-            page,
-            "settings_save",
-            runtime=SimpleNamespace(is_running=Mock(return_value=True)),
-        )
-        page._start_settings_save_worker = Mock()
-
-        TelegramProxyPage._request_settings_save(page, "host", host="proxy.local")
-        TelegramProxyPage._request_settings_save(page, "port", port=9090)
-
-        self.assertEqual(
-            [(payload["action"], payload["host"], payload["port"]) for payload in state.pending],
-            [("host", "proxy.local", 0), ("port", "", 9090)],
-        )
-
-    def test_settings_save_failure_ignored_when_new_save_is_pending(self) -> None:
-        page = TelegramProxyPage.__new__(TelegramProxyPage)
-        page._cleanup_in_progress = False
-        runtime = Mock()
-        runtime.is_current.return_value = True
-        page._settings_save_runtime = runtime
-        _set_queue_state(page, "settings_save", runtime=runtime, pending=[{"action": "port", "port": 9090}])
-        page._settings_save_restart_pending = "schedule"
-
-        with patch.object(telegram_proxy_page, "log") as log_mock:
-            TelegramProxyPage._on_settings_save_failed(page, 7, "host", "stale error", {})
-
-        self.assertEqual(page._settings_save_restart_pending, "schedule")
-        log_mock.assert_not_called()
-
     def test_scheduled_external_link_start_queues_next_link(self) -> None:
         page = TelegramProxyPage.__new__(TelegramProxyPage)
         page._cleanup_in_progress = False
@@ -376,6 +291,7 @@ class TelegramProxyWorkerQueueTests(unittest.TestCase):
         page = TelegramProxyPage.__new__(TelegramProxyPage)
         page._cleanup_in_progress = False
         _set_state(page, "proxy_start", runtime=SimpleNamespace(is_running=Mock(return_value=True)))
+        page._telegram_proxy = SimpleNamespace(has_pending_settings_saves=Mock(return_value=False))
         page._start_proxy_worker = Mock()
 
         TelegramProxyPage._request_proxy_start(page)
@@ -467,21 +383,6 @@ class TelegramProxyWorkerQueueTests(unittest.TestCase):
 
         page._schedule_proxy_stop_worker_start.assert_not_called()
         self.assertTrue(page._proxy_stop_state.pending)
-
-    def test_stale_settings_save_worker_finished_does_not_restart_pending_save(self) -> None:
-        page = TelegramProxyPage.__new__(TelegramProxyPage)
-        page._cleanup_in_progress = False
-        _set_queue_state(
-            page,
-            "settings_save",
-            runtime=SimpleNamespace(request_id=7),
-            pending=[{"action": "host", "host": "new"}],
-        )
-        page._schedule_settings_save_worker_start = Mock()
-
-        TelegramProxyPage._on_settings_save_worker_finished(page, SimpleNamespace(_request_id=6))
-
-        page._schedule_settings_save_worker_start.assert_not_called()
 
     def test_stale_ensure_hosts_worker_finished_does_not_restart_pending_ensure(self) -> None:
         page = TelegramProxyPage.__new__(TelegramProxyPage)

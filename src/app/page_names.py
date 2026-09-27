@@ -47,6 +47,7 @@ class PageName(Enum):
 
     # === Telegram Proxy ===
     TELEGRAM_PROXY = auto()          # Telegram WebSocket Proxy
+    TELEGRAM_PROXY_ADVANCED = auto() # Продвинутые настройки Telegram Proxy (вложенная)
 
     # === Оркестратор (автообучение) ===
     ORCHESTRA = auto()               # Оркестр - главная

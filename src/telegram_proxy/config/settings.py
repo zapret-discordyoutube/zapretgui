@@ -33,6 +33,7 @@ class TelegramProxySettingsState:
     buffer_kb: int
     fake_tls_domain: str
     proxy_protocol: bool
+    auto_deeplink: bool
 
 
 @dataclass(slots=True)
@@ -69,6 +70,7 @@ def default_state() -> TelegramProxySettingsState:
         buffer_kb=256,
         fake_tls_domain="",
         proxy_protocol=False,
+        auto_deeplink=True,
     )
 
 def validate_host(host: str) -> bool:
@@ -134,10 +136,6 @@ def normalize_buffer_kb(value: object) -> int:
         return 256
     return max(4, min(4096, number))
 
-
-def build_manual_instruction_text(host: str, port: int, *, mode: object = "socks5") -> str:
-    proxy_type = "MTProxy" if normalize_proxy_mode(mode) == "mtproxy" else "SOCKS5"
-    return f"  Тип: {proxy_type}  |  Хост: {normalize_host(host)}  |  Порт: {normalize_port(port)}"
 
 def build_proxy_url(
     host: str,
@@ -210,6 +208,7 @@ def _settings_state_from_data(data: dict, upstream_catalog: UpstreamCatalog) -> 
         buffer_kb=buffer_kb,
         fake_tls_domain=fake_tls_domain,
         proxy_protocol=proxy_protocol,
+        auto_deeplink=bool(raw.get("auto_deeplink", defaults.auto_deeplink)),
     )
 
 
@@ -341,6 +340,15 @@ def set_proxy_protocol(enabled: bool) -> None:
         from settings.store import set_tg_proxy_proxy_protocol
 
         set_tg_proxy_proxy_protocol(bool(enabled))
+    except Exception:
+        pass
+
+
+def set_auto_deeplink(enabled: bool) -> None:
+    try:
+        from settings.store import set_tg_proxy_auto_deeplink
+
+        set_tg_proxy_auto_deeplink(bool(enabled))
     except Exception:
         pass
 
@@ -636,9 +644,16 @@ def get_upstream_mtproxy_link(preset_id: str) -> str:
         return ""
 
 def consume_auto_deeplink_request() -> bool:
+    """True только один раз: когда авто-настройка включена и ссылку ещё не открывали."""
     try:
-        from settings.store import get_tg_proxy_deeplink_done, set_tg_proxy_deeplink_done
+        from settings.store import (
+            get_tg_proxy_auto_deeplink,
+            get_tg_proxy_deeplink_done,
+            set_tg_proxy_deeplink_done,
+        )
 
+        if not get_tg_proxy_auto_deeplink():
+            return False
         if get_tg_proxy_deeplink_done():
             return False
         set_tg_proxy_deeplink_done(True)

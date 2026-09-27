@@ -106,29 +106,16 @@ def start_proxy_runtime(
     manager,
     starting: bool,
     running: bool,
-    host: str,
-    port: int,
     set_starting,
     btn_toggle,
     status_label,
-    append_log_line,
     create_start_worker,
-    mode: str = "socks5",
-    upstream_config=None,
-    cloudflare_config=None,
-    mtproxy_secret: str = "",
-    pool_size: int = 4,
-    buffer_kb: int = 256,
-    fake_tls_domain: str = "",
-    proxy_protocol: bool = False,
     on_finished=None,
 ) -> None:
+    """Запускает прокси в фоне. Все настройки worker читает из хранилища сам."""
     plan = telegram_proxy_page_runtime.build_start_plan(
         starting=bool(starting),
         running=bool(running),
-        host=host,
-        port=port,
-        upstream_config=upstream_config,
     )
     if not plan.should_start:
         return
@@ -136,28 +123,13 @@ def start_proxy_runtime(
     set_starting(True)
     btn_toggle.setEnabled(plan.toggle_enabled)
     status_label.setText(plan.status_text)
-    if plan.upstream_log_line:
-        append_log_line(plan.upstream_log_line)
 
     runtime = _page_runtime(page, "_proxy_start_runtime")
     if runtime.is_running():
         return
     runtime.start_qthread_worker(
         worker_factory=lambda request_id: _mark_worker_request_id(
-            create_start_worker(
-                manager=manager,
-                port=port,
-                mode=str(mode or "socks5"),
-                host=host,
-                upstream_config=upstream_config,
-                cloudflare_config=cloudflare_config,
-                mtproxy_secret=str(mtproxy_secret or ""),
-                pool_size=int(pool_size),
-                buffer_kb=int(buffer_kb),
-                fake_tls_domain=str(fake_tls_domain or ""),
-                proxy_protocol=bool(proxy_protocol),
-                parent=page,
-            ),
+            create_start_worker(manager=manager, parent=page),
             request_id,
         ),
         on_loaded=lambda _request_id, ok: _finish_proxy_start_worker(page, ok),
@@ -336,6 +308,7 @@ def apply_status_changed(
         set_speed_state(0, 0, (), ())
     if plan.clear_stats:
         stats_label.setText("")
+        stats_label.setVisible(False)
     if plan.invalidate_relay_check:
         set_generation(relay_check_gen + 1)
 
@@ -389,3 +362,4 @@ def apply_stats_updated(
         plan.next_speed_hist_down,
     )
     stats_label.setText(plan.stats_text)
+    stats_label.setVisible(bool(plan.stats_text))

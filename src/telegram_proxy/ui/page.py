@@ -40,50 +40,26 @@ from telegram_proxy.ui.proxy_runtime_workflow import (
 )
 from telegram_proxy.ui.runtime_helpers import (
     apply_ui_texts,
-    apply_upstream_preset_ui,
-    apply_upstream_runtime_state,
     refresh_pivot_texts,
     refresh_status_texts,
 )
 from telegram_proxy.ui.text_plan import TELEGRAM_PROXY_SETTINGS_TEXT
-from telegram_proxy.ui.upstream_workflow import (
-    handle_upstream_preset_changed,
-    handle_upstream_toggle,
-    schedule_upstream_restart,
-)
-from telegram_proxy.ui.settings_save_flow import merge_restart_request
-from telegram_proxy.ui.settings_build import (
-    build_telegram_proxy_advanced_settings_panel,
-    build_telegram_proxy_settings_panel,
-)
-from telegram_proxy.ui.settings_ui_state import (
-    build_advanced_settings_auto_sections,
-    build_advanced_settings_ui_plan,
-    is_advanced_section_visible,
-)
+from telegram_proxy.ui.upstream_workflow import schedule_upstream_restart
+from telegram_proxy.ui.settings_build import build_telegram_proxy_settings_panel
 from telegram_proxy.ui.worker_state import (
     TelegramProxyPageQueuedWorkerState,
     TelegramProxyPageWorkerState,
 )
-from ui.fluent_widgets import (
-    enable_setting_card_group_auto_height,
-    insert_widget_into_setting_card_group,
-)
+from ui.fluent_widgets import enable_setting_card_group_auto_height
 from log.log import log
 
 import telegram_proxy.ui.page_runtime as telegram_proxy_page_runtime
 import telegram_proxy.config.settings as telegram_proxy_settings
 from qfluentwidgets import (
-    BodyLabel,
     CaptionLabel,
-    StrongBodyLabel,
-    SpinBox,
     InfoBar,
     InfoBarPosition,
     SegmentedWidget,
-    LineEdit,
-    PasswordLineEdit,
-    SettingCardGroup,
     PushButton,
     PrimaryPushButton,
 )
@@ -121,7 +97,7 @@ class _StatusDot(QWidget):
 class TelegramProxyPage(BasePage):
     """Telegram WebSocket Proxy settings page."""
 
-    def __init__(self, parent=None, *, telegram_proxy_feature, get_zapret_running):
+    def __init__(self, parent=None, *, telegram_proxy_feature, get_zapret_running, open_advanced_settings):
         super().__init__(
             "Telegram Proxy",
             TELEGRAM_PROXY_SETTINGS_TEXT.page_subtitle,
@@ -129,6 +105,7 @@ class TelegramProxyPage(BasePage):
         )
         self._telegram_proxy = telegram_proxy_feature
         self._get_zapret_running = get_zapret_running
+        self._open_advanced_settings = open_advanced_settings
         self._log_timer = None
         self._stats_timer = None
         self._diag_poll_timer = None
@@ -143,13 +120,8 @@ class TelegramProxyPage(BasePage):
         self._restart_stop_state = TelegramProxyPageWorkerState(self._restart_stop_runtime)
         self._relay_check_runtime = OneShotWorkerRuntime()
         self._relay_check_state = TelegramProxyPageWorkerState(self._relay_check_runtime)
-        self._cloudflare_check_runtime = OneShotWorkerRuntime()
-        self._cloudflare_check_state = TelegramProxyPageWorkerState(self._cloudflare_check_runtime)
-        self._cloudflare_check_kind = ""
         self._ensure_hosts_runtime = OneShotWorkerRuntime()
         self._ensure_hosts_state = TelegramProxyPageWorkerState(self._ensure_hosts_runtime)
-        self._settings_save_runtime = OneShotWorkerRuntime()
-        self._settings_save_state = TelegramProxyPageQueuedWorkerState(self._settings_save_runtime)
         self._upstream_apply_runtime = OneShotWorkerRuntime()
         self._upstream_apply_state = TelegramProxyPageWorkerState(self._upstream_apply_runtime)
         self._open_log_file_runtime = OneShotWorkerRuntime()
@@ -160,22 +132,19 @@ class TelegramProxyPage(BasePage):
         self._log_line_state = TelegramProxyPageQueuedWorkerState(self._log_line_runtime)
         self._auto_deeplink_runtime = OneShotWorkerRuntime()
         self._auto_deeplink_state = TelegramProxyPageWorkerState(self._auto_deeplink_runtime)
-        self._settings_save_restart_pending = ""
+        # Авто-настройка Telegram: ссылка открывается, когда прокси переходит
+        # из «остановлен» в «работает», но не раньше загрузки настроек страницы.
+        self._auto_deeplink_last_running = False
+        self._auto_deeplink_due = False
+        self._initial_state_applied = False
+        # Запуск ждёт, пока очередь сохранений допишет настройки в хранилище.
+        self._start_after_settings_flush = False
         self._initial_state_runtime = OneShotWorkerRuntime()
         self._initial_state_load_started_at = 0.0
         self._relay_check_gen = 0
         self._cleanup_in_progress = False
         self._runtime_initialized = False
         self._built_panel_indexes: set[int] = set()
-        self._advanced_settings_built = False
-        self._advanced_signals_connected = False
-        self._initial_advanced_build_scheduled = False
-        self._advanced_auto_sections: set[str] = set()
-        self._initial_state = telegram_proxy_settings.TelegramProxyPageInitialStatePlan(
-            upstream_catalog=telegram_proxy_settings.UpstreamCatalog(),
-            settings=telegram_proxy_settings.default_state(),
-        )
-        self._current_settings_state = self._initial_state.settings
         self._btn_copy_logs = None
         self._btn_open_log_file = None
         self._btn_clear_logs = None
@@ -232,9 +201,7 @@ class TelegramProxyPage(BasePage):
         ):
             return
         self._log_ui_timing("telegram_proxy_ui.initial_state.load", self._initial_state_load_started_at)
-        self._initial_state = initial_state
-        self._apply_initial_upstream_catalog(getattr(initial_state, "upstream_catalog", None))
-        self._apply_initial_settings_state(getattr(initial_state, "settings", telegram_proxy_settings.default_state()))
+        self._apply_initial_settings_state(initial_state.settings)
 
     def _on_initial_state_failed(self, request_id: int, error: str) -> None:
         if not self._initial_state_runtime.is_current(
@@ -246,6 +213,7 @@ class TelegramProxyPage(BasePage):
 
     def _after_ui_built(self) -> None:
         started_at = time.perf_counter()
+        self._telegram_proxy.add_settings_flushed_listener(self._on_settings_flushed)
         self._connect_signals()
         self._log_timer = QTimer(self)
         self._log_timer.timeout.connect(self._flush_log_buffer)
@@ -267,7 +235,6 @@ class TelegramProxyPage(BasePage):
 
     def on_page_activated(self) -> None:
         self._run_runtime_init_once()
-        self._apply_advanced_settings_ui()
 
     def _setup_ui(self):
         started_at = time.perf_counter()
@@ -323,226 +290,43 @@ class TelegramProxyPage(BasePage):
         elif not should_run and self._log_timer.isActive():
             self._log_timer.stop()
 
-    def _add_settings_item(self, container, widget: QWidget) -> None:
-        add_setting_card = getattr(container, "addSettingCard", None)
-        if callable(add_setting_card):
-            add_setting_card(widget)
-        else:
-            container.add_widget(widget)
-
-    def _insert_group_label(self, container, label: QWidget, index: int = 1) -> None:
-        if getattr(container, "vBoxLayout", None) is not None:
-            try:
-                insert_widget_into_setting_card_group(container, index, label)
-                enable_setting_card_group_auto_height(container)
-                return
-            except Exception:
-                pass
-        add_widget = getattr(container, "add_widget", None)
-        if callable(add_widget):
-            add_widget(label)
-
     def _build_settings_panel(self, layout: QVBoxLayout):
-        from ui.widgets.win11_controls import Win11ToggleRow, Win11ComboRow
         widgets = build_telegram_proxy_settings_panel(
             layout,
             content_parent=self.content,
             status_dot_cls=_StatusDot,
-            strong_body_label_cls=StrongBodyLabel,
-            caption_label_cls=CaptionLabel,
-            body_label_cls=BodyLabel,
-            push_button_cls=PushButton,
-            primary_push_button_cls=PrimaryPushButton,
-            setting_card_group_cls=SettingCardGroup,
-            line_edit_cls=LineEdit,
-            spin_box_cls=SpinBox,
-            password_line_edit_cls=PasswordLineEdit,
-            win11_toggle_row_cls=Win11ToggleRow,
-            win11_combo_row_cls=Win11ComboRow,
             on_toggle_proxy=self._on_toggle_proxy,
             on_open_in_telegram=self._on_open_in_telegram,
             on_copy_link=self._on_copy_link,
             on_open_zastogram=self._on_open_zastogram,
-            on_open_mtproxy=self._on_open_mtproxy,
             on_generate_mtproxy_secret=self._on_generate_mtproxy_secret,
             on_copy_fake_tls_nginx_config=self._on_copy_fake_tls_nginx_config,
-            on_test_cloudflare=self._on_test_cloudflare,
-            on_copy_cloudflare_dns=self._on_copy_cloudflare_dns,
-            on_test_cloudflare_worker=self._on_test_cloudflare_worker,
-            on_copy_cloudflare_worker_code=self._on_copy_cloudflare_worker_code,
-            upstream_catalog=self._initial_state.upstream_catalog,
+            on_open_advanced_settings=self._on_open_advanced_settings,
         )
         self._status_card = widgets.status_card
         self._status_dot = widgets.status_dot
         self._status_label = widgets.status_label
         self._btn_toggle = widgets.btn_toggle
         self._stats_label = widgets.stats_label
-        self._setup_section_label = widgets.setup_section_label
-        self._setup_desc_label = widgets.setup_desc_label
-        self._setup_fallback_label = widgets.setup_fallback_label
-        self._setup_card = widgets.setup_card
+        self._setup_title_label = widgets.setup_title_label
         self._setup_open_btn = widgets.setup_open_btn
         self._setup_copy_btn = widgets.setup_copy_btn
         self._setup_zastogram_btn = widgets.setup_zastogram_btn
         self._settings_card = widgets.settings_card
-        self._settings_host_row = widgets.settings_host_row
-        self._host_label = widgets.host_label
+        self._host_port_row = widgets.host_port_row
         self._host_edit = widgets.host_edit
-        self._port_label = widgets.port_label
         self._port_spin = widgets.port_spin
         self._proxy_mode_row = widgets.proxy_mode_row
         self._mtproxy_secret_row = widgets.mtproxy_secret_row
-        self._mtproxy_secret_label = widgets.mtproxy_secret_label
         self._mtproxy_secret_edit = widgets.mtproxy_secret_edit
         self._mtproxy_generate_btn = widgets.mtproxy_generate_btn
         self._fake_tls_domain_row = widgets.fake_tls_domain_row
-        self._fake_tls_domain_label = widgets.fake_tls_domain_label
         self._fake_tls_domain_edit = widgets.fake_tls_domain_edit
         self._fake_tls_nginx_btn = widgets.fake_tls_nginx_btn
+        self._proxy_protocol_toggle = widgets.proxy_protocol_toggle
         self._auto_deeplink_toggle = widgets.auto_deeplink_toggle
-        self._advanced_toggle = widgets.advanced_toggle
-        self._advanced_card = widgets.advanced_card
-        self._upstream_card = widgets.upstream_card
-        self._upstream_desc_label = widgets.upstream_desc_label
-        self._upstream_toggle = widgets.upstream_toggle
-        self._upstream_catalog = widgets.upstream_catalog
-        self._upstream_preset_row = widgets.upstream_preset_row
-        self._upstream_runtime_state_label = widgets.upstream_runtime_state_label
-        self._upstream_catalog_hint = widgets.upstream_catalog_hint
-        self._upstream_manual_widget = widgets.upstream_manual_widget
-        self._upstream_host_label = widgets.upstream_host_label
-        self._upstream_host_edit = widgets.upstream_host_edit
-        self._upstream_port_label = widgets.upstream_port_label
-        self._upstream_port_spin = widgets.upstream_port_spin
-        self._upstream_user_label = widgets.upstream_user_label
-        self._upstream_user_edit = widgets.upstream_user_edit
-        self._upstream_pass_label = widgets.upstream_pass_label
-        self._upstream_pass_edit = widgets.upstream_pass_edit
-        self._mtproxy_action_btn = widgets.mtproxy_action_btn
-        self._mtproxy_action_widget = widgets.mtproxy_action_widget
-        self._current_mtproxy_preset_id = ""
-        self._upstream_mode_toggle = widgets.upstream_mode_toggle
-        self._upstream_udp_toggle = widgets.upstream_udp_toggle
-        self._cloudflare_toggle = widgets.cloudflare_toggle
-        self._cloudflare_domains_row = widgets.cloudflare_domains_row
-        self._cloudflare_domains_label = widgets.cloudflare_domains_label
-        self._cloudflare_domains_edit = widgets.cloudflare_domains_edit
-        self._cloudflare_test_btn = widgets.cloudflare_test_btn
-        self._cloudflare_dns_btn = widgets.cloudflare_dns_btn
-        self._cloudflare_worker_toggle = widgets.cloudflare_worker_toggle
-        self._cloudflare_worker_domains_row = widgets.cloudflare_worker_domains_row
-        self._cloudflare_worker_domains_label = widgets.cloudflare_worker_domains_label
-        self._cloudflare_worker_domains_edit = widgets.cloudflare_worker_domains_edit
-        self._cloudflare_worker_test_btn = widgets.cloudflare_worker_test_btn
-        self._cloudflare_worker_code_btn = widgets.cloudflare_worker_code_btn
-        self._dc_ip_row = widgets.dc_ip_row
-        self._dc_ip_label = widgets.dc_ip_label
-        self._dc_ip_edit = widgets.dc_ip_edit
-        self._performance_label = widgets.performance_label
-        self._pool_size_label = widgets.pool_size_label
-        self._pool_size_spin = widgets.pool_size_spin
-        self._buffer_kb_label = widgets.buffer_kb_label
-        self._buffer_kb_spin = widgets.buffer_kb_spin
-        self._proxy_protocol_toggle = widgets.proxy_protocol_toggle
-        self._manual_section_label = widgets.manual_section_label
-        self._instructions_card = widgets.instructions_card
-        self._instr1_label = widgets.instr1_label
-        self._instr2_label = widgets.instr2_label
-        self._manual_host_port_label = widgets.manual_host_port_label
-
-    def _assign_advanced_settings_widgets(self, widgets) -> None:
-        self._advanced_card = widgets.advanced_card
-        self._upstream_card = widgets.upstream_card
-        self._mtproxy_secret_row = widgets.mtproxy_secret_row
-        self._mtproxy_secret_label = widgets.mtproxy_secret_label
-        self._mtproxy_secret_edit = widgets.mtproxy_secret_edit
-        self._mtproxy_generate_btn = widgets.mtproxy_generate_btn
-        self._fake_tls_domain_row = widgets.fake_tls_domain_row
-        self._fake_tls_domain_label = widgets.fake_tls_domain_label
-        self._fake_tls_domain_edit = widgets.fake_tls_domain_edit
-        self._fake_tls_nginx_btn = widgets.fake_tls_nginx_btn
-        self._upstream_card = widgets.upstream_card
-        self._upstream_desc_label = widgets.upstream_desc_label
-        self._upstream_toggle = widgets.upstream_toggle
-        self._upstream_catalog = widgets.upstream_catalog
-        self._upstream_preset_row = widgets.upstream_preset_row
-        self._upstream_runtime_state_label = widgets.upstream_runtime_state_label
-        self._upstream_catalog_hint = widgets.upstream_catalog_hint
-        self._upstream_manual_widget = widgets.upstream_manual_widget
-        self._upstream_host_label = widgets.upstream_host_label
-        self._upstream_host_edit = widgets.upstream_host_edit
-        self._upstream_port_label = widgets.upstream_port_label
-        self._upstream_port_spin = widgets.upstream_port_spin
-        self._upstream_user_label = widgets.upstream_user_label
-        self._upstream_user_edit = widgets.upstream_user_edit
-        self._upstream_pass_label = widgets.upstream_pass_label
-        self._upstream_pass_edit = widgets.upstream_pass_edit
-        self._mtproxy_action_btn = widgets.mtproxy_action_btn
-        self._mtproxy_action_widget = widgets.mtproxy_action_widget
-        self._upstream_mode_toggle = widgets.upstream_mode_toggle
-        self._upstream_udp_toggle = widgets.upstream_udp_toggle
-        self._cloudflare_toggle = widgets.cloudflare_toggle
-        self._cloudflare_domains_row = widgets.cloudflare_domains_row
-        self._cloudflare_domains_label = widgets.cloudflare_domains_label
-        self._cloudflare_domains_edit = widgets.cloudflare_domains_edit
-        self._cloudflare_test_btn = widgets.cloudflare_test_btn
-        self._cloudflare_dns_btn = widgets.cloudflare_dns_btn
-        self._cloudflare_worker_toggle = widgets.cloudflare_worker_toggle
-        self._cloudflare_worker_domains_row = widgets.cloudflare_worker_domains_row
-        self._cloudflare_worker_domains_label = widgets.cloudflare_worker_domains_label
-        self._cloudflare_worker_domains_edit = widgets.cloudflare_worker_domains_edit
-        self._cloudflare_worker_test_btn = widgets.cloudflare_worker_test_btn
-        self._cloudflare_worker_code_btn = widgets.cloudflare_worker_code_btn
-        self._dc_ip_row = widgets.dc_ip_row
-        self._dc_ip_label = widgets.dc_ip_label
-        self._dc_ip_edit = widgets.dc_ip_edit
-        self._performance_label = widgets.performance_label
-        self._pool_size_label = widgets.pool_size_label
-        self._pool_size_spin = widgets.pool_size_spin
-        self._buffer_kb_label = widgets.buffer_kb_label
-        self._buffer_kb_spin = widgets.buffer_kb_spin
-        self._proxy_protocol_toggle = widgets.proxy_protocol_toggle
-        self._manual_section_label = widgets.manual_section_label
-        self._instructions_card = widgets.instructions_card
-        self._instr1_label = widgets.instr1_label
-        self._instr2_label = widgets.instr2_label
-        self._manual_host_port_label = widgets.manual_host_port_label
-
-    def _ensure_advanced_settings_built(self) -> None:
-        if self.__dict__.get("_advanced_settings_built", False):
-            return
-        started_at = time.perf_counter()
-        from ui.widgets.win11_controls import Win11ToggleRow, Win11ComboRow
-
-        widgets = build_telegram_proxy_advanced_settings_panel(
-            self._settings_layout,
-            content_parent=self.content,
-            strong_body_label_cls=StrongBodyLabel,
-            caption_label_cls=CaptionLabel,
-            body_label_cls=BodyLabel,
-            push_button_cls=PushButton,
-            setting_card_group_cls=SettingCardGroup,
-            line_edit_cls=LineEdit,
-            spin_box_cls=SpinBox,
-            password_line_edit_cls=PasswordLineEdit,
-            win11_toggle_row_cls=Win11ToggleRow,
-            win11_combo_row_cls=Win11ComboRow,
-            on_open_mtproxy=self._on_open_mtproxy,
-            on_generate_mtproxy_secret=self._on_generate_mtproxy_secret,
-            on_copy_fake_tls_nginx_config=self._on_copy_fake_tls_nginx_config,
-            on_test_cloudflare=self._on_test_cloudflare,
-            on_copy_cloudflare_dns=self._on_copy_cloudflare_dns,
-            on_test_cloudflare_worker=self._on_test_cloudflare_worker,
-            on_copy_cloudflare_worker_code=self._on_copy_cloudflare_worker_code,
-            upstream_catalog=self._upstream_catalog,
-        )
-        self._assign_advanced_settings_widgets(widgets)
-        self._advanced_settings_built = True
-        self._connect_advanced_signals()
-        self._apply_ui_texts()
-        self._apply_advanced_settings_state(self._current_settings_state)
-        self._on_upstream_state_changed(self._proxy_manager().upstream_state)
-        self._log_ui_timing("telegram_proxy_ui.advanced_settings.build", started_at)
+        self._advanced_nav_row = widgets.advanced_nav_row
+        self._advanced_nav_btn = widgets.advanced_nav_btn
 
     def _build_logs_panel(self, layout: QVBoxLayout):
         widgets = build_telegram_proxy_logs_panel(
@@ -639,40 +423,16 @@ class TelegramProxyPage(BasePage):
         apply_ui_texts(
             refresh_pivot_texts_callback=self._refresh_pivot_texts,
             refresh_status_texts_callback=self._refresh_status_texts,
-            setup_section_label=getattr(self, "_setup_section_label", None),
             settings_card=getattr(self, "_settings_card", None),
-            advanced_card=getattr(self, "_advanced_card", None),
-            upstream_card=getattr(self, "_upstream_card", None),
-            manual_section_label=getattr(self, "_manual_section_label", None),
-            setup_desc_label=getattr(self, "_setup_desc_label", None),
-            setup_fallback_label=getattr(self, "_setup_fallback_label", None),
-            host_label=getattr(self, "_host_label", None),
-            port_label=getattr(self, "_port_label", None),
-            mtproxy_secret_label=getattr(self, "_mtproxy_secret_label", None),
-            fake_tls_domain_label=getattr(self, "_fake_tls_domain_label", None),
-            dc_ip_label=getattr(self, "_dc_ip_label", None),
-            performance_label=getattr(self, "_performance_label", None),
-            pool_size_label=getattr(self, "_pool_size_label", None),
-            buffer_kb_label=getattr(self, "_buffer_kb_label", None),
-            cloudflare_domains_label=getattr(self, "_cloudflare_domains_label", None),
-            cloudflare_worker_domains_label=getattr(self, "_cloudflare_worker_domains_label", None),
-            upstream_desc_label=getattr(self, "_upstream_desc_label", None),
-            upstream_host_label=getattr(self, "_upstream_host_label", None),
-            upstream_port_label=getattr(self, "_upstream_port_label", None),
-            upstream_user_label=getattr(self, "_upstream_user_label", None),
-            upstream_pass_label=getattr(self, "_upstream_pass_label", None),
-            mtproxy_desc_label=getattr(self, "_mtproxy_desc_label", None),
-            instr1_label=getattr(self, "_instr1_label", None),
-            instr2_label=getattr(self, "_instr2_label", None),
+            setup_title_label=getattr(self, "_setup_title_label", None),
+            host_port_row=getattr(self, "_host_port_row", None),
+            mtproxy_secret_row=getattr(self, "_mtproxy_secret_row", None),
+            fake_tls_domain_row=getattr(self, "_fake_tls_domain_row", None),
+            advanced_nav_row=getattr(self, "_advanced_nav_row", None),
             diag_desc_label=getattr(self, "_diag_desc_label", None),
             setup_open_btn=getattr(self, "_setup_open_btn", None),
             setup_copy_btn=getattr(self, "_setup_copy_btn", None),
-            mtproxy_action_btn=getattr(self, "_mtproxy_action_btn", None),
-            cloudflare_test_btn=getattr(self, "_cloudflare_test_btn", None),
-            cloudflare_dns_btn=getattr(self, "_cloudflare_dns_btn", None),
             fake_tls_nginx_btn=getattr(self, "_fake_tls_nginx_btn", None),
-            cloudflare_worker_test_btn=getattr(self, "_cloudflare_worker_test_btn", None),
-            cloudflare_worker_code_btn=getattr(self, "_cloudflare_worker_code_btn", None),
             btn_copy_logs=getattr(self, "_btn_copy_logs", None),
             btn_open_log_file=getattr(self, "_btn_open_log_file", None),
             btn_clear_logs=getattr(self, "_btn_clear_logs", None),
@@ -681,26 +441,11 @@ class TelegramProxyPage(BasePage):
             host_edit=getattr(self, "_host_edit", None),
             mtproxy_secret_edit=getattr(self, "_mtproxy_secret_edit", None),
             fake_tls_domain_edit=getattr(self, "_fake_tls_domain_edit", None),
-            dc_ip_edit=getattr(self, "_dc_ip_edit", None),
-            cloudflare_domains_edit=getattr(self, "_cloudflare_domains_edit", None),
-            cloudflare_worker_domains_edit=getattr(self, "_cloudflare_worker_domains_edit", None),
-            upstream_host_edit=getattr(self, "_upstream_host_edit", None),
-            upstream_user_edit=getattr(self, "_upstream_user_edit", None),
-            upstream_pass_edit=getattr(self, "_upstream_pass_edit", None),
             log_edit=getattr(self, "_log_edit", None),
             diag_edit=getattr(self, "_diag_edit", None),
             auto_deeplink_toggle=getattr(self, "_auto_deeplink_toggle", None),
-            advanced_toggle=getattr(self, "_advanced_toggle", None),
             proxy_mode_row=getattr(self, "_proxy_mode_row", None),
             proxy_protocol_toggle=getattr(self, "_proxy_protocol_toggle", None),
-            upstream_toggle=getattr(self, "_upstream_toggle", None),
-            upstream_preset_row=getattr(self, "_upstream_preset_row", None),
-            upstream_catalog_hint=getattr(self, "_upstream_catalog_hint", None),
-            upstream_mode_toggle=getattr(self, "_upstream_mode_toggle", None),
-            upstream_udp_toggle=getattr(self, "_upstream_udp_toggle", None),
-            cloudflare_toggle=getattr(self, "_cloudflare_toggle", None),
-            cloudflare_worker_toggle=getattr(self, "_cloudflare_worker_toggle", None),
-            update_manual_instructions_callback=self._update_manual_instructions,
         )
 
     def set_ui_language(self, language: str) -> None:
@@ -726,177 +471,72 @@ class TelegramProxyPage(BasePage):
             except Exception:
                 pass
 
-    def _apply_upstream_preset_ui(self, index: int) -> None:
-        if not self.__dict__.get("_advanced_settings_built", False):
-            return
-        self._current_mtproxy_preset_id = apply_upstream_preset_ui(
-            upstream_toggle=self._upstream_toggle,
-            upstream_catalog=self._upstream_catalog,
-            upstream_preset_row=self._upstream_preset_row,
-            upstream_catalog_hint=self._upstream_catalog_hint,
-            upstream_manual_widget=self._upstream_manual_widget,
-            mtproxy_action_widget=self._mtproxy_action_widget,
-            upstream_mode_toggle=self._upstream_mode_toggle,
-            upstream_udp_toggle=self._upstream_udp_toggle,
-            index=index,
-            upstream_runtime_state_label=self._upstream_runtime_state_label,
-        )
-        enable_setting_card_group_auto_height(self._upstream_card)
-
-    def _apply_initial_upstream_catalog(self, upstream_catalog) -> None:
-        if upstream_catalog is None:
-            return
-        self._upstream_catalog = upstream_catalog
-        if not self.__dict__.get("_advanced_settings_built", False):
-            return
-        combo = self._upstream_preset_row.combo
-        combo.blockSignals(True)
-        try:
-            combo.clear()
-            for text, data in upstream_catalog.items():
-                combo.addItem(text, userData=data)
-        finally:
-            combo.blockSignals(False)
-        try:
-            self._upstream_preset_row.refresh_accessibility()
-        except Exception:
-            pass
-
     def _connect_signals(self):
         mgr = self._proxy_manager()
-        mgr.status_changed.connect(self._on_status_changed)
-        mgr.upstream_state_changed.connect(self._on_upstream_state_changed)
+        mgr.status_changed.connect(self._on_manager_status_changed)
 
         self._port_spin.valueChanged.connect(self._on_port_changed)
         self._host_edit.editingFinished.connect(self._on_host_changed)
-        self._advanced_toggle.toggled.connect(self._on_advanced_toggled)
         self._proxy_mode_row.currentIndexChanged.connect(self._on_proxy_mode_changed)
-        self._connect_advanced_signals()
-
-        # Sync initial state — proxy may already be running (e.g., started from tray)
-        self._on_status_changed(mgr.is_running)
-        self._on_upstream_state_changed(mgr.upstream_state)
-
-    def _connect_advanced_signals(self) -> None:
-        if self.__dict__.get("_advanced_signals_connected", False):
-            return
-        if not self.__dict__.get("_advanced_settings_built", False):
-            return
         self._mtproxy_secret_edit.editingFinished.connect(self._on_mtproxy_secret_changed)
         self._fake_tls_domain_edit.editingFinished.connect(self._on_fake_tls_domain_changed)
         self._proxy_protocol_toggle.toggled.connect(self._on_proxy_protocol_changed)
-        self._dc_ip_edit.editingFinished.connect(self._on_dc_ip_changed)
-        self._pool_size_spin.valueChanged.connect(self._on_pool_size_changed)
-        self._buffer_kb_spin.valueChanged.connect(self._on_buffer_kb_changed)
+        self._auto_deeplink_toggle.toggled.connect(self._on_auto_deeplink_toggled)
 
-        # Upstream proxy signals
-        self._upstream_toggle.toggled.connect(self._on_upstream_changed)
-        self._upstream_preset_row.currentIndexChanged.connect(
-            self._on_upstream_preset_changed
-        )
-        self._upstream_host_edit.editingFinished.connect(self._on_upstream_host_changed)
-        self._upstream_port_spin.valueChanged.connect(self._on_upstream_port_changed)
-        self._upstream_user_edit.editingFinished.connect(self._on_upstream_user_changed)
-        self._upstream_pass_edit.editingFinished.connect(self._on_upstream_pass_changed)
-        self._upstream_mode_toggle.toggled.connect(self._on_upstream_mode_changed)
-        self._upstream_udp_toggle.toggled.connect(self._on_upstream_udp_changed)
-        self._cloudflare_toggle.toggled.connect(self._on_cloudflare_changed)
-        self._cloudflare_domains_edit.editingFinished.connect(self._on_cloudflare_domains_changed)
-        self._cloudflare_worker_toggle.toggled.connect(self._on_cloudflare_worker_changed)
-        self._cloudflare_worker_domains_edit.editingFinished.connect(self._on_cloudflare_worker_domains_changed)
-        self._advanced_signals_connected = True
+        # Прокси мог уже работать (например, запущен из трея или при старте программы).
+        self._on_manager_status_changed(bool(mgr.is_running))
+
+    def _on_manager_status_changed(self, running: bool) -> None:
+        self._on_status_changed(running)
+        self._note_proxy_running_for_auto_deeplink(bool(running))
 
     def _apply_initial_settings_state(self, state: telegram_proxy_settings.TelegramProxySettingsState) -> None:
         started_at = time.perf_counter()
-        self._current_settings_state = state
         self._port_spin.blockSignals(True)
         self._port_spin.setValue(state.port)
         self._port_spin.blockSignals(False)
-
         self._host_edit.setText(state.host)
-        self._update_manual_instructions()
-
         self._proxy_mode_row.setCurrentData(state.mode, block_signals=True)
-        self._advanced_auto_sections = self._advanced_settings_auto_sections(state)
-        advanced_should_open = bool(self._advanced_auto_sections)
-        self._advanced_toggle.setChecked(advanced_should_open, block_signals=True)
-        if advanced_should_open:
-            self._schedule_initial_advanced_settings_build()
-        self._apply_advanced_settings_state(state)
-        self._log_ui_timing("telegram_proxy_ui.settings.apply", started_at)
-
-    def _schedule_initial_advanced_settings_build(self) -> None:
-        if self.__dict__.get("_advanced_settings_built", False):
-            return
-        if self.__dict__.get("_initial_advanced_build_scheduled", False):
-            return
-        self._initial_advanced_build_scheduled = True
-        QTimer.singleShot(150, self._run_initial_advanced_settings_build)
-
-    def _run_initial_advanced_settings_build(self) -> None:
-        self._initial_advanced_build_scheduled = False
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        try:
-            advanced = bool(self._advanced_toggle.isChecked())
-        except Exception:
-            advanced = False
-        if not advanced:
-            return
-        self._ensure_advanced_settings_built()
-        self._apply_advanced_settings_state(self._current_settings_state)
-
-    def _apply_advanced_settings_state(self, state: telegram_proxy_settings.TelegramProxySettingsState) -> None:
-        if not self.__dict__.get("_advanced_settings_built", False):
-            return
         self._mtproxy_secret_edit.setText(state.mtproxy_secret)
+        self._mtproxy_secret_edit.setCursorPosition(0)
         self._fake_tls_domain_edit.setText(state.fake_tls_domain)
         self._proxy_protocol_toggle.setChecked(state.proxy_protocol, block_signals=True)
-        self._dc_ip_edit.setText(", ".join(state.dc_ip))
-        self._pool_size_spin.blockSignals(True)
-        self._pool_size_spin.setValue(state.pool_size)
-        self._pool_size_spin.blockSignals(False)
-        self._buffer_kb_spin.blockSignals(True)
-        self._buffer_kb_spin.setValue(state.buffer_kb)
-        self._buffer_kb_spin.blockSignals(False)
+        self._auto_deeplink_toggle.setChecked(state.auto_deeplink, block_signals=True)
+        self._apply_mtproxy_rows_visibility()
+        self._initial_state_applied = True
+        self._log_ui_timing("telegram_proxy_ui.settings.apply", started_at)
+        self._run_due_auto_deeplink()
 
-        self._upstream_toggle.setChecked(state.upstream_enabled, block_signals=True)
+    def _apply_mtproxy_rows_visibility(self) -> None:
+        """Строки MTProxy видны только в режиме MTProxy."""
+        is_mtproxy = self._local_proxy_mode() == "mtproxy"
+        self._mtproxy_secret_row.setVisible(is_mtproxy)
+        self._fake_tls_domain_row.setVisible(is_mtproxy)
+        self._proxy_protocol_toggle.setVisible(is_mtproxy)
+        enable_setting_card_group_auto_height(self._settings_card)
 
-        self._upstream_host_edit.setText(state.upstream_host)
-        self._upstream_port_spin.blockSignals(True)
-        self._upstream_port_spin.setValue(state.upstream_port)
-        self._upstream_port_spin.blockSignals(False)
-        self._upstream_user_edit.setText(state.upstream_user)
-        self._upstream_pass_edit.setText(state.upstream_password)
+    def _on_open_advanced_settings(self) -> None:
+        self._open_advanced_settings()
 
-        if self._upstream_catalog.choices:
-            target_index = min(max(int(state.upstream_preset_index), 0), len(self._upstream_catalog.choices) - 1)
-            self._upstream_preset_row.setCurrentIndex(target_index, block_signals=True)
-            self._apply_upstream_preset_ui(target_index)
+    # -- Авто-настройка Telegram --
 
-        self._upstream_mode_toggle.setChecked(state.upstream_mode == "always", block_signals=True)
-        self._upstream_udp_toggle.setChecked(state.upstream_udp_enabled, block_signals=True)
-        self._cloudflare_toggle.setChecked(state.cloudflare_enabled, block_signals=True)
-        self._cloudflare_domains_edit.setText(", ".join(state.cloudflare_domains))
-        self._cloudflare_worker_toggle.setChecked(state.cloudflare_worker_enabled, block_signals=True)
-        self._cloudflare_worker_domains_edit.setText(", ".join(state.cloudflare_worker_domains))
-        self._apply_advanced_settings_ui()
+    def _note_proxy_running_for_auto_deeplink(self, running: bool) -> None:
+        was_running = self._auto_deeplink_last_running
+        self._auto_deeplink_last_running = bool(running)
+        if running and not was_running:
+            self._auto_deeplink_due = True
+            self._run_due_auto_deeplink()
 
-    def _advanced_settings_auto_sections(self, state: telegram_proxy_settings.TelegramProxySettingsState) -> set[str]:
-        return set(build_advanced_settings_auto_sections(state))
-
-    def _advanced_settings_should_open(self, state: telegram_proxy_settings.TelegramProxySettingsState) -> bool:
-        return bool(self._advanced_settings_auto_sections(state))
-
-    def _advanced_section_visible(self, section: str) -> bool:
-        return is_advanced_section_visible(
-            self.__dict__.get("_advanced_auto_sections") or set(),
-            section,
-        )
-
-    def _try_auto_deeplink(self):
-        """Open tg:// deep link automatically on first start."""
+    def _run_due_auto_deeplink(self) -> None:
+        # Пока настройки не загружены, режим и secret на странице ещё не те,
+        # и ссылка получилась бы неверной.
+        if not self._auto_deeplink_due or not self._initial_state_applied:
+            return
+        self._auto_deeplink_due = False
         self._request_auto_deeplink_check()
+
+    def _on_auto_deeplink_toggled(self, checked: bool) -> None:
+        self._request_settings_save("auto_deeplink", enabled=bool(checked))
 
     def create_auto_deeplink_worker(self, request_id: int):
         return self._telegram_proxy.create_auto_deeplink_worker(request_id, parent=self)
@@ -922,12 +562,12 @@ class TelegramProxyPage(BasePage):
             cleanup_in_progress=self._cleanup_in_progress,
         ):
             return
-        if self._worker_state("_auto_deeplink_state", "_auto_deeplink_runtime").pending:
-            return
+        # Результат не отбрасываем даже при ждущей повторной проверке:
+        # хранилище уже отметило ссылку открытой, повтор вернёт False.
         if not should_open:
             return
         QTimer.singleShot(2000, self._on_open_in_telegram)
-        self._append_log_line("Auto-opening Telegram proxy setup link...")
+        self._append_log_line("Открываем ссылку настройки прокси в Telegram...")
 
     def _on_auto_deeplink_failed(self, request_id: int, error: str) -> None:
         if not self._auto_deeplink_runtime.is_current(
@@ -1211,6 +851,7 @@ class TelegramProxyPage(BasePage):
         self._restarting = bool(value)
         if not value:
             self.__dict__.pop("_restart_again_pending", None)
+            self._start_after_settings_flush = False
 
     def _restart_if_running(self):
         if self.__dict__.get("_cleanup_in_progress", False):
@@ -1333,112 +974,20 @@ class TelegramProxyPage(BasePage):
             cleanup_in_progress=self._cleanup_in_progress,
         )
 
-    def create_settings_save_worker(self, request_id: int, *, action: str, context_extra: dict | None = None, **kwargs):
-        return self._telegram_proxy.create_settings_save_worker(
-            request_id,
-            action=action,
-            context_extra=context_extra,
-            parent=self,
-            **kwargs,
-        )
+    def _request_settings_save(self, action: str, **kwargs) -> None:
+        self._telegram_proxy.request_settings_save(action, **kwargs)
 
-    def _request_settings_save(
-        self,
-        action: str,
-        *,
-        host: str = "",
-        port: int = 0,
-        user: str = "",
-        password: str = "",
-        preset_id: str = "",
-        enabled: bool = False,
-        value: object = "",
-        restart: str = "",
-        update_manual: bool = False,
-    ) -> None:
-        payload = {
-            "action": str(action or ""),
-            "host": str(host or ""),
-            "port": int(port or 0),
-            "user": str(user or ""),
-            "password": str(password or ""),
-            "enabled": bool(enabled),
-            "value": value,
-            "context_extra": {
-                "restart": str(restart or ""),
-                "update_manual": bool(update_manual),
-            },
-        }
-        if preset_id:
-            payload["preset_id"] = str(preset_id or "")
-        state = self._queued_worker_state("_settings_save_state", "_settings_save_runtime")
-        state.start_or_queue(payload, self._start_settings_save_worker, self._queue_settings_save_payload)
-
-    def _queue_settings_save_payload(self, payload: dict) -> None:
-        queued = dict(payload or {})
-        action = str(queued.get("action") or "")
-        self._queued_worker_state("_settings_save_state", "_settings_save_runtime").replace_by_key(
-            queued,
-            key=lambda pending: str(pending.get("action") or ""),
-        )
-
-    def _start_settings_save_worker(self, payload: dict) -> None:
-        def bind_worker(worker) -> None:
-            worker.completed.connect(self._on_settings_save_finished)
-            worker.failed.connect(self._on_settings_save_failed)
-
-        self._settings_save_runtime.start_qthread_worker(
-            worker_factory=lambda request_id: self.create_settings_save_worker(
-                request_id,
-                action=str(payload.get("action") or ""),
-                host=str(payload.get("host") or ""),
-                port=int(payload.get("port") or 0),
-                user=str(payload.get("user") or ""),
-                password=str(payload.get("password") or ""),
-                preset_id=str(payload.get("preset_id") or ""),
-                enabled=bool(payload.get("enabled")),
-                value=payload.get("value", ""),
-                context_extra=dict(payload.get("context_extra") or {}),
-            ),
-            bind_worker=bind_worker,
-            on_finished=self._on_settings_save_worker_finished,
-        )
-
-    def _on_settings_save_finished(self, request_id: int, _action: str, _result, context) -> None:
-        if not self._settings_save_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
+    def _on_settings_flushed(self, restart: str) -> None:
+        """Очередь сохранений опустела: применяем настройки и запускаем отложенный старт."""
+        if self.__dict__.get("_cleanup_in_progress", False):
             return
-        context = dict(context or {})
-        restart = str(context.get("restart") or "")
-        self._settings_save_restart_pending = merge_restart_request(
-            getattr(self, "_settings_save_restart_pending", ""),
-            restart,
-        )
-        if self._queued_worker_state("_settings_save_state", "_settings_save_runtime").has_pending():
-            return
-        if bool(context.get("update_manual")):
-            self._update_manual_instructions()
-        self._dispatch_pending_restart()
+        self._dispatch_pending_restart(restart)
+        if self._start_after_settings_flush:
+            self._start_after_settings_flush = False
+            self._request_proxy_start()
 
-    def _on_settings_save_failed(self, request_id: int, action: str, error: str, _context) -> None:
-        if not self._settings_save_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        if self._queued_worker_state("_settings_save_state", "_settings_save_runtime").has_pending():
-            return
-        log(f"{self.__class__.__name__}: не удалось сохранить настройку Telegram Proxy ({action}): {error}", "WARNING")
-        # Рестарт, накопленный от предыдущих успешных сохранений, не теряем:
-        # конфиг уже изменён на диске, работающий прокси всё ещё на старом.
-        self._dispatch_pending_restart()
-
-    def _dispatch_pending_restart(self) -> None:
-        """Выполнить накопленное действие применения настроек и сбросить его."""
-        restart = str(getattr(self, "_settings_save_restart_pending", "") or "")
-        self._settings_save_restart_pending = ""
+    def _dispatch_pending_restart(self, restart: str) -> None:
+        """Выполнить итоговое действие применения настроек."""
         if restart == "schedule":
             self._schedule_restart()
         elif restart == "upstream_schedule":
@@ -1448,41 +997,17 @@ class TelegramProxyPage(BasePage):
         elif restart == "now":
             self._restart_if_running()
 
-    def _on_settings_save_worker_finished(self, _worker) -> None:
-        state = self._queued_worker_state("_settings_save_state", "_settings_save_runtime")
-        state.schedule_next_after_finish(
-            _worker,
-            is_current_worker_finish=self._is_current_worker_finish,
-            single_shot=QTimer.singleShot,
-            start=self._start_settings_save_worker,
-            queue_item=self._queue_settings_save_payload,
-            is_cleanup_in_progress=lambda: self.__dict__.get("_cleanup_in_progress", False),
-        )
-
-    def _schedule_settings_save_worker_start(self, payload: dict) -> None:
-        queued = dict(payload or {})
-        state = self._queued_worker_state("_settings_save_state", "_settings_save_runtime")
-        state.schedule_start(
-            queued,
-            QTimer.singleShot,
-            self._start_settings_save_worker,
-            queue_item=self._queue_settings_save_payload,
-            is_cleanup_in_progress=lambda: self.__dict__.get("_cleanup_in_progress", False),
-        )
-
-    def _run_scheduled_settings_save_worker_start(self, payload: dict) -> None:
-        self._queued_worker_state("_settings_save_state", "_settings_save_runtime").run_scheduled(
-            dict(payload or {}),
-            self._start_settings_save_worker,
-            lambda: self.__dict__.get("_cleanup_in_progress", False),
-        )
-
     @pyqtSlot()
     def _start_proxy(self):
         self._request_proxy_start()
 
     def _request_proxy_start(self) -> None:
         if self.__dict__.get("_cleanup_in_progress", False):
+            return
+        if self._telegram_proxy.has_pending_settings_saves():
+            # Worker запуска читает настройки из хранилища. Пока очередь
+            # сохранений не пуста, там ещё старые значения — ждём её.
+            self._start_after_settings_flush = True
             return
         self._worker_state("_proxy_start_state", "_proxy_start_runtime").start_or_mark_pending(self._start_proxy_worker)
 
@@ -1496,19 +1021,10 @@ class TelegramProxyPage(BasePage):
             manager=mgr,
             starting=bool(getattr(self, "_starting", False)),
             running=bool(mgr.is_running),
-            host=self._host_edit.text().strip() or "127.0.0.1",
-            port=self._port_spin.value(),
             set_starting=lambda value: setattr(self, "_starting", value),
             btn_toggle=self._btn_toggle,
             status_label=self._status_label,
-            append_log_line=self._append_log_line,
             create_start_worker=self._telegram_proxy.create_start_worker,
-            mode=self._local_proxy_mode(),
-            mtproxy_secret=self._ensure_mtproxy_secret_if_needed(),
-            pool_size=self._local_pool_size(),
-            buffer_kb=self._local_buffer_kb(),
-            fake_tls_domain=self._local_fake_tls_domain(),
-            proxy_protocol=self._local_proxy_protocol(),
             on_finished=self._on_proxy_start_worker_finished,
         )
 
@@ -1628,6 +1144,7 @@ class TelegramProxyPage(BasePage):
     def _request_proxy_stop(self) -> None:
         if self.__dict__.get("_cleanup_in_progress", False):
             return
+        self._start_after_settings_flush = False
         self._worker_state("_proxy_stop_state", "_proxy_stop_runtime").start_or_mark_pending(self._start_proxy_stop_worker)
 
     def _start_proxy_stop_worker(self) -> None:
@@ -1714,7 +1231,6 @@ class TelegramProxyPage(BasePage):
                 self._stats_timer.stop()
             return
         self._apply_stats(mgr.stats)
-        self._on_upstream_state_changed(mgr.upstream_state)
 
     def _apply_stats(self, stats):
         if stats is None:
@@ -1740,13 +1256,11 @@ class TelegramProxyPage(BasePage):
             self._port_spin.blockSignals(True)
             self._port_spin.setValue(normalized)
             self._port_spin.blockSignals(False)
-        self._update_manual_instructions()
         self._request_settings_save("port", port=normalized)
 
     def _on_host_changed(self):
         host = telegram_proxy_settings.normalize_host(self._host_edit.text().strip())
         self._host_edit.setText(host)
-        self._update_manual_instructions()
         self._request_settings_save("host", host=host)
 
     def _local_proxy_mode(self) -> str:
@@ -1759,15 +1273,11 @@ class TelegramProxyPage(BasePage):
             return "socks5"
 
     def _local_mtproxy_secret(self) -> str:
-        edit = getattr(self, "_mtproxy_secret_edit", None)
-        if edit is None:
-            return ""
-        return telegram_proxy_settings.normalize_secret(edit.text())
+        return telegram_proxy_settings.normalize_secret(self._mtproxy_secret_edit.text())
 
     def _ensure_mtproxy_secret_if_needed(self) -> str:
         if self._local_proxy_mode() != "mtproxy":
             return ""
-        self._ensure_advanced_settings_built()
         secret = self._local_mtproxy_secret()
         if secret:
             return secret
@@ -1777,137 +1287,14 @@ class TelegramProxyPage(BasePage):
         return secret
 
     def _local_fake_tls_domain(self) -> str:
-        edit = getattr(self, "_fake_tls_domain_edit", None)
-        if edit is not None:
-            return telegram_proxy_settings.normalize_fake_tls_domain(edit.text())
-        try:
-            start_config = self._telegram_proxy.get_start_config()
-            return str(getattr(start_config, "fake_tls_domain", "") or "")
-        except Exception:
-            return ""
-
-    def _local_pool_size(self) -> int:
-        spin = getattr(self, "_pool_size_spin", None)
-        if spin is None:
-            return 4
-        return telegram_proxy_settings.normalize_pool_size(spin.value())
-
-    def _local_buffer_kb(self) -> int:
-        spin = getattr(self, "_buffer_kb_spin", None)
-        if spin is None:
-            return 256
-        return telegram_proxy_settings.normalize_buffer_kb(spin.value())
-
-    def _local_proxy_protocol(self) -> bool:
-        toggle = getattr(self, "_proxy_protocol_toggle", None)
-        return bool(toggle is not None and toggle.isChecked())
-
-    def _normalized_dc_ip_text(self) -> str:
-        edit = getattr(self, "_dc_ip_edit", None)
-        if edit is None:
-            return ""
-        overrides = telegram_proxy_settings.parse_dc_endpoint_overrides(edit.text())
-        text = ", ".join(f"{dc}:{ip}" for dc, ip in overrides.items())
-        edit.setText(text)
-        return text
-
-    def _apply_advanced_settings_ui(self) -> None:
-        plan = self._build_advanced_settings_ui_plan()
-        if plan.should_build_advanced_widgets:
-            self._ensure_advanced_settings_built()
-        if not self.__dict__.get("_advanced_settings_built", False):
-            enable_setting_card_group_auto_height(self._settings_card)
-            return
-        self._apply_advanced_settings_ui_plan(plan)
-        enable_setting_card_group_auto_height(self._settings_card)
-        enable_setting_card_group_auto_height(self._advanced_card)
-
-    def _build_advanced_settings_ui_plan(self):
-        cloudflare_toggle = self.__dict__.get("_cloudflare_toggle")
-        cloudflare_worker_toggle = self.__dict__.get("_cloudflare_worker_toggle")
-        return build_advanced_settings_ui_plan(
-            advanced_checked=bool(self._advanced_toggle.isChecked()),
-            proxy_mode=self._local_proxy_mode(),
-            auto_sections=self.__dict__.get("_advanced_auto_sections") or set(),
-            cloudflare_enabled=bool(
-                cloudflare_toggle is not None
-                and cloudflare_toggle.isChecked()
-            ),
-            cloudflare_worker_enabled=bool(
-                cloudflare_worker_toggle is not None
-                and cloudflare_worker_toggle.isChecked()
-            ),
-        )
-
-    def _apply_advanced_settings_ui_plan(self, plan) -> None:
-        self._advanced_card.setVisible(plan.advanced_card_visible)
-        self._mtproxy_secret_row.setVisible(plan.mtproxy_rows_visible)
-        self._fake_tls_domain_row.setVisible(plan.mtproxy_rows_visible)
-        self._proxy_protocol_toggle.setVisible(plan.mtproxy_rows_visible)
-
-        self._upstream_toggle.setVisible(plan.upstream_controls_visible)
-        if plan.upstream_controls_visible:
-            self._apply_upstream_preset_ui(self._upstream_preset_row.combo.currentIndex())
-        else:
-            self._upstream_preset_row.setVisible(False)
-            self._upstream_runtime_state_label.setVisible(False)
-            self._upstream_catalog_hint.setVisible(False)
-            self._upstream_manual_widget.setVisible(False)
-            self._mtproxy_action_widget.setVisible(False)
-            self._upstream_mode_toggle.setVisible(False)
-            self._upstream_udp_toggle.setVisible(False)
-
-        self._cloudflare_toggle.setVisible(plan.cloudflare_controls_visible)
-        self._cloudflare_worker_toggle.setVisible(plan.cloudflare_controls_visible)
-        self._cloudflare_domains_row.setVisible(plan.cloudflare_domains_visible)
-        self._cloudflare_worker_domains_row.setVisible(plan.cloudflare_worker_domains_visible)
-        self._cloudflare_worker_domains_edit.setEnabled(plan.cloudflare_worker_domains_enabled)
-        self._dc_ip_row.setVisible(plan.dc_ip_row_visible)
-        self._performance_label.setVisible(plan.performance_controls_visible)
-        performance_row = self._pool_size_spin.parentWidget()
-        if performance_row is not None:
-            performance_row.setVisible(plan.performance_controls_visible)
-
-        self._update_manual_instructions()
-        enable_setting_card_group_auto_height(self._advanced_card)
-
-    def _apply_auto_advanced_section_visibility(self) -> None:
-        if not self.__dict__.get("_advanced_settings_built", False):
-            return
-        self._apply_advanced_settings_ui_plan(self._build_advanced_settings_ui_plan())
-
-    def _apply_local_proxy_mode_ui(self, *, auto_open_mtproxy: bool = True) -> None:
-        is_mtproxy = self._local_proxy_mode() == "mtproxy"
-        if is_mtproxy:
-            self._ensure_advanced_settings_built()
-        if auto_open_mtproxy and is_mtproxy and not self._advanced_toggle.isChecked():
-            self._advanced_toggle.setChecked(True)
-        if not self.__dict__.get("_advanced_settings_built", False):
-            self._update_manual_instructions()
-            enable_setting_card_group_auto_height(self._settings_card)
-            return
-        self._apply_advanced_settings_ui_plan(self._build_advanced_settings_ui_plan())
-        enable_setting_card_group_auto_height(self._settings_card)
-        enable_setting_card_group_auto_height(self._advanced_card)
-
-    def _apply_cloudflare_ui(self) -> None:
-        if not self.__dict__.get("_advanced_settings_built", False):
-            return
-        self._apply_advanced_settings_ui_plan(self._build_advanced_settings_ui_plan())
-
-    def _on_advanced_toggled(self, _checked: bool):
-        if _checked:
-            self._advanced_auto_sections = set()
-            self._ensure_advanced_settings_built()
-            self._apply_advanced_settings_state(self._current_settings_state)
-        self._apply_advanced_settings_ui()
+        return telegram_proxy_settings.normalize_fake_tls_domain(self._fake_tls_domain_edit.text())
 
     def _on_proxy_mode_changed(self, _index: int):
         mode = self._local_proxy_mode()
-        self._apply_local_proxy_mode_ui()
+        self._apply_mtproxy_rows_visibility()
         if mode == "mtproxy":
             self._ensure_mtproxy_secret_if_needed()
-        self._request_settings_save("proxy_mode", value=mode, restart="now", update_manual=True)
+        self._request_settings_save("proxy_mode", value=mode, restart="now")
 
     def _on_generate_mtproxy_secret(self):
         secret = telegram_proxy_settings.generate_mtproxy_secret()
@@ -1922,97 +1309,10 @@ class TelegramProxyPage(BasePage):
     def _on_fake_tls_domain_changed(self):
         domain = telegram_proxy_settings.normalize_fake_tls_domain(self._fake_tls_domain_edit.text())
         self._fake_tls_domain_edit.setText(domain)
-        self._request_settings_save("fake_tls_domain", value=domain, restart="now", update_manual=True)
+        self._request_settings_save("fake_tls_domain", value=domain, restart="now")
 
     def _on_proxy_protocol_changed(self, checked: bool):
         self._request_settings_save("proxy_protocol", enabled=bool(checked), restart="now")
-
-    def _on_dc_ip_changed(self):
-        self._request_settings_save("dc_ip", value=self._normalized_dc_ip_text(), restart="now")
-
-    def _on_pool_size_changed(self, value: int):
-        normalized = telegram_proxy_settings.normalize_pool_size(value)
-        if normalized != value:
-            self._pool_size_spin.blockSignals(True)
-            self._pool_size_spin.setValue(normalized)
-            self._pool_size_spin.blockSignals(False)
-        self._request_settings_save("pool_size", value=normalized, restart="schedule")
-
-    def _on_buffer_kb_changed(self, value: int):
-        normalized = telegram_proxy_settings.normalize_buffer_kb(value)
-        if normalized != value:
-            self._buffer_kb_spin.blockSignals(True)
-            self._buffer_kb_spin.setValue(normalized)
-            self._buffer_kb_spin.blockSignals(False)
-        self._request_settings_save("buffer_kb", value=normalized, restart="schedule")
-
-    def _cloudflare_domains_text(self, edit) -> str:
-        domains = telegram_proxy_settings.normalize_domain_list(edit.text())
-        edit.setText(", ".join(domains))
-        return ", ".join(domains)
-
-    def _on_cloudflare_changed(self, checked: bool):
-        self._apply_cloudflare_ui()
-        self._request_settings_save("cloudflare_enabled", enabled=bool(checked), restart="now")
-
-    def _on_cloudflare_domains_changed(self):
-        self._request_settings_save(
-            "cloudflare_domains",
-            value=self._cloudflare_domains_text(self._cloudflare_domains_edit),
-            restart="now",
-        )
-
-    def _on_cloudflare_worker_changed(self, checked: bool):
-        self._apply_cloudflare_ui()
-        self._request_settings_save("cloudflare_worker_enabled", enabled=bool(checked), restart="now")
-
-    def _on_cloudflare_worker_domains_changed(self):
-        self._request_settings_save(
-            "cloudflare_worker_domains",
-            value=self._cloudflare_domains_text(self._cloudflare_worker_domains_edit),
-            restart="now",
-        )
-
-    def _on_test_cloudflare(self):
-        domains = self._cloudflare_domains_text(self._cloudflare_domains_edit)
-        self._start_cloudflare_check("domain", domains)
-
-    def _on_test_cloudflare_worker(self):
-        domains = self._cloudflare_domains_text(self._cloudflare_worker_domains_edit)
-        if not domains:
-            self._show_cloudflare_message(
-                title="Worker не указан",
-                content="Введите домен Cloudflare Worker, например name.workers.dev.",
-                success=False,
-            )
-            return
-        self._start_cloudflare_check("worker", domains)
-
-    def _on_copy_cloudflare_dns(self):
-        text = self._telegram_proxy.get_cloudflare_dns_records_text()
-        plan = self._telegram_proxy.copy_text(
-            text,
-            success_title="Скопировано",
-            success_content="DNS-записи Cloudflare",
-            success_log="Copied Cloudflare DNS records",
-        )
-        if plan.log_line:
-            self._append_log_line(plan.log_line)
-        if plan.ok:
-            self._show_cloudflare_message(plan.info_title, plan.info_content, success=True)
-
-    def _on_copy_cloudflare_worker_code(self):
-        text = self._telegram_proxy.get_cloudflare_worker_code()
-        plan = self._telegram_proxy.copy_text(
-            text,
-            success_title="Скопировано",
-            success_content="Код Cloudflare Worker",
-            success_log="Copied Cloudflare Worker code",
-        )
-        if plan.log_line:
-            self._append_log_line(plan.log_line)
-        if plan.ok:
-            self._show_cloudflare_message(plan.info_title, plan.info_content, success=True)
 
     def _on_copy_fake_tls_nginx_config(self):
         text = self._telegram_proxy.get_fake_tls_nginx_config(
@@ -2024,255 +1324,21 @@ class TelegramProxyPage(BasePage):
             text,
             success_title="Скопировано",
             success_content="Конфиг Nginx для Fake TLS",
-            success_log="Copied Fake TLS Nginx config",
         )
-        if plan.log_line:
-            self._append_log_line(plan.log_line)
         if plan.ok:
-            self._show_cloudflare_message(plan.info_title, plan.info_content, success=True)
+            self._show_success_message(plan.info_title, plan.info_content)
 
-    def create_cloudflare_check_worker(self, request_id: int, *, kind: str, domains):
-        return self._telegram_proxy.create_cloudflare_check_worker(
-            request_id,
-            kind=kind,
-            domains=domains,
-            parent=self,
-        )
-
-    def _start_cloudflare_check(self, kind: str, domains: str) -> None:
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        state = self._worker_state("_cloudflare_check_state", "_cloudflare_check_runtime")
-        normalized_kind = str(kind or "domain").strip().lower()
-        if state.is_busy():
-            self._show_cloudflare_message(
-                "Проверка уже идёт",
-                "Дождитесь результата текущей проверки Cloudflare.",
-                success=False,
-            )
-            return
-        self._cloudflare_check_kind = normalized_kind
-        self._set_cloudflare_check_buttons_enabled(False)
-        self._append_log_line(
-            "Проверяем Cloudflare Worker..."
-            if normalized_kind == "worker"
-            else "Проверяем Cloudflare-домен..."
-        )
-
-        def bind_worker(worker) -> None:
-            worker.completed.connect(self._on_cloudflare_check_finished)
-            worker.failed.connect(self._on_cloudflare_check_failed)
-
-        self._cloudflare_check_runtime.start_qthread_worker(
-            worker_factory=lambda request_id: self.create_cloudflare_check_worker(
-                request_id,
-                kind=normalized_kind,
-                domains=domains,
-            ),
-            bind_worker=bind_worker,
-            on_finished=self._on_cloudflare_check_worker_finished,
-        )
-
-    def _on_cloudflare_check_finished(self, request_id: int, result) -> None:
-        if not self._cloudflare_check_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        summary = result.summary() if hasattr(result, "summary") else str(result or "")
-        self._append_log_line(f"Проверка Cloudflare: {summary}")
-        for entry in tuple(getattr(result, "entries", ()) or ()):
-            status = "OK" if getattr(entry, "ok", False) else "FAIL"
-            error = str(getattr(entry, "error", "") or "")
-            suffix = f" - {error}" if error else ""
-            self._append_log_line(f"Cloudflare {status}: {getattr(entry, 'host', '')}{suffix}")
-
-        if bool(getattr(result, "ok", False)):
-            self._show_cloudflare_message("Cloudflare отвечает", summary, success=True)
-        else:
-            self._show_cloudflare_message("Cloudflare не отвечает", summary, success=False)
-
-    def _on_cloudflare_check_failed(self, request_id: int, error: str) -> None:
-        if not self._cloudflare_check_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        message = str(error or "").strip() or "Не удалось проверить Cloudflare."
-        self._append_log_line(f"Ошибка проверки Cloudflare: {message}")
-        self._show_cloudflare_message("Ошибка проверки", message, success=False)
-
-    def _on_cloudflare_check_worker_finished(self, _worker) -> None:
-        if not self._is_current_worker_finish(self.__dict__.get("_cloudflare_check_runtime"), _worker):
-            return
-        self._set_cloudflare_check_buttons_enabled(True)
-        self._worker_state("_cloudflare_check_state", "_cloudflare_check_runtime").reset()
-
-    def _set_cloudflare_check_buttons_enabled(self, enabled: bool) -> None:
-        for button in (
-            getattr(self, "_cloudflare_test_btn", None),
-            getattr(self, "_cloudflare_worker_test_btn", None),
-        ):
-            if button is not None:
-                button.setEnabled(bool(enabled))
-        if enabled:
-            self._apply_ui_texts()
-            return
-        if getattr(self, "_cloudflare_check_kind", "") == "worker":
-            if getattr(self, "_cloudflare_worker_test_btn", None) is not None:
-                self._cloudflare_worker_test_btn.setText("Проверяем...")
-        elif getattr(self, "_cloudflare_test_btn", None) is not None:
-            self._cloudflare_test_btn.setText("Проверяем...")
-
-    def _show_cloudflare_message(self, title: str, content: str, *, success: bool) -> None:
-        if InfoBar is None:
-            return
+    def _show_success_message(self, title: str, content: str) -> None:
         try:
-            if success:
-                InfoBar.success(
-                    title=str(title or ""),
-                    content=str(content or ""),
-                    parent=self,
-                    duration=2500,
-                    position=InfoBarPosition.TOP,
-                )
-            else:
-                InfoBar.warning(
-                    title=str(title or ""),
-                    content=str(content or ""),
-                    parent=self,
-                    duration=3500,
-                    position=InfoBarPosition.TOP,
-                )
+            InfoBar.success(
+                title=str(title or ""),
+                content=str(content or ""),
+                parent=self,
+                duration=2500,
+                position=InfoBarPosition.TOP,
+            )
         except Exception:
             pass
-
-    # -- Upstream proxy handlers --
-
-    @pyqtSlot(object)
-    def _on_upstream_state_changed(self, state) -> None:
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        if state is None:
-            return
-        label = self.__dict__.get("_upstream_runtime_state_label")
-        if label is None:
-            return
-        apply_upstream_runtime_state(label, state)
-
-    def _on_upstream_changed(self, checked: bool):
-        handle_upstream_toggle(
-            checked=checked,
-            request_upstream_enabled=lambda value: self._request_settings_save(
-                "upstream_enabled",
-                enabled=bool(value),
-                restart="upstream",
-            ),
-            apply_upstream_preset_ui=self._apply_upstream_preset_ui,
-            current_index=self._upstream_preset_row.combo.currentIndex(),
-            upstream_catalog=self._upstream_catalog,
-            request_upstream_preset_save=lambda preset_id: self._request_settings_save(
-                "upstream_preset",
-                preset_id=preset_id,
-                restart="upstream",
-            ),
-        )
-
-    def _on_upstream_preset_changed(self, index: int):
-        """Handle upstream server selection."""
-        self._current_mtproxy_preset_id = handle_upstream_preset_changed(
-            index=index,
-            upstream_catalog=self._upstream_catalog,
-            apply_upstream_preset_ui=self._apply_upstream_preset_ui,
-            upstream_host_edit=self._upstream_host_edit,
-            upstream_port_spin=self._upstream_port_spin,
-            upstream_user_edit=self._upstream_user_edit,
-            upstream_pass_edit=self._upstream_pass_edit,
-            request_upstream_preset_save=lambda preset_id: self._request_settings_save(
-                "upstream_preset",
-                preset_id=preset_id,
-                restart="upstream",
-            ),
-            request_manual_upstream_save=lambda host, port, user, password: self._request_settings_save(
-                "manual_upstream",
-                host=host,
-                port=port,
-                user=user,
-                password=password,
-                restart="upstream",
-            ),
-        )
-
-    def _on_upstream_host_changed(self):
-        self._request_settings_save(
-            "manual_upstream",
-            host=self._upstream_host_edit.text(),
-            port=self._upstream_port_spin.value(),
-            user=self._upstream_user_edit.text(),
-            password=self._upstream_pass_edit.text(),
-            restart="upstream",
-        )
-
-    def _on_upstream_port_changed(self, port: int):
-        self._request_settings_save(
-            "manual_upstream",
-            host=self._upstream_host_edit.text(),
-            port=port,
-            user=self._upstream_user_edit.text(),
-            password=self._upstream_pass_edit.text(),
-            restart="upstream_schedule",
-        )
-
-    def _on_upstream_user_changed(self):
-        self._request_settings_save(
-            "manual_upstream",
-            host=self._upstream_host_edit.text(),
-            port=self._upstream_port_spin.value(),
-            user=self._upstream_user_edit.text(),
-            password=self._upstream_pass_edit.text(),
-            restart="upstream",
-        )
-
-    def _on_upstream_pass_changed(self):
-        self._request_settings_save(
-            "manual_upstream",
-            host=self._upstream_host_edit.text(),
-            port=self._upstream_port_spin.value(),
-            user=self._upstream_user_edit.text(),
-            password=self._upstream_pass_edit.text(),
-            restart="upstream",
-        )
-
-    def _on_upstream_mode_changed(self, checked: bool):
-        self._request_settings_save("upstream_mode", enabled=bool(checked), restart="upstream")
-
-    def _on_upstream_udp_changed(self, checked: bool):
-        self._request_settings_save("upstream_udp_enabled", enabled=bool(checked), restart="upstream")
-
-    def _on_open_mtproxy(self):
-        """Open MTProxy deep link in browser."""
-        preset_id = getattr(self, '_current_mtproxy_preset_id', '')
-        link = telegram_proxy_settings.get_upstream_mtproxy_link(preset_id)
-        if not link:
-            return
-        self._start_external_link_worker(
-            link,
-            success_log="Opened MTProxy link",
-            error_prefix="Failed to open MTProxy link",
-        )
-
-    def _update_manual_instructions(self):
-        """Update manual instructions label with current host/port."""
-        label = getattr(self, "_manual_host_port_label", None)
-        if label is None:
-            return
-        label.setText(
-            telegram_proxy_settings.build_manual_instruction_text(
-                self._host_edit.text().strip(),
-                self._port_spin.value(),
-                mode=self._local_proxy_mode(),
-            )
-        )
 
     def _on_open_in_telegram(self):
         """Open Telegram deep link to auto-configure Telegram."""
@@ -2575,12 +1641,6 @@ class TelegramProxyPage(BasePage):
         )
         self._external_link_runtime.cancel()
         self._queued_worker_state("_external_link_state", "_external_link_runtime").reset()
-        self._settings_save_runtime.stop(
-            blocking=False,
-            log_fn=log,
-            warning_prefix="telegram proxy settings save worker",
-        )
-        self._settings_save_runtime.cancel()
         self._upstream_apply_runtime.stop(
             blocking=False,
             log_fn=log,
@@ -2616,13 +1676,6 @@ class TelegramProxyPage(BasePage):
         )
         self._relay_check_runtime.cancel()
         self._worker_state("_relay_check_state", "_relay_check_runtime").reset()
-        self._cloudflare_check_runtime.stop(
-            blocking=False,
-            log_fn=log,
-            warning_prefix="telegram proxy cloudflare check worker",
-        )
-        self._cloudflare_check_runtime.cancel()
-        self._worker_state("_cloudflare_check_state", "_cloudflare_check_runtime").reset()
         for _timer_attr in ("_restart_debounce_timer", "_upstream_apply_debounce_timer"):
             timer = getattr(self, _timer_attr, None)
             if timer is not None:
@@ -2630,8 +1683,8 @@ class TelegramProxyPage(BasePage):
                 timer.deleteLater()
                 setattr(self, _timer_attr, None)
         self._queued_worker_state("_log_line_state", "_log_line_runtime").reset()
-        self._queued_worker_state("_settings_save_state", "_settings_save_runtime").reset()
-        self._settings_save_restart_pending = ""
+        self._telegram_proxy.remove_settings_flushed_listener(self._on_settings_flushed)
+        self._start_after_settings_flush = False
         self.__dict__.pop("_restart_again_pending", None)
         mgr = self._proxy_manager()
         mgr.cleanup()

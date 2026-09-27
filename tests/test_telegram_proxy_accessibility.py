@@ -7,16 +7,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QLabel, QSizePolicy, QSpinBox, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    BodyLabel,
     CaptionLabel,
     LineEdit,
-    PasswordLineEdit,
     PrimaryPushButton,
     PushButton,
     SegmentedWidget,
-    SettingCardGroup,
-    SpinBox,
-    StrongBodyLabel,
 )
 
 from telegram_proxy.ui.build import (
@@ -24,13 +19,15 @@ from telegram_proxy.ui.build import (
     build_telegram_proxy_logs_panel,
     build_telegram_proxy_shell,
 )
-from telegram_proxy.ui.settings_build import build_telegram_proxy_advanced_settings_panel
+from telegram_proxy.config.upstream_catalog import UpstreamCatalog
+from telegram_proxy.ui.advanced_build import build_telegram_proxy_advanced_panel
+from telegram_proxy.ui.advanced_page import TelegramProxyAdvancedPage
 from telegram_proxy.ui.settings_build import build_telegram_proxy_settings_panel
 from telegram_proxy.ui.proxy_runtime_workflow import apply_status_changed
 from telegram_proxy.ui.proxy_runtime_workflow import restart_proxy_if_running
 from telegram_proxy.ui.runtime_helpers import refresh_status_texts
 from telegram_proxy.ui.page import TelegramProxyPage
-from ui.widgets.win11_controls import Win11ComboRow, Win11ToggleRow
+from ui.widgets.win11_controls import Win11ComboRow
 
 
 class _AccessibleStatusDot:
@@ -215,36 +212,17 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
         self.addCleanup(parent.deleteLater)
         layout = QVBoxLayout(parent)
 
-        widgets = build_telegram_proxy_advanced_settings_panel(
+        widgets = build_telegram_proxy_advanced_panel(
             layout,
             content_parent=parent,
-            strong_body_label_cls=StrongBodyLabel,
-            caption_label_cls=CaptionLabel,
-            body_label_cls=BodyLabel,
-            push_button_cls=PushButton,
-            setting_card_group_cls=SettingCardGroup,
-            line_edit_cls=LineEdit,
-            spin_box_cls=SpinBox,
-            password_line_edit_cls=PasswordLineEdit,
-            win11_toggle_row_cls=Win11ToggleRow,
-            win11_combo_row_cls=Win11ComboRow,
+            upstream_catalog={"manual": "Manual"},
             on_open_mtproxy=lambda: None,
-            on_generate_mtproxy_secret=lambda: None,
-            on_copy_fake_tls_nginx_config=lambda: None,
             on_test_cloudflare=lambda: None,
             on_copy_cloudflare_dns=lambda: None,
             on_test_cloudflare_worker=lambda: None,
             on_copy_cloudflare_worker_code=lambda: None,
-            upstream_catalog={"manual": "Manual"},
         )
 
-        self.assertEqual(widgets.mtproxy_secret_edit.accessibleName(), "Secret MTProxy")
-        self.assertIn("ключ подключения", widgets.mtproxy_secret_edit.accessibleDescription())
-        self.assertEqual(widgets.mtproxy_generate_btn.accessibleName(), "Создать secret MTProxy")
-        self.assertIn("случайный secret", widgets.mtproxy_generate_btn.accessibleDescription())
-        self.assertEqual(widgets.fake_tls_domain_edit.accessibleName(), "Домен MTProxy Fake TLS")
-        self.assertIn("Fake TLS", widgets.fake_tls_domain_edit.accessibleDescription())
-        self.assertEqual(widgets.fake_tls_nginx_btn.accessibleName(), "Скопировать Nginx-конфиг MTProxy Fake TLS")
         self.assertEqual(widgets.upstream_host_edit.accessibleName(), "Хост upstream-прокси Telegram Proxy")
         self.assertEqual(
             widgets.upstream_port_spin.accessibleName(),
@@ -274,29 +252,13 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
             layout,
             content_parent=parent,
             status_dot_cls=QLabel,
-            strong_body_label_cls=StrongBodyLabel,
-            caption_label_cls=CaptionLabel,
-            body_label_cls=BodyLabel,
-            push_button_cls=PushButton,
-            primary_push_button_cls=PrimaryPushButton,
-            setting_card_group_cls=SettingCardGroup,
-            line_edit_cls=LineEdit,
-            spin_box_cls=SpinBox,
-            password_line_edit_cls=PasswordLineEdit,
-            win11_toggle_row_cls=Win11ToggleRow,
-            win11_combo_row_cls=Win11ComboRow,
             on_toggle_proxy=lambda: None,
             on_open_in_telegram=lambda: None,
             on_copy_link=lambda: None,
             on_open_zastogram=lambda: None,
-            on_open_mtproxy=lambda: None,
             on_generate_mtproxy_secret=lambda: None,
             on_copy_fake_tls_nginx_config=lambda: None,
-            on_test_cloudflare=lambda: None,
-            on_copy_cloudflare_dns=lambda: None,
-            on_test_cloudflare_worker=lambda: None,
-            on_copy_cloudflare_worker_code=lambda: None,
-            upstream_catalog={"manual": "Manual"},
+            on_open_advanced_settings=lambda: None,
         )
 
         self.assertEqual(widgets.setup_open_btn.accessibleName(), "Открыть Telegram Proxy в Telegram")
@@ -317,6 +279,17 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
             "Открыть ZaStoGram Desktop в Forgejo",
         )
         self.assertIn("Forgejo", widgets.setup_zastogram_btn.accessibleDescription())
+        self.assertEqual(widgets.mtproxy_secret_edit.accessibleName(), "Secret MTProxy")
+        self.assertIn("ключ подключения", widgets.mtproxy_secret_edit.accessibleDescription())
+        self.assertEqual(widgets.mtproxy_generate_btn.accessibleName(), "Создать secret MTProxy")
+        self.assertIn("случайный secret", widgets.mtproxy_generate_btn.accessibleDescription())
+        self.assertEqual(widgets.fake_tls_domain_edit.accessibleName(), "Домен MTProxy Fake TLS")
+        self.assertIn("Fake TLS", widgets.fake_tls_domain_edit.accessibleDescription())
+        self.assertEqual(widgets.fake_tls_nginx_btn.accessibleName(), "Скопировать Nginx-конфиг MTProxy Fake TLS")
+        self.assertEqual(
+            widgets.advanced_nav_btn.accessibleName(),
+            "Открыть продвинутые настройки Telegram Proxy",
+        )
         self.assertEqual(widgets.host_edit.accessibleName(), "Адрес Telegram Proxy")
         self.assertIn("IP-адрес", widgets.host_edit.accessibleDescription())
         self.assertEqual(widgets.port_spin.accessibleName(), "Порт Telegram Proxy, значение: 1353")
@@ -335,27 +308,15 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
         self.addCleanup(parent.deleteLater)
         layout = QVBoxLayout(parent)
 
-        widgets = build_telegram_proxy_advanced_settings_panel(
+        widgets = build_telegram_proxy_advanced_panel(
             layout,
             content_parent=parent,
-            strong_body_label_cls=StrongBodyLabel,
-            caption_label_cls=CaptionLabel,
-            body_label_cls=BodyLabel,
-            push_button_cls=PushButton,
-            setting_card_group_cls=SettingCardGroup,
-            line_edit_cls=LineEdit,
-            spin_box_cls=SpinBox,
-            password_line_edit_cls=PasswordLineEdit,
-            win11_toggle_row_cls=Win11ToggleRow,
-            win11_combo_row_cls=Win11ComboRow,
+            upstream_catalog={"manual": "Manual"},
             on_open_mtproxy=lambda: None,
-            on_generate_mtproxy_secret=lambda: None,
-            on_copy_fake_tls_nginx_config=lambda: None,
             on_test_cloudflare=lambda: None,
             on_copy_cloudflare_dns=lambda: None,
             on_test_cloudflare_worker=lambda: None,
             on_copy_cloudflare_worker_code=lambda: None,
-            upstream_catalog={"manual": "Manual"},
         )
 
         self.assertEqual(
@@ -379,56 +340,28 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
             layout,
             content_parent=parent,
             status_dot_cls=QLabel,
-            strong_body_label_cls=StrongBodyLabel,
-            caption_label_cls=CaptionLabel,
-            body_label_cls=BodyLabel,
-            push_button_cls=PushButton,
-            primary_push_button_cls=PrimaryPushButton,
-            setting_card_group_cls=SettingCardGroup,
-            line_edit_cls=LineEdit,
-            spin_box_cls=SpinBox,
-            password_line_edit_cls=PasswordLineEdit,
-            win11_toggle_row_cls=Win11ToggleRow,
-            win11_combo_row_cls=Win11ComboRow,
             on_toggle_proxy=lambda: None,
             on_open_in_telegram=lambda: None,
             on_copy_link=lambda: None,
             on_open_zastogram=lambda: None,
-            on_open_mtproxy=lambda: None,
             on_generate_mtproxy_secret=lambda: None,
             on_copy_fake_tls_nginx_config=lambda: None,
-            on_test_cloudflare=lambda: None,
-            on_copy_cloudflare_dns=lambda: None,
-            on_test_cloudflare_worker=lambda: None,
-            on_copy_cloudflare_worker_code=lambda: None,
-            upstream_catalog={"manual": "Manual"},
+            on_open_advanced_settings=lambda: None,
         )
-        advanced_widgets = build_telegram_proxy_advanced_settings_panel(
+        advanced_widgets = build_telegram_proxy_advanced_panel(
             layout,
             content_parent=parent,
-            strong_body_label_cls=StrongBodyLabel,
-            caption_label_cls=CaptionLabel,
-            body_label_cls=BodyLabel,
-            push_button_cls=PushButton,
-            setting_card_group_cls=SettingCardGroup,
-            line_edit_cls=LineEdit,
-            spin_box_cls=SpinBox,
-            password_line_edit_cls=PasswordLineEdit,
-            win11_toggle_row_cls=Win11ToggleRow,
-            win11_combo_row_cls=Win11ComboRow,
+            upstream_catalog={"manual": "Manual"},
             on_open_mtproxy=lambda: None,
-            on_generate_mtproxy_secret=lambda: None,
-            on_copy_fake_tls_nginx_config=lambda: None,
             on_test_cloudflare=lambda: None,
             on_copy_cloudflare_dns=lambda: None,
             on_test_cloudflare_worker=lambda: None,
             on_copy_cloudflare_worker_code=lambda: None,
-            upstream_catalog={"manual": "Manual"},
         )
         line_edits = (
             main_widgets.host_edit,
-            advanced_widgets.mtproxy_secret_edit,
-            advanced_widgets.fake_tls_domain_edit,
+            main_widgets.mtproxy_secret_edit,
+            main_widgets.fake_tls_domain_edit,
             advanced_widgets.upstream_host_edit,
             advanced_widgets.cloudflare_domains_edit,
             advanced_widgets.cloudflare_worker_domains_edit,
@@ -456,16 +389,19 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
         )
         self.addCleanup(row.deleteLater)
 
-        page = TelegramProxyPage.__new__(TelegramProxyPage)
-        page._advanced_settings_built = True
+        page = TelegramProxyAdvancedPage.__new__(TelegramProxyAdvancedPage)
+        page._upstream_catalog = UpstreamCatalog()
+        page._upstream_catalog_loaded = False
         page._upstream_preset_row = row
 
-        TelegramProxyPage._apply_initial_upstream_catalog(
+        TelegramProxyAdvancedPage._apply_upstream_catalog(
             page,
-            {
-                "Основной сервер": "main",
-                "Запасной сервер": "backup",
-            },
+            UpstreamCatalog(
+                [
+                    {"id": "main", "name": "Основной сервер", "type": "socks5", "host": "10.0.0.1", "port": 1080},
+                    {"id": "backup", "name": "Запасной сервер", "type": "socks5", "host": "10.0.0.2", "port": 1080},
+                ]
+            ),
         )
 
         create_menu = getattr(row.combo, "_create_accessible_combo_menu", None)

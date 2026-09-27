@@ -399,6 +399,7 @@ def normalize_telegram_proxy(data: object) -> dict[str, Any]:
         "buffer_kb": as_int(raw.get("buffer_kb"), defaults["buffer_kb"], minimum=4, maximum=4096),
         "fake_tls_domain": normalize_domain(raw.get("fake_tls_domain")),
         "proxy_protocol": as_bool(raw.get("proxy_protocol"), defaults["proxy_protocol"]),
+        "auto_deeplink": as_bool(raw.get("auto_deeplink"), defaults["auto_deeplink"]),
     }
 
 

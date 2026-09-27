@@ -946,9 +946,116 @@ class Win11ComboRow(FluentSettingCard):
             set_combo_items_accessibility(combo, name=title)
 
 
+class Win11ControlRow(FluentSettingCard):
+    """Строка в стиле Windows 11 с любыми полями справа: ввод, числа, кнопки.
+
+    Выглядит так же, как Win11ToggleRow и Win11ComboRow, поэтому такие строки
+    можно смешивать в одной группе настроек без разнобоя в шрифтах и значках.
+    """
+
+    def __init__(self, icon_name: str, title: str, description: str = "", icon_color: str = "", parent=None):
+        self._icon_name = icon_name
+        self._icon_color = icon_color
+        self._title_label = None
+        self._desc_label = None
+        self._icon_label = None
+        self._accessible_title = str(title or "")
+        self._accessible_description = str(description or "")
+        initial_tokens = get_theme_tokens()
+
+        super().__init__(
+            self._build_icon(initial_tokens),
+            title,
+            description or None,
+            parent=parent,
+        )
+        self.setIconSize(18, 18)
+        self._icon_label = getattr(self, "iconLabel", None)
+        self._title_label = getattr(self, "titleLabel", None)
+        self._desc_label = getattr(self, "contentLabel", None)
+        # При узком окне уступает текст слева, а поля и кнопки справа
+        # сохраняют свою ширину и не наезжают друг на друга.
+        for label in (self._title_label, self._desc_label):
+            if label is not None:
+                # 1, а не 0: ноль вернул бы минимум по длине текста.
+                label.setMinimumWidth(1)
+
+        self.control_layout = QHBoxLayout()
+        self.control_layout.setSpacing(8)
+        self.hBoxLayout.addLayout(self.control_layout)
+        self.hBoxLayout.addSpacing(16)
+
+        self._apply_text_styles(initial_tokens)
+        self._update_row_accessibility()
+        self._theme_refresh = ThemeRefreshBinding(
+            self,
+            self._apply_theme_refresh,
+            key_builder=_build_theme_refresh_key,
+        )
+
+    def add_control(self, widget: QWidget) -> QWidget:
+        self.control_layout.addWidget(widget)
+        return widget
+
+    def _resolved_icon_color(self, tokens=None) -> str:
+        theme_tokens = tokens or get_theme_tokens()
+        c = str(self._icon_color or "").strip()
+        if not c:
+            return theme_tokens.accent_hex
+        return c
+
+    def _build_icon(self, tokens=None) -> QIcon:
+        theme_tokens = tokens or get_theme_tokens()
+        try:
+            return get_themed_qta_icon(self._icon_name, color=self._resolved_icon_color(theme_tokens))
+        except Exception:
+            return QIcon()
+
+    def _refresh_icon(self, tokens=None) -> None:
+        icon_label = self._icon_label
+        if icon_label is None:
+            return
+        try:
+            icon_label.setIcon(self._build_icon(tokens))
+        except Exception:
+            return
+
+    def _apply_text_styles(self, tokens=None) -> None:
+        _apply_setting_card_text_styles(self._title_label, self._desc_label, tokens)
+
+    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
+        _ = force
+        self._refresh_icon(tokens)
+        self._apply_text_styles(tokens)
+
+    def set_texts(self, title: str, description: str = "") -> None:
+        next_title = str(title or "")
+        next_description = str(description or "")
+        if (next_title, next_description) == (self._accessible_title, self._accessible_description):
+            return
+        try:
+            self.setTitle(next_title)
+            self.setContent(next_description)
+        except Exception:
+            return
+        self._accessible_title = next_title
+        self._accessible_description = next_description
+        self._update_row_accessibility()
+
+    def _update_row_accessibility(self) -> None:
+        title = str(self._accessible_title or "").strip()
+        description = str(self._accessible_description or "").strip()
+        state_text = f"Настройка: {title}" if title else "Настройка"
+        if description:
+            state_text = f"{state_text}. {description}"
+        set_state_text(self, state_text)
+        set_control_accessibility(self, name=title or None, description=description)
+
+
 __all__ = [
     "Win11ToggleRow",
     "Win11RadioOption",
     "Win11NumberRow",
     "Win11ComboRow",
+    "Win11ControlRow",
 ]
