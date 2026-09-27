@@ -2,44 +2,29 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 
 class TelegramProxyCloudflareRuntimeTests(unittest.TestCase):
-    def test_selected_upstream_preset_routes_as_main_tcp_route_even_when_saved_fallback(self) -> None:
+    def test_upstream_mode_decides_main_or_fallback_route_for_any_server(self) -> None:
         from telegram_proxy.proxy.routing import UpstreamProxyConfig, should_route_upstream
 
-        selected_fallback_config = UpstreamProxyConfig(
-            enabled=True,
-            host="150.241.74.19",
-            port=443,
-            tls=True,
-            mode="fallback",
-            preset_id="ee",
-            preset_name="Эстония",
+        preset_fallback = UpstreamProxyConfig(
+            enabled=True, host="150.241.74.19", port=443, tls=True, mode="fallback", preset_id="ee"
         )
-        manual_fallback_config = UpstreamProxyConfig(
-            enabled=True,
-            host="127.0.0.1",
-            port=1080,
-            mode="fallback",
+        preset_always = UpstreamProxyConfig(
+            enabled=True, host="150.241.74.19", port=443, tls=True, mode="always", preset_id="ee"
         )
-        selected_always_config = UpstreamProxyConfig(
-            enabled=True,
-            host="150.241.74.19",
-            port=443,
-            tls=True,
-            mode="always",
-            preset_id="ee",
-            preset_name="Эстония",
-        )
+        manual_fallback = UpstreamProxyConfig(enabled=True, host="127.0.0.1", port=1080, mode="fallback")
+        disabled = UpstreamProxyConfig(enabled=False, host="127.0.0.1", port=1080, mode="always")
 
-        self.assertTrue(should_route_upstream(selected_fallback_config, mode="always"))
-        self.assertFalse(should_route_upstream(selected_fallback_config, mode="fallback"))
-        self.assertFalse(should_route_upstream(manual_fallback_config, mode="always"))
-        self.assertTrue(should_route_upstream(manual_fallback_config, mode="fallback"))
-        self.assertTrue(should_route_upstream(selected_always_config, mode="always"))
-        self.assertFalse(should_route_upstream(selected_always_config, mode="fallback"))
+        # По умолчанию сервер страны — запасной путь после WSS.
+        self.assertFalse(should_route_upstream(preset_fallback, mode="always"))
+        self.assertTrue(should_route_upstream(preset_fallback, mode="fallback"))
+        # «Весь TCP через SOCKS5» работает и для сервера страны.
+        self.assertTrue(should_route_upstream(preset_always, mode="always"))
+        self.assertTrue(should_route_upstream(manual_fallback, mode="fallback"))
+        self.assertFalse(should_route_upstream(disabled, mode="always"))
 
     def test_cloudflare_settings_are_normalized_in_settings_schema_shape(self) -> None:
         from settings.normalize import normalize_telegram_proxy
@@ -213,65 +198,13 @@ class TelegramProxyCloudflareRuntimeTests(unittest.TestCase):
         self.assertEqual(callback_bound, [("127.0.0.1", 45678)])
         self.assertTrue(relay.closed)
 
-    def test_cloudflare_helpers_build_domain_and_worker_targets(self) -> None:
-        from telegram_proxy.proxy.cloudflare import (
-            CloudflareFallbackConfig,
-            build_cloudflare_domains,
-            build_worker_path,
-            should_try_cloudflare,
-        )
+    def test_cloudflare_helpers_build_worker_path_and_builtin_pool(self) -> None:
+        from telegram_proxy.proxy.cloudflare import AUTO_CLOUDFLARE_DOMAINS, build_worker_path
+        from telegram_proxy.proxy.route_catalog import CDN_FRONTS
 
-        config = CloudflareFallbackConfig(
-            enabled=True,
-            domains=("example.com",),
-            worker_enabled=True,
-            worker_domains=("demo.workers.dev",),
-        )
-
-        self.assertTrue(should_try_cloudflare(config))
-        self.assertEqual(build_cloudflare_domains(4, config), ["kws4.example.com"])
         self.assertEqual(build_worker_path("149.154.167.91", 4), "/apiws?dst=149.154.167.91&dc=4")
-
-    def test_cloudflare_domain_balancer_keeps_successful_domain_first(self) -> None:
-        from telegram_proxy.proxy.cloudflare import (
-            CloudflareDomainBalancer,
-            CloudflareFallbackConfig,
-            build_cloudflare_domains,
-        )
-
-        config = CloudflareFallbackConfig(
-            enabled=True,
-            domains=("first.example.com", "fast.example.com", "last.example.com"),
-        )
-        balancer = CloudflareDomainBalancer()
-
-        self.assertEqual(
-            build_cloudflare_domains(4, config, balancer=balancer),
-            [
-                "kws4.first.example.com",
-                "kws4.fast.example.com",
-                "kws4.last.example.com",
-            ],
-        )
-
-        balancer.record_success(4, "kws4.fast.example.com")
-
-        self.assertEqual(
-            build_cloudflare_domains(4, config, balancer=balancer),
-            [
-                "kws4.fast.example.com",
-                "kws4.first.example.com",
-                "kws4.last.example.com",
-            ],
-        )
-        self.assertEqual(
-            build_cloudflare_domains(2, config, balancer=balancer),
-            [
-                "kws2.first.example.com",
-                "kws2.fast.example.com",
-                "kws2.last.example.com",
-            ],
-        )
+        self.assertEqual(AUTO_CLOUDFLARE_DOMAINS, tuple(front.domain for front in CDN_FRONTS))
+        self.assertEqual(len(AUTO_CLOUDFLARE_DOMAINS), 20)
 
     def test_cloudflare_guides_include_dns_records_and_worker_code(self) -> None:
         from telegram_proxy.proxy.cloudflare import build_cfproxy_dns_records_text, build_cfworker_code
@@ -300,8 +233,8 @@ class TelegramProxyCloudflareRuntimeTests(unittest.TestCase):
 
         calls = []
 
-        async def fake_connect(host, domain, path="/apiws", timeout=10.0, **_kwargs):
-            calls.append((host, domain, path, timeout))
+        async def fake_connect(target, *, timeout):
+            calls.append((target.connect_host, target.sni, target.path, timeout))
             return _Ws()
 
         domain_result = asyncio.run(
@@ -332,409 +265,6 @@ class TelegramProxyCloudflareRuntimeTests(unittest.TestCase):
                 ("worker.example.dev", "worker.example.dev", "/apiws?dst=149.154.167.91&dc=4", 1.5),
             ],
         )
-
-    def test_wss_proxy_uses_cloudflare_before_plain_tcp_fallback(self) -> None:
-        import inspect
-        import telegram_proxy.wss_proxy as wss_proxy
-
-        source = inspect.getsource(wss_proxy.TelegramWSProxy._tunnel_via_wss)
-
-        self.assertIn("_cloudflare_fallback", source)
-        self.assertLess(source.index("_cloudflare_fallback"), source.index("_tcp_fallback"))
-
-    def test_wss_proxy_remembers_successful_cloudflare_domain(self) -> None:
-        from telegram_proxy.proxy.cloudflare import CloudflareFallbackConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _Ws:
-            async def send(self, data):
-                return None
-
-        calls: list[str] = []
-
-        async def fake_connect(host, domain, path="/apiws", timeout=10.0, **_kwargs):
-            calls.append(domain)
-            if domain == "kws4.first.example.com":
-                raise OSError("dead domain")
-            return _Ws()
-
-        async def fake_relay(*args, **kwargs):
-            return None
-
-        proxy = TelegramWSProxy(
-            cloudflare_config=CloudflareFallbackConfig(
-                enabled=True,
-                domains=("first.example.com", "fast.example.com"),
-            )
-        )
-        proxy._relay_wss = fake_relay
-
-        with (
-            patch("telegram_proxy.wss_proxy.RawWebSocket.connect", side_effect=fake_connect),
-            patch("telegram_proxy.wss_proxy.log.warning"),
-        ):
-            first_ok = asyncio.run(
-                proxy._cloudflare_fallback(
-                    None,
-                    None,
-                    "149.154.167.91",
-                    443,
-                    b"x" * 64,
-                    False,
-                    "test",
-                    4,
-                    False,
-                )
-            )
-            second_ok = asyncio.run(
-                proxy._cloudflare_fallback(
-                    None,
-                    None,
-                    "149.154.167.91",
-                    443,
-                    b"x" * 64,
-                    False,
-                    "test",
-                    4,
-                    False,
-                )
-            )
-
-        self.assertTrue(first_ok)
-        self.assertTrue(second_ok)
-        self.assertEqual(
-            calls,
-            [
-                "kws4.first.example.com",
-                "kws4.fast.example.com",
-                "kws4.fast.example.com",
-            ],
-        )
-
-    def test_cloudflare_failures_are_written_to_user_log_with_next_route(self) -> None:
-        from telegram_proxy.proxy.cloudflare import CloudflareFallbackConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        logs: list[str] = []
-
-        async def fake_connect(*_args, **_kwargs):
-            raise TimeoutError()
-
-        proxy = TelegramWSProxy(
-            on_log=logs.append,
-            cloudflare_config=CloudflareFallbackConfig(
-                enabled=True,
-                domains=("first.example.com",),
-            ),
-        )
-
-        with patch("telegram_proxy.wss_proxy.RawWebSocket.connect", side_effect=fake_connect):
-            ok = asyncio.run(
-                proxy._cloudflare_fallback(
-                    None,
-                    None,
-                    "91.105.192.100",
-                    443,
-                    b"x" * 64,
-                    False,
-                    "test",
-                    203,
-                    False,
-                )
-            )
-
-        self.assertFalse(ok)
-        joined = "\n".join(logs)
-        self.assertIn("route=Cloudflare", joined)
-        self.assertIn("dc=203", joined)
-        self.assertIn("target=91.105.192.100:443", joined)
-        self.assertIn("result=error", joined)
-        self.assertIn("TimeoutError", joined)
-        self.assertIn("next=try next Cloudflare domain or TCP fallback", joined)
-
-    def test_disabled_cloudflare_is_not_logged_as_cloudflare_route(self) -> None:
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        logs: list[str] = []
-        proxy = TelegramWSProxy(on_log=logs.append)
-
-        ok = asyncio.run(
-            proxy._cloudflare_fallback(
-                None,
-                None,
-                "91.105.192.100",
-                443,
-                b"x" * 64,
-                False,
-                "test",
-                203,
-                False,
-            )
-        )
-
-        self.assertFalse(ok)
-        self.assertNotIn("route=Cloudflare", "\n".join(logs))
-
-    def test_http_transport_tries_direct_tcp_before_upstream_fallback(self) -> None:
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _Reader:
-            async def readexactly(self, size):
-                init = b"GET /api HTTP/1.1\r\nHost: telegram\r\n\r\n"
-                return init[:size].ljust(size, b"x")
-
-        class _Writer:
-            def get_extra_info(self, name, default=None):
-                if name == "peername":
-                    return ("127.0.0.1", 34567)
-                return default
-
-            def close(self):
-                return None
-
-            async def wait_closed(self):
-                return None
-
-        class _RemoteWriter:
-            transport = None
-
-            def write(self, _data):
-                return None
-
-            async def drain(self):
-                return None
-
-        async def fake_relay(*_args, **_kwargs):
-            return (12, False)
-
-        logs: list[str] = []
-        proxy = TelegramWSProxy(
-            on_log=logs.append,
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="127.0.0.1",
-                port=1080,
-                mode="fallback",
-            ),
-        )
-        upstream = AsyncMock(return_value=True)
-        proxy._upstream_proxy_connect = upstream
-        proxy._relay_tcp = fake_relay
-
-        with (
-            patch("telegram_proxy.wss_proxy.socks5.handshake", return_value=("149.154.175.50", 80)),
-            patch(
-                "telegram_proxy.wss_proxy.asyncio.open_connection",
-                new=AsyncMock(return_value=(object(), _RemoteWriter())),
-            ) as direct_tcp,
-        ):
-            asyncio.run(proxy._handle_socks5_client(_Reader(), _Writer()))
-
-        direct_tcp.assert_awaited_once_with("149.154.175.50", 80)
-        upstream.assert_not_awaited()
-        joined = "\n".join(logs)
-        self.assertIn("HTTP transport -> direct TCP", joined)
-        self.assertNotIn("HTTP transport -> upstream (fallback mode)", joined)
-        self.assertEqual(proxy.stats.passthrough_connections, 1)
-
-    def test_builtin_upstream_preset_routes_http_without_direct_probe(self) -> None:
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _Reader:
-            async def readexactly(self, size):
-                init = b"GET /api HTTP/1.1\r\nHost: telegram\r\n\r\n"
-                return init[:size].ljust(size, b"x")
-
-        class _Writer:
-            def get_extra_info(self, name, default=None):
-                if name == "peername":
-                    return ("127.0.0.1", 34567)
-                return default
-
-            def close(self):
-                return None
-
-            async def wait_closed(self):
-                return None
-
-        logs: list[str] = []
-        proxy = TelegramWSProxy(
-            on_log=logs.append,
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="150.241.74.19",
-                port=443,
-                tls=True,
-                mode="fallback",
-                preset_id="ee",
-                preset_name="Эстония",
-            ),
-        )
-        upstream = AsyncMock(return_value=True)
-        proxy._upstream_proxy_connect = upstream
-
-        with (
-            patch("telegram_proxy.wss_proxy.socks5.handshake", return_value=("149.154.167.41", 80)),
-            patch("telegram_proxy.wss_proxy.asyncio.open_connection", new_callable=AsyncMock) as direct_tcp,
-        ):
-            asyncio.run(proxy._handle_socks5_client(_Reader(), _Writer()))
-
-        direct_tcp.assert_not_awaited()
-        upstream.assert_awaited_once()
-        self.assertIn("HTTP transport -> upstream (always mode)", "\n".join(logs))
-
-    def test_builtin_upstream_preset_routes_dc_without_wss_probe(self) -> None:
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _Reader:
-            async def readexactly(self, size):
-                return (b"x" * 64)[:size]
-
-        class _Writer:
-            def get_extra_info(self, name, default=None):
-                if name == "peername":
-                    return ("127.0.0.1", 34567)
-                return default
-
-            def close(self):
-                return None
-
-            async def wait_closed(self):
-                return None
-
-        logs: list[str] = []
-        proxy = TelegramWSProxy(
-            on_log=logs.append,
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="150.241.74.19",
-                port=443,
-                tls=True,
-                mode="fallback",
-                preset_id="ee",
-                preset_name="Эстония",
-            ),
-        )
-        upstream = AsyncMock(return_value=True)
-        proxy._upstream_proxy_connect = upstream
-
-        with (
-            patch("telegram_proxy.wss_proxy.socks5.handshake", return_value=("149.154.167.41", 443)),
-            patch("telegram_proxy.wss_proxy.RawWebSocket.connect", new_callable=AsyncMock) as wss_connect,
-        ):
-            asyncio.run(proxy._handle_socks5_client(_Reader(), _Writer()))
-
-        wss_connect.assert_not_awaited()
-        upstream.assert_awaited_once()
-        self.assertIn("upstream (always mode)", "\n".join(logs))
-
-    def test_http_transport_uses_upstream_after_direct_tcp_failure(self) -> None:
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _Reader:
-            async def readexactly(self, size):
-                init = b"GET /api HTTP/1.1\r\nHost: telegram\r\n\r\n"
-                return init[:size].ljust(size, b"x")
-
-        class _Writer:
-            def get_extra_info(self, name, default=None):
-                if name == "peername":
-                    return ("127.0.0.1", 34567)
-                return default
-
-            def close(self):
-                return None
-
-            async def wait_closed(self):
-                return None
-
-        async def fail_direct_tcp(*_args, **_kwargs):
-            raise TimeoutError()
-
-        logs: list[str] = []
-        proxy = TelegramWSProxy(
-            on_log=logs.append,
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="127.0.0.1",
-                port=1080,
-                mode="fallback",
-            ),
-        )
-        upstream = AsyncMock(return_value=True)
-        proxy._upstream_proxy_connect = upstream
-
-        with (
-            patch("telegram_proxy.wss_proxy.socks5.handshake", return_value=("149.154.175.50", 80)),
-            patch("telegram_proxy.wss_proxy.asyncio.open_connection", side_effect=fail_direct_tcp) as direct_tcp,
-        ):
-            asyncio.run(proxy._handle_socks5_client(_Reader(), _Writer()))
-
-        direct_tcp.assert_called_once()
-        upstream.assert_awaited_once()
-        joined = "\n".join(logs)
-        self.assertIn("HTTP TCP failed -> trying upstream SOCKS5 fallback", joined)
-        self.assertNotIn("HTTP transport -> upstream (fallback mode)", joined)
-
-    def test_http_transport_uses_upstream_immediately_after_learned_direct_block(self) -> None:
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _Reader:
-            async def readexactly(self, size):
-                init = b"GET /api HTTP/1.1\r\nHost: telegram\r\n\r\n"
-                return init[:size].ljust(size, b"x")
-
-        class _Writer:
-            def get_extra_info(self, name, default=None):
-                if name == "peername":
-                    return ("127.0.0.1", 34567)
-                return default
-
-            def close(self):
-                return None
-
-            async def wait_closed(self):
-                return None
-
-        async def fail_direct_tcp(*_args, **_kwargs):
-            raise TimeoutError()
-
-        logs: list[str] = []
-        proxy = TelegramWSProxy(
-            on_log=logs.append,
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="127.0.0.1",
-                port=1080,
-                mode="fallback",
-            ),
-        )
-        upstream = AsyncMock(return_value=True)
-        proxy._upstream_proxy_connect = upstream
-
-        with (
-            patch("telegram_proxy.wss_proxy.socks5.handshake", return_value=("149.154.167.41", 80)),
-            patch("telegram_proxy.wss_proxy.asyncio.open_connection", side_effect=fail_direct_tcp),
-        ):
-            asyncio.run(proxy._handle_socks5_client(_Reader(), _Writer()))
-
-        upstream.assert_awaited_once()
-        upstream.reset_mock()
-
-        with (
-            patch("telegram_proxy.wss_proxy.socks5.handshake", return_value=("149.154.167.51", 80)),
-            patch("telegram_proxy.wss_proxy.asyncio.open_connection", new_callable=AsyncMock) as direct_tcp,
-        ):
-            asyncio.run(proxy._handle_socks5_client(_Reader(), _Writer()))
-
-        direct_tcp.assert_not_called()
-        upstream.assert_awaited_once()
-        self.assertIn("HTTP transport -> upstream (fallback mode)", "\n".join(logs))
 
     def test_http_transport_records_failure_for_status_without_upstream(self) -> None:
         from telegram_proxy.wss_proxy import TelegramWSProxy
@@ -796,23 +326,20 @@ class TelegramProxyCloudflareRuntimeTests(unittest.TestCase):
         async def fail_upstream(*_args, **_kwargs):
             raise TimeoutError()
 
-        with patch("telegram_proxy.wss_proxy.socks5.connect_via_socks5", side_effect=fail_upstream):
-            ok = asyncio.run(
-                proxy._upstream_proxy_connect(
-                    None,
-                    None,
-                    "149.154.175.50",
-                    443,
-                    b"x" * 64,
-                    "test",
-                    1,
-                    False,
-                )
+        async def run_check():
+            return await proxy.open_upstream(
+                target_host="149.154.175.50",
+                target_port=443,
+                label="test",
+                dc=1,
+                is_media=False,
             )
 
-        self.assertFalse(ok)
+        with patch("telegram_proxy.proxy.socks5.connect_via_socks5", side_effect=fail_upstream):
+            opened = asyncio.run(run_check())
+
+        self.assertIsNone(opened)
         joined = "\n".join(logs)
-        self.assertIn("upstream 127.0.0.1:1080 connect failed", joined)
         self.assertIn("route=upstream SOCKS5", joined)
         self.assertIn("dc=1", joined)
         self.assertIn("target=149.154.175.50:443 via 127.0.0.1:1080", joined)
@@ -822,449 +349,44 @@ class TelegramProxyCloudflareRuntimeTests(unittest.TestCase):
         self.assertNotIn("secret-user", joined)
         self.assertNotIn("secret-pass", joined)
 
-    def test_upstream_replaces_telegram_ipv6_media_target_with_same_dc_ipv4(self) -> None:
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
+    def test_telegram_ipv6_media_target_becomes_same_dc_ipv4(self) -> None:
+        from telegram_proxy.proxy.obfs import build_server_header
         from telegram_proxy.wss_proxy import TelegramWSProxy
 
-        class _RemoteWriter:
-            def __init__(self):
-                self.transport = None
+        header, _cipher = build_server_header(-1)
 
-            def write(self, _data):
+        class _Reader:
+            async def readexactly(self, size):
+                return header[:size]
+
+        class _Writer:
+            def get_extra_info(self, name, default=None):
+                return ("127.0.0.1", 40000) if name == "peername" else default
+
+            def close(self):
                 return None
 
-            async def drain(self):
+            async def wait_closed(self):
                 return None
 
-        class _ClientReader:
-            pass
+        seen: list[dict] = []
 
-        class _ClientWriter:
-            pass
+        class _Session:
+            def __init__(self, _host, **kwargs):
+                seen.append(kwargs)
 
-        async def fake_connect(*args, **_kwargs):
-            seen.append(args)
-            return object(), _RemoteWriter()
-
-        async def fake_relay(*_args, **_kwargs):
-            return (0, False)
-
-        seen: list[tuple] = []
-        proxy = TelegramWSProxy(
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="127.0.0.1",
-                port=1080,
-                mode="fallback",
-            ),
-        )
-        proxy._relay_tcp = fake_relay
-
-        with patch("telegram_proxy.wss_proxy.socks5.connect_via_socks5", side_effect=fake_connect):
-            ok = asyncio.run(
-                proxy._upstream_proxy_connect(
-                    _ClientReader(),
-                    _ClientWriter(),
-                    "2001:b28:f23d:f001:0:0:0:7",
-                    443,
-                    b"x" * 64,
-                    "test",
-                    1,
-                    True,
-                )
-            )
-
-        self.assertTrue(ok)
-        self.assertEqual(seen[0][2:4], ("149.154.175.52", 443))
-
-    def test_wss_timeout_domain_is_temporarily_deprioritized_next_time(self) -> None:
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _FakePool:
-            async def get(self, *_args, **_kwargs):
+            async def run(self):
                 return None
 
-        class _FakeWebSocket:
-            async def send(self, _data):
-                return None
-
-        async def fake_connect(_relay_ip, domain, *_args, **_kwargs):
-            seen_domains.append(domain)
-            if domain == "kws2.web.telegram.org":
-                raise TimeoutError()
-            return _FakeWebSocket()
-
-        async def fake_relay(*_args, **_kwargs):
-            return None
-
-        async def run_two(proxy: TelegramWSProxy):
-            for index in range(2):
-                await proxy._tunnel_via_wss(
-                    object(),
-                    object(),
-                    2,
-                    False,
-                    b"x" * 64,
-                    False,
-                    "149.154.167.51",
-                    443,
-                    f"test-{index}",
-                )
-
-        seen_domains: list[str] = []
-        logs: list[str] = []
-        proxy = TelegramWSProxy(on_log=logs.append)
-        proxy._ws_pool = _FakePool()
-        proxy._relay_wss = fake_relay
-
-        with patch("telegram_proxy.wss_proxy.RawWebSocket.connect", side_effect=fake_connect):
-            asyncio.run(run_two(proxy))
-
-        self.assertEqual(
-            seen_domains,
-            ["kws2.web.telegram.org", "kws2-1.web.telegram.org", "kws2-1.web.telegram.org"],
-        )
-        self.assertIn("WSS domain kws2.web.telegram.org temporarily deprioritized after TimeoutError", "\n".join(logs))
-
-    def test_wss_zero_recv_domain_is_temporarily_deprioritized_next_time(self) -> None:
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _FakePool:
-            async def get(self, *_args, **_kwargs):
-                return None
-
-        class _FakeWebSocket:
-            async def send(self, _data):
-                return None
-
-        async def fake_connect(_relay_ip, domain, *_args, **_kwargs):
-            seen_domains.append(domain)
-            return _FakeWebSocket()
-
-        async def fake_relay(*_args, **_kwargs):
-            return (0, 1)
-
-        async def run_two(proxy: TelegramWSProxy):
-            for index in range(2):
-                await proxy._tunnel_via_wss(
-                    object(),
-                    object(),
-                    2,
-                    False,
-                    b"x" * 64,
-                    False,
-                    "149.154.167.51",
-                    443,
-                    f"test-{index}",
-                )
-
-        seen_domains: list[str] = []
-        logs: list[str] = []
-        proxy = TelegramWSProxy(on_log=logs.append)
-        proxy._ws_pool = _FakePool()
-        proxy._relay_wss = fake_relay
-
-        with patch("telegram_proxy.wss_proxy.RawWebSocket.connect", side_effect=fake_connect):
-            asyncio.run(run_two(proxy))
-
-        self.assertEqual(
-            seen_domains,
-            ["kws2.web.telegram.org", "kws2-1.web.telegram.org"],
-        )
-        self.assertIn("WSS domain kws2.web.telegram.org temporarily deprioritized after recv=0", "\n".join(logs))
-
-    def test_wss_zero_recv_skips_wss_when_all_domains_are_temporarily_deprioritized(self) -> None:
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _FakePool:
-            async def get(self, *_args, **_kwargs):
-                return None
-
-        class _FakeWebSocket:
-            async def send(self, _data):
-                return None
-
-        async def fake_connect(_relay_ip, domain, *_args, **_kwargs):
-            seen_domains.append(domain)
-            return _FakeWebSocket()
-
-        async def fake_relay(*_args, **_kwargs):
-            return (0, 1)
-
-        async def fake_tcp_fallback(*_args, **_kwargs):
-            tcp_fallbacks.append(True)
-
-        async def fake_upstream(*_args, **_kwargs):
-            upstream_fallbacks.append(True)
-            return True
-
-        async def run_three(proxy: TelegramWSProxy):
-            for index in range(3):
-                await proxy._tunnel_via_wss(
-                    object(),
-                    object(),
-                    2,
-                    False,
-                    b"x" * 64,
-                    False,
-                    "149.154.167.51",
-                    443,
-                    f"test-{index}",
-                )
-
-        seen_domains: list[str] = []
-        tcp_fallbacks: list[bool] = []
-        upstream_fallbacks: list[bool] = []
-        proxy = TelegramWSProxy(
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="fallback.tls",
-                port=443,
-                tls=True,
-                mode="fallback",
-            )
-        )
-        proxy._ws_pool = _FakePool()
-        proxy._relay_wss = fake_relay
-        proxy._tcp_fallback = fake_tcp_fallback
-        proxy._upstream_proxy_connect = fake_upstream
-
-        with patch("telegram_proxy.wss_proxy.RawWebSocket.connect", side_effect=fake_connect):
-            asyncio.run(run_three(proxy))
-
-        self.assertEqual(
-            seen_domains,
-            ["kws2.web.telegram.org", "kws2-1.web.telegram.org"],
-        )
-        self.assertEqual(upstream_fallbacks, [True])
-        self.assertEqual(tcp_fallbacks, [])
-
-    def test_no_wss_dc_tries_direct_tcp_before_upstream_fallback(self) -> None:
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _RemoteWriter:
-            def __init__(self):
-                self.transport = None
-
-            def write(self, _data):
-                return None
-
-            async def drain(self):
-                return None
-
-        async def fake_direct_tcp(target_host, target_port):
-            direct_calls.append((target_host, target_port))
-            return object(), _RemoteWriter()
-
-        async def fake_upstream(_client_reader, _client_writer, target_host, target_port, _init, _label, dc, is_media, **_kwargs):
-            upstream_calls.append((target_host, target_port, dc, is_media))
-            return True
-
-        async def fake_relay(*_args, **_kwargs):
-            return 1, False
-
-        async def fake_wait_for(awaitable, *, timeout):
-            timeouts.append(timeout)
-            return await awaitable
-
-        direct_calls: list[tuple[str, int]] = []
-        upstream_calls: list[tuple[str, int, int, bool]] = []
-        timeouts: list[float] = []
-        logs: list[str] = []
-        proxy = TelegramWSProxy(
-            on_log=logs.append,
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="proxy.local",
-                port=443,
-                mode="fallback",
-            ),
-        )
-        proxy._upstream_proxy_connect = fake_upstream
-        proxy._relay_tcp = fake_relay
-
+        proxy = TelegramWSProxy()
         with (
-            patch("telegram_proxy.wss_proxy.asyncio.open_connection", side_effect=fake_direct_tcp),
-            patch("telegram_proxy.wss_proxy.asyncio.wait_for", side_effect=fake_wait_for),
+            patch("telegram_proxy.wss_proxy.socks5.handshake", return_value=("2001:b28:f23d:f001:0:0:0:7", 443)),
+            patch("telegram_proxy.wss_proxy.TelegramSession", _Session),
         ):
-            asyncio.run(
-                proxy._tcp_fallback(
-                    object(),
-                    object(),
-                    "149.154.175.100",
-                    443,
-                    b"x" * 64,
-                    "test",
-                    3,
-                    False,
-                )
-            )
+            asyncio.run(proxy._handle_socks5_client(_Reader(), _Writer()))
 
-        self.assertEqual(direct_calls, [("149.154.175.100", 443)])
-        self.assertEqual(upstream_calls, [])
-        self.assertGreaterEqual(timeouts[0], 2.5)
-        self.assertLessEqual(timeouts[0], 3.5)
-        self.assertIn("DC3 TCP fallback -> 149.154.175.100:443", "\n".join(logs))
-
-    def test_no_wss_dc_uses_upstream_after_direct_tcp_failure(self) -> None:
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        async def fail_direct_tcp(*_args, **_kwargs):
-            raise TimeoutError()
-
-        async def fake_upstream(_client_reader, _client_writer, target_host, target_port, _init, _label, dc, is_media, **_kwargs):
-            upstream_calls.append((target_host, target_port, dc, is_media))
-            return True
-
-        upstream_calls: list[tuple[str, int, int, bool]] = []
-        logs: list[str] = []
-        proxy = TelegramWSProxy(
-            on_log=logs.append,
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="proxy.local",
-                port=443,
-                mode="fallback",
-            ),
-        )
-        proxy._upstream_proxy_connect = fake_upstream
-
-        with patch("telegram_proxy.wss_proxy.asyncio.open_connection", side_effect=fail_direct_tcp):
-            asyncio.run(
-                proxy._tcp_fallback(
-                    object(),
-                    object(),
-                    "149.154.175.100",
-                    443,
-                    b"x" * 64,
-                    "test",
-                    3,
-                    False,
-                )
-            )
-
-        self.assertEqual(upstream_calls, [("149.154.175.100", 443, 3, False)])
-        self.assertIn("DC3 TCP failed -> trying upstream", "\n".join(logs))
-
-    def test_no_wss_media_dc_uses_upstream_without_direct_tcp_probe(self) -> None:
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        async def fake_upstream(_client_reader, _client_writer, target_host, target_port, _init, _label, dc, is_media, **_kwargs):
-            upstream_calls.append((target_host, target_port, dc, is_media))
-            return True
-
-        async def unexpected_direct_tcp(*_args, **_kwargs):
-            direct_calls.append(True)
-            raise AssertionError("media DC without WSS should skip direct TCP")
-
-        direct_calls: list[bool] = []
-        upstream_calls: list[tuple[str, int, int, bool]] = []
-        logs: list[str] = []
-        proxy = TelegramWSProxy(
-            on_log=logs.append,
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="proxy.local",
-                port=443,
-                mode="fallback",
-            ),
-        )
-        proxy._upstream_proxy_connect = fake_upstream
-
-        with patch("telegram_proxy.wss_proxy.asyncio.open_connection", side_effect=unexpected_direct_tcp):
-            asyncio.run(
-                proxy._tcp_fallback(
-                    object(),
-                    object(),
-                    "149.154.175.211",
-                    443,
-                    b"x" * 64,
-                    "test",
-                    1,
-                    True,
-                )
-            )
-
-        self.assertEqual(direct_calls, [])
-        self.assertEqual(upstream_calls, [("149.154.175.211", 443, 1, True)])
-        self.assertIn("DC1 media no WSS -> upstream proxy", "\n".join(logs))
-
-    def test_http_upstream_relay_does_not_block_mtproto_upstream_relay(self) -> None:
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _RemoteWriter:
-            def __init__(self):
-                self.transport = None
-
-            def write(self, _data):
-                return None
-
-            async def drain(self):
-                return None
-
-        async def fake_connect(_proxy_host, _proxy_port, _target_host, target_port, **_kwargs):
-            connected_ports.append(target_port)
-            return object(), _RemoteWriter()
-
-        async def fake_relay(*_args, dc=0, **_kwargs):
-            if dc == 0:
-                http_relay_started.set()
-                await release_http_relay.wait()
-            return (1, False)
-
-        async def run_pair(proxy: TelegramWSProxy):
-            http_task = asyncio.create_task(
-                proxy._upstream_proxy_connect(
-                    object(),
-                    object(),
-                    "149.154.167.41",
-                    80,
-                    b"x" * 64,
-                    "http",
-                    0,
-                    False,
-                )
-            )
-            await asyncio.wait_for(http_relay_started.wait(), timeout=0.5)
-            mtproto_task = asyncio.create_task(
-                proxy._upstream_proxy_connect(
-                    object(),
-                    object(),
-                    "149.154.175.100",
-                    443,
-                    b"x" * 64,
-                    "dc3",
-                    3,
-                    False,
-                )
-            )
-            await asyncio.wait_for(mtproto_task, timeout=0.5)
-            release_http_relay.set()
-            await asyncio.wait_for(http_task, timeout=0.5)
-
-        connected_ports: list[int] = []
-        http_relay_started = asyncio.Event()
-        release_http_relay = asyncio.Event()
-        proxy = TelegramWSProxy(
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="proxy.local",
-                port=443,
-                mode="fallback",
-            ),
-            pool_size=1,
-        )
-        proxy._relay_tcp = fake_relay
-
-        with patch("telegram_proxy.wss_proxy.socks5.connect_via_socks5", side_effect=fake_connect):
-            asyncio.run(run_pair(proxy))
-
-        self.assertEqual(connected_ports, [80, 443])
+        self.assertEqual((seen[0]["dc"], seen[0]["is_media"]), (1, True))
+        self.assertEqual((seen[0]["target_host"], seen[0]["target_port"]), ("149.154.175.52", 443))
 
     def test_proxy_server_is_bound_before_explicit_single_start_serving(self) -> None:
         from telegram_proxy.wss_proxy import TelegramWSProxy
@@ -1282,20 +404,6 @@ class TelegramProxyCloudflareRuntimeTests(unittest.TestCase):
             async def wait_closed(self):
                 return None
 
-        class _WsPool:
-            def __init__(self, *_args, **_kwargs):
-                return None
-
-            async def warmup(self):
-                return None
-
-            async def close_all(self):
-                return None
-
-        class _WorkerPool(_WsPool):
-            async def warmup(self, *_args, **_kwargs):
-                return None
-
         server = _Server()
 
         async def fake_start_server(*_args, **_kwargs):
@@ -1308,8 +416,6 @@ class TelegramProxyCloudflareRuntimeTests(unittest.TestCase):
 
         with (
             patch("telegram_proxy.wss_proxy.asyncio.start_server", side_effect=fake_start_server) as start_server,
-            patch("telegram_proxy.wss_proxy._WsPool", _WsPool),
-            patch("telegram_proxy.wss_proxy.CloudflareWorkerPool", _WorkerPool),
         ):
             asyncio.run(run_proxy_once())
 
@@ -1321,14 +427,12 @@ class TelegramProxyCloudflareRuntimeTests(unittest.TestCase):
 
         class _Reader:
             def __init__(self):
-                self._chunks = [
-                    b"\x05\x00",
-                    b"\x05\x00\x00\x04",
-                    b"\x00" * 18,
-                ]
+                self._data = bytearray(b"\x05\x00" + b"\x05\x00\x00\x04" + b"\x00" * 18)
 
-            async def readexactly(self, _size):
-                return self._chunks.pop(0)
+            async def readexactly(self, size):
+                chunk = bytes(self._data[:size])
+                del self._data[:size]
+                return chunk
 
         class _Writer:
             def __init__(self):
@@ -1362,118 +466,6 @@ class TelegramProxyCloudflareRuntimeTests(unittest.TestCase):
         request = opened[0].writes[1]
         self.assertEqual(request[:4], b"\x05\x01\x00\x04")
         self.assertEqual(len(request), 4 + 16 + 2)
-
-    def test_wss_proxy_uses_cloudflare_worker_pool_before_fresh_connect(self) -> None:
-        from telegram_proxy.proxy.cloudflare import CloudflareFallbackConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _Ws:
-            async def send(self, data):
-                return None
-
-        class _WorkerPool:
-            def __init__(self):
-                self.calls: list[tuple[int, str, str]] = []
-
-            async def get(self, dc, worker_domain, fallback_dst):
-                self.calls.append((dc, worker_domain, fallback_dst))
-                return _Ws()
-
-        async def fake_relay(*args, **kwargs):
-            return None
-
-        worker_pool = _WorkerPool()
-        proxy = TelegramWSProxy(
-            cloudflare_config=CloudflareFallbackConfig(
-                worker_enabled=True,
-                worker_domains=("worker.example.dev",),
-            )
-        )
-        proxy._cloudflare_worker_pool = worker_pool
-        proxy._relay_wss = fake_relay
-
-        with patch("telegram_proxy.wss_proxy.RawWebSocket.connect") as connect:
-            ok = asyncio.run(
-                proxy._cloudflare_fallback(
-                    None,
-                    None,
-                    "149.154.167.91",
-                    443,
-                    b"x" * 64,
-                    False,
-                    "test",
-                    4,
-                    False,
-                )
-            )
-
-        self.assertTrue(ok)
-        self.assertEqual(worker_pool.calls, [(4, "worker.example.dev", "149.154.167.91")])
-        self.assertEqual(connect.call_count, 0)
-        self.assertEqual(proxy.stats.cloudflare_worker_connections, 1)
-
-    def test_proxy_start_prewarms_worker_pool_for_fallback_media_targets(self) -> None:
-        from telegram_proxy.proxy.cloudflare import CloudflareFallbackConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        warmup_calls: list[tuple[tuple[str, ...], tuple[tuple[int, str], ...]]] = []
-
-        class _WsPool:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def warmup(self):
-                return None
-
-            async def close_all(self):
-                return None
-
-        class _WorkerPool:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def warmup(self, worker_domains, fallback_targets):
-                warmup_calls.append((tuple(worker_domains), tuple(fallback_targets)))
-
-            async def close_all(self):
-                return None
-
-        async def run_proxy_once():
-            proxy = TelegramWSProxy(
-                port=0,
-                cloudflare_config=CloudflareFallbackConfig(
-                    worker_enabled=True,
-                    worker_domains=("worker.example.dev",),
-                ),
-            )
-            await proxy.start()
-            await asyncio.sleep(0)
-            await proxy.stop()
-
-        with (
-            patch("telegram_proxy.wss_proxy._WsPool", _WsPool),
-            patch("telegram_proxy.wss_proxy.CloudflareWorkerPool", _WorkerPool),
-        ):
-            asyncio.run(run_proxy_once())
-
-        self.assertEqual(
-            warmup_calls,
-            [
-                (
-                    ("worker.example.dev",),
-                    (
-                        (1, "149.154.175.50"),
-                        (1, "149.154.175.52"),
-                        (3, "149.154.175.100"),
-                        (3, "149.154.175.102"),
-                        (5, "91.108.56.100"),
-                        (5, "91.108.56.102"),
-                        (203, "91.105.192.100"),
-                    ),
-                )
-            ],
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

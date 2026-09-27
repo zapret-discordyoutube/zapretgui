@@ -95,6 +95,16 @@ def _install_loop_exception_handler(
     loop.set_exception_handler(_handler)
 
 
+def _route_health_path():
+    """Где помнить подавленные маршруты WSS между запусками (служебный кэш)."""
+    try:
+        from config.runtime_layout import APPLICATION_PATHS
+
+        return APPLICATION_PATHS.tmp_dir / "tg_proxy_route_health.json"
+    except Exception:
+        return None
+
+
 class TelegramProxyRuntime:
     """Thread-safe runtime wrapper for the Telegram WSS proxy.
 
@@ -184,6 +194,7 @@ class TelegramProxyRuntime:
             buffer_kb=self._buffer_kb,
             fake_tls_domain=self._fake_tls_domain,
             proxy_protocol=self._proxy_protocol,
+            route_health_path=_route_health_path(),
         )
         self._started.clear()
         self._thread = threading.Thread(

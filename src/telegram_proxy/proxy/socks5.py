@@ -1,10 +1,9 @@
 # telegram_proxy/socks5.py
-"""Minimal SOCKS5 server implementation (RFC 1928).
+"""SOCKS5 (RFC 1928) ровно в том объёме, что нужен Telegram.
 
-Supports only what Telegram needs:
-- No authentication (METHOD 0x00)
-- CONNECT command (CMD 0x01)
-- IPv4 (ATYP 0x01) and Domain (ATYP 0x03) address types
+Сервер (вход прокси): без пароля, CONNECT и UDP ASSOCIATE, адреса IPv4/IPv6/домен.
+Клиент (внешний SOCKS5): CONNECT и UDP ASSOCIATE, вход без пароля или по
+логину и паролю (RFC 1929), по желанию поверх TLS.
 """
 
 import asyncio
@@ -209,11 +208,6 @@ def _send_reply(
     )
 
 
-def send_failure(writer: asyncio.StreamWriter, rep: int = REP_GENERAL_FAILURE) -> None:
-    """Send failure reply. For use after handshake if tunnel setup fails."""
-    _send_reply(writer, rep)
-
-
 def parse_udp_packet(data: bytes) -> UdpPacket:
     if len(data) < 4:
         raise Socks5Error("UDP packet is too short")
@@ -404,111 +398,27 @@ async def connect_via_socks5(
     tls_server_name: str = "",
     tls_verify: bool = False,
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    """Connect to target through a SOCKS5 proxy. Returns (reader, writer) to target.
-
-    Supports IPv4, IPv6 and domain names as target_host.
-    Supports no-auth (0x00) and username/password auth (0x02, RFC 1929).
-    Raises Socks5Error on any SOCKS5 protocol failure.
-    """
-    ssl_context = None
-    server_hostname = None
-    if tls:
-        ssl_context = ssl.create_default_context()
-        if not tls_verify:
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-        server_hostname = str(tls_server_name or proxy_host or "").strip() or None
-
-    reader, writer = await asyncio.wait_for(
-        asyncio.open_connection(
-            proxy_host,
-            proxy_port,
-            ssl=ssl_context,
-            server_hostname=server_hostname,
-        ),
+    """Подключиться к target через внешний SOCKS5. Ошибки протокола — Socks5Error."""
+    reader, writer = await _open_socks5_control_connection(
+        proxy_host,
+        proxy_port,
+        username=username,
+        password=password,
         timeout=timeout,
+        tls=tls,
+        tls_server_name=tls_server_name,
+        tls_verify=tls_verify,
     )
-
     try:
-        # Phase 1: Greeting — offer available auth methods
-        has_creds = bool(username)
-        if has_creds:
-            writer.write(struct.pack("!BBBB", SOCKS_VER, 2, AUTH_NONE, AUTH_USERPASS))
-        else:
-            writer.write(struct.pack("!BBB", SOCKS_VER, 1, AUTH_NONE))
+        atyp, encoded_host = _encode_address(target_host)
+        writer.write(
+            struct.pack("!BBBB", SOCKS_VER, CMD_CONNECT, 0x00, atyp)
+            + encoded_host
+            + struct.pack("!H", int(target_port))
+        )
         await writer.drain()
-
-        reply = await asyncio.wait_for(reader.readexactly(2), timeout=timeout)
-        ver, method = struct.unpack("!BB", reply)
-        if ver != SOCKS_VER:
-            raise Socks5Error(f"Upstream proxy bad SOCKS version: {ver}")
-
-        if method == AUTH_USERPASS:
-            if not has_creds:
-                raise Socks5Error("Upstream proxy requires auth but no credentials provided")
-            # RFC 1929: VER=1, ULEN, USERNAME, PLEN, PASSWORD
-            uname = username.encode("utf-8")
-            passwd = password.encode("utf-8")
-            auth_req = struct.pack("!BB", 0x01, len(uname)) + uname
-            auth_req += struct.pack("!B", len(passwd)) + passwd
-            writer.write(auth_req)
-            await writer.drain()
-            auth_reply = await asyncio.wait_for(reader.readexactly(2), timeout=timeout)
-            auth_ver, auth_status = struct.unpack("!BB", auth_reply)
-            if auth_status != 0x00:
-                raise Socks5Error(f"Upstream proxy auth failed (status=0x{auth_status:02X})")
-        elif method == AUTH_NONE:
-            pass  # No auth needed
-        elif method == 0xFF:
-            raise Socks5Error("Upstream proxy rejected all auth methods")
-        else:
-            raise Socks5Error(f"Upstream proxy selected unsupported method 0x{method:02X}")
-
-        # Phase 2: CONNECT request
-        try:
-            target_addr = ip_address(str(target_host))
-        except ValueError:
-            target_addr = None
-
-        if isinstance(target_addr, IPv4Address):
-            req = struct.pack("!BBB", SOCKS_VER, CMD_CONNECT, 0x00)
-            req += struct.pack("!B", ATYP_IPV4) + target_addr.packed
-        elif isinstance(target_addr, IPv6Address):
-            req = struct.pack("!BBB", SOCKS_VER, CMD_CONNECT, 0x00)
-            req += struct.pack("!B", ATYP_IPV6) + target_addr.packed
-        else:
-            # Domain name
-            domain_bytes = target_host.encode("ascii")
-            req = struct.pack("!BBB", SOCKS_VER, CMD_CONNECT, 0x00)
-            req += struct.pack("!BB", ATYP_DOMAIN, len(domain_bytes)) + domain_bytes
-
-        req += struct.pack("!H", target_port)
-        writer.write(req)
-        await writer.drain()
-
-        # Read CONNECT reply header (VER + REP + RSV + ATYP)
-        resp = await asyncio.wait_for(reader.readexactly(4), timeout=timeout)
-        ver, rep, _rsv, atyp = struct.unpack("!BBBB", resp)
-
-        if ver != SOCKS_VER:
-            raise Socks5Error(f"Upstream proxy bad reply version: {ver}")
-        if rep != REP_SUCCESS:
-            raise Socks5ReplyError("CONNECT", rep)
-
-        # Consume bound address (we don't need it but must read it)
-        if atyp == ATYP_IPV4:
-            await reader.readexactly(4 + 2)  # 4-byte addr + 2-byte port
-        elif atyp == ATYP_DOMAIN:
-            domain_len = (await reader.readexactly(1))[0]
-            await reader.readexactly(domain_len + 2)  # domain + 2-byte port
-        elif atyp == ATYP_IPV6:
-            await reader.readexactly(16 + 2)  # 16-byte addr + 2-byte port
-        else:
-            # Unknown ATYP — try to read 4+2 as fallback
-            await reader.readexactly(4 + 2)
-
+        await _read_socks5_reply_address(reader, timeout=timeout, command_name="CONNECT")
         return reader, writer
-
     except Exception:
         try:
             writer.close()

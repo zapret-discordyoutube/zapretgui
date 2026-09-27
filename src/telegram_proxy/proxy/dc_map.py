@@ -1,37 +1,11 @@
 # telegram_proxy/dc_map.py
-"""Telegram datacenter IP mapping and WebSocket endpoint resolution.
+"""Адреса датацентров Telegram: IP -> DC, прямые TCP-адреса, диапазоны Telegram.
 
-Key insight: only DC2 and DC4 WebSocket relays accept connections.
-DC1, DC3, DC5 return HTTP 302 redirects. All traffic is routed through
-DC2/DC4 WSS relays which read the real DC id from the MTProto init packet.
+Маршруты WSS (релеи, фронты, туннель) описаны в route_catalog.py и routes.py.
 """
 
-import socket as _socket
-import struct
 from ipaddress import IPv4Network, IPv4Address, IPv6Network, IPv6Address
 
-from telegram_proxy.proxy.route_catalog import (
-    WSS_PATH,
-    WSS_RELAY_IP,
-    stable_wss_domain_map,
-    stable_wss_domains_for_dc,
-    wss_enabled_dcs,
-)
-
-
-# ---- WebSocket relay configuration ----
-
-# Per-domain IP overrides (empty = all use WSS_RELAY_IP).
-# Only add entries here after manually verifying that a domain works at a
-# specific IP.  Unverified IPs from DNS can break media downloads.
-WSS_RELAY_IPS: dict[str, str] = {}
-
-# WSS domains that are allowed for automatic runtime routing.
-# See route_catalog.py for the full stable/candidate/fallback_only map.
-WSS_DOMAINS = stable_wss_domain_map()
-
-# For DCs without their own relay, try these (cross-DC routing via init).
-WSS_FALLBACK_ORDER = list(wss_enabled_dcs())
 
 # Mapping: IP -> (dc_id, is_media)
 # Used to determine DC when MTProto init packet parsing fails
@@ -148,30 +122,13 @@ _V6_SUBNET_TO_DC: list[tuple[IPv6Network, int]] = [
     (IPv6Network("2a0a:f280::/32"), 2),
 ]
 
-# Telegram IP ranges as integer tuples for fast lookup
-_TG_RANGES = [
-    # 185.76.151.0/24
-    (struct.unpack("!I", _socket.inet_aton("185.76.151.0"))[0],
-     struct.unpack("!I", _socket.inet_aton("185.76.151.255"))[0]),
-    # 149.154.160.0/20
-    (struct.unpack("!I", _socket.inet_aton("149.154.160.0"))[0],
-     struct.unpack("!I", _socket.inet_aton("149.154.175.255"))[0]),
-    # 91.105.192.0/23
-    (struct.unpack("!I", _socket.inet_aton("91.105.192.0"))[0],
-     struct.unpack("!I", _socket.inet_aton("91.105.193.255"))[0]),
-    # 91.108.0.0/16
-    (struct.unpack("!I", _socket.inet_aton("91.108.0.0"))[0],
-     struct.unpack("!I", _socket.inet_aton("91.108.255.255"))[0]),
-]
-
 # Pre-compiled set of (network_int, mask) for fast lookup
 _COMPILED_NETS: list[tuple[int, int, int]] = []  # (net_addr, mask, dc)
-_COMPILED_TG_RANGES: list[tuple[int, int]] = []  # (net_addr, mask)
 
 
 def _compile() -> None:
     """Pre-compile CIDR ranges for fast integer matching."""
-    global _COMPILED_NETS, _COMPILED_TG_RANGES
+    global _COMPILED_NETS
     if _COMPILED_NETS:
         return
     # Sort by prefix length descending (most specific first)
@@ -180,10 +137,6 @@ def _compile() -> None:
         net_int = int(net.network_address)
         mask = int(net.netmask)
         _COMPILED_NETS.append((net_int, mask, dc))
-    for net in TELEGRAM_CIDRS:
-        net_int = int(net.network_address)
-        mask = int(net.netmask)
-        _COMPILED_TG_RANGES.append((net_int, mask))
 
 
 def ip_to_dc(ip: str) -> int:
@@ -212,58 +165,16 @@ def ip_to_dc(ip: str) -> int:
     return 2  # Default DC
 
 
-def ip_to_dc_media(ip: str) -> tuple[int, bool]:
-    """Map IP to (dc_id, is_media) using the exact IP table.
-
-    Falls back to CIDR-based lookup if IP not in table.
-    """
-    entry = IP_TO_DC.get(ip)
-    if entry is not None:
-        return entry
-    return (ip_to_dc(ip), False)
-
-
 def is_telegram_ip(ip: str) -> bool:
-    """Check if an IP address belongs to Telegram's known ranges.
-
-    Uses fast integer comparison against precomputed ranges.
-    Supports both IPv4 and IPv6.
-    """
-    if ":" in ip:
-        # IPv6
-        try:
-            addr = IPv6Address(ip)
-            return any(addr in net for net in TELEGRAM_V6_CIDRS)
-        except ValueError:
-            return False
+    """Адрес из официальных диапазонов Telegram (core.telegram.org/resources/cidr.txt)."""
     try:
-        n = struct.unpack("!I", _socket.inet_aton(ip))[0]
-        return any(lo <= n <= hi for lo, hi in _TG_RANGES)
-    except OSError:
+        if ":" in ip:
+            addr6 = IPv6Address(ip)
+            return any(addr6 in net for net in TELEGRAM_V6_CIDRS)
+        addr = IPv4Address(ip)
+    except ValueError:
         return False
-
-
-def ws_domains_for_dc(dc: int, is_media: bool = False) -> list[str]:
-    """Get WebSocket domain names to try for a datacenter.
-
-    The stable route map lives in route_catalog.py.  Only stable routes are
-    returned here; candidate routes are documented but not used automatically.
-
-    For media connections, tries the -1 variant first.
-    """
-    domains = stable_wss_domains_for_dc(dc, is_media=is_media)
-    if domains:
-        return list(domains)
-
-    # DC doesn't have its own relay -- use fallback DCs
-    result = []
-    for fallback_dc in WSS_FALLBACK_ORDER:
-        domains = WSS_DOMAINS[fallback_dc]
-        if is_media:
-            result.extend(reversed(domains))
-        else:
-            result.extend(domains)
-    return result
+    return any(addr in net for net in TELEGRAM_CIDRS)
 
 
 def parse_dc_endpoint_overrides(value: object) -> dict[int, str]:

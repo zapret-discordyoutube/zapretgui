@@ -5,6 +5,8 @@ import inspect
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
+from telegram_proxy.proxy.route_catalog import CDN_FRONTS
+
 
 @dataclass(frozen=True, slots=True)
 class CloudflareFallbackConfig:
@@ -68,23 +70,8 @@ CLOUDFLARE_DNS_RECORDS: tuple[CloudflareDnsRecord, ...] = (
     CloudflareDnsRecord(203, "kws203", "91.105.192.100"),
 )
 
-AUTO_CLOUDFLARE_DOMAINS: tuple[str, ...] = (
-    "sorokdva.co.uk",
-    "sorokodin.co.uk",
-    "lovetrue.co.uk",
-    "pyatdesyatdva.co.uk",
-    "noskomnadzor.co.uk",
-    "pomogite.co.uk",
-    "cakeisalie.co.uk",
-    "havegreatday.co.uk",
-    "pclead.co.uk",
-    "offshor.co.uk",
-    "kartoshka.co.uk",
-    "notelega.co.uk",
-    "nebally.co.uk",
-    "pyatdesyatodin.co.uk",
-    "ebally.co.uk",
-)
+# Встроенные фронты: один список с routes.py (route_catalog.CDN_FRONTS).
+AUTO_CLOUDFLARE_DOMAINS: tuple[str, ...] = tuple(front.domain for front in CDN_FRONTS)
 
 _DNS_RECORD_BY_DC = {record.dc: record for record in CLOUDFLARE_DNS_RECORDS}
 
@@ -207,72 +194,6 @@ def normalize_domain_list(value: object) -> tuple[str, ...]:
     return tuple(result)
 
 
-def should_try_cloudflare(config: CloudflareFallbackConfig | None) -> bool:
-    if config is None:
-        return False
-    if config.enabled and (config.domains or AUTO_CLOUDFLARE_DOMAINS):
-        return True
-    return bool(config.worker_enabled and config.worker_domains)
-
-
-class CloudflareDomainBalancer:
-    """Keeps the last working Cloudflare base domain first for each Telegram DC."""
-
-    __slots__ = ("_active_by_dc", "_domains")
-
-    def __init__(self) -> None:
-        self._active_by_dc: dict[int, str] = {}
-        self._domains: tuple[str, ...] = ()
-
-    def reset(self) -> None:
-        self._active_by_dc.clear()
-        self._domains = ()
-
-    def ordered_domains(self, dc: int, domains: tuple[str, ...]) -> list[str]:
-        self._sync_domains(domains)
-        active = self._active_by_dc.get(int(dc))
-        if active not in self._domains:
-            active = None
-        if active is None:
-            return list(self._domains)
-        return [active, *(domain for domain in self._domains if domain != active)]
-
-    def record_success(self, dc: int, domain: str) -> bool:
-        normalized = str(domain or "").strip().lower()
-        prefix = f"kws{int(dc)}."
-        base_domain = normalized[len(prefix):] if normalized.startswith(prefix) else normalized
-        if base_domain not in self._domains:
-            return False
-        previous = self._active_by_dc.get(int(dc))
-        self._active_by_dc[int(dc)] = base_domain
-        return previous != base_domain
-
-    def _sync_domains(self, domains: tuple[str, ...]) -> None:
-        if self._domains == domains:
-            return
-        self._domains = domains
-        valid = set(domains)
-        self._active_by_dc = {
-            dc: domain
-            for dc, domain in self._active_by_dc.items()
-            if domain in valid
-        }
-
-
-def build_cloudflare_domains(
-    dc: int,
-    config: CloudflareFallbackConfig,
-    *,
-    balancer: CloudflareDomainBalancer | None = None,
-) -> list[str]:
-    result: list[str] = []
-    domains = config.domains or AUTO_CLOUDFLARE_DOMAINS
-    ordered_domains = balancer.ordered_domains(dc, domains) if balancer is not None else list(domains)
-    for base_domain in ordered_domains:
-        result.append(f"kws{int(dc)}.{base_domain}")
-    return result
-
-
 def build_worker_path(dst: str, dc: int) -> str:
     return "/apiws?" + urlencode({"dst": str(dst or ""), "dc": str(int(dc or 0))})
 
@@ -311,12 +232,20 @@ async def _check_entry(
     timeout: float,
     connect,
 ) -> CloudflareCheckEntry:
+    from telegram_proxy.proxy.ws import WsTarget
+
     try:
-        ws = await connect(host, host, path=path, timeout=float(timeout))
+        ws = await connect(WsTarget(connect_host=host, sni=host, path=path), timeout=float(timeout))
         await _close_ws(ws)
         return CloudflareCheckEntry(kind=kind, host=host, path=path, ok=True)
     except Exception as exc:
         return CloudflareCheckEntry(kind=kind, host=host, path=path, ok=False, error=str(exc))
+
+
+async def _connect_ws(target, *, timeout: float):
+    from telegram_proxy.proxy import ws
+
+    return await ws.connect(target, tcp_timeout=timeout, upgrade_timeout=timeout)
 
 
 def _probe_targets(kind: str, domains: object, dcs: tuple[int, ...]) -> tuple[tuple[str, str], ...]:
@@ -353,12 +282,10 @@ async def check_cloudflare_connectivity(
     timeout: float = 6.0,
     connect=None,
 ) -> CloudflareCheckResult:
-    from telegram_proxy.proxy.transport import RawWebSocket
-
     normalized_kind = str(kind or "").strip().lower()
     if normalized_kind not in {"domain", "worker"}:
         normalized_kind = "domain"
-    connect_fn = connect or RawWebSocket.connect
+    connect_fn = connect or _connect_ws
     tasks = [
         _check_entry(kind=normalized_kind, host=host, path=path, timeout=timeout, connect=connect_fn)
         for host, path in _probe_targets(normalized_kind, domains, tuple(int(dc) for dc in dcs))
@@ -383,14 +310,11 @@ __all__ = [
     "CloudflareCheckEntry",
     "CloudflareCheckResult",
     "CloudflareDnsRecord",
-    "CloudflareDomainBalancer",
     "CloudflareFallbackConfig",
     "build_cfproxy_dns_records_text",
     "build_cfworker_code",
-    "build_cloudflare_domains",
     "build_worker_path",
     "check_cloudflare_connectivity",
     "normalize_domain_list",
     "run_cloudflare_connectivity_check",
-    "should_try_cloudflare",
 ]

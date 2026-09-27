@@ -21,15 +21,11 @@ class UpstreamProxyEndpoint:
 
 @dataclass(frozen=True)
 class UpstreamProxyConfig(UpstreamProxyEndpoint):
-    """Configuration for an external SOCKS5 proxy.
+    """Внешний SOCKS5-сервер (встроенный сервер страны или ручной).
 
-    Modes:
-      - "fallback": route through upstream only when WSS+TCP both fail
-      - "always":   route all TCP traffic through upstream proxy
-
-    A bundled country preset is user-selected infrastructure, not an
-    auto-discovered fallback. Treat it as the main TCP route even if an older
-    settings file still stores "fallback".
+    Режимы (переключатель «Весь TCP через SOCKS5»):
+      - "fallback": запасной путь после всех маршрутов WSS (по умолчанию);
+      - "always":   весь TCP Telegram только через этот сервер.
     """
 
     enabled: bool = False
@@ -75,12 +71,8 @@ def should_route_upstream(upstream: UpstreamProxyConfig, *, mode: str) -> bool:
     """Return True when traffic should go through the external proxy now."""
     if not upstream.enabled:
         return False
-    selected_preset = bool(str(upstream.preset_id or "").strip())
     configured_mode = str(upstream.mode or "").strip().lower()
-    requested_mode = str(mode or "").strip().lower()
-    if selected_preset:
-        return requested_mode == "always"
-    return configured_mode == requested_mode
+    return configured_mode == str(mode or "").strip().lower()
 
 
 __all__ = [

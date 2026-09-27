@@ -12,42 +12,30 @@ import telegram_proxy.runtime.plans as telegram_plans
 
 
 class TelegramProxyActionsArchitectureTests(unittest.TestCase):
-    def test_wss_pools_skip_websockets_with_closing_transport(self) -> None:
+    def test_spare_pool_skips_websockets_that_are_closing(self) -> None:
         import asyncio
+        from types import SimpleNamespace
 
-        from telegram_proxy.proxy.pool import CloudflareWorkerPool, WsPool
+        from telegram_proxy.proxy.pool import WsSparePool
         from telegram_proxy.proxy.stats import ProxyStats
 
-        class _Transport:
-            def is_closing(self) -> bool:
-                return True
-
-        class _Writer:
-            transport = _Transport()
-
         class _WebSocket:
-            _closed = False
-            writer = _Writer()
+            is_closing = True
+            opened_at = time.monotonic()
+
+            def has_unread_data(self) -> bool:
+                return False
 
             async def close(self) -> None:
-                self._closed = True
+                return None
 
         async def run_check() -> None:
             stats = ProxyStats()
-
-            ws_pool = WsPool(stats, pool_size=0)
-            ws_pool._idle[(2, False)] = [(_WebSocket(), time.monotonic())]
-            self.assertIsNone(await ws_pool.get(2, False, "149.154.167.220", ["kws2.web.telegram.org"]))
-            self.assertEqual(stats.pool_hits, 0)
-            self.assertEqual(stats.pool_misses, 1)
-
-            worker_pool = CloudflareWorkerPool(stats, pool_size=0)
-            worker_pool._idle[(2, "worker.example.dev", "149.154.167.51")] = [
-                (_WebSocket(), time.monotonic())
-            ]
-            self.assertIsNone(await worker_pool.get(2, "worker.example.dev", "149.154.167.51"))
-            self.assertEqual(stats.cloudflare_worker_pool_hits, 0)
-            self.assertEqual(stats.cloudflare_worker_pool_misses, 1)
+            pool = WsSparePool(stats)
+            pool._spares["relay:kws2"] = [_WebSocket()]
+            self.assertIsNone(pool.take(SimpleNamespace(pool_key="relay:kws2")))
+            self.assertEqual((stats.pool_hits, stats.pool_misses), (0, 1))
+            await pool.close_all()
 
         asyncio.run(run_check())
 
@@ -76,59 +64,50 @@ class TelegramProxyActionsArchitectureTests(unittest.TestCase):
         self.assertIn("telegram_proxy.config.settings", commands_source)
 
     def test_wss_proxy_is_split_into_focused_modules(self) -> None:
-        transport = importlib.import_module("telegram_proxy.proxy.transport")
         routing = importlib.import_module("telegram_proxy.proxy.routing")
-        relay = importlib.import_module("telegram_proxy.proxy.relay")
         stats = importlib.import_module("telegram_proxy.proxy.stats")
-        mtproto = importlib.import_module("telegram_proxy.proxy.mtproto")
-        pool = importlib.import_module("telegram_proxy.proxy.pool")
+        cloudflare = importlib.import_module("telegram_proxy.proxy.cloudflare")
         wss_proxy = importlib.import_module("telegram_proxy.wss_proxy")
 
-        self.assertIs(wss_proxy.RawWebSocket, transport.RawWebSocket)
-        self.assertIs(wss_proxy.WsHandshakeError, transport.WsHandshakeError)
         self.assertIs(wss_proxy.UpstreamProxyConfig, routing.UpstreamProxyConfig)
         self.assertIs(wss_proxy.check_relay_reachable, routing.check_relay_reachable)
-        self.assertIs(wss_proxy.RELAY_BUFFER, relay.RELAY_BUFFER)
         self.assertIs(wss_proxy.ProxyStats, stats.ProxyStats)
-        self.assertIs(wss_proxy._MsgSplitter, mtproto.MsgSplitter)
-        self.assertIs(wss_proxy._WsPool, pool.WsPool)
+        self.assertIs(wss_proxy.CloudflareFallbackConfig, cloudflare.CloudflareFallbackConfig)
 
         wss_source = inspect.getsource(wss_proxy)
-        self.assertNotIn("def _dc_from_init", wss_source)
-        self.assertNotIn("def _patch_init_dc", wss_source)
+        # Маршруты, заголовок obfuscated2 и пересылка живут в proxy/*,
+        # а wss_proxy только принимает соединения.
+        self.assertIn("TelegramSession(", wss_source)
+        self.assertNotIn("def _tunnel", wss_source)
+        self.assertNotIn("_cloudflare_fallback", wss_source)
         self.assertNotIn("class _MsgSplitter", wss_source)
-        self.assertNotIn("class _WsPool", wss_source)
         self.assertNotIn("transparent_port_to_dc", wss_source)
         self.assertNotIn("TRANSPARENT_PORT_BASE", wss_source)
-        self.assertNotIn("telegram_proxy.raw_websocket", wss_source)
-        self.assertNotIn("telegram_proxy.relay", wss_source)
-        self.assertNotIn("telegram_proxy.routing", wss_source)
-        self.assertNotIn("telegram_proxy.stats", wss_source)
-        self.assertIn("relay_tcp(", wss_source)
-        self.assertIn("relay_wss(", wss_source)
-        self.assertIn("should_route_upstream(", wss_source)
 
     def test_proxy_network_helpers_live_under_proxy_package(self) -> None:
         root = Path(__file__).resolve().parents[1]
         telegram_proxy_root = root / "src" / "telegram_proxy"
         proxy_root = telegram_proxy_root / "proxy"
 
-        self.assertTrue((proxy_root / "__init__.py").exists())
-        self.assertTrue((proxy_root / "transport.py").exists())
-        self.assertTrue((proxy_root / "relay.py").exists())
-        self.assertTrue((proxy_root / "routing.py").exists())
-        self.assertTrue((proxy_root / "stats.py").exists())
-        self.assertTrue((proxy_root / "mtproto.py").exists())
-        self.assertTrue((proxy_root / "pool.py").exists())
-        self.assertTrue((proxy_root / "dc_map.py").exists())
-        self.assertTrue((proxy_root / "socks5.py").exists())
+        for name in (
+            "__init__.py",
+            "obfs.py",
+            "ws.py",
+            "health.py",
+            "routes.py",
+            "session.py",
+            "pool.py",
+            "routing.py",
+            "stats.py",
+            "dc_map.py",
+            "socks5.py",
+        ):
+            self.assertTrue((proxy_root / name).exists(), name)
 
-        self.assertFalse((telegram_proxy_root / "raw_websocket.py").exists())
-        self.assertFalse((telegram_proxy_root / "relay.py").exists())
-        self.assertFalse((telegram_proxy_root / "routing.py").exists())
-        self.assertFalse((telegram_proxy_root / "stats.py").exists())
-        self.assertFalse((telegram_proxy_root / "dc_map.py").exists())
-        self.assertFalse((telegram_proxy_root / "socks5.py").exists())
+        for name in ("transport.py", "relay.py", "mtproto.py"):
+            self.assertFalse((proxy_root / name).exists(), name)
+        for name in ("raw_websocket.py", "relay.py", "routing.py", "stats.py", "dc_map.py", "socks5.py", "service.py", "__main__.py"):
+            self.assertFalse((telegram_proxy_root / name).exists(), name)
 
     def test_removed_transparent_mode_has_no_proxy_helpers(self) -> None:
         dc_map = importlib.import_module("telegram_proxy.proxy.dc_map")

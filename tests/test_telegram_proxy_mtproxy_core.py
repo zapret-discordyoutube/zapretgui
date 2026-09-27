@@ -132,7 +132,7 @@ class TelegramProxyMTProxyCoreTests(unittest.TestCase):
 
         with (
             patch("telegram_proxy.wss_proxy.read_mtproxy_client_init", return_value=client),
-            patch("telegram_proxy.wss_proxy.parse_client_init", return_value=None),
+            patch("telegram_proxy.wss_proxy.parse_secret_client", return_value=None),
         ):
             asyncio.run(proxy._handle_mtproxy_client(object(), _Writer()))
 
@@ -272,137 +272,19 @@ class TelegramProxyMTProxyCoreTests(unittest.TestCase):
         self.assertIn("ssl_preread on;", nginx_config)
 
     def test_mtproxy_client_init_parser_checks_secret_and_dc(self) -> None:
-        from telegram_proxy.proxy.mtproxy import parse_client_init
+        from telegram_proxy.proxy.obfs import INTERMEDIATE, parse_secret_client
 
         secret = "aabbccddeeff00112233445566778899"
         init = _build_mtproxy_init(secret_hex=secret, dc=4, is_media=True)
 
-        parsed = parse_client_init(init, secret)
-        wrong_secret = parse_client_init(init, "00112233445566778899aabbccddeeff")
+        parsed = parse_secret_client(init, secret)
+        wrong_secret = parse_secret_client(init, "00112233445566778899aabbccddeeff")
 
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed.dc, 4)
         self.assertTrue(parsed.is_media)
-        self.assertEqual(parsed.proto_tag, b"\xee\xee\xee\xee")
+        self.assertEqual(parsed.framing, INTERMEDIATE)
         self.assertIsNone(wrong_secret)
-
-    def test_mtproxy_crypto_context_builds_relay_init_and_transforms_streams(self) -> None:
-        from telegram_proxy.proxy.mtproxy import (
-            build_crypto_context,
-            generate_relay_init,
-            parse_client_init,
-        )
-        from telegram_proxy.proxy.mtproto import dc_from_init
-
-        secret = "aabbccddeeff00112233445566778899"
-        client_init = _build_mtproxy_init(secret_hex=secret, dc=2)
-        parsed = parse_client_init(client_init, secret)
-        relay_init = generate_relay_init(parsed.proto_tag, dc=2, is_media=False)
-        context = build_crypto_context(parsed.client_prekey_iv, secret, relay_init)
-
-        client_payload = b"\x11" * 128
-        telegram_payload = context.client_to_telegram(client_payload)
-        client_response = context.telegram_to_client(b"\x22" * 128)
-
-        relay_dc, relay_is_media = dc_from_init(relay_init)
-        self.assertEqual(relay_dc, 2)
-        self.assertFalse(relay_is_media)
-        self.assertEqual(len(telegram_payload), len(client_payload))
-        self.assertEqual(len(client_response), 128)
-        self.assertNotEqual(telegram_payload, client_payload)
-
-    def test_mtproxy_msg_splitter_splits_intermediate_packets(self) -> None:
-        from telegram_proxy.proxy.aes_ctr import AesCtrStream
-        from telegram_proxy.proxy.mtproxy import (
-            MTProxyMsgSplitter,
-            PROTO_TAG_INTERMEDIATE,
-            generate_relay_init,
-        )
-
-        relay_init = generate_relay_init(PROTO_TAG_INTERMEDIATE, dc=4, is_media=False)
-        encryptor = AesCtrStream(relay_init[8:40], relay_init[40:56])
-        encryptor.update(b"\x00" * 64)
-
-        first_packet = struct.pack("<I", 8) + b"12345678"
-        second_packet = struct.pack("<I", 4) + b"abcd"
-        encrypted = encryptor.update(first_packet + second_packet)
-
-        splitter = MTProxyMsgSplitter(relay_init, PROTO_TAG_INTERMEDIATE)
-
-        self.assertEqual(
-            splitter.split(encrypted),
-            [encrypted[: len(first_packet)], encrypted[len(first_packet):]],
-        )
-
-    def test_mtproxy_relay_sends_split_packets_as_separate_ws_frames(self) -> None:
-        import asyncio
-
-        from telegram_proxy.proxy.mtproxy import relay_mtproxy_wss
-
-        class _Reader:
-            def __init__(self, chunks):
-                self._chunks = list(chunks)
-
-            async def read(self, _size):
-                if self._chunks:
-                    return self._chunks.pop(0)
-                return b""
-
-        class _Writer:
-            def write(self, _data):
-                return None
-
-            async def drain(self):
-                return None
-
-        class _Ws:
-            def __init__(self):
-                self.sent = []
-                self._closed = False
-
-            async def send(self, data):
-                self.sent.append(data)
-
-            async def send_batch(self, parts):
-                self.sent.extend(parts)
-
-            async def recv(self):
-                await asyncio.sleep(1)
-
-            async def close(self):
-                self._closed = True
-
-        class _Crypto:
-            def client_to_telegram(self, data):
-                return data
-
-            def telegram_to_client(self, data):
-                return data
-
-        class _Splitter:
-            def split(self, data):
-                midpoint = len(data) // 2
-                return [data[:midpoint], data[midpoint:]]
-
-            def flush(self):
-                return []
-
-        ws = _Ws()
-        asyncio.run(
-            relay_mtproxy_wss(
-                client_reader=_Reader([b"aaaabbbb"]),
-                client_writer=_Writer(),
-                ws=ws,
-                crypto=_Crypto(),
-                splitter=_Splitter(),
-                stats=SimpleNamespace(bytes_sent=0, bytes_received=0),
-                log_fn=lambda _message: None,
-                label="test",
-                dc=4,
-            )
-        )
-
-        self.assertEqual(ws.sent, [b"aaaa", b"bbbb"])
 
     def test_runtime_start_config_reads_mtproxy_mode_and_secret(self) -> None:
         from unittest.mock import patch
@@ -496,10 +378,11 @@ class TelegramProxyMTProxyCoreTests(unittest.TestCase):
             fake_tls_domain="front.example.com",
             proxy_protocol=True,
         )
+        disabled = TelegramWSProxy(mode="socks5", pool_size=0)
 
-        self.assertEqual(proxy._ws_pool._pool_size, 7)
-        self.assertEqual(proxy._cloudflare_worker_pool._pool_size, 7)
-        self.assertEqual(proxy._buffer_size, 384 * 1024)
+        self.assertTrue(proxy.ws_pool._enabled)
+        self.assertFalse(disabled.ws_pool._enabled)
+        self.assertEqual(proxy.buffer_size, 384 * 1024)
         self.assertEqual(proxy._fake_tls_domain, "front.example.com")
         self.assertTrue(proxy._proxy_protocol)
 
@@ -591,54 +474,9 @@ class TelegramProxyMTProxyCoreTests(unittest.TestCase):
         self.assertEqual(dc_to_tcp_endpoint(4, is_media=True), ("149.154.164.250", 443))
         self.assertEqual(dc_to_tcp_endpoint(4, overrides, is_media=True), ("149.154.167.220", 443))
         self.assertEqual(dc_to_tcp_endpoint(203), ("91.105.192.100", 443))
-        self.assertIn("dc_to_tcp_endpoint(dc, self._dc_endpoint_overrides, is_media=is_media)", inspect.getsource(wss_proxy.TelegramWSProxy._handle_mtproxy_client))
-        self.assertNotIn("TCP_ENDPOINTS.get(dc", inspect.getsource(wss_proxy.TelegramWSProxy._handle_mtproxy_client))
-
-    def test_standalone_cli_accepts_mtproxy_mode_and_secret(self) -> None:
-        from telegram_proxy.__main__ import build_arg_parser
-
-        parser = build_arg_parser()
-        args = parser.parse_args(
-            [
-                "--port",
-                "1443",
-                "--mode",
-                "mtproxy",
-                "--secret",
-                "aabbccddeeff00112233445566778899",
-                "--dc-ip",
-                "2:149.154.167.220",
-                "--dc-ip",
-                "4:149.154.167.220",
-                "--fake-tls-domain",
-                "front.example.com",
-                "--proxy-protocol",
-            ]
-        )
-
-        self.assertEqual(args.port, 1443)
-        self.assertEqual(args.mode, "mtproxy")
-        self.assertEqual(args.secret, "aabbccddeeff00112233445566778899")
-        self.assertEqual(args.dc_ip, ["2:149.154.167.220", "4:149.154.167.220"])
-        self.assertEqual(args.fake_tls_domain, "front.example.com")
-        self.assertTrue(args.proxy_protocol)
-
-    def test_windows_service_command_can_pass_mtproxy_secret(self) -> None:
-        from telegram_proxy.service import build_service_args
-
-        args = build_service_args(
-            port=1443,
-            mode="mtproxy",
-            mtproxy_secret="aabbccddeeff00112233445566778899",
-            dc_ip=["2:149.154.167.220", "4:149.154.167.220"],
-            fake_tls_domain="front.example.com",
-            proxy_protocol=True,
-        )
-
-        self.assertEqual(
-            args,
-            "-m telegram_proxy --port 1443 --mode mtproxy --secret aabbccddeeff00112233445566778899 --dc-ip 2:149.154.167.220 --dc-ip 4:149.154.167.220 --fake-tls-domain front.example.com --proxy-protocol",
-        )
+        handler_source = inspect.getsource(wss_proxy.TelegramWSProxy._handle_mtproxy_client)
+        self.assertIn("self._dc_endpoint_overrides", handler_source)
+        self.assertNotIn("TCP_ENDPOINTS.get(dc", handler_source)
 
     def test_page_links_follow_selected_local_proxy_mode(self) -> None:
         from telegram_proxy.config.settings import build_proxy_url
@@ -652,238 +490,6 @@ class TelegramProxyMTProxyCoreTests(unittest.TestCase):
         self.assertEqual(
             build_proxy_url("127.0.0.1", 1443, mode="mtproxy", mtproxy_secret=secret),
             "tg://proxy?server=127.0.0.1&port=1443&secret=ddaabbccddeeff00112233445566778899",
-        )
-
-    def test_wss_proxy_has_separate_mtproxy_runtime_entry(self) -> None:
-        import inspect
-        import telegram_proxy.wss_proxy as wss_proxy
-
-        start_source = inspect.getsource(wss_proxy.TelegramWSProxy.start)
-        handler_source = inspect.getsource(wss_proxy.TelegramWSProxy._handle_mtproxy_client)
-        tunnel_source = inspect.getsource(wss_proxy.TelegramWSProxy._tunnel_mtproxy_via_wss)
-
-        self.assertIn("_handle_mtproxy_client", start_source)
-        self.assertIn("parse_client_init", handler_source)
-        self.assertIn("generate_relay_init", handler_source)
-        self.assertIn("build_crypto_context", handler_source)
-        self.assertIn("relay_mtproxy_wss", tunnel_source)
-        self.assertIn("_cloudflare_fallback", tunnel_source)
-        self.assertIn("MTProxyMsgSplitter", tunnel_source)
-        self.assertIn("splitter=splitter", tunnel_source)
-
-    def test_mtproxy_skips_plain_wss_for_dc_without_own_relay(self) -> None:
-        import asyncio
-        from unittest.mock import patch
-
-        from telegram_proxy.proxy.mtproxy import PROTO_TAG_INTERMEDIATE, generate_relay_init
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _NoWssPool:
-            async def get(self, *_args, **_kwargs):
-                raise AssertionError("MTProxy DC without own WSS relay must go straight to fallback")
-
-        async def fake_cloudflare(*_args, **_kwargs):
-            return True
-
-        proxy = TelegramWSProxy(mode="mtproxy", mtproxy_secret="aabbccddeeff00112233445566778899")
-        proxy._ws_pool = _NoWssPool()
-        relay_init = generate_relay_init(PROTO_TAG_INTERMEDIATE, dc=1, is_media=False)
-
-        with (
-            patch.object(proxy, "_cloudflare_fallback", side_effect=fake_cloudflare) as cloudflare,
-            patch("telegram_proxy.wss_proxy.RawWebSocket.connect") as connect,
-        ):
-            asyncio.run(
-                proxy._tunnel_mtproxy_via_wss(
-                    object(),
-                    object(),
-                    1,
-                    False,
-                    relay_init,
-                    object(),
-                    PROTO_TAG_INTERMEDIATE,
-                    "149.154.175.50",
-                    443,
-                    "test",
-                )
-            )
-
-        self.assertEqual(cloudflare.call_count, 1)
-        connect.assert_not_called()
-
-    def test_mtproxy_respects_upstream_always_mode_before_wss(self) -> None:
-        import asyncio
-        from unittest.mock import patch
-
-        from telegram_proxy.proxy.mtproxy import PROTO_TAG_INTERMEDIATE, generate_relay_init
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _NoWssPool:
-            async def get(self, *_args, **_kwargs):
-                raise AssertionError("MTProxy upstream always mode must skip WSS")
-
-        async def fake_upstream(*_args, **_kwargs):
-            return True
-
-        proxy = TelegramWSProxy(
-            mode="mtproxy",
-            mtproxy_secret="aabbccddeeff00112233445566778899",
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="127.0.0.1",
-                port=1080,
-                mode="always",
-            ),
-        )
-        proxy._ws_pool = _NoWssPool()
-        relay_init = generate_relay_init(PROTO_TAG_INTERMEDIATE, dc=2, is_media=True)
-
-        with (
-            patch.object(proxy, "_mtproxy_upstream_proxy_connect", side_effect=fake_upstream) as upstream,
-            patch.object(proxy, "_cloudflare_fallback") as cloudflare,
-            patch("telegram_proxy.wss_proxy.RawWebSocket.connect") as connect,
-        ):
-            asyncio.run(
-                proxy._tunnel_mtproxy_via_wss(
-                    object(),
-                    object(),
-                    2,
-                    True,
-                    relay_init,
-                    object(),
-                    PROTO_TAG_INTERMEDIATE,
-                    "149.154.167.151",
-                    443,
-                    "test",
-                )
-            )
-
-        self.assertEqual(upstream.call_count, 1)
-        cloudflare.assert_not_called()
-        connect.assert_not_called()
-
-    def test_mtproxy_upstream_zero_recv_deprioritizes_current_bundled_proxy(self) -> None:
-        import asyncio
-        from unittest.mock import patch
-
-        from telegram_proxy.proxy.mtproxy import PROTO_TAG_INTERMEDIATE, generate_relay_init
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig, UpstreamProxyEndpoint
-        from telegram_proxy.proxy.upstream_controller import ZERO_RECV_OBSERVATION_WINDOW
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        class _RemoteWriter:
-            transport = None
-
-            def write(self, _data):
-                return None
-
-            async def drain(self):
-                return None
-
-        async def fake_connect(proxy_host, *_args, **_kwargs):
-            seen_hosts.append(proxy_host)
-            return object(), _RemoteWriter()
-
-        async def fake_relay(*_args, **_kwargs):
-            return (0, 1)
-
-        async def run_seven(proxy: TelegramWSProxy):
-            for index in range(7):
-                if index == 5:
-                    clock[0] += ZERO_RECV_OBSERVATION_WINDOW
-                await proxy._mtproxy_upstream_proxy_connect(
-                    object(),
-                    object(),
-                    "91.108.56.102",
-                    443,
-                    relay_init,
-                    object(),
-                    f"test-{index}",
-                    5,
-                    True,
-                )
-
-        seen_hosts: list[str] = []
-        logs: list[str] = []
-        clock = [1000.0]
-        relay_init = generate_relay_init(PROTO_TAG_INTERMEDIATE, dc=5, is_media=True)
-        proxy = TelegramWSProxy(
-            mode="mtproxy",
-            mtproxy_secret="aabbccddeeff00112233445566778899",
-            on_log=logs.append,
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="slow.proxy",
-                port=443,
-                tls=True,
-                preset_id="ee",
-                preset_name="Эстония",
-                mode="always",
-                fallback_proxies=(
-                    UpstreamProxyEndpoint(host="fast.proxy", port=443, tls=True),
-                ),
-            ),
-        )
-        proxy._upstream_runtime.controller._clock = lambda: clock[0]
-
-        with (
-            patch("telegram_proxy.wss_proxy.socks5.connect_via_socks5", side_effect=fake_connect),
-            patch("telegram_proxy.wss_proxy.relay_mtproxy_tcp", side_effect=fake_relay),
-        ):
-            asyncio.run(run_seven(proxy))
-
-        self.assertEqual(seen_hosts, ["slow.proxy"] * 6 + ["fast.proxy"])
-        self.assertIn("шесть соединений без ответных данных", "\n".join(logs))
-
-    def test_mtproxy_tcp_fallback_tries_upstream_after_direct_connect_failure(self) -> None:
-        import asyncio
-        from unittest.mock import patch
-
-        from telegram_proxy.proxy.mtproxy import PROTO_TAG_INTERMEDIATE, generate_relay_init
-        from telegram_proxy.proxy.routing import UpstreamProxyConfig
-        from telegram_proxy.wss_proxy import TelegramWSProxy
-
-        async def fake_upstream(*_args, **_kwargs):
-            return True
-
-        proxy = TelegramWSProxy(
-            mode="mtproxy",
-            mtproxy_secret="aabbccddeeff00112233445566778899",
-            upstream_config=UpstreamProxyConfig(
-                enabled=True,
-                host="127.0.0.1",
-                port=1080,
-                mode="fallback",
-            ),
-        )
-        relay_init = generate_relay_init(PROTO_TAG_INTERMEDIATE, dc=5, is_media=False)
-
-        with (
-            patch("telegram_proxy.wss_proxy.asyncio.open_connection", side_effect=OSError("blocked")),
-            patch.object(proxy, "_mtproxy_upstream_proxy_connect", side_effect=fake_upstream) as upstream,
-        ):
-            asyncio.run(
-                proxy._mtproxy_tcp_fallback(
-                    object(),
-                    object(),
-                    "91.108.56.100",
-                    443,
-                    relay_init,
-                    object(),
-                    "test",
-                    5,
-                    False,
-                )
-            )
-
-        self.assertEqual(upstream.call_count, 1)
-        self.assertEqual(
-            [
-                (event.dc, event.is_media, event.route, event.status, event.reason)
-                for event in proxy.stats.route_events
-            ],
-            [(5, False, "TCP", "ошибка", "OSError: blocked")],
         )
 
 

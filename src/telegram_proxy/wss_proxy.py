@@ -1,78 +1,49 @@
 # telegram_proxy/wss_proxy.py
-"""Core Telegram WebSocket proxy server.
+"""Локальный прокси Telegram: приём соединений Desktop и выбор маршрута.
 
-Tunnels TCP connections to Telegram through WSS endpoints
-(kws{N}.web.telegram.org) to bypass IP-based blocking by ISPs.
+Цепочка:
 
-Architecture (matching the proven Flowseal/tg-ws-proxy approach):
-1. Accept SOCKS5 connection from Telegram Desktop
-2. Complete SOCKS5 handshake, note target IP
-3. Read the 64-byte MTProto obfuscation init packet
-4. Decrypt the init packet to extract (dc_id, is_media)
-5. Connect to WSS relay IP via raw TCP+TLS with SNI hostname
-6. Perform WebSocket upgrade handshake manually
-7. Forward the init packet as the first WS binary frame
-8. Bridge TCP <-> WS bidirectionally, splitting MTProto messages
+    Telegram Desktop
+      ├ SOCKS5 (proxy/socks5.py) → 64 байта заголовка → obfs.parse_plain_client
+      └ MTProxy (+ Fake TLS, proxy/fake_tls.py)       → obfs.parse_secret_client
+            ↓
+      proxy/session.TelegramSession: план маршрутов (proxy/routes.py),
+      повтор пакетов на следующий маршрут, пока сервер молчит, пересылка.
 
-Only DC2 and DC4 have working WebSocket relays.
-The relay reads the DC id from the init packet and routes internally.
+Главный путь — WSS (релей kwsN, фронты Cloudflare, туннель через воркер),
+запасной — внешний SOCKS5. Не-Telegram трафик и HTTP-транспорт (порт 80) идут
+обычным TCP: WSS для них не подходит.
 """
 
 import asyncio
 import errno
 import logging
 import time
-from typing import Optional, Callable
+from pathlib import Path
+from typing import Callable, Optional
 
-from telegram_proxy.proxy.dc_map import (
-    ip_to_dc,
-    is_telegram_ip,
-    ws_domains_for_dc,
-    IP_TO_DC,
-    WSS_DOMAINS,
-    WSS_RELAY_IP,
-    WSS_PATH,
-    dc_to_tcp_endpoint,
-)
 from telegram_proxy.proxy import socks5
-from telegram_proxy.proxy.cloudflare import (
-    CloudflareDomainBalancer,
-    CloudflareFallbackConfig,
-    build_cloudflare_domains,
-    build_worker_path,
-    should_try_cloudflare,
-)
-from telegram_proxy.proxy.mtproto import (
-    MsgSplitter as _MsgSplitter,
-    dc_from_init as _dc_from_init,
-    is_http_transport as _is_http_transport,
-    patch_init_dc as _patch_init_dc,
-)
-from telegram_proxy.proxy.mtproxy import (
-    MTProxyMsgSplitter,
-    build_crypto_context,
-    generate_relay_init,
-    normalize_secret,
-    parse_client_init,
-    relay_mtproxy_tcp,
-    relay_mtproxy_wss,
-)
+from telegram_proxy.proxy.cloudflare import CloudflareFallbackConfig
+from telegram_proxy.proxy.dc_map import IP_TO_DC, dc_to_tcp_endpoint, ip_to_dc, is_telegram_ip
 from telegram_proxy.proxy.fake_tls import normalize_fake_tls_domain, read_mtproxy_client_init
-from telegram_proxy.proxy.pool import (
-    CloudflareWorkerPool,
-    WsPool as _WsPool,
-    get_wss_semaphore as _get_wss_semaphore,
-    relay_ip_for_domain as _relay_ip_for_domain,
-    reset_wss_semaphore,
+from telegram_proxy.proxy.health import RouteHealth
+from telegram_proxy.proxy.mtproxy import normalize_secret
+from telegram_proxy.proxy.obfs import (
+    HEADER_LEN,
+    is_http_transport,
+    parse_plain_client,
+    parse_secret_client,
 )
-from telegram_proxy.proxy.relay import RELAY_BUFFER, relay_tcp, relay_wss
+from telegram_proxy.proxy.pool import WsSparePool
+from telegram_proxy.proxy.route_catalog import CDN_FRONTS
+from telegram_proxy.proxy.routes import PlanInput
 from telegram_proxy.proxy.routing import (
     UpstreamProxyConfig,
     check_relay_reachable,
     should_route_upstream,
 )
+from telegram_proxy.proxy.session import TelegramSession
 from telegram_proxy.proxy.stats import ProxyStats
-from telegram_proxy.proxy.transport import RawWebSocket, WsHandshakeError, apply_socket_options
 from telegram_proxy.proxy.upstream_controller import UpstreamRuntimeSnapshot, endpoint_display_name
 from telegram_proxy.proxy.upstream_runtime import (
     FULL_CONNECT_TIMEOUT,
@@ -84,27 +55,19 @@ from telegram_proxy.proxy.upstream_runtime import (
     UpstreamTargetRejectedError,
     UpstreamUnavailableError,
 )
+from telegram_proxy.proxy.ws import apply_socket_options
 
 log = logging.getLogger("tg_proxy")
 
-# WebSocket / TCP connect timeout
+# Не-Telegram трафик и HTTP-транспорт: обычный TCP.
 CONNECT_TIMEOUT = 10.0
+HTTP_DIRECT_CONNECT_TIMEOUT = 3.0
+INIT_READ_TIMEOUT = 15.0
+RAW_READ_CHUNK = 128 * 1024
 
-# Direct TCP fallback is only a quick probe before external SOCKS.
-TCP_FALLBACK_CONNECT_TIMEOUT = 3.0
-
-# External SOCKS should still fail over faster than direct TCP, but real client
-# paths to bundled VPS nodes can occasionally need more than 3 seconds.
 UPSTREAM_CONNECT_TIMEOUT = FULL_CONNECT_TIMEOUT
 
-# DC fail cooldown (seconds)
-DC_FAIL_COOLDOWN = 10.0
-
-# How long to wait for first server response before declaring DC blocked
-_RECV_ZERO_TIMEOUT = 8.0
-
-_WSS_ZERO_RECV_FAILS = 1
-_WSS_DOMAIN_PENALTY_SECONDS = 60.0
+_KNOWN_DCS = frozenset({1, 2, 3, 4, 5, 203})
 
 # Коды «адрес уже используется» для повторного bind после рестарта.
 _ADDRESS_IN_USE_WINERRORS = frozenset({10048, 10013})
@@ -114,6 +77,17 @@ def _is_address_in_use_error(exc: OSError) -> bool:
     if isinstance(exc, OSError) and exc.errno == errno.EADDRINUSE:
         return True
     return getattr(exc, "winerror", None) in _ADDRESS_IN_USE_WINERRORS
+
+
+def _is_domain(host: str) -> bool:
+    if ":" in host:
+        return False
+    return not all(c.isdigit() or c == "." for c in host)
+
+
+def _error_text(exc: BaseException) -> str:
+    text = str(exc)
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
 
 class _Socks5UdpRelayProtocol(asyncio.DatagramProtocol):
@@ -170,32 +144,19 @@ class _Socks5UdpRelay:
         self.local_port = local_port
 
     def close(self) -> None:
-        try:
-            self.local_transport.close()
-        except Exception:
-            pass
-        try:
-            self.upstream_transport.close()
-        except Exception:
-            pass
-        try:
-            self.upstream_session.writer.close()
-        except Exception:
-            pass
-
-
-# ---- Main proxy class ----
+        for closer in (
+            self.local_transport.close,
+            self.upstream_transport.close,
+            self.upstream_session.writer.close,
+        ):
+            try:
+                closer()
+            except Exception:
+                pass
 
 
 class TelegramWSProxy:
-    """Async TCP server that tunnels Telegram traffic through WebSocket.
-
-    Usage:
-        proxy = TelegramWSProxy(port=1353, mode="socks5")
-        await proxy.start()
-        # ... proxy is running ...
-        await proxy.stop()
-    """
+    """Асинхронный сервер: SOCKS5 или MTProxy на входе, WSS/SOCKS5/TCP на выходе."""
 
     def __init__(
         self,
@@ -212,6 +173,7 @@ class TelegramWSProxy:
         buffer_kb: int = 256,
         fake_tls_domain: str = "",
         proxy_protocol: bool = False,
+        route_health_path: Path | str | None = None,
     ):
         self._port = port
         self._mode = mode
@@ -220,44 +182,38 @@ class TelegramWSProxy:
         self._on_upstream_state = on_upstream_state
         self._upstream = upstream_config or UpstreamProxyConfig()
         self._cloudflare = cloudflare_config or CloudflareFallbackConfig()
-        self._cloudflare_domain_balancer = CloudflareDomainBalancer()
         self._mtproxy_secret = normalize_secret(mtproxy_secret)
         self._dc_endpoint_overrides = dict(dc_endpoint_overrides or {})
-        self._pool_size = max(0, min(32, int(pool_size or 4)))
-        self._buffer_size = max(4, min(4096, int(buffer_kb or 256))) * 1024
+        self._pool_size = max(0, min(32, int(pool_size if pool_size is not None else 4)))
+        self.buffer_size = max(4, min(4096, int(buffer_kb or 256))) * 1024
         self._fake_tls_domain = normalize_fake_tls_domain(fake_tls_domain)
         self._proxy_protocol = bool(proxy_protocol)
-        self._upstream_runtime = UpstreamConnectionExecutor(
-            self._upstream,
-            connect_limit=self._pool_size,
-            on_snapshot=self._on_upstream_state,
-            on_log=self._log,
-        )
-        self._wss_domain_penalty_until: dict[tuple[int, bool, str], float] = {}
-        self._wss_zero_recv_counts: dict[tuple[int, bool, str], int] = {}
+        self._route_health_path = route_health_path
         self._servers: list[asyncio.Server] = []
         self._tasks: set[asyncio.Task] = set()
         self._running = False
         self.stats = ProxyStats()
-        self._ws_pool = _WsPool(self.stats, pool_size=self._pool_size, buffer_size=self._buffer_size)
-        self._cloudflare_worker_pool = CloudflareWorkerPool(
-            self.stats,
-            pool_size=self._pool_size,
-            buffer_size=self._buffer_size,
-        )
-        # WS blacklist: set of (dc, is_media) where ALL domains returned 302
-        self._ws_blacklist: set[tuple[int, bool]] = set()
-        # Cooldown for failed DCs: {(dc, is_media): fail_until_timestamp}
-        self._dc_cooldown: dict[tuple[int, bool], float] = {}
-        # DCs that should use upstream (learned from consecutive recv=0 failures)
-        self._dc_upstream_required: set[tuple[int, bool]] = set()
-        # HTTP transport cannot use WSS. If direct HTTP/80 is blocked once,
-        # skip the repeated 10s direct timeout while this proxy session runs.
-        self._http_upstream_required = False
+        self.route_health = RouteHealth(path=route_health_path, front_count=len(CDN_FRONTS))
+        self.ws_pool = WsSparePool(self.stats, enabled=self._pool_size > 0, buffer_size=self.buffer_size)
+        self._upstream_runtime = self._new_upstream_runtime()
         self._mtproxy_invalid_init_log_marks = {1, 5, 20, 50}
         self._mtproxy_bad_handshake_log_marks = {1, 5, 20, 50}
 
-    def _log(self, msg: str) -> None:
+    def _new_upstream_runtime(self) -> UpstreamConnectionExecutor:
+        return UpstreamConnectionExecutor(
+            self._upstream,
+            connect_limit=self._pool_size or 4,
+            on_snapshot=self._on_upstream_state,
+            on_log=self.log,
+        )
+
+    # ---- то, что нужно сессиям (session.SessionHost) ----
+
+    @property
+    def mode_label(self) -> str:
+        return "MTProxy" if self._mode == "mtproxy" else "SOCKS5"
+
+    def log(self, msg: str) -> None:
         log.info(msg)
         if self._on_log:
             try:
@@ -265,117 +221,10 @@ class TelegramWSProxy:
             except Exception:
                 pass
 
-    def _record_route(
-        self,
-        *,
-        dc: int,
-        is_media: bool,
-        route: str,
-        status: str,
-        reason: str = "",
-    ) -> None:
-        self.stats.record_route_event(
-            dc=dc,
-            is_media=is_media,
-            route=route,
-            status=status,
-            reason=reason,
-        )
+    def record_route(self, *, dc: int, is_media: bool, route: str, status: str, reason: str = "") -> None:
+        self.stats.record_route_event(dc=dc, is_media=is_media, route=route, status=status, reason=reason)
 
-    def _wss_domains_for(self, dc: int, is_media: bool) -> list[str]:
-        domains = ws_domains_for_dc(dc, is_media)
-        now = time.monotonic()
-        ready: list[str] = []
-        penalized: list[str] = []
-        for domain in domains:
-            key = (int(dc), bool(is_media), domain)
-            until = self._wss_domain_penalty_until.get(key, 0.0)
-            if until <= now:
-                self._wss_domain_penalty_until.pop(key, None)
-                self._wss_zero_recv_counts.pop(key, None)
-                ready.append(domain)
-            else:
-                penalized.append(domain)
-        if ready:
-            return ready
-        return []
-
-    def _mark_wss_domain_timeout(self, dc: int, is_media: bool, domain: str, label: str, exc: Exception) -> None:
-        if not isinstance(exc, TimeoutError):
-            return
-        key = (int(dc), bool(is_media), domain)
-        self._wss_domain_penalty_until[key] = time.monotonic() + _WSS_DOMAIN_PENALTY_SECONDS
-        self._log(
-            f"[{label}] WSS domain {domain} temporarily deprioritized after TimeoutError "
-            f"for {_WSS_DOMAIN_PENALTY_SECONDS:.0f}s"
-        )
-
-    def _mark_wss_domain_zero_recv(self, dc: int, is_media: bool, domain: str, label: str) -> None:
-        domain = str(domain or "").strip()
-        if not domain:
-            return
-        key = (int(dc), bool(is_media), domain)
-        count = self._wss_zero_recv_counts.get(key, 0) + 1
-        self._wss_zero_recv_counts[key] = count
-        if count < _WSS_ZERO_RECV_FAILS:
-            return
-        self._wss_domain_penalty_until[key] = time.monotonic() + _WSS_DOMAIN_PENALTY_SECONDS
-        self._log(
-            f"[{label}] WSS domain {domain} temporarily deprioritized after recv=0 "
-            f"({count}/{_WSS_ZERO_RECV_FAILS}) for {_WSS_DOMAIN_PENALTY_SECONDS:.0f}s"
-        )
-
-    def _mark_wss_domain_recv_ok(self, dc: int, is_media: bool, domain: str) -> None:
-        domain = str(domain or "").strip()
-        if not domain:
-            return
-        key = (int(dc), bool(is_media), domain)
-        self._wss_zero_recv_counts.pop(key, None)
-        self._wss_domain_penalty_until.pop(key, None)
-
-    @staticmethod
-    def _should_log_mtproxy_problem(count: int, marks: set[int]) -> bool:
-        return int(count) in marks or (int(count) > 0 and int(count) % 100 == 0)
-
-    def _record_mtproxy_invalid_init(self, label: str) -> None:
-        self.stats.mtproxy_invalid_init_count += 1
-        count = int(self.stats.mtproxy_invalid_init_count)
-        self.stats.mtproxy_last_problem = (
-            "нет MTProxy init packet: проверьте тип прокси, старые записи, "
-            "Fake TLS/secret или авто-проверку Telegram"
-        )
-        if not self._should_log_mtproxy_problem(count, self._mtproxy_invalid_init_log_marks):
-            return
-        self._log(
-            f"[{label}] MTProxy init packet не получен; повторов: {count}. "
-            "Что это значит: Telegram подключился к MTProxy-порту, но не прислал "
-            "первый MTProxy-пакет. Что делать: проверьте тип прокси в Telegram, "
-            "удалите старые записи 127.0.0.1, проверьте secret/Fake TLS; "
-            "одиночные проверки клиента могут закрываться сами."
-        )
-
-    def _record_mtproxy_bad_handshake(self, label: str) -> None:
-        self.stats.mtproxy_bad_handshake_count += 1
-        count = int(self.stats.mtproxy_bad_handshake_count)
-        self.stats.mtproxy_last_problem = (
-            "init есть, но secret или тип secret dd/ee не подошёл"
-        )
-        if not self._should_log_mtproxy_problem(count, self._mtproxy_bad_handshake_log_marks):
-            return
-        self._log(
-            f"[{label}] MTProxy init получен, но не расшифровался; повторов: {count}. "
-            "Чаще всего это неверный secret, старый прокси в Telegram или mismatch "
-            "типа secret dd/ee."
-        )
-
-    @staticmethod
-    def _route_error(exc: Exception) -> str:
-        text = str(exc)
-        if text:
-            return f"{type(exc).__name__}: {text}"
-        return type(exc).__name__
-
-    def _log_route_detail(
+    def log_route_detail(
         self,
         label: str,
         *,
@@ -390,7 +239,7 @@ class TelegramWSProxy:
     ) -> None:
         parts = [
             f"[{label}] route={route}",
-            f"mode={'MTProxy' if self._mode == 'mtproxy' else 'SOCKS5'}",
+            f"mode={self.mode_label}",
             f"dc={int(dc)}",
             f"media={'yes' if is_media else 'no'}",
         ]
@@ -403,106 +252,150 @@ class TelegramWSProxy:
             parts.append(f"next={next_step}")
         if elapsed is not None:
             parts.append(f"elapsed={elapsed:.1f}s")
-        self._log(" ".join(parts))
+        self.log(" ".join(parts))
 
-    def _has_healthy_upstream_proxy(self) -> bool:
-        return self._upstream_runtime.has_available_endpoint()
+    def plan_input(self, *, dc: int, is_media: bool, target_host: str, target_port: int) -> PlanInput:
+        return PlanInput(
+            dc=dc,
+            is_media=is_media,
+            target_host=target_host,
+            target_port=target_port,
+            upstream=self._upstream,
+            cloudflare=self._cloudflare,
+        )
 
-    async def _open_upstream_proxy(
+    async def open_upstream(
         self,
         *,
-        upstream_host: str,
-        upstream_port: int,
+        target_host: str,
+        target_port: int,
         label: str,
         dc: int,
         is_media: bool,
-        mtproxy: bool = False,
     ) -> OpenedUpstream | None:
         media_tag = " media" if is_media else ""
-        prefix = "MTProxy " if mtproxy else ""
         try:
-            opened = await self._upstream_runtime.open_connection(upstream_host, upstream_port)
+            opened = await self._upstream_runtime.open_connection(target_host, target_port)
         except (UpstreamBusyError, UpstreamUnavailableError) as exc:
-            self._log(f"[{label}] {prefix}DC{dc}{media_tag} upstream skipped: {exc}")
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="внешний SOCKS5",
-                status="пропуск",
-                reason=str(exc),
-            )
+            self.log(f"[{label}] DC{dc}{media_tag} upstream skipped: {exc}")
+            self.record_route(dc=dc, is_media=is_media, route="внешний SOCKS5", status="пропуск", reason=str(exc))
             return None
-        except UpstreamTargetRejectedError as exc:
-            failed_endpoint = getattr(exc, "endpoint", None)
-            endpoint_name = endpoint_display_name(failed_endpoint) or "текущий сервер"
+        except (UpstreamTargetRejectedError, UpstreamConnectError, UpstreamStaleError) as exc:
+            rejected = isinstance(exc, UpstreamTargetRejectedError)
+            endpoint_name = endpoint_display_name(getattr(exc, "endpoint", None)) or "текущий сервер"
             self.stats.failed_connections += 1
-            self._log(
-                f"[{label}] {prefix}DC{dc}{media_tag} upstream {endpoint_name} "
-                f"target rejected; active server kept: {type(exc).__name__}: {exc}"
-            )
-            self._log_route_detail(
+            self.log_route_detail(
                 label,
                 route="upstream SOCKS5",
                 dc=dc,
                 is_media=is_media,
-                target=f"{upstream_host}:{upstream_port} via {endpoint_name}",
+                target=f"{target_host}:{target_port} via {endpoint_name}",
                 result="error",
-                reason=self._route_error(exc),
-                next_step="текущий сервер сохранён; проверяются правила доступа к адресу",
+                reason=_error_text(exc),
+                next_step=(
+                    "текущий сервер сохранён; проверяются правила доступа к адресу"
+                    if rejected
+                    else "следующее соединение использует общий активный сервер"
+                ),
             )
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="внешний SOCKS5",
-                status="ошибка",
-                reason=self._route_error(exc),
-            )
-            return None
-        except (UpstreamConnectError, UpstreamStaleError) as exc:
-            failed_endpoint = getattr(exc, "endpoint", None)
-            endpoint_name = endpoint_display_name(failed_endpoint) or "предыдущий сервер"
-            self.stats.failed_connections += 1
-            self._log(
-                f"[{label}] {prefix}DC{dc}{media_tag} upstream {endpoint_name} "
-                f"connect failed: {type(exc).__name__}: {exc}"
-            )
-            self._log_route_detail(
-                label,
-                route="upstream SOCKS5",
-                dc=dc,
-                is_media=is_media,
-                target=f"{upstream_host}:{upstream_port} via {endpoint_name}",
-                result="error",
-                reason=self._route_error(exc),
-                next_step="следующее соединение использует общий активный сервер",
-            )
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="внешний SOCKS5",
-                status="ошибка",
-                reason=self._route_error(exc),
+            self.record_route(
+                dc=dc, is_media=is_media, route="внешний SOCKS5", status="ошибка", reason=_error_text(exc)
             )
             return None
 
-        endpoint = opened.endpoint
-        apply_socket_options(opened.writer.transport, self._buffer_size)
-        self._log(
-            f"[{label}] {prefix}DC{dc}{media_tag} upstream connected via "
-            f"{endpoint_display_name(endpoint)} ({opened.elapsed:.1f}s)"
-        )
-        self._log_route_detail(
-            label,
-            route="upstream SOCKS5",
-            dc=dc,
-            is_media=is_media,
-            target=f"{upstream_host}:{upstream_port} via {endpoint_display_name(endpoint)}",
-            result="connected",
-            elapsed=opened.elapsed,
+        apply_socket_options(opened.writer.transport, self.buffer_size)
+        self.log(
+            f"[{label}] DC{dc}{media_tag} upstream connected via "
+            f"{endpoint_display_name(opened.endpoint)} ({opened.elapsed:.1f}s)"
         )
         self.stats.upstream_connections += 1
-        self._record_route(dc=dc, is_media=is_media, route="внешний SOCKS5", status="OK")
         return opened
+
+    def upstream_recv_ok(self, opened: OpenedUpstream) -> None:
+        self._upstream_runtime.record_recv_ok(opened)
+
+    def upstream_zero_recv(self, opened: OpenedUpstream) -> None:
+        self._upstream_runtime.record_zero_recv(opened)
+
+    def upstream_release(self, opened: OpenedUpstream) -> None:
+        self._upstream_runtime.release(opened)
+
+    # ---- жизненный цикл ----
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    @property
+    def upstream_state(self) -> UpstreamRuntimeSnapshot:
+        return self._upstream_runtime.snapshot()
+
+    async def start(self) -> None:
+        if self._running:
+            return
+
+        self.stats = ProxyStats()
+        self.ws_pool = WsSparePool(self.stats, enabled=self._pool_size > 0, buffer_size=self.buffer_size)
+        self._upstream_runtime = self._new_upstream_runtime()
+
+        handler = self._handle_mtproxy_client if self._mode == "mtproxy" else self._handle_socks5_client
+        # После рестарта предыдущий сокет может освобождаться с задержкой —
+        # повторяем bind вместо мгновенного падения.
+        bind_deadline = time.monotonic() + 3.0
+        while True:
+            try:
+                server = await asyncio.start_server(handler, self._host, self._port, start_serving=False)
+                break
+            except OSError as exc:
+                if not _is_address_in_use_error(exc) or time.monotonic() >= bind_deadline:
+                    raise
+                self.log(f"Port {self._host}:{self._port} busy ({exc}), retrying bind...")
+                await asyncio.sleep(0.25)
+        self._servers.append(server)
+        for srv in self._servers:
+            await srv.start_serving()
+
+        self._running = True
+        self.log(f"{self.mode_label} proxy started on {self._host}:{self._port}")
+        self._upstream_runtime.emit_snapshot(force=True)
+
+    async def stop(self) -> None:
+        if not self._running:
+            return
+        self._running = False
+        self.log("Stopping proxy...")
+
+        # Сначала освобождаем порт: рестарт ждёт stop с коротким таймаутом.
+        # close() сразу перестаёт слушать, а wait_closed() с Python 3.12 ждёт
+        # ещё и все живые соединения — поэтому их задачи отменяются раньше.
+        for srv in self._servers:
+            srv.close()
+
+        for task in list(self._tasks):
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks.clear()
+
+        await self.ws_pool.close_all()
+        await self._upstream_runtime.close()
+
+        for srv in self._servers:
+            try:
+                await asyncio.wait_for(srv.wait_closed(), timeout=2.0)
+            except TimeoutError:
+                self.log("Proxy stop: some client sockets are still closing")
+        self._servers.clear()
+        self.log("Proxy stopped")
+
+    def apply_upstream_config(self, upstream_config: Optional[UpstreamProxyConfig]) -> None:
+        """Горячая замена внешнего SOCKS без рестарта (из потока event loop прокси)."""
+        self._upstream = upstream_config or UpstreamProxyConfig()
+        self._upstream_runtime.apply_config(self._upstream)
+        target = str(self._upstream.preset_name or self._upstream.host or "").strip() or "manual"
+        self.log(f"Upstream config applied without restart: {target}")
+
+    # ---- UDP (звонки) через внешний SOCKS5 ----
 
     async def _open_udp_relay(self, label: str) -> _Socks5UdpRelay:
         if not self._upstream.enabled or not self._upstream.udp_enabled:
@@ -512,7 +405,7 @@ class TelegramWSProxy:
         if endpoint is None:
             raise socks5.Socks5Error("No upstream SOCKS5 proxy for UDP relay")
 
-        self._log(f"[{label}] UDP ASSOCIATE -> upstream proxy {endpoint.host}:{endpoint.port}")
+        self.log(f"[{label}] UDP ASSOCIATE -> upstream proxy {endpoint.host}:{endpoint.port}")
         upstream_session = await socks5.open_udp_associate_via_socks5(
             endpoint.host,
             endpoint.port,
@@ -525,8 +418,8 @@ class TelegramWSProxy:
         )
 
         loop = asyncio.get_running_loop()
-        local_protocol = _Socks5UdpRelayProtocol(label=label, side="client", log_callback=self._log)
-        upstream_protocol = _Socks5UdpRelayProtocol(label=label, side="upstream", log_callback=self._log)
+        local_protocol = _Socks5UdpRelayProtocol(label=label, side="client", log_callback=self.log)
+        upstream_protocol = _Socks5UdpRelayProtocol(label=label, side="upstream", log_callback=self.log)
         local_protocol.peer = upstream_protocol
         upstream_protocol.peer = local_protocol
         upstream_protocol.fixed_target = (upstream_session.relay_host, upstream_session.relay_port)
@@ -547,14 +440,11 @@ class TelegramWSProxy:
                 upstream_session.writer.close()
             except Exception:
                 pass
-            try:
-                if local_transport is not None:
-                    local_transport.close()
-            except Exception:
-                pass
+            if local_transport is not None:
+                local_transport.close()
             raise
         local_sock = local_transport.get_extra_info("sockname") or (local_bind_host, 0)
-        self._log(
+        self.log(
             f"[{label}] UDP relay ready: local {local_sock[0]}:{local_sock[1]} "
             f"-> {upstream_session.relay_host}:{upstream_session.relay_port}"
         )
@@ -566,164 +456,139 @@ class TelegramWSProxy:
             local_port=int(local_sock[1]),
         )
 
-    @property
-    def is_running(self) -> bool:
-        return self._running
+    # ---- обычный TCP: не-Telegram, HTTP-транспорт, непонятный поток ----
 
-    @property
-    def upstream_state(self) -> UpstreamRuntimeSnapshot:
-        return self._upstream_runtime.snapshot()
+    async def _relay_raw(self, client_reader, client_writer, remote_reader, remote_writer, label: str) -> int:
+        sent_total = 0
+        recv_total = 0
+        started = time.monotonic()
 
-    async def start(self) -> None:
-        """Start the proxy server(s)."""
-        if self._running:
-            return
+        async def forward(src, dst, *, outgoing: bool) -> None:
+            nonlocal sent_total, recv_total
+            while True:
+                data = await src.read(RAW_READ_CHUNK)
+                if not data:
+                    return
+                if outgoing:
+                    sent_total += len(data)
+                    self.stats.bytes_sent += len(data)
+                else:
+                    recv_total += len(data)
+                    self.stats.bytes_received += len(data)
+                dst.write(data)
+                await dst.drain()
 
-        self.stats = ProxyStats()
-        self._ws_pool = _WsPool(self.stats, pool_size=self._pool_size, buffer_size=self._buffer_size)
-        self._cloudflare_worker_pool = CloudflareWorkerPool(
-            self.stats,
-            pool_size=self._pool_size,
-            buffer_size=self._buffer_size,
-        )
-        # Reset learned routing state from previous session
-        self._dc_upstream_required = set()
-        self._http_upstream_required = False
-        self._ws_blacklist = set()
-        self._dc_cooldown = {}
-        self._wss_domain_penalty_until = {}
-        self._wss_zero_recv_counts = {}
-        self._cloudflare_domain_balancer.reset()
-        # Reset semaphore for fresh event loop
-        reset_wss_semaphore()
-        self._upstream_runtime = UpstreamConnectionExecutor(
-            self._upstream,
-            connect_limit=self._pool_size,
-            on_snapshot=self._on_upstream_state,
-            on_log=self._log,
-        )
-
-        handler = self._handle_mtproxy_client if self._mode == "mtproxy" else self._handle_socks5_client
-        # После рестарта предыдущий сокет может освобождаться с задержкой —
-        # повторяем bind с backoff вместо мгновенного падения.
-        bind_deadline = time.monotonic() + 3.0
-        while True:
+        tasks = [
+            asyncio.create_task(forward(client_reader, remote_writer, outgoing=True)),
+            asyncio.create_task(forward(remote_reader, client_writer, outgoing=False)),
+        ]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                try:
+                    await task
+                except BaseException:
+                    pass
             try:
-                server = await asyncio.start_server(
-                    handler,
-                    self._host,
-                    self._port,
-                    start_serving=False,
+                remote_writer.close()
+            except Exception:
+                pass
+            if label:
+                self.log(
+                    f"[{label}] tcp relay done: sent={sent_total} recv={recv_total} "
+                    f"({time.monotonic() - started:.1f}s)"
                 )
-                break
-            except OSError as exc:
-                # Ретраим только «порт ещё занят» (освобождается после рестарта);
-                # прочие ошибки (невалидный host, нет прав) — сразу наружу.
-                if not _is_address_in_use_error(exc) or time.monotonic() >= bind_deadline:
-                    raise
-                self._log(
-                    f"Port {self._host}:{self._port} busy ({exc}), retrying bind..."
-                )
-                await asyncio.sleep(0.25)
-        self._servers.append(server)
+        return recv_total
 
-        for srv in self._servers:
-            await srv.start_serving()
+    async def _raw_via_upstream(self, reader, writer, first: bytes, target_host: str, target_port: int, label: str) -> bool:
+        opened = await self.open_upstream(
+            target_host=target_host, target_port=target_port, label=label, dc=0, is_media=False
+        )
+        if opened is None:
+            return False
+        try:
+            opened.writer.write(first)
+            await opened.writer.drain()
+            recv_total = await self._relay_raw(reader, writer, opened.reader, opened.writer, label)
+            if recv_total > 0:
+                self.upstream_recv_ok(opened)
+            else:
+                self.upstream_zero_recv(opened)
+        finally:
+            self.upstream_release(opened)
+        return True
 
-        # Mark running AFTER server is successfully bound and listening
-        self._running = True
-        mode_label = "MTProxy" if self._mode == "mtproxy" else "SOCKS5"
-        self._log(f"{mode_label} proxy started on {self._host}:{self._port}")
-        self._upstream_runtime.emit_snapshot(force=True)
-
-        # Pre-fill WebSocket connection pool (non-blocking)
-        asyncio.create_task(self._ws_pool.warmup())
-        if self._cloudflare.worker_enabled and self._cloudflare.worker_domains:
-            asyncio.create_task(
-                self._cloudflare_worker_pool.warmup(
-                    self._cloudflare.worker_domains,
-                    self._cloudflare_worker_warmup_targets(),
-                )
-            )
-
-    async def stop(self) -> None:
-        """Graceful shutdown."""
-        if not self._running:
+    async def _raw_tcp_session(self, reader, writer, first: bytes, target_host: str, target_port: int, label: str) -> None:
+        """HTTP-транспорт Telegram (порт 80) и потоки без obfuscated2: WSS не подходит."""
+        if should_route_upstream(self._upstream, mode="always"):
+            self.log(f"[{label}] HTTP transport -> upstream (always mode)")
+            await self._raw_via_upstream(reader, writer, first, target_host, target_port, label)
             return
 
-        self._running = False
-        self._log("Stopping proxy...")
+        self.stats.passthrough_connections += 1
+        started = time.monotonic()
+        try:
+            remote_reader, remote_writer = await asyncio.wait_for(
+                asyncio.open_connection(target_host, target_port),
+                timeout=HTTP_DIRECT_CONNECT_TIMEOUT,
+            )
+        except Exception as exc:
+            fallback = self._upstream.enabled
+            self.log_route_detail(
+                label,
+                route="HTTP direct TCP",
+                dc=0,
+                is_media=False,
+                target=f"{target_host}:{target_port}",
+                result="error",
+                reason=_error_text(exc),
+                next_step="upstream SOCKS5 fallback" if fallback else "none; HTTP transport cannot use WSS",
+                elapsed=time.monotonic() - started,
+            )
+            self.record_route(dc=0, is_media=False, route="HTTP direct TCP", status="ошибка", reason=_error_text(exc))
+            if fallback:
+                await self._raw_via_upstream(reader, writer, first, target_host, target_port, label)
+            return
+        apply_socket_options(remote_writer.transport, self.buffer_size)
+        self.log_route_detail(
+            label,
+            route="HTTP direct TCP",
+            dc=0,
+            is_media=False,
+            target=f"{target_host}:{target_port}",
+            result="connected",
+            reason="HTTP transport cannot use WSS",
+            elapsed=time.monotonic() - started,
+        )
+        remote_writer.write(first)
+        await remote_writer.drain()
+        await self._relay_raw(reader, writer, remote_reader, remote_writer, label)
 
-        # Сначала освобождаем слушающий порт: закрытие пулов/соединений может
-        # занять секунды, а рестарт ждёт stop с коротким таймаутом.
-        for srv in self._servers:
-            srv.close()
-        for srv in self._servers:
-            await srv.wait_closed()
-        self._servers.clear()
+    # ---- входы ----
 
-        # Close all pooled WebSocket connections
-        await self._ws_pool.close_all()
-        await self._cloudflare_worker_pool.close_all()
-        await self._upstream_runtime.close()
-
-        for task in list(self._tasks):
-            task.cancel()
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
-        self._tasks.clear()
-
-        self._log("Proxy stopped")
-
-    def apply_upstream_config(
-        self,
-        upstream_config: Optional[UpstreamProxyConfig],
-    ) -> None:
-        """Горячая замена upstream-конфига без рестарта прокси.
-
-        Должен вызываться из потока event loop прокси (см.
-        TelegramProxyRuntime.apply_upstream_config). Новые соединения сразу
-        используют новый основной сервер; состояние проверок сбрасывается,
-        а соединения прежнего внешнего SOCKS закрываются, чтобы Telegram
-        переподключился через новый сервер.
-        """
-        self._upstream = upstream_config or UpstreamProxyConfig()
-        self._upstream_runtime.apply_config(self._upstream)
-        target = str(self._upstream.preset_name or self._upstream.host or "").strip() or "manual"
-        self._log(f"Upstream config applied without restart: {target}")
-
-    # ---- Connection handlers ----
-
-    def _cloudflare_worker_warmup_targets(self) -> list[tuple[int, str]]:
-        targets: list[tuple[int, str]] = []
-        seen: set[tuple[int, str]] = set()
-        for dc in (1, 2, 3, 4, 5, 203):
-            if dc in WSS_DOMAINS:
-                continue
-            for is_media in (False, True):
-                host, _port = dc_to_tcp_endpoint(
-                    dc,
-                    self._dc_endpoint_overrides,
-                    is_media=is_media,
-                )
-                key = (dc, host)
-                if key in seen:
-                    continue
-                seen.add(key)
-                targets.append(key)
-        return targets
-
-    async def _handle_socks5_client(
-        self,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-    ) -> None:
-        """Handle incoming SOCKS5 connection."""
+    def _track_task(self) -> asyncio.Task | None:
         task = asyncio.current_task()
         if task:
             self._tasks.add(task)
         self.stats.total_connections += 1
         self.stats.active_connections += 1
+        return task
+
+    async def _finish_connection(self, task: asyncio.Task | None, writer) -> None:
+        self.stats.active_connections -= 1
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+        if task:
+            self._tasks.discard(task)
+
+    async def _handle_socks5_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = self._track_task()
         peer = writer.get_extra_info("peername", ("?", 0))
         label = f"{peer[0]}:{peer[1]}"
         udp_relay: _Socks5UdpRelay | None = None
@@ -735,7 +600,7 @@ class TelegramWSProxy:
                     udp_relay = await self._open_udp_relay(label)
                     return udp_relay.local_host, udp_relay.local_port
                 except Exception as exc:
-                    self._log(f"[{label}] UDP relay failed: {type(exc).__name__}: {exc}")
+                    self.log(f"[{label}] UDP relay failed: {type(exc).__name__}: {exc}")
                     raise
 
             result = await socks5.handshake(
@@ -748,210 +613,50 @@ class TelegramWSProxy:
                 return
 
             if isinstance(result, socks5.UdpAssociateRequest):
-                self._log(
-                    f"[{label}] UDP ASSOCIATE accepted; "
-                    f"client hint {result.client_host}:{result.client_port}"
-                )
-                try:
-                    await reader.read()
-                finally:
-                    if udp_relay is not None:
-                        udp_relay.close()
+                self.log(f"[{label}] UDP ASSOCIATE accepted; client hint {result.client_host}:{result.client_port}")
+                await reader.read()
                 return
 
             target_host, target_port = result
-
-            # Non-Telegram traffic: passthrough (domains + non-Telegram IPs)
-            is_domain = _is_domain(target_host)
-            is_tg = not is_domain and is_telegram_ip(target_host)
-            if not is_tg:
-                self.stats.passthrough_connections += 1
-                log.debug("[%s] passthrough -> %s:%d", label, target_host, target_port)
-                try:
-                    rr, rw = await asyncio.wait_for(
-                        asyncio.open_connection(target_host, target_port),
-                        timeout=CONNECT_TIMEOUT,
-                    )
-                    apply_socket_options(rw.transport, self._buffer_size)
-                except Exception as exc:
-                    log.warning("[%s] passthrough connect failed: %s", label, exc)
-                    return
-                await self._relay_tcp(reader, writer, rr, rw)
+            if _is_domain(target_host) or not is_telegram_ip(target_host):
+                await self._passthrough(reader, writer, target_host, target_port, label)
                 return
 
-            self._log(f"[{label}] -> {target_host}:{target_port}")
-
-            # Read the 64-byte MTProto init packet
+            self.log(f"[{label}] -> {target_host}:{target_port}")
             try:
-                init = await asyncio.wait_for(
-                    reader.readexactly(64), timeout=15.0,
-                )
-            except (asyncio.IncompleteReadError, asyncio.TimeoutError) as e:
-                self._log(f"[{label}] no init packet: {type(e).__name__}")
+                init = await asyncio.wait_for(reader.readexactly(HEADER_LEN), timeout=INIT_READ_TIMEOUT)
+            except (asyncio.IncompleteReadError, asyncio.TimeoutError) as exc:
+                self.log(f"[{label}] no init packet: {type(exc).__name__}")
                 return
 
-            # HTTP transport (port 80): pass through directly, can't use WSS
-            if _is_http_transport(init):
-                # "always" mode: even HTTP goes through upstream
-                if should_route_upstream(self._upstream, mode="always"):
-                    self._log(f"[{label}] HTTP transport -> upstream (always mode)")
-                    self._record_route(
-                        dc=0,
-                        is_media=False,
-                        route="внешний SOCKS5",
-                        status="пропуск",
-                        reason="HTTP transport, весь TCP через внешний SOCKS5",
-                    )
-                    await self._upstream_proxy_connect(
-                        reader, writer, target_host, target_port,
-                        init, label, dc=0, is_media=False,
-                    )
-                    return
-                if should_route_upstream(self._upstream, mode="fallback") and self._http_upstream_required:
-                    if self._has_healthy_upstream_proxy():
-                        self._log(f"[{label}] HTTP transport -> upstream (fallback mode)")
-                        self._record_route(
-                            dc=0,
-                            is_media=False,
-                            route="внешний SOCKS5",
-                            status="пропуск",
-                            reason="HTTP transport, fallback SOCKS5",
-                        )
-                        if await self._upstream_proxy_connect(
-                            reader, writer, target_host, target_port,
-                            init, label, dc=0, is_media=False,
-                        ):
-                            return
-                        self._log(f"[{label}] HTTP upstream failed -> direct TCP probe")
-                    else:
-                        self._log(f"[{label}] HTTP transport -> direct TCP (upstream temporarily unavailable)")
-                self.stats.passthrough_connections += 1
-                self._log(f"[{label}] HTTP transport -> direct TCP")
-                t_connect = time.monotonic()
-                try:
-                    rr, rw = await asyncio.wait_for(
-                        asyncio.open_connection(target_host, target_port),
-                        timeout=CONNECT_TIMEOUT,
-                    )
-                    apply_socket_options(rw.transport, self._buffer_size)
-                except Exception as exc:
-                    elapsed = time.monotonic() - t_connect
-                    self._log(f"[{label}] HTTP TCP failed: {type(exc).__name__}")
-                    self._log_route_detail(
-                        label,
-                        route="HTTP direct TCP",
-                        dc=0,
-                        is_media=False,
-                        target=f"{target_host}:{target_port}",
-                        result="error",
-                        reason=self._route_error(exc),
-                        next_step=(
-                            "upstream SOCKS5 fallback"
-                            if should_route_upstream(self._upstream, mode="fallback")
-                            else "none; HTTP transport cannot use WSS"
-                        ),
-                        elapsed=elapsed,
-                    )
-                    self._record_route(
-                        dc=0,
-                        is_media=False,
-                        route="HTTP direct TCP",
-                        status="ошибка",
-                        reason=self._route_error(exc),
-                    )
-                    if should_route_upstream(self._upstream, mode="fallback"):
-                        self._http_upstream_required = True
-                        self._log(f"[{label}] HTTP TCP failed -> trying upstream SOCKS5 fallback")
-                        await self._upstream_proxy_connect(
-                            reader, writer, target_host, target_port,
-                            init, label, dc=0, is_media=False,
-                        )
-                    return
-                elapsed = time.monotonic() - t_connect
-                self._http_upstream_required = False
-                self._log_route_detail(
-                    label,
-                    route="HTTP direct TCP",
-                    dc=0,
-                    is_media=False,
-                    target=f"{target_host}:{target_port}",
-                    result="connected",
-                    reason="HTTP transport cannot use WSS",
-                    elapsed=elapsed,
-                )
-                rw.write(init)
-                await rw.drain()
-                await self._relay_tcp(reader, writer, rr, rw)
+            client = None if is_http_transport(init) else parse_plain_client(init)
+            if client is None:
+                kind = "HTTP transport" if is_http_transport(init) else "not obfuscated2"
+                self.log(f"[{label}] {kind} -> plain TCP")
+                await self._raw_tcp_session(reader, writer, init, target_host, target_port, label)
                 return
 
-            # Extract DC from init packet
-            dc, is_media = _dc_from_init(init)
-            init_patched = False
-
-            # Fallback: if init parsing failed, use IP lookup
-            if dc is None:
+            dc, is_media = client.dc, client.is_media
+            if dc not in _KNOWN_DCS:
                 entry = IP_TO_DC.get(target_host)
-                if entry is not None:
-                    dc, is_media = entry
-                    # Patch the init packet with the correct DC
-                    init = _patch_init_dc(init, -dc if is_media else dc)
-                    init_patched = True
-                    self._log(f"[{label}] DC from IP table: DC{dc} (patched)")
-                else:
-                    # Last resort: CIDR-based DC lookup
-                    dc = ip_to_dc(target_host) if not _is_domain(target_host) else 2
-                    self._log(f"[{label}] DC from CIDR: DC{dc}")
-            else:
-                self._log(f"[{label}] DC from init: DC{dc}{' media' if is_media else ''}")
+                dc, is_media = entry if entry is not None else (ip_to_dc(target_host), False)
+                self.log(f"[{label}] DC from IP table: DC{dc}")
+            if ":" in target_host:
+                # IPv6 Telegram часто недоступен; маршрутам нужен IPv4 того же DC.
+                target_host, target_port = dc_to_tcp_endpoint(dc, self._dc_endpoint_overrides, is_media=is_media)
+            self.log(f"[{label}] DC{dc}{' media' if is_media else ''} ({target_host}:{target_port})")
 
-            media_tag = " media" if is_media else ""
-            self._log(f"[{label}] DC{dc}{media_tag} ({target_host}:{target_port})")
-
-            # "always" mode: route all Telegram TCP traffic through upstream,
-            # skip WSS entirely. UDP calls use the separate experimental toggle.
-            if should_route_upstream(self._upstream, mode="always"):
-                self._log(f"[{label}] DC{dc} -> upstream (always mode)")
-                self._record_route(
-                    dc=dc,
-                    is_media=is_media,
-                    route="WSS",
-                    status="пропуск",
-                    reason="весь TCP через внешний SOCKS5",
-                )
-                await self._upstream_proxy_connect(
-                    reader, writer, target_host, target_port,
-                    init, label, dc, is_media,
-                )
-                return
-
-            # Only DC2 and DC4 have proven working WSS relays.
-            # Cross-DC routing via kws2 does NOT work (recv=0, server rejects).
-            # Port 80 fallback tested: DC1 partial, DC5 dead. Not reliable.
-            if dc not in WSS_DOMAINS:
-                self._log(f"[{label}] DC{dc} -> TCP (no WSS relay for this DC)")
-                self._record_route(
-                    dc=dc,
-                    is_media=is_media,
-                    route="WSS",
-                    status="пропуск",
-                    reason="для этого DC нет WSS relay",
-                )
-                if await self._cloudflare_fallback(
-                    reader, writer, target_host, target_port,
-                    init, init_patched, label, dc, is_media,
-                ):
-                    return
-                await self._tcp_fallback(
-                    reader, writer, target_host, target_port,
-                    init, label, dc, is_media,
-                )
-                return
-
-            await self._tunnel_via_wss(
-                reader, writer, dc, is_media, init, init_patched,
-                target_host, target_port, label,
-            )
-
+            await TelegramSession(
+                self,
+                reader=reader,
+                writer=writer,
+                client=client,
+                dc=dc,
+                is_media=is_media,
+                target_host=target_host,
+                target_port=target_port,
+                label=label,
+            ).run()
         except (asyncio.CancelledError, ConnectionError, OSError):
             pass
         except Exception:
@@ -960,36 +665,68 @@ class TelegramWSProxy:
         finally:
             if udp_relay is not None:
                 udp_relay.close()
-            self.stats.active_connections -= 1
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception:
-                pass
-            if task:
-                self._tasks.discard(task)
+            await self._finish_connection(task, writer)
 
-    async def _handle_mtproxy_client(
-        self,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-    ) -> None:
-        """Handle incoming MTProxy secret connection."""
-        task = asyncio.current_task()
-        if task:
-            self._tasks.add(task)
-        self.stats.total_connections += 1
-        self.stats.active_connections += 1
+    async def _passthrough(self, reader, writer, target_host: str, target_port: int, label: str) -> None:
+        self.stats.passthrough_connections += 1
+        log.debug("[%s] passthrough -> %s:%d", label, target_host, target_port)
+        try:
+            remote_reader, remote_writer = await asyncio.wait_for(
+                asyncio.open_connection(target_host, target_port),
+                timeout=CONNECT_TIMEOUT,
+            )
+        except Exception as exc:
+            log.warning("[%s] passthrough connect failed: %s", label, exc)
+            return
+        apply_socket_options(remote_writer.transport, self.buffer_size)
+        await self._relay_raw(reader, writer, remote_reader, remote_writer, "")
+
+    @staticmethod
+    def _should_log_mtproxy_problem(count: int, marks: set[int]) -> bool:
+        return int(count) in marks or (int(count) > 0 and int(count) % 100 == 0)
+
+    def _record_mtproxy_invalid_init(self, label: str) -> None:
+        self.stats.mtproxy_invalid_init_count += 1
+        count = int(self.stats.mtproxy_invalid_init_count)
+        self.stats.mtproxy_last_problem = (
+            "нет MTProxy init packet: проверьте тип прокси, старые записи, "
+            "Fake TLS/secret или авто-проверку Telegram"
+        )
+        if not self._should_log_mtproxy_problem(count, self._mtproxy_invalid_init_log_marks):
+            return
+        self.log(
+            f"[{label}] MTProxy init packet не получен; повторов: {count}. "
+            "Что это значит: Telegram подключился к MTProxy-порту, но не прислал "
+            "первый MTProxy-пакет. Что делать: проверьте тип прокси в Telegram, "
+            "удалите старые записи 127.0.0.1, проверьте secret/Fake TLS; "
+            "одиночные проверки клиента могут закрываться сами."
+        )
+
+    def _record_mtproxy_bad_handshake(self, label: str) -> None:
+        self.stats.mtproxy_bad_handshake_count += 1
+        count = int(self.stats.mtproxy_bad_handshake_count)
+        self.stats.mtproxy_last_problem = "init есть, но secret или тип secret dd/ee не подошёл"
+        if not self._should_log_mtproxy_problem(count, self._mtproxy_bad_handshake_log_marks):
+            return
+        self.log(
+            f"[{label}] MTProxy init получен, но не расшифровался; повторов: {count}. "
+            "Чаще всего это неверный secret, старый прокси в Telegram или mismatch "
+            "типа secret dd/ee."
+        )
+
+    async def _handle_mtproxy_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = self._track_task()
         peer = writer.get_extra_info("peername", ("?", 0))
         label = f"{peer[0]}:{peer[1]}"
+        client_writer = writer
 
         try:
             if not self._mtproxy_secret:
                 self.stats.failed_connections += 1
-                self._log(f"[{label}] MTProxy secret is not configured")
+                self.log(f"[{label}] MTProxy secret is not configured")
                 return
 
-            client = await read_mtproxy_client_init(
+            incoming = await read_mtproxy_client_init(
                 reader,
                 writer,
                 self._mtproxy_secret,
@@ -997,1141 +734,48 @@ class TelegramWSProxy:
                 fake_tls_domain=self._fake_tls_domain,
                 proxy_protocol=self._proxy_protocol,
             )
-            if client is None:
+            if incoming is None:
                 self._record_mtproxy_invalid_init(label)
                 return
-            client_init = client.init
-            client_reader = client.reader
-            client_writer = client.writer
-            label = client.label
+            client_writer = incoming.writer
+            label = incoming.label
 
-            parsed = parse_client_init(client_init, self._mtproxy_secret)
-            if parsed is None:
+            client = parse_secret_client(incoming.init, self._mtproxy_secret)
+            if client is None or client.dc <= 0:
                 self.stats.failed_connections += 1
                 self._record_mtproxy_bad_handshake(label)
                 return
 
-            dc = parsed.dc
-            is_media = parsed.is_media
-            relay_init = generate_relay_init(parsed.proto_tag, dc=dc, is_media=is_media)
-            crypto = build_crypto_context(parsed.client_prekey_iv, self._mtproxy_secret, relay_init)
-
-            target_host, target_port = dc_to_tcp_endpoint(dc, self._dc_endpoint_overrides, is_media=is_media)
-            media_tag = " media" if is_media else ""
-            self._log(f"[{label}] MTProxy DC{dc}{media_tag} -> {target_host}:{target_port}")
-
-            await self._tunnel_mtproxy_via_wss(
-                client_reader,
-                client_writer,
-                dc,
-                is_media,
-                relay_init,
-                crypto,
-                parsed.proto_tag,
-                target_host,
-                target_port,
-                label,
+            target_host, target_port = dc_to_tcp_endpoint(
+                client.dc, self._dc_endpoint_overrides, is_media=client.is_media
             )
+            media_tag = " media" if client.is_media else ""
+            self.log(f"[{label}] MTProxy DC{client.dc}{media_tag} -> {target_host}:{target_port}")
+
+            await TelegramSession(
+                self,
+                reader=incoming.reader,
+                writer=incoming.writer,
+                client=client,
+                dc=client.dc,
+                is_media=client.is_media,
+                target_host=target_host,
+                target_port=target_port,
+                label=label,
+            ).run()
         except (asyncio.CancelledError, ConnectionError, OSError):
             pass
         except Exception:
             self.stats.failed_connections += 1
             log.exception("[%s] MTProxy handler error", label)
         finally:
-            self.stats.active_connections -= 1
-            try:
-                writer_to_close = locals().get("client_writer", writer)
-                writer_to_close.close()
-                await writer_to_close.wait_closed()
-            except Exception:
-                pass
-            if task:
-                self._tasks.discard(task)
-
-    # ---- Core tunneling ----
-
-    async def _tunnel_via_wss(
-        self,
-        client_reader: asyncio.StreamReader,
-        client_writer: asyncio.StreamWriter,
-        dc: int,
-        is_media: bool,
-        init: bytes,
-        init_patched: bool,
-        target_host: str,
-        target_port: int,
-        label: str,
-    ) -> None:
-        """Try WSS tunnel, fall back to direct TCP if WSS fails."""
-
-        dc_key = (dc, is_media)
-        now = time.monotonic()
-        media_tag = " media" if is_media else ""
-
-        # Check WS blacklist
-        if dc_key in self._ws_blacklist:
-            log.debug("[%s] DC%d%s WS blacklisted -> TCP", label, dc, media_tag)
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="WSS",
-                status="пропуск",
-                reason="раньше были только 302 redirect",
-            )
-            if await self._cloudflare_fallback(
-                client_reader, client_writer, target_host, target_port,
-                init, init_patched, label, dc, is_media,
-            ):
-                return
-            await self._tcp_fallback(
-                client_reader, client_writer, target_host, target_port,
-                init, label, dc, is_media,
-            )
-            return
-
-        # Check cooldown
-        fail_until = self._dc_cooldown.get(dc_key, 0)
-        if now < fail_until:
-            log.debug("[%s] DC%d%s WS cooldown (%.0fs) -> TCP",
-                      label, dc, media_tag, fail_until - now)
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="WSS",
-                status="пропуск",
-                reason=f"пауза после ошибки {fail_until - now:.0f}s",
-            )
-            if await self._cloudflare_fallback(
-                client_reader, client_writer, target_host, target_port,
-                init, init_patched, label, dc, is_media,
-            ):
-                return
-            await self._tcp_fallback(
-                client_reader, client_writer, target_host, target_port,
-                init, label, dc, is_media,
-            )
-            return
-
-        # Try WebSocket connection
-        domains = self._wss_domains_for(dc, is_media)
-        ws = None
-        current_domain = ""
-
-        # Try the connection pool first
-        ws = await self._ws_pool.get(dc, is_media, WSS_RELAY_IP, domains) if domains else None
-        if ws is not None:
-            current_domain = str(getattr(ws, "domain", "") or "")
-            self._log(f"[{label}] DC{dc}{media_tag} WSS from pool")
-
-        # If pool miss, try fresh WebSocket connection
-        all_redirects = True
-        any_redirect = False
-        ws_failure_reason = "нет доступного WSS"
-
-        sem = _get_wss_semaphore()
-        for domain in domains if ws is None else []:
-            relay_ip = _relay_ip_for_domain(domain)
-            try:
-                self._log(f"[{label}] DC{dc}{media_tag} -> wss://{domain}{WSS_PATH}")
-                async with sem:
-                    ws = await RawWebSocket.connect(
-                        relay_ip,
-                        domain,
-                        WSS_PATH,
-                        timeout=CONNECT_TIMEOUT,
-                        buffer_size=self._buffer_size,
-                    )
-                all_redirects = False
-                self._log_route_detail(
-                    label,
-                    route="WSS",
-                    dc=dc,
-                    is_media=is_media,
-                    target=f"{domain}{WSS_PATH} via {relay_ip}",
-                    result="connected",
-                )
-                current_domain = domain
-                break
-            except WsHandshakeError as exc:
-                if exc.is_redirect:
-                    any_redirect = True
-                    ws_failure_reason = f"{domain}: HTTP {exc.status_code} redirect"
-                    log.warning("[%s] DC%d%s got %d from %s -> %s",
-                                label, dc, media_tag, exc.status_code,
-                                domain, exc.location or "?")
-                    self._log_route_detail(
-                        label,
-                        route="WSS",
-                        dc=dc,
-                        is_media=is_media,
-                        target=f"{domain}{WSS_PATH} via {relay_ip}",
-                        result="redirect",
-                        reason=f"HTTP {exc.status_code} -> {exc.location or '?'}",
-                        next_step="try next WSS domain",
-                    )
-                    continue
-                else:
-                    all_redirects = False
-                    ws_failure_reason = f"{domain}: {exc.status_line}"
-                    log.warning("[%s] DC%d%s WS handshake: %s",
-                                label, dc, media_tag, exc.status_line)
-                    self._log_route_detail(
-                        label,
-                        route="WSS",
-                        dc=dc,
-                        is_media=is_media,
-                        target=f"{domain}{WSS_PATH} via {relay_ip}",
-                        result="error",
-                        reason=exc.status_line,
-                        next_step="try next WSS domain or fallback",
-                    )
-            except Exception as exc:
-                all_redirects = False
-                ws_failure_reason = f"{domain}: {self._route_error(exc)}"
-                self._mark_wss_domain_timeout(dc, is_media, domain, label, exc)
-                log.warning("[%s] DC%d%s WS connect failed: %s",
-                            label, dc, media_tag, exc)
-                self._log_route_detail(
-                    label,
-                    route="WSS",
-                    dc=dc,
-                    is_media=is_media,
-                    target=f"{domain}{WSS_PATH} via {relay_ip}",
-                    result="error",
-                    reason=self._route_error(exc),
-                    next_step="try next WSS domain or fallback",
-                )
-
-        # WS failed
-        if ws is None:
-            if any_redirect and all_redirects:
-                self._ws_blacklist.add(dc_key)
-                log.warning("[%s] DC%d%s blacklisted for WS (all 302)",
-                            label, dc, media_tag)
-            else:
-                self._dc_cooldown[dc_key] = now + DC_FAIL_COOLDOWN
-                self._log(f"[{label}] DC{dc}{media_tag} WS failed, cooldown {DC_FAIL_COOLDOWN:.0f}s")
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="WSS",
-                status="ошибка",
-                reason=ws_failure_reason,
-            )
-
-            # "always" mode: skip TCP fallback, go straight to upstream
-            if should_route_upstream(self._upstream, mode="always"):
-                await self._upstream_proxy_connect(
-                    client_reader, client_writer, target_host, target_port,
-                    init, label, dc, is_media,
-                )
-                return
-
-            if should_route_upstream(self._upstream, mode="fallback") and self._has_healthy_upstream_proxy():
-                self._log(f"[{label}] DC{dc}{media_tag} WSS unavailable -> upstream proxy")
-                await self._upstream_proxy_connect(
-                    client_reader, client_writer, target_host, target_port,
-                    init, label, dc, is_media,
-                )
-                return
-
-            if await self._cloudflare_fallback(
-                client_reader, client_writer, target_host, target_port,
-                init, init_patched, label, dc, is_media,
-            ):
-                return
-
-            await self._tcp_fallback(
-                client_reader, client_writer, target_host, target_port,
-                init, label, dc, is_media,
-            )
-            return
-
-        # WS success
-        self._dc_cooldown.pop(dc_key, None)
-        self.stats.wss_connections += 1
-        self._log(f"[{label}] DC{dc}{media_tag} WSS connected")
-
-        # Create splitter ONLY for patched inits (mobile clients with random DC bytes).
-        # Normal Telegram Desktop uses intermediate protocol where the splitter's
-        # abridged-protocol boundary detection would produce wrong splits.
-        splitter = None
-        if init_patched:
-            try:
-                splitter = _MsgSplitter(init)
-            except Exception:
-                pass
-
-        # Send the buffered init packet as the first WS frame
-        await ws.send(init)
-
-        # Bidirectional bridge
-        relay_result = await self._relay_wss(client_reader, client_writer, ws, splitter, label, dc=dc)
-        recv_total = 0
-        sent_total = 0
-        if isinstance(relay_result, tuple) and len(relay_result) >= 2:
-            recv_total = int(relay_result[0] or 0)
-            sent_total = int(relay_result[1] or 0)
-        if recv_total > 0:
-            self._mark_wss_domain_recv_ok(dc, is_media, current_domain)
-            self._record_route(dc=dc, is_media=is_media, route="WSS", status="OK")
-            return
-        if sent_total > 0:
-            self._mark_wss_domain_zero_recv(dc, is_media, current_domain, label)
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="WSS",
-                status="ошибка",
-                reason="recv=0",
-            )
-
-    async def _tunnel_mtproxy_via_wss(
-        self,
-        client_reader: asyncio.StreamReader,
-        client_writer: asyncio.StreamWriter,
-        dc: int,
-        is_media: bool,
-        relay_init: bytes,
-        crypto,
-        proto_tag: bytes,
-        target_host: str,
-        target_port: int,
-        label: str,
-    ) -> None:
-        """Try WSS tunnel for MTProxy, fall back to Cloudflare/TCP."""
-        dc_key = (dc, is_media)
-        now = time.monotonic()
-        media_tag = " media" if is_media else ""
-        try:
-            splitter = MTProxyMsgSplitter(relay_init, proto_tag)
-        except Exception:
-            splitter = None
-
-        if should_route_upstream(self._upstream, mode="always"):
-            self._log(f"[{label}] MTProxy DC{dc}{media_tag} -> upstream (always mode)")
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="WSS",
-                status="пропуск",
-                reason="весь TCP через внешний SOCKS5",
-            )
-            await self._mtproxy_upstream_proxy_connect(
-                client_reader,
-                client_writer,
-                target_host,
-                target_port,
-                relay_init,
-                crypto,
-                label,
-                dc,
-                is_media,
-            )
-            return
-
-        if dc not in WSS_DOMAINS:
-            self._log(f"[{label}] MTProxy DC{dc}{media_tag} -> fallback (no own WSS relay)")
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="WSS",
-                status="пропуск",
-                reason="для этого DC нет WSS relay",
-            )
-            if await self._cloudflare_fallback(
-                client_reader,
-                client_writer,
-                target_host,
-                target_port,
-                relay_init,
-                False,
-                label,
-                dc,
-                is_media,
-                relay_wss_fn=lambda **kwargs: relay_mtproxy_wss(crypto=crypto, splitter=splitter, **kwargs),
-            ):
-                return
-            await self._mtproxy_tcp_fallback(
-                client_reader, client_writer, target_host, target_port, relay_init, crypto, label, dc, is_media
-            )
-            return
-
-        if dc_key in self._ws_blacklist or now < self._dc_cooldown.get(dc_key, 0):
-            reason = "раньше были только 302 redirect" if dc_key in self._ws_blacklist else "пауза после ошибки"
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="WSS",
-                status="пропуск",
-                reason=reason,
-            )
-            if await self._cloudflare_fallback(
-                client_reader,
-                client_writer,
-                target_host,
-                target_port,
-                relay_init,
-                False,
-                label,
-                dc,
-                is_media,
-                relay_wss_fn=lambda **kwargs: relay_mtproxy_wss(crypto=crypto, splitter=splitter, **kwargs),
-            ):
-                return
-            await self._mtproxy_tcp_fallback(
-                client_reader, client_writer, target_host, target_port, relay_init, crypto, label, dc, is_media
-            )
-            return
-
-        domains = self._wss_domains_for(dc, is_media)
-        ws = await self._ws_pool.get(dc, is_media, WSS_RELAY_IP, domains)
-        if ws is not None:
-            self._log(f"[{label}] MTProxy DC{dc}{media_tag} WSS from pool")
-
-        all_redirects = True
-        any_redirect = False
-        ws_failure_reason = "нет доступного WSS"
-        sem = _get_wss_semaphore()
-        for domain in domains if ws is None else []:
-            relay_ip = _relay_ip_for_domain(domain)
-            try:
-                self._log(f"[{label}] MTProxy DC{dc}{media_tag} -> wss://{domain}{WSS_PATH}")
-                async with sem:
-                    ws = await RawWebSocket.connect(
-                        relay_ip,
-                        domain,
-                        WSS_PATH,
-                        timeout=CONNECT_TIMEOUT,
-                        buffer_size=self._buffer_size,
-                    )
-                all_redirects = False
-                self._log_route_detail(
-                    label,
-                    route="WSS",
-                    dc=dc,
-                    is_media=is_media,
-                    target=f"{domain}{WSS_PATH} via {relay_ip}",
-                    result="connected",
-                )
-                self._wss_domain_penalty_until.pop((int(dc), bool(is_media), domain), None)
-                break
-            except WsHandshakeError as exc:
-                if exc.is_redirect:
-                    any_redirect = True
-                    ws_failure_reason = f"{domain}: HTTP {exc.status_code} redirect"
-                    self._log_route_detail(
-                        label,
-                        route="WSS",
-                        dc=dc,
-                        is_media=is_media,
-                        target=f"{domain}{WSS_PATH} via {relay_ip}",
-                        result="redirect",
-                        reason=f"HTTP {exc.status_code} -> {exc.location or '?'}",
-                        next_step="try next WSS domain",
-                    )
-                    continue
-                all_redirects = False
-                ws_failure_reason = f"{domain}: {exc.status_line}"
-                self._log_route_detail(
-                    label,
-                    route="WSS",
-                    dc=dc,
-                    is_media=is_media,
-                    target=f"{domain}{WSS_PATH} via {relay_ip}",
-                    result="error",
-                    reason=exc.status_line,
-                    next_step="try next WSS domain or fallback",
-                )
-            except Exception as exc:
-                all_redirects = False
-                ws_failure_reason = f"{domain}: {self._route_error(exc)}"
-                self._mark_wss_domain_timeout(dc, is_media, domain, label, exc)
-                self._log_route_detail(
-                    label,
-                    route="WSS",
-                    dc=dc,
-                    is_media=is_media,
-                    target=f"{domain}{WSS_PATH} via {relay_ip}",
-                    result="error",
-                    reason=self._route_error(exc),
-                    next_step="try next WSS domain or fallback",
-                )
-
-        if ws is None:
-            if any_redirect and all_redirects:
-                self._ws_blacklist.add(dc_key)
-            else:
-                self._dc_cooldown[dc_key] = now + DC_FAIL_COOLDOWN
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="WSS",
-                status="ошибка",
-                reason=ws_failure_reason,
-            )
-            if await self._cloudflare_fallback(
-                client_reader,
-                client_writer,
-                target_host,
-                target_port,
-                relay_init,
-                False,
-                label,
-                dc,
-                is_media,
-                relay_wss_fn=lambda **kwargs: relay_mtproxy_wss(crypto=crypto, splitter=splitter, **kwargs),
-            ):
-                return
-            await self._mtproxy_tcp_fallback(
-                client_reader, client_writer, target_host, target_port, relay_init, crypto, label, dc, is_media
-            )
-            return
-
-        self._dc_cooldown.pop(dc_key, None)
-        self.stats.wss_connections += 1
-        self._record_route(dc=dc, is_media=is_media, route="WSS", status="OK")
-        await ws.send(relay_init)
-        await relay_mtproxy_wss(
-            client_reader=client_reader,
-            client_writer=client_writer,
-            ws=ws,
-            crypto=crypto,
-            stats=self.stats,
-            log_fn=self._log,
-            label=label,
-            dc=dc,
-            splitter=splitter,
-        )
-
-    async def _cloudflare_fallback(
-        self,
-        client_reader: asyncio.StreamReader,
-        client_writer: asyncio.StreamWriter,
-        target_host: str,
-        target_port: int,
-        init: bytes,
-        init_patched: bool,
-        label: str,
-        dc: int,
-        is_media: bool,
-        relay_wss_fn=None,
-    ) -> bool:
-        """Try Cloudflare Worker/domain fallback before plain TCP fallback."""
-        if not should_try_cloudflare(self._cloudflare):
-            return False
-
-        media_tag = " media" if is_media else ""
-        splitter = None
-        if init_patched:
-            try:
-                splitter = _MsgSplitter(init)
-            except Exception:
-                pass
-
-        if self._cloudflare.worker_enabled and self._cloudflare.worker_domains:
-            path = build_worker_path(target_host, dc)
-            for worker_domain in self._cloudflare.worker_domains:
-                t_connect = time.monotonic()
-                try:
-                    ws = await self._cloudflare_worker_pool.get(dc, worker_domain, target_host)
-                    if ws is not None:
-                        self._log(
-                            f"[{label}] DC{dc}{media_tag} -> Cloudflare Worker pool "
-                            f"{worker_domain}{path}"
-                        )
-                    else:
-                        self._log(
-                            f"[{label}] DC{dc}{media_tag} -> Cloudflare Worker "
-                            f"{worker_domain}{path}"
-                        )
-                        ws = await RawWebSocket.connect(
-                            worker_domain,
-                            worker_domain,
-                            path=path,
-                            timeout=CONNECT_TIMEOUT,
-                            buffer_size=self._buffer_size,
-                        )
-                    elapsed = time.monotonic() - t_connect
-                    self._log_route_detail(
-                        label,
-                        route="Cloudflare Worker",
-                        dc=dc,
-                        is_media=is_media,
-                        target=f"{worker_domain}{path} -> {target_host}:{target_port}",
-                        result="connected",
-                        elapsed=elapsed,
-                    )
-                    self.stats.cloudflare_connections += 1
-                    self.stats.cloudflare_worker_connections += 1
-                    self._record_route(
-                        dc=dc,
-                        is_media=is_media,
-                        route="Cloudflare Worker",
-                        status="OK",
-                        reason=worker_domain,
-                    )
-                    await ws.send(init)
-                    if relay_wss_fn is None:
-                        await self._relay_wss(client_reader, client_writer, ws, splitter, label, dc=dc)
-                    else:
-                        await relay_wss_fn(
-                            client_reader=client_reader,
-                            client_writer=client_writer,
-                            ws=ws,
-                            stats=self.stats,
-                            log_fn=self._log,
-                            label=label,
-                            dc=dc,
-                        )
-                    return True
-                except Exception as exc:
-                    log.warning(
-                        "[%s] DC%d%s Cloudflare Worker %s failed: %s",
-                        label,
-                        dc,
-                        media_tag,
-                        worker_domain,
-                        exc,
-                    )
-                    elapsed = time.monotonic() - t_connect
-                    self._log_route_detail(
-                        label,
-                        route="Cloudflare Worker",
-                        dc=dc,
-                        is_media=is_media,
-                        target=f"{worker_domain}{path} -> {target_host}:{target_port}",
-                        result="error",
-                        reason=self._route_error(exc),
-                        next_step="try next Worker domain or Cloudflare domain",
-                        elapsed=elapsed,
-                    )
-                    self._record_route(
-                        dc=dc,
-                        is_media=is_media,
-                        route="Cloudflare Worker",
-                        status="ошибка",
-                        reason=f"{worker_domain}: {self._route_error(exc)}",
-                    )
-
-        if self._cloudflare.enabled and self._cloudflare.domains:
-            for domain in build_cloudflare_domains(
-                dc,
-                self._cloudflare,
-                balancer=self._cloudflare_domain_balancer,
-            ):
-                t_connect = time.monotonic()
-                try:
-                    self._log(f"[{label}] DC{dc}{media_tag} -> Cloudflare wss://{domain}{WSS_PATH}")
-                    ws = await RawWebSocket.connect(
-                        domain,
-                        domain,
-                        path=WSS_PATH,
-                        timeout=CONNECT_TIMEOUT,
-                        buffer_size=self._buffer_size,
-                    )
-                    elapsed = time.monotonic() - t_connect
-                    self._log_route_detail(
-                        label,
-                        route="Cloudflare",
-                        dc=dc,
-                        is_media=is_media,
-                        target=f"{domain}{WSS_PATH} -> {target_host}:{target_port}",
-                        result="connected",
-                        elapsed=elapsed,
-                    )
-                    self.stats.cloudflare_connections += 1
-                    self._cloudflare_domain_balancer.record_success(dc, domain)
-                    self._record_route(
-                        dc=dc,
-                        is_media=is_media,
-                        route="Cloudflare",
-                        status="OK",
-                        reason=domain,
-                    )
-                    await ws.send(init)
-                    if relay_wss_fn is None:
-                        await self._relay_wss(client_reader, client_writer, ws, splitter, label, dc=dc)
-                    else:
-                        await relay_wss_fn(
-                            client_reader=client_reader,
-                            client_writer=client_writer,
-                            ws=ws,
-                            stats=self.stats,
-                            log_fn=self._log,
-                            label=label,
-                            dc=dc,
-                        )
-                    return True
-                except Exception as exc:
-                    log.warning(
-                        "[%s] DC%d%s Cloudflare domain %s failed: %s",
-                        label,
-                        dc,
-                        media_tag,
-                        domain,
-                        exc,
-                    )
-                    elapsed = time.monotonic() - t_connect
-                    self._log_route_detail(
-                        label,
-                        route="Cloudflare",
-                        dc=dc,
-                        is_media=is_media,
-                        target=f"{target_host}:{target_port}",
-                        result="error",
-                        reason=self._route_error(exc),
-                        next_step="try next Cloudflare domain or TCP fallback",
-                        elapsed=elapsed,
-                    )
-                    self._record_route(
-                        dc=dc,
-                        is_media=is_media,
-                        route="Cloudflare",
-                        status="ошибка",
-                        reason=f"{domain}: {self._route_error(exc)}",
-                    )
-
-        self.stats.cloudflare_failures += 1
-        self._record_route(
-            dc=dc,
-            is_media=is_media,
-            route="Cloudflare",
-            status="ошибка",
-            reason="нет рабочего Worker или домена",
-        )
-        self._log_route_detail(
-            label,
-            route="Cloudflare",
-            dc=dc,
-            is_media=is_media,
-            target=f"{target_host}:{target_port}",
-            result="exhausted",
-            reason="no working Worker or domain",
-            next_step="TCP fallback",
-        )
-        return False
-
-    async def _mtproxy_tcp_fallback(
-        self,
-        client_reader: asyncio.StreamReader,
-        client_writer: asyncio.StreamWriter,
-        target_host: str,
-        target_port: int,
-        relay_init: bytes,
-        crypto,
-        label: str,
-        dc: int,
-        is_media: bool,
-    ) -> None:
-        media_tag = " media" if is_media else ""
-        self._log(f"[{label}] MTProxy DC{dc}{media_tag} TCP fallback -> {target_host}:{target_port}")
-        try:
-            rr, rw = await asyncio.wait_for(
-                asyncio.open_connection(target_host, target_port),
-                timeout=CONNECT_TIMEOUT,
-            )
-            apply_socket_options(rw.transport, self._buffer_size)
-        except Exception as exc:
-            self.stats.failed_connections += 1
-            self._log(f"[{label}] MTProxy TCP fallback failed: {type(exc).__name__}")
-            self._log_route_detail(
-                label,
-                route="TCP fallback",
-                dc=dc,
-                is_media=is_media,
-                target=f"{target_host}:{target_port}",
-                result="error",
-                reason=self._route_error(exc),
-                next_step="upstream SOCKS5" if self._upstream.enabled else "none",
-            )
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="TCP",
-                status="ошибка",
-                reason=self._route_error(exc),
-            )
-            if self._upstream.enabled:
-                self._log(f"[{label}] MTProxy DC{dc}{media_tag} TCP failed -> trying upstream")
-                await self._mtproxy_upstream_proxy_connect(
-                    client_reader,
-                    client_writer,
-                    target_host,
-                    target_port,
-                    relay_init,
-                    crypto,
-                    label,
-                    dc,
-                    is_media,
-                )
-            return
-
-        self.stats.tcp_fallback_connections += 1
-        self._log_route_detail(
-            label,
-            route="TCP fallback",
-            dc=dc,
-            is_media=is_media,
-            target=f"{target_host}:{target_port}",
-            result="connected",
-        )
-        self._record_route(dc=dc, is_media=is_media, route="TCP", status="OK")
-        rw.write(relay_init)
-        await rw.drain()
-        await relay_mtproxy_tcp(
-            client_reader=client_reader,
-            client_writer=client_writer,
-            remote_reader=rr,
-            remote_writer=rw,
-            crypto=crypto,
-            stats=self.stats,
-            log_fn=self._log,
-            label=label,
-            dc=dc,
-        )
-
-    async def _mtproxy_upstream_proxy_connect(
-        self,
-        client_reader: asyncio.StreamReader,
-        client_writer: asyncio.StreamWriter,
-        target_host: str,
-        target_port: int,
-        relay_init: bytes,
-        crypto,
-        label: str,
-        dc: int,
-        is_media: bool,
-    ) -> bool:
-        """Route MTProxy relay traffic through the external SOCKS5 fallback."""
-        if not self._upstream.enabled:
-            return False
-
-        media_tag = " media" if is_media else ""
-        upstream_host, upstream_port = self._upstream_target(target_host, target_port, dc, is_media)
-        if upstream_host != target_host or upstream_port != target_port:
-            self._log(
-                f"[{label}] MTProxy DC{dc}{media_tag} upstream target "
-                f"{target_host}:{target_port} -> {upstream_host}:{upstream_port}"
-            )
-        opened = await self._open_upstream_proxy(
-            upstream_host=upstream_host,
-            upstream_port=upstream_port,
-            label=label,
-            dc=dc,
-            is_media=is_media,
-            mtproxy=True,
-        )
-        if opened is None:
-            return False
-        rr, rw = opened.reader, opened.writer
-        upstream_notified = False
-
-        def notify_on_first_response() -> None:
-            nonlocal upstream_notified
-            if upstream_notified:
-                return
-            upstream_notified = True
-            self._upstream_runtime.record_recv_ok(opened)
-
-        try:
-            rw.write(relay_init)
-            await rw.drain()
-            relay_result = await relay_mtproxy_tcp(
-                client_reader=client_reader,
-                client_writer=client_writer,
-                remote_reader=rr,
-                remote_writer=rw,
-                crypto=crypto,
-                stats=self.stats,
-                log_fn=self._log,
-                label=label,
-                dc=dc,
-                on_first_response=notify_on_first_response,
-            )
-            recv_total = int(relay_result[0] or 0) if isinstance(relay_result, tuple) else 0
-            if recv_total > 0:
-                if not upstream_notified:
-                    self._upstream_runtime.record_recv_ok(opened)
-            else:
-                self._upstream_runtime.record_zero_recv(opened)
-        finally:
-            self._upstream_runtime.release(opened)
-        return True
-
-    async def _tcp_fallback(
-        self,
-        client_reader: asyncio.StreamReader,
-        client_writer: asyncio.StreamWriter,
-        target_host: str,
-        target_port: int,
-        init: bytes,
-        label: str,
-        dc: int,
-        is_media: bool,
-    ) -> None:
-        """Fall back to direct TCP to the original DC IP.
-
-        If upstream proxy is configured in "fallback" mode and this DC has
-        previously had recv=0 failures, routes through upstream instead.
-        After a direct TCP relay with recv=0, marks the DC for future upstream routing.
-        """
-        media_tag = " media" if is_media else ""
-
-        # If this DC is known-blocked and upstream is available, use upstream
-        if ((dc, is_media) in self._dc_upstream_required
-                and should_route_upstream(self._upstream, mode="fallback")):
-            self._log(f"[{label}] DC{dc}{media_tag} learned-blocked -> upstream proxy")
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="TCP",
-                status="пропуск",
-                reason="раньше был recv=0",
-            )
-            ok = await self._upstream_proxy_connect(
-                client_reader, client_writer,
-                target_host, target_port, init, label, dc, is_media,
-            )
-            if not ok:
-                self._dc_upstream_required.discard((dc, is_media))
-                self._log(f"[{label}] DC{dc}{media_tag} upstream failed, unmarked for re-probe")
-            return
-
-        if (
-            is_media
-            and dc not in WSS_DOMAINS
-            and should_route_upstream(self._upstream, mode="fallback")
-        ):
-            self._log(f"[{label}] DC{dc}{media_tag} no WSS -> upstream proxy")
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="TCP",
-                status="пропуск",
-                reason="медиа DC без WSS relay",
-            )
-            ok = await self._upstream_proxy_connect(
-                client_reader, client_writer,
-                target_host, target_port, init, label, dc, is_media,
-            )
-            if ok:
-                return
-            self._log(f"[{label}] DC{dc}{media_tag} upstream failed -> direct TCP probe")
-
-        self._log(f"[{label}] DC{dc}{media_tag} TCP fallback -> {target_host}:{target_port}")
-        t_connect = time.monotonic()
-        try:
-            rr, rw = await asyncio.wait_for(
-                asyncio.open_connection(target_host, target_port),
-                timeout=TCP_FALLBACK_CONNECT_TIMEOUT,
-            )
-            apply_socket_options(rw.transport, self._buffer_size)
-        except Exception as exc:
-            elapsed = time.monotonic() - t_connect
-            self.stats.failed_connections += 1
-            self._log(f"[{label}] TCP fallback failed ({elapsed:.1f}s): {type(exc).__name__}")
-            self._log_route_detail(
-                label,
-                route="TCP fallback",
-                dc=dc,
-                is_media=is_media,
-                target=f"{target_host}:{target_port}",
-                result="error",
-                reason=self._route_error(exc),
-                next_step="upstream SOCKS5" if self._upstream.enabled else "none",
-                elapsed=elapsed,
-            )
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="TCP",
-                status="ошибка",
-                reason=self._route_error(exc),
-            )
-            # TCP connect failed — try upstream if available
-            if self._upstream.enabled:
-                self._dc_upstream_required.add((dc, is_media))
-                self._log(f"[{label}] DC{dc}{media_tag} TCP failed -> trying upstream")
-                await self._upstream_proxy_connect(
-                    client_reader, client_writer,
-                    target_host, target_port, init, label, dc, is_media,
-                )
-            return
-
-        elapsed = time.monotonic() - t_connect
-        self._log(f"[{label}] DC{dc}{media_tag} TCP connected ({elapsed:.1f}s)")
-        self._log_route_detail(
-            label,
-            route="TCP fallback",
-            dc=dc,
-            is_media=is_media,
-            target=f"{target_host}:{target_port}",
-            result="connected",
-            elapsed=elapsed,
-        )
-        self.stats.tcp_fallback_connections += 1
-        self._record_route(dc=dc, is_media=is_media, route="TCP", status="OK")
-        # Forward the buffered init packet
-        rw.write(init)
-        await rw.drain()
-        recv_total, watchdog_fired = await self._relay_tcp(
-            client_reader, client_writer, rr, rw, label,
-            dc=dc, recv_zero_timeout=_RECV_ZERO_TIMEOUT,
-        )
-
-        # Learn from watchdog timeout: server silence = DC is blocked by DPI.
-        # Only mark on watchdog — client disconnect with recv=0 is NOT blocking evidence.
-        if watchdog_fired and recv_total == 0 and self._upstream.enabled:
-            self._dc_upstream_required.add((dc, is_media))
-            self._log(f"[{label}] DC{dc}{media_tag} recv=0 (watchdog) -> marked for upstream routing")
-            self._log_route_detail(
-                label,
-                route="TCP fallback",
-                dc=dc,
-                is_media=is_media,
-                target=f"{target_host}:{target_port}",
-                result="error",
-                reason="recv=0 watchdog",
-                next_step="future connections use upstream SOCKS5",
-            )
-            self._record_route(
-                dc=dc,
-                is_media=is_media,
-                route="TCP",
-                status="ошибка",
-                reason="recv=0 watchdog",
-            )
-
-    async def _upstream_proxy_connect(
-        self,
-        client_reader: asyncio.StreamReader,
-        client_writer: asyncio.StreamWriter,
-        target_host: str,
-        target_port: int,
-        init: bytes,
-        label: str,
-        dc: int,
-        is_media: bool,
-    ) -> bool:
-        """Route through upstream SOCKS5 proxy as last-resort fallback.
-        Returns True if upstream connected, False on failure."""
-        if not self._upstream.enabled:
-            return False
-        fallback_mode = should_route_upstream(self._upstream, mode="fallback")
-        has_healthy_upstream = self._has_healthy_upstream_proxy()
-        if fallback_mode and not has_healthy_upstream:
-            self._log(f"[{label}] upstream temporarily unavailable; skip fallback")
-            return False
-
-        media_tag = " media" if is_media else ""
-        upstream_host, upstream_port = self._upstream_target(target_host, target_port, dc, is_media)
-        if upstream_host != target_host or upstream_port != target_port:
-            self._log(
-                f"[{label}] DC{dc}{media_tag} upstream target "
-                f"{target_host}:{target_port} -> {upstream_host}:{upstream_port}"
-            )
-        opened = await self._open_upstream_proxy(
-            upstream_host=upstream_host,
-            upstream_port=upstream_port,
-            label=label,
-            dc=dc,
-            is_media=is_media,
-        )
-        if opened is None:
-            return False
-        rr, rw = opened.reader, opened.writer
-        upstream_notified = False
-
-        def notify_on_first_response() -> None:
-            nonlocal upstream_notified
-            if upstream_notified:
-                return
-            upstream_notified = True
-            self._upstream_runtime.record_recv_ok(opened)
-
-        try:
-            # Forward the buffered init packet
-            rw.write(init)
-            await rw.drain()
-            recv_total, _watchdog_fired = await self._relay_tcp(
-                client_reader,
-                client_writer,
-                rr,
-                rw,
-                label,
-                dc=dc,
-                on_first_response=notify_on_first_response,
-            )
-            if recv_total > 0:
-                if not upstream_notified:
-                    self._upstream_runtime.record_recv_ok(opened)
-            else:
-                self._upstream_runtime.record_zero_recv(opened)
-        finally:
-            self._upstream_runtime.release(opened)
-        return True
-
-    def _upstream_target(
-        self,
-        target_host: str,
-        target_port: int,
-        dc: int,
-        is_media: bool,
-    ) -> tuple[str, int]:
-        if ":" not in str(target_host) or int(dc or 0) <= 0 or int(target_port or 0) != 443:
-            return target_host, target_port
-        if not is_telegram_ip(str(target_host)):
-            return target_host, target_port
-        return dc_to_tcp_endpoint(dc, self._dc_endpoint_overrides, is_media=is_media)
-
-    async def _relay_wss(
-        self,
-        client_reader: asyncio.StreamReader,
-        client_writer: asyncio.StreamWriter,
-        ws: RawWebSocket,
-        splitter: Optional[_MsgSplitter],
-        label: str,
-        dc: int = 0,
-    ) -> tuple[int, int]:
-        return await relay_wss(
-            client_reader=client_reader,
-            client_writer=client_writer,
-            ws=ws,
-            splitter=splitter,
-            stats=self.stats,
-            log_fn=self._log,
-            label=label,
-            dc=dc,
-        )
-
-    async def _relay_tcp(
-        self,
-        client_reader: asyncio.StreamReader,
-        client_writer: asyncio.StreamWriter,
-        remote_reader: asyncio.StreamReader,
-        remote_writer: asyncio.StreamWriter,
-        label: str = "",
-        dc: int = 0,
-        recv_zero_timeout: float = 0,
-        on_first_response: Optional[Callable[[], None]] = None,
-    ) -> tuple[int, bool]:
-        return await relay_tcp(
-            client_reader=client_reader,
-            client_writer=client_writer,
-            remote_reader=remote_reader,
-            remote_writer=remote_writer,
-            stats=self.stats,
-            log_fn=self._log,
-            label=label,
-            dc=dc,
-            recv_zero_timeout=recv_zero_timeout,
-            on_first_response=on_first_response,
-        )
+            await self._finish_connection(task, client_writer)
 
 
-def _is_domain(host: str) -> bool:
-    """Check if host is a domain name (not an IP address)."""
-    if ":" in host:
-        return False  # IPv6 address
-    return not all(c.isdigit() or c == "." for c in host)
+__all__ = [
+    "CloudflareFallbackConfig",
+    "ProxyStats",
+    "TelegramWSProxy",
+    "UpstreamProxyConfig",
+    "check_relay_reachable",
+]

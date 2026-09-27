@@ -1,316 +1,185 @@
+"""Пул запасных WebSocket: сокеты, уже прошедшие TCP, TLS и upgrade.
+
+Запасной сокет ещё не отправил заголовок obfuscated2, поэтому релей его ни к
+чему не привязал, и любое новое соединение того же маршрута может его взять.
+Правила из ZaStoGram (jni/tgnet/wss/WssPool.cpp):
+
+* прогреваются только маршруты, которые реально запрашивались, и только
+  2 минуты после последнего запроса;
+* по одному запасному на маршрут; если за 3 с после взятия пришёл ещё запрос
+  (загрузка открывает два соединения), 30 с держатся два запасных;
+* первый запасной открывается через 3 с после первого запроса: на старте все
+  соединения Telegram открываются разом, и лишние сокеты теряют SYN;
+* запасной живёт не дольше 70 с: релеи kws закрывают молчащий сокет через
+  ~100 с;
+* пауза после неудачи удваивается от 2 до 60 с;
+* все фронты одного DC — один маршрут пула: подходит любой готовый фронт.
+
+Отказы запасных сокетов не влияют на здоровье маршрутов.
+"""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from typing import Optional
+from typing import Awaitable, Callable
 
-from telegram_proxy.proxy.dc_map import (
-    WSS_DOMAINS,
-    WSS_PATH,
-    WSS_RELAY_IP,
-    WSS_RELAY_IPS,
-    ws_domains_for_dc,
-)
-from telegram_proxy.proxy.cloudflare import build_worker_path
-from telegram_proxy.proxy.stats import ProxyStats
-from telegram_proxy.proxy.transport import RawWebSocket, WsHandshakeError
+from telegram_proxy.proxy import ws as ws_transport
 
 
 log = logging.getLogger("tg_proxy")
 
-WS_POOL_SIZE = 4
-WS_POOL_MAX_AGE = 120.0
-MAX_CONCURRENT_WSS = 4
-_wss_semaphore: Optional[asyncio.Semaphore] = None
+DEMAND_TTL = 120.0
+FIRST_OPEN_DELAY = 3.0
+MAX_IDLE = 70.0
+BURST_WINDOW = 3.0
+BURST_HOLD = 30.0
+RETRY_MIN = 2.0
+RETRY_MAX = 60.0
 
 
-def get_wss_semaphore() -> asyncio.Semaphore:
-    """Lazy-init semaphore inside the active event loop."""
-    global _wss_semaphore
-    if _wss_semaphore is None:
-        _wss_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WSS)
-    return _wss_semaphore
-
-
-def reset_wss_semaphore() -> None:
-    """Reset WSS connection limit for a fresh event loop/session."""
-    global _wss_semaphore
-    _wss_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WSS)
-
-
-def relay_ip_for_domain(domain: str) -> str:
-    """Get the relay IP for a WSS domain, with fallback."""
-    return WSS_RELAY_IPS.get(domain, WSS_RELAY_IP)
-
-
-def normalize_pool_size(value: object) -> int:
-    try:
-        number = int(value)
-    except Exception:
-        return WS_POOL_SIZE
-    return max(0, min(32, number))
-
-
-def _websocket_is_unusable(ws: RawWebSocket) -> bool:
-    if getattr(ws, "_closed", False):
-        return True
-    transport = getattr(getattr(ws, "writer", None), "transport", None)
-    is_closing = getattr(transport, "is_closing", None)
-    if not callable(is_closing):
-        return False
-    try:
-        return bool(is_closing())
-    except Exception:
-        return True
-
-
-class WsPool:
-    """Pre-opened WebSocket connection pool."""
-
-    def __init__(self, stats: ProxyStats, pool_size: int = WS_POOL_SIZE, buffer_size: int = 256 * 1024):
-        self._idle: dict[tuple[int, bool], list[tuple[RawWebSocket, float]]] = {}
-        self._refilling: set[tuple[int, bool]] = set()
-        self._stats = stats
-        self._pool_size = normalize_pool_size(pool_size)
-        self._buffer_size = int(buffer_size)
-
-    async def get(
-        self, dc: int, is_media: bool,
-        target_ip: str, domains: list[str],
-    ) -> Optional[RawWebSocket]:
-        """Return a pooled WebSocket or None if pool is empty."""
-        if not domains:
-            return None
-        key = (dc, is_media)
-        now = time.monotonic()
-        allowed_domains = {str(domain) for domain in domains}
-
-        bucket = self._idle.get(key, [])
-        while bucket:
-            ws, created = bucket.pop(0)
-            age = now - created
-            domain = str(getattr(ws, "domain", "") or "")
-            if domain and domain not in allowed_domains:
-                asyncio.create_task(self._quiet_close(ws))
-                continue
-            if age > WS_POOL_MAX_AGE or _websocket_is_unusable(ws):
-                asyncio.create_task(self._quiet_close(ws))
-                continue
-            self._stats.pool_hits += 1
-            media_tag = "m" if is_media else ""
-            log.debug(
-                "WS pool hit for DC%d%s (age=%.1fs, left=%d)",
-                dc,
-                media_tag,
-                age,
-                len(bucket),
-            )
-            self._schedule_refill(key, target_ip, domains)
-            return ws
-
-        self._stats.pool_misses += 1
-        self._schedule_refill(key, target_ip, domains)
-        return None
-
-    def _schedule_refill(
-        self, key: tuple[int, bool],
-        target_ip: str, domains: list[str],
-    ) -> None:
-        if key in self._refilling:
-            return
-        self._refilling.add(key)
-        asyncio.create_task(self._refill(key, target_ip, domains))
-
-    async def _refill(
-        self, key: tuple[int, bool],
-        target_ip: str, domains: list[str],
-    ) -> None:
-        dc, is_media = key
-        try:
-            bucket = self._idle.setdefault(key, [])
-            needed = self._pool_size - len(bucket)
-            if needed <= 0:
-                return
-            tasks = [
-                asyncio.create_task(self._connect_one(target_ip, domains, self._buffer_size))
-                for _ in range(needed)
-            ]
-            for task in tasks:
-                try:
-                    ws = await task
-                    if ws is not None:
-                        bucket.append((ws, time.monotonic()))
-                except Exception:
-                    pass
-            media_tag = "m" if is_media else ""
-            log.debug("WS pool refilled DC%d%s: %d ready", dc, media_tag, len(bucket))
-        finally:
-            self._refilling.discard(key)
-
-    @staticmethod
-    async def _connect_one(
-        target_ip: str, domains: list[str], buffer_size: int = 256 * 1024,
-    ) -> Optional[RawWebSocket]:
-        sem = get_wss_semaphore()
-        async with sem:
-            for domain in domains:
-                relay_ip = relay_ip_for_domain(domain)
-                try:
-                    ws = await RawWebSocket.connect(
-                        relay_ip, domain, WSS_PATH, timeout=8.0, buffer_size=buffer_size,
-                    )
-                    return ws
-                except WsHandshakeError as exc:
-                    if exc.is_redirect:
-                        continue
-                    return None
-                except Exception:
-                    return None
-        return None
-
-    @staticmethod
-    async def _quiet_close(ws: RawWebSocket) -> None:
-        try:
-            await ws.close()
-        except Exception:
-            pass
-
-    async def warmup(self) -> None:
-        for dc, _domain_list in WSS_DOMAINS.items():
-            for is_media in (False, True):
-                key = (dc, is_media)
-                domains = ws_domains_for_dc(dc, is_media)
-                self._schedule_refill(key, WSS_RELAY_IP, domains)
-        log.info("WS pool warmup started for %d DC(s)", len(WSS_DOMAINS))
-
-    async def close_all(self) -> None:
-        for bucket in self._idle.values():
-            for ws, _created in bucket:
-                asyncio.create_task(self._quiet_close(ws))
-        self._idle.clear()
-
-
-class CloudflareWorkerPool:
-    """Pre-opened WebSocket connections to user Cloudflare Worker domains."""
-
-    def __init__(self, stats: ProxyStats, pool_size: int = WS_POOL_SIZE, buffer_size: int = 256 * 1024):
-        self._idle: dict[tuple[int, str, str], list[tuple[RawWebSocket, float]]] = {}
-        self._refilling: set[tuple[int, str, str]] = set()
-        self._stats = stats
-        self._pool_size = normalize_pool_size(pool_size)
-        self._buffer_size = int(buffer_size)
-
-    async def get(self, dc: int, worker_domain: str, fallback_dst: str) -> Optional[RawWebSocket]:
-        key = (int(dc), str(worker_domain), str(fallback_dst))
-        now = time.monotonic()
-
-        bucket = self._idle.get(key, [])
-        while bucket:
-            ws, created = bucket.pop(0)
-            age = now - created
-            if age > WS_POOL_MAX_AGE or _websocket_is_unusable(ws):
-                asyncio.create_task(self._quiet_close(ws))
-                continue
-            self._stats.cloudflare_worker_pool_hits += 1
-            self._schedule_refill(key)
-            return ws
-
-        self._stats.cloudflare_worker_pool_misses += 1
-        self._schedule_refill(key)
-        return None
-
-    def _schedule_refill(self, key: tuple[int, str, str]) -> None:
-        if key in self._refilling:
-            return
-        self._refilling.add(key)
-        asyncio.create_task(self._refill(key))
-
-    async def _refill(self, key: tuple[int, str, str]) -> None:
-        dc, worker_domain, fallback_dst = key
-        try:
-            bucket = self._idle.setdefault(key, [])
-            needed = self._pool_size - len(bucket)
-            if needed <= 0:
-                return
-            tasks = [
-                asyncio.create_task(self._connect_one(dc, worker_domain, fallback_dst, self._buffer_size))
-                for _ in range(needed)
-            ]
-            for task in tasks:
-                try:
-                    ws = await task
-                    if ws is not None:
-                        bucket.append((ws, time.monotonic()))
-                except Exception:
-                    pass
-            log.debug(
-                "Cloudflare Worker pool refilled DC%d %s: %d ready",
-                dc,
-                worker_domain,
-                len(bucket),
-            )
-        finally:
-            self._refilling.discard(key)
-
-    @staticmethod
-    async def _connect_one(
-        dc: int, worker_domain: str, fallback_dst: str, buffer_size: int = 256 * 1024
-    ) -> Optional[RawWebSocket]:
-        path = build_worker_path(fallback_dst, dc)
-        sem = get_wss_semaphore()
-        async with sem:
-            try:
-                return await RawWebSocket.connect(
-                    worker_domain,
-                    worker_domain,
-                    path=path,
-                    timeout=8.0,
-                    buffer_size=buffer_size,
-                )
-            except Exception:
-                return None
-
-    @staticmethod
-    async def _quiet_close(ws: RawWebSocket) -> None:
-        try:
-            await ws.close()
-        except Exception:
-            pass
-
-    async def warmup(
+class WsSparePool:
+    def __init__(
         self,
-        worker_domains: tuple[str, ...],
-        fallback_targets: list[tuple[int, str]],
+        stats,
+        *,
+        enabled: bool = True,
+        buffer_size: int = 256 * 1024,
+        connect: Callable[..., Awaitable[ws_transport.WebSocket]] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        scheduled: set[tuple[int, str, str]] = set()
-        for worker_domain in worker_domains:
-            worker = str(worker_domain or "").strip()
-            if not worker:
-                continue
-            for dc, fallback_dst in fallback_targets:
-                target = str(fallback_dst or "").strip()
-                if not target:
+        self._stats = stats
+        self._enabled = bool(enabled)
+        self._buffer_size = int(buffer_size)
+        self._connect = connect or ws_transport.connect
+        self._clock = clock
+        self._spares: dict[str, list[ws_transport.WebSocket]] = {}
+        self._targets: dict[str, ws_transport.WsTarget] = {}
+        self._demand_at: dict[str, float] = {}
+        self._taken_at: dict[str, float] = {}
+        self._burst_until: dict[str, float] = {}
+        self._wake: dict[str, asyncio.Event] = {}
+        self._tasks: dict[str, asyncio.Task] = {}
+        self._closed = False
+
+    @staticmethod
+    def _target_of(route) -> ws_transport.WsTarget:
+        return ws_transport.WsTarget(connect_host=route.connect_host, sni=route.sni, path=route.path)
+
+    def _usable(self, ws: ws_transport.WebSocket) -> bool:
+        if ws.is_closing or ws.has_unread_data():
+            return False
+        return self._clock() - ws.opened_at < MAX_IDLE
+
+    def take(self, route) -> ws_transport.WebSocket | None:
+        """Взять готовый запасной сокет маршрута или None (промах)."""
+        key = str(getattr(route, "pool_key", "") or "")
+        if not self._enabled or self._closed or not key:
+            return None
+        now = self._clock()
+        self._demand_at[key] = now
+        spares = self._spares.get(key) or []
+        taken = None
+        while spares:
+            candidate = spares.pop(0)
+            if self._usable(candidate):
+                taken = candidate
+                break
+            asyncio.ensure_future(candidate.close())
+        if taken is None:
+            self._stats.pool_misses += 1
+            return None
+        self._stats.pool_hits += 1
+        last = self._taken_at.get(key)
+        if last is not None and now - last < BURST_WINDOW:
+            self._burst_until[key] = now + BURST_HOLD
+        self._taken_at[key] = now
+        self._ensure_refill(key, first=False)
+        return taken
+
+    def remember(self, route) -> None:
+        """Маршрут открылся вживую: держать для него запасной."""
+        key = str(getattr(route, "pool_key", "") or "")
+        if not self._enabled or self._closed or not key:
+            return
+        self._targets[key] = self._target_of(route)
+        first = key not in self._demand_at
+        self._demand_at[key] = self._clock()
+        self._ensure_refill(key, first=first)
+
+    def _ensure_refill(self, key: str, *, first: bool) -> None:
+        event = self._wake.setdefault(key, asyncio.Event())
+        event.set()
+        task = self._tasks.get(key)
+        if task is not None and not task.done():
+            return
+        if key not in self._targets:
+            return
+        self._tasks[key] = asyncio.create_task(self._refill(key, first=first))
+
+    async def _sleep_or_wake(self, key: str, seconds: float) -> None:
+        event = self._wake.setdefault(key, asyncio.Event())
+        event.clear()
+        try:
+            await asyncio.wait_for(event.wait(), timeout=max(0.05, seconds))
+        except TimeoutError:
+            pass
+
+    async def _refill(self, key: str, *, first: bool) -> None:
+        backoff = 0.0
+        try:
+            if first:
+                await asyncio.sleep(FIRST_OPEN_DELAY)
+            while not self._closed:
+                now = self._clock()
+                if now - self._demand_at.get(key, -1e9) > DEMAND_TTL:
+                    break
+                spares = self._spares.setdefault(key, [])
+                for spare in list(spares):
+                    if not self._usable(spare):
+                        spares.remove(spare)
+                        await spare.close()
+                want = 2 if now < self._burst_until.get(key, 0.0) else 1
+                if len(spares) >= want:
+                    oldest = min(spare.opened_at for spare in spares)
+                    await self._sleep_or_wake(key, MAX_IDLE - (now - oldest) + 0.1)
                     continue
-                key = (int(dc), worker, target)
-                if key in scheduled:
+                target = self._targets.get(key)
+                if target is None:
+                    break
+                try:
+                    spare = await self._connect(target, buffer_size=self._buffer_size)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    backoff = min(RETRY_MAX, max(RETRY_MIN, backoff * 2))
+                    log.debug("pool %s: spare failed (%s), retry in %.0fs", key, exc, backoff)
+                    await self._sleep_or_wake(key, backoff)
                     continue
-                scheduled.add(key)
-                self._schedule_refill(key)
-        if scheduled:
-            log.info("Cloudflare Worker pool warmup started for %d target(s)", len(scheduled))
+                backoff = 0.0
+                if self._closed:
+                    await spare.close()
+                    break
+                spares.append(spare)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if self._tasks.get(key) is asyncio.current_task():
+                self._tasks.pop(key, None)
 
     async def close_all(self) -> None:
-        for bucket in self._idle.values():
-            for ws, _created in bucket:
-                asyncio.create_task(self._quiet_close(ws))
-        self._idle.clear()
+        self._closed = True
+        tasks = list(self._tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._tasks.clear()
+        for spares in self._spares.values():
+            for spare in spares:
+                await spare.close()
+        self._spares.clear()
 
 
-__all__ = [
-    "CloudflareWorkerPool",
-    "WsPool",
-    "get_wss_semaphore",
-    "relay_ip_for_domain",
-    "reset_wss_semaphore",
-]
+__all__ = ["WsSparePool"]
