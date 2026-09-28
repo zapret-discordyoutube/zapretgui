@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable, Sequence
 
 from blockcheck.strategy_search import probes
-from blockcheck.strategy_search.engine import ScanFatal
+from blockcheck.strategy_search.engine import STOP_WINWS, ScanFatal
 from blockcheck.strategy_search.ordering import Candidate
 from blockcheck.strategy_search.winws_session import WinwsSession
 
@@ -135,7 +135,7 @@ class RealEnvironment:
         self._remove_probe_files()
         result = self._shutdown_sync(reason="blockcheck_pre_scan", include_cleanup=True)
         if getattr(result, "still_running", False):
-            raise ScanFatal("Не удалось остановить Zapret перед подбором. Остановите его вручную и повторите.")
+            raise ScanFatal("Не удалось остановить Zapret перед подбором. Остановите его вручную и повторите.", STOP_WINWS)
         self._needs_readiness_check = True
 
     def post_cleanup(self) -> None:
@@ -164,7 +164,7 @@ class RealEnvironment:
 
             path = exe_path_for_launch_method(ZAPRET2_MODE)
             if not os.path.exists(path):
-                raise ScanFatal(f"Не найден {EXE_NAME_WINWS2}: {path}. Переустановите программу.")
+                raise ScanFatal(f"Не найден {EXE_NAME_WINWS2}: {path}. Переустановите программу.", STOP_WINWS)
             self._winws2 = path
         return self._winws2
 
@@ -228,7 +228,7 @@ class RealEnvironment:
             return
         description = describe_windivert_readiness_failure(probe)
         if int(getattr(probe, "error_code", 0) or 0) == 1058:
-            raise ScanFatal(description)
+            raise ScanFatal(description, STOP_WINWS)
         self._log(f"  {description}")
 
     def strategy_pause_seconds(self) -> float:

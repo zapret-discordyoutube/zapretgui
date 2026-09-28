@@ -29,6 +29,19 @@ class StrategyScanStartPlan:
 
 
 @dataclass(slots=True)
+class StrategyScanPanelOutcome:
+    """Итог подбора для панели: вид, заголовок, объяснение, лучшая стратегия."""
+
+    kind: str
+    title: str
+    detail: str = ""
+    best_text: str = ""
+    # Номер лучшей стратегии в строках результатов (-1 — нет).
+    best_index: int = -1
+    celebrate: bool = False
+
+
+@dataclass(slots=True)
 class StrategyScanFinishPlan:
     total_available: int
     working_count: int
@@ -41,6 +54,7 @@ class StrategyScanFinishPlan:
     notification_kind: str
     baseline_variant: str
     fatal_error: str = ""
+    outcome: StrategyScanPanelOutcome | None = None
 
 
 @dataclass(slots=True)
@@ -127,6 +141,7 @@ class StrategyScanLanguagePlan:
     stop_text: str
     prepare_support_text: str
     protocol_items: list[str]
+    protocol_hints: list[str]
     udp_scope_label: str
     udp_scope_items: list[str]
     quick_domains_text: str

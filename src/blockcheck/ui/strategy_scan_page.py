@@ -42,10 +42,7 @@ from ui.combo_accessibility import set_combo_items_accessibility
 from app.ui_texts import tr as tr_catalog
 from qfluentwidgets import (
     ComboBox,
-    CaptionLabel,
     BodyLabel,
-    ProgressBar,
-    TableWidget,
     PrimaryPushButton,
     PushButton,
     LineEdit,
@@ -101,6 +98,8 @@ class StrategyScanPage(BasePage):
         self._games_scope_combo = None
         self._udp_scope_hint_label: QLabel | None = None
         self._log_caption = None
+        self._result_objects: list = []
+        self._scan_panel = None
         self._protocol_label = None
         self._mode_label = None
         self._prepare_support_btn = None
@@ -165,17 +164,14 @@ class StrategyScanPage(BasePage):
     # ------------------------------------------------------------------
 
     def _build_ui(self):
-        # ── Control Card ──
+        # ── «Что починить» ──
         control_widgets = build_strategy_scan_control_section(
             tr_fn=lambda key, default: tr_catalog(key, default=default),
             combo_cls=ComboBox,
-            caption_label_cls=CaptionLabel,
             body_label_cls=BodyLabel,
-            progress_bar_cls=ProgressBar,
             primary_button_cls=PrimaryPushButton,
             push_button_cls=PushButton,
             line_edit_cls=LineEdit,
-            parent=self.content,
             on_protocol_changed=self._on_protocol_changed,
             on_udp_games_scope_changed=self._on_udp_games_scope_changed,
             on_show_quick_domains_menu=self._show_quick_domains_menu,
@@ -189,36 +185,32 @@ class StrategyScanPage(BasePage):
         self._games_scope_combo = control_widgets.games_scope_combo
         self._mode_label = control_widgets.mode_label
         self._mode_combo = control_widgets.mode_combo
+        self._mode_hint_label = control_widgets.mode_hint_label
         self._target_label = control_widgets.target_label
         self._target_input = control_widgets.target_input
         self._quick_domain_btn = control_widgets.quick_domain_btn
         self._udp_scope_hint_label = control_widgets.udp_scope_hint_label
-        self._warning_card = None
-        self._progress_bar = control_widgets.progress_bar
-        self._status_label = control_widgets.status_label
         self._start_btn = control_widgets.start_btn
         self._stop_btn = control_widgets.stop_btn
         self._mode_combo.currentIndexChanged.connect(self._update_control_accessibility)
-        self._update_control_accessibility()
-        self._set_status_text(self._status_label.text())
-
+        self._mode_combo.currentIndexChanged.connect(self._refresh_mode_hint)
         self.add_widget(self._control_card)
 
-        # ── Results Table Card ──
-        results_widgets = build_strategy_scan_results_section(
-            tr_fn=lambda key, default: tr_catalog(key, default=default),
-            table_cls=TableWidget,
-        )
+        # ── Ход и итог, результаты ──
+        results_widgets = build_strategy_scan_results_section(on_apply_best=self._on_apply_best)
+        self._scan_panel = results_widgets.panel
+        self._progress_bar = results_widgets.progress_bar
+        self._status_label = results_widgets.status_label
         self._results_card = results_widgets.results_card
-        self._table = results_widgets.table
+        self._results_view = results_widgets.results_view
+        self.add_widget(self._scan_panel)
         self.add_widget(self._results_card)
 
-        # ── Log Card ──
+        # ── Подробный лог (свёрнут) ──
         self._log_expanded = False
         log_widgets = build_strategy_scan_log_section(
             tr_fn=lambda key, default: tr_catalog(key, default=default),
             push_button_cls=PushButton,
-            parent=self.content,
             on_toggle_log_expand=self._toggle_log_expand,
             on_prepare_support=self._prepare_support_from_strategy_scan,
         )
@@ -230,26 +222,30 @@ class StrategyScanPage(BasePage):
         self._log_edit = log_widgets.log_edit
         self.add_widget(self._log_card)
 
+        self._update_control_accessibility()
+        self._refresh_mode_hint()
         self._on_protocol_changed(self._protocol_combo.currentIndex())
+        self._set_status_text(self._status_label.text())
+
+    def _refresh_mode_hint(self, *_args) -> None:
+        from blockcheck.strategy_scan_page_plans import mode_hint_text
+
+        self._mode_hint_label.setText(mode_hint_text(self._mode_combo.currentIndex(), language=self._ui_language))
 
     # ------------------------------------------------------------------
     # Log expand / collapse
     # ------------------------------------------------------------------
 
     def _toggle_log_expand(self):
-        """Развернуть/свернуть лог на всю страницу."""
+        """Показать или скрыть подробный лог (он раскрывается в своей карточке)."""
         self._log_expanded = not self._log_expanded
         apply_log_expand_state(
             blockcheck_feature=self._blockcheck,
             expanded=self._log_expanded,
             language=self._ui_language,
-            control_card=self._control_card,
-            warning_card=self._warning_card,
-            results_card=self._results_card,
             log_edit=self._log_edit,
             expand_log_btn=self._expand_log_btn,
         )
-        self._update_log_expand_accessibility()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -465,9 +461,9 @@ class StrategyScanPage(BasePage):
     # ------------------------------------------------------------------
 
     def _apply_page_theme(self, tokens=None, force: bool = False):
+        # Свои виджеты перекрашиваются сами через ThemeRefreshBinding.
         _ = tokens
         _ = force
-        pass  # Table colors are set per-cell, no global refresh needed
 
     def _apply_language_plan(self, language: str) -> None:
         apply_language_plan_ui(
@@ -475,7 +471,6 @@ class StrategyScanPage(BasePage):
             language=language,
             log_expanded=self._log_expanded,
             expand_log_btn=self._expand_log_btn,
-            log_caption_label=self._log_caption,
             protocol_label=self._protocol_label,
             mode_label=self._mode_label,
             mode_combo=self._mode_combo,
@@ -509,6 +504,8 @@ class StrategyScanPage(BasePage):
             parent=self,
             on_run_log_started=self._on_run_log_started,
             on_strategy_started=self._on_strategy_started,
+            on_strategy_args_started=self._on_strategy_args_started,
+            on_stage_changed=self._on_stage_changed,
             on_strategy_result=self._on_strategy_result,
             on_log=self._on_log,
             on_phase_changed=self._on_phase_changed,
@@ -517,9 +514,10 @@ class StrategyScanPage(BasePage):
         )
         self._target_input.setText(run_result.target)
 
-        self._table.setRowCount(0)
-        set_state_text(self._table, "Результаты подбора стратегии: пока нет результатов")
+        self._results_view.clear()
+        self._results_card.setVisible(False)
         self._result_rows.clear()
+        self._result_objects.clear()
         self._log_edit.clear()
         set_state_text(self._log_edit, "Подробный лог подбора стратегии: пока нет записей")
         self._set_support_status("")
@@ -532,8 +530,10 @@ class StrategyScanPage(BasePage):
         self._run_log_file = None
 
         self._apply_interaction_plan(self._blockcheck.build_running_interaction_plan())
-        self._progress_bar.setVisible(True)
-        self._progress_bar.setValue(0)
+        self._scan_panel.show_running(run_result.target, self._running_subtitle())
+        from blockcheck.ui.fun_texts import phrases
+
+        self._scan_panel.set_phrases(phrases("scan_network", self._ui_language))
         set_state_text(self._progress_bar, "Ход подбора стратегии: выполняется")
         self._set_status_text(run_result.status_text)
         start_strategy_scan_worker(
@@ -557,7 +557,7 @@ class StrategyScanPage(BasePage):
             return False
         # Пользователь сам запускает Zapret: подбор не должен запускать его
         # второй раз, когда остановится.
-        cancel_restore = getattr(self._scan_worker, "cancel_runtime_restore", None)
+        cancel_restore = getattr(self.__dict__.get("_scan_worker"), "cancel_runtime_restore", None)
         if cancel_restore is not None:
             cancel_restore()
         self._on_stop()
@@ -594,23 +594,62 @@ class StrategyScanPage(BasePage):
             status_label=self._status_label,
             done_count=len(self._result_rows),
         )
-        self._set_status_text(self._status_label.text())
+        if self._scan_panel is not None:
+            self._scan_panel.set_strategy_progress(len(self._result_rows), total)
 
     def _on_strategy_result(self, result):
-        """Add a row to the results table."""
+        """Строка результата: найденные сверху, остальные — в свёрнутые группы."""
         if self._cleanup_in_progress:
             return
         stored_row = add_strategy_result_row(
             blockcheck_feature=self._blockcheck,
-            table=self._table,
+            results_view=self._results_view,
             result=result,
             row_number=len(self._result_rows) + 1,
-            tr_fn=lambda key, default: tr_catalog(key, default=default),
-            push_button_cls=PushButton,
             on_apply_strategy=self._on_apply_strategy,
         )
         self._result_rows.append(dict(stored_row))
+        self._result_objects.append(result)
+        self._results_card.setVisible(True)
         self._progress_bar.setValue(len(self._result_rows))
+        if getattr(result, "success", False):
+            self._scan_panel.note_found(sum(1 for row in self._result_rows if row.get("success")))
+
+    def _running_subtitle(self) -> str:
+        mode = self._mode_combo.currentText() if self._mode_combo is not None else ""
+        return (
+            f"{self._protocol_combo.currentText()} · {mode}. "
+            "Zapret на время подбора выключен — потом включится снова, если работал."
+        )
+
+    def _on_stage_changed(self, step: str, status: str, text: str) -> None:
+        if self._cleanup_in_progress or self._scan_panel is None:
+            return
+        self._scan_panel.set_step(step, status, text)
+        if status == "running" and step in ("network", "baseline", "control"):
+            from blockcheck.ui.fun_texts import phrases
+
+            self._scan_panel.set_phrases(phrases(f"scan_{step}", self._ui_language))
+
+    def _on_strategy_args_started(self, args: str) -> None:
+        if self._cleanup_in_progress or self._scan_panel is None:
+            return
+        from blockcheck.ui.fun_texts import strategy_phrases
+
+        self._scan_panel.set_phrases(strategy_phrases(args, self._ui_language))
+
+    def _on_apply_best(self) -> None:
+        """«Применить лучшую» — самая быстрая из надёжных стратегий."""
+        working = [
+            (float(row.get("time_ms") or 1e9), index)
+            for index, row in enumerate(self._result_rows)
+            if row.get("success")
+        ]
+        if not working:
+            return
+        _time, index = min(working)
+        if 0 <= index < len(self._result_objects):
+            self._on_apply_strategy(self._result_objects[index])
 
     def _on_continue_question(self, reason: str) -> None:
         """Цель открывается без обхода: спросить, проверять ли всё равно."""
@@ -719,8 +758,8 @@ class StrategyScanPage(BasePage):
             status_label=self._status_label,
             set_support_status=self._set_support_status,
             parent_widget=self.window(),
+            panel=self._scan_panel,
         )
-        self._set_status_text(self._status_label.text())
 
     def _on_strategy_scan_finalize_failed(self, request_id: int, error: str) -> None:
         if not self._strategy_scan_finalize_runtime.is_current(
@@ -1045,7 +1084,8 @@ class StrategyScanPage(BasePage):
             name=state_text,
             description=description,
         )
-        set_combo_items_accessibility(combo, name=name)
+        if isinstance(combo, ComboBox):
+            set_combo_items_accessibility(combo, name=name)
 
     def _update_control_accessibility(self, *_args) -> None:
         self._update_combo_accessibility(
@@ -1063,20 +1103,6 @@ class StrategyScanPage(BasePage):
             name="Тщательность подбора",
             description="Выберите, сколько стратегий нужно проверить: больше стратегий — дольше поиск.",
         )
-
-    def _update_log_expand_accessibility(self) -> None:
-        if self._log_expanded:
-            set_control_accessibility(
-                self._expand_log_btn,
-                name="Свернуть лог подбора стратегии",
-                description="Возвращает подробный лог подбора стратегии к обычному размеру.",
-            )
-        else:
-            set_control_accessibility(
-                self._expand_log_btn,
-                name="Развернуть лог подбора стратегии",
-                description="Разворачивает подробный лог подбора стратегии на странице.",
-            )
 
     def _apply_interaction_plan(self, plan) -> None:
         self._start_btn.setEnabled(plan.start_enabled)
@@ -1273,7 +1299,7 @@ class StrategyScanPage(BasePage):
             self._apply_language_plan(language)
             self._refresh_udp_scope_hint()
             self._update_control_accessibility()
-            self._update_log_expand_accessibility()
+            self._refresh_mode_hint()
             self._set_status_text(self._status_label.text())
         except Exception:
             pass

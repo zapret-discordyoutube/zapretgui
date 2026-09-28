@@ -24,6 +24,10 @@ def _tr(key: str, *, default: str = "") -> str:
 
 class StrategyScanWorker(QObject):
     strategy_started = pyqtSignal(str, int, int)
+    # Строки текущей стратегии: окно подбирает к ним шутку про приём обхода.
+    strategy_args_started = pyqtSignal(str)
+    # Шаг подбора для панели хода: (шаг, статус, текст).
+    stage_changed = pyqtSignal(str, str, str)
     strategy_result = pyqtSignal(object)
     scan_log = pyqtSignal(str)
     phase_changed = pyqtSignal(str)
@@ -303,8 +307,12 @@ class _WorkerEvents:
     def phase(self, text: str) -> None:
         self._worker.phase(text)
 
-    def strategy_started(self, name: str, index: int, total: int) -> None:
+    def strategy_started(self, name: str, index: int, total: int, args: str = "") -> None:
+        self._worker.strategy_args_started.emit(str(args or ""))
         self._worker.strategy_started.emit(name, index, total)
+
+    def stage(self, step: str, status: str, text: str = "") -> None:
+        self._worker.stage_changed.emit(str(step), str(status), str(text or ""))
 
     def strategy_result(self, result) -> None:
         self._worker.strategy_result.emit(result)

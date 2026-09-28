@@ -179,6 +179,23 @@ def stagger_float_in(container: QWidget) -> StaggeredFloatIn | None:
         return None
 
 
+def float_in(widget: QWidget, *, delay_ms: int = 0) -> bool:
+    """Один виджет выплывает снизу (новая строка результата и т.п.).
+
+    Возвращает False, если выплывания не будет: анимации выключены, окно
+    свёрнуто или у виджета уже есть свой эффект.
+    """
+    if sip.isdeleted(widget) or not are_live_animations_enabled():
+        return False
+    if widget.graphicsEffect() is not None:
+        return False
+    window = widget.window()
+    if window is not None and window.isMinimized():
+        return False
+    _FloatIn(widget, delay_ms, widget)
+    return True
+
+
 def skip_float_in(widget: QWidget) -> QWidget:
     """Помечает виджет, у которого свой вход (например, девиз)."""
     widget.__dict__[NO_FLOAT_IN_ATTR] = True
@@ -188,6 +205,7 @@ def skip_float_in(widget: QWidget) -> QWidget:
 __all__ = [
     "StaggeredFloatIn",
     "attach_stagger_float_in",
+    "float_in",
     "skip_float_in",
     "stagger_float_in",
 ]

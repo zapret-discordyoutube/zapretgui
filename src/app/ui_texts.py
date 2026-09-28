@@ -4224,20 +4224,20 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "Back",
     },
     "page.strategy_scan.protocol": {
-        "ru": "Что должно заработать:",
-        "en": "What should work:",
+        "ru": "Что должно заработать?",
+        "en": "What should work?",
     },
     "page.strategy_scan.protocol_tcp": {
-        "ru": "Сайты и приложения (TCP/HTTPS)",
-        "en": "Sites and apps (TCP/HTTPS)",
+        "ru": "Сайты и приложения",
+        "en": "Sites and apps",
     },
     "page.strategy_scan.protocol_stun": {
-        "ru": "Голосовые звонки Discord и Telegram (STUN)",
-        "en": "Discord and Telegram voice calls (STUN)",
+        "ru": "Голосовые звонки",
+        "en": "Voice calls",
     },
     "page.strategy_scan.protocol_games": {
-        "ru": "Онлайн-игры: Roblox, Steam, Amazon (UDP)",
-        "en": "Online games: Roblox, Steam, Amazon (UDP)",
+        "ru": "Онлайн-игры",
+        "en": "Online games",
     },
     "page.strategy_scan.udp_scope": {
         "ru": "Какие адреса игр:",
@@ -4252,24 +4252,24 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "Game lists only",
     },
     "page.strategy_scan.mode": {
-        "ru": "Насколько тщательно:",
-        "en": "How thorough:",
+        "ru": "Тщательность:",
+        "en": "Thoroughness:",
     },
     "page.strategy_scan.mode_quick": {
-        "ru": "Быстро — 30 стратегий, до 3 мин",
-        "en": "Quick — 30 strategies, up to 3 min",
+        "ru": "Быстро · 30",
+        "en": "Quick · 30",
     },
     "page.strategy_scan.mode_standard": {
-        "ru": "Тщательно — 80 стратегий, до 8 мин",
-        "en": "Thorough — 80 strategies, up to 8 min",
+        "ru": "Тщательно · 80",
+        "en": "Thorough · 80",
     },
     "page.strategy_scan.mode_full": {
-        "ru": "Все стратегии — дольше всего",
-        "en": "All strategies — takes longest",
+        "ru": "Все стратегии",
+        "en": "All strategies",
     },
     "page.strategy_scan.target": {
-        "ru": "Какой сайт проверять:",
-        "en": "Site to check:",
+        "ru": "Какой сайт проверить:",
+        "en": "Which site to check:",
     },
     "page.strategy_scan.target.default": {
         "ru": "discord.com",
@@ -4316,8 +4316,8 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "Apply",
     },
     "page.strategy_scan.log": {
-        "ru": "Подробный лог подбора:",
-        "en": "Detailed search log:",
+        "ru": "Подробный лог",
+        "en": "Detailed log",
     },
     "page.strategy_scan.starting": {
         "ru": "Запуск сканирования...",
@@ -4362,6 +4362,30 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
     "page.strategy_scan.try_full": {
         "ru": "Запустите подбор ещё раз: проверятся следующие стратегии, или выберите «Все стратегии»",
         "en": "Run the scan again to test the next strategies, or choose «All strategies»",
+    },
+    "page.strategy_scan.protocol_tcp.hint": {
+        "ru": "YouTube, Discord, Instagram — всё, что в браузере",
+        "en": "YouTube, Discord, Instagram — anything in a browser",
+    },
+    "page.strategy_scan.protocol_stun.hint": {
+        "ru": "Звонки в Discord и Telegram",
+        "en": "Discord and Telegram calls",
+    },
+    "page.strategy_scan.protocol_games.hint": {
+        "ru": "Roblox, Steam, Amazon и другие",
+        "en": "Roblox, Steam, Amazon and more",
+    },
+    "page.strategy_scan.mode_quick.hint": {
+        "ru": "≈ 1–3 минуты",
+        "en": "≈ 1–3 minutes",
+    },
+    "page.strategy_scan.mode_standard.hint": {
+        "ru": "≈ 3–7 минут",
+        "en": "≈ 3–7 minutes",
+    },
+    "page.strategy_scan.mode_full.hint": {
+        "ru": "долго — самое время для чая ☕",
+        "en": "long — perfect time for tea ☕",
     },
     "page.strategy_scan.baseline_question_title": {
         "ru": "Подбирать нечего",

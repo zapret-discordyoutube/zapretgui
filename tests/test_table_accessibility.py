@@ -7,8 +7,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QLabel, QTableWidget, QWidget
-from qfluentwidgets import PushButton
+from PyQt6.QtWidgets import QApplication, QTableWidget, QWidget
 
 
 class TableAccessibilityTests(unittest.TestCase):
@@ -16,54 +15,41 @@ class TableAccessibilityTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
-    def _add_strategy_scan_result_row(self, table: QTableWidget) -> None:
+    def test_strategy_scan_result_row_has_screen_reader_text(self) -> None:
         from blockcheck.ui.strategy_scan_page_results_workflow import add_strategy_result_row
+        from blockcheck.ui.strategy_scan_widgets import StrategyResultsView
 
         class _Feature:
             def build_result_presentation(self, _result, *, row_number: int):
-                self.row_number = row_number
                 return SimpleNamespace(
-                    number_text="1",
+                    number_text=str(row_number),
                     strategy_name="TLS fake",
                     strategy_tooltip="Подмена TLS",
-                    status_text="OK",
+                    status_text="Работает 3/3",
                     status_tone="success",
                     status_tooltip="Стратегия сработала",
-                    time_text="120 ms",
+                    time_text="120",
                     can_apply=True,
-                    stored_row={"strategy": "TLS fake"},
+                    stored_row={"strategy": "TLS fake", "verdict": "working"},
                 )
 
+        applied = []
+        view = StrategyResultsView()
         add_strategy_result_row(
             blockcheck_feature=_Feature(),
-            table=table,
-            result=SimpleNamespace(strategy_args="--lua-desync=fake", strategy_name="TLS fake"),
+            results_view=view,
+            result=SimpleNamespace(strategy_args="--lua-desync=fake", strategy_name="TLS fake", success=True),
             row_number=1,
-            tr_fn=lambda _key, default: default,
-            push_button_cls=PushButton,
-            on_apply_strategy=lambda _result: None,
+            on_apply_strategy=applied.append,
         )
 
-    def test_strategy_scan_result_row_has_screen_reader_text(self) -> None:
-        table = QTableWidget(0, 5)
-
-        self._add_strategy_scan_result_row(table)
-
-        expected = "Строка 1. Стратегия TLS fake, статус OK, время 120 ms. Доступно действие: применить."
-        self.assertEqual(table.item(0, 1).data(Qt.ItemDataRole.AccessibleTextRole), expected)
-        self.assertEqual(table.item(0, 2).data(Qt.ItemDataRole.AccessibleTextRole), expected)
-        self.assertEqual(table.item(0, 3).data(Qt.ItemDataRole.AccessibleTextRole), expected)
-        self.assertEqual(table.cellWidget(0, 4).accessibleName(), "Применить стратегию TLS fake")
-
-    def test_strategy_scan_table_reports_current_row_to_screen_reader(self) -> None:
-        table = QTableWidget(0, 5)
-
-        self._add_strategy_scan_result_row(table)
-        row_text = table.item(0, 1).data(Qt.ItemDataRole.AccessibleTextRole)
-
-        table.setCurrentCell(0, 2)
-
-        self.assertEqual(table.property("screenReaderStateText"), row_text)
+        row = view.working_group.rows()[0]
+        expected = "Строка 1. Стратегия TLS fake, статус Работает 3/3, время 120. Доступно действие: применить."
+        self.assertEqual(row.property("screenReaderStateText"), expected)
+        self.assertEqual(row.apply_button.accessibleName(), "Применить стратегию TLS fake")
+        row.apply_button.click()
+        self.assertEqual(len(applied), 1)
+        self.assertIn("надёжно работают 1", view.property("screenReaderStateText"))
 
     def test_updater_server_row_has_screen_reader_text(self) -> None:
         from updater.ui.table_view import render_server_row

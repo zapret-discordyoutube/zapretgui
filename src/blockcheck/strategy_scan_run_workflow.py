@@ -29,6 +29,8 @@ def start_strategy_scan_run(
     on_run_log_started,
     on_strategy_started,
     on_strategy_result,
+    on_strategy_args_started=None,
+    on_stage_changed=None,
     on_log,
     on_phase_changed,
     on_continue_question,
@@ -57,6 +59,10 @@ def start_strategy_scan_run(
     )
     worker.run_log_started.connect(on_run_log_started)
     worker.strategy_started.connect(on_strategy_started)
+    if on_strategy_args_started is not None:
+        worker.strategy_args_started.connect(on_strategy_args_started)
+    if on_stage_changed is not None:
+        worker.stage_changed.connect(on_stage_changed)
     worker.strategy_result.connect(on_strategy_result)
     worker.scan_log.connect(on_log)
     worker.phase_changed.connect(on_phase_changed)

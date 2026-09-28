@@ -1,10 +1,12 @@
-"""Runtime-helper слой для Strategy Scan page."""
+"""Смена языка и раскрытие лога на вкладке «Подбор стратегии»."""
 
 from __future__ import annotations
 
-from ui.accessibility import set_state_text
-from ui.fluent_widgets import set_tooltip
+from qfluentwidgets import FluentIcon
+
 from app.ui_texts import tr as tr_catalog
+from ui.accessibility import set_control_accessibility, set_state_text
+from ui.fluent_widgets import set_tooltip
 
 
 def apply_log_expand_state(
@@ -12,24 +14,26 @@ def apply_log_expand_state(
     blockcheck_feature,
     expanded: bool,
     language: str,
-    control_card,
-    warning_card,
-    results_card,
     log_edit,
     expand_log_btn,
 ) -> None:
-    plan = blockcheck_feature.build_log_expand_plan(
-        expanded=expanded,
-        language=language,
-    )
-
-    control_card.setVisible(plan.control_visible)
-    if warning_card is not None:
-        warning_card.setVisible(plan.warning_visible)
-    results_card.setVisible(plan.results_visible)
+    """Лог раскрывается внутри своей карточки; остальная вкладка остаётся на месте."""
+    plan = blockcheck_feature.build_log_expand_plan(expanded=expanded, language=language)
     log_edit.setMinimumHeight(plan.log_min_height)
     log_edit.setMaximumHeight(plan.log_max_height)
+    log_edit.setVisible(bool(expanded))
     expand_log_btn.setText(plan.button_text)
+    try:
+        expand_log_btn.setIcon(FluentIcon.CHEVRON_DOWN_MED if expanded else FluentIcon.CHEVRON_RIGHT_MED)
+    except Exception:
+        pass
+    name = "Скрыть подробный лог подбора стратегии" if expanded else "Показать подробный лог подбора стратегии"
+    set_control_accessibility(
+        expand_log_btn,
+        name=name,
+        description="Технический лог подбора — он нужен для обращения в поддержку.",
+    )
+    set_state_text(expand_log_btn, name)
 
 
 def apply_language_plan_ui(
@@ -38,7 +42,6 @@ def apply_language_plan_ui(
     language: str,
     log_expanded: bool,
     expand_log_btn,
-    log_caption_label,
     protocol_label,
     mode_label,
     mode_combo,
@@ -51,14 +54,8 @@ def apply_language_plan_ui(
     games_scope_combo,
     quick_domain_btn,
 ) -> None:
-    plan = blockcheck_feature.build_language_plan(
-        language=language,
-        log_expanded=log_expanded,
-    )
-    # Карточки без шапок: заголовки не выставляются (set_title добавил бы шапку).
+    plan = blockcheck_feature.build_language_plan(language=language, log_expanded=log_expanded)
     expand_log_btn.setText(plan.expand_log_text)
-    if log_caption_label is not None:
-        log_caption_label.setText(plan.log_caption)
     for label, text in (
         (protocol_label, plan.protocol_label),
         (mode_label, plan.mode_label),
@@ -76,7 +73,7 @@ def apply_language_plan_ui(
             "page.blockcheck_public.action.start.description",
             language=language,
             default="Запустить автоматический перебор стратегий обхода DPI для выбранной цели.",
-        )
+        ),
     )
     set_tooltip(
         stop_btn,
@@ -84,12 +81,19 @@ def apply_language_plan_ui(
             "page.blockcheck_public.action.stop.description",
             language=language,
             default="Остановить текущее сканирование стратегий и вернуть страницу в обычный режим.",
-        )
+        ),
     )
     if prepare_support_btn is not None:
         prepare_support_btn.setText(plan.prepare_support_text)
     for index, text in enumerate(plan.protocol_items):
         protocol_combo.setItemText(index, text)
+    set_details = getattr(protocol_combo, "set_item_details", None)
+    if set_details is not None:
+        from blockcheck.strategy_scan_page_plans import PROTOCOL_TILE_DETAILS
+
+        for index, hint in enumerate(plan.protocol_hints):
+            icon = PROTOCOL_TILE_DETAILS[index][2] if index < len(PROTOCOL_TILE_DETAILS) else "fa5s.circle"
+            set_details(index, subtitle=hint, icon=icon)
     if mode_combo is not None:
         for index, text in enumerate(plan.mode_items):
             mode_combo.setItemText(index, text)

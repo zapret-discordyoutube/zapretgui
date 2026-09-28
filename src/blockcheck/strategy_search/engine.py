@@ -64,8 +64,28 @@ UDP_GAMES_CANARIES: tuple[tuple[str, str, str, int], ...] = (
 )
 
 
+# Почему подбор остановился (для панели итога: у каждой причины свой вид).
+STOP_NO_INTERNET = "no_internet"
+STOP_ADDRESS_BLOCK = "address_block"
+STOP_DNS_STUB = "dns_stub"
+STOP_UNRESOLVED = "unresolved"
+STOP_WINWS = "winws"
+STOP_NETWORK_LOST = "network_lost"
+STOP_OTHER = "other"
+
+# Шаги для панели хода подбора.
+STEP_NETWORK = "network"
+STEP_BASELINE = "baseline"
+STEP_CONTROL = "control"
+STEP_STRATEGIES = "strategies"
+
+
 class ScanFatal(Exception):
     """Подбор дальше не имеет смысла; текст — объяснение для пользователя."""
+
+    def __init__(self, message: str, kind: str = STOP_OTHER) -> None:
+        super().__init__(message)
+        self.kind = kind
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +104,8 @@ class SearchRequest:
 class SearchEvents(Protocol):
     def log(self, message: str) -> None: ...
     def phase(self, text: str) -> None: ...
-    def strategy_started(self, name: str, index: int, total: int) -> None: ...
+    def strategy_started(self, name: str, index: int, total: int, args: str = "") -> None: ...
+    def stage(self, step: str, status: str, text: str = "") -> None: ...
     def strategy_result(self, result: StrategyProbeResult) -> None: ...
     def ask_continue(self, reason: str) -> bool: ...
     def is_cancelled(self) -> bool: ...
@@ -160,6 +181,7 @@ class StrategySearch:
         self._cancelled = False
         self._protocol = request.scan_protocol
         self._target = _Target()
+        self._running_step = ""
 
     # --- Управление -----------------------------------------------------------
 
@@ -178,6 +200,12 @@ class StrategySearch:
             self._env.cancel_probes()
         except Exception:
             logger.debug("cancel_probes failed", exc_info=True)
+
+    def _stage(self, step: str, status: str, text: str = "") -> None:
+        self._running_step = step if status == "running" else ""
+        handler = getattr(self._events, "stage", None)
+        if handler is not None:
+            handler(step, status, text)
 
     # --- Подбор ---------------------------------------------------------------
 
@@ -202,24 +230,34 @@ class StrategySearch:
                 return self._finish(report, working, failed, started, cancelled=True)
 
             self._events.phase("Проверка сети")
+            self._stage(STEP_NETWORK, "running", "Проверяем, есть ли интернет")
             if not self._env.control_alive():
                 raise ScanFatal(
                     "Нет интернета: не открывается ни один обычный сайт. "
-                    "Проверьте подключение и запустите подбор снова."
+                    "Проверьте подключение и запустите подбор снова.",
+                    STOP_NO_INTERNET,
                 )
+            self._stage(STEP_NETWORK, "done", "Интернет есть")
 
             self._events.phase("Проверка без обхода")
+            self._stage(STEP_BASELINE, "running", "Пробуем открыть без обхода")
             if not self._baseline(report):
                 return self._finish(report, working, failed, started, cancelled=self.cancelled)
-            if not self._target.forced and not self._pass_control(report):
-                return self._finish(report, working, failed, started, cancelled=self.cancelled)
+            if self._target.forced:
+                self._stage(STEP_BASELINE, "skipped", "Открывается и без обхода — проверяем для сведения")
+                self._stage(STEP_CONTROL, "skipped", "Контрольный запуск не нужен")
+            else:
+                self._stage(STEP_BASELINE, "done", "Без обхода закрыто — есть что подбирать")
+                if not self._pass_control(report):
+                    return self._finish(report, working, failed, started, cancelled=self.cancelled)
 
             queue: deque[tuple[Candidate, bool]] = deque((candidate, False) for candidate in batch)
             index = 0
             while queue and not self.cancelled:
                 candidate, rechecked = queue.popleft()
-                self._events.strategy_started(candidate.name, index, len(batch))
+                self._events.strategy_started(candidate.name, index, len(batch), candidate.args)
                 self._events.phase(f"[{index + 1}/{len(batch)}] {candidate.name}")
+                self._stage(STEP_STRATEGIES, "running", f"Проверяем {index + 1} из {len(batch)}: {candidate.name}")
                 run = self._test_strategy(candidate)
                 if self.cancelled and run.verdict == rules.VERDICT_CANCELLED:
                     break
@@ -227,7 +265,7 @@ class StrategySearch:
                     if not self._env.control_alive():
                         self._events.log("  Похоже, пропал интернет — жду и перепроверю эту стратегию")
                         if not self._wait_for_network():
-                            raise ScanFatal("Во время подбора пропал интернет. Подбор остановлен.")
+                            raise ScanFatal("Во время подбора пропал интернет. Подбор остановлен.", STOP_NETWORK_LOST)
                         if not rechecked:
                             queue.appendleft((candidate, True))
                             continue
@@ -245,9 +283,14 @@ class StrategySearch:
                 pause = self._env.strategy_pause_seconds()
                 if pause > 0 and queue:
                     self._env.sleep(pause)
+            if not self.cancelled:
+                self._stage(STEP_STRATEGIES, "done", f"Проверено стратегий: {index}")
             return self._finish(report, working, failed, started, cancelled=self.cancelled)
         except ScanFatal as fatal:
             report.fatal_error = str(fatal)
+            report.stop_kind = fatal.kind
+            if self._running_step:
+                self._stage(self._running_step, "failed", "")
             self._events.log(f"СТОП: {fatal}")
             return self._finish(report, working, failed, started, cancelled=True)
         finally:
@@ -298,7 +341,7 @@ class StrategySearch:
             now=self._env.wall_time(),
         )
         if not ordered:
-            raise ScanFatal("Каталог стратегий пуст: переустановите программу.")
+            raise ScanFatal("Каталог стратегий пуст: переустановите программу.", STOP_OTHER)
         return batch_for_mode(ordered, self._request.mode), len(ordered)
 
     # --- Проверка «до подбора» ----------------------------------------------------
@@ -317,12 +360,13 @@ class StrategySearch:
         host = self._probe_host()
         addresses, error = self._env.resolve(host, 443, udp=False)
         if error:
-            raise ScanFatal(f"Не удалось узнать адрес {host}: {error}")
+            raise ScanFatal(f"Не удалось узнать адрес {host}: {error}", STOP_UNRESOLVED)
         stubs = stub_addresses(addresses)
         if stubs and len(stubs) == len(addresses):
             raise ScanFatal(
                 f"Провайдер подменяет адрес {host}: DNS отдаёт заглушку {stubs[0]}. "
-                "Стратегии обхода тут не помогут — сначала настройте DNS на странице «Настройка DNS»."
+                "Стратегии обхода тут не помогут — сначала настройте DNS на странице «Настройка DNS».",
+                STOP_DNS_STUB,
             )
         addresses = [address for address in addresses if address not in stubs][:BASELINE_MAX_ADDRESSES]
         outcomes = self._env.probe_https(host, addresses)
@@ -331,9 +375,10 @@ class StrategySearch:
         decision = rules.decide_baseline(list(zip(addresses, outcomes)))
 
         if decision.state == rules.BASELINE_NOT_DPI:
-            raise ScanFatal(self._not_dpi_reason(host, addresses, decision.reason))
+            raise ScanFatal(self._not_dpi_reason(host, addresses, decision.reason), STOP_ADDRESS_BLOCK)
         if decision.state == rules.BASELINE_OPEN:
             report.baseline_accessible = True
+            self._stage(STEP_BASELINE, "skipped", "Открывается и без обхода")
             if not self._ask_continue(
                 f"{host} открывается и без обхода — подбирать нечего: любая стратегия покажется рабочей."
             ):
@@ -384,9 +429,10 @@ class StrategySearch:
         games_addresses = tuple(spec.address for spec in specs if spec.address)
         games_ports = tuple(spec.port for spec in specs)
         if state == rules.BASELINE_NOT_DPI:
-            raise ScanFatal(f"Не удалось проверить {self._request.target}: {reason}")
+            raise ScanFatal(f"Не удалось проверить {self._request.target}: {reason}", STOP_UNRESOLVED)
         if state == rules.BASELINE_OPEN:
             report.baseline_accessible = True
+            self._stage(STEP_BASELINE, "skipped", "Отвечает и без обхода")
             if not self._ask_continue(
                 f"{self._request.target} отвечает и без обхода — подбирать нечего: "
                 "любая стратегия покажется рабочей."
@@ -414,13 +460,15 @@ class StrategySearch:
     def _pass_control(self, report: StrategyScanReport) -> bool:
         """Запуск winws2 без приёмов обхода: цель должна остаться закрытой."""
         self._events.phase("Контрольный запуск winws2")
+        self._stage(STEP_CONTROL, "running", "Запускаем winws2 вхолостую")
         run = self._test_strategy(Candidate("pass", "pass", PASS_STRATEGY_ARGS), confirm=False)
         if run.verdict == rules.VERDICT_CANCELLED:
             return False
         if run.verdict == rules.VERDICT_CRASH:
-            raise ScanFatal(f"winws2 не запускается даже с пустой стратегией: {run.reason}")
+            raise ScanFatal(f"winws2 не запускается даже с пустой стратегией: {run.reason}", STOP_WINWS)
         if run.attempts and run.attempts[0].passed:
             report.baseline_accessible = True
+            self._stage(STEP_CONTROL, "failed", "Открывается даже от пустого запуска winws2")
             if not self._ask_continue(
                 "Цель открывается от одного запуска winws2, даже без приёмов обхода. "
                 "Так любая стратегия покажется рабочей."
@@ -429,6 +477,7 @@ class StrategySearch:
             self._target.forced = True
             return True
         self._events.log("  Контроль пройден: без приёмов обхода цель закрыта")
+        self._stage(STEP_CONTROL, "done", "Контрольный запуск: без приёмов обхода закрыто")
         return True
 
     # --- Одна стратегия -------------------------------------------------------------

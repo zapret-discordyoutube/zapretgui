@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from blockcheck.strategy_scan_state import (
+    StrategyScanPanelOutcome,
     StrategyApplyResult,
     StrategyScanFinishPlan,
     StrategyScanInteractionPlan,
@@ -119,35 +120,52 @@ def build_idle_interaction_plan(*, is_udp_games: bool) -> StrategyScanInteractio
 
 # Подписи страницы подбора: их берут и сборка страницы, и смена языка.
 PROTOCOL_ITEMS = (
-    ("page.strategy_scan.protocol_tcp", "Сайты и приложения (TCP/HTTPS)", "tcp_https"),
-    ("page.strategy_scan.protocol_stun", "Голосовые звонки Discord и Telegram (STUN)", "stun_voice"),
-    ("page.strategy_scan.protocol_games", "Онлайн-игры: Roblox, Steam, Amazon (UDP)", "udp_games"),
+    ("page.strategy_scan.protocol_tcp", "Сайты и приложения", "tcp_https"),
+    ("page.strategy_scan.protocol_stun", "Голосовые звонки", "stun_voice"),
+    ("page.strategy_scan.protocol_games", "Онлайн-игры", "udp_games"),
+)
+# Пояснение и значок плитки для каждого пункта PROTOCOL_ITEMS (по порядку).
+PROTOCOL_TILE_DETAILS = (
+    ("page.strategy_scan.protocol_tcp.hint", "YouTube, Discord, Instagram — всё, что в браузере", "fa5s.globe-europe"),
+    ("page.strategy_scan.protocol_stun.hint", "Звонки в Discord и Telegram", "fa5s.headset"),
+    ("page.strategy_scan.protocol_games.hint", "Roblox, Steam, Amazon и другие", "fa5s.gamepad"),
 )
 MODE_ITEMS = (
-    ("page.strategy_scan.mode_quick", "Быстро — 30 стратегий, до 3 мин", "quick"),
-    ("page.strategy_scan.mode_standard", "Тщательно — 80 стратегий, до 8 мин", "standard"),
-    ("page.strategy_scan.mode_full", "Все стратегии — дольше всего", "full"),
+    ("page.strategy_scan.mode_quick", "Быстро · 30", "quick"),
+    ("page.strategy_scan.mode_standard", "Тщательно · 80", "standard"),
+    ("page.strategy_scan.mode_full", "Все стратегии", "full"),
 )
+# Подсказка о времени для каждого пункта MODE_ITEMS (по порядку).
+MODE_HINTS = (
+    ("page.strategy_scan.mode_quick.hint", "≈ 1–3 минуты"),
+    ("page.strategy_scan.mode_standard.hint", "≈ 3–7 минут"),
+    ("page.strategy_scan.mode_full.hint", "долго — самое время для чая ☕"),
+)
+
+
+def mode_hint_text(index: int, *, language: str | None = None) -> str:
+    if not 0 <= index < len(MODE_HINTS):
+        return ""
+    key, default = MODE_HINTS[index]
+    return tr_catalog(key, language=language, default=default)
 
 
 def build_log_expand_plan(*, expanded: bool, language: str) -> StrategyScanLogExpandPlan:
-    if expanded:
-        return StrategyScanLogExpandPlan(
-            control_visible=False,
-            warning_visible=False,
-            results_visible=False,
-            log_min_height=400,
-            log_max_height=16777215,
-            button_text=tr_catalog("page.strategy_scan.collapse_log", language=language, default="Свернуть"),
-        )
+    """Лог раскрывается внутри своей карточки, остальная вкладка остаётся на месте."""
     return StrategyScanLogExpandPlan(
         control_visible=True,
         warning_visible=True,
         results_visible=True,
-        log_min_height=180,
-        log_max_height=300,
-        button_text=tr_catalog("page.strategy_scan.expand_log", language=language, default="Развернуть"),
+        log_min_height=200,
+        log_max_height=360,
+        button_text=_log_button_text(expanded, language),
     )
+
+
+def _log_button_text(expanded: bool, language: str | None) -> str:
+    if expanded:
+        return tr_catalog("page.strategy_scan.collapse_log", language=language, default="Скрыть подробный лог")
+    return tr_catalog("page.strategy_scan.expand_log", language=language, default="Подробный лог")
 
 
 def build_language_plan(*, language: str, log_expanded: bool) -> StrategyScanLanguagePlan:
@@ -155,20 +173,17 @@ def build_language_plan(*, language: str, log_expanded: bool) -> StrategyScanLan
         return tr_catalog(key, language=language, default=default)
 
     return StrategyScanLanguagePlan(
-        log_caption=_tr("page.strategy_scan.log", "Подробный лог подбора:"),
-        expand_log_text=(
-            _tr("page.strategy_scan.collapse_log", "Свернуть")
-            if log_expanded
-            else _tr("page.strategy_scan.expand_log", "Развернуть")
-        ),
-        protocol_label=_tr("page.strategy_scan.protocol", "Что должно заработать:"),
-        target_label=_tr("page.strategy_scan.target", "Какой сайт проверять:"),
-        mode_label=_tr("page.strategy_scan.mode", "Насколько тщательно:"),
+        log_caption=_tr("page.strategy_scan.log", "Подробный лог"),
+        expand_log_text=_log_button_text(log_expanded, language),
+        protocol_label=_tr("page.strategy_scan.protocol", "Что должно заработать?"),
+        target_label=_tr("page.strategy_scan.target", "Какой сайт проверить:"),
+        mode_label=_tr("page.strategy_scan.mode", "Тщательность:"),
         mode_items=[_tr(key, default) for key, default, _value in MODE_ITEMS],
         start_text=_tr("page.strategy_scan.start", "Найти рабочую стратегию"),
         stop_text=_tr("page.strategy_scan.stop", "Остановить"),
         prepare_support_text=_tr("page.strategy_scan.prepare_support", "Подготовить обращение"),
         protocol_items=[_tr(key, default) for key, default, _value in PROTOCOL_ITEMS],
+        protocol_hints=[_tr(key, default) for key, default, _icon in PROTOCOL_TILE_DETAILS],
         udp_scope_label=_tr("page.strategy_scan.udp_scope", "Какие адреса игр:"),
         udp_scope_items=[
             _tr("page.strategy_scan.udp_scope_all", "Все списки адресов (по умолчанию)"),
@@ -321,6 +336,7 @@ def build_result_presentation(result, *, row_number: int) -> StrategyScanResultP
             "args": result.strategy_args,
             "success": bool(result.success),
             "verdict": verdict,
+            "time_ms": time_ms,
         },
     )
 
@@ -391,6 +407,7 @@ def finalize_scan_report(
     else:
         notification_kind = "not_found"
 
+    outcome = build_panel_outcome(report, result_rows)
     return StrategyScanFinishPlan(
         total_available=total_available,
         working_count=working,
@@ -403,6 +420,81 @@ def finalize_scan_report(
         notification_kind=notification_kind,
         baseline_variant=baseline_variant,
         fatal_error=fatal_error,
+        outcome=outcome,
+    )
+
+
+_STOP_TITLES = {
+    "no_internet": "Интернет куда-то убежал",
+    "address_block": "Тут стратегии бессильны",
+    "dns_stub": "Провайдер подменяет адрес сайта",
+    "unresolved": "Не удалось узнать адрес цели",
+    "winws": "winws2 не запускается",
+    "network_lost": "Интернет пропал посреди подбора",
+}
+
+
+def build_panel_outcome(report, result_rows: list[dict]) -> StrategyScanPanelOutcome:
+    """Что показать в панели итога: заголовок с улыбкой, точное объяснение, лучшая стратегия."""
+    target = str(getattr(report, "target", "") or "")
+    tested = int(getattr(report, "total_tested", 0) or 0)
+    available = int(getattr(report, "total_available", 0) or 0)
+    working = [
+        (index, row)
+        for index, row in enumerate(result_rows)
+        if row.get("success")
+    ]
+    fatal_error = str(getattr(report, "fatal_error", "") or "")
+    stop_kind = str(getattr(report, "stop_kind", "") or "")
+
+    if working:
+        best_index, best = min(working, key=lambda item: float(item[1].get("time_ms") or 1e9))
+        count = len(working)
+        noun = "надёжная стратегия" if count == 1 else ("надёжные стратегии" if 2 <= count <= 4 else "надёжных стратегий")
+        best_time = float(best.get("time_ms") or 0)
+        best_text = f"Лучшая — «{best.get('name', '')}»" + (f", ответ за {best_time:.0f} мс" if best_time > 0 else "")
+        detail = (
+            "Каждая открыла сайт три раза подряд, а без обхода он закрыт. "
+            "Нажмите «Применить лучшую» — стратегия запишется в выбранный пресет."
+        )
+        if getattr(report, "baseline_accessible", False):
+            detail = "Но цель открывалась и без обхода, поэтому это только для сведения."
+        return StrategyScanPanelOutcome(
+            kind="found",
+            title=f"Ура! Нашлась {count} {noun}" if count == 1 else f"Ура! Нашлось {count} {noun}",
+            detail=detail,
+            best_text=best_text,
+            best_index=best_index,
+            celebrate=not getattr(report, "baseline_accessible", False),
+        )
+    if fatal_error:
+        return StrategyScanPanelOutcome(
+            kind=stop_kind or "error",
+            title=_STOP_TITLES.get(stop_kind, "Подбор остановлен"),
+            detail=fatal_error,
+        )
+    if getattr(report, "baseline_accessible", False):
+        return StrategyScanPanelOutcome(
+            kind="open",
+            title="А сайт-то и так открывается 🙂",
+            detail=(
+                f"Без обхода {target} открывается — подбирать нечего. Если в браузере он всё равно "
+                "не грузится, дело не в блокировке: проверьте DNS, прокси или сам браузер."
+            ),
+        )
+    if getattr(report, "cancelled", False):
+        return StrategyScanPanelOutcome(
+            kind="cancelled",
+            title="Подбор остановлен",
+            detail=f"Проверено стратегий: {tested}. Можно продолжить позже — повторный запуск начнёт с непроверенных.",
+        )
+    return StrategyScanPanelOutcome(
+        kind="not_found",
+        title="Пока ни одна не подошла",
+        detail=(
+            f"Проверено {tested} из {available}. Запустите подбор ещё раз — проверятся следующие стратегии, "
+            "— или выберите «Все стратегии». Провалившиеся уйдут в конец очереди."
+        ),
     )
 
 

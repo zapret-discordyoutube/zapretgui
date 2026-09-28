@@ -173,6 +173,8 @@ class FakeEvents:
         self.results = []
         self.logs: list[str] = []
         self.cancel_after_results: int | None = None
+        self.started_args: list[str] = []
+        self.stages: list[tuple[str, str]] = []
 
     def log(self, message):
         self.logs.append(message)
@@ -180,8 +182,11 @@ class FakeEvents:
     def phase(self, text):
         pass
 
-    def strategy_started(self, name, index, total):
-        pass
+    def strategy_started(self, name, index, total, args=""):
+        self.started_args.append(args)
+
+    def stage(self, step, status, text=""):
+        self.stages.append((step, status))
 
     def strategy_result(self, result):
         self.results.append(result)
@@ -382,6 +387,30 @@ class StrategyVerdictTests(unittest.TestCase):
         # Сброс — след работы DPI: сеть жива, второй ответ control не спрашивался.
         self.assertEqual(env.control, [False])
         self.assertEqual(events.results[0].verdict, rules.VERDICT_FAILED)
+
+
+class StageEventTests(unittest.TestCase):
+    def test_successful_scan_walks_all_steps(self) -> None:
+        env = FakeEnv(network=blocked_unless("good"), candidates=[cand("good")])
+        _report, events = run(env)
+
+        done = [step for step, status in events.stages if status == "done"]
+        self.assertEqual(done, ["network", "baseline", "control", "strategies"])
+        self.assertIn("--lua-desync=fake:id=good", events.started_args)
+
+    def test_stop_marks_running_step_failed_and_reports_kind(self) -> None:
+        env = FakeEnv(network=lambda running, n: NO_CONNECT, candidates=[cand("a")], port80_open=True)
+        report, events = run(env)
+
+        self.assertEqual(report.stop_kind, "address_block")
+        self.assertIn(("baseline", "failed"), events.stages)
+
+    def test_no_internet_kind(self) -> None:
+        env = FakeEnv(network=lambda running, n: RESET, candidates=[cand("a")], control=[False])
+        report, events = run(env)
+
+        self.assertEqual(report.stop_kind, "no_internet")
+        self.assertIn(("network", "failed"), events.stages)
 
 
 class BatchTests(unittest.TestCase):
