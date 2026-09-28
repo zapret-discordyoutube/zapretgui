@@ -16,7 +16,10 @@ class TelegramProxyUiTextsTests(unittest.TestCase):
         )
         self.assertEqual(plan.setup_title, "Подключить Telegram")
         self.assertIn("Telegram сам предложит добавить прокси", plan.setup_description)
-        self.assertIn("Zastogram", plan.setup_description)
+        self.assertNotIn("Zastogram", plan.setup_description)
+        self.assertEqual(plan.zastogram_title, "Не помогает прокси?")
+        self.assertIn("ZaStoGram", plan.zastogram_description)
+        self.assertIn("Telegram Desktop", plan.zastogram_description)
         self.assertEqual(plan.upstream_group_title, "Внешний прокси")
         self.assertEqual(plan.upstream_toggle_title, "Использовать внешний прокси")
         self.assertEqual(

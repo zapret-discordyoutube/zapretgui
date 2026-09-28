@@ -199,6 +199,14 @@ def ensure_qt_runtime() -> QApplication:
         "StartupQtThemeSignalGuards",
         f"{(_time.perf_counter() - t_signal_guards) * 1000:.0f}ms",
     )
+    t_button_motion = _time.perf_counter()
+    from ui.button_motion import install_button_motion
+
+    install_button_motion()
+    emit_startup_metric(
+        "StartupQtButtonMotion",
+        f"{(_time.perf_counter() - t_button_motion) * 1000:.0f}ms",
+    )
     t_accent_signal = _time.perf_counter()
     _connect_qfluent_accent_signal_lazy()
     emit_startup_metric(

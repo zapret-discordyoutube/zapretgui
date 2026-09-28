@@ -10,6 +10,8 @@ class TelegramProxySettingsText:
     page_subtitle: str
     setup_title: str
     setup_description: str
+    zastogram_title: str
+    zastogram_description: str
     settings_title: str
     host_port_title: str
     host_port_description: str
@@ -70,8 +72,12 @@ TELEGRAM_PROXY_SETTINGS_TEXT = TelegramProxySettingsText(
     setup_title="Подключить Telegram",
     setup_description=(
         "Откройте ссылку. Telegram сам предложит добавить прокси. "
-        "Если Telegram не открылся, скопируйте ссылку и отправьте её себе в чат. "
-        "Если ничего не помогает — скачайте Zastogram."
+        "Если Telegram не открылся, скопируйте ссылку и отправьте её себе в чат."
+    ),
+    zastogram_title="Не помогает прокси?",
+    zastogram_description=(
+        "Скачайте ZaStoGram — Telegram Desktop для сетей с блокировками: "
+        "он сам обходит DPI, без прокси"
     ),
     settings_title="Основные настройки",
     host_port_title="Адрес и порт",

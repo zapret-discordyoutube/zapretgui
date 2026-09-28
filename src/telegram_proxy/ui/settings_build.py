@@ -9,6 +9,7 @@ from qfluentwidgets import (
     CaptionLabel,
     FluentIcon,
     HorizontalSeparator,
+    IconWidget,
     LineEdit,
     PrimaryPushButton,
     PushButton,
@@ -188,18 +189,37 @@ def _build_status_card(*, status_dot_cls, on_toggle_proxy, on_open_in_telegram, 
     setup_copy_btn.clicked.connect(on_copy_link)
     setup_row.addWidget(setup_copy_btn)
 
-    setup_zastogram_btn = PushButton("Zastogram", icon=FluentIcon.GITHUB)
+    status_card.add_layout(setup_row)
+
+    # ZaStoGram — отдельной строкой с пояснением: запасной путь, если
+    # прокси не помог, должен быть понятен без наведения мыши.
+    status_card.add_widget(HorizontalSeparator())
+    zastogram_row = QHBoxLayout()
+    zastogram_row.setSpacing(12)
+    zastogram_icon = IconWidget(FluentIcon.DOWNLOAD)
+    zastogram_icon.setFixedSize(20, 20)
+    zastogram_row.addWidget(zastogram_icon)
+    zastogram_text = QVBoxLayout()
+    zastogram_text.setSpacing(2)
+    zastogram_title_label = StrongBodyLabel(text.zastogram_title)
+    zastogram_description_label = CaptionLabel(text.zastogram_description)
+    zastogram_description_label.setWordWrap(True)
+    zastogram_text.addWidget(zastogram_title_label)
+    zastogram_text.addWidget(zastogram_description_label)
+    zastogram_row.addLayout(zastogram_text, 1)
+
+    setup_zastogram_btn = PushButton("Скачать ZaStoGram", icon=FluentIcon.DOWNLOAD)
     setup_zastogram_btn.setMinimumWidth(124)
-    set_tooltip(setup_zastogram_btn, "Если ничего не помогает — скачайте ZaStoGram Desktop.")
+    set_tooltip(setup_zastogram_btn, "Открыть страницу последнего выпуска ZaStoGram Desktop.")
     set_control_accessibility(
         setup_zastogram_btn,
-        name="Открыть ZaStoGram Desktop в Forgejo",
-        description="Открывает страницу проекта ZaStoGram Desktop в Forgejo в браузере.",
+        name="Скачать ZaStoGram Desktop",
+        description="Открывает в браузере страницу последнего выпуска ZaStoGram Desktop в Forgejo.",
     )
-    set_state_text(setup_zastogram_btn, "Открыть ZaStoGram Desktop в Forgejo")
+    set_state_text(setup_zastogram_btn, "Скачать ZaStoGram Desktop")
     setup_zastogram_btn.clicked.connect(on_open_zastogram)
-    setup_row.addWidget(setup_zastogram_btn)
-    status_card.add_layout(setup_row)
+    zastogram_row.addWidget(setup_zastogram_btn)
+    status_card.add_layout(zastogram_row)
 
     return (
         status_card,

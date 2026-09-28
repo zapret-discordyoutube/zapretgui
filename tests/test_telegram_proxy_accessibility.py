@@ -273,12 +273,13 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
             "Копировать ссылку Telegram Proxy",
         )
         self.assertIn("буфер обмена", widgets.setup_copy_btn.accessibleDescription())
-        self.assertEqual(widgets.setup_zastogram_btn.accessibleName(), "Открыть ZaStoGram Desktop в Forgejo")
+        self.assertEqual(widgets.setup_zastogram_btn.text(), "Скачать ZaStoGram")
+        self.assertEqual(widgets.setup_zastogram_btn.accessibleName(), "Скачать ZaStoGram Desktop")
         self.assertEqual(
             widgets.setup_zastogram_btn.property("screenReaderStateText"),
-            "Открыть ZaStoGram Desktop в Forgejo",
+            "Скачать ZaStoGram Desktop",
         )
-        self.assertIn("Forgejo", widgets.setup_zastogram_btn.accessibleDescription())
+        self.assertIn("последнего выпуска", widgets.setup_zastogram_btn.accessibleDescription())
         self.assertEqual(widgets.mtproxy_secret_edit.accessibleName(), "Secret MTProxy")
         self.assertIn("ключ подключения", widgets.mtproxy_secret_edit.accessibleDescription())
         self.assertEqual(widgets.mtproxy_generate_btn.accessibleName(), "Создать secret MTProxy")
