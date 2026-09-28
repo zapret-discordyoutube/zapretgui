@@ -19,6 +19,9 @@ from ui.accessibility import set_control_accessibility, set_state_text
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips
+from ui.widgets.fun import FunTicker, Mascot, burst_confetti
+from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
+from ui.widgets.stagger_float_in import float_in
 
 ActionHandler = Callable[[str, str], None]
 
@@ -176,23 +179,32 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
 
         header = QHBoxLayout()
         header.setSpacing(12)
-        self._icon = QLabel(self)
-        self._icon.setFixedSize(28, 28)
-        header.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignTop)
+        # Выдра-талисман: работает, пока идёт проверка, и реагирует на итог.
+        self.mascot = Mascot(self, size=44)
+        header.addWidget(self.mascot, 0, Qt.AlignmentFlag.AlignTop)
         titles = QVBoxLayout()
         titles.setSpacing(2)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        self._icon = QLabel(self)
+        self._icon.setFixedSize(24, 24)
+        title_row.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
         self.title_label = StrongBodyLabel("", self)
         self.title_label.setWordWrap(True)
+        title_row.addWidget(self.title_label, 1)
+        titles.addLayout(title_row)
         self.env_label = CaptionLabel("", self)
         self.env_label.setWordWrap(True)
-        titles.addWidget(self.title_label)
         titles.addWidget(self.env_label)
+        self.ticker = FunTicker(self)
+        self.ticker.setVisible(False)
+        titles.addWidget(self.ticker)
         header.addLayout(titles, 1)
         root.addLayout(header)
 
         self._problems_host = QWidget(self)
         self._problems_layout = QVBoxLayout(self._problems_host)
-        self._problems_layout.setContentsMargins(40, 4, 0, 0)
+        self._problems_layout.setContentsMargins(56, 4, 0, 0)
         self._problems_layout.setSpacing(6)
         root.addWidget(self._problems_host)
 
@@ -223,8 +235,12 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
                 widget.deleteLater()
         self._problems_host.setVisible(False)
 
-    def _set_state(self, level: str, title: str, env: str = "") -> None:
+    def _set_state(self, level: str, title: str, env: str = "", *, mood: str = MOOD_IDLE) -> None:
         self._level = level if level in _LEVEL_ICONS else "unknown"
+        if level != "pending":
+            self.ticker.stop()
+            self.ticker.setVisible(False)
+        self.mascot.set_mood(mood)
         self.title_label.setText(title)
         self.env_label.setText(env)
         self.env_label.setVisible(bool(env))
@@ -236,38 +252,49 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self._clear_problems()
         self._set_state(
             "idle",
-            "Нажмите «Проверить»",
-            "Проверим, какие сайты открываются, и подскажем, что делать с остальными.",
+            "Выдра готова проверить вашу сеть",
+            "Нажмите «Проверить»: посмотрим, какие сайты открываются, и подскажем, что делать с остальными.",
         )
 
     def set_pending(self) -> None:
+        from blockcheck.ui.fun_texts import phrases
+
         self._clear_problems()
-        self._set_state("pending", "Проверяем…", "")
+        self._set_state("pending", "Проверяем, что у вас открывается…", "", mood=MOOD_BUSY)
+        self.ticker.setVisible(True)
+        self.ticker.set_phrases(phrases("blockcheck"))
+        self.ticker.start()
 
     def set_stopped(self, text: str = "Проверка остановлена") -> None:
         self._clear_problems()
-        self._set_state("unknown", text, "")
+        failed = "ошибк" in str(text or "").lower()
+        self._set_state("unknown", text, "", mood=MOOD_ALARM if failed else MOOD_IDLE)
 
     def show_report(self, report: dict) -> None:
         self._clear_problems()
         problems = list(report.get("problems") or ())
         blocking = [item for item in problems if item.get("level") in ("fail", "warn")]
         if not problems:
-            level, title = "ok", "Всё открывается"
+            level, title, mood = "ok", "Всё открывается — провайдер сегодня добрый 🎉", MOOD_HAPPY
         elif not blocking:
-            level, title = "unknown", "Часть проверок не дала ответа"
+            level, title, mood = "unknown", "Часть проверок не дала ответа", MOOD_IDLE
         else:
             level = "fail" if any(item.get("level") == "fail" for item in blocking) else "warn"
-            title = f"Найдены проблемы: {len(blocking)}"
-        for problem in problems:
-            self._problems_layout.addWidget(_ProblemRow(problem, self._on_action, self._problems_host))
+            title = f"Найдены проблемы: {len(blocking)} — ниже, что с ними делать"
+            mood = MOOD_ALARM if level == "fail" else MOOD_SAD
+        rows = [_ProblemRow(problem, self._on_action, self._problems_host) for problem in problems]
         working = list(report.get("working") or ())
         if working and problems:
-            self._problems_layout.addWidget(
-                _ProblemRow({"level": "ok", "text": f"Открываются: {', '.join(working)}"}, None, self._problems_host)
-            )
-        self._problems_host.setVisible(self._problems_layout.count() > 0)
-        self._set_state(level, title, _environment_text(report))
+            rows.append(_ProblemRow({"level": "ok", "text": f"Открываются: {', '.join(working)}"}, None, self._problems_host))
+        for row in rows:
+            self._problems_layout.addWidget(row)
+        self._problems_host.setVisible(bool(rows))
+        self._set_state(level, title, _environment_text(report), mood=mood)
+        # Проблемы выплывают по очереди, а если всё хорошо — салют.
+        for order, row in enumerate(rows):
+            float_in(row, delay_ms=120 + order * 90)
+        if level == "ok":
+            burst_confetti(self)
 
     def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
         _ = force

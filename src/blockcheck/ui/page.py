@@ -651,6 +651,10 @@ class BlockcheckPage(BasePage):
         self._summary_panel.show_report(report)
         self._sites_table.show_report(report)
         self._results_card.setVisible(True)
+        # Список сайтов выплывает следом за итогом.
+        from ui.widgets.stagger_float_in import float_in
+
+        float_in(self._results_card, delay_ms=250)
         elapsed = float(report.get("elapsed") or 0.0)
         self._set_status_text(
             tr_catalog("page.blockcheck.done", default="Готово") + f" за {elapsed:.0f} с — итог ниже"

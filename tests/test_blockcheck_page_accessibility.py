@@ -144,7 +144,8 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         page._on_finished(dict(_REPORT))
 
         self.assertEqual(page._summary_panel.level, "fail")
-        self.assertEqual(page._summary_panel.title_label.text(), "Найдены проблемы: 2")
+        # Точный смысл — в начале заголовка, шутка (если есть) — после.
+        self.assertTrue(page._summary_panel.title_label.text().startswith("Найдены проблемы: 2"))
         self.assertFalse(page._results_card.isHidden())
         self.assertTrue(page._report_btn.isEnabled())
         names = [page._sites_table.item(row, 0).text() for row in range(page._sites_table.rowCount())]
@@ -239,7 +240,7 @@ class SummaryPanelTests(unittest.TestCase):
         panel.show_report({"problems": [], "working": ["Discord"], "zapret_running": False, "elapsed": 3})
 
         self.assertEqual(panel.level, "ok")
-        self.assertEqual(panel.title_label.text(), "Всё открывается")
+        self.assertTrue(panel.title_label.text().startswith("Всё открывается"))
         self.assertIn("Zapret выключен", panel.env_label.text())
 
 
