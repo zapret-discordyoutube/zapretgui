@@ -119,12 +119,8 @@ class StrategyScanLogExpandPlan:
 
 @dataclass(slots=True)
 class StrategyScanLanguagePlan:
-    control_title: str
-    results_title: str
-    log_title: str
+    log_caption: str
     expand_log_text: str
-    intro_text: str
-    warning_text: str
     protocol_label: str
     target_label: str
     mode_label: str

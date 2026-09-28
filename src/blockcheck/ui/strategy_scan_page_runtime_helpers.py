@@ -24,7 +24,8 @@ def apply_log_expand_state(
     )
 
     control_card.setVisible(plan.control_visible)
-    warning_card.setVisible(plan.warning_visible)
+    if warning_card is not None:
+        warning_card.setVisible(plan.warning_visible)
     results_card.setVisible(plan.results_visible)
     log_edit.setMinimumHeight(plan.log_min_height)
     log_edit.setMaximumHeight(plan.log_max_height)
@@ -36,12 +37,8 @@ def apply_language_plan_ui(
     blockcheck_feature,
     language: str,
     log_expanded: bool,
-    control_card,
-    results_card,
-    log_card,
     expand_log_btn,
-    warning_notice,
-    intro_label,
+    log_caption_label,
     protocol_label,
     mode_label,
     mode_combo,
@@ -58,14 +55,10 @@ def apply_language_plan_ui(
         language=language,
         log_expanded=log_expanded,
     )
-    control_card.set_title(plan.control_title)
-    results_card.set_title(plan.results_title)
-    log_card.set_title(plan.log_title)
+    # Карточки без шапок: заголовки не выставляются (set_title добавил бы шапку).
     expand_log_btn.setText(plan.expand_log_text)
-    if warning_notice is not None:
-        warning_notice.setText(plan.warning_text)
-    if intro_label is not None:
-        intro_label.setText(plan.intro_text)
+    if log_caption_label is not None:
+        log_caption_label.setText(plan.log_caption)
     for label, text in (
         (protocol_label, plan.protocol_label),
         (mode_label, plan.mode_label),

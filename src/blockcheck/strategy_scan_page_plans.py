@@ -125,17 +125,9 @@ PROTOCOL_ITEMS = (
     ("page.strategy_scan.protocol_games", "Онлайн-игры: Roblox, Steam, Amazon (UDP)", "udp_games"),
 )
 MODE_ITEMS = (
-    ("page.strategy_scan.mode_quick", "Быстро — 30 лучших стратегий, до 3 минут", "quick"),
-    ("page.strategy_scan.mode_standard", "Тщательно — 80 стратегий, до 8 минут", "standard"),
+    ("page.strategy_scan.mode_quick", "Быстро — 30 стратегий, до 3 мин", "quick"),
+    ("page.strategy_scan.mode_standard", "Тщательно — 80 стратегий, до 8 мин", "standard"),
     ("page.strategy_scan.mode_full", "Все стратегии — дольше всего", "full"),
-)
-INTRO_DEFAULT = (
-    "Программа по очереди включает стратегии обхода и проверяет, открывается ли выбранный сайт. "
-    "Рабочие появятся в таблице ниже — любую можно сразу применить."
-)
-WARNING_DEFAULT = (
-    "На время поиска Zapret будет выключен: каждая стратегия проверяется отдельно. "
-    "Когда найдёте рабочую, нажмите «Применить» — или просто снова запустите Zapret."
 )
 
 
@@ -164,16 +156,12 @@ def build_language_plan(*, language: str, log_expanded: bool) -> StrategyScanLan
         return tr_catalog(key, language=language, default=default)
 
     return StrategyScanLanguagePlan(
-        control_title=_tr("page.strategy_scan.control", "Поиск рабочей стратегии"),
-        results_title=_tr("page.strategy_scan.results", "Найденные стратегии"),
-        log_title=_tr("page.strategy_scan.log", "Подробный лог"),
+        log_caption=_tr("page.strategy_scan.log", "Подробный лог подбора:"),
         expand_log_text=(
             _tr("page.strategy_scan.collapse_log", "Свернуть")
             if log_expanded
             else _tr("page.strategy_scan.expand_log", "Развернуть")
         ),
-        intro_text=_tr("page.strategy_scan.intro", INTRO_DEFAULT),
-        warning_text=_tr("page.strategy_scan.warning_text", WARNING_DEFAULT),
         protocol_label=_tr("page.strategy_scan.protocol", "Что должно заработать:"),
         target_label=_tr("page.strategy_scan.target", "Какой сайт проверять:"),
         mode_label=_tr("page.strategy_scan.mode", "Насколько тщательно:"),

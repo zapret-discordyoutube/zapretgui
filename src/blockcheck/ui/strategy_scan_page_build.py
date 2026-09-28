@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QHeaderView
+from PyQt6.QtWidgets import QHBoxLayout, QHeaderView
 from qfluentwidgets import CaptionLabel, FluentIcon
 
-from blockcheck.strategy_scan_page_plans import INTRO_DEFAULT, MODE_ITEMS, PROTOCOL_ITEMS, WARNING_DEFAULT
-from ui.fluent_widgets import SemanticNotice, SettingsCard, set_tooltip
+from blockcheck.strategy_scan_page_plans import MODE_ITEMS, PROTOCOL_ITEMS
+from ui.fluent_widgets import SettingsCard, set_tooltip
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.log_limits import BLOCKCHECK_LOG_VIEW_MAX_LINES, apply_text_line_limit
 from ui.pages.base_page import ScrollBlockingTextEdit
@@ -20,7 +19,6 @@ from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips
 @dataclass(slots=True)
 class StrategyScanControlWidgets:
     control_card: object
-    intro_label: object
     protocol_label: object
     protocol_combo: object
     games_scope_label: object
@@ -31,7 +29,6 @@ class StrategyScanControlWidgets:
     target_input: object
     quick_domain_btn: object
     udp_scope_hint_label: object
-    warning_notice: object
     progress_bar: object
     status_label: object
     start_btn: object
@@ -47,6 +44,7 @@ class StrategyScanResultsWidgets:
 @dataclass(slots=True)
 class StrategyScanLogWidgets:
     log_card: object
+    log_caption: object
     expand_log_btn: object
     support_status_label: object
     prepare_support_btn: object
@@ -70,6 +68,12 @@ def build_strategy_scan_control_section(
     on_start,
     on_stop,
 ) -> StrategyScanControlWidgets:
+    """Две строки без шапки: «что и где проверять» и «насколько тщательно → кнопка».
+
+    Страница живёт во вкладке BlockCheck, поэтому заголовки карточек, абзац
+    вступления и отдельная плашка-предупреждение только съедали место:
+    предупреждение о выключении Zapret показано в строке статуса.
+    """
     _ = parent
 
     def _set_action_accessibility(widget, *, name: str, description: str) -> None:
@@ -81,30 +85,22 @@ def build_strategy_scan_control_section(
         set_state_text(label, f"Поле подбора стратегии: {label.text()}")
         return label
 
-    control_card = SettingsCard(tr_fn("page.strategy_scan.control", "Поиск рабочей стратегии"))
+    control_card = SettingsCard()
 
-    intro_label = body_label_cls(tr_fn("page.strategy_scan.intro", INTRO_DEFAULT))
-    intro_label.setWordWrap(True)
-    control_card.add_widget(intro_label)
-
-    form = QGridLayout()
-    form.setHorizontalSpacing(16)
-    form.setVerticalSpacing(10)
-    form.setColumnStretch(1, 1)
-
+    what_row = QHBoxLayout()
+    what_row.setSpacing(10)
     protocol_label = _field_label("page.strategy_scan.protocol", "Что должно заработать:")
     protocol_combo = combo_cls()
     for key, default, value in PROTOCOL_ITEMS:
         protocol_combo.addItem(tr_fn(key, default), userData=value)
     protocol_combo.setCurrentIndex(0)
-    protocol_combo.setMinimumWidth(360)
+    protocol_combo.setMinimumWidth(320)
     protocol_combo.currentIndexChanged.connect(on_protocol_changed)
-    form.addWidget(protocol_label, 0, 0)
-    form.addWidget(protocol_combo, 0, 1, alignment=Qt.AlignmentFlag.AlignLeft)
+    what_row.addWidget(protocol_label)
+    what_row.addWidget(protocol_combo)
+    what_row.addSpacing(12)
 
     target_label = _field_label("page.strategy_scan.target", "Какой сайт проверять:")
-    target_row = QHBoxLayout()
-    target_row.setSpacing(8)
     target_input = line_edit_cls()
     target_input.setText(tr_fn("page.strategy_scan.target.default", "discord.com"))
     target_input.setPlaceholderText(tr_fn("page.strategy_scan.target.placeholder", "discord.com"))
@@ -113,10 +109,8 @@ def build_strategy_scan_control_section(
         name="Цель подбора стратегии",
         description="Введите домен или STUN-цель для подбора стратегии.",
     )
-    target_input.setMinimumWidth(260)
+    target_input.setMinimumWidth(200)
     target_input.setFixedHeight(33)
-    target_row.addWidget(target_input)
-
     quick_domain_btn = push_button_cls(
         tr_fn("page.strategy_scan.quick_domains", "Выбрать из списка"),
         icon=FluentIcon.MENU,
@@ -132,11 +126,11 @@ def build_strategy_scan_control_section(
         description=quick_domain_description,
     )
     quick_domain_btn.clicked.connect(on_show_quick_domains_menu)
-    target_row.addWidget(quick_domain_btn)
-    target_row.addStretch(1)
-    form.addWidget(target_label, 1, 0)
-    form.addLayout(target_row, 1, 1)
+    what_row.addWidget(target_label)
+    what_row.addWidget(target_input, 1)
+    what_row.addWidget(quick_domain_btn)
 
+    # В режиме онлайн-игр вместо сайта выбирается набор адресов игр.
     games_scope_label = _field_label("page.strategy_scan.udp_scope", "Какие адреса игр:")
     games_scope_combo = combo_cls()
     games_scope_combo.addItem(
@@ -150,28 +144,36 @@ def build_strategy_scan_control_section(
     games_scope_combo.setCurrentIndex(0)
     games_scope_combo.setMinimumWidth(260)
     games_scope_combo.currentIndexChanged.connect(on_udp_games_scope_changed)
-    form.addWidget(games_scope_label, 2, 0)
-    form.addWidget(games_scope_combo, 2, 1, alignment=Qt.AlignmentFlag.AlignLeft)
+    what_row.addWidget(games_scope_label)
+    what_row.addWidget(games_scope_combo)
+    what_row.addStretch(0)
+    control_card.add_layout(what_row)
 
+    run_row = QHBoxLayout()
+    run_row.setSpacing(10)
     mode_label = _field_label("page.strategy_scan.mode", "Насколько тщательно:")
     mode_combo = combo_cls()
     for key, default, value in MODE_ITEMS:
         mode_combo.addItem(tr_fn(key, default), value)
     mode_combo.setCurrentIndex(0)
-    mode_combo.setMinimumWidth(360)
-    form.addWidget(mode_label, 3, 0)
-    form.addWidget(mode_combo, 3, 1, alignment=Qt.AlignmentFlag.AlignLeft)
-    control_card.add_layout(form)
+    mode_combo.setMinimumWidth(320)
+    run_row.addWidget(mode_label)
+    run_row.addWidget(mode_combo)
+    run_row.addSpacing(12)
 
-    udp_scope_hint_label = caption_label_cls("")
-    udp_scope_hint_label.setWordWrap(True)
-    control_card.add_widget(udp_scope_hint_label)
+    status_label = caption_label_cls(
+        tr_fn("page.strategy_scan.ready", "Zapret на время поиска выключится")
+    )
+    set_tooltip(
+        status_label,
+        tr_fn(
+            "page.strategy_scan.ready_hint",
+            "Каждая стратегия проверяется отдельно, поэтому текущий обход DPI на время поиска выключается. "
+            "Когда найдёте рабочую, нажмите «Применить» — или снова запустите Zapret.",
+        ),
+    )
+    run_row.addWidget(status_label, 1)
 
-    warning_notice = SemanticNotice(tr_fn("page.strategy_scan.warning_text", WARNING_DEFAULT), tone="info")
-    control_card.add_widget(warning_notice)
-
-    buttons_row = QHBoxLayout()
-    buttons_row.setSpacing(8)
     start_btn = primary_button_cls(
         tr_fn("page.strategy_scan.start", "Найти рабочую стратегию"),
         icon=FluentIcon.SEARCH,
@@ -187,7 +189,7 @@ def build_strategy_scan_control_section(
         description=start_description,
     )
     start_btn.clicked.connect(on_start)
-    buttons_row.addWidget(start_btn)
+    run_row.addWidget(start_btn)
 
     stop_btn = push_button_cls(
         tr_fn("page.strategy_scan.stop", "Остановить"),
@@ -204,14 +206,14 @@ def build_strategy_scan_control_section(
         description=stop_description,
     )
     stop_btn.setEnabled(False)
+    stop_btn.setVisible(False)
     stop_btn.clicked.connect(on_stop)
-    buttons_row.addWidget(stop_btn)
+    run_row.addWidget(stop_btn)
+    control_card.add_layout(run_row)
 
-    status_label = caption_label_cls(tr_fn("page.strategy_scan.ready", "Готово к поиску"))
-    status_label.setWordWrap(True)
-    buttons_row.addSpacing(8)
-    buttons_row.addWidget(status_label, 1)
-    control_card.add_layout(buttons_row)
+    udp_scope_hint_label = caption_label_cls("")
+    udp_scope_hint_label.setWordWrap(True)
+    control_card.add_widget(udp_scope_hint_label)
 
     progress_bar = progress_bar_cls()
     progress_bar.setVisible(False)
@@ -228,7 +230,6 @@ def build_strategy_scan_control_section(
 
     return StrategyScanControlWidgets(
         control_card=control_card,
-        intro_label=intro_label,
         protocol_label=protocol_label,
         protocol_combo=protocol_combo,
         games_scope_label=games_scope_label,
@@ -239,7 +240,6 @@ def build_strategy_scan_control_section(
         target_input=target_input,
         quick_domain_btn=quick_domain_btn,
         udp_scope_hint_label=udp_scope_hint_label,
-        warning_notice=warning_notice,
         progress_bar=progress_bar,
         status_label=status_label,
         start_btn=start_btn,
@@ -248,9 +248,7 @@ def build_strategy_scan_control_section(
 
 
 def build_strategy_scan_results_section(*, tr_fn, table_cls) -> StrategyScanResultsWidgets:
-    results_card = SettingsCard(
-        tr_fn("page.strategy_scan.results", "Найденные стратегии")
-    )
+    results_card = SettingsCard()
 
     table = table_cls()
     table.setColumnCount(5)
@@ -297,9 +295,7 @@ def build_strategy_scan_log_section(*, tr_fn, push_button_cls, parent, on_toggle
         set_control_accessibility(widget, name=name, description=description)
         set_state_text(widget, name)
 
-    log_card = SettingsCard(
-        tr_fn("page.strategy_scan.log", "Подробный лог")
-    )
+    log_card = SettingsCard()
 
     expand_log_btn = push_button_cls("Развернуть", icon=FluentIcon.FULL_SCREEN)
     _set_action_accessibility(
@@ -311,6 +307,8 @@ def build_strategy_scan_log_section(*, tr_fn, push_button_cls, parent, on_toggle
     expand_log_btn.clicked.connect(on_toggle_log_expand)
 
     log_header = QHBoxLayout()
+    log_caption = CaptionLabel(tr_fn("page.strategy_scan.log", "Подробный лог подбора:"))
+    log_header.addWidget(log_caption)
     support_status_label = CaptionLabel("")
     support_status_label.setWordWrap(True)
     set_state_text(support_status_label, "Статус обращения по подбору стратегии: нет статуса")
@@ -347,6 +345,7 @@ def build_strategy_scan_log_section(*, tr_fn, push_button_cls, parent, on_toggle
 
     return StrategyScanLogWidgets(
         log_card=log_card,
+        log_caption=log_caption,
         expand_log_btn=expand_log_btn,
         support_status_label=support_status_label,
         prepare_support_btn=prepare_support_btn,

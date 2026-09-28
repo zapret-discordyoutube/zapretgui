@@ -100,7 +100,7 @@ class StrategyScanPage(BasePage):
         self._games_scope_label: QLabel | None = None
         self._games_scope_combo = None
         self._udp_scope_hint_label: QLabel | None = None
-        self._intro_label = None
+        self._log_caption = None
         self._protocol_label = None
         self._mode_label = None
         self._prepare_support_btn = None
@@ -220,7 +220,6 @@ class StrategyScanPage(BasePage):
             on_stop=self._on_stop,
         )
         self._control_card = control_widgets.control_card
-        self._intro_label = control_widgets.intro_label
         self._protocol_label = control_widgets.protocol_label
         self._protocol_combo = control_widgets.protocol_combo
         self._games_scope_label = control_widgets.games_scope_label
@@ -231,7 +230,7 @@ class StrategyScanPage(BasePage):
         self._target_input = control_widgets.target_input
         self._quick_domain_btn = control_widgets.quick_domain_btn
         self._udp_scope_hint_label = control_widgets.udp_scope_hint_label
-        self._warning_card = control_widgets.warning_notice
+        self._warning_card = None
         self._progress_bar = control_widgets.progress_bar
         self._status_label = control_widgets.status_label
         self._start_btn = control_widgets.start_btn
@@ -261,6 +260,7 @@ class StrategyScanPage(BasePage):
             on_prepare_support=self._prepare_support_from_strategy_scan,
         )
         self._log_card = log_widgets.log_card
+        self._log_caption = log_widgets.log_caption
         self._expand_log_btn = log_widgets.expand_log_btn
         self._support_status_label = log_widgets.support_status_label
         self._prepare_support_btn = log_widgets.prepare_support_btn
@@ -496,12 +496,8 @@ class StrategyScanPage(BasePage):
             blockcheck_feature=self._blockcheck,
             language=language,
             log_expanded=self._log_expanded,
-            control_card=self._control_card,
-            results_card=self._results_card,
-            log_card=self._log_card,
             expand_log_btn=self._expand_log_btn,
-            warning_notice=self._warning_card,
-            intro_label=self._intro_label,
+            log_caption_label=self._log_caption,
             protocol_label=self._protocol_label,
             mode_label=self._mode_label,
             mode_combo=self._mode_combo,
@@ -1180,6 +1176,8 @@ class StrategyScanPage(BasePage):
     def _apply_interaction_plan(self, plan) -> None:
         self._start_btn.setEnabled(plan.start_enabled)
         self._stop_btn.setEnabled(plan.stop_enabled)
+        # «Остановить» нужна только во время поиска: в покое она лишь занимала место.
+        self._stop_btn.setVisible(plan.stop_enabled or not plan.start_enabled)
         self._protocol_combo.setEnabled(plan.protocol_enabled)
         if self._games_scope_combo is not None:
             self._games_scope_combo.setEnabled(plan.games_scope_enabled)

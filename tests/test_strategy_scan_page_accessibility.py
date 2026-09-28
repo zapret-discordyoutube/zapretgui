@@ -52,10 +52,10 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
             "Адреса игр, выбрано: Все списки адресов (по умолчанию)",
         )
         self.assertIn("онлайн-игр", page._games_scope_combo.accessibleDescription())
-        self.assertEqual(page._mode_combo.accessibleName(), "Тщательность подбора, выбрано: Быстро — 30 лучших стратегий, до 3 минут")
+        self.assertEqual(page._mode_combo.accessibleName(), "Тщательность подбора, выбрано: Быстро — 30 стратегий, до 3 мин")
         self.assertEqual(
             page._mode_combo.property("screenReaderStateText"),
-            "Тщательность подбора, выбрано: Быстро — 30 лучших стратегий, до 3 минут",
+            "Тщательность подбора, выбрано: Быстро — 30 стратегий, до 3 мин",
         )
         self.assertIn("сколько стратегий", page._mode_combo.accessibleDescription())
         self.assertEqual(page._target_input.accessibleName(), "Цель подбора стратегии")
@@ -82,7 +82,7 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
             "Ход подбора стратегии: не выполняется",
         )
         self.assertIn("Показывает", page._progress_bar.accessibleDescription())
-        self.assertEqual(page._status_label.accessibleName(), "Статус подбора стратегии: Готово к поиску")
+        self.assertEqual(page._status_label.accessibleName(), "Статус подбора стратегии: Zapret на время поиска выключится")
         self.assertEqual(page._table.accessibleName(), "Результаты подбора стратегии: пока нет результатов")
         self.assertEqual(
             page._table.property("screenReaderStateText"),
@@ -235,19 +235,15 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
 
     def test_language_refresh_updates_field_labels(self) -> None:
         protocol_label = CaptionLabel("Old")
-        warning = CaptionLabel("Old warning")
+        log_caption = CaptionLabel("Old log")
         start_btn = PushButton()
 
         apply_language_plan_ui(
             blockcheck_feature=blockcheck_public,
             language="ru",
             log_expanded=False,
-            control_card=_TitleCardStub(),
-            results_card=_TitleCardStub(),
-            log_card=_TitleCardStub(),
             expand_log_btn=PushButton(),
-            warning_notice=warning,
-            intro_label=CaptionLabel(),
+            log_caption_label=log_caption,
             protocol_label=protocol_label,
             mode_label=CaptionLabel(),
             mode_combo=_ComboStub(3),
@@ -267,7 +263,17 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
             "Поле подбора стратегии: Что должно заработать:",
         )
         self.assertEqual(start_btn.text(), "Найти рабочую стратегию")
-        self.assertIn("Zapret будет выключен", warning.text())
+        self.assertEqual(log_caption.text(), "Подробный лог подбора:")
+
+    def test_cards_have_no_headers_to_save_space(self) -> None:
+        page = StrategyScanPage(
+            blockcheck_feature=_BlockcheckFeatureStub(),
+            create_strategy_scan_worker=lambda *_args, **_kwargs: None,
+        )
+        self.addCleanup(page.deleteLater)
+
+        for card in (page._control_card, page._results_card, page._log_card):
+            self.assertIsNone(card._title_label)
 
 
 class _ProgressFeatureStub:

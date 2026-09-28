@@ -4363,10 +4363,6 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "ru": "Назад",
         "en": "Back",
     },
-    "page.strategy_scan.control": {
-        "ru": "Поиск рабочей стратегии",
-        "en": "Find a working strategy",
-    },
     "page.strategy_scan.protocol": {
         "ru": "Что должно заработать:",
         "en": "What should work:",
@@ -4400,12 +4396,12 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "How thorough:",
     },
     "page.strategy_scan.mode_quick": {
-        "ru": "Быстро — 30 лучших стратегий, до 3 минут",
-        "en": "Quick — 30 best strategies, up to 3 minutes",
+        "ru": "Быстро — 30 стратегий, до 3 мин",
+        "en": "Quick — 30 strategies, up to 3 min",
     },
     "page.strategy_scan.mode_standard": {
-        "ru": "Тщательно — 80 стратегий, до 8 минут",
-        "en": "Thorough — 80 strategies, up to 8 minutes",
+        "ru": "Тщательно — 80 стратегий, до 8 мин",
+        "en": "Thorough — 80 strategies, up to 8 min",
     },
     "page.strategy_scan.mode_full": {
         "ru": "Все стратегии — дольше всего",
@@ -4440,20 +4436,8 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "Stop",
     },
     "page.strategy_scan.ready": {
-        "ru": "Готово к поиску",
-        "en": "Ready to search",
-    },
-    "page.strategy_scan.intro": {
-        "ru": "Программа по очереди включает стратегии обхода и проверяет, открывается ли выбранный сайт. Рабочие появятся в таблице ниже — любую можно сразу применить.",
-        "en": "The app switches bypass strategies on one by one and checks whether the chosen site opens. Working ones appear in the table below — apply any of them right away.",
-    },
-    "page.strategy_scan.warning_text": {
-        "ru": "На время поиска Zapret будет выключен: каждая стратегия проверяется отдельно. Когда найдёте рабочую, нажмите «Применить» — или просто снова запустите Zapret.",
-        "en": "Zapret is turned off while searching: each strategy is tested on its own. When you find a working one, press “Apply” — or simply start Zapret again.",
-    },
-    "page.strategy_scan.results": {
-        "ru": "Найденные стратегии",
-        "en": "Strategies found",
+        "ru": "Zapret на время поиска выключится",
+        "en": "Zapret is off while searching",
     },
     "page.strategy_scan.col_strategy": {
         "ru": "Стратегия",
@@ -4472,8 +4456,8 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "Apply",
     },
     "page.strategy_scan.log": {
-        "ru": "Подробный лог",
-        "en": "Detailed Log",
+        "ru": "Подробный лог подбора:",
+        "en": "Detailed search log:",
     },
     "page.strategy_scan.starting": {
         "ru": "Запуск сканирования...",
