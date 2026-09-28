@@ -6,7 +6,6 @@ from importlib import import_module
 _EXPORTS: dict[str, tuple[str, str]] = {
     "AppearanceFeature": ("app.feature_facades.appearance", "AppearanceFeature"),
     "BlockcheckFeature": ("app.feature_facades.blockcheck", "BlockcheckFeature"),
-    "DiagnosticsFeature": ("app.feature_facades.diagnostics", "DiagnosticsFeature"),
     "DnsFeature": ("app.feature_facades.dns", "DnsFeature"),
     "DpiSettingsFeature": ("app.feature_facades.dpi_settings", "DpiSettingsFeature"),
     "ExternalActionsFeature": ("app.feature_facades.external", "ExternalActionsFeature"),
@@ -25,7 +24,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "UpdaterFeature": ("app.feature_facades.updater", "UpdaterFeature"),
     "WindowGeometryFeature": ("app.feature_facades.window_geometry", "WindowGeometryFeature"),
     "build_appearance_feature": ("app.feature_facades.appearance", "build_appearance_feature"),
-    "build_diagnostics_feature": ("app.feature_facades.diagnostics", "build_diagnostics_feature"),
     "build_dns_feature": ("app.feature_facades.dns", "build_dns_feature"),
     "build_dpi_settings_feature": ("app.feature_facades.dpi_settings", "build_dpi_settings_feature"),
     "build_external_actions_feature": ("app.feature_facades.external", "build_external_actions_feature"),

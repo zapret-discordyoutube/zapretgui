@@ -529,6 +529,22 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Сервисы",
         "en": "Services",
     },
+    "page.blockcheck.scope": {
+        "ru": "Что проверить:",
+        "en": "What to check:",
+    },
+    "page.blockcheck.scope_main": {
+        "ru": "Discord и YouTube",
+        "en": "Discord and YouTube",
+    },
+    "page.blockcheck.scope_all": {
+        "ru": "Все сайты",
+        "en": "All sites",
+    },
+    "page.blockcheck.report": {
+        "ru": "Отчёт",
+        "en": "Report",
+    },
     "page.blockcheck.title": {
         "ru": "BlockCheck",
         "en": "BlockCheck",
@@ -538,8 +554,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Live Network Monitoring",
     },
     "page.blockcheck.subtitle": {
-        "ru": "Автоматический анализ блокировок и диагностика сети в один клик",
-        "en": "Automatic blocking analysis and network diagnostics in one click",
+        "ru": "Какие сайты открываются, почему не открываются остальные и что с этим делать",
+        "en": "Which sites open, why others don't and what to do about it",
     },
     "page.blockcheck.tab.blockcheck": {
         "ru": "BlockCheck",
@@ -549,49 +565,29 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Подбор стратегии",
         "en": "Strategy Selection",
     },
-    "page.blockcheck.tab.diagnostics": {
-        "ru": "Диагностика",
-        "en": "Diagnostics",
-    },
     "page.blockcheck.tab.dns_spoofing": {
         "ru": "DNS подмена",
         "en": "DNS Spoofing",
     },
-    "page.blockcheck.mode": {
-        "ru": "Режим:",
-        "en": "Mode:",
-    },
-    "page.blockcheck.mode_quick": {
-        "ru": "Быстрая",
-        "en": "Quick",
-    },
-    "page.blockcheck.mode_full": {
-        "ru": "Полная",
-        "en": "Full",
-    },
-    "page.blockcheck.mode_dpi": {
-        "ru": "Только DPI",
-        "en": "DPI Only",
-    },
     "page.blockcheck.start": {
-        "ru": "Запустить",
-        "en": "Start",
+        "ru": "Проверить",
+        "en": "Check",
     },
     "page.blockcheck.stop": {
         "ru": "Остановить",
         "en": "Stop",
     },
     "page.blockcheck.ready": {
-        "ru": "Проверяет, какие сайты и как блокирует провайдер",
-        "en": "Checks which sites your ISP blocks and how",
+        "ru": "Проверяем так же, как браузер. Займёт 5–30 секунд",
+        "en": "Checked the way a browser opens sites. Takes 5–30 seconds",
     },
     "page.blockcheck.running": {
-        "ru": "Запуск тестов...",
-        "en": "Running tests...",
+        "ru": "Проверяем… обычно это 5–30 секунд",
+        "en": "Checking… usually 5–30 seconds",
     },
     "page.blockcheck.stopping": {
-        "ru": "Остановка...",
-        "en": "Stopping...",
+        "ru": "Останавливаем…",
+        "en": "Stopping…",
     },
     "page.blockcheck.done": {
         "ru": "Готово",
@@ -600,18 +596,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.blockcheck.error": {
         "ru": "Ошибка выполнения",
         "en": "Execution error",
-    },
-    "page.blockcheck.col_target": {
-        "ru": "Цель",
-        "en": "Target",
-    },
-    "page.blockcheck.no_dpi": {
-        "ru": "DPI не обнаружен на проверенных ресурсах",
-        "en": "No DPI detected on tested resources",
-    },
-    "page.blockcheck.log": {
-        "ru": "Подробный лог:",
-        "en": "Detailed log:",
     },
     "page.blockcheck.custom_domains": {
         "ru": "Проверить ещё и свои домены:",
@@ -1016,58 +1000,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.autostart.tip.recommendation": {
         "ru": "Используется один тип автозапуска: ярлык ZapretGUI в папке автозагрузки Windows.",
         "en": "Only one autostart type is used: a ZapretGUI shortcut in the Windows Startup folder.",
-    },
-    "page.connection.title": {
-        "ru": "Диагностика соединения",
-        "en": "Connection Diagnostics",
-    },
-    "page.connection.subtitle": {
-        "ru": "Открываются ли Discord и YouTube, и если нет — почему и что сделать",
-        "en": "Whether Discord and YouTube open, and if not — why and what to do",
-    },
-    "page.connection.log.hint": {
-        "ru": "Подробный отчёт: адреса, ответы DNS и время ответа серверов. Пригодится поддержке.",
-        "en": "Detailed report: addresses, DNS answers and server response times. Useful for support.",
-    },
-    "page.connection.test.select": {
-        "ru": "Что проверить:",
-        "en": "What to check:",
-    },
-    "page.connection.test.all": {
-        "ru": "Discord и YouTube",
-        "en": "Discord and YouTube",
-    },
-    "page.connection.test.discord_only": {
-        "ru": "Только Discord",
-        "en": "Discord only",
-    },
-    "page.connection.test.youtube_only": {
-        "ru": "Только YouTube",
-        "en": "YouTube only",
-    },
-    "page.connection.button.start": {
-        "ru": "Проверить",
-        "en": "Check",
-    },
-    "page.connection.button.stop": {
-        "ru": "Остановить",
-        "en": "Stop",
-    },
-    "page.connection.button.show_log": {
-        "ru": "Показать отчёт",
-        "en": "Show report",
-    },
-    "page.connection.button.hide_log": {
-        "ru": "Скрыть отчёт",
-        "en": "Hide report",
-    },
-    "page.connection.button.send_log": {
-        "ru": "Подготовить обращение",
-        "en": "Prepare report",
-    },
-    "page.connection.status.ready": {
-        "ru": "Проверяем так же, как браузер. Обычно 5–15 секунд",
-        "en": "Checked the way a browser opens sites. Usually 5–15 seconds",
     },
     "page.custom_domains.title": {
         "ru": "Кастомные (мои) домены (hostlist) для работы с Zapret",
@@ -4271,38 +4203,6 @@ TEXTS: dict[str, dict[str, str]] = {
 
 
 TEXTS_EXTRA: dict[str, dict[str, str]] = {
-    "page.blockcheck.domains_section": {
-        "ru": "Часть 1: Проверка доменов (TLS + HTTP injection)",
-        "en": "Part 1: Domain Checks (TLS + HTTP injection)",
-    },
-    "page.blockcheck.col_dns_isp": {
-        "ru": "DNS/ISP",
-        "en": "DNS/ISP",
-    },
-    "page.blockcheck.tcp_section": {
-        "ru": "Проверка обрыва на 16–20 КБ (TCP)",
-        "en": "Cut-off check at 16–20 KB (TCP)",
-    },
-    "page.blockcheck.col_provider": {
-        "ru": "Провайдер",
-        "en": "Provider",
-    },
-    "page.blockcheck.col_status": {
-        "ru": "Статус",
-        "en": "Status",
-    },
-    "page.blockcheck.col_error_details": {
-        "ru": "Ошибка / Детали",
-        "en": "Error / Details",
-    },
-    "page.blockcheck.warning": {
-        "ru": "Предупреждение",
-        "en": "Warning",
-    },
-    "page.blockcheck.col_details": {
-        "ru": "Детали",
-        "en": "Details",
-    },
     "page.control.button.stop_only_template": {
         "ru": "Остановить только {exe_name}",
         "en": "Stop only {exe_name}",

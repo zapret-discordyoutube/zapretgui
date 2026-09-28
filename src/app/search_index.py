@@ -61,11 +61,10 @@ SEARCH_ENTRIES: tuple[SearchEntry, ...] = (
     SearchEntry("network.tools", PageName.NETWORK, "page.network.tools", section_key="page.network.tools"),
     SearchEntry("blockcheck.tab.blockcheck", PageName.BLOCKCHECK, "page.blockcheck.tab.blockcheck", section_key="nav.page.blockcheck", tab_key="blockcheck", text_prefixes=("page.blockcheck.",)),
     SearchEntry("blockcheck.tab.strategy_scan", PageName.BLOCKCHECK, "page.blockcheck.tab.strategy_scan", section_key="nav.page.blockcheck", tab_key="strategy_scan", text_prefixes=("page.strategy_scan.", "page.strategy_sort.")),
-    SearchEntry("blockcheck.tab.diagnostics", PageName.BLOCKCHECK, "page.blockcheck.tab.diagnostics", section_key="nav.page.blockcheck", tab_key="diagnostics", text_prefixes=("page.connection.",)),
     SearchEntry("blockcheck.tab.dns_spoofing", PageName.BLOCKCHECK, "page.blockcheck.tab.dns_spoofing", section_key="nav.page.blockcheck", tab_key="dns_spoofing", text_prefixes=("page.dns_check.",)),
-    SearchEntry("diag.tab.connection", PageName.BLOCKCHECK, "tab.diagnostics.connection", section_key="nav.page.blockcheck", tab_key="diagnostics"),
+    # «Диагностика соединения» влилась в BlockCheck: поиск по старому названию ведёт туда.
+    SearchEntry("diag.tab.connection", PageName.BLOCKCHECK, "tab.diagnostics.connection", section_key="nav.page.blockcheck", tab_key="blockcheck"),
     SearchEntry("diag.tab.dns", PageName.BLOCKCHECK, "tab.diagnostics.dns", section_key="nav.page.blockcheck", tab_key="dns_spoofing"),
-    SearchEntry("blockcheck.connection.title", PageName.BLOCKCHECK, "page.connection.title", section_key="page.blockcheck.tab.diagnostics", tab_key="diagnostics"),
     SearchEntry("blockcheck.dns_check.title", PageName.BLOCKCHECK, "page.dns_check.title", section_key="page.blockcheck.tab.dns_spoofing", tab_key="dns_spoofing"),
     SearchEntry("blockcheck.strategy_scan.title", PageName.BLOCKCHECK, "page.strategy_scan.title", section_key="page.blockcheck.tab.strategy_scan", tab_key="strategy_scan"),
     SearchEntry("blockcheck.strategy_sort.title", PageName.BLOCKCHECK, "page.strategy_sort.title", section_key="page.blockcheck.tab.strategy_scan", tab_key="strategy_scan"),
@@ -111,7 +110,6 @@ _PAGE_SEARCH_EXTRA_PREFIXES: dict[PageName, tuple[str, ...]] = {
     PageName.ZAPRET2_PRESET_SETUP: ("page.winws2_pages.",),
     PageName.ZAPRET1_PRESET_SETUP: ("page.winws1_pages.",),
     PageName.BLOCKCHECK: (
-        "page.connection.",
         "page.dns_check.",
         "page.strategy_scan.",
         "page.strategy_sort.",

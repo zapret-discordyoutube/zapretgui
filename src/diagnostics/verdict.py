@@ -266,9 +266,12 @@ _BROKEN = (ReachState.DPI, ReachState.FREEZE, ReachState.IP_BLOCK, ReachState.CE
 
 _ADVICE_STRATEGY = "Подберите другую стратегию: вкладка «Подбор стратегии» найдёт рабочую для вашего провайдера."
 _ADVICE_START = "Запустите Zapret на странице «Управление Zapret 2»."
-_ADVICE_DNS = (
+# Общий текст совета: движок убирает его из строк сайтов и оставляет одну
+# общую строку про DNS, сравнивая именно с этой константой.
+ADVICE_DNS = (
     "Включите DNS с шифрованием (DoH) в разделе «Настройка DNS» — провайдер не сможет подменять ответы."
 )
+_ADVICE_DNS = ADVICE_DNS
 _ADVICE_CERT = (
     "Проверьте антивирус (проверку HTTPS-трафика), прокси и VPN: кто-то подменяет сертификаты сайтов."
 )
@@ -337,7 +340,7 @@ def summarize_service(
         states = [main.reach] + [item.reach for item in secondary_broken]
         headline = f"{label} не открывается: {_reason_for(states)}"
         if main.reach in (ReachState.DPI, ReachState.FREEZE) and zapret_running:
-            headline += " — текущая стратегия Zapret не помогает"
+            headline += " — Zapret запущен, но эту блокировку не обходит"
         advice = _advice_for(states, zapret_running=zapret_running)
         if spoofed:
             advice = advice + (_ADVICE_DNS,)

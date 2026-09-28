@@ -183,30 +183,6 @@ class PreflightHangRegressionTests(unittest.TestCase):
         self.assertNotIn("shutdown(wait=True", source)
         self.assertNotIn("wait=not cancelled", source)
 
-    def test_cancel_stops_mass_resolution_promptly(self) -> None:
-        """«Остановить» обязана срабатывать, пока сеть ещё молчит.
-
-        Массовый preflight заменён этапом резолва в планировщике проб — проверка
-        та же, точка входа новая.
-        """
-        from blockcheck.runner import BlockcheckRunner
-
-        targets = [{"name": f"d{i}", "value": f"https://d{i}.test"} for i in range(20)]
-
-        runner = BlockcheckRunner(parallel=4)
-        threading.Timer(0.5, runner.cancel).start()
-
-        with _BlackholeDNS():
-            started = time.monotonic()
-            runner._stage_resolve(targets)
-            elapsed = time.monotonic() - started
-
-        self.assertLess(
-            elapsed, 4.0,
-            f"после отмены этап резолва возвращался {elapsed:.1f}с",
-        )
-
-
 class NoUnboundedResolutionTests(unittest.TestCase):
     """Статический guard: блокирующий резолв не должен вернуться в код."""
 

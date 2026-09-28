@@ -16,17 +16,15 @@ class BlockcheckRunLogState:
 
 def create_blockcheck_worker(
     *,
-    mode: str = "full",
-    extra_domains: list[str] | None = None,
-    skip_preflight_failed: bool = False,
+    scope: str = "main",
+    user_domains: list[str] | None = None,
     parent=None,
 ):
     from blockcheck.worker import BlockcheckWorker
 
     return BlockcheckWorker(
-        mode=mode,
-        extra_domains=extra_domains,
-        skip_preflight_failed=skip_preflight_failed,
+        scope=scope,
+        user_domains=user_domains,
         start_run_log=start_blockcheck_run_log,
         append_run_log=append_blockcheck_run_log,
         close_run_log=close_blockcheck_run_log,
@@ -107,12 +105,12 @@ def make_blockcheck_run_log_path(mode: str) -> str:
     return os.path.join(log_dir, f"blockcheck_run_{ts}_{safe_mode}.log")
 
 
-def start_blockcheck_run_log(mode: str, extra_domains: list[str]):
-    path = make_blockcheck_run_log_path(mode)
+def start_blockcheck_run_log(scope: str, extra_domains: list[str]):
+    path = make_blockcheck_run_log_path(scope)
     header = (
         f"=== Blockcheck Run Log ({datetime.now():%Y-%m-%d %H:%M:%S}) ===\n"
-        f"Mode: {mode}\n"
-        f"Extra domains: {len(extra_domains)}\n"
+        f"Scope: {scope}\n"
+        f"User domains: {len(extra_domains)}\n"
     )
     if extra_domains:
         header += f"Domains: {', '.join(extra_domains)}\n"

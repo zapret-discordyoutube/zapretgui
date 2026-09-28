@@ -248,7 +248,6 @@ def build_blockcheck_page_kwargs(
     *,
     page_name: PageName,
     blockcheck_feature,
-    diagnostics_feature,
     dns_feature,
     runtime_feature,
 ) -> dict:
@@ -264,7 +263,6 @@ def build_blockcheck_page_kwargs(
 
     return {
         "blockcheck_feature": blockcheck_feature,
-        "diagnostics_feature": diagnostics_feature,
         "dns_feature": dns_feature,
         "create_strategy_scan_worker": _create_strategy_scan_worker,
     }

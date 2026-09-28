@@ -1374,7 +1374,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
 
     def test_feature_builders_do_not_import_page_command_modules_before_ui(self) -> None:
         import builtins
-        from app.feature_facades.diagnostics import build_diagnostics_feature
         from app.feature_facades.dns import build_dns_feature
         from app.feature_facades.dpi_settings import build_dpi_settings_feature
         from app.feature_facades.external import build_external_actions_feature
@@ -1416,7 +1415,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             mark_startup_ready=Mock(),
         )
         with patch.object(builtins, "__import__", side_effect=tracking_import):
-            build_diagnostics_feature()
             build_dns_feature()
             build_dpi_settings_feature()
             build_external_actions_feature()

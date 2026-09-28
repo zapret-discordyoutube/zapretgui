@@ -35,7 +35,6 @@ _PAGE_EXPORTS: dict[str, tuple[str, str]] = {
     "PremiumPage": ("donater.ui.page", "PremiumPage"),
     "BlockcheckPage": ("blockcheck.ui.page", "BlockcheckPage"),
     "ServersPage": ("updater.ui.page", "ServersPage"),
-    "ConnectionTestPage": ("diagnostics.ui.page", "ConnectionTestPage"),
     "OrchestraPage": ("orchestra.ui.page", "OrchestraPage"),
     "OrchestraSettingsPage": ("orchestra.ui.settings_page", "OrchestraSettingsPage"),
     "OrchestraLockedPage": ("orchestra.ui.locked_page", "OrchestraLockedPage"),

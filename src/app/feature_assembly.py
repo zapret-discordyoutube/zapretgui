@@ -106,7 +106,6 @@ def build_app_features(*, deps: AppFeatureAssemblyDeps, paths: Any, state: Any) 
         for name in (
             "appearance",
             "blockcheck",
-            "diagnostics",
             "dns",
             "dpi_settings",
             "external",
@@ -126,7 +125,6 @@ def build_app_features(*, deps: AppFeatureAssemblyDeps, paths: Any, state: Any) 
     }
     build_appearance_feature = facades["appearance"].build_appearance_feature
     BlockcheckFeature = facades["blockcheck"].BlockcheckFeature
-    build_diagnostics_feature = facades["diagnostics"].build_diagnostics_feature
     build_dns_feature = facades["dns"].build_dns_feature
     build_dpi_settings_feature = facades["dpi_settings"].build_dpi_settings_feature
     build_external_actions_feature = facades["external"].build_external_actions_feature
@@ -207,7 +205,6 @@ def build_app_features(*, deps: AppFeatureAssemblyDeps, paths: Any, state: Any) 
             presets_feature=preset_profile.presets,
             profile_feature=preset_profile.profile,
         ),
-        diagnostics=build_diagnostics_feature(),
         dns=build_dns_feature(),
         fakes=build_fakes_feature(paths),
         hosts=build_hosts_feature(),

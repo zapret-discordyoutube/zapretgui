@@ -104,7 +104,6 @@ class BlockcheckScanShutdownWiringTests(unittest.TestCase):
         kwargs = build_blockcheck_page_kwargs(
             page_name=PageName.BLOCKCHECK,
             blockcheck_feature=blockcheck_feature,
-            diagnostics_feature=object(),
             dns_feature=object(),
             runtime_feature=runtime_feature,
         )

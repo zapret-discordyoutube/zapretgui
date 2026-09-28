@@ -1,8 +1,13 @@
-"""Движок диагностики соединения и проверки DNS подмены.
+"""Движок BlockCheck и проверки DNS подмены.
 
-Как он устроен
---------------
-Для каждого адреса из списка сервиса:
+BlockCheck отвечает на вопрос «какие сайты открываются и что с остальными».
+Сайты собраны в сервисы (Discord — это сайт, чат и CDN картинок; YouTube — сайт,
+превью и видеосервер). Режим «Discord и YouTube» проверяет только их, «Все
+сайты» — ещё мессенджеры, соцсети, контрольные сайты и домены пользователя.
+Голосовые серверы (UDP) и обрыв загрузки на 16–20 КБ проверяются всегда.
+
+Как проверяется один адрес
+--------------------------
 
 1. Параллельно спрашиваются DNS системы (без кэша и hosts), эталон по
    DNS-over-HTTPS к 1.1.1.1 и 8.8.8.8 (по IP, чтобы эталон не зависел от
@@ -14,8 +19,8 @@
    по IPv6: браузер сам переключается на IPv6, если IPv4 режут сильнее.
 3. **Честен ли DNS.** Если адрес из DNS не совпал с эталоном, решает
    сертификат по этому адресу (см. ``diagnostics.verdict``).
-4. Результаты печатаются в постоянном порядке, в конце — итог по сервисам.
-   Тот же итог возвращается словарём для карточек на странице.
+4. Результаты печатаются в постоянном порядке, в конце — итог с советами.
+   Тот же итог возвращается словарём для экрана BlockCheck.
 
 Все сетевые вызовы ограничены по времени; кнопка «Стоп» снимает их сразу.
 """
@@ -39,6 +44,7 @@ from diagnostics.tls_probe import (
     https_get,
 )
 from diagnostics.verdict import (
+    ADVICE_DNS as _ADVICE_DNS,
     DnsJudgement,
     DnsState,
     Level,
@@ -60,9 +66,13 @@ from utils.windows_dns_query import (
 from utils.windows_http import HttpCancel, https_request
 
 __all__ = [
+    "SCOPE_ALL",
+    "SCOPE_MAIN",
     "SERVICES",
+    "Service",
     "Target",
-    "run_connection_test",
+    "build_services",
+    "run_blockcheck",
     "run_dns_check",
 ]
 
@@ -80,12 +90,18 @@ READ_TIMEOUT = 3.0
 REACH_ATTEMPTS = 2
 DISCOVERY_TIMEOUT = 6.0
 # Верхняя граница на всю проверку: дальше недопроверенное помечается как
-# «нет ответа», а не подвешивает окно.
-RUN_DEADLINE = 25.0
-_TIMED_OUT_LINE = (
-    f"⚠️ Часть проверок не уложилась в {RUN_DEADLINE:.0f} с и была прервана — "
-    "их результат неизвестен."
-)
+# «нет ответа», а не подвешивает окно. Для «Всех сайтов» — дольше: там ещё
+# голосовые серверы и загрузка файлов для проверки обрыва.
+RUN_DEADLINE = 30.0
+RUN_DEADLINE_ALL = 45.0
+FREEZE_READ_TIMEOUT = 4.0
+
+
+def _timed_out_line(deadline: float) -> str:
+    return (
+        f"⚠️ Часть проверок не уложилась в {deadline:.0f} с и была прервана — "
+        "их результат неизвестен."
+    )
 
 # Сколько тела ответа читать, чтобы заметить обрыв после ~16 КБ (ТСПУ режет
 # соединение с зарубежными CDN ровно на этом объёме).
@@ -121,8 +137,27 @@ class Target:
     discover_googlevideo: bool = False
 
 
-SERVICES: dict[str, tuple[str, tuple[Target, ...]]] = {
-    "discord": (
+@dataclass(frozen=True, slots=True)
+class Service:
+    key: str
+    label: str
+    targets: tuple[Target, ...]
+    # Контрольный сайт: его почти никогда не блокируют. Если не открываются
+    # даже контрольные — дело в подключении, а не в блокировках.
+    control: bool = False
+
+
+def _site(key: str, label: str, host: str, *, control: bool = False) -> Service:
+    return Service(key, label, (Target(host, "сайт", read_body=True, main=True),), control=control)
+
+
+SCOPE_MAIN = "main"
+SCOPE_ALL = "all"
+
+# «Discord и YouTube» — то, ради чего Zapret ставят чаще всего.
+SERVICES: dict[str, Service] = {
+    "discord": Service(
+        "discord",
         "Discord",
         (
             Target("discord.com", "сайт и вход", read_body=True, main=True),
@@ -130,7 +165,8 @@ SERVICES: dict[str, tuple[str, tuple[Target, ...]]] = {
             Target("cdn.discordapp.com", "картинки и файлы"),
         ),
     ),
-    "youtube": (
+    "youtube": Service(
+        "youtube",
         "YouTube",
         (
             Target(YOUTUBE_HOST, "сайт", read_body=True, main=True),
@@ -144,6 +180,41 @@ SERVICES: dict[str, tuple[str, tuple[Target, ...]]] = {
         ),
     ),
 }
+
+# Добавляются в режиме «Все сайты».
+EXTRA_SERVICES: tuple[Service, ...] = (
+    Service(
+        "telegram",
+        "Telegram",
+        (
+            Target("telegram.org", "сайт", read_body=True, main=True),
+            Target("web.telegram.org", "веб-версия"),
+        ),
+    ),
+    _site("instagram", "Instagram", "www.instagram.com"),
+    _site("facebook", "Facebook", "www.facebook.com"),
+    _site("x", "X (Twitter)", "x.com"),
+    _site("linkedin", "LinkedIn", "www.linkedin.com"),
+    _site("spotify", "Spotify", "www.spotify.com"),
+    _site("rutracker", "RuTracker", "rutracker.org"),
+    _site("google", "Google", "www.google.com", control=True),
+    _site("cloudflare", "Cloudflare", "www.cloudflare.com", control=True),
+)
+
+
+def build_services(scope: str, user_domains=()) -> dict[str, Service]:
+    """Сервисы для проверки: основные, при «Все сайты» — остальные и свои домены."""
+    services = dict(SERVICES)
+    if str(scope or "").strip().lower() == SCOPE_ALL:
+        for service in EXTRA_SERVICES:
+            services[service.key] = service
+    known_hosts = {target.host for service in services.values() for target in service.targets}
+    for domain in user_domains or ():
+        host = str(domain or "").strip().lower().rstrip(".")
+        if host and host not in known_hosts:
+            known_hosts.add(host)
+            services[f"user:{host}"] = _site(f"user:{host}", host, host)
+    return services
 
 
 class _Stopped(Exception):
@@ -183,13 +254,14 @@ class _Run:
     выводится с пометкой, что часть проверок не успела.
     """
 
-    def __init__(self, should_stop: ShouldStop | None, *, workers: int) -> None:
+    def __init__(self, should_stop: ShouldStop | None, *, workers: int, deadline: float | None = None) -> None:
         self._should_stop = should_stop
         self._user_stopped = False
         self.timed_out = False
         self.http_cancel = HttpCancel()
         self.probe_cancel = ProbeCancel()
-        self.deadline = time.monotonic() + RUN_DEADLINE
+        self.deadline_seconds = RUN_DEADLINE if deadline is None else float(deadline)
+        self.deadline = time.monotonic() + self.deadline_seconds
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="diag")
 
     def _cancel_all(self) -> None:
@@ -535,15 +607,6 @@ def _probe_lines(probe: _Probe, *, full: bool) -> list[str]:
     return lines
 
 
-def _verdict_lines(verdict: ServiceVerdict) -> list[str]:
-    lines = [f"{_LEVEL_ICON[verdict.level]} {verdict.headline}"]
-    if verdict.dns_note:
-        lines.append(f"   ⚠️ {verdict.dns_note}")
-    for item in verdict.advice:
-        lines.append(f"   👉 {item}")
-    return lines
-
-
 def _dns_provider_name(ip: str) -> tuple[str, str]:
     """(название провайдера из списка программы, его раздел) или пустые строки."""
     try:
@@ -604,36 +667,28 @@ def _zapret_status() -> tuple[bool | None, str]:
 # ---------------------------------------------------------------------------
 
 
-def _selected_services(test_type: str) -> list[str]:
-    normalized = str(test_type or "").strip().lower()
-    if normalized in SERVICES:
-        return [normalized]
-    return list(SERVICES)
-
-
 def _run_probes(
     run: _Run,
-    services: list[str],
+    services: dict[str, Service],
     *,
     full: bool,
     emit: Emit,
 ) -> dict[str, list[_Probe]]:
     """Запускает все цели сразу и печатает их блоки по порядку."""
     planned: list[tuple[str, Target, Future]] = []
-    for service in services:
-        _label, targets = SERVICES[service]
-        for target in targets:
+    for key, service in services.items():
+        for target in service.targets:
             if not full and target.discover_googlevideo:
                 target = Target(target.host, target.purpose, target.path, main=target.main)
-            planned.append((service, target, run.submit(_probe_target, run, target, service, full=full)))
+            planned.append((key, target, run.submit(_probe_target, run, target, key, full=full)))
 
-    collected: dict[str, list[_Probe]] = {service: [] for service in services}
+    collected: dict[str, list[_Probe]] = {key: [] for key in services}
     current_service = ""
-    for service, target, future in planned:
-        if service != current_service:
-            current_service = service
+    for key, target, future in planned:
+        if key != current_service:
+            current_service = key
             emit("")
-            emit(f"━━━━━━━━ {SERVICES[service][0]} ━━━━━━━━")
+            emit(f"━━━━━━━━ {services[key].label} ━━━━━━━━")
         try:
             probe = run.wait(future)
         except _Stopped:
@@ -641,14 +696,14 @@ def _run_probes(
         except Exception as exc:
             emit(f"❔ {target.host} — {target.purpose}: проверка не выполнилась ({exc})")
             continue
-        collected[service].append(probe)
+        collected[key].append(probe)
         for line in _probe_lines(probe, full=full):
             emit(line)
     emit("")
     return collected
 
 
-def _service_verdict(service: str, probes: list[_Probe], *, zapret_running: bool | None) -> ServiceVerdict:
+def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: bool | None) -> ServiceVerdict:
     outcomes = [
         TargetOutcome(
             host=probe.host,
@@ -659,7 +714,7 @@ def _service_verdict(service: str, probes: list[_Probe], *, zapret_running: bool
         )
         for probe in probes
     ]
-    return summarize_service(SERVICES[service][0], outcomes, zapret_running=zapret_running)
+    return summarize_service(service.label, outcomes, zapret_running=zapret_running)
 
 
 def _short_text(probe: _Probe) -> str:
@@ -685,54 +740,242 @@ def _target_report(probe: _Probe) -> dict:
     }
 
 
-def run_connection_test(test_type: str, *, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
-    """Полная диагностика вкладки «Диагностика». Возвращает итог для карточек."""
-    services = _selected_services(test_type)
-    targets_count = sum(len(SERVICES[service][1]) for service in services)
-    run = _Run(should_stop, workers=max(8, targets_count * 6))
+def _download(run: _Run, host: str, path: str) -> ProbeResult | None:
+    """Загрузка файла для проверки обрыва: адрес из hosts/DNS системы, иначе эталон."""
+    ips = list(hosts_file_ipv4(host)) or list(query_ipv4(host, timeout=DNS_TIMEOUT, cancelled=run.dns_cancelled).ips)
+    if not ips:
+        ips = list(_doh_lookup(run, host)[1])
+    if not ips:
+        return None
+    from diagnostics.freeze_check import READ_LIMIT
+
+    return https_get(
+        host,
+        ips[0],
+        path,
+        timeout=HTTPS_TIMEOUT,
+        read_limit=READ_LIMIT,
+        read_timeout=FREEZE_READ_TIMEOUT,
+        cancel=run.probe_cancel,
+    )
+
+
+def _wait_plain(future: Future):
+    return future.result()
+
+
+_LEVEL_ORDER = {Level.FAIL: 0, Level.WARN: 1, Level.UNKNOWN: 2, Level.OK: 3}
+
+
+def _problem(level: Level, text: str, advice=(), *, action: str = "", target: str = "") -> dict:
+    return {"level": level.value, "text": text, "advice": list(advice), "action": action, "target": target}
+
+
+def _collect_problems(
+    services: dict[str, Service],
+    verdicts: dict[str, ServiceVerdict],
+    collected: dict[str, list[_Probe]],
+    *,
+    voice,
+    freeze,
+    zapret_running: bool | None,
+) -> tuple[list[dict], list[str], list[str]]:
+    """Итог для экрана: проблемы по важности, открывающиеся сервисы, подменённые DNS."""
+    problems: list[dict] = []
+
+    controls = [key for key, service in services.items() if service.control]
+    if controls and all(verdicts[key].level in (Level.FAIL, Level.UNKNOWN) for key in controls):
+        problems.append(
+            _problem(
+                Level.FAIL,
+                "Не открываются даже контрольные сайты (Google, Cloudflare) — похоже, нет интернета "
+                "или всё соединение режет антивирус, прокси или VPN",
+                ("Проверьте подключение к интернету и повторите проверку.",),
+            )
+        )
+
+    ordered = sorted(
+        (key for key in services if not services[key].control),
+        key=lambda key: _LEVEL_ORDER.get(verdicts[key].level, 9),
+    )
+    working: list[str] = []
+    for key in ordered:
+        verdict = verdicts[key]
+        advice = tuple(item for item in verdict.advice if item != _ADVICE_DNS)
+        blocked_host = next(
+            (probe.host for probe in collected.get(key, ()) if probe.reach_state != ReachState.OK),
+            "",
+        )
+        if verdict.level in (Level.FAIL, Level.WARN) and blocked_host:
+            action = "strategy" if zapret_running else "start_zapret"
+            problems.append(_problem(verdict.level, verdict.headline, advice, action=action, target=blocked_host))
+        elif verdict.level == Level.UNKNOWN:
+            problems.append(_problem(Level.UNKNOWN, verdict.headline, advice))
+        else:
+            working.append(services[key].label)
+
+    if freeze is not None and freeze.level != Level.OK:
+        problems.append(_problem(freeze.level, freeze.headline, freeze.advice, action="strategy" if zapret_running else "start_zapret"))
+    if voice is not None and voice.level != Level.OK:
+        problems.append(_problem(voice.level, voice.headline, voice.advice, action="strategy_voice"))
+
+    spoofed = [
+        probe.host
+        for probes in collected.values()
+        for probe in probes
+        if probe.judgement is not None and probe.judgement.state == DnsState.SPOOFED
+    ]
+    if spoofed:
+        shown = ", ".join(spoofed[:5]) + (f" и ещё {len(spoofed) - 5}" if len(spoofed) > 5 else "")
+        problems.append(
+            _problem(
+                Level.WARN,
+                f"DNS подменяет адреса: {shown}. Браузер с защищённым DNS этого не замечает, а программы, "
+                "которые спрашивают адрес у Windows, эти сайты не откроют",
+                (_ADVICE_DNS,),
+                action="dns",
+            )
+        )
+    problems.sort(key=lambda item: _LEVEL_ORDER.get(Level(item["level"]), 9))
+    return problems, working, spoofed
+
+
+def _section_lines(title: str, report, rows) -> list[str]:
+    icon = {Level.OK: "✅", Level.WARN: "⚠️", Level.FAIL: "❌", Level.UNKNOWN: "❔"}
+    lines = ["", f"━━━━━━━━ {title} ━━━━━━━━"]
+    for mark, name, text in rows:
+        lines.append(f"{mark} {name}: {text}")
+    lines.append(f"{icon[report.level]} {report.headline}")
+    return lines
+
+
+def run_blockcheck(
+    scope: str = SCOPE_MAIN,
+    *,
+    user_domains=(),
+    emit: Emit,
+    should_stop: ShouldStop | None = None,
+) -> dict:
+    """Проверка BlockCheck. Печатает отчёт через ``emit`` и возвращает итог для экрана."""
+    from diagnostics.freeze_check import check_freeze, summarize_freeze
+    from diagnostics.voice_check import check_voice, summarize_voice
+
+    scope = SCOPE_ALL if str(scope or "").strip().lower() == SCOPE_ALL else SCOPE_MAIN
+    services = build_services(scope, user_domains)
+    targets_count = sum(len(service.targets) for service in services.values())
+    run = _Run(
+        should_stop,
+        workers=targets_count * 10 + 24,
+        deadline=RUN_DEADLINE_ALL if scope == SCOPE_ALL else RUN_DEADLINE,
+    )
     started = time.monotonic()
     try:
-        emit(f"🔍 Диагностика соединения — {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
-        for line in _environment_lines():
+        title = "Все сайты" if scope == SCOPE_ALL else "Discord и YouTube"
+        emit(f"🔍 BlockCheck: {title} — {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
+        environment = _environment_lines()
+        for line in environment:
             emit(line)
         zapret_running, zapret_line = _zapret_status()
         emit(zapret_line)
         emit("⏳ Проверяем так же, как браузер: TLS 1.3, правильные адреса сайтов…")
 
+        # Звонки и обрыв на 16 КБ проверяются всегда: режим меняет только список сайтов.
+        voice_future = run.submit(check_voice, run.submit, _wait_plain)
+        freeze_future = run.submit(
+            check_freeze,
+            run.submit,
+            _wait_plain,
+            lambda host, path: _download(run, host, path),
+        )
+
         collected = _run_probes(run, services, full=True, emit=emit)
 
+        voice = freeze = None
+        if voice_future is not None:
+            try:
+                voice = summarize_voice(run.wait(voice_future))
+            except _Stopped:
+                raise
+            except Exception as exc:
+                emit(f"❔ Голосовые серверы: проверка не выполнилась ({exc})")
+            if voice is not None:
+                for line in _section_lines(
+                    "Голосовые звонки (UDP)",
+                    voice,
+                    [("✅" if item.answered else "❌", item.name, item.text) for item in voice.servers],
+                ):
+                    emit(line)
+        if freeze_future is not None:
+            try:
+                freeze = summarize_freeze(run.wait(freeze_future), zapret_running=zapret_running)
+            except _Stopped:
+                raise
+            except Exception as exc:
+                emit(f"❔ Обрыв на 16–20 КБ: проверка не выполнилась ({exc})")
+            if freeze is not None:
+                marks = {"ok": "✅", "freeze": "❌", "unknown": "❔"}
+                for line in _section_lines(
+                    "Обрыв на 16–20 КБ",
+                    freeze,
+                    [(marks[item.state.value], item.name, item.text) for item in freeze.servers],
+                ):
+                    emit(line)
+
+        verdicts = {
+            key: _service_verdict(service, collected[key], zapret_running=zapret_running)
+            for key, service in services.items()
+        }
+        problems, working, spoofed = _collect_problems(
+            services,
+            verdicts,
+            collected,
+            voice=voice,
+            freeze=freeze,
+            zapret_running=zapret_running,
+        )
+
+        emit("")
         emit("━━━━━━━━ 📊 Итог ━━━━━━━━")
         if run.timed_out:
-            emit(_TIMED_OUT_LINE)
-        summary: dict[str, str] = {}
-        reports: list[dict] = []
-        for service in services:
-            verdict = _service_verdict(service, collected[service], zapret_running=zapret_running)
-            lines = _verdict_lines(verdict)
-            for line in lines:
-                emit(line)
-            summary[service] = lines[0]
-            reports.append(
-                {
-                    "key": service,
-                    "label": SERVICES[service][0],
-                    "level": verdict.level.value,
-                    "headline": verdict.headline,
-                    "advice": list(verdict.advice),
-                    "dns_note": verdict.dns_note,
-                    "targets": [_target_report(probe) for probe in collected[service]],
-                }
-            )
+            emit(_timed_out_line(run.deadline_seconds))
+        icon = {"ok": "✅", "warn": "⚠️", "fail": "❌", "unknown": "❔"}
+        for problem in problems:
+            emit(f"{icon[problem['level']]} {problem['text']}")
+            for advice in problem["advice"]:
+                emit(f"   👉 {advice}")
+        if working:
+            emit(f"✅ Открываются: {', '.join(working)}")
         elapsed = time.monotonic() - started
         emit(f"Проверка заняла {elapsed:.1f} с.")
+
         return {
-            "summary": summary,
-            "services": reports,
+            "scope": scope,
+            "services": [
+                {
+                    "key": key,
+                    "label": service.label,
+                    "control": service.control,
+                    "level": verdicts[key].level.value,
+                    "headline": verdicts[key].headline,
+                    "advice": list(verdicts[key].advice),
+                    "dns_note": verdicts[key].dns_note,
+                    "targets": [_target_report(probe) for probe in collected[key]],
+                }
+                for key, service in services.items()
+            ],
+            "voice": _section_report(voice, [(item.name, item.answered, item.text) for item in voice.servers]) if voice else None,
+            "freeze": _section_report(
+                freeze, [(item.name, item.state.value == "ok", item.text) for item in freeze.servers]
+            ) if freeze else None,
+            "problems": problems,
+            "working": working,
+            "spoofed_hosts": spoofed,
+            "environment": environment,
             "zapret_running": zapret_running,
             "zapret_line": zapret_line,
             "timed_out": run.timed_out,
             "elapsed": elapsed,
-            "dns_poisoning_detected": _has_spoofing(collected),
+            "dns_poisoning_detected": bool(spoofed),
         }
     except _Stopped:
         return {"stopped": True}
@@ -740,11 +983,20 @@ def run_connection_test(test_type: str, *, emit: Emit, should_stop: ShouldStop |
         run.close()
 
 
+def _section_report(report, rows) -> dict:
+    return {
+        "level": report.level.value,
+        "headline": report.headline,
+        "advice": list(report.advice),
+        "items": [{"name": name, "ok": bool(ok), "text": text} for name, ok, text in rows],
+    }
+
+
 def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
     """Проверка DNS подмены для вкладки «Проверка DNS подмены»."""
-    services = list(SERVICES)
-    targets_count = sum(len(SERVICES[service][1]) for service in services)
-    run = _Run(should_stop, workers=max(8, targets_count * 4))
+    services = build_services(SCOPE_MAIN)
+    targets_count = sum(len(service.targets) for service in services.values())
+    run = _Run(should_stop, workers=targets_count * 10)
     started = time.monotonic()
     try:
         emit("🔍 ПРОВЕРКА DNS ПОДМЕНЫ")
@@ -760,7 +1012,7 @@ def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
         spoofed = _has_spoofing(collected)
         emit("━━━━━━━━ 📊 Итог ━━━━━━━━")
         if run.timed_out:
-            emit(_TIMED_OUT_LINE)
+            emit(_timed_out_line(run.deadline_seconds))
         if spoofed:
             emit("❌ Обнаружена DNS подмена:")
             for probes in collected.values():

@@ -154,7 +154,7 @@ def build_strategy_scan_control_section(
     mode_label = _field_label("page.strategy_scan.mode", "Насколько тщательно:")
     mode_combo = combo_cls()
     for key, default, value in MODE_ITEMS:
-        mode_combo.addItem(tr_fn(key, default), value)
+        mode_combo.addItem(tr_fn(key, default), userData=value)
     mode_combo.setCurrentIndex(0)
     mode_combo.setMinimumWidth(320)
     run_row.addWidget(mode_label)

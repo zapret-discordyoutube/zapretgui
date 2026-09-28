@@ -1,40 +1,40 @@
-"""BlockCheck page — network blocking analysis and DPI detection UI."""
+"""BlockCheck: какие сайты открываются и что делать с остальными.
+
+Вкладки страницы: «BlockCheck» (сама проверка), «Подбор стратегии» и
+«DNS подмена». Бывшая вкладка «Диагностика» влилась в BlockCheck: режим
+«Discord и YouTube» — это она.
+
+Экран проверки сверху вниз: что проверить и кнопка → свои домены → итог
+(одна фраза, проблемы по важности, советы и кнопка «Подобрать стратегию») →
+список сайтов → «Отчёт» (отдельное окно) и «Подготовить обращение».
+Проверяет движок ``diagnostics.engine.run_blockcheck`` в фоновом потоке.
+"""
 
 from __future__ import annotations
 
 import logging
 import time
 
-import qtawesome as qta
-
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel
+from PyQt6.QtWidgets import QHBoxLayout, QWidget
 
 import blockcheck.page_runtime as blockcheck_page_runtime
+from blockcheck.ui.check_results import BlockcheckSitesTable, BlockcheckSummaryPanel
 from blockcheck.ui.domain_chip import DomainChip
 from blockcheck.ui.domains_build import build_blockcheck_domains_ui
-from blockcheck.ui.sections_build import build_actions_section, build_results_section
-from blockcheck.ui.log_build import build_log_card_section
-from blockcheck.ui.summary_content import (
-    build_dpi_summary_content,
-)
-from blockcheck.ui.summary_build import build_dpi_summary_section
 from blockcheck.ui.helpers import (
     add_domain_chip,
     collect_extra_domains,
     remove_domain_chip,
 )
-from blockcheck.ui.page_results_workflow import (
-    update_target_result_table,
-)
+from blockcheck.ui.report_dialog import show_report_dialog
 from ui.performance_metrics import log_ui_timing_since
 from blockcheck.page_run_workflow import (
     request_blockcheck_stop,
     reset_blockcheck_running_ui,
     start_blockcheck_page_run,
 )
-from ui.pages.base_page import BasePage, ScrollBlockingTextEdit
+from ui.pages.base_page import BasePage
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.combo_accessibility import set_combo_items_accessibility
 from ui.segmented_accessibility import set_segmented_items_accessibility
@@ -47,22 +47,24 @@ from qfluentwidgets import (
     ComboBox,
     CaptionLabel,
     BodyLabel,
-    StrongBodyLabel,
     IndeterminateProgressBar,
-    isDarkTheme,
     themeColor,
-    TableWidget,
     PrimaryPushButton,
     PushButton,
     LineEdit,
-    CheckBox,
     SegmentedWidget,
+    FluentIcon,
 )
 
 from ui.fluent_widgets import SettingsCard, InfoBarHelper, set_tooltip
 from log.log import log
 
+import qtawesome as qta
+
 logger = logging.getLogger(__name__)
+
+SCOPE_MAIN = "main"
+SCOPE_ALL = "all"
 
 
 def update_blockcheck_tabs_accessibility(pivot, *, current: object | None = None, language: str = "ru") -> None:
@@ -71,7 +73,6 @@ def update_blockcheck_tabs_accessibility(pivot, *, current: object | None = None
     labels = {
         "blockcheck": tr_catalog("page.blockcheck.tab.blockcheck", language=language, default="BlockCheck"),
         "strategy_scan": tr_catalog("page.blockcheck.tab.strategy_scan", language=language, default="Подбор стратегии"),
-        "diagnostics": tr_catalog("page.blockcheck.tab.diagnostics", language=language, default="Диагностика"),
         "dns_spoofing": tr_catalog("page.blockcheck.tab.dns_spoofing", language=language, default="DNS подмена"),
     }
     key = str(current or "").strip() if isinstance(current, str) else ""
@@ -86,7 +87,7 @@ def update_blockcheck_tabs_accessibility(pivot, *, current: object | None = None
     set_control_accessibility(
         pivot,
         name=state,
-        description="Выберите раздел BlockCheck: BlockCheck, Подбор стратегии, Диагностика или DNS подмена.",
+        description="Выберите раздел BlockCheck: BlockCheck, Подбор стратегии или DNS подмена.",
     )
     set_segmented_items_accessibility(pivot, name="Раздел BlockCheck")
 
@@ -96,20 +97,20 @@ def update_blockcheck_tabs_accessibility(pivot, *, current: object | None = None
 # ---------------------------------------------------------------------------
 
 class BlockcheckPage(BasePage):
-    """BlockCheck — network blocking analysis and DPI detection."""
+    """BlockCheck — какие сайты открываются и что делать с остальными."""
 
     TAB_BLOCKCHECK = "blockcheck"
     TAB_STRATEGY_SCAN = "strategy_scan"
-    TAB_DIAGNOSTICS = "diagnostics"
     TAB_DNS_SPOOFING = "dns_spoofing"
     TAB_ORDER = (
         TAB_BLOCKCHECK,
         TAB_STRATEGY_SCAN,
-        TAB_DIAGNOSTICS,
         TAB_DNS_SPOOFING,
     )
+    # «Диагностика» влилась в BlockCheck: старые ссылки на неё ведут сюда.
     TAB_ALIASES = {
-        "connection": TAB_DIAGNOSTICS,
+        "diagnostics": TAB_BLOCKCHECK,
+        "connection": TAB_BLOCKCHECK,
         "dns": TAB_DNS_SPOOFING,
     }
 
@@ -118,14 +119,15 @@ class BlockcheckPage(BasePage):
         parent=None,
         *,
         blockcheck_feature,
-        diagnostics_feature,
         dns_feature,
         create_strategy_scan_worker,
     ):
         super().__init__(
             title=tr_catalog("page.blockcheck.title", default="BlockCheck"),
-            subtitle=tr_catalog("page.blockcheck.subtitle",
-                                default="Автоматический анализ блокировок и диагностика сети"),
+            subtitle=tr_catalog(
+                "page.blockcheck.subtitle",
+                default="Какие сайты открываются, почему не открываются остальные и что с этим делать",
+            ),
             parent=parent,
             title_key="page.blockcheck.title",
             subtitle_key="page.blockcheck.subtitle",
@@ -133,37 +135,21 @@ class BlockcheckPage(BasePage):
         self.setObjectName("BlockcheckPage")
 
         self._blockcheck = blockcheck_feature
-        self._diagnostics = diagnostics_feature
         self._dns = dns_feature
         self._create_strategy_scan_worker = create_strategy_scan_worker
-        self._last_report = None
+        self._last_report: dict | None = None
+        self._report_lines: list[str] = []
         self._run_log_file: str | None = None
         self._tab_widgets: list[QWidget] = []
         self._strategy_tab_page = None
-        self._diagnostics_tab_page = None
         self._dns_spoofing_tab_page = None
         self._active_tab_index: int = 0
         self._pending_tab_key: str | None = None
         self._pending_diagnostics_start_focus = False
         self._cleanup_in_progress = False
         self._tabs_pivot = None
-        self._domains_section_label: QLabel | None = None
-        self._tcp_section_label: QLabel | None = None
-        self._results_card = None
-        self._table = None
-        self._tcp_table = None
-        self._dpi_card = None
-        self._dpi_badge = None
-        self._dpi_detail = None
-        self._dns_summary = None
-        self._recommendation = None
-        self._log_card = None
-        self._expand_log_btn = None
-        self._log_edit = None
-        self._log_expanded = False
-        self._runtime_warnings_seen: set[str] = set()
         self._domains_caption = None
-        self._log_caption = None
+        self._domains_flow = None
         self._prepare_support_btn = None
         self._support_status_label = None
         self._initial_state = blockcheck_page_runtime.BlockcheckPageInitialStatePlan(user_domains=())
@@ -255,7 +241,6 @@ class BlockcheckPage(BasePage):
 
     def _build_ui(self):
         total_started_at = time.perf_counter()
-        # ── Tabs (BlockCheck / Strategy scan / Diagnostics / DNS spoofing) ──
         section_started_at = time.perf_counter()
         self._tabs_pivot = SegmentedWidget(self)
         self._tabs_pivot.addItem(
@@ -269,11 +254,6 @@ class BlockcheckPage(BasePage):
             lambda: self.switch_to_tab(self.TAB_STRATEGY_SCAN),
         )
         self._tabs_pivot.addItem(
-            self.TAB_DIAGNOSTICS,
-            tr_catalog("page.blockcheck.tab.diagnostics", default="Диагностика"),
-            lambda: self.switch_to_tab(self.TAB_DIAGNOSTICS),
-        )
-        self._tabs_pivot.addItem(
             self.TAB_DNS_SPOOFING,
             tr_catalog("page.blockcheck.tab.dns_spoofing", default="DNS подмена"),
             lambda: self.switch_to_tab(self.TAB_DNS_SPOOFING),
@@ -285,90 +265,77 @@ class BlockcheckPage(BasePage):
         self.add_widget(self._tabs_pivot)
         self._log_ui_timing("blockcheck_ui.tabs.build", section_started_at)
 
-        # ── Control Card ──
+        # ── Что проверить и кнопка: одна строка ──
         section_started_at = time.perf_counter()
-        # Без шапок и подписи «Действия»: режим, галочка, статус и кнопки —
-        # одна строка, как на остальных вкладках BlockCheck.
         self._control_card = SettingsCard()
-
-        ctrl_row = QHBoxLayout()
-        ctrl_row.setSpacing(12)
-
-        # Mode combo
-        mode_label = CaptionLabel(
-            tr_catalog("page.blockcheck.mode", default="Режим:")
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self._scope_label = BodyLabel(tr_catalog("page.blockcheck.scope", default="Что проверить:"))
+        set_state_text(self._scope_label, f"Поле BlockCheck: {self._scope_label.text()}")
+        row.addWidget(self._scope_label)
+        self._scope_combo = ComboBox()
+        # userData — именованным: второй позиционный аргумент у qfluentwidgets —
+        # значок, и значение терялось (старый выбор режима всегда давал «Полную»).
+        self._scope_combo.addItem(
+            tr_catalog("page.blockcheck.scope_main", default="Discord и YouTube"), userData=SCOPE_MAIN
         )
-        ctrl_row.addWidget(mode_label)
-
-        self._mode_combo = ComboBox()
-        self._mode_combo.addItem(
-            tr_catalog("page.blockcheck.mode_quick", default="Быстрая"), "quick"
+        self._scope_combo.addItem(
+            tr_catalog("page.blockcheck.scope_all", default="Все сайты"), userData=SCOPE_ALL
         )
-        self._mode_combo.addItem(
-            tr_catalog("page.blockcheck.mode_full", default="Полная"), "full"
-        )
-        self._mode_combo.addItem(
-            tr_catalog("page.blockcheck.mode_dpi", default="Только DPI"), "dpi_only"
-        )
-        self._mode_combo.setCurrentIndex(1)  # Default: full
-        self._mode_combo.setFixedWidth(160)
-        self._update_mode_combo_accessibility()
-        self._mode_combo.currentIndexChanged.connect(self._update_mode_combo_accessibility)
-        ctrl_row.addWidget(self._mode_combo)
-        ctrl_row.addSpacing(8)
-
-        # Пропуск нерезолвящихся доменов
-        self._skip_failed_cb = CheckBox(
-            tr_catalog("page.blockcheck.skip_failed",
-                       default="Пропускать проблемные домены")
-        )
-        self._skip_failed_cb.setChecked(False)
-        set_tooltip(
-            self._skip_failed_cb,
-            "Если включено, домены, чьё имя не разрешается, не будут "
-            "проверяться и не попадут в таблицу результатов"
-        )
-        self._update_skip_failed_accessibility()
-        self._skip_failed_cb.toggled.connect(self._update_skip_failed_accessibility)
-        ctrl_row.addWidget(self._skip_failed_cb)
+        self._scope_combo.setCurrentIndex(1)
+        self._scope_combo.setMinimumWidth(260)
+        self._update_scope_combo_accessibility()
+        self._scope_combo.currentIndexChanged.connect(self._update_scope_combo_accessibility)
+        row.addWidget(self._scope_combo)
+        row.addSpacing(8)
 
         self._status_label = CaptionLabel(
-            tr_catalog("page.blockcheck.ready", default="Проверяет, какие сайты и как блокирует провайдер")
+            tr_catalog("page.blockcheck.ready", default="Проверяем так же, как браузер. Займёт 5–30 секунд")
         )
         self._set_status_text(self._status_label.text())
-        ctrl_row.addSpacing(8)
-        ctrl_row.addWidget(self._status_label, 1)
+        row.addWidget(self._status_label, 1)
 
-        actions_widgets = build_actions_section(
-            tr_fn=lambda key, default: tr_catalog(key, default=default),
-            primary_button_cls=PrimaryPushButton,
-            push_button_cls=PushButton,
-            on_start=self._on_start,
-            on_stop=self._on_stop,
-        )
-        self._start_btn = actions_widgets.start_button
-        self._stop_btn = actions_widgets.stop_button
-        ctrl_row.addWidget(self._start_btn)
-        ctrl_row.addWidget(self._stop_btn)
-
-        self._control_card.add_layout(ctrl_row)
-
-        # Progress
         self._progress_bar = IndeterminateProgressBar()
         self._progress_bar.setVisible(False)
-        self._progress_bar.setFixedHeight(4)
+        self._progress_bar.setFixedWidth(160)
         set_control_accessibility(
             self._progress_bar,
             name="Ход BlockCheck: не выполняется",
             description="Показывает, что проверка BlockCheck выполняется.",
         )
         set_state_text(self._progress_bar, "Ход BlockCheck: не выполняется")
-        self._control_card.add_widget(self._progress_bar)
+        row.addWidget(self._progress_bar)
 
+        self._start_btn = PrimaryPushButton(tr_catalog("page.blockcheck.start", default="Проверить"))
+        self._start_btn.setIcon(FluentIcon.PLAY)
+        start_description = tr_catalog(
+            "page.blockcheck.action.start.description",
+            default="Проверить, какие сайты открываются и что мешает остальным.",
+        )
+        set_tooltip(self._start_btn, start_description)
+        set_control_accessibility(self._start_btn, name="Запустить BlockCheck", description=start_description)
+        set_state_text(self._start_btn, "Запустить BlockCheck")
+        self._start_btn.clicked.connect(self._on_start)
+        row.addWidget(self._start_btn)
+
+        self._stop_btn = PushButton(tr_catalog("page.blockcheck.stop", default="Остановить"))
+        self._stop_btn.setIcon(FluentIcon.CANCEL)
+        stop_description = tr_catalog(
+            "page.blockcheck.action.stop.description",
+            default="Остановить текущую проверку.",
+        )
+        set_tooltip(self._stop_btn, stop_description)
+        set_control_accessibility(self._stop_btn, name="Остановить BlockCheck", description=stop_description)
+        set_state_text(self._stop_btn, "Остановить BlockCheck")
+        self._stop_btn.clicked.connect(self._on_stop)
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.setVisible(False)
+        row.addWidget(self._stop_btn)
+        self._control_card.add_layout(row)
         self._add_tab_widget(self._control_card)
         self._log_ui_timing("blockcheck_ui.control_card.build", section_started_at)
 
-        # ── Custom Domains Card ──
+        # ── Свои домены ──
         section_started_at = time.perf_counter()
         domains_widgets = build_blockcheck_domains_ui(
             tr_fn=lambda key, default: tr_catalog(key, default=default),
@@ -388,103 +355,65 @@ class BlockcheckPage(BasePage):
         self._add_domain_btn = domains_widgets.add_button
         self._domains_flow = domains_widgets.flow_widget
         self._domains_flow_layout = domains_widgets.flow_layout
-
         self._add_tab_widget(self._domains_card)
         self._log_ui_timing("blockcheck_ui.domains_card.build", section_started_at)
 
-        # Load persisted user domains
+        # ── Итог и список сайтов ──
+        self._summary_panel = BlockcheckSummaryPanel(on_action=self._on_problem_action, parent=self.content)
+        self._add_tab_widget(self._summary_panel)
+
+        self._results_card = SettingsCard()
+        self._sites_table = BlockcheckSitesTable()
+        self._results_card.add_widget(self._sites_table)
+        self._add_tab_widget(self._results_card)
+        # Пустая таблица с одной шапкой до первой проверки — лишний мусор.
+        self._results_card.setVisible(False)
+
+        # ── Отчёт и обращение ──
+        self._footer_card = SettingsCard()
+        footer = QHBoxLayout()
+        footer.setSpacing(10)
+        self._support_status_label = CaptionLabel("")
+        set_state_text(self._support_status_label, "Статус обращения BlockCheck: нет статуса")
+        footer.addWidget(self._support_status_label, 1)
+        self._report_btn = PushButton(tr_catalog("page.blockcheck.report", default="Отчёт"))
+        self._report_btn.setIcon(FluentIcon.DOCUMENT)
+        set_control_accessibility(
+            self._report_btn,
+            name="Открыть подробный отчёт BlockCheck",
+            description="Открывает окно с техническими подробностями проверки.",
+        )
+        self._report_btn.clicked.connect(self._open_report)
+        self._report_btn.setEnabled(False)
+        footer.addWidget(self._report_btn)
+        self._prepare_support_btn = PushButton(
+            tr_catalog("page.blockcheck.prepare_support", default="Подготовить обращение")
+        )
+        self._prepare_support_btn.setIcon(FluentIcon.SEND)
+        set_control_accessibility(
+            self._prepare_support_btn,
+            name="Подготовить обращение по BlockCheck",
+            description="Готовит обращение с логами BlockCheck для поддержки.",
+        )
+        self._prepare_support_btn.clicked.connect(self._prepare_support_from_blockcheck)
+        footer.addWidget(self._prepare_support_btn)
+        self._footer_card.add_layout(footer)
+        self._add_tab_widget(self._footer_card)
+
         section_started_at = time.perf_counter()
         self._sync_domains_flow_visibility()
         self._apply_initial_domain_chips(self._initial_state.user_domains)
         self._log_ui_timing("blockcheck_ui.domain_chips.apply", section_started_at)
 
-        # Strategy scan tab (lazy-created)
         section_started_at = time.perf_counter()
         self._switch_tab(0)
         self._log_ui_timing("blockcheck_ui.initial_tab.switch", section_started_at)
         self._log_ui_timing("blockcheck_ui.build.total", total_started_at)
 
-    def _ensure_run_output_ui(self) -> None:
-        """Создаёт тяжёлые виджеты запуска только когда они реально нужны."""
-        started_at = time.perf_counter()
-        active_tab_index = int(getattr(self, "_active_tab_index", 0) or 0)
-        show_blockcheck = self.TAB_ORDER[active_tab_index] == self.TAB_BLOCKCHECK
-
-        if self._results_card is None:
-            section_started_at = time.perf_counter()
-            results_widgets = build_results_section(
-                tr_fn=lambda key, default: tr_catalog(key, default=default),
-                settings_card_cls=SettingsCard,
-                strong_body_label_cls=StrongBodyLabel,
-                table_widget_cls=TableWidget,
-            )
-            self._results_card = results_widgets.results_card
-            self._domains_section_label = results_widgets.domains_section_label
-            self._table = results_widgets.results_table
-            self._tcp_section_label = results_widgets.tcp_section_label
-            self._tcp_table = results_widgets.tcp_table
-            self._add_tab_widget(self._results_card)
-            self._results_card.setVisible(show_blockcheck)
-            self._log_ui_timing("blockcheck_ui.results_section.build", section_started_at)
-
-        if self._dpi_card is None:
-            section_started_at = time.perf_counter()
-            dpi_widgets = build_dpi_summary_section(
-                tr_fn=lambda key, default: tr_catalog(key, default=default),
-                settings_card_cls=SettingsCard,
-                qlabel_cls=QLabel,
-                body_label_cls=BodyLabel,
-                caption_label_cls=CaptionLabel,
-                qt_namespace=Qt,
-            )
-            self._dpi_card = dpi_widgets.card
-            self._dpi_badge = dpi_widgets.badge
-            self._dpi_detail = dpi_widgets.detail
-            self._dns_summary = dpi_widgets.dns_summary
-            self._recommendation = dpi_widgets.recommendation
-            self._add_tab_widget(self._dpi_card)
-            # Пустая карточка итогов DPI до первой проверки только занимала место.
-            self._dpi_card.setVisible(show_blockcheck and self._has_dpi_summary())
-            self._log_ui_timing("blockcheck_ui.dpi_summary.build", section_started_at)
-
-        if self._log_card is None:
-            section_started_at = time.perf_counter()
-            log_widgets = build_log_card_section(
-                tr_fn=lambda key, default: tr_catalog(key, default=default),
-                settings_card_cls=SettingsCard,
-                qhbox_layout_cls=QHBoxLayout,
-                caption_label_cls=CaptionLabel,
-                push_button_cls=PushButton,
-                qta_module=qta,
-                theme_color_fn=themeColor,
-                text_edit_cls=ScrollBlockingTextEdit,
-                qfont_cls=QFont,
-                on_toggle_expand=self._toggle_log_expand,
-                on_prepare_support=self._prepare_support_from_blockcheck,
-            )
-            self._log_card = log_widgets.card
-            self._log_caption = log_widgets.log_caption
-            self._expand_log_btn = log_widgets.expand_button
-            self._support_status_label = log_widgets.support_status_label
-            self._prepare_support_btn = log_widgets.prepare_support_button
-            self._log_edit = log_widgets.log_edit
-            self._add_tab_widget(self._log_card)
-            self._log_card.setVisible(show_blockcheck)
-            self._log_ui_timing("blockcheck_ui.log_card.build", section_started_at)
-
-        self._log_ui_timing("blockcheck_ui.run_output.ensure", started_at)
-
-    # ------------------------------------------------------------------
-    # Theme
-    # ------------------------------------------------------------------
-
     def _apply_page_theme(self, tokens=None, force: bool = False):
         _ = tokens
         _ = force
-        """Update DPI badge colors and chip styles on theme change."""
-        if self._last_report:
-            self._update_dpi_summary(self._last_report)
-        # Refresh chip styles
+        # Цвета итогов и строк обновляются самими виджетами; здесь — плашки доменов.
         for i in range(self._domains_flow_layout.count()):
             item = self._domains_flow_layout.itemAt(i)
             if item and item.widget() and isinstance(item.widget(), DomainChip):
@@ -522,31 +451,6 @@ class BlockcheckPage(BasePage):
             logger.warning("Failed to create embedded strategy tab: %s", e)
         finally:
             self._log_ui_timing("blockcheck_ui.strategy_tab.build", started_at)
-
-    def _ensure_diagnostics_tab(self):
-        """Create embedded connection diagnostics tab on first open."""
-        if self._diagnostics_tab_page is not None:
-            return
-        started_at = time.perf_counter()
-        try:
-            from diagnostics.ui.page import ConnectionTestPage
-
-            self._diagnostics_tab_page = ConnectionTestPage(
-                parent=self,
-                diagnostics_feature=self._diagnostics,
-                embedded=True,
-            )
-            self._diagnostics_tab_page.setVisible(False)
-            self.add_widget(self._diagnostics_tab_page)
-
-            try:
-                self._diagnostics_tab_page.set_ui_language(self._ui_language)
-            except Exception:
-                pass
-        except Exception as e:
-            logger.warning("Failed to create diagnostics tab: %s", e)
-        finally:
-            self._log_ui_timing("blockcheck_ui.diagnostics_tab.build", started_at)
 
     def _ensure_dns_spoofing_tab(self):
         """Create embedded DNS spoofing tab on first open."""
@@ -626,7 +530,7 @@ class BlockcheckPage(BasePage):
         return stopped
 
     def _switch_tab(self, index: int) -> None:
-        """Switch between BlockCheck, strategy scan and diagnostics tabs."""
+        """Переключает вкладки BlockCheck / Подбор стратегии / DNS подмена."""
         started_at = time.perf_counter()
         if not self.TAB_ORDER:
             return
@@ -643,89 +547,138 @@ class BlockcheckPage(BasePage):
 
         if tab_key == self.TAB_STRATEGY_SCAN:
             self._ensure_strategy_tab()
-        elif tab_key == self.TAB_DIAGNOSTICS:
-            self._ensure_diagnostics_tab()
         elif tab_key == self.TAB_DNS_SPOOFING:
             self._ensure_dns_spoofing_tab()
 
         show_blockcheck = tab_key == self.TAB_BLOCKCHECK
         for widget in self._tab_widgets:
             widget.setVisible(show_blockcheck)
-        if self._dpi_card is not None and not self._has_dpi_summary():
-            self._dpi_card.setVisible(False)
+        if self._results_card is not None and self._last_report is None:
+            self._results_card.setVisible(False)
 
         if self._strategy_tab_page is not None:
             self._strategy_tab_page.setVisible(tab_key == self.TAB_STRATEGY_SCAN)
-
-        if self._diagnostics_tab_page is not None:
-            self._diagnostics_tab_page.setVisible(tab_key == self.TAB_DIAGNOSTICS)
-
         if self._dns_spoofing_tab_page is not None:
             self._dns_spoofing_tab_page.setVisible(tab_key == self.TAB_DNS_SPOOFING)
 
-        if tab_key == self.TAB_DIAGNOSTICS:
+        if tab_key == self.TAB_BLOCKCHECK:
             self._apply_pending_diagnostics_start_focus()
         self._log_ui_timing(f"blockcheck_ui.switch_tab.{tab_key}", started_at)
 
     def _apply_pending_diagnostics_start_focus(self) -> None:
+        """«Открыть диагностику» со страниц управления: Discord и YouTube, фокус на «Проверить»."""
         if not self._pending_diagnostics_start_focus:
             return
-        self._ensure_diagnostics_tab()
-        page = self._diagnostics_tab_page
-        if page is None:
-            return
-        request_focus = getattr(page, "request_start_focus", None)
-        if not callable(request_focus):
+        if self.TAB_ORDER[self._active_tab_index] != self.TAB_BLOCKCHECK:
+            self._switch_tab(self.TAB_ORDER.index(self.TAB_BLOCKCHECK))
             return
         self._pending_diagnostics_start_focus = False
-        request_focus()
+        if not self._run_runtime.is_running():
+            index = self._scope_combo.findData(SCOPE_MAIN)
+            if index >= 0:
+                self._scope_combo.setCurrentIndex(index)
+        try:
+            self._start_btn.setFocus()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
-    # Start / Stop
+    # Проверка
     # ------------------------------------------------------------------
+
+    def _current_scope(self) -> str:
+        return str(self._scope_combo.currentData() or SCOPE_MAIN)
 
     def _on_start(self):
         if self._run_runtime.is_running():
             return
-        self._ensure_run_output_ui()
         self._cleanup_in_progress = False
-
-        mode = self._mode_combo.currentData()
-        if mode is None:
-            mode = "full"
         self._last_report = None
-        extra = self._get_extra_domains()
-
-        run_state = start_blockcheck_page_run(
+        self._report_lines = []
+        self._summary_panel.set_pending()
+        self._sites_table.clear_rows()
+        self._results_card.setVisible(False)
+        self._report_btn.setEnabled(False)
+        start_blockcheck_page_run(
             blockcheck_feature=self._blockcheck,
-            mode=mode,
-            extra_domains=extra,
-            skip_preflight_failed=self._skip_failed_cb.isChecked(),
+            scope=self._current_scope(),
+            user_domains=self._get_extra_domains(),
             parent=self,
             run_runtime=self._run_runtime,
-            table=self._table,
-            tcp_table=self._tcp_table,
-            tcp_section_label=self._tcp_section_label,
-            dpi_card=self._dpi_card,
-            log_edit=self._log_edit,
             start_button=self._start_btn,
             stop_button=self._stop_btn,
-            mode_combo=self._mode_combo,
-            skip_failed_checkbox=self._skip_failed_cb,
+            scope_combo=self._scope_combo,
             progress_bar=self._progress_bar,
             status_label=self._status_label,
-            runtime_warnings_seen=self._runtime_warnings_seen,
             set_support_status=self._set_support_status,
             tr_fn=tr_catalog,
-            on_phase_changed=self._on_phase_changed,
-            on_test_result=self._on_test_result,
-            on_target_complete=self._on_target_complete,
             on_log=self._on_log,
             on_run_log_started=self._on_run_log_started,
             on_finished=self._on_finished,
         )
-        self._run_log_file = run_state.run_log_file
         self._set_status_text(self._status_label.text())
+
+    def _on_log(self, message: str):
+        if self._cleanup_in_progress:
+            return
+        self._report_lines.append(str(message or ""))
+
+    def _on_finished(self, report):
+        if self._cleanup_in_progress:
+            return
+        self._reset_ui()
+        self._report_btn.setEnabled(bool(self._report_lines))
+        if not isinstance(report, dict):
+            self._summary_panel.set_stopped()
+            self._set_status_text(tr_catalog("page.blockcheck.cancelled", default="Проверка остановлена"))
+            self._set_support_status(
+                tr_catalog(
+                    "page.blockcheck.support_ready_after_cancel",
+                    default="Можно подготовить обращение по тому, что успели проверить",
+                )
+            )
+            return
+        self._last_report = report
+        self._summary_panel.show_report(report)
+        self._sites_table.show_report(report)
+        self._results_card.setVisible(True)
+        elapsed = float(report.get("elapsed") or 0.0)
+        self._set_status_text(
+            tr_catalog("page.blockcheck.done", default="Готово") + f" за {elapsed:.0f} с — итог ниже"
+        )
+        self._set_support_status("")
+
+    def _open_report(self) -> None:
+        show_report_dialog(self.window(), "\n".join(self._report_lines))
+
+    def _on_problem_action(self, action: str, target: str) -> None:
+        """Кнопки у проблем в итоге: сразу в «Подбор стратегии» с нужной целью."""
+        if action not in ("strategy", "strategy_voice"):
+            return
+        self.switch_to_tab(self.TAB_STRATEGY_SCAN)
+        page = self._strategy_tab_page
+        prefill = getattr(page, "prefill_target", None)
+        if callable(prefill):
+            prefill(target, protocol="stun_voice" if action == "strategy_voice" else "tcp_https")
+
+    def _reset_ui(self):
+        reset_blockcheck_running_ui(
+            start_button=self._start_btn,
+            stop_button=self._stop_btn,
+            scope_combo=self._scope_combo,
+            progress_bar=self._progress_bar,
+        )
+
+    def _update_scope_combo_accessibility(self, *_args) -> None:
+        text = str(self._scope_combo.currentText() or "").strip() or "не выбрано"
+        state_text = f"Что проверить BlockCheck, выбрано: {text}"
+        set_state_text(self._scope_combo, state_text)
+        set_control_accessibility(
+            self._scope_combo,
+            name=state_text,
+            description="«Discord и YouTube» — только они; «Все сайты» — ещё мессенджеры, соцсети и ваши домены. Звонки и обрыв на 16 КБ проверяются всегда.",
+        )
+        set_combo_items_accessibility(self._scope_combo, name="Что проверить BlockCheck")
 
     def _on_run_log_started(self, run_log_file) -> None:
         if self._cleanup_in_progress:
@@ -759,176 +712,10 @@ class BlockcheckPage(BasePage):
                 )
             )
 
-    # ------------------------------------------------------------------
-    # Signal handlers
-    # ------------------------------------------------------------------
-
-    def _on_phase_changed(self, phase: str):
-        if self._cleanup_in_progress:
-            return
-        self._set_status_text(phase)
-
-    def _on_test_result(self, result):
-        """Update table with individual test result."""
-        if self._cleanup_in_progress:
-            return
-        pass  # Table is updated on target_complete for better UX
-
-    def _on_target_complete(self, target_result):
-        """Add/update a row in the results table for a completed target."""
-        if self._cleanup_in_progress:
-            return
-        self._ensure_run_output_ui()
-        update_target_result_table(
-            target_result=target_result,
-            table=self._table,
-            tcp_table=self._tcp_table,
-            tcp_section_label=self._tcp_section_label,
-        )
-
-    def _on_log(self, message: str):
-        if self._cleanup_in_progress:
-            return
-        self._ensure_run_output_ui()
-        self._log_edit.append(message)
-
-        text = str(message or "").strip()
-        if text.startswith("WARNING:"):
-            warning_text = text[len("WARNING:"):].strip() or text
-            if warning_text not in self._runtime_warnings_seen:
-                self._runtime_warnings_seen.add(warning_text)
-                try:
-                    InfoBarHelper.warning(
-                        self.window(),
-                        tr_catalog("page.blockcheck.warning", default="Предупреждение"),
-                        warning_text,
-                    )
-                except Exception:
-                    pass
-
-    def _on_finished(self, report):
-        """Handle test completion."""
-        if self._cleanup_in_progress:
-            return
-        self._last_report = report
-        self._reset_ui()
-        was_cancelled = bool(report is not None and getattr(report, "cancelled", False))
-
-        if report is None:
-            self._set_status_text(tr_catalog("page.blockcheck.error", default="Ошибка выполнения"))
-            self._set_support_status(
-                tr_catalog(
-                    "page.blockcheck.support_ready_after_error",
-                    default="Можно подготовить обращение по логам ошибки",
-                )
-            )
-            return
-
-        elapsed = report.elapsed_seconds
-        if was_cancelled:
-            self._set_status_text(
-                tr_catalog("page.blockcheck.cancelled", default="Отменено") + f" ({elapsed:.1f}s)"
-            )
-            self._set_support_status(
-                tr_catalog(
-                    "page.blockcheck.support_ready_after_cancel",
-                    default="Можно подготовить обращение по частичным логам отменённого запуска",
-                )
-            )
-        else:
-            self._set_status_text(
-                tr_catalog("page.blockcheck.done", default="Готово") + f" ({elapsed:.1f}s)"
-            )
-            self._set_support_status(
-                tr_catalog(
-                    "page.blockcheck.support_ready",
-                    default="Можно подготовить обращение по этому запуску",
-                )
-            )
-
-        # Re-update all targets with final classifications
-        for tr in report.targets:
-            self._on_target_complete(tr)
-
-        if was_cancelled:
-            self._dpi_card.setVisible(False)
-            try:
-                InfoBarHelper.warning(
-                    self.window(),
-                    tr_catalog("page.blockcheck.cancelled", default="Отменено"),
-                    tr_catalog(
-                        "page.blockcheck.cancelled.info",
-                        default="Проверка остановлена пользователем. Показаны частичные результаты.",
-                    ),
-                )
-            except Exception:
-                pass
-            return
-
-        # Show DPI summary
-        self._update_dpi_summary(report)
-
-        try:
-            InfoBarHelper.success(
-                self.window(),
-                tr_catalog("page.blockcheck.done", default="Готово"),
-                f"{len(report.targets)} целей проверено за {elapsed:.1f}s",
-            )
-        except Exception:
-            pass
-
-    # ------------------------------------------------------------------
-    # UI helpers
-    # ------------------------------------------------------------------
-
-    def _reset_ui(self):
-        reset_blockcheck_running_ui(
-            start_button=self._start_btn,
-            stop_button=self._stop_btn,
-            mode_combo=self._mode_combo,
-            skip_failed_checkbox=self._skip_failed_cb,
-            progress_bar=self._progress_bar,
-        )
-
     def _set_status_text(self, text: str) -> None:
         value = str(text or "").strip()
         self._status_label.setText(value)
         set_state_text(self._status_label, f"Статус BlockCheck: {value}")
-
-    def _update_mode_combo_accessibility(self, *_args) -> None:
-        text = str(self._mode_combo.currentText() or "").strip() or "не выбрано"
-        state_text = f"Режим BlockCheck, выбрано: {text}"
-        set_state_text(self._mode_combo, state_text)
-        set_control_accessibility(
-            self._mode_combo,
-            name=state_text,
-            description="Выберите глубину проверки BlockCheck.",
-        )
-        set_combo_items_accessibility(self._mode_combo, name="Режим BlockCheck")
-
-    def _update_skip_failed_accessibility(self, *_args) -> None:
-        state = "включено" if self._skip_failed_cb.isChecked() else "выключено"
-        state_text = f"Пропускать проблемные домены, {state}"
-        set_state_text(self._skip_failed_cb, state_text)
-        set_control_accessibility(
-            self._skip_failed_cb,
-            name=state_text,
-            description="Если включено, домены с DNS-заглушкой или ошибкой провайдера будут пропущены.",
-        )
-
-    def _update_log_expand_accessibility(self) -> None:
-        if self._log_expanded:
-            set_control_accessibility(
-                self._expand_log_btn,
-                name="Свернуть лог BlockCheck",
-                description="Возвращает подробный лог BlockCheck к обычному размеру.",
-            )
-        else:
-            set_control_accessibility(
-                self._expand_log_btn,
-                name="Развернуть лог BlockCheck",
-                description="Разворачивает подробный лог BlockCheck на странице.",
-            )
 
     def _set_support_status(self, text: str) -> None:
         if self._support_status_label is None:
@@ -939,7 +726,7 @@ class BlockcheckPage(BasePage):
             set_state_text(self._support_status_label, f"Статус обращения BlockCheck: {value}")
 
     def _prepare_support_from_blockcheck(self) -> None:
-        mode_label = self._mode_combo.currentText() if self._mode_combo is not None else "BlockCheck"
+        mode_label = self._scope_combo.currentText() if self._scope_combo is not None else "BlockCheck"
         extra_domains = self._get_extra_domains()
         self._request_support_prepare(
             run_log_file=self._run_log_file,
@@ -1075,50 +862,6 @@ class BlockcheckPage(BasePage):
         if self._prepare_support_btn is not None:
             self._prepare_support_btn.setEnabled(False)
         self._start_support_prepare_worker(dict(pending or {}))
-
-    def _toggle_log_expand(self):
-        """Развернуть/свернуть лог на всю страницу."""
-        self._ensure_run_output_ui()
-        self._log_expanded = not self._log_expanded
-
-        if self._log_expanded:
-            self._control_card.setVisible(False)
-            self._domains_card.setVisible(False)
-            self._results_card.setVisible(False)
-            self._dpi_card.setVisible(False)
-            self._log_edit.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
-            self._log_edit.setMinimumHeight(400)
-            self._expand_log_btn.setText("Свернуть")
-            self._update_log_expand_accessibility()
-        else:
-            self._control_card.setVisible(True)
-            self._domains_card.setVisible(True)
-            self._results_card.setVisible(True)
-            # dpi_card visibility depends on whether results exist
-            if self._last_report and self._last_report.targets:
-                self._dpi_card.setVisible(True)
-            self._log_edit.setMinimumHeight(180)
-            self._log_edit.setMaximumHeight(300)
-            self._expand_log_btn.setText("Развернуть")
-            self._update_log_expand_accessibility()
-
-    def _update_dpi_summary(self, report):
-        """Show DPI summary card after tests complete."""
-        self._ensure_run_output_ui()
-        self._dpi_card.setVisible(True)
-        content = build_dpi_summary_content(
-            report=report,
-            is_dark=isDarkTheme(),
-            no_dpi_text=tr_catalog("page.blockcheck.no_dpi", default="DPI не обнаружен на проверенных ресурсах"),
-        )
-        self._dpi_badge.setText(content.badge_label)
-        self._dpi_badge.setStyleSheet(
-            f"background: {content.badge_bg}; color: {content.badge_fg}; "
-            f"font-weight: 600; font-size: 13px; border-radius: 8px; padding: 6px 16px;"
-        )
-        self._dpi_detail.setText(content.detail_text)
-        self._dns_summary.setText(content.dns_summary_text)
-        self._recommendation.setText(content.recommendation_text)
 
     # ------------------------------------------------------------------
     # Custom domains
@@ -1398,9 +1141,6 @@ class BlockcheckPage(BasePage):
         if self._domains_flow is not None:
             self._domains_flow.setVisible(bool(self._get_extra_domains()))
 
-    def _has_dpi_summary(self) -> bool:
-        return bool(self._last_report and getattr(self._last_report, "targets", None))
-
     def _get_extra_domains(self) -> list[str]:
         """Collect domains from chips to pass to worker."""
         return collect_extra_domains(
@@ -1441,7 +1181,7 @@ class BlockcheckPage(BasePage):
         )
         self._run_runtime.cancel()
 
-        for page in (self._strategy_tab_page, self._diagnostics_tab_page, self._dns_spoofing_tab_page):
+        for page in (self._strategy_tab_page, self._dns_spoofing_tab_page):
             if page is None:
                 continue
             cleanup_handler = getattr(page, "cleanup", None)
@@ -1458,104 +1198,41 @@ class BlockcheckPage(BasePage):
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
 
+        def _tr(key: str, default: str) -> str:
+            return tr_catalog(key, language=language, default=default)
+
         try:
             if self._tabs_pivot is not None:
+                self._tabs_pivot.setItemText(self.TAB_BLOCKCHECK, _tr("page.blockcheck.tab.blockcheck", "BlockCheck"))
                 self._tabs_pivot.setItemText(
-                    self.TAB_BLOCKCHECK,
-                    tr_catalog("page.blockcheck.tab.blockcheck", language=language, default="BlockCheck"),
+                    self.TAB_STRATEGY_SCAN, _tr("page.blockcheck.tab.strategy_scan", "Подбор стратегии")
                 )
-                self._tabs_pivot.setItemText(
-                    self.TAB_STRATEGY_SCAN,
-                    tr_catalog("page.blockcheck.tab.strategy_scan", language=language, default="Подбор стратегии"),
-                )
-                self._tabs_pivot.setItemText(
-                    self.TAB_DIAGNOSTICS,
-                    tr_catalog("page.blockcheck.tab.diagnostics", language=language, default="Диагностика"),
-                )
-                self._tabs_pivot.setItemText(
-                    self.TAB_DNS_SPOOFING,
-                    tr_catalog("page.blockcheck.tab.dns_spoofing", language=language, default="DNS подмена"),
-                )
+                self._tabs_pivot.setItemText(self.TAB_DNS_SPOOFING, _tr("page.blockcheck.tab.dns_spoofing", "DNS подмена"))
             self._update_tabs_accessibility()
             # Карточки без шапок: set_title не вызывается, он добавил бы шапку обратно.
+            self._scope_label.setText(_tr("page.blockcheck.scope", "Что проверить:"))
+            self._scope_combo.setItemText(0, _tr("page.blockcheck.scope_main", "Discord и YouTube"))
+            self._scope_combo.setItemText(1, _tr("page.blockcheck.scope_all", "Все сайты"))
+            self._update_scope_combo_accessibility()
             if self._domains_caption is not None:
-                self._domains_caption.setText(
-                    tr_catalog("page.blockcheck.custom_domains", language=language, default="Проверить ещё и свои домены:")
-                )
-            if self._log_caption is not None:
-                self._log_caption.setText(tr_catalog("page.blockcheck.log", language=language, default="Подробный лог:"))
-
-            if self._domains_section_label is not None:
-                self._domains_section_label.setText(
-                    tr_catalog(
-                        "page.blockcheck.domains_section",
-                        language=language,
-                        default="Часть 1: Проверка доменов (TLS + HTTP injection)",
-                    )
-                )
-            if self._tcp_section_label is not None:
-                self._tcp_section_label.setText(
-                    tr_catalog(
-                        "page.blockcheck.tcp_section",
-                        language=language,
-                        default="Проверка обрыва на 16–20 КБ (TCP)",
-                    )
-                )
-
-            if self._table is not None:
-                self._table.setHorizontalHeaderLabels([
-                    tr_catalog("page.blockcheck.col_target", language=language, default="Цель"),
-                    "HTTP",
-                    "TLS 1.2",
-                    "TLS 1.3",
-                    tr_catalog("page.blockcheck.col_dns_isp", language=language, default="DNS/ISP"),
-                    "DPI",
-                    "Ping",
-                    tr_catalog("page.blockcheck.col_details", language=language, default="Детали"),
-                ])
-
-            if self._tcp_table is not None:
-                self._tcp_table.setHorizontalHeaderLabels([
-                    "ID",
-                    "ASN",
-                    tr_catalog("page.blockcheck.col_provider", language=language, default="Провайдер"),
-                    tr_catalog("page.blockcheck.col_status", language=language, default="Статус"),
-                    tr_catalog("page.blockcheck.col_error_details", language=language, default="Ошибка / Детали"),
-                ])
-
-            self._start_btn.setText(tr_catalog("page.blockcheck.start", language=language, default="Запустить"))
-            self._stop_btn.setText(tr_catalog("page.blockcheck.stop", language=language, default="Остановить"))
+                self._domains_caption.setText(_tr("page.blockcheck.custom_domains", "Проверить ещё и свои домены:"))
+            self._start_btn.setText(_tr("page.blockcheck.start", "Проверить"))
+            self._stop_btn.setText(_tr("page.blockcheck.stop", "Остановить"))
             set_tooltip(
                 self._start_btn,
-                tr_catalog(
+                _tr(
                     "page.blockcheck.action.start.description",
-                    language=language,
-                    default="Запустить анализ блокировок и проверку DPI для выбранного режима.",
-                )
+                    "Проверить, какие сайты открываются и что мешает остальным.",
+                ),
             )
-            set_tooltip(
-                self._stop_btn,
-                tr_catalog(
-                    "page.blockcheck.action.stop.description",
-                    language=language,
-                    default="Остановить текущую проверку и вернуть страницу в обычный режим.",
-                )
-            )
-            self._skip_failed_cb.setText(tr_catalog("page.blockcheck.skip_failed", language=language, default="Пропускать проблемные домены"))
-            self._add_domain_btn.setText(tr_catalog("page.blockcheck.add_domain", language=language, default="Добавить"))
-            self._domain_input.setPlaceholderText(tr_catalog("page.blockcheck.domain_placeholder", language=language, default="example.com"))
+            set_tooltip(self._stop_btn, _tr("page.blockcheck.action.stop.description", "Остановить текущую проверку."))
+            self._report_btn.setText(_tr("page.blockcheck.report", "Отчёт"))
+            self._add_domain_btn.setText(_tr("page.blockcheck.add_domain", "Добавить"))
+            self._domain_input.setPlaceholderText(_tr("page.blockcheck.domain_placeholder", "example.com"))
             if self._prepare_support_btn is not None:
-                self._prepare_support_btn.setText(
-                    tr_catalog(
-                        "page.blockcheck.prepare_support",
-                        language=language,
-                        default="Подготовить обращение",
-                    )
-                )
+                self._prepare_support_btn.setText(_tr("page.blockcheck.prepare_support", "Подготовить обращение"))
             if self._strategy_tab_page is not None:
                 self._strategy_tab_page.set_ui_language(language)
-            if self._diagnostics_tab_page is not None:
-                self._diagnostics_tab_page.set_ui_language(language)
             if self._dns_spoofing_tab_page is not None:
                 self._dns_spoofing_tab_page.set_ui_language(language)
         except Exception:

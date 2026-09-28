@@ -461,6 +461,21 @@ class StrategyScanPage(BasePage):
             owner=self,
         )
 
+    def prefill_target(self, target: str, *, protocol: str = "tcp_https") -> None:
+        """BlockCheck нашёл проблему: подставляет, что подбирать, но не запускает поиск."""
+        if self._strategy_scan_run_runtime.is_running():
+            return
+        index = self._protocol_combo.findData(protocol)
+        if index >= 0 and index != self._protocol_combo.currentIndex():
+            self._protocol_combo.setCurrentIndex(index)
+        value = str(target or "").strip()
+        if value and protocol == "tcp_https":
+            self._target_input.setText(value)
+        try:
+            self._start_btn.setFocus()
+        except Exception:
+            pass
+
     def _on_pick_quick_domain(self, domain: str) -> None:
         """Fill the domain field from quick picker."""
         if not domain:

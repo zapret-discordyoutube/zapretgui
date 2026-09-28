@@ -14,11 +14,9 @@ if str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
 
 from blockcheck.config import ISP_REDIRECT_MARKERS  # noqa: E402
-from blockcheck.dns_integrity import resolve_doh  # noqa: E402
 from blockcheck.googlevideo_discovery import _fetch_watch_page  # noqa: E402
 from blockcheck.isp_page_detector import detect_isp_page  # noqa: E402
 from blockcheck.models import TestStatus as BlockcheckStatus  # noqa: E402
-from blockcheck.tcp_test import check_tcp_16_20_single  # noqa: E402
 
 
 class _Response:
@@ -77,31 +75,13 @@ class RequestsDependencyBoundaryTests(unittest.TestCase):
         sources = "\n".join(
             (PROJECT_SRC / "blockcheck" / name).read_text("utf-8")
             for name in (
-                "dns_integrity.py",
                 "googlevideo_discovery.py",
                 "isp_page_detector.py",
-                "tcp_test.py",
             )
         )
 
         self.assertNotIn("httpx", runtime.lower())
         self.assertNotIn("httpx", sources.lower())
-
-    def test_doh_keeps_json_a_record_filter(self) -> None:
-        response = _Response(json_data={
-            "Answer": [
-                {"type": 1, "data": "1.2.3.4"},
-                {"type": 28, "data": "2001:db8::1"},
-            ]
-        })
-        session = _Session(response)
-
-        with patch("requests.Session", return_value=session):
-            result = resolve_doh("example.org", "https://dns.example/query", timeout=3)
-
-        self.assertEqual(result, ["1.2.3.4"])
-        self.assertEqual(session.calls[0][1]["timeout"], 3)
-        self.assertTrue(session.calls[0][1]["allow_redirects"])
 
     def test_googlevideo_download_stays_streamed_and_limited(self) -> None:
         host = b"https://rr7---sn-user.googlevideo.com/videoplayback"
@@ -126,18 +106,6 @@ class RequestsDependencyBoundaryTests(unittest.TestCase):
         self.assertEqual(result.error_code, "ISP_PAGE")
         self.assertFalse(session.calls[0][1]["verify"])
         self.assertEqual(session.max_redirects, 5)
-
-    def test_tcp_boundary_is_counted_from_streamed_chunks(self) -> None:
-        session = _Session(_Response(chunks=(b"a" * 9000, b"b" * 9000)))
-
-        with patch("requests.Session", return_value=session):
-            result = check_tcp_16_20_single("https://large.example/file", timeout=6)
-
-        self.assertEqual(result.status, BlockcheckStatus.FAIL)
-        self.assertEqual(result.error_code, "TCP_16_20")
-        self.assertEqual(result.raw_data["bytes_received"], 18_000)
-        self.assertTrue(session.calls[0][1]["stream"])
-
 
 if __name__ == "__main__":
     unittest.main()

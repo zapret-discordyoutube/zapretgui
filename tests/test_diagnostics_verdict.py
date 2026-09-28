@@ -149,7 +149,7 @@ class ServiceSummaryTests(unittest.TestCase):
         verdict = summarize_service("Discord", self._outcomes(ReachState.DPI), zapret_running=True)
 
         self.assertEqual(verdict.level, Level.FAIL)
-        self.assertIn("не помогает", verdict.headline)
+        self.assertIn("не обходит", verdict.headline)
         self.assertIn("Подбор стратегии", verdict.advice[0])
 
     def test_main_blocked_without_zapret_suggests_start(self) -> None:
@@ -169,7 +169,9 @@ class ServiceSummaryTests(unittest.TestCase):
 class _Net:
     """Фейковая сеть для движка: DNS, эталон и HTTPS по адресу."""
 
-    def __init__(self, *, system=DISCORD_REAL, reference=DISCORD_REAL, status=0, https=None, reference_v6=()):
+    def __init__(self, *, system=DISCORD_REAL, reference=DISCORD_REAL, status=0, https=None, reference_v6=(), voice=(), freeze=()):
+        self.voice = voice
+        self.freeze = freeze
         self.system = system
         self.reference = reference
         self.reference_v6 = reference_v6
@@ -197,6 +199,9 @@ class _Net:
             patch.object(engine, "system_dns_servers", return_value=("83.220.169.155",)),
             patch.object(engine, "_zapret_status", return_value=(True, "✅ Zapret запущен")),
             patch.object(engine, "_discover_googlevideo", return_value=("rr1---sn-test.googlevideo.com", "")),
+            # Звонки и обрыв 16 КБ проверяются в любом режиме — без сети в тестах.
+            patch("diagnostics.voice_check.check_voice", return_value=self.voice),
+            patch("diagnostics.freeze_check.check_freeze", return_value=self.freeze),
         )
 
     def run(self, fn, *args, **kwargs):
@@ -264,10 +269,10 @@ class EngineScenarioTests(unittest.TestCase):
         """Случай из жалобы: DNS говорит «домена нет», браузер с DoH открывает сайт."""
         lines: list[str] = []
         net = _Net(system=(), status=DNS_STATUS_NAME_ERROR, reference=("142.251.157.4",))
-        result = net.run(engine.run_connection_test, "youtube", emit=lines.append)
+        result = net.run(engine.run_blockcheck, "main", emit=lines.append)
         text = "\n".join(lines)
 
-        youtube = result["services"][0]
+        youtube = next(item for item in result["services"] if item["key"] == "youtube")
         self.assertEqual(youtube["headline"], "YouTube открывается")
         self.assertEqual(youtube["level"], "warn")
         self.assertIn("www.youtube.com", youtube["dns_note"])
@@ -278,7 +283,7 @@ class EngineScenarioTests(unittest.TestCase):
     def test_dpi_reset_retries_once_on_another_address_and_reports_strategy(self) -> None:
         lines: list[str] = []
         net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET))
-        result = net.run(engine.run_connection_test, "discord", emit=lines.append)
+        result = net.run(engine.run_blockcheck, "main", emit=lines.append)
         text = "\n".join(lines)
 
         discord_calls = [ip for host, ip in net.calls if host == "discord.com"]
@@ -287,7 +292,7 @@ class EngineScenarioTests(unittest.TestCase):
         self.assertEqual(result["services"][0]["level"], "fail")
         self.assertIn("Подбор стратегии", text)
         hosts_order = [line.split(" ")[1] for line in lines if line.startswith("❌ ") and "." in line.split(" ")[1]]
-        self.assertEqual(hosts_order, ["discord.com", "gateway.discord.gg", "cdn.discordapp.com"])
+        self.assertEqual(hosts_order[:3], ["discord.com", "gateway.discord.gg", "cdn.discordapp.com"])
 
     def test_site_blocked_over_ipv4_but_open_over_ipv6_is_reported_as_working(self) -> None:
         """Браузер сам уходит на IPv6, поэтому и проверка обязана его попробовать."""
@@ -297,16 +302,16 @@ class EngineScenarioTests(unittest.TestCase):
             return _ok(ip) if ip == v6 else ProbeResult(ip=ip, kind=KIND_RESET)
 
         net = _Net(https=_https, reference_v6=(v6,))
-        result = net.run(engine.run_connection_test, "discord", emit=lambda _line: None)
+        result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
 
-        discord = result["services"][0]
+        discord = next(item for item in result["services"] if item["key"] == "discord")
         self.assertEqual(discord["level"], "ok")
         self.assertIn("IPv6", discord["targets"][0]["short"])
         self.assertIn(("discord.com", v6), net.calls)
 
     def test_ipv6_is_not_tried_when_ipv4_opens(self) -> None:
         net = _Net(reference_v6=("2606:4700::6810:1",))
-        net.run(engine.run_connection_test, "discord", emit=lambda _line: None)
+        net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
 
         self.assertFalse(any(":" in ip for _host, ip in net.calls))
 
@@ -317,7 +322,7 @@ class EngineScenarioTests(unittest.TestCase):
             return _ok(ip)
 
         net = _Net(system=("5.6.7.8",), https=_https)
-        result = net.run(engine.run_connection_test, "discord", emit=lambda _line: None)
+        result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
 
         self.assertEqual(result["services"][0]["level"], "ok")
         self.assertIn(("discord.com", DISCORD_REAL[0]), net.calls)
@@ -352,6 +357,79 @@ class EngineScenarioTests(unittest.TestCase):
 
         self.assertTrue(result.get("stopped"))
         self.assertLess(time.monotonic() - started, 2.0)
+
+
+class BlockcheckScopeTests(unittest.TestCase):
+    """Режимы BlockCheck, голосовые серверы, обрыв 16 КБ и сводка проблем."""
+
+    def test_scopes_and_user_domains(self) -> None:
+        main = engine.build_services("main")
+        everything = engine.build_services("all", ["Example.org", "discord.com"])
+
+        self.assertEqual(list(main), ["discord", "youtube"])
+        self.assertIn("telegram", everything)
+        self.assertTrue(everything["google"].control)
+        self.assertIn("user:example.org", everything)
+        # Домен, который и так проверяется, не дублируется.
+        self.assertNotIn("user:discord.com", everything)
+
+    def test_unparsable_stun_answer_means_udp_works(self) -> None:
+        from types import SimpleNamespace
+
+        from diagnostics.voice_check import _describe, summarize_voice, VoiceServer
+
+        answered, _text = _describe(SimpleNamespace(status=SimpleNamespace(value="fail"), error_code="PARSE_ERR", detail=""))
+        self.assertTrue(answered)
+        report = summarize_voice((VoiceServer("A", "a", False, "нет"), VoiceServer("B", "b", False, "нет")))
+        self.assertEqual(report.level, Level.FAIL)
+        # На win10 молчали только серверы Telegram — это про звонки Telegram, не «UDP вообще».
+        report = summarize_voice((
+            VoiceServer("Google STUN", "stun.l.google.com", True, "да"),
+            VoiceServer("Telegram STUN", "stun.telegram.org", False, "нет"),
+        ))
+        self.assertEqual(report.level, Level.WARN)
+        self.assertIn("Telegram", report.headline)
+        report = summarize_voice((
+            VoiceServer("Google STUN", "stun.l.google.com", True, "да"),
+            VoiceServer("CF STUN", "stun.cloudflare.com", False, "нет"),
+        ))
+        self.assertEqual(report.level, Level.OK)
+
+    def test_freeze_classification(self) -> None:
+        from diagnostics.freeze_check import FreezeState, classify_download
+
+        frozen = classify_download(_ok(body_cut=True, body_size=16_500))
+        self.assertEqual(frozen[0], FreezeState.FREEZE)
+        self.assertEqual(classify_download(_ok(body_size=32_768))[0], FreezeState.OK)
+        # Сброс сразу, без данных — не «доступ есть» и не «обрыв», а «не удалось проверить».
+        self.assertEqual(classify_download(ProbeResult(ip="1.1.1.1", kind=KIND_RESET))[0], FreezeState.UNKNOWN)
+        self.assertEqual(classify_download(_ok(body_size=2_000))[0], FreezeState.UNKNOWN)
+
+    def _run_all(self, https):
+        from diagnostics.freeze_check import FreezeServer, FreezeState
+        from diagnostics.voice_check import VoiceServer
+
+        net = _Net(
+            https=https,
+            voice=(VoiceServer("CF", "stun", True, "отвечает"),),
+            freeze=(FreezeServer("Akamai", FreezeState.OK, "получено 32 КБ"),),
+        )
+        return net.run(engine.run_blockcheck, "all", emit=lambda _line: None)
+
+    def test_controls_down_means_no_internet_first(self) -> None:
+        result = self._run_all(lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT))
+
+        self.assertIn("контрольные сайты", result["problems"][0]["text"])
+
+    def test_blocked_site_gets_strategy_action_with_its_host(self) -> None:
+        result = self._run_all(lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET) if host == "x.com" else _ok(ip))
+
+        problem = result["problems"][0]
+        self.assertEqual(problem["action"], "strategy")
+        self.assertEqual(problem["target"], "x.com")
+        self.assertIn("Discord", result["working"])
+        self.assertEqual(result["voice"]["level"], "ok")
+        self.assertEqual(result["freeze"]["level"], "ok")
 
 
 class TlsProbeFailureTests(unittest.TestCase):

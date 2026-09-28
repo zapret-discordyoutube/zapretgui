@@ -99,10 +99,6 @@ import telegram_proxy.runtime.workers as telegram_proxy_workers
 from telegram_proxy.ui.page import TelegramProxyPage
 from telegram_proxy.ui.worker_state import TelegramProxyPageQueuedWorkerState
 from telegram_proxy.runtime.workers import TelegramProxyDiagnosticsWorker
-from diagnostics.ui.page import ConnectionTestPage
-import diagnostics.ui.runtime_helpers as diagnostics_runtime_helpers
-import app.feature_facades.diagnostics as diagnostics_feature_facade
-from app.feature_facades.diagnostics import DiagnosticsFeature
 import ui.navigation.text_sync as navigation_text_sync
 import ui.theme as ui_theme
 import ui.window_appearance_bindings as window_appearance_bindings
@@ -3162,7 +3158,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         kwargs = build_blockcheck_page_kwargs(
             page_name=PageName.BLOCKCHECK,
             blockcheck_feature=blockcheck_feature,
-            diagnostics_feature=Mock(),
             dns_feature=Mock(),
             runtime_feature=runtime_feature,
         )
@@ -4867,51 +4862,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertNotIn("_ensure_hosts_worker =", page_source)
         self.assertNotIn("worker.start()", start_source)
 
-    def test_connection_support_bundle_prepares_through_worker(self) -> None:
-        support_worker = importlib.import_module("diagnostics.support_worker")
-        page_source = inspect.getsource(ConnectionTestPage)
-        handler_source = inspect.getsource(ConnectionTestPage.open_support_with_log)
-        request_source = "\n".join(
-            (
-                inspect.getsource(ConnectionTestPage._request_support_prepare),
-                inspect.getsource(ConnectionTestPage._start_support_prepare_worker),
-            )
-        )
-        handler_body = handler_source.split("\n", 1)[1]
-        worker_source = inspect.getsource(support_worker.ConnectionSupportPrepareWorker.run)
-        feature_source = inspect.getsource(DiagnosticsFeature)
-        feature_build_source = inspect.getsource(diagnostics_feature_facade.build_diagnostics_feature)
-
-        self.assertIn("_request_support_prepare", handler_source)
-        self.assertNotIn("open_support_with_log(", handler_body)
-        self.assertIn("create_support_prepare_worker", page_source)
-        self.assertIn("_support_prepare_runtime", page_source)
-        self.assertIn("start_qthread_worker", request_source)
-        self.assertNotIn("worker.start()", request_source)
-        self.assertIn("create_connection_support_prepare_worker", feature_source)
-        self.assertIn("prepare_connection_support=", feature_build_source)
-        self.assertIn("_prepare_connection_support", worker_source)
-        self.assertNotIn("diagnostics.commands", worker_source)
-        self.assertIn("prepare_connection_support", worker_source)
-        self.assertFalse(hasattr(diagnostics_runtime_helpers, "open_support_with_log"))
-
-    def test_connection_test_run_uses_page_worker_runtime(self) -> None:
-        page_source = inspect.getsource(ConnectionTestPage)
-        start_source = inspect.getsource(ConnectionTestPage.start_test)
-        stop_source = inspect.getsource(ConnectionTestPage.stop_test)
-        cleanup_source = inspect.getsource(ConnectionTestPage.cleanup)
-        runtime_source = inspect.getsource(diagnostics_runtime_helpers.start_connection_test)
-        cleanup_runtime_source = inspect.getsource(diagnostics_runtime_helpers.cleanup_connection_runtime)
-
-        self.assertIn("_connection_test_runtime", page_source)
-        self.assertIn("OneShotWorkerRuntime", page_source)
-        self.assertIn("start_qobject_worker", start_source)
-        self.assertIn("stop_connection_test", stop_source)
-        self.assertIn("runtime=self._connection_test_runtime", cleanup_source)
-        self.assertIn("runtime.stop", cleanup_runtime_source)
-        self.assertNotIn("self.worker_thread", page_source)
-        self.assertNotIn("QThread", runtime_source)
-        self.assertNotIn("worker_thread.start()", runtime_source)
 
 
 if __name__ == "__main__":
