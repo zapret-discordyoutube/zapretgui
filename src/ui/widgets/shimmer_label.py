@@ -37,12 +37,14 @@ class ShimmerLabel(QLabel):
         first_delay_ms: int = DEFAULT_FIRST_DELAY_MS,
         enter_delay_ms: int = 0,
         shimmer: bool = True,
+        enter: bool = True,
     ) -> None:
         super().__init__(text, parent)
         self._period_ms = max(SWEEP_DURATION_MS + 500, int(period_ms))
         self._first_delay_ms = max(0, int(first_delay_ms))
         self._enter_delay_ms = max(0, int(enter_delay_ms))
         self._shimmer = bool(shimmer)
+        self._enter_enabled = bool(enter)
         self._t = -1.0
         self._enter = 1.0
         self._glow = QColor(255, 255, 255)
@@ -128,7 +130,7 @@ class ShimmerLabel(QLabel):
     def _start_enter(self) -> None:
         self._enter_wait.stop()
         self._enter_anim.stop()
-        if not self._can_animate():
+        if not self._enter_enabled or not self._can_animate():
             self._enter = 1.0
             return
         # Пока ждём своей очереди, строка скрыта — потом выплывает.

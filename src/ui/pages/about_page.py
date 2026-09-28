@@ -24,6 +24,7 @@ from app.ui_texts import tr as tr_catalog
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.queued_worker_state import QueuedWorkerState
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
+from ui.widgets.stagger_float_in import attach_stagger_float_in
 from log.log import log
 
 
@@ -34,6 +35,9 @@ from qfluentwidgets import (
     PushSettingCard,
     SettingCardGroup,
 )
+
+PREMIUM_STAR_TWINKLE_MS = 7000
+
 
 def _make_section_label(text: str, parent: QWidget | None = None) -> QLabel:
     """Создаёт заголовок секции для использования внутри sub-layout."""
@@ -122,6 +126,9 @@ class AboutPage(BasePage):
         self._about_tab = tabs_widgets.about_tab
         self._help_tab = tabs_widgets.help_tab
         self._kvn_tab = tabs_widgets.kvn_tab
+        # При каждом показе вкладки её карточки выплывают по очереди.
+        for tab in (self._about_tab, self._help_tab, self._kvn_tab):
+            attach_stagger_float_in(tab, page=self)
         self._about_layout = tabs_widgets.about_layout
         self._help_layout = tabs_widgets.help_layout
         self._kvn_layout = tabs_widgets.kvn_layout
@@ -337,6 +344,10 @@ class AboutPage(BasePage):
         self.sub_status_icon.setPixmap(get_cached_qta_pixmap(plan.icon_name, color=plan.icon_color, size=18))
         self.sub_status_label.setText(plan.label_text)
         set_subscription_status_accessibility(self.sub_status_label, plan.label_text)
+        set_twinkle = getattr(self.sub_status_icon, "set_idle_twinkle", None)
+        if callable(set_twinkle):
+            # Звезда Premium изредка поблёскивает, значок Free стоит спокойно.
+            set_twinkle(PREMIUM_STAR_TWINKLE_MS if display.is_premium else 0)
 
     def _current_subscription_display(self) -> PremiumDisplay:
         store = self._ui_state_store

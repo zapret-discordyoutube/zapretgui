@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from collections.abc import Callable
 
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QApplication, QLabel, QHBoxLayout, QVBoxLayout
+from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout
 
 from ui.accessibility import set_state_text
 from ui.pages.about_page_accessibility import apply_about_buttons_accessibility
@@ -19,9 +19,10 @@ from qfluentwidgets import (
     PushButton,
     PushSettingCard,
     StrongBodyLabel,
-    SubtitleLabel,
 )
 from ui.theme import get_cached_qta_pixmap, get_themed_qta_icon
+from ui.widgets.motion_icon import MotionIcon
+from ui.widgets.shimmer_label import ShimmerLabel
 from ui.widgets.spinning_logo import SpinningLogo
 
 
@@ -32,7 +33,7 @@ class AboutPageAboutWidgets:
     about_version_value_label: object
     update_btn: object
     about_section_subscription_label: object
-    sub_status_icon: QLabel
+    sub_status_icon: object
     sub_status_label: object
     sub_desc_label: object
     premium_btn: object
@@ -103,7 +104,13 @@ def build_about_page_about_content(
     text_layout = QVBoxLayout()
     text_layout.setSpacing(2)
     app_name_text = tr_fn("page.about.app_name", "Zapret 2 GUI")
-    about_app_name_label = SubtitleLabel(app_name_text)
+    # Название живёт лёгким бликом; выплывает вместе со всей карточкой.
+    about_app_name_label = ShimmerLabel(app_name_text, enter=False, first_delay_ms=1400)
+    about_app_name_label.set_glow_color(tokens.accent_hex if tokens.is_light else "#ffffff")
+    about_app_name_label.setStyleSheet(
+        f"QLabel {{ color: {tokens.fg}; font-size: 20px; font-weight: 600; "
+        f"font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif; }}"
+    )
     about_version_value_label = CaptionLabel(
         tr_fn("page.about.version.value_template", "Версия {version}").format(version=app_version)
     )
@@ -141,9 +148,9 @@ def build_about_page_about_content(
     sub_status_layout = QHBoxLayout()
     sub_status_layout.setSpacing(8)
 
-    sub_status_icon = QLabel()
+    # Значок статуса: у Premium звезда изредка поблёскивает (см. AboutPage).
+    sub_status_icon = MotionIcon(size=18)
     sub_status_icon.setPixmap(get_cached_qta_pixmap('fa5s.user', color=tokens.fg_faint, size=18))
-    sub_status_icon.setFixedSize(22, 22)
     sub_status_layout.addWidget(sub_status_icon)
 
     sub_status_label = StrongBodyLabel(
@@ -175,7 +182,7 @@ def build_about_page_about_content(
     sub_btns.addStretch()
     kvn_btn = PushButton(
         tr_fn("page.about.button.zapret_kvn", "Zapret KVN"),
-        icon=FluentIcon.GITHUB,
+        icon=FluentIcon.GLOBE,
     )
     apply_about_buttons_accessibility(tr_fn=tr_fn, kvn_btn=kvn_btn)
     kvn_btn.clicked.connect(on_open_kvn_tab)

@@ -42,9 +42,15 @@ class AboutKvnAccessibilityTests(unittest.TestCase):
 
         # BypassBlock живёт на «Справке» — во вкладке KVN его больше нет.
         self.assertFalse(hasattr(widgets, "bypass_card"))
+        # Покупка вынесена в шапку отдельной акцентной кнопкой.
+        self.assertFalse(hasattr(widgets, "bot_card"))
+        self.assertEqual(widgets.bot_btn.accessibleName(), "Купить подписку Zapret KVN")
+        self.assertEqual(widgets.bot_btn.property("screenReaderStateText"), "Купить подписку Zapret KVN")
+        self.assertIn("@zapretvpns_bot", widgets.bot_btn.accessibleDescription())
+        self.assertEqual(widgets.yt_card.accessibleName(), "Ускорение YouTube и Discord")
+        self.assertEqual(widgets.game_card.accessibleName(), "Игровые серверы")
         expected = {
             widgets.tg_card: ("Открыть канал Zapret KVN", "Новости и обновления"),
-            widgets.bot_card: ("Купить подписку Zapret KVN", "Оформление через Telegram-бота"),
             widgets.gh_card: ("Открыть исходный код Zapret KVN", "Forgejo репозиторий Zapret KVN"),
         }
         for card, (name, description) in expected.items():

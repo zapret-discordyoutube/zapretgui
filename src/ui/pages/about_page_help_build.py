@@ -12,6 +12,7 @@ from ui.pages.about_page_help_accessibility import set_help_card_accessibility
 from ui.accessibility import set_state_text
 from ui.theme import get_themed_qta_icon
 from ui.widgets.shimmer_label import ShimmerLabel
+from ui.widgets.stagger_float_in import skip_float_in
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,6 +292,8 @@ def build_about_page_help_content(
     on_open_link: Callable[[str], None],
 ) -> AboutPageHelpWidgets:
     motto_wrap = build_about_page_motto_block(tr_fn=tr_fn, tokens=tokens)
+    # У девиза свой вход (строки выплывают сами), общий эффект вкладки не нужен.
+    skip_float_in(motto_wrap)
     layout.addWidget(motto_wrap)
     layout.addSpacing(6)
     layout.addWidget(make_section_label(tr_fn("page.about.help.section.links", "Ссылки")))
@@ -301,6 +304,7 @@ def build_about_page_help_content(
     for group_spec in HELP_LINK_GROUPS:
         title = tr_fn(group_spec.title_key, group_spec.title)
         group = setting_card_group_cls(title, content_parent)
+        group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         set_state_text(group, f"Раздел справки: {title}")
         group_cards = []
         for link in group_spec.links:
