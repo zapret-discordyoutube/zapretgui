@@ -614,6 +614,22 @@ class BlockcheckScopeTests(unittest.TestCase):
         # Причина одна — нет интернета; строки «X не открывается» по каждому сайту не нужны.
         self.assertEqual(len(texts), 1)
 
+    def test_controls_cut_by_deadline_do_not_hide_real_blocks(self) -> None:
+        controls = {"www.google.com", "www.cloudflare.com"}
+
+        def _https(host, ip):
+            if host in controls:
+                return ProbeResult(ip=ip, kind="cancelled")
+            if host == "x.com":
+                return ProbeResult(ip=ip, kind=KIND_RESET)
+            return _ok(ip)
+
+        result = self._run_all(_https)
+        texts = [problem["text"] for problem in result["problems"]]
+
+        self.assertFalse(any("контрольные сайты" in text for text in texts))
+        self.assertTrue(any(problem["target"] == "x.com" for problem in result["problems"]))
+
     def test_strategy_button_only_for_blocks_a_strategy_can_bypass(self) -> None:
         result = self._run_all(
             lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT) if host == "x.com" else _ok(ip)

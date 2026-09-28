@@ -820,7 +820,10 @@ def _collect_problems(
     problems: list[dict] = []
 
     controls = [key for key, service in services.items() if service.control]
-    offline = bool(controls) and all(verdicts[key].level in (Level.FAIL, Level.UNKNOWN) for key in controls)
+    # Только настоящий провал контрольных сайтов: «не успели проверить»
+    # (лимит времени) — не «нет интернета», иначе такой прогон спрятал бы
+    # найденные блокировки остальных сайтов.
+    offline = bool(controls) and all(verdicts[key].level == Level.FAIL for key in controls)
     if offline:
         problems.append(
             _problem(
