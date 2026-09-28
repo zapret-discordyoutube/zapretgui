@@ -27,7 +27,11 @@ class DNSProviderCatalogTests(unittest.TestCase):
         self.assertLess(names.index("Xbox DNS v2"), names.index("Xbox DNS (old)"))
         self.assertEqual(
             providers["Xbox DNS"]["ipv4"],
-            ["111.88.96.50", "111.88.96.51"],
+            ["111.88.96.54", "111.88.96.55"],
+        )
+        self.assertEqual(
+            providers["Xbox DNS"]["ipv6"],
+            ["2a00:ab00:1233:26::50", "2a00:ab00:1233:26::51"],
         )
         self.assertEqual(
             providers["Xbox DNS v2"]["ipv4"],
@@ -42,6 +46,8 @@ class DNSProviderCatalogTests(unittest.TestCase):
         doh_templates = _load_doh_templates_from_source()
         expected_template = "https://xbox-dns.ru/dns-query"
         for address in (
+            "111.88.96.54",
+            "111.88.96.55",
             "111.88.96.50",
             "111.88.96.51",
             "87.228.47.200",
@@ -50,6 +56,17 @@ class DNSProviderCatalogTests(unittest.TestCase):
             "80.78.247.254",
         ):
             self.assertEqual(doh_templates[address], expected_template)
+
+    def test_malw_dns_uses_current_addresses_with_doh_template(self) -> None:
+        provider = DNS_PROVIDERS["Для ИИ"]["dns.malw.link"]
+        self.assertEqual(provider["ipv4"], ["95.216.204.218", "80.253.249.40"])
+        self.assertEqual(
+            provider["ipv6"],
+            ["2a01:4f9:c014:6dac::1", "2a12:bec4:1460:5b7::2"],
+        )
+        doh_templates = _load_doh_templates_from_source()
+        for address in provider["ipv4"]:
+            self.assertEqual(doh_templates[address], provider["doh"])
 
 
 if __name__ == "__main__":

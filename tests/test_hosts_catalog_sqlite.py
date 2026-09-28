@@ -81,11 +81,12 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.08.27.2")
+        self.assertEqual(catalog.catalog_version, "2026.09.28.1")
         self.assertEqual(len(catalog.content_sha256), 64)
         self.assertEqual(len(catalog.service_order), 73)
-        self.assertEqual(len(catalog.dns_profiles), 7)
+        self.assertEqual(len(catalog.dns_profiles), 6)
         self.assertNotIn("fin_dns", catalog.dns_profiles)
+        self.assertNotIn("play2go_cloud_dns", catalog.dns_profiles)
         self.assertEqual(catalog.service_id_by_name["Discord"], "hosts.discord")
         self.assertEqual(
             catalog.service_id_by_name["ChatGPT & Sora (OpenAI)"],
@@ -99,7 +100,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 818)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 4905)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 6498)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -111,6 +112,15 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                 ).fetchone()[0],
                 0,
             )
+            for dead_relay in ("95.182.120.241", "185.246.223.127", "144.31.14.104"):
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM dns_answers WHERE ip_address = ?",
+                        (dead_relay,),
+                    ).fetchone()[0],
+                    0,
+                    dead_relay,
+                )
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM hosts_entries").fetchone()[0], 499)
         finally:
             connection.close()
@@ -147,7 +157,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
     def test_runtime_reads_dns_and_direct_rows_from_sqlite(self) -> None:
         self.assertEqual(
             len(self.proxy_domains.get_service_domain_ip_rows("ChatGPT & Sora (OpenAI)", "xbox_dns")),
-            53,
+            100,
         )
         self.assertEqual(
             self.proxy_domains.get_service_domain_ip_rows("Discord", "hosts")[:2],
@@ -286,8 +296,12 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                     """
                 ).fetchone()[0]
                 connection.execute(
-                    "INSERT INTO dns_answers VALUES (?, 'xbox_dns', '87.228.47.205', 1)",
+                    "DELETE FROM dns_answers WHERE domain_id = ? AND profile_id = 'xbox_dns'",
                     (domain_id,),
+                )
+                connection.executemany(
+                    "INSERT INTO dns_answers VALUES (?, 'xbox_dns', ?, ?)",
+                    [(domain_id, "87.228.47.205", 1), (domain_id, "87.228.47.204", 0)],
                 )
                 connection.commit()
             finally:

@@ -66,8 +66,8 @@ DNS_PROVIDERS = {
     },
     "Для ИИ": {
         "Xbox DNS": {
-            "ipv4": ["111.88.96.50", "111.88.96.51"],
-            "ipv6": [],
+            "ipv4": ["111.88.96.54", "111.88.96.55"],
+            "ipv6": ["2a00:ab00:1233:26::50", "2a00:ab00:1233:26::51"],
             "desc": "ChatGPT",
             "icon": "fa5s.robot",
             "color": "#9c27b0",
@@ -98,8 +98,8 @@ DNS_PROVIDERS = {
             "doh": "https://dns.comss.one/dns-query"
         },
         "dns.malw.link": {
-            "ipv4": ["84.21.189.133", "64.188.98.242"],
-            "ipv6": ["2a12:bec4:1460:d5::2", "2a01:ecc0:2c1:2::2"],
+            "ipv4": ["95.216.204.218", "80.253.249.40"],
+            "ipv6": ["2a01:4f9:c014:6dac::1", "2a12:bec4:1460:5b7::2"],
             "desc": "ChatGPT",
             "icon": "fa5s.comments",
             "color": "#2196f3",
