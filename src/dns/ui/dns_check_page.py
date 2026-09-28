@@ -24,13 +24,16 @@ from qfluentwidgets import (
     PrimaryPushButton,
     PushButton,
     CaptionLabel,
+    TransparentPushButton,
 )
+
+from dns.ui.dns_check_widgets import DnsDomainsView, DnsSummaryPanel
 
 
 class DNSCheckPage(BasePage):
     """Страница проверки DNS подмены провайдером."""
     
-    def __init__(self, parent=None, *, dns_feature, embedded: bool = False):
+    def __init__(self, parent=None, *, dns_feature, embedded: bool = False, open_dns_settings=None):
         super().__init__(
             "Проверка DNS подмены",
             "Проверка резолвинга доменов YouTube и Discord через различные DNS серверы",
@@ -39,6 +42,8 @@ class DNSCheckPage(BasePage):
             subtitle_key="page.dns_check.subtitle",
         )
         self._dns = dns_feature
+        self._open_dns_settings = open_dns_settings
+        self._log_expanded = False
         self._cleanup_in_progress = False
         self._check_runtime = OneShotWorkerRuntime()
         self._check_state = LatestValueWorkerState(
@@ -153,7 +158,28 @@ class DNSCheckPage(BasePage):
         self._update_action_button_state_text()
         self.layout.addWidget(self.control_card)
 
+        # Итог с выдрой и список доменов.
+        self.summary_panel = DnsSummaryPanel(on_open_dns_settings=self._open_dns_settings)
+        self.layout.addWidget(self.summary_panel)
+        self.domains_card = SettingsCard()
+        self.domains_view = DnsDomainsView()
+        self.domains_card.add_widget(self.domains_view)
+        self.domains_card.setVisible(False)
+        self.layout.addWidget(self.domains_card)
+
+        # Подробный лог — свёрнут, его можно сохранить в файл.
         self.results_card = SettingsCard()
+        log_header = QHBoxLayout()
+        self.log_toggle_btn = TransparentPushButton("Подробный лог", icon=FluentIcon.CHEVRON_RIGHT_MED)
+        set_control_accessibility(
+            self.log_toggle_btn,
+            name="Показать подробный лог проверки DNS",
+            description="Текстовый отчёт проверки: какие адреса пришли и почему решено именно так.",
+        )
+        self.log_toggle_btn.clicked.connect(self._toggle_log)
+        log_header.addWidget(self.log_toggle_btn)
+        log_header.addStretch(1)
+        self.results_card.add_layout(log_header)
         self.result_text = ScrollBlockingTextEdit()
         self.result_text.setReadOnly(True)
         self.result_text.setFont(QFont("Consolas", 10))
@@ -175,9 +201,22 @@ class DNSCheckPage(BasePage):
             }}
             """
         )
+        self.result_text.setVisible(False)
         self.results_card.add_widget(self.result_text)
         self.layout.addWidget(self.results_card)
         self.layout.addStretch()
+
+    def _toggle_log(self) -> None:
+        self._log_expanded = not self._log_expanded
+        self.result_text.setVisible(self._log_expanded)
+        self.log_toggle_btn.setText("Скрыть подробный лог" if self._log_expanded else "Подробный лог")
+        self.log_toggle_btn.setIcon(FluentIcon.CHEVRON_DOWN_MED if self._log_expanded else FluentIcon.CHEVRON_RIGHT_MED)
+        name = "Скрыть подробный лог проверки DNS" if self._log_expanded else "Показать подробный лог проверки DNS"
+        set_control_accessibility(
+            self.log_toggle_btn,
+            name=name,
+            description="Текстовый отчёт проверки: какие адреса пришли и почему решено именно так.",
+        )
 
     def _set_status(self, text: str, *, tone: str, bold: bool) -> None:
         tokens = get_theme_tokens()
@@ -244,6 +283,9 @@ class DNSCheckPage(BasePage):
         self.result_text.clear()
         set_state_text(self.result_text, "Результаты проверки DNS: проверка ещё не запускалась")
         self._clear_results_plain_text_cache()
+        self.summary_panel.set_pending()
+        self.domains_view.clear()
+        self.domains_card.setVisible(False)
         start_plan = dns_check_page_plans.build_start_plan()
         self._apply_interaction_state(
             check_enabled=start_plan.check_enabled,
@@ -310,6 +352,9 @@ class DNSCheckPage(BasePage):
             progress_visible=plan.progress_visible,
         )
         self._set_status(plan.status_text, tone=plan.status_tone, bold=True)
+        self.summary_panel.show_results(results)
+        self.domains_view.show_results(results)
+        self.domains_card.setVisible(bool(self.domains_view.rows()))
 
     def _on_check_worker_finished(self, request_id: int, _thread) -> None:
         if not self._is_current_request_finish(self.__dict__.get("_check_runtime"), request_id):

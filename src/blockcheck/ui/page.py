@@ -121,6 +121,7 @@ class BlockcheckPage(BasePage):
         blockcheck_feature,
         dns_feature,
         create_strategy_scan_worker,
+        open_dns_settings=None,
     ):
         super().__init__(
             title=tr_catalog("page.blockcheck.title", default="BlockCheck"),
@@ -137,6 +138,7 @@ class BlockcheckPage(BasePage):
         self._blockcheck = blockcheck_feature
         self._dns = dns_feature
         self._create_strategy_scan_worker = create_strategy_scan_worker
+        self._open_dns_settings = open_dns_settings
         self._last_report: dict | None = None
         self._report_lines: list[str] = []
         self._run_log_file: str | None = None
@@ -464,6 +466,7 @@ class BlockcheckPage(BasePage):
                 parent=self,
                 dns_feature=self._dns,
                 embedded=True,
+                open_dns_settings=self._open_dns_settings,
             )
             self._dns_spoofing_tab_page.setVisible(False)
             self.add_widget(self._dns_spoofing_tab_page)

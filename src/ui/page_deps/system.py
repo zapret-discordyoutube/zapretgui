@@ -250,6 +250,7 @@ def build_blockcheck_page_kwargs(
     blockcheck_feature,
     dns_feature,
     runtime_feature,
+    show_page=None,
 ) -> dict:
     _ = page_name
 
@@ -269,6 +270,8 @@ def build_blockcheck_page_kwargs(
         "blockcheck_feature": blockcheck_feature,
         "dns_feature": dns_feature,
         "create_strategy_scan_worker": _create_strategy_scan_worker,
+        # «Поймали провайдера на подмене DNS» → кнопка ведёт на «Настройка DNS».
+        "open_dns_settings": (lambda: show_page(PageName.NETWORK)) if show_page is not None else None,
     }
 
 
