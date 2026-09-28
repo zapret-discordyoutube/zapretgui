@@ -689,6 +689,251 @@ class TechniqueIllustrationTests(unittest.TestCase):
             window.deleteLater()
 
 
+class _FocusGrabbingPage(QWidget):
+    """Как редактор пресета: после открытия сам забирает фокус таймером."""
+
+    def __init__(self, parent=None) -> None:
+        from PyQt6.QtWidgets import QPlainTextEdit
+
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        self.editor = QPlainTextEdit(self)
+        self.editor.setPlainText("--lua-desync=fake")
+        layout.addWidget(self.editor)
+        self.values = {"count": "7"}
+
+    def onboarding_target(self, name):
+        return self.editor if name == "editor" else None
+
+    def onboarding_text_values(self, _name):
+        return dict(self.values)
+
+    def grab_focus_later(self) -> None:
+        from PyQt6.QtCore import QTimer
+
+        QTimer.singleShot(0, self.editor.setFocus)
+
+
+class OnboardingCardBehaviourTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _app()
+
+    def _overlay(self, steps, page_cls=_FocusGrabbingPage):
+        from PyQt6.QtTest import QTest
+
+        from app.page_names import PageName
+        from ui.onboarding.overlay import OnboardingOverlay
+        from ui.onboarding.steps import TourContext
+
+        window = QWidget()
+        window.resize(900, 700)
+        layout = QVBoxLayout(window)
+        page = page_cls(window)
+        layout.addWidget(page)
+
+        class Host:
+            def show_page(self, _name, allow_internal=False):
+                return True
+
+            def get_loaded_page(self, _name):
+                return page
+
+            def current_page(self):
+                return page
+
+        window.ui_session = SimpleNamespace(nav_items={}, nav_header_by_group={}, nav_headers=[], page_host=Host())
+        window.show()
+        window.activateWindow()
+        QTest.qWaitForWindowActive(window, 1000)
+        context = TourContext(
+            window=window,
+            control_page_name=PageName.ZAPRET2_MODE_CONTROL,
+            pages={"control": PageName.ZAPRET2_MODE_CONTROL},
+            current_page=page,
+        )
+        overlay = OnboardingOverlay(window, context, steps)
+        return window, page, overlay
+
+    def test_arrows_keep_working_when_page_takes_focus(self) -> None:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+
+        from ui.onboarding.steps import TourStep, _page_target
+
+        steps = (
+            TourStep("welcome", hero=True),
+            TourStep("editor", _page_target("editor"), page="control"),
+            TourStep("finish", hero=True),
+        )
+        window, page, overlay = self._overlay(steps)
+        try:
+            overlay.start()
+            overlay.go_next()
+            page.grab_focus_later()
+            for _ in range(5):
+                QApplication.processEvents()
+            focus = QApplication.focusWidget()
+            self.assertTrue(focus is not None and overlay.isAncestorOf(focus))
+            QTest.keyClick(focus, Qt.Key.Key_A)
+            self.assertEqual(page.editor.toPlainText(), "--lua-desync=fake")
+            QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Right)
+            self.assertEqual(overlay.current_step_key(), "finish")
+        finally:
+            overlay.finish("skipped", immediate=True)
+            window.close()
+            window.deleteLater()
+
+    def test_many_dots_fit_the_card_and_a_click_opens_that_step(self) -> None:
+        from PyQt6.QtCore import QPoint, Qt
+        from PyQt6.QtTest import QTest
+
+        from ui.onboarding.steps import TourStep
+
+        steps = tuple(TourStep(f"step_{index}", hero=True) for index in range(60))
+        window, _page, overlay = self._overlay(steps)
+        try:
+            overlay.start()
+            for _ in range(30):
+                QApplication.processEvents()
+            dots = overlay._card.dots
+            rects = dots.dot_rects()
+            self.assertEqual(len(rects), 60)
+            self.assertLessEqual(rects[-1].right(), dots.width() + 0.5)
+            target = rects[41].center().toPoint()
+            QTest.mouseClick(dots, Qt.MouseButton.LeftButton, pos=QPoint(target.x(), target.y()))
+            self.assertEqual(overlay.current_step_key(), "step_41")
+        finally:
+            overlay.finish("skipped", immediate=True)
+            window.close()
+            window.deleteLater()
+
+    def test_opacity_effect_is_off_once_text_is_fully_shown(self) -> None:
+        import time
+
+        from ui.onboarding.steps import TourStep
+
+        window, _page, overlay = self._overlay((TourStep("welcome", hero=True), TourStep("next", hero=True)))
+        try:
+            overlay.start()
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and overlay._card.content_effect.isEnabled():
+                QApplication.processEvents()
+                time.sleep(0.01)
+            self.assertFalse(overlay._card.content_effect.isEnabled())
+        finally:
+            overlay.finish("skipped", immediate=True)
+            window.close()
+            window.deleteLater()
+
+    def test_live_values_fill_the_text_and_missing_ones_become_a_dash(self) -> None:
+        from ui.onboarding.overlay import _fill_placeholders, _unbreakable_options
+        from ui.onboarding.steps import TourStep, _page_target
+
+        self.assertEqual(_fill_placeholders("{count} и {example}", {"count": "3"}), "3 и —")
+        self.assertEqual(_unbreakable_options("Строка --lua-desync тут"), "Строка \u2011\u2011lua\u2011desync тут")
+
+        steps = (TourStep("preset_blobs", _page_target("editor"), page="control", text_key="section:blobs"),)
+        window, page, overlay = self._overlay(steps)
+        page.values = {"count": "42", "example": "tls_vk"}
+        try:
+            overlay.start()
+            body = overlay._card.body_label.text()
+            self.assertIn("42", body)
+            self.assertIn("tls_vk", body)
+            self.assertNotIn("{", body)
+        finally:
+            overlay.finish("skipped", immediate=True)
+            window.close()
+            window.deleteLater()
+
+
+class OnboardingDecorTests(unittest.TestCase):
+    """Полоска прогресса сверху и перетекающие точки."""
+
+    def setUp(self) -> None:
+        _app()
+
+    def _overlay(self, count: int, *, animated: bool):
+        from app.page_names import PageName
+        from ui.onboarding import overlay as overlay_module
+        from ui.onboarding.steps import TourContext, TourStep
+
+        window, page = _build_window()
+        window.show()
+        context = TourContext(
+            window=window,
+            control_page_name=PageName.ZAPRET2_MODE_CONTROL,
+            pages={"control": PageName.ZAPRET2_MODE_CONTROL},
+            current_page=page,
+        )
+        steps = tuple(TourStep(f"step_{index}", hero=True) for index in range(count))
+        with patch.object(overlay_module, "are_live_animations_enabled", return_value=animated):
+            overlay = overlay_module.OnboardingOverlay(window, context, steps)
+        overlay.start()
+        return window, overlay
+
+    @staticmethod
+    def _run(overlay, seconds: float) -> None:
+        import time
+
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            QApplication.processEvents()
+            time.sleep(0.005)
+
+    def test_progress_glides_to_the_new_share_and_back(self) -> None:
+        window, overlay = self._overlay(4, animated=True)
+        card = overlay._card
+        try:
+            self._run(overlay, 1.6)
+            self.assertAlmostEqual(card.progress(), 0.25, places=3)
+            overlay.go_next()
+            overlay.go_next()
+            self._run(overlay, 0.05)
+            self.assertGreater(card.progress(), 0.25)
+            self.assertLess(card.progress(), 0.75)
+            self._run(overlay, 1.6)
+            self.assertAlmostEqual(card.progress(), 0.75, places=3)
+            overlay.go_back()
+            self._run(overlay, 1.6)
+            self.assertAlmostEqual(card.progress(), 0.5, places=3)
+        finally:
+            overlay.finish("skipped", immediate=True)
+            window.close()
+            window.deleteLater()
+
+    def test_without_animations_everything_is_in_place_at_once(self) -> None:
+        window, overlay = self._overlay(5, animated=False)
+        try:
+            overlay.go_to(3)
+            self.assertAlmostEqual(overlay._card.progress(), 0.8, places=6)
+            overlay._on_frame()
+            self.assertEqual(overlay._card.dots.position(), 3.0)
+        finally:
+            overlay.finish("skipped", immediate=True)
+            window.close()
+            window.deleteLater()
+
+    def test_pill_flows_to_a_far_step_and_clicks_hit_what_is_visible(self) -> None:
+        window, overlay = self._overlay(12, animated=True)
+        dots = overlay._card.dots
+        try:
+            self._run(overlay, 0.5)
+            overlay.go_to(9)
+            self._run(overlay, 0.04)
+            self.assertGreater(dots.position(), 0.0)
+            self.assertLess(dots.position(), 9.0)
+            # Во время движения точки сдвинуты: нажатие по видимой точке 4 ведёт на шаг 4.
+            rect = dots.dot_rects()[4]
+            self.assertEqual(dots.index_at(rect.center().x()), 4)
+            self._run(overlay, 1.2)
+            self.assertEqual(dots.position(), 9.0)
+        finally:
+            overlay.finish("skipped", immediate=True)
+            window.close()
+            window.deleteLater()
+
+
 class StartOnboardingTourTests(unittest.TestCase):
     def setUp(self) -> None:
         _app()

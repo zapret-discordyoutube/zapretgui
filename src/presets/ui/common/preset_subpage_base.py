@@ -22,6 +22,14 @@ from ui.message_box_accessibility import set_message_box_button_accessibility
 from ui.queued_worker_state import QueuedWorkerState
 from ui.popup_menu import exec_popup_menu
 from presets.ui.common.raw_preset_text_editor import RawPresetTextEditor
+from ui.onboarding.preset_sections import (
+    build_outline,
+    editor_lines_rect,
+    scroll_editor_to_line,
+    section_lines,
+    section_name,
+    section_text_values,
+)
 from presets.ui.common.preset_status_bar import (
     PresetStatusBar,
     build_runtime_preset_status_plan,
@@ -988,7 +996,53 @@ class PresetRawEditorPage(BasePage):
     def onboarding_target(self, name: str):
         if name == "editor":
             return self.__dict__.get("editor")
+        section = section_name(name)
+        if section:
+            outline = self._onboarding_outline()
+            if outline is None:
+                return None
+            return editor_lines_rect(self.__dict__.get("editor"), section_lines(outline, section))
         return None
+
+    def onboarding_set_state(self, state: str | None) -> None:
+        """Тур прокручивает редактор к части пресета, потом возвращает как было."""
+        editor = self.__dict__.get("editor")
+        if editor is None:
+            return
+        section = section_name(state or "")
+        if not section:
+            saved = self.__dict__.pop("_onboarding_saved_scroll", None)
+            if saved is not None:
+                editor.verticalScrollBar().setValue(saved)
+            return
+        self.__dict__.setdefault("_onboarding_saved_scroll", editor.verticalScrollBar().value())
+        outline = self._onboarding_outline()
+        lines = section_lines(outline, section) if outline is not None else ()
+        if lines:
+            scroll_editor_to_line(editor, min(lines))
+
+    def onboarding_text_values(self, name: str) -> dict[str, str]:
+        section = section_name(name)
+        outline = self._onboarding_outline() if section else None
+        return section_text_values(outline, section) if outline is not None else {}
+
+    def _onboarding_outline(self):
+        """Оглавление текста, который сейчас в редакторе; пересчёт — только после правок."""
+        editor = self.__dict__.get("editor")
+        if editor is None:
+            return None
+        revision = editor.document().revision()
+        cached = self.__dict__.get("_onboarding_outline_cache")
+        if cached is not None and cached[0] == revision:
+            return cached[1]
+        from settings.mode import is_zapret2_launch_method
+
+        outline = build_outline(
+            self._current_raw_editor_text(),
+            zapret2=is_zapret2_launch_method(self._launch_method),
+        )
+        self._onboarding_outline_cache = (revision, outline)
+        return outline
 
     def handle_page_command(self, command: str, payload: dict) -> bool:
         if command == "open_raw_preset":

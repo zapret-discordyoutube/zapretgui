@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import PureWindowsPath
 
 from settings.mode import ENGINE_WINWS1, ENGINE_WINWS2
@@ -77,33 +78,41 @@ def _normalize_engine(engine: str) -> EngineName:
     return normalized  # type: ignore[return-value]
 
 
-def _split_header_and_body(text: str) -> tuple[list[str], list[str]]:
-    header_lines: list[str] = []
-    body_lines: list[str] = []
-    in_header = True
-    for raw in normalize_text(text).split("\n"):
+def _header_line_count(lines: list[str]) -> int:
+    """Сколько строк в начале — служебные заголовки (# ...) и пустые."""
+    for index, raw in enumerate(lines):
         stripped = raw.strip()
-        if in_header and (stripped.startswith("#") or not stripped):
-            header_lines.append(raw)
-            continue
-        in_header = False
-        body_lines.append(raw)
-    return header_lines, body_lines
+        if not (stripped.startswith("#") or not stripped):
+            return index
+    return len(lines)
 
 
-def _split_preamble_and_profile_lines(body_lines: list[str]) -> tuple[list[str], list[tuple[str, list[str]]], list[str]]:
-    preamble: list[str] = []
-    profiles: list[tuple[str, list[str]]] = []
-    footer: list[str] = []
-    current: list[str] = []
-    current_new_line = ""
+def _split_header_and_body(text: str) -> tuple[list[str], list[str]]:
+    lines = normalize_text(text).split("\n")
+    count = _header_line_count(lines)
+    return lines[:count], lines[count:]
+
+
+def _split_preamble_and_profile_indices(
+    body_lines: list[str],
+) -> tuple[list[int], list[tuple[int | None, list[int]]], list[int]]:
+    """Номера строк общей части, профилей (со строкой --new) и хвоста.
+
+    Один разбор на всех: по нему делит пресет и сам разборщик, и оглавление
+    для обучающего тура.
+    """
+    preamble: list[int] = []
+    profiles: list[tuple[int | None, list[int]]] = []
+    footer: list[int] = []
+    current: list[int] = []
+    current_new_line: int | None = None
     saw_profile = False
 
-    def _push_profile(new_line: str, raw_lines: list[str]) -> None:
-        if raw_lines:
-            profiles.append((new_line, list(raw_lines)))
+    def _push_profile(new_line: int | None, indexes: list[int]) -> None:
+        if indexes:
+            profiles.append((new_line, list(indexes)))
 
-    for raw in body_lines:
+    for index, raw in enumerate(body_lines):
         stripped = raw.strip()
         if _is_new_profile_line(stripped):
             if saw_profile:
@@ -113,27 +122,39 @@ def _split_preamble_and_profile_lines(body_lines: list[str]) -> tuple[list[str],
                 preamble.extend(current)
                 current = []
             saw_profile = True
-            current_new_line = stripped
+            current_new_line = index
             continue
 
         if not saw_profile and not _looks_like_profile_line(stripped):
-            preamble.append(raw)
+            preamble.append(index)
             continue
 
         if not saw_profile and _looks_like_profile_line(stripped):
             saw_profile = True
-            current_new_line = ""
-        current.append(raw)
+            current_new_line = None
+        current.append(index)
 
     if current:
         if saw_profile:
-            if current_new_line and not _has_profile_content(current):
+            if current_new_line is not None and not _has_profile_content([body_lines[i] for i in current]):
                 footer.extend(current)
             else:
                 _push_profile(current_new_line, current)
         else:
             preamble.extend(current)
     return preamble, profiles, footer
+
+
+def _split_preamble_and_profile_lines(body_lines: list[str]) -> tuple[list[str], list[tuple[str, list[str]]], list[str]]:
+    preamble, profiles, footer = _split_preamble_and_profile_indices(body_lines)
+    return (
+        [body_lines[i] for i in preamble],
+        [
+            (body_lines[new_line].strip() if new_line is not None else "", [body_lines[i] for i in indexes])
+            for new_line, indexes in profiles
+        ],
+        [body_lines[i] for i in footer],
+    )
 
 
 def _has_profile_content(lines: list[str]) -> bool:
@@ -175,13 +196,14 @@ def _parse_profile(lines: list[str], *, engine: EngineName, index: int, new_line
 
     for raw in lines:
         stripped = raw.strip()
-        if not stripped:
+        kind = _profile_line_kind(stripped, engine, saw_strategy=saw_strategy)
+        if kind == "blank":
             segments.append(ProfileSegment(kind="blank", text=raw))
             continue
-        if stripped.startswith("#"):
+        if kind == "comment":
             segments.append(ProfileSegment(kind="comment", text=raw))
             continue
-        if _is_directive(stripped):
+        if kind == "directive":
             directive_name, directive_value = _split_option(stripped)
             if _is_profile_name_directive(engine, directive_name):
                 name = directive_value or name
@@ -189,24 +211,24 @@ def _parse_profile(lines: list[str], *, engine: EngineName, index: int, new_line
                 enabled = False
             segments.append(ProfileSegment(kind="directive", text=stripped, name=directive_name, value=directive_value))
             continue
-        if _is_match_line(stripped):
+        if kind == "match":
             _add_match_line(match, stripped)
             option_name, option_value = _split_option(stripped)
             segments.append(ProfileSegment(kind="match", text=stripped, name=option_name, value=option_value))
             continue
-        if _is_strategy_filter_line(stripped, engine):
+        if kind == "strategy_filter":
             strategy_lines.append(stripped)
             saw_strategy = True
             option_name, option_value = _split_option(stripped)
             segments.append(ProfileSegment(kind="strategy_filter", text=stripped, name=option_name, value=option_value))
             continue
-        if _is_strategy_line(stripped, engine):
+        if kind == "strategy":
             strategy_lines.append(stripped)
             saw_strategy = True
             option_name, option_value = _split_option(stripped)
             segments.append(ProfileSegment(kind="strategy", text=stripped, name=option_name, value=option_value))
             continue
-        if engine == ENGINE_WINWS1 and saw_strategy:
+        if kind == "strategy_tail":
             strategy_lines.append(stripped)
             option_name, option_value = _split_option(stripped)
             segments.append(ProfileSegment(kind="strategy", text=stripped, name=option_name, value=option_value))
@@ -269,6 +291,26 @@ def _name_from_new_line(new_line: str) -> str:
     if stripped.lower().startswith("--new="):
         return stripped.split("=", 1)[1].strip().strip('"').strip("'")
     return ""
+
+
+def _profile_line_kind(stripped: str, engine: EngineName, *, saw_strategy: bool) -> str:
+    """Вид строки профиля: blank, comment, directive, match, strategy_filter,
+    strategy, strategy_tail (продолжение стратегии winws1) или other."""
+    if not stripped:
+        return "blank"
+    if stripped.startswith("#"):
+        return "comment"
+    if _is_directive(stripped):
+        return "directive"
+    if _is_match_line(stripped):
+        return "match"
+    if _is_strategy_filter_line(stripped, engine):
+        return "strategy_filter"
+    if _is_strategy_line(stripped, engine):
+        return "strategy"
+    if engine == ENGINE_WINWS1 and saw_strategy:
+        return "strategy_tail"
+    return "other"
 
 
 def _is_directive(stripped: str) -> bool:
@@ -427,3 +469,104 @@ def _is_complex_match(match: ProfileMatch) -> bool:
     if match.other_lines:
         return True
     return False
+
+
+# ── Оглавление пресета ───────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileOutline:
+    """Номера строк одного профиля (с нуля, по всему тексту пресета)."""
+
+    new_line: int | None
+    lines: tuple[int, ...]
+    name: tuple[int, ...]
+    match: tuple[int, ...]
+    packets: tuple[int, ...]
+    strategy: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PresetOutline:
+    """Где в тексте пресета какая часть.
+
+    Строится теми же правилами, что и parse_preset_text, поэтому обучающий
+    тур показывает пресет ровно так, как его понимает программа.
+    """
+
+    lines: tuple[str, ...]
+    header: tuple[int, ...]
+    lua_init: tuple[int, ...]
+    interception: tuple[int, ...]
+    blobs: tuple[int, ...]
+    engine_options: tuple[int, ...]
+    profiles: tuple[ProfileOutline, ...]
+
+
+def preset_text_outline(text: str, *, engine: str) -> PresetOutline:
+    normalized_engine = _normalize_engine(engine)
+    lines = normalize_text(text).split("\n")
+    body_start = _header_line_count(lines)
+    header = tuple(index for index in range(body_start) if lines[index].strip())
+    preamble, raw_profiles, _footer = _split_preamble_and_profile_indices(lines[body_start:])
+
+    lua_init: list[int] = []
+    interception: list[int] = []
+    blobs: list[int] = []
+    engine_options: list[int] = []
+    for body_index in preamble:
+        index = body_start + body_index
+        stripped = lines[index].strip()
+        lowered = stripped.lower()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if lowered.startswith("--lua-init"):
+            lua_init.append(index)
+        elif lowered.startswith("--wf-"):
+            interception.append(index)
+        elif lowered.startswith("--blob="):
+            blobs.append(index)
+        else:
+            engine_options.append(index)
+
+    profiles: list[ProfileOutline] = []
+    for new_line, body_indexes in raw_profiles:
+        groups: dict[str, list[int]] = {"name": [], "match": [], "packets": [], "strategy": []}
+        content: list[int] = []
+        saw_strategy = False
+        for body_index in body_indexes:
+            index = body_start + body_index
+            kind = _profile_line_kind(lines[index].strip(), normalized_engine, saw_strategy=saw_strategy)
+            if kind in {"blank", "comment"}:
+                continue
+            content.append(index)
+            if kind == "directive":
+                groups["name"].append(index)
+            elif kind == "strategy_filter":
+                groups["packets"].append(index)
+                saw_strategy = True
+            elif kind in {"strategy", "strategy_tail"}:
+                groups["strategy"].append(index)
+                saw_strategy = True
+            else:
+                groups["match"].append(index)
+        profiles.append(
+            ProfileOutline(
+                new_line=body_start + new_line if new_line is not None else None,
+                lines=tuple(content),
+                name=tuple(groups["name"]),
+                match=tuple(groups["match"]),
+                packets=tuple(groups["packets"]),
+                strategy=tuple(groups["strategy"]),
+            )
+        )
+
+    return PresetOutline(
+        lines=tuple(lines),
+        header=header,
+        lua_init=tuple(lua_init),
+        interception=tuple(interception),
+        blobs=tuple(blobs),
+        engine_options=tuple(engine_options),
+        profiles=tuple(profiles),
+    )

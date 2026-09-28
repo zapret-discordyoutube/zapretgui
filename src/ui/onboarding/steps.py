@@ -98,6 +98,9 @@ class TourStep:
     wiki_url: str = ""
     # Анимированная схема на карточке (ключ сцены из ui.onboarding.illustrations).
     illustration: str = ""
+    # Живые значения для текста: страница отдаёт их через
+    # onboarding_text_values(text_key), тур подставляет в {…} текста.
+    text_key: str = ""
 
 
 def is_alive_widget(widget) -> bool:
@@ -212,6 +215,18 @@ def _page_target(name: str) -> TargetResolver:
     return _resolve
 
 
+def _preset_section(section: str) -> TourStep:
+    """Шаг разбора пресета: подсветить часть в редакторе и рассказать о ней."""
+    target = f"section:{section}"
+    return TourStep(
+        f"preset_{section}",
+        _page_target(target),
+        page="preset_editor",
+        page_state=target,
+        text_key=target,
+    )
+
+
 _TOUR_STEPS: tuple[TourStep, ...] = (
     TourStep("welcome", hero=True),
     TourStep("how_it_works", hero=True),
@@ -223,6 +238,17 @@ _TOUR_STEPS: tuple[TourStep, ...] = (
     TourStep("presets_list", _page_target("presets_list"), page="user_presets", target_optional=True),
     TourStep("preset_menu", _page_target("preset_menu"), page="user_presets", page_state="preset_menu"),
     TourStep("preset_file", _page_target("editor"), page="preset_editor", target_optional=True),
+    _preset_section("header"),
+    _preset_section("lua_init"),
+    _preset_section("engine_options"),
+    _preset_section("interception"),
+    _preset_section("blobs"),
+    _preset_section("profile"),
+    _preset_section("profile_name"),
+    _preset_section("profile_match"),
+    _preset_section("profile_packets"),
+    _preset_section("profile_strategy"),
+    _preset_section("profile_new"),
     TourStep("presets_toolbar", _page_target("presets_toolbar"), page="user_presets"),
     TourStep("profiles_list", _page_target("profiles_list"), page="preset_setup", target_optional=True),
     TourStep("profile_row", _page_target("first_profile"), page="preset_setup"),

@@ -4910,6 +4910,176 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "Open in the preset menu."
         ),
     },
+    "onboarding.step.preset_header.title": {
+        "ru": "Служебные строки",
+        "en": "Service lines",
+    },
+    "onboarding.step.preset_header.body": {
+        "ru": (
+            "Файл начинается со строк с #. Для движка это комментарии — он их пропускает. Их читает "
+            "программа: имя пресета («{name}»), версия встроенного пресета и цвет значка в списке."
+        ),
+        "en": (
+            "The file starts with lines beginning with #. The engine treats them as comments and "
+            "skips them. The app reads them: the preset name (\"{name}\"), the built-in preset "
+            "version and the icon colour in the list."
+        ),
+    },
+    "onboarding.step.preset_lua_init.title": {
+        "ru": "Подключение техник: --lua-init",
+        "en": "Loading techniques: --lua-init",
+    },
+    "onboarding.step.preset_lua_init.body": {
+        "ru": (
+            "Строки --lua-init подключают Lua-файлы, в которых записаны сами техники обхода — fake, "
+            "multisplit и другие. Здесь их {count}.\n\n"
+            "Для Zapret 2 этот блок обязателен: без него стратегии не найдут нужных функций. "
+            "Трогать его не нужно."
+        ),
+        "en": (
+            "The --lua-init lines load the Lua files that contain the bypass techniques themselves "
+            "— fake, multisplit and others. There are {count} of them here.\n\n"
+            "This block is required for Zapret 2: without it strategies cannot find their "
+            "functions. Leave it as is."
+        ),
+    },
+    "onboarding.step.preset_engine_options.title": {
+        "ru": "Общие настройки движка",
+        "en": "Engine-wide settings",
+    },
+    "onboarding.step.preset_engine_options.body": {
+        "ru": "Эти настройки действуют на весь пресет сразу, а не на один профиль. Здесь: {lines}.",
+        "en": "These settings apply to the whole preset, not to a single profile. Here: {lines}.",
+    },
+    "onboarding.step.preset_interception.title": {
+        "ru": "Какой трафик перехватывается: --wf-…",
+        "en": "Which traffic is captured: --wf-…",
+    },
+    "onboarding.step.preset_interception.body": {
+        "ru": (
+            "Эти строки решают, какие соединения Windows вообще отдаёт программе. Перехватом "
+            "занимается драйвер WinDivert. TCP-порты: {tcp}. UDP-порты: {udp}. Строки --wf-raw-part "
+            "добавляют особые случаи, например голосовые звонки Discord.\n\n"
+            "Если порта здесь нет, его не увидит ни один профиль ниже."
+        ),
+        "en": (
+            "These lines decide which connections Windows hands to the app at all. Capturing is "
+            "done by the WinDivert driver. TCP ports: {tcp}. UDP ports: {udp}. The --wf-raw-part "
+            "lines add special cases, such as Discord voice calls.\n\n"
+            "If a port is not listed here, no profile below will ever see it."
+        ),
+    },
+    "onboarding.step.preset_blobs.title": {
+        "ru": "Фейки: --blob",
+        "en": "Fakes: --blob",
+    },
+    "onboarding.step.preset_blobs.body": {
+        "ru": (
+            "Здесь объявлены фейки — готовые поддельные пакеты из папки bin, всего {count}. Строка "
+            "даёт фейку короткое имя, например {example}, и стратегии зовут его по этому имени.\n\n"
+            "Фейк должен быть объявлен здесь: при запуске программа сама ничего не подставляет."
+        ),
+        "en": (
+            "Fakes are declared here — ready-made decoy packets from the bin folder, {count} in "
+            "total. Each line gives a fake a short name, such as {example}, and strategies refer to "
+            "it by that name.\n\n"
+            "A fake must be declared here: the app adds nothing on its own at launch."
+        ),
+    },
+    "onboarding.step.preset_profile.title": {
+        "ru": "Профили",
+        "en": "Profiles",
+    },
+    "onboarding.step.preset_profile.body": {
+        "ru": (
+            "Дальше идут профили — правила: какой трафик и какой стратегией обходить. В этом "
+            "пресете их {count}. Разберём один — «{name}», остальные устроены так же."
+        ),
+        "en": (
+            "Profiles come next — rules saying which traffic to handle and with which strategy. "
+            "This preset has {count} of them. Let's look at one — \"{name}\"; the rest are built the "
+            "same way."
+        ),
+    },
+    "onboarding.step.preset_profile_name.title": {
+        "ru": "--name — имя профиля",
+        "en": "--name — the profile name",
+    },
+    "onboarding.step.preset_profile_name.body": {
+        "ru": (
+            "Так профиль называется в программе: «{name}». Если рядом стоит строка --skip, профиль "
+            "выключен и движок его пропускает."
+        ),
+        "en": (
+            "This is how the profile is named in the app: \"{name}\". If there is a --skip line next "
+            "to it, the profile is turned off and the engine skips it."
+        ),
+    },
+    "onboarding.step.preset_profile_match.title": {
+        "ru": "Когда срабатывает профиль",
+        "en": "When the profile applies",
+    },
+    "onboarding.step.preset_profile_match.body": {
+        "ru": (
+            "Здесь условия: {match}. --filter-tcp и --filter-udp задают протокол и порты, "
+            "--hostlist — список сайтов, --ipset — список IP-адресов. Профиль берёт соединение, "
+            "только если подходят все условия сразу."
+        ),
+        "en": (
+            "These are the conditions: {match}. --filter-tcp and --filter-udp set the protocol and "
+            "ports, --hostlist is a list of sites, --ipset is a list of IP addresses. The profile "
+            "takes a connection only if all conditions match."
+        ),
+    },
+    "onboarding.step.preset_profile_packets.title": {
+        "ru": "К каким пакетам применять",
+        "en": "Which packets to handle",
+    },
+    "onboarding.step.preset_profile_packets.body": {
+        "ru": (
+            "Здесь: {packets}. --payload говорит, какие данные обрабатывать — например, начало "
+            "защищённого соединения (tls_client_hello). --out-range и --in-range — какие по счёту "
+            "пакеты.\n\n"
+            "Порядок важен: эти строки должны стоять перед --lua-desync, к которому относятся."
+        ),
+        "en": (
+            "Here: {packets}. --payload says which data to handle — for example the start of a "
+            "secure connection (tls_client_hello). --out-range and --in-range say which packets by "
+            "number.\n\n"
+            "Order matters: these lines must come before the --lua-desync they apply to."
+        ),
+    },
+    "onboarding.step.preset_profile_strategy.title": {
+        "ru": "Стратегия: --lua-desync",
+        "en": "The strategy: --lua-desync",
+    },
+    "onboarding.step.preset_profile_strategy.body": {
+        "ru": (
+            "Это и есть стратегия: техника «{technique}» и её настройки. Когда вы выбираете для "
+            "профиля готовую стратегию, программа меняет именно эти строки. Строк --lua-desync "
+            "может быть несколько — тогда техники работают вместе."
+        ),
+        "en": (
+            "This is the strategy itself: the \"{technique}\" technique and its settings. When you "
+            "pick a ready strategy for a profile, the app changes exactly these lines. There can be "
+            "several --lua-desync lines — then the techniques work together."
+        ),
+    },
+    "onboarding.step.preset_profile_new.title": {
+        "ru": "--new — граница профилей",
+        "en": "--new — the profile boundary",
+    },
+    "onboarding.step.preset_profile_new.body": {
+        "ru": (
+            "Строка --new закрывает профиль и начинает следующий — «{next}». Так до конца файла.\n\n"
+            "Порядок профилей важен: если к соединению подходят несколько, сработает верхний."
+        ),
+        "en": (
+            "The --new line closes a profile and starts the next one — \"{next}\". And so on until "
+            "the end of the file.\n\n"
+            "The order of profiles matters: if several match a connection, the upper one wins."
+        ),
+    },
     "onboarding.step.presets_toolbar.title": {
         "ru": "Свои пресеты",
         "en": "Your own presets",
