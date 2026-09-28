@@ -628,6 +628,15 @@ class BlockcheckPage(BasePage):
             return
         self._reset_ui()
         self._report_btn.setEnabled(bool(self._report_lines))
+        if isinstance(report, dict) and report.get("failed"):
+            # Падение — не «остановлено»: пользователь ничего не нажимал.
+            failed_text = "Проверка завершилась с ошибкой"
+            self._summary_panel.set_stopped(failed_text)
+            self._set_status_text(failed_text)
+            self._set_support_status(
+                "Подготовьте обращение: в нём будет журнал с текстом ошибки"
+            )
+            return
         if not isinstance(report, dict):
             self._summary_panel.set_stopped()
             self._set_status_text(tr_catalog("page.blockcheck.cancelled", default="Проверка остановлена"))
@@ -652,7 +661,19 @@ class BlockcheckPage(BasePage):
         show_report_dialog(self.window(), "\n".join(self._report_lines))
 
     def _on_problem_action(self, action: str, target: str) -> None:
-        """Кнопки у проблем в итоге: сразу в «Подбор стратегии» с нужной целью."""
+        """Кнопки у проблем в итоге: подбор стратегии с нужной целью, запуск
+        Zapret или настройка DNS."""
+        if action == "start_zapret":
+            from ui.workflows.mode import show_active_mode_control_page
+
+            show_active_mode_control_page(self.window(), allow_internal=False)
+            return
+        if action == "dns":
+            from app.page_names import PageName
+            from ui.window_adapter import show_page
+
+            show_page(self.window(), PageName.NETWORK)
+            return
         if action not in ("strategy", "strategy_voice"):
             return
         self.switch_to_tab(self.TAB_STRATEGY_SCAN)
@@ -686,6 +707,12 @@ class BlockcheckPage(BasePage):
         self._run_log_file = run_log_file
 
     def _on_stop(self):
+        if self._run_runtime.is_queued():
+            # Проверка ещё ждёт очереди фоновых задач: снимаем её из очереди,
+            # иначе она запустилась бы уже после «Стопа».
+            self._run_runtime.stop()
+            self._on_finished(None)
+            return
         request_blockcheck_stop(
             worker=self._run_runtime.worker,
             stop_button=self._stop_btn,

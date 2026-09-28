@@ -50,9 +50,26 @@ _SECTION_WORDS = {
         "unknown": "? Не удалось проверить",
     },
 }
+# Сервер, который не удалось проверить, — «?», а не «✗»: это не «не работает».
+_ITEM_MARKS = {"ok": "✓", "fail": "✗", "freeze": "✗", "unknown": "?"}
+
+
+def _item_mark(item: dict) -> str:
+    state = str(item.get("state") or ("ok" if item.get("ok") else "fail"))
+    return _ITEM_MARKS.get(state, "?")
+
+
 _ACTION_TEXT = {
     "strategy": "Подобрать стратегию",
     "strategy_voice": "Подобрать стратегию для звонков",
+    "start_zapret": "Запустить Zapret",
+    "dns": "Настройка DNS",
+}
+_ACTION_DESCRIPTION = {
+    "strategy": "Открывает подбор стратегии",
+    "strategy_voice": "Открывает подбор стратегии для голосовых звонков",
+    "start_zapret": "Открывает страницу управления Zapret",
+    "dns": "Открывает раздел «Настройка DNS», где включается DNS с шифрованием",
 }
 
 
@@ -124,7 +141,10 @@ class _ProblemRow(QWidget):
             set_control_accessibility(
                 button,
                 name=_ACTION_TEXT[action],
-                description=f"Открывает подбор стратегии{f' для {target}' if target else ''}.",
+                description=(
+                    f"{_ACTION_DESCRIPTION.get(action, '')}"
+                    f"{f' для {target}' if target and action == 'strategy' else ''}."
+                ),
             )
             layout.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
             self.action_button = button
@@ -274,13 +294,18 @@ def _environment_text(report: dict) -> str:
     return " · ".join(parts)
 
 
+def _target_mark(item: dict) -> str:
+    """✓ открывается, ? проверка не дала ответа, ✗ не открывается."""
+    if item.get("ok"):
+        return "✓"
+    return "?" if str(item.get("state") or "") == "unknown" else "✗"
+
+
 def _service_details(service: dict) -> tuple[str, str]:
     """(коротко для ячейки, подробно для подсказки)."""
     targets = list(service.get("targets") or ())
     if len(targets) > 1:
-        short = " · ".join(
-            f"{'✓' if item.get('ok') else '✗'} {item.get('purpose', '')}" for item in targets
-        )
+        short = " · ".join(f"{_target_mark(item)} {item.get('purpose', '')}" for item in targets)
     elif targets:
         short = str(targets[0].get("short") or "")
     else:
@@ -369,7 +394,7 @@ class BlockcheckSitesTable(TableWidget):
                 continue
             level = str(section.get("level") or "unknown")
             tooltip = "\n".join(
-                f"{'✓' if item.get('ok') else '✗'} {item.get('name', '')}: {item.get('text', '')}"
+                f"{_item_mark(item)} {item.get('name', '')}: {item.get('text', '')}"
                 for item in section.get("items") or ()
             )
             headline = str(section.get("headline") or "")

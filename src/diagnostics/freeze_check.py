@@ -13,10 +13,15 @@
 * сервер, который сразу сбросил соединение (0 байт), тоже давал «доступ есть».
   На деле это «не удалось проверить»: сброс сразу — другой вид блокировки или
   недоступный хостинг, про 16 КБ он ничего не говорит.
+* у каждого провайдера бралось по одному адресу: если он умер или не ответил,
+  провайдер выпадал из проверки, а итог всё равно был «обрыва нет», хотя
+  проверилась половина серверов. Теперь при неудаче берётся запасной адрес того
+  же провайдера, а итог честно говорит, сколько серверов проверено.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
@@ -38,6 +43,12 @@ __all__ = [
 
 READ_LIMIT = 32 * 1024
 TARGETS_COUNT = 6
+# Сколько адресов одного провайдера пробовать, если первый не дал ответа.
+CANDIDATES_PER_PROVIDER = 3
+# Запасной адрес берётся, только пока с начала проверки прошло меньше этого:
+# иначе запасные попытки не уложатся в общий лимит BlockCheck и оборвут
+# проверку сайтов.
+FALLBACK_BUDGET = 14.0
 # Провайдеры в порядке предпочтения: крупные хостинги, у которых ТСПУ
 # обрывает загрузку чаще всего.
 _PREFERRED_PROVIDERS = ("Akamai", "AWS", "Cloudflare", "CDN77", "Hetzner", "OVH", "DigitalOcean", "Fastly")
@@ -64,18 +75,28 @@ class FreezeReport:
     advice: tuple[str, ...] = ()
 
 
-def pick_freeze_targets(targets, count: int = TARGETS_COUNT) -> list[dict]:
-    """По одному HTTPS-адресу от разных провайдеров, в постоянном порядке."""
-    by_provider: dict[str, dict] = {}
+def pick_freeze_targets(
+    targets,
+    count: int = TARGETS_COUNT,
+    per_provider: int = CANDIDATES_PER_PROVIDER,
+) -> list[tuple[str, list[dict]]]:
+    """Провайдеры для проверки и до ``per_provider`` HTTPS-адресов у каждого.
+
+    Первый адрес — основной, остальные — запасные на случай, если он не ответит.
+    Порядок постоянный: сначала крупные хостинги из ``_PREFERRED_PROVIDERS``.
+    """
+    by_provider: dict[str, list[dict]] = {}
     for item in targets:
         url = str(item.get("url") or "")
         provider = str(item.get("provider") or "")
-        if not url.startswith("https://") or provider in by_provider:
+        if not url.startswith("https://"):
             continue
-        by_provider[provider] = item
-    ordered = [by_provider[name] for name in _PREFERRED_PROVIDERS if name in by_provider]
-    ordered += [item for name, item in by_provider.items() if name not in _PREFERRED_PROVIDERS]
-    return ordered[: max(0, int(count))]
+        candidates = by_provider.setdefault(provider, [])
+        if len(candidates) < max(1, int(per_provider)):
+            candidates.append(item)
+    names = [name for name in _PREFERRED_PROVIDERS if name in by_provider]
+    names += [name for name in by_provider if name not in _PREFERRED_PROVIDERS]
+    return [(name, by_provider[name]) for name in names[: max(0, int(count))]]
 
 
 def classify_download(result: ProbeResult | None) -> tuple[FreezeState, str]:
@@ -98,30 +119,66 @@ def classify_download(result: ProbeResult | None) -> tuple[FreezeState, str]:
     return FreezeState.UNKNOWN, f"файл слишком маленький ({kb} КБ) — не показательно"
 
 
+def _split_url(url: str) -> tuple[str, str]:
+    parts = urlsplit(url)
+    path = parts.path or "/"
+    if parts.query:
+        path = f"{path}?{parts.query}"
+    return parts.hostname or "", path
+
+
+def _check_provider(
+    provider: str,
+    candidates: list[dict],
+    download: Callable[[str, str], ProbeResult | None],
+    fallback_allowed: Callable[[], bool],
+) -> FreezeServer:
+    """Пробует адреса провайдера по очереди, пока один не даст ясный ответ."""
+    host = ""
+    state, text = FreezeState.UNKNOWN, "нет адресов для проверки"
+    tried = 0
+    for item in candidates:
+        if tried and not fallback_allowed():
+            break
+        host, path = _split_url(str(item.get("url") or ""))
+        tried += 1
+        state, text = classify_download(download(host, path))
+        if state != FreezeState.UNKNOWN:
+            break
+    if state == FreezeState.UNKNOWN and tried > 1:
+        text = f"{text} (запасные адреса тоже не помогли, всего адресов: {tried})"
+    return FreezeServer(name=f"{provider} ({host})" if host else provider, state=state, text=text)
+
+
 def check_freeze(
     submit: Callable[..., Future],
     wait: Callable[[Future], object],
     download: Callable[[str, str], ProbeResult | None],
+    *,
+    budget: float = FALLBACK_BUDGET,
 ) -> tuple[FreezeServer, ...]:
-    """Качает файлы параллельно. ``download(host, path)`` сам выбирает адрес."""
+    """Провайдеры проверяются параллельно, адреса одного провайдера — по очереди.
+
+    ``download(host, path)`` сам выбирает IP. Запасной адрес пробуется, только
+    пока не вышел ``budget`` секунд с начала проверки.
+    """
     from blockcheck.data_lists import TCP_16_20_TARGETS
 
-    planned = []
-    for item in pick_freeze_targets(TCP_16_20_TARGETS):
-        parts = urlsplit(str(item["url"]))
-        path = parts.path or "/"
-        if parts.query:
-            path = f"{path}?{parts.query}"
-        name = f"{item.get('provider', '')} ({parts.hostname})"
-        planned.append((name, submit(download, parts.hostname or "", path)))
+    started = time.monotonic()
 
+    def _fallback_allowed() -> bool:
+        return time.monotonic() - started < budget
+
+    planned = [
+        (provider, submit(_check_provider, provider, candidates, download, _fallback_allowed))
+        for provider, candidates in pick_freeze_targets(TCP_16_20_TARGETS)
+    ]
     servers: list[FreezeServer] = []
-    for name, future in planned:
+    for provider, future in planned:
         try:
-            state, text = classify_download(wait(future))
+            servers.append(wait(future))
         except Exception as exc:
-            state, text = FreezeState.UNKNOWN, f"ошибка проверки ({exc})"
-        servers.append(FreezeServer(name=name, state=state, text=text))
+            servers.append(FreezeServer(name=provider, state=FreezeState.UNKNOWN, text=f"ошибка проверки ({exc})"))
     return tuple(servers)
 
 
@@ -140,8 +197,23 @@ def summarize_freeze(servers: tuple[FreezeServer, ...], *, zapret_running: bool 
             servers,
             advice,
         )
-    if fine:
+    unknown = len(servers) - len(fine)
+    if fine and not unknown:
         return FreezeReport(Level.OK, "Обрыва загрузки на 16–20 КБ нет", servers)
+    if fine and len(fine) >= unknown:
+        return FreezeReport(
+            Level.OK,
+            f"Обрыва на 16–20 КБ нет: проверено {len(fine)} из {len(servers)} серверов, "
+            "остальные проверить не удалось",
+            servers,
+        )
+    if fine:
+        return FreezeReport(
+            Level.UNKNOWN,
+            f"Обрыв на 16–20 КБ проверен не до конца: без обрыва {len(fine)} из {len(servers)} серверов, "
+            "остальные не ответили",
+            servers,
+        )
     return FreezeReport(
         Level.UNKNOWN,
         "Обрыв на 16–20 КБ проверить не удалось: тестовые серверы не ответили",

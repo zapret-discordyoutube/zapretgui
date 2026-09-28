@@ -150,6 +150,16 @@ def judge_dns(
         return DnsJudgement(DnsState.SPOOFED, f"DNS вернул адрес-заглушку {stubs[0]} вместо настоящего сервера")
 
     if reference_ips and set(system_ips) & set(reference_ips):
+        # Кроме настоящего адреса DNS дал и другой. ``check_kind`` здесь —
+        # проверка именно этого другого адреса: чужой сертификат на нём значит,
+        # что часть ответов подменена.
+        if check_kind == KIND_CERT:
+            problem = check_cert_problem or "сертификат не прошёл проверку"
+            return DnsJudgement(
+                DnsState.SPOOFED,
+                f"DNS отвечает то правильным адресом, то адресом чужого сервера ({problem}) — "
+                "провайдер перехватывает часть запросов",
+            )
         return DnsJudgement(DnsState.OK, "адрес совпадает с эталоном")
 
     if check_kind == KIND_OK:
@@ -275,11 +285,28 @@ _ADVICE_DNS = ADVICE_DNS
 _ADVICE_CERT = (
     "Проверьте антивирус (проверку HTTPS-трафика), прокси и VPN: кто-то подменяет сертификаты сайтов."
 )
+_ADVICE_HOSTS = (
+    "Удалите или исправьте запись этого сайта в файле hosts (страница «Редактор hosts») — "
+    "адрес в ней устарел."
+)
 _ADVICE_IP = "Серверы недоступны по адресу. Zapret в таком случае помогает не всегда — попробуйте другой DNS или VPN."
 
 
-def _reason_for(states: list[ReachState]) -> str:
+def _cert_cause(items: list[TargetOutcome]) -> DnsState | None:
+    """Откуда чужой сервер: из файла hosts, из подменённого DNS или «по пути»."""
+    causes = {item.dns for item in items if item.reach == ReachState.CERT}
+    for cause in (DnsState.LOCAL, DnsState.SPOOFED):
+        if cause in causes:
+            return cause
+    return None
+
+
+def _reason_for(states: list[ReachState], cert_cause: DnsState | None = None) -> str:
     if ReachState.CERT in states:
+        if cert_cause == DnsState.LOCAL:
+            return "запись в файле hosts ведёт на чужой сервер"
+        if cert_cause == DnsState.SPOOFED:
+            return "DNS подсовывает адрес чужого сервера"
         return "вместо настоящего сервера отвечает чужой"
     if ReachState.FREEZE in states:
         return "ТСПУ обрывает загрузку данных"
@@ -290,8 +317,17 @@ def _reason_for(states: list[ReachState]) -> str:
     return "проверка не дала ответа"
 
 
-def _advice_for(states: list[ReachState], *, zapret_running: bool | None) -> tuple[str, ...]:
+def _advice_for(
+    states: list[ReachState],
+    *,
+    zapret_running: bool | None,
+    cert_cause: DnsState | None = None,
+) -> tuple[str, ...]:
     if ReachState.CERT in states:
+        if cert_cause == DnsState.LOCAL:
+            return (_ADVICE_HOSTS,)
+        if cert_cause == DnsState.SPOOFED:
+            return (_ADVICE_DNS,)
         return (_ADVICE_CERT,)
     if ReachState.DPI in states or ReachState.FREEZE in states:
         return (_ADVICE_STRATEGY,) if zapret_running else (_ADVICE_START,)
@@ -330,19 +366,21 @@ def summarize_service(
             level = Level.WARN
             parts = ", ".join(item.purpose for item in secondary_broken)
             states = [item.reach for item in secondary_broken]
-            headline = f"{label} открывается, но не работают {parts}: {_reason_for(states)}"
-            advice = _advice_for(states, zapret_running=zapret_running)
-        if spoofed:
+            cause = _cert_cause(secondary_broken)
+            headline = f"{label} открывается, но не работают {parts}: {_reason_for(states, cause)}"
+            advice = _advice_for(states, zapret_running=zapret_running, cert_cause=cause)
+        if spoofed and _ADVICE_DNS not in advice:
             advice = advice + (_ADVICE_DNS,)
         return ServiceVerdict(level, headline, advice, dns_note)
 
     if main.reach in _BROKEN:
         states = [main.reach] + [item.reach for item in secondary_broken]
-        headline = f"{label} не открывается: {_reason_for(states)}"
+        cause = _cert_cause([main, *secondary_broken])
+        headline = f"{label} не открывается: {_reason_for(states, cause)}"
         if main.reach in (ReachState.DPI, ReachState.FREEZE) and zapret_running:
             headline += " — Zapret запущен, но эту блокировку не обходит"
-        advice = _advice_for(states, zapret_running=zapret_running)
-        if spoofed:
+        advice = _advice_for(states, zapret_running=zapret_running, cert_cause=cause)
+        if spoofed and _ADVICE_DNS not in advice:
             advice = advice + (_ADVICE_DNS,)
         return ServiceVerdict(Level.FAIL, headline, advice, dns_note)
 

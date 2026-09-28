@@ -224,8 +224,11 @@ def https_get(
         return max(0.05, deadline - time.perf_counter())
 
     def _result(kind: str, detail: str = "", **extra) -> ProbeResult:
-        if token.cancelled and kind != KIND_OK:
+        # Отмена посреди тела ответа — тоже отмена: иначе снятая по лимиту
+        # времени медленная загрузка выглядела бы обрывом ТСПУ на 16 КБ.
+        if token.cancelled and (kind != KIND_OK or extra.get("body_cut")):
             kind = KIND_CANCELLED
+            extra.pop("body_cut", None)
         return ProbeResult(
             ip=ip,
             kind=kind,

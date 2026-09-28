@@ -58,6 +58,7 @@ from diagnostics.verdict import (
 )
 from utils.windows_dns_query import (
     DNS_STATUS_NAME_ERROR,
+    ERROR_CANCELLED,
     DnsAnswer,
     hosts_file_ipv4,
     query_ipv4,
@@ -205,9 +206,11 @@ EXTRA_SERVICES: tuple[Service, ...] = (
 def build_services(scope: str, user_domains=()) -> dict[str, Service]:
     """Сервисы для проверки: основные, при «Все сайты» — остальные и свои домены."""
     services = dict(SERVICES)
-    if str(scope or "").strip().lower() == SCOPE_ALL:
-        for service in EXTRA_SERVICES:
-            services[service.key] = service
+    if str(scope or "").strip().lower() != SCOPE_ALL:
+        # Свои домены — часть режима «Все сайты»: так написано на экране.
+        return services
+    for service in EXTRA_SERVICES:
+        services[service.key] = service
     known_hosts = {target.host for service in services.values() for target in service.targets}
     for domain in user_domains or ():
         host = str(domain or "").strip().lower().rstrip(".")
@@ -236,6 +239,9 @@ class _Probe:
     reference_ipv6: tuple[str, ...] = ()
     # HTTPS-запрос к адресу из hosts или DNS системы (проверка сертификата).
     local_check: ProbeResult | None = None
+    # DNS ответил и адресом из эталона, и другим: запрос к этому другому
+    # адресу решает, CDN это или подмена «через раз».
+    suspect_check: ProbeResult | None = None
     # Итоговый запрос «открывается ли» и откуда взят его адрес.
     reach: ProbeResult | None = None
     reach_source: str = ""
@@ -412,8 +418,11 @@ def _reach_order(probe: _Probe, *, local_ok: bool) -> tuple[list[str], str]:
     """Адреса для проверки «открывается ли» и откуда они взяты."""
     if probe.hosts_ips:
         return list(probe.hosts_ips), SOURCE_HOSTS
-    system = list(probe.dns.ips)
-    matches = bool(set(system) & set(probe.reference_ips))
+    reference = set(probe.reference_ips)
+    # Сначала адреса, которые подтвердил эталон: если DNS «через раз»
+    # подсовывает чужой адрес, открываемость сайта проверяется по настоящему.
+    system = sorted(probe.dns.ips, key=lambda ip: ip not in reference)
+    matches = bool(set(system) & reference)
     if system and (local_ok or matches or not probe.reference_ips):
         return system, SOURCE_SYSTEM
     return list(probe.reference_ips), SOURCE_REFERENCE
@@ -424,6 +433,10 @@ def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
     order, source = _reach_order(probe, local_ok=bool(local and local.ok))
     probe.reach_source = source
     if not order:
+        # Адреса нет потому, что проверку прервали (лимит времени или «Стоп»),
+        # — это «не успели», а не «не удалось узнать адрес».
+        if run.dns_cancelled() or probe.dns.status == ERROR_CANCELLED:
+            probe.reach = ProbeResult(ip="", kind=KIND_CANCELLED)
         return
 
     attempts: list[ProbeResult] = []
@@ -431,16 +444,24 @@ def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
         attempts.append(local)
     while len(attempts) < REACH_ATTEMPTS:
         last = attempts[-1] if attempts else None
-        if last is not None and (last.ok or last.kind in (KIND_CANCELLED, KIND_CERT)):
+        if last is not None and (last.ok or last.kind == KIND_CANCELLED):
             break
         if run.dns_cancelled():
             break
         tried = {item.ip for item in attempts}
-        ip = next((item for item in order if item not in tried), order[0])
+        untried = [item for item in order if item not in tried]
+        # Чужой сертификат на одном адресе — повод попробовать другой, но не
+        # тот же самый ещё раз.
+        if last is not None and last.kind == KIND_CERT and not untried:
+            break
+        ip = untried[0] if untried else order[0]
         attempts.append(_get(run, probe.host, ip, probe.target.path, read_limit=read_limit))
 
     probe.attempts = len(attempts)
-    probe.reach = next((item for item in attempts if item.ok), attempts[-1] if attempts else None)
+    if not attempts:
+        probe.reach = ProbeResult(ip="", kind=KIND_CANCELLED)
+        return
+    probe.reach = next((item for item in attempts if item.ok), attempts[-1])
 
     # Браузер сам уходит на IPv6, если IPv4 не отвечает: без этой попытки
     # проверка показала бы ❌ там, где сайт у пользователя открывается.
@@ -501,20 +522,33 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Pr
         local_future = run.submit(_get, run, host, local_ips[0], target.path, read_limit=read_limit)
 
     probe.reference_ok, probe.reference_ips = doh_future.result()
-    matches = bool(set(probe.dns.ips) & set(probe.reference_ips))
+    reference = set(probe.reference_ips)
+    matches = bool(set(probe.dns.ips) & reference)
     if local_future is None and local_ips and (probe.hosts_ips or not matches):
         local_future = run.submit(_get, run, host, local_ips[0], target.path)
+    # DNS дал и адрес из эталона, и другой. У CDN так бывает, но так же
+    # выглядит подмена «через раз»: сертификат по другому адресу решает.
+    suspects = [ip for ip in probe.dns.ips if ip not in reference] if (matches and not probe.hosts_ips) else []
+    suspect_future: Future | None = None
+    if suspects and not (local_ips and local_ips[0] == suspects[0]):
+        suspect_future = run.submit(_get, run, host, suspects[0], target.path)
     if local_future is not None:
         probe.local_check = local_future.result()
+    if suspect_future is not None:
+        probe.suspect_check = suspect_future.result()
+    elif suspects:
+        probe.suspect_check = probe.local_check
 
-    local = probe.local_check
+    # При совпадении с эталоном о DNS говорит только проверка «лишнего»
+    # адреса: сбой на подтверждённом адресе — дело не DNS.
+    dns_check = probe.suspect_check if matches and not probe.hosts_ips else probe.local_check
     probe.judgement = judge_dns(
         system_ips=probe.dns.ips,
         system_status=probe.dns.status,
         reference_ips=probe.reference_ips,
         hosts_ips=probe.hosts_ips,
-        check_kind=local.kind if local else "",
-        check_cert_problem=local.cert_problem if local else "",
+        check_kind=dns_check.kind if dns_check else "",
+        check_cert_problem=dns_check.cert_problem if dns_check else "",
         nxdomain_count=probe.dns_nxdomain,
         attempts=DNS_ATTEMPTS,
     )
@@ -556,7 +590,7 @@ def _reach_text(probe: _Probe) -> str:
             return f"открывается по IPv6, по IPv4 — нет ({result.elapsed_ms:.0f} мс{tls}, {result.ip})"
         return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source})"
     text = describe_reach(result, timeout=HTTPS_TIMEOUT)
-    if result is None:
+    if result is None or not result.ip:
         return text
     tries = f", попыток: {probe.attempts}" if probe.attempts > 1 else ""
     ipv6 = ", по IPv6 тоже не открылся" if probe.ipv6_result is not None else ""
@@ -765,6 +799,8 @@ def _wait_plain(future: Future):
 
 
 _LEVEL_ORDER = {Level.FAIL: 0, Level.WARN: 1, Level.UNKNOWN: 2, Level.OK: 3}
+# Блокировки, которые обходит стратегия Zapret.
+_BYPASSABLE = (ReachState.DPI, ReachState.FREEZE)
 
 
 def _problem(level: Level, text: str, advice=(), *, action: str = "", target: str = "") -> dict:
@@ -784,7 +820,8 @@ def _collect_problems(
     problems: list[dict] = []
 
     controls = [key for key, service in services.items() if service.control]
-    if controls and all(verdicts[key].level in (Level.FAIL, Level.UNKNOWN) for key in controls):
+    offline = bool(controls) and all(verdicts[key].level in (Level.FAIL, Level.UNKNOWN) for key in controls)
+    if offline:
         problems.append(
             _problem(
                 Level.FAIL,
@@ -794,29 +831,40 @@ def _collect_problems(
             )
         )
 
-    ordered = sorted(
-        (key for key in services if not services[key].control),
-        key=lambda key: _LEVEL_ORDER.get(verdicts[key].level, 9),
-    )
+    # Сервисы идут в том же порядке, что и в отчёте: «Открываются: …» не должен
+    # начинаться с сайтов, у которых просто подменён DNS. Проблемы по важности
+    # сортируются в конце, и внутри одного уровня этот порядок сохраняется.
     working: list[str] = []
-    for key in ordered:
+    for key, service in services.items():
+        if service.control:
+            continue
         verdict = verdicts[key]
-        advice = tuple(item for item in verdict.advice if item != _ADVICE_DNS)
-        blocked_host = next(
-            (probe.host for probe in collected.get(key, ()) if probe.reach_state != ReachState.OK),
-            "",
-        )
-        if verdict.level in (Level.FAIL, Level.WARN) and blocked_host:
-            action = "strategy" if zapret_running else "start_zapret"
-            problems.append(_problem(verdict.level, verdict.headline, advice, action=action, target=blocked_host))
+        broken = [probe for probe in collected.get(key, ()) if probe.reach_state != ReachState.OK]
+        if verdict.level in (Level.FAIL, Level.WARN) and broken:
+            if offline:
+                # Без интернета «Zapret не обходит блокировку» у каждого сайта —
+                # неправда и шум: причина одна, она уже написана первой строкой.
+                continue
+            advice = tuple(item for item in verdict.advice if item != _ADVICE_DNS)
+            # Стратегия помогает только от DPI и обрыва. При чужом сертификате,
+            # недоступном адресе или без адреса кнопка подбора увела бы не туда.
+            bypassable = next((probe for probe in broken if probe.reach_state in _BYPASSABLE), None)
+            action = ""
+            if bypassable is not None:
+                action = "strategy" if zapret_running else "start_zapret"
+            target = (bypassable or broken[0]).host
+            problems.append(_problem(verdict.level, verdict.headline, advice, action=action, target=target))
         elif verdict.level == Level.UNKNOWN:
-            problems.append(_problem(Level.UNKNOWN, verdict.headline, advice))
+            if not offline:
+                problems.append(_problem(Level.UNKNOWN, verdict.headline, verdict.advice))
         else:
-            working.append(services[key].label)
+            working.append(service.label)
 
-    if freeze is not None and freeze.level != Level.OK:
+    if freeze is not None and freeze.level in (Level.FAIL, Level.WARN):
         problems.append(_problem(freeze.level, freeze.headline, freeze.advice, action="strategy" if zapret_running else "start_zapret"))
-    if voice is not None and voice.level != Level.OK:
+    elif freeze is not None and freeze.level == Level.UNKNOWN and not offline:
+        problems.append(_problem(freeze.level, freeze.headline, freeze.advice))
+    if voice is not None and voice.level != Level.OK and not offline:
         problems.append(_problem(voice.level, voice.headline, voice.advice, action="strategy_voice"))
 
     spoofed = [
@@ -830,7 +878,7 @@ def _collect_problems(
         problems.append(
             _problem(
                 Level.WARN,
-                f"DNS подменяет адреса: {shown}. Браузер с защищённым DNS этого не замечает, а программы, "
+                f"DNS подменяет ответы для {shown}. Браузер с защищённым DNS этого не замечает, а программы, "
                 "которые спрашивают адрес у Windows, эти сайты не откроют",
                 (_ADVICE_DNS,),
                 action="dns",
@@ -963,9 +1011,11 @@ def run_blockcheck(
                 }
                 for key, service in services.items()
             ],
-            "voice": _section_report(voice, [(item.name, item.answered, item.text) for item in voice.servers]) if voice else None,
+            "voice": _section_report(
+                voice, [(item.name, "ok" if item.answered else "fail", item.text) for item in voice.servers]
+            ) if voice else None,
             "freeze": _section_report(
-                freeze, [(item.name, item.state.value == "ok", item.text) for item in freeze.servers]
+                freeze, [(item.name, item.state.value, item.text) for item in freeze.servers]
             ) if freeze else None,
             "problems": problems,
             "working": working,
@@ -988,7 +1038,9 @@ def _section_report(report, rows) -> dict:
         "level": report.level.value,
         "headline": report.headline,
         "advice": list(report.advice),
-        "items": [{"name": name, "ok": bool(ok), "text": text} for name, ok, text in rows],
+        # state: ok / fail / freeze / unknown — «не удалось проверить» не должно
+        # выглядеть как «не работает».
+        "items": [{"name": name, "ok": state == "ok", "state": state, "text": text} for name, state, text in rows],
     }
 
 

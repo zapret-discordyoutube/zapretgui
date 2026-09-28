@@ -20,7 +20,8 @@ class BlockcheckWorker(QObject):
 
     run_log_started = pyqtSignal(object)
     log_message = pyqtSignal(str)
-    # Итог проверки (словарь из run_blockcheck) или None, если её остановили.
+    # Итог проверки (словарь из run_blockcheck), None — если её остановили,
+    # {"failed": True, "error": …} — если проверка упала.
     finished = pyqtSignal(object)
 
     def __init__(
@@ -44,7 +45,9 @@ class BlockcheckWorker(QObject):
         self._run_log_file = None
 
     def run(self):
-        self._cancelled = False
+        # Флаг «Стоп» здесь не сбрасывается: проверку могли остановить, пока
+        # она ждала очереди фоновых задач. Обработчик создаётся на каждую
+        # проверку заново.
         self._running = True
         report = None
         try:
@@ -67,7 +70,7 @@ class BlockcheckWorker(QObject):
         except Exception as e:
             logger.exception("BlockcheckWorker crashed")
             self._emit(f"❌ Проверка упала: {e}")
-            report = None
+            report = {"failed": True, "error": str(e)}
         finally:
             try:
                 self._close_run_log_action(self._run_log_file)

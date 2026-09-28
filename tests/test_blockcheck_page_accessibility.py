@@ -166,6 +166,40 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertEqual(page._summary_panel.level, "unknown")
         self.assertEqual(page._summary_panel.title_label.text(), "Проверка остановлена")
 
+    def test_failed_run_is_not_reported_as_stopped(self) -> None:
+        page = _make_page()
+        self.addCleanup(page.deleteLater)
+
+        page._on_finished({"failed": True, "error": "boom"})
+
+        self.assertEqual(page._summary_panel.title_label.text(), "Проверка завершилась с ошибкой")
+
+    def test_stop_while_waiting_in_queue_removes_the_run(self) -> None:
+        page = _make_page()
+        self.addCleanup(page.deleteLater)
+        runtime = Mock()
+        runtime.is_queued.return_value = True
+        page._run_runtime = runtime
+
+        page._on_stop()
+
+        runtime.stop.assert_called_once_with()
+        self.assertEqual(page._summary_panel.title_label.text(), "Проверка остановлена")
+
+    def test_zapret_and_dns_buttons_open_their_pages(self) -> None:
+        from app.page_names import PageName
+
+        page = _make_page()
+        self.addCleanup(page.deleteLater)
+        with patch("ui.window_adapter.show_page") as show_page, patch(
+            "ui.workflows.mode.show_active_mode_control_page"
+        ) as show_control:
+            page._on_problem_action("dns", "")
+            page._on_problem_action("start_zapret", "x.com")
+
+        self.assertEqual(show_page.call_args.args[1], PageName.NETWORK)
+        show_control.assert_called_once()
+
     def test_strategy_button_opens_strategy_tab_with_target(self) -> None:
         page = _make_page()
         self.addCleanup(page.deleteLater)
@@ -186,16 +220,18 @@ class SummaryPanelTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_problem_rows_have_action_only_for_strategy(self) -> None:
+    def test_problem_rows_have_their_action_buttons(self) -> None:
         calls = []
         panel = BlockcheckSummaryPanel(on_action=lambda action, target: calls.append((action, target)))
         panel.show_report(dict(_REPORT))
 
         rows = panel.problem_rows()
-        self.assertIsNotNone(rows[0].action_button)
-        self.assertIsNone(rows[1].action_button)
         rows[0].action_button.click()
-        self.assertEqual(calls, [("strategy", "x.com")])
+        # У предупреждения про DNS — кнопка «Настройка DNS», у строки «Открываются» кнопки нет.
+        self.assertEqual(rows[1].action_button.text(), "Настройка DNS")
+        rows[1].action_button.click()
+        self.assertIsNone(rows[2].action_button)
+        self.assertEqual(calls, [("strategy", "x.com"), ("dns", "")])
         self.assertIn("Zapret включён", panel.env_label.text())
 
     def test_no_problems_is_all_ok(self) -> None:
@@ -308,6 +344,43 @@ class _RunRuntimeStub:
     def start_qobject_worker(self, *, parent, worker_factory) -> None:
         _ = parent
         self.worker = worker_factory(1)
+
+
+class BlockcheckWorkerTests(unittest.TestCase):
+    def _worker(self):
+        from types import SimpleNamespace
+
+        from blockcheck.worker import BlockcheckWorker
+
+        return BlockcheckWorker(
+            start_run_log=lambda *_a: SimpleNamespace(path=None, created=True),
+            append_run_log=lambda *_a: None,
+            close_run_log=lambda *_a: None,
+        )
+
+    def test_stop_pressed_before_start_is_not_lost(self) -> None:
+        seen = []
+        worker = self._worker()
+        worker.stop()
+
+        def _fake_run(*_args, should_stop, **_kwargs):
+            seen.append(should_stop())
+            return {"stopped": True}
+
+        with patch("diagnostics.engine.run_blockcheck", side_effect=_fake_run):
+            worker.run()
+
+        self.assertEqual(seen, [True])
+
+    def test_crash_is_reported_as_failure_not_stop(self) -> None:
+        results = []
+        worker = self._worker()
+        worker.finished.connect(results.append)
+
+        with patch("diagnostics.engine.run_blockcheck", side_effect=RuntimeError("boom")):
+            worker.run()
+
+        self.assertEqual(results, [{"failed": True, "error": "boom"}])
 
 
 class RunWorkflowTests(unittest.TestCase):

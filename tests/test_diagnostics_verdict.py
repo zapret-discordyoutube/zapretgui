@@ -14,6 +14,7 @@ from diagnostics.tls_probe import (
     KIND_RESET,
     KIND_TIMEOUT,
     KIND_TLS,
+    ProbeCancel,
     ProbeResult,
     https_get,
 )
@@ -166,6 +167,16 @@ class ServiceSummaryTests(unittest.TestCase):
         self.assertIn("часть 0", verdict.headline)
 
 
+class _Done:
+    """Уже готовый результат вместо Future: проверка обрыва без пула потоков."""
+
+    def __init__(self, value) -> None:
+        self._value = value
+
+    def result(self, timeout=None):
+        return self._value
+
+
 class _Net:
     """Фейковая сеть для движка: DNS, эталон и HTTPS по адресу."""
 
@@ -185,7 +196,13 @@ class _Net:
             return self.https(host, ip)
 
         return (
-            patch.object(engine, "query_ipv4", return_value=DnsAnswer(ips=self.system, status=self.status)),
+            patch.object(
+                engine,
+                "query_ipv4",
+                side_effect=lambda host, **_kw: (
+                    self.system(host) if callable(self.system) else DnsAnswer(ips=self.system, status=self.status)
+                ),
+            ),
             patch.object(
                 engine,
                 "_doh_lookup",
@@ -359,6 +376,106 @@ class EngineScenarioTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 2.0)
 
 
+class EngineMixedAnswerTests(unittest.TestCase):
+    """Найденные при разборе ошибки: смешанный ответ DNS, прерывание по времени, hosts."""
+
+    def _mixed_net(self, https):
+        stub = "95.1.1.1"
+        answers = iter([DnsAnswer(ips=(stub,)), DnsAnswer(ips=DISCORD_REAL), DnsAnswer(ips=DISCORD_REAL)] * 20)
+
+        def _system(_host):
+            return next(answers)
+
+        return _Net(system=_system, https=https), stub
+
+    def test_dns_that_sometimes_gives_foreign_server_is_spoofing_but_site_opens(self) -> None:
+        def _https(host, ip):
+            if ip == "95.1.1.1":
+                return ProbeResult(ip=ip, kind=KIND_CERT, cert_problem="сертификат выдан другому сайту")
+            return _ok(ip)
+
+        net, _stub = self._mixed_net(_https)
+        result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+
+        discord = next(item for item in result["services"] if item["key"] == "discord")
+        main = next(item for item in discord["targets"] if item["main"])
+        # Сайт открывается по настоящему адресу, а DNS помечен как подмена.
+        self.assertTrue(main["ok"])
+        self.assertEqual(main["dns_state"], "spoofed")
+        self.assertIn("чужого сервера", main["dns_reason"])
+
+    def test_cdn_with_extra_genuine_address_is_not_spoofing(self) -> None:
+        net, _stub = self._mixed_net(lambda host, ip: _ok(ip))
+        result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+
+        discord = next(item for item in result["services"] if item["key"] == "discord")
+        self.assertTrue(all(item["dns_state"] == "ok" for item in discord["targets"]))
+
+    def test_deadline_before_first_request_is_not_no_address(self) -> None:
+        probe = engine._Probe(target=engine.Target("discord.com", "сайт"), service="discord", host="discord.com")
+        probe.dns = DnsAnswer(ips=DISCORD_REAL)
+        probe.reference_ips = DISCORD_REAL
+        run = engine._Run(None, workers=1, deadline=0)
+        self.addCleanup(run.close)
+
+        engine._check_reach(run, probe, read_limit=0)
+
+        self.assertEqual(judge_reach(probe.reach), ReachState.UNKNOWN)
+
+    def test_cancel_in_the_middle_of_body_is_not_a_freeze(self) -> None:
+        """Лимит времени снял медленную загрузку после 16 КБ — это не обрыв ТСПУ."""
+        from diagnostics import tls_probe
+
+        cancel = ProbeCancel()
+        chunks = [b"HTTP/1.1 200 OK\r\n\r\n" + b"x" * 16_000]
+
+        class _Tls:
+            def settimeout(self, _value): pass
+            def do_handshake(self): pass
+            def version(self): return "TLSv1.3"
+            def sendall(self, _data): pass
+            def shutdown(self, _how): pass
+            def close(self): pass
+
+            def recv(self, _size):
+                if chunks:
+                    return chunks.pop(0)
+                cancel.cancel()
+                raise socket.timeout()
+
+        class _Context:
+            def wrap_socket(self, _sock, **_kwargs):
+                return _Tls()
+
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        self.addCleanup(listener.close)
+        with patch.object(tls_probe, "_client_context", return_value=_Context()):
+            result = https_get(
+                "example.com", "127.0.0.1", timeout=2.0, port=listener.getsockname()[1],
+                read_limit=64_000, cancel=cancel,
+            )
+
+        self.assertEqual(result.kind, "cancelled")
+        self.assertNotEqual(judge_reach(result), ReachState.FREEZE)
+
+    def test_stale_hosts_entry_gets_hosts_advice_not_antivirus(self) -> None:
+        verdict = summarize_service(
+            "Instagram",
+            [TargetOutcome("www.instagram.com", "сайт", ReachState.CERT, DnsState.LOCAL, main=True)],
+            zapret_running=True,
+        )
+
+        self.assertIn("hosts", verdict.headline)
+        self.assertTrue(any("hosts" in item for item in verdict.advice))
+        self.assertFalse(any("антивирус" in item for item in verdict.advice))
+
+    def test_user_domains_only_in_all_sites_scope(self) -> None:
+        self.assertNotIn("user:example.org", engine.build_services("main", ["example.org"]))
+        self.assertIn("user:example.org", engine.build_services("all", ["example.org"]))
+
+
 class BlockcheckScopeTests(unittest.TestCase):
     """Режимы BlockCheck, голосовые серверы, обрыв 16 КБ и сводка проблем."""
 
@@ -405,6 +522,51 @@ class BlockcheckScopeTests(unittest.TestCase):
         self.assertEqual(classify_download(ProbeResult(ip="1.1.1.1", kind=KIND_RESET))[0], FreezeState.UNKNOWN)
         self.assertEqual(classify_download(_ok(body_size=2_000))[0], FreezeState.UNKNOWN)
 
+    def test_freeze_takes_spare_address_of_same_provider(self) -> None:
+        from diagnostics import freeze_check
+        from diagnostics.freeze_check import FreezeState, check_freeze
+
+        targets = (
+            {"provider": "Hetzner", "url": "https://dead.example/a.css"},
+            {"provider": "Hetzner", "url": "https://alive.example/b.bin"},
+            {"provider": "Hetzner", "url": "https://third.example/c.bin"},
+            {"provider": "OVH", "url": "https://ovh.example/1Mb.dat"},
+        )
+        calls: list[str] = []
+
+        def _download(host, _path):
+            calls.append(host)
+            return None if host == "dead.example" else _ok(body_size=33_000)
+
+        with patch("blockcheck.data_lists.TCP_16_20_TARGETS", targets):
+            servers = check_freeze(lambda fn, *a: _Done(fn(*a)), lambda f: f.result(), _download)
+
+        self.assertEqual([item.state for item in servers], [FreezeState.OK, FreezeState.OK])
+        self.assertIn("alive.example", servers[0].name)
+        # Ответ получен со второго адреса — третий не трогаем.
+        self.assertNotIn("third.example", calls)
+        # Вышел запас времени — запасные адреса не пробуются.
+        calls.clear()
+        with patch("blockcheck.data_lists.TCP_16_20_TARGETS", targets):
+            servers = check_freeze(lambda fn, *a: _Done(fn(*a)), lambda f: f.result(), _download, budget=0)
+        self.assertEqual(servers[0].state, FreezeState.UNKNOWN)
+        self.assertNotIn("alive.example", calls)
+        self.assertEqual(freeze_check.CANDIDATES_PER_PROVIDER, 3)
+
+    def test_freeze_summary_says_how_many_servers_were_checked(self) -> None:
+        from diagnostics.freeze_check import FreezeServer, FreezeState, summarize_freeze
+
+        ok = FreezeServer("A", FreezeState.OK, "32 КБ")
+        unknown = FreezeServer("B", FreezeState.UNKNOWN, "сброс")
+        full = summarize_freeze((ok, ok), zapret_running=True)
+        self.assertEqual((full.level, full.headline), (Level.OK, "Обрыва загрузки на 16–20 КБ нет"))
+        half = summarize_freeze((ok, ok, ok, unknown, unknown, unknown), zapret_running=True)
+        self.assertEqual(half.level, Level.OK)
+        self.assertIn("3 из 6", half.headline)
+        mostly_unknown = summarize_freeze((ok, unknown, unknown), zapret_running=True)
+        self.assertEqual(mostly_unknown.level, Level.UNKNOWN)
+        self.assertIn("1 из 3", mostly_unknown.headline)
+
     def _run_all(self, https):
         from diagnostics.freeze_check import FreezeServer, FreezeState
         from diagnostics.voice_check import VoiceServer
@@ -420,6 +582,45 @@ class BlockcheckScopeTests(unittest.TestCase):
         result = self._run_all(lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT))
 
         self.assertIn("контрольные сайты", result["problems"][0]["text"])
+
+    def test_working_sites_keep_service_order_and_offline_hides_site_noise(self) -> None:
+        # У YouTube подменён DNS (уровень «предупреждение»), но в «Открываются»
+        # он не должен выскакивать раньше Discord.
+        def _https(host, ip):
+            return _ok(ip)
+
+        from diagnostics.freeze_check import FreezeServer, FreezeState
+        from diagnostics.voice_check import VoiceServer
+
+        def _system(host):
+            if host == "www.youtube.com":
+                return DnsAnswer(ips=(), status=DNS_STATUS_NAME_ERROR)
+            return DnsAnswer(ips=DISCORD_REAL)
+
+        net = _Net(
+            system=_system,
+            https=_https,
+            voice=(VoiceServer("CF", "stun", True, "отвечает"),),
+            freeze=(FreezeServer("Akamai", FreezeState.OK, "получено 32 КБ"),),
+        )
+        result = net.run(engine.run_blockcheck, "all", emit=lambda _line: None)
+        youtube = next(item for item in result["services"] if item["key"] == "youtube")
+        self.assertEqual(youtube["level"], "warn")
+        self.assertEqual(result["working"][:2], ["Discord", "YouTube"])
+
+        offline = self._run_all(lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT))
+        texts = [problem["text"] for problem in offline["problems"]]
+        self.assertIn("контрольные сайты", texts[0])
+        # Причина одна — нет интернета; строки «X не открывается» по каждому сайту не нужны.
+        self.assertEqual(len(texts), 1)
+
+    def test_strategy_button_only_for_blocks_a_strategy_can_bypass(self) -> None:
+        result = self._run_all(
+            lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT) if host == "x.com" else _ok(ip)
+        )
+
+        problem = next(item for item in result["problems"] if item["target"] == "x.com")
+        self.assertEqual(problem["action"], "")
 
     def test_blocked_site_gets_strategy_action_with_its_host(self) -> None:
         result = self._run_all(lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET) if host == "x.com" else _ok(ip))
