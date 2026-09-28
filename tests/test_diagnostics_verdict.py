@@ -163,9 +163,10 @@ class ServiceSummaryTests(unittest.TestCase):
 class _Net:
     """Фейковая сеть для движка: DNS, эталон и HTTPS по адресу."""
 
-    def __init__(self, *, system=DISCORD_REAL, reference=DISCORD_REAL, status=0, https=None):
+    def __init__(self, *, system=DISCORD_REAL, reference=DISCORD_REAL, status=0, https=None, reference_v6=()):
         self.system = system
         self.reference = reference
+        self.reference_v6 = reference_v6
         self.status = status
         self.https = https or (lambda host, ip: _ok(ip))
         self.calls: list[tuple[str, str]] = []
@@ -177,7 +178,14 @@ class _Net:
 
         return (
             patch.object(engine, "query_ipv4", return_value=DnsAnswer(ips=self.system, status=self.status)),
-            patch.object(engine, "_doh_lookup", return_value=(True, self.reference)),
+            patch.object(
+                engine,
+                "_doh_lookup",
+                side_effect=lambda _run, _host, record_type=engine.DNS_TYPE_A: (
+                    True,
+                    self.reference_v6 if record_type == engine.DNS_TYPE_AAAA else self.reference,
+                ),
+            ),
             patch.object(engine, "https_get", side_effect=_https_get),
             patch.object(engine, "hosts_file_ipv4", return_value=()),
             patch.object(engine, "system_dns_servers", return_value=("83.220.169.155",)),
@@ -253,6 +261,27 @@ class EngineScenarioTests(unittest.TestCase):
         self.assertIn("Подбор стратегии", text)
         hosts_order = [line.split(" ")[1] for line in lines if line.startswith("❌ ") and "." in line.split(" ")[1]]
         self.assertEqual(hosts_order, ["discord.com", "gateway.discord.gg", "cdn.discordapp.com"])
+
+    def test_site_blocked_over_ipv4_but_open_over_ipv6_is_reported_as_working(self) -> None:
+        """Браузер сам уходит на IPv6, поэтому и проверка обязана его попробовать."""
+        v6 = "2606:4700::6810:1"
+
+        def _https(host, ip):
+            return _ok(ip) if ip == v6 else ProbeResult(ip=ip, kind=KIND_RESET)
+
+        net = _Net(https=_https, reference_v6=(v6,))
+        result = net.run(engine.run_connection_test, "discord", emit=lambda _line: None)
+
+        discord = result["services"][0]
+        self.assertEqual(discord["level"], "ok")
+        self.assertIn("IPv6", discord["targets"][0]["short"])
+        self.assertIn(("discord.com", v6), net.calls)
+
+    def test_ipv6_is_not_tried_when_ipv4_opens(self) -> None:
+        net = _Net(reference_v6=("2606:4700::6810:1",))
+        net.run(engine.run_connection_test, "discord", emit=lambda _line: None)
+
+        self.assertFalse(any(":" in ip for _host, ip in net.calls))
 
     def test_system_address_that_fails_is_rechecked_by_reference_address(self) -> None:
         def _https(host, ip):

@@ -1038,8 +1038,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Whether Discord and YouTube open, and if not — why and what to do",
     },
     "page.connection.intro": {
-        "ru": "Проверяем Discord и YouTube так же, как их открывает браузер: доходит ли соединение, не режет ли его DPI и не подменяет ли DNS адреса. Занимает 5–15 секунд.",
-        "en": "Discord and YouTube are checked the way a browser opens them: whether the connection gets through, whether DPI cuts it and whether DNS spoofs addresses. Takes 5–15 seconds.",
+        "ru": "Проверяем Discord и YouTube так же, как их открывает браузер: доходит ли соединение, не режет ли его DPI и не подменяет ли DNS адреса. Обычно занимает 5–15 секунд.",
+        "en": "Discord and YouTube are checked the way a browser opens them: whether the connection gets through, whether DPI cuts it and whether DNS spoofs addresses. Usually takes 5–15 seconds.",
     },
     "page.connection.card.testing": {
         "ru": "Проверка соединения",

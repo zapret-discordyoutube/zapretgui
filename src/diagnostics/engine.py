@@ -10,7 +10,8 @@
 2. **Открывается ли сайт.** HTTPS-запрос идёт через ``diagnostics.tls_probe``
    (OpenSSL, TLS 1.3 — как браузер и как подбор стратегий) к адресу, которым
    воспользовался бы браузер: из hosts, из DNS системы, если он подлинный,
-   иначе из эталона. При неудаче — ещё одна попытка на другом адресе.
+   иначе из эталона. При неудаче — ещё одна попытка на другом адресе и одна
+   по IPv6: браузер сам переключается на IPv6, если IPv4 режут сильнее.
 3. **Честен ли DNS.** Если адрес из DNS не совпал с эталоном, решает
    сертификат по этому адресу (см. ``diagnostics.verdict``).
 4. Результаты печатаются в постоянном порядке, в конце — итог по сервисам.
@@ -87,9 +88,11 @@ _TIMED_OUT_LINE = (
 BODY_PROBE_BYTES = 64 * 1024
 
 _DOH_ENDPOINTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("1.1.1.1", "/dns-query?name={name}&type=A", ("Accept: application/dns-json",)),
-    ("8.8.8.8", "/resolve?name={name}&type=A", ()),
+    ("1.1.1.1", "/dns-query?name={name}&type={type}", ("Accept: application/dns-json",)),
+    ("8.8.8.8", "/resolve?name={name}&type={type}", ()),
 )
+DNS_TYPE_A = 1
+DNS_TYPE_AAAA = 28
 
 _WATCH_PAGE = "/watch?v=jNQXAC9IVRw&hl=en"
 _WATCH_PAGE_MAX_BYTES = 2_000_000
@@ -153,12 +156,15 @@ class _Probe:
     hosts_ips: tuple[str, ...] = ()
     reference_ips: tuple[str, ...] = ()
     reference_ok: bool = False
+    reference_ipv6: tuple[str, ...] = ()
     # HTTPS-запрос к адресу из hosts или DNS системы (проверка сертификата).
     local_check: ProbeResult | None = None
     # Итоговый запрос «открывается ли» и откуда взят его адрес.
     reach: ProbeResult | None = None
     reach_source: str = ""
     attempts: int = 0
+    # Была ли запасная попытка по IPv6 и чем она кончилась.
+    ipv6_result: ProbeResult | None = None
     judgement: DnsJudgement | None = None
     reach_state: ReachState = ReachState.UNKNOWN
 
@@ -231,14 +237,14 @@ class _Run:
 # ---------------------------------------------------------------------------
 
 
-def _doh_lookup(run: _Run, host: str) -> tuple[bool, tuple[str, ...]]:
+def _doh_lookup(run: _Run, host: str, record_type: int = DNS_TYPE_A) -> tuple[bool, tuple[str, ...]]:
     """Эталонные адреса по DNS-over-HTTPS. (ответил ли хоть один, адреса)."""
 
     def _one(endpoint: tuple[str, str, tuple[str, ...]]) -> tuple[bool, list[str]]:
         server, path, headers = endpoint
         result = https_request(
             server,
-            path.format(name=quote(host)),
+            path.format(name=quote(host), type=record_type),
             headers=headers,
             timeout=DOH_TIMEOUT,
             max_body=64 * 1024,
@@ -253,7 +259,7 @@ def _doh_lookup(run: _Run, host: str) -> tuple[bool, tuple[str, ...]]:
         answers = [
             str(item.get("data") or "")
             for item in data.get("Answer") or []
-            if isinstance(item, dict) and item.get("type") == 1
+            if isinstance(item, dict) and item.get("type") == record_type
         ]
         return data.get("Status") == 0 or bool(answers), answers
 
@@ -304,7 +310,7 @@ def _discover_googlevideo(run: _Run) -> tuple[str, str]:
     if not candidates:
         candidates = list(_doh_lookup(run, YOUTUBE_HOST)[1])
 
-    for ip in candidates[:2]:
+    for ip in candidates[:1]:
         result = https_get(
             YOUTUBE_HOST,
             ip,
@@ -358,6 +364,21 @@ def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
     probe.attempts = len(attempts)
     probe.reach = next((item for item in attempts if item.ok), attempts[-1] if attempts else None)
 
+    # Браузер сам уходит на IPv6, если IPv4 не отвечает: без этой попытки
+    # проверка показала бы ❌ там, где сайт у пользователя открывается.
+    last = probe.reach
+    if (
+        last is not None
+        and not last.ok
+        and last.kind not in (KIND_CANCELLED, KIND_CERT)
+        and probe.reference_ipv6
+        and source != SOURCE_HOSTS
+        and not run.dns_cancelled()
+    ):
+        probe.ipv6_result = _get(run, probe.host, probe.reference_ipv6[0], probe.target.path, read_limit=read_limit)
+        if probe.ipv6_result.ok:
+            probe.reach = probe.ipv6_result
+
 
 def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Probe:
     host = target.host
@@ -370,6 +391,7 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Pr
 
     dns_future = run.submit(query_ipv4, host, timeout=DNS_TIMEOUT, cancelled=run.dns_cancelled)
     doh_future = run.submit(_doh_lookup, run, host)
+    doh6_future = run.submit(_doh_lookup, run, host, DNS_TYPE_AAAA) if full else None
     probe.hosts_ips = hosts_file_ipv4(host)
     probe.dns = dns_future.result()
 
@@ -397,6 +419,8 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Pr
     )
 
     if full:
+        if doh6_future is not None:
+            probe.reference_ipv6 = doh6_future.result()[1]
         _check_reach(run, probe, read_limit=read_limit)
         probe.reach_state = judge_reach(probe.reach)
     return probe
@@ -427,12 +451,15 @@ def _reach_text(probe: _Probe) -> str:
     source = _SOURCE_NOTE.get(probe.reach_source, "")
     if probe.reach_state == ReachState.OK and result is not None:
         tls = f", {result.tls_version.replace('TLSv', 'TLS ')}" if result.tls_version else ""
+        if ":" in result.ip:
+            return f"открывается по IPv6, по IPv4 — нет ({result.elapsed_ms:.0f} мс{tls}, {result.ip})"
         return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source})"
     text = describe_reach(result, timeout=HTTPS_TIMEOUT)
     if result is None:
         return text
     tries = f", попыток: {probe.attempts}" if probe.attempts > 1 else ""
-    return f"{text} ({result.ip}{source}{tries})"
+    ipv6 = ", по IPv6 тоже не открылся" if probe.ipv6_result is not None else ""
+    return f"{text} ({result.ip}{source}{tries}{ipv6})"
 
 
 def _dns_detail(probe: _Probe) -> str:
@@ -605,6 +632,14 @@ def _service_verdict(service: str, probes: list[_Probe], *, zapret_running: bool
     return summarize_service(SERVICES[service][0], outcomes, zapret_running=zapret_running)
 
 
+def _short_text(probe: _Probe) -> str:
+    if probe.reach_state != ReachState.OK:
+        return describe_reach(probe.reach, timeout=HTTPS_TIMEOUT)
+    if probe.reach is not None and ":" in probe.reach.ip:
+        return "открывается только по IPv6"
+    return "открывается"
+
+
 def _target_report(probe: _Probe) -> dict:
     return {
         "host": probe.host,
@@ -613,7 +648,7 @@ def _target_report(probe: _Probe) -> dict:
         "state": probe.reach_state.value,
         "ok": probe.reach_state == ReachState.OK,
         "text": _reach_text(probe),
-        "short": "открывается" if probe.reach_state == ReachState.OK else describe_reach(probe.reach, timeout=HTTPS_TIMEOUT),
+        "short": _short_text(probe),
         "dns_state": probe.judgement.state.value if probe.judgement else "",
         "dns_reason": probe.judgement.reason if probe.judgement else "",
         "note": probe.discovery_note,

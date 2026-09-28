@@ -315,7 +315,7 @@ def apply_connection_language(
         _tr(
             "page.connection.intro",
             "Проверяем Discord и YouTube так же, как их открывает браузер: доходит ли соединение, "
-            "не режет ли его DPI и не подменяет ли DNS адреса. Занимает 5–15 секунд.",
+            "не режет ли его DPI и не подменяет ли DNS адреса. Обычно занимает 5–15 секунд.",
         )
     )
     test_select_label.setText(_tr("page.connection.test.select", "Что проверить:"))
