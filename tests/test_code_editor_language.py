@@ -333,6 +333,25 @@ class PresetStatusBarProblemsTests(unittest.TestCase):
         self.assertTrue(bar.problems_button.isHidden())
         self.assertTrue(bar.problem_label.isHidden())
 
+    def test_long_messages_wrap_instead_of_being_cut(self) -> None:
+        from presets.ui.common.preset_status_bar import PresetStatusBar, build_preset_status_plan
+
+        bar = PresetStatusBar()
+        self.addCleanup(bar.deleteLater)
+        long_text = "Ошибка переключения пресета: winws2 не запустился. " * 6
+        message = "Функции «hostfakespli» нет в подключённых lua-файлах. Возможно, имелось в виду hostfakesplit. " * 2
+        bar.set_plan(build_preset_status_plan("error", launch_method="direct_zapret2", text=long_text))
+        bar.set_problems(errors=1, warnings=0, current_message=message, current_severity="error")
+        bar.resize(900, 24)
+        bar.show()
+        self.app.processEvents()
+
+        self.assertEqual(bar.text_label.text(), long_text.strip())
+        self.assertEqual(bar.problem_label.text(), " ".join(message.split()))
+        self.assertTrue(bar.text_label.wordWrap())
+        self.assertTrue(bar.problem_label.wordWrap())
+        self.assertGreater(bar.sizeHint().height(), 24)
+
 
 if __name__ == "__main__":
     unittest.main()

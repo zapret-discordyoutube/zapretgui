@@ -375,16 +375,9 @@ def _handle_invalid_parameter(exit_code: int, stderr: str) -> WinDivertDiagnosis
             severity="critical",
         )
 
-    # Lua desync function not found — lua-init auto-fix didn't help,
-    # meaning the .lua file itself is missing from disk.
     m = re.search(r"desync function '([^']+)' does not exist", stderr or "")
     if m:
-        func_name = m.group(1)
-        return WinDivertDiagnosis(
-            cause=f"Lua-функция '{func_name}' не найдена — файл .lua отсутствует на диске",
-            solution="Переустановите программу — файлы в папке lua/ повреждены или удалены",
-            severity="critical",
-        )
+        return _diagnose_missing_lua_function(m.group(1))
 
     # Lua script syntax/runtime error
     if "lua" in stderr_lower and ("error" in stderr_lower or "syntax" in stderr_lower):
@@ -395,6 +388,51 @@ def _handle_invalid_parameter(exit_code: int, stderr: str) -> WinDivertDiagnosis
         )
 
     return _diagnosis_from_table(_ERROR_INVALID_PARAMETER, severity="warning")
+
+
+def _diagnose_missing_lua_function(func_name: str) -> WinDivertDiagnosis:
+    """winws2: «desync function 'X' does not exist» — функции X нет в загруженных lua.
+
+    Отсутствующий на диске lua-файл winws2 сообщает раньше и другим текстом
+    (LUA file ... not accessible), поэтому здесь две причины: функция из
+    известного файла, который пресет не подключил, или опечатка в имени.
+    Справочник функций — profile.winws2_language.lua_catalog, тот же, по
+    которому редактор пресета подчёркивает такую строку.
+    """
+    from profile.winws2_language.lua_catalog import LUA_FUNCTIONS_BY_NAME, closest_lua_function_names
+
+    spec = LUA_FUNCTIONS_BY_NAME.get(func_name)
+    if spec is not None:
+        lua_init = f"--lua-init=@lua/{spec.files[0]}"
+        return WinDivertDiagnosis(
+            cause=f"Lua-функция «{func_name}» есть в файле lua/{spec.files[0]}, но пресет этот файл не подключает",
+            solution=(
+                f"Добавьте в начало пресета строку {lua_init} — в редакторе пресета это сделает Ctrl+. "
+                "на подчёркнутой строке. Если такая строка уже есть, файл повреждён: переустановите программу"
+            ),
+            severity="critical",
+        )
+    suggestions = closest_lua_function_names(func_name)
+    if suggestions:
+        return WinDivertDiagnosis(
+            cause=(
+                f"В пресете опечатка: Lua-функции «{func_name}» не существует. "
+                f"Возможно, имелось в виду «{suggestions[0]}»"
+            ),
+            solution=(
+                f"Исправьте в строке --lua-desync имя «{func_name}» на «{suggestions[0]}» — "
+                "в редакторе пресета строка подчёркнута, Ctrl+. исправит её"
+            ),
+            severity="critical",
+        )
+    return WinDivertDiagnosis(
+        cause=f"Lua-функции «{func_name}» нет ни в одном lua-файле программы",
+        solution=(
+            "Проверьте имя функции в строке --lua-desync или подключите свой lua-файл "
+            "с этой функцией через --lua-init"
+        ),
+        severity="critical",
+    )
 
 
 def _handle_bad_pathname(exit_code: int, stderr: str) -> WinDivertDiagnosis:

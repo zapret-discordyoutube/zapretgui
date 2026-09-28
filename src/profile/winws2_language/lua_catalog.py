@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -596,6 +597,11 @@ def std_set_of(arg_name: str) -> str:
 ALL_KNOWN_ARG_NAMES: frozenset[str] = frozenset(LUA_ARGS)
 
 
+def closest_lua_function_names(name: str, *, limit: int = 3) -> list[str]:
+    """Похожие имена функций для подсказки «возможно, имелось в виду…»."""
+    return difflib.get_close_matches(str(name or ""), list(LUA_FUNCTIONS_BY_NAME), n=limit, cutoff=0.6)
+
+
 __all__ = [
     "ALL_KNOWN_ARG_NAMES",
     "KNOWN_LUA_FILES",
@@ -607,6 +613,7 @@ __all__ = [
     "LuaFunctionSpec",
     "ORCHESTRATOR_LABELS",
     "STD_SET_TITLES",
+    "closest_lua_function_names",
     "function_arg_names",
     "ignored_arg_names",
     "std_arg_names",

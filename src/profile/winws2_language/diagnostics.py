@@ -28,9 +28,9 @@ from .file_refs import file_references
 from .lua_catalog import (
     KNOWN_LUA_FILES,
     LUA_ARGS,
-    LUA_FUNCTIONS,
     LUA_FUNCTIONS_BY_NAME,
     ORCHESTRATOR_LABELS,
+    closest_lua_function_names,
     function_arg_names,
     ignored_arg_names,
 )
@@ -413,7 +413,7 @@ def _check_lua_desync(c: _Collector, option: ParsedOption, context: LanguageCont
     function_span = (base + call.function_start, base + call.function_end)
     if spec is None:
         if lua_known:
-            suggestions = _closest(call.function, [s.name for s in LUA_FUNCTIONS])
+            suggestions = closest_lua_function_names(call.function)
             fixes = tuple(
                 QuickFix(f"Заменить на {name}", (replace_in_line(line, *function_span, name),))
                 for name in suggestions

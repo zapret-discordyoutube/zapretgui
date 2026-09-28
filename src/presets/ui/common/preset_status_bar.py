@@ -132,7 +132,6 @@ def set_pulse_dot_color_if_changed(widget: PulsingDot, color: str) -> bool:
     return True
 
 
-PROBLEM_MESSAGE_MAX_CHARS = 90
 _PROBLEM_COLORS = {
     "error": ("#c42b1c", "#ff6b61"),
     "warning": ("#9d5d00", "#f2c14e"),
@@ -161,13 +160,6 @@ def build_problems_counter_text(errors: int, warnings: int) -> str:
     return ", ".join(parts)
 
 
-def shorten_problem_message(message: str, limit: int = PROBLEM_MESSAGE_MAX_CHARS) -> str:
-    text = " ".join(str(message or "").split())
-    if len(text) <= limit:
-        return text
-    return text[: max(1, limit - 1)].rstrip() + "…"
-
-
 def _preset_status_state_text(text: str) -> str:
     value = str(text or "").strip()
     return f"Статус пресета: {value}" if value else "Статус пресета"
@@ -181,8 +173,10 @@ class PresetStatusBar(QWidget):
         self._last_plan: PresetStatusPlan | None = None
         self._last_theme_key: tuple[str, bool] | None = None
         self._last_indicator: str | None = None
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(24)
+        # Длинное сообщение (например, причина ошибки запуска) переносится на
+        # следующие строки, а не обрезается: высота строки статуса растёт.
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self.setMinimumHeight(24)
 
         self.spinner = Win11Spinner(size=16, parent=self)
         self.spinner.hide()
@@ -191,26 +185,27 @@ class PresetStatusBar(QWidget):
         self.pulse_dot.hide()
 
         self.text_label = CaptionLabel("", self)
-        self.text_label.setWordWrap(False)
-        self.text_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.text_label.setWordWrap(True)
+        self.text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.text_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 2, 0, 0)
         layout.setSpacing(6)
-        layout.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addWidget(self.pulse_dot, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addWidget(self.text_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addStretch(1)
+        layout.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.pulse_dot, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.text_label, 3, Qt.AlignmentFlag.AlignVCenter)
 
         # Проверка текста пресета: что не так в строке курсора и общий счётчик.
         # Клик по счётчику переводит курсор к следующей проблеме (как F8).
         self._problem_severity = ""
         self._line_problem_severity = ""
         self.problem_label = CaptionLabel("", self)
-        self.problem_label.setWordWrap(False)
-        self.problem_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.problem_label.setWordWrap(True)
+        self.problem_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.problem_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.problem_label.hide()
-        layout.addWidget(self.problem_label, 1, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self.problem_label, 2, Qt.AlignmentFlag.AlignVCenter)
 
         self.problems_button = TransparentPushButton("", self)
         self.problems_button.setFixedHeight(22)
@@ -244,7 +239,7 @@ class PresetStatusBar(QWidget):
         set_state_text(self.problems_button, counter or "Проблем нет")
 
         message = str(current_message or "").strip()
-        shown = shorten_problem_message(message)
+        shown = " ".join(message.split())
         set_text_if_changed(self.problem_label, shown)
         self.problem_label.setVisible(bool(shown))
         set_tooltip(self.problem_label, message)
