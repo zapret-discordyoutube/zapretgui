@@ -561,6 +561,7 @@ class BlockcheckPage(BasePage):
             self._dns_spoofing_tab_page = DNSCheckPage(
                 parent=self,
                 dns_feature=self._dns,
+                embedded=True,
             )
             self._dns_spoofing_tab_page.setVisible(False)
             self.add_widget(self._dns_spoofing_tab_page)

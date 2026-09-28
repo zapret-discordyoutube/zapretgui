@@ -39,7 +39,7 @@ class DNSCheckPageAccessibilityTests(unittest.TestCase):
             "Сохранить результаты проверки DNS, недоступно",
         )
         self.assertIn("текстовый файл", page.save_button.accessibleDescription())
-        self.assertEqual(page.status_label.accessibleName(), "Статус проверки DNS: Готово к проверке")
+        self.assertEqual(page.status_label.accessibleName(), "Статус проверки DNS: Сравниваем ответ DNS с эталоном и видим, подменяет ли провайдер адреса")
         self.assertEqual(
             page.result_text.accessibleName(),
             "Результаты проверки DNS: проверка ещё не запускалась",
@@ -49,6 +49,16 @@ class DNSCheckPageAccessibilityTests(unittest.TestCase):
             page.result_text.property("screenReaderStateText"),
             "Результаты проверки DNS: проверка ещё не запускалась",
         )
+
+    def test_embedded_tab_is_compact(self) -> None:
+        """Во вкладке BlockCheck лишние заголовки и карточка «Что проверяем» съедали место."""
+        page = DNSCheckPage(dns_feature=_DnsFeatureStub(), embedded=True)
+        self.addCleanup(page.deleteLater)
+
+        self.assertTrue(page.title_label.isHidden())
+        self.assertIsNone(page.control_card._title_label)
+        self.assertIsNone(page.results_card._title_label)
+        self.assertFalse(hasattr(page, "info_card"))
 
     def test_progress_bar_exposes_screen_reader_state(self) -> None:
         page = DNSCheckPage(dns_feature=_DnsFeatureStub())

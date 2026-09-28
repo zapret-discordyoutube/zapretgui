@@ -1301,26 +1301,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Проверка резолвинга доменов YouTube и Discord через различные DNS серверы",
         "en": "Check resolution of YouTube and Discord domains via different DNS servers",
     },
-    "page.dns_check.card.what_we_check": {
-        "ru": "Что проверяем",
-        "en": "What we check",
-    },
-    "page.dns_check.info.blocking": {
-        "ru": "Блокирует ли провайдер сайты через DNS подмену",
-        "en": "Whether the provider blocks sites via DNS spoofing",
-    },
-    "page.dns_check.info.servers": {
-        "ru": "Какие DNS серверы возвращают корректные адреса",
-        "en": "Which DNS servers return correct addresses",
-    },
-    "page.dns_check.info.recommended": {
-        "ru": "Какой DNS сервер рекомендуется использовать",
-        "en": "Which DNS server is recommended",
-    },
-    "page.dns_check.card.testing": {
-        "ru": "Тестирование",
-        "en": "Testing",
-    },
     "page.dns_check.button.start": {
         "ru": "Начать проверку",
         "en": "Start check",
@@ -1334,12 +1314,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Save results",
     },
     "page.dns_check.status.ready": {
-        "ru": "Готово к проверке",
-        "en": "Ready to check",
-    },
-    "page.dns_check.card.results": {
-        "ru": "Результаты",
-        "en": "Results",
+        "ru": "Сравниваем ответ DNS с эталоном и видим, подменяет ли провайдер адреса",
+        "en": "Compares the DNS answer with a reference to see whether the ISP spoofs addresses",
     },
     "page.dpi_settings.subtitle": {
         "ru": "Параметры обхода блокировок",

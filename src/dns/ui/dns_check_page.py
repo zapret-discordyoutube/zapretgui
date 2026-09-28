@@ -4,17 +4,15 @@
 import html
 
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel,
-)
+from PyQt6.QtWidgets import QHBoxLayout
 from PyQt6.QtGui import QFont, QTextCursor
 
 from ui.pages.base_page import BasePage, ScrollBlockingTextEdit
 from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 import dns.dns_check_plans as dns_check_page_plans
-from ui.fluent_widgets import QuickActionsBar, SettingsCard, set_tooltip
-from ui.theme import get_cached_qta_pixmap, get_theme_tokens
+from ui.fluent_widgets import SettingsCard, set_tooltip
+from ui.theme import get_theme_tokens
 from ui.theme_semantic import get_semantic_palette
 from ui.accessibility import set_control_accessibility, set_state_text
 from app.ui_texts import tr as tr_catalog
@@ -23,9 +21,8 @@ from qfluentwidgets import (
     IndeterminateProgressBar,
     FluentIcon,
     InfoBar,
+    PrimaryPushButton,
     PushButton,
-    StrongBodyLabel,
-    BodyLabel,
     CaptionLabel,
 )
 
@@ -33,7 +30,7 @@ from qfluentwidgets import (
 class DNSCheckPage(BasePage):
     """Страница проверки DNS подмены провайдером."""
     
-    def __init__(self, parent=None, *, dns_feature):
+    def __init__(self, parent=None, *, dns_feature, embedded: bool = False):
         super().__init__(
             "Проверка DNS подмены",
             "Проверка резолвинга доменов YouTube и Discord через различные DNS серверы",
@@ -61,17 +58,14 @@ class DNSCheckPage(BasePage):
         self._results_plain_text_cache = ""
         self._status_tone = "muted"
         self._status_bold = False
-        self._info_icon_labels = []
-        self._info_text_labels = []
-        self._info_item_keys = [
-            "page.dns_check.info.blocking",
-            "page.dns_check.info.servers",
-            "page.dns_check.info.recommended",
-        ]
-        self._actions_title_label = None
-        self._actions_bar = None
-
         self._build_ui()
+        if embedded:
+            # Во вкладке BlockCheck заголовок и отступы уже есть у самой BlockCheck.
+            if self.title_label is not None:
+                self.title_label.setVisible(False)
+            if self.subtitle_label is not None:
+                self.subtitle_label.setVisible(False)
+            self.vBoxLayout.setContentsMargins(0, 8, 0, 0)
         self._apply_page_theme(force=True)
 
     def _apply_interaction_state(
@@ -104,70 +98,18 @@ class DNSCheckPage(BasePage):
         self._set_action_button_state_text(self.save_button, "Сохранить результаты проверки DNS")
     
     def _build_ui(self):
-        """Создаёт интерфейс страницы."""
+        """Создаёт интерфейс страницы.
+
+        Страница живёт во вкладке BlockCheck, поэтому без шапок у карточек,
+        карточки «Что проверяем» и подписи «Действия»: кнопки и статус — одна
+        строка, под ней отчёт.
+        """
         tokens = get_theme_tokens()
-        # Информационная карточка
-        self.info_card = SettingsCard(tr_catalog("page.dns_check.card.what_we_check", language=self._ui_language, default="Что проверяем"))
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(8)
-        
-        info_items = [
-            ("fa5s.search", self._info_item_keys[0], "Блокирует ли провайдер сайты через DNS подмену"),
-            ("fa5s.server", self._info_item_keys[1], "Какие DNS серверы возвращают корректные адреса"),
-            ("fa5s.check-circle", self._info_item_keys[2], "Какой DNS сервер рекомендуется использовать"),
-        ]
-        
-        for icon_name, text_key, default_text in info_items:
-            row = QHBoxLayout()
-            row.setSpacing(10)
-            
-            try:
-                icon_label = QLabel()
-                icon_label.setProperty("dnsIconName", icon_name)
-                icon_label.setPixmap(get_cached_qta_pixmap(icon_name, color=tokens.accent_hex, size=16))
-                icon_label.setFixedWidth(20)
-                self._info_icon_labels.append(icon_label)
-                row.addWidget(icon_label)
-            except Exception:
-                pass
-            
-            text_label = BodyLabel(tr_catalog(text_key, language=self._ui_language, default=default_text))
-            text_label.setStyleSheet(f"color: {tokens.fg_muted};")
-            text_label.setProperty("textKey", text_key)
-            text_label.setProperty("textDefault", default_text)
-            self._info_text_labels.append(text_label)
-            row.addWidget(text_label, 1)
-            
-            info_layout.addLayout(row)
-        
-        self.info_card.add_layout(info_layout)
-        self.layout.addWidget(self.info_card)
-        
-        # Карточка с управлением
-        self.control_card = SettingsCard(tr_catalog("page.dns_check.card.testing", language=self._ui_language, default="Тестирование"))
-        
-        # Прогресс бар
-        self.progress_bar = IndeterminateProgressBar(self)
-        self.progress_bar.setVisible(False)
-        set_state_text(self.progress_bar, "Ход проверки DNS: не выполняется")
-        self.control_card.add_widget(self.progress_bar)
-        
-        # Статус
-        self.status_label = CaptionLabel(tr_catalog("page.dns_check.status.ready", language=self._ui_language, default="Готово к проверке"))
-        self._set_status(tr_catalog("page.dns_check.status.ready", language=self._ui_language, default="Готово к проверке"), tone="muted", bold=False)
-        self.control_card.add_widget(self.status_label)
+        self.control_card = SettingsCard()
+        row = QHBoxLayout()
+        row.setSpacing(10)
 
-        self.layout.addWidget(self.control_card)
-
-        # Действия
-        self._actions_title_label = StrongBodyLabel(
-            tr_catalog("page.dns_check.section.actions", language=self._ui_language, default="Действия")
-        )
-        self.layout.addWidget(self._actions_title_label)
-
-        self._actions_bar = QuickActionsBar(self.content)
-
-        self.check_button = PushButton(
+        self.check_button = PrimaryPushButton(
             tr_catalog("page.dns_check.button.start", language=self._ui_language, default="Начать проверку"),
             icon=FluentIcon.PLAY,
         )
@@ -182,7 +124,7 @@ class DNSCheckPage(BasePage):
             description=start_description,
         )
         self.check_button.clicked.connect(self.start_check)
-        self._actions_bar.add_button(self.check_button)
+        row.addWidget(self.check_button)
 
         self.quick_check_button = PushButton(
             tr_catalog("page.dns_check.button.quick", language=self._ui_language, default="Быстрая проверка"),
@@ -199,7 +141,20 @@ class DNSCheckPage(BasePage):
             description=quick_description,
         )
         self.quick_check_button.clicked.connect(self.quick_dns_check)
-        self._actions_bar.add_button(self.quick_check_button)
+        row.addWidget(self.quick_check_button)
+
+        self.status_label = CaptionLabel()
+        self._set_status(
+            tr_catalog(
+                "page.dns_check.status.ready",
+                language=self._ui_language,
+                default="Сравниваем ответ DNS с эталоном и видим, подменяет ли провайдер адреса",
+            ),
+            tone="muted",
+            bold=False,
+        )
+        row.addSpacing(8)
+        row.addWidget(self.status_label, 1)
 
         self.save_button = PushButton(
             tr_catalog("page.dns_check.button.save", language=self._ui_language, default="Сохранить результаты"),
@@ -216,15 +171,18 @@ class DNSCheckPage(BasePage):
             description=save_description,
         )
         self.save_button.setEnabled(False)
-        self._update_action_button_state_text()
         self.save_button.clicked.connect(self.save_results)
-        self._actions_bar.add_button(self.save_button)
+        row.addWidget(self.save_button)
+        self.control_card.add_layout(row)
 
-        self.layout.addWidget(self._actions_bar)
-        
-        # Результаты
-        self.results_card = SettingsCard(tr_catalog("page.dns_check.card.results", language=self._ui_language, default="Результаты"))
-        
+        self.progress_bar = IndeterminateProgressBar(self)
+        self.progress_bar.setVisible(False)
+        set_state_text(self.progress_bar, "Ход проверки DNS: не выполняется")
+        self.control_card.add_widget(self.progress_bar)
+        self._update_action_button_state_text()
+        self.layout.addWidget(self.control_card)
+
+        self.results_card = SettingsCard()
         self.result_text = ScrollBlockingTextEdit()
         self.result_text.setReadOnly(True)
         self.result_text.setFont(QFont("Consolas", 10))
@@ -247,10 +205,7 @@ class DNSCheckPage(BasePage):
             """
         )
         self.results_card.add_widget(self.result_text)
-        
         self.layout.addWidget(self.results_card)
-        
-        # Stretch в конце
         self.layout.addStretch()
 
     def _set_status(self, text: str, *, tone: str, bold: bool) -> None:
@@ -286,22 +241,6 @@ class DNSCheckPage(BasePage):
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
         tokens = tokens or get_theme_tokens()
-        for label in list(self._info_text_labels):
-            try:
-                label.setStyleSheet(f"color: {tokens.fg_muted};")
-            except Exception:
-                pass
-
-        try:
-            for icon_label in list(self._info_icon_labels):
-                try:
-                    icon_name = (icon_label.property("dnsIconName") or "fa5s.search").strip()
-                    icon_label.setPixmap(get_cached_qta_pixmap(icon_name, color=tokens.accent_hex, size=16))
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
         try:
             self.result_text.setStyleSheet(
                 f"""
@@ -759,30 +698,8 @@ class DNSCheckPage(BasePage):
         except Exception as e:
             log(f"Ошибка при очистке dns_check_page: {e}", "DEBUG")
 
-    def _set_card_title(self, card: SettingsCard, text: str) -> None:
-        try:
-            card.set_title(text)
-        except Exception:
-            pass
-
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-
-        self._set_card_title(self.info_card, tr_catalog("page.dns_check.card.what_we_check", language=self._ui_language, default="Что проверяем"))
-        self._set_card_title(self.control_card, tr_catalog("page.dns_check.card.testing", language=self._ui_language, default="Тестирование"))
-        self._set_card_title(self.results_card, tr_catalog("page.dns_check.card.results", language=self._ui_language, default="Результаты"))
-        if self._actions_title_label is not None:
-            self._actions_title_label.setText(
-                tr_catalog("page.dns_check.section.actions", language=self._ui_language, default="Действия")
-            )
-
-        for label in list(self._info_text_labels):
-            try:
-                key = label.property("textKey")
-                default = label.property("textDefault")
-                label.setText(tr_catalog(str(key), language=self._ui_language, default=str(default or "")))
-            except Exception:
-                pass
 
         self.check_button.setText(tr_catalog("page.dns_check.button.start", language=self._ui_language, default="Начать проверку"))
         self.quick_check_button.setText(tr_catalog("page.dns_check.button.quick", language=self._ui_language, default="Быстрая проверка"))
