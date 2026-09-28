@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from PyQt6.QtCore import QPointF, QRect, QRectF, Qt
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath
@@ -119,26 +120,48 @@ def _mix(idle: QColor, hover: QColor, amount: float) -> QColor:
     )
 
 
+SHEEN_BAND_PX = 110.0
+SHEEN_SLANT_PX = 26.0
+SHEEN_PEAK_DARK = 0.075
+SHEEN_PEAK_LIGHT = 0.09
+
+
 def _paint_sheen(painter: QPainter, rect: QRect, tokens, progress: float) -> None:
-    """Полупрозрачная светлая полоса проходит по строке слева направо."""
+    """Спокойный косой блик проходит по строке слева направо.
+
+    Ширина полосы постоянная (на длинной строке блик не расплывается в пятно),
+    яркость мягко нарастает к середине пути и так же мягко гаснет.
+    """
     progress = max(0.0, min(1.0, float(progress)))
     area = QRectF(rect)
-    band = max(40.0, area.width() * 0.3)
-    center_x = area.left() - band + (area.width() + 2 * band) * progress
-    # Блик ярче в середине пути и тает к концу, чтобы не «щёлкал» на краях.
-    strength = 0.07 * (1.0 - progress) ** 0.6
+    band = SHEEN_BAND_PX
+    travel = area.width() + band + SHEEN_SLANT_PX
+    center_x = area.left() - band / 2.0 - SHEEN_SLANT_PX / 2.0 + travel * progress
+    fade = math.sin(math.pi * progress)
+    strength = (SHEEN_PEAK_LIGHT if tokens.is_light else SHEEN_PEAK_DARK) * fade * fade
+    if strength <= 0.002:
+        return
     glow = QColor(tokens.accent_hex) if tokens.is_light else QColor(255, 255, 255)
-    peak = QColor(glow)
-    peak.setAlphaF(strength)
     clear = QColor(glow)
     clear.setAlphaF(0.0)
-    gradient = QLinearGradient(QPointF(center_x - band / 2, 0), QPointF(center_x + band / 2, 0))
+    soft = QColor(glow)
+    soft.setAlphaF(strength * 0.45)
+    peak = QColor(glow)
+    peak.setAlphaF(strength)
+    # Полоса наклонена: градиент идёт из левого нижнего угла в правый верхний.
+    gradient = QLinearGradient(
+        QPointF(center_x - band / 2.0, area.bottom() + SHEEN_SLANT_PX / 2.0),
+        QPointF(center_x + band / 2.0, area.top() - SHEEN_SLANT_PX / 2.0),
+    )
     gradient.setColorAt(0.0, clear)
+    gradient.setColorAt(0.35, soft)
     gradient.setColorAt(0.5, peak)
+    gradient.setColorAt(0.65, soft)
     gradient.setColorAt(1.0, clear)
     shape = QPainterPath()
     shape.addRoundedRect(area, 10, 10)
     painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.setClipPath(shape)
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(gradient)

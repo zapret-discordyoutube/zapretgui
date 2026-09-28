@@ -11,7 +11,7 @@ from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.folder_header import FOLDER_HEADER_HEIGHT, is_folder_toggle_click, paint_folder_header_row
 from ui.widgets.active_row_motion import active_row_motion
 from ui.widgets.hover_row import paint_profile_hover_row, profile_hover_row_rect
-from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_rotated, row_hover_motion
+from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_icon_motion, row_hover_motion
 
 from .common import (
     PRESET_DROP_MARKER_PROPERTY,
@@ -458,10 +458,11 @@ class PresetListDelegate(QStyledItemDelegate):
             [tokens.accent_hex, tokens.fg],
             minimum_ratio=2.6,
         )
-        paint_rotated(
+        paint_icon_motion(
             painter,
             icon_rect,
-            hover_motion.icon_angle(index) if hover_motion is not None else 0.0,
+            hover_motion,
+            index,
             lambda: cached_icon("fa5s.file-alt", icon_color).paint(painter, icon_rect),
         )
 

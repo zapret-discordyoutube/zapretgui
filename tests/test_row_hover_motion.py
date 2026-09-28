@@ -65,22 +65,62 @@ class RowHoverMotionTests(unittest.TestCase):
         self.assertIs(attach_row_hover_motion(self.view), self.motion)
         self.assertIs(row_hover_motion(self.view), self.motion)
 
-    def test_hover_fades_in_sways_icon_and_runs_sheen_then_settles(self) -> None:
+    def test_hover_fades_in_tilts_icon_and_runs_sheen_after_dwell_then_settles(self) -> None:
         self._move_to_row(2)
         _wait(0.06)
 
         level = self.motion.hover_level(self._index(2))
         self.assertGreater(level, 0.0)
         self.assertLess(level, 1.0)
-        self.assertGreater(abs(self.motion.icon_angle(self._index(2))), 0.3)
-        self.assertIsNotNone(self.motion.sheen_progress(self._index(2)))
+        angle = self.motion.icon_angle(self._index(2))
+        self.assertGreater(angle, 0.3)
+        self.assertLessEqual(angle, motion_module.TILT_PEAK_DEG)
+        self.assertGreater(self.motion.icon_scale(self._index(2)), 1.0)
+        # Блик ждёт, пока мышь задержится на строке.
+        self.assertIsNone(self.motion.sheen_progress(self._index(2)))
         self.assertEqual(self.motion.hover_level(self._index(3)), 0.0)
 
-        _wait(0.7)
+        _wait(0.2)
+        self.assertIsNotNone(self.motion.sheen_progress(self._index(2)))
+
+        _wait(0.9)
         self.assertEqual(self.motion.hover_level(self._index(2)), 1.0)
         self.assertEqual(self.motion.icon_angle(self._index(2)), 0.0)
+        self.assertEqual(self.motion.icon_scale(self._index(2)), 1.0)
         self.assertIsNone(self.motion.sheen_progress(self._index(2)))
         self.assertFalse(self.motion._timer.isActive())
+
+    def test_quick_pass_over_rows_does_not_flash_sheen(self) -> None:
+        for row in (1, 2, 3, 4):
+            self._move_to_row(row)
+            _wait(0.03)
+        _wait(0.3)
+        for row in (1, 2, 3):
+            self.assertIsNone(self.motion.sheen_progress(self._index(row)))
+        self.assertIsNotNone(self.motion.sheen_progress(self._index(4)))
+
+    def test_sheen_is_not_repeated_right_away_on_the_same_row(self) -> None:
+        self._move_to_row(2)
+        _wait(1.0)
+        self._move_to_row(3)
+        _wait(0.02)
+        self._move_to_row(2)
+        _wait(0.25)
+        self.assertIsNone(self.motion.sheen_progress(self._index(2)))
+
+    def test_icon_is_drawn_smoothly_while_moving(self) -> None:
+        painter = mock.Mock()
+        calls = []
+        motion_module.paint_rotated(painter, QRect(0, 0, 14, 14), 5.0, lambda: calls.append(True), scale=1.05)
+        hints = [call.args for call in painter.setRenderHint.call_args_list]
+        self.assertIn((QPainter.RenderHint.SmoothPixmapTransform, True), hints)
+        painter.rotate.assert_called_once_with(5.0)
+        painter.scale.assert_called_once_with(1.05, 1.05)
+        self.assertEqual(calls, [True])
+
+        still = mock.Mock()
+        motion_module.paint_rotated(still, QRect(0, 0, 14, 14), 0.0, lambda: calls.append(True))
+        still.rotate.assert_not_called()
 
     def test_leaving_row_fades_out(self) -> None:
         self._move_to_row(2)
@@ -130,13 +170,14 @@ class RowHoverMotionTests(unittest.TestCase):
         if idle != hover:
             self.assertNotIn(half, (idle, hover))
 
-    def test_preset_and_profile_delegates_attach_hover_motion(self) -> None:
+    def test_preset_profile_and_strategy_delegates_attach_hover_motion(self) -> None:
         from PyQt6.QtWidgets import QListView
 
         from profile.ui.profile_list_delegate import ProfileListDelegate
+        from profile.ui.profile_strategy_list_widget import ProfileStrategyListDelegate
         from ui.presets_menu.delegate import PresetListDelegate
 
-        for delegate_cls in (PresetListDelegate, ProfileListDelegate):
+        for delegate_cls in (PresetListDelegate, ProfileListDelegate, ProfileStrategyListDelegate):
             with self.subTest(delegate=delegate_cls.__name__):
                 view = QListView()
                 self.addCleanup(view.deleteLater)

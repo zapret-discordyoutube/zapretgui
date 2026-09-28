@@ -12,7 +12,7 @@ from ui.theme import get_theme_tokens, to_qcolor
 from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.folder_header import FOLDER_HEADER_HEIGHT, is_folder_toggle_click, paint_folder_header_row
 from ui.widgets.hover_row import paint_profile_hover_row, profile_hover_row_rect
-from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_rotated, row_hover_motion
+from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_icon_motion, row_hover_motion
 from ui.widgets.profile_row_style import (
     PROFILE_BADGE_HOSTLIST_BG,
     PROFILE_BADGE_HOSTLIST_FG,
@@ -240,17 +240,21 @@ class ProfileListDelegate(QStyledItemDelegate):
         icon_color = str(index.data(ProfileListModel.IconColorRole) or "#888888")
         if not bool(index.data(ProfileListModel.InPresetRole)):
             icon_color = "#888888"
+        # Пока значок наклоняется, он рисуется из картинки двойного размера:
+        # так при повороте и увеличении края остаются чёткими.
+        moving = hover_motion is not None and hover_motion.icon_moving(index)
         pixmap = profile_icon_pixmap(
             str(index.data(ProfileListModel.IconNameRole) or ""),
             color=icon_color,
-            size=self._ICON_SIZE,
+            size=self._ICON_SIZE * (2 if moving else 1),
             theme_name=tokens.theme_name,
         )
         if not pixmap.isNull():
-            paint_rotated(
+            paint_icon_motion(
                 painter,
                 row_layout.icon_rect,
-                hover_motion.icon_angle(index) if hover_motion is not None else 0.0,
+                hover_motion,
+                index,
                 lambda: painter.drawPixmap(row_layout.icon_rect, pixmap),
             )
 

@@ -55,6 +55,7 @@ from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
 from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.fluent_scrollbar import install_fluent_scrollbars
 from ui.widgets.hover_row import paint_profile_hover_row, profile_hover_row_rect
+from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_icon_motion, row_hover_motion
 
 
 def _set_widget_text_if_changed(widget, text: str) -> bool:
@@ -74,6 +75,7 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
     def __init__(self, view: QListWidget):
         super().__init__(view)
         self._tooltip = FluentItemToolTipController(view.viewport())
+        attach_row_hover_motion(view)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         painter.save()
@@ -88,6 +90,9 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
         )
 
         motion = active_row_motion(self.parent())
+        hover_motion = row_hover_motion(self.parent())
+        # Выделенная строка подсвечена сразу, плавно проявляется только наведение мышью.
+        live_hover = hover_motion is not None and not selected
         paint_profile_hover_row(
             painter,
             rect,
@@ -97,6 +102,8 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
             show_active_marker=not (motion is not None and motion.hides_static_marker(index)),
             active_reveal=motion.row_reveal(index) if motion is not None else None,
             residual_active=motion.row_residual(index) if motion is not None else 0.0,
+            hover_level=hover_motion.hover_level(index) if live_hover else None,
+            sheen=hover_motion.sheen_progress(index) if live_hover else None,
         )
         icon_dy = round(motion.icon_offset(index)) if motion is not None else 0
 
@@ -121,9 +128,15 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
         icon_size = 14
         if icon_name:
             icon_rect = QRect(left, rect.center().y() - icon_size // 2 + icon_dy, icon_size, icon_size)
-            pixmap = get_cached_qta_pixmap(icon_name, color=visual_color or tokens.fg_faint, size=icon_size)
+            # Пока значок наклоняется, он рисуется из картинки двойного размера — края чёткие.
+            moving = hover_motion is not None and hover_motion.icon_moving(index)
+            pixmap = get_cached_qta_pixmap(
+                icon_name,
+                color=visual_color or tokens.fg_faint,
+                size=icon_size * (2 if moving else 1),
+            )
             if not pixmap.isNull():
-                painter.drawPixmap(icon_rect, pixmap)
+                paint_icon_motion(painter, icon_rect, hover_motion, index, lambda: painter.drawPixmap(icon_rect, pixmap))
             else:
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(to_qcolor(visual_color or tokens.fg_faint, "#aeb5c1"))
