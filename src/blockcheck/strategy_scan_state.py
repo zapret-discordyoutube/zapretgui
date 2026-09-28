@@ -123,7 +123,12 @@ class StrategyScanLanguagePlan:
     results_title: str
     log_title: str
     expand_log_text: str
-    warning_title: str
+    intro_text: str
+    warning_text: str
+    protocol_label: str
+    target_label: str
+    mode_label: str
+    mode_items: list[str]
     start_text: str
     stop_text: str
     prepare_support_text: str

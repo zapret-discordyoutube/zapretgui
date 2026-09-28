@@ -40,10 +40,14 @@ def apply_language_plan_ui(
     results_card,
     log_card,
     expand_log_btn,
-    warning_card,
+    warning_notice,
+    intro_label,
+    protocol_label,
+    mode_label,
+    mode_combo,
+    target_label,
     start_btn,
     stop_btn,
-    actions_title_label,
     prepare_support_btn,
     protocol_combo,
     games_scope_label,
@@ -58,14 +62,21 @@ def apply_language_plan_ui(
     results_card.set_title(plan.results_title)
     log_card.set_title(plan.log_title)
     expand_log_btn.setText(plan.expand_log_text)
-    warning_card.set_title(plan.warning_title)
+    if warning_notice is not None:
+        warning_notice.setText(plan.warning_text)
+    if intro_label is not None:
+        intro_label.setText(plan.intro_text)
+    for label, text in (
+        (protocol_label, plan.protocol_label),
+        (mode_label, plan.mode_label),
+        (target_label, plan.target_label),
+        (games_scope_label, plan.udp_scope_label),
+    ):
+        if label is not None:
+            label.setText(text)
+            set_state_text(label, f"Поле подбора стратегии: {text}")
     start_btn.setText(plan.start_text)
     stop_btn.setText(plan.stop_text)
-    if actions_title_label is not None:
-        actions_title_label.setText(
-            tr_catalog("page.blockcheck_public.actions.title", language=language, default="Действия")
-        )
-        set_state_text(actions_title_label, f"Раздел подбора стратегии: {actions_title_label.text()}")
     set_tooltip(
         start_btn,
         tr_catalog(
@@ -84,14 +95,14 @@ def apply_language_plan_ui(
     )
     if prepare_support_btn is not None:
         prepare_support_btn.setText(plan.prepare_support_text)
-    protocol_combo.setItemText(0, plan.protocol_items[0])
-    protocol_combo.setItemText(1, plan.protocol_items[1])
-    protocol_combo.setItemText(2, plan.protocol_items[2])
-    if games_scope_label is not None:
-        games_scope_label.setText(plan.udp_scope_label)
+    for index, text in enumerate(plan.protocol_items):
+        protocol_combo.setItemText(index, text)
+    if mode_combo is not None:
+        for index, text in enumerate(plan.mode_items):
+            mode_combo.setItemText(index, text)
     if games_scope_combo is not None:
-        games_scope_combo.setItemText(0, plan.udp_scope_items[0])
-        games_scope_combo.setItemText(1, plan.udp_scope_items[1])
+        for index, text in enumerate(plan.udp_scope_items):
+            games_scope_combo.setItemText(index, text)
     if quick_domain_btn is not None:
         quick_domain_btn.setText(plan.quick_domains_text)
         set_tooltip(quick_domain_btn, plan.quick_domains_tooltip)

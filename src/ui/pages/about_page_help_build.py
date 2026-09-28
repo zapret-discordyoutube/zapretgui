@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout, QFrame, QSizePolic
 
 from ui.pages.about_page_help_accessibility import set_help_card_accessibility
 from ui.accessibility import set_state_text
+from ui.widgets.shimmer_label import ShimmerLabel
 
 
 @dataclass(slots=True)
@@ -42,9 +43,13 @@ def build_about_page_motto_block(*, tr_fn: Callable[[str, str], str], tokens):
     motto_text_layout.setContentsMargins(0, 0, 0, 0)
     motto_text_layout.setSpacing(2)
 
-    motto_title = QLabel(
+    # Строки по очереди выплывают при открытии вкладки, потом по английской
+    # и с задержкой по русской ходит лёгкий зацикленный блик.
+    glow = tokens.accent_hex if tokens.is_light else "#ffffff"
+    motto_title = ShimmerLabel(
         tr_fn("page.about.help.motto.title", "keep thinking, keep searching, keep learning....")
     )
+    motto_title.set_glow_color(glow)
     motto_title.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
     motto_title.setWordWrap(True)
     motto_title.setStyleSheet(
@@ -53,12 +58,15 @@ def build_about_page_motto_block(*, tr_fn: Callable[[str, str], str], tokens):
         f"font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif; }}"
     )
 
-    motto_translate = QLabel(
+    motto_translate = ShimmerLabel(
         tr_fn(
             "page.about.help.motto.subtitle",
             "Продолжай думать, продолжай искать, продолжай учиться....",
-        )
+        ),
+        enter_delay_ms=180,
+        first_delay_ms=1500,
     )
+    motto_translate.set_glow_color(glow)
     motto_translate.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
     motto_translate.setWordWrap(True)
     motto_translate.setStyleSheet(
@@ -68,11 +76,13 @@ def build_about_page_motto_block(*, tr_fn: Callable[[str, str], str], tokens):
         f"padding-top: 2px; }}"
     )
 
-    motto_cta = QLabel(
+    motto_cta = ShimmerLabel(
         tr_fn(
             "page.about.help.motto.cta",
             "Zapret2 - думай свободно, ищи смелее, учись всегда.",
-        )
+        ),
+        enter_delay_ms=360,
+        shimmer=False,
     )
     motto_cta.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
     motto_cta.setWordWrap(True)

@@ -1006,60 +1006,64 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Connection Diagnostics",
     },
     "page.connection.subtitle": {
-        "ru": "Автотест Discord и YouTube, проверка DNS подмены и быстрая подготовка обращения в Forgejo Issues",
-        "en": "Auto-test Discord and YouTube, check DNS spoofing, and quickly prepare a Forgejo Issues report",
+        "ru": "Открываются ли Discord и YouTube, и если нет — почему и что сделать",
+        "en": "Whether Discord and YouTube open, and if not — why and what to do",
     },
-    "page.connection.hero.title": {
-        "ru": "Диагностика сетевых соединений",
-        "en": "Network Connection Diagnostics",
-    },
-    "page.connection.hero.subtitle": {
-        "ru": "Проверьте доступность Discord и YouTube, а затем одной кнопкой соберите ZIP с логами и откройте Forgejo Issues.",
-        "en": "Check Discord and YouTube availability, then create a ZIP with logs and open Forgejo Issues in one click.",
+    "page.connection.intro": {
+        "ru": "Проверяем Discord и YouTube так же, как их открывает браузер: доходит ли соединение, не режет ли его DPI и не подменяет ли DNS адреса. Занимает 5–15 секунд.",
+        "en": "Discord and YouTube are checked the way a browser opens them: whether the connection gets through, whether DPI cuts it and whether DNS spoofs addresses. Takes 5–15 seconds.",
     },
     "page.connection.card.testing": {
-        "ru": "Тестирование",
-        "en": "Testing",
+        "ru": "Проверка соединения",
+        "en": "Connection check",
     },
     "page.connection.card.result": {
-        "ru": "Результат тестирования",
-        "en": "Test Result",
+        "ru": "Подробный отчёт",
+        "en": "Detailed report",
+    },
+    "page.connection.log.hint": {
+        "ru": "Адреса, ответы DNS и время ответа каждого сервера. Пригодится поддержке.",
+        "en": "Addresses, DNS answers and response time of each server. Useful for support.",
     },
     "page.connection.test.select": {
-        "ru": "Выбор теста:",
-        "en": "Test selection:",
+        "ru": "Что проверить:",
+        "en": "What to check:",
     },
     "page.connection.test.all": {
-        "ru": "🌐 Все тесты (Discord + YouTube)",
-        "en": "🌐 All tests (Discord + YouTube)",
+        "ru": "Discord и YouTube",
+        "en": "Discord and YouTube",
     },
     "page.connection.test.discord_only": {
-        "ru": "🎮 Только Discord",
-        "en": "🎮 Discord only",
+        "ru": "Только Discord",
+        "en": "Discord only",
     },
     "page.connection.test.youtube_only": {
-        "ru": "🎬 Только YouTube",
-        "en": "🎬 YouTube only",
+        "ru": "Только YouTube",
+        "en": "YouTube only",
     },
     "page.connection.button.start": {
-        "ru": "Запустить тест",
-        "en": "Start test",
+        "ru": "Проверить",
+        "en": "Check",
     },
     "page.connection.button.stop": {
-        "ru": "Стоп",
+        "ru": "Остановить",
         "en": "Stop",
+    },
+    "page.connection.button.show_log": {
+        "ru": "Показать отчёт",
+        "en": "Show report",
+    },
+    "page.connection.button.hide_log": {
+        "ru": "Скрыть отчёт",
+        "en": "Hide report",
     },
     "page.connection.button.send_log": {
         "ru": "Подготовить обращение",
         "en": "Prepare report",
     },
     "page.connection.status.ready": {
-        "ru": "Готово к тестированию",
-        "en": "Ready for testing",
-    },
-    "page.connection.progress.waiting": {
-        "ru": "Ожидает запуска",
-        "en": "Waiting to start",
+        "ru": "Нажмите «Проверить»",
+        "en": "Press “Check”",
     },
     "page.custom_domains.title": {
         "ru": "Кастомные (мои) домены (hostlist) для работы с Zapret",
@@ -4336,64 +4340,64 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "Strategy Scanner",
     },
     "page.strategy_scan.subtitle": {
-        "ru": "Автоматический перебор стратегий обхода DPI",
-        "en": "Automatic scan of DPI bypass strategies",
+        "ru": "Найдёт стратегию обхода DPI, которая работает у вашего провайдера",
+        "en": "Finds a DPI bypass strategy that works with your ISP",
     },
     "page.strategy_scan.back": {
         "ru": "Назад",
         "en": "Back",
     },
     "page.strategy_scan.control": {
-        "ru": "Управление сканированием",
-        "en": "Scan Controls",
+        "ru": "Поиск рабочей стратегии",
+        "en": "Find a working strategy",
     },
     "page.strategy_scan.protocol": {
-        "ru": "Протокол:",
-        "en": "Protocol:",
+        "ru": "Что должно заработать:",
+        "en": "What should work:",
     },
     "page.strategy_scan.protocol_tcp": {
-        "ru": "TCP/HTTPS",
-        "en": "TCP/HTTPS",
+        "ru": "Сайты и приложения (TCP/HTTPS)",
+        "en": "Sites and apps (TCP/HTTPS)",
     },
     "page.strategy_scan.protocol_stun": {
-        "ru": "STUN Voice (Discord/Telegram)",
-        "en": "STUN Voice (Discord/Telegram)",
+        "ru": "Голосовые звонки Discord и Telegram (STUN)",
+        "en": "Discord and Telegram voice calls (STUN)",
     },
     "page.strategy_scan.protocol_games": {
-        "ru": "UDP Games (Roblox/Amazon/Steam)",
-        "en": "UDP Games (Roblox/Amazon/Steam)",
+        "ru": "Онлайн-игры: Roblox, Steam, Amazon (UDP)",
+        "en": "Online games: Roblox, Steam, Amazon (UDP)",
     },
     "page.strategy_scan.udp_scope": {
-        "ru": "Охват UDP:",
-        "en": "UDP Scope:",
+        "ru": "Какие адреса игр:",
+        "en": "Game addresses:",
     },
     "page.strategy_scan.udp_scope_all": {
-        "ru": "Все ipset (по умолчанию)",
-        "en": "All ipset (default)",
+        "ru": "Все списки адресов (по умолчанию)",
+        "en": "All address lists (default)",
     },
     "page.strategy_scan.udp_scope_games_only": {
-        "ru": "Только игровые ipset",
-        "en": "Games-only ipset",
+        "ru": "Только игровые списки",
+        "en": "Game lists only",
     },
     "page.strategy_scan.mode": {
-        "ru": "Режим:",
-        "en": "Mode:",
+        "ru": "Насколько тщательно:",
+        "en": "How thorough:",
     },
     "page.strategy_scan.mode_quick": {
-        "ru": "Быстрый (30)",
-        "en": "Quick (30)",
+        "ru": "Быстро — 30 лучших стратегий, до 3 минут",
+        "en": "Quick — 30 best strategies, up to 3 minutes",
     },
     "page.strategy_scan.mode_standard": {
-        "ru": "Стандартный (80)",
-        "en": "Standard (80)",
+        "ru": "Тщательно — 80 стратегий, до 8 минут",
+        "en": "Thorough — 80 strategies, up to 8 minutes",
     },
     "page.strategy_scan.mode_full": {
-        "ru": "Полный (все)",
-        "en": "Full (all)",
+        "ru": "Все стратегии — дольше всего",
+        "en": "All strategies — takes longest",
     },
     "page.strategy_scan.target": {
-        "ru": "Цель:",
-        "en": "Target:",
+        "ru": "Какой сайт проверять:",
+        "en": "Site to check:",
     },
     "page.strategy_scan.target.default": {
         "ru": "discord.com",
@@ -4404,52 +4408,52 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "discord.com",
     },
     "page.strategy_scan.quick_domains": {
-        "ru": "Быстрый выбор",
-        "en": "Quick Pick",
+        "ru": "Выбрать из списка",
+        "en": "Pick from list",
     },
     "page.strategy_scan.quick_domains_hint": {
-        "ru": "Выберите домен из готового списка",
-        "en": "Choose a domain from the preset list",
+        "ru": "Готовые адреса: Discord, YouTube, Telegram и другие",
+        "en": "Ready addresses: Discord, YouTube, Telegram and more",
     },
     "page.strategy_scan.start": {
-        "ru": "Начать сканирование",
-        "en": "Start Scan",
+        "ru": "Найти рабочую стратегию",
+        "en": "Find a working strategy",
     },
     "page.strategy_scan.stop": {
         "ru": "Остановить",
         "en": "Stop",
     },
     "page.strategy_scan.ready": {
-        "ru": "Готово к сканированию",
-        "en": "Ready to scan",
+        "ru": "Готово к поиску",
+        "en": "Ready to search",
     },
-    "page.strategy_scan.warning_title": {
-        "ru": "Внимание",
-        "en": "Attention",
+    "page.strategy_scan.intro": {
+        "ru": "Программа по очереди включает стратегии обхода и проверяет, открывается ли выбранный сайт. Рабочие появятся в таблице ниже — любую можно сразу применить.",
+        "en": "The app switches bypass strategies on one by one and checks whether the chosen site opens. Working ones appear in the table below — apply any of them right away.",
     },
     "page.strategy_scan.warning_text": {
-        "ru": f"Во время сканирования текущий обход DPI будет остановлен. Каждая стратегия тестируется отдельно через {ENGINE_WINWS2}. После завершения можно перезапустить обход.",
-        "en": f"During scanning, the current DPI bypass will be stopped. Each strategy is tested separately through {ENGINE_WINWS2}. You can restart bypass after the scan finishes.",
+        "ru": "На время поиска Zapret будет выключен: каждая стратегия проверяется отдельно. Когда найдёте рабочую, нажмите «Применить» — или просто снова запустите Zapret.",
+        "en": "Zapret is turned off while searching: each strategy is tested on its own. When you find a working one, press “Apply” — or simply start Zapret again.",
     },
     "page.strategy_scan.results": {
-        "ru": "Результаты",
-        "en": "Results",
+        "ru": "Найденные стратегии",
+        "en": "Strategies found",
     },
     "page.strategy_scan.col_strategy": {
         "ru": "Стратегия",
         "en": "Strategy",
     },
     "page.strategy_scan.col_status": {
-        "ru": "Статус",
-        "en": "Status",
+        "ru": "Результат",
+        "en": "Result",
     },
     "page.strategy_scan.col_time": {
-        "ru": "Время (мс)",
-        "en": "Time (ms)",
+        "ru": "Ответ, мс",
+        "en": "Response, ms",
     },
     "page.strategy_scan.col_action": {
-        "ru": "Действие",
-        "en": "Action",
+        "ru": "Применить",
+        "en": "Apply",
     },
     "page.strategy_scan.log": {
         "ru": "Подробный лог",

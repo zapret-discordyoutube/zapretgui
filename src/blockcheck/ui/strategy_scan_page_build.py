@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QHBoxLayout, QHeaderView
+from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QHeaderView
 from qfluentwidgets import CaptionLabel, FluentIcon
 
-from ui.fluent_widgets import QuickActionsBar, SettingsCard, set_tooltip
+from blockcheck.strategy_scan_page_plans import INTRO_DEFAULT, MODE_ITEMS, PROTOCOL_ITEMS, WARNING_DEFAULT
+from ui.fluent_widgets import SemanticNotice, SettingsCard, set_tooltip
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.log_limits import BLOCKCHECK_LOG_VIEW_MAX_LINES, apply_text_line_limit
 from ui.pages.base_page import ScrollBlockingTextEdit
@@ -18,18 +20,20 @@ from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips
 @dataclass(slots=True)
 class StrategyScanControlWidgets:
     control_card: object
+    intro_label: object
+    protocol_label: object
     protocol_combo: object
     games_scope_label: object
     games_scope_combo: object
+    mode_label: object
     mode_combo: object
     target_label: object
     target_input: object
     quick_domain_btn: object
     udp_scope_hint_label: object
+    warning_notice: object
     progress_bar: object
     status_label: object
-    actions_title_label: object
-    actions_bar: object
     start_btn: object
     stop_btn: object
 
@@ -56,6 +60,7 @@ def build_strategy_scan_control_section(
     caption_label_cls,
     body_label_cls,
     progress_bar_cls,
+    primary_button_cls,
     push_button_cls,
     line_edit_cls,
     parent,
@@ -65,85 +70,41 @@ def build_strategy_scan_control_section(
     on_start,
     on_stop,
 ) -> StrategyScanControlWidgets:
+    _ = parent
+
     def _set_action_accessibility(widget, *, name: str, description: str) -> None:
         set_control_accessibility(widget, name=name, description=description)
         set_state_text(widget, name)
 
-    control_card = SettingsCard(
-        tr_fn("page.strategy_scan.control", "Управление сканированием")
-    )
+    def _field_label(key: str, default: str):
+        label = body_label_cls(tr_fn(key, default))
+        set_state_text(label, f"Поле подбора стратегии: {label.text()}")
+        return label
 
-    settings_row = QHBoxLayout()
-    settings_row.setSpacing(12)
+    control_card = SettingsCard(tr_fn("page.strategy_scan.control", "Поиск рабочей стратегии"))
 
-    protocol_label = caption_label_cls(
-        tr_fn("page.strategy_scan.protocol", "Протокол:")
-    )
-    set_state_text(protocol_label, f"Поле подбора стратегии: {protocol_label.text()}")
-    settings_row.addWidget(protocol_label)
+    intro_label = body_label_cls(tr_fn("page.strategy_scan.intro", INTRO_DEFAULT))
+    intro_label.setWordWrap(True)
+    control_card.add_widget(intro_label)
 
+    form = QGridLayout()
+    form.setHorizontalSpacing(16)
+    form.setVerticalSpacing(10)
+    form.setColumnStretch(1, 1)
+
+    protocol_label = _field_label("page.strategy_scan.protocol", "Что должно заработать:")
     protocol_combo = combo_cls()
-    protocol_combo.addItem(
-        tr_fn("page.strategy_scan.protocol_tcp", "TCP/HTTPS"),
-        userData="tcp_https",
-    )
-    protocol_combo.addItem(
-        tr_fn("page.strategy_scan.protocol_stun", "STUN Voice (Discord/Telegram)"),
-        userData="stun_voice",
-    )
-    protocol_combo.addItem(
-        tr_fn("page.strategy_scan.protocol_games", "UDP Games (Roblox/Amazon/Steam)"),
-        userData="udp_games",
-    )
+    for key, default, value in PROTOCOL_ITEMS:
+        protocol_combo.addItem(tr_fn(key, default), userData=value)
     protocol_combo.setCurrentIndex(0)
-    protocol_combo.setFixedWidth(150)
+    protocol_combo.setMinimumWidth(360)
     protocol_combo.currentIndexChanged.connect(on_protocol_changed)
-    settings_row.addWidget(protocol_combo)
+    form.addWidget(protocol_label, 0, 0)
+    form.addWidget(protocol_combo, 0, 1, alignment=Qt.AlignmentFlag.AlignLeft)
 
-    games_scope_label = caption_label_cls(
-        tr_fn("page.strategy_scan.udp_scope", "Охват UDP:")
-    )
-    set_state_text(games_scope_label, f"Поле подбора стратегии: {games_scope_label.text()}")
-    settings_row.addWidget(games_scope_label)
-
-    games_scope_combo = combo_cls()
-    games_scope_combo.addItem(
-        tr_fn("page.strategy_scan.udp_scope_all", "Все ipset (по умолчанию)"),
-        userData="all",
-    )
-    games_scope_combo.addItem(
-        tr_fn("page.strategy_scan.udp_scope_games_only", "Только игровые ipset"),
-        userData="games_only",
-    )
-    games_scope_combo.setCurrentIndex(0)
-    games_scope_combo.setFixedWidth(220)
-    games_scope_combo.currentIndexChanged.connect(on_udp_games_scope_changed)
-    settings_row.addWidget(games_scope_combo)
-
-    settings_row.addSpacing(16)
-
-    mode_label = caption_label_cls(
-        tr_fn("page.strategy_scan.mode", "Режим:")
-    )
-    set_state_text(mode_label, f"Поле подбора стратегии: {mode_label.text()}")
-    settings_row.addWidget(mode_label)
-
-    mode_combo = combo_cls()
-    mode_combo.addItem(tr_fn("page.strategy_scan.mode_quick", "Быстрый (30)"), "quick")
-    mode_combo.addItem(tr_fn("page.strategy_scan.mode_standard", "Стандартный (80)"), "standard")
-    mode_combo.addItem(tr_fn("page.strategy_scan.mode_full", "Полный (все)"), "full")
-    mode_combo.setCurrentIndex(0)
-    mode_combo.setFixedWidth(180)
-    settings_row.addWidget(mode_combo)
-
-    settings_row.addSpacing(16)
-
-    target_label = caption_label_cls(
-        tr_fn("page.strategy_scan.target", "Цель:")
-    )
-    set_state_text(target_label, f"Поле подбора стратегии: {target_label.text()}")
-    settings_row.addWidget(target_label)
-
+    target_label = _field_label("page.strategy_scan.target", "Какой сайт проверять:")
+    target_row = QHBoxLayout()
+    target_row.setSpacing(8)
     target_input = line_edit_cls()
     target_input.setText(tr_fn("page.strategy_scan.target.default", "discord.com"))
     target_input.setPlaceholderText(tr_fn("page.strategy_scan.target.placeholder", "discord.com"))
@@ -152,15 +113,18 @@ def build_strategy_scan_control_section(
         name="Цель подбора стратегии",
         description="Введите домен или STUN-цель для подбора стратегии.",
     )
-    target_input.setFixedWidth(200)
+    target_input.setMinimumWidth(260)
     target_input.setFixedHeight(33)
-    settings_row.addWidget(target_input)
+    target_row.addWidget(target_input)
 
     quick_domain_btn = push_button_cls(
-        tr_fn("page.strategy_scan.quick_domains", "Быстрый выбор"),
+        tr_fn("page.strategy_scan.quick_domains", "Выбрать из списка"),
         icon=FluentIcon.MENU,
     )
-    quick_domain_description = tr_fn("page.strategy_scan.quick_domains_hint", "Выберите домен из готового списка")
+    quick_domain_description = tr_fn(
+        "page.strategy_scan.quick_domains_hint",
+        "Готовые адреса: Discord, YouTube, Telegram и другие",
+    )
     set_tooltip(quick_domain_btn, quick_domain_description)
     _set_action_accessibility(
         quick_domain_btn,
@@ -168,42 +132,48 @@ def build_strategy_scan_control_section(
         description=quick_domain_description,
     )
     quick_domain_btn.clicked.connect(on_show_quick_domains_menu)
-    settings_row.addWidget(quick_domain_btn)
+    target_row.addWidget(quick_domain_btn)
+    target_row.addStretch(1)
+    form.addWidget(target_label, 1, 0)
+    form.addLayout(target_row, 1, 1)
 
-    settings_row.addStretch()
-    control_card.add_layout(settings_row)
+    games_scope_label = _field_label("page.strategy_scan.udp_scope", "Какие адреса игр:")
+    games_scope_combo = combo_cls()
+    games_scope_combo.addItem(
+        tr_fn("page.strategy_scan.udp_scope_all", "Все списки адресов (по умолчанию)"),
+        userData="all",
+    )
+    games_scope_combo.addItem(
+        tr_fn("page.strategy_scan.udp_scope_games_only", "Только игровые списки"),
+        userData="games_only",
+    )
+    games_scope_combo.setCurrentIndex(0)
+    games_scope_combo.setMinimumWidth(260)
+    games_scope_combo.currentIndexChanged.connect(on_udp_games_scope_changed)
+    form.addWidget(games_scope_label, 2, 0)
+    form.addWidget(games_scope_combo, 2, 1, alignment=Qt.AlignmentFlag.AlignLeft)
+
+    mode_label = _field_label("page.strategy_scan.mode", "Насколько тщательно:")
+    mode_combo = combo_cls()
+    for key, default, value in MODE_ITEMS:
+        mode_combo.addItem(tr_fn(key, default), value)
+    mode_combo.setCurrentIndex(0)
+    mode_combo.setMinimumWidth(360)
+    form.addWidget(mode_label, 3, 0)
+    form.addWidget(mode_combo, 3, 1, alignment=Qt.AlignmentFlag.AlignLeft)
+    control_card.add_layout(form)
 
     udp_scope_hint_label = caption_label_cls("")
     udp_scope_hint_label.setWordWrap(True)
     control_card.add_widget(udp_scope_hint_label)
 
-    progress_bar = progress_bar_cls()
-    progress_bar.setVisible(False)
-    progress_bar.setFixedHeight(4)
-    progress_bar.setRange(0, 100)
-    progress_bar.setValue(0)
-    set_control_accessibility(
-        progress_bar,
-        name="Ход подбора стратегии: не выполняется",
-        description="Показывает, что подбор стратегии выполняется.",
-    )
-    set_state_text(progress_bar, "Ход подбора стратегии: не выполняется")
-    control_card.add_widget(progress_bar)
+    warning_notice = SemanticNotice(tr_fn("page.strategy_scan.warning_text", WARNING_DEFAULT), tone="info")
+    control_card.add_widget(warning_notice)
 
-    status_label = caption_label_cls(
-        tr_fn("page.strategy_scan.ready", "Готово к сканированию")
-    )
-    control_card.add_widget(status_label)
-
-    actions_title_label = body_label_cls(
-        tr_fn("page.strategy_scan.actions.title", "Действия")
-    )
-    set_state_text(actions_title_label, f"Раздел подбора стратегии: {actions_title_label.text()}")
-
-    actions_bar = QuickActionsBar(parent)
-
-    start_btn = push_button_cls(
-        tr_fn("page.strategy_scan.start", "Начать сканирование"),
+    buttons_row = QHBoxLayout()
+    buttons_row.setSpacing(8)
+    start_btn = primary_button_cls(
+        tr_fn("page.strategy_scan.start", "Найти рабочую стратегию"),
         icon=FluentIcon.SEARCH,
     )
     start_description = tr_fn(
@@ -217,7 +187,7 @@ def build_strategy_scan_control_section(
         description=start_description,
     )
     start_btn.clicked.connect(on_start)
-    actions_bar.add_button(start_btn)
+    buttons_row.addWidget(start_btn)
 
     stop_btn = push_button_cls(
         tr_fn("page.strategy_scan.stop", "Остановить"),
@@ -235,22 +205,43 @@ def build_strategy_scan_control_section(
     )
     stop_btn.setEnabled(False)
     stop_btn.clicked.connect(on_stop)
-    actions_bar.add_button(stop_btn)
+    buttons_row.addWidget(stop_btn)
+
+    status_label = caption_label_cls(tr_fn("page.strategy_scan.ready", "Готово к поиску"))
+    status_label.setWordWrap(True)
+    buttons_row.addSpacing(8)
+    buttons_row.addWidget(status_label, 1)
+    control_card.add_layout(buttons_row)
+
+    progress_bar = progress_bar_cls()
+    progress_bar.setVisible(False)
+    progress_bar.setFixedHeight(4)
+    progress_bar.setRange(0, 100)
+    progress_bar.setValue(0)
+    set_control_accessibility(
+        progress_bar,
+        name="Ход подбора стратегии: не выполняется",
+        description="Показывает, что подбор стратегии выполняется.",
+    )
+    set_state_text(progress_bar, "Ход подбора стратегии: не выполняется")
+    control_card.add_widget(progress_bar)
 
     return StrategyScanControlWidgets(
         control_card=control_card,
+        intro_label=intro_label,
+        protocol_label=protocol_label,
         protocol_combo=protocol_combo,
         games_scope_label=games_scope_label,
         games_scope_combo=games_scope_combo,
+        mode_label=mode_label,
         mode_combo=mode_combo,
         target_label=target_label,
         target_input=target_input,
         quick_domain_btn=quick_domain_btn,
         udp_scope_hint_label=udp_scope_hint_label,
+        warning_notice=warning_notice,
         progress_bar=progress_bar,
         status_label=status_label,
-        actions_title_label=actions_title_label,
-        actions_bar=actions_bar,
         start_btn=start_btn,
         stop_btn=stop_btn,
     )
@@ -258,7 +249,7 @@ def build_strategy_scan_control_section(
 
 def build_strategy_scan_results_section(*, tr_fn, table_cls) -> StrategyScanResultsWidgets:
     results_card = SettingsCard(
-        tr_fn("page.strategy_scan.results", "Результаты")
+        tr_fn("page.strategy_scan.results", "Найденные стратегии")
     )
 
     table = table_cls()
@@ -266,9 +257,9 @@ def build_strategy_scan_results_section(*, tr_fn, table_cls) -> StrategyScanResu
     headers = [
         "#",
         tr_fn("page.strategy_scan.col_strategy", "Стратегия"),
-        tr_fn("page.strategy_scan.col_status", "Статус"),
-        tr_fn("page.strategy_scan.col_time", "Время (мс)"),
-        tr_fn("page.strategy_scan.col_action", "Действие"),
+        tr_fn("page.strategy_scan.col_status", "Результат"),
+        tr_fn("page.strategy_scan.col_time", "Ответ, мс"),
+        tr_fn("page.strategy_scan.col_action", "Применить"),
     ]
     table.setHorizontalHeaderLabels(headers)
     table.setEditTriggers(table_cls.EditTrigger.NoEditTriggers)
@@ -316,7 +307,7 @@ def build_strategy_scan_log_section(*, tr_fn, push_button_cls, parent, on_toggle
         name="Развернуть лог подбора стратегии",
         description="Разворачивает подробный лог подбора стратегии на странице.",
     )
-    expand_log_btn.setFixedWidth(120)
+    expand_log_btn.setMinimumWidth(140)
     expand_log_btn.clicked.connect(on_toggle_log_expand)
 
     log_header = QHBoxLayout()

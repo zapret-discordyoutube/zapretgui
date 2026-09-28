@@ -80,7 +80,7 @@ def build_udp_scope_hint_plan(
 
     return StrategyScanUdpHintPlan(
         visible=True,
-        text=f"UDP scope: {scope_label} | ipset files: {len(paths)} | {preview}",
+        text=f"Будут проверены адреса из {len(paths)} файл(ов) списков: {preview}. Набор: {scope_label}.",
         tooltip="\n".join(paths),
     )
 
@@ -118,6 +118,27 @@ def build_idle_interaction_plan(*, is_udp_games: bool) -> StrategyScanInteractio
     )
 
 
+# Подписи страницы подбора: их берут и сборка страницы, и смена языка.
+PROTOCOL_ITEMS = (
+    ("page.strategy_scan.protocol_tcp", "Сайты и приложения (TCP/HTTPS)", "tcp_https"),
+    ("page.strategy_scan.protocol_stun", "Голосовые звонки Discord и Telegram (STUN)", "stun_voice"),
+    ("page.strategy_scan.protocol_games", "Онлайн-игры: Roblox, Steam, Amazon (UDP)", "udp_games"),
+)
+MODE_ITEMS = (
+    ("page.strategy_scan.mode_quick", "Быстро — 30 лучших стратегий, до 3 минут", "quick"),
+    ("page.strategy_scan.mode_standard", "Тщательно — 80 стратегий, до 8 минут", "standard"),
+    ("page.strategy_scan.mode_full", "Все стратегии — дольше всего", "full"),
+)
+INTRO_DEFAULT = (
+    "Программа по очереди включает стратегии обхода и проверяет, открывается ли выбранный сайт. "
+    "Рабочие появятся в таблице ниже — любую можно сразу применить."
+)
+WARNING_DEFAULT = (
+    "На время поиска Zapret будет выключен: каждая стратегия проверяется отдельно. "
+    "Когда найдёте рабочую, нажмите «Применить» — или просто снова запустите Zapret."
+)
+
+
 def build_log_expand_plan(*, expanded: bool, language: str) -> StrategyScanLogExpandPlan:
     if expanded:
         return StrategyScanLogExpandPlan(
@@ -139,54 +160,37 @@ def build_log_expand_plan(*, expanded: bool, language: str) -> StrategyScanLogEx
 
 
 def build_language_plan(*, language: str, log_expanded: bool) -> StrategyScanLanguagePlan:
+    def _tr(key: str, default: str) -> str:
+        return tr_catalog(key, language=language, default=default)
+
     return StrategyScanLanguagePlan(
-        control_title=tr_catalog("page.strategy_scan.control", language=language, default="Управление сканированием"),
-        results_title=tr_catalog("page.strategy_scan.results", language=language, default="Результаты"),
-        log_title=tr_catalog("page.strategy_scan.log", language=language, default="Подробный лог"),
+        control_title=_tr("page.strategy_scan.control", "Поиск рабочей стратегии"),
+        results_title=_tr("page.strategy_scan.results", "Найденные стратегии"),
+        log_title=_tr("page.strategy_scan.log", "Подробный лог"),
         expand_log_text=(
-            tr_catalog("page.strategy_scan.collapse_log", language=language, default="Свернуть")
+            _tr("page.strategy_scan.collapse_log", "Свернуть")
             if log_expanded
-            else tr_catalog("page.strategy_scan.expand_log", language=language, default="Развернуть")
+            else _tr("page.strategy_scan.expand_log", "Развернуть")
         ),
-        warning_title=tr_catalog("page.strategy_scan.warning_title", language=language, default="Внимание"),
-        start_text=tr_catalog("page.strategy_scan.start", language=language, default="Начать сканирование"),
-        stop_text=tr_catalog("page.strategy_scan.stop", language=language, default="Остановить"),
-        prepare_support_text=tr_catalog(
-            "page.strategy_scan.prepare_support",
-            language=language,
-            default="Подготовить обращение",
-        ),
-        protocol_items=[
-            tr_catalog("page.strategy_scan.protocol_tcp", language=language, default="TCP/HTTPS"),
-            tr_catalog(
-                "page.strategy_scan.protocol_stun",
-                language=language,
-                default="STUN Voice (Discord/Telegram)",
-            ),
-            tr_catalog(
-                "page.strategy_scan.protocol_games",
-                language=language,
-                default="UDP Games (Roblox/Amazon/Steam)",
-            ),
-        ],
-        udp_scope_label=tr_catalog("page.strategy_scan.udp_scope", language=language, default="Охват UDP:"),
+        intro_text=_tr("page.strategy_scan.intro", INTRO_DEFAULT),
+        warning_text=_tr("page.strategy_scan.warning_text", WARNING_DEFAULT),
+        protocol_label=_tr("page.strategy_scan.protocol", "Что должно заработать:"),
+        target_label=_tr("page.strategy_scan.target", "Какой сайт проверять:"),
+        mode_label=_tr("page.strategy_scan.mode", "Насколько тщательно:"),
+        mode_items=[_tr(key, default) for key, default, _value in MODE_ITEMS],
+        start_text=_tr("page.strategy_scan.start", "Найти рабочую стратегию"),
+        stop_text=_tr("page.strategy_scan.stop", "Остановить"),
+        prepare_support_text=_tr("page.strategy_scan.prepare_support", "Подготовить обращение"),
+        protocol_items=[_tr(key, default) for key, default, _value in PROTOCOL_ITEMS],
+        udp_scope_label=_tr("page.strategy_scan.udp_scope", "Какие адреса игр:"),
         udp_scope_items=[
-            tr_catalog(
-                "page.strategy_scan.udp_scope_all",
-                language=language,
-                default="Все ipset (по умолчанию)",
-            ),
-            tr_catalog(
-                "page.strategy_scan.udp_scope_games_only",
-                language=language,
-                default="Только игровые ipset",
-            ),
+            _tr("page.strategy_scan.udp_scope_all", "Все списки адресов (по умолчанию)"),
+            _tr("page.strategy_scan.udp_scope_games_only", "Только игровые списки"),
         ],
-        quick_domains_text=tr_catalog("page.strategy_scan.quick_domains", language=language, default="Быстрый выбор"),
-        quick_domains_tooltip=tr_catalog(
+        quick_domains_text=_tr("page.strategy_scan.quick_domains", "Выбрать из списка"),
+        quick_domains_tooltip=_tr(
             "page.strategy_scan.quick_domains_hint",
-            language=language,
-            default="Выберите домен из готового списка",
+            "Готовые адреса: Discord, YouTube, Telegram и другие",
         ),
     )
 

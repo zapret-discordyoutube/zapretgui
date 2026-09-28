@@ -41,6 +41,7 @@ def apply_interaction_state(
         send_log_btn,
         f"Подготовить обращение с логами, {'доступно' if send_log_enabled else 'недоступно'}",
     )
+    stop_btn.setVisible(progress_visible)
     progress_bar.setVisible(progress_visible)
     progress_state = "выполняется" if progress_visible else "не выполняется"
     set_state_text(progress_bar, f"Ход диагностики соединений: {progress_state}")
@@ -51,27 +52,27 @@ def apply_interaction_state(
         progress_bar.stop()
 
 
-def set_connection_status(*, status_label, status_badge, text: str, status: str = "muted") -> None:
+def set_connection_status(*, status_label, text: str, status: str = "muted") -> None:
+    _ = status
     status_label.setText(text)
     value = clean_connection_status_text(text)
     if value:
         set_state_text(status_label, f"Статус диагностики: {value}")
-    status_badge.set_status(text, status)
 
 
 def refresh_test_combo_items(*, combo, language: str) -> None:
     current = combo.currentIndex() if combo is not None else 0
     items = [
         (
-            tr_catalog("page.connection.test.all", language=language, default="🌐 Все тесты (Discord + YouTube)"),
+            tr_catalog("page.connection.test.all", language=language, default="Discord и YouTube"),
             "all",
         ),
         (
-            tr_catalog("page.connection.test.discord_only", language=language, default="🎮 Только Discord"),
+            tr_catalog("page.connection.test.discord_only", language=language, default="Только Discord"),
             "discord",
         ),
         (
-            tr_catalog("page.connection.test.youtube_only", language=language, default="🎬 Только YouTube"),
+            tr_catalog("page.connection.test.youtube_only", language=language, default="Только YouTube"),
             "youtube",
         ),
     ]
@@ -126,8 +127,6 @@ def start_connection_test(
     result_text,
     apply_interaction_state_callback,
     set_status_callback,
-    status_badge,
-    progress_badge,
 ) -> dict | None:
     if is_testing:
         result_text.append("ℹ️ Тест уже выполняется. Дождитесь завершения.")
@@ -157,8 +156,6 @@ def start_connection_test(
         progress_visible=plan.progress_visible,
     )
     set_status_callback(plan.status_text, plan.status_tone)
-    status_badge.set_status(plan.status_badge_text, plan.status_tone)
-    progress_badge.set_status(plan.progress_badge_text, plan.status_tone)
 
     return {
         "cleanup_in_progress": False,
@@ -250,8 +247,6 @@ def finish_connection_test(
     finish_mode: str,
     apply_interaction_state_callback,
     set_status_callback,
-    status_badge,
-    progress_badge,
     append_callback,
 ) -> dict | None:
     if cleanup_in_progress:
@@ -278,8 +273,6 @@ def finish_connection_test(
         progress_visible=plan.progress_visible,
     )
     set_status_callback(plan.status_text, plan.status_tone)
-    status_badge.set_status(plan.status_badge_text, plan.status_tone)
-    progress_badge.set_status(plan.progress_badge_text, "muted")
     for line in plan.finish_lines:
         append_callback(line)
 
@@ -294,39 +287,43 @@ def apply_connection_language(
     *,
     language: str,
     controls_card,
-    actions_title_label,
-    hero_title,
-    hero_subtitle,
+    log_card,
+    intro_label,
     test_select_label,
+    log_hint_label,
     refresh_test_combo_items_callback,
     start_btn,
     stop_btn,
+    toggle_log_btn,
+    log_visible: bool,
     send_log_btn,
 ) -> None:
-    try:
-        if controls_card is not None:
-            controls_card.set_title(
-                tr_catalog("page.connection.card.testing", language=language, default="Тестирование")
-            )
-    except Exception:
-        pass
-    if actions_title_label is not None:
-        actions_title_label.setText(
-            tr_catalog("page.connection.actions.title", language=language, default="Действия")
-        )
+    def _tr(key: str, default: str) -> str:
+        return tr_catalog(key, language=language, default=default)
 
-    hero_title.setText(
-        tr_catalog("page.connection.hero.title", language=language, default="Диагностика сетевых соединений")
-    )
-    hero_subtitle.setText(
-        tr_catalog(
-            "page.connection.hero.subtitle",
-            language=language,
-            default="Проверьте доступность Discord и YouTube, а затем одной кнопкой соберите ZIP с логами и откройте Forgejo Issues.",
+    for card, key, default in (
+        (controls_card, "page.connection.card.testing", "Проверка соединения"),
+        (log_card, "page.connection.card.result", "Подробный отчёт"),
+    ):
+        try:
+            if card is not None:
+                card.set_title(_tr(key, default))
+        except Exception:
+            pass
+
+    intro_label.setText(
+        _tr(
+            "page.connection.intro",
+            "Проверяем Discord и YouTube так же, как их открывает браузер: доходит ли соединение, "
+            "не режет ли его DPI и не подменяет ли DNS адреса. Занимает 5–15 секунд.",
         )
     )
-    test_select_label.setText(
-        tr_catalog("page.connection.test.select", language=language, default="Выбор теста:")
+    test_select_label.setText(_tr("page.connection.test.select", "Что проверить:"))
+    log_hint_label.setText(
+        _tr(
+            "page.connection.log.hint",
+            "Адреса, ответы DNS и время ответа каждого сервера. Пригодится поддержке.",
+        )
     )
     refresh_test_combo_items_callback()
 
@@ -334,72 +331,52 @@ def apply_connection_language(
         set_control_accessibility(widget, name=name, description=description)
         set_state_text(widget, name)
 
-    start_btn.setText(tr_catalog("page.connection.button.start", language=language, default="Запустить тест"))
-    stop_btn.setText(tr_catalog("page.connection.button.stop", language=language, default="Стоп"))
-    send_log_btn.setText(tr_catalog("page.connection.button.send_log", language=language, default="Подготовить обращение"))
-    set_tooltip(
-        start_btn,
-        tr_catalog(
-            "page.connection.action.start.description",
-            language=language,
-            default="Запустить выбранный сценарий диагностики для Discord и YouTube.",
-        )
+    start_btn.setText(_tr("page.connection.button.start", "Проверить"))
+    stop_btn.setText(_tr("page.connection.button.stop", "Остановить"))
+    send_log_btn.setText(_tr("page.connection.button.send_log", "Подготовить обращение"))
+    set_log_toggle_text(toggle_log_btn, visible=log_visible, language=language)
+
+    start_description = _tr(
+        "page.connection.action.start.description",
+        "Проверить, открываются ли Discord и YouTube и не подменяет ли DNS их адреса.",
     )
+    set_tooltip(start_btn, start_description)
     _set_action_accessibility(
         start_btn,
-        name=tr_catalog(
-            "page.connection.action.start.accessible_name",
-            language=language,
-            default="Запустить диагностический тест",
-        ),
-        description=tr_catalog(
-            "page.connection.action.start.description",
-            language=language,
-            default="Запустить выбранный сценарий диагностики для Discord и YouTube.",
-        ),
+        name=_tr("page.connection.action.start.accessible_name", "Запустить диагностический тест"),
+        description=start_description,
     )
-    set_tooltip(
-        stop_btn,
-        tr_catalog(
-            "page.connection.action.stop.description",
-            language=language,
-            default="Останавливает текущий тест, если он уже запущен.",
-        )
+    stop_description = _tr(
+        "page.connection.action.stop.description",
+        "Останавливает текущий тест, если он уже запущен.",
     )
+    set_tooltip(stop_btn, stop_description)
     _set_action_accessibility(
         stop_btn,
-        name=tr_catalog(
-            "page.connection.action.stop.accessible_name",
-            language=language,
-            default="Остановить диагностический тест",
-        ),
-        description=tr_catalog(
-            "page.connection.action.stop.description",
-            language=language,
-            default="Останавливает текущий тест, если он уже запущен.",
-        ),
+        name=_tr("page.connection.action.stop.accessible_name", "Остановить диагностический тест"),
+        description=stop_description,
     )
-    set_tooltip(
-        send_log_btn,
-        tr_catalog(
-            "page.connection.action.support.description",
-            language=language,
-            default="Собрать архив логов и открыть готовое обращение в Forgejo Issues.",
-        )
+    support_description = _tr(
+        "page.connection.action.support.description",
+        "Собрать архив логов и открыть готовое обращение в Forgejo Issues.",
     )
+    set_tooltip(send_log_btn, support_description)
     _set_action_accessibility(
         send_log_btn,
-        name=tr_catalog(
-            "page.connection.action.support.accessible_name",
-            language=language,
-            default="Подготовить обращение с логами",
-        ),
-        description=tr_catalog(
-            "page.connection.action.support.description",
-            language=language,
-            default="Собрать архив логов и открыть готовое обращение в Forgejo Issues.",
-        ),
+        name=_tr("page.connection.action.support.accessible_name", "Подготовить обращение с логами"),
+        description=support_description,
     )
+
+
+def set_log_toggle_text(toggle_btn, *, visible: bool, language: str) -> None:
+    if toggle_btn is None:
+        return
+    if visible:
+        text = tr_catalog("page.connection.button.hide_log", language=language, default="Скрыть отчёт")
+    else:
+        text = tr_catalog("page.connection.button.show_log", language=language, default="Показать отчёт")
+    toggle_btn.setText(text)
+    set_state_text(toggle_btn, f"{text}, подробный отчёт {'открыт' if visible else 'скрыт'}")
 
 
 def cleanup_connection_runtime(

@@ -2,22 +2,26 @@
 
 Как он устроен
 --------------
-1. Для каждого адреса из списка сервиса запускаются параллельно:
-   DNS-запрос к серверам системы (без кэша и hosts), эталонный запрос через
+Для каждого адреса из списка сервиса:
+
+1. Параллельно спрашиваются DNS системы (без кэша и hosts), эталон по
    DNS-over-HTTPS к 1.1.1.1 и 8.8.8.8 (по IP, чтобы эталон не зависел от
-   проверяемого DNS), HTTPS-запрос к самому сайту, TCP-подключение к порту
-   443, при необходимости ping и проверка TLS 1.2 / 1.3.
-2. Все сетевые вызовы идут через Windows API (dnsapi, WinHTTP, ICMP) и
-   ограничены по времени; кнопка «Стоп» снимает их сразу.
-3. Результаты печатаются в постоянном порядке: блок адреса выводится, как
-   только готовы его проверки и все блоки перед ним.
-4. Выводы делает ``diagnostics.verdict`` — здесь только сбор фактов и текст.
+   проверяемого DNS) и файл hosts.
+2. **Открывается ли сайт.** HTTPS-запрос идёт через ``diagnostics.tls_probe``
+   (OpenSSL, TLS 1.3 — как браузер и как подбор стратегий) к адресу, которым
+   воспользовался бы браузер: из hosts, из DNS системы, если он подлинный,
+   иначе из эталона. При неудаче — ещё одна попытка на другом адресе.
+3. **Честен ли DNS.** Если адрес из DNS не совпал с эталоном, решает
+   сертификат по этому адресу (см. ``diagnostics.verdict``).
+4. Результаты печатаются в постоянном порядке, в конце — итог по сервисам.
+   Тот же итог возвращается словарём для карточек на странице.
+
+Все сетевые вызовы ограничены по времени; кнопка «Стоп» снимает их сразу.
 """
 
 from __future__ import annotations
 
 import json
-import socket
 import sys
 import time
 from collections.abc import Callable
@@ -26,13 +30,24 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from urllib.parse import quote
 
+from diagnostics.tls_probe import (
+    KIND_CANCELLED,
+    KIND_CERT,
+    ProbeCancel,
+    ProbeResult,
+    https_get,
+)
 from diagnostics.verdict import (
-    ChannelState,
     DnsJudgement,
     DnsState,
-    describe_channel,
-    judge_channel,
+    Level,
+    ReachState,
+    ServiceVerdict,
+    TargetOutcome,
+    describe_reach,
     judge_dns,
+    judge_reach,
+    summarize_service,
 )
 from utils.windows_dns_query import (
     DnsAnswer,
@@ -40,15 +55,7 @@ from utils.windows_dns_query import (
     query_ipv4,
     system_dns_servers,
 )
-from utils.windows_http import (
-    KIND_OK,
-    TLS_1_2,
-    TLS_1_3,
-    HttpCancel,
-    HttpsResult,
-    https_request,
-    is_tls13_supported,
-)
+from utils.windows_http import HttpCancel, https_request
 
 __all__ = [
     "SERVICES",
@@ -63,10 +70,9 @@ ShouldStop = Callable[[], bool]
 
 DNS_TIMEOUT = 4.0
 DOH_TIMEOUT = 5.0
-HTTPS_TIMEOUT = 6.0
-TCP_TIMEOUT = 4.0
-TCP_MAX_ADDRESSES = 6
-PING_TIMEOUT_MS = 1500
+HTTPS_TIMEOUT = 5.0
+READ_TIMEOUT = 3.0
+REACH_ATTEMPTS = 2
 DISCOVERY_TIMEOUT = 6.0
 # Верхняя граница на всю проверку: дальше недопроверенное помечается как
 # «нет ответа», а не подвешивает окно.
@@ -79,22 +85,20 @@ _TIMED_OUT_LINE = (
 # Сколько тела ответа читать, чтобы заметить обрыв после ~16 КБ (ТСПУ режет
 # соединение с зарубежными CDN ровно на этом объёме).
 BODY_PROBE_BYTES = 64 * 1024
-_FREEZE_MIN_BYTES = 14_000
-_FREEZE_MAX_BYTES = 24_000
 
 _DOH_ENDPOINTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("1.1.1.1", "/dns-query?name={name}&type=A", ("Accept: application/dns-json",)),
     ("8.8.8.8", "/resolve?name={name}&type=A", ()),
 )
 
-_BROWSER_HEADERS = (
-    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-    "Accept-Language: en-US,en;q=0.8",
-)
 _WATCH_PAGE = "/watch?v=jNQXAC9IVRw&hl=en"
 _WATCH_PAGE_MAX_BYTES = 2_000_000
+YOUTUBE_HOST = "www.youtube.com"
 GOOGLEVIDEO_FALLBACK_HOST = "redirector.googlevideo.com"
+
+SOURCE_HOSTS = "hosts"
+SOURCE_SYSTEM = "system"
+SOURCE_REFERENCE = "reference"
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,8 +107,8 @@ class Target:
     purpose: str
     path: str = "/"
     read_body: bool = False
-    tls_versions: bool = False
-    ping: bool = False
+    # Главный адрес сервиса: если он не открывается, не открывается сервис.
+    main: bool = False
     # Хост видеосервера каждый раз узнаётся у YouTube: он свой у каждого
     # провайдера и меняется со временем.
     discover_googlevideo: bool = False
@@ -114,7 +118,7 @@ SERVICES: dict[str, tuple[str, tuple[Target, ...]]] = {
     "discord": (
         "Discord",
         (
-            Target("discord.com", "сайт и вход", read_body=True, tls_versions=True, ping=True),
+            Target("discord.com", "сайт и вход", read_body=True, main=True),
             Target("gateway.discord.gg", "чат и статусы"),
             Target("cdn.discordapp.com", "картинки и файлы"),
         ),
@@ -122,13 +126,12 @@ SERVICES: dict[str, tuple[str, tuple[Target, ...]]] = {
     "youtube": (
         "YouTube",
         (
-            Target("www.youtube.com", "сайт", read_body=True, tls_versions=True, ping=True),
+            Target(YOUTUBE_HOST, "сайт", read_body=True, main=True),
             Target("i.ytimg.com", "превью видео", path="/generate_204"),
             Target(
                 GOOGLEVIDEO_FALLBACK_HOST,
-                "видеосервер",
+                "видео",
                 path="/generate_204",
-                tls_versions=True,
                 discover_googlevideo=True,
             ),
         ),
@@ -141,13 +144,6 @@ class _Stopped(Exception):
 
 
 @dataclass(slots=True)
-class _TcpResult:
-    ok: bool
-    ip: str
-    elapsed_ms: float = 0.0
-
-
-@dataclass(slots=True)
 class _Probe:
     target: Target
     service: str
@@ -157,13 +153,14 @@ class _Probe:
     hosts_ips: tuple[str, ...] = ()
     reference_ips: tuple[str, ...] = ()
     reference_ok: bool = False
-    https: HttpsResult = field(default_factory=HttpsResult)
-    tcp: tuple[_TcpResult, ...] = ()
-    tls12: HttpsResult | None = None
-    tls13: HttpsResult | None = None
-    ping: object | None = None
+    # HTTPS-запрос к адресу из hosts или DNS системы (проверка сертификата).
+    local_check: ProbeResult | None = None
+    # Итоговый запрос «открывается ли» и откуда взят его адрес.
+    reach: ProbeResult | None = None
+    reach_source: str = ""
+    attempts: int = 0
     judgement: DnsJudgement | None = None
-    channel: ChannelState = ChannelState.UNKNOWN
+    reach_state: ReachState = ReachState.UNKNOWN
 
 
 class _Run:
@@ -178,9 +175,14 @@ class _Run:
         self._should_stop = should_stop
         self._user_stopped = False
         self.timed_out = False
-        self.cancel = HttpCancel()
+        self.http_cancel = HttpCancel()
+        self.probe_cancel = ProbeCancel()
         self.deadline = time.monotonic() + RUN_DEADLINE
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="diag")
+
+    def _cancel_all(self) -> None:
+        self.http_cancel.cancel()
+        self.probe_cancel.cancel()
 
     def stopped(self) -> bool:
         if self._user_stopped:
@@ -188,7 +190,7 @@ class _Run:
         try:
             if self._should_stop is not None and self._should_stop():
                 self._user_stopped = True
-                self.cancel.cancel()
+                self._cancel_all()
         except Exception:
             return False
         return self._user_stopped
@@ -198,8 +200,8 @@ class _Run:
             return False
         if not self.timed_out:
             self.timed_out = True
-            # Всё, что ещё висит, снимаем: WinHTTP и DNS вернутся сразу.
-            self.cancel.cancel()
+            # Всё, что ещё висит, снимаем: запросы и DNS вернутся сразу.
+            self._cancel_all()
         return True
 
     def dns_cancelled(self) -> bool:
@@ -220,7 +222,7 @@ class _Run:
                 continue
 
     def close(self) -> None:
-        self.cancel.cancel()
+        self._cancel_all()
         self.pool.shutdown(wait=False, cancel_futures=True)
 
 
@@ -240,7 +242,7 @@ def _doh_lookup(run: _Run, host: str) -> tuple[bool, tuple[str, ...]]:
             headers=headers,
             timeout=DOH_TIMEOUT,
             max_body=64 * 1024,
-            cancel=run.cancel,
+            cancel=run.http_cancel,
         )
         if result.status != 200 or not result.body:
             return False, []
@@ -267,23 +269,16 @@ def _doh_lookup(run: _Run, host: str) -> tuple[bool, tuple[str, ...]]:
     return answered, tuple(ips)
 
 
-def _tcp_connect(ip: str, timeout: float) -> _TcpResult:
-    started = time.perf_counter()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        sock.settimeout(timeout)
-        code = sock.connect_ex((ip, 443))
-    except OSError:
-        code = -1
-    finally:
-        sock.close()
-    return _TcpResult(code == 0, ip, (time.perf_counter() - started) * 1000)
-
-
-def _ping(host: str, ip: str):
-    from utils.windows_icmp import ping_ipv4_host_winapi
-
-    return ping_ipv4_host_winapi(host, count=2, timeout_ms=PING_TIMEOUT_MS, resolved_ip=ip)
+def _get(run: _Run, host: str, ip: str, path: str, *, read_limit: int = 0) -> ProbeResult:
+    return https_get(
+        host,
+        ip,
+        path,
+        timeout=HTTPS_TIMEOUT,
+        read_limit=read_limit,
+        read_timeout=READ_TIMEOUT,
+        cancel=run.probe_cancel,
+    )
 
 
 def _discover_googlevideo(run: _Run) -> tuple[str, str]:
@@ -301,20 +296,67 @@ def _discover_googlevideo(run: _Run) -> tuple[str, str]:
             return True
         return False
 
-    result = https_request(
-        "www.youtube.com",
-        _WATCH_PAGE,
-        headers=_BROWSER_HEADERS,
-        timeout=DISCOVERY_TIMEOUT,
-        max_body=_WATCH_PAGE_MAX_BYTES,
-        body_done=_done,
-        cancel=run.cancel,
-    )
-    if found:
-        return found[0], "адрес видеосервера получен от YouTube"
-    if result.kind != KIND_OK:
-        return GOOGLEVIDEO_FALLBACK_HOST, "YouTube не открылся, поэтому проверяем общий адрес видеосерверов"
-    return GOOGLEVIDEO_FALLBACK_HOST, "YouTube не назвал видеосервер, поэтому проверяем общий адрес"
+    # Адрес YouTube — тот, которым воспользовался бы браузер: hosts, DNS
+    # системы, а если DNS его не дал — эталон.
+    candidates = list(hosts_file_ipv4(YOUTUBE_HOST))
+    if not candidates:
+        candidates = list(query_ipv4(YOUTUBE_HOST, timeout=DNS_TIMEOUT, cancelled=run.dns_cancelled).ips)
+    if not candidates:
+        candidates = list(_doh_lookup(run, YOUTUBE_HOST)[1])
+
+    for ip in candidates[:2]:
+        result = https_get(
+            YOUTUBE_HOST,
+            ip,
+            _WATCH_PAGE,
+            timeout=DISCOVERY_TIMEOUT,
+            read_limit=_WATCH_PAGE_MAX_BYTES,
+            read_timeout=READ_TIMEOUT,
+            body_done=_done,
+            cancel=run.probe_cancel,
+        )
+        if found:
+            return found[0], "адрес видеосервера получен от YouTube"
+        if result.ok:
+            return GOOGLEVIDEO_FALLBACK_HOST, "YouTube не назвал видеосервер, поэтому проверяем общий адрес"
+        if result.kind == KIND_CANCELLED:
+            break
+    return GOOGLEVIDEO_FALLBACK_HOST, "страница YouTube не открылась, поэтому проверяем общий адрес видеосерверов"
+
+
+def _reach_order(probe: _Probe, *, local_ok: bool) -> tuple[list[str], str]:
+    """Адреса для проверки «открывается ли» и откуда они взяты."""
+    if probe.hosts_ips:
+        return list(probe.hosts_ips), SOURCE_HOSTS
+    system = list(probe.dns.ips)
+    matches = bool(set(system) & set(probe.reference_ips))
+    if system and (local_ok or matches or not probe.reference_ips):
+        return system, SOURCE_SYSTEM
+    return list(probe.reference_ips), SOURCE_REFERENCE
+
+
+def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
+    local = probe.local_check
+    order, source = _reach_order(probe, local_ok=bool(local and local.ok))
+    probe.reach_source = source
+    if not order:
+        return
+
+    attempts: list[ProbeResult] = []
+    if local is not None and local.ip == order[0]:
+        attempts.append(local)
+    while len(attempts) < REACH_ATTEMPTS:
+        last = attempts[-1] if attempts else None
+        if last is not None and (last.ok or last.kind in (KIND_CANCELLED, KIND_CERT)):
+            break
+        if run.dns_cancelled():
+            break
+        tried = {item.ip for item in attempts}
+        ip = next((item for item in order if item not in tried), order[0])
+        attempts.append(_get(run, probe.host, ip, probe.target.path, read_limit=read_limit))
+
+    probe.attempts = len(attempts)
+    probe.reach = next((item for item in attempts if item.ok), attempts[-1] if attempts else None)
 
 
 def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Probe:
@@ -324,69 +366,52 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Pr
         host, discovery_note = _discover_googlevideo(run)
 
     probe = _Probe(target=target, service=service, host=host, discovery_note=discovery_note)
+    read_limit = BODY_PROBE_BYTES if (full and target.read_body) else 0
 
     dns_future = run.submit(query_ipv4, host, timeout=DNS_TIMEOUT, cancelled=run.dns_cancelled)
     doh_future = run.submit(_doh_lookup, run, host)
-    https_future = run.submit(
-        https_request,
-        host,
-        target.path,
-        timeout=HTTPS_TIMEOUT,
-        max_body=BODY_PROBE_BYTES if (full and target.read_body) else 0,
-        cancel=run.cancel,
-    )
-    tls_futures: dict[str, Future] = {}
-    if full and target.tls_versions:
-        tls_futures["tls12"] = run.submit(
-            https_request, host, target.path, timeout=HTTPS_TIMEOUT, tls_protocols=TLS_1_2, cancel=run.cancel
-        )
-        if is_tls13_supported():
-            tls_futures["tls13"] = run.submit(
-                https_request, host, target.path, timeout=HTTPS_TIMEOUT, tls_protocols=TLS_1_3, cancel=run.cancel
-            )
-
     probe.hosts_ips = hosts_file_ipv4(host)
     probe.dns = dns_future.result()
 
-    # TCP — ко всем адресам, которыми реально пользуются программы: провайдер
-    # нередко блокирует только часть адресов сайта.
-    connect_ips = (probe.hosts_ips or probe.dns.ips)[:TCP_MAX_ADDRESSES]
-    tcp_futures = [run.submit(_tcp_connect, ip, TCP_TIMEOUT) for ip in connect_ips] if full else []
-    ping_future = run.submit(_ping, host, connect_ips[0]) if (full and target.ping and connect_ips) else None
+    local_ips = probe.hosts_ips or probe.dns.ips
+    local_future: Future | None = None
+    if full and local_ips:
+        # В полной проверке запрос к адресу из DNS нужен всегда — не ждём эталон.
+        local_future = run.submit(_get, run, host, local_ips[0], target.path, read_limit=read_limit)
 
     probe.reference_ok, probe.reference_ips = doh_future.result()
-    probe.https = https_future.result()
-    probe.tls12 = tls_futures["tls12"].result() if "tls12" in tls_futures else None
-    probe.tls13 = tls_futures["tls13"].result() if "tls13" in tls_futures else None
-    probe.tcp = tuple(future.result() for future in tcp_futures)
-    probe.ping = ping_future.result() if ping_future else None
+    matches = bool(set(probe.dns.ips) & set(probe.reference_ips))
+    if local_future is None and local_ips and (probe.hosts_ips or not matches):
+        local_future = run.submit(_get, run, host, local_ips[0], target.path)
+    if local_future is not None:
+        probe.local_check = local_future.result()
 
+    local = probe.local_check
     probe.judgement = judge_dns(
         system_ips=probe.dns.ips,
         system_status=probe.dns.status,
         reference_ips=probe.reference_ips,
         hosts_ips=probe.hosts_ips,
-        https_kind=probe.https.kind,
-        https_cert_problem=probe.https.cert_problem,
-        https_remote_ip=probe.https.remote_ip,
+        check_kind=local.kind if local else "",
+        check_cert_problem=local.cert_problem if local else "",
     )
-    probe.channel = judge_channel(
-        https_kind=probe.https.kind,
-        tcp_ok=any(item.ok for item in probe.tcp) if probe.tcp else None,
-    )
-    if probe.channel == ChannelState.OK and _is_body_freeze(probe.https):
-        probe.channel = ChannelState.DPI
+
+    if full:
+        _check_reach(run, probe, read_limit=read_limit)
+        probe.reach_state = judge_reach(probe.reach)
     return probe
-
-
-def _is_body_freeze(result: HttpsResult) -> bool:
-    """Ответ пришёл, но данные оборвались на 14–24 КБ — почерк ТСПУ."""
-    return bool(result.read_error) and _FREEZE_MIN_BYTES <= len(result.body) <= _FREEZE_MAX_BYTES
 
 
 # ---------------------------------------------------------------------------
 # Текст отчёта
 # ---------------------------------------------------------------------------
+
+_LEVEL_ICON = {Level.OK: "✅", Level.WARN: "⚠️", Level.FAIL: "❌", Level.UNKNOWN: "❔"}
+_DNS_ICON = {DnsState.OK: "✅", DnsState.SPOOFED: "❌", DnsState.LOCAL: "ℹ️", DnsState.UNKNOWN: "⚠️"}
+_SOURCE_NOTE = {
+    SOURCE_HOSTS: ", адрес из файла hosts",
+    SOURCE_REFERENCE: ", адрес по DNS-over-HTTPS",
+}
 
 
 def _ips_text(ips: tuple[str, ...], limit: int = 3) -> str:
@@ -396,134 +421,70 @@ def _ips_text(ips: tuple[str, ...], limit: int = 3) -> str:
     return f"{shown} и ещё {len(ips) - limit}" if len(ips) > limit else shown
 
 
-def _dns_lines(probe: _Probe) -> list[str]:
+def _reach_text(probe: _Probe) -> str:
+    """Одна строка: открывается ли адрес и почему нет."""
+    result = probe.reach
+    source = _SOURCE_NOTE.get(probe.reach_source, "")
+    if probe.reach_state == ReachState.OK and result is not None:
+        tls = f", {result.tls_version.replace('TLSv', 'TLS ')}" if result.tls_version else ""
+        return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source})"
+    text = describe_reach(result, timeout=HTTPS_TIMEOUT)
+    if result is None:
+        return text
+    tries = f", попыток: {probe.attempts}" if probe.attempts > 1 else ""
+    return f"{text} ({result.ip}{source}{tries})"
+
+
+def _dns_detail(probe: _Probe) -> str:
+    parts: list[str] = []
+    if probe.hosts_ips:
+        parts.append(f"hosts: {_ips_text(probe.hosts_ips)}")
+    if probe.dns.ips:
+        parts.append(f"DNS системы: {_ips_text(probe.dns.ips)}")
+    else:
+        parts.append(f"DNS системы: нет адреса ({probe.dns.detail})")
+    if probe.reference_ips:
+        parts.append(f"эталон: {_ips_text(probe.reference_ips)}")
+    elif not probe.reference_ok:
+        parts.append("эталон: недоступен")
+    return " · ".join(parts)
+
+
+def _dns_lines(probe: _Probe, indent: str) -> list[str]:
     judgement = probe.judgement
     lines: list[str] = []
-    if probe.hosts_ips:
-        lines.append(f"  Файл hosts: {_ips_text(probe.hosts_ips)}")
-    if probe.dns.ips:
-        lines.append(f"  DNS системы: {_ips_text(probe.dns.ips)}")
-    else:
-        lines.append(f"  DNS системы: нет адреса ({probe.dns.detail})")
-    if probe.reference_ips:
-        lines.append(f"  Эталон (DNS-over-HTTPS): {_ips_text(probe.reference_ips)}")
-    elif not probe.reference_ok:
-        lines.append("  Эталон (DNS-over-HTTPS): недоступен")
     if judgement is not None:
-        icon = {
-            DnsState.OK: "✅",
-            DnsState.SPOOFED: "❌",
-            DnsState.LOCAL: "ℹ️",
-            DnsState.UNKNOWN: "⚠️",
-        }[judgement.state]
-        lines.append(f"  {icon} DNS: {judgement.reason}")
+        lines.append(f"{indent}{_DNS_ICON[judgement.state]} DNS: {judgement.reason}")
+    lines.append(f"{indent}   {_dns_detail(probe)}")
     return lines
-
-
-def _https_line(probe: _Probe) -> str:
-    result = probe.https
-    if result.kind == KIND_OK:
-        where = f", сервер {result.remote_ip}" if result.remote_ip else ""
-        if _is_body_freeze(result):
-            return (
-                f"  ❌ HTTPS: ответ начал приходить, но оборвался на {len(result.body) // 1024} КБ — "
-                "так ТСПУ режет соединения с зарубежными серверами"
-            )
-        return f"  ✅ HTTPS: сервер ответил (код {result.status}, {result.elapsed_ms:.0f} мс{where})"
-    return f"  ❌ HTTPS: {describe_channel(result.kind, cert_problem=result.cert_problem, timeout=HTTPS_TIMEOUT)}"
-
-
-def _tls_line(probe: _Probe) -> str | None:
-    if probe.tls12 is None:
-        return None
-
-    def _one(result: HttpsResult | None) -> str:
-        if result is None:
-            return "не поддерживается этой версией Windows"
-        if result.kind == KIND_OK:
-            return "✓ работает"
-        return f"✗ {describe_channel(result.kind, cert_problem=result.cert_problem, timeout=HTTPS_TIMEOUT)}"
-
-    return f"  🔐 TLS 1.2: {_one(probe.tls12)} · TLS 1.3: {_one(probe.tls13)}"
-
-
-def _tcp_line(probe: _Probe) -> str | None:
-    if not probe.tcp:
-        return None
-    alive = [item for item in probe.tcp if item.ok]
-    dead = [item.ip for item in probe.tcp if not item.ok]
-    total = len(probe.tcp)
-    if not alive:
-        return f"  ❌ TCP 443: ни один адрес не отвечает ({total}) — адрес заблокирован или нет сети"
-    fastest = min(item.elapsed_ms for item in alive)
-    if not dead:
-        if total == 1:
-            return f"  ✅ TCP 443: адрес {alive[0].ip} отвечает за {fastest:.0f} мс"
-        return f"  ✅ TCP 443: отвечают все адреса ({total}), быстрейший за {fastest:.0f} мс"
-    return (
-        f"  ⚠️ TCP 443: отвечают {len(alive)} из {total} адресов, не отвечает {_ips_text(tuple(dead))} — "
-        "часть серверов недоступна, программы обычно переключаются на рабочий"
-    )
-
-
-def _ping_line(probe: _Probe) -> str | None:
-    result = probe.ping
-    if result is None:
-        return None
-    received = int(getattr(result, "received", 0) or 0)
-    sent = int(getattr(result, "sent", 0) or 0)
-    ip = getattr(result, "resolved_ip", "") or ""
-    if received:
-        average = getattr(result, "average_ms", None)
-        delay = f", {average:.0f} мс" if average is not None else ""
-        return f"  📶 Ping {ip}: ответил на {received} из {sent}{delay}"
-    if getattr(result, "error_code", "") == "TIMEOUT":
-        return f"  📶 Ping {ip}: не отвечает (многие серверы игнорируют ping, на работу это не влияет)"
-    return f"  📶 Ping {ip}: не удалось выполнить ({getattr(result, 'detail', '') or 'ошибка ICMP'})"
 
 
 def _probe_lines(probe: _Probe, *, full: bool) -> list[str]:
-    lines = [f"{probe.host} — {probe.target.purpose}"]
+    title = f"{probe.host} — {probe.target.purpose}"
+    if not full:
+        lines = [title]
+        if probe.discovery_note:
+            lines.append(f"  ℹ️ {probe.discovery_note}")
+        lines.extend(_dns_lines(probe, "  "))
+        return lines
+
+    icon = "✅" if probe.reach_state == ReachState.OK else "❌"
+    if probe.reach_state == ReachState.UNKNOWN:
+        icon = "❔"
+    lines = [f"{icon} {title}: {_reach_text(probe)}"]
     if probe.discovery_note:
-        lines.append(f"  ℹ️ {probe.discovery_note}")
-    lines.extend(_dns_lines(probe))
-    if full:
-        for line in (_tcp_line(probe), _https_line(probe), _tls_line(probe), _ping_line(probe)):
-            if line:
-                lines.append(line)
-    elif probe.https.kind != KIND_OK and probe.judgement and probe.judgement.state == DnsState.UNKNOWN:
-        lines.append(f"  ℹ️ Проверка сертификата: {describe_channel(probe.https.kind, cert_problem=probe.https.cert_problem, timeout=HTTPS_TIMEOUT)}")
+        lines.append(f"   ℹ️ {probe.discovery_note}")
+    lines.extend(_dns_lines(probe, "   "))
     return lines
 
 
-def _service_summary(label: str, probes: list[_Probe], *, zapret_running: bool | None) -> str:
-    states = [probe.judgement.state for probe in probes if probe.judgement]
-    channels = [probe.channel for probe in probes]
-    if DnsState.SPOOFED in states:
-        return (
-            f"❌ {label}: DNS подменяет адреса. Откройте «Настройка DNS» и включите DNS "
-            "с шифрованием (DoH) — провайдер не сможет его перехватить."
-        )
-    if ChannelState.CERT in channels:
-        return (
-            f"❌ {label}: вместо настоящего сервера отвечает чужой — трафик перехватывает "
-            "антивирус, прокси или провайдер."
-        )
-    if ChannelState.DPI in channels:
-        if zapret_running:
-            return (
-                f"❌ {label}: соединение режет DPI провайдера. Zapret запущен, но текущая стратегия "
-                "не помогает — подберите другую."
-            )
-        return f"❌ {label}: соединение режет DPI провайдера. Запустите Zapret."
-    if ChannelState.IP_BLOCK in channels:
-        return (
-            f"❌ {label}: серверы недоступны по адресу — блокировка по IP или нет интернета. "
-            "Zapret помогает в таком случае не всегда."
-        )
-    if all(channel == ChannelState.OK for channel in channels):
-        return f"✅ {label}: всё работает."
-    return f"⚠️ {label}: часть проверок не дала ответа — повторите проверку."
+def _verdict_lines(verdict: ServiceVerdict) -> list[str]:
+    lines = [f"{_LEVEL_ICON[verdict.level]} {verdict.headline}"]
+    if verdict.dns_note:
+        lines.append(f"   ⚠️ {verdict.dns_note}")
+    for item in verdict.advice:
+        lines.append(f"   👉 {item}")
+    return lines
 
 
 def _dns_provider_name(ip: str) -> tuple[str, str]:
@@ -606,7 +567,7 @@ def _run_probes(
         _label, targets = SERVICES[service]
         for target in targets:
             if not full and target.discover_googlevideo:
-                target = Target(target.host, target.purpose, target.path)
+                target = Target(target.host, target.purpose, target.path, main=target.main)
             planned.append((service, target, run.submit(_probe_target, run, target, service, full=full)))
 
     collected: dict[str, list[_Probe]] = {service: [] for service in services}
@@ -621,20 +582,49 @@ def _run_probes(
         except _Stopped:
             raise
         except Exception as exc:
-            emit(f"{target.host}: ❌ проверка не выполнилась ({exc})")
+            emit(f"❔ {target.host} — {target.purpose}: проверка не выполнилась ({exc})")
             continue
         collected[service].append(probe)
         for line in _probe_lines(probe, full=full):
             emit(line)
-        emit("")
+    emit("")
     return collected
 
 
+def _service_verdict(service: str, probes: list[_Probe], *, zapret_running: bool | None) -> ServiceVerdict:
+    outcomes = [
+        TargetOutcome(
+            host=probe.host,
+            purpose=probe.target.purpose,
+            reach=probe.reach_state,
+            dns=probe.judgement.state if probe.judgement else DnsState.UNKNOWN,
+            main=probe.target.main,
+        )
+        for probe in probes
+    ]
+    return summarize_service(SERVICES[service][0], outcomes, zapret_running=zapret_running)
+
+
+def _target_report(probe: _Probe) -> dict:
+    return {
+        "host": probe.host,
+        "purpose": probe.target.purpose,
+        "main": probe.target.main,
+        "state": probe.reach_state.value,
+        "ok": probe.reach_state == ReachState.OK,
+        "text": _reach_text(probe),
+        "short": "открывается" if probe.reach_state == ReachState.OK else describe_reach(probe.reach, timeout=HTTPS_TIMEOUT),
+        "dns_state": probe.judgement.state.value if probe.judgement else "",
+        "dns_reason": probe.judgement.reason if probe.judgement else "",
+        "note": probe.discovery_note,
+    }
+
+
 def run_connection_test(test_type: str, *, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
-    """Полная диагностика вкладки «Диагностика». Возвращает краткую сводку."""
+    """Полная диагностика вкладки «Диагностика». Возвращает итог для карточек."""
     services = _selected_services(test_type)
     targets_count = sum(len(SERVICES[service][1]) for service in services)
-    run = _Run(should_stop, workers=max(8, targets_count * 8))
+    run = _Run(should_stop, workers=max(8, targets_count * 6))
     started = time.monotonic()
     try:
         emit(f"🔍 Диагностика соединения — {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
@@ -642,7 +632,7 @@ def run_connection_test(test_type: str, *, emit: Emit, should_stop: ShouldStop |
             emit(line)
         zapret_running, zapret_line = _zapret_status()
         emit(zapret_line)
-        emit(f"⏳ Проверяем {targets_count} адресов одновременно, это займёт несколько секунд…")
+        emit("⏳ Проверяем так же, как браузер: TLS 1.3, правильные адреса сайтов…")
 
         collected = _run_probes(run, services, full=True, emit=emit)
 
@@ -650,13 +640,33 @@ def run_connection_test(test_type: str, *, emit: Emit, should_stop: ShouldStop |
         if run.timed_out:
             emit(_TIMED_OUT_LINE)
         summary: dict[str, str] = {}
+        reports: list[dict] = []
         for service in services:
-            line = _service_summary(SERVICES[service][0], collected[service], zapret_running=zapret_running)
-            summary[service] = line
-            emit(line)
-        emit(f"Проверка заняла {time.monotonic() - started:.1f} с.")
+            verdict = _service_verdict(service, collected[service], zapret_running=zapret_running)
+            lines = _verdict_lines(verdict)
+            for line in lines:
+                emit(line)
+            summary[service] = lines[0]
+            reports.append(
+                {
+                    "key": service,
+                    "label": SERVICES[service][0],
+                    "level": verdict.level.value,
+                    "headline": verdict.headline,
+                    "advice": list(verdict.advice),
+                    "dns_note": verdict.dns_note,
+                    "targets": [_target_report(probe) for probe in collected[service]],
+                }
+            )
+        elapsed = time.monotonic() - started
+        emit(f"Проверка заняла {elapsed:.1f} с.")
         return {
             "summary": summary,
+            "services": reports,
+            "zapret_running": zapret_running,
+            "zapret_line": zapret_line,
+            "timed_out": run.timed_out,
+            "elapsed": elapsed,
             "dns_poisoning_detected": _has_spoofing(collected),
         }
     except _Stopped:

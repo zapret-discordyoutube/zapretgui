@@ -10,8 +10,6 @@ class ConnectionTestStartPlan:
     start_lines: tuple[str, ...]
     status_text: str
     status_tone: str
-    status_badge_text: str
-    progress_badge_text: str
     start_enabled: bool
     stop_enabled: bool
     combo_enabled: bool
@@ -23,8 +21,6 @@ class ConnectionTestStartPlan:
 class ConnectionTestFinishPlan:
     status_text: str
     status_tone: str
-    status_badge_text: str
-    progress_badge_text: str
     finish_lines: tuple[str, ...]
     start_enabled: bool
     stop_enabled: bool
@@ -74,14 +70,9 @@ def normalize_test_type(test_type: str) -> str:
 def build_start_plan(*, selection: str, test_type: str) -> ConnectionTestStartPlan:
     return ConnectionTestStartPlan(
         test_type=normalize_test_type(test_type),
-        start_lines=(
-            f"🚀 Запуск тестирования: {selection}",
-            "=" * 50,
-        ),
-        status_text="🔄 Тестирование в процессе...",
+        start_lines=(f"Запуск тестирования: {selection}",),
+        status_text="Проверяем… обычно это занимает 5–15 секунд",
         status_tone="info",
-        status_badge_text="Тест выполняется",
-        progress_badge_text="Идёт проверка",
         start_enabled=False,
         stop_enabled=True,
         combo_enabled=False,
@@ -91,14 +82,9 @@ def build_start_plan(*, selection: str, test_type: str) -> ConnectionTestStartPl
 
 def build_finish_plan() -> ConnectionTestFinishPlan:
     return ConnectionTestFinishPlan(
-        status_text="✅ Тестирование завершено",
+        status_text="Проверка завершена — итог ниже",
         status_tone="success",
-        status_badge_text="Тест завершён",
-        progress_badge_text="Готово к обращению",
-        finish_lines=(
-            "\n" + "=" * 50,
-            "🎉 Тестирование завершено! Теперь можно одной кнопкой подготовить обращение в поддержку.",
-        ),
+        finish_lines=(),
         start_enabled=True,
         stop_enabled=False,
         combo_enabled=True,
@@ -108,14 +94,9 @@ def build_finish_plan() -> ConnectionTestFinishPlan:
 
 def build_stopped_finish_plan() -> ConnectionTestFinishPlan:
     return ConnectionTestFinishPlan(
-        status_text="⏹️ Тест остановлен",
+        status_text="Проверка остановлена",
         status_tone="warning",
-        status_badge_text="Тест остановлен",
-        progress_badge_text="Остановлено",
-        finish_lines=(
-            "\n" + "=" * 50,
-            "⏹️ Тест остановлен пользователем. Можно запустить его снова или подготовить обращение по уже собранным логам.",
-        ),
+        finish_lines=("⏹️ Проверка остановлена. Можно запустить её снова.",),
         start_enabled=True,
         stop_enabled=False,
         combo_enabled=True,
@@ -125,8 +106,8 @@ def build_stopped_finish_plan() -> ConnectionTestFinishPlan:
 
 def build_stop_plan() -> ConnectionTestStopPlan:
     return ConnectionTestStopPlan(
-        append_lines=("\n⚠️ Остановка теста...",),
-        status_text="⏹️ Останавливаем...",
+        append_lines=("⚠️ Останавливаем проверку…",),
+        status_text="Останавливаем…",
         status_tone="warning",
         poll_interval_ms=100,
         max_attempts=50,

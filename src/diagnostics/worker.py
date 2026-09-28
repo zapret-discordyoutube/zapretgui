@@ -2,7 +2,8 @@
 
 Сам ничего не проверяет: запускает ``diagnostics.engine`` и пересылает его
 строки в окно и в файл ``connection_test_temp.log`` (этот файл потом кладётся
-в архив для обращения в поддержку).
+в архив для обращения в поддержку), а итог по сервисам — сигналом
+``report_signal`` для карточек на странице.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ class ConnectionTestWorker(QObject):
     """Рабочий поток для выполнения тестов соединения."""
 
     update_signal = pyqtSignal(str)
+    report_signal = pyqtSignal(object)
     finished_signal = pyqtSignal()
     finished = pyqtSignal()
 
@@ -81,11 +83,13 @@ class ConnectionTestWorker(QObject):
             self._open_logger()
             from diagnostics.engine import run_connection_test
 
-            run_connection_test(
+            report = run_connection_test(
                 self.test_type,
                 emit=self.log_message,
                 should_stop=self.is_stop_requested,
             )
+            if not self._stop_requested and isinstance(report, dict) and not report.get("stopped"):
+                self.report_signal.emit(report)
             if self._stop_requested:
                 self.log_message("⚠️ Тестирование остановлено пользователем", allow_after_stop=True)
             else:

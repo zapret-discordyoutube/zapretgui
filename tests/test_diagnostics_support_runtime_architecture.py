@@ -60,6 +60,7 @@ class DiagnosticsSupportRuntimeArchitectureTests(unittest.TestCase):
 
         worker = SimpleNamespace(
             update_signal=_Signal(),
+            report_signal=_Signal(),
             finished_signal=_Signal(),
             finished=_Signal(),
         )

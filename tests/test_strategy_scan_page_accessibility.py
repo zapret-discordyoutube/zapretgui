@@ -40,22 +40,22 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
         )
         self.addCleanup(page.deleteLater)
 
-        self.assertEqual(page._protocol_combo.accessibleName(), "Протокол подбора стратегии, выбрано: TCP/HTTPS")
+        self.assertEqual(page._protocol_combo.accessibleName(), "Что должно заработать, выбрано: Сайты и приложения (TCP/HTTPS)")
         self.assertEqual(
             page._protocol_combo.property("screenReaderStateText"),
-            "Протокол подбора стратегии, выбрано: TCP/HTTPS",
+            "Что должно заработать, выбрано: Сайты и приложения (TCP/HTTPS)",
         )
-        self.assertIn("тип соединения", page._protocol_combo.accessibleDescription())
-        self.assertEqual(page._games_scope_combo.accessibleName(), "Охват UDP, выбрано: Все ipset (по умолчанию)")
+        self.assertIn("для чего подобрать стратегию", page._protocol_combo.accessibleDescription())
+        self.assertEqual(page._games_scope_combo.accessibleName(), "Адреса игр, выбрано: Все списки адресов (по умолчанию)")
         self.assertEqual(
             page._games_scope_combo.property("screenReaderStateText"),
-            "Охват UDP, выбрано: Все ipset (по умолчанию)",
+            "Адреса игр, выбрано: Все списки адресов (по умолчанию)",
         )
-        self.assertIn("UDP Games", page._games_scope_combo.accessibleDescription())
-        self.assertEqual(page._mode_combo.accessibleName(), "Режим подбора стратегии, выбрано: Быстрый (30)")
+        self.assertIn("онлайн-игр", page._games_scope_combo.accessibleDescription())
+        self.assertEqual(page._mode_combo.accessibleName(), "Тщательность подбора, выбрано: Быстро — 30 лучших стратегий, до 3 минут")
         self.assertEqual(
             page._mode_combo.property("screenReaderStateText"),
-            "Режим подбора стратегии, выбрано: Быстрый (30)",
+            "Тщательность подбора, выбрано: Быстро — 30 лучших стратегий, до 3 минут",
         )
         self.assertIn("сколько стратегий", page._mode_combo.accessibleDescription())
         self.assertEqual(page._target_input.accessibleName(), "Цель подбора стратегии")
@@ -63,18 +63,15 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
         self.assertIn("домен или STUN-цель", page._target_input.accessibleDescription())
         self.assertEqual(
             page._games_scope_label.property("screenReaderStateText"),
-            "Поле подбора стратегии: Охват UDP:",
+            "Поле подбора стратегии: Какие адреса игр:",
         )
         self.assertEqual(
             page._target_label.property("screenReaderStateText"),
-            "Поле подбора стратегии: Цель:",
+            "Поле подбора стратегии: Какой сайт проверять:",
         )
         self.assertEqual(page._quick_domain_btn.accessibleName(), "Быстрый выбор цели")
         self.assertEqual(page._quick_domain_btn.property("screenReaderStateText"), "Быстрый выбор цели")
-        self.assertEqual(
-            page._actions_title_label.property("screenReaderStateText"),
-            "Раздел подбора стратегии: Действия",
-        )
+        self.assertEqual(page._start_btn.text(), "Найти рабочую стратегию")
         self.assertEqual(page._start_btn.accessibleName(), "Начать подбор стратегии")
         self.assertEqual(page._start_btn.property("screenReaderStateText"), "Начать подбор стратегии")
         self.assertEqual(page._stop_btn.accessibleName(), "Остановить подбор стратегии")
@@ -85,7 +82,7 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
             "Ход подбора стратегии: не выполняется",
         )
         self.assertIn("Показывает", page._progress_bar.accessibleDescription())
-        self.assertEqual(page._status_label.accessibleName(), "Статус подбора стратегии: Готово к сканированию")
+        self.assertEqual(page._status_label.accessibleName(), "Статус подбора стратегии: Готово к поиску")
         self.assertEqual(page._table.accessibleName(), "Результаты подбора стратегии: пока нет результатов")
         self.assertEqual(
             page._table.property("screenReaderStateText"),
@@ -124,11 +121,11 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
 
         self.assertEqual(
             menu.view.item(0).data(Qt.ItemDataRole.AccessibleTextRole),
-            "Протокол подбора стратегии: TCP/HTTPS, выбран",
+            "Что должно заработать: Сайты и приложения (TCP/HTTPS), выбран",
         )
         self.assertEqual(
             menu.view.item(1).data(Qt.ItemDataRole.AccessibleTextRole),
-            "Протокол подбора стратегии: STUN Voice (Discord/Telegram), не выбран",
+            "Что должно заработать: Голосовые звонки Discord и Telegram (STUN), не выбран",
         )
 
     def test_quick_target_menu_items_are_named_for_screen_reader(self) -> None:
@@ -236,8 +233,10 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
             "Подробный лог подбора стратегии: пока нет записей",
         )
 
-    def test_language_refresh_updates_action_section_screen_reader_state(self) -> None:
-        action_label = CaptionLabel("Old")
+    def test_language_refresh_updates_field_labels(self) -> None:
+        protocol_label = CaptionLabel("Old")
+        warning = CaptionLabel("Old warning")
+        start_btn = PushButton()
 
         apply_language_plan_ui(
             blockcheck_feature=blockcheck_public,
@@ -247,10 +246,14 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
             results_card=_TitleCardStub(),
             log_card=_TitleCardStub(),
             expand_log_btn=PushButton(),
-            warning_card=_TitleCardStub(),
-            start_btn=PushButton(),
+            warning_notice=warning,
+            intro_label=CaptionLabel(),
+            protocol_label=protocol_label,
+            mode_label=CaptionLabel(),
+            mode_combo=_ComboStub(3),
+            target_label=CaptionLabel(),
+            start_btn=start_btn,
             stop_btn=PushButton(),
-            actions_title_label=action_label,
             prepare_support_btn=PushButton(),
             protocol_combo=_ComboStub(3),
             games_scope_label=CaptionLabel("Old UDP"),
@@ -258,11 +261,13 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
             quick_domain_btn=PushButton(),
         )
 
-        self.assertEqual(action_label.text(), "Действия")
+        self.assertEqual(protocol_label.text(), "Что должно заработать:")
         self.assertEqual(
-            action_label.property("screenReaderStateText"),
-            "Раздел подбора стратегии: Действия",
+            protocol_label.property("screenReaderStateText"),
+            "Поле подбора стратегии: Что должно заработать:",
         )
+        self.assertEqual(start_btn.text(), "Найти рабочую стратегию")
+        self.assertIn("Zapret будет выключен", warning.text())
 
 
 class _ProgressFeatureStub:

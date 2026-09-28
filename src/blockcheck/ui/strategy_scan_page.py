@@ -9,7 +9,6 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel
-from settings.mode import ENGINE_WINWS2
 
 from ui.pages.base_page import BasePage
 from blockcheck.ui.strategy_scan_page_build import (
@@ -47,6 +46,7 @@ from qfluentwidgets import (
     BodyLabel,
     ProgressBar,
     TableWidget,
+    PrimaryPushButton,
     PushButton,
     LineEdit,
     RoundMenu,
@@ -54,7 +54,7 @@ from qfluentwidgets import (
 )
 
 from ui.fluent_widgets import (
-    SettingsCard, InfoBarHelper, set_tooltip,
+    InfoBarHelper, set_tooltip,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ class StrategyScanPage(BasePage):
         super().__init__(
             title=tr_catalog("page.blockcheck_public.title", default="Подбор стратегии"),
             subtitle=tr_catalog("page.blockcheck_public.subtitle",
-                                default="Автоматический перебор стратегий обхода DPI"),
+                                default="Найдёт стратегию обхода DPI, которая работает у вашего провайдера"),
             parent=parent,
             title_key="page.blockcheck_public.title",
             subtitle_key="page.blockcheck_public.subtitle",
@@ -100,8 +100,9 @@ class StrategyScanPage(BasePage):
         self._games_scope_label: QLabel | None = None
         self._games_scope_combo = None
         self._udp_scope_hint_label: QLabel | None = None
-        self._actions_title_label = None
-        self._actions_bar = None
+        self._intro_label = None
+        self._protocol_label = None
+        self._mode_label = None
         self._prepare_support_btn = None
         self._support_status_label = None
         self._cleanup_in_progress = False
@@ -208,6 +209,7 @@ class StrategyScanPage(BasePage):
             caption_label_cls=CaptionLabel,
             body_label_cls=BodyLabel,
             progress_bar_cls=ProgressBar,
+            primary_button_cls=PrimaryPushButton,
             push_button_cls=PushButton,
             line_edit_cls=LineEdit,
             parent=self.content,
@@ -218,18 +220,20 @@ class StrategyScanPage(BasePage):
             on_stop=self._on_stop,
         )
         self._control_card = control_widgets.control_card
+        self._intro_label = control_widgets.intro_label
+        self._protocol_label = control_widgets.protocol_label
         self._protocol_combo = control_widgets.protocol_combo
         self._games_scope_label = control_widgets.games_scope_label
         self._games_scope_combo = control_widgets.games_scope_combo
+        self._mode_label = control_widgets.mode_label
         self._mode_combo = control_widgets.mode_combo
         self._target_label = control_widgets.target_label
         self._target_input = control_widgets.target_input
         self._quick_domain_btn = control_widgets.quick_domain_btn
         self._udp_scope_hint_label = control_widgets.udp_scope_hint_label
+        self._warning_card = control_widgets.warning_notice
         self._progress_bar = control_widgets.progress_bar
         self._status_label = control_widgets.status_label
-        self._actions_title_label = control_widgets.actions_title_label
-        self._actions_bar = control_widgets.actions_bar
         self._start_btn = control_widgets.start_btn
         self._stop_btn = control_widgets.stop_btn
         self._mode_combo.currentIndexChanged.connect(self._update_control_accessibility)
@@ -237,23 +241,6 @@ class StrategyScanPage(BasePage):
         self._set_status_text(self._status_label.text())
 
         self.add_widget(self._control_card)
-        self.add_widget(self._actions_title_label)
-        self.add_widget(self._actions_bar)
-
-        # ── Warning Card ──
-        self._warning_card = SettingsCard(
-            tr_catalog("page.blockcheck_public.warning_title", default="Внимание")
-        )
-        warning_text = BodyLabel()
-        warning_text.setText(tr_catalog(
-            "page.blockcheck_public.warning_text",
-            default="Во время сканирования текущий обход DPI будет остановлен. "
-                    f"Каждая стратегия тестируется отдельно через {ENGINE_WINWS2}. "
-                    "После завершения можно перезапустить обход.",
-        ))
-        warning_text.setWordWrap(True)
-        self._warning_card.add_widget(warning_text)
-        self.add_widget(self._warning_card)
 
         # ── Results Table Card ──
         results_widgets = build_strategy_scan_results_section(
@@ -360,8 +347,8 @@ class StrategyScanPage(BasePage):
         hint_plan = self._blockcheck.build_udp_scope_hint_plan(
             scan_protocol=selection.scan_protocol,
             udp_games_scope=selection.udp_games_scope,
-            scope_all_label=tr_catalog("page.blockcheck_public.udp_scope_all", default="Все ipset (по умолчанию)"),
-            scope_games_only_label=tr_catalog("page.blockcheck_public.udp_scope_games_only", default="Только игровые ipset"),
+            scope_all_label=tr_catalog("page.strategy_scan.udp_scope_all", default="Все списки адресов (по умолчанию)"),
+            scope_games_only_label=tr_catalog("page.strategy_scan.udp_scope_games_only", default="Только игровые списки"),
         )
         self._udp_scope_hint_label.setText(hint_plan.text)
         set_tooltip(self._udp_scope_hint_label, hint_plan.tooltip)
@@ -513,10 +500,14 @@ class StrategyScanPage(BasePage):
             results_card=self._results_card,
             log_card=self._log_card,
             expand_log_btn=self._expand_log_btn,
-            warning_card=self._warning_card,
+            warning_notice=self._warning_card,
+            intro_label=self._intro_label,
+            protocol_label=self._protocol_label,
+            mode_label=self._mode_label,
+            mode_combo=self._mode_combo,
+            target_label=self._target_label,
             start_btn=self._start_btn,
             stop_btn=self._stop_btn,
-            actions_title_label=self._actions_title_label,
             prepare_support_btn=self._prepare_support_btn,
             protocol_combo=self._protocol_combo,
             games_scope_label=self._games_scope_label,
@@ -1158,18 +1149,18 @@ class StrategyScanPage(BasePage):
     def _update_control_accessibility(self, *_args) -> None:
         self._update_combo_accessibility(
             self._protocol_combo,
-            name="Протокол подбора стратегии",
-            description="Выберите тип соединения, для которого нужно подобрать стратегию.",
+            name="Что должно заработать",
+            description="Выберите, для чего подобрать стратегию: сайты и приложения, голосовые звонки или игры.",
         )
         self._update_combo_accessibility(
             self._games_scope_combo,
-            name="Охват UDP",
-            description="Выберите набор ipset для режима UDP Games.",
+            name="Адреса игр",
+            description="Выберите, какие списки адресов проверять в режиме онлайн-игр.",
         )
         self._update_combo_accessibility(
             self._mode_combo,
-            name="Режим подбора стратегии",
-            description="Выберите, сколько стратегий нужно проверить.",
+            name="Тщательность подбора",
+            description="Выберите, сколько стратегий нужно проверить: больше стратегий — дольше поиск.",
         )
 
     def _update_log_expand_accessibility(self) -> None:

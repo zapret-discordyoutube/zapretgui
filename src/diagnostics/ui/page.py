@@ -8,9 +8,9 @@ from PyQt6.QtWidgets import (
 from qfluentwidgets import (
     IndeterminateProgressBar,
     ComboBox,
-    StrongBodyLabel,
     BodyLabel,
     CaptionLabel,
+    PrimaryPushButton,
     PushButton,
 )
 
@@ -19,8 +19,8 @@ from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from diagnostics.ui.build import (
     build_connection_controls,
-    build_connection_header,
     build_connection_log_viewer,
+    build_connection_results,
 )
 from diagnostics.ui.components import clean_connection_status_text
 from diagnostics.ui.runtime_helpers import (
@@ -32,6 +32,7 @@ from diagnostics.ui.runtime_helpers import (
     release_worker_resources,
     refresh_test_combo_items,
     set_connection_status,
+    set_log_toggle_text,
     start_connection_test,
     stop_connection_test,
 )
@@ -44,7 +45,7 @@ class ConnectionTestPage(BasePage):
     def __init__(self, parent=None, *, diagnostics_feature):
         super().__init__(
             "Диагностика соединения",
-            "Автотест Discord и YouTube, проверка DNS подмены и быстрая подготовка обращения в Forgejo Issues",
+            "Открываются ли Discord и YouTube, и если нет — почему и что сделать",
             parent,
             title_key="page.connection.title",
             subtitle_key="page.connection.subtitle",
@@ -52,9 +53,10 @@ class ConnectionTestPage(BasePage):
         self._diagnostics = diagnostics_feature
         self.is_testing = False
         self.stop_check_timer = None
-        self._actions_title_label = None
-        self._actions_bar = None
         self._controls_card = None
+        self._log_card = None
+        self._log_visible = False
+        self._got_report = False
         self._pending_start_focus = False
         self._finish_mode = "completed"
         self._cleanup_in_progress = False
@@ -126,8 +128,11 @@ class ConnectionTestPage(BasePage):
         )
 
     def _build_page_ui(self) -> None:
-        self._build_header()
         self._build_controls()
+        self.results_panel = build_connection_results(
+            container_layout=self.container_layout,
+            content_parent=self.container,
+        )
         self._build_log_viewer()
         self.add_widget(self.container)
         self.add_spacing(8)
@@ -135,50 +140,51 @@ class ConnectionTestPage(BasePage):
     # ──────────────────────────────────────────────────────────────
     # UI
     # ──────────────────────────────────────────────────────────────
-    def _build_header(self):
-        widgets = build_connection_header(
-            container_layout=self.container_layout,
-            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
-            strong_body_label_cls=StrongBodyLabel,
-            body_label_cls=BodyLabel,
-        )
-        self.hero_title = widgets.hero_title
-        self.hero_subtitle = widgets.hero_subtitle
-        self.status_badge = widgets.status_badge
-        self.progress_badge = widgets.progress_badge
+    def _tr(self, key: str, default: str) -> str:
+        return tr_catalog(key, language=self._ui_language, default=default)
 
     def _build_controls(self):
         widgets = build_connection_controls(
             container_layout=self.container_layout,
-            content_parent=self.content,
-            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            tr_fn=self._tr,
             combo_cls=ComboBox,
             body_label_cls=BodyLabel,
             caption_label_cls=CaptionLabel,
             progress_bar_cls=IndeterminateProgressBar,
+            primary_button_cls=PrimaryPushButton,
             push_button_cls=PushButton,
             on_start=self.start_test,
             on_stop=self.stop_test,
-            on_support=self.open_support_with_log,
         )
         self._controls_card = widgets.controls_card
+        self.intro_label = widgets.intro_label
         self.test_select_label = widgets.test_select_label
         self.test_combo = widgets.test_combo
         self._refresh_test_combo_items()
         self.status_label = widgets.status_label
         self.progress_bar = widgets.progress_bar
-        self._actions_title_label = widgets.actions_title_label
-        self._actions_bar = widgets.actions_bar
         self.start_btn = widgets.start_btn
         self.stop_btn = widgets.stop_btn
-        self.send_log_btn = widgets.send_log_btn
 
     def _build_log_viewer(self):
         widgets = build_connection_log_viewer(
             container_layout=self.container_layout,
-            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            tr_fn=self._tr,
+            caption_label_cls=CaptionLabel,
+            push_button_cls=PushButton,
+            on_toggle=self.toggle_log,
+            on_support=self.open_support_with_log,
         )
+        self._log_card = widgets.log_card
+        self.log_hint_label = widgets.hint_label
+        self.toggle_log_btn = widgets.toggle_btn
+        self.send_log_btn = widgets.send_log_btn
         self.result_text = widgets.result_text
+
+    def toggle_log(self) -> None:
+        self._log_visible = not self._log_visible
+        self.result_text.setVisible(self._log_visible)
+        set_log_toggle_text(self.toggle_log_btn, visible=self._log_visible, language=self._ui_language)
 
     # ──────────────────────────────────────────────────────────────
     # Логика теста
@@ -191,11 +197,11 @@ class ConnectionTestPage(BasePage):
             result_text=self.result_text,
             apply_interaction_state_callback=self._apply_interaction_state,
             set_status_callback=self._set_status,
-            status_badge=self.status_badge,
-            progress_badge=self.progress_badge,
         )
         if state is None:
             return
+        self._got_report = False
+        self.results_panel.set_pending(state["test_type"])
         self._cleanup_in_progress = state["cleanup_in_progress"]
         self._finish_mode = state["finish_mode"]
         self.is_testing = state["is_testing"]
@@ -210,6 +216,7 @@ class ConnectionTestPage(BasePage):
 
     def _bind_connection_test_worker(self, worker) -> None:
         worker.update_signal.connect(self._on_worker_update)
+        worker.report_signal.connect(self._on_worker_report)
         worker.finished_signal.connect(self._on_worker_finished)
         worker.finished.connect(lambda _worker=worker: release_worker_resources(_worker))
 
@@ -245,7 +252,14 @@ class ConnectionTestPage(BasePage):
             result_text=self.result_text,
         )
 
+    def _on_worker_report(self, report) -> None:
+        if self._cleanup_in_progress or not isinstance(report, dict):
+            return
+        self._got_report = True
+        self.results_panel.show_report(report)
+
     def _on_worker_finished(self):
+        was_stopped = self._finish_mode == "stopped"
         state = finish_connection_test(
             cleanup_in_progress=self._cleanup_in_progress,
             is_testing=self.is_testing,
@@ -254,12 +268,14 @@ class ConnectionTestPage(BasePage):
             finish_mode=self._finish_mode,
             apply_interaction_state_callback=self._apply_interaction_state,
             set_status_callback=self._set_status,
-            status_badge=self.status_badge,
-            progress_badge=self.progress_badge,
             append_callback=self._append,
         )
         if state is None:
             return
+        if not self._got_report:
+            self.results_panel.mark_unfinished(
+                "Проверка остановлена." if was_stopped else "Проверка не завершилась — откройте подробный отчёт."
+            )
         self._finish_mode = state["finish_mode"]
         self.is_testing = state["is_testing"]
         self.stop_check_timer = state["stop_check_timer"]
@@ -419,7 +435,6 @@ class ConnectionTestPage(BasePage):
     def _set_status(self, text: str, status: str = "muted"):
         set_connection_status(
             status_label=self.status_label,
-            status_badge=self.status_badge,
             text=text,
             status=status,
         )
@@ -435,16 +450,18 @@ class ConnectionTestPage(BasePage):
         apply_connection_language(
             language=self._ui_language,
             controls_card=self._controls_card,
-            actions_title_label=self._actions_title_label,
-            hero_title=self.hero_title,
-            hero_subtitle=self.hero_subtitle,
+            log_card=self._log_card,
+            intro_label=self.intro_label,
             test_select_label=self.test_select_label,
+            log_hint_label=self.log_hint_label,
             refresh_test_combo_items_callback=self._refresh_test_combo_items,
             start_btn=self.start_btn,
             stop_btn=self.stop_btn,
+            toggle_log_btn=self.toggle_log_btn,
+            log_visible=self._log_visible,
             send_log_btn=self.send_log_btn,
         )
-    
+
     def cleanup(self):
         """Очистка потоков при закрытии"""
         from log.log import log
