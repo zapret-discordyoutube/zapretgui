@@ -13,7 +13,9 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from ui.close_dialog import CloseDialog
-from ui.fluent_dialog import MessageBox
+from PyQt6.QtGui import QColor
+
+from ui.fluent_dialog import ColorDialog, MessageBox
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +63,24 @@ class FluentDialogLifecycleTests(unittest.TestCase):
         QTimer.singleShot(0, dialog.reject)
         self.assertEqual(dialog.exec(), 0)
         self.assertIn(dialog, parent.removed_filters)
+
+    def test_color_dialog_uses_same_managed_lifecycle(self) -> None:
+        # Регрессия v21.1.6.6: на «Оформлении» ColorDialog брался из
+        # qfluentwidgets напрямую → AttributeError: 'ColorDialog' object has
+        # no attribute 'windowMask' в MaskDialogBase.eventFilter.
+        from PyQt6.QtCore import QEvent
+
+        parent = self._parent()
+        dialog = ColorDialog(QColor("#0099bc"), "Выбрать цвет", parent, False)
+        self.addCleanup(dialog.deleteLater)
+
+        self.assertIn(dialog, parent.installed_filters)
+        QTimer.singleShot(0, dialog.reject)
+        self.assertEqual(dialog.exec(), 0)
+        self.assertIn(dialog, parent.removed_filters)
+
+        dialog.__dict__.pop("windowMask")
+        self.assertFalse(dialog.eventFilter(QWidget(), QEvent(QEvent.Type.Resize)))
 
     def test_closed_dialog_does_not_receive_later_parent_events(self) -> None:
         parent = QWidget()
@@ -146,7 +166,7 @@ class FluentDialogLifecycleTests(unittest.TestCase):
             for node in ast.walk(tree):
                 if not isinstance(node, ast.ImportFrom) or node.module != "qfluentwidgets":
                     continue
-                if any(alias.name in {"MessageBox", "MessageBoxBase"} for alias in node.names):
+                if any(alias.name in {"ColorDialog", "MessageBox", "MessageBoxBase"} for alias in node.names):
                     offenders.append(path.relative_to(ROOT).as_posix())
 
         self.assertEqual(offenders, ["src/ui/fluent_dialog.py"])

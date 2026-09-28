@@ -44,6 +44,7 @@ from app.state_store import AppUiState, MainWindowStateStore
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.accessibility import set_control_accessibility, set_state_text
 from app.ui_texts import tr as tr_catalog
+from ui.fluent_dialog import ColorDialog
 from ui.widgets.win11_controls import Win11ToggleRow
 from log.log import log
 from qfluentwidgets import (
@@ -51,7 +52,6 @@ from qfluentwidgets import (
     CaptionLabel,
     ColorPickerButton,
     setThemeColor,
-    ColorDialog,
     CheckBox,
     SegmentedWidget,
     RadioButton,
