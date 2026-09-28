@@ -32,6 +32,8 @@ from PyQt6.QtWidgets import QApplication, QGraphicsOpacityEffect, QHBoxLayout, Q
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
+    FluentIcon,
+    HyperlinkButton,
     PrimaryPushButton,
     PushButton,
     SubtitleLabel,
@@ -42,9 +44,11 @@ from qfluentwidgets import (
 )
 
 from app.ui_texts import tr as tr_catalog
+from log.log import log
 from ui.animation_policy import are_live_animations_enabled
 from ui.onboarding.blur import blur_pixmap
 from ui.onboarding.steps import (
+    TOUR_SUBPAGE_PARENTS,
     TourContext,
     TourStep,
     TourTarget,
@@ -182,6 +186,11 @@ class _TourCard(QWidget):
         self.body_label.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.body_label)
 
+        # Статья вики по теме шага: открывается сразу, искать не нужно.
+        self.wiki_button = HyperlinkButton(FluentIcon.LINK, "", "", self.content)
+        self.wiki_button.hide()
+        layout.addWidget(self.wiki_button, 0, Qt.AlignmentFlag.AlignLeft)
+
         layout.addSpacing(8)
         self.dots = _ProgressDots(self.content)
         layout.addWidget(self.dots, 0, Qt.AlignmentFlag.AlignLeft)
@@ -277,6 +286,9 @@ class OnboardingOverlay(QWidget):
         self._index = -1
         self._targets: list[TourTarget] = []
         self._page_changed = False
+        # Страница, которая сейчас что-то показывает для шага (меню, вкладку).
+        self._state_page: QWidget | None = None
+        self._failed_target_step = ""
         self._finishing = False
         self._finish_reason = ""
         self._animated = are_live_animations_enabled()
@@ -375,6 +387,7 @@ class OnboardingOverlay(QWidget):
             return
         self._finishing = True
         self._finish_reason = reason
+        self._leave_page_state()
         self._opacity_target = 0.0
         self._blur_timer.stop()
         if immediate or not self._animated:
@@ -423,41 +436,101 @@ class OnboardingOverlay(QWidget):
             return []
         try:
             return [target for target in step.target(self._ctx) if is_target_shown(target)]
-        except Exception:
+        except Exception as exc:
+            # Цели ищутся каждый кадр: пишем в лог один раз на шаг.
+            if self._failed_target_step != step.key:
+                self._failed_target_step = step.key
+                log(f"Обучающий тур: не удалось найти цель шага {step.key}: {exc!r}", "WARNING")
             return []
 
-    def _open_page(self, page_key: str | None) -> None:
-        """Открывает страницу шага штатным путём через page host."""
+    def _open_page(self, page_key: str | None) -> bool:
+        """Открывает страницу шага штатным путём через page host.
+
+        False — страницу открыть не удалось, шаг надо пропустить.
+        """
         if not page_key:
-            return
+            return True
         page_name = self._ctx.pages.get(page_key)
         if page_name is None:
-            return
+            return False
         from ui.window_adapter import get_current_page, get_loaded_page, show_page
 
         window = self._window
         page = get_loaded_page(window, page_name)
         if page is None or get_current_page(window) is not page:
-            show_page(window, page_name, allow_internal=True)
+            parent_key = TOUR_SUBPAGE_PARENTS.get(page_key)
+            if parent_key is not None:
+                if not self._open_subpage(parent_key, page_key):
+                    return False
+            else:
+                show_page(window, page_name, allow_internal=True)
             page = get_loaded_page(window, page_name)
             self._page_changed = True
         self._ctx.current_page = page
         self._ctx.current_page_key = page_key
+        return is_alive_widget(page)
+
+    def _open_subpage(self, parent_key: str, page_key: str) -> bool:
+        """Страницу с параметром открывает родитель: он знает, какой
+        пресет или профиль показать."""
+        if not self._open_page(parent_key):
+            return False
+        opener = getattr(self._ctx.current_page, "onboarding_open_subpage", None)
+        if not callable(opener):
+            return False
+        try:
+            return bool(opener(page_key))
+        except Exception as exc:
+            log(f"Обучающий тур: не удалось открыть страницу {page_key}: {exc!r}", "WARNING")
+            return False
+
+    def _enter_page_state(self, step: TourStep) -> None:
+        if not step.page_state:
+            return
+        page = self._ctx.current_page
+        setter = getattr(page, "onboarding_set_state", None) if is_alive_widget(page) else None
+        if not callable(setter):
+            return
+        self._state_page = page
+        try:
+            setter(step.page_state)
+        except Exception as exc:
+            log(f"Обучающий тур: страница не показала {step.page_state} для шага {step.key}: {exc!r}", "WARNING")
+            self._leave_page_state()
+
+    def _leave_page_state(self) -> None:
+        page, self._state_page = self._state_page, None
+        if not is_alive_widget(page):
+            return
+        setter = getattr(page, "onboarding_set_state", None)
+        if not callable(setter):
+            return
+        try:
+            setter(None)
+        except Exception as exc:
+            log(f"Обучающий тур: страница не вернула вид после шага: {exc!r}", "WARNING")
 
     def _enter_step(self, index: int, *, direction: int, first: bool = False) -> None:
         self._page_changed = False
+        previous_index = self._index
+        self._leave_page_state()
         targets: list[TourTarget] = []
         while 0 <= index < len(self._steps):
             step = self._steps[index]
-            self._open_page(step.page)
-            targets = self._resolve_targets(step)
-            if targets or step.target is None or step.target_optional:
-                break
+            if self._open_page(step.page):
+                self._enter_page_state(step)
+                targets = self._resolve_targets(step)
+                if targets or step.target is None or step.target_optional:
+                    break
+                self._leave_page_state()
             index += direction
         if index >= len(self._steps):
             self.finish("done")
             return
         if index < 0:
+            # Назад идти некуда: остаёмся на текущем шаге как было.
+            if 0 <= previous_index < len(self._steps) and previous_index != index:
+                self._enter_step(previous_index, direction=1, first=first)
             return
 
         self._index = index
@@ -498,6 +571,12 @@ class OnboardingOverlay(QWidget):
         card.hero_title.setText(title)
         card.title_label.setText(title)
         card.body_label.setText(body)
+        card.wiki_button.setVisible(bool(step.wiki_url))
+        if step.wiki_url:
+            wiki_text = self._tr("onboarding.button.wiki", "Подробнее в вики")
+            card.wiki_button.setUrl(step.wiki_url)
+            card.wiki_button.setText(wiki_text)
+            card.wiki_button.setAccessibleName(f"{wiki_text}: {title}")
         card.dots.set_progress(self._index, total)
 
         card.back_button.setVisible(self._index > 0)

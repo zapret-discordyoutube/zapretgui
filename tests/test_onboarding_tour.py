@@ -183,6 +183,29 @@ class OnboardingOverlayTests(unittest.TestCase):
             window.close()
             window.deleteLater()
 
+    def test_wiki_button_opens_step_article_and_hides_without_one(self) -> None:
+        from ui.onboarding.steps import TourStep, _page_target
+
+        url = "https://wiki.zapret.moe/Zapret2/preset"
+        steps = (
+            TourStep("welcome", hero=True),
+            TourStep("start", _page_target("start"), page="control", wiki_url=url),
+        )
+        window, overlay = self._overlay(steps)
+        try:
+            overlay.start()
+            button = overlay._card.wiki_button
+            self.assertTrue(button.isHidden())
+            overlay.go_next()
+            self.assertFalse(button.isHidden())
+            self.assertEqual(button.getUrl().toString(), url)
+            self.assertEqual(button.text(), "Подробнее в вики")
+            overlay.go_back()
+            self.assertTrue(button.isHidden())
+        finally:
+            window.close()
+            window.deleteLater()
+
     def test_overlay_is_child_of_window_not_separate_window(self) -> None:
         from ui.onboarding.steps import TourStep
 
@@ -289,6 +312,276 @@ class OnboardingKeyboardTests(unittest.TestCase):
         finally:
             window.close()
             window.deleteLater()
+
+
+class _ParentPage(QWidget):
+    """Страница-родитель: открывает вложенную страницу и показывает «меню»."""
+
+    def __init__(self, host, parent=None) -> None:
+        super().__init__(parent)
+        self._host = host
+        layout = QVBoxLayout(self)
+        self.row = QPushButton("Строка", self)
+        self.second = QPushButton("Вторая", self)
+        self.menu = QPushButton("Меню", self)
+        layout.addWidget(self.row)
+        layout.addWidget(self.second)
+        layout.addWidget(self.menu)
+        self.menu.hide()
+        self.allow_subpage = True
+        self.open_calls: list[str] = []
+        self.states: list[str | None] = []
+
+    def onboarding_target(self, name):
+        if name == "menu":
+            return [self.row, self.menu] if self.menu.isVisible() else None
+        if name == "pair":
+            return [self.row, None, self.second]
+        return None
+
+    def onboarding_set_state(self, state) -> None:
+        self.states.append(state)
+        self.menu.setVisible(state == "menu")
+
+    def onboarding_open_subpage(self, key) -> bool:
+        self.open_calls.append(key)
+        if not self.allow_subpage:
+            return False
+        return self._host.show_page(self._host.child_name)
+
+
+class _ChildPage(QWidget):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        self.editor = QPushButton("Текст пресета", self)
+        layout.addWidget(self.editor)
+
+    def onboarding_target(self, name):
+        return self.editor if name == "editor" else None
+
+
+def _build_multi_page_window():
+    from app.page_names import PageName
+
+    window = QWidget()
+    window.resize(900, 640)
+    layout = QVBoxLayout(window)
+
+    class Host:
+        child_name = PageName.ZAPRET2_PRESET_RAW_EDITOR
+
+        def __init__(self) -> None:
+            self.pages = {}
+            self.current = None
+            self.shown: list = []
+
+        def show_page(self, name, allow_internal=False):
+            _ = allow_internal
+            self.shown.append(name)
+            for page_name, page in self.pages.items():
+                page.setVisible(page_name == name)
+            self.current = self.pages.get(name)
+            return self.current is not None
+
+        def get_loaded_page(self, name):
+            return self.pages.get(name)
+
+        def current_page(self):
+            return self.current
+
+    host = Host()
+    control = _FakePage(window)
+    parent = _ParentPage(host, window)
+    child = _ChildPage(window)
+    host.pages = {
+        PageName.ZAPRET2_MODE_CONTROL: control,
+        PageName.ZAPRET2_USER_PRESETS: parent,
+        PageName.ZAPRET2_PRESET_RAW_EDITOR: child,
+    }
+    for page in host.pages.values():
+        layout.addWidget(page)
+    host.show_page(PageName.ZAPRET2_MODE_CONTROL)
+    window.ui_session = SimpleNamespace(
+        nav_items={},
+        nav_header_by_group={},
+        nav_headers=[],
+        page_host=host,
+    )
+    return window, host, control, parent, child
+
+
+class OnboardingSubpageAndStateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _app()
+
+    def _overlay(self, steps):
+        from app.page_names import PageName
+        from ui.onboarding.overlay import OnboardingOverlay
+        from ui.onboarding.steps import TourContext
+
+        window, host, control, parent, child = _build_multi_page_window()
+        window.show()
+        context = TourContext(
+            window=window,
+            control_page_name=PageName.ZAPRET2_MODE_CONTROL,
+            pages={
+                "control": PageName.ZAPRET2_MODE_CONTROL,
+                "user_presets": PageName.ZAPRET2_USER_PRESETS,
+                "preset_editor": PageName.ZAPRET2_PRESET_RAW_EDITOR,
+            },
+            current_page=control,
+        )
+        overlay = OnboardingOverlay(window, context, steps)
+        return window, host, parent, child, overlay
+
+    def test_subpage_is_opened_by_its_parent_page_and_not_reopened(self) -> None:
+        from ui.onboarding.steps import TourStep, _page_target
+
+        steps = (
+            TourStep("welcome", hero=True),
+            TourStep("file", _page_target("editor"), page="preset_editor"),
+            TourStep("file_again", _page_target("editor"), page="preset_editor"),
+            TourStep("start", _page_target("start"), page="control"),
+        )
+        window, host, parent, child, overlay = self._overlay(steps)
+        try:
+            overlay.start()
+            overlay.go_next()
+            self.assertEqual(overlay.current_step_key(), "file")
+            self.assertEqual(parent.open_calls, ["preset_editor"])
+            self.assertIs(host.current, child)
+            overlay.go_next()
+            # Страница уже открыта — родителя второй раз не дёргаем.
+            self.assertEqual(overlay.current_step_key(), "file_again")
+            self.assertEqual(parent.open_calls, ["preset_editor"])
+            overlay.go_next()
+            overlay.go_back()
+            # После ухода на другую страницу «Назад» снова открывает через родителя.
+            self.assertEqual(overlay.current_step_key(), "file_again")
+            self.assertEqual(parent.open_calls, ["preset_editor", "preset_editor"])
+            self.assertIs(host.current, child)
+        finally:
+            window.close()
+            window.deleteLater()
+
+    def test_subpage_step_is_skipped_when_parent_cannot_open_it(self) -> None:
+        from ui.onboarding.steps import TourStep, _page_target
+
+        steps = (
+            TourStep("welcome", hero=True),
+            TourStep("file", _page_target("editor"), page="preset_editor", target_optional=True),
+            TourStep("start", _page_target("start"), page="control"),
+        )
+        window, _host, parent, _child, overlay = self._overlay(steps)
+        parent.allow_subpage = False
+        try:
+            overlay.start()
+            overlay.go_next()
+            self.assertEqual(parent.open_calls, ["preset_editor"])
+            self.assertEqual(overlay.current_step_key(), "start")
+        finally:
+            window.close()
+            window.deleteLater()
+
+    def test_page_state_is_shown_on_its_step_and_reset_when_leaving(self) -> None:
+        from ui.onboarding.steps import TourStep, _page_target
+
+        steps = (
+            TourStep("welcome", hero=True),
+            TourStep("menu", _page_target("menu"), page="user_presets", page_state="menu"),
+            TourStep("start", _page_target("start"), page="control"),
+        )
+        window, _host, parent, _child, overlay = self._overlay(steps)
+        try:
+            overlay.start()
+            overlay.go_next()
+            self.assertEqual(overlay.current_step_key(), "menu")
+            self.assertEqual(parent.states, ["menu"])
+            self.assertEqual(overlay._targets, [parent.row, parent.menu])
+            overlay.go_next()
+            self.assertEqual(parent.states, ["menu", None])
+            overlay.go_back()
+            self.assertEqual(parent.states, ["menu", None, "menu"])
+            overlay.finish("skipped", immediate=True)
+            self.assertEqual(parent.states, ["menu", None, "menu", None])
+            self.assertFalse(parent.menu.isVisible())
+        finally:
+            window.close()
+            window.deleteLater()
+
+    def test_list_target_highlights_every_shown_widget(self) -> None:
+        from ui.onboarding.steps import TourContext, _page_target
+
+        window, _host, parent, _child, _overlay = self._overlay(())
+        try:
+            parent.show()
+            context = TourContext(window=window, current_page=parent)
+            self.assertEqual(_page_target("pair")(context), [parent.row, parent.second])
+        finally:
+            window.close()
+            window.deleteLater()
+
+
+class MenuPreviewTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _app()
+
+    def test_real_menu_is_shown_as_picture_inside_page_not_as_window(self) -> None:
+        from PyQt6.QtCore import QRect
+        from qfluentwidgets import Action, RoundMenu
+
+        from ui.onboarding.menu_preview import create_menu_preview, place_menu_preview, remove_menu_preview
+
+        host = QWidget()
+        host.resize(600, 400)
+        row = QPushButton("Строка", host)
+        row.setGeometry(10, 10, 580, 40)
+        host.show()
+        try:
+            menu = RoundMenu(parent=host)
+            menu.addAction(Action("Открыть", menu))
+            menu.addAction(Action("Дублировать", menu))
+            preview = create_menu_preview(host, menu)
+            self.assertIsNotNone(preview)
+            self.assertFalse(preview.isWindow())
+            self.assertFalse(menu.isVisible())
+            place_menu_preview(preview, row, QRect(0, 0, row.width(), row.height()))
+            self.assertTrue(preview.isVisible())
+            self.assertTrue(host.rect().contains(preview.geometry()))
+            self.assertFalse(any(w.isWindow() and w.isVisible() for w in QApplication.topLevelWidgets() if w is not host))
+            remove_menu_preview(preview)
+            self.assertFalse(preview.isVisible())
+        finally:
+            host.close()
+            host.deleteLater()
+
+
+class TourStepCatalogTests(unittest.TestCase):
+    def test_wiki_links_belong_to_real_steps(self) -> None:
+        from config.urls import ONBOARDING_WIKI_URLS
+        from ui.onboarding.steps import TOUR_STEPS
+
+        step_keys = {step.key for step in TOUR_STEPS}
+        self.assertEqual(set(ONBOARDING_WIKI_URLS) - step_keys, set())
+        for step in TOUR_STEPS:
+            self.assertEqual(step.wiki_url, ONBOARDING_WIKI_URLS.get(step.key, ""))
+            if step.wiki_url:
+                self.assertTrue(step.wiki_url.startswith("https://wiki.zapret.moe/"), step.key)
+
+    def test_every_step_has_title_and_body_in_both_languages(self) -> None:
+        from app.ui_texts import TEXTS
+        from ui.onboarding.steps import TOUR_STEPS
+
+        # Прямо по словарю: tr() подставил бы русский текст вместо пропавшего английского.
+        missing = []
+        for step in TOUR_STEPS:
+            for part in ("title", "body"):
+                key = f"onboarding.step.{step.key}.{part}"
+                for language in ("ru", "en"):
+                    if not str((TEXTS.get(key) or {}).get(language) or "").strip():
+                        missing.append(f"{key} [{language}]")
+        self.assertEqual(missing, [])
 
 
 class StartOnboardingTourTests(unittest.TestCase):

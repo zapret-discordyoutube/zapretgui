@@ -176,6 +176,15 @@ class ProfileOrderPageBase(BasePage):
         if reload_if_visible and self.isVisible():
             self._reload_order_profiles(force=True)
 
+    def onboarding_target(self, name: str):
+        if name == "order_list":
+            return [
+                widget
+                for widget in (self.__dict__.get("_order_priority_hint"), self.__dict__.get("_order_list"))
+                if widget is not None
+            ]
+        return None
+
     def _build_content(self) -> None:
         if self.title_label is not None:
             self.title_label.hide()

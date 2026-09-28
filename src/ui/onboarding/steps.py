@@ -13,13 +13,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from PyQt6 import sip
 from PyQt6.QtCore import QRect
 from PyQt6.QtWidgets import QWidget
 
 from app.page_names import PageName
+from config.urls import ONBOARDING_WIKI_URLS
 from ui.window_ui_session import get_window_ui_session
 
 
@@ -34,16 +35,30 @@ MODE_TOUR_PAGES: dict[PageName, dict[str, PageName]] = {
     PageName.ZAPRET2_MODE_CONTROL: {
         "control": PageName.ZAPRET2_MODE_CONTROL,
         "user_presets": PageName.ZAPRET2_USER_PRESETS,
+        "preset_editor": PageName.ZAPRET2_PRESET_RAW_EDITOR,
         "preset_setup": PageName.ZAPRET2_PRESET_SETUP,
+        "profile_order": PageName.ZAPRET2_PROFILE_ORDER,
+        "profile_setup": PageName.ZAPRET2_PROFILE_SETUP,
     },
     PageName.ZAPRET1_MODE_CONTROL: {
         "control": PageName.ZAPRET1_MODE_CONTROL,
         "user_presets": PageName.ZAPRET1_USER_PRESETS,
+        "preset_editor": PageName.ZAPRET1_PRESET_RAW_EDITOR,
         "preset_setup": PageName.ZAPRET1_PRESET_SETUP,
+        "profile_order": PageName.ZAPRET1_PROFILE_ORDER,
+        "profile_setup": PageName.ZAPRET1_PROFILE_SETUP,
     },
     PageName.ORCHESTRA: {
         "control": PageName.ORCHESTRA,
     },
+}
+
+# Страницы, которым нужен параметр (какой пресет, какой профиль). Их
+# открывает страница-родитель своим обычным путём через
+# onboarding_open_subpage(ключ): сама выбирает пресет или профиль.
+TOUR_SUBPAGE_PARENTS: dict[str, str] = {
+    "preset_editor": "user_presets",
+    "profile_setup": "preset_setup",
 }
 
 TourTarget = QWidget | tuple[QWidget, QRect]
@@ -75,6 +90,12 @@ class TourStep:
     target_optional: bool = False
     # Крупная карточка по центру: приветствие и объяснения без подсветки.
     hero: bool = False
+    # Что страница показывает вживую на время шага: открытое меню, нужную
+    # вкладку. Тур передаёт его в page.onboarding_set_state(), а при уходе
+    # с шага — None, и страница возвращает всё как было.
+    page_state: str | None = None
+    # Статья вики по теме шага — кнопка «Подробнее в вики» на карточке.
+    wiki_url: str = ""
 
 
 def is_alive_widget(widget) -> bool:
@@ -136,6 +157,19 @@ def _nav_item(*page_names: PageName) -> TargetResolver:
     return _resolve
 
 
+def _nav_items(*page_names: PageName) -> TargetResolver:
+    """Несколько пунктов бокового меню сразу — все, что видны."""
+
+    def _resolve(ctx: TourContext) -> list[TourTarget]:
+        session = get_window_ui_session(ctx.window)
+        if session is None:
+            return []
+        items = [session.nav_items.get(page_name) for page_name in page_names]
+        return [item for item in items if is_widget_shown(item)]
+
+    return _resolve
+
+
 def _nav_group(group_name: str) -> TargetResolver:
     """Заголовок группы бокового меню вместе со всеми её видимыми пунктами."""
 
@@ -169,12 +203,14 @@ def _page_target(name: str) -> TargetResolver:
         if not callable(getter):
             return []
         target = getter(name)
-        return [target] if is_target_shown(target) else []
+        # Список — несколько виджетов, подсвечиваем их вместе.
+        targets = target if isinstance(target, list) else [target]
+        return [item for item in targets if is_target_shown(item)]
 
     return _resolve
 
 
-TOUR_STEPS: tuple[TourStep, ...] = (
+_TOUR_STEPS: tuple[TourStep, ...] = (
     TourStep("welcome", hero=True),
     TourStep("how_it_works", hero=True),
     TourStep("building_blocks", hero=True),
@@ -183,17 +219,31 @@ TOUR_STEPS: tuple[TourStep, ...] = (
     TourStep("status", _page_target("status"), page="control"),
     TourStep("preset", _page_target("preset"), page="control"),
     TourStep("presets_list", _page_target("presets_list"), page="user_presets", target_optional=True),
+    TourStep("preset_menu", _page_target("preset_menu"), page="user_presets", page_state="preset_menu"),
+    TourStep("preset_file", _page_target("editor"), page="preset_editor", target_optional=True),
     TourStep("presets_toolbar", _page_target("presets_toolbar"), page="user_presets"),
     TourStep("profiles_list", _page_target("profiles_list"), page="preset_setup", target_optional=True),
     TourStep("profile_row", _page_target("first_profile"), page="preset_setup"),
+    TourStep("profile_menu", _page_target("profile_menu"), page="preset_setup", page_state="profile_menu"),
     TourStep("profiles_toolbar", _page_target("profiles_toolbar"), page="preset_setup"),
+    TourStep("profile_order", _page_target("order_list"), page="profile_order", target_optional=True),
+    TourStep("list_type", _page_target("list_type"), page="profile_setup", target_optional=True),
+    TourStep("ranges", _page_target("ranges"), page="profile_setup"),
+    TourStep("profile_tabs", _page_target("tabs"), page="profile_setup"),
+    TourStep("list_entries", _page_target("list_entries"), page="profile_setup", page_state="editor"),
     TourStep("fakes", _page_target("fakes"), page="control"),
     TourStep("dpi_mode", _nav_item(PageName.DPI_SETTINGS, PageName.ORCHESTRA_SETTINGS)),
     TourStep("program_settings", _page_target("program_settings"), page="control"),
     TourStep("tools", _nav_group("system")),
+    TourStep("geo_blocks", _nav_items(PageName.NETWORK, PageName.HOSTS)),
     TourStep("diagnostics", _nav_group("diagnostics")),
     TourStep("appearance", _nav_group("appearance")),
     TourStep("finish", _page_target("tour_card"), page="control", target_optional=True),
+)
+
+# Ссылки на вики живут в config.urls вместе с остальными адресами.
+TOUR_STEPS: tuple[TourStep, ...] = tuple(
+    replace(step, wiki_url=ONBOARDING_WIKI_URLS.get(step.key, "")) for step in _TOUR_STEPS
 )
 
 
@@ -201,6 +251,7 @@ __all__ = [
     "CONTROL_PAGE_NAMES",
     "MODE_TOUR_PAGES",
     "TOUR_STEPS",
+    "TOUR_SUBPAGE_PARENTS",
     "TourContext",
     "TourStep",
     "TourTarget",

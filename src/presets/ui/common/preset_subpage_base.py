@@ -985,6 +985,11 @@ class PresetRawEditorPage(BasePage):
             return False
         return not self._raw_preset_content_dirty
 
+    def onboarding_target(self, name: str):
+        if name == "editor":
+            return self.__dict__.get("editor")
+        return None
+
     def handle_page_command(self, command: str, payload: dict) -> bool:
         if command == "open_raw_preset":
             self.set_preset_file_name(str((payload or {}).get("preset_name") or ""))

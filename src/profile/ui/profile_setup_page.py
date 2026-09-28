@@ -1591,6 +1591,45 @@ class ProfileSetupPageBase(BasePage):
         self._profile_key = next_key
         self.reload_current_profile()
 
+    def onboarding_target(self, name: str):
+        if name == "list_type":
+            return [self.__dict__.get("_filter_combo"), self.__dict__.get("_filter_value")]
+        if name == "ranges":
+            return [
+                self.__dict__.get(attr)
+                for attr in (
+                    "_in_range_label",
+                    "_in_range_mode",
+                    "_in_range_value",
+                    "_out_range_label",
+                    "_out_range_mode",
+                    "_out_range_value",
+                )
+            ]
+        if name == "tabs":
+            return self._strategy_tabs
+        if name == "list_entries":
+            stack = self._strategy_stack
+            if stack is None or stack.currentIndex() != 1:
+                return None
+            return self._list_file_editor_placeholder
+        return None
+
+    def onboarding_set_state(self, state: str | None) -> None:
+        """Тур открывает вкладку «Редактор», а потом возвращает «Готовые стратегии»."""
+        if self._strategy_tabs is None:
+            return
+        if state == "editor":
+            if not self._editor_tab_available:
+                return
+            self._onboarding_switched_tab = True
+            set_segmented_current_item_if_changed(self._strategy_tabs, "editor")
+            self._switch_strategy_tab(1)
+            return
+        if self.__dict__.pop("_onboarding_switched_tab", False):
+            set_segmented_current_item_if_changed(self._strategy_tabs, "strategies")
+            self._switch_strategy_tab(0)
+
     def handle_page_command(self, command: str, payload: dict) -> bool:
         if command == "open_profile":
             self.show_profile(str((payload or {}).get("profile_key") or ""))

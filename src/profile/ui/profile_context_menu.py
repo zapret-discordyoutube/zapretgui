@@ -31,6 +31,30 @@ def show_profile_context_menu(
     if not profile_key:
         return
 
+    menu, action_map = build_profile_context_menu(parent=parent, item=item)
+    chosen = exec_popup_menu(menu, global_pos, owner=parent, capture_action=True)
+    command, payload = action_map.get(chosen, ("", None))
+    if command == "open":
+        actions.open_profile(profile_key)
+    elif command == "set_enabled":
+        actions.set_enabled(profile_key, bool(payload))
+    elif command == "duplicate":
+        actions.duplicate_profile(profile_key)
+    elif command == "delete_from_preset":
+        actions.delete_from_preset(profile_key)
+    elif command == "edit_user_profile":
+        actions.edit_user_profile(profile_key)
+    elif command == "delete_user_profile":
+        actions.delete_user_profile(profile_key)
+
+
+def build_profile_context_menu(*, parent, item) -> tuple[RoundMenu, dict[object, tuple[str, object]]]:
+    """Собирает меню профиля, не показывая его.
+
+    Тот же набор пунктов показывает и обучающий тур, поэтому сборка
+    отделена от показа.
+    """
+    profile_key = str(getattr(item, "key", "") or "").strip()
     in_preset = bool(getattr(item, "in_preset", False))
     enabled = bool(getattr(item, "enabled", False))
     user_profile_id = str(getattr(item, "user_profile_id", "") or "").strip()
@@ -78,20 +102,7 @@ def show_profile_context_menu(
 
         _add_action("Удалить пользовательский profile", icon_name="DELETE", command="delete_user_profile")
 
-    chosen = exec_popup_menu(menu, global_pos, owner=parent, capture_action=True)
-    command, payload = action_map.get(chosen, ("", None))
-    if command == "open":
-        actions.open_profile(profile_key)
-    elif command == "set_enabled":
-        actions.set_enabled(profile_key, bool(payload))
-    elif command == "duplicate":
-        actions.duplicate_profile(profile_key)
-    elif command == "delete_from_preset":
-        actions.delete_from_preset(profile_key)
-    elif command == "edit_user_profile":
-        actions.edit_user_profile(profile_key)
-    elif command == "delete_user_profile":
-        actions.delete_user_profile(profile_key)
+    return menu, action_map
 
 
 def _profile_menu_name(item, *, fallback: str) -> str:

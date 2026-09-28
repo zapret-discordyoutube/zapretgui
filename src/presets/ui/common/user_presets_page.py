@@ -12,13 +12,14 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QFileDialog,
     QHBoxLayout,
     QSizePolicy,
     QWidget,
 )
 from ui.pages.base_page import BasePage
-from presets.ui.common.preset_actions_menu import show_preset_actions_menu
+from presets.ui.common.preset_actions_menu import build_preset_actions_menu, show_preset_actions_menu
 from presets.ui.common.preset_rating_menu import show_preset_rating_menu
 from presets.user_presets_runtime_service import (
     UserPresetsRuntimeAdapter,
@@ -81,6 +82,7 @@ from log.log import log
 from ui.presets_menu.common import fluent_icon, make_menu_action
 from ui.presets_menu.delegate import PresetListDelegate
 from ui.presets_menu.model import PresetListModel
+from ui.onboarding.menu_preview import create_menu_preview, place_menu_preview, remove_menu_preview
 from ui.presets_menu.toolbar import PresetsToolbarLayout
 from ui.presets_menu.common import tr_text as _tr_text
 from ui.latest_value_worker_state import LatestValueWorkerState
@@ -530,6 +532,60 @@ class UserPresetsPageBase(BasePage):
         if name == "presets_toolbar":
             toolbar = self.__dict__.get("_toolbar_layout")
             return getattr(toolbar, "container", None)
+        if name == "preset_menu":
+            row = self._onboarding_active_preset_row()
+            preview = self.__dict__.get("_onboarding_menu_preview")
+            if row is None or preview is None:
+                return None
+            # Окно могли растянуть: держим меню рядом со строкой.
+            place_menu_preview(preview, *row)
+            return [row, preview]
+        return None
+
+    def onboarding_set_state(self, state: str | None) -> None:
+        """Тур показывает настоящее меню выбранного пресета (см. ui.onboarding.menu_preview)."""
+        remove_menu_preview(self.__dict__.pop("_onboarding_menu_preview", None))
+        if state != "preset_menu":
+            return
+        name = str(self._runtime_service.active_preset_file_name() or "").strip()
+        row = self._onboarding_active_preset_row(scroll=True)
+        if not name or row is None:
+            return
+        menu = self._build_preset_actions_menu_for(name)
+        preview = create_menu_preview(self, menu) if menu is not None else None
+        if preview is not None:
+            self._onboarding_menu_preview = preview
+            place_menu_preview(preview, *row)
+
+    def onboarding_open_subpage(self, key: str) -> bool:
+        """Тур открывает выбранный пресет в редакторе — как пункт «Открыть» в меню."""
+        if key != "preset_editor":
+            return False
+        name = str(self._runtime_service.active_preset_file_name() or "").strip()
+        if not name:
+            return False
+        self._open_preset_subpage(name)
+        return True
+
+    def _onboarding_active_preset_row(self, *, scroll: bool = False):
+        """Строка выбранного пресета: (viewport, прямоугольник строки)."""
+        view = self.__dict__.get("presets_list")
+        model = self.__dict__.get("_presets_model")
+        if view is None or model is None:
+            return None
+        for row in range(model.rowCount()):
+            index = model.index(row, 0)
+            if str(index.data(PresetListModel.KindRole) or "") != "preset":
+                continue
+            if not index.data(PresetListModel.ActiveRole):
+                continue
+            if scroll:
+                view.scrollTo(index, QAbstractItemView.ScrollHint.EnsureVisible)
+            viewport = view.viewport()
+            rect = view.visualRect(index).intersected(viewport.rect())
+            if rect.isValid() and rect.height() >= 8:
+                return viewport, rect
+            return None
         return None
 
     def _build_ui(self):
@@ -2530,6 +2586,22 @@ class UserPresetsPageBase(BasePage):
         self._schedule_next_preset_write_action_after_finish("_preset_activate_request_id", worker)
 
     def _on_edit_preset(self, name: str, global_pos: QPoint | None = None):
+        self._open_preset_actions_menu(name, global_pos=global_pos, show_menu_fn=show_preset_actions_menu)
+
+    def _build_preset_actions_menu_for(self, name: str):
+        """То же меню, что по правой кнопке, но собранное без показа."""
+        built = []
+
+        def _build_only(parent, *, global_pos, **menu_options):
+            _ = global_pos
+            menu, _actions, _disabled = build_preset_actions_menu(parent, **menu_options)
+            built.append(menu)
+            return None
+
+        self._open_preset_actions_menu(name, global_pos=None, show_menu_fn=_build_only)
+        return built[0] if built else None
+
+    def _open_preset_actions_menu(self, name: str, *, global_pos: QPoint | None, show_menu_fn) -> None:
         open_edit_preset_menu_action(
             page=self,
             name=name,
@@ -2543,7 +2615,7 @@ class UserPresetsPageBase(BasePage):
             fluent_icon=fluent_icon,
             round_menu_cls=RoundMenu,
             on_preset_list_action_fn=self._on_preset_list_action,
-            show_preset_actions_menu_fn=show_preset_actions_menu,
+            show_preset_actions_menu_fn=show_menu_fn,
             tr_prefix=self._config.tr_prefix,
         )
 

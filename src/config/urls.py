@@ -7,6 +7,29 @@ PRESET_INFO_URL = "https://wiki.zapret.moe/Zapret2/preset"  # URL о пресе�
 PROFILE_INFO_URL = "https://wiki.zapret.moe/Zapret2/filter"  # URL о профилях
 WINWS_LOG_ANALYZER_INFO_URL = "https://wiki.zapret.moe/Zapret2/log-analyzer"  # URL об анализаторе логов winws2
 ANDROID_URL = "https://wiki.zapret.moe/Zapret/android"  # URL инструкции для Android
+# Статьи вики к шагам обучающего тура (ключ — шаг из ui.onboarding.steps).
+# Шаги без подходящей статьи здесь не указаны — у них нет кнопки «Подробнее в вики».
+ONBOARDING_WIKI_URLS = {
+    "welcome": DOCS_URL,
+    "how_it_works": "https://wiki.zapret.moe/Zapret/about#обход-dpi-система-тспу",
+    "building_blocks": "https://wiki.zapret.moe/Zapret2/profile#пресет-и-профиль--в-чём-разница",
+    "preset": PRESET_INFO_URL,
+    "presets_list": PRESET_INFO_URL,
+    "preset_file": PRESET_INFO_URL,
+    "profiles_list": "https://wiki.zapret.moe/Zapret2/profile",
+    "profile_row": "https://wiki.zapret.moe/Zapret2/verify-strategy",
+    "profiles_toolbar": "https://wiki.zapret.moe/Zapret2/add-profile",
+    "profile_order": "https://wiki.zapret.moe/Zapret2/profile-independence",
+    "list_type": "https://wiki.zapret.moe/Zapret2/filter#списки-ip-и-доменов",
+    "ranges": "https://wiki.zapret.moe/Zapret2/out-range",
+    "profile_tabs": PROFILE_INFO_URL,
+    "list_entries": "https://wiki.zapret.moe/Zapret2/find-site-domains",
+    "fakes": "https://wiki.zapret.moe/Zapret2/blob",
+    "dpi_mode": "https://wiki.zapret.moe/Zapret2/Zapret2#чем-zapret-2-отличается-от-обычного-zapret-winws-nfqws",
+    "geo_blocks": "https://wiki.zapret.moe/Zapret/hosts",
+    "diagnostics": WINWS_LOG_ANALYZER_INFO_URL,
+    "finish": "https://wiki.zapret.moe/Zapret/zapret_not_working",
+}
 BOLVAN_URL = "https://github.com/bol-van/zapret-win-bundle"  # URL автора
 SUPPORT_ISSUES_URL = "https://git.zapret.moe/zapretdiscordyoutube/zapretgui/issues"  # Основная ссылка поддержки
 # Forgejo (в отличие от GitHub) требует в ?template= полный путь к файлу шаблона

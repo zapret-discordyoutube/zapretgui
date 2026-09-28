@@ -483,17 +483,56 @@ class ProfilesList(QWidget):
         Строки рисует делегат, отдельных виджетов у них нет, поэтому
         обучающий тур подсвечивает прямоугольник внутри viewport.
         """
+        found = self.first_visible_profile()
+        return found[1] if found is not None else None
+
+    def first_visible_profile(self, *, prefer_enabled_in_preset: bool = False):
+        """Ключ первой видимой строки профиля и её (viewport, прямоугольник).
+
+        prefer_enabled_in_preset — сначала искать включённый профиль из
+        пресета: у него в меню «Выключить» и «Удалить из preset», как
+        рассказывает обучающий тур.
+        """
         view = self._view
         viewport = view.viewport()
         visible = viewport.rect()
+        first = None
         for row in range(self._model.rowCount()):
             index = self._model.index(row, 0)
             if str(index.data(ProfileListModel.KindRole) or "") != "profile":
                 continue
             rect = view.visualRect(index).intersected(visible)
-            if rect.isValid() and rect.height() >= 8:
-                return viewport, rect
-        return None
+            if not rect.isValid() or rect.height() < 8:
+                continue
+            found = str(index.data(ProfileListModel.ProfileKeyRole) or ""), (viewport, rect)
+            if not prefer_enabled_in_preset:
+                return found
+            if index.data(ProfileListModel.InPresetRole) and index.data(ProfileListModel.EnabledRole):
+                return found
+            first = first or found
+        return first
+
+    def first_profile_key_with_list(self) -> str:
+        """Первый профиль пресета со списком сайтов или адресов.
+
+        У такого профиля на своей странице есть выбор Hostlist/IPset и
+        вкладка «Редактор» — их показывает обучающий тур. Если профилей
+        со списком нет, берётся просто первый профиль пресета.
+        """
+        fallback = ""
+        for row in range(self._model.rowCount()):
+            index = self._model.index(row, 0)
+            if str(index.data(ProfileListModel.KindRole) or "") != "profile":
+                continue
+            if not index.data(ProfileListModel.InPresetRole):
+                continue
+            key = str(index.data(ProfileListModel.ProfileKeyRole) or "")
+            if not key:
+                continue
+            if str(index.data(ProfileListModel.ListTypeRole) or "") in {"hostlist", "ipset"}:
+                return key
+            fallback = fallback or key
+        return fallback
 
     def expand_all(self) -> None:
         self._request_all_groups_expanded(True)

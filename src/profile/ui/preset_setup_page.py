@@ -9,7 +9,12 @@ from log.log import log
 from profile.match_filters import filter_values
 from profile.key_resolution import profile_reference_key
 from profile.list_apply_signature import profile_payload_apply_signature
-from profile.ui.profile_context_menu import ProfileContextMenuActions, show_profile_context_menu
+from profile.ui.profile_context_menu import (
+    ProfileContextMenuActions,
+    build_profile_context_menu,
+    show_profile_context_menu,
+)
+from ui.onboarding.menu_preview import create_menu_preview, place_menu_preview, remove_menu_preview
 from profile.ui.profile_folder_menu import show_profile_folder_menu
 from profile.ui.profile_list_filter_state import ProfileListFilterState
 from profile.ui.profile_payload_controller import (
@@ -346,7 +351,47 @@ class PresetSetupPageBase(BasePage):
         if name == "profiles_toolbar":
             toolbar = self.__dict__.get("_toolbar_actions_bar")
             return getattr(toolbar, "container", None)
+        if name == "profile_menu":
+            profiles_list = self._profiles_list_widget()
+            preview = self.__dict__.get("_onboarding_menu_preview")
+            found = profiles_list.first_visible_profile(prefer_enabled_in_preset=True) if profiles_list is not None else None
+            if found is None or preview is None:
+                return None
+            row = found[1]
+            # Окно могли растянуть: держим меню рядом со строкой.
+            place_menu_preview(preview, *row)
+            return [row, preview]
         return None
+
+    def onboarding_set_state(self, state: str | None) -> None:
+        """Тур показывает настоящее меню первого профиля (см. ui.onboarding.menu_preview)."""
+        remove_menu_preview(self.__dict__.pop("_onboarding_menu_preview", None))
+        if state != "profile_menu":
+            return
+        profiles_list = self._profiles_list_widget()
+        found = profiles_list.first_visible_profile(prefer_enabled_in_preset=True) if profiles_list is not None else None
+        if found is None:
+            return
+        profile_key, row = found
+        item = profiles_list.profile_item_for_key(profile_key)
+        if item is None:
+            return
+        menu, _actions = build_profile_context_menu(parent=self, item=item)
+        preview = create_menu_preview(self, menu)
+        if preview is not None:
+            self._onboarding_menu_preview = preview
+            place_menu_preview(preview, *row)
+
+    def onboarding_open_subpage(self, key: str) -> bool:
+        """Тур открывает профиль со списком — как обычный клик по профилю."""
+        if key != "profile_setup":
+            return False
+        profiles_list = self._profiles_list_widget()
+        profile_key = profiles_list.first_profile_key_with_list() if profiles_list is not None else ""
+        if not profile_key:
+            return False
+        self._open_profile_setup_by_reference(profile_key)
+        return True
 
     def _profiles_list_widget(self) -> ProfilesList | None:
         """Виджет списка; чтение устойчиво к duck-typed стабам из тестов."""

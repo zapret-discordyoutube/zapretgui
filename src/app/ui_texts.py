@@ -4845,6 +4845,7 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     "onboarding.button.back": {"ru": "Назад", "en": "Back"},
     "onboarding.button.skip": {"ru": "Пропустить", "en": "Skip"},
     "onboarding.button.done": {"ru": "Готово", "en": "Done"},
+    "onboarding.button.wiki": {"ru": "Подробнее в вики", "en": "Read more in the wiki"},
     "onboarding.step.welcome.title": {
         "ru": "Добро пожаловать в Zapret!",
         "en": "Welcome to Zapret!",
@@ -4988,6 +4989,55 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "preset first."
         ),
     },
+    "onboarding.step.preset_menu.title": {
+        "ru": "Что можно делать с пресетом",
+        "en": "What you can do with a preset",
+    },
+    "onboarding.step.preset_menu.body": {
+        "ru": (
+            "Это меню открывается, если нажать на пресет правой кнопкой мыши.\n\n"
+            "Открыть — посмотреть и поправить текст пресета. Рейтинг — оценить пресет, чтобы помнить, "
+            "какой работает лучше. Выше и ниже — переставить его в списке. Дублировать — сделать "
+            "копию и менять её, не трогая оригинал. Экспорт — сохранить файл пресета, например чтобы "
+            "поделиться им.\n\n"
+            "Переименовать и Удалить есть только у ваших пресетов, а выбранный сейчас удалить нельзя. "
+            "Вернуть встроенный появляется, если вы меняли встроенный пресет, — он вернёт исходный "
+            "вид. У пресетов, добавленных по ссылке, есть ещё пункты, чтобы обновить их из источника "
+            "или отвязать от него."
+        ),
+        "en": (
+            "This menu opens when you right-click a preset.\n\n"
+            "Open shows the preset text so you can edit it. Rating lets you score a preset to "
+            "remember which one works best. Up and down move it in the list. Duplicate makes a copy "
+            "you can change without touching the original. Export saves the preset file, for example "
+            "to share it.\n\n"
+            "Rename and Delete exist only for your own presets, and the selected preset cannot be "
+            "deleted. Restore built-in appears when you have changed a built-in preset and brings "
+            "back its original version. Presets added from a link also have items to update them from "
+            "the source or unlink them."
+        ),
+    },
+    "onboarding.step.preset_file.title": {
+        "ru": "Пресет — это обычный текстовый файл",
+        "en": "A preset is a plain text file",
+    },
+    "onboarding.step.preset_file.body": {
+        "ru": (
+            "Любой пресет — просто файл .txt. Здесь он открыт целиком: каждая строка — одна настройка "
+            "движка, и запускается ровно то, что здесь написано. Где лежит файл, видно в карточке сверху.\n\n"
+            "Править пресет можно прямо здесь. Изменения сохраняются сами через секунду, а если этот "
+            "пресет сейчас запущен, программа сразу применит их. Открыть это окно можно пунктом "
+            "«Открыть» в меню пресета."
+        ),
+        "en": (
+            "Any preset is just a .txt file. Here it is open in full: every line is one engine "
+            "setting, and exactly what is written here is what runs. The card at the top shows where "
+            "the file is.\n\n"
+            "You can edit the preset right here. Changes save on their own after a second, and if "
+            "this preset is running, the app applies them right away. You can open this view with "
+            "Open in the preset menu."
+        ),
+    },
     "onboarding.step.presets_toolbar.title": {
         "ru": "Свои пресеты",
         "en": "Your own presets",
@@ -5011,17 +5061,13 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     "onboarding.step.profiles_list.body": {
         "ru": (
             "Это «Профили пресета» — из чего состоит выбранный пресет. Профиль — правило: какой трафик "
-            "обрабатывать и какой стратегией.\n\n"
-            "Какой трафик, задают списки. Hostlist — список адресов сайтов, например youtube.com. "
-            "IPset — список IP-адресов: он нужен там, где адреса сайта в трафике не видно, например "
-            "у игр и голосовых звонков."
+            "обрабатывать и какой стратегией. Какой трафик, задаёт список сайтов или адресов — о нём "
+            "чуть дальше."
         ),
         "en": (
             "This is Preset profiles — what the selected preset is made of. A profile is a rule: which "
-            "traffic to handle and with which strategy.\n\n"
-            "Lists define the traffic. A hostlist is a list of site names such as youtube.com. An IPset "
-            "is a list of IP addresses; it is used where the site name is not visible in the traffic, "
-            "for example in games and voice calls."
+            "traffic to handle and with which strategy. The traffic is set by a list of sites or "
+            "addresses — more on that a bit later."
         ),
     },
     "onboarding.step.profile_row.title": {
@@ -5034,14 +5080,36 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "Горящая точка значит, что стратегия выбрана и профиль работает.\n\n"
             "Нажмите на профиль, чтобы выбрать для него другую готовую стратегию. Если сервис не "
             "открывается, попробуйте несколько стратегий по очереди — какая-то подойдёт вашему "
-            "провайдеру. Правой кнопкой мыши профиль можно выключить."
+            "провайдеру."
         ),
         "en": (
             "On the left are the profile name and list type (Hostlist or IPset), on the right is the "
             "selected strategy. A lit dot means a strategy is selected and the profile works.\n\n"
             "Click a profile to choose another ready strategy for it. If a service does not open, try "
-            "several strategies one by one — one of them will suit your provider. Right-click a profile "
-            "to turn it off."
+            "several strategies one by one — one of them will suit your provider."
+        ),
+    },
+    "onboarding.step.profile_menu.title": {
+        "ru": "Что можно делать с профилем",
+        "en": "What you can do with a profile",
+    },
+    "onboarding.step.profile_menu.body": {
+        "ru": (
+            "Это меню открывается, если нажать на профиль правой кнопкой мыши.\n\n"
+            "Открыть — настройки профиля: список, стратегия, диапазоны. Выключить — профиль останется "
+            "в пресете, но движок будет его пропускать: в текст пресета добавится строка --skip. "
+            "Дублировать — копия профиля, например чтобы попробовать другую стратегию. Удалить из "
+            "preset — убрать профиль из файла пресета совсем.\n\n"
+            "У профилей, которые вы создали сами, в меню есть ещё пункты, чтобы изменить или удалить "
+            "их."
+        ),
+        "en": (
+            "This menu opens when you right-click a profile.\n\n"
+            "Open shows the profile settings: list, strategy, ranges. Turn off keeps the profile in "
+            "the preset, but the engine skips it: a --skip line is added to the preset text. "
+            "Duplicate makes a copy of the profile, for example to try another strategy. Remove from "
+            "preset deletes the profile from the preset file.\n\n"
+            "Profiles you created yourself also have menu items to edit or delete them."
         ),
     },
     "onboarding.step.profiles_toolbar.title": {
@@ -5051,11 +5119,109 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     "onboarding.step.profiles_toolbar.body": {
         "ru": (
             "Здесь можно добавить в пресет ещё профиль, найти нужный поиском и поменять вид списка. "
-            "Если нужного сервиса нет, отправьте запрос на новый профиль."
+            "Кнопка «Порядок в пресете» показывает, в каком порядке профили записаны в файле. Если "
+            "нужного сервиса нет, отправьте запрос на новый профиль."
         ),
         "en": (
             "Here you can add another profile to the preset, search for one and change the list view. "
-            "If the service you need is missing, send a request for a new profile."
+            "The Order in preset button shows the order of profiles in the file. If the service you "
+            "need is missing, send a request for a new profile."
+        ),
+    },
+    "onboarding.step.profile_order.title": {
+        "ru": "Порядок в пресете важен",
+        "en": "Order in the preset matters",
+    },
+    "onboarding.step.profile_order.body": {
+        "ru": (
+            "Это страница «Порядок в пресете», она открывается кнопкой над списком профилей. Здесь "
+            "профили стоят так же, как записаны в файле пресета.\n\n"
+            "Движок проверяет профили сверху вниз. Если к одному сайту или IP подходят два профиля, "
+            "сработает тот, что выше. Поэтому исключения и узкие правила ставьте выше общих. Чтобы "
+            "поменять порядок, перетащите профиль мышью."
+        ),
+        "en": (
+            "This is the Order in preset page, opened with a button above the profile list. Profiles "
+            "here are in the same order as in the preset file.\n\n"
+            "The engine checks profiles from top to bottom. If two profiles match the same site or "
+            "IP, the upper one wins. So put exceptions and narrow rules above general ones. Drag a "
+            "profile with the mouse to change the order."
+        ),
+    },
+    "onboarding.step.list_type.title": {
+        "ru": "Hostlist или IPset",
+        "en": "Hostlist or IPset",
+    },
+    "onboarding.step.list_type.body": {
+        "ru": (
+            "Это страница одного профиля. Слева — чем профиль выбирает трафик, справа — файл со списком.\n\n"
+            "Hostlist — список имён сайтов, например youtube.com. Движок узнаёт сайт по имени, "
+            "которое программа сообщает при подключении. Подходит для сайтов и большинства приложений.\n\n"
+            "IPset — список IP-адресов и подсетей. Он нужен, когда имени сайта в трафике не видно: "
+            "игры, голосовые звонки, некоторые приложения. Минус в том, что на одном адресе бывает "
+            "много сайтов, а адреса сервиса могут меняться."
+        ),
+        "en": (
+            "This is the page of a single profile. On the left is how the profile picks traffic, on "
+            "the right is the list file.\n\n"
+            "A hostlist is a list of site names such as youtube.com. The engine recognises the site "
+            "by the name an app sends when it connects. It suits sites and most apps.\n\n"
+            "An IPset is a list of IP addresses and subnets. It is needed when the site name is not "
+            "visible in the traffic: games, voice calls, some apps. The downside is that one address "
+            "can host many sites, and a service's addresses can change."
+        ),
+    },
+    "onboarding.step.ranges.title": {
+        "ru": "К каким пакетам применять",
+        "en": "Which packets to handle",
+    },
+    "onboarding.step.ranges.body": {
+        "ru": (
+            "--out-range — пакеты от вас к сайту, --in-range — от сайта к вам. Эти поля решают, к "
+            "каким пакетам соединения применять стратегию.\n\n"
+            "a — всегда, x — никогда, n — по номеру пакета, d — по номеру пакета с данными. Например, "
+            "d и 8 — стратегия работает только на первых 8 пакетах с данными. Блокировка обычно "
+            "смотрит на начало соединения, а дальше обработка только нагружает процессор."
+        ),
+        "en": (
+            "--out-range covers packets from you to the site, --in-range covers packets from the site "
+            "to you. These fields decide which packets of a connection the strategy handles.\n\n"
+            "a means always, x never, n by packet number, d by number of packets with data. For "
+            "example, d and 8 means the strategy works only on the first 8 data packets. Blocking "
+            "usually looks at the start of a connection, and handling the rest only loads the CPU."
+        ),
+    },
+    "onboarding.step.profile_tabs.title": {
+        "ru": "Вкладки профиля",
+        "en": "Profile tabs",
+    },
+    "onboarding.step.profile_tabs.body": {
+        "ru": (
+            "Готовые стратегии — выбрать способ обхода для этого профиля. Редактор — записи списка "
+            "сайтов или адресов. Когда применяется — условия профиля и его текст внутри пресета."
+        ),
+        "en": (
+            "Ready strategies — choose the bypass method for this profile. Editor — the entries of "
+            "the site or address list. When it applies — the profile conditions and its text inside "
+            "the preset."
+        ),
+    },
+    "onboarding.step.list_entries.title": {
+        "ru": "Системные и ваши записи",
+        "en": "Built-in and your entries",
+    },
+    "onboarding.step.list_entries.body": {
+        "ru": (
+            "Сверху — «База»: системные записи. Они приходят с программой и обновляются вместе с ней.\n\n"
+            "Снизу — «Ваши записи». Добавляйте сюда свои сайты или адреса, по одному на строку. Они "
+            "лежат в отдельном файле в папке lists/user и не пропадут при обновлении.\n\n"
+            "Движок получает общий список: базу плюс ваши записи."
+        ),
+        "en": (
+            "At the top is Base: the built-in entries. They come with the app and are updated with it.\n\n"
+            "Below are Your entries. Add your own sites or addresses here, one per line. They are "
+            "kept in a separate file in the lists/user folder and survive updates.\n\n"
+            "The engine gets one combined list: the base plus your entries."
         ),
     },
     "onboarding.step.fakes.title": {
@@ -5129,6 +5295,34 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "• DNS settings — change DNS servers if your provider spoofs site addresses;\n"
             "• Hosts editor — unblock individual services through the system hosts file;\n"
             "• Telegram Proxy — a proxy right on your computer so Telegram works when it is throttled."
+        ),
+    },
+    "onboarding.step.geo_blocks.title": {
+        "ru": "Гео-ограничения стратегиями не обойти",
+        "en": "Strategies cannot bypass geo-restrictions",
+    },
+    "onboarding.step.geo_blocks.body": {
+        "ru": (
+            "Важно: если сервис пишет «недоступно в вашей стране» или «not available in your region», "
+            "это не блокировка провайдера. Сам сервис закрыл доступ для России — так делают ChatGPT, "
+            "Gemini и другие ИИ-сервисы, некоторые игры и магазины. Стратегии Zapret такие ограничения "
+            "не обходят, сколько их ни перебирай: они помогают только против блокировок провайдера.\n\n"
+            "Гео-ограничения обходят по-другому:\n"
+            "• Редактор hosts — отметьте сервис, и программа пропишет в файл hosts адреса, через которые "
+            "он откроется;\n"
+            "• Настройка DNS — в группе «Для ИИ» есть DNS-серверы, которые открывают ChatGPT и похожие "
+            "сервисы."
+        ),
+        "en": (
+            "Important: if a service says \"not available in your country\" or \"not available in your "
+            "region\", it is not your provider blocking it. The service itself has closed access for "
+            "Russia — ChatGPT, Gemini and other AI services, some games and stores do this. Zapret "
+            "strategies do not bypass such restrictions no matter how many you try: they only help "
+            "against provider blocks.\n\n"
+            "Geo-restrictions are bypassed differently:\n"
+            "• Hosts editor — tick a service and the app writes addresses to the hosts file through "
+            "which it opens;\n"
+            "• DNS settings — the For AI group has DNS servers that open ChatGPT and similar services."
         ),
     },
     "onboarding.step.diagnostics.title": {
