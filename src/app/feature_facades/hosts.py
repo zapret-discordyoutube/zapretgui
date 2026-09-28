@@ -10,6 +10,7 @@ from ui.performance_metrics import log_ui_timing_since
 
 @dataclass(frozen=True, slots=True)
 class HostsFeature:
+    refresh_applied_selection: Callable
     warm_page_data_cache: Callable
     consume_warmed_services_catalog_plan: Callable
     create_hosts_runtime: Callable
@@ -189,6 +190,7 @@ def build_hosts_feature() -> HostsFeature:
         )
 
     return HostsFeature(
+        refresh_applied_selection=lambda *args, **kwargs: _public().refresh_applied_selection(*args, **kwargs),
         warm_page_data_cache=_warm_page_data_cache,
         consume_warmed_services_catalog_plan=_consume_warmed_services_catalog_plan,
         create_hosts_runtime=lambda *args, **kwargs: _public().create_hosts_runtime(*args, **kwargs),

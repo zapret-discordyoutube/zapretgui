@@ -7,6 +7,7 @@ from typing import Callable
 @dataclass(frozen=True, slots=True)
 class DnsFeature:
     apply_dns_on_startup_async: Callable
+    migrate_outdated_dns_addresses: Callable
     warm_page_data_cache: Callable
     consume_warmed_page_data: Callable
     normalize_adapter_alias: Callable
@@ -174,6 +175,7 @@ def build_dns_feature() -> DnsFeature:
 
     feature = DnsFeature(
         apply_dns_on_startup_async=lambda *args, **kwargs: _public().apply_dns_on_startup_async(*args, **kwargs),
+        migrate_outdated_dns_addresses=lambda *args, **kwargs: _public().migrate_outdated_dns_addresses(*args, **kwargs),
         warm_page_data_cache=lambda *args, **kwargs: _public().warm_page_data_cache(*args, **kwargs),
         consume_warmed_page_data=lambda *args, **kwargs: _public().consume_warmed_page_data(*args, **kwargs),
         normalize_adapter_alias=lambda *args, **kwargs: _public().normalize_adapter_alias(*args, **kwargs),

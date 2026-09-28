@@ -74,6 +74,21 @@ def apply_service_profiles(hosts_manager, service_dns: dict[str, str]) -> HostsC
     return HostsCommandResult(success=success, message=message)
 
 
+def refresh_applied_selection(hosts_manager=None) -> HostsCommandResult:
+    """При запуске переписывает уже применённый блок hosts, если каталог сменил адреса."""
+    from hosts.proxy_domains import has_saved_user_hosts_selection
+    from log.log import log
+
+    manager = hosts_manager or create_hosts_manager(
+        status_callback=lambda message: log(f"Hosts при запуске: {message}", "DEBUG")
+    )
+    changed, reason = manager.refresh_applied_service_selection(
+        load_user_selection(),
+        has_saved_selection=has_saved_user_hosts_selection(),
+    )
+    return HostsCommandResult(success=True, message=reason, changed=bool(changed))
+
+
 def clear_hosts(hosts_manager) -> HostsCommandResult:
     success = bool(hosts_manager.clear_hosts_file())
     message = "Записи ZapretGUI очищены" if success else getattr(hosts_manager, "last_status", None) or "Ошибка"

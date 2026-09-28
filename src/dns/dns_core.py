@@ -693,15 +693,23 @@ class DNSManager:
         address_family: str = "IPv4"
     ) -> Tuple[bool, str]:
         """Устанавливает пользовательские DNS через WinAPI"""
+        dns_list = [primary_dns]
+        if secondary_dns:
+            dns_list.append(secondary_dns)
+        return self.set_dns_servers(adapter_name, dns_list, address_family)
+
+    def set_dns_servers(
+        self,
+        adapter_name: str,
+        dns_list: List[str],
+        address_family: str = "IPv4",
+    ) -> Tuple[bool, str]:
+        """Записывает весь список DNS адаптера через WinAPI (с DoH для известных адресов)."""
         try:
             guid = self.get_adapter_guid(adapter_name)
             if not guid:
                 return False, "GUID not found"
-            
-            dns_list = [primary_dns]
-            if secondary_dns:
-                dns_list.append(secondary_dns)
-            
+
             is_ipv6 = (address_family.lower() == "ipv6")
 
             doh_templates = None

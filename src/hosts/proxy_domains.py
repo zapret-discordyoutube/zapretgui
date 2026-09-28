@@ -381,6 +381,15 @@ def load_user_hosts_selection() -> dict[str, str]:
     return result
 
 
+def has_saved_user_hosts_selection() -> bool:
+    """Есть ли в settings.sqlite3 хоть какой-то выбор hosts, включая уже недоступные профили."""
+    try:
+        return bool(settings_store.get_hosts_selection())
+    except Exception as exc:
+        _log(f"Не удалось прочитать выбор hosts из settings.sqlite3: {exc}", "WARNING")
+        return False
+
+
 def save_user_hosts_selection(selected_profiles: dict[str, str]) -> bool:
     """Store stable service IDs and retain choices for temporarily removed services."""
     try:
@@ -412,6 +421,7 @@ def save_user_hosts_selection(selected_profiles: dict[str, str]) -> bool:
 
 
 __all__ = [
+    "has_saved_user_hosts_selection",
     "get_all_services",
     "get_dns_profile_display_name",
     "get_dns_profiles",

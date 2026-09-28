@@ -19,6 +19,12 @@ def apply_dns_on_startup_async(status_callback=None):
     return _apply_dns_on_startup_async(status_callback=status_callback)
 
 
+def migrate_outdated_dns_addresses():
+    from dns.address_migration import migrate_outdated_dns_addresses as _migrate
+
+    return _migrate()
+
+
 def get_network_adapters_native():
     from dns.dns_core import get_network_adapters_native as _get_network_adapters_native
 

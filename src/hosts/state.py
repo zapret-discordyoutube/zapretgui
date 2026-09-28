@@ -21,3 +21,4 @@ class HostsCommandResult:
     success: bool
     message: str = ""
     error: str = ""
+    changed: bool = False

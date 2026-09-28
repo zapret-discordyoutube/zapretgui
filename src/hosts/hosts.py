@@ -486,6 +486,138 @@ def safe_write_hosts_file(content):
         log(f"Ошибка при записи файла hosts: {e}")
         return False
     
+def _filter_desired_hosts_rows(domain_ip_rows, *, allow_ipv6: bool) -> tuple[list[tuple[str, str]], bool]:
+    """Чистит строки перед записью: пустые, повторы и IPv6 без поддержки IPv6.
+
+    Возвращает (строки для записи, были ли вообще запрошены строки).
+    """
+    desired_rows: list[tuple[str, str]] = []
+    seen_rows: set[tuple[str, str]] = set()
+    had_requested_rows = False
+    for row in (domain_ip_rows or []):
+        if not isinstance(row, (tuple, list)) or len(row) < 2:
+            continue
+        domain = str(row[0]).strip()
+        ip = str(row[1]).strip()
+        if not domain or not ip:
+            continue
+        had_requested_rows = True
+        if is_ipv6_address(ip) and not allow_ipv6:
+            continue
+        row_key = (domain.casefold(), ip.casefold())
+        if row_key in seen_rows:
+            continue
+        seen_rows.add(row_key)
+        desired_rows.append((domain, ip))
+    return desired_rows, had_requested_rows
+
+
+def _build_service_selection_rows(
+    service_dns: dict[str, str],
+    static_enabled: set[str] | None = None,
+) -> tuple[list[tuple[str, str]], bool]:
+    """Собирает строки hosts из выбора «сервис → профиль» по текущему каталогу.
+
+    Возвращает (строки domain/ip по порядку, был ли выбран хоть один профиль).
+    """
+    # key = normalized domain; value = (display_domain, [ip1, ip2, ...]).
+    selected_by_domain: dict[str, tuple[str, list[str]]] = {}
+    domain_order: list[str] = []
+    requested_any_profile = False
+
+    def merge_rows(rows: list[tuple[str, str]]) -> None:
+        per_service: dict[str, tuple[str, list[str], set[str]]] = {}
+        per_service_order: list[str] = []
+
+        for domain, ip in rows:
+            domain_s = (domain or "").strip()
+            ip_s = (ip or "").strip()
+            if not domain_s or not ip_s:
+                continue
+
+            domain_key = domain_s.casefold()
+            ip_key = ip_s.casefold()
+            item = per_service.get(domain_key)
+            if item is None:
+                per_service[domain_key] = (domain_s, [ip_s], {ip_key})
+                per_service_order.append(domain_key)
+                continue
+
+            display_domain, ips, seen_ips = item
+            if ip_key in seen_ips:
+                continue
+            ips.append(ip_s)
+            seen_ips.add(ip_key)
+            per_service[domain_key] = (display_domain, ips, seen_ips)
+
+        for domain_key in per_service_order:
+            display_domain, ips, _seen_ips = per_service[domain_key]
+            if domain_key not in selected_by_domain:
+                domain_order.append(domain_key)
+            # Keep old override semantics between services: later service replaces domain mapping.
+            selected_by_domain[domain_key] = (display_domain, ips)
+
+    for service_name, profile_name in (service_dns or {}).items():
+        if not isinstance(service_name, str):
+            continue
+        if not isinstance(profile_name, str):
+            continue
+
+        normalized = profile_name.strip().lower()
+        if not normalized or normalized in ("off", "откл", "откл.", "0", "false"):
+            continue
+
+        requested_any_profile = True
+        rows = get_service_domain_ip_rows(service_name, profile_name.strip())
+        if not rows:
+            # Профиль недоступен для сервиса (не хватает IP) — просто пропускаем.
+            continue
+        merge_rows(rows)
+
+    if static_enabled:
+        default_profile = (get_dns_profiles() or [None])[0]
+        for service_name in static_enabled:
+            rows = get_service_domain_ip_rows(service_name, default_profile) if default_profile else []
+            if rows:
+                merge_rows(rows)
+
+    selected_rows: list[tuple[str, str]] = []
+    for domain_key in domain_order:
+        display_domain, ips = selected_by_domain.get(domain_key, ("", []))
+        for ip in ips:
+            selected_rows.append((display_domain, ip))
+    return selected_rows, requested_any_profile
+
+
+def _hosts_rows_key(rows) -> list[tuple[str, str]]:
+    return [(str(domain).strip().casefold(), str(ip).strip().casefold()) for domain, ip in rows]
+
+
+def decide_applied_selection_refresh(
+    *,
+    block_rows: list[tuple[str, str]],
+    has_saved_selection: bool,
+    ipv6_available: bool,
+    build_desired_rows,
+) -> tuple[bool, str]:
+    """Решает, нужно ли при запуске переписать блок ZapretGUI в hosts.
+
+    Блок переписывается, только если пользователь уже применял выбор (блок
+    есть и выбор сохранён) и адреса в блоке отличаются от текущего каталога.
+    """
+    if not block_rows:
+        return False, "блока ZapretGUI в hosts нет"
+    if not has_saved_selection:
+        return False, "выбор сервисов не сохранён"
+    if not ipv6_available and any(is_ipv6_address(ip) for _domain, ip in block_rows):
+        # IPv6 мог просто ещё не подняться при запуске — не выкидываем IPv6-записи.
+        return False, "IPv6 сейчас недоступен, а в блоке есть IPv6-записи"
+    desired_rows = list(build_desired_rows() or [])
+    if _hosts_rows_key(desired_rows) == _hosts_rows_key(block_rows):
+        return False, "адреса в hosts уже актуальны"
+    return True, "адреса в hosts устарели"
+
+
 class HostsManager:
     def __init__(self, status_callback=None):
         self.status_callback = status_callback
@@ -674,72 +806,7 @@ class HostsManager:
         """
         log("🟡 apply_service_dns_selections начат", "DEBUG")
 
-        # key = normalized domain; value = (display_domain, [ip1, ip2, ...]).
-        selected_by_domain: dict[str, tuple[str, list[str]]] = {}
-        domain_order: list[str] = []
-        requested_any_profile = False
-
-        def merge_rows(rows: list[tuple[str, str]]) -> None:
-            per_service: dict[str, tuple[str, list[str], set[str]]] = {}
-            per_service_order: list[str] = []
-
-            for domain, ip in rows:
-                domain_s = (domain or "").strip()
-                ip_s = (ip or "").strip()
-                if not domain_s or not ip_s:
-                    continue
-
-                domain_key = domain_s.casefold()
-                ip_key = ip_s.casefold()
-                item = per_service.get(domain_key)
-                if item is None:
-                    per_service[domain_key] = (domain_s, [ip_s], {ip_key})
-                    per_service_order.append(domain_key)
-                    continue
-
-                display_domain, ips, seen_ips = item
-                if ip_key in seen_ips:
-                    continue
-                ips.append(ip_s)
-                seen_ips.add(ip_key)
-                per_service[domain_key] = (display_domain, ips, seen_ips)
-
-            for domain_key in per_service_order:
-                display_domain, ips, _seen_ips = per_service[domain_key]
-                if domain_key not in selected_by_domain:
-                    domain_order.append(domain_key)
-                # Keep old override semantics between services: later service replaces domain mapping.
-                selected_by_domain[domain_key] = (display_domain, ips)
-
-        for service_name, profile_name in (service_dns or {}).items():
-            if not isinstance(service_name, str):
-                continue
-            if not isinstance(profile_name, str):
-                continue
-
-            normalized = profile_name.strip().lower()
-            if not normalized or normalized in ("off", "откл", "откл.", "0", "false"):
-                continue
-
-            requested_any_profile = True
-            rows = get_service_domain_ip_rows(service_name, profile_name.strip())
-            if not rows:
-                # Профиль недоступен для сервиса (не хватает IP) — просто пропускаем.
-                continue
-            merge_rows(rows)
-
-        if static_enabled:
-            default_profile = (get_dns_profiles() or [None])[0]
-            for service_name in static_enabled:
-                rows = get_service_domain_ip_rows(service_name, default_profile) if default_profile else []
-                if rows:
-                    merge_rows(rows)
-
-        selected_rows: list[tuple[str, str]] = []
-        for domain_key in domain_order:
-            display_domain, ips = selected_by_domain.get(domain_key, ("", []))
-            for ip in ips:
-                selected_rows.append((display_domain, ip))
+        selected_rows, requested_any_profile = _build_service_selection_rows(service_dns, static_enabled)
 
         if requested_any_profile and not selected_rows:
             self.set_status("Не найдено записей hosts для выбранных сервисов")
@@ -747,6 +814,42 @@ class HostsManager:
             return False
 
         return self.apply_domain_ip_rows(selected_rows)
+
+    def refresh_applied_service_selection(
+        self,
+        service_dns: dict[str, str],
+        *,
+        has_saved_selection: bool,
+    ) -> tuple[bool, str]:
+        """Обновляет адреса в уже записанном блоке ZapretGUI по свежему каталогу.
+
+        Возвращает (переписан ли блок, причина). Ничего не пишет, если блока
+        нет, выбор не сохранён или адреса и так совпадают.
+        """
+        content = safe_read_hosts_file(create_if_missing=False)
+        block_rows = _iter_managed_hosts_block_rows((content or "").splitlines(keepends=True))
+        allow_ipv6 = is_ipv6_available() if block_rows else True
+
+        def _desired_rows() -> list[tuple[str, str]]:
+            rows, _requested = _build_service_selection_rows(service_dns)
+            desired, _had_rows = _filter_desired_hosts_rows(rows, allow_ipv6=allow_ipv6)
+            return desired
+
+        should_apply, reason = decide_applied_selection_refresh(
+            block_rows=block_rows,
+            has_saved_selection=has_saved_selection,
+            ipv6_available=allow_ipv6,
+            build_desired_rows=_desired_rows,
+        )
+        if not should_apply:
+            log(f"Hosts при запуске: обновление не нужно ({reason})", "DEBUG")
+            return False, reason
+        if not self.apply_service_dns_selections(service_dns):
+            reason = self.last_status or "не удалось переписать hosts"
+            log(f"Hosts при запуске: не удалось обновить адреса: {reason}", "WARNING")
+            return False, reason
+        log("Hosts при запуске: устаревшие адреса в блоке ZapretGUI заменены по свежему каталогу", "INFO")
+        return True, reason
 
     def apply_domain_ip_map(self, domain_ip_map: dict[str, str]) -> bool:
         """Применяет домены в hosts из словаря {domain: ip}."""
@@ -778,25 +881,10 @@ class HostsManager:
             while new_lines and new_lines[-1].strip() == "":
                 new_lines.pop()
 
-            allow_ipv6 = is_ipv6_available()
-            desired_rows: list[tuple[str, str]] = []
-            seen_rows: set[tuple[str, str]] = set()
-            had_requested_rows = False
-            for row in (domain_ip_rows or []):
-                if not isinstance(row, (tuple, list)) or len(row) < 2:
-                    continue
-                domain = str(row[0]).strip()
-                ip = str(row[1]).strip()
-                if not domain or not ip:
-                    continue
-                had_requested_rows = True
-                if is_ipv6_address(ip) and not allow_ipv6:
-                    continue
-                row_key = (domain.casefold(), ip.casefold())
-                if row_key in seen_rows:
-                    continue
-                seen_rows.add(row_key)
-                desired_rows.append((domain, ip))
+            desired_rows, had_requested_rows = _filter_desired_hosts_rows(
+                domain_ip_rows,
+                allow_ipv6=is_ipv6_available(),
+            )
 
             if had_requested_rows and not desired_rows:
                 self.set_status("Нет подходящих hosts-записей для применения")
