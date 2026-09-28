@@ -13,7 +13,11 @@ from PyQt6.QtGui import QColor, QPixmap
 from qfluentwidgets import BodyLabel, CaptionLabel, CheckBox, ColorPickerButton, ComboBox, RadioButton, SegmentedWidget, Slider
 
 from ui.fluent_widgets import SettingsCard
-from ui.pages.appearance_page_lower_build import build_holiday_sections, build_opacity_section
+from ui.pages.appearance_page_lower_build import (
+    build_holiday_sections,
+    build_opacity_section,
+    select_opacity_choice,
+)
 from ui.pages.appearance_page_top_build import (
     build_background_section,
     build_display_mode_section,
@@ -221,7 +225,9 @@ class AppearanceAccessibilityTests(unittest.TestCase):
             "Стиль иконок бокового меню: Windows 11 Fluent, выбрано",
         )
 
-    def test_opacity_slider_reads_current_percent(self) -> None:
+    def test_opacity_is_a_dropdown_that_reads_current_percent(self) -> None:
+        from ui.widgets.win11_controls import Win11ComboRow
+
         class _Page:
             content = QWidget()
 
@@ -235,49 +241,38 @@ class AppearanceAccessibilityTests(unittest.TestCase):
                 pass
 
         page = _Page()
+        changes: list[int] = []
         widgets = build_opacity_section(
             page=page,
             tr_language="ru",
-            settings_card_cls=SettingsCard,
-            caption_label_cls=CaptionLabel,
-            body_label_cls=BodyLabel,
-            slider_cls=Slider,
+            combo_row_cls=Win11ComboRow,
             initial_opacity=72,
-            get_icon_pixmap=lambda *_args: QPixmap(20, 20),
-            on_opacity_changed=lambda _value: None,
+            on_opacity_changed=changes.append,
         )
+        row = widgets.opacity_row
 
-        self.assertEqual(widgets.opacity_slider.accessibleName(), "Прозрачность окна, значение: 72%")
-        self.assertIn("Настройка прозрачности", widgets.opacity_slider.accessibleDescription())
-        self.assertEqual(widgets.opacity_label.accessibleName(), "Текущее значение прозрачности окна: 72%")
-        self.assertEqual(
-            widgets.opacity_label.property("screenReaderStateText"),
-            "Текущее значение прозрачности окна: 72%",
-        )
+        # Ползунок ловил колесо мыши при прокрутке страницы — теперь список.
+        self.assertIsInstance(row, Win11ComboRow)
+        self.assertEqual(row.currentData(), 72)
+        self.assertEqual(changes, [])
+        self.assertIn("выбрано: 72%", row.accessibleName())
+        self.assertIn("Настройка прозрачности", row.accessibleDescription())
+        values = [row.combo.itemData(index) for index in range(row.combo.count())]
+        self.assertEqual(values, sorted(values, reverse=True))
+        self.assertIn(100, values)
+        self.assertIn(72, values)
 
-        widgets.opacity_slider.setValue(85)
+        row.setCurrentData(85)
 
-        self.assertEqual(widgets.opacity_slider.accessibleName(), "Прозрачность окна, значение: 85%")
-        self.assertEqual(
-            widgets.opacity_slider.property("screenReaderStateText"),
-            "Прозрачность окна, значение: 85%",
-        )
+        self.assertEqual(changes, [85])
+        self.assertIn("выбрано: 85%", row.accessibleName())
 
-        from ui.pages.appearance_page import AppearancePage
+        select_opacity_choice(row, 63)
 
-        page_for_update = AppearancePage.__new__(AppearancePage)
-        page_for_update._opacity_label = widgets.opacity_label
-        page_for_update._is_ui_syncing = lambda: False
-        page_for_update._request_appearance_save = lambda *_args, **_kwargs: None
-        page_for_update._on_opacity_changed_callback = lambda _value: None
-
-        AppearancePage._on_opacity_changed(page_for_update, 64)
-
-        self.assertEqual(widgets.opacity_label.accessibleName(), "Текущее значение прозрачности окна: 64%")
-        self.assertEqual(
-            widgets.opacity_label.property("screenReaderStateText"),
-            "Текущее значение прозрачности окна: 64%",
-        )
+        self.assertEqual(row.currentData(), 63)
+        self.assertEqual(changes, [85])
+        values = [row.combo.itemData(index) for index in range(row.combo.count())]
+        self.assertEqual(values, sorted(values, reverse=True))
 
     def test_holiday_switches_read_premium_limit_and_state(self) -> None:
         class _Page:

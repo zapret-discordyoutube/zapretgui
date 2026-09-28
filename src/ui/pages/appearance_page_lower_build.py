@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout
 
 from ui.fluent_widgets import SettingsCard, build_premium_badge
@@ -23,9 +22,24 @@ class AppearanceHolidayWidgets:
 
 @dataclass(slots=True)
 class AppearanceOpacityWidgets:
-    opacity_icon_label: object
-    opacity_label: object
-    opacity_slider: object
+    opacity_row: object
+
+
+# Выпадающий список, а не ползунок: ползунок ловил колесо мыши при прокрутке
+# страницы и случайно менял прозрачность окна.
+OPACITY_CHOICES = (100, 95, 90, 85, 80, 75, 70, 60, 50, 40, 30)
+
+
+def opacity_choice_items(current: object | None = None) -> list[tuple[str, int]]:
+    """Пункты списка прозрачности; сохранённое нестандартное значение не теряется."""
+    values = set(OPACITY_CHOICES)
+    try:
+        current_value = int(current)
+    except (TypeError, ValueError):
+        current_value = None
+    if current_value is not None and 0 <= current_value <= 100:
+        values.add(current_value)
+    return [(f"{value}%", value) for value in sorted(values, reverse=True)]
 
 
 @dataclass(slots=True)
@@ -186,18 +200,10 @@ def build_opacity_section(
     *,
     page,
     tr_language: str,
-    settings_card_cls,
-    caption_label_cls,
-    body_label_cls,
-    slider_cls,
+    combo_row_cls,
     initial_opacity: int,
-    get_icon_pixmap,
     on_opacity_changed,
 ):
-    opacity_card = settings_card_cls()
-    opacity_layout = QVBoxLayout()
-    opacity_layout.setSpacing(12)
-
     is_win11_plus = sys.platform == "win32" and sys.getwindowsversion().build >= 22000
     if is_win11_plus:
         opacity_title_text = tr_catalog(
@@ -228,52 +234,43 @@ def build_opacity_section(
             ),
         )
 
-    opacity_desc = caption_label_cls(opacity_desc_text)
-    opacity_desc.setWordWrap(True)
-    opacity_layout.addWidget(opacity_desc)
-
-    opacity_row = QHBoxLayout()
-    opacity_row.setSpacing(12)
-
-    opacity_icon = QLabel()
-    opacity_icon.setPixmap(get_icon_pixmap('fa5s.adjust', 20))
-    opacity_row.addWidget(opacity_icon)
-
-    opacity_title = body_label_cls(opacity_title_text)
-    opacity_row.addWidget(opacity_title)
-    opacity_row.addStretch()
-
-    opacity_label = caption_label_cls(f"{initial_opacity}%")
-    opacity_label.setMinimumWidth(40)
-    opacity_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-    update_opacity_value_label_accessibility(opacity_label, initial_opacity)
-    opacity_row.addWidget(opacity_label)
-    opacity_layout.addLayout(opacity_row)
-
-    opacity_slider = slider_cls(Qt.Orientation.Horizontal)
-    opacity_slider.setMinimum(0)
-    opacity_slider.setMaximum(100)
-    opacity_slider.setValue(initial_opacity)
-    opacity_slider.setSingleStep(1)
-    opacity_slider.setPageStep(5)
-    opacity_slider.setProperty("appearanceOpacityTitle", opacity_title_text)
-    opacity_slider.setProperty("appearanceOpacityDescription", opacity_desc_text)
-    update_opacity_slider_accessibility(opacity_slider, initial_opacity)
-    opacity_slider.valueChanged.connect(
-        lambda value, slider=opacity_slider: update_opacity_slider_accessibility(slider, value)
+    opacity_row = combo_row_cls(
+        "fa5s.adjust",
+        opacity_title_text,
+        opacity_desc_text,
+        items=opacity_choice_items(initial_opacity),
     )
-    opacity_slider.valueChanged.connect(on_opacity_changed)
-    opacity_layout.addWidget(opacity_slider)
-
-    opacity_card.add_layout(opacity_layout)
-    page.add_widget(opacity_card)
+    opacity_row.setCurrentData(int(initial_opacity), block_signals=True)
+    opacity_row.currentIndexChanged.connect(
+        lambda _index, row=opacity_row: on_opacity_changed(int(row.currentData()))
+    )
+    page.add_widget(opacity_row)
     page.add_spacing(16)
 
-    return AppearanceOpacityWidgets(
-        opacity_icon_label=opacity_icon,
-        opacity_label=opacity_label,
-        opacity_slider=opacity_slider,
-    )
+    return AppearanceOpacityWidgets(opacity_row=opacity_row)
+
+
+def select_opacity_choice(row, value: object) -> None:
+    """Показывает значение в списке без сигнала; нестандартное добавляет пунктом."""
+    if row is None:
+        return
+    try:
+        current_value = int(value)
+    except (TypeError, ValueError):
+        return
+    combo = row.combo
+    if combo.findData(current_value) < 0:
+        position = combo.count()
+        for index in range(combo.count()):
+            if int(combo.itemData(index)) < current_value:
+                position = index
+                break
+        combo.blockSignals(True)
+        try:
+            combo.insertItem(position, f"{current_value}%", userData=current_value)
+        finally:
+            combo.blockSignals(False)
+    row.setCurrentData(current_value, block_signals=True)
 
 
 def build_performance_section(
@@ -359,32 +356,3 @@ def build_performance_section(
     )
 
 
-def update_opacity_slider_accessibility(slider, value: object | None = None) -> None:
-    if slider is None:
-        return
-    try:
-        current_value = int(slider.value() if value is None else value)
-    except Exception:
-        current_value = 100
-    title = str(slider.property("appearanceOpacityTitle") or "Прозрачность окна").strip()
-    description = str(slider.property("appearanceOpacityDescription") or "").strip()
-    state = f"{title}, значение: {current_value}%"
-    set_state_text(slider, state)
-    set_control_accessibility(
-        slider,
-        name=state,
-        description=description or "Настройка прозрачности окна приложения.",
-    )
-
-
-def update_opacity_value_label_accessibility(label, value: object | None = None) -> None:
-    if label is None:
-        return
-    try:
-        current_value = int(value)
-    except Exception:
-        try:
-            current_value = int(str(label.text() or "").strip().rstrip("%"))
-        except Exception:
-            current_value = 100
-    set_state_text(label, f"Текущее значение прозрачности окна: {current_value}%")

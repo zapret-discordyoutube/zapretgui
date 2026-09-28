@@ -14,9 +14,8 @@ from ui.pages.appearance_page_lower_build import (
     build_holiday_sections,
     build_opacity_section,
     build_performance_section,
+    select_opacity_choice,
     update_holiday_checkbox_accessibility,
-    update_opacity_slider_accessibility,
-    update_opacity_value_label_accessibility,
 )
 from ui.pages.appearance_page_runtime_helpers import (
     apply_appearance_language,
@@ -45,7 +44,7 @@ from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.accessibility import set_control_accessibility, set_state_text
 from app.ui_texts import tr as tr_catalog
 from ui.fluent_dialog import ColorDialog
-from ui.widgets.win11_controls import Win11ToggleRow
+from ui.widgets.win11_controls import Win11ComboRow, Win11ToggleRow
 from log.log import log
 from qfluentwidgets import (
     BodyLabel,
@@ -193,9 +192,7 @@ class AppearancePage(BasePage):
         self._ui_state_unsubscribe = None
         self._garland_checkbox = None
         self._snowflakes_checkbox = None
-        self._opacity_slider = None
-        self._opacity_label = None
-        self._opacity_icon_label = None
+        self._opacity_row = None
         self._garland_icon_label = None
         self._snowflakes_icon_label = None
         self._color_picker_btn = None
@@ -533,17 +530,11 @@ class AppearancePage(BasePage):
         opacity_widgets = build_opacity_section(
             page=self,
             tr_language=self._ui_language,
-            settings_card_cls=SettingsCard,
-            caption_label_cls=CaptionLabel,
-            body_label_cls=BodyLabel,
-            slider_cls=Slider,
+            combo_row_cls=Win11ComboRow,
             initial_opacity=initial_state.window_opacity,
-            get_icon_pixmap=lambda icon, size: get_cached_qta_pixmap(icon, color=get_theme_tokens().accent_hex, size=size),
             on_opacity_changed=self._on_opacity_changed,
         )
-        self._opacity_icon_label = opacity_widgets.opacity_icon_label
-        self._opacity_label = opacity_widgets.opacity_label
-        self._opacity_slider = opacity_widgets.opacity_slider
+        self._opacity_row = opacity_widgets.opacity_row
         self._log_ui_timing("appearance_ui.opacity_section.build", section_started_at)
 
         # ═══════════════════════════════════════════════════════════
@@ -1385,11 +1376,6 @@ class AppearancePage(BasePage):
         """Обработчик изменения прозрачности окна"""
         if self._is_ui_syncing():
             return
-        # Обновляем лейбл
-        if self._opacity_label:
-            self._opacity_label.setText(f"{value}%")
-            update_opacity_value_label_accessibility(self._opacity_label, value)
-
         self._request_appearance_save("window_opacity", int(value))
         self._on_opacity_changed_callback(int(value))
         log(f"Прозрачность окна: {int(value)}%", "DEBUG")
@@ -1430,7 +1416,6 @@ class AppearancePage(BasePage):
         for lbl, icon_name, size in (
             (self._garland_icon_label,   'fa5s.holly-berry', 20),
             (self._snowflakes_icon_label, 'fa5s.snowflake',  20),
-            (self._opacity_icon_label,    'fa5s.adjust',     20),
         ):
             if lbl is not None:
                 lbl.setPixmap(get_cached_qta_pixmap(icon_name, color=tokens.accent_hex, size=size))
@@ -1749,13 +1734,8 @@ class AppearancePage(BasePage):
         )
 
     def set_opacity_value(self, value: int):
-        """Устанавливает значение слайдера прозрачности (без эмита сигнала)"""
-        if self._opacity_slider:
-            self._set_slider_value_silently(self._opacity_slider, value)
-            update_opacity_slider_accessibility(self._opacity_slider, value)
-        if self._opacity_label:
-            self._opacity_label.setText(f"{value}%")
-            update_opacity_value_label_accessibility(self._opacity_label, value)
+        """Показывает значение прозрачности в списке (без эмита сигнала)."""
+        select_opacity_choice(self._opacity_row, value)
 
     def _on_animations_changed(self, enabled: bool):
         """Handle animations SwitchButton toggle."""
