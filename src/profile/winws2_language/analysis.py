@@ -17,8 +17,10 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 import posixpath
+import threading
 
 from profile.winws2_preset_source import WINWS2_LUA_INIT_PATHS
 
@@ -111,7 +113,29 @@ def lua_init_file_name(value: str) -> str:
     return posixpath.basename(path)
 
 
+_CACHE_LIMIT = 4
+_cache: "OrderedDict[tuple[str, bool], PresetAnalysis]" = OrderedDict()
+_cache_lock = threading.Lock()
+
+
 def analyze_winws2_text(text: str, *, fragment: bool = False) -> PresetAnalysis:
+    """Разбор с маленьким кэшем: проверка, подсказки и описания при наведении
+    спрашивают про один и тот же текст подряд. Результат не изменяют."""
+    key = (str(text or ""), bool(fragment))
+    with _cache_lock:
+        cached = _cache.get(key)
+        if cached is not None:
+            _cache.move_to_end(key)
+            return cached
+    analysis = _analyze(key[0], fragment=key[1])
+    with _cache_lock:
+        _cache[key] = analysis
+        while len(_cache) > _CACHE_LIMIT:
+            _cache.popitem(last=False)
+    return analysis
+
+
+def _analyze(text: str, *, fragment: bool) -> PresetAnalysis:
     tokens = tokenize(text)
     analysis = PresetAnalysis(text=str(text or ""), fragment=bool(fragment), tokens=tokens)
     profile = ProfileInfo(index=0, line=tokens[0].line if tokens else 0)

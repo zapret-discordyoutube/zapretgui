@@ -211,6 +211,53 @@ class CodeEditorLanguageTests(unittest.TestCase):
         QTest.keyClick(editor, Qt.Key.Key_Enter)
         self.assertEqual(editor.toPlainText(), "--port=")
 
+    def test_popup_never_covers_the_line_being_typed(self) -> None:
+        editor = self._editor("\n".join(f"line {i}" for i in range(80)))
+        editor.setFocus()
+        for line, scroll in ((70, 70 - 20), (3, 0)):
+            self._place(editor, line, len(f"line {line}"))
+            editor.verticalScrollBar().setValue(scroll)
+            self.app.processEvents()
+            editor.ensureCursorVisible()
+            QTest.keyClicks(editor, " --")
+            with self.subTest(line=line):
+                self.assertTrue(editor.is_completion_visible())
+                self.assertFalse(editor.completion_popup().geometry().intersects(editor.cursorRect()))
+            QTest.keyClick(editor, Qt.Key.Key_Escape)
+
+    def test_wheel_over_popup_scrolls_text_and_closes_list(self) -> None:
+        from PyQt6.QtCore import QPoint, QPointF
+        from PyQt6.QtGui import QWheelEvent
+
+        editor = self._editor("\n".join(f"line {i}" for i in range(200)))
+        editor.setFocus()
+        self._place(editor, 5, 6)
+        QTest.keyClicks(editor, " --")
+        popup = editor.completion_popup()
+        self.assertTrue(editor.is_completion_visible())
+        before = editor.verticalScrollBar().value()
+        event = QWheelEvent(
+            QPointF(5, 5), QPointF(popup.mapToGlobal(QPoint(5, 5))), QPoint(0, 0), QPoint(0, -120),
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False,
+        )
+        QApplication.sendEvent(popup.list_widget.viewport(), event)
+        self.assertFalse(editor.is_completion_visible())
+        self.assertGreater(editor.verticalScrollBar().value(), before)
+
+    def test_problems_are_not_rechecked_while_list_is_open(self) -> None:
+        editor = self._editor("")
+        language = editor.language_support()
+        editor.setFocus()
+        QTest.keyClicks(editor, "BAD --")
+        self.assertTrue(editor.is_completion_visible())
+        calls = language.diagnose_calls
+        editor._on_diagnostics_timer()
+        self.assertEqual(language.diagnose_calls, calls)
+        QTest.keyClick(editor, Qt.Key.Key_Escape)
+        QTest.qWait(400)
+        self.assertGreater(language.diagnose_calls, calls)
+        self.assertEqual(len(editor.diagnostics()), 1)
+
     def test_editor_without_language_keeps_old_behaviour(self) -> None:
         from ui.code_editor.editor import CodeEditor
 

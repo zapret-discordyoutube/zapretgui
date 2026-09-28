@@ -16,7 +16,7 @@ from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPalette, QTextCharFor
 from qfluentwidgets import PlainTextEdit, RoundMenu, isDarkTheme, themeColor
 from qfluentwidgets.components.widgets.menu import TextEditMenu
 
-from ui.code_editor.completion_popup import CompletionPopup
+from ui.code_editor.completion_popup import MAX_VISIBLE_ROWS, MIN_VISIBLE_ROWS, POPUP_MAX_WIDTH, CompletionPopup
 from ui.code_editor.language import (
     SEVERITY_ERROR,
     SEVERITY_HINT,
@@ -161,7 +161,8 @@ class CodeEditor(PlainTextEdit):
         }
         self._diagnostics_timer = QTimer(self)
         self._diagnostics_timer.setSingleShot(True)
-        self._diagnostics_timer.timeout.connect(self.refresh_diagnostics)
+        self._diagnostics_timer.timeout.connect(self._on_diagnostics_timer)
+        self._diagnostics_deferred = False
         self._completion_popup: CompletionPopup | None = None
         self._completion = None
         self._tooltip: FluentItemToolTipController | None = None
@@ -843,9 +844,18 @@ class CodeEditor(PlainTextEdit):
     def diagnostics(self) -> tuple:
         return self._diagnostics
 
+    def _on_diagnostics_timer(self) -> None:
+        # Пока открыт список подсказок, человек дописывает слово: не мигать
+        # ошибками на недописанном тексте, проверить после закрытия списка.
+        if self.is_completion_visible():
+            self._diagnostics_deferred = True
+            return
+        self.refresh_diagnostics()
+
     def refresh_diagnostics(self) -> None:
         """Проверяет текст сейчас (обычно проверка идёт с задержкой после правки)."""
         self._diagnostics_timer.stop()
+        self._diagnostics_deferred = False
         support = self._language
         diagnostics: tuple = ()
         if support is not None:
@@ -1006,6 +1016,7 @@ class CodeEditor(PlainTextEdit):
         if self._completion_popup is None:
             popup = CompletionPopup(self.viewport())
             popup.rowAccepted.connect(self.accept_completion)
+            popup.wheelScrolled.connect(self._on_completion_wheel)
             self._completion_popup = popup
             self._apply_completion_popup_colors()
             self.verticalScrollBar().valueChanged.connect(self._hide_completion_on_scroll)
@@ -1015,14 +1026,32 @@ class CodeEditor(PlainTextEdit):
     def _hide_completion_on_scroll(self, _value=None) -> None:
         self.hide_completion()
 
+    def _on_completion_wheel(self, event) -> None:
+        """Колесо над списком подсказок прокручивает текст, список закрывается."""
+        self.hide_completion()
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            return
+        delta = event.angleDelta().y()
+        if not delta:
+            return
+        bar = self.verticalScrollBar()
+        step = max(1, QtWidgets.QApplication.wheelScrollLines()) * max(1, bar.singleStep())
+        bar.setValue(bar.value() - int(round(delta / 120 * step)))
+
     def _apply_completion_popup_colors(self) -> None:
         popup = self._completion_popup
         if popup is None:
             return
         dark = isDarkTheme()
-        background = QColor(44, 44, 44) if dark else QColor(251, 251, 251)
-        border = QColor(255, 255, 255, 30) if dark else QColor(0, 0, 0, 30)
-        popup.apply_colors(background=background, border=border)
+        theme = self.theme_colors()
+        background = QColor(40, 40, 40) if dark else QColor(252, 252, 252)
+        border = QColor(255, 255, 255, 34) if dark else QColor(0, 0, 0, 34)
+        muted = QColor(theme.text)
+        muted.setAlpha(120)
+        selection = QColor(theme.accent)
+        selection.setAlpha(60 if dark else 40)
+        popup.apply_colors(background=background, border=border, text=theme.text, muted=muted,
+                           selection=selection)
 
     def completion_popup(self) -> CompletionPopup | None:
         return self._completion_popup
@@ -1033,8 +1062,10 @@ class CodeEditor(PlainTextEdit):
     def hide_completion(self) -> None:
         self._completion = None
         popup = getattr(self, "_completion_popup", None)
-        if popup is not None:
+        if popup is not None and popup.isVisible():
             popup.hide()
+            if getattr(self, "_diagnostics_deferred", False):
+                self._diagnostics_timer.start(DIAGNOSTICS_DELAY_MS)
 
     def _cursor_inside_completion(self) -> bool:
         result = self._completion
@@ -1068,31 +1099,43 @@ class CodeEditor(PlainTextEdit):
         self._completion = result
         popup = self._ensure_completion_popup()
         popup.set_items([item.label for item in items], [item.detail for item in items], font=self.font())
-        self._position_completion_popup()
+        if not self._position_completion_popup():
+            self.hide_completion()
+            return False
         popup.show()
         popup.raise_()
         return True
 
-    def _position_completion_popup(self) -> None:
+    def _position_completion_popup(self) -> bool:
+        """Ставит список под строкой курсора, а если места нет — над ней.
+
+        Строку, в которой печатают, список не закрывает никогда: он
+        сжимается под свободное место (не меньше трёх вариантов, если влезает).
+        """
         popup = self._completion_popup
         result = self._completion
         if popup is None or result is None:
-            return
+            return False
         block = self.document().findBlockByNumber(int(result.line))
         anchor = QTextCursor(self.document())
         if block.isValid():
             anchor.setPosition(block.position() + max(0, min(int(result.start), block.length() - 1)))
         rect = self.cursorRect(anchor)
         viewport = self.viewport().rect()
-        size = popup.preferred_size(min(560, viewport.width() - 16))
+        row_height = popup.row_height()
+        wanted = min(MAX_VISIBLE_ROWS, max(1, popup.row_count()))
+        below_rows = (viewport.height() - rect.bottom() - 12) // row_height
+        above_rows = (rect.top() - 12) // row_height
+        place_below = below_rows >= min(wanted, MIN_VISIBLE_ROWS) or below_rows >= above_rows
+        rows = min(wanted, below_rows if place_below else above_rows)
+        if rows < 1:
+            return False
+        size = popup.preferred_size(min(POPUP_MAX_WIDTH, viewport.width() - 8), rows)
         width = min(size.width(), max(120, viewport.width() - 4))
-        height = min(size.height(), max(60, viewport.height() - 4))
-        x = max(0, min(rect.left(), viewport.width() - width))
-        y = rect.bottom() + 4
-        if y + height > viewport.height():
-            above = rect.top() - height - 4
-            y = above if above >= 0 else max(0, viewport.height() - height)
-        popup.setGeometry(x, y, width, height)
+        x = max(0, min(rect.left() - 11, viewport.width() - width))
+        y = rect.bottom() + 3 if place_below else rect.top() - size.height() - 3
+        popup.setGeometry(x, y, width, size.height())
+        return True
 
     def accept_completion(self, row: int | None = None) -> bool:
         result = self._completion
