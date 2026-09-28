@@ -11,6 +11,7 @@ from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.folder_header import FOLDER_HEADER_HEIGHT, is_folder_toggle_click, paint_folder_header_row
 from ui.widgets.active_row_motion import active_row_motion
 from ui.widgets.hover_row import paint_profile_hover_row, profile_hover_row_rect
+from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_rotated, row_hover_motion
 
 from .common import (
     PRESET_DROP_MARKER_PROPERTY,
@@ -67,6 +68,7 @@ class PresetListDelegate(QStyledItemDelegate):
         self._pending_shake_timer = QTimer(self)
         self._pending_shake_timer.timeout.connect(self._advance_pending_shake)
         self._tooltip = FluentItemToolTipController(view.viewport())
+        attach_row_hover_motion(view, row_filter=_is_preset_row)
         self.set_ui_language("ru")
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
@@ -430,6 +432,8 @@ class PresetListDelegate(QStyledItemDelegate):
         pressed = self._pressed_row == index.row()
 
         motion = active_row_motion(self._view)
+        hover_motion = row_hover_motion(self._view)
+        live_hover = hover_motion is not None and not focused
         row_paint = paint_profile_hover_row(
             painter,
             rect,
@@ -439,6 +443,8 @@ class PresetListDelegate(QStyledItemDelegate):
             show_active_marker=False,
             active_reveal=motion.row_reveal(index) if motion is not None else None,
             residual_active=motion.row_residual(index) if motion is not None else 0.0,
+            hover_level=hover_motion.hover_level(index) if live_hover else None,
+            sheen=hover_motion.sheen_progress(index) if live_hover else None,
         )
         bg = row_paint.background
 
@@ -452,7 +458,12 @@ class PresetListDelegate(QStyledItemDelegate):
             [tokens.accent_hex, tokens.fg],
             minimum_ratio=2.6,
         )
-        cached_icon("fa5s.file-alt", icon_color).paint(painter, icon_rect)
+        paint_rotated(
+            painter,
+            icon_rect,
+            hover_motion.icon_angle(index) if hover_motion is not None else 0.0,
+            lambda: cached_icon("fa5s.file-alt", icon_color).paint(painter, icon_rect),
+        )
 
         text_left = icon_rect.right() + 10
         actions = self._action_rects(rect, "preset", is_active, is_builtin)
@@ -592,6 +603,10 @@ class PresetListDelegate(QStyledItemDelegate):
             )
 
         painter.restore()
+
+
+def _is_preset_row(index) -> bool:
+    return str(index.data(PresetListModel.KindRole) or "") == "preset"
 
 
 __all__ = ["PresetListDelegate"]

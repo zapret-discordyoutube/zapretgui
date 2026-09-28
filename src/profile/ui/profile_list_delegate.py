@@ -12,6 +12,7 @@ from ui.theme import get_theme_tokens, to_qcolor
 from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.folder_header import FOLDER_HEADER_HEIGHT, is_folder_toggle_click, paint_folder_header_row
 from ui.widgets.hover_row import paint_profile_hover_row, profile_hover_row_rect
+from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_rotated, row_hover_motion
 from ui.widgets.profile_row_style import (
     PROFILE_BADGE_HOSTLIST_BG,
     PROFILE_BADGE_HOSTLIST_FG,
@@ -41,6 +42,7 @@ class ProfileListDelegate(QStyledItemDelegate):
         self._pressed_row = -1
         self._selected_rows: set[int] = set()
         self._tooltip = FluentItemToolTipController(view.viewport())
+        attach_row_hover_motion(view, row_filter=_is_profile_row)
 
     def setHoverRow(self, row: int) -> None:
         self._hover_row = int(row)
@@ -175,23 +177,31 @@ class ProfileListDelegate(QStyledItemDelegate):
 
         tokens = get_theme_tokens()
         rect = profile_hover_row_rect(option.rect)
+        selected = bool(option.state & QStyle.StateFlag.State_Selected) or bool(
+            option.state & QStyle.StateFlag.State_HasFocus
+        )
         hovered = _profile_row_is_interactive(
             index.row(),
             hovered=bool(option.state & QStyle.StateFlag.State_MouseOver),
-            selected=bool(option.state & QStyle.StateFlag.State_Selected) or bool(
-                option.state & QStyle.StateFlag.State_HasFocus
-            ),
+            selected=selected,
             hover_row=self._hover_row,
             pressed_row=self._pressed_row,
             selected_rows=self._selected_rows,
         )
         active = str(index.data(ProfileListModel.StrategyIdRole) or "") not in {"", "none"}
+        hover_motion = row_hover_motion(self._view)
+        # Выделенная или нажатая строка подсвечена всегда, плавно — только наведение мышью.
+        live_hover = hover_motion is not None and not (
+            selected or self._pressed_row == index.row() or index.row() in self._selected_rows
+        )
         paint_profile_hover_row(
             painter,
             rect,
             active=False,
             hovered=hovered,
             show_active_marker=False,
+            hover_level=hover_motion.hover_level(index) if live_hover else None,
+            sheen=hover_motion.sheen_progress(index) if live_hover else None,
         )
 
         strategy_name = str(index.data(ProfileListModel.StrategyNameRole) or "")
@@ -237,7 +247,12 @@ class ProfileListDelegate(QStyledItemDelegate):
             theme_name=tokens.theme_name,
         )
         if not pixmap.isNull():
-            painter.drawPixmap(row_layout.icon_rect, pixmap)
+            paint_rotated(
+                painter,
+                row_layout.icon_rect,
+                hover_motion.icon_angle(index) if hover_motion is not None else 0.0,
+                lambda: painter.drawPixmap(row_layout.icon_rect, pixmap),
+            )
 
         painter.setFont(name_font)
         painter.setPen(to_qcolor(tokens.fg, "#f5f5f5"))
@@ -464,6 +479,10 @@ def _status_dot_color(
     if bool(active):
         return str(active_color or "#5caee8")
     return str(fallback or "#8f9aa6")
+
+
+def _is_profile_row(index) -> bool:
+    return str(index.data(ProfileListModel.KindRole) or "") not in {"folder", "empty"}
 
 
 def _profile_row_is_interactive(
