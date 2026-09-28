@@ -194,6 +194,21 @@ class StrategyScanWorkerQuestionTests(unittest.TestCase):
         self.assertFalse(worker.restore_runtime_if_needed())
         self.assertEqual(calls, ["start"])
 
+    def test_manual_start_during_scan_cancels_restore(self) -> None:
+        from blockcheck.ui.strategy_scan_page import StrategyScanPage
+
+        calls = []
+        worker = _make_worker("discord.com")
+        worker.set_runtime_restore(was_running=True, restore=lambda: calls.append("start"))
+        page = StrategyScanPage.__new__(StrategyScanPage)
+        page._scan_worker = worker
+        page._strategy_scan_run_runtime = SimpleNamespace(is_running=lambda: True)
+        page._on_stop = lambda: None
+
+        self.assertTrue(StrategyScanPage.request_runtime_conflicting_stop(page))
+        self.assertFalse(worker.restore_runtime_if_needed())
+        self.assertEqual(calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

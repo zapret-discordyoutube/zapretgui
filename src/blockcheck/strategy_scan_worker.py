@@ -210,6 +210,10 @@ class StrategyScanWorker(QObject):
         self._runtime_was_running = bool(was_running)
         self._restore_runtime = restore
 
+    def cancel_runtime_restore(self) -> None:
+        """Zapret запускает сам пользователь — возвращать его после подбора не нужно."""
+        self._restore_runtime = None
+
     def restore_runtime_if_needed(self) -> bool:
         """Из потока окна после конца подбора: вернуть Zapret, если он работал."""
         restore = self._restore_runtime
