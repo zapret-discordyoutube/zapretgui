@@ -12,7 +12,7 @@ from presets.ui.control.control_page_runtime_shared import (
     BUTTON_ICON_TEXT_GAP_PROPERTY,
     set_button_text_accessibility,
 )
-from ui.pulsing_dot import PulsingDot
+from ui.pulsing_dot import PulsingDot, PacketFlowIndicator
 from ui.accessibility import enable_keyboard_click, set_control_accessibility, set_state_text
 from ui.theme import get_themed_qta_icon
 
@@ -43,7 +43,7 @@ def build_mode_status_section_common(
     status_layout.setContentsMargins(16, 14, 16, 14)
     status_layout.setSpacing(16)
 
-    status_dot = PulsingDot()
+    status_dot = PacketFlowIndicator()
     set_state_text(status_dot, "Индикатор состояния Zapret: состояние пока не загружено")
     status_layout.addWidget(status_dot)
 

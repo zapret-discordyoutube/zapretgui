@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from PyQt6.QtCore import QElapsedTimer, QEasingCurve, QEvent, QPointF, Qt, QTimer, QVariantAnimation
+from PyQt6.QtCore import QElapsedTimer, QEasingCurve, QEvent, QPointF, QRectF, Qt, QTimer, QVariantAnimation
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QWidget
 
@@ -210,6 +210,99 @@ class PulsingDot(QWidget):
         core_r = base_r * (1.0 + BEAT_SCALE * beat)
         painter.setBrush(self._shown_color)
         painter.drawEllipse(center, core_r, core_r)
+
+        painter.setBrush(QColor(255, 255, 255, 90))
+        shine = max(2.0, side * 0.09375) / 2
+        painter.drawEllipse(QPointF(center.x() - shine, center.y() - shine - 1), shine, shine)
+        painter.end()
+
+
+# Поток пакетов для карточки «Статус работы»: сквозь точку по верхней дорожке
+# идут запросы (до точки серые, после — цвета точки), по нижней обратно летят
+# ответы. Кадры идут непрерывно, но только пока карточка видна, окно не свёрнуто
+# и анимации включены; область маленькая, поэтому перерисовка дешёвая.
+FLOW_WIDTH = 84
+FLOW_LANE_GAP = 5
+FLOW_RAW_COLOR = QColor(150, 156, 168)
+# (направление, скорость в px/с, сдвиги пакетов вдоль дорожки в долях длины)
+FLOW_LANES = (
+    (1, 34.0, (0.0, 0.31, 0.47, 0.78)),
+    (-1, 26.0, (0.12, 0.58, 0.66)),
+)
+
+
+class PacketFlowIndicator(PulsingDot):
+    """Точка состояния, сквозь которую бегают пакеты, пока процесс работает."""
+
+    def __init__(self, parent=None, *, size: int = 32, width: int = FLOW_WIDTH):
+        super().__init__(parent, size=size)
+        self.setFixedSize(max(int(width), self.height()), self.height())
+        self._flow_time = 0.0
+        self._flow_origin = 0.0
+
+    def _start_beat(self) -> None:
+        if self._can_animate():
+            # Поток продолжается с того места, где остановился, без рывка.
+            self._flow_origin = self._flow_time
+        super()._start_beat()
+
+    def _on_beat_frame(self) -> None:
+        # Пауз между ударами нет, поэтому на каждом кадре заново проверяем,
+        # можно ли ещё анимировать (окно свернули, анимации выключили).
+        if not self._can_animate():
+            self._halt()
+            self.update()
+            return
+        self._flow_time = self._flow_origin + self._beat_clock.elapsed() / 1000.0
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        _ = event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        width = float(self.width())
+        center = QPointF(width / 2, self.height() / 2)
+        side = max(12, self.height())
+        base_r = max(3.0, side * 0.1875)
+        lanes_y = (center.y() - FLOW_LANE_GAP, center.y() + FLOW_LANE_GAP)
+
+        track = QColor(FLOW_RAW_COLOR)
+        track.setAlphaF(0.16)
+        painter.setBrush(track)
+        for y in lanes_y:
+            painter.drawRect(QRectF(2.0, y - 0.5, width - 4.0, 1.0))
+
+        flash = 0.0
+        if self._is_pulsing:
+            # Без анимаций пакеты остаются на месте, чтобы «работает» всё равно
+            # отличалось от «остановлен» не только цветом.
+            for (direction, speed, offsets), y in zip(FLOW_LANES, lanes_y):
+                for offset in offsets:
+                    u = (self._flow_time * speed / width + offset) % 1.0
+                    x = u * width if direction > 0 else width - u * width
+                    edge = min(1.0, min(x, width - x) / 10.0)
+                    passed = x > center.x() if direction > 0 else True
+                    color = QColor(self._shown_color if passed else FLOW_RAW_COLOR)
+                    flash += 0.5 * math.exp(-(((x - center.x()) / 4.0) ** 2))
+
+                    color.setAlphaF(0.25 * edge)
+                    painter.setBrush(color)
+                    painter.drawRect(QRectF(x - 3.0 - direction * 6.0, y - 1.0, 6.0, 2.0))
+                    color.setAlphaF(edge)
+                    painter.setBrush(color)
+                    painter.drawRoundedRect(QRectF(x - 3.0, y - 1.5, 6.0, 3.0), 1.5, 1.5)
+        flash = min(1.0, flash) if self.is_beating() else 0.0
+
+        glow = QColor(self._shown_color)
+        glow.setAlphaF(0.35 + 0.3 * flash)
+        painter.setBrush(glow)
+        glow_r = (base_r + max(1.0, side * 0.09375)) * (1.0 + 0.5 * flash)
+        painter.drawEllipse(center, glow_r, glow_r)
+
+        painter.setBrush(self._shown_color)
+        painter.drawEllipse(center, base_r, base_r)
 
         painter.setBrush(QColor(255, 255, 255, 90))
         shine = max(2.0, side * 0.09375) / 2

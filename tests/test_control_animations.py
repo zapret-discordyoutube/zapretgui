@@ -16,7 +16,7 @@ import ui.widgets.soft_visibility as soft_module
 from ui.widgets.soft_visibility import set_visible_softly, soft_visibility_target
 from donater.premium_display import TIER_ACTIVE, TIER_FREE, PremiumDisplay
 from presets.ui.control.top_summary_widget import ControlTopSummaryWidget
-from ui.pulsing_dot import PulsingDot
+from ui.pulsing_dot import PacketFlowIndicator, PulsingDot
 from ui.widgets.motion_icon import GESTURE_BOUNCE, MotionIcon
 
 
@@ -109,6 +109,79 @@ class PulsingDotTests(unittest.TestCase):
         self.assertNotEqual(dot._shown_color, QColor("#4caf50"))
         dot._fade.setCurrentTime(dot._fade.duration())
         self.assertEqual(dot._shown_color, QColor("#4caf50"))
+
+
+class PacketFlowIndicatorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def setUp(self) -> None:
+        self._enabled = True
+        patcher = mock.patch.object(dot_module, "are_live_animations_enabled", side_effect=lambda: self._enabled)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_flow_is_continuous_without_rest_pause(self) -> None:
+        flow = PacketFlowIndicator()
+        _host(self, flow).show()
+        self.assertEqual(flow.width(), dot_module.FLOW_WIDTH)
+
+        flow.start_pulse()
+        with mock.patch.object(flow._beat_clock, "elapsed", return_value=dot_module.BEAT_DURATION_MS * 3):
+            flow._on_beat_frame()
+
+        self.assertTrue(flow.is_beating())
+        self.assertFalse(flow._rest_timer.isActive())
+        self.assertGreater(flow._flow_time, 0.0)
+
+    def test_flow_stops_when_hidden_or_stopped(self) -> None:
+        flow = PacketFlowIndicator()
+        host = _host(self, flow)
+        flow.start_pulse()
+        self.assertFalse(flow.is_beating())
+
+        host.show()
+        self.assertTrue(flow.is_beating())
+        host.hide()
+        self.assertFalse(flow.is_beating())
+
+        host.show()
+        flow.stop_pulse()
+        self.assertFalse(flow.is_beating())
+        self.assertFalse(flow._rest_timer.isActive())
+
+    def test_flow_halts_on_next_frame_when_animations_turn_off(self) -> None:
+        flow = PacketFlowIndicator()
+        _host(self, flow).show()
+        flow.start_pulse()
+        self.assertTrue(flow.is_beating())
+
+        self._enabled = False
+        flow._on_beat_frame()
+
+        self.assertFalse(flow.is_beating())
+        self.assertFalse(flow._rest_timer.isActive())
+
+    def test_no_flow_when_animations_are_disabled(self) -> None:
+        self._enabled = False
+        flow = PacketFlowIndicator()
+        _host(self, flow).show()
+
+        flow.start_pulse()
+
+        self.assertTrue(flow._is_pulsing)
+        self.assertFalse(flow.is_beating())
+
+    def test_paints_running_and_stopped_states(self) -> None:
+        flow = PacketFlowIndicator()
+        flow.set_color("#6ccb5f")
+        for pulsing in (True, False):
+            flow._is_pulsing = pulsing
+            image = QPixmap(flow.size())
+            image.fill(QColor(0, 0, 0, 0))
+            flow.render(image)
+            self.assertFalse(image.isNull())
 
 
 class MotionIconTests(unittest.TestCase):
