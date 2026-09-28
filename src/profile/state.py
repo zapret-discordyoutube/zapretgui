@@ -73,6 +73,9 @@ class ProfileSetupPayload:
     in_range: str = "x"
     out_range: str = "a"
     current_strategy_state: ProfileStrategyState = ProfileStrategyState()
+    # Общие строки пресета (до первого профиля): редактор текста профиля берёт
+    # из них объявленные фейки и подключённые lua-файлы для проверки.
+    preset_preamble_text: str = ""
 
 
 @dataclass(frozen=True)

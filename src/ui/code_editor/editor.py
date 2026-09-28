@@ -2,7 +2,8 @@
 
 Переиспользуемый виджет: ничего не знает о пресетах, профилях и файлах —
 только текст. Конкретную подсветку синтаксиса задаёт вызывающая сторона
-через `highlighter_factory`.
+через `highlighter_factory`, а проверку текста, подсказки при наборе и
+быстрые исправления — через `set_language_support` (см. `language.py`).
 """
 
 from __future__ import annotations
@@ -10,10 +11,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PyQt6 import QtWidgets
-from PyQt6.QtCore import QRect, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPalette, QTextCursor, QTextFormat
-from qfluentwidgets import PlainTextEdit, isDarkTheme, themeColor
+from PyQt6.QtCore import QEvent, QPointF, QRect, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPalette, QTextCharFormat, QTextCursor, QTextFormat
+from qfluentwidgets import PlainTextEdit, RoundMenu, isDarkTheme, themeColor
+from qfluentwidgets.components.widgets.menu import TextEditMenu
 
+from ui.code_editor.completion_popup import CompletionPopup
+from ui.code_editor.language import (
+    SEVERITY_ERROR,
+    SEVERITY_HINT,
+    SEVERITY_ORDER,
+    SEVERITY_WARNING,
+    worst_severity,
+)
 from ui.code_editor.line_number_area import LineNumberArea
 from ui.code_editor.match_ruler import RULER_WIDTH, MatchRuler
 from ui.code_editor.syntax import SyntaxTheme
@@ -27,6 +37,7 @@ from ui.code_editor.line_ops import (
 )
 from ui.smooth_scroll import apply_editor_smooth_scroll_preference
 from ui.theme_refresh import ThemeRefreshBinding
+from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 
 MIN_POINT_SIZE = 6
 MAX_POINT_SIZE = 32
@@ -39,6 +50,8 @@ MONOSPACE_FAMILIES = (
     "Courier New",
     "monospace",
 )
+DIAGNOSTICS_DELAY_MS = 300
+PROBLEM_GUTTER_WIDTH = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +61,51 @@ class CursorStatus:
     selected_characters: int
     selected_lines: int
     total_lines: int
+
+
+@dataclass(frozen=True, slots=True)
+class ProblemsSummary:
+    """Сколько проблем нашла проверка и что не так в строке курсора."""
+
+    errors: int
+    warnings: int
+    hints: int
+    current_message: str = ""
+    current_severity: str = ""
+
+    @property
+    def total(self) -> int:
+        return self.errors + self.warnings
+
+
+class _CodeEditorContextMenu(TextEditMenu):
+    """Обычное меню правки, перед которым стоят исправления для этого места."""
+
+    def __init__(self, editor, fixes) -> None:
+        super().__init__(editor)
+        self._fixes = tuple(fixes)
+        self._fix_actions: list[QAction] = []
+        self._fixes_added = False
+
+    def createActions(self):  # noqa: N802
+        super().createActions()
+        editor = self.parent()
+        self._fixes_added = False
+        self._fix_actions = [
+            QAction(str(fix.title), self, triggered=lambda _checked=False, f=fix: editor.apply_quick_fix(f))
+            for fix in self._fixes
+        ]
+
+    def _ensure_fixes(self) -> None:
+        if self._fixes_added or not self._fix_actions:
+            return
+        self._fixes_added = True
+        RoundMenu.addActions(self, self._fix_actions)
+        self.addSeparator()
+
+    def addAction(self, action):  # noqa: N802
+        self._ensure_fixes()
+        super().addAction(action)
 
 
 def build_cursor_status_text(status: CursorStatus) -> str:
@@ -71,6 +129,7 @@ class CodeEditor(PlainTextEdit):
     findNextRequested = pyqtSignal(bool)
     gotoLineRequested = pyqtSignal()
     escapePressed = pyqtSignal()
+    problemsChanged = pyqtSignal(object)
 
     def __init__(self, parent=None, *, highlighter_factory=None) -> None:
         super().__init__(parent)
@@ -90,6 +149,23 @@ class CodeEditor(PlainTextEdit):
         self._current_match_color = QColor(255, 150, 50, 120)
         self._highlighter = None
         self._suppress_content_signals = False
+        self._language = None
+        self._diagnostics: tuple = ()
+        # Курсоры с выделением сами сдвигаются при правках, поэтому подчёркивание
+        # остаётся на месте, пока проверка не пересчитана.
+        self._diagnostic_cursors: list[tuple[QTextCursor, str, object]] = []
+        self._problem_colors = {
+            SEVERITY_ERROR: QColor("#e0443e"),
+            SEVERITY_WARNING: QColor("#d9a400"),
+            SEVERITY_HINT: QColor(128, 128, 128, 160),
+        }
+        self._diagnostics_timer = QTimer(self)
+        self._diagnostics_timer.setSingleShot(True)
+        self._diagnostics_timer.timeout.connect(self.refresh_diagnostics)
+        self._completion_popup: CompletionPopup | None = None
+        self._completion = None
+        self._tooltip: FluentItemToolTipController | None = None
+        self._last_problems_summary: ProblemsSummary | None = None
 
         self.setLineWrapMode(PlainTextEdit.LineWrapMode.NoWrap)
         # Одиночный Tab отдаётся навигации по фокусу (accessibility); отступ
@@ -159,7 +235,8 @@ class CodeEditor(PlainTextEdit):
             advance = self.fontMetrics().horizontalAdvance("9")
         except Exception:
             advance = 8
-        return 14 + advance * digits
+        gutter = PROBLEM_GUTTER_WIDTH if getattr(self, "_language", None) is not None else 0
+        return 14 + advance * digits + gutter
 
     def _update_line_number_area_width(self) -> None:
         width = self.line_number_area_width()
@@ -243,6 +320,9 @@ class CodeEditor(PlainTextEdit):
         current_block = self.textCursor().blockNumber()
         width = self._line_number_area.width() - 8
         height = self.fontMetrics().height()
+        problem_lines = self._problem_line_severities() if self._language is not None else {}
+        if problem_lines:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
@@ -258,6 +338,14 @@ class CodeEditor(PlainTextEdit):
                     int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
                     str(block_number + 1),
                 )
+                severity = problem_lines.get(block_number)
+                if severity:
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(self._problem_colors.get(severity, self._problem_colors[SEVERITY_HINT]))
+                    radius = 3.5 if severity != SEVERITY_HINT else 2.5
+                    center_y = top + height / 2
+                    painter.drawEllipse(QPointF(6.0, center_y), radius, radius)
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
             block = block.next()
             top = bottom
             bottom = top + self.blockBoundingRect(block).height()
@@ -304,9 +392,19 @@ class CodeEditor(PlainTextEdit):
             viewport=ruler_viewport,
         )
 
+        dark = isDarkTheme()
+        self._problem_colors = {
+            SEVERITY_ERROR: QColor("#ff6b61") if dark else QColor("#c42b1c"),
+            SEVERITY_WARNING: QColor("#f2c14e") if dark else QColor("#9d5d00"),
+            SEVERITY_HINT: QColor(text.red(), text.green(), text.blue(), 150),
+        }
+        if self._completion_popup is not None:
+            self._apply_completion_popup_colors()
+
         self._apply_highlighter_theme(theme)
 
         self._refresh_extra_selections()
+        self._refresh_problem_ruler()
         self._line_number_area.update()
 
     def _apply_highlighter_theme(self, theme=None) -> None:
@@ -332,6 +430,8 @@ class CodeEditor(PlainTextEdit):
     def _on_text_changed(self) -> None:
         if self._suppress_content_signals:
             return
+        if self._language is not None:
+            self._diagnostics_timer.start(DIAGNOSTICS_DELAY_MS)
         self.contentEdited.emit()
 
     # -------------------------------------------------------------- подсветка
@@ -390,6 +490,8 @@ class CodeEditor(PlainTextEdit):
         current_line.cursor = cursor
         selections.append(current_line)
 
+        selections.extend(self._diagnostic_selections())
+
         document = self.document()
         # Позиции совпадений могли устареть: правка документа приходит раньше,
         # чем контроллер успевает пересчитать поиск.
@@ -436,6 +538,10 @@ class CodeEditor(PlainTextEdit):
     def _on_cursor_position_changed(self) -> None:
         self._refresh_extra_selections()
         self._emit_cursor_status()
+        if self._language is not None:
+            self._emit_problems_summary()
+            if self._completion is not None and not self._cursor_inside_completion():
+                self.hide_completion()
 
     def _emit_cursor_status(self) -> None:
         try:
@@ -626,10 +732,14 @@ class CodeEditor(PlainTextEdit):
         return super().focusNextPrevChild(next_child)
 
     def keyPressEvent(self, event):  # noqa: N802
+        if self._handle_completion_key(event):
+            event.accept()
+            return
         if self._handle_shortcut(event):
             event.accept()
             return
         super().keyPressEvent(event)
+        self._after_key_typed(event)
 
     def _handle_shortcut(self, event) -> bool:
         key = event.key()
@@ -644,6 +754,10 @@ class CodeEditor(PlainTextEdit):
 
         if key == Qt.Key.Key_F3 and not ctrl and not alt:
             self.findNextRequested.emit(shift)
+            return True
+
+        if key == Qt.Key.Key_F8 and not ctrl and not alt and self._language is not None:
+            self.goto_next_problem(forward=not shift)
             return True
 
         if ctrl and not alt:
@@ -667,6 +781,12 @@ class CodeEditor(PlainTextEdit):
                 return True
             if self.isReadOnly():
                 return False
+            if key == Qt.Key.Key_Space and self._language is not None:
+                self.request_completion(explicit=True)
+                return True
+            if key == Qt.Key.Key_Period and not shift and self._language is not None:
+                self.show_quick_fix_menu()
+                return True
             if key == Qt.Key.Key_D and not shift:
                 return self.duplicate_selected_lines()
             if key == Qt.Key.Key_L and not shift:
@@ -698,3 +818,452 @@ class CodeEditor(PlainTextEdit):
             return self.indent_selected_lines()
 
         return False
+
+    # ------------------------------------------------------ поддержка языка
+
+    def set_language_support(self, support) -> None:
+        """Подключает проверку текста, подсказки и исправления (или None)."""
+        self._language = support
+        self.hide_completion()
+        self._update_line_number_area_width()
+        if support is None:
+            self._diagnostics_timer.stop()
+            self._diagnostics = ()
+            self._diagnostic_cursors = []
+            self._refresh_extra_selections()
+            self._refresh_problem_ruler()
+            self._emit_problems_summary(force=True)
+        else:
+            self._diagnostics_timer.start(0)
+        self._line_number_area.update()
+
+    def language_support(self):
+        return self._language
+
+    def diagnostics(self) -> tuple:
+        return self._diagnostics
+
+    def refresh_diagnostics(self) -> None:
+        """Проверяет текст сейчас (обычно проверка идёт с задержкой после правки)."""
+        self._diagnostics_timer.stop()
+        support = self._language
+        diagnostics: tuple = ()
+        if support is not None:
+            try:
+                diagnostics = tuple(support.diagnose(self.toPlainText()) or ())
+            except Exception:
+                diagnostics = ()
+        self._diagnostics = diagnostics
+        document = self.document()
+        cursors: list[tuple[QTextCursor, str, object]] = []
+        for diagnostic in diagnostics:
+            block = document.findBlockByNumber(int(diagnostic.line))
+            if not block.isValid():
+                continue
+            length = max(0, block.length() - 1)
+            start = max(0, min(int(diagnostic.start), length))
+            end = max(start, min(int(diagnostic.end), length))
+            if end == start:
+                if start > 0:
+                    start -= 1
+                elif length:
+                    end = 1
+            cursor = QTextCursor(document)
+            cursor.setPosition(block.position() + start)
+            cursor.setPosition(block.position() + end, QTextCursor.MoveMode.KeepAnchor)
+            cursors.append((cursor, str(diagnostic.severity), diagnostic))
+        self._diagnostic_cursors = cursors
+        self._refresh_extra_selections()
+        self._refresh_problem_ruler()
+        self._line_number_area.update()
+        self._emit_problems_summary(force=True)
+
+    def _diagnostic_line(self, cursor: QTextCursor) -> int:
+        return self.document().findBlock(cursor.selectionStart()).blockNumber()
+
+    def _problem_line_severities(self) -> dict[int, str]:
+        lines: dict[int, str] = {}
+        for cursor, severity, _diagnostic in self._diagnostic_cursors:
+            line = self._diagnostic_line(cursor)
+            lines[line] = worst_severity((lines.get(line, ""), severity))
+        return lines
+
+    def _diagnostic_selections(self) -> list:
+        selections = []
+        for cursor, severity, _diagnostic in self._diagnostic_cursors:
+            if not cursor.hasSelection():
+                continue
+            fmt = QTextCharFormat()
+            fmt.setUnderlineStyle(
+                QTextCharFormat.UnderlineStyle.DotLine
+                if severity == SEVERITY_HINT
+                else QTextCharFormat.UnderlineStyle.WaveUnderline
+            )
+            fmt.setUnderlineColor(self._problem_colors.get(severity, self._problem_colors[SEVERITY_HINT]))
+            selection = QtWidgets.QTextEdit.ExtraSelection()
+            selection.format = fmt
+            selection.cursor = cursor
+            selections.append(selection)
+        return selections
+
+    def _refresh_problem_ruler(self) -> None:
+        problems = []
+        for line, severity in sorted(self._problem_line_severities().items()):
+            if severity == SEVERITY_HINT:
+                continue
+            problems.append((line, self._problem_colors.get(severity, self._problem_colors[SEVERITY_WARNING])))
+        self._match_ruler.set_problems(problems, total_lines=max(1, self.blockCount()))
+        self._update_line_number_area_width()
+        self._update_match_ruler_geometry()
+        self._sync_ruler_visible_range()
+
+    def problems_summary(self) -> ProblemsSummary:
+        counts = {SEVERITY_ERROR: 0, SEVERITY_WARNING: 0, SEVERITY_HINT: 0}
+        for _cursor, severity, _diagnostic in self._diagnostic_cursors:
+            counts[severity] = counts.get(severity, 0) + 1
+        line = self.textCursor().blockNumber()
+        current = [
+            (SEVERITY_ORDER.get(severity, 9), severity, diagnostic)
+            for cursor, severity, diagnostic in self._diagnostic_cursors
+            if self._diagnostic_line(cursor) == line
+        ]
+        current.sort(key=lambda item: item[0])
+        message = str(current[0][2].message) if current else ""
+        severity = current[0][1] if current else ""
+        return ProblemsSummary(
+            errors=counts[SEVERITY_ERROR],
+            warnings=counts[SEVERITY_WARNING],
+            hints=counts[SEVERITY_HINT],
+            current_message=message,
+            current_severity=severity,
+        )
+
+    def _emit_problems_summary(self, *, force: bool = False) -> None:
+        summary = self.problems_summary()
+        if not force and summary == self._last_problems_summary:
+            return
+        self._last_problems_summary = summary
+        try:
+            self.problemsChanged.emit(summary)
+        except Exception:
+            pass
+
+    def goto_next_problem(self, *, forward: bool = True) -> bool:
+        """Переводит курсор к следующей (или предыдущей) проблеме по кругу."""
+        if self._diagnostics_timer.isActive():
+            self.refresh_diagnostics()
+        entries = [(cursor.selectionStart(), severity) for cursor, severity, _d in self._diagnostic_cursors]
+        serious = [position for position, severity in entries if severity != SEVERITY_HINT]
+        positions = sorted(set(serious or [position for position, _severity in entries]))
+        if not positions:
+            return False
+        here = self.textCursor().position()
+        if forward:
+            target = next((position for position in positions if position > here), positions[0])
+        else:
+            target = next((position for position in reversed(positions) if position < here), positions[-1])
+        cursor = self.textCursor()
+        cursor.setPosition(target)
+        self.setTextCursor(cursor)
+        self.centerCursor()
+        return True
+
+    # ------------------------------------------------------------- подсказки
+
+    def viewportEvent(self, event):  # noqa: N802
+        # Qt зовёт viewportEvent ещё из конструктора базового класса.
+        if getattr(self, "_language", None) is not None and event.type() == QEvent.Type.ToolTip:
+            self._show_tooltip_at(event.pos(), event.globalPos())
+            return True
+        return super().viewportEvent(event)
+
+    def _show_tooltip_at(self, pos, global_pos) -> None:
+        cursor = self.cursorForPosition(pos)
+        position = cursor.position()
+        line = cursor.blockNumber()
+        column = cursor.positionInBlock()
+        titles = {SEVERITY_ERROR: "Ошибка", SEVERITY_WARNING: "Предупреждение", SEVERITY_HINT: "Подсказка"}
+        parts = [
+            f"{titles.get(severity, 'Проблема')}: {diagnostic.message}"
+            for problem_cursor, severity, diagnostic in self._diagnostic_cursors
+            if problem_cursor.selectionStart() <= position <= problem_cursor.selectionEnd()
+            and self._diagnostic_line(problem_cursor) == line
+        ]
+        try:
+            description = str(self._language.describe(self.toPlainText(), line, column) or "")
+        except Exception:
+            description = ""
+        if description:
+            parts.append(description)
+        if self._tooltip is None:
+            self._tooltip = FluentItemToolTipController(self.viewport(), duration=12000)
+        if parts:
+            self._tooltip.show_text("\n\n".join(parts), global_pos)
+        else:
+            self._tooltip.hide()
+
+    def _ensure_completion_popup(self) -> CompletionPopup:
+        if self._completion_popup is None:
+            popup = CompletionPopup(self.viewport())
+            popup.rowAccepted.connect(self.accept_completion)
+            self._completion_popup = popup
+            self._apply_completion_popup_colors()
+            self.verticalScrollBar().valueChanged.connect(self._hide_completion_on_scroll)
+            self.horizontalScrollBar().valueChanged.connect(self._hide_completion_on_scroll)
+        return self._completion_popup
+
+    def _hide_completion_on_scroll(self, _value=None) -> None:
+        self.hide_completion()
+
+    def _apply_completion_popup_colors(self) -> None:
+        popup = self._completion_popup
+        if popup is None:
+            return
+        dark = isDarkTheme()
+        background = QColor(44, 44, 44) if dark else QColor(251, 251, 251)
+        border = QColor(255, 255, 255, 30) if dark else QColor(0, 0, 0, 30)
+        popup.apply_colors(background=background, border=border)
+
+    def completion_popup(self) -> CompletionPopup | None:
+        return self._completion_popup
+
+    def is_completion_visible(self) -> bool:
+        return self._completion_popup is not None and self._completion_popup.isVisible()
+
+    def hide_completion(self) -> None:
+        self._completion = None
+        popup = getattr(self, "_completion_popup", None)
+        if popup is not None:
+            popup.hide()
+
+    def _cursor_inside_completion(self) -> bool:
+        result = self._completion
+        if result is None:
+            return False
+        cursor = self.textCursor()
+        return cursor.blockNumber() == int(result.line) and cursor.positionInBlock() >= int(result.start)
+
+    def request_completion(self, *, explicit: bool = False) -> bool:
+        """Спрашивает подсказки для места курсора и показывает список."""
+        support = self._language
+        if support is None or self.isReadOnly():
+            return False
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            self.hide_completion()
+            return False
+        try:
+            result = support.complete(
+                self.toPlainText(),
+                cursor.blockNumber(),
+                cursor.positionInBlock(),
+                explicit=bool(explicit),
+            )
+        except Exception:
+            result = None
+        items = tuple(getattr(result, "items", ()) or ())
+        if not items:
+            self.hide_completion()
+            return False
+        self._completion = result
+        popup = self._ensure_completion_popup()
+        popup.set_items([item.label for item in items], [item.detail for item in items], font=self.font())
+        self._position_completion_popup()
+        popup.show()
+        popup.raise_()
+        return True
+
+    def _position_completion_popup(self) -> None:
+        popup = self._completion_popup
+        result = self._completion
+        if popup is None or result is None:
+            return
+        block = self.document().findBlockByNumber(int(result.line))
+        anchor = QTextCursor(self.document())
+        if block.isValid():
+            anchor.setPosition(block.position() + max(0, min(int(result.start), block.length() - 1)))
+        rect = self.cursorRect(anchor)
+        viewport = self.viewport().rect()
+        size = popup.preferred_size(min(560, viewport.width() - 16))
+        width = min(size.width(), max(120, viewport.width() - 4))
+        height = min(size.height(), max(60, viewport.height() - 4))
+        x = max(0, min(rect.left(), viewport.width() - width))
+        y = rect.bottom() + 4
+        if y + height > viewport.height():
+            above = rect.top() - height - 4
+            y = above if above >= 0 else max(0, viewport.height() - height)
+        popup.setGeometry(x, y, width, height)
+
+    def accept_completion(self, row: int | None = None) -> bool:
+        result = self._completion
+        popup = self._completion_popup
+        if result is None or popup is None:
+            return False
+        index = popup.current_row() if row is None else int(row)
+        items = tuple(result.items)
+        if not 0 <= index < len(items):
+            return False
+        item = items[index]
+        block = self.document().findBlockByNumber(int(result.line))
+        if not block.isValid():
+            self.hide_completion()
+            return False
+        limit = block.length() - 1
+        start = block.position() + max(0, min(int(result.start), limit))
+        end = block.position() + max(0, min(int(result.end), limit))
+        cursor = QTextCursor(self.document())
+        cursor.beginEditBlock()
+        cursor.setPosition(start)
+        cursor.setPosition(max(start, end), QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(str(item.insert_text))
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.hide_completion()
+        if bool(getattr(item, "reopen", False)):
+            QTimer.singleShot(0, lambda: self.request_completion(explicit=False))
+        return True
+
+    def _handle_completion_key(self, event) -> bool:
+        if not self.is_completion_visible():
+            return False
+        key = event.key()
+        modifiers = event.modifiers()
+        if modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier):
+            return False
+        popup = self._completion_popup
+        if key == Qt.Key.Key_Up:
+            popup.move_selection(-1)
+            return True
+        if key == Qt.Key.Key_Down:
+            popup.move_selection(1)
+            return True
+        if key == Qt.Key.Key_PageUp:
+            popup.move_selection(-8)
+            return True
+        if key == Qt.Key.Key_PageDown:
+            popup.move_selection(8)
+            return True
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not modifiers & Qt.KeyboardModifier.ShiftModifier:
+            return self.accept_completion()
+        if key == Qt.Key.Key_Escape:
+            self.hide_completion()
+            return True
+        return False
+
+    _AUTO_COMPLETE_CHARS = frozenset("-=:,@/~")
+
+    def _after_key_typed(self, event) -> None:
+        if self._language is None or self.isReadOnly():
+            return
+        key = event.key()
+        if event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier):
+            return
+        text = event.text()
+        if self.is_completion_visible():
+            if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete, Qt.Key.Key_Left, Qt.Key.Key_Right) or (
+                text and text.isprintable()
+            ):
+                self.request_completion(explicit=False)
+            return
+        if text and (text in self._AUTO_COMPLETE_CHARS or text.isalnum() or text == "_"):
+            self.request_completion(explicit=False)
+
+    def focusOutEvent(self, event):  # noqa: N802
+        self.hide_completion()
+        super().focusOutEvent(event)
+
+    # ------------------------------------------------------ быстрые исправления
+
+    def quick_fixes_at_cursor(self) -> list:
+        """Исправления для проблем в строке курсора и действия по месту."""
+        if self._language is None:
+            return []
+        if self._diagnostics_timer.isActive():
+            self.refresh_diagnostics()
+        cursor = self.textCursor()
+        line = cursor.blockNumber()
+        fixes: list = []
+        titles: set[str] = set()
+        ordered = sorted(
+            (
+                (SEVERITY_ORDER.get(severity, 9), diagnostic)
+                for problem_cursor, severity, diagnostic in self._diagnostic_cursors
+                if self._diagnostic_line(problem_cursor) == line
+            ),
+            key=lambda item: item[0],
+        )
+        for _order, diagnostic in ordered:
+            for fix in tuple(getattr(diagnostic, "fixes", ()) or ()):
+                if fix.title not in titles:
+                    titles.add(fix.title)
+                    fixes.append(fix)
+        try:
+            actions = tuple(self._language.quick_actions(self.toPlainText(), line, cursor.positionInBlock()) or ())
+        except Exception:
+            actions = ()
+        for action in actions:
+            if action.title not in titles:
+                titles.add(action.title)
+                fixes.append(action)
+        return fixes
+
+    def show_quick_fix_menu(self) -> bool:
+        if self.isReadOnly():
+            return False
+        fixes = self.quick_fixes_at_cursor()
+        if not fixes:
+            return False
+        menu = RoundMenu(parent=self)
+        for fix in fixes:
+            menu.addAction(
+                QAction(str(fix.title), menu, triggered=lambda _checked=False, f=fix: self.apply_quick_fix(f))
+            )
+        position = self.viewport().mapToGlobal(self.cursorRect().bottomLeft())
+        menu.exec(position)
+        return True
+
+    def contextMenuEvent(self, event):  # noqa: N802
+        if self._language is None or self.isReadOnly():
+            super().contextMenuEvent(event)
+            return
+        cursor = self.cursorForPosition(event.pos())
+        if not self.textCursor().hasSelection():
+            self.setTextCursor(cursor)
+        menu = _CodeEditorContextMenu(self, self.quick_fixes_at_cursor())
+        menu.exec(event.globalPos())
+
+    def apply_quick_fix(self, fix) -> bool:
+        return self.apply_text_edits(tuple(getattr(fix, "edits", ()) or ()))
+
+    def _position_of(self, line: int, column: int) -> int:
+        document = self.document()
+        block = document.findBlockByNumber(int(line))
+        if not block.isValid():
+            return max(0, document.characterCount() - 1)
+        return block.position() + max(0, min(int(column), block.length() - 1))
+
+    def apply_text_edits(self, edits) -> bool:
+        """Применяет правки одним шагом отмены (Ctrl+Z вернёт всё сразу)."""
+        if self.isReadOnly() or not edits:
+            return False
+        planned = []
+        for edit in edits:
+            start = self._position_of(edit.start_line, edit.start_column)
+            end = self._position_of(edit.end_line, edit.end_column)
+            planned.append((min(start, end), max(start, end), str(edit.text)))
+        planned.sort(key=lambda item: item[0], reverse=True)
+        cursor = QTextCursor(self.document())
+        cursor.beginEditBlock()
+        try:
+            for start, end, text in planned:
+                cursor.setPosition(start)
+                cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                cursor.insertText(text)
+        finally:
+            cursor.endEditBlock()
+        first_start, _end, first_text = planned[-1]
+        caret = self.textCursor()
+        caret.setPosition(min(first_start + len(first_text), max(0, self.document().characterCount() - 1)))
+        self.setTextCursor(caret)
+        self.refresh_diagnostics()
+        return True

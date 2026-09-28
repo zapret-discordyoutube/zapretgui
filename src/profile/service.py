@@ -638,6 +638,7 @@ class ProfilePresetService:
             in_range=editable.in_range,
             out_range=editable.out_range,
             current_strategy_state=strategy_states.get(str(item.strategy_id or "").strip(), ProfileStrategyState()),
+            preset_preamble_text="\n".join(preset.preamble_lines),
         )
 
     def set_profile_enabled(

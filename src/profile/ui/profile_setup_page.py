@@ -1033,6 +1033,19 @@ class ProfileSetupPageBase(BasePage):
         # contentEdited, а не textChanged: перекраска синтаксиса при смене темы
         # тоже эмитит textChanged и сбрасывала бы кэш текста без правки.
         self._raw_profile_text.contentEdited.connect(self._on_raw_profile_text_changed)
+        self._raw_profile_language = None
+        if is_zapret2_launch_method(self.launch_method):
+            from profile.ui.winws2_editor_language import Winws2EditorLanguageController
+
+            # Проверка и подсказки для текста одного профиля: фейки и lua-файлы
+            # берутся из общих строк пресета.
+            self._raw_profile_language = Winws2EditorLanguageController(
+                self._raw_profile_text,
+                current_text=self._current_raw_profile_text,
+                fragment=True,
+                preset_text=lambda: str(getattr(self._payload, "preset_preamble_text", "") or ""),
+                parent=self,
+            )
         match_layout.addWidget(self._raw_profile_text)
 
         raw_actions = QWidget(match_tab)
@@ -2590,6 +2603,9 @@ class ProfileSetupPageBase(BasePage):
 
     def cleanup(self) -> None:
         self._cleanup_in_progress = True
+        language = self.__dict__.get("_raw_profile_language")
+        if language is not None:
+            language.cleanup()
         timer = self.__dict__.get("_settings_save_timer")
         if timer is not None:
             try:

@@ -2,8 +2,9 @@
 
 Показывает, где в документе находятся найденные совпадения целиком — включая
 те, что сейчас за пределами экрана: по ней видно, сколько ещё листать.
-Отрисовку и попадания считает сам виджет, редактор передаёт только номера
-строк.
+Узкой меткой у правого края отмечаются и строки с проблемами (ошибки и
+предупреждения проверки текста). Отрисовку и попадания считает сам виджет,
+редактор передаёт только номера строк.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from ui.accessibility import set_control_accessibility, set_state_text
 RULER_WIDTH = 14
 MARKER_HEIGHT = 3
 MARKER_MARGIN = 3
+PROBLEM_MARKER_WIDTH = 4
 
 
 def marker_offset(line: int, total_lines: int, height: int) -> int:
@@ -60,6 +62,7 @@ class MatchRuler(QWidget):
         )
         set_state_text(self, ruler_name)
         self._lines: tuple[int, ...] = ()
+        self._problems: tuple[tuple[int, QColor], ...] = ()
         self._current_line: int | None = None
         self._total_lines = 1
         self._visible_range: tuple[int, int] = (0, 0)
@@ -79,6 +82,16 @@ class MatchRuler(QWidget):
         self._current_line = None if current_line is None else max(0, int(current_line))
         self.update()
 
+    def set_problems(self, problems, *, total_lines: int) -> None:
+        """Строки с проблемами: пары (номер строки, цвет метки)."""
+        self._problems = tuple((max(0, int(line)), QColor(color)) for line, color in (problems or ()))
+        self._total_lines = max(1, int(total_lines))
+        self.update()
+
+    @property
+    def problem_lines(self) -> tuple[int, ...]:
+        return tuple(line for line, _color in self._problems)
+
     def set_visible_range(self, first_line: int, last_line: int) -> None:
         value = (max(0, int(first_line)), max(0, int(last_line)))
         if value == self._visible_range:
@@ -91,7 +104,7 @@ class MatchRuler(QWidget):
         return self._lines
 
     def has_markers(self) -> bool:
-        return bool(self._lines)
+        return bool(self._lines) or bool(self._problems)
 
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
@@ -114,6 +127,12 @@ class MatchRuler(QWidget):
             painter.fillRect(
                 QRect(MARKER_MARGIN, offset, marker_width, MARKER_HEIGHT),
                 self._current_color if is_current else self._marker_color,
+            )
+        for line, color in self._problems:
+            offset = marker_offset(line, self._total_lines, height)
+            painter.fillRect(
+                QRect(width - PROBLEM_MARKER_WIDTH, offset, PROBLEM_MARKER_WIDTH, MARKER_HEIGHT + 1),
+                color,
             )
         painter.end()
 

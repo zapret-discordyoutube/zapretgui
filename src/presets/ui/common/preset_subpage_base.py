@@ -363,6 +363,7 @@ class PresetRawEditorPage(BasePage):
         self._commit_timer = self._raw_text_editor.commit_timer
 
         self._build_ui()
+        self._editor_language = self._attach_editor_language()
         self.editor.installEventFilter(self)
         self.searchInput.installEventFilter(self)
         try:
@@ -720,6 +721,44 @@ class PresetRawEditorPage(BasePage):
 
     def _preset_launch_method(self) -> str | None:
         return self._launch_method
+
+    def _attach_editor_language(self):
+        """Подсказки, проверка и быстрые исправления — только для Zapret 2.
+
+        Проверка лишь подчёркивает проблемы и предлагает исправления: текст
+        пресета меняется только действием пользователя.
+        """
+        from settings.mode import is_zapret2_launch_method
+
+        if not is_zapret2_launch_method(self._launch_method):
+            return None
+        from profile.ui.winws2_editor_language import Winws2EditorLanguageController
+
+        controller = Winws2EditorLanguageController(
+            self.editor,
+            current_text=self._current_raw_editor_text,
+            parent=self,
+        )
+        self.editor.problemsChanged.connect(self._on_editor_problems_changed)
+        self.footerStatusBar.problemsClicked.connect(self._goto_next_editor_problem)
+        return controller
+
+    def _on_editor_problems_changed(self, summary) -> None:
+        if bool(self.__dict__.get("_cleanup_in_progress", False)):
+            return
+        status_bar = self.__dict__.get("footerStatusBar")
+        if status_bar is None:
+            return
+        status_bar.set_problems(
+            errors=int(getattr(summary, "errors", 0) or 0),
+            warnings=int(getattr(summary, "warnings", 0) or 0),
+            current_message=str(getattr(summary, "current_message", "") or ""),
+            current_severity=str(getattr(summary, "current_severity", "") or ""),
+        )
+
+    def _goto_next_editor_problem(self) -> None:
+        if self.editor.goto_next_problem(forward=True):
+            self.editor.setFocus()
 
 
     def _preset_folder_scope_key(self) -> str | None:
@@ -2314,4 +2353,7 @@ class PresetRawEditorPage(BasePage):
                 text_editor.cleanup()
         except Exception:
             pass
+        language = self.__dict__.get("_editor_language")
+        if language is not None:
+            language.cleanup()
         self._ui_state_store = None
