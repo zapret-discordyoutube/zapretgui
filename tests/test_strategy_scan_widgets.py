@@ -113,6 +113,30 @@ class OutcomeTests(unittest.TestCase):
         self.assertEqual(outcome.detail, "порт 443 закрыт, порт 80 открыт")
         self.assertEqual(outcome.title, "Тут стратегии бессильны")
 
+    def test_plural_forms(self) -> None:
+        rows = [{"success": True, "name": f"s{i}", "time_ms": float(i + 1)} for i in range(24)]
+        self.assertIn("Нашлось 24 надёжные стратегии", build_panel_outcome(self._report(), rows).title)
+        rows = [{"success": True, "name": f"s{i}", "time_ms": float(i + 1)} for i in range(21)]
+        self.assertIn("Нашлась 21 надёжная стратегия", build_panel_outcome(self._report(), rows).title)
+        rows = [{"success": True, "name": f"s{i}", "time_ms": float(i + 1)} for i in range(12)]
+        self.assertIn("Нашлось 12 надёжных стратегий", build_panel_outcome(self._report(), rows).title)
+
+    def test_forced_scan_does_not_celebrate_or_offer_apply(self) -> None:
+        rows = [{"success": True, "name": "x", "time_ms": 10.0}]
+        outcome = build_panel_outcome(self._report(baseline_accessible=True), rows)
+        self.assertEqual(outcome.kind, "open")
+        self.assertFalse(outcome.celebrate)
+        self.assertEqual(outcome.best_text, "")
+        self.assertIn("ни при чём", outcome.title)
+
+    def test_switching_back_to_sites_drops_stun_target(self) -> None:
+        from blockcheck.strategy_scan_page_plans import build_protocol_ui_plan
+
+        plan = build_protocol_ui_plan(scan_protocol="tcp_https", current_value="stun.cloudflare.com:3478")
+        self.assertEqual(plan.normalized_target, "discord.com")
+        kept = build_protocol_ui_plan(scan_protocol="tcp_https", current_value="youtube.com")
+        self.assertEqual(kept.normalized_target, "youtube.com")
+
     def test_open_without_bypass_and_not_found(self) -> None:
         self.assertEqual(build_panel_outcome(self._report(total_tested=0, baseline_accessible=True), []).kind, "open")
         not_found = build_panel_outcome(self._report(), [{"success": False}])

@@ -535,7 +535,7 @@ class StrategyScanPage(BasePage):
 
         self._scan_panel.set_phrases(phrases("scan_network", self._ui_language))
         set_state_text(self._progress_bar, "Ход подбора стратегии: выполняется")
-        self._set_status_text(run_result.status_text)
+        self._set_status_text(self._running_subtitle())
         start_strategy_scan_worker(
             run_result.worker,
             parent=self,

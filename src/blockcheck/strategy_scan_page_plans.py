@@ -42,6 +42,10 @@ def build_protocol_ui_plan(*, scan_protocol: str, current_value: str) -> Strateg
 
     if scan_protocol in {"stun_voice", "udp_games"} and current and ":" not in current and not current.upper().startswith("STUN:"):
         current = ""
+    # Обратный переход: STUN-сервер из режима звонков/игр — не сайт.
+    lowered = current.strip().lower()
+    if scan_protocol == "tcp_https" and (":" in lowered or lowered.startswith("stun")):
+        current = ""
 
     normalized = normalize_target_input(current, scan_protocol)
     if not normalized:
@@ -319,7 +323,8 @@ def build_result_presentation(result, *, row_number: int) -> StrategyScanResultP
 
     time_ms = float(getattr(result, "time_ms", 0) or 0)
     time_text = f"{time_ms:.0f}" if time_ms > 0 else "—"
-    can_apply = bool(result.success) and bool(getattr(result, "apply_lines", ()))
+    forced = bool((getattr(result, "raw_data", None) or {}).get("forced"))
+    can_apply = bool(result.success) and bool(getattr(result, "apply_lines", ())) and not forced
 
     return StrategyScanResultPresentation(
         number_text=str(int(row_number)),
@@ -424,6 +429,19 @@ def finalize_scan_report(
     )
 
 
+def _plural(count: int, one: str, few: str, many: str) -> str:
+    """1 стратегия, 2 стратегии, 5 стратегий (с учётом 11–14)."""
+    tail = count % 100
+    if 11 <= tail <= 14:
+        return many
+    last = count % 10
+    if last == 1:
+        return one
+    if 2 <= last <= 4:
+        return few
+    return many
+
+
 _STOP_TITLES = {
     "no_internet": "Интернет куда-то убежал",
     "address_block": "Тут стратегии бессильны",
@@ -447,25 +465,36 @@ def build_panel_outcome(report, result_rows: list[dict]) -> StrategyScanPanelOut
     fatal_error = str(getattr(report, "fatal_error", "") or "")
     stop_kind = str(getattr(report, "stop_kind", "") or "")
 
+    if working and getattr(report, "baseline_accessible", False):
+        # Цель открывалась и без обхода: «сработали» все, потому что сайт и так
+        # открыт. Праздновать и применять тут нечего.
+        return StrategyScanPanelOutcome(
+            kind="open",
+            title="Сайт открывается и без обхода — стратегии тут ни при чём",
+            detail=(
+                f"Проверено для сведения: {len(working)} {_plural(len(working), 'стратегия открыла', 'стратегии открыли', 'стратегий открыли')} "
+                f"{target}, но он открывается и без них. Применять их незачем. Если в браузере сайт всё равно "
+                "не грузится — проверьте DNS, прокси или сам браузер."
+            ),
+        )
     if working:
         best_index, best = min(working, key=lambda item: float(item[1].get("time_ms") or 1e9))
         count = len(working)
-        noun = "надёжная стратегия" if count == 1 else ("надёжные стратегии" if 2 <= count <= 4 else "надёжных стратегий")
+        noun = _plural(count, "надёжная стратегия", "надёжные стратегии", "надёжных стратегий")
         best_time = float(best.get("time_ms") or 0)
         best_text = f"Лучшая — «{best.get('name', '')}»" + (f", ответ за {best_time:.0f} мс" if best_time > 0 else "")
         detail = (
             "Каждая открыла сайт три раза подряд, а без обхода он закрыт. "
             "Нажмите «Применить лучшую» — стратегия запишется в выбранный пресет."
         )
-        if getattr(report, "baseline_accessible", False):
-            detail = "Но цель открывалась и без обхода, поэтому это только для сведения."
+        verb = "Нашлась" if count % 10 == 1 and count % 100 != 11 else "Нашлось"
         return StrategyScanPanelOutcome(
             kind="found",
-            title=f"Ура! Нашлась {count} {noun}" if count == 1 else f"Ура! Нашлось {count} {noun}",
+            title=f"Ура! {verb} {count} {noun}",
             detail=detail,
             best_text=best_text,
             best_index=best_index,
-            celebrate=not getattr(report, "baseline_accessible", False),
+            celebrate=True,
         )
     if fatal_error:
         return StrategyScanPanelOutcome(
