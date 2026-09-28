@@ -20,7 +20,6 @@ class AboutPageKvnWidgets:
     links_group: object
     tg_card: object
     bot_card: object
-    bypass_card: object
     gh_card: object
 
 
@@ -31,7 +30,6 @@ def build_about_page_kvn_content(
     content_parent,
     on_open_kvn_channel,
     on_open_kvn_bot,
-    on_open_kvn_bypass,
     on_open_kvn_github,
 ) -> AboutPageKvnWidgets:
     hero_wrap = QFrame()
@@ -120,19 +118,6 @@ def build_about_page_kvn_content(
     )
     bot_card.clicked.connect(on_open_kvn_bot)
 
-    bypass_card = PushSettingCard(
-        "Открыть",
-        get_themed_qta_icon("fa5b.telegram", color="#229ED9"),
-        "Канал BypassBlock",
-        "Второй канал с новостями",
-    )
-    set_kvn_card_accessibility(
-        bypass_card,
-        action_name="Открыть канал BypassBlock",
-        description="Второй канал с новостями",
-    )
-    bypass_card.clicked.connect(on_open_kvn_bypass)
-
     gh_card = PushSettingCard(
         "Открыть",
         get_themed_qta_icon("fa5b.github", color=tokens.accent_hex),
@@ -146,7 +131,7 @@ def build_about_page_kvn_content(
     )
     gh_card.clicked.connect(on_open_kvn_github)
 
-    links_group.addSettingCards([tg_card, bot_card, bypass_card, gh_card])
+    links_group.addSettingCards([tg_card, bot_card, gh_card])
     layout.addWidget(links_group)
     layout.addStretch()
 
@@ -158,6 +143,5 @@ def build_about_page_kvn_content(
         links_group=links_group,
         tg_card=tg_card,
         bot_card=bot_card,
-        bypass_card=bypass_card,
         gh_card=gh_card,
     )

@@ -55,28 +55,16 @@ class GlobalSearchIndexTests(unittest.TestCase):
 
         self.assertIn("премиум", build_search_filter_text(premium_match.entry, language="ru").casefold())
 
-    def test_about_support_search_opens_about_tab(self) -> None:
+    def test_about_links_search_opens_help_tab(self) -> None:
         from app.search_index import SEARCH_ENTRIES
 
-        support_entries = [
-            entry for entry in SEARCH_ENTRIES
-            if entry.entry_id.startswith("about.support.")
-        ]
+        # Все ссылки собраны на «Справке»; на вкладке «О программе» их больше нет.
+        help_entries = [entry for entry in SEARCH_ENTRIES if entry.entry_id.startswith("about.help.")]
 
-        self.assertTrue(support_entries)
-        self.assertTrue(all(entry.tab_key == "about" for entry in support_entries))
+        self.assertTrue(help_entries)
+        self.assertTrue(all(entry.tab_key == "help" for entry in help_entries))
+        self.assertFalse(any(entry.entry_id.startswith(("about.support.", "about.course.")) for entry in SEARCH_ENTRIES))
         self.assertFalse(any(entry.entry_id == "about.tab.support" for entry in SEARCH_ENTRIES))
-
-    def test_about_course_search_opens_about_tab(self) -> None:
-        from app.search_index import SEARCH_ENTRIES
-
-        course_entries = [
-            entry for entry in SEARCH_ENTRIES
-            if entry.entry_id.startswith("about.course.")
-        ]
-
-        self.assertTrue(course_entries)
-        self.assertTrue(all(entry.tab_key == "about" for entry in course_entries))
 
     def test_profile_search_entries_use_profile_summary_not_list_contents(self) -> None:
         from app.page_names import PageName

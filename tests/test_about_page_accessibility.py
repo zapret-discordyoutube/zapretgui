@@ -23,6 +23,7 @@ class AboutPageAccessibilityTests(unittest.TestCase):
     def test_about_buttons_have_screen_reader_names(self) -> None:
         parent = QWidget()
         layout = QVBoxLayout(parent)
+        opened: list[str] = []
 
         widgets = build_about_page_about_content(
             layout,
@@ -33,7 +34,8 @@ class AboutPageAccessibilityTests(unittest.TestCase):
             make_section_label=lambda text: QWidget(),
             on_open_updates=lambda: None,
             on_open_premium=lambda: None,
-            on_open_kvn_github=lambda: None,
+            on_open_kvn_tab=lambda: opened.append("kvn"),
+            on_open_help_tab=lambda: opened.append("help"),
         )
 
         self.assertEqual(widgets.update_btn.accessibleName(), "Открыть настройки обновлений")
@@ -66,27 +68,17 @@ class AboutPageAccessibilityTests(unittest.TestCase):
         self.assertEqual(widgets.premium_btn.property("screenReaderStateText"), "Открыть Premium и VPN")
         self.assertIn("Premium", widgets.premium_btn.accessibleDescription())
         self.assertEqual(widgets.kvn_btn.text(), "Zapret KVN")
-        self.assertEqual(widgets.kvn_btn.accessibleName(), "Открыть Zapret KVN в Forgejo")
-        self.assertEqual(widgets.kvn_btn.property("screenReaderStateText"), "Открыть Zapret KVN в Forgejo")
-        self.assertIn("Forgejo", widgets.kvn_btn.accessibleDescription())
+        self.assertEqual(widgets.kvn_btn.accessibleName(), "Открыть вкладку Zapret KVN")
+        self.assertEqual(widgets.kvn_btn.property("screenReaderStateText"), "Открыть вкладку Zapret KVN")
+        self.assertIn("вкладку Zapret KVN", widgets.kvn_btn.accessibleDescription())
 
-        self.assertEqual(widgets.course_group.accessibleName(), "Раздел о программе: Обучение")
-        self.assertEqual(
-            widgets.course_group.property("screenReaderStateText"),
-            "Раздел о программе: Обучение",
-        )
-        self.assertEqual(widgets.youtube_course_card.accessibleName(), "Открыть курс и гайд по Zapret 2")
-        self.assertIn("Видео по настройке", widgets.youtube_course_card.accessibleDescription())
-        self.assertEqual(
-            bytes(widgets.youtube_course_card.linkButton.getUrl().toEncoded()).decode("ascii"),
-            "https://www.youtube.com/@%D0%9F%D1%80%D0%B8%D0%B2%D0%B0%D1%82%D0%BD%D0%BE%D1%81%D1%82%D1%8C/videos",
-        )
-        self.assertEqual(widgets.youtube_playlist_card.accessibleName(), "Открыть плейлист курса по Zapret 2")
-        self.assertIn("Все видео курса", widgets.youtube_playlist_card.accessibleDescription())
-        self.assertEqual(
-            widgets.youtube_playlist_card.linkButton.getUrl().toString(),
-            "https://www.youtube.com/playlist?list=PLa6yzOvgEWW0F1PL0D8pOPI8lD_rfLL1s",
-        )
+        # Ссылок на этой вкладке нет — только дорога на «Справку».
+        self.assertFalse(hasattr(widgets, "course_group"))
+        self.assertEqual(widgets.help_card.accessibleName(), "Открыть вкладку «Справка»")
+        self.assertIn("«Справка»", widgets.help_card.accessibleDescription())
+        widgets.help_card.button.click()
+        widgets.kvn_btn.click()
+        self.assertEqual(opened, ["help", "kvn"])
 
     def test_subscription_status_update_reads_state_for_screen_reader(self) -> None:
         page = AboutPage.__new__(AboutPage)
@@ -172,11 +164,11 @@ class AboutPageAccessibilityTests(unittest.TestCase):
         self.assertEqual(page.premium_btn.property("screenReaderStateText"), "Открыть Premium и VPN")
         self.assertIn("Premium", page.premium_btn.accessible_description)
         self.assertEqual(page.kvn_btn.text(), "Zapret KVN")
-        self.assertEqual(page.kvn_btn.accessible_name, "Открыть Zapret KVN в Forgejo")
-        self.assertEqual(page.kvn_btn.property("screenReaderStateText"), "Открыть Zapret KVN в Forgejo")
-        self.assertIn("Forgejo", page.kvn_btn.accessible_description)
+        self.assertEqual(page.kvn_btn.accessible_name, "Открыть вкладку Zapret KVN")
+        self.assertEqual(page.kvn_btn.property("screenReaderStateText"), "Открыть вкладку Zapret KVN")
+        self.assertIn("вкладку Zapret KVN", page.kvn_btn.accessible_description)
 
-    def test_about_page_shows_support_blocks_on_about_tab(self) -> None:
+    def test_about_page_keeps_links_only_on_help_tab(self) -> None:
         page = AboutPage(
             open_premium=lambda: None,
             open_updates=lambda: None,
@@ -188,14 +180,18 @@ class AboutPageAccessibilityTests(unittest.TestCase):
 
         self.assertNotIn("support", page.tabs_pivot.items)
         self.assertEqual(page.stacked_widget.count(), 3)
-        self.assertIsNotNone(page._support_discussions_card)
-        self.assertIsNotNone(page._support_telegram_card)
-        self.assertIsNotNone(page._support_discord_card)
+        self.assertFalse(hasattr(page, "_support_discussions_card"))
 
         page.switch_to_tab("support")
-
         self.assertEqual(page.stacked_widget.currentIndex(), 0)
         self.assertEqual(page.tabs_pivot.currentRouteKey(), "about")
+
+        import about.plans as about_page_plans
+
+        page._switch_tab(about_page_plans.resolve_tab_index("help"))
+        self.assertEqual(page.tabs_pivot.currentRouteKey(), "help")
+        self.assertIn("chats_folder", page._help_link_cards)
+        self.assertIn("links_channel", page._help_link_cards)
 
 
 class _TextWidget:

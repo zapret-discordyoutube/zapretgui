@@ -1,13 +1,10 @@
 # ui/pages/about_page.py
-"""Страница О программе — версия, подписка, поддержка, справка"""
+"""Страница О программе — версия, подписка, справка со всеми ссылками, Zapret KVN"""
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QFrame, QSizePolicy, QLayout,
-)
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QLayout
 
 from .base_page import BasePage
 import about.plans as about_page_plans
@@ -18,9 +15,8 @@ from ui.pages.about_page_about_build import (
     set_subscription_description_accessibility,
     set_subscription_status_accessibility,
 )
-from ui.pages.about_page_help_build import build_about_page_help_content
+from ui.pages.about_page_help_build import HELP_LINK_GROUPS, build_about_page_help_content
 from ui.pages.about_page_kvn_build import build_about_page_kvn_content
-from ui.pages.about_page_support_build import build_about_page_support_content
 from ui.pages.about_page_tabs_build import build_about_page_tabs
 from app.state_store import AppUiState, MainWindowStateStore
 from donater.premium_display import TIER_UNKNOWN, PremiumDisplay, premium_display_from_ui_state
@@ -34,10 +30,9 @@ from log.log import log
 from qfluentwidgets import (
     StrongBodyLabel,
     InfoBar,
-    HyperlinkCard,
+    PrimaryPushSettingCard,
     PushSettingCard,
     SettingCardGroup,
-    FluentIcon,
 )
 
 def _make_section_label(text: str, parent: QWidget | None = None) -> QLabel:
@@ -73,10 +68,7 @@ class AboutPage(BasePage):
         self._create_about_open_action_worker = create_open_action_worker
         self._about_open_runtime = OneShotWorkerRuntime()
         self._about_open_state = QueuedWorkerState[tuple[str, str, str]](self._about_open_runtime)
-        self._support_icon_label: QLabel | None = None
-        self._support_discussions_card = None
-        self._support_telegram_card = None
-        self._support_discord_card = None
+        self._help_link_cards: dict[str, object] = {}
 
         # Tab lazy init flags
         self._help_tab_initialized = False
@@ -318,7 +310,8 @@ class AboutPage(BasePage):
             make_section_label=lambda text: _make_section_label(text),
             on_open_updates=self._open_updates_callback,
             on_open_premium=self._open_premium_callback,
-            on_open_kvn_github=self._open_kvn_github,
+            on_open_kvn_tab=lambda: self.switch_to_tab("kvn"),
+            on_open_help_tab=lambda: self.switch_to_tab("help"),
         )
         self.about_section_version_label = widgets.about_section_version_label
         self.about_app_name_label = widgets.about_app_name_label
@@ -330,8 +323,7 @@ class AboutPage(BasePage):
         self.sub_desc_label = widgets.sub_desc_label
         self.premium_btn = widgets.premium_btn
         self.kvn_btn = widgets.kvn_btn
-        layout.addSpacing(16)
-        self._build_support_content(layout)
+        layout.addStretch()
 
     def update_subscription_status(self, display: PremiumDisplay):
         """Обновляет отображение статуса подписки"""
@@ -353,144 +345,27 @@ class AboutPage(BasePage):
         return premium_display_from_ui_state(store.snapshot())
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Блоки поддержки внутри вкладки «О программе»
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _build_support_content(self, layout: QVBoxLayout):
-        self._support_icon_label = None
-        self._support_discussions_card = None
-        self._support_telegram_card = None
-        self._support_discord_card = None
-        tokens = get_theme_tokens()
-        widgets = build_about_page_support_content(
-            layout,
-            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
-            content_parent=self.content,
-            tokens=tokens,
-            on_open_discussions=self._open_support_discussions,
-            on_open_telegram=self._open_telegram_support,
-            on_open_discord=self._open_discord,
-        )
-        self._support_discussions_card = widgets.discussions_card
-        self._support_telegram_card = widgets.telegram_card
-        self._support_discord_card = widgets.discord_card
-
-    def _open_support_discussions(self) -> None:
-        self._request_about_open_action(
-            "support_discussions",
-            error_default="Не удалось открыть Forgejo Issues:\n{error}",
-        )
-
-    def _open_telegram_support(self) -> None:
-        self._request_about_open_action(
-            "support_telegram",
-            error_default="Не удалось открыть Telegram:\n{error}",
-        )
-
-    def _open_discord(self) -> None:
-        self._request_about_open_action(
-            "support_discord",
-            error_default="Не удалось открыть Discord:\n{error}",
-        )
-
-    # ─────────────────────────────────────────────────────────────────────────
     # Tab 2: Справка
     # ─────────────────────────────────────────────────────────────────────────
 
     def _build_help_content(self, layout: QVBoxLayout):
-        build_about_page_help_content(
+        widgets = build_about_page_help_content(
             layout,
             tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
             tokens=get_theme_tokens(),
             content_parent=self.content,
             make_section_label=lambda text: _make_section_label(text),
-            hyperlink_card_cls=HyperlinkCard,
             push_setting_card_cls=PushSettingCard,
+            primary_push_setting_card_cls=PrimaryPushSettingCard,
             setting_card_group_cls=SettingCardGroup,
-            fluent_icon=FluentIcon,
-            on_open_forum=self._open_forum_for_beginners,
-            on_open_telegram_news=self._open_telegram_news,
+            on_open_link=self._open_help_link,
         )
+        self._help_link_cards = widgets.cards
 
-    def _add_motto_block(self, layout: QVBoxLayout):
-        tokens = get_theme_tokens()
-        motto_wrap = QFrame()
-        motto_wrap.setStyleSheet("QFrame { background: transparent; border: none; }")
-
-        motto_row = QHBoxLayout(motto_wrap)
-        motto_row.setContentsMargins(0, 0, 0, 0)
-        motto_row.setSpacing(0)
-
-        motto_text_wrap = QFrame()
-        motto_text_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        motto_text_wrap.setStyleSheet("QFrame { background: transparent; border: none; }")
-
-        motto_text_layout = QVBoxLayout(motto_text_wrap)
-        motto_text_layout.setContentsMargins(0, 0, 0, 0)
-        motto_text_layout.setSpacing(2)
-
-        motto_title = QLabel(
-            tr_catalog(
-                "page.about.help.motto.title",
-                language=self._ui_language,
-                default="keep thinking, keep searching, keep learning....",
-            )
-        )
-        motto_title.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-        motto_title.setWordWrap(True)
-        motto_title.setStyleSheet(
-            f"QLabel {{ color: {tokens.fg}; font-size: 25px; font-weight: 700; "
-            f"letter-spacing: 0.8px; "
-            f"font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif; }}"
-        )
-
-        motto_translate = QLabel(
-            tr_catalog(
-                "page.about.help.motto.subtitle",
-                language=self._ui_language,
-                default="Продолжай думать, продолжай искать, продолжай учиться....",
-            )
-        )
-        motto_translate.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-        motto_translate.setWordWrap(True)
-        motto_translate.setStyleSheet(
-            f"QLabel {{ color: {tokens.fg_muted}; font-size: 17px; font-style: italic; "
-            f"font-weight: 600; letter-spacing: 0.5px; "
-            f"font-family: 'Palatino Linotype', 'Book Antiqua', 'Georgia', serif; "
-            f"padding-top: 2px; }}"
-        )
-
-        motto_cta = QLabel(
-            tr_catalog(
-                "page.about.help.motto.cta",
-                language=self._ui_language,
-                default="Zapret2 - думай свободно, ищи смелее, учись всегда.",
-            )
-        )
-        motto_cta.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-        motto_cta.setWordWrap(True)
-        motto_cta.setStyleSheet(
-            f"QLabel {{ color: {tokens.fg_faint}; font-size: 12px; letter-spacing: 1.1px; "
-            f"font-family: 'Segoe UI', sans-serif; text-transform: uppercase; "
-            f"padding-top: 6px; }}"
-        )
-
-        motto_text_layout.addWidget(motto_title)
-        motto_text_layout.addWidget(motto_translate)
-        motto_text_layout.addWidget(motto_cta)
-        motto_row.addWidget(motto_text_wrap, 1)
-        layout.addWidget(motto_wrap)
-
-    def _open_forum_for_beginners(self):
+    def _open_help_link(self, action_name: str) -> None:
         self._request_about_open_action(
-            "forum_for_beginners",
-            error_default="Не удалось открыть вики-сайт:\n{error}",
-        )
-
-    def _open_telegram_news(self):
-        self._request_about_open_action(
-            "telegram_news",
-            error_default="Не удалось открыть Telegram:\n{error}",
+            action_name,
+            error_default="Не удалось открыть ссылку:\n{error}",
         )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -508,7 +383,6 @@ class AboutPage(BasePage):
             content_parent=self.content,
             on_open_kvn_channel=self._open_kvn_channel,
             on_open_kvn_bot=self._open_kvn_bot,
-            on_open_kvn_bypass=self._open_kvn_bypass,
             on_open_kvn_github=self._open_kvn_github,
         )
 
@@ -521,12 +395,6 @@ class AboutPage(BasePage):
     def _open_kvn_bot(self):
         self._request_about_open_action(
             "kvn_bot",
-            error_default="Не удалось открыть Telegram:\n{error}",
-        )
-
-    def _open_kvn_bypass(self):
-        self._request_about_open_action(
-            "kvn_bypass",
             error_default="Не удалось открыть Telegram:\n{error}",
         )
 
@@ -708,34 +576,16 @@ class AboutPage(BasePage):
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
         tokens = tokens or get_theme_tokens()
-        if self._support_discussions_card is not None:
-            try:
-                self._support_discussions_card.iconLabel.setIcon(
-                    get_themed_qta_icon("fa5b.github", color=tokens.accent_hex)
-                )
-            except Exception:
-                pass
-        if self._support_telegram_card is not None:
-            try:
-                self._support_telegram_card.iconLabel.setIcon(
-                    get_themed_qta_icon("fa5b.telegram", color="#229ED9")
-                )
-            except Exception:
-                pass
-        if self._support_discord_card is not None:
-            try:
-                self._support_discord_card.iconLabel.setIcon(
-                    get_themed_qta_icon("fa5b.discord", color="#5865F2")
-                )
-            except Exception:
-                pass
-        if self._support_icon_label is not None:
-            try:
-                self._support_icon_label.setPixmap(
-                    get_cached_qta_pixmap("fa5b.github", color=tokens.accent_hex, size=36)
-                )
-            except Exception:
-                pass
+        # Значки без своего фирменного цвета идут акцентным — перекрашиваем.
+        for group in HELP_LINK_GROUPS:
+            for link in group.links:
+                card = self._help_link_cards.get(link.action)
+                if card is None or link.icon_color:
+                    continue
+                try:
+                    card.iconLabel.setIcon(get_themed_qta_icon(link.icon, color=tokens.accent_hex))
+                except Exception:
+                    pass
 
     def cleanup(self) -> None:
         self._cleanup_in_progress = True

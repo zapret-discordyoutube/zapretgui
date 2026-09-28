@@ -26,7 +26,6 @@ class AboutKvnAccessibilityTests(unittest.TestCase):
             content_parent=parent,
             on_open_kvn_channel=lambda: None,
             on_open_kvn_bot=lambda: None,
-            on_open_kvn_bypass=lambda: None,
             on_open_kvn_github=lambda: None,
         )
 
@@ -41,10 +40,11 @@ class AboutKvnAccessibilityTests(unittest.TestCase):
             "Раздел Zapret KVN: Ссылки",
         )
 
+        # BypassBlock живёт на «Справке» — во вкладке KVN его больше нет.
+        self.assertFalse(hasattr(widgets, "bypass_card"))
         expected = {
             widgets.tg_card: ("Открыть канал Zapret KVN", "Новости и обновления"),
             widgets.bot_card: ("Купить подписку Zapret KVN", "Оформление через Telegram-бота"),
-            widgets.bypass_card: ("Открыть канал BypassBlock", "Второй канал с новостями"),
             widgets.gh_card: ("Открыть исходный код Zapret KVN", "Forgejo репозиторий Zapret KVN"),
         }
         for card, (name, description) in expected.items():

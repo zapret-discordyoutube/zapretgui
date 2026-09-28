@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
-from qfluentwidgets import FluentIcon, HyperlinkCard, PushSettingCard, SettingCardGroup
+from qfluentwidgets import FluentIcon, HyperlinkCard, PrimaryPushSettingCard, PushSettingCard, SettingCardGroup
 
 from ui.pages.about_page_help_build import build_about_page_help_content
 from ui.theme import get_theme_tokens
@@ -20,63 +20,108 @@ class AboutHelpAccessibilityTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
-    def test_help_cards_have_screen_reader_text(self) -> None:
+    def _build(self, opened: list[str]):
         parent = QWidget()
+        self.addCleanup(parent.deleteLater)
         layout = QVBoxLayout(parent)
-
-        widgets = build_about_page_help_content(
+        return build_about_page_help_content(
             layout,
             tr_fn=lambda _key, default: default,
             tokens=get_theme_tokens(),
             content_parent=parent,
             make_section_label=lambda text: QWidget(),
-            hyperlink_card_cls=HyperlinkCard,
             push_setting_card_cls=PushSettingCard,
+            primary_push_setting_card_cls=PrimaryPushSettingCard,
             setting_card_group_cls=SettingCardGroup,
-            fluent_icon=FluentIcon,
-            on_open_forum=lambda: None,
-            on_open_telegram_news=lambda: None,
+            on_open_link=opened.append,
         )
 
-        self.assertFalse(hasattr(widgets, "youtube_card"))
-        self.assertFalse(hasattr(widgets, "youtube_playlist_card"))
-        self.assertFalse(hasattr(widgets, "folder_card"))
+    def test_links_are_grouped_learn_ask_follow(self) -> None:
+        widgets = self._build([])
 
-        self.assertEqual(widgets.docs_group.accessibleName(), "Раздел справки: Документация")
+        self.assertEqual(list(widgets.groups), ["learn", "ask", "news"])
+        for key, title in (("learn", "Научиться"), ("ask", "Спросить"), ("news", "Следить за новостями")):
+            with self.subTest(group=key):
+                self.assertEqual(widgets.groups[key].accessibleName(), f"Раздел справки: {title}")
+                self.assertEqual(widgets.groups[key].property("screenReaderStateText"), f"Раздел справки: {title}")
+
         self.assertEqual(
-            widgets.docs_group.property("screenReaderStateText"),
-            "Раздел справки: Документация",
+            list(widgets.cards),
+            [
+                "forum_for_beginners", "youtube_course", "android_guide",
+                "chats_folder", "support_telegram", "support_discord", "support_discussions",
+                "links_channel", "telegram_news", "mastodon", "bastyon", "source_code",
+            ],
         )
-        self.assertEqual(widgets.news_group.accessibleName(), "Раздел справки: Новости")
-        self.assertEqual(
-            widgets.news_group.property("screenReaderStateText"),
-            "Раздел справки: Новости",
-        )
+        # Главные «всё в одном месте» ссылки выделены акцентом и стоят первыми в своих группах.
+        self.assertIsInstance(widgets.cards["chats_folder"], PrimaryPushSettingCard)
+        self.assertIsInstance(widgets.cards["links_channel"], PrimaryPushSettingCard)
+        self.assertNotIsInstance(widgets.cards["telegram_news"], PrimaryPushSettingCard)
+
+    def test_help_cards_have_screen_reader_text(self) -> None:
+        widgets = self._build([])
 
         expected = {
-            widgets.forum_card: ("Открыть вики-сайт", "Документация и инструкции"),
-            widgets.info_card: ("Открыть руководство и ответы", "Руководство и ответы на вопросы"),
-            widgets.android_card: ("Открыть инструкцию для Android", "Открыть инструкцию на сайте"),
-            widgets.github_card: ("Открыть Forgejo", "Исходный код и документация"),
-            widgets.telegram_card: ("Открыть Telegram канал", "Новости и обновления"),
-            widgets.mastodon_card: ("Открыть Mastodon профиль", "Новости в Fediverse"),
-            widgets.bastyon_card: ("Открыть Bastyon профиль", "Новости в Bastyon"),
+            "forum_for_beginners": ("Открыть вики-сайт", "Документация и инструкции"),
+            "youtube_course": ("Открыть видеокурс на YouTube", "Все видео курса"),
+            "android_guide": ("Открыть инструкцию для Android", "Открыть инструкцию на сайте"),
+            "chats_folder": ("Открыть папку со всеми чатами в Telegram", "одной папкой"),
+            "support_telegram": ("Открыть Telegram-чат", "Быстрые вопросы"),
+            "support_discord": ("Открыть Discord", "Обсуждение и живое общение"),
+            "support_discussions": ("Открыть Forgejo Issues", "Forgejo Issues"),
+            "links_channel": ("Открыть канал со всеми ссылками", "в одном месте"),
+            "telegram_news": ("Открыть Telegram канал", "Новости и обновления"),
+            "mastodon": ("Открыть Mastodon профиль", "Новости в Fediverse"),
+            "bastyon": ("Открыть Bastyon профиль", "Новости в Bastyon"),
+            "source_code": ("Открыть исходный код в Forgejo", "Репозиторий программы"),
         }
-        for card, (name, description) in expected.items():
-            with self.subTest(name=name):
+        for action, (name, description) in expected.items():
+            card = widgets.cards[action]
+            with self.subTest(action=action):
                 self.assertEqual(card.accessibleName(), name)
                 self.assertEqual(card.property("screenReaderStateText"), name)
                 self.assertIn(description, card.accessibleDescription())
-                button = getattr(card, "button", None)
-                if button is not None:
-                    self.assertEqual(button.accessibleName(), name)
-                    self.assertEqual(button.property("screenReaderStateText"), name)
-                    self.assertIn(description, button.accessibleDescription())
-                link_button = getattr(card, "linkButton", None)
-                if link_button is not None:
-                    self.assertEqual(link_button.accessibleName(), name)
-                    self.assertEqual(link_button.property("screenReaderStateText"), name)
-                    self.assertIn(description, link_button.accessibleDescription())
+                self.assertEqual(card.button.accessibleName(), name)
+                self.assertEqual(card.button.text(), "Открыть")
+
+    def test_every_card_opens_its_own_action(self) -> None:
+        opened: list[str] = []
+        widgets = self._build(opened)
+
+        for card in widgets.cards.values():
+            card.button.click()
+
+        self.assertEqual(opened, list(widgets.cards))
+
+    def test_every_help_action_has_an_opener_and_hubs_point_to_telegram(self) -> None:
+        from app.page_names import PageName
+        from ui.page_deps.system import build_about_page_kwargs
+
+        class _Feature:
+            def __init__(self) -> None:
+                self.actions: dict[str, object] = {}
+
+            def create_external_action_worker(self, request_id, *, action_name, action_fn, parent=None):
+                self.actions[action_name] = action_fn
+                return None
+
+        feature = _Feature()
+        kwargs = build_about_page_kwargs(
+            page_name=PageName.ABOUT,
+            external_actions_feature=feature,
+            show_page=lambda *_args, **_kwargs: None,
+            ui_state_store=None,
+        )
+        widgets = self._build([])
+        for index, action in enumerate(widgets.cards):
+            kwargs["create_open_action_worker"](index, action_name=action)
+        self.assertEqual(set(feature.actions), set(widgets.cards))
+
+        with patch("config.telegram_links.open_telegram_link") as open_link:
+            feature.actions["chats_folder"]()
+            feature.actions["links_channel"]()
+        self.assertEqual(open_link.call_args_list[0].kwargs.get("slug"), "xjPs164MI7AxZWE6")
+        self.assertEqual(open_link.call_args_list[1].args[0], "runetvpnyoutubediscord")
 
     def test_hyperlink_cards_can_be_opened_from_keyboard(self) -> None:
         from ui.pages.about_page_help_accessibility import set_help_card_accessibility

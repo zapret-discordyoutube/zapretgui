@@ -155,16 +155,29 @@ def build_about_page_kwargs(*, page_name: PageName, external_actions_feature, sh
 
     def _create_about_open_action_worker(request_id: int, *, action_name: str, parent=None):
         import about.commands as about_commands
+        from config.urls import ANDROID_URL
 
         actions = {
-            "support_discussions": about_commands.open_support_discussions,
+            # «Справка»: научиться
+            "forum_for_beginners": about_commands.open_docs_home,
+            "youtube_course": lambda: about_commands.open_link(
+                "https://www.youtube.com/playlist?list=PLa6yzOvgEWW0F1PL0D8pOPI8lD_rfLL1s"
+            ),
+            "android_guide": lambda: about_commands.open_link(ANDROID_URL),
+            # «Справка»: спросить
+            "chats_folder": lambda: about_commands.open_telegram_folder("xjPs164MI7AxZWE6"),
             "support_telegram": lambda: about_commands.open_telegram("zaprethelp"),
             "support_discord": lambda: about_commands.open_discord("https://discord.gg/kkcBDG2uws"),
-            "forum_for_beginners": about_commands.open_docs_home,
+            "support_discussions": about_commands.open_support_discussions,
+            # «Справка»: следить за новостями
+            "links_channel": lambda: about_commands.open_telegram("runetvpnyoutubediscord"),
             "telegram_news": lambda: about_commands.open_telegram("bypassblock"),
+            "mastodon": lambda: about_commands.open_link("https://mastodon.social/@zapret"),
+            "bastyon": lambda: about_commands.open_link("https://bastyon.com/zapretgui"),
+            "source_code": lambda: about_commands.open_github("https://git.zapret.moe/zapretdiscordyoutube/zapretgui"),
+            # Zapret KVN
             "kvn_channel": lambda: about_commands.open_telegram("vpndiscordyooutube"),
             "kvn_bot": lambda: about_commands.open_telegram("zapretvpns_bot"),
-            "kvn_bypass": lambda: about_commands.open_telegram("bypassblock"),
             "kvn_github": lambda: about_commands.open_github("https://git.zapret.moe/zapretkvn/zapret-kvn"),
         }
         return external_actions_feature.create_external_action_worker(

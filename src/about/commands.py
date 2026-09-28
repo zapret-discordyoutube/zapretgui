@@ -45,6 +45,27 @@ def open_telegram(domain: str, *, post: int | None = None) -> AboutActionResult:
         return AboutActionResult(False, str(e))
 
 
+def open_telegram_folder(slug: str) -> AboutActionResult:
+    """Папка Telegram (t.me/addlist/...): добавляет сразу все чаты из неё."""
+    try:
+        from config.telegram_links import open_telegram_link
+
+        open_telegram_link("", slug=slug)
+        log(f"Открыта папка Telegram: {slug}", "INFO")
+        return AboutActionResult(True, slug)
+    except Exception as e:
+        return AboutActionResult(False, str(e))
+
+
+def open_link(url: str) -> AboutActionResult:
+    try:
+        webbrowser.open(url)
+        log(f"Открыта ссылка: {url}", "INFO")
+        return AboutActionResult(True, url)
+    except Exception as e:
+        return AboutActionResult(False, str(e))
+
+
 def open_discord(url: str) -> AboutActionResult:
     try:
         webbrowser.open(url)
@@ -68,6 +89,8 @@ __all__ = [
     "open_discord",
     "open_docs_home",
     "open_github",
+    "open_link",
     "open_support_discussions",
     "open_telegram",
+    "open_telegram_folder",
 ]

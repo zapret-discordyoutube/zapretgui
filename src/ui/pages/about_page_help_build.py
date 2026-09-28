@@ -10,21 +10,200 @@ from PyQt6.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout, QFrame, QSizePolic
 
 from ui.pages.about_page_help_accessibility import set_help_card_accessibility
 from ui.accessibility import set_state_text
+from ui.theme import get_themed_qta_icon
 from ui.widgets.shimmer_label import ShimmerLabel
+
+
+@dataclass(frozen=True, slots=True)
+class HelpLink:
+    """Одна ссылка «Справки»: карточка с кнопкой «Открыть» справа."""
+
+    action: str
+    icon: str
+    icon_color: str
+    title_key: str
+    title: str
+    desc_key: str
+    desc: str
+    accessible_key: str
+    accessible: str
+    primary: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class HelpLinkGroup:
+    key: str
+    title_key: str
+    title: str
+    links: tuple[HelpLink, ...]
+
+
+# Все внешние ссылки программы собраны здесь, в трёх понятных группах.
+# action — имя действия открытия в page_deps/system.py::build_about_page_kwargs.
+HELP_LINK_GROUPS: tuple[HelpLinkGroup, ...] = (
+    HelpLinkGroup(
+        key="learn",
+        title_key="page.about.help.group.learn",
+        title="Научиться",
+        links=(
+            HelpLink(
+                action="forum_for_beginners",
+                icon="fa5s.book-open",
+                icon_color="",
+                title_key="page.about.help.docs.forum.title",
+                title="Вики-сайт",
+                desc_key="page.about.help.docs.forum.desc",
+                desc="Документация и инструкции",
+                accessible_key="page.about.help.docs.forum.accessible_name",
+                accessible="Открыть вики-сайт",
+            ),
+            HelpLink(
+                action="youtube_course",
+                icon="fa5b.youtube",
+                icon_color="#FF0000",
+                title_key="page.about.help.learn.youtube.title",
+                title="Видеокурс на YouTube",
+                desc_key="page.about.help.learn.youtube.desc",
+                desc="Все видео курса по Zapret 2 одним списком",
+                accessible_key="page.about.help.learn.youtube.accessible_name",
+                accessible="Открыть видеокурс на YouTube",
+            ),
+            HelpLink(
+                action="android_guide",
+                icon="fa5b.android",
+                icon_color="#3DDC84",
+                title_key="page.about.help.docs.android.title",
+                title="На Android (Magisk Zapret, ByeByeDPI и др.)",
+                desc_key="page.about.help.docs.android.desc",
+                desc="Открыть инструкцию на сайте",
+                accessible_key="page.about.help.docs.android.accessible_name",
+                accessible="Открыть инструкцию для Android",
+            ),
+        ),
+    ),
+    HelpLinkGroup(
+        key="ask",
+        title_key="page.about.help.group.ask",
+        title="Спросить",
+        links=(
+            HelpLink(
+                action="chats_folder",
+                icon="fa5s.folder-open",
+                icon_color="#229ED9",
+                title_key="page.about.help.ask.folder.title",
+                title="Папка со всеми чатами",
+                desc_key="page.about.help.ask.folder.desc",
+                desc="Все наши чаты в Telegram одной папкой — добавьте её целиком",
+                accessible_key="page.about.help.ask.folder.accessible_name",
+                accessible="Открыть папку со всеми чатами в Telegram",
+                primary=True,
+            ),
+            HelpLink(
+                action="support_telegram",
+                icon="fa5b.telegram",
+                icon_color="#229ED9",
+                title_key="page.about.help.ask.telegram.title",
+                title="Telegram-чат",
+                desc_key="page.about.support.telegram.desc",
+                desc="Быстрые вопросы и общение с сообществом",
+                accessible_key="page.about.help.ask.telegram.accessible_name",
+                accessible="Открыть Telegram-чат",
+            ),
+            HelpLink(
+                action="support_discord",
+                icon="fa5b.discord",
+                icon_color="#5865F2",
+                title_key="page.about.support.discord.title",
+                title="Discord",
+                desc_key="page.about.support.discord.desc",
+                desc="Обсуждение и живое общение",
+                accessible_key="page.about.support.discord.accessible_name",
+                accessible="Открыть Discord",
+            ),
+            HelpLink(
+                action="support_discussions",
+                icon="fa5s.bug",
+                icon_color="",
+                title_key="page.about.help.ask.issues.title",
+                title="Сообщить о проблеме",
+                desc_key="page.about.help.ask.issues.desc",
+                desc="Forgejo Issues: ошибки, пожелания и обмен конфигами",
+                accessible_key="page.about.help.ask.issues.accessible_name",
+                accessible="Открыть Forgejo Issues",
+            ),
+        ),
+    ),
+    HelpLinkGroup(
+        key="news",
+        title_key="page.about.help.group.follow",
+        title="Следить за новостями",
+        links=(
+            HelpLink(
+                action="links_channel",
+                icon="fa5s.link",
+                icon_color="#229ED9",
+                title_key="page.about.help.news.links.title",
+                title="Канал со всеми ссылками",
+                desc_key="page.about.help.news.links.desc",
+                desc="Все наши каналы, чаты и сайты в одном месте",
+                accessible_key="page.about.help.news.links.accessible_name",
+                accessible="Открыть канал со всеми ссылками",
+                primary=True,
+            ),
+            HelpLink(
+                action="telegram_news",
+                icon="fa5b.telegram",
+                icon_color="#229ED9",
+                title_key="page.about.help.news.telegram.title",
+                title="Telegram канал",
+                desc_key="page.about.help.news.telegram.desc",
+                desc="Новости и обновления",
+                accessible_key="page.about.help.news.telegram.accessible_name",
+                accessible="Открыть Telegram канал",
+            ),
+            HelpLink(
+                action="mastodon",
+                icon="fa5b.mastodon",
+                icon_color="#6364FF",
+                title_key="page.about.help.news.mastodon.title",
+                title="Mastodon профиль",
+                desc_key="page.about.help.news.mastodon.desc",
+                desc="Новости в Fediverse",
+                accessible_key="page.about.help.news.mastodon.accessible_name",
+                accessible="Открыть Mastodon профиль",
+            ),
+            HelpLink(
+                action="bastyon",
+                icon="fa5s.globe",
+                icon_color="",
+                title_key="page.about.help.news.bastyon.title",
+                title="Bastyon профиль",
+                desc_key="page.about.help.news.bastyon.desc",
+                desc="Новости в Bastyon",
+                accessible_key="page.about.help.news.bastyon.accessible_name",
+                accessible="Открыть Bastyon профиль",
+            ),
+            HelpLink(
+                action="source_code",
+                icon="fa5s.code-branch",
+                icon_color="",
+                title_key="page.about.help.news.source.title",
+                title="Исходный код",
+                desc_key="page.about.help.news.source.desc",
+                desc="Репозиторий программы в Forgejo",
+                accessible_key="page.about.help.news.source.accessible_name",
+                accessible="Открыть исходный код в Forgejo",
+            ),
+        ),
+    ),
+)
 
 
 @dataclass(slots=True)
 class AboutPageHelpWidgets:
     motto_wrap: object
-    docs_group: object
-    forum_card: object
-    info_card: object
-    android_card: object
-    github_card: object
-    news_group: object
-    telegram_card: object
-    mastodon_card: object
-    bastyon_card: object
+    groups: dict[str, object]
+    cards: dict[str, object]
 
 
 def build_about_page_motto_block(*, tr_fn: Callable[[str, str], str], tokens):
@@ -106,164 +285,45 @@ def build_about_page_help_content(
     tokens,
     content_parent,
     make_section_label: Callable[[str], object],
-    hyperlink_card_cls,
     push_setting_card_cls,
+    primary_push_setting_card_cls,
     setting_card_group_cls,
-    fluent_icon,
-    on_open_forum,
-    on_open_telegram_news,
+    on_open_link: Callable[[str], None],
 ) -> AboutPageHelpWidgets:
-    try:
-        from config.urls import INFO_URL, ANDROID_URL
-    except Exception:
-        INFO_URL = ""
-        ANDROID_URL = ""
-
     motto_wrap = build_about_page_motto_block(tr_fn=tr_fn, tokens=tokens)
     layout.addWidget(motto_wrap)
     layout.addSpacing(6)
     layout.addWidget(make_section_label(tr_fn("page.about.help.section.links", "Ссылки")))
 
-    docs_title = tr_fn("page.about.help.group.docs", "Документация")
-    docs_group = setting_card_group_cls(
-        docs_title,
-        content_parent,
-    )
-    set_state_text(docs_group, f"Раздел справки: {docs_title}")
-
-    forum_card = push_setting_card_cls(
-        tr_fn("page.about.help.button.open", "Открыть"),
-        fluent_icon.SEND,
-        tr_fn("page.about.help.docs.forum.title", "Вики-сайт"),
-        tr_fn("page.about.help.docs.forum.desc", "Документация и инструкции"),
-    )
-    set_help_card_accessibility(
-        forum_card,
-        action_name=tr_fn(
-            "page.about.help.docs.forum.accessible_name",
-            "Открыть вики-сайт",
-        ),
-        description=tr_fn("page.about.help.docs.forum.desc", "Документация и инструкции"),
-    )
-    forum_card.clicked.connect(on_open_forum)
-
-    info_card = hyperlink_card_cls(
-        INFO_URL,
-        tr_fn("page.about.help.button.open", "Открыть"),
-        fluent_icon.INFO,
-        tr_fn("page.about.help.docs.info.title", "Что это такое?"),
-        tr_fn("page.about.help.docs.info.desc", "Руководство и ответы на вопросы"),
-    )
-    set_help_card_accessibility(
-        info_card,
-        action_name=tr_fn(
-            "page.about.help.docs.info.accessible_name",
-            "Открыть руководство и ответы",
-        ),
-        description=tr_fn("page.about.help.docs.info.desc", "Руководство и ответы на вопросы"),
-    )
-
-    android_card = hyperlink_card_cls(
-        ANDROID_URL,
-        tr_fn("page.about.help.button.open", "Открыть"),
-        fluent_icon.PHONE,
-        tr_fn("page.about.help.docs.android.title", "На Android (Magisk Zapret, ByeByeDPI и др.)"),
-        tr_fn("page.about.help.docs.android.desc", "Открыть инструкцию на сайте"),
-    )
-    set_help_card_accessibility(
-        android_card,
-        action_name=tr_fn(
-            "page.about.help.docs.android.accessible_name",
-            "Открыть инструкцию для Android",
-        ),
-        description=tr_fn("page.about.help.docs.android.desc", "Открыть инструкцию на сайте"),
-    )
-
-    github_card = hyperlink_card_cls(
-        "https://git.zapret.moe/zapretdiscordyoutube/zapretgui",
-        tr_fn("page.about.help.button.open", "Открыть"),
-        fluent_icon.GITHUB,
-        "Forgejo",
-        tr_fn("page.about.help.docs.github.desc", "Исходный код и документация"),
-    )
-    set_help_card_accessibility(
-        github_card,
-        action_name=tr_fn("page.about.help.docs.github.accessible_name", "Открыть Forgejo"),
-        description=tr_fn("page.about.help.docs.github.desc", "Исходный код и документация"),
-    )
-
-    docs_group.addSettingCards([forum_card, info_card, android_card, github_card])
-    layout.addWidget(docs_group)
-    layout.addSpacing(8)
-
-    news_title = tr_fn("page.about.help.group.news", "Новости")
-    news_group = setting_card_group_cls(
-        news_title,
-        content_parent,
-    )
-    set_state_text(news_group, f"Раздел справки: {news_title}")
-
-    telegram_card = push_setting_card_cls(
-        tr_fn("page.about.help.button.open", "Открыть"),
-        fluent_icon.MEGAPHONE,
-        tr_fn("page.about.help.news.telegram.title", "Telegram канал"),
-        tr_fn("page.about.help.news.telegram.desc", "Новости и обновления"),
-    )
-    set_help_card_accessibility(
-        telegram_card,
-        action_name=tr_fn(
-            "page.about.help.news.telegram.accessible_name",
-            "Открыть Telegram канал",
-        ),
-        description=tr_fn("page.about.help.news.telegram.desc", "Новости и обновления"),
-    )
-    telegram_card.clicked.connect(on_open_telegram_news)
-
-    mastodon_card = hyperlink_card_cls(
-        "https://mastodon.social/@zapret",
-        tr_fn("page.about.help.button.open", "Открыть"),
-        fluent_icon.GLOBE,
-        tr_fn("page.about.help.news.mastodon.title", "Mastodon профиль"),
-        tr_fn("page.about.help.news.mastodon.desc", "Новости в Fediverse"),
-    )
-    set_help_card_accessibility(
-        mastodon_card,
-        action_name=tr_fn(
-            "page.about.help.news.mastodon.accessible_name",
-            "Открыть Mastodon профиль",
-        ),
-        description=tr_fn("page.about.help.news.mastodon.desc", "Новости в Fediverse"),
-    )
-
-    bastyon_card = hyperlink_card_cls(
-        "https://bastyon.com/zapretgui",
-        tr_fn("page.about.help.button.open", "Открыть"),
-        fluent_icon.GLOBE,
-        tr_fn("page.about.help.news.bastyon.title", "Bastyon профиль"),
-        tr_fn("page.about.help.news.bastyon.desc", "Новости в Bastyon"),
-    )
-    set_help_card_accessibility(
-        bastyon_card,
-        action_name=tr_fn(
-            "page.about.help.news.bastyon.accessible_name",
-            "Открыть Bastyon профиль",
-        ),
-        description=tr_fn("page.about.help.news.bastyon.desc", "Новости в Bastyon"),
-    )
-
-    news_group.addSettingCards([telegram_card, mastodon_card, bastyon_card])
-    layout.addWidget(news_group)
+    open_text = tr_fn("page.about.help.button.open", "Открыть")
+    groups: dict[str, object] = {}
+    cards: dict[str, object] = {}
+    for group_spec in HELP_LINK_GROUPS:
+        title = tr_fn(group_spec.title_key, group_spec.title)
+        group = setting_card_group_cls(title, content_parent)
+        set_state_text(group, f"Раздел справки: {title}")
+        group_cards = []
+        for link in group_spec.links:
+            card_cls = primary_push_setting_card_cls if link.primary else push_setting_card_cls
+            description = tr_fn(link.desc_key, link.desc)
+            card = card_cls(
+                open_text,
+                get_themed_qta_icon(link.icon, color=link.icon_color or tokens.accent_hex),
+                tr_fn(link.title_key, link.title),
+                description,
+            )
+            set_help_card_accessibility(
+                card,
+                action_name=tr_fn(link.accessible_key, link.accessible),
+                description=description,
+            )
+            card.clicked.connect(lambda _checked=False, action=link.action: on_open_link(action))
+            cards[link.action] = card
+            group_cards.append(card)
+        group.addSettingCards(group_cards)
+        groups[group_spec.key] = group
+        layout.addWidget(group)
+        layout.addSpacing(8)
     layout.addStretch()
 
-    return AboutPageHelpWidgets(
-        motto_wrap=motto_wrap,
-        docs_group=docs_group,
-        forum_card=forum_card,
-        info_card=info_card,
-        android_card=android_card,
-        github_card=github_card,
-        news_group=news_group,
-        telegram_card=telegram_card,
-        mastodon_card=mastodon_card,
-        bastyon_card=bastyon_card,
-    )
+    return AboutPageHelpWidgets(motto_wrap=motto_wrap, groups=groups, cards=cards)

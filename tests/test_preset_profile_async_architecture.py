@@ -2583,14 +2583,9 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertIn("create_external_action_worker", feature_source)
         self.assertNotIn("ui.pages.about_open_worker", page_source)
         for method_name in (
-            "_open_support_discussions",
-            "_open_telegram_support",
-            "_open_discord",
-            "_open_forum_for_beginners",
-            "_open_telegram_news",
+            "_open_help_link",
             "_open_kvn_channel",
             "_open_kvn_bot",
-            "_open_kvn_bypass",
             "_open_kvn_github",
         ):
             source = inspect.getsource(getattr(AboutPage, method_name))

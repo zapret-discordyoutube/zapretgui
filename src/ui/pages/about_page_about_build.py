@@ -15,14 +15,13 @@ from ui.fluent_widgets import SettingsCard
 from qfluentwidgets import (
     CaptionLabel,
     FluentIcon,
-    HyperlinkCard,
     PrimaryPushButton,
     PushButton,
-    SettingCardGroup,
+    PushSettingCard,
     StrongBodyLabel,
     SubtitleLabel,
 )
-from ui.theme import get_cached_qta_pixmap
+from ui.theme import get_cached_qta_pixmap, get_themed_qta_icon
 from ui.widgets.spinning_logo import SpinningLogo
 
 
@@ -38,9 +37,7 @@ class AboutPageAboutWidgets:
     sub_desc_label: object
     premium_btn: object
     kvn_btn: object
-    course_group: object
-    youtube_course_card: object
-    youtube_playlist_card: object
+    help_card: object
 
 
 def set_subscription_status_accessibility(label, text: object) -> None:
@@ -89,7 +86,8 @@ def build_about_page_about_content(
     make_section_label: Callable[[str], object],
     on_open_updates,
     on_open_premium,
-    on_open_kvn_github,
+    on_open_kvn_tab,
+    on_open_help_tab,
 ) -> AboutPageAboutWidgets:
     about_section_version_label = make_section_label(
         tr_fn("page.about.section.version", "Версия")
@@ -180,7 +178,7 @@ def build_about_page_about_content(
         icon=FluentIcon.GITHUB,
     )
     apply_about_buttons_accessibility(tr_fn=tr_fn, kvn_btn=kvn_btn)
-    kvn_btn.clicked.connect(on_open_kvn_github)
+    kvn_btn.clicked.connect(on_open_kvn_tab)
     sub_btns.addWidget(kvn_btn)
     sub_layout.addLayout(sub_btns)
 
@@ -188,47 +186,25 @@ def build_about_page_about_content(
     layout.addWidget(sub_card)
     layout.addSpacing(16)
 
-    course_title = tr_fn("page.about.course.group", "Обучение")
-    course_group = SettingCardGroup(
-        course_title,
-        content_parent,
+    # Все ссылки (вики, видеокурс, чаты, новости) живут на вкладке «Справка»,
+    # здесь только дорога туда — без дублей.
+    help_description = tr_fn(
+        "page.about.help_link.desc",
+        "Вики, видеокурс, чаты и новости собраны на вкладке «Справка»",
     )
-    set_state_text(course_group, f"Раздел о программе: {course_title}")
-
-    youtube_course_card = HyperlinkCard(
-        "https://www.youtube.com/@%D0%9F%D1%80%D0%B8%D0%B2%D0%B0%D1%82%D0%BD%D0%BE%D1%81%D1%82%D1%8C/videos",
-        tr_fn("page.about.button.open", "Открыть"),
-        FluentIcon.PLAY,
-        tr_fn("page.about.course.youtube.title", "Курс и гайд по Zapret 2"),
-        tr_fn("page.about.course.youtube.desc", "Видео по настройке и пониманию Zapret 2"),
+    help_card = PushSettingCard(
+        tr_fn("page.about.help_link.button", "Открыть справку"),
+        get_themed_qta_icon("fa5s.life-ring", color=tokens.accent_hex),
+        tr_fn("page.about.help_link.title", "Нужна помощь?"),
+        help_description,
     )
     set_link_card_accessibility(
-        youtube_course_card,
-        action_name=tr_fn(
-            "page.about.course.youtube.accessible_name",
-            "Открыть курс и гайд по Zapret 2",
-        ),
-        description=tr_fn("page.about.course.youtube.desc", "Видео по настройке и пониманию Zapret 2"),
+        help_card,
+        action_name=tr_fn("page.about.help_link.accessible_name", "Открыть вкладку «Справка»"),
+        description=help_description,
     )
-
-    youtube_playlist_card = HyperlinkCard(
-        "https://www.youtube.com/playlist?list=PLa6yzOvgEWW0F1PL0D8pOPI8lD_rfLL1s",
-        tr_fn("page.about.button.open", "Открыть"),
-        FluentIcon.PLAY,
-        tr_fn("page.about.course.youtube_playlist.title", "Плейлист курса по Zapret 2"),
-        tr_fn("page.about.course.youtube_playlist.desc", "Все видео курса одним списком"),
-    )
-    set_link_card_accessibility(
-        youtube_playlist_card,
-        action_name=tr_fn(
-            "page.about.course.youtube_playlist.accessible_name",
-            "Открыть плейлист курса по Zapret 2",
-        ),
-        description=tr_fn("page.about.course.youtube_playlist.desc", "Все видео курса одним списком"),
-    )
-
-    course_group.addSettingCards([youtube_course_card, youtube_playlist_card])
-    layout.addWidget(course_group)
+    help_card.clicked.connect(on_open_help_tab)
+    layout.addWidget(help_card)
 
     return AboutPageAboutWidgets(
         about_section_version_label=about_section_version_label,
@@ -241,7 +217,5 @@ def build_about_page_about_content(
         sub_desc_label=sub_desc_label,
         premium_btn=premium_btn,
         kvn_btn=kvn_btn,
-        course_group=course_group,
-        youtube_course_card=youtube_course_card,
-        youtube_playlist_card=youtube_playlist_card,
+        help_card=help_card,
     )

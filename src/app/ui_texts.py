@@ -750,36 +750,12 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Zapret KVN",
     },
     "page.about.action.zapret_kvn.accessible_name": {
-        "ru": "Открыть Zapret KVN в Forgejo",
-        "en": "Open Zapret KVN on Forgejo",
+        "ru": "Открыть вкладку Zapret KVN",
+        "en": "Open the Zapret KVN tab",
     },
     "page.about.action.zapret_kvn.description": {
-        "ru": "Открывает репозиторий проекта Zapret KVN в Forgejo.",
-        "en": "Opens the Zapret KVN project repository on Forgejo.",
-    },
-    "page.about.support.section.discussions": {
-        "ru": "Forgejo Issues",
-        "en": "Forgejo Issues",
-    },
-    "page.about.support.section.community": {
-        "ru": "Каналы сообщества",
-        "en": "Community Channels",
-    },
-    "page.about.support.discussions.title": {
-        "ru": "Forgejo Issues",
-        "en": "Forgejo Issues",
-    },
-    "page.about.support.discussions.desc": {
-        "ru": "Основной канал поддержки. Здесь можно задать вопрос, описать проблему и приложить материалы вручную.",
-        "en": "Main support channel. Ask questions, describe the issue, and attach materials manually.",
-    },
-    "page.about.support.discussions.button": {
-        "ru": "Открыть",
-        "en": "Open",
-    },
-    "page.about.support.telegram.title": {
-        "ru": "Telegram",
-        "en": "Telegram",
+        "ru": "Показывает вкладку Zapret KVN: канал, подписка и исходный код.",
+        "en": "Shows the Zapret KVN tab: channel, subscription and source code.",
     },
     "page.about.support.telegram.desc": {
         "ru": "Быстрые вопросы и общение с сообществом",
@@ -793,21 +769,105 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Обсуждение и живое общение",
         "en": "Discussion and live chat",
     },
-    "page.about.support.button.open": {
-        "ru": "Открыть",
-        "en": "Open",
-    },
     "page.about.help.section.links": {
         "ru": "Ссылки",
         "en": "Links",
     },
-    "page.about.help.group.docs": {
-        "ru": "Документация",
-        "en": "Documentation",
+    "page.about.help.group.learn": {
+        "ru": "Научиться",
+        "en": "Learn",
     },
-    "page.about.help.group.news": {
-        "ru": "Новости",
-        "en": "News",
+    "page.about.help.group.ask": {
+        "ru": "Спросить",
+        "en": "Ask",
+    },
+    "page.about.help.group.follow": {
+        "ru": "Следить за новостями",
+        "en": "Follow the news",
+    },
+    "page.about.help.learn.youtube.title": {
+        "ru": "Видеокурс на YouTube",
+        "en": "Video course on YouTube",
+    },
+    "page.about.help.learn.youtube.desc": {
+        "ru": "Все видео курса по Zapret 2 одним списком",
+        "en": "All Zapret 2 course videos in one playlist",
+    },
+    "page.about.help.learn.youtube.accessible_name": {
+        "ru": "Открыть видеокурс на YouTube",
+        "en": "Open the video course on YouTube",
+    },
+    "page.about.help.ask.folder.title": {
+        "ru": "Папка со всеми чатами",
+        "en": "Folder with all chats",
+    },
+    "page.about.help.ask.folder.desc": {
+        "ru": "Все наши чаты в Telegram одной папкой — добавьте её целиком",
+        "en": "All our Telegram chats in one folder — add it at once",
+    },
+    "page.about.help.ask.folder.accessible_name": {
+        "ru": "Открыть папку со всеми чатами в Telegram",
+        "en": "Open the folder with all Telegram chats",
+    },
+    "page.about.help.ask.telegram.title": {
+        "ru": "Telegram-чат",
+        "en": "Telegram chat",
+    },
+    "page.about.help.ask.telegram.accessible_name": {
+        "ru": "Открыть Telegram-чат",
+        "en": "Open the Telegram chat",
+    },
+    "page.about.help.ask.issues.title": {
+        "ru": "Сообщить о проблеме",
+        "en": "Report a problem",
+    },
+    "page.about.help.ask.issues.desc": {
+        "ru": "Forgejo Issues: ошибки, пожелания и обмен конфигами",
+        "en": "Forgejo Issues: bugs, requests and config sharing",
+    },
+    "page.about.help.ask.issues.accessible_name": {
+        "ru": "Открыть Forgejo Issues",
+        "en": "Open Forgejo Issues",
+    },
+    "page.about.help.news.links.title": {
+        "ru": "Канал со всеми ссылками",
+        "en": "Channel with all links",
+    },
+    "page.about.help.news.links.desc": {
+        "ru": "Все наши каналы, чаты и сайты в одном месте",
+        "en": "All our channels, chats and sites in one place",
+    },
+    "page.about.help.news.links.accessible_name": {
+        "ru": "Открыть канал со всеми ссылками",
+        "en": "Open the channel with all links",
+    },
+    "page.about.help.news.source.title": {
+        "ru": "Исходный код",
+        "en": "Source code",
+    },
+    "page.about.help.news.source.desc": {
+        "ru": "Репозиторий программы в Forgejo",
+        "en": "The program repository on Forgejo",
+    },
+    "page.about.help.news.source.accessible_name": {
+        "ru": "Открыть исходный код в Forgejo",
+        "en": "Open the source code on Forgejo",
+    },
+    "page.about.help_link.title": {
+        "ru": "Нужна помощь?",
+        "en": "Need help?",
+    },
+    "page.about.help_link.desc": {
+        "ru": "Вики, видеокурс, чаты и новости собраны на вкладке «Справка»",
+        "en": "Wiki, video course, chats and news are on the Help tab",
+    },
+    "page.about.help_link.button": {
+        "ru": "Открыть справку",
+        "en": "Open help",
+    },
+    "page.about.help_link.accessible_name": {
+        "ru": "Открыть вкладку «Справка»",
+        "en": "Open the Help tab",
     },
     "page.about.help.button.open": {
         "ru": "Открыть",
@@ -821,14 +881,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Документация и инструкции",
         "en": "Documentation and guides",
     },
-    "page.about.help.docs.info.title": {
-        "ru": "Что это такое?",
-        "en": "What is this?",
-    },
-    "page.about.help.docs.info.desc": {
-        "ru": "Руководство и ответы на вопросы",
-        "en": "Guide and FAQ",
-    },
     "page.about.help.docs.android.title": {
         "ru": "На Android (Magisk Zapret, ByeByeDPI и др.)",
         "en": "On Android (Magisk Zapret, ByeByeDPI, etc.)",
@@ -837,10 +889,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Открыть инструкцию на сайте",
         "en": "Open website guide",
     },
-    "page.about.help.docs.github.desc": {
-        "ru": "Исходный код и документация",
-        "en": "Source code and documentation",
-    },
     "page.about.help.news.telegram.title": {
         "ru": "Telegram канал",
         "en": "Telegram channel",
@@ -848,26 +896,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.about.help.news.telegram.desc": {
         "ru": "Новости и обновления",
         "en": "News and updates",
-    },
-    "page.about.course.group": {
-        "ru": "Обучение",
-        "en": "Learning",
-    },
-    "page.about.course.youtube.title": {
-        "ru": "Курс и гайд по Zapret 2",
-        "en": "Zapret 2 course and guide",
-    },
-    "page.about.course.youtube.desc": {
-        "ru": "Видео по настройке и пониманию Zapret 2",
-        "en": "Videos about setting up and understanding Zapret 2",
-    },
-    "page.about.course.youtube_playlist.title": {
-        "ru": "Плейлист курса по Zapret 2",
-        "en": "Zapret 2 course playlist",
-    },
-    "page.about.course.youtube_playlist.desc": {
-        "ru": "Все видео курса одним списком",
-        "en": "All course videos in one playlist",
     },
     "page.about.help.news.mastodon.title": {
         "ru": "Mastodon профиль",
