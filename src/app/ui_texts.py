@@ -1037,21 +1037,9 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Открываются ли Discord и YouTube, и если нет — почему и что сделать",
         "en": "Whether Discord and YouTube open, and if not — why and what to do",
     },
-    "page.connection.intro": {
-        "ru": "Проверяем Discord и YouTube так же, как их открывает браузер: доходит ли соединение, не режет ли его DPI и не подменяет ли DNS адреса. Обычно занимает 5–15 секунд.",
-        "en": "Discord and YouTube are checked the way a browser opens them: whether the connection gets through, whether DPI cuts it and whether DNS spoofs addresses. Usually takes 5–15 seconds.",
-    },
-    "page.connection.card.testing": {
-        "ru": "Проверка соединения",
-        "en": "Connection check",
-    },
-    "page.connection.card.result": {
-        "ru": "Подробный отчёт",
-        "en": "Detailed report",
-    },
     "page.connection.log.hint": {
-        "ru": "Адреса, ответы DNS и время ответа каждого сервера. Пригодится поддержке.",
-        "en": "Addresses, DNS answers and response time of each server. Useful for support.",
+        "ru": "Подробный отчёт: адреса, ответы DNS и время ответа серверов. Пригодится поддержке.",
+        "en": "Detailed report: addresses, DNS answers and server response times. Useful for support.",
     },
     "page.connection.test.select": {
         "ru": "Что проверить:",
@@ -1090,8 +1078,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Prepare report",
     },
     "page.connection.status.ready": {
-        "ru": "Нажмите «Проверить»",
-        "en": "Press “Check”",
+        "ru": "Проверяем так же, как браузер. Обычно 5–15 секунд",
+        "en": "Checked the way a browser opens sites. Usually 5–15 seconds",
     },
     "page.custom_domains.title": {
         "ru": "Кастомные (мои) домены (hostlist) для работы с Zapret",

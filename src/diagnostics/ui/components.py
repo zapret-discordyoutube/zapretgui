@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, SimpleCardWidget, StrongBodyLabel, TextEdit
@@ -148,6 +148,28 @@ class ServiceResultCard(SimpleCardWidget):
     def level(self) -> str:
         return self._level
 
+    # Текст с переносом строк не передаёт свою высоту через вложенные области
+    # прокрутки (страница диагностики встроена во вкладки BlockCheck): на
+    # Windows карточке доставалось меньше места, и строки наезжали друг на
+    # друга. Поэтому карточка сама держит высоту, нужную тексту при её ширине.
+    def _sync_min_height(self) -> None:
+        layout = self.layout()
+        if layout is None or self.width() <= 0:
+            return
+        needed = layout.totalHeightForWidth(self.width()) if layout.hasHeightForWidth() else -1
+        if needed <= 0:
+            needed = layout.totalSizeHint().height()
+        if needed != self.minimumHeight():
+            self.setMinimumHeight(needed)
+
+    def _schedule_min_height_sync(self) -> None:
+        self._sync_min_height()
+        QTimer.singleShot(0, self._sync_min_height)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_min_height()
+
     def headline(self) -> str:
         return self._headline.text()
 
@@ -169,6 +191,7 @@ class ServiceResultCard(SimpleCardWidget):
         self._headline.setText(headline)
         self._apply_theme_refresh()
         set_state_text(self, f"{self._label}: {_LEVEL_WORDS[self._level]}. {headline}")
+        self._schedule_min_height_sync()
 
     def set_idle(self) -> None:
         self._clear_details()

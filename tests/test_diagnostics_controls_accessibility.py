@@ -81,21 +81,19 @@ class DiagnosticsControlsAccessibilityTests(unittest.TestCase):
         self.assertIn("архив логов", log.send_log_btn.accessibleDescription())
         self.assertEqual(log.toggle_btn.accessibleName(), "Показать подробный отчёт")
 
-    def test_intro_and_selector_labels_have_screen_reader_state(self) -> None:
+    def test_selector_label_and_ready_status_are_compact(self) -> None:
         parent = QWidget()
         layout = QVBoxLayout(parent)
 
         widgets = _controls(layout)
 
-        self.assertTrue(
-            str(widgets.intro_label.property("screenReaderStateText")).startswith(
-                "Описание диагностики: Проверяем Discord и YouTube так же, как их открывает браузер"
-            )
-        )
         self.assertEqual(
             widgets.test_select_label.property("screenReaderStateText"),
             "Поле диагностики: Что проверить:",
         )
+        self.assertIn("как браузер", widgets.status_label.text())
+        # Карточка без шапки: во вкладке BlockCheck лишние заголовки съедали место.
+        self.assertIsNone(widgets.controls_card._title_label)
 
     def test_test_combo_name_includes_selected_scenario(self) -> None:
         combo = ComboBox()
@@ -228,9 +226,6 @@ class DiagnosticsControlsAccessibilityTests(unittest.TestCase):
 
         apply_connection_language(
             language="ru",
-            controls_card=widgets.controls_card,
-            log_card=log.log_card,
-            intro_label=widgets.intro_label,
             test_select_label=widgets.test_select_label,
             log_hint_label=log.hint_label,
             refresh_test_combo_items_callback=lambda: None,
@@ -285,6 +280,33 @@ class ResultsPanelTests(unittest.TestCase):
             "YouTube: есть проблемы. YouTube открывается",
         )
         self.assertFalse(card._dns_notice.isHidden())
+
+    def test_card_reserves_height_for_wrapped_text(self) -> None:
+        """Во вкладках BlockCheck текст с переносом не передавал свою высоту, и строки наезжали."""
+        panel = ConnectionResultsPanel()
+        panel.resize(420, 800)
+        panel.show()
+        long_note = "DNS подменяет адрес www.youtube.com — провайдер перехватывает обычные DNS-запросы. " * 3
+        panel.show_report(
+            {
+                "services": [
+                    {
+                        "key": "youtube",
+                        "level": "warn",
+                        "headline": "YouTube открывается",
+                        "advice": ["Включите DNS с шифрованием (DoH) в разделе «Настройка DNS»"],
+                        "dns_note": long_note,
+                        "targets": [{"purpose": "сайт", "ok": True, "short": "открывается"}] * 3,
+                    }
+                ]
+            }
+        )
+        QApplication.processEvents()
+        card = panel.cards["youtube"]
+        needed = card.layout().totalHeightForWidth(card.width())
+
+        self.assertGreater(needed, 0)
+        self.assertEqual(card.minimumHeight(), needed)
 
     def test_unfinished_cards_do_not_stay_pending(self) -> None:
         panel = ConnectionResultsPanel()

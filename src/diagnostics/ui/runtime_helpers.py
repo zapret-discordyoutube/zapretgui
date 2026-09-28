@@ -286,9 +286,6 @@ def finish_connection_test(
 def apply_connection_language(
     *,
     language: str,
-    controls_card,
-    log_card,
-    intro_label,
     test_select_label,
     log_hint_label,
     refresh_test_combo_items_callback,
@@ -301,28 +298,11 @@ def apply_connection_language(
     def _tr(key: str, default: str) -> str:
         return tr_catalog(key, language=language, default=default)
 
-    for card, key, default in (
-        (controls_card, "page.connection.card.testing", "Проверка соединения"),
-        (log_card, "page.connection.card.result", "Подробный отчёт"),
-    ):
-        try:
-            if card is not None:
-                card.set_title(_tr(key, default))
-        except Exception:
-            pass
-
-    intro_label.setText(
-        _tr(
-            "page.connection.intro",
-            "Проверяем Discord и YouTube так же, как их открывает браузер: доходит ли соединение, "
-            "не режет ли его DPI и не подменяет ли DNS адреса. Обычно занимает 5–15 секунд.",
-        )
-    )
     test_select_label.setText(_tr("page.connection.test.select", "Что проверить:"))
     log_hint_label.setText(
         _tr(
             "page.connection.log.hint",
-            "Адреса, ответы DNS и время ответа каждого сервера. Пригодится поддержке.",
+            "Подробный отчёт: адреса, ответы DNS и время ответа серверов. Пригодится поддержке.",
         )
     )
     refresh_test_combo_items_callback()

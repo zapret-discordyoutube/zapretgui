@@ -536,6 +536,7 @@ class BlockcheckPage(BasePage):
             self._diagnostics_tab_page = ConnectionTestPage(
                 parent=self,
                 diagnostics_feature=self._diagnostics,
+                embedded=True,
             )
             self._diagnostics_tab_page.setVisible(False)
             self.add_widget(self._diagnostics_tab_page)

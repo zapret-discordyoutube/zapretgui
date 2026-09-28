@@ -1,7 +1,9 @@
 """Сборка секций ConnectionTestPage.
 
-Порядок на странице: что проверить и кнопка «Проверить» → итог по каждому
-сервису крупно → подробный отчёт (свёрнут) с кнопкой обращения в поддержку.
+Порядок на странице: строка «что проверить → кнопка» → итог по каждому
+сервису крупно → строка подробного отчёта (свёрнут) с кнопкой обращения.
+Карточки без шапок: страница живёт во вкладке BlockCheck, и лишние заголовки
+съедали место.
 """
 
 from __future__ import annotations
@@ -20,7 +22,6 @@ from ui.log_limits import DIAGNOSTICS_LOG_VIEW_MAX_LINES, apply_text_line_limit
 @dataclass(slots=True)
 class ConnectionControlsWidgets:
     controls_card: object
-    intro_label: object
     test_select_label: object
     test_combo: object
     status_label: object
@@ -56,18 +57,9 @@ def build_connection_controls(
     on_start,
     on_stop,
 ) -> ConnectionControlsWidgets:
-    controls_card = SettingsCard(tr_fn("page.connection.card.testing", "Проверка соединения"))
-
-    intro_label = body_label_cls(
-        tr_fn(
-            "page.connection.intro",
-            "Проверяем Discord и YouTube так же, как их открывает браузер: доходит ли соединение, "
-            "не режет ли его DPI и не подменяет ли DNS адреса. Обычно занимает 5–15 секунд.",
-        )
-    )
-    intro_label.setWordWrap(True)
-    set_state_text(intro_label, f"Описание диагностики: {intro_label.text()}")
-    controls_card.add_widget(intro_label)
+    # Без шапки и без отдельного абзаца-вступления: одна строка «что проверить →
+    # статус → кнопка». Пояснение живёт в строке статуса, пока проверка не запущена.
+    controls_card = SettingsCard()
 
     row = QHBoxLayout()
     row.setSpacing(12)
@@ -76,9 +68,27 @@ def build_connection_controls(
     row.addWidget(test_select_label)
 
     test_combo = combo_cls()
-    test_combo.setMinimumWidth(220)
+    test_combo.setMinimumWidth(200)
     row.addWidget(test_combo)
-    row.addStretch(1)
+
+    status_label = caption_label_cls(
+        tr_fn("page.connection.status.ready", "Проверяем так же, как браузер. Обычно 5–15 секунд")
+    )
+    row.addSpacing(8)
+    row.addWidget(status_label, 1)
+
+    progress_bar = progress_bar_cls()
+    progress_bar.setVisible(False)
+    progress_bar.setFixedWidth(160)
+    set_control_accessibility(
+        progress_bar,
+        name=tr_fn("page.connection.progress.accessible_name", "Ход диагностики соединений"),
+        description=tr_fn(
+            "page.connection.progress.accessible_description",
+            "Показывает, что проверка выполняется.",
+        ),
+    )
+    row.addWidget(progress_bar)
 
     start_btn = primary_button_cls(tr_fn("page.connection.button.start", "Проверить"))
     start_btn.setIcon(FluentIcon.PLAY)
@@ -113,27 +123,9 @@ def build_connection_controls(
     row.addWidget(stop_btn)
     controls_card.add_layout(row)
 
-    status_row = QHBoxLayout()
-    status_row.setSpacing(12)
-    status_label = caption_label_cls(tr_fn("page.connection.status.ready", "Нажмите «Проверить»"))
-    status_row.addWidget(status_label, 1)
-    progress_bar = progress_bar_cls()
-    progress_bar.setVisible(False)
-    set_control_accessibility(
-        progress_bar,
-        name=tr_fn("page.connection.progress.accessible_name", "Ход диагностики соединений"),
-        description=tr_fn(
-            "page.connection.progress.accessible_description",
-            "Показывает, что проверка выполняется.",
-        ),
-    )
-    status_row.addWidget(progress_bar, 1)
-    controls_card.add_layout(status_row)
-
     container_layout.addWidget(controls_card)
     return ConnectionControlsWidgets(
         controls_card=controls_card,
-        intro_label=intro_label,
         test_select_label=test_select_label,
         test_combo=test_combo,
         status_label=status_label,
@@ -158,17 +150,16 @@ def build_connection_log_viewer(
     on_toggle,
     on_support,
 ) -> ConnectionLogWidgets:
-    log_card = SettingsCard(tr_fn("page.connection.card.result", "Подробный отчёт"))
+    log_card = SettingsCard()
 
     row = QHBoxLayout()
     row.setSpacing(12)
     hint_label = caption_label_cls(
         tr_fn(
             "page.connection.log.hint",
-            "Адреса, ответы DNS и время ответа каждого сервера. Пригодится поддержке.",
+            "Подробный отчёт: адреса, ответы DNS и время ответа серверов. Пригодится поддержке.",
         )
     )
-    hint_label.setWordWrap(True)
     row.addWidget(hint_label, 1)
 
     toggle_btn = push_button_cls(tr_fn("page.connection.button.show_log", "Показать отчёт"))

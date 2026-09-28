@@ -42,7 +42,7 @@ from ui.accessibility import set_state_text
 class ConnectionTestPage(BasePage):
     """Страница теста соединений, заменяющая старое диалоговое окно."""
 
-    def __init__(self, parent=None, *, diagnostics_feature):
+    def __init__(self, parent=None, *, diagnostics_feature, embedded: bool = False):
         super().__init__(
             "Диагностика соединения",
             "Открываются ли Discord и YouTube, и если нет — почему и что сделать",
@@ -64,16 +64,22 @@ class ConnectionTestPage(BasePage):
         self._support_prepare_runtime = OneShotWorkerRuntime()
         self._support_prepare_state = LatestValueWorkerState(self._support_prepare_runtime, empty_value=None)
 
-        # Контейнер с ограниченной шириной, чтобы не расползалось за края
+        # На всю ширину страницы: узкая колонка по центру оставляла пустые поля.
         self.container = QWidget(self.content)
         self.container.setObjectName("connectionContainer")
-        self.container.setMaximumWidth(1080)
         self.container_layout = QVBoxLayout(self.container)
         self.container_layout.setContentsMargins(0, 0, 0, 0)
-        self.container_layout.setSpacing(14)
-        self.container_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        self.container_layout.setSpacing(10)
+        self.container_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self._build_page_ui()
+        if embedded:
+            # Во вкладке BlockCheck заголовок и отступы уже есть у самой BlockCheck.
+            if self.title_label is not None:
+                self.title_label.setVisible(False)
+            if self.subtitle_label is not None:
+                self.subtitle_label.setVisible(False)
+            self.vBoxLayout.setContentsMargins(0, 8, 0, 0)
 
     def create_support_prepare_worker(self, request_id: int, *, selection: str):
         return self._diagnostics.create_connection_support_prepare_worker(
@@ -135,7 +141,6 @@ class ConnectionTestPage(BasePage):
         )
         self._build_log_viewer()
         self.add_widget(self.container)
-        self.add_spacing(8)
 
     # ──────────────────────────────────────────────────────────────
     # UI
@@ -157,7 +162,6 @@ class ConnectionTestPage(BasePage):
             on_stop=self.stop_test,
         )
         self._controls_card = widgets.controls_card
-        self.intro_label = widgets.intro_label
         self.test_select_label = widgets.test_select_label
         self.test_combo = widgets.test_combo
         self._refresh_test_combo_items()
@@ -449,9 +453,6 @@ class ConnectionTestPage(BasePage):
         super().set_ui_language(language)
         apply_connection_language(
             language=self._ui_language,
-            controls_card=self._controls_card,
-            log_card=self._log_card,
-            intro_label=self.intro_label,
             test_select_label=self.test_select_label,
             log_hint_label=self.log_hint_label,
             refresh_test_combo_items_callback=self._refresh_test_combo_items,

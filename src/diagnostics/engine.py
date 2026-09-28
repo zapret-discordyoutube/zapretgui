@@ -431,7 +431,7 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Pr
 # ---------------------------------------------------------------------------
 
 _LEVEL_ICON = {Level.OK: "✅", Level.WARN: "⚠️", Level.FAIL: "❌", Level.UNKNOWN: "❔"}
-_DNS_ICON = {DnsState.OK: "✅", DnsState.SPOOFED: "❌", DnsState.LOCAL: "ℹ️", DnsState.UNKNOWN: "⚠️"}
+_DNS_ICON = {DnsState.OK: "✅", DnsState.SPOOFED: "❌", DnsState.LOCAL: "ℹ️", DnsState.UNKNOWN: "❔"}
 _SOURCE_NOTE = {
     SOURCE_HOSTS: ", адрес из файла hosts",
     SOURCE_REFERENCE: ", адрес по DNS-over-HTTPS",
@@ -732,14 +732,22 @@ def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
         if run.timed_out:
             emit(_TIMED_OUT_LINE)
         if spoofed:
-            emit("❌ Обнаружена DNS подмена: провайдер отдаёт неверные адреса.")
-            emit("Откройте «Настройка DNS» и включите DNS с шифрованием (DoH) — его провайдер перехватить не сможет.")
+            emit("❌ Обнаружена DNS подмена:")
+            for probes in collected.values():
+                for probe in probes:
+                    if probe.judgement is not None and probe.judgement.state == DnsState.SPOOFED:
+                        emit(f"   • {probe.host} — {probe.judgement.reason}")
+            emit(
+                "Браузер с защищённым DNS этого не замечает, а программы, которые спрашивают адрес "
+                "у Windows (в том числе приложение Discord), получат неверный ответ."
+            )
+            emit("👉 Откройте «Настройка DNS» и включите DNS с шифрованием (DoH) — его провайдер перехватить не сможет.")
         elif any(
             probe.judgement and probe.judgement.state == DnsState.UNKNOWN
             for probes in collected.values()
             for probe in probes
         ):
-            emit("⚠️ Явной подмены не найдено, но часть адресов проверить не удалось.")
+            emit("✅ Явной подмены не найдено. Часть адресов (❔) отличается от эталона, а проверить их не удалось — для CDN это обычно нормально.")
         else:
             emit("✅ DNS работает честно. Если сайты не открываются — дело не в DNS, а в блокировке соединения.")
         emit(f"Проверка заняла {time.monotonic() - started:.1f} с.")
