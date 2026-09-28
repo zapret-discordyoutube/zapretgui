@@ -1608,6 +1608,11 @@ class ProfileSetupPageBase(BasePage):
             ]
         if name == "tabs":
             return self._strategy_tabs
+        if name == "strategies":
+            stack = self._strategy_stack
+            if stack is None or stack.currentIndex() != 0:
+                return None
+            return self._strategy_list
         if name == "list_entries":
             stack = self._strategy_stack
             if stack is None or stack.currentIndex() != 1:

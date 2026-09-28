@@ -96,6 +96,8 @@ class TourStep:
     page_state: str | None = None
     # Статья вики по теме шага — кнопка «Подробнее в вики» на карточке.
     wiki_url: str = ""
+    # Анимированная схема на карточке (ключ сцены из ui.onboarding.illustrations).
+    illustration: str = ""
 
 
 def is_alive_widget(widget) -> bool:
@@ -230,6 +232,15 @@ _TOUR_STEPS: tuple[TourStep, ...] = (
     TourStep("list_type", _page_target("list_type"), page="profile_setup", target_optional=True),
     TourStep("ranges", _page_target("ranges"), page="profile_setup"),
     TourStep("profile_tabs", _page_target("tabs"), page="profile_setup"),
+    TourStep("strategy_choice", _page_target("strategies"), page="profile_setup", illustration="blocked"),
+    TourStep("technique_fake", page="profile_setup", illustration="fake"),
+    TourStep("technique_multisplit", page="profile_setup", illustration="multisplit"),
+    TourStep("technique_multidisorder", page="profile_setup", illustration="multidisorder"),
+    TourStep("technique_fakedsplit", page="profile_setup", illustration="fakedsplit"),
+    TourStep("technique_hostfakesplit", page="profile_setup", illustration="hostfakesplit"),
+    TourStep("technique_tcpseg", page="profile_setup", illustration="tcpseg"),
+    TourStep("technique_oob", page="profile_setup", illustration="oob"),
+    TourStep("technique_syndata", page="profile_setup", illustration="syndata"),
     TourStep("list_entries", _page_target("list_entries"), page="profile_setup", page_state="editor"),
     TourStep("fakes", _page_target("fakes"), page="control"),
     TourStep("dpi_mode", _nav_item(PageName.DPI_SETTINGS, PageName.ORCHESTRA_SETTINGS)),

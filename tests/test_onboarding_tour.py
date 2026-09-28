@@ -584,6 +584,111 @@ class TourStepCatalogTests(unittest.TestCase):
         self.assertEqual(missing, [])
 
 
+class TechniqueIllustrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _app()
+
+    def _illustration(self, host):
+        from ui.onboarding.illustrations import TechniqueIllustration
+
+        illustration = TechniqueIllustration(host, tr_fn=lambda _key, default: default)
+        illustration.resize(532, illustration.height())
+        return illustration
+
+    def test_every_scene_draws_something_at_every_moment(self) -> None:
+        from ui.onboarding.illustrations import SCENES
+
+        host = QWidget()
+        try:
+            illustration = self._illustration(host)
+            for key in SCENES:
+                illustration.set_scene(key)
+                for phase in (0.05, 0.3, 0.6, 0.86):
+                    illustration.set_phase(phase)
+                    image = illustration.grab().toImage()
+                    colors = {image.pixel(x, y) for x in range(0, image.width(), 7) for y in range(0, image.height(), 7)}
+                    self.assertGreater(len(colors), 3, f"{key} @ {phase}")
+        finally:
+            host.deleteLater()
+
+    def test_every_illustrated_step_uses_a_known_scene(self) -> None:
+        from ui.onboarding.illustrations import SCENES
+        from ui.onboarding.steps import TOUR_STEPS
+
+        illustrated = [step for step in TOUR_STEPS if step.illustration]
+        self.assertGreaterEqual(len(illustrated), 9)
+        for step in illustrated:
+            self.assertIn(step.illustration, SCENES, step.key)
+
+    def test_animation_runs_only_while_visible(self) -> None:
+        host = QWidget()
+        host.resize(600, 300)
+        host.show()
+        try:
+            illustration = self._illustration(host)
+            illustration.set_scene("fake")
+            illustration.show()
+            with patch("ui.onboarding.illustrations.are_live_animations_enabled", return_value=True):
+                illustration.set_scene("multisplit")
+            self.assertTrue(illustration.is_animating())
+            illustration.hide()
+            self.assertFalse(illustration.is_animating())
+        finally:
+            host.close()
+            host.deleteLater()
+
+    def test_without_animations_shows_still_frame_with_result(self) -> None:
+        from ui.onboarding.illustrations import STATIC_PHASE
+
+        host = QWidget()
+        host.resize(600, 300)
+        host.show()
+        try:
+            illustration = self._illustration(host)
+            illustration.show()
+            with patch("ui.onboarding.illustrations.are_live_animations_enabled", return_value=False):
+                illustration.set_scene("fake")
+            self.assertFalse(illustration.is_animating())
+            self.assertEqual(illustration.phase(), STATIC_PHASE)
+        finally:
+            host.close()
+            host.deleteLater()
+
+    def test_card_shows_illustration_only_on_its_steps(self) -> None:
+        from app.page_names import PageName
+        from ui.onboarding.overlay import CARD_WIDTH, HERO_CARD_WIDTH, OnboardingOverlay
+        from ui.onboarding.steps import TourContext, TourStep, _page_target
+
+        window, page = _build_window()
+        window.resize(900, 760)
+        window.show()
+        context = TourContext(
+            window=window,
+            control_page_name=PageName.ZAPRET2_MODE_CONTROL,
+            pages={"control": PageName.ZAPRET2_MODE_CONTROL},
+            current_page=page,
+        )
+        steps = (
+            TourStep("start", _page_target("start"), page="control"),
+            TourStep("technique_fake", illustration="fake"),
+        )
+        overlay = OnboardingOverlay(window, context, steps)
+        try:
+            overlay.start()
+            illustration = overlay._card.illustration
+            self.assertTrue(illustration.isHidden())
+            self.assertEqual(overlay.card_target_size().width(), CARD_WIDTH)
+            overlay.go_next()
+            self.assertFalse(illustration.isHidden())
+            self.assertEqual(illustration.scene_key(), "fake")
+            self.assertEqual(overlay.card_target_size().width(), HERO_CARD_WIDTH)
+            overlay.go_back()
+            self.assertTrue(illustration.isHidden())
+        finally:
+            window.close()
+            window.deleteLater()
+
+
 class StartOnboardingTourTests(unittest.TestCase):
     def setUp(self) -> None:
         _app()

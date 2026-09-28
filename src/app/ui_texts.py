@@ -5038,6 +5038,183 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "the preset."
         ),
     },
+    "onboarding.scene.you": {"ru": "Вы", "en": "You"},
+    "onboarding.scene.provider": {"ru": "Провайдер", "en": "Provider"},
+    "onboarding.scene.site": {"ru": "Сайт", "en": "Site"},
+    "onboarding.scene.check": {"ru": "проверка", "en": "inspection"},
+    "onboarding.scene.junk": {"ru": "мусор", "en": "junk"},
+    "onboarding.scene.syn_data": {"ru": "SYN + данные", "en": "SYN + data"},
+    "onboarding.scene.bubble.blocked": {"ru": "Узнал — блок!", "en": "Recognised — blocked!"},
+    "onboarding.scene.bubble.fake": {"ru": "google.com — пропущу", "en": "google.com — let it pass"},
+    "onboarding.scene.bubble.unknown": {"ru": "Не узнал…", "en": "Can't tell…"},
+    "onboarding.scene.bubble.which_real": {"ru": "Где тут настоящее?", "en": "Which one is real?"},
+    "onboarding.scene.bubble.fake_host": {"ru": "abc.ru — пропущу", "en": "abc.ru — let it pass"},
+    "onboarding.scene.bubble.junk": {"ru": "Мусор — пропущу", "en": "Junk — let it pass"},
+    "onboarding.scene.bubble.odd": {"ru": "Странно, но пропущу", "en": "Odd, but let it pass"},
+    "onboarding.step.strategy_choice.title": {
+        "ru": "Какую стратегию выбрать? Лучшей нет",
+        "en": "Which strategy to pick? There is no best one",
+    },
+    "onboarding.step.strategy_choice.body": {
+        "ru": (
+            "Универсальной хорошей стратегии не существует: провайдеры блокируют по-разному, и что "
+            "помогает одному, у другого не работает.\n\n"
+            "Сверху — как обычно работает блокировка: проверка у провайдера читает имя сайта в "
+            "первом пакете и обрывает соединение. Стратегия — это набор техник, которые мешают ей "
+            "прочитать имя. Где-то помогает нарезка, где-то подсунутый фейк, где-то их сочетание.\n\n"
+            "Дальше — коротко о главных техниках. Разберитесь, что делает каждая, и оставляйте то, "
+            "что работает у вашего провайдера: поменяли стратегию — проверили сайт."
+        ),
+        "en": (
+            "There is no universal good strategy: providers block in different ways, and what helps "
+            "one person does not work for another.\n\n"
+            "Above is how blocking usually works: the provider's inspection reads the site name in "
+            "the first packet and cuts the connection. A strategy is a set of techniques that stop "
+            "it from reading the name. Sometimes splitting helps, sometimes a fake, sometimes both.\n\n"
+            "Next is a short look at the main techniques. Learn what each one does and keep what "
+            "works for your provider: change the strategy, then check the site."
+        ),
+    },
+    "onboarding.step.technique_fake.title": {
+        "ru": "fake — подсунуть фейк",
+        "en": "fake — slip in a decoy",
+    },
+    "onboarding.step.technique_fake.body": {
+        "ru": (
+            "Перед настоящим пакетом уходит поддельный — с именем другого, разрешённого сайта. "
+            "Поддельный специально «испорчен», поэтому до сайта не доходит, а проверка видит его "
+            "первым и пропускает соединение. Следом спокойно проходит настоящий.\n\n"
+            "В названиях стратегий: fake."
+        ),
+        "en": (
+            "A fake packet with the name of another, allowed site goes before the real one. The "
+            "fake is deliberately \"broken\", so it never reaches the site, but the inspection sees "
+            "it first and lets the connection through. The real packet follows.\n\n"
+            "In strategy names: fake."
+        ),
+    },
+    "onboarding.step.technique_multisplit.title": {
+        "ru": "multisplit — нарезка",
+        "en": "multisplit — splitting",
+    },
+    "onboarding.step.technique_multisplit.body": {
+        "ru": (
+            "Первый пакет режется на части — например «you» и «tube.com», — и они уходят по "
+            "отдельности. Проверка видит обрывки и не узнаёт имя сайта, а сайт сам склеивает части.\n\n"
+            "В названиях стратегий: multisplit, split."
+        ),
+        "en": (
+            "The first packet is cut into pieces — for example \"you\" and \"tube.com\" — sent "
+            "separately. The inspection sees fragments and does not recognise the site name, while "
+            "the site glues the pieces back.\n\n"
+            "In strategy names: multisplit, split."
+        ),
+    },
+    "onboarding.step.technique_multidisorder.title": {
+        "ru": "multidisorder — нарезка задом наперёд",
+        "en": "multidisorder — splitting in reverse",
+    },
+    "onboarding.step.technique_multidisorder.body": {
+        "ru": (
+            "Та же нарезка, но части уходят в обратном порядке: сначала вторая, потом первая. "
+            "Некоторые проверки ждут части по порядку и сбиваются, а сайт всё равно расставит их по "
+            "местам.\n\n"
+            "В названиях стратегий: multidisorder, disorder."
+        ),
+        "en": (
+            "The same splitting, but the pieces go in reverse order: the second one first. Some "
+            "inspections expect pieces in order and get confused, while the site still puts them "
+            "back in place.\n\n"
+            "In strategy names: multidisorder, disorder."
+        ),
+    },
+    "onboarding.step.technique_fakedsplit.title": {
+        "ru": "fakedsplit — нарезка с фейками",
+        "en": "fakedsplit — splitting with fakes",
+    },
+    "onboarding.step.technique_fakedsplit.body": {
+        "ru": (
+            "Настоящие части идут вперемешку с поддельными такого же размера. Проверка не может "
+            "понять, где настоящие данные, а поддельные до сайта не доходят. fakeddisorder — то же "
+            "самое в обратном порядке.\n\n"
+            "В названиях стратегий: fakedsplit, fakeddisorder."
+        ),
+        "en": (
+            "Real pieces go mixed with fake ones of the same size. The inspection cannot tell which "
+            "data is real, and the fakes never reach the site. fakeddisorder does the same in "
+            "reverse order.\n\n"
+            "In strategy names: fakedsplit, fakeddisorder."
+        ),
+    },
+    "onboarding.step.technique_hostfakesplit.title": {
+        "ru": "hostfakesplit — чужие имена вокруг",
+        "en": "hostfakesplit — decoy names around",
+    },
+    "onboarding.step.technique_hostfakesplit.body": {
+        "ru": (
+            "Пакет режется точно по границам имени сайта, а вокруг настоящего имени уходят "
+            "поддельные. Проверка видит чужие имена, сайт получает только настоящее.\n\n"
+            "В названиях стратегий: hostfakesplit."
+        ),
+        "en": (
+            "The packet is cut exactly at the edges of the site name, and fake names are sent "
+            "around the real one. The inspection sees other names, the site gets only the real one.\n\n"
+            "In strategy names: hostfakesplit."
+        ),
+    },
+    "onboarding.step.technique_tcpseg.title": {
+        "ru": "tcpseg — мусор спереди",
+        "en": "tcpseg — junk in front",
+    },
+    "onboarding.step.technique_tcpseg.body": {
+        "ru": (
+            "Кусок данных уходит отдельным пакетом, а с приёмом seqovl к нему спереди приклеивается "
+            "мусор. Сайт мусор отбрасывает, а проверка может принять его за начало сообщения и "
+            "пропустить.\n\n"
+            "В готовых стратегиях этот приём встречается как seqovl — например, «multisplit seqovl700»."
+        ),
+        "en": (
+            "A piece of data is sent as a separate packet, and with seqovl some junk is glued in "
+            "front of it. The site drops the junk, while the inspection may take it for the start "
+            "of the message and let it pass.\n\n"
+            "In ready strategies this trick shows up as seqovl — for example, \"multisplit seqovl700\"."
+        ),
+    },
+    "onboarding.step.technique_oob.title": {
+        "ru": "oob — лишний байт",
+        "en": "oob — an extra byte",
+    },
+    "onboarding.step.technique_oob.body": {
+        "ru": (
+            "В сообщение вставляется один «срочный» байт. Система на стороне сайта его выкидывает, "
+            "а проверка видит испорченное имя — например «you#tube.com» — и не узнаёт сайт.\n\n"
+            "В готовых стратегиях его пока нет — его можно дописать вручную в тексте профиля."
+        ),
+        "en": (
+            "One \"urgent\" byte is inserted into the message. The system on the site's side throws "
+            "it away, while the inspection sees a broken name — for example \"you#tube.com\" — and "
+            "does not recognise the site.\n\n"
+            "Ready strategies do not use it yet — you can add it by hand in the profile text."
+        ),
+    },
+    "onboarding.step.technique_syndata.title": {
+        "ru": "syndata — данные в первом пакете",
+        "en": "syndata — data in the first packet",
+    },
+    "onboarding.step.technique_syndata.body": {
+        "ru": (
+            "Данные кладутся прямо в самый первый пакет соединения — тот, которым компьютер только "
+            "«стучится» к сайту. Это сбивает часть проверок, а соединение устанавливается как "
+            "обычно.\n\n"
+            "В названиях стратегий: syndata."
+        ),
+        "en": (
+            "Data is put right into the very first packet of the connection — the one the computer "
+            "only \"knocks\" with. This confuses some inspections, while the connection is set up as "
+            "usual.\n\n"
+            "In strategy names: syndata."
+        ),
+    },
     "onboarding.step.list_entries.title": {
         "ru": "Системные и ваши записи",
         "en": "Built-in and your entries",

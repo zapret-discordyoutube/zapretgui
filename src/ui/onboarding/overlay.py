@@ -47,6 +47,7 @@ from app.ui_texts import tr as tr_catalog
 from log.log import log
 from ui.animation_policy import are_live_animations_enabled
 from ui.onboarding.blur import blur_pixmap
+from ui.onboarding.illustrations import TechniqueIllustration
 from ui.onboarding.steps import (
     TOUR_SUBPAGE_PARENTS,
     TourContext,
@@ -180,6 +181,11 @@ class _TourCard(QWidget):
         self.title_label = SubtitleLabel(self.content)
         self.title_label.setWordWrap(True)
         layout.addWidget(self.title_label)
+
+        # Схема техники обхода: пакеты бегут от «Вы» через проверку к сайту.
+        self.illustration = TechniqueIllustration(self.content, tr_fn=overlay._tr)
+        self.illustration.hide()
+        layout.addWidget(self.illustration)
 
         self.body_label = BodyLabel(self.content)
         self.body_label.setWordWrap(True)
@@ -571,6 +577,8 @@ class OnboardingOverlay(QWidget):
         card.hero_title.setText(title)
         card.title_label.setText(title)
         card.body_label.setText(body)
+        card.illustration.set_scene(step.illustration)
+        card.illustration.setVisible(bool(step.illustration))
         card.wiki_button.setVisible(bool(step.wiki_url))
         if step.wiki_url:
             wiki_text = self._tr("onboarding.button.wiki", "Подробнее в вики")
@@ -592,7 +600,7 @@ class OnboardingOverlay(QWidget):
         card.next_button.setText(next_text)
         card.next_button.setAccessibleDescription(body)
 
-        width = HERO_CARD_WIDTH if step.hero else CARD_WIDTH
+        width = HERO_CARD_WIDTH if (step.hero or step.illustration) else CARD_WIDTH
         width = int(max(260, min(width, self.width() - 2 * CARD_MARGIN)))
         height = card.content_height_for_width(width)
         self._card_size = QSize(width, height)
