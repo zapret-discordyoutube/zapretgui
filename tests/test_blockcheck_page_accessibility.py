@@ -90,7 +90,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
             "Ход BlockCheck: не выполняется",
         )
         self.assertIn("Показывает", page._progress_bar.accessibleDescription())
-        self.assertEqual(page._status_label.accessibleName(), "Статус BlockCheck: Готово")
+        self.assertEqual(page._status_label.accessibleName(), "Статус BlockCheck: Проверяет, какие сайты и как блокирует провайдер")
         page._ensure_run_output_ui()
         self.assertEqual(page._log_edit.accessibleName(), "Подробный лог BlockCheck: пока нет записей")
         self.assertEqual(
@@ -109,11 +109,8 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
 
         actions = build_actions_section(
             tr_fn=lambda _key, default: default,
-            strong_body_label_cls=QLabel,
-            quick_actions_bar_cls=_ActionBarStub,
-            content_parent=QWidget(),
+            primary_button_cls=PushButton,
             push_button_cls=PushButton,
-            qta_module=None,
             on_start=lambda: None,
             on_stop=lambda: None,
         )
@@ -124,18 +121,33 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
             table_widget_cls=QTableWidget,
         )
 
-        self.assertEqual(
-            actions.title_label.property("screenReaderStateText"),
-            "Раздел BlockCheck: Действия",
-        )
+        self.assertEqual(actions.start_button.accessibleName(), "Запустить BlockCheck")
+        # «Остановить» видна только во время проверки.
+        self.assertTrue(actions.stop_button.isHidden())
         self.assertEqual(
             results.domains_section_label.property("screenReaderStateText"),
             "Раздел результатов BlockCheck: Часть 1: Проверка доменов (TLS + HTTP injection)",
         )
         self.assertEqual(
             results.tcp_section_label.property("screenReaderStateText"),
-            "Раздел результатов BlockCheck: Часть 2: Проверка TCP 16-20KB",
+            "Раздел результатов BlockCheck: Проверка обрыва на 16–20 КБ (TCP)",
         )
+
+    def test_cards_have_no_headers_to_save_space(self) -> None:
+        with patch.object(BlockcheckPage, "_request_page_initial_state_load", lambda self: None):
+            page = BlockcheckPage(
+                blockcheck_feature=_FeatureStub(),
+                diagnostics_feature=_FeatureStub(),
+                dns_feature=_FeatureStub(),
+                create_strategy_scan_worker=lambda *_args, **_kwargs: None,
+            )
+        self.addCleanup(page.deleteLater)
+        page._ensure_run_output_ui()
+
+        for card in (page._control_card, page._domains_card, page._results_card, page._dpi_card, page._log_card):
+            self.assertIsNone(card._title_label)
+        # Кнопка запуска стоит в строке управления, отдельной подписи «Действия» нет.
+        self.assertIs(page._start_btn.parent(), page._control_card._card_root)
 
     def test_first_open_does_not_build_run_output_until_needed(self) -> None:
         with patch.object(BlockcheckPage, "_request_page_initial_state_load", lambda self: None):
@@ -328,7 +340,7 @@ class _ActionBarStub:
 
 
 class _SettingsCardStub:
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str = "") -> None:
         self.title = str(title)
         self.widgets = []
 
@@ -411,6 +423,7 @@ class _LogEditStub:
 class _ButtonStub:
     def __init__(self, text: str = "") -> None:
         self._enabled = True
+        self._visible = True
         self._text = str(text)
         self.properties = {}
         self.accessible_name = ""
@@ -421,6 +434,12 @@ class _ButtonStub:
 
     def isEnabled(self) -> bool:  # noqa: N802
         return self._enabled
+
+    def setVisible(self, visible: bool) -> None:  # noqa: N802
+        self._visible = bool(visible)
+
+    def isVisible(self) -> bool:  # noqa: N802
+        return self._visible
 
     def setEnabled(self, enabled: bool) -> None:  # noqa: N802
         self._enabled = bool(enabled)

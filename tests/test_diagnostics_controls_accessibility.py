@@ -242,6 +242,24 @@ class DiagnosticsControlsAccessibilityTests(unittest.TestCase):
         self.assertEqual(log.toggle_btn.text(), "Скрыть отчёт")
 
 
+class EmbeddedHeaderTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def test_embedded_page_header_stays_hidden_after_language_refresh(self) -> None:
+        """Во вкладке BlockCheck смена языка возвращала описание страницы над вкладкой."""
+        from unittest.mock import Mock
+
+        page = ConnectionTestPage(diagnostics_feature=Mock(), embedded=True)
+        self.addCleanup(page.deleteLater)
+
+        page.set_ui_language("ru")
+
+        self.assertTrue(page.title_label.isHidden())
+        self.assertTrue(page.subtitle_label.isHidden())
+
+
 class ResultsPanelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

@@ -51,6 +51,7 @@ from diagnostics.verdict import (
     summarize_service,
 )
 from utils.windows_dns_query import (
+    DNS_STATUS_NAME_ERROR,
     DnsAnswer,
     hosts_file_ipv4,
     query_ipv4,
@@ -70,6 +71,9 @@ Emit = Callable[[str], None]
 ShouldStop = Callable[[], bool]
 
 DNS_TIMEOUT = 4.0
+# Провайдер подменяет DNS не каждый раз: один запрос давал то «подмена», то
+# «всё честно». Три запроса подряд ловят и такую подмену.
+DNS_ATTEMPTS = 3
 DOH_TIMEOUT = 5.0
 HTTPS_TIMEOUT = 5.0
 READ_TIMEOUT = 3.0
@@ -153,6 +157,8 @@ class _Probe:
     host: str
     discovery_note: str = ""
     dns: DnsAnswer = field(default_factory=DnsAnswer)
+    # Сколько из DNS_ATTEMPTS запросов получили «такого сайта нет».
+    dns_nxdomain: int = 0
     hosts_ips: tuple[str, ...] = ()
     reference_ips: tuple[str, ...] = ()
     reference_ok: bool = False
@@ -380,6 +386,24 @@ def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
             probe.reach = probe.ipv6_result
 
 
+def _merge_dns_answers(answers: list[DnsAnswer]) -> tuple[DnsAnswer, int]:
+    """Сводит несколько одинаковых DNS-запросов. (ответ, сколько раз «сайта нет»).
+
+    Адреса — все, что пришли хоть раз; если адресов не было ни разу, берётся
+    первый ответ с его кодом ошибки.
+    """
+    nxdomain = sum(1 for answer in answers if not answer.ips and answer.status == DNS_STATUS_NAME_ERROR)
+    ips: list[str] = []
+    for answer in answers:
+        for ip in answer.ips:
+            if ip not in ips:
+                ips.append(ip)
+    if not ips:
+        return (answers[0] if answers else DnsAnswer()), nxdomain
+    first = next(answer for answer in answers if answer.ips)
+    return DnsAnswer(ips=tuple(ips), cnames=first.cnames, status=first.status, elapsed_ms=first.elapsed_ms), nxdomain
+
+
 def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Probe:
     host = target.host
     discovery_note = ""
@@ -389,11 +413,14 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Pr
     probe = _Probe(target=target, service=service, host=host, discovery_note=discovery_note)
     read_limit = BODY_PROBE_BYTES if (full and target.read_body) else 0
 
-    dns_future = run.submit(query_ipv4, host, timeout=DNS_TIMEOUT, cancelled=run.dns_cancelled)
+    dns_futures = [
+        run.submit(query_ipv4, host, timeout=DNS_TIMEOUT, cancelled=run.dns_cancelled)
+        for _attempt in range(DNS_ATTEMPTS)
+    ]
     doh_future = run.submit(_doh_lookup, run, host)
     doh6_future = run.submit(_doh_lookup, run, host, DNS_TYPE_AAAA) if full else None
     probe.hosts_ips = hosts_file_ipv4(host)
-    probe.dns = dns_future.result()
+    probe.dns, probe.dns_nxdomain = _merge_dns_answers([future.result() for future in dns_futures])
 
     local_ips = probe.hosts_ips or probe.dns.ips
     local_future: Future | None = None
@@ -416,6 +443,8 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Pr
         hosts_ips=probe.hosts_ips,
         check_kind=local.kind if local else "",
         check_cert_problem=local.cert_problem if local else "",
+        nxdomain_count=probe.dns_nxdomain,
+        attempts=DNS_ATTEMPTS,
     )
 
     if full:
@@ -467,7 +496,8 @@ def _dns_detail(probe: _Probe) -> str:
     if probe.hosts_ips:
         parts.append(f"hosts: {_ips_text(probe.hosts_ips)}")
     if probe.dns.ips:
-        parts.append(f"DNS системы: {_ips_text(probe.dns.ips)}")
+        flaky = f" (а {probe.dns_nxdomain} из {DNS_ATTEMPTS} раз — «сайта нет»)" if probe.dns_nxdomain else ""
+        parts.append(f"DNS системы: {_ips_text(probe.dns.ips)}{flaky}")
     else:
         parts.append(f"DNS системы: нет адреса ({probe.dns.detail})")
     if probe.reference_ips:
@@ -739,7 +769,7 @@ def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
                         emit(f"   • {probe.host} — {probe.judgement.reason}")
             emit(
                 "Браузер с защищённым DNS этого не замечает, а программы, которые спрашивают адрес "
-                "у Windows (в том числе приложение Discord), получат неверный ответ."
+                "у Windows, получат неверный ответ."
             )
             emit("👉 Откройте «Настройка DNS» и включите DNS с шифрованием (DoH) — его провайдер перехватить не сможет.")
         elif any(

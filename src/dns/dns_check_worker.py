@@ -54,26 +54,3 @@ class DNSCheckSaveWorker(QThread):
             plain_text=self._plain_text,
         )
         self.saved.emit(self._request_id, plan)
-
-
-class DNSQuickCheckWorker(QThread):
-    """Выполняет быструю DNS-проверку вне UI-потока."""
-
-    completed = pyqtSignal(int, object)
-
-    def __init__(self, request_id: int, *, run_quick_dns_check, parent=None):
-        super().__init__(parent)
-        self._request_id = int(request_id)
-        self._run_quick_dns_check = run_quick_dns_check
-
-    def run(self) -> None:
-        from dns.dns_check_plans import DNSQuickCheckPlan
-
-        try:
-            plan = self._run_quick_dns_check()
-        except Exception as exc:
-            plan = DNSQuickCheckPlan(
-                lines=(f"❌ Ошибка быстрой проверки DNS: {exc}",),
-                enable_save=True,
-            )
-        self.completed.emit(self._request_id, plan)

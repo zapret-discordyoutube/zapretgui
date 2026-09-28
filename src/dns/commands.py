@@ -67,16 +67,6 @@ def create_dns_check_save_worker(request_id: int, *, file_path: str, plain_text:
     )
 
 
-def create_dns_quick_check_worker(request_id: int, *, parent=None):
-    from dns.dns_check_worker import DNSQuickCheckWorker
-
-    return DNSQuickCheckWorker(
-        request_id,
-        run_quick_dns_check=run_quick_dns_check,
-        parent=parent,
-    )
-
-
 def run_dns_poisoning_check(*, log_callback=None, should_stop=None) -> dict:
     from diagnostics.engine import run_dns_check
 
@@ -126,47 +116,6 @@ def save_dns_check_results(*, file_path: str, plain_text: str):
             title="Ошибка",
             content=f"Не удалось сохранить файл:\n{str(e)}",
         )
-
-
-def run_quick_dns_check():
-    from utils.net_resolve import DEFAULT_DNS_TIMEOUT, resolve_ipv4
-
-    from dns.dns_check_plans import DNSQuickCheckPlan
-
-    lines: list[str] = [
-        "⚡ БЫСТРАЯ ПРОВЕРКА СИСТЕМНОГО DNS",
-        "=" * 45,
-        "",
-    ]
-    test_domains = {
-        "YouTube": "www.youtube.com",
-        "Discord": "discord.com",
-        "Google": "google.com",
-        "Cloudflare": "cloudflare.com",
-    }
-
-    all_ok = True
-    for name, domain in test_domains.items():
-        try:
-            # gethostbyname без таймаута подвешивал страницу DNS на мёртвом
-            # резолвере — здесь ждём результат не дольше дедлайна.
-            ip = resolve_ipv4(domain, timeout=DEFAULT_DNS_TIMEOUT)
-            if ip:
-                lines.append(f"✅ {name} ({domain}): {ip}")
-            else:
-                lines.append(f"❌ {name} ({domain}): не резолвится")
-                all_ok = False
-        except Exception as e:
-            lines.append(f"❌ {name} ({domain}): Ошибка - {e}")
-            all_ok = False
-
-    lines.append("")
-    if all_ok:
-        lines.append("✅ Все домены резолвятся корректно")
-    else:
-        lines.append("⚠️ Есть проблемы с резолвингом некоторых доменов")
-
-    return DNSQuickCheckPlan(lines=tuple(lines), enable_save=True)
 
 
 def check_ipv6_connectivity() -> bool:

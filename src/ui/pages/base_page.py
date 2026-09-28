@@ -92,6 +92,9 @@ class BasePage(_FluentScrollArea):
         self._page_load_generation = 0
         self._page_open_metric_started_at = 0.0
         self._page_open_metric_first_show = True
+        # Страница встроена вкладкой в другую страницу: свой заголовок скрыт
+        # насовсем, смена языка его не возвращает.
+        self._page_header_hidden = False
         self._content_paint_metric_targets: dict[int, dict[str, object]] = {}
         self._content_paint_metric_next_token = 0
         self._ready_callbacks: list[object] = []
@@ -372,6 +375,19 @@ class BasePage(_FluentScrollArea):
     # ------------------------------------------------------------------
     # Shared helpers used by page classes
     # ------------------------------------------------------------------
+
+    def hide_page_header(self) -> None:
+        """Прячет заголовок и описание страницы, встроенной вкладкой в другую.
+
+        У внешней страницы свой заголовок и отступы, поэтому свои здесь только
+        дублируют его и съедают место.
+        """
+        self._page_header_hidden = True
+        if self.title_label is not None:
+            self.title_label.setVisible(False)
+        if self.subtitle_label is not None:
+            self.subtitle_label.setVisible(False)
+        self.vBoxLayout.setContentsMargins(0, 8, 0, 0)
 
     def add_widget(self, widget: QWidget, stretch: int = 0):
         """Добавляет виджет на страницу"""
@@ -664,7 +680,9 @@ class BasePage(_FluentScrollArea):
             try:
                 if self._subtitle_key:
                     self.subtitle_label.setText(subtitle_text)
-                self.subtitle_label.setVisible(bool(self.subtitle_label.text().strip()))
+                self.subtitle_label.setVisible(
+                    not self._page_header_hidden and bool(self.subtitle_label.text().strip())
+                )
                 if self.subtitle_label.text().strip():
                     set_state_text(self.subtitle_label, f"Описание страницы: {self.subtitle_label.text()}")
             except Exception:

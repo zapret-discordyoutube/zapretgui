@@ -354,7 +354,7 @@ class TableAccessibilityTests(unittest.TestCase):
 
 
 class _FakeSettingsCard:
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str = "") -> None:
         self.title = str(title)
         self.widgets = []
 

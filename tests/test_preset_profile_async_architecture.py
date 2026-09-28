@@ -2874,29 +2874,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertNotIn("diagnostics.engine", worker_source)
         self.assertIn("run_dns_check", commands_source)
 
-    def test_dns_quick_check_runs_through_worker(self) -> None:
-        page_source = inspect.getsource(dns_check_page.DNSCheckPage)
-        quick_source = inspect.getsource(dns_check_page.DNSCheckPage.quick_dns_check)
-        feature_source = inspect.getsource(__import__("app.feature_facades.dns", fromlist=["build_dns_feature"]).build_dns_feature)
-        plans_source = inspect.getsource(dns_check_page_plans)
-        commands_source = inspect.getsource(__import__("dns.commands", fromlist=["run_quick_dns_check"]).run_quick_dns_check)
-
-        self.assertTrue(hasattr(dns_check_worker, "DNSQuickCheckWorker"))
-        worker_source = inspect.getsource(dns_check_worker.DNSQuickCheckWorker.run)
-
-        self.assertIn("create_dns_quick_check_worker", page_source)
-        self.assertIn("_start_quick_dns_check_worker", quick_source)
-        self.assertNotIn("run_quick_dns_check(", quick_source)
-        self.assertIn("create_dns_quick_check_worker", feature_source)
-        self.assertIn("run_quick_dns_check=run_quick_dns_check", feature_source)
-        self.assertIn("_run_quick_dns_check", worker_source)
-        self.assertNotIn("dns.commands", worker_source)
-        self.assertNotIn("socket.", plans_source)
-        # Резолв живёт в commands, а не в plans. Через net_resolve, а не
-        # socket.gethostbyname: тот не имеет таймаута и подвешивал страницу.
-        self.assertIn("resolve_ipv4", commands_source)
-        self.assertNotIn("socket.gethostbyname", commands_source)
-
     def test_telegram_proxy_settings_save_runs_through_worker(self) -> None:
         from telegram_proxy.ui.advanced_page import TelegramProxyAdvancedPage
 

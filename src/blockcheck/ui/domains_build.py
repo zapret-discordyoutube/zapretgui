@@ -12,6 +12,7 @@ from ui.accessibility import set_control_accessibility, set_state_text
 @dataclass(slots=True)
 class BlockcheckDomainsWidgets:
     card: object
+    caption_label: object
     input_edit: object
     add_button: object
     flow_widget: object
@@ -24,18 +25,22 @@ def build_blockcheck_domains_ui(
     settings_card_cls,
     qhbox_layout_cls,
     qwidget_cls,
+    caption_label_cls,
     line_edit_cls,
     push_button_cls,
     qta_module,
     theme_color_fn,
     on_add,
 ) -> BlockcheckDomainsWidgets:
-    card = settings_card_cls(
-        tr_fn("page.blockcheck.custom_domains", "Пользовательские домены")
-    )
+    card = settings_card_cls()
 
     input_row = qhbox_layout_cls()
     input_row.setSpacing(8)
+
+    caption_label = caption_label_cls(
+        tr_fn("page.blockcheck.custom_domains", "Проверить ещё и свои домены:")
+    )
+    input_row.addWidget(caption_label)
 
     input_edit = line_edit_cls()
     input_edit.setPlaceholderText(
@@ -75,6 +80,7 @@ def build_blockcheck_domains_ui(
 
     return BlockcheckDomainsWidgets(
         card=card,
+        caption_label=caption_label,
         input_edit=input_edit,
         add_button=add_button,
         flow_widget=flow_widget,

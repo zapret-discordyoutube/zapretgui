@@ -50,34 +50,22 @@ class DNSCheckPage(BasePage):
             self._save_runtime,
             empty_value=None,
         )
-        self._quick_runtime = OneShotWorkerRuntime()
-        self._quick_check_state = LatestValueWorkerState(
-            self._quick_runtime,
-            empty_value=False,
-        )
         self._results_plain_text_cache = ""
         self._status_tone = "muted"
         self._status_bold = False
         self._build_ui()
         if embedded:
-            # Во вкладке BlockCheck заголовок и отступы уже есть у самой BlockCheck.
-            if self.title_label is not None:
-                self.title_label.setVisible(False)
-            if self.subtitle_label is not None:
-                self.subtitle_label.setVisible(False)
-            self.vBoxLayout.setContentsMargins(0, 8, 0, 0)
+            self.hide_page_header()
         self._apply_page_theme(force=True)
 
     def _apply_interaction_state(
         self,
         *,
         check_enabled: bool,
-        quick_enabled: bool,
         save_enabled: bool,
         progress_visible: bool,
     ) -> None:
         self.check_button.setEnabled(check_enabled)
-        self.quick_check_button.setEnabled(quick_enabled)
         self.save_button.setEnabled(save_enabled)
         self.progress_bar.setVisible(progress_visible)
         self._update_action_button_state_text()
@@ -94,7 +82,6 @@ class DNSCheckPage(BasePage):
 
     def _update_action_button_state_text(self) -> None:
         self._set_action_button_state_text(self.check_button, "Начать полную проверку DNS")
-        self._set_action_button_state_text(self.quick_check_button, "Начать быструю проверку DNS")
         self._set_action_button_state_text(self.save_button, "Сохранить результаты проверки DNS")
     
     def _build_ui(self):
@@ -126,22 +113,6 @@ class DNSCheckPage(BasePage):
         self.check_button.clicked.connect(self.start_check)
         row.addWidget(self.check_button)
 
-        self.quick_check_button = PushButton(
-            tr_catalog("page.dns_check.button.quick", language=self._ui_language, default="Быстрая проверка"),
-            icon=FluentIcon.SPEED_HIGH,
-        )
-        quick_description = self._action_description(
-            "page.dns_check.action.quick.description",
-            "Сделать быстрый тест только текущего системного DNS без полного сценария.",
-        )
-        set_tooltip(self.quick_check_button, quick_description)
-        set_control_accessibility(
-            self.quick_check_button,
-            name="Начать быструю проверку DNS",
-            description=quick_description,
-        )
-        self.quick_check_button.clicked.connect(self.quick_dns_check)
-        row.addWidget(self.quick_check_button)
 
         self.status_label = CaptionLabel()
         self._set_status(
@@ -276,7 +247,6 @@ class DNSCheckPage(BasePage):
         start_plan = dns_check_page_plans.build_start_plan()
         self._apply_interaction_state(
             check_enabled=start_plan.check_enabled,
-            quick_enabled=start_plan.quick_enabled,
             save_enabled=start_plan.save_enabled,
             progress_visible=start_plan.progress_visible,
         )
@@ -336,7 +306,6 @@ class DNSCheckPage(BasePage):
         plan = dns_check_page_plans.build_finish_plan(results)
         self._apply_interaction_state(
             check_enabled=plan.check_enabled,
-            quick_enabled=plan.quick_enabled,
             save_enabled=plan.save_enabled,
             progress_visible=plan.progress_visible,
         )
@@ -399,114 +368,6 @@ class DNSCheckPage(BasePage):
     @_check_start_scheduled.setter
     def _check_start_scheduled(self, value: bool) -> None:
         self._check_state_obj().start_scheduled = bool(value)
-    
-    def quick_dns_check(self):
-        """Выполняет быструю проверку только системного DNS."""
-        state = self._quick_check_state_obj()
-        if state.is_busy():
-            state.pending = True
-            return
-        state.pending = False
-        self.result_text.clear()
-        set_state_text(self.result_text, "Результаты проверки DNS: проверка ещё не запускалась")
-        self._clear_results_plain_text_cache()
-        self._apply_interaction_state(
-            check_enabled=False,
-            quick_enabled=False,
-            save_enabled=False,
-            progress_visible=True,
-        )
-        self._set_status("⚡ Быстрая проверка DNS...", tone="accent", bold=False)
-        self._start_quick_dns_check_worker()
-
-    def create_dns_quick_check_worker(self, request_id: int):
-        return self._dns.create_dns_quick_check_worker(request_id, parent=self)
-
-    def _start_quick_dns_check_worker(self) -> None:
-        self._quick_runtime.start_qthread_worker(
-            worker_factory=self.create_dns_quick_check_worker,
-            on_finished=self._on_quick_dns_check_worker_finished,
-            bind_worker=self._bind_quick_dns_check_worker,
-        )
-
-    def _bind_quick_dns_check_worker(self, worker) -> None:
-        worker.completed.connect(self._on_quick_dns_check_finished)
-
-    def _on_quick_dns_check_finished(self, request_id: int, plan) -> None:
-        if not self._quick_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        for line in plan.lines:
-            self.append_result(line)
-        self._apply_interaction_state(
-            check_enabled=True,
-            quick_enabled=True,
-            save_enabled=bool(plan.enable_save),
-            progress_visible=False,
-        )
-        self._set_status("✅ Быстрая проверка завершена", tone="success", bold=True)
-
-    def _on_quick_dns_check_worker_finished(self, worker) -> None:
-        if not self._is_current_worker_finish(self.__dict__.get("_quick_runtime"), worker):
-            return
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        if self._quick_check_state_obj().has_pending():
-            self._schedule_quick_dns_check_start()
-
-    def _schedule_quick_dns_check_start(self) -> None:
-        self._quick_check_state_obj().schedule_start(
-            QTimer.singleShot,
-            self._run_scheduled_quick_dns_check_start,
-            cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False),
-        )
-
-    def _run_scheduled_quick_dns_check_start(self) -> None:
-        pending = bool(
-            self._quick_check_state_obj().take_pending_for_scheduled_start(
-                cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False),
-            )
-        )
-        if not pending:
-            return
-        self.quick_dns_check()
-
-    def _quick_check_state_obj(self) -> LatestValueWorkerState:
-        state = self.__dict__.get("_quick_check_state")
-        runtime = self.__dict__.get("_quick_runtime")
-        if state is None:
-            pending = bool(self.__dict__.pop("_quick_check_pending", False))
-            start_scheduled = bool(
-                self.__dict__.pop("_quick_check_start_scheduled", False)
-            )
-            state = LatestValueWorkerState(
-                runtime,
-                empty_value=False,
-                pending=pending,
-                start_scheduled=start_scheduled,
-            )
-            self.__dict__["_quick_check_state"] = state
-        elif getattr(state, "runtime", None) is None and runtime is not None:
-            state.runtime = runtime
-        return state
-
-    @property
-    def _quick_check_pending(self) -> bool:
-        return bool(self._quick_check_state_obj().pending)
-
-    @_quick_check_pending.setter
-    def _quick_check_pending(self, value: bool) -> None:
-        self._quick_check_state_obj().pending = bool(value)
-
-    @property
-    def _quick_check_start_scheduled(self) -> bool:
-        return bool(self._quick_check_state_obj().start_scheduled)
-
-    @_quick_check_start_scheduled.setter
-    def _quick_check_start_scheduled(self, value: bool) -> None:
-        self._quick_check_state_obj().start_scheduled = bool(value)
     
     def save_results(self):
         """Сохраняет результаты в файл."""
@@ -676,7 +537,6 @@ class DNSCheckPage(BasePage):
             self._cleanup_in_progress = True
             self._check_state_obj().reset()
             self._save_results_state_obj().reset()
-            self._quick_check_state_obj().reset()
             self._check_runtime.stop(
                 blocking=False,
                 log_fn=log,
@@ -689,12 +549,6 @@ class DNSCheckPage(BasePage):
                 warning_prefix="DNS check save worker",
             )
             self._save_runtime.cancel()
-            self._quick_runtime.stop(
-                blocking=False,
-                log_fn=log,
-                warning_prefix="DNS quick check worker",
-            )
-            self._quick_runtime.cancel()
         except Exception as e:
             log(f"Ошибка при очистке dns_check_page: {e}", "DEBUG")
 
@@ -702,7 +556,6 @@ class DNSCheckPage(BasePage):
         super().set_ui_language(language)
 
         self.check_button.setText(tr_catalog("page.dns_check.button.start", language=self._ui_language, default="Начать проверку"))
-        self.quick_check_button.setText(tr_catalog("page.dns_check.button.quick", language=self._ui_language, default="Быстрая проверка"))
         self.save_button.setText(tr_catalog("page.dns_check.button.save", language=self._ui_language, default="Сохранить результаты"))
         start_description = self._action_description(
             "page.dns_check.action.start.description",
@@ -713,16 +566,6 @@ class DNSCheckPage(BasePage):
             self.check_button,
             name="Начать полную проверку DNS",
             description=start_description,
-        )
-        quick_description = self._action_description(
-            "page.dns_check.action.quick.description",
-            "Сделать быстрый тест только текущего системного DNS без полного сценария.",
-        )
-        set_tooltip(self.quick_check_button, quick_description)
-        set_control_accessibility(
-            self.quick_check_button,
-            name="Начать быструю проверку DNS",
-            description=quick_description,
         )
         save_description = self._action_description(
             "page.dns_check.action.save.description",

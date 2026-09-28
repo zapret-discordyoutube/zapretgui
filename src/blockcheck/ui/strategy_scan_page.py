@@ -126,17 +126,7 @@ class StrategyScanPage(BasePage):
 
         self._build_ui()
         if self._embedded:
-            try:
-                if self.title_label is not None:
-                    self.title_label.setVisible(False)
-                if self.subtitle_label is not None:
-                    self.subtitle_label.setVisible(False)
-            except Exception:
-                pass
-            try:
-                self.vBoxLayout.setContentsMargins(0, 8, 0, 0)
-            except Exception:
-                pass
+            self.hide_page_header()
 
     def create_support_prepare_worker(
         self,

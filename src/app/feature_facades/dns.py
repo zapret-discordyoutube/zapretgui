@@ -12,7 +12,6 @@ class DnsFeature:
     normalize_adapter_alias: Callable
     create_dns_check_worker: Callable
     create_dns_check_save_worker: Callable
-    create_dns_quick_check_worker: Callable
     create_page_load_worker: Callable
     create_connectivity_test_worker: Callable
     create_force_dns_action_worker: Callable
@@ -46,7 +45,6 @@ def build_dns_feature() -> DnsFeature:
     run_connectivity_test = lambda *args, **kwargs: _public().run_connectivity_test(*args, **kwargs)
     run_dns_poisoning_check = lambda *args, **kwargs: _commands().run_dns_poisoning_check(*args, **kwargs)
     save_dns_check_results = lambda *args, **kwargs: _commands().save_dns_check_results(*args, **kwargs)
-    run_quick_dns_check = lambda *args, **kwargs: _commands().run_quick_dns_check(*args, **kwargs)
 
     def _create_force_dns_action_worker(
         request_id: int,
@@ -174,15 +172,6 @@ def build_dns_feature() -> DnsFeature:
             parent=parent,
         )
 
-    def _create_dns_quick_check_worker(request_id: int, *, parent=None):
-        from dns.dns_check_worker import DNSQuickCheckWorker
-
-        return DNSQuickCheckWorker(
-            request_id,
-            run_quick_dns_check=run_quick_dns_check,
-            parent=parent,
-        )
-
     feature = DnsFeature(
         apply_dns_on_startup_async=lambda *args, **kwargs: _public().apply_dns_on_startup_async(*args, **kwargs),
         warm_page_data_cache=lambda *args, **kwargs: _public().warm_page_data_cache(*args, **kwargs),
@@ -190,7 +179,6 @@ def build_dns_feature() -> DnsFeature:
         normalize_adapter_alias=lambda *args, **kwargs: _public().normalize_adapter_alias(*args, **kwargs),
         create_dns_check_worker=_create_dns_check_worker,
         create_dns_check_save_worker=_create_dns_check_save_worker,
-        create_dns_quick_check_worker=_create_dns_quick_check_worker,
         create_page_load_worker=_create_page_load_worker,
         create_connectivity_test_worker=_create_connectivity_test_worker,
         create_force_dns_action_worker=_create_force_dns_action_worker,

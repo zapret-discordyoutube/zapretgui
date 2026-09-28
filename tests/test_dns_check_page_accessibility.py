@@ -27,12 +27,6 @@ class DNSCheckPageAccessibilityTests(unittest.TestCase):
             "Начать полную проверку DNS, доступно",
         )
         self.assertIn("расширенный отчёт", page.check_button.accessibleDescription())
-        self.assertEqual(page.quick_check_button.accessibleName(), "Начать быструю проверку DNS, доступно")
-        self.assertEqual(
-            page.quick_check_button.property("screenReaderStateText"),
-            "Начать быструю проверку DNS, доступно",
-        )
-        self.assertIn("текущего системного DNS", page.quick_check_button.accessibleDescription())
         self.assertEqual(page.save_button.accessibleName(), "Сохранить результаты проверки DNS, недоступно")
         self.assertEqual(
             page.save_button.property("screenReaderStateText"),
@@ -72,7 +66,6 @@ class DNSCheckPageAccessibilityTests(unittest.TestCase):
 
         page._apply_interaction_state(
             check_enabled=False,
-            quick_enabled=False,
             save_enabled=False,
             progress_visible=True,
         )
@@ -87,17 +80,12 @@ class DNSCheckPageAccessibilityTests(unittest.TestCase):
             "Начать полную проверку DNS, недоступно",
         )
         self.assertEqual(
-            page.quick_check_button.property("screenReaderStateText"),
-            "Начать быструю проверку DNS, недоступно",
-        )
-        self.assertEqual(
             page.save_button.property("screenReaderStateText"),
             "Сохранить результаты проверки DNS, недоступно",
         )
 
         page._apply_interaction_state(
             check_enabled=True,
-            quick_enabled=True,
             save_enabled=True,
             progress_visible=False,
         )
@@ -127,25 +115,13 @@ class DNSCheckPageAccessibilityTests(unittest.TestCase):
             "Результаты проверки DNS: проверка ещё не запускалась",
         )
 
-    def test_quick_check_start_restores_empty_result_screen_reader_state(self) -> None:
-        from ui.accessibility import set_state_text
-
+    def test_no_separate_quick_check_button(self) -> None:
+        """Обычная проверка укладывается в секунду-две, отдельная «Быстрая» только путала."""
         page = DNSCheckPage(dns_feature=_DnsFeatureStub())
         self.addCleanup(page.deleteLater)
-        page._quick_runtime = _StartRuntimeStub()
-        page._quick_check_state.runtime = page._quick_runtime
-        set_state_text(page.result_text, "Старый быстрый DNS-результат")
 
-        page.quick_dns_check()
-
-        self.assertEqual(
-            page.result_text.accessibleName(),
-            "Результаты проверки DNS: проверка ещё не запускалась",
-        )
-        self.assertEqual(
-            page.result_text.property("screenReaderStateText"),
-            "Результаты проверки DNS: проверка ещё не запускалась",
-        )
+        self.assertFalse(hasattr(page, "quick_check_button"))
+        self.assertFalse(hasattr(page, "quick_dns_check"))
 
 
 class _StartRuntimeStub:

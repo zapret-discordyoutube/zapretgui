@@ -104,6 +104,8 @@ def judge_dns(
     hosts_ips: tuple[str, ...],
     check_kind: str = "",
     check_cert_problem: str = "",
+    nxdomain_count: int = 0,
+    attempts: int = 1,
 ) -> DnsJudgement:
     """Вердикт по одному домену.
 
@@ -120,6 +122,16 @@ def judge_dns(
                 f"{note}; сервер по этому адресу предъявил чужой сертификат — запись в hosts устарела или неверна",
             )
         return DnsJudgement(DnsState.LOCAL, note)
+
+    # Провайдер подсовывает «сайта нет» наперегонки с настоящим ответом: иногда
+    # первым приходит настоящий. Хоть один такой ответ при существующем сайте —
+    # подмена, даже если в остальных попытках адрес пришёл правильный.
+    if system_ips and nxdomain_count and reference_ips:
+        return DnsJudgement(
+            DnsState.SPOOFED,
+            f"DNS отвечает то правильно, то «такого сайта нет» ({nxdomain_count} из {attempts} раз) — "
+            "провайдер перехватывает часть запросов",
+        )
 
     if not system_ips:
         if system_status in (DNS_STATUS_NAME_ERROR, DNS_STATUS_NO_RECORDS) and reference_ips:

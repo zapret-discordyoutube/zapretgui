@@ -102,21 +102,18 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
             (
                 inspect.getsource(dns_check_worker.DNSCheckWorker),
                 inspect.getsource(dns_check_worker.DNSCheckSaveWorker),
-                inspect.getsource(dns_check_worker.DNSQuickCheckWorker),
             )
         )
 
         for expected in (
             "run_dns_poisoning_check=run_dns_poisoning_check",
             "save_dns_check_results=save_dns_check_results",
-            "run_quick_dns_check=run_quick_dns_check",
         ):
             self.assertIn(expected, feature_source)
 
         for expected in (
             "_run_dns_poisoning_check",
             "_save_dns_check_results",
-            "_run_quick_dns_check",
         ):
             self.assertIn(expected, worker_source)
 
@@ -1068,25 +1065,22 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
         page._schedule_connectivity_test_start.assert_not_called()
         self.assertTrue(page._connectivity_test_pending)
 
-    def test_dns_check_page_uses_one_shot_runtime_for_check_save_and_quick(self) -> None:
+    def test_dns_check_page_uses_one_shot_runtime_for_check_and_save(self) -> None:
         page_source = inspect.getsource(DNSCheckPage)
         start_source = inspect.getsource(DNSCheckPage.start_check)
-        quick_source = inspect.getsource(DNSCheckPage._start_quick_dns_check_worker)
         save_source = inspect.getsource(DNSCheckPage._start_save_results_worker)
         cleanup_source = inspect.getsource(DNSCheckPage.cleanup)
 
         self.assertIn("OneShotWorkerRuntime", page_source)
         for name in (
             "_check_runtime",
-            "_quick_runtime",
             "_save_runtime",
         ):
             self.assertIn(name, page_source)
             self.assertIn(f"{name}.stop", cleanup_source)
         self.assertIn("start_qobject_worker", start_source)
-        for source in (quick_source, save_source):
-            self.assertIn("start_qthread_worker", source)
-        for source in (start_source, quick_source, save_source):
+        self.assertIn("start_qthread_worker", save_source)
+        for source in (start_source, save_source):
             self.assertNotIn("worker.start()", source)
         self.assertNotIn("self.thread = QThread", start_source)
 
@@ -1107,24 +1101,6 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
         self.assertIn("_check_state_obj()", start_source)
         self.assertIn("_check_state_obj()", schedule_source)
         self.assertIn("_check_state_obj().reset()", cleanup_source)
-
-    def test_dns_quick_check_uses_shared_latest_worker_state(self) -> None:
-        from ui.latest_value_worker_state import LatestValueWorkerState
-
-        page = DNSCheckPage.__new__(DNSCheckPage)
-        page._quick_runtime = SimpleNamespace(is_running=Mock(return_value=False))
-
-        init_source = inspect.getsource(DNSCheckPage.__init__)
-        quick_source = inspect.getsource(DNSCheckPage.quick_dns_check)
-        schedule_source = inspect.getsource(DNSCheckPage._schedule_quick_dns_check_start)
-        cleanup_source = inspect.getsource(DNSCheckPage.cleanup)
-
-        self.assertIsInstance(DNSCheckPage._quick_check_state_obj(page), LatestValueWorkerState)
-        self.assertNotIn("self._quick_check_pending = False", init_source)
-        self.assertNotIn("self._quick_check_start_scheduled = False", init_source)
-        self.assertIn("_quick_check_state_obj()", quick_source)
-        self.assertIn("_quick_check_state_obj()", schedule_source)
-        self.assertIn("_quick_check_state_obj().reset()", cleanup_source)
 
     def test_dns_check_save_uses_shared_latest_worker_state(self) -> None:
         from ui.latest_value_worker_state import LatestValueWorkerState
@@ -1285,13 +1261,10 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
         page._cleanup_in_progress = False
         page._check_runtime = Mock()
         page._save_runtime = Mock()
-        page._quick_runtime = Mock()
         page._check_pending = True
         page._check_start_scheduled = True
         page._save_results_pending = {"file_path": "dns.txt", "plain_text": "old"}
         page._save_results_start_scheduled = True
-        page._quick_check_pending = True
-        page._quick_check_start_scheduled = True
 
         DNSCheckPage.cleanup(page)
 
@@ -1300,8 +1273,6 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
         self.assertFalse(page._check_start_scheduled)
         self.assertIsNone(page._save_results_pending)
         self.assertFalse(page._save_results_start_scheduled)
-        self.assertFalse(page._quick_check_pending)
-        self.assertFalse(page._quick_check_start_scheduled)
         page._check_runtime.stop.assert_called_once_with(
             blocking=False,
             log_fn=ANY,
@@ -1314,12 +1285,6 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
             warning_prefix="DNS check save worker",
         )
         page._save_runtime.cancel.assert_called_once()
-        page._quick_runtime.stop.assert_called_once_with(
-            blocking=False,
-            log_fn=ANY,
-            warning_prefix="DNS quick check worker",
-        )
-        page._quick_runtime.cancel.assert_called_once()
 
     def test_dns_full_check_queues_while_worker_runs(self) -> None:
         page = DNSCheckPage.__new__(DNSCheckPage)
@@ -1357,63 +1322,6 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
 
         self.assertFalse(page._check_pending)
         page.start_check.assert_called_once_with()
-
-    def test_dns_quick_check_queues_while_worker_runs(self) -> None:
-        page = DNSCheckPage.__new__(DNSCheckPage)
-        page._quick_runtime = SimpleNamespace(is_running=Mock(return_value=True))
-        page._quick_check_pending = False
-        page.result_text = Mock()
-        page._apply_interaction_state = Mock()
-        page._set_status = Mock()
-        page._start_quick_dns_check_worker = Mock()
-
-        DNSCheckPage.quick_dns_check(page)
-
-        self.assertTrue(page._quick_check_pending)
-        page.result_text.clear.assert_not_called()
-        page._apply_interaction_state.assert_not_called()
-        page._set_status.assert_not_called()
-        page._start_quick_dns_check_worker.assert_not_called()
-
-    def test_dns_pending_quick_check_restarts_after_event_loop_turn(self) -> None:
-        import dns.ui.dns_check_page as dns_check_page
-
-        page = DNSCheckPage.__new__(DNSCheckPage)
-        page._cleanup_in_progress = False
-        page._quick_check_pending = True
-        page._quick_check_start_scheduled = False
-        page.quick_dns_check = Mock()
-        single_shot = Mock(side_effect=lambda _delay, _callback: None)
-
-        with patch.object(dns_check_page, "QTimer", SimpleNamespace(singleShot=single_shot), create=True):
-            DNSCheckPage._on_quick_dns_check_worker_finished(page, object())
-
-        single_shot.assert_called_once()
-        self.assertEqual(single_shot.call_args.args[0], 0)
-        page.quick_dns_check.assert_not_called()
-
-        single_shot.call_args.args[1]()
-
-        self.assertFalse(page._quick_check_pending)
-        page.quick_dns_check.assert_called_once_with()
-
-    def test_stale_dns_quick_check_finish_does_not_restart_pending_check(self) -> None:
-        import dns.ui.dns_check_page as dns_check_page
-
-        page = DNSCheckPage.__new__(DNSCheckPage)
-        page._cleanup_in_progress = False
-        page._quick_runtime = SimpleNamespace(worker=object())
-        page._quick_check_pending = True
-        page._quick_check_start_scheduled = False
-        page.quick_dns_check = Mock()
-        single_shot = Mock()
-
-        with patch.object(dns_check_page, "QTimer", SimpleNamespace(singleShot=single_shot), create=True):
-            DNSCheckPage._on_quick_dns_check_worker_finished(page, object())
-
-        single_shot.assert_not_called()
-        page.quick_dns_check.assert_not_called()
-        self.assertTrue(page._quick_check_pending)
 
     def test_startup_dns_apply_uses_one_shot_runtime(self) -> None:
         module_source = inspect.getsource(dns_worker)

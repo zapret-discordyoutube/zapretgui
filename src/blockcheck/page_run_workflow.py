@@ -58,6 +58,7 @@ def start_blockcheck_page_run(
 
     start_button.setEnabled(False)
     stop_button.setEnabled(True)
+    stop_button.setVisible(True)
     mode_combo.setEnabled(False)
     skip_failed_checkbox.setEnabled(False)
     set_state_text(start_button, "Запустить BlockCheck, недоступно")
@@ -127,6 +128,7 @@ def reset_blockcheck_running_ui(
     """Возвращает основные элементы управления BlockCheck в idle-состояние."""
     start_button.setEnabled(True)
     stop_button.setEnabled(False)
+    stop_button.setVisible(False)
     mode_combo.setEnabled(True)
     skip_failed_checkbox.setEnabled(True)
     set_state_text(start_button, "Запустить BlockCheck, доступно")

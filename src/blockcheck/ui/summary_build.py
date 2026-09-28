@@ -25,9 +25,7 @@ def build_dpi_summary_section(
     caption_label_cls,
     qt_namespace=Qt,
 ) -> BlockcheckSummaryWidgets:
-    card = settings_card_cls(
-        tr_fn("page.blockcheck.dpi_summary", "DPI Анализ")
-    )
+    card = settings_card_cls()
     card.setVisible(False)
 
     badge = qlabel_cls()

@@ -15,8 +15,6 @@ from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips
 
 @dataclass(slots=True)
 class BlockcheckActionsWidgets:
-    title_label: object
-    actions_bar: object
     start_button: object
     stop_button: object
 
@@ -33,22 +31,13 @@ class BlockcheckResultsWidgets:
 def build_actions_section(
     *,
     tr_fn,
-    strong_body_label_cls,
-    quick_actions_bar_cls,
-    content_parent,
+    primary_button_cls,
     push_button_cls,
-    qta_module,
     on_start,
     on_stop,
 ) -> BlockcheckActionsWidgets:
-    title_label = strong_body_label_cls(
-        tr_fn("page.blockcheck.actions.title", "Действия")
-    )
-    set_state_text(title_label, f"Раздел BlockCheck: {title_label.text()}")
-
-    actions_bar = quick_actions_bar_cls(content_parent)
-
-    start_btn = push_button_cls(
+    """Кнопки запуска и остановки: они стоят в строке управления, без подписи «Действия»."""
+    start_btn = primary_button_cls(
         tr_fn("page.blockcheck.start", "Запустить"),
         icon=FluentIcon.PLAY,
     )
@@ -64,7 +53,6 @@ def build_actions_section(
     )
     set_state_text(start_btn, "Запустить BlockCheck")
     start_btn.clicked.connect(on_start)
-    actions_bar.add_button(start_btn)
 
     stop_btn = push_button_cls(
         tr_fn("page.blockcheck.stop", "Остановить"),
@@ -83,11 +71,10 @@ def build_actions_section(
     set_state_text(stop_btn, "Остановить BlockCheck")
     stop_btn.clicked.connect(on_stop)
     stop_btn.setEnabled(False)
-    actions_bar.add_button(stop_btn)
+    # Нужна только во время проверки: в покое неактивная кнопка лишь занимала место.
+    stop_btn.setVisible(False)
 
     return BlockcheckActionsWidgets(
-        title_label=title_label,
-        actions_bar=actions_bar,
         start_button=start_btn,
         stop_button=stop_btn,
     )
@@ -100,9 +87,7 @@ def build_results_section(
     strong_body_label_cls,
     table_widget_cls,
 ) -> BlockcheckResultsWidgets:
-    results_card = settings_card_cls(
-        tr_fn("page.blockcheck.results", "Результаты")
-    )
+    results_card = settings_card_cls()
 
     domains_section_label = strong_body_label_cls(
         tr_fn(
@@ -111,6 +96,8 @@ def build_results_section(
         )
     )
     set_state_text(domains_section_label, f"Раздел результатов BlockCheck: {domains_section_label.text()}")
+    # Подпись первой таблицы нужна, только когда под ней появляется вторая (TCP).
+    domains_section_label.setVisible(False)
     results_card.add_widget(domains_section_label)
 
     results_table = table_widget_cls()
@@ -151,7 +138,7 @@ def build_results_section(
     results_card.add_widget(results_table)
 
     tcp_section_label = strong_body_label_cls(
-        tr_fn("page.blockcheck.tcp_section", "Часть 2: Проверка TCP 16-20KB")
+        tr_fn("page.blockcheck.tcp_section", "Проверка обрыва на 16–20 КБ (TCP)")
     )
     set_state_text(tcp_section_label, f"Раздел результатов BlockCheck: {tcp_section_label.text()}")
     results_card.add_widget(tcp_section_label)

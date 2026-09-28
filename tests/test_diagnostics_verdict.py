@@ -87,6 +87,12 @@ class JudgeDnsTests(unittest.TestCase):
         self.assertEqual(judgement.state, DnsState.LOCAL)
         self.assertIn("hosts", judgement.reason)
 
+    def test_occasional_nxdomain_with_real_addresses_is_spoofing(self) -> None:
+        judgement = self._judge(check_kind="", nxdomain_count=1, attempts=3)
+
+        self.assertEqual(judgement.state, DnsState.SPOOFED)
+        self.assertIn("1 из 3", judgement.reason)
+
     def test_nxdomain_for_existing_site_is_dns_block(self) -> None:
         judgement = self._judge(system_ips=(), system_status=DNS_STATUS_NAME_ERROR, check_kind="")
 
@@ -215,6 +221,27 @@ class EngineScenarioTests(unittest.TestCase):
         self.assertNotIn("Обнаружена DNS подмена", text)
         self.assertIn("Comss DNS", text)
         self.assertIn("сам меняет адреса", text)
+
+    def test_dns_that_answers_nxdomain_only_sometimes_is_still_spoofing(self) -> None:
+        """У пользователя вкладка DNS то находила подмену, то нет: провайдер отвечал «сайта нет» не каждый раз."""
+        answers = iter([
+            DnsAnswer(ips=(), status=DNS_STATUS_NAME_ERROR),
+            DnsAnswer(ips=DISCORD_REAL),
+            DnsAnswer(ips=DISCORD_REAL),
+        ] * 10)
+        lines: list[str] = []
+        net = _Net()
+        with patch.object(engine, "query_ipv4", side_effect=lambda *_a, **_k: next(answers)):
+            patches = [item for item in net.patches() if getattr(item, "attribute", "") != "query_ipv4"]
+            from contextlib import ExitStack
+
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+                result = engine.run_dns_check(emit=lines.append)
+
+        self.assertTrue(result["summary"]["dns_poisoning_detected"])
+        self.assertIn("то правильно, то «такого сайта нет»", "\n".join(lines))
 
     def test_dns_tab_skips_https_when_address_matches_reference(self) -> None:
         net = _Net()

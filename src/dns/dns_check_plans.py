@@ -9,7 +9,6 @@ class DNSCheckStartPlan:
     status_text: str
     status_tone: str
     check_enabled: bool
-    quick_enabled: bool
     save_enabled: bool
     progress_visible: bool
 
@@ -24,7 +23,6 @@ class DNSCheckFinishPlan:
     status_text: str
     status_tone: str
     check_enabled: bool
-    quick_enabled: bool
     save_enabled: bool
     progress_visible: bool
 
@@ -33,12 +31,6 @@ class DNSCheckFinishPlan:
 class DNSCheckCleanupPlan:
     should_quit_thread: bool
     wait_timeout_ms: int
-
-
-@dataclass(slots=True)
-class DNSQuickCheckPlan:
-    lines: tuple[str, ...]
-    enable_save: bool
 
 
 @dataclass(slots=True)
@@ -52,7 +44,6 @@ def build_start_plan() -> DNSCheckStartPlan:
         status_text="🔄 Выполняется проверка DNS...",
         status_tone="accent",
         check_enabled=False,
-        quick_enabled=False,
         save_enabled=False,
         progress_visible=True,
     )
@@ -80,7 +71,6 @@ def build_finish_plan(results: dict) -> DNSCheckFinishPlan:
             status_text="⚠️ Обнаружена DNS подмена!",
             status_tone="error",
             check_enabled=True,
-            quick_enabled=True,
             save_enabled=True,
             progress_visible=False,
         )
@@ -88,7 +78,6 @@ def build_finish_plan(results: dict) -> DNSCheckFinishPlan:
         status_text="✅ Проверка завершена",
         status_tone="success",
         check_enabled=True,
-        quick_enabled=True,
         save_enabled=True,
         progress_visible=False,
     )

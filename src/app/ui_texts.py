@@ -557,10 +557,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "DNS подмена",
         "en": "DNS Spoofing",
     },
-    "page.blockcheck.control": {
-        "ru": "Управление",
-        "en": "Control",
-    },
     "page.blockcheck.mode": {
         "ru": "Режим:",
         "en": "Mode:",
@@ -586,8 +582,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Stop",
     },
     "page.blockcheck.ready": {
-        "ru": "Готово",
-        "en": "Ready",
+        "ru": "Проверяет, какие сайты и как блокирует провайдер",
+        "en": "Checks which sites your ISP blocks and how",
     },
     "page.blockcheck.running": {
         "ru": "Запуск тестов...",
@@ -605,29 +601,21 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Ошибка выполнения",
         "en": "Execution error",
     },
-    "page.blockcheck.results": {
-        "ru": "Результаты",
-        "en": "Results",
-    },
     "page.blockcheck.col_target": {
         "ru": "Цель",
         "en": "Target",
-    },
-    "page.blockcheck.dpi_summary": {
-        "ru": "DPI Анализ",
-        "en": "DPI Analysis",
     },
     "page.blockcheck.no_dpi": {
         "ru": "DPI не обнаружен на проверенных ресурсах",
         "en": "No DPI detected on tested resources",
     },
     "page.blockcheck.log": {
-        "ru": "Подробный лог",
-        "en": "Detailed Log",
+        "ru": "Подробный лог:",
+        "en": "Detailed log:",
     },
     "page.blockcheck.custom_domains": {
-        "ru": "Пользовательские домены",
-        "en": "Custom Domains",
+        "ru": "Проверить ещё и свои домены:",
+        "en": "Also check your own domains:",
     },
     "page.blockcheck.domain_placeholder": {
         "ru": "example.com",
@@ -1304,10 +1292,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.dns_check.button.start": {
         "ru": "Начать проверку",
         "en": "Start check",
-    },
-    "page.dns_check.button.quick": {
-        "ru": "Быстрая проверка",
-        "en": "Quick check",
     },
     "page.dns_check.button.save": {
         "ru": "Сохранить результаты",
@@ -4296,8 +4280,8 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "DNS/ISP",
     },
     "page.blockcheck.tcp_section": {
-        "ru": "Часть 2: Проверка TCP 16-20KB",
-        "en": "Part 2: TCP 16-20KB Checks",
+        "ru": "Проверка обрыва на 16–20 КБ (TCP)",
+        "en": "Cut-off check at 16–20 KB (TCP)",
     },
     "page.blockcheck.col_provider": {
         "ru": "Провайдер",

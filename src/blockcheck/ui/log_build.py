@@ -13,6 +13,7 @@ from ui.accessibility import set_control_accessibility, set_state_text
 @dataclass(slots=True)
 class BlockcheckLogWidgets:
     card: object
+    log_caption: object
     expand_button: object
     support_status_label: object
     prepare_support_button: object
@@ -33,9 +34,7 @@ def build_log_card_section(
     on_toggle_expand,
     on_prepare_support,
 ) -> BlockcheckLogWidgets:
-    card = settings_card_cls(
-        tr_fn("page.blockcheck.log", "Подробный лог")
-    )
+    card = settings_card_cls()
 
     expand_btn = push_button_cls("Развернуть", icon=FluentIcon.FULL_SCREEN)
     set_control_accessibility(
@@ -43,10 +42,12 @@ def build_log_card_section(
         name="Развернуть лог BlockCheck",
         description="Разворачивает подробный лог BlockCheck на странице.",
     )
-    expand_btn.setFixedWidth(120)
+    expand_btn.setMinimumWidth(140)
     expand_btn.clicked.connect(on_toggle_expand)
 
     log_header = qhbox_layout_cls()
+    log_caption = caption_label_cls(tr_fn("page.blockcheck.log", "Подробный лог:"))
+    log_header.addWidget(log_caption)
     support_status_label = caption_label_cls("")
     support_status_label.setWordWrap(True)
     set_state_text(support_status_label, "Статус обращения BlockCheck: нет статуса")
@@ -83,6 +84,7 @@ def build_log_card_section(
 
     return BlockcheckLogWidgets(
         card=card,
+        log_caption=log_caption,
         expand_button=expand_btn,
         support_status_label=support_status_label,
         prepare_support_button=prepare_support_btn,

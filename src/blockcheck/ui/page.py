@@ -52,13 +52,14 @@ from qfluentwidgets import (
     isDarkTheme,
     themeColor,
     TableWidget,
+    PrimaryPushButton,
     PushButton,
     LineEdit,
     CheckBox,
     SegmentedWidget,
 )
 
-from ui.fluent_widgets import SettingsCard, InfoBarHelper, QuickActionsBar, set_tooltip
+from ui.fluent_widgets import SettingsCard, InfoBarHelper, set_tooltip
 from log.log import log
 
 logger = logging.getLogger(__name__)
@@ -161,8 +162,8 @@ class BlockcheckPage(BasePage):
         self._log_edit = None
         self._log_expanded = False
         self._runtime_warnings_seen: set[str] = set()
-        self._actions_title_label = None
-        self._actions_bar = None
+        self._domains_caption = None
+        self._log_caption = None
         self._prepare_support_btn = None
         self._support_status_label = None
         self._initial_state = blockcheck_page_runtime.BlockcheckPageInitialStatePlan(user_domains=())
@@ -286,9 +287,9 @@ class BlockcheckPage(BasePage):
 
         # ── Control Card ──
         section_started_at = time.perf_counter()
-        self._control_card = SettingsCard(
-            tr_catalog("page.blockcheck.control", default="Управление")
-        )
+        # Без шапок и подписи «Действия»: режим, галочка, статус и кнопки —
+        # одна строка, как на остальных вкладках BlockCheck.
+        self._control_card = SettingsCard()
 
         ctrl_row = QHBoxLayout()
         ctrl_row.setSpacing(12)
@@ -314,8 +315,7 @@ class BlockcheckPage(BasePage):
         self._update_mode_combo_accessibility()
         self._mode_combo.currentIndexChanged.connect(self._update_mode_combo_accessibility)
         ctrl_row.addWidget(self._mode_combo)
-
-        ctrl_row.addStretch()
+        ctrl_row.addSpacing(8)
 
         # Пропуск нерезолвящихся доменов
         self._skip_failed_cb = CheckBox(
@@ -332,6 +332,25 @@ class BlockcheckPage(BasePage):
         self._skip_failed_cb.toggled.connect(self._update_skip_failed_accessibility)
         ctrl_row.addWidget(self._skip_failed_cb)
 
+        self._status_label = CaptionLabel(
+            tr_catalog("page.blockcheck.ready", default="Проверяет, какие сайты и как блокирует провайдер")
+        )
+        self._set_status_text(self._status_label.text())
+        ctrl_row.addSpacing(8)
+        ctrl_row.addWidget(self._status_label, 1)
+
+        actions_widgets = build_actions_section(
+            tr_fn=lambda key, default: tr_catalog(key, default=default),
+            primary_button_cls=PrimaryPushButton,
+            push_button_cls=PushButton,
+            on_start=self._on_start,
+            on_stop=self._on_stop,
+        )
+        self._start_btn = actions_widgets.start_button
+        self._stop_btn = actions_widgets.stop_button
+        ctrl_row.addWidget(self._start_btn)
+        ctrl_row.addWidget(self._stop_btn)
+
         self._control_card.add_layout(ctrl_row)
 
         # Progress
@@ -346,34 +365,8 @@ class BlockcheckPage(BasePage):
         set_state_text(self._progress_bar, "Ход BlockCheck: не выполняется")
         self._control_card.add_widget(self._progress_bar)
 
-        # Status label
-        self._status_label = CaptionLabel(
-            tr_catalog("page.blockcheck.ready", default="Готово")
-        )
-        self._set_status_text(self._status_label.text())
-        self._control_card.add_widget(self._status_label)
         self._add_tab_widget(self._control_card)
         self._log_ui_timing("blockcheck_ui.control_card.build", section_started_at)
-
-        section_started_at = time.perf_counter()
-        actions_widgets = build_actions_section(
-            tr_fn=lambda key, default: tr_catalog(key, default=default),
-            strong_body_label_cls=StrongBodyLabel,
-            quick_actions_bar_cls=QuickActionsBar,
-            content_parent=self.content,
-            push_button_cls=PushButton,
-            qta_module=qta,
-            on_start=self._on_start,
-            on_stop=self._on_stop,
-        )
-        self._actions_title_label = actions_widgets.title_label
-        self._actions_bar = actions_widgets.actions_bar
-        self._start_btn = actions_widgets.start_button
-        self._stop_btn = actions_widgets.stop_button
-
-        self._add_tab_widget(self._actions_title_label)
-        self._add_tab_widget(self._actions_bar)
-        self._log_ui_timing("blockcheck_ui.actions.build", section_started_at)
 
         # ── Custom Domains Card ──
         section_started_at = time.perf_counter()
@@ -382,6 +375,7 @@ class BlockcheckPage(BasePage):
             settings_card_cls=SettingsCard,
             qhbox_layout_cls=QHBoxLayout,
             qwidget_cls=QWidget,
+            caption_label_cls=CaptionLabel,
             line_edit_cls=LineEdit,
             push_button_cls=PushButton,
             qta_module=qta,
@@ -389,6 +383,7 @@ class BlockcheckPage(BasePage):
             on_add=self._on_add_domain,
         )
         self._domains_card = domains_widgets.card
+        self._domains_caption = domains_widgets.caption_label
         self._domain_input = domains_widgets.input_edit
         self._add_domain_btn = domains_widgets.add_button
         self._domains_flow = domains_widgets.flow_widget
@@ -399,6 +394,7 @@ class BlockcheckPage(BasePage):
 
         # Load persisted user domains
         section_started_at = time.perf_counter()
+        self._sync_domains_flow_visibility()
         self._apply_initial_domain_chips(self._initial_state.user_domains)
         self._log_ui_timing("blockcheck_ui.domain_chips.apply", section_started_at)
 
@@ -447,7 +443,8 @@ class BlockcheckPage(BasePage):
             self._dns_summary = dpi_widgets.dns_summary
             self._recommendation = dpi_widgets.recommendation
             self._add_tab_widget(self._dpi_card)
-            self._dpi_card.setVisible(show_blockcheck)
+            # Пустая карточка итогов DPI до первой проверки только занимала место.
+            self._dpi_card.setVisible(show_blockcheck and self._has_dpi_summary())
             self._log_ui_timing("blockcheck_ui.dpi_summary.build", section_started_at)
 
         if self._log_card is None:
@@ -466,6 +463,7 @@ class BlockcheckPage(BasePage):
                 on_prepare_support=self._prepare_support_from_blockcheck,
             )
             self._log_card = log_widgets.card
+            self._log_caption = log_widgets.log_caption
             self._expand_log_btn = log_widgets.expand_button
             self._support_status_label = log_widgets.support_status_label
             self._prepare_support_btn = log_widgets.prepare_support_button
@@ -653,6 +651,8 @@ class BlockcheckPage(BasePage):
         show_blockcheck = tab_key == self.TAB_BLOCKCHECK
         for widget in self._tab_widgets:
             widget.setVisible(show_blockcheck)
+        if self._dpi_card is not None and not self._has_dpi_summary():
+            self._dpi_card.setVisible(False)
 
         if self._strategy_tab_page is not None:
             self._strategy_tab_page.setVisible(tab_key == self.TAB_STRATEGY_SCAN)
@@ -1251,6 +1251,7 @@ class BlockcheckPage(BasePage):
                 flow_layout=self._domains_flow_layout,
                 chip_cls=DomainChip,
             )
+            self._sync_domains_flow_visibility()
 
     def _on_user_domain_action_failed(self, request_id: int, action: str, error: str, _context) -> None:
         if not self._user_domain_action_runtime.is_current(
@@ -1390,6 +1391,15 @@ class BlockcheckPage(BasePage):
             chip_cls=DomainChip,
             on_removed=self._on_remove_domain,
         )
+        self._sync_domains_flow_visibility()
+
+    def _sync_domains_flow_visibility(self) -> None:
+        """Строка плашек доменов видна, только когда в ней что-то есть."""
+        if self._domains_flow is not None:
+            self._domains_flow.setVisible(bool(self._get_extra_domains()))
+
+    def _has_dpi_summary(self) -> bool:
+        return bool(self._last_report and getattr(self._last_report, "targets", None))
 
     def _get_extra_domains(self) -> list[str]:
         """Collect domains from chips to pass to worker."""
@@ -1467,12 +1477,13 @@ class BlockcheckPage(BasePage):
                     tr_catalog("page.blockcheck.tab.dns_spoofing", language=language, default="DNS подмена"),
                 )
             self._update_tabs_accessibility()
-            self._control_card.set_title(tr_catalog("page.blockcheck.control", language=language, default="Управление"))
-            self._domains_card.set_title(tr_catalog("page.blockcheck.custom_domains", language=language, default="Пользовательские домены"))
-            if self._results_card is not None:
-                self._results_card.set_title(tr_catalog("page.blockcheck.results", language=language, default="Результаты"))
-            if self._log_card is not None:
-                self._log_card.set_title(tr_catalog("page.blockcheck.log", language=language, default="Подробный лог"))
+            # Карточки без шапок: set_title не вызывается, он добавил бы шапку обратно.
+            if self._domains_caption is not None:
+                self._domains_caption.setText(
+                    tr_catalog("page.blockcheck.custom_domains", language=language, default="Проверить ещё и свои домены:")
+                )
+            if self._log_caption is not None:
+                self._log_caption.setText(tr_catalog("page.blockcheck.log", language=language, default="Подробный лог:"))
 
             if self._domains_section_label is not None:
                 self._domains_section_label.setText(
@@ -1487,7 +1498,7 @@ class BlockcheckPage(BasePage):
                     tr_catalog(
                         "page.blockcheck.tcp_section",
                         language=language,
-                        default="Часть 2: Проверка TCP 16-20KB",
+                        default="Проверка обрыва на 16–20 КБ (TCP)",
                     )
                 )
 
@@ -1514,10 +1525,6 @@ class BlockcheckPage(BasePage):
 
             self._start_btn.setText(tr_catalog("page.blockcheck.start", language=language, default="Запустить"))
             self._stop_btn.setText(tr_catalog("page.blockcheck.stop", language=language, default="Остановить"))
-            if self._actions_title_label is not None:
-                self._actions_title_label.setText(
-                    tr_catalog("page.blockcheck.actions.title", language=language, default="Действия")
-                )
             set_tooltip(
                 self._start_btn,
                 tr_catalog(
