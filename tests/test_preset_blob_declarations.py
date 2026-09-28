@@ -482,40 +482,34 @@ class LuaDefinedBlobNamesTests(unittest.TestCase):
         self.assertEqual(names, set(LUA_DEFINED_BLOB_NAMES))
 
 
-class StrategyScannerProbePresetBlobTests(unittest.TestCase):
-    def _scanner(self, work_dir: str, catalog):
-        from blockcheck.strategy_scanner import StrategyScanner
+class StrategySearchProbeConfigBlobTests(unittest.TestCase):
+    def _config(self, catalog, strategy_args: str) -> list[str]:
+        from blockcheck.strategy_search.environment import RealEnvironment
+        from blockcheck.strategy_search.probe_profile import build_probe_config_text, build_probe_profile
 
-        scanner = object.__new__(StrategyScanner)
-        scanner._work_dir = work_dir
-        scanner._scan_protocol = "tcp_https"
-        scanner._cb = SimpleNamespace(on_log=lambda _message: None)
-        scanner._load_fakes_catalog = (lambda: catalog) if catalog is not None else None
-        scanner._prepare_fakes_catalog()
-        return scanner
+        env = RealEnvironment(
+            shutdown_sync=lambda **_kw: None,
+            load_fakes_catalog=(lambda: catalog) if catalog is not None else None,
+        )
+        profile = build_probe_profile("tcp_https", strategy_args=strategy_args, match_domain="discord.com")
+        return build_probe_config_text(profile, env.blob_lines(strategy_args)).splitlines()
 
-    def test_probe_preset_declares_strategy_fakes_after_lua_init_block(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            scanner = self._scanner(temp_dir, _catalog())
-            path = scanner._write_temp_preset(
-                "--lua-desync=fake:blob=tls_google:repeats=2\n--lua-desync=fake:blob=fake_default_tls",
-                "discord.com",
-            )
-            lines = Path(path).read_text(encoding="utf-8").splitlines()
+    def test_probe_config_declares_strategy_fakes_after_lua_init_block(self) -> None:
+        lines = self._config(
+            _catalog(),
+            "--lua-desync=fake:blob=tls_google:repeats=2\n--lua-desync=fake:blob=fake_default_tls",
+        )
 
         count = len(WINWS2_LUA_INIT_LINES)
         self.assertEqual(lines[:count], list(WINWS2_LUA_INIT_LINES))
-        self.assertEqual(lines[count : count + 3], ["", TLS_GOOGLE_LINE, ""])
+        self.assertEqual(lines[count], TLS_GOOGLE_LINE)
         self.assertEqual(sum(1 for line in lines if line.startswith("--blob=")), 1)
 
-    def test_probe_preset_without_registry_has_no_blob_lines(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            scanner = self._scanner(temp_dir, None)
-            path = scanner._write_temp_preset("--lua-desync=fake:blob=tls_google", "discord.com")
-            text = Path(path).read_text(encoding="utf-8")
+    def test_probe_config_without_registry_has_no_blob_lines(self) -> None:
+        lines = self._config(None, "--lua-desync=fake:blob=tls_google")
 
-        self.assertNotIn("--blob=", text)
-        self.assertIn("--lua-desync=fake:blob=tls_google", text)
+        self.assertFalse(any(line.startswith("--blob=") for line in lines))
+        self.assertIn("--lua-desync=fake:blob=tls_google", lines)
 
 
 if __name__ == "__main__":

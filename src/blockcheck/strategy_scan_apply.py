@@ -5,10 +5,7 @@ from pathlib import Path, PureWindowsPath
 from blockcheck.strategy_scan_state import StrategyApplyResult
 from blockcheck.strategy_scan_targeting import (
     default_target_for_protocol,
-    format_stun_target,
     normalize_target_domain,
-    resolve_games_ipset_paths,
-    stun_target_parts,
 )
 from config.runtime_layout import APPLICATION_PATHS
 
@@ -414,52 +411,25 @@ def apply_strategy(
     strategy_name: str,
     scan_target: str,
     scan_protocol: str,
-    scan_udp_games_scope: str,
+    apply_lines,
 ) -> StrategyApplyResult:
+    """Записать в выбранный пресет найденную стратегию.
+
+    ``apply_lines`` — ровно те строки, на которых подбор проверял стратегию
+    (``strategy_search.probe_profile``). Здесь они не пересобираются: что
+    проверили, то и записали.
+    """
+    new_strategy_lines = [str(line).strip() for line in (apply_lines or ()) if str(line or "").strip()]
+    if not new_strategy_lines:
+        raise RuntimeError("У стратегии нет проверенного профиля — запустите подбор ещё раз")
     target = scan_target or default_target_for_protocol(scan_protocol)
 
     if scan_protocol == "stun_voice":
-        target_host, target_port = stun_target_parts(target)
-        if not target_host:
-            target_host = "stun.l.google.com"
-            target_port = 19302
-
-        new_strategy_lines = [
-            "--wf-udp-out=443-65535",
-            "--filter-l7=stun,discord",
-            "--payload=stun,discord_ip_discovery",
-            strategy_args,
-        ]
-        applied_profile = f"voice, проверка {format_stun_target(target_host, target_port)}"
+        applied_profile = f"голосовые звонки, проверка {target}"
     elif scan_protocol == "udp_games":
-        games_ipset_paths = resolve_games_ipset_paths(scan_udp_games_scope)
-        probe_host, probe_port = stun_target_parts(target)
-        if not probe_host:
-            probe_host = "stun.cloudflare.com"
-            probe_port = 3478
-
-        new_strategy_lines = [
-            "--wf-udp-out=443,50000-65535",
-            "--filter-udp=443,50000-65535",
-            *[f"--ipset={path}" for path in games_ipset_paths],
-            strategy_args,
-        ]
-        shown_paths = ", ".join(games_ipset_paths[:3])
-        if len(games_ipset_paths) > 3:
-            shown_paths += f", ... (+{len(games_ipset_paths) - 3})"
-        applied_profile = (
-            f"Games UDP ipsets ({shown_paths}), "
-            f"проверка {format_stun_target(probe_host, probe_port)}"
-        )
+        applied_profile = f"игры UDP, проверка {target}"
     else:
-        normalized_target = normalize_target_domain(target) or "discord.com"
-        new_strategy_lines = [
-            "--filter-tcp=443",
-            f"--hostlist-domains={normalized_target}",
-            "--out-range=-d8",
-            strategy_args,
-        ]
-        applied_profile = normalized_target
+        applied_profile = normalize_target_domain(target) or target
 
     selected_file_name, operation, blob_warnings = apply_profile_to_selected_preset(
         profile_feature=profile_feature,

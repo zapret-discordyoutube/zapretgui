@@ -59,15 +59,18 @@ class StrategyScanApplyRuntimeArchitectureTests(unittest.TestCase):
         page._strategy_apply_start_scheduled = False
         page.create_strategy_apply_worker = Mock()
 
-        StrategyScanPage._request_strategy_apply(page, "--dpi-desync=fake", "old")
-        StrategyScanPage._request_strategy_apply(page, "--dpi-desync=split", "new")
+        old = SimpleNamespace(strategy_args="--lua-desync=fake", strategy_name="old", apply_lines=("--a",))
+        new = SimpleNamespace(strategy_args="--lua-desync=multisplit", strategy_name="new", apply_lines=("--b",))
+        StrategyScanPage._request_strategy_apply(page, old)
+        StrategyScanPage._request_strategy_apply(page, new)
 
         page.create_strategy_apply_worker.assert_not_called()
         self.assertEqual(
             page._strategy_apply_pending,
             {
-                "strategy_args": "--dpi-desync=split",
+                "strategy_args": "--lua-desync=multisplit",
                 "strategy_name": "new",
+                "apply_lines": ("--b",),
             },
         )
 

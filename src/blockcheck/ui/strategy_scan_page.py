@@ -93,7 +93,7 @@ class StrategyScanPage(BasePage):
         self._scan_protocol: str = "tcp_https"
         self._scan_udp_games_scope: str = "all"
         self._scan_mode: str = "quick"
-        self._scan_cursor: int = 0
+        self._scan_worker = None
         self._run_log_file: Path | None = None
         self._quick_domain_btn: PushButton | None = None
         self._target_label: QLabel | None = None
@@ -113,11 +113,6 @@ class StrategyScanPage(BasePage):
         self._support_prepare_state = LatestValueWorkerState(self._support_prepare_runtime, empty_value=None)
         self._quick_targets_runtime = OneShotWorkerRuntime()
         self._quick_targets_state = LatestValueWorkerState(self._quick_targets_runtime, empty_value=None)
-        self._strategy_scan_resume_save_runtime = OneShotWorkerRuntime()
-        self._strategy_scan_resume_save_state = LatestValueWorkerState(
-            self._strategy_scan_resume_save_runtime,
-            empty_value=None,
-        )
         self._strategy_scan_finalize_runtime = OneShotWorkerRuntime()
         self._strategy_scan_finalize_state = LatestValueWorkerState(
             self._strategy_scan_finalize_runtime,
@@ -156,33 +151,11 @@ class StrategyScanPage(BasePage):
             parent=self,
         )
 
-    def create_strategy_scan_resume_save_worker(
-        self,
-        request_id: int,
-        *,
-        scan_target: str,
-        scan_protocol: str,
-        next_index: int,
-        udp_games_scope: str,
-    ):
-        return self._blockcheck.create_strategy_scan_resume_save_worker(
-            request_id,
-            scan_target=scan_target,
-            scan_protocol=scan_protocol,
-            next_index=next_index,
-            udp_games_scope=udp_games_scope,
-            parent=self,
-        )
-
     def create_strategy_scan_finalize_worker(self, request_id: int, *, report):
         return self._blockcheck.create_strategy_scan_finalize_worker(
             request_id,
             report=report,
-            scan_target=self._scan_target,
             scan_protocol=self._scan_protocol,
-            scan_udp_games_scope=self._scan_udp_games_scope,
-            scan_mode=self._scan_mode,
-            scan_cursor=self._scan_cursor,
             result_rows=list(self._result_rows),
             parent=self,
         )
@@ -532,11 +505,6 @@ class StrategyScanPage(BasePage):
             raw_protocol_value=self._protocol_combo.currentData(),
             raw_udp_scope_value=self._games_scope_combo.currentData() if self._games_scope_combo is not None else "all",
             mode_index=self._mode_combo.currentIndex(),
-            previous_target=self._scan_target,
-            previous_protocol=self._scan_protocol,
-            previous_scope=self._scan_udp_games_scope,
-            result_rows_count=len(self._result_rows),
-            table_row_count=self._table.rowCount(),
             starting_status_text=tr_catalog("page.blockcheck_public.starting", default="Запуск сканирования..."),
             parent=self,
             on_run_log_started=self._on_run_log_started,
@@ -544,28 +512,28 @@ class StrategyScanPage(BasePage):
             on_strategy_result=self._on_strategy_result,
             on_log=self._on_log,
             on_phase_changed=self._on_phase_changed,
+            on_continue_question=self._on_continue_question,
             on_finished=self._on_finished,
         )
         self._target_input.setText(run_result.target)
 
-        if not run_result.keep_current_results:
-            self._table.setRowCount(0)
-            set_state_text(self._table, "Результаты подбора стратегии: пока нет результатов")
-            self._result_rows.clear()
-            self._log_edit.clear()
-            set_state_text(self._log_edit, "Подробный лог подбора стратегии: пока нет записей")
+        self._table.setRowCount(0)
+        set_state_text(self._table, "Результаты подбора стратегии: пока нет результатов")
+        self._result_rows.clear()
+        self._log_edit.clear()
+        set_state_text(self._log_edit, "Подробный лог подбора стратегии: пока нет записей")
         self._set_support_status("")
 
         self._scan_target = run_result.target
         self._scan_protocol = run_result.scan_protocol
         self._scan_udp_games_scope = run_result.udp_games_scope
         self._scan_mode = run_result.mode
-        self._scan_cursor = run_result.scan_cursor
+        self._scan_worker = run_result.worker
         self._run_log_file = None
 
         self._apply_interaction_plan(self._blockcheck.build_running_interaction_plan())
         self._progress_bar.setVisible(True)
-        self._progress_bar.setValue(self._scan_cursor)
+        self._progress_bar.setValue(0)
         set_state_text(self._progress_bar, "Ход подбора стратегии: выполняется")
         self._set_status_text(run_result.status_text)
         start_strategy_scan_worker(
@@ -619,7 +587,7 @@ class StrategyScanPage(BasePage):
             result_rows=self._result_rows,
             progress_bar=self._progress_bar,
             status_label=self._status_label,
-            scan_cursor=self._scan_cursor,
+            done_count=len(self._result_rows),
         )
         self._set_status_text(self._status_label.text())
 
@@ -631,102 +599,59 @@ class StrategyScanPage(BasePage):
             blockcheck_feature=self._blockcheck,
             table=self._table,
             result=result,
-            scan_cursor=self._scan_cursor,
+            row_number=len(self._result_rows) + 1,
             tr_fn=lambda key, default: tr_catalog(key, default=default),
             push_button_cls=PushButton,
             on_apply_strategy=self._on_apply_strategy,
         )
         self._result_rows.append(dict(stored_row))
-        self._scan_cursor = int(self._scan_cursor) + 1
-        self._request_strategy_scan_resume_save(
-            scan_target=self._scan_target,
-            scan_protocol=self._scan_protocol,
-            udp_games_scope=self._scan_udp_games_scope,
-            next_index=self._scan_cursor,
-        )
-        self._progress_bar.setValue(self._scan_cursor)
+        self._progress_bar.setValue(len(self._result_rows))
 
-    def _request_strategy_scan_resume_save(
-        self,
-        *,
-        scan_target: str,
-        scan_protocol: str,
-        udp_games_scope: str,
-        next_index: int,
-    ) -> None:
-        payload = {
-            "scan_target": scan_target,
-            "scan_protocol": scan_protocol,
-            "udp_games_scope": udp_games_scope,
-            "next_index": int(next_index),
-        }
-        state = self._strategy_scan_resume_save_state_obj()
-        if state.is_busy():
-            state.pending = payload
+    def _on_continue_question(self, reason: str) -> None:
+        """Цель открывается без обхода: спросить, проверять ли всё равно."""
+        worker = self._scan_worker
+        if worker is None:
             return
+        proceed = False
+        if not self._cleanup_in_progress:
+            try:
+                from qfluentwidgets import MessageBox
+                from ui.message_box_accessibility import set_message_box_button_accessibility
 
-        state.pending = None
-        self._start_strategy_scan_resume_save_worker(payload)
+                title = tr_catalog("page.strategy_scan.baseline_question_title", default="Подбирать нечего")
+                body = f"{reason}\n\n" + tr_catalog(
+                    "page.strategy_scan.baseline_question_text",
+                    default="Всё равно проверить стратегии? Результаты будут только для сведения.",
+                )
+                box = MessageBox(title, body, self.window())
+                box.yesButton.setText(
+                    tr_catalog("page.strategy_scan.baseline_question_yes", default="Всё равно проверить")
+                )
+                box.cancelButton.setText(
+                    tr_catalog("page.strategy_scan.baseline_question_no", default="Не проверять")
+                )
+                set_message_box_button_accessibility(
+                    box,
+                    yes_name="Всё равно проверить стратегии",
+                    yes_description=body,
+                    cancel_name="Не проверять стратегии",
+                    cancel_description="Подбор завершится без проверки стратегий.",
+                )
+                proceed = bool(box.exec())
+            except Exception:
+                logger.exception("Strategy scan continue question failed")
+                proceed = False
+        worker.answer_continue(proceed)
 
-    def _start_strategy_scan_resume_save_worker(self, payload: dict) -> None:
-        if self._cleanup_in_progress:
+    def _restore_runtime_after_scan(self) -> None:
+        """Подбор останавливал Zapret — вернуть его, если он работал до подбора."""
+        restore = getattr(self._scan_worker, "restore_runtime_if_needed", None)
+        if restore is None:
             return
-
-        def worker_factory(request_id: int):
-            return self.create_strategy_scan_resume_save_worker(request_id, **payload)
-
-        def bind_worker(worker) -> None:
-            worker.completed.connect(self._on_strategy_scan_resume_save_finished)
-            worker.failed.connect(self._on_strategy_scan_resume_save_failed)
-
-        self._strategy_scan_resume_save_runtime.start_qthread_worker(
-            worker_factory=worker_factory,
-            bind_worker=bind_worker,
-            on_finished=self._on_strategy_scan_resume_save_runtime_finished,
-        )
-
-    def _on_strategy_scan_resume_save_finished(self, request_id: int, _result) -> None:
-        if not self._strategy_scan_resume_save_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-
-    def _on_strategy_scan_resume_save_failed(self, request_id: int, error: str) -> None:
-        if not self._strategy_scan_resume_save_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        logger.warning("Failed to save strategy-scan resume progress: %s", error)
-
-    def _on_strategy_scan_resume_save_runtime_finished(self, _worker) -> None:
-        self._strategy_scan_resume_save_state_obj().schedule_pending_after_finish(
-            _worker,
-            is_current_worker_finish=self._is_current_worker_finish,
-            single_shot=QTimer.singleShot,
-            run_scheduled=self._run_scheduled_strategy_scan_resume_save_worker_start,
-            cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False),
-        )
-
-    def _schedule_strategy_scan_resume_save_worker_start(self, payload: dict) -> None:
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        state = self._strategy_scan_resume_save_state_obj()
-        state.pending = dict(payload or {})
-        state.schedule_start(
-            QTimer.singleShot,
-            self._run_scheduled_strategy_scan_resume_save_worker_start,
-            cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False),
-        )
-
-    def _run_scheduled_strategy_scan_resume_save_worker_start(self) -> None:
-        pending = self._strategy_scan_resume_save_state_obj().take_pending_for_scheduled_start(
-            cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False),
-        )
-        if pending is None:
-            return
-        self._start_strategy_scan_resume_save_worker(pending)
+        try:
+            restore()
+        except Exception:
+            logger.exception("Failed to restore Zapret after strategy scan")
 
     def _on_log(self, message: str):
         if self._cleanup_in_progress:
@@ -749,6 +674,7 @@ class StrategyScanPage(BasePage):
         """Handle scan completion."""
         if self._cleanup_in_progress:
             return
+        self._restore_runtime_after_scan()
         self._request_strategy_scan_finalize(report)
 
     def _request_strategy_scan_finalize(self, report) -> None:
@@ -913,39 +839,6 @@ class StrategyScanPage(BasePage):
     def _quick_targets_start_scheduled(self, value: bool) -> None:
         self._quick_targets_state_obj().start_scheduled = bool(value)
 
-    def _strategy_scan_resume_save_state_obj(self) -> LatestValueWorkerState:
-        state = self.__dict__.get("_strategy_scan_resume_save_state")
-        runtime = self.__dict__.get("_strategy_scan_resume_save_runtime")
-        if state is None:
-            pending = self.__dict__.pop("_strategy_scan_resume_save_pending", None)
-            start_scheduled = bool(self.__dict__.pop("_strategy_scan_resume_save_start_scheduled", False))
-            state = LatestValueWorkerState(
-                runtime,
-                empty_value=None,
-                pending=pending,
-                start_scheduled=start_scheduled,
-            )
-            self.__dict__["_strategy_scan_resume_save_state"] = state
-        elif getattr(state, "runtime", None) is None and runtime is not None:
-            state.runtime = runtime
-        return state
-
-    @property
-    def _strategy_scan_resume_save_pending(self):
-        return self._strategy_scan_resume_save_state_obj().pending
-
-    @_strategy_scan_resume_save_pending.setter
-    def _strategy_scan_resume_save_pending(self, value) -> None:
-        self._strategy_scan_resume_save_state_obj().pending = value
-
-    @property
-    def _strategy_scan_resume_save_start_scheduled(self) -> bool:
-        return bool(self._strategy_scan_resume_save_state_obj().start_scheduled)
-
-    @_strategy_scan_resume_save_start_scheduled.setter
-    def _strategy_scan_resume_save_start_scheduled(self, value: bool) -> None:
-        self._strategy_scan_resume_save_state_obj().start_scheduled = bool(value)
-
     def _strategy_scan_finalize_state_obj(self) -> LatestValueWorkerState:
         state = self.__dict__.get("_strategy_scan_finalize_state")
         runtime = self.__dict__.get("_strategy_scan_finalize_runtime")
@@ -1016,25 +909,26 @@ class StrategyScanPage(BasePage):
     # Apply strategy
     # ------------------------------------------------------------------
 
-    def _on_apply_strategy(self, strategy_args: str, strategy_name: str):
-        """Copy the working strategy into the selected source preset."""
-        self._request_strategy_apply(strategy_args, strategy_name)
+    def _on_apply_strategy(self, result):
+        """Записать проверенную стратегию в выбранный пресет."""
+        self._request_strategy_apply(result)
 
-    def create_strategy_apply_worker(self, request_id: int, *, strategy_args: str, strategy_name: str):
+    def create_strategy_apply_worker(self, request_id: int, *, strategy_args: str, strategy_name: str, apply_lines=()):
         return self._blockcheck.create_strategy_apply_worker(
             request_id,
             strategy_args=strategy_args,
             strategy_name=strategy_name,
             scan_target=self._scan_target,
             scan_protocol=self._scan_protocol,
-            scan_udp_games_scope=self._scan_udp_games_scope,
+            apply_lines=tuple(apply_lines or ()),
             parent=self,
         )
 
-    def _request_strategy_apply(self, strategy_args: str, strategy_name: str) -> None:
+    def _request_strategy_apply(self, result) -> None:
         payload = {
-            "strategy_args": str(strategy_args or ""),
-            "strategy_name": str(strategy_name or ""),
+            "strategy_args": str(getattr(result, "strategy_args", "") or ""),
+            "strategy_name": str(getattr(result, "strategy_name", "") or ""),
+            "apply_lines": tuple(getattr(result, "apply_lines", ()) or ()),
         }
         state = self._strategy_apply_state_obj()
         if state.is_busy():
@@ -1049,6 +943,7 @@ class StrategyScanPage(BasePage):
                 request_id,
                 strategy_args=str(payload.get("strategy_args") or ""),
                 strategy_name=str(payload.get("strategy_name") or ""),
+                apply_lines=tuple(payload.get("apply_lines") or ()),
             )
 
         def bind_worker(worker) -> None:
@@ -1398,12 +1293,6 @@ class StrategyScanPage(BasePage):
             warning_prefix="strategy scan quick targets worker",
         )
         self._quick_targets_runtime.cancel()
-        self._strategy_scan_resume_save_state_obj().reset()
-        self._strategy_scan_resume_save_runtime.stop(
-            blocking=False,
-            warning_prefix="strategy scan resume save worker",
-        )
-        self._strategy_scan_resume_save_runtime.cancel()
         self._strategy_scan_finalize_state_obj().reset()
         self._strategy_scan_finalize_runtime.stop(
             blocking=False,

@@ -490,9 +490,19 @@ class BlockcheckApplyTests(unittest.TestCase):
                 "strategy_name": "found",
                 "scan_target": "www.youtube.com",
                 "scan_protocol": "tcp_https",
-                "scan_udp_games_scope": "all",
             }
             params.update(kwargs)
+            if "apply_lines" not in params:
+                from blockcheck.strategy_search.probe_profile import build_probe_profile
+
+                # Как у подбора: «Применить» получает проверенный профиль целиком.
+                params["apply_lines"] = tuple(
+                    build_probe_profile(
+                        params["scan_protocol"],
+                        strategy_args=params["strategy_args"],
+                        match_domain=params["scan_target"],
+                    ).apply_lines()
+                )
             with patch("settings.store.MAIN_DIRECTORY", str(root)):
                 return apply_strategy(profile_feature=profile_feature, **params)
 
@@ -530,6 +540,7 @@ class BlockcheckApplyTests(unittest.TestCase):
         # поверх веток пишется один --payload с объединением их типов.
         text = "\n".join(
             (
+                "--wf-tcp-out=80,443",
                 "--name=YouTube",
                 "--filter-tcp=80,443",
                 "--hostlist-domains=www.youtube.com",
@@ -550,6 +561,7 @@ class BlockcheckApplyTests(unittest.TestCase):
             store.text,
             "\n".join(
                 (
+                    "--wf-tcp-out=80,443",
                     "--name=YouTube",
                     "--filter-tcp=80,443",
                     "--hostlist-domains=www.youtube.com",
@@ -564,6 +576,7 @@ class BlockcheckApplyTests(unittest.TestCase):
     def test_apply_adds_scanned_payload_when_profile_payload_misses_it(self) -> None:
         text = "\n".join(
             (
+                "--wf-tcp-out=80,443",
                 "--name=YouTube",
                 "--filter-tcp=80,443",
                 "--hostlist-domains=www.youtube.com",

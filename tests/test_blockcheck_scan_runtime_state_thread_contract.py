@@ -95,10 +95,13 @@ class BlockcheckScanShutdownWiringTests(unittest.TestCase):
         from ui.page_deps.system import build_blockcheck_page_kwargs
         from ui.page_registry import PageName
 
-        blockcheck_feature = SimpleNamespace(create_strategy_scan_worker=Mock(return_value="worker"))
+        worker = Mock(name="worker")
+        blockcheck_feature = SimpleNamespace(create_strategy_scan_worker=Mock(return_value=worker))
         runtime_feature = SimpleNamespace(
             shutdown_sync=Mock(name="shutdown_sync"),
             shutdown_sync_from_worker=Mock(name="shutdown_sync_from_worker"),
+            is_running=Mock(return_value=True),
+            start=Mock(name="start"),
         )
 
         kwargs = build_blockcheck_page_kwargs(
@@ -110,11 +113,13 @@ class BlockcheckScanShutdownWiringTests(unittest.TestCase):
 
         result = kwargs["create_strategy_scan_worker"](target="discord.com")
 
-        self.assertEqual(result, "worker")
+        self.assertIs(result, worker)
         blockcheck_feature.create_strategy_scan_worker.assert_called_once_with(
             target="discord.com",
             shutdown_sync=runtime_feature.shutdown_sync_from_worker,
         )
+        # Подбор выключает Zapret: окно вернёт его, если он работал до подбора.
+        worker.set_runtime_restore.assert_called_once_with(was_running=True, restore=runtime_feature.start)
 
     def test_updater_runtime_actions_use_worker_variant_of_shutdown_sync(self) -> None:
         from ui.page_deps.system import build_servers_page_kwargs

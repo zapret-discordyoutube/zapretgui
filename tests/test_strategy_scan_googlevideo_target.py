@@ -7,7 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 
 PROJECT_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -27,18 +27,24 @@ def _make_worker(
     target: str,
     *,
     scan_protocol: str = "tcp_https",
-    start_index: int = 0,
 ) -> StrategyScanWorker:
     return StrategyScanWorker(
         target=target,
         mode="quick",
-        start_index=start_index,
         scan_protocol=scan_protocol,
         shutdown_sync=lambda *a, **k: None,
         start_run_log=lambda **k: SimpleNamespace(path=None),
         append_run_log=lambda *_a: None,
         close_run_log=lambda *_a: None,
+        environment_factory=lambda **_kw: object(),
     )
+
+
+_SEARCH = "blockcheck.strategy_search.engine.run_strategy_search"
+
+
+def _request(search_mock):
+    return search_mock.call_args.args[0]
 
 
 def _stub_scanner_report(target: str) -> StrategyScanReport:
@@ -55,8 +61,6 @@ class StrategyScanGoogleVideoTargetTests(unittest.TestCase):
         logs: list[str] = []
         worker.scan_log.connect(logs.append)
 
-        scanner = Mock()
-        scanner.run.return_value = _stub_scanner_report("rr5---sn-test.googlevideo.com")
         with patch(
             "blockcheck.googlevideo_discovery.discover_googlevideo_host",
             return_value=GoogleVideoDiscoveryResult(
@@ -64,83 +68,65 @@ class StrategyScanGoogleVideoTargetTests(unittest.TestCase):
                 detail="найдено вариантов: 1",
             ),
         ) as discover, patch(
-            "blockcheck.strategy_scanner.StrategyScanner",
-            return_value=scanner,
-        ) as scanner_cls:
+            _SEARCH,
+            return_value=_stub_scanner_report("googlevideo.com"),
+        ) as search:
             worker.run()
 
         discover.assert_called_once()
-        self.assertEqual(
-            scanner_cls.call_args.kwargs["target"],
-            "rr5---sn-test.googlevideo.com",
-        )
+        # Проверяется видеосервер, а профиль пишется на googlevideo.com.
+        self.assertEqual(_request(search).probe_host, "rr5---sn-test.googlevideo.com")
+        self.assertEqual(_request(search).target, "googlevideo.com")
         self.assertTrue(
             any("rr5---sn-test.googlevideo.com" in line for line in logs),
             logs,
         )
 
     def test_bare_googlevideo_discovery_failure_aborts_with_fatal_error(self) -> None:
-        worker = _make_worker("googlevideo.com", start_index=3)
+        worker = _make_worker("googlevideo.com")
         finished: list[object] = []
         worker.scan_finished.connect(finished.append)
 
         with patch(
             "blockcheck.googlevideo_discovery.discover_googlevideo_host",
             return_value=GoogleVideoDiscoveryResult(detail="YouTube не отдал адресов"),
-        ), patch("blockcheck.strategy_scanner.StrategyScanner") as scanner_cls:
+        ), patch(_SEARCH) as search:
             worker.run()
 
-        scanner_cls.assert_not_called()
+        search.assert_not_called()
         self.assertEqual(len(finished), 1)
         report = finished[0]
         self.assertTrue(report.cancelled)
         self.assertIn("YouTube не отдал адресов", report.fatal_error)
         self.assertEqual(report.target, "googlevideo.com")
-        self.assertEqual(report.total_tested, 3)
+        self.assertEqual(report.total_tested, 0)
 
     def test_non_googlevideo_target_skips_discovery(self) -> None:
         worker = _make_worker("discord.com")
-        scanner = Mock()
-        scanner.run.return_value = _stub_scanner_report("discord.com")
         with patch(
             "blockcheck.googlevideo_discovery.discover_googlevideo_host"
-        ) as discover, patch(
-            "blockcheck.strategy_scanner.StrategyScanner",
-            return_value=scanner,
-        ) as scanner_cls:
+        ) as discover, patch(_SEARCH, return_value=_stub_scanner_report("discord.com")) as search:
             worker.run()
 
         discover.assert_not_called()
-        self.assertEqual(scanner_cls.call_args.kwargs["target"], "discord.com")
+        self.assertEqual(_request(search).target, "discord.com")
+        self.assertEqual(_request(search).probe_host, "")
 
     def test_rr_host_target_not_touched(self) -> None:
         worker = _make_worker("rr5---sn-abc.googlevideo.com")
-        scanner = Mock()
-        scanner.run.return_value = _stub_scanner_report("rr5---sn-abc.googlevideo.com")
         with patch(
             "blockcheck.googlevideo_discovery.discover_googlevideo_host"
-        ) as discover, patch(
-            "blockcheck.strategy_scanner.StrategyScanner",
-            return_value=scanner,
-        ) as scanner_cls:
+        ) as discover, patch(_SEARCH, return_value=_stub_scanner_report("rr5---sn-abc.googlevideo.com")) as search:
             worker.run()
 
         discover.assert_not_called()
-        self.assertEqual(
-            scanner_cls.call_args.kwargs["target"],
-            "rr5---sn-abc.googlevideo.com",
-        )
+        self.assertEqual(_request(search).target, "rr5---sn-abc.googlevideo.com")
 
     def test_stun_protocol_skips_discovery(self) -> None:
         worker = _make_worker("stun.l.google.com:19302", scan_protocol="stun_voice")
-        scanner = Mock()
-        scanner.run.return_value = _stub_scanner_report("stun.l.google.com:19302")
         with patch(
             "blockcheck.googlevideo_discovery.discover_googlevideo_host"
-        ) as discover, patch(
-            "blockcheck.strategy_scanner.StrategyScanner",
-            return_value=scanner,
-        ):
+        ) as discover, patch(_SEARCH, return_value=_stub_scanner_report("stun.l.google.com:19302")):
             worker.run()
 
         discover.assert_not_called()
@@ -157,14 +143,56 @@ class StrategyScanGoogleVideoTargetTests(unittest.TestCase):
         with patch(
             "blockcheck.googlevideo_discovery.discover_googlevideo_host",
             side_effect=cancel_and_fail,
-        ), patch("blockcheck.strategy_scanner.StrategyScanner") as scanner_cls:
+        ), patch(_SEARCH) as search:
             worker.run()
 
-        scanner_cls.assert_not_called()
+        search.assert_not_called()
         self.assertEqual(len(finished), 1)
         report = finished[0]
         self.assertTrue(report.cancelled)
         self.assertEqual(report.fatal_error, "")
+
+
+class StrategyScanWorkerQuestionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def test_question_waits_for_answer_from_window(self) -> None:
+        import threading
+
+        worker = _make_worker("discord.com")
+        worker.continue_question.connect(lambda _reason: None)
+        answers = []
+        thread = threading.Thread(target=lambda: answers.append(worker.ask_continue("открыто без обхода")))
+        thread.start()
+        worker.answer_continue(True)
+        thread.join(2)
+        self.assertEqual(answers, [True])
+
+    def test_stop_unblocks_pending_question_with_no(self) -> None:
+        import threading
+
+        worker = _make_worker("discord.com")
+        answers = []
+        thread = threading.Thread(target=lambda: answers.append(worker.ask_continue("открыто без обхода")))
+        thread.start()
+        worker.stop()
+        thread.join(2)
+        self.assertEqual(answers, [False])
+
+    def test_runtime_is_restored_only_when_it_was_running(self) -> None:
+        calls = []
+        worker = _make_worker("discord.com")
+        worker.set_runtime_restore(was_running=False, restore=lambda: calls.append("start"))
+        self.assertFalse(worker.restore_runtime_if_needed())
+
+        worker = _make_worker("discord.com")
+        worker.set_runtime_restore(was_running=True, restore=lambda: calls.append("start"))
+        self.assertTrue(worker.restore_runtime_if_needed())
+        # Второй раз не запускает.
+        self.assertFalse(worker.restore_runtime_if_needed())
+        self.assertEqual(calls, ["start"])
 
 
 if __name__ == "__main__":

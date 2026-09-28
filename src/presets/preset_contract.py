@@ -145,7 +145,7 @@ DRY_RUN_FUNCTION_MARKER = "dry_run"
 # --- 3. Сгенерированные конфиги --------------------------------------------
 
 GENERATED_CONFIG_EXEMPTIONS: dict[str, str] = {
-    "src/blockcheck/strategy_scanner.py": "временный пресет пробы blockcheck",
+    "src/blockcheck/strategy_search/environment.py": "временный @config пробы подбора стратегии",
     "src/orchestra/orchestra_runner.py": "рабочий конфиг circular-оркестратора",
 }
 

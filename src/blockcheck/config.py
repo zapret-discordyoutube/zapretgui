@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from settings.mode import RELATIVE_EXE_PATH_WINWS2
 
 # ---------------------------------------------------------------------------
 # Timeouts (seconds)
@@ -135,17 +134,6 @@ WINDOWS_ERRNO_NET_UNREACH = 10051   # WSAENETUNREACH
 # прежние 4 воркера растягивали ~300 проб на минуты.
 DEFAULT_PARALLEL = 16
 MAX_PARALLEL = 32
-
-# ---------------------------------------------------------------------------
-# Strategy scanner
-# ---------------------------------------------------------------------------
-STRATEGY_PROBE_TIMEOUT = 5        # seconds per HTTPS connect + TLS handshake
-STRATEGY_RESPONSE_TIMEOUT = 3     # seconds to read HTTP response after TLS ok
-STRATEGY_STARTUP_WAIT = 1.0       # seconds to wait for winws2 startup
-STRATEGY_KILL_TIMEOUT = 4         # seconds to wait for winws2 shutdown
-WINWS2_EXE_RELATIVE = RELATIVE_EXE_PATH_WINWS2
-PROBE_TEMP_PRESET = "blockcheck_probe.txt"
-PROBE_TEMP_HOSTLIST = "blockcheck_probe_hosts.txt"
 
 # ---------------------------------------------------------------------------
 # Preflight

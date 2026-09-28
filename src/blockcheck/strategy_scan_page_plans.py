@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from blockcheck.strategy_scan_resume import clear_resume_state, get_resume_index, save_resume_state, scan_key
 from blockcheck.strategy_scan_state import (
     StrategyApplyResult,
     StrategyScanFinishPlan,
@@ -270,44 +269,58 @@ def build_progress_plan(
     working = count_working_results(result_rows)
     return StrategyScanProgressPlan(
         total=max(0, int(total)),
-        status_text=f"[{index + 1}/{total}] {strategy_name}  |  {working} рабочих",
+        status_text=f"[{index + 1}/{total}] {strategy_name}  |  надёжно работают: {working}",
     )
 
 
-def build_result_presentation(result, *, scan_cursor: int) -> StrategyScanResultPresentation:
-    tip_parts = [result.strategy_args]
-    if result.error:
-        tip_parts.append(f"\n--- Ошибка ---\n{result.error}")
+_VERDICT_PRESENTATION = {
+    # verdict: (текст в таблице, тон)
+    "working": ("Работает", "success"),
+    "unstable": ("Нестабильно", "timeout"),
+    "failed": ("Не работает", "fail"),
+    "crash": ("Сбой winws2", "timeout"),
+    "not_counted": ("Не засчитано", "timeout"),
+}
+
+
+def build_result_presentation(result, *, row_number: int) -> StrategyScanResultPresentation:
+    verdict = str(getattr(result, "verdict", "") or ("working" if result.success else "failed"))
+    status_text, status_tone = _VERDICT_PRESENTATION.get(verdict, ("Не работает", "fail"))
+    attempts_ok = int(getattr(result, "attempts_ok", 0) or 0)
+    attempts_total = int(getattr(result, "attempts_total", 0) or 0)
+    if verdict in ("working", "unstable", "not_counted") and attempts_total:
+        status_text = f"{status_text} {attempts_ok}/{attempts_total}"
 
     error_text = str(getattr(result, "error", "") or "")
-    error_lower = error_text.lower()
-    if result.success:
-        status_text = "OK"
-        status_tone = "success"
-    elif "timeout" in error_lower:
-        status_text = "TIMEOUT"
-        status_tone = "timeout"
+    tip_parts = [result.strategy_args]
+    if error_text:
+        tip_parts.append(f"\n--- Причина ---\n{error_text}")
+    if verdict == "working":
+        status_tooltip = f"Открылось {attempts_ok} раза подряд на свежих соединениях"
+    elif verdict == "unstable":
+        status_tooltip = f"Открылось не каждый раз ({attempts_ok} из {attempts_total}): {error_text}"
     else:
-        status_text = "FAIL"
-        status_tone = "fail"
+        status_tooltip = error_text or status_text
 
     time_ms = float(getattr(result, "time_ms", 0) or 0)
     time_text = f"{time_ms:.0f}" if time_ms > 0 else "—"
+    can_apply = bool(result.success) and bool(getattr(result, "apply_lines", ()))
 
     return StrategyScanResultPresentation(
-        number_text=str(scan_cursor + 1),
+        number_text=str(int(row_number)),
         strategy_name=result.strategy_name,
         strategy_tooltip="".join(tip_parts),
         status_text=status_text,
         status_tone=status_tone,
-        status_tooltip=error_text if error_text else "OK",
+        status_tooltip=status_tooltip,
         time_text=time_text,
-        can_apply=bool(result.success),
+        can_apply=can_apply,
         stored_row={
             "id": getattr(result, "strategy_id", ""),
             "name": result.strategy_name,
             "args": result.strategy_args,
             "success": bool(result.success),
+            "verdict": verdict,
         },
     )
 
@@ -318,133 +331,61 @@ def plan_scan_start(
     scan_protocol: str,
     udp_games_scope: str,
     mode: str,
-    previous_target: str,
-    previous_protocol: str,
-    previous_scope: str,
-    result_rows_count: int,
-    table_row_count: int,
     starting_status_text: str,
 ) -> StrategyScanStartPlan:
     target = normalize_target_input(raw_target_input, scan_protocol)
     if not target:
         target = default_target_for_protocol(scan_protocol)
-
-    prev_scan_key = scan_key(previous_target, previous_protocol, previous_scope)
-    current_scan_key = scan_key(target, scan_protocol, udp_games_scope)
-
-    resume_next_index = get_resume_index(target, scan_protocol, udp_games_scope)
-    resume_available = resume_next_index > 0
-
-    keep_current_results = (
-        resume_available
-        and previous_protocol == scan_protocol
-        and previous_scope == udp_games_scope
-        and prev_scan_key == current_scan_key
-        and result_rows_count == resume_next_index
-        and table_row_count == result_rows_count
-    )
-
-    scan_cursor = resume_next_index if resume_available else 0
-    if resume_available:
-        status_text = f"Возобновление сканирования с [{scan_cursor + 1}]..."
-    else:
-        status_text = starting_status_text
-
     return StrategyScanStartPlan(
         target=target,
         scan_protocol=scan_protocol,
         udp_games_scope=udp_games_scope,
         mode=mode,
-        keep_current_results=keep_current_results,
-        scan_cursor=scan_cursor,
-        status_text=status_text,
+        status_text=starting_status_text,
     )
 
 
 def finalize_scan_report(
     report,
     *,
-    scan_target: str,
     scan_protocol: str,
-    scan_udp_games_scope: str,
-    scan_mode: str,
-    scan_cursor: int,
     result_rows: list[dict],
 ) -> StrategyScanFinishPlan:
     working = sum(1 for row in result_rows if row.get("success"))
+    baseline_variant = "stun" if scan_protocol in {"stun_voice", "udp_games"} else "tcp"
 
     if report is None:
-        if scan_cursor > 0:
-            save_resume_state(
-                scan_target,
-                scan_protocol,
-                scan_cursor,
-                scan_udp_games_scope,
-            )
         return StrategyScanFinishPlan(
             total_available=0,
             working_count=working,
-            total_count=scan_cursor,
+            total_count=len(result_rows),
             cancelled=False,
             baseline_accessible=False,
-            status_text="Ошибка сканирования",
+            status_text="Ошибка подбора",
             log_message="ERROR: Strategy scan execution failed",
             support_status_code="ready_after_error",
             notification_kind="none",
-            baseline_variant="stun" if scan_protocol in {"stun_voice", "udp_games"} else "tcp",
+            baseline_variant=baseline_variant,
         )
 
     total_available = max(0, int(getattr(report, "total_available", 0) or 0))
-
-    if report.cancelled:
-        if scan_cursor > 0:
-            save_resume_state(
-                scan_target,
-                scan_protocol,
-                scan_cursor,
-                scan_udp_games_scope,
-            )
-        else:
-            clear_resume_state(
-                scan_target,
-                scan_protocol,
-                scan_udp_games_scope,
-            )
-    else:
-        full_scan_completed = (
-            scan_mode == "full"
-            and total_available > 0
-            and report.total_tested >= total_available
-        )
-        if full_scan_completed:
-            clear_resume_state(
-                scan_target,
-                scan_protocol,
-                scan_udp_games_scope,
-            )
-        else:
-            save_resume_state(
-                scan_target,
-                scan_protocol,
-                report.total_tested,
-                scan_udp_games_scope,
-            )
-
-    total_count = max(scan_cursor, report.total_tested)
+    total_count = int(report.total_tested)
     elapsed = report.elapsed_seconds
     fatal_error = str(getattr(report, "fatal_error", "") or "")
 
     if fatal_error:
-        status_text = f"Остановлено из-за ошибки. Протестировано: {total_count}, рабочих: {working} ({elapsed:.1f}s)"
+        status_text = f"Остановлено. Проверено: {total_count}, надёжно работают: {working} ({elapsed:.0f} с)"
     elif report.cancelled:
-        status_text = f"Отменено. Протестировано: {total_count}, рабочих: {working} ({elapsed:.1f}s)"
+        status_text = f"Отменено. Проверено: {total_count}, надёжно работают: {working} ({elapsed:.0f} с)"
     else:
-        status_text = f"Готово. Протестировано: {total_count}, рабочих: {working} ({elapsed:.1f}s)"
+        status_text = f"Готово. Проверено: {total_count}, надёжно работают: {working} ({elapsed:.0f} с)"
 
-    if report.cancelled:
+    if fatal_error or (report.cancelled and total_count == 0):
         notification_kind = "none"
     elif report.baseline_accessible:
         notification_kind = "baseline_accessible"
+    elif report.cancelled:
+        notification_kind = "none"
     elif working > 0:
         notification_kind = "found"
     else:
@@ -460,7 +401,7 @@ def finalize_scan_report(
         log_message=f"\n{status_text}",
         support_status_code="ready_after_error" if fatal_error else "ready",
         notification_kind=notification_kind,
-        baseline_variant="stun" if scan_protocol in {"stun_voice", "udp_games"} else "tcp",
+        baseline_variant=baseline_variant,
         fatal_error=fatal_error,
     )
 
@@ -480,7 +421,7 @@ def build_finish_notification_plan(finish_plan: StrategyScanFinishPlan, *, scan_
                 title_key="page.strategy_scan.baseline_ok_title_stun",
                 title_default=title_default,
                 body_key="page.strategy_scan.baseline_ok_text_stun",
-                body_default="STUN/UDP уже доступен без обхода DPI — результаты могут быть ложноположительными",
+                body_default="Цель отвечает и без обхода: результаты подбора — только для сведения",
                 body_text="",
             )
 
@@ -489,7 +430,7 @@ def build_finish_notification_plan(finish_plan: StrategyScanFinishPlan, *, scan_
             title_key="page.strategy_scan.baseline_ok_title",
             title_default=title_default,
             body_key="page.strategy_scan.baseline_ok_text",
-            body_default="Домен доступен без обхода DPI — результаты могут быть ложноположительными",
+            body_default="Сайт открывается и без обхода: результаты подбора — только для сведения",
             body_text="",
         )
 
@@ -497,7 +438,7 @@ def build_finish_notification_plan(finish_plan: StrategyScanFinishPlan, *, scan_
         return StrategyScanNotificationPlan(
             kind="success",
             title_key="page.strategy_scan.found",
-            title_default="Найдены рабочие стратегии",
+            title_default="Найдены надёжные стратегии",
             body_key="",
             body_default="",
             body_text=f"{finish_plan.working_count} из {finish_plan.total_count}",
@@ -509,7 +450,7 @@ def build_finish_notification_plan(finish_plan: StrategyScanFinishPlan, *, scan_
             title_key="page.strategy_scan.not_found",
             title_default="Рабочих стратегий не найдено",
             body_key="page.strategy_scan.try_full",
-            body_default="Попробуйте полный режим сканирования",
+            body_default="Запустите подбор ещё раз: проверятся следующие стратегии, или выберите «Все стратегии»",
             body_text="",
         )
 

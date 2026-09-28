@@ -256,10 +256,14 @@ def build_blockcheck_page_kwargs(
     def _create_strategy_scan_worker(**kwargs):
         # Сканер выполняет pre/post-scan cleanup в своём QThread, поэтому получает
         # worker-вариант остановки: runtime-state и UI-подписчиков обновляет GUI-поток.
-        return blockcheck_feature.create_strategy_scan_worker(
+        worker = blockcheck_feature.create_strategy_scan_worker(
             **kwargs,
             shutdown_sync=runtime_feature.shutdown_sync_from_worker,
         )
+        # Подбор останавливает Zapret на время замеров. Если он работал,
+        # окно запустит его снова, когда подбор закончится.
+        worker.set_runtime_restore(was_running=runtime_feature.is_running(), restore=runtime_feature.start)
+        return worker
 
     return {
         "blockcheck_feature": blockcheck_feature,

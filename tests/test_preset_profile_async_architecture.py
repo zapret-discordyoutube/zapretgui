@@ -3273,24 +3273,16 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertIn("build_quick_target_menu_plan", worker_source)
         self.assertNotIn("build_quick_target_menu_plan", handler_source)
 
-    def test_strategy_scan_resume_progress_saves_through_worker(self) -> None:
+    def test_strategy_scan_has_no_resume_cursor(self) -> None:
         import blockcheck.workers as blockcheck_workers
 
         page_source = inspect.getsource(StrategyScanPage)
-        result_source = inspect.getsource(StrategyScanPage._on_strategy_result)
         feature_source = inspect.getsource(BlockcheckFeature)
 
-        self.assertTrue(hasattr(blockcheck_workers, "StrategyScanResumeSaveWorker"))
-        worker_source = inspect.getsource(blockcheck_workers.StrategyScanResumeSaveWorker.run)
-
-        self.assertIn("_request_strategy_scan_resume_save", result_source)
-        self.assertNotIn("record_strategy_scan_result(", result_source)
-        self.assertIn("_strategy_scan_resume_save_worker", page_source)
-        self.assertIn("create_strategy_scan_resume_save_worker", feature_source)
-        self.assertIn("save_resume_state=self.save_resume_state", feature_source)
-        self.assertIn("_save_resume_state", worker_source)
-        self.assertNotIn("blockcheck_public", worker_source)
-        self.assertIn("save_resume_state", worker_source)
+        # Порядок стратегий теперь задаёт история подбора, а не курсор продолжения.
+        self.assertFalse(hasattr(blockcheck_workers, "StrategyScanResumeSaveWorker"))
+        self.assertNotIn("resume", page_source)
+        self.assertNotIn("resume", feature_source)
 
     def test_strategy_scan_finish_plan_finalizes_through_worker(self) -> None:
         import blockcheck.workers as blockcheck_workers

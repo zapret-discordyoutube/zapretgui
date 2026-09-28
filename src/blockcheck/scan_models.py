@@ -8,25 +8,31 @@ from typing import Any
 
 @dataclass
 class StrategyProbeResult:
-    """Result of testing a single strategy against a target."""
+    """Итог проверки одной стратегии."""
 
     strategy_name: str
     strategy_id: str
     strategy_args: str
     target: str
+    # Стратегия надёжно работает: прошла все попытки подряд.
     success: bool
+    # Время ответа сервера в удачной попытке (не включает запуск winws2).
     time_ms: float
+    # Почему не засчитана (пусто, если работает).
     error: str = ""
-    http_code: int = 0
     scan_protocol: str = "tcp_https"
-    probe_type: str = "https"
-    target_port: int = 443
+    # ``blockcheck.strategy_search.verdict.VERDICT_*``.
+    verdict: str = ""
+    attempts_ok: int = 0
+    attempts_total: int = 0
+    # Строки, которые проверялись и ровно так же пишутся в пресет «Применить».
+    apply_lines: tuple[str, ...] = ()
     raw_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class StrategyScanReport:
-    """Aggregated result of scanning multiple strategies."""
+    """Итог подбора целиком."""
 
     target: str
     total_tested: int
@@ -35,8 +41,11 @@ class StrategyScanReport:
     failed_strategies: list[StrategyProbeResult] = field(default_factory=list)
     elapsed_seconds: float = 0.0
     cancelled: bool = False
+    # Цель открывалась и без обхода (пользователь решил проверять всё равно
+    # или отказался от подбора).
     baseline_accessible: bool = False
     scan_protocol: str = "tcp_https"
-    # Причина аварийной остановки скана (например, WinDivert недоступен);
-    # пустая строка — скан завершился или отменён пользователем.
+    # Причина аварийной остановки подбора (нет интернета, WinDivert недоступен,
+    # блокировка по адресу, которую стратегии не снимают); пусто — подбор
+    # завершился или отменён пользователем.
     fatal_error: str = ""

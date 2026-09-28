@@ -86,7 +86,6 @@ def prepare_strategy_scan_support_request(
     target: str,
     protocol_label: str,
     mode_label: str,
-    resume_state_path: str | os.PathLike[str] | None,
     scan_protocol: str,
 ) -> SupportRequestFeedback:
     extra_note = (
@@ -104,7 +103,6 @@ def prepare_strategy_scan_support_request(
         candidate_paths=[
             run_log_file,
             *_common_candidate_paths(),
-            str(resume_state_path) if resume_state_path is not None else None,
         ],
         recent_patterns=("blockcheck_run_*.log", "zapret_winws2_debug_*.log"),
         extra_note=extra_note,

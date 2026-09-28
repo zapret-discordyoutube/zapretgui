@@ -317,13 +317,15 @@ class ScanGuardTests(unittest.TestCase):
             scan_guard.mark_external_winws_scan_active(False)
             self.assertFalse(scan_guard.is_external_winws_scan_active())
 
-    def test_blockcheck_scanner_wraps_run_with_scan_flag(self) -> None:
-        from blockcheck.strategy_scanner import StrategyScanner
+    def test_strategy_search_holds_scan_flag_for_whole_scan(self) -> None:
+        from blockcheck.strategy_search.environment import RealEnvironment
 
-        source = inspect.getsource(StrategyScanner.run)
-        self.assertIn("mark_external_winws_scan_active(True)", source)
-        self.assertIn("finally", source)
-        self.assertIn("mark_external_winws_scan_active(False)", source)
+        self.assertIn("mark_external_winws_scan_active(True)", inspect.getsource(RealEnvironment.pre_cleanup))
+        # Каждая стратегия продлевает флаг: полный подбор дольше его срока.
+        self.assertIn("mark_external_winws_scan_active(True)", inspect.getsource(RealEnvironment.start_session))
+        post_source = inspect.getsource(RealEnvironment.post_cleanup)
+        self.assertIn("finally", post_source)
+        self.assertIn("mark_external_winws_scan_active(False)", post_source)
 
 
 class ResolveUnexpectedExitTests(unittest.TestCase):

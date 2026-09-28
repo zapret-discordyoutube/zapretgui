@@ -733,6 +733,23 @@ def set_blockcheck_settings(values: dict[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(updated["blockcheck"])
 
 
+def update_blockcheck_settings(mutator) -> dict[str, Any]:
+    """Read-modify-write секции blockcheck одной транзакцией.
+
+    `mutator` получает копию секции, прочитанную внутри BEGIN IMMEDIATE, и
+    меняет её на месте. Так итоги подбора стратегии не затирают правку
+    пользовательских доменов из другого потока.
+    """
+
+    def _mutate(data: dict[str, Any]) -> None:
+        section = copy.deepcopy(_as_dict(data.get("blockcheck")))
+        mutator(section)
+        _set_path_value(data, ("blockcheck",), section)
+
+    updated = _update_settings(_mutate)
+    return copy.deepcopy(updated["blockcheck"])
+
+
 def get_folders_settings() -> dict[str, Any]:
     return _read_section("folders")
 

@@ -93,15 +93,6 @@ class BlockcheckFeature:
             **kwargs,
         )
 
-    def create_strategy_scan_resume_save_worker(self, request_id: int, **kwargs):
-        from blockcheck.workers import StrategyScanResumeSaveWorker
-
-        return StrategyScanResumeSaveWorker(
-            request_id,
-            save_resume_state=self.save_resume_state,
-            **kwargs,
-        )
-
     def create_strategy_scan_finalize_worker(self, request_id: int, **kwargs):
         from blockcheck.workers import StrategyScanFinalizeWorker
 
@@ -119,9 +110,6 @@ class BlockcheckFeature:
 
     def start_run_log(self, *args, **kwargs):
         return self._commands().start_run_log(*args, **kwargs)
-
-    def save_resume_state(self, *args, **kwargs):
-        return self._commands().save_resume_state(*args, **kwargs)
 
     def start_blockcheck_run_log(self, *args, **kwargs):
         return self._worker_commands().start_blockcheck_run_log(*args, **kwargs)

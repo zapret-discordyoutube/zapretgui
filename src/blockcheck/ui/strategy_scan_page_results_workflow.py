@@ -26,7 +26,7 @@ def apply_strategy_started_progress(
     result_rows: list[dict],
     progress_bar,
     status_label,
-    scan_cursor: int,
+    done_count: int,
 ) -> None:
     progress_plan = blockcheck_feature.build_progress_plan(
         strategy_name=strategy_name,
@@ -36,8 +36,8 @@ def apply_strategy_started_progress(
     )
     if progress_plan.total > 0:
         progress_bar.setRange(0, progress_plan.total)
-    if progress_bar.value() < scan_cursor:
-        progress_bar.setValue(scan_cursor)
+    if progress_bar.value() < done_count:
+        progress_bar.setValue(done_count)
     set_state_text(progress_bar, "Ход подбора стратегии: выполняется")
     _set_strategy_scan_status(status_label, progress_plan.status_text)
 
@@ -55,7 +55,7 @@ def add_strategy_result_row(
     blockcheck_feature,
     table,
     result,
-    scan_cursor: int,
+    row_number: int,
     tr_fn,
     push_button_cls,
     on_apply_strategy,
@@ -63,7 +63,7 @@ def add_strategy_result_row(
     ensure_strategy_result_table_current_row_accessibility(table)
     row_plan = blockcheck_feature.build_result_presentation(
         result,
-        scan_cursor=scan_cursor,
+        row_number=row_number,
     )
     row_idx = table.rowCount()
     table.insertRow(row_idx)
@@ -107,12 +107,9 @@ def add_strategy_result_row(
         set_control_accessibility(
             apply_btn,
             name=f"Применить стратегию {row_plan.strategy_name}",
-            description="Применяет найденную рабочую стратегию к текущему preset.",
+            description="Записывает проверенную стратегию в выбранный пресет.",
         )
-        apply_btn.clicked.connect(
-            lambda checked=False, args=result.strategy_args, name=result.strategy_name:
-            on_apply_strategy(args, name)
-        )
+        apply_btn.clicked.connect(lambda checked=False, found=result: on_apply_strategy(found))
         table.setCellWidget(row_idx, 4, apply_btn)
 
     table.scrollToBottom()

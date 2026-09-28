@@ -10,15 +10,6 @@ from blockcheck.strategy_scan_logs import (
     append_run_log,
     prepare_support,
 )
-from blockcheck.strategy_scan_resume import (
-    resume_state_path,
-    scan_key,
-    load_resume_state,
-    write_resume_state,
-    get_resume_index,
-    save_resume_state,
-    clear_resume_state,
-)
 from blockcheck.strategy_scan_state import (
     StrategyScanRunLogState,
     StrategyApplyResult,
@@ -108,15 +99,12 @@ __all__ = [
     "build_support_error_plan",
     "build_support_success_plan",
     "build_udp_scope_hint_plan",
-    "clear_resume_state",
     "count_working_results",
     "default_target_for_protocol",
     "finalize_scan_report",
     "format_stun_target",
-    "get_resume_index",
     "load_quick_domains",
     "load_quick_stun_targets",
-    "load_resume_state",
     "make_run_log_path",
     "mode_from_index",
     "normalize_target_domain",
@@ -125,11 +113,7 @@ __all__ = [
     "plan_scan_start",
     "prepare_support",
     "resolve_games_ipset_paths",
-    "resume_state_path",
-    "save_resume_state",
-    "scan_key",
     "scan_protocol_from_value",
     "start_run_log",
     "stun_target_parts",
-    "write_resume_state",
 ]

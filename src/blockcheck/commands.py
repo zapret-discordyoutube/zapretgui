@@ -32,32 +32,6 @@ def create_blockcheck_worker(
     )
 
 
-def create_strategy_scan_worker(
-    *,
-    target: str,
-    mode: str = "quick",
-    start_index: int = 0,
-    scan_protocol: str = "tcp_https",
-    udp_games_scope: str = "all",
-    shutdown_sync,
-    parent=None,
-):
-    from blockcheck.strategy_scan_worker import StrategyScanWorker
-
-    return StrategyScanWorker(
-        target=target,
-        mode=mode,
-        start_index=start_index,
-        scan_protocol=scan_protocol,
-        udp_games_scope=udp_games_scope,
-        shutdown_sync=shutdown_sync,
-        start_run_log=start_strategy_scan_run_log,
-        append_run_log=append_strategy_scan_run_log,
-        close_run_log=close_strategy_scan_run_log,
-        parent=parent,
-    )
-
-
 def load_page_initial_state():
     from blockcheck.page_runtime import load_page_initial_state as _load_page_initial_state
 
@@ -157,7 +131,6 @@ def start_strategy_scan_run_log(
     target: str,
     mode: str,
     scan_protocol: str,
-    resume_index: int,
     udp_games_scope: str,
 ):
     from blockcheck.strategy_scan_logs import start_run_log
@@ -166,7 +139,6 @@ def start_strategy_scan_run_log(
         target=target,
         mode=mode,
         scan_protocol=scan_protocol,
-        resume_index=resume_index,
         udp_games_scope=udp_games_scope,
     )
 

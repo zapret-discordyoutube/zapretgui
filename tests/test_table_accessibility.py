@@ -20,8 +20,8 @@ class TableAccessibilityTests(unittest.TestCase):
         from blockcheck.ui.strategy_scan_page_results_workflow import add_strategy_result_row
 
         class _Feature:
-            def build_result_presentation(self, _result, *, scan_cursor: int):
-                self.scan_cursor = scan_cursor
+            def build_result_presentation(self, _result, *, row_number: int):
+                self.row_number = row_number
                 return SimpleNamespace(
                     number_text="1",
                     strategy_name="TLS fake",
@@ -38,10 +38,10 @@ class TableAccessibilityTests(unittest.TestCase):
             blockcheck_feature=_Feature(),
             table=table,
             result=SimpleNamespace(strategy_args="--lua-desync=fake", strategy_name="TLS fake"),
-            scan_cursor=0,
+            row_number=1,
             tr_fn=lambda _key, default: default,
             push_button_cls=PushButton,
-            on_apply_strategy=lambda _args, _name: None,
+            on_apply_strategy=lambda _result: None,
         )
 
     def test_strategy_scan_result_row_has_screen_reader_text(self) -> None:

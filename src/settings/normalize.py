@@ -657,16 +657,25 @@ def normalize_updater(data: object) -> dict[str, Any]:
     }
 
 
-def normalize_blockcheck_scan_resume(data: object) -> dict[str, Any]:
-    raw = as_dict(data)
-    domains: dict[str, dict[str, int]] = {}
-    for raw_key, raw_value in as_dict(raw.get("domains")).items():
+def normalize_blockcheck_strategy_history(data: object) -> dict[str, Any]:
+    history: dict[str, dict[str, Any]] = {}
+    for raw_key, raw_value in as_dict(data).items():
         key = as_clean_str(raw_key).lower()
         if not key:
             continue
-        value_raw = as_dict(raw_value)
-        domains[key] = {"next_index": as_int(value_raw.get("next_index"), 0, minimum=0)}
-    return {"domains": domains}
+        entry = as_dict(raw_value)
+        confirmed = [item for item in unique_str_list(entry.get("confirmed")) if item]
+        failed: dict[str, float] = {}
+        for raw_id, raw_time in as_dict(entry.get("failed")).items():
+            strategy_id = as_clean_str(raw_id)
+            if not strategy_id:
+                continue
+            try:
+                failed[strategy_id] = max(float(raw_time), 0.0)
+            except (TypeError, ValueError):
+                continue
+        history[key] = {"confirmed": confirmed, "failed": failed}
+    return history
 
 
 def normalize_blockcheck(data: object) -> dict[str, Any]:
@@ -677,7 +686,7 @@ def normalize_blockcheck(data: object) -> dict[str, Any]:
             for item in unique_str_list(raw.get("user_domains"))
             if normalize_lookup_key(item)
         ],
-        "scan_resume": normalize_blockcheck_scan_resume(raw.get("scan_resume")),
+        "strategy_history": normalize_blockcheck_strategy_history(raw.get("strategy_history")),
     }
 
 

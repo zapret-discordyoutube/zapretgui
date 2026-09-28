@@ -201,27 +201,6 @@ class AggressiveCleanupKasperskySafeTests(unittest.TestCase):
             self.assertFalse(system_ops._is_kaspersky_present_safe())
 
 
-class StrategyScannerCooldownTests(unittest.TestCase):
-    def test_cooldown_pause_with_kaspersky(self) -> None:
-        from blockcheck import strategy_scanner
-
-        with patch("utils.antivirus_probe.is_kaspersky_present", return_value=True):
-            pause = strategy_scanner._strategy_cleanup_pause_seconds()
-
-        self.assertEqual(pause, strategy_scanner._KASPERSKY_STRATEGY_COOLDOWN_SECONDS)
-
-    def test_default_pause_without_kaspersky(self) -> None:
-        from blockcheck import strategy_scanner
-
-        with patch("utils.antivirus_probe.is_kaspersky_present", return_value=False):
-            self.assertEqual(strategy_scanner._strategy_cleanup_pause_seconds(), 0.8)
-
-    def test_probe_failure_uses_default_pause(self) -> None:
-        from blockcheck import strategy_scanner
-
-        with patch("utils.antivirus_probe.is_kaspersky_present", side_effect=OSError("boom")):
-            self.assertEqual(strategy_scanner._strategy_cleanup_pause_seconds(), 0.8)
-
 
 if __name__ == "__main__":
     unittest.main()

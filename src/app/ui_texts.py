@@ -4340,28 +4340,44 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "en": "STUN/UDP already reachable",
     },
     "page.strategy_scan.baseline_ok_text_stun": {
-        "ru": "STUN/UDP уже доступен без обхода DPI — результаты могут быть ложноположительными",
-        "en": "STUN/UDP is already reachable without DPI bypass - results may be false positives",
+        "ru": "Цель отвечает и без обхода: результаты подбора — только для сведения",
+        "en": "The target answers without bypass: scan results are for reference only",
     },
     "page.strategy_scan.baseline_ok_title": {
         "ru": "Домен уже доступен",
         "en": "Domain is already reachable",
     },
     "page.strategy_scan.baseline_ok_text": {
-        "ru": "Домен доступен без обхода DPI — результаты могут быть ложноположительными",
-        "en": "Domain is reachable without DPI bypass - results may be false positives",
+        "ru": "Сайт открывается и без обхода: результаты подбора — только для сведения",
+        "en": "The site opens without bypass: scan results are for reference only",
     },
     "page.strategy_scan.found": {
-        "ru": "Найдены рабочие стратегии",
-        "en": "Working strategies found",
+        "ru": "Найдены надёжные стратегии",
+        "en": "Reliable strategies found",
     },
     "page.strategy_scan.not_found": {
         "ru": "Рабочих стратегий не найдено",
         "en": "No working strategies found",
     },
     "page.strategy_scan.try_full": {
-        "ru": "Попробуйте полный режим сканирования",
-        "en": "Try full scan mode",
+        "ru": "Запустите подбор ещё раз: проверятся следующие стратегии, или выберите «Все стратегии»",
+        "en": "Run the scan again to test the next strategies, or choose «All strategies»",
+    },
+    "page.strategy_scan.baseline_question_title": {
+        "ru": "Подбирать нечего",
+        "en": "Nothing to find",
+    },
+    "page.strategy_scan.baseline_question_text": {
+        "ru": "Всё равно проверить стратегии? Результаты будут только для сведения.",
+        "en": "Test the strategies anyway? Results will be for reference only.",
+    },
+    "page.strategy_scan.baseline_question_yes": {
+        "ru": "Всё равно проверить",
+        "en": "Test anyway",
+    },
+    "page.strategy_scan.baseline_question_no": {
+        "ru": "Не проверять",
+        "en": "Don't test",
     },
     "page.strategy_scan.applied": {
         "ru": "Стратегия добавлена",

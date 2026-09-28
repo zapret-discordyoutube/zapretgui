@@ -25,8 +25,6 @@ class StrategyScanStartPlan:
     scan_protocol: str
     udp_games_scope: str
     mode: str
-    keep_current_results: bool
-    scan_cursor: int
     status_text: str
 
 

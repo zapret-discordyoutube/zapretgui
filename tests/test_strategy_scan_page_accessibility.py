@@ -181,7 +181,7 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
             result_rows=[],
             progress_bar=progress_bar,
             status_label=status_label,
-            scan_cursor=1,
+            done_count=1,
         )
 
         self.assertEqual(progress_bar.accessibleName(), "Ход подбора стратегии: выполняется")
@@ -293,6 +293,7 @@ class _WorkerStub:
         self.strategy_result = _SignalStub()
         self.scan_log = _SignalStub()
         self.phase_changed = _SignalStub()
+        self.continue_question = _SignalStub()
         self.scan_finished = _SignalStub()
 
 

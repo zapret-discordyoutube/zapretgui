@@ -5,7 +5,6 @@ from pathlib import Path
 
 from config.runtime_layout import APPLICATION_PATHS
 from support_request_actions import prepare_strategy_scan_support_request
-from blockcheck.strategy_scan_resume import resume_state_path
 from blockcheck.strategy_scan_state import StrategyScanRunLogState
 from log.run_log_sessions import run_log_sessions
 
@@ -58,7 +57,6 @@ def start_run_log(
     target: str,
     mode: str,
     scan_protocol: str,
-    resume_index: int,
     udp_games_scope: str = "all",
 ) -> StrategyScanRunLogState:
     primary_path = make_run_log_path(
@@ -83,7 +81,6 @@ def start_run_log(
             header += f"UDP games scope: {udp_games_scope}\n"
         header += (
             f"Target: {target}\n"
-            f"Resume index: {max(0, int(resume_index))}\n"
             f"{'=' * 70}\n\n"
         )
         if run_log_sessions.start(path, header):
@@ -109,6 +106,5 @@ def prepare_support(
         target=target,
         protocol_label=protocol_label,
         mode_label=mode_label,
-        resume_state_path=resume_state_path(),
         scan_protocol=scan_protocol,
     )

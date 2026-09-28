@@ -18,7 +18,7 @@ class StrategyApplyWorker(QThread):
         strategy_name: str,
         scan_target: str,
         scan_protocol: str,
-        scan_udp_games_scope: str,
+        apply_lines=(),
         parent=None,
     ):
         super().__init__(parent)
@@ -28,7 +28,7 @@ class StrategyApplyWorker(QThread):
         self._strategy_name = str(strategy_name or "")
         self._scan_target = str(scan_target or "")
         self._scan_protocol = str(scan_protocol or "")
-        self._scan_udp_games_scope = str(scan_udp_games_scope or "")
+        self._apply_lines = tuple(str(line) for line in (apply_lines or ()))
 
     def run(self) -> None:
         try:
@@ -37,7 +37,7 @@ class StrategyApplyWorker(QThread):
                 strategy_name=self._strategy_name,
                 scan_target=self._scan_target,
                 scan_protocol=self._scan_protocol,
-                scan_udp_games_scope=self._scan_udp_games_scope,
+                apply_lines=self._apply_lines,
             )
         except Exception as exc:
             log(f"StrategyApplyWorker: не удалось применить стратегию: {exc}", "WARNING")

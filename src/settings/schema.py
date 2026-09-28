@@ -235,7 +235,8 @@ def default_updater() -> dict[str, Any]:
 def default_blockcheck() -> dict[str, Any]:
     return {
         "user_domains": [],
-        "scan_resume": {"domains": {}},
+        # Итоги прошлых подборов стратегии: {"<режим>|<цель>": {"confirmed": [...], "failed": {id: время}}}.
+        "strategy_history": {},
     }
 
 
