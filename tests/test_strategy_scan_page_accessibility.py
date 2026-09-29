@@ -197,8 +197,12 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
         page._strategy_scan_run_runtime = _RunRuntimeStub()
         set_state_text(page._results_view, "Старая строка подбора стратегии")
         page._log_lines.append("Старый лог подбора стратегии")
+        # До первого подбора блока «Подробный лог / Подготовить обращение» нет.
+        self.assertTrue(page._log_card.isHidden())
 
         page._on_start()
+
+        self.assertFalse(page._log_card.isHidden())
 
         self.assertEqual(page._results_view.row_count(), 0)
         self.assertEqual(page._results_view.accessibleName(), "Результаты подбора стратегии: пока нет результатов")

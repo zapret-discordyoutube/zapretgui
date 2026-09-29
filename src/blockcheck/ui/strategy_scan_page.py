@@ -222,6 +222,9 @@ class StrategyScanPage(BasePage):
         self._support_status_label = log_widgets.support_status_label
         self._prepare_support_btn = log_widgets.prepare_support_btn
         self.add_widget(self._log_card)
+        # Лог и обращение появляются с первым подбором: до него там
+        # показывать нечего.
+        self._log_card.setVisible(False)
 
         self._update_control_accessibility()
         self._refresh_mode_hint()
@@ -524,6 +527,7 @@ class StrategyScanPage(BasePage):
         self._result_objects.clear()
         self._log_lines.clear()
         self._set_support_status("")
+        self._log_card.setVisible(True)
 
         self._scan_target = run_result.target
         self._scan_protocol = run_result.scan_protocol
@@ -765,9 +769,12 @@ class StrategyScanPage(BasePage):
         if restore is None:
             return
         try:
-            restore()
+            restored = restore()
         except Exception:
             logger.exception("Failed to restore Zapret after strategy scan")
+            return
+        if restored:
+            self._on_log("Подбор закончен — запускаю Zapret снова, как было до подбора")
 
     def _on_log(self, message: str):
         if self._cleanup_in_progress:

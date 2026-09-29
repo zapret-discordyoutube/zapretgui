@@ -194,6 +194,27 @@ class StrategyScanWorkerQuestionTests(unittest.TestCase):
         self.assertFalse(worker.restore_runtime_if_needed())
         self.assertEqual(calls, ["start"])
 
+    def test_runtime_is_restored_after_worker_qobject_was_deleted(self) -> None:
+        """finished → deleteLater успевает раньше, чем окно получит scan_finished."""
+        from PyQt6 import sip
+
+        from blockcheck.ui.strategy_scan_page import StrategyScanPage
+
+        calls = []
+        worker = _make_worker("discord.com")
+        worker.set_runtime_restore(was_running=True, restore=lambda: calls.append("start"))
+        sip.delete(worker)
+
+        page = StrategyScanPage.__new__(StrategyScanPage)
+        page._scan_worker = worker
+        page._cleanup_in_progress = False
+        page._log_lines = []
+
+        StrategyScanPage._restore_runtime_after_scan(page)
+
+        self.assertEqual(calls, ["start"])
+        self.assertTrue(any("запускаю Zapret снова" in line for line in page._log_lines))
+
     def test_manual_start_during_scan_cancels_restore(self) -> None:
         from blockcheck.ui.strategy_scan_page import StrategyScanPage
 

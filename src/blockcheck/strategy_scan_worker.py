@@ -222,12 +222,15 @@ class StrategyScanWorker(QObject):
         self._restore_runtime = None
 
     def restore_runtime_if_needed(self) -> bool:
-        """Из потока окна после конца подбора: вернуть Zapret, если он работал."""
+        """Из потока окна после конца подбора: вернуть Zapret, если он работал.
+
+        К этому моменту Qt-часть worker-а уже может быть удалена (deleteLater
+        по ``finished``), поэтому здесь нельзя трогать сигналы — только Python.
+        """
         restore = self._restore_runtime
         self._restore_runtime = None
         if not self._runtime_was_running or restore is None:
             return False
-        self.log("Подбор закончен — запускаю Zapret снова, как было до подбора")
         restore()
         return True
 
