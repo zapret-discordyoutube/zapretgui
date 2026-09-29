@@ -449,6 +449,27 @@ class HostsPageTests(unittest.TestCase):
             page._on_tiles_scrolled(0)
             self.assertTrue(page.top_panel.isVisible())
 
+    def test_write_status_is_one_line_pill_that_stays(self) -> None:
+        page = self._page(_manual_snapshot())
+        status = page.summary_status
+        self.assertTrue(status.isHidden())
+
+        with patch("hosts.ui.page.are_live_animations_enabled", return_value=False):
+            page._applying = True
+            page._render_summary()
+            self.assertFalse(status.isHidden())
+            self.assertEqual(status.text(), "Записываю…")
+
+            page._applying = False
+            page._just_written = True
+            page._render_summary()
+
+        self.assertFalse(status.isHidden())
+        self.assertTrue(status.text().startswith("Записано"))
+        self.assertFalse(status.label.wordWrap())
+        # Надпись целиком, в одну строку, без обрезки по ширине.
+        self.assertGreaterEqual(status.sizeHint().width(), status.label.fontMetrics().horizontalAdvance(status.text()))
+
     def test_tiles_use_switch_for_direct_and_profile_field_for_dns(self) -> None:
         page = self._page(_manual_snapshot(beta="p1"))
         tiles = {tile.key: tile for tile in page.tiles.tiles() if tile.kind == "tile"}

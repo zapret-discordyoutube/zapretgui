@@ -13,10 +13,10 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, QPoint, Qt, QVariantAnimation
+from PyQt6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt, QVariantAnimation
 from PyQt6.QtGui import QColor
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import (
     Action,
     BodyLabel,
@@ -31,6 +31,7 @@ from qfluentwidgets import (
     StrongBodyLabel,
     TransparentPushButton,
     getFont,
+    isDarkTheme,
     themeColor,
 )
 
@@ -64,6 +65,76 @@ _GROUP_HINTS = {
     CATEGORY_AI: ("page.hosts.group.ai.hint", "сами закрыты для России, нужен DNS-профиль"),
     CATEGORY_OTHER: ("page.hosts.group.other.hint", "через DNS-профиль"),
 }
+
+
+
+class _StatusPill(QWidget):
+    """Статус записи в сводке: значок и текст в одну строку на мягкой заливке.
+
+    Появляется плавно и остаётся, пока следующая запись его не сменит.
+    """
+
+    FADE_MS = 180
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("hostsStatusPill")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 5, 12, 5)
+        layout.setSpacing(6)
+        self.icon = QLabel(self)
+        self.icon.setFixedSize(14, 14)
+        layout.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.label = CaptionLabel(self)
+        self.label.setWordWrap(False)
+        layout.addWidget(self.label, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._opacity = QGraphicsOpacityEffect(self)
+        self._opacity.setOpacity(1.0)
+        self.setGraphicsEffect(self._opacity)
+        self._fade: QPropertyAnimation | None = None
+        self.setVisible(False)
+
+    def text(self) -> str:
+        return self.label.text()
+
+    def set_status(self, text: str, color: str, icon_name: str) -> None:
+        text = str(text or "")
+        if not text:
+            if self._fade is not None:
+                self._fade.stop()
+            self.label.setText("")
+            self.setVisible(False)
+            return
+        self.label.setText(text)
+        self.label.setStyleSheet(f"color: {color}; background: transparent;")
+        if icon_name:
+            self.icon.setPixmap(get_cached_qta_pixmap(icon_name, color=color, size=14))
+        self.icon.setVisible(bool(icon_name))
+        back = QColor(color)
+        back.setAlpha(52 if isDarkTheme() else 38)
+        self.setStyleSheet(
+            "#hostsStatusPill {"
+            f" background-color: rgba({back.red()}, {back.green()}, {back.blue()}, {back.alpha()});"
+            " border-radius: 12px; }"
+        )
+        if self.isHidden():
+            self.setVisible(True)
+            self._fade_in()
+
+    def _fade_in(self) -> None:
+        if self._fade is not None:
+            self._fade.stop()
+        if not are_live_animations_enabled():
+            self._opacity.setOpacity(1.0)
+            return
+        fade = QPropertyAnimation(self._opacity, b"opacity", self)
+        fade.setStartValue(0.0)
+        fade.setEndValue(1.0)
+        fade.setDuration(self.FADE_MS)
+        fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._fade = fade
+        fade.start()
 
 
 class HostsPage(BasePage):
@@ -142,10 +213,7 @@ class HostsPage(BasePage):
         self.summary_detail = CaptionLabel(self.summary_card)
         summary_text.addWidget(self.summary_detail)
         summary_row.addLayout(summary_text, 1)
-        self.summary_status = CaptionLabel(self.summary_card)
-        self.summary_status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.summary_status.setWordWrap(True)
-        self.summary_status.setMaximumWidth(360)
+        self.summary_status = _StatusPill(self.summary_card)
         summary_row.addWidget(self.summary_status, 0, Qt.AlignmentFlag.AlignVCenter)
         self.summary_card.main_layout.addLayout(summary_row)
         top_layout.addWidget(self.summary_card)
@@ -631,17 +699,16 @@ class HostsPage(BasePage):
         self.summary_detail.setText(detail)
         self.summary_detail.setVisible(bool(detail))
         if self._applying:
-            status, color = self._tr("page.hosts.summary.writing", "записываю…"), accent.name()
+            status, color, icon = self._tr("page.hosts.summary.writing", "Записываю…"), accent.name(), "fa5s.sync-alt"
         elif self._just_written:
             status = self._tr(
                 "page.hosts.summary.written",
-                "записано — перезапустите браузер, чтобы изменения заработали",
+                "Записано — перезапустите браузер, чтобы изменения заработали",
             )
-            color = semantic.success
+            color, icon = semantic.success, "fa5s.check-circle"
         else:
-            status, color = "", tokens.fg_muted
-        self.summary_status.setText(status)
-        self.summary_status.setStyleSheet(f"color: {color}; background: transparent;")
+            status, color, icon = "", tokens.fg_muted, ""
+        self.summary_status.set_status(status, color, icon)
         spoken = " ".join(part for part in (str(services) if services else "", title, detail, status) if part)
         set_state_text(self.summary_label, spoken)
         self.all_off_button.setEnabled(snapshot is not None)

@@ -1374,12 +1374,12 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Click a tile — the service addresses are written to the system hosts file right away.",
     },
     "page.hosts.summary.writing": {
-        "ru": "записываю…",
-        "en": "writing…",
+        "ru": "Записываю…",
+        "en": "Writing…",
     },
     "page.hosts.summary.written": {
-        "ru": "записано — перезапустите браузер, чтобы изменения заработали",
-        "en": "written — restart the browser for the changes to take effect",
+        "ru": "Записано — перезапустите браузер, чтобы изменения заработали",
+        "en": "Written — restart the browser for the changes to take effect",
     },
     "page.hosts.button.file": {
         "ru": "Файл hosts",
