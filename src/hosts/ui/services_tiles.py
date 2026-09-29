@@ -13,10 +13,12 @@ DNS-профилем под названием ряд иконок провай�
 
 from __future__ import annotations
 
+import math
+import time
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPixmap
+from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPixmap, QRadialGradient
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 from qfluentwidgets import getFont, isDarkTheme, themeColor
 
@@ -36,6 +38,15 @@ class HostsChoice:
     # Профиль есть у этого сервиса. Недоступный не рисуется, но место
     # остаётся, чтобы иконки стояли ровными столбцами по всей странице.
     available: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class _Change:
+    """Идущая анимация смены: kind — "pick" | "drop" | "switch"."""
+
+    kind: str
+    profile_id: str
+    started: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +98,9 @@ class HostsTilesGrid(QWidget):
     # Место справа под полосу прокрутки, чтобы она не лежала на плитках.
     SCROLLBAR_GUTTER = 14
     FLASH_MS = 520
+    # Смена выбора: оборот иконки и расходящееся свечение.
+    CHANGE_SECONDS = 0.65
+    FRAME_MS = 16
     _RADIUS = 5.0
     _ICON = 20
     _PAD = 14
@@ -117,6 +131,13 @@ class HostsTilesGrid(QWidget):
         self._pixmaps: dict[tuple, QPixmap] = {}
         # Сколько плиток нарисовано заново (а не взято готовыми) — для тестов.
         self.rendered_tiles = 0
+        # Анимации смены по ключу плитки; кадры идут, только пока они есть.
+        self._changes: dict[str, _Change] = {}
+        self._live_keys: set[str] = set()
+        self._now = time.monotonic
+        self._frames = QTimer(self)
+        self._frames.setInterval(self.FRAME_MS)
+        self._frames.timeout.connect(self._on_frame)
         self._title_font = getFont(14)
         self._title_font_on = getFont(14, QFont.Weight.DemiBold)
         self._caption_font = getFont(12)
@@ -140,6 +161,7 @@ class HostsTilesGrid(QWidget):
         # Перерисовываются только изменившиеся плитки.
         old_by_key = {tile.key: (tile, QRect(rect)) for tile, rect in zip(self._tiles, self._rects) if tile.key}
         old_layout = [(tile.kind, tile.key) for tile in self._tiles]
+        self._start_changes(old_by_key, tiles)
         self._tiles = tiles
         self._hover = -1
         self._hover_choice = -1
@@ -149,6 +171,7 @@ class HostsTilesGrid(QWidget):
         self._cursor = self._index_of(cursor_key)
         in_use = {tile for tile in self._tiles}
         self._pixmaps = {key: pixmap for key, pixmap in self._pixmaps.items() if key[0] in in_use}
+        self._sync_frames()
         if old_layout != [(tile.kind, tile.key) for tile in self._tiles]:
             self.update()
             return
@@ -156,6 +179,60 @@ class HostsTilesGrid(QWidget):
             previous = old_by_key.get(tile.key)
             if previous is None or previous[0] != tile or previous[1] != rect:
                 self.update(rect)
+
+    # ── анимации смены ───────────────────────────────────────
+
+    def _start_changes(self, old_by_key: dict, tiles: list[HostsTile]) -> None:
+        """Плитка, у которой сменился выбор, крутит иконку и светится.
+
+        Первая загрузка не анимируется: старой плитки с тем же ключом нет.
+        """
+        if not are_live_animations_enabled():
+            self._changes.clear()
+            return
+        now = self._now()
+        for tile in tiles:
+            if tile.kind != "tile" or not tile.key or tile.key not in old_by_key:
+                continue
+            old = old_by_key[tile.key][0]
+            if tile.has_choices and old.selected != tile.selected:
+                if tile.selected:
+                    self._changes[tile.key] = _Change("pick", tile.selected, now)
+                elif old.selected:
+                    self._changes[tile.key] = _Change("drop", old.selected, now)
+            elif tile.has_switch and old.is_on != tile.is_on:
+                self._changes[tile.key] = _Change("switch", "", now)
+
+    def _spinning_keys(self) -> set[str]:
+        """Плитки, которые сейчас рисуются по кадрам, а не из кэша."""
+        keys = set(self._changes)
+        if are_live_animations_enabled():
+            keys.update(tile.key for tile in self._tiles if tile.pending and tile.has_choices and tile.selected)
+        return keys
+
+    def _change_progress(self, key: str) -> tuple[_Change | None, float]:
+        change = self._changes.get(key)
+        if change is None:
+            return None, 1.0
+        return change, min(1.0, max(0.0, (self._now() - change.started) / self.CHANGE_SECONDS))
+
+    def _sync_frames(self) -> None:
+        if self._spinning_keys():
+            if not self._frames.isActive():
+                self._frames.start()
+        elif self._frames.isActive():
+            self._frames.stop()
+
+    def _on_frame(self) -> None:
+        now = self._now()
+        finished = [key for key, change in self._changes.items() if now - change.started >= self.CHANGE_SECONDS]
+        for key in finished:
+            del self._changes[key]
+        for key in self._spinning_keys() | set(finished):
+            index = self._index_of(key)
+            if index >= 0:
+                self.update(self._rects[index])
+        self._sync_frames()
 
     def flash(self, key: str) -> None:
         """Плитка коротко подсвечивается акцентом — выбор принят."""
@@ -279,6 +356,7 @@ class HostsTilesGrid(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         dirty = event.rect()
+        self._live_keys = self._spinning_keys()
         for index, rect in enumerate(self._rects):
             if not rect.intersects(dirty):
                 continue
@@ -300,8 +378,10 @@ class HostsTilesGrid(QWidget):
 
     def _tile_pixmap(self, index: int, rect: QRect, tile: HostsTile, tokens, dark: bool, accent: str, dpr: float) -> QPixmap:
         flash = self._flash.get(tile.key, 0.0)
-        key = (tile, rect.width(), rect.height(), self._tile_state(index), dark, accent, dpr, round(flash, 2))
-        cached = self._pixmaps.get(key) if flash <= 0 else None
+        # Во время вспышки и кручения плитка рисуется по кадрам, без кэша.
+        live = flash > 0 or tile.key in self._live_keys
+        key = (tile, rect.width(), rect.height(), self._tile_state(index), dark, accent, dpr)
+        cached = None if live else self._pixmaps.get(key)
         if cached is not None:
             return cached
         pixmap = QPixmap(int(rect.width() * dpr), int(rect.height() * dpr))
@@ -312,7 +392,7 @@ class HostsTilesGrid(QWidget):
         self._paint_tile(painter, index, QRect(0, 0, rect.width(), rect.height()), tile, tokens, dark)
         painter.end()
         self.rendered_tiles += 1
-        if flash <= 0:
+        if not live:
             self._pixmaps[key] = pixmap
         return pixmap
 
@@ -465,6 +545,8 @@ class HostsTilesGrid(QWidget):
         hover_slot = self._hover_choice if index == self._hover else -1
         pressed_slot = self._pressed_choice if index == self._pressed else -1
         muted = QColor(255, 255, 255, 110) if dark else QColor(0, 0, 0, 95)
+        change, progress = self._change_progress(tile.key)
+        spinning = tile.pending and are_live_animations_enabled()
         for slot, choice in enumerate(tile.choices[: self._visible_slots(rect)]):
             if not choice.available:
                 continue
@@ -472,6 +554,24 @@ class HostsTilesGrid(QWidget):
             selected = choice.profile_id == tile.selected
             color = QColor(choice.color)
             painter.setPen(Qt.PenStyle.NoPen)
+            # Кручение и свечение: выбранная только что (pick), выключенная
+            # (drop — назад и серым) и выбранная, пока идёт запись.
+            angle, glow_radius, glow_alpha, glow_color = 0.0, 0.0, 0, color
+            if change is not None and change.profile_id == choice.profile_id and progress < 1.0:
+                eased = 1.0 - (1.0 - progress) ** 3
+                angle = 360.0 * eased * (1 if change.kind == "pick" else -1)
+                glow_radius = 12.0 + 12.0 * eased
+                glow_alpha = int(170 * (1.0 - progress))
+                if change.kind == "drop":
+                    glow_color = QColor(160, 160, 160)
+            elif spinning and selected:
+                now = self._now()
+                angle = (now * 420.0) % 360.0
+                glow_radius = 17.0
+                glow_alpha = int(70 + 50 * math.sin(now * 7.0))
+            if glow_alpha > 0:
+                self._paint_glow(painter, area.center(), glow_radius, glow_color, glow_alpha)
+                painter.setPen(Qt.PenStyle.NoPen)
             if selected:
                 back = QColor(color)
                 back.setAlpha(86 if dark else 60)
@@ -483,16 +583,42 @@ class HostsTilesGrid(QWidget):
                 back = QColor(255, 255, 255, 12) if dark else QColor(0, 0, 0, 6)
             painter.setBrush(back)
             painter.drawEllipse(area)
-            icon_color = choice.color if (selected or slot == hover_slot) else muted.name(QColor.NameFormat.HexArgb)
+            highlighted = selected or slot == hover_slot or angle != 0.0
+            icon_color = choice.color if highlighted else muted.name(QColor.NameFormat.HexArgb)
             size = self._CHOICE_ICON
             pixmap = get_cached_qta_pixmap(choice.icon_name, color=icon_color, size=size)
-            offset = (self._CHOICE - size) // 2
-            painter.drawPixmap(int(area.left()) + offset, int(area.top()) + offset, pixmap)
+            if angle:
+                painter.save()
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                painter.translate(area.center())
+                painter.rotate(angle)
+                painter.drawPixmap(QPointF(-size / 2, -size / 2), pixmap)
+                painter.restore()
+            else:
+                offset = (self._CHOICE - size) // 2
+                painter.drawPixmap(int(area.left()) + offset, int(area.top()) + offset, pixmap)
+
+    @staticmethod
+    def _paint_glow(painter: QPainter, center: QPointF, radius: float, color: QColor, alpha: int) -> None:
+        """Мягкое круговое свечение: к краю цвет плавно уходит в прозрачность."""
+        gradient = QRadialGradient(center, radius)
+        inner = QColor(color)
+        inner.setAlpha(max(0, min(255, alpha)))
+        outer = QColor(color)
+        outer.setAlpha(0)
+        gradient.setColorAt(0.0, inner)
+        gradient.setColorAt(1.0, outer)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(gradient)
+        painter.drawEllipse(center, radius, radius)
 
     def _paint_switch(self, painter: QPainter, area: QRect, tile: HostsTile, dark: bool) -> None:
-        """Тумблер в цветах переключателя qfluentwidgets."""
+        """Тумблер в цветах переключателя qfluentwidgets; при смене кружок едет и светится."""
         box = QRectF(area).adjusted(1, 1, -1, -1)
         radius = box.height() / 2
+        change, progress = self._change_progress(tile.key)
+        if change is not None and change.kind == "switch" and progress < 1.0:
+            self._paint_glow(painter, box.center(), box.width() / 2 + 10 * progress + 4, QColor(themeColor()), int(150 * (1.0 - progress)))
         if tile.is_on:
             back = QColor(themeColor())
             painter.setPen(back)
@@ -505,6 +631,10 @@ class HostsTilesGrid(QWidget):
             knob = QColor(255, 255, 255, 201) if dark else QColor(0, 0, 0, 156)
             knob_x = box.left() + 4
         painter.drawRoundedRect(box, radius, radius)
+        if change is not None and change.kind == "switch" and progress < 1.0:
+            eased = 1.0 - (1.0 - progress) ** 3
+            start_x = box.left() + 4 if tile.is_on else box.right() - 4 - 12
+            knob_x = start_x + (knob_x - start_x) * eased
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(knob)
         painter.drawEllipse(QRectF(knob_x, box.center().y() - 6, 12, 12))

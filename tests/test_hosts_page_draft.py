@@ -532,6 +532,65 @@ class HostsPageTests(unittest.TestCase):
         _QTest.keyClick(page.tiles, _Qt.Key.Key_Return)
         self.assertEqual(chosen, [("Alpha", "p2")])
 
+    def _grid_with(self, **tile_kwargs):
+        from hosts.ui.services_tiles import HostsChoice, HostsTile, HostsTilesGrid
+
+        choices = (HostsChoice("p1", "Профиль 1", "fa5s.cat", "#F59E0B"), HostsChoice("p2", "Профиль 2", "fa5s.bug", "#E5484D"))
+        grid = HostsTilesGrid()
+        self.addCleanup(grid.deleteLater)
+        clock = [100.0]
+        grid._now = lambda: clock[0]
+        grid.resize(600, 100)
+
+        def tiles(selected=None, on=False):
+            return [
+                HostsTile("tile", "Alpha", key="Alpha", choices=choices, selected=selected, is_on=bool(selected)),
+                HostsTile("tile", "Direct", key="Direct", has_switch=True, is_on=on),
+            ]
+
+        return grid, tiles, clock
+
+    def test_profile_change_spins_only_that_tile_and_stops(self) -> None:
+        grid, tiles, clock = self._grid_with()
+        with patch("hosts.ui.services_tiles.are_live_animations_enabled", return_value=True):
+            grid.set_tiles(tiles())
+            # Первая загрузка не анимируется.
+            self.assertEqual(grid._changes, {})
+            self.assertFalse(grid._frames.isActive())
+
+            grid.set_tiles(tiles(selected="p2"))
+            self.assertEqual(set(grid._changes), {"Alpha"})
+            self.assertEqual(grid._changes["Alpha"].kind, "pick")
+            self.assertTrue(grid._frames.isActive())
+
+            # Посреди анимации плитка рисуется по кадрам, без кэша.
+            clock[0] += grid.CHANGE_SECONDS / 2
+            grid.grab()
+            drawn = grid.rendered_tiles
+            grid.grab()
+            self.assertGreater(grid.rendered_tiles, drawn)
+
+            clock[0] += grid.CHANGE_SECONDS
+            grid._on_frame()
+            self.assertEqual(grid._changes, {})
+            self.assertFalse(grid._frames.isActive())
+            grid.grab()
+            drawn = grid.rendered_tiles
+            grid.grab()
+            self.assertEqual(grid.rendered_tiles, drawn)
+
+            grid.set_tiles(tiles(selected=None, on=True))
+            self.assertEqual(grid._changes["Alpha"].kind, "drop")
+            self.assertEqual(grid._changes["Direct"].kind, "switch")
+
+    def test_no_change_animation_when_live_animations_are_off(self) -> None:
+        grid, tiles, _clock = self._grid_with()
+        with patch("hosts.ui.services_tiles.are_live_animations_enabled", return_value=False):
+            grid.set_tiles(tiles())
+            grid.set_tiles(tiles(selected="p1", on=True))
+        self.assertEqual(grid._changes, {})
+        self.assertFalse(grid._frames.isActive())
+
     def test_unchanged_tiles_are_not_redrawn(self) -> None:
         page = self._page(_manual_snapshot())
         grid = page.tiles
