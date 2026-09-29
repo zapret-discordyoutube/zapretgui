@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt, QVariantAnimation
+from PyQt6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QLabel, QVBoxLayout, QWidget
@@ -51,9 +51,6 @@ from ui.theme_semantic import get_semantic_palette
 
 
 ADOBE_TILE_KEY = "__adobe__"
-# Сводка сворачивается, когда список прокручен ниже этого места.
-COLLAPSE_SCROLL_PX = 24
-COLLAPSE_MS = 180
 
 _GROUP_TITLES = {
     CATEGORY_DIRECT: ("page.hosts.group.direct", "Напрямую"),
@@ -167,8 +164,6 @@ class HostsPage(BasePage):
         self._just_written = False
         self._restore_runtime = OneShotWorkerRuntime()
         self._profile_menu: RoundMenu | None = None
-        self._summary_collapsed = False
-        self._collapse_anim: QVariantAnimation | None = None
 
         self._build_ui()
         self._retranslate()
@@ -578,9 +573,8 @@ class HostsPage(BasePage):
         except RuntimeError:
             pass
 
-    def _on_tiles_scrolled(self, value: int) -> None:
+    def _on_tiles_scrolled(self, _value: int) -> None:
         self._close_profile_menu()
-        self._set_summary_collapsed(value > COLLAPSE_SCROLL_PX)
 
     def _set_service_profile(self, service_name: str, profile_id) -> None:
         if self._draft is not None and self._draft.set(service_name, profile_id):
@@ -612,38 +606,6 @@ class HostsPage(BasePage):
         self._render()
         # Запись и тогда, когда всё уже выключено: уберутся лишние строки блока.
         self._commit(force=block is not None)
-
-    # ── сводка: сворачивается при прокрутке ──────────────────
-
-    def _set_summary_collapsed(self, collapsed: bool) -> None:
-        if collapsed == self._summary_collapsed:
-            return
-        self._summary_collapsed = collapsed
-        panel = self.top_panel
-        full = max(panel.sizeHint().height(), 1)
-        if self._collapse_anim is not None:
-            self._collapse_anim.stop()
-        if not are_live_animations_enabled():
-            panel.setMaximumHeight(0 if collapsed else 16777215)
-            panel.setVisible(not collapsed)
-            return
-        panel.setVisible(True)
-        start = panel.height() if panel.isVisible() else 0
-        anim = QVariantAnimation(self)
-        anim.setStartValue(start)
-        anim.setEndValue(0 if collapsed else full)
-        anim.setDuration(COLLAPSE_MS)
-        anim.valueChanged.connect(lambda value: panel.setMaximumHeight(int(value)))
-
-        def _done() -> None:
-            if self._summary_collapsed:
-                panel.hide()
-            else:
-                panel.setMaximumHeight(16777215)
-
-        anim.finished.connect(_done)
-        self._collapse_anim = anim
-        anim.start()
 
     # ── отрисовка ────────────────────────────────────────────
 

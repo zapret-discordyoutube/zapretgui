@@ -441,13 +441,13 @@ class HostsPageTests(unittest.TestCase):
         self.assertTrue(menu.closed)
         self.assertIsNone(page._profile_menu)
 
-    def test_summary_collapses_when_tiles_are_scrolled_down(self) -> None:
+    def test_summary_stays_visible_when_tiles_are_scrolled(self) -> None:
         page = self._page(_manual_snapshot())
         with patch("hosts.ui.page.are_live_animations_enabled", return_value=False):
             page._on_tiles_scrolled(200)
-            self.assertFalse(page.top_panel.isVisible())
-            page._on_tiles_scrolled(0)
-            self.assertTrue(page.top_panel.isVisible())
+        # Сводка стоит на месте: прокручиваются только плитки под ней.
+        self.assertFalse(page.top_panel.isHidden())
+        self.assertEqual(page.top_panel.maximumHeight(), 16777215)
 
     def test_write_status_is_one_line_pill_that_stays(self) -> None:
         page = self._page(_manual_snapshot())
