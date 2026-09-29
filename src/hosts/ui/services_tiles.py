@@ -539,7 +539,21 @@ class HostsTilesGrid(QWidget):
         pad = self._PAD
         icon_color = (tile.icon_color or tokens.icon_fg) if tile.is_on else tokens.icon_fg_muted
         icon = get_cached_qta_pixmap(tile.icon_name or "fa5s.globe", color=icon_color, size=self._ICON)
-        painter.drawPixmap(rect.left() + pad, rect.top() + pad, icon)
+        angle, glow_alpha, glow_color = self._icon_motion(tile, self._now())
+        if glow_alpha > 0 or angle:
+            # Переключили: иконка сервиса качается и светится.
+            center = QPointF(rect.left() + pad + self._ICON / 2, rect.top() + pad + self._ICON / 2)
+            if glow_alpha > 0:
+                _change, progress = self._change_progress(tile.key)
+                self._paint_glow(painter, center, 14.0 + 10.0 * progress, glow_color, glow_alpha)
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            painter.translate(center)
+            painter.rotate(angle)
+            painter.drawPixmap(QPointF(-self._ICON / 2, -self._ICON / 2), icon)
+            painter.restore()
+        else:
+            painter.drawPixmap(rect.left() + pad, rect.top() + pad, icon)
 
         text_left = rect.left() + pad + self._ICON + 10
         right_edge = rect.right() - pad
@@ -662,6 +676,23 @@ class HostsTilesGrid(QWidget):
             else:
                 offset = (self._CHOICE - size) // 2
                 painter.drawPixmap(int(area.left()) + offset, int(area.top()) + offset, pixmap)
+
+    def _icon_motion(self, tile: HostsTile, now: float) -> tuple[float, int, QColor]:
+        """Покачивание и свечение иконки сервиса при смене: (угол, прозрачность, цвет).
+
+        Затухающие колебания влево-вправо; включили — свечение цвета сервиса,
+        выключили — серое. Без идущей смены — покой.
+        """
+        change = self._changes.get(tile.key)
+        if change is None:
+            return 0.0, 0, QColor()
+        progress = min(1.0, max(0.0, (now - change.started) / self.CHANGE_SECONDS))
+        if progress >= 1.0:
+            return 0.0, 0, QColor()
+        angle = 16.0 * math.sin(progress * 4.0 * math.pi) * (1.0 - progress)
+        turned_on = change.kind == "pick" or (change.kind == "switch" and tile.is_on)
+        color = QColor(tile.icon_color or themeColor().name()) if turned_on else QColor(160, 160, 160)
+        return angle, int(170 * (1.0 - progress)), color
 
     @staticmethod
     def _paint_glow(painter: QPainter, center: QPointF, radius: float, color: QColor, alpha: int) -> None:

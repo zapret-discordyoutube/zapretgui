@@ -585,6 +585,25 @@ class HostsPageTests(unittest.TestCase):
             self.assertEqual(grid._changes["Alpha"].kind, "drop")
             self.assertEqual(grid._changes["Direct"].kind, "switch")
 
+    def test_service_icon_sways_and_glows_on_switch(self) -> None:
+        grid, tiles, clock = self._grid_with()
+        with patch("hosts.ui.services_tiles.are_live_animations_enabled", return_value=True):
+            grid.set_tiles(tiles(on=True))
+            grid.set_tiles(tiles(selected="p1", on=False))
+            by_key = {tile.key: tile for tile in grid.tiles()}
+
+            clock[0] += grid.CHANGE_SECONDS * 0.1
+            angle, glow, color = grid._icon_motion(by_key["Alpha"], clock[0])
+            self.assertNotEqual(angle, 0.0)
+            self.assertGreater(glow, 0)
+            angle, glow, color = grid._icon_motion(by_key["Direct"], clock[0])
+            self.assertNotEqual(angle, 0.0)
+            # Тумблер выключили — свечение серое.
+            self.assertEqual(color.name(), "#a0a0a0")
+
+            clock[0] += grid.CHANGE_SECONDS
+            self.assertEqual(grid._icon_motion(by_key["Alpha"], clock[0])[:2], (0.0, 0))
+
     def test_no_change_animation_when_live_animations_are_off(self) -> None:
         grid, tiles, _clock = self._grid_with()
         with patch("hosts.ui.services_tiles.are_live_animations_enabled", return_value=False):
