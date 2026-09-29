@@ -141,6 +141,9 @@ class BlockcheckPage(BasePage):
         self._open_dns_settings = open_dns_settings
         self._last_report: dict | None = None
         self._report_lines: list[str] = []
+        # Блок «Отчёт / Подготовить обращение» есть только после проверки:
+        # до неё там показывать нечего.
+        self._support_footer_available = False
         self._run_log_file: str | None = None
         self._tab_widgets: list[QWidget] = []
         self._strategy_tab_page = None
@@ -401,6 +404,7 @@ class BlockcheckPage(BasePage):
         footer.addWidget(self._prepare_support_btn)
         self._footer_card.add_layout(footer)
         self._add_tab_widget(self._footer_card)
+        self._footer_card.setVisible(False)
 
         section_started_at = time.perf_counter()
         self._sync_domains_flow_visibility()
@@ -558,6 +562,8 @@ class BlockcheckPage(BasePage):
             widget.setVisible(show_blockcheck)
         if self._results_card is not None and self._last_report is None:
             self._results_card.setVisible(False)
+        if not self._support_footer_available:
+            self._footer_card.setVisible(False)
 
         if self._strategy_tab_page is not None:
             self._strategy_tab_page.setVisible(tab_key == self.TAB_STRATEGY_SCAN)
@@ -602,6 +608,7 @@ class BlockcheckPage(BasePage):
         self._sites_table.clear_rows()
         self._results_card.setVisible(False)
         self._report_btn.setEnabled(False)
+        self._set_support_footer_available(False)
         start_blockcheck_page_run(
             blockcheck_feature=self._blockcheck,
             scope=self._current_scope(),
@@ -631,6 +638,7 @@ class BlockcheckPage(BasePage):
             return
         self._reset_ui()
         self._report_btn.setEnabled(bool(self._report_lines))
+        self._set_support_footer_available(True)
         if isinstance(report, dict) and report.get("failed"):
             # Падение — не «остановлено»: пользователь ничего не нажимал.
             failed_text = "Проверка завершилась с ошибкой"
@@ -745,6 +753,13 @@ class BlockcheckPage(BasePage):
                     default="Подождите завершения остановки перед новым запуском",
                 )
             )
+
+    def _set_support_footer_available(self, available: bool) -> None:
+        self._support_footer_available = bool(available)
+        self._footer_card.setVisible(
+            self._support_footer_available
+            and self.TAB_ORDER[self._active_tab_index] == self.TAB_BLOCKCHECK
+        )
 
     def _set_status_text(self, text: str) -> None:
         value = str(text or "").strip()

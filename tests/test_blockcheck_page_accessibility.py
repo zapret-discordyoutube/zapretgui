@@ -117,6 +117,10 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
             self.assertIsNone(card._title_label)
         # Пустая таблица до первой проверки не показывается.
         self.assertTrue(page._results_card.isHidden())
+        # Отчёта ещё нет — блока «Отчёт / Подготовить обращение» тоже нет.
+        self.assertTrue(page._footer_card.isHidden())
+        page._switch_tab(0)
+        self.assertTrue(page._footer_card.isHidden())
 
     def test_diagnostics_tab_is_merged_into_blockcheck(self) -> None:
         page = _make_page()
@@ -148,6 +152,11 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertTrue(page._summary_panel.title_label.text().startswith("Найдены проблемы: 2"))
         self.assertFalse(page._results_card.isHidden())
         self.assertTrue(page._report_btn.isEnabled())
+        self.assertFalse(page._footer_card.isHidden())
+        page._switch_tab(1)
+        self.assertTrue(page._footer_card.isHidden())
+        page._switch_tab(0)
+        self.assertFalse(page._footer_card.isHidden())
         names = [page._sites_table.item(row, 0).text() for row in range(page._sites_table.rowCount())]
         # Сначала сломанное; YouTube открывается — подмена DNS только в подробностях.
         self.assertEqual(names[0], "X (Twitter)")
