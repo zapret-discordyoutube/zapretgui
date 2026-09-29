@@ -24,7 +24,7 @@ from app.ui_texts import tr as tr_catalog
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.queued_worker_state import QueuedWorkerState
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
-from ui.widgets.stagger_float_in import attach_stagger_float_in
+from ui.widgets.stagger_float_in import attach_stagger_float_in, skip_float_in
 from log.log import log
 
 
@@ -128,12 +128,14 @@ class AboutPage(BasePage):
         self._kvn_tab = tabs_widgets.kvn_tab
         # При каждом показе вкладки её карточки выплывают по очереди.
         for tab in (self._about_tab, self._help_tab, self._kvn_tab):
-            attach_stagger_float_in(tab, page=self)
+            attach_stagger_float_in(tab)
         self._about_layout = tabs_widgets.about_layout
         self._help_layout = tabs_widgets.help_layout
         self._kvn_layout = tabs_widgets.kvn_layout
         self._build_about_content(self._about_layout)
 
+        # Карточки вкладки выплывают сами, стопка вкладок целиком не выплывает.
+        skip_float_in(self.stacked_widget)
         self.add_widget(self.stacked_widget)
 
     def _apply_pending_tab_if_ready(self) -> None:

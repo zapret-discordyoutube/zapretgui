@@ -1,15 +1,14 @@
-"""Карточки вкладки выплывают снизу вверх по очереди, когда вкладку показывают.
+"""Карточки выплывают снизу вверх по очереди, когда контейнер показывают.
 
-Помощник вешается на контейнер вкладки. При каждом показе он проходит по
-виджетам его раскладки сверху вниз и каждому ненадолго ставит эффект,
-который рисует виджет полупрозрачным и чуть ниже своего места; эффект
-плавно доводит его до места и снимается. Раскладку эффект не трогает,
-поэтому соседи не прыгают.
+Помощник вешается на контейнер: содержимое каждой страницы (BasePage) и
+вкладки «О программе». При каждом показе он проходит по виджетам его
+раскладки сверху вниз и каждому ненадолго ставит эффект, который рисует
+виджет полупрозрачным и чуть ниже своего места; эффект плавно доводит его
+до места и снимается. Раскладку эффект не трогает, поэтому соседи не прыгают.
 
-Если в этот момент идёт переход между страницами (ui/page_transition.py),
-выплывание пропускается: вход страницы уже анимирован, двойная анимация
-лишняя. Виджет с атрибутом ``_zapret_no_float_in`` (у него свой вход,
-например девиз) не трогается.
+Выплывают только карточки, которые сейчас видны на экране. Виджет с
+атрибутом ``_zapret_no_float_in`` (у него свой вход, например девиз)
+не трогается.
 """
 
 from __future__ import annotations
@@ -93,12 +92,11 @@ class _FloatIn(QObject):
 
 
 class StaggeredFloatIn(QObject):
-    """Подключается к контейнеру вкладки и оживляет его при каждом показе."""
+    """Подключается к контейнеру и оживляет его при каждом показе."""
 
-    def __init__(self, container: QWidget, *, page: QWidget | None = None) -> None:
+    def __init__(self, container: QWidget) -> None:
         super().__init__(container)
         self._container = container
-        self._page = page
         self._running: list[_FloatIn] = []
         container.installEventFilter(self)
 
@@ -130,23 +128,16 @@ class StaggeredFloatIn(QObject):
             if widget.graphicsEffect() is not None:
                 # Чужой эффект (тень и т.п.) не подменяем.
                 continue
+            if widget.visibleRegion().isEmpty():
+                # Ниже края окна: выплывать там некому смотреть.
+                continue
             result.append(widget)
         return result
-
-    def _page_is_revealing(self) -> bool:
-        if self._page is None:
-            return False
-        try:
-            from ui.page_transition import is_page_revealing
-
-            return bool(is_page_revealing(self._page))
-        except Exception:
-            return False
 
     def play(self) -> None:
         if sip.isdeleted(self._container) or not self._container.isVisible():
             return
-        if not are_live_animations_enabled() or self._page_is_revealing():
+        if not are_live_animations_enabled():
             return
         window = self._container.window()
         if window is not None and window.isMinimized():
@@ -163,11 +154,11 @@ class StaggeredFloatIn(QObject):
                 item.finish()
 
 
-def attach_stagger_float_in(container: QWidget, *, page: QWidget | None = None) -> StaggeredFloatIn:
+def attach_stagger_float_in(container: QWidget) -> StaggeredFloatIn:
     """Подключает выплывание карточек к контейнеру (один раз на контейнер)."""
     controller = container.__dict__.get(_CONTROLLER_ATTR)
     if controller is None:
-        controller = StaggeredFloatIn(container, page=page)
+        controller = StaggeredFloatIn(container)
         container.__dict__[_CONTROLLER_ATTR] = controller
     return controller
 

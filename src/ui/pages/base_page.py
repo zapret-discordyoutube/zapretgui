@@ -23,6 +23,7 @@ from ui.smooth_scroll import (
     apply_page_smooth_scroll_preference,
     apply_smooth_scroll_mode,
 )
+from ui.widgets.stagger_float_in import attach_stagger_float_in
 
 
 class ScrollBlockingPlainTextEdit(_FluentPlainTextEdit):
@@ -163,6 +164,9 @@ class BasePage(_FluentScrollArea):
             self.vBoxLayout.addWidget(self.subtitle_label)
         else:
             self.subtitle_label = None
+
+        # При каждом открытии страницы её карточки выплывают снизу по очереди.
+        attach_stagger_float_in(self.content)
 
     def _set_page_registry_name(self, page_name) -> None:
         self._page_registry_name = page_name

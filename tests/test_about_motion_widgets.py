@@ -7,7 +7,7 @@ from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 import ui.widgets.stagger_float_in as float_module
 import ui.widgets.turning_globe as globe_module
@@ -62,12 +62,28 @@ class StaggerFloatInTests(unittest.TestCase):
         self.assertFalse(self.controller.is_running())
         self.assertTrue(all(card.graphicsEffect() is None for card in self.cards))
 
-    def test_page_transition_already_animates_the_entrance(self) -> None:
-        page = QWidget()
-        self.addCleanup(page.deleteLater)
-        controller = float_module.StaggeredFloatIn(QWidget(), page=page)
-        with mock.patch("ui.page_transition.is_page_revealing", return_value=True):
-            self.assertTrue(controller._page_is_revealing())
+    def test_cards_below_the_window_edge_stay_in_place(self) -> None:
+        scroll = QScrollArea()
+        self.addCleanup(scroll.deleteLater)
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        top = QLabel("top")
+        top.setFixedHeight(40)
+        below = QLabel("below")
+        below.setFixedHeight(40)
+        layout.addWidget(top)
+        layout.addSpacing(600)
+        layout.addWidget(below)
+        scroll.setWidget(content)
+        controller = attach_stagger_float_in(content)
+        scroll.resize(300, 200)
+        scroll.show()
+        _wait(0.05)
+
+        self.assertTrue(controller.is_running())
+        self.assertIsNotNone(top.graphicsEffect())
+        self.assertIsNone(below.graphicsEffect())
 
     def test_hiding_finishes_immediately(self) -> None:
         self.container.show()
@@ -137,6 +153,31 @@ class KvnLayoutTests(unittest.TestCase):
         self.assertLess(widgets.features_group.height(), 260)
 
 
+class PageOpenFloatInTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def test_every_page_floats_its_cards_in_when_opened(self) -> None:
+        from ui.pages.base_page import BasePage
+
+        with mock.patch.object(float_module, "are_live_animations_enabled", return_value=True):
+            page = BasePage("Страница", "Описание")
+            self.addCleanup(page.deleteLater)
+            card = QLabel("card")
+            page.add_widget(card)
+            page.resize(500, 400)
+            page.show()
+            _wait(0.05)
+
+            self.assertTrue(float_module.stagger_float_in(page.content).is_running())
+            self.assertIsNotNone(card.graphicsEffect())
+
+            page.hide()
+            QApplication.processEvents()
+            self.assertIsNone(card.graphicsEffect())
+
+
 class AboutPageMotionWiringTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -159,6 +200,8 @@ class AboutPageMotionWiringTests(unittest.TestCase):
 
         for tab in (page._about_tab, page._help_tab, page._kvn_tab):
             self.assertIsNotNone(stagger_float_in(tab))
+        # Стопку вкладок целиком не двигаем: её карточки выплывают сами.
+        self.assertTrue(page.stacked_widget.__dict__.get(float_module.NO_FLOAT_IN_ATTR))
 
         page.update_subscription_status(PremiumDisplay(tier=next(iter(PREMIUM_TIERS)), days=37))
         self.assertGreater(page.sub_status_icon._twinkle_interval_ms, 0)
