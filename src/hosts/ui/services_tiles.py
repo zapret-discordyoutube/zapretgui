@@ -25,6 +25,12 @@ from qfluentwidgets import getFont, isDarkTheme, themeColor
 from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
+from ui.widgets.stagger_float_in import (
+    FLOAT_IN_DURATION_MS,
+    FLOAT_IN_RISE_PX,
+    FLOAT_IN_STEP_MS,
+    float_in_progress,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +107,9 @@ class HostsTilesGrid(QWidget):
     # Смена выбора: оборот иконки и расходящееся свечение.
     CHANGE_SECONDS = 0.65
     FRAME_MS = 16
+    # Свой вход страницы: плитки выплывают по очереди чаще, чем карточки.
+    ENTRANCE_STEP_MS = FLOAT_IN_STEP_MS // 2
+    ENTRANCE_MAX_STEPS = 16
     _RADIUS = 5.0
     _ICON = 20
     _PAD = 14
@@ -134,6 +143,9 @@ class HostsTilesGrid(QWidget):
         # Анимации смены по ключу плитки; кадры идут, только пока они есть.
         self._changes: dict[str, _Change] = {}
         self._live_keys: set[str] = set()
+        # Вход при показе страницы: начало (сек) и очередь видимых плиток.
+        self._entrance_start: float | None = None
+        self._entrance_order: dict[int, int] = {}
         self._now = time.monotonic
         self._frames = QTimer(self)
         self._frames.setInterval(self.FRAME_MS)
@@ -180,6 +192,44 @@ class HostsTilesGrid(QWidget):
             if previous is None or previous[0] != tile or previous[1] != rect:
                 self.update(rect)
 
+    # ── вход при показе страницы ─────────────────────────────
+
+    def play_float_in(self, delay_ms: int) -> None:
+        """Свой вход (см. ui.widgets.stagger_float_in): видимые плитки и
+        заголовки выплывают по очереди. Рисуются готовые картинки с
+        прозрачностью и подъёмом — без графического эффекта на всю сетку."""
+        self.finish_float_in()
+        if not are_live_animations_enabled():
+            return
+        visible = self.visibleRegion().boundingRect()
+        order = [index for index, rect in enumerate(self._rects) if rect.intersects(visible)]
+        if not order:
+            return
+        self._entrance_order = {index: position for position, index in enumerate(order)}
+        self._entrance_start = self._now() + max(0, int(delay_ms)) / 1000.0
+        self._sync_frames()
+        self.update(visible)
+
+    def finish_float_in(self) -> None:
+        """Сразу поставить всё на место (страницу скрыли или показали заново)."""
+        if self._entrance_start is None:
+            return
+        self._entrance_start = None
+        self._entrance_order = {}
+        self._sync_frames()
+        self.update()
+
+    def _entrance_progress(self, index: int, now: float) -> float:
+        """0..1 — насколько плитка уже выплыла; 1 — вход не идёт."""
+        if self._entrance_start is None or index not in self._entrance_order:
+            return 1.0
+        step = min(self._entrance_order[index], self.ENTRANCE_MAX_STEPS) * self.ENTRANCE_STEP_MS
+        return float_in_progress((now - self._entrance_start) * 1000.0 - step)
+
+    def _entrance_finished(self, now: float) -> bool:
+        last = min(len(self._entrance_order), self.ENTRANCE_MAX_STEPS + 1) * self.ENTRANCE_STEP_MS
+        return (now - self._entrance_start) * 1000.0 >= last + FLOAT_IN_DURATION_MS
+
     # ── анимации смены ───────────────────────────────────────
 
     def _start_changes(self, old_by_key: dict, tiles: list[HostsTile]) -> None:
@@ -217,7 +267,7 @@ class HostsTilesGrid(QWidget):
         return change, min(1.0, max(0.0, (self._now() - change.started) / self.CHANGE_SECONDS))
 
     def _sync_frames(self) -> None:
-        if self._spinning_keys():
+        if self._spinning_keys() or self._entrance_start is not None:
             if not self._frames.isActive():
                 self._frames.start()
         elif self._frames.isActive():
@@ -225,6 +275,11 @@ class HostsTilesGrid(QWidget):
 
     def _on_frame(self) -> None:
         now = self._now()
+        if self._entrance_start is not None:
+            self.update(self.visibleRegion())
+            if self._entrance_finished(now):
+                self._entrance_start = None
+                self._entrance_order = {}
         finished = [key for key, change in self._changes.items() if now - change.started >= self.CHANGE_SECONDS]
         for key in finished:
             del self._changes[key]
@@ -357,14 +412,24 @@ class HostsTilesGrid(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         dirty = event.rect()
         self._live_keys = self._spinning_keys()
+        now = self._now()
         for index, rect in enumerate(self._rects):
-            if not rect.intersects(dirty):
+            if not rect.adjusted(0, 0, 0, int(FLOAT_IN_RISE_PX)).intersects(dirty):
                 continue
+            entrance = self._entrance_progress(index, now)
+            if entrance <= 0.0:
+                continue
+            if entrance < 1.0:
+                painter.save()
+                painter.setOpacity(entrance)
+                painter.translate(0.0, FLOAT_IN_RISE_PX * (1.0 - entrance))
             tile = self._tiles[index]
             if tile.kind == "tile":
                 painter.drawPixmap(rect.topLeft(), self._tile_pixmap(index, rect, tile, tokens, dark, accent, dpr))
             else:
                 self._paint_header(painter, rect, tile, tokens)
+            if entrance < 1.0:
+                painter.restore()
         painter.end()
 
     def _tile_state(self, index: int) -> tuple:

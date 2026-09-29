@@ -357,6 +357,8 @@ class HostsPageTests(unittest.TestCase):
         page.resize(1000, 700)
         page.show()
         QApplication.processEvents()
+        # Вход страницы (выплывание) проверяется отдельно; здесь — готовая страница.
+        page.tiles.finish_float_in()
         return page
 
     def _finish_write(self, page, *, success: bool = True, snapshot=None, message: str = "") -> None:

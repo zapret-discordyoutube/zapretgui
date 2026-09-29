@@ -6,9 +6,18 @@
 виджет полупрозрачным и чуть ниже своего места; эффект плавно доводит его
 до места и снимается. Раскладку эффект не трогает, поэтому соседи не прыгают.
 
-Выплывают только карточки, которые сейчас видны на экране. Виджет с
-атрибутом ``_zapret_no_float_in`` (у него свой вход, например девиз)
-не трогается.
+Выплывают только карточки, которые сейчас видны на экране.
+
+Появление есть у каждой страницы, выключать его нельзя. Если виджет большой
+и рисуется вручную (например, сетка плиток hosts) и эффект обходился бы
+дорого, ему дают метод ``play_float_in(delay_ms)``: помощник вызывает его
+в общей очереди вместо эффекта, а при скрытии — ``finish_float_in()``.
+Такой вход рисуется теми же константами и той же плавностью
+(``float_in_progress``).
+
+``skip_float_in`` — только для виджетов, у которых вход уже есть свой
+(вкладки «О программе» со своим помощником, девиз, шапка с глобусом);
+архитектурная проверка не пускает его в другие файлы.
 """
 
 from __future__ import annotations
@@ -27,6 +36,15 @@ FLOAT_IN_RISE_PX = 16.0
 _MAX_STAGGERED = 8
 _CONTROLLER_ATTR = "_zapret_stagger_float_in"
 NO_FLOAT_IN_ATTR = "_zapret_no_float_in"
+# Метод «своего входа» у виджета: play_float_in(delay_ms) / finish_float_in().
+OWN_FLOAT_IN_METHOD = "play_float_in"
+OWN_FLOAT_IN_FINISH = "finish_float_in"
+
+
+def float_in_progress(elapsed_ms: float) -> float:
+    """Доля пройденного пути выплывания (0..1) с той же плавностью OutCubic."""
+    linear = max(0.0, min(1.0, float(elapsed_ms) / FLOAT_IN_DURATION_MS))
+    return 1.0 - (1.0 - linear) ** 3
 
 
 class _RiseEffect(QGraphicsEffect):
@@ -98,6 +116,8 @@ class StaggeredFloatIn(QObject):
         super().__init__(container)
         self._container = container
         self._running: list[_FloatIn] = []
+        # Виджеты со своим входом, запущенные в этот показ.
+        self._own: list[QWidget] = []
         container.installEventFilter(self)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
@@ -111,7 +131,7 @@ class StaggeredFloatIn(QObject):
         return False
 
     def is_running(self) -> bool:
-        return any(not sip.isdeleted(item) for item in self._running)
+        return any(not sip.isdeleted(item) for item in self._running) or bool(self._own)
 
     def _targets(self) -> list[QWidget]:
         layout = self._container.layout()
@@ -125,7 +145,7 @@ class StaggeredFloatIn(QObject):
                 continue
             if widget.__dict__.get(NO_FLOAT_IN_ATTR):
                 continue
-            if widget.graphicsEffect() is not None:
+            if widget.graphicsEffect() is not None and not _has_own_float_in(widget):
                 # Чужой эффект (тень и т.п.) не подменяем.
                 continue
             if widget.visibleRegion().isEmpty():
@@ -145,13 +165,26 @@ class StaggeredFloatIn(QObject):
         self.finish_all()
         for order, widget in enumerate(self._targets()):
             delay = min(order, _MAX_STAGGERED) * FLOAT_IN_STEP_MS
-            self._running.append(_FloatIn(widget, delay, self))
+            if _has_own_float_in(widget):
+                getattr(widget, OWN_FLOAT_IN_METHOD)(delay)
+                self._own.append(widget)
+            else:
+                self._running.append(_FloatIn(widget, delay, self))
 
     def finish_all(self) -> None:
         running, self._running = self._running, []
         for item in running:
             if not sip.isdeleted(item):
                 item.finish()
+        own, self._own = self._own, []
+        for widget in own:
+            finish = getattr(widget, OWN_FLOAT_IN_FINISH, None)
+            if not sip.isdeleted(widget) and callable(finish):
+                finish()
+
+
+def _has_own_float_in(widget: QWidget) -> bool:
+    return callable(getattr(widget, OWN_FLOAT_IN_METHOD, None))
 
 
 def attach_stagger_float_in(container: QWidget) -> StaggeredFloatIn:
@@ -188,15 +221,24 @@ def float_in(widget: QWidget, *, delay_ms: int = 0) -> bool:
 
 
 def skip_float_in(widget: QWidget) -> QWidget:
-    """Помечает виджет, у которого свой вход (например, девиз)."""
+    """Помечает виджет, у которого вход уже есть свой (например, девиз).
+
+    Не для того, чтобы просто выключить появление: большой виджет с ручной
+    отрисовкой получает ``play_float_in``. Разрешённые файлы — в
+    ``app.architecture_checks.check_skip_float_in_is_allowlisted``.
+    """
     widget.__dict__[NO_FLOAT_IN_ATTR] = True
     return widget
 
 
 __all__ = [
+    "FLOAT_IN_DURATION_MS",
+    "FLOAT_IN_RISE_PX",
+    "FLOAT_IN_STEP_MS",
     "StaggeredFloatIn",
     "attach_stagger_float_in",
     "float_in",
+    "float_in_progress",
     "skip_float_in",
     "stagger_float_in",
 ]

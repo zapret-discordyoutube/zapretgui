@@ -172,6 +172,26 @@ def check_switches_use_aligned_switch_button(files: list[Path]) -> list[Problem]
     )
 
 
+def check_skip_float_in_is_allowlisted(files: list[Path]) -> list[Problem]:
+    """Появление страниц не выключают: skip_float_in — только для виджетов,
+    у которых вход уже есть свой (вкладки «О программе», девиз, шапка).
+
+    Большому виджету с ручной отрисовкой дают play_float_in(delay_ms):
+    общий модуль ui.widgets.stagger_float_in вызывает его в своей очереди.
+    """
+    return _scan_lines(
+        files,
+        re.compile(r"\bskip_float_in\s*\("),
+        "не выключайте появление страницы — дайте виджету play_float_in (свой вход через ui.widgets.stagger_float_in)",
+        allowed_paths={
+            "src/ui/widgets/stagger_float_in.py",
+            "src/ui/pages/about_page.py",
+            "src/ui/pages/about_page_help_build.py",
+            "src/ui/pages/about_page_kvn_build.py",
+        },
+    )
+
+
 def check_no_window_level_state_subscriptions(files: list[Path]) -> list[Problem]:
     scopes = []
     for path in files:
@@ -1548,6 +1568,7 @@ def run_checks() -> list[Problem]:
     problems.extend(check_no_page_signal_layer(files))
     problems.extend(check_no_window_level_state_subscriptions(files))
     problems.extend(check_switches_use_aligned_switch_button(files))
+    problems.extend(check_skip_float_in_is_allowlisted(files))
     problems.extend(check_runtime_feedback_uses_ui_bridge(files))
     problems.extend(check_runtime_ui_bridge_is_feature_neutral())
     problems.extend(check_preset_display_state_not_in_window_layer(files))
