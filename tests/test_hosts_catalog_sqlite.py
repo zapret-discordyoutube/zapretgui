@@ -81,10 +81,10 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.09.28.1")
+        self.assertEqual(catalog.catalog_version, "2026.09.29.1")
         self.assertEqual(len(catalog.content_sha256), 64)
         self.assertEqual(len(catalog.service_order), 73)
-        self.assertEqual(len(catalog.dns_profiles), 6)
+        self.assertEqual(len(catalog.dns_profiles), 8)
         self.assertNotIn("fin_dns", catalog.dns_profiles)
         self.assertNotIn("play2go_cloud_dns", catalog.dns_profiles)
         self.assertEqual(catalog.service_id_by_name["Discord"], "hosts.discord")
@@ -100,7 +100,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 818)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 6498)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 6608)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -122,6 +122,32 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                     dead_relay,
                 )
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM hosts_entries").fetchone()[0], 499)
+        finally:
+            connection.close()
+
+    def test_sni_proxy_profiles_cover_only_chatgpt(self) -> None:
+        connection = sqlite3.connect(PRIVATE_DATABASE)
+        try:
+            for profile_id, proxy_ip in (("astracat", "217.60.179.6"), ("geohide", "217.60.245.219")):
+                services = connection.execute(
+                    "SELECT DISTINCT d.service_id FROM dns_answers a"
+                    " JOIN domains d USING(domain_id) WHERE a.profile_id = ?",
+                    (profile_id,),
+                ).fetchall()
+                self.assertEqual(services, [("dns.chatgpt_and_sora_openai",)], profile_id)
+                uncovered = connection.execute(
+                    "SELECT COUNT(*) FROM domains d WHERE d.service_id = 'dns.chatgpt_and_sora_openai'"
+                    " AND NOT EXISTS (SELECT 1 FROM dns_answers a"
+                    " WHERE a.domain_id = d.domain_id AND a.profile_id = ?)",
+                    (profile_id,),
+                ).fetchone()[0]
+                self.assertEqual(uncovered, 0, profile_id)
+                chatgpt_ip = connection.execute(
+                    "SELECT a.ip_address FROM dns_answers a JOIN domains d USING(domain_id)"
+                    " WHERE d.hostname = 'chatgpt.com' AND a.profile_id = ?",
+                    (profile_id,),
+                ).fetchall()
+                self.assertEqual(chatgpt_ip, [(proxy_ip,)], profile_id)
         finally:
             connection.close()
 
