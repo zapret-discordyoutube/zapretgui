@@ -1409,13 +1409,37 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Не удалось открыть Блокнот",
         "en": "Could not open Notepad",
     },
+    "page.hosts.group.direct.hint": {
+        "ru": "адрес прописывается как есть",
+        "en": "the address is written as is",
+    },
+    "page.hosts.group.ai.hint": {
+        "ru": "сами закрыты для России, нужен DNS-профиль",
+        "en": "blocked for Russia by themselves, a DNS profile is needed",
+    },
+    "page.hosts.group.other.hint": {
+        "ru": "через DNS-профиль",
+        "en": "via a DNS profile",
+    },
+    "page.hosts.group.counter": {
+        "ru": "{on} из {total}",
+        "en": "{on} of {total}",
+    },
+    "page.hosts.summary.services": {
+        "ru": "сервисов включено в hosts",
+        "en": "services enabled in hosts",
+    },
+    "page.hosts.summary.lines": {
+        "ru": "строк от ZapretGUI в файле: {lines}",
+        "en": "ZapretGUI lines in the file: {lines}",
+    },
+    "page.hosts.adobe.note": {
+        "ru": "Закрывает серверы проверки лицензии Adobe",
+        "en": "Blocks Adobe license check servers",
+    },
     "page.hosts.loading": {
         "ru": "Загрузка…",
         "en": "Loading…",
-    },
-    "page.hosts.summary.on": {
-        "ru": "В hosts включено сервисов: {services} · строк от ZapretGUI: {lines}",
-        "en": "Services on in hosts: {services} · ZapretGUI lines: {lines}",
     },
     "page.hosts.summary.off": {
         "ru": "Сейчас ZapretGUI ничего не прописывает в hosts",
@@ -1538,16 +1562,16 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Off",
     },
     "page.hosts.group.direct": {
-        "ru": "Напрямую — адрес прописывается как есть",
-        "en": "Direct — the address is written as is",
+        "ru": "Напрямую",
+        "en": "Direct",
     },
     "page.hosts.group.ai": {
-        "ru": "ИИ — сами закрыты для России, нужен DNS-профиль",
-        "en": "AI — blocked for Russia by the services themselves, needs a DNS profile",
+        "ru": "ИИ-сервисы",
+        "en": "AI services",
     },
     "page.hosts.group.other": {
-        "ru": "Остальные — через DNS-профиль",
-        "en": "Other — via a DNS profile",
+        "ru": "Остальные сервисы",
+        "en": "Other services",
     },
     "page.hosts.hint.ipv6": {
         "ru": "Нужен IPv6 — сейчас его нет",

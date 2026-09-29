@@ -14,11 +14,13 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QEvent, QPoint, Qt, QVariantAnimation
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import (
     Action,
     BodyLabel,
+    CaptionLabel,
     DropDownPushButton,
     FluentIcon,
     InfoBar,
@@ -26,14 +28,17 @@ from qfluentwidgets import (
     RoundMenu,
     ScrollArea,
     SearchLineEdit,
+    StrongBodyLabel,
     TransparentPushButton,
+    getFont,
+    themeColor,
 )
 
 from app.ui_texts import tr as tr_catalog
 from hosts.draft import MIXED, HostsDraft
 from hosts.hosts_blocks import BLOCK_ZAPRETGUI
 from hosts.page_snapshot import CATEGORY_AI, CATEGORY_DIRECT, CATEGORY_OTHER, HostsPageSnapshot
-from hosts.ui.services_tiles import HostsTile, HostsTilesGrid
+from hosts.ui.services_tiles import HostsTile, HostsTilesGrid, split_service_title
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import SettingsCard
@@ -50,9 +55,14 @@ COLLAPSE_SCROLL_PX = 24
 COLLAPSE_MS = 180
 
 _GROUP_TITLES = {
-    CATEGORY_DIRECT: ("page.hosts.group.direct", "Напрямую — адрес прописывается как есть"),
-    CATEGORY_AI: ("page.hosts.group.ai", "ИИ — сами закрыты для России, нужен DNS-профиль"),
-    CATEGORY_OTHER: ("page.hosts.group.other", "Остальные — через DNS-профиль"),
+    CATEGORY_DIRECT: ("page.hosts.group.direct", "Напрямую"),
+    CATEGORY_AI: ("page.hosts.group.ai", "ИИ-сервисы"),
+    CATEGORY_OTHER: ("page.hosts.group.other", "Остальные сервисы"),
+}
+_GROUP_HINTS = {
+    CATEGORY_DIRECT: ("page.hosts.group.direct.hint", "адрес прописывается как есть"),
+    CATEGORY_AI: ("page.hosts.group.ai.hint", "сами закрыты для России, нужен DNS-профиль"),
+    CATEGORY_OTHER: ("page.hosts.group.other.hint", "через DNS-профиль"),
 }
 
 
@@ -118,14 +128,25 @@ class HostsPage(BasePage):
             self.vBoxLayout.removeWidget(self.subtitle_label)
             self.subtitle_label.setParent(self.top_panel)
             top_layout.addWidget(self.subtitle_label)
+        # Сводка: крупная цифра включённых сервисов, строки и статус записи.
         self.summary_card = SettingsCard(parent=self.top_panel)
         summary_row = QHBoxLayout()
-        summary_row.setSpacing(10)
-        self.summary_dot = QLabel("●", self.summary_card)
-        summary_row.addWidget(self.summary_dot)
-        self.summary_label = BodyLabel(self.summary_card)
-        self.summary_label.setWordWrap(True)
-        summary_row.addWidget(self.summary_label, 1)
+        summary_row.setSpacing(14)
+        self.summary_count = QLabel(self.summary_card)
+        self.summary_count.setFont(getFont(28, QFont.Weight.DemiBold))
+        summary_row.addWidget(self.summary_count, 0, Qt.AlignmentFlag.AlignVCenter)
+        summary_text = QVBoxLayout()
+        summary_text.setSpacing(0)
+        self.summary_label = StrongBodyLabel(self.summary_card)
+        summary_text.addWidget(self.summary_label)
+        self.summary_detail = CaptionLabel(self.summary_card)
+        summary_text.addWidget(self.summary_detail)
+        summary_row.addLayout(summary_text, 1)
+        self.summary_status = CaptionLabel(self.summary_card)
+        self.summary_status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.summary_status.setWordWrap(True)
+        self.summary_status.setMaximumWidth(360)
+        summary_row.addWidget(self.summary_status, 0, Qt.AlignmentFlag.AlignVCenter)
         self.summary_card.main_layout.addLayout(summary_row)
         top_layout.addWidget(self.summary_card)
         self.add_widget(self.top_panel)
@@ -590,32 +611,39 @@ class HostsPage(BasePage):
         tokens = get_theme_tokens()
         semantic = get_semantic_palette()
         if snapshot is None:
-            text = self._tr("page.hosts.loading", "Загрузка…")
-            active = False
+            services, lines = 0, 0
+            title = self._tr("page.hosts.loading", "Загрузка…")
         else:
             block = snapshot.block(BLOCK_ZAPRETGUI)
             lines = block.count if block is not None else 0
             services = sum(1 for entry in snapshot.services if entry.current)
-            active = lines > 0
-            if active:
-                text = self._tr(
-                    "page.hosts.summary.on",
-                    "В hosts включено сервисов: {services} · строк от ZapretGUI: {lines}",
-                    lines=lines,
-                    services=services,
-                )
-            else:
-                text = self._tr("page.hosts.summary.off", "Сейчас ZapretGUI ничего не прописывает в hosts")
-            if self._applying:
-                text += " · " + self._tr("page.hosts.summary.writing", "записываю…")
-            elif self._just_written:
-                text += " · " + self._tr(
-                    "page.hosts.summary.written",
-                    "записано — перезапустите браузер, чтобы изменения заработали",
-                )
-        self.summary_label.setText(text)
-        set_state_text(self.summary_label, text)
-        self.summary_dot.setStyleSheet(f"color: {semantic.success if active else tokens.fg_faint}; font-size: 12px;")
+            title = (
+                self._tr("page.hosts.summary.services", "сервисов включено в hosts")
+                if services
+                else self._tr("page.hosts.summary.off", "Сейчас ZapretGUI ничего не прописывает в hosts")
+            )
+        self.summary_count.setText(str(services))
+        self.summary_count.setVisible(snapshot is not None and services > 0)
+        accent = QColor(themeColor())
+        self.summary_count.setStyleSheet(f"color: {accent.name()}; background: transparent;")
+        self.summary_label.setText(title)
+        detail = self._tr("page.hosts.summary.lines", "строк от ZapretGUI в файле: {lines}", lines=lines) if lines else ""
+        self.summary_detail.setText(detail)
+        self.summary_detail.setVisible(bool(detail))
+        if self._applying:
+            status, color = self._tr("page.hosts.summary.writing", "записываю…"), accent.name()
+        elif self._just_written:
+            status = self._tr(
+                "page.hosts.summary.written",
+                "записано — перезапустите браузер, чтобы изменения заработали",
+            )
+            color = semantic.success
+        else:
+            status, color = "", tokens.fg_muted
+        self.summary_status.setText(status)
+        self.summary_status.setStyleSheet(f"color: {color}; background: transparent;")
+        spoken = " ".join(part for part in (str(services) if services else "", title, detail, status) if part)
+        set_state_text(self.summary_label, spoken)
         self.all_off_button.setEnabled(snapshot is not None)
 
     def _render_dns_all(self) -> None:
@@ -640,8 +668,8 @@ class HostsPage(BasePage):
             return
         labels = dict(draft.snapshot.dns_profiles)
         off_label = self._tr("page.hosts.profile.off", "Выкл.")
-        on_caption = self._tr("page.hosts.state.on", "включён")
-        off_caption = self._tr("page.hosts.state.off", "выключен")
+        on_state = self._tr("page.hosts.state.on", "включён")
+        off_state = self._tr("page.hosts.state.off", "выключен")
         ipv6_hint = self._tr("page.hosts.hint.ipv6", "Нужен IPv6 — сейчас его нет")
         writing_text = self._tr("page.hosts.state.changed", "записывается")
         grouped: dict[str, list[HostsTile]] = {CATEGORY_DIRECT: [], CATEGORY_AI: [], CATEGORY_OTHER: []}
@@ -649,28 +677,29 @@ class HostsPage(BasePage):
             if self._search and self._search not in entry.name.casefold():
                 continue
             value = draft.value(entry.name)
-            pending = draft.is_changed(entry.name)
+            pending = draft.is_changed(entry.name) and self._applying
+            title, note = split_service_title(entry.name)
+            if entry.unavailable_reason:
+                note = ipv6_hint
             if entry.is_direct:
-                badge = ""
-                caption = ipv6_hint if entry.unavailable_reason else (on_caption if value else off_caption)
-                state = on_caption if value else off_caption
+                state = on_state if value else off_state
+                combo_text = ""
             else:
-                badge = "" if entry.unavailable_reason else (labels.get(value, value) if value else off_label)
-                caption = ipv6_hint if entry.unavailable_reason else ""
                 state = labels.get(value, value) if value else off_label
+                combo_text = "" if entry.unavailable_reason else state
             accessible = f"{entry.name}: {state}" + (f", {writing_text}" if pending else "")
             grouped.setdefault(entry.category, []).append(
                 HostsTile(
                     kind="tile",
-                    title=entry.name,
+                    title=title,
                     key=entry.name,
+                    note=note,
                     icon_name=entry.icon_name,
                     icon_color=entry.icon_color,
                     is_on=bool(value),
-                    badge=badge,
-                    caption=caption,
-                    has_menu=not entry.is_direct,
-                    pending=pending and self._applying,
+                    has_switch=entry.is_direct and not entry.unavailable_reason,
+                    combo_text=combo_text,
+                    pending=pending,
                     enabled=not entry.unavailable_reason,
                     accessible_text=accessible,
                 )
@@ -682,7 +711,10 @@ class HostsPage(BasePage):
                 continue
             key, default = _GROUP_TITLES[category]
             on_count = sum(1 for item in items if item.is_on)
-            tiles.append(HostsTile(kind="group", title=f"{self._tr(key, default)}  ·  {on_count} из {len(items)}"))
+            counter = self._tr("page.hosts.group.counter", "{on} из {total}", on=on_count, total=len(items))
+            hint_key, hint_default = _GROUP_HINTS[category]
+            counter = f"{counter}  ·  {self._tr(hint_key, hint_default)}"
+            tiles.append(HostsTile(kind="group", title=self._tr(key, default), counter=counter))
             tiles.extend(items)
 
         adobe_title = self._tr("page.hosts.adobe.title", "Блокировать активацию Adobe")
@@ -693,12 +725,13 @@ class HostsPage(BasePage):
                     kind="tile",
                     title=adobe_title,
                     key=ADOBE_TILE_KEY,
+                    note=self._tr("page.hosts.adobe.note", "Закрывает серверы проверки лицензии Adobe"),
                     icon_name="fa5s.ban",
                     icon_color="#ff6b61",
                     is_on=draft.adobe,
-                    caption=on_caption if draft.adobe else off_caption,
+                    has_switch=True,
                     pending=draft.adobe_changed and self._applying,
-                    accessible_text=f"{adobe_title}: {on_caption if draft.adobe else off_caption}",
+                    accessible_text=f"{adobe_title}: {on_state if draft.adobe else off_state}",
                 )
             )
         if not tiles:

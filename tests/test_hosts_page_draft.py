@@ -449,6 +449,26 @@ class HostsPageTests(unittest.TestCase):
             page._on_tiles_scrolled(0)
             self.assertTrue(page.top_panel.isVisible())
 
+    def test_tiles_use_switch_for_direct_and_profile_field_for_dns(self) -> None:
+        page = self._page(_manual_snapshot(beta="p1"))
+        tiles = {tile.key: tile for tile in page.tiles.tiles() if tile.kind == "tile"}
+
+        self.assertTrue(tiles["Direct"].has_switch)
+        self.assertEqual(tiles["Direct"].combo_text, "")
+        self.assertFalse(tiles["Alpha"].has_switch)
+        self.assertEqual(tiles["Alpha"].combo_text, "Выкл.")
+        self.assertEqual(tiles["Beta"].combo_text, "Профиль 1")
+        self.assertTrue(tiles["Beta"].is_on)
+
+    def test_note_in_brackets_moves_to_second_line(self) -> None:
+        from hosts.ui.services_tiles import split_service_title
+
+        self.assertEqual(
+            split_service_title("YouTube (иногда может не работать с ним!)"),
+            ("YouTube", "иногда может не работать с ним!"),
+        )
+        self.assertEqual(split_service_title("Discord"), ("Discord", ""))
+
     def test_only_the_tiles_scroll(self) -> None:
         from PyQt6.QtCore import Qt
 
