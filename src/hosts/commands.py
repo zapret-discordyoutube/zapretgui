@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hosts.state import HostsCommandResult, HostsState
+from hosts.state import HostsApplyResult, HostsCommandResult
 
 
 def read_hosts_file():
@@ -28,52 +28,6 @@ def create_hosts_manager(status_callback=None):
     return HostsManager(status_callback=status_callback)
 
 
-def create_hosts_runtime(status_callback=None):
-    return create_hosts_manager(status_callback=status_callback)
-
-
-def get_hosts_state(hosts_manager=None) -> HostsState:
-    manager = hosts_manager or create_hosts_manager()
-    error = ""
-    accessible = False
-    active_domains: set[str] = set()
-    adobe_active = False
-
-    try:
-        read_check = getattr(manager, "is_hosts_file_readable", None)
-        if callable(read_check):
-            accessible = bool(read_check())
-        else:
-            accessible = bool(manager.is_hosts_file_accessible())
-    except Exception as exc:
-        error = str(exc)
-
-    if not error:
-        try:
-            active_domains = set((manager.get_active_domains_map() or {}).keys())
-        except Exception as exc:
-            error = str(exc)
-            active_domains = set()
-
-    try:
-        adobe_active = bool(manager.is_adobe_domains_active())
-    except Exception:
-        adobe_active = False
-
-    return HostsState(
-        accessible=accessible,
-        active_domains=frozenset(active_domains),
-        adobe_active=adobe_active,
-        error=error,
-    )
-
-
-def apply_service_profiles(hosts_manager, service_dns: dict[str, str]) -> HostsCommandResult:
-    success = bool(hosts_manager.apply_service_dns_selections(service_dns or {}))
-    message = "Применено" if success else getattr(hosts_manager, "last_status", None) or "Ошибка"
-    return HostsCommandResult(success=success, message=message)
-
-
 def refresh_applied_selection(hosts_manager=None) -> HostsCommandResult:
     """При запуске переписывает уже применённый блок hosts, если каталог сменил адреса."""
     from hosts.proxy_domains import has_saved_user_hosts_selection
@@ -89,34 +43,39 @@ def refresh_applied_selection(hosts_manager=None) -> HostsCommandResult:
     return HostsCommandResult(success=True, message=reason, changed=bool(changed))
 
 
-def clear_hosts(hosts_manager) -> HostsCommandResult:
-    success = bool(hosts_manager.clear_hosts_file())
-    message = "Записи ZapretGUI очищены" if success else getattr(hosts_manager, "last_status", None) or "Ошибка"
-    return HostsCommandResult(success=success, message=message)
+def load_page_snapshot():
+    """Снимок страницы Hosts: каталог, текст hosts и доступ. Только чтение."""
+    from hosts.page_snapshot import load_page_snapshot as _load_page_snapshot
+
+    return _load_page_snapshot()
 
 
-def add_adobe_domains(hosts_manager) -> HostsCommandResult:
-    success = bool(hosts_manager.add_adobe_domains())
-    message = "Adobe заблокирован" if success else getattr(hosts_manager, "last_status", None) or "Ошибка"
-    return HostsCommandResult(success=success, message=message)
+def apply_hosts_draft(selection: dict[str, str], adobe: bool | None = None) -> HostsApplyResult:
+    """Записывает черновик страницы одной операцией и возвращает свежий снимок.
 
+    selection — полный выбор «сервис → профиль»; adobe — None, если блок
+    Adobe не меняли.
+    """
+    from log.log import log
 
-def remove_adobe_domains(hosts_manager) -> HostsCommandResult:
-    success = bool(hosts_manager.remove_adobe_domains())
-    message = "Adobe разблокирован" if success else getattr(hosts_manager, "last_status", None) or "Ошибка"
-    return HostsCommandResult(success=success, message=message)
+    manager = create_hosts_manager(
+        status_callback=lambda message: log(f"Hosts: {message}", "DEBUG")
+    )
+    selection = dict(selection or {})
+    success = bool(manager.apply_service_dns_selections(selection))
+    message = str(manager.last_status or "")
+    if success:
+        save_user_selection(selection)
+    if success and adobe is not None:
+        success = bool(manager.add_adobe_domains() if adobe else manager.remove_adobe_domains())
+        message = str(manager.last_status or message)
 
-
-def execute_hosts_operation(hosts_manager, operation: str, payload=None) -> HostsCommandResult:
-    if operation == "apply_selection":
-        return apply_service_profiles(hosts_manager, payload or {})
-    if operation == "clear_all":
-        return clear_hosts(hosts_manager)
-    if operation == "adobe_add":
-        return add_adobe_domains(hosts_manager)
-    if operation == "adobe_remove":
-        return remove_adobe_domains(hosts_manager)
-    return HostsCommandResult(success=False, message="Неизвестная операция")
+    snapshot = None
+    try:
+        snapshot = load_page_snapshot()
+    except Exception as exc:
+        log(f"Hosts: не удалось перечитать состояние после записи: {exc}", "WARNING")
+    return HostsApplyResult(success=success, message=message, snapshot=snapshot)
 
 
 def load_user_selection() -> dict[str, str]:
@@ -135,79 +94,6 @@ def save_user_selection(selection: dict[str, str]) -> bool:
         return bool(save_user_hosts_selection(dict(selection)))
     except Exception:
         return False
-
-
-def get_catalog_signature():
-    from hosts.proxy_domains import get_hosts_catalog_signature
-
-    try:
-        return get_hosts_catalog_signature()
-    except Exception:
-        return None
-
-
-def invalidate_catalog_cache() -> None:
-    from hosts.proxy_domains import invalidate_hosts_catalog_cache
-
-    try:
-        invalidate_hosts_catalog_cache()
-    except Exception:
-        pass
-
-
-def read_active_domains_map(hosts_manager) -> dict[str, str]:
-    if hosts_manager is None:
-        return {}
-    try:
-        return dict(hosts_manager.get_active_domains_map() or {})
-    except Exception:
-        return {}
-
-
-def read_active_domain_ip_map(hosts_manager) -> dict[str, list[str]]:
-    if hosts_manager is None:
-        return {}
-    try:
-        get_active_domain_ip_map = getattr(hosts_manager, "get_active_domain_ip_map", None)
-        if callable(get_active_domain_ip_map):
-            active_ip_map = get_active_domain_ip_map() or {}
-            return {
-                str(domain or "").strip().casefold(): [
-                    str(ip or "").strip()
-                    for ip in (ips if isinstance(ips, (list, tuple, set, frozenset)) else [ips])
-                    if str(ip or "").strip()
-                ]
-                for domain, ips in active_ip_map.items()
-                if str(domain or "").strip()
-            }
-    except Exception:
-        pass
-
-    return {
-        domain: [ip]
-        for domain, ip in read_active_domains_map(hosts_manager).items()
-        if domain and ip
-    }
-
-
-def build_services_catalog_plan(
-    *,
-    hosts_runtime,
-    current_selection: dict[str, str],
-    direct_title: str,
-    ai_title: str,
-    other_title: str,
-):
-    import hosts.page_plans as hosts_page_plans
-
-    active_domains_map = read_active_domain_ip_map(hosts_runtime)
-    return hosts_page_plans.build_services_catalog_plan(
-        current_selection=current_selection,
-        active_domains_map=active_domains_map,
-        direct_title=direct_title,
-        ai_title=ai_title,
-        other_title=other_title,
-    )
 
 
 def get_hosts_path_str() -> str:

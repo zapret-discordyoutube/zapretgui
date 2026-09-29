@@ -259,6 +259,7 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
             on_generate_mtproxy_secret=lambda: None,
             on_copy_fake_tls_nginx_config=lambda: None,
             on_open_advanced_settings=lambda: None,
+            on_telegram_hosts_action=lambda: None,
         )
 
         self.assertEqual(widgets.setup_open_btn.accessibleName(), "Открыть Telegram Proxy в Telegram")
@@ -348,6 +349,7 @@ class TelegramProxyAccessibilityTests(unittest.TestCase):
             on_generate_mtproxy_secret=lambda: None,
             on_copy_fake_tls_nginx_config=lambda: None,
             on_open_advanced_settings=lambda: None,
+            on_telegram_hosts_action=lambda: None,
         )
         advanced_widgets = build_telegram_proxy_advanced_panel(
             layout,

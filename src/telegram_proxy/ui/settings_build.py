@@ -50,6 +50,9 @@ class TelegramProxySettingsPanelWidgets:
     auto_deeplink_toggle: object
     advanced_nav_row: object
     advanced_nav_btn: object
+    hosts_card: object
+    hosts_row: object
+    hosts_btn: object
 
 
 def set_spinbox_value_accessibility(spinbox, *, name: str, description: str) -> None:
@@ -246,6 +249,7 @@ def build_telegram_proxy_settings_panel(
     on_generate_mtproxy_secret,
     on_copy_fake_tls_nginx_config,
     on_open_advanced_settings,
+    on_telegram_hosts_action,
 ) -> TelegramProxySettingsPanelWidgets:
     text = TELEGRAM_PROXY_SETTINGS_TEXT
     (
@@ -384,6 +388,25 @@ def build_telegram_proxy_settings_panel(
     enable_setting_card_group_auto_height(settings_card)
 
     layout.addWidget(settings_card)
+
+    # Записи сайтов Telegram в hosts меняются только этой кнопкой.
+    # Состояние и текст кнопки страница подставляет после чтения файла.
+    hosts_card = SettingCardGroup(text.hosts_group_title, content_parent)
+    hosts_row, hosts_btn = build_action_row(
+        icon_name="fa5s.file-alt",
+        title=text.hosts_title,
+        description=f"{text.hosts_state_checking}\n{text.hosts_hint}",
+        button_text=text.hosts_add_button,
+        button_icon=FluentIcon.ADD,
+        accessible_name=text.hosts_add_accessible_name,
+        on_click=on_telegram_hosts_action,
+    )
+    set_tooltip(hosts_btn, text.hosts_hint)
+    hosts_btn.setEnabled(False)
+    hosts_card.addSettingCard(hosts_row)
+    enable_setting_card_group_auto_height(hosts_card)
+    layout.addWidget(hosts_card)
+
     layout.addStretch()
 
     return TelegramProxySettingsPanelWidgets(
@@ -411,4 +434,7 @@ def build_telegram_proxy_settings_panel(
         auto_deeplink_toggle=auto_deeplink_toggle,
         advanced_nav_row=advanced_nav_row,
         advanced_nav_btn=advanced_nav_btn,
+        hosts_card=hosts_card,
+        hosts_row=hosts_row,
+        hosts_btn=hosts_btn,
     )

@@ -82,9 +82,6 @@ def _make_profile_index(service_name: str, candidate_ips: list[str]) -> dict[str
         "service_id_by_name": {service_name: "hosts.test_service"},
         "direct_profile": "hosts",
         "domain_names_by_service": {service_name: ["raw.githubusercontent.com"]},
-        "profile_domain_maps_by_service": {
-            service_name: {"hosts": {"raw.githubusercontent.com": candidate_ips[0]}}
-        },
         "profile_domain_ip_candidates_by_service": {
             service_name: {"hosts": {"raw.githubusercontent.com": list(candidate_ips)}}
         },

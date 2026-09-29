@@ -56,7 +56,7 @@ class TelegramProxyFeature:
     copy_text: Callable
     open_log_file: Callable
     open_external_link: Callable
-    ensure_telegram_hosts: Callable
+    run_telegram_hosts_action: Callable
     run_diagnostics: Callable
     append_log_line: Callable
     consume_auto_deeplink_request: Callable
@@ -211,12 +211,13 @@ class TelegramProxyFeature:
             parent=parent,
         )
 
-    def create_ensure_hosts_worker(self, request_id: int, *, parent=None):
-        from telegram_proxy.runtime.workers import TelegramHostsEnsureWorker
+    def create_hosts_worker(self, request_id: int, *, action: str, parent=None):
+        from telegram_proxy.runtime.workers import TelegramHostsWorker
 
-        return TelegramHostsEnsureWorker(
+        return TelegramHostsWorker(
             request_id,
-            ensure_hosts_fn=self.ensure_telegram_hosts,
+            action=action,
+            run_hosts_action_fn=self.run_telegram_hosts_action,
             parent=parent,
         )
 
@@ -532,7 +533,7 @@ def build_telegram_proxy_feature() -> TelegramProxyFeature:
         copy_text=lambda *args, **kwargs: _copy_text_via_qt(*args, **kwargs),
         open_log_file=lambda *args, **kwargs: _public().open_log_file(*args, **kwargs),
         open_external_link=lambda *args, **kwargs: _public().open_external_link(*args, **kwargs),
-        ensure_telegram_hosts=lambda *args, **kwargs: _public().ensure_telegram_hosts(*args, **kwargs),
+        run_telegram_hosts_action=lambda *args, **kwargs: _public().run_telegram_hosts_action(*args, **kwargs),
         run_diagnostics=lambda *args, **kwargs: _public().run_diagnostics(*args, **kwargs),
         append_log_line=lambda *args, **kwargs: _public().append_log_line(*args, **kwargs),
         consume_auto_deeplink_request=lambda *args, **kwargs: _public().consume_auto_deeplink_request(*args, **kwargs),

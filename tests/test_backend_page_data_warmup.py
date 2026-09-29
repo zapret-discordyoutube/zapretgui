@@ -125,55 +125,27 @@ class BackendPageDataWarmupTests(unittest.TestCase):
         metric.assert_any_call("StartupHostsPageWarmupStarted", "backend_cache")
         metric.assert_any_call("StartupHostsPageWarmupFinished", "backend_cache")
 
-    def test_hosts_feature_warms_services_catalog_plan_for_first_open(self) -> None:
-        import sys
-
+    def test_hosts_feature_warms_page_snapshot_for_first_open(self) -> None:
         from app.feature_facades.hosts import build_hosts_feature
 
-        selection = {"Claude": "xbox_dns"}
-        catalog_plan = object()
-        catalog_sig = ("hosts_catalog", 1, 2)
-        public = SimpleNamespace(
-            load_user_selection=Mock(return_value=selection),
-            get_catalog_signature=Mock(return_value=catalog_sig),
-            create_hosts_runtime=Mock(return_value=object()),
-            build_services_catalog_plan=Mock(return_value=catalog_plan),
-        )
-
+        snapshot = object()
+        load_snapshot = Mock(return_value=snapshot)
         metric_stages: list[str] = []
 
         with (
-            patch.dict(sys.modules, {"hosts.public": public}),
+            patch("hosts.public.load_page_snapshot", load_snapshot),
             patch(
                 "app.feature_facades.hosts.log_ui_timing_since",
                 side_effect=lambda _scope, _name, stage, *_args, **_kwargs: metric_stages.append(stage),
             ),
         ):
             feature = build_hosts_feature()
-
             self.assertTrue(feature.warm_page_data_cache())
-            warmed = feature.consume_warmed_services_catalog_plan(
-                current_selection=selection,
-                direct_title="Напрямую из hosts",
-                ai_title="ИИ",
-                other_title="Остальные",
-            )
 
-        self.assertIsNotNone(warmed)
-        self.assertIs(warmed.plan, catalog_plan)
-        self.assertEqual(warmed.catalog_signature, catalog_sig)
-        public.build_services_catalog_plan.assert_called_once()
-        self.assertEqual(public.get_catalog_signature.call_count, 2)
-        self.assertEqual(
-            metric_stages,
-            [
-                "hosts_warmup.selection.load",
-                "hosts_warmup.runtime.create",
-                "hosts_warmup.services_catalog_plan.build",
-                "hosts_warmup.catalog_signature.after",
-                "hosts_warmup.cache_store",
-            ],
-        )
+        # Прогрев только читает: снимок собирается один раз, файлы не меняются.
+        load_snapshot.assert_called_once_with()
+        self.assertEqual(metric_stages, ["hosts_warmup.snapshot"])
+        self.assertFalse(hasattr(feature, "consume_warmed_services_catalog_plan"))
 
     def test_telegram_proxy_page_is_prepared_after_interactive_without_opening_it(self) -> None:
         from app.page_names import PageName

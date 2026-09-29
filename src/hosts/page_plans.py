@@ -5,14 +5,6 @@ from dataclasses import dataclass
 
 
 _DNS_PROFILE_IP_SUFFIX = re.compile(r"\s*\(\s*(?:\d{1,3}\.){3}\d{1,3}\s*\)\s*$")
-_MISSING = object()
-
-
-@dataclass(slots=True)
-class HostsOperationCompletionPlan:
-    reset_profiles: bool
-    clear_error: bool
-    error_message: str
 
 
 @dataclass(slots=True)
@@ -62,219 +54,6 @@ class HostsServicesCatalogPlan:
     selection_changed: bool
 
 
-@dataclass(slots=True)
-class HostsSelectionMutationPlan:
-    new_selection: dict[str, str]
-    changed: bool
-    apply_now: bool
-    force_checked: bool | None = None
-    force_enabled: bool | None = None
-    skipped_services: list[str] | None = None
-
-
-@dataclass(slots=True)
-class HostsStatusPlan:
-    active_count: int
-    has_active: bool
-    adobe_active: bool
-
-
-@dataclass(slots=True)
-class HostsAccessPlan:
-    show_error: bool
-    error_message: str
-
-
-@dataclass(slots=True)
-class HostsUiMessagePlan:
-    kind: str
-    title: str
-    content: str
-
-
-@dataclass(slots=True)
-class HostsPermissionRestorePlan:
-    clear_error: bool
-    error_message: str
-    message_plan: HostsUiMessagePlan | None
-
-
-@dataclass(slots=True)
-class HostsCatalogRefreshPlan:
-    changed: bool
-    new_signature: object
-    invalidate_cache: bool
-    should_rebuild: bool
-    should_log: bool
-    log_message: str
-
-
-@dataclass(slots=True)
-class HostsStatusDisplayPlan:
-    dot_active: bool
-    label_text: str
-    adobe_active: bool
-
-
-@dataclass(slots=True)
-class HostsPageInitPlan:
-    init_hosts_runtime: bool
-    check_access: bool
-    rebuild_services: bool
-    mark_initialized: bool
-    invalidate_cache: bool
-    update_ui: bool
-
-
-@dataclass(slots=True)
-class HostsActivationPlan:
-    reconcile_hidden_refresh: bool
-    invalidate_cache: bool
-    update_ui: bool
-
-
-@dataclass(slots=True)
-class HostsErrorBarPlan:
-    title: str
-    content: str
-    action_text: str
-    action_pending_text: str
-
-
-def build_page_init_plan(
-    *,
-    runtime_initialized: bool,
-    has_hosts_runtime: bool,
-) -> HostsPageInitPlan:
-    should_initialize = not bool(runtime_initialized)
-    _ = has_hosts_runtime
-
-    return HostsPageInitPlan(
-        init_hosts_runtime=should_initialize and not has_hosts_runtime,
-        check_access=should_initialize,
-        rebuild_services=should_initialize,
-        mark_initialized=should_initialize,
-        invalidate_cache=True,
-        update_ui=True,
-    )
-
-
-def build_activation_plan(*, catalog_dirty: bool) -> HostsActivationPlan:
-    return HostsActivationPlan(
-        reconcile_hidden_refresh=bool(catalog_dirty),
-        invalidate_cache=True,
-        update_ui=True,
-    )
-
-
-def build_status_plan(runtime_state) -> HostsStatusPlan:
-    active_count = len(runtime_state.active_domains)
-    return HostsStatusPlan(
-        active_count=active_count,
-        has_active=active_count > 0,
-        adobe_active=bool(runtime_state.adobe_active),
-    )
-
-
-def build_status_display_plan(
-    runtime_state,
-    *,
-    active_text: str,
-    none_text: str,
-) -> HostsStatusDisplayPlan:
-    status_plan = build_status_plan(runtime_state)
-    return HostsStatusDisplayPlan(
-        dot_active=status_plan.has_active,
-        label_text=active_text if status_plan.has_active else none_text,
-        adobe_active=status_plan.adobe_active,
-    )
-
-
-def build_access_plan(
-    runtime_state,
-    *,
-    hosts_path: str,
-    read_error_message: str,
-    no_access_message: str,
-) -> HostsAccessPlan:
-    if runtime_state.error_message:
-        return HostsAccessPlan(
-            show_error=True,
-            error_message=read_error_message,
-        )
-    if runtime_state.accessible:
-        return HostsAccessPlan(
-            show_error=False,
-            error_message="",
-        )
-    return HostsAccessPlan(
-        show_error=True,
-        error_message=no_access_message.format(path=hosts_path),
-    )
-
-
-def build_error_bar_plan(
-    *,
-    message: str,
-    title: str,
-    action_text: str,
-    action_pending_text: str,
-) -> HostsErrorBarPlan:
-    return HostsErrorBarPlan(
-        title=title,
-        content=str(message or ""),
-        action_text=action_text,
-        action_pending_text=action_pending_text,
-    )
-
-
-def build_catalog_refresh_plan(*, current_signature, new_signature, trigger: str, services_layout_exists: bool) -> HostsCatalogRefreshPlan:
-    changed = new_signature != current_signature
-    return HostsCatalogRefreshPlan(
-        changed=changed,
-        new_signature=new_signature,
-        invalidate_cache=changed,
-        should_rebuild=bool(changed and services_layout_exists),
-        should_log=bool(changed and current_signature is not None and services_layout_exists),
-        log_message=f"Hosts: hosts-каталог изменился ({trigger}) — обновляем список сервисов",
-    )
-
-
-def build_restore_permissions_plan(*, success: bool, message: str) -> HostsPermissionRestorePlan:
-    if success:
-        return HostsPermissionRestorePlan(
-            clear_error=True,
-            error_message="",
-            message_plan=HostsUiMessagePlan(
-                kind="success",
-                title="Готово",
-                content="Права доступа к файлу hosts восстановлены",
-            ),
-        )
-    return HostsPermissionRestorePlan(
-        clear_error=False,
-        error_message=str(message or ""),
-        message_plan=None,
-    )
-
-
-def get_direct_profile_name() -> str | None:
-    from hosts.proxy_domains import get_dns_profile_display_name, get_dns_profiles
-
-    try:
-        for profile in (get_dns_profiles() or []):
-            profile_id = (profile or "").strip().lower()
-            display_name = (get_dns_profile_display_name(profile) or "").strip().lower()
-            text = f"{profile_id} {display_name}"
-            if not text.strip():
-                continue
-            if ("вкл. (активировать hosts)" in text) or ("direct" in text) or ("no proxy" in text):
-                return profile
-    except Exception:
-        pass
-    return None
-
-
 def _iter_ip_values(raw_ips) -> list[str]:
     if isinstance(raw_ips, str):
         values = [raw_ips]
@@ -310,17 +89,6 @@ def _normalize_active_domain_ip_sets(active_domains_map: dict[str, object]) -> d
     return {domain: ips for domain, ips in normalized.items() if ips}
 
 
-def _rows_to_domain_ip_sets(rows) -> dict[str, set[str]]:
-    domain_ips: dict[str, set[str]] = {}
-    for domain, ip in rows or []:
-        domain_key = str(domain or "").strip().casefold()
-        ip_key = str(ip or "").strip().casefold()
-        if not domain_key or not ip_key:
-            continue
-        domain_ips.setdefault(domain_key, set()).add(ip_key)
-    return domain_ips
-
-
 def _domain_ip_sets_are_active(
     required_domain_ips: dict[str, set[str]],
     active_domain_ips: dict[str, set[str]],
@@ -347,52 +115,6 @@ def _domain_ip_sets_have_allowed_match(
     return True
 
 
-def infer_profile_from_hosts(
-    service_name: str,
-    available_profiles: list[str],
-    active_domains_map: dict[str, object],
-) -> str | None:
-    from hosts.proxy_domains import get_service_domain_ip_rows
-
-    active_domain_ips = _normalize_active_domain_ip_sets(active_domains_map)
-    if not active_domain_ips or not available_profiles:
-        return None
-
-    for profile_name in available_profiles:
-        try:
-            required_domain_ips = _rows_to_domain_ip_sets(
-                get_service_domain_ip_rows(service_name, profile_name) or []
-            )
-        except Exception:
-            required_domain_ips = {}
-        if not required_domain_ips:
-            continue
-
-        if _domain_ip_sets_are_active(required_domain_ips, active_domain_ips):
-            return profile_name
-
-    return None
-
-
-def infer_direct_toggle_from_hosts(service_name: str, active_domains_map: dict[str, object]) -> bool:
-    from hosts.proxy_domains import get_service_domain_ip_rows
-
-    active_domain_ips = _normalize_active_domain_ip_sets(active_domains_map)
-    if not active_domain_ips:
-        return False
-    direct_profile = get_direct_profile_name()
-    if not direct_profile:
-        return False
-    try:
-        rows = get_service_domain_ip_rows(service_name, direct_profile) or []
-    except Exception:
-        return False
-    domain_ip_candidates = _rows_to_domain_ip_sets(rows)
-    if not domain_ip_candidates:
-        return False
-    return _domain_ip_sets_have_allowed_match(domain_ip_candidates, active_domain_ips)
-
-
 def _service_has_active_domains_from_index(
     service_name: str,
     normalized_active: dict[str, str],
@@ -404,36 +126,6 @@ def _service_has_active_domains_from_index(
         if str(domain or "").strip().casefold() in normalized_active:
             return True
     return False
-
-
-def _infer_profile_from_index(
-    service_name: str,
-    available_profiles: list[str],
-    normalized_active: dict[str, str],
-    profile_domain_maps_by_service: dict[str, dict[str, dict[str, str]]],
-) -> str | None:
-    if not normalized_active or not available_profiles:
-        return None
-
-    profile_maps = profile_domain_maps_by_service.get(service_name, {}) or {}
-    for profile_name in available_profiles:
-        domain_map = profile_maps.get(profile_name, {}) or {}
-        if not domain_map:
-            continue
-
-        matches = 0
-        total = len(domain_map)
-        for domain_key, ip in domain_map.items():
-            active_ip = normalized_active.get(str(domain_key or "").casefold())
-            if active_ip is None:
-                continue
-            if (active_ip or "").strip().casefold() == (ip or "").strip().casefold():
-                matches += 1
-
-        if total and matches == total:
-            return profile_name
-
-    return None
 
 
 def _infer_direct_toggle_from_index(
@@ -491,106 +183,54 @@ def _infer_profile_from_ip_candidates_index(
     return None
 
 
-def service_has_active_domains(service_name: str, active_domains_map: dict[str, object]) -> bool:
-    from hosts.proxy_domains import get_service_domain_names
-
-    normalized_active = _normalize_active_domains_map(active_domains_map)
-    if not normalized_active:
-        return False
-    try:
-        for domain in (get_service_domain_names(service_name) or []):
-            if str(domain or "").strip().casefold() in normalized_active:
-                return True
-    except Exception:
-        return False
-    return False
-
-
 def build_selection_sync_plan(
     *,
     service_names: list[str],
     active_domains_map: dict[str, object],
-    available_profiles_by_service: dict[str, list[str]] | None = None,
-    service_has_proxy_by_service: dict[str, bool] | None = None,
-    direct_profile: object = _MISSING,
-    domain_names_by_service: dict[str, list[str]] | None = None,
-    profile_domain_maps_by_service: dict[str, dict[str, dict[str, str]]] | None = None,
-    profile_domain_ip_candidates_by_service: dict[str, dict[str, dict[str, list[str]]]] | None = None,
+    available_profiles_by_service: dict[str, list[str]],
+    service_has_proxy_by_service: dict[str, bool],
+    direct_profile: str | None,
+    domain_names_by_service: dict[str, list[str]],
+    profile_domain_ip_candidates_by_service: dict[str, dict[str, dict[str, list[str]]]],
 ) -> HostsSelectionSyncPlan:
-    from hosts.proxy_domains import get_service_available_dns_profiles, service_has_proxy_profiles
-
-    if direct_profile is _MISSING:
-        direct_profile = get_direct_profile_name()
+    """Что сейчас включено по строкам блока ZapretGUI (по готовому индексу каталога)."""
     direct_profile = direct_profile if isinstance(direct_profile, str) else None
-    available_profiles_by_service = dict(available_profiles_by_service or {})
-    service_has_proxy_by_service = dict(service_has_proxy_by_service or {})
-    domain_names_by_service = dict(domain_names_by_service or {}) if domain_names_by_service is not None else None
-    profile_domain_maps_by_service = (
-        dict(profile_domain_maps_by_service or {}) if profile_domain_maps_by_service is not None else None
-    )
-    profile_domain_ip_candidates_by_service = (
-        dict(profile_domain_ip_candidates_by_service or {})
-        if profile_domain_ip_candidates_by_service is not None
-        else None
-    )
     normalized_active = _normalize_active_domains_map(active_domains_map)
     active_domain_ips = _normalize_active_domain_ip_sets(active_domains_map)
     entries: dict[str, HostsSelectionSyncEntry] = {}
     new_selection: dict[str, str] = {}
 
     for service_name in service_names:
-        if service_name in service_has_proxy_by_service:
-            direct_only = not bool(service_has_proxy_by_service.get(service_name))
-        else:
-            direct_only = not service_has_proxy_profiles(service_name)
-        if service_name in available_profiles_by_service:
-            available = list(available_profiles_by_service.get(service_name) or [])
-        else:
-            available = list(get_service_available_dns_profiles(service_name) or [])
+        direct_only = not bool(service_has_proxy_by_service.get(service_name))
+        available = list(available_profiles_by_service.get(service_name) or [])
         selected_profile: str | None = None
-        if domain_names_by_service is not None:
-            has_active_domains = _service_has_active_domains_from_index(
-                service_name,
-                normalized_active,
-                domain_names_by_service,
-            )
-        else:
-            has_active_domains = service_has_active_domains(service_name, active_domains_map)
+        has_active_domains = _service_has_active_domains_from_index(
+            service_name,
+            normalized_active,
+            domain_names_by_service,
+        )
         toggle_enabled = False
         toggle_checked = False
 
         if direct_only:
-            if profile_domain_ip_candidates_by_service is not None:
-                enabled = _infer_direct_toggle_from_index(
-                    service_name,
-                    direct_profile,
-                    active_domain_ips,
-                    profile_domain_ip_candidates_by_service,
-                )
-            else:
-                enabled = infer_direct_toggle_from_hosts(service_name, active_domains_map)
+            enabled = _infer_direct_toggle_from_index(
+                service_name,
+                direct_profile,
+                active_domain_ips,
+                profile_domain_ip_candidates_by_service,
+            )
             toggle_enabled = bool(direct_profile and direct_profile in available)
             toggle_checked = bool(enabled and toggle_enabled)
             if toggle_checked and direct_profile:
                 selected_profile = direct_profile
                 new_selection[service_name] = direct_profile
         else:
-            if profile_domain_ip_candidates_by_service is not None:
-                inferred = _infer_profile_from_ip_candidates_index(
-                    service_name,
-                    available,
-                    active_domain_ips,
-                    profile_domain_ip_candidates_by_service,
-                )
-            elif profile_domain_maps_by_service is not None:
-                inferred = _infer_profile_from_index(
-                    service_name,
-                    available,
-                    normalized_active,
-                    profile_domain_maps_by_service,
-                )
-            else:
-                inferred = infer_profile_from_hosts(service_name, available, active_domains_map)
+            inferred = _infer_profile_from_ip_candidates_index(
+                service_name,
+                available,
+                active_domain_ips,
+                profile_domain_ip_candidates_by_service,
+            )
             if inferred:
                 selected_profile = inferred
                 new_selection[service_name] = inferred
@@ -673,12 +313,10 @@ def build_services_catalog_plan(
     raw_available = profile_index.get("available_by_service") or {}
     raw_has_proxy = profile_index.get("has_proxy_by_service") or {}
     raw_domain_names = profile_index.get("domain_names_by_service") or {}
-    raw_profile_domain_maps = profile_index.get("profile_domain_maps_by_service") or {}
     raw_profile_domain_ip_candidates = profile_index.get("profile_domain_ip_candidates_by_service") or {}
     available_profiles_by_service = dict(raw_available) if isinstance(raw_available, dict) else {}
     service_has_proxy_by_service = dict(raw_has_proxy) if isinstance(raw_has_proxy, dict) else {}
     domain_names_by_service = dict(raw_domain_names) if isinstance(raw_domain_names, dict) else {}
-    profile_domain_maps_by_service = dict(raw_profile_domain_maps) if isinstance(raw_profile_domain_maps, dict) else {}
     profile_domain_ip_candidates_by_service = (
         dict(raw_profile_domain_ip_candidates) if isinstance(raw_profile_domain_ip_candidates, dict) else {}
     )
@@ -703,7 +341,6 @@ def build_services_catalog_plan(
         service_has_proxy_by_service=service_has_proxy_by_service,
         direct_profile=direct_profile,
         domain_names_by_service=domain_names_by_service,
-        profile_domain_maps_by_service=profile_domain_maps_by_service,
         profile_domain_ip_candidates_by_service=profile_domain_ip_candidates_by_service,
     )
     current_selection = dict(current_selection or {})
@@ -821,112 +458,3 @@ def build_services_catalog_plan(
     )
 
 
-def build_profile_selection_plan(
-    *,
-    current_selection: dict[str, str],
-    service_name: str,
-    selected_profile: object,
-) -> HostsSelectionMutationPlan:
-    new_selection = dict(current_selection)
-    profile_name = selected_profile.strip() if isinstance(selected_profile, str) else ""
-    if not profile_name:
-        new_selection.pop(service_name, None)
-    else:
-        new_selection[service_name] = profile_name
-
-    return HostsSelectionMutationPlan(
-        new_selection=new_selection,
-        changed=new_selection != dict(current_selection),
-        apply_now=True,
-    )
-
-
-def build_mode_toggle_plan(
-    *,
-    current_selection: dict[str, str],
-    service_name: str,
-    checked: bool,
-) -> HostsSelectionMutationPlan:
-    direct_profile = get_direct_profile_name()
-    new_selection = dict(current_selection)
-    if not direct_profile:
-        new_selection.pop(service_name, None)
-        return HostsSelectionMutationPlan(
-            new_selection=new_selection,
-            changed=new_selection != dict(current_selection),
-            apply_now=False,
-            force_checked=False,
-            force_enabled=False,
-        )
-
-    if checked:
-        new_selection[service_name] = direct_profile
-    else:
-        new_selection.pop(service_name, None)
-
-    return HostsSelectionMutationPlan(
-        new_selection=new_selection,
-        changed=new_selection != dict(current_selection),
-        apply_now=True,
-    )
-
-
-def build_reset_selection_plan() -> HostsSelectionMutationPlan:
-    return HostsSelectionMutationPlan(
-        new_selection={},
-        changed=True,
-        apply_now=False,
-    )
-
-
-def build_bulk_profile_selection_plan(
-    *,
-    current_selection: dict[str, str],
-    service_names: list[str],
-    profile_name: str | None,
-) -> HostsSelectionMutationPlan:
-    from hosts.proxy_domains import get_service_available_dns_profiles
-
-    target_profile = (profile_name or "").strip()
-    if target_profile:
-        unavailable = [
-            service_name
-            for service_name in service_names
-            if target_profile not in (get_service_available_dns_profiles(service_name) or [])
-        ]
-        if unavailable:
-            return HostsSelectionMutationPlan(
-                new_selection=dict(current_selection),
-                changed=False,
-                apply_now=False,
-                skipped_services=unavailable,
-            )
-
-    new_selection = dict(current_selection)
-    for service_name in service_names:
-        if not target_profile:
-            new_selection.pop(service_name, None)
-        else:
-            new_selection[service_name] = target_profile
-
-    return HostsSelectionMutationPlan(
-        new_selection=new_selection,
-        changed=new_selection != dict(current_selection),
-        apply_now=new_selection != dict(current_selection),
-        skipped_services=[],
-    )
-
-
-def build_operation_completion_plan(*, operation: str | None, success: bool, message: str, hosts_path: str) -> HostsOperationCompletionPlan:
-    if success:
-        return HostsOperationCompletionPlan(
-            reset_profiles=operation == "clear_all",
-            clear_error=True,
-            error_message="",
-        )
-
-    return HostsOperationCompletionPlan(
-        reset_profiles=False,
-        clear_error=False,
-        error_message=f"{message}\nПуть: {hosts_path}",
-    )

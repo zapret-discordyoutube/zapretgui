@@ -27,6 +27,20 @@ class TelegramProxySettingsText:
     auto_setup_description: str
     advanced_nav_title: str
     advanced_nav_description: str
+    hosts_group_title: str
+    hosts_title: str
+    hosts_hint: str
+    hosts_state_checking: str
+    hosts_state_none: str
+    hosts_state_all: str
+    hosts_state_partial: str
+    hosts_state_error: str
+    hosts_add_button: str
+    hosts_remove_button: str
+    hosts_add_accessible_name: str
+    hosts_remove_accessible_name: str
+    hosts_error_title: str
+    hosts_done_title: str
     upstream_group_title: str
     upstream_toggle_title: str
     upstream_toggle_description: str
@@ -94,6 +108,20 @@ TELEGRAM_PROXY_SETTINGS_TEXT = TelegramProxySettingsText(
     auto_setup_description="Открыть ссылку в Telegram при первом запуске прокси",
     advanced_nav_title="Продвинутые настройки",
     advanced_nav_description="Внешний прокси, Cloudflare, DC→IP, пул и буфер",
+    hosts_group_title="Сайты Telegram в hosts",
+    hosts_title="Записи Telegram в hosts",
+    hosts_hint="Нужны, чтобы web.telegram.org и t.me открывались в браузере. Самому прокси не нужны.",
+    hosts_state_checking="Проверяем файл hosts",
+    hosts_state_none="Не прописаны",
+    hosts_state_all="Прописаны все {total}",
+    hosts_state_partial="Прописаны частично: {present} из {total}",
+    hosts_state_error="Не удалось прочитать файл hosts",
+    hosts_add_button="Прописать",
+    hosts_remove_button="Убрать",
+    hosts_add_accessible_name="Прописать записи Telegram в hosts",
+    hosts_remove_accessible_name="Убрать записи Telegram из hosts",
+    hosts_error_title="Не удалось изменить hosts",
+    hosts_done_title="Файл hosts обновлён",
     upstream_group_title="Внешний прокси",
     upstream_toggle_title="Использовать внешний прокси",
     upstream_toggle_description="Резервный SOCKS5, если часть серверов Telegram не отвечает.",

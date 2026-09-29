@@ -48,7 +48,6 @@ from presets.user_presets_runtime_service import (
     UserPresetsRuntimeService,
 )
 from hosts.ui.page import HostsPage
-import hosts.ui.page_runtime as hosts_page_runtime
 import hosts.commands as hosts_commands
 import log.commands as log_commands
 from log.ui.page import LogsPage
@@ -2080,8 +2079,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         telegram_apply_source = inspect.getsource(TelegramProxyPage._apply_initial_settings_state)
         blockcheck_source = inspect.getsource(BlockcheckPage._build_ui)
         blockcheck_initial_source = inspect.getsource(BlockcheckPage._on_initial_state_loaded)
-        hosts_activation_source = inspect.getsource(HostsPage.on_page_activated)
-        hosts_rebuild_source = inspect.getsource(HostsPage._rebuild_services_selectors)
 
         self.assertIn("appearance_ui.build.total", appearance_source)
         self.assertIn("appearance_ui.accent_section.build", appearance_lower_source)
@@ -2094,8 +2091,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertIn("blockcheck_ui.initial_state.load", blockcheck_initial_source)
         self.assertIn("blockcheck_ui.build.total", blockcheck_source)
         self.assertIn("blockcheck_ui.domain_chips.apply", blockcheck_source)
-        self.assertIn("hosts_ui.activation.total", hosts_activation_source)
-        self.assertIn("hosts_ui.services.rebuild", hosts_rebuild_source)
 
     def test_appearance_page_initial_state_is_single_backend_plan(self) -> None:
         build_source = inspect.getsource(AppearancePage._build_ui)
@@ -4380,132 +4375,30 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
 
         self.assertNotIn("stop_watching_presets", source)
 
-    def test_hosts_page_first_render_does_not_read_hosts_state_in_constructor(self) -> None:
+    def test_hosts_page_first_render_uses_memory_snapshot_not_files(self) -> None:
         init_source = inspect.getsource(HostsPage.__init__)
-        build_status_source = inspect.getsource(HostsPage._build_status_section)
         activated_source = inspect.getsource(HostsPage.on_page_activated)
 
-        self.assertNotIn("_run_runtime_init_once()", init_source)
-        self.assertNotIn("_get_active_domains()", build_status_source)
-        self.assertIn("_run_runtime_init_once(show_access_errors=True)", activated_source)
+        # Конструктор ничего не запускает; открытие берёт снимок из памяти
+        # и отдаёт проверку свежести фоновой задаче.
+        self.assertNotIn("_request_snapshot", init_source)
+        self.assertIn("self._hosts.peek_page_snapshot()", activated_source)
+        self.assertIn("self._request_snapshot()", activated_source)
 
-    def test_hosts_warmup_defers_access_error_until_real_activation(self) -> None:
-        page = HostsPage.__new__(HostsPage)
-        page._runtime_initialized = True
-        page._runtime_access_checked = False
-        page._check_hosts_access = Mock()
-
-        HostsPage._run_runtime_init_once(page, show_access_errors=False)
-
-        page._check_hosts_access.assert_not_called()
-        self.assertFalse(page._runtime_access_checked)
-
-        HostsPage._run_runtime_init_once(page, show_access_errors=True)
-
-        page._check_hosts_access.assert_called_once_with()
-        self.assertTrue(page._runtime_access_checked)
-
-    def test_hosts_services_catalog_is_prepared_through_worker_not_page_reading(self) -> None:
-        rebuild_source = inspect.getsource(HostsPage._rebuild_services_selectors)
-        build_source = inspect.getsource(HostsPage._build_services_selectors)
-
-        self.assertIn("_start_services_catalog_worker", rebuild_source)
-        self.assertNotIn("read_active_domains_map", build_source)
-        self.assertNotIn("build_services_catalog_plan", build_source)
-
-    def test_hosts_user_selection_loads_through_worker(self) -> None:
-        spec = importlib.util.find_spec("hosts.selection_load_worker")
-        self.assertIsNotNone(spec)
-        selection_load_worker = importlib.import_module("hosts.selection_load_worker")
-
-        init_source = inspect.getsource(HostsPage.__init__)
-        runtime_source = inspect.getsource(HostsPage._run_runtime_init_once)
-        worker_source = inspect.getsource(selection_load_worker.HostsSelectionLoadWorker.run)
-
-        self.assertIn("self._hosts = deps.hosts_feature", init_source)
-        self.assertIn("_selection_load_runtime", init_source)
-        self.assertIn("_start_user_selection_load_worker", runtime_source)
-        self.assertNotIn("self._controller.load_user_selection()", runtime_source)
-        self.assertIn("self._hosts.create_selection_load_worker", inspect.getsource(HostsPage._start_user_selection_load_worker))
-        self.assertIn("_load_user_selection", worker_source)
-        self.assertNotIn("hosts.commands", worker_source)
-        self.assertNotIn("self._controller", worker_source)
-        self.assertIn("load_user_selection", inspect.getsource(hosts_commands.load_user_selection))
-
-    def test_hosts_runtime_state_loads_through_worker(self) -> None:
-        spec = importlib.util.find_spec("hosts.state_load_worker")
-        self.assertIsNotNone(spec)
-        state_load_worker = importlib.import_module("hosts.state_load_worker")
-
-        init_source = inspect.getsource(HostsPage.__init__)
-        update_source = inspect.getsource(HostsPage._update_ui)
-        access_source = inspect.getsource(HostsPage._check_hosts_access)
-        worker_source = inspect.getsource(state_load_worker.HostsStateLoadWorker.run)
-
-        self.assertIn("self._hosts = deps.hosts_feature", init_source)
-        self.assertIn("_state_load_runtime", init_source)
-        self.assertIn("_request_hosts_state_load", update_source)
-        self.assertIn("_request_hosts_state_load", access_source)
-        self.assertNotIn("_get_hosts_runtime_state()", update_source)
-        self.assertNotIn("_get_hosts_runtime_state()", access_source)
-        self.assertIn("self._hosts.create_state_load_worker", inspect.getsource(HostsPage._request_hosts_state_load))
-        self.assertIn("_get_hosts_state", worker_source)
-        self.assertNotIn("hosts.commands", worker_source)
-        self.assertNotIn("self._controller", worker_source)
-        self.assertIn("get_hosts_state", inspect.getsource(hosts_commands.get_hosts_state))
-
-    def test_hosts_open_file_runs_through_worker(self) -> None:
-        spec = importlib.util.find_spec("hosts.open_file_worker")
-        self.assertIsNotNone(spec)
-        open_file_worker = importlib.import_module("hosts.open_file_worker")
-
-        init_source = inspect.getsource(HostsPage.__init__)
-        open_source = inspect.getsource(HostsPage._open_hosts_file)
+    def test_hosts_page_file_work_runs_through_feature_workers(self) -> None:
         page_source = inspect.getsource(HostsPage)
-        worker_source = inspect.getsource(open_file_worker.HostsOpenFileWorker.run)
 
-        self.assertIn("self._hosts = deps.hosts_feature", init_source)
-        self.assertIn("_open_file_runtime", init_source)
-        self.assertIn("_request_open_hosts_file", open_source)
-        self.assertNotIn(".open_hosts_file(", open_source)
-        self.assertIn("create_open_hosts_file_worker", page_source)
-        self.assertIn("self._hosts.create_open_hosts_file_worker", page_source)
-        self.assertIn("_open_hosts_file", worker_source)
-        self.assertNotIn("hosts.commands", worker_source)
-        self.assertNotIn("self._controller", worker_source)
+        for factory in (
+            "self._hosts.create_snapshot_worker",
+            "self._hosts.create_apply_worker",
+            "self._hosts.create_open_hosts_file_worker",
+            "self._hosts.create_permission_restore_worker",
+        ):
+            self.assertIn(factory, page_source)
+        self.assertNotIn("hosts.commands", page_source)
+        self.assertNotIn("safe_read_hosts_file", page_source)
+        self.assertNotIn("safe_write_hosts_file", page_source)
         self.assertIn("open_hosts_file", inspect.getsource(hosts_commands.open_hosts_file))
-
-    def test_hosts_restore_permissions_runs_through_worker(self) -> None:
-        spec = importlib.util.find_spec("hosts.permission_restore_worker")
-        self.assertIsNotNone(spec)
-        permission_restore_worker = importlib.import_module("hosts.permission_restore_worker")
-
-        init_source = inspect.getsource(HostsPage.__init__)
-        restore_source = inspect.getsource(HostsPage._restore_hosts_permissions)
-        request_source = inspect.getsource(HostsPage._request_restore_hosts_permissions)
-        create_source = inspect.getsource(HostsPage.create_permission_restore_worker)
-        worker_source = inspect.getsource(permission_restore_worker.HostsPermissionRestoreWorker.run)
-
-        self.assertIn("self._hosts = deps.hosts_feature", init_source)
-        self.assertIn("_permission_restore_runtime", init_source)
-        self.assertIn("_request_restore_hosts_permissions", restore_source)
-        self.assertNotIn("restore_hosts_permissions_flow(", restore_source)
-        self.assertIn("create_permission_restore_worker", request_source)
-        self.assertIn("self._hosts.create_permission_restore_worker", create_source)
-        self.assertIn("_restore_hosts_permissions", worker_source)
-        self.assertNotIn("hosts.commands", worker_source)
-        self.assertNotIn("self._controller", worker_source)
-        self.assertIn("restore_hosts_permissions", inspect.getsource(hosts_commands.restore_hosts_permissions))
-
-    def test_hosts_page_cache_cannot_sync_read_runtime_state(self) -> None:
-        page_source = inspect.getsource(HostsPage)
-        cache_source = inspect.getsource(hosts_page_runtime.HostsPageRuntimeCache)
-
-        self.assertFalse(hasattr(HostsPage, "_get_hosts_runtime_state"))
-        self.assertFalse(hasattr(HostsPage, "_get_active_domains"))
-        self.assertNotIn("self._controller.get_hosts_state", page_source)
-        self.assertNotIn("get_runtime_state(", cache_source)
-        self.assertNotIn("get_active_domains(", cache_source)
 
     def test_dns_isp_warning_settings_access_runs_through_worker(self) -> None:
         dns_workers = importlib.import_module("dns.page_workers")
@@ -4530,7 +4423,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         page_classes = (
             dns_page.NetworkPage,
             ServersPage,
-            TelegramProxyPage,
             PremiumPage,
             DpiSettingsPage,
             OrchestraWhitelistPage,
@@ -4835,25 +4727,38 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertNotIn("_diag_worker", page_source)
         self.assertNotIn("worker.start()", workflow_source)
 
-    def test_telegram_ensure_hosts_runs_through_worker_runtime(self) -> None:
+    def test_telegram_hosts_actions_run_through_worker_runtime(self) -> None:
         page_source = inspect.getsource(TelegramProxyPage)
-        ensure_source = inspect.getsource(TelegramProxyPage._ensure_telegram_hosts)
-        start_source = inspect.getsource(TelegramProxyPage._start_ensure_hosts_worker)
+        request_source = inspect.getsource(TelegramProxyPage._request_telegram_hosts_status)
+        click_source = inspect.getsource(TelegramProxyPage._on_telegram_hosts_button_clicked)
+        start_source = inspect.getsource(TelegramProxyPage._start_hosts_worker)
+        activated_source = inspect.getsource(TelegramProxyPage.on_page_activated)
         cleanup_source = inspect.getsource(TelegramProxyPage.cleanup)
         feature_source = inspect.getsource(TelegramProxyFeature)
-        worker_source = inspect.getsource(telegram_proxy_workers.TelegramHostsEnsureWorker)
+        worker_source = inspect.getsource(telegram_proxy_workers.TelegramHostsWorker)
 
-        self.assertIn("_ensure_hosts_runtime", page_source)
-        self.assertIn("_start_ensure_hosts_worker", ensure_source)
+        self.assertIn("_hosts_runtime", page_source)
+        self.assertIn("_start_hosts_status_worker", request_source)
+        self.assertIn("_start_hosts_worker(plan.button_action)", click_source)
+        self.assertIn("_request_telegram_hosts_status()", activated_source)
+        self.assertNotIn('"add"', activated_source)
         self.assertIn("start_qthread_worker", start_source)
         self.assertIn("bind_worker", start_source)
-        self.assertIn("worker.completed.connect(self._on_telegram_hosts_ensured)", start_source)
-        self.assertIn("create_ensure_hosts_worker", feature_source)
+        self.assertIn("worker.completed.connect(self._on_telegram_hosts_result)", start_source)
+        self.assertIn("create_hosts_worker", feature_source)
         self.assertIn("completed = pyqtSignal(int, object)", worker_source)
-        self.assertIn("_ensure_hosts_runtime.stop", cleanup_source)
-        self.assertNotIn("_ensure_hosts_worker =", page_source)
+        self.assertIn("_hosts_runtime.stop", cleanup_source)
+        self.assertNotIn("_hosts_worker =", page_source)
         self.assertNotIn("worker.start()", start_source)
-
+        self.assertNotIn("ensure_telegram_hosts", page_source)
+        # Страница строится заранее при старте: чтение hosts — только при открытии.
+        for source in (
+            inspect.getsource(TelegramProxyPage.__init__),
+            inspect.getsource(TelegramProxyPage._after_ui_built),
+            inspect.getsource(TelegramProxyPage._setup_ui),
+        ):
+            self.assertNotIn("_request_telegram_hosts_status", source)
+            self.assertNotIn("_start_hosts_worker", source)
 
 
 if __name__ == "__main__":

@@ -126,6 +126,26 @@ def apply_upstream_runtime_state(row, state, default_description: str) -> None:
     row.setToolTip(reason or "Фактический SOCKS-сервер, который сейчас использует Telegram Proxy.")
 
 
+def apply_telegram_hosts_row(row, button, plan) -> None:
+    """Показывает состояние записей Telegram в hosts и нужную кнопку."""
+    if row is not None:
+        # Состояние и пояснение — две строки описания; в узком окне конец
+        # строки обрезается, поэтому полный текст дублируется подсказкой.
+        row.set_texts(TELEGRAM_PROXY_SETTINGS_TEXT.hosts_title, plan.description)
+        set_tooltip(row, plan.description)
+    if button is None:
+        return
+    button.setText(plan.button_text)
+    button.setIcon(FluentIcon.DELETE if plan.button_action == "remove" else FluentIcon.ADD)
+    button.setEnabled(bool(plan.button_enabled))
+    set_control_accessibility(
+        button,
+        name=plan.button_accessible_name,
+        description=plan.description,
+    )
+    set_state_text(button, plan.button_accessible_name)
+
+
 def apply_ui_texts(
     *,
     refresh_pivot_texts_callback,

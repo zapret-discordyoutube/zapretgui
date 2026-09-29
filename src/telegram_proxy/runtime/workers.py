@@ -5,6 +5,7 @@ import time
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from log.log import log
+from telegram_proxy.runtime.plans import TelegramHostsActionResult
 
 
 class TelegramProxyInitialStateWorker(QThread):
@@ -332,21 +333,29 @@ class TelegramProxyDiagnosticsWorker(QThread):
         self.completed.emit(str(result_text or ""))
 
 
-class TelegramHostsEnsureWorker(QThread):
+class TelegramHostsWorker(QThread):
+    """Читает или меняет записи Telegram в hosts вне UI-потока.
+
+    ``action``: ``status`` — только прочитать, ``add`` / ``remove`` — по кнопке.
+    Сигнал ``completed`` приходит всегда, даже при ошибке, чтобы страница
+    снова включила кнопку.
+    """
+
     completed = pyqtSignal(int, object)
 
-    def __init__(self, request_id: int, *, ensure_hosts_fn, parent=None):
+    def __init__(self, request_id: int, *, action: str, run_hosts_action_fn, parent=None):
         super().__init__(parent)
         self._request_id = int(request_id)
-        self._ensure_hosts_fn = ensure_hosts_fn
+        self._action = str(action or "")
+        self._run_hosts_action_fn = run_hosts_action_fn
 
     def run(self) -> None:
         try:
-            plan = self._ensure_hosts_fn()
+            result = self._run_hosts_action_fn(self._action)
         except Exception as exc:
-            log(f"TelegramHostsEnsureWorker: ошибка проверки hosts: {exc}", "WARNING")
-            plan = None
-        self.completed.emit(self._request_id, plan)
+            log(f"TelegramHostsWorker: ошибка действия с hosts ({self._action}): {exc}", "WARNING")
+            result = TelegramHostsActionResult(self._action, False, False, str(exc), None)
+        self.completed.emit(self._request_id, result)
 
 
 class TelegramProxySettingsSaveWorker(QThread):

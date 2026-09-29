@@ -86,42 +86,6 @@ def _format_hosts_entries_count(count: int) -> str:
     return f"{count} {word}"
 
 
-def _remove_top_domain_entries(lines: list[str], domain_keys: set[str]) -> tuple[list[str], set[str], int | None]:
-    """Убирает первое вхождение каждого нужного домена и возвращает место для нового блока."""
-    if not domain_keys:
-        return lines, set(), None
-
-    new_lines: list[str] = []
-    removed_keys: set[str] = set()
-    insert_at: int | None = None
-
-    for line in lines:
-        parsed = _parse_hosts_mapping_line(line)
-        if parsed is None:
-            new_lines.append(line)
-            continue
-
-        ip, domains, comment = parsed
-        matched_keys = {
-            domain.casefold()
-            for domain in domains
-            if domain.casefold() in domain_keys and domain.casefold() not in removed_keys
-        }
-        if not matched_keys:
-            new_lines.append(line)
-            continue
-
-        if insert_at is None:
-            insert_at = len(new_lines)
-        removed_keys.update(matched_keys)
-
-        remaining_domains = [domain for domain in domains if domain.casefold() not in matched_keys]
-        if remaining_domains:
-            new_lines.append(_format_hosts_mapping_line(ip, remaining_domains, comment))
-
-    return new_lines, removed_keys, insert_at
-
-
 def _iter_managed_hosts_block_rows(lines: list[str]) -> list[tuple[str, str]]:
     """Возвращает строки (domain, ip), которые лежат внутри блока ZapretGUI."""
     rows: list[tuple[str, str]] = []
@@ -322,17 +286,12 @@ def restore_hosts_permissions():
 
 def check_hosts_file_name():
     """Проверяет правильность написания имени файла hosts"""
-    hosts_dir = Path(r"C:\Windows\System32\drivers\etc")
-    
-    # ✅ НОВОЕ: Создаем директорию если её нет
+    hosts_dir = HOSTS_PATH.parent
+
+    # Проверка только читает: каталог etc не создаём.
     if not hosts_dir.exists():
-        try:
-            hosts_dir.mkdir(parents=True, exist_ok=True)
-            log(f"Создана директория: {hosts_dir}")
-        except Exception as e:
-            log(f"Не удалось создать директорию: {e}", "❌ ERROR")
-            return False, f"Не удалось создать директорию etc: {e}"
-    
+        return True, None
+
     # Сначала проверяем правильный файл hosts
     hosts_lower = hosts_dir / "hosts"
     if hosts_lower.exists():
@@ -351,8 +310,8 @@ def check_hosts_file_name():
         log("Обнаружен файл HOSTS (с большими буквами) - это неправильно!", level="⚠ WARNING")
         return False, "Файл должен называться 'hosts' (с маленькими буквами), а не 'HOSTS'"
     
-    # ✅ НОВОЕ: Если файла нет вообще - это нормально, мы его создадим
-    return True, None  # Изменено с False на True
+    # Файла нет вообще — это нормально, его создаст явная запись.
+    return True, None
 
 def is_file_readonly(filepath):
     """Проверяет, установлен ли атрибут 'только для чтения' у файла"""
@@ -363,21 +322,11 @@ def is_file_readonly(filepath):
         log(f"Ошибка при проверке атрибутов файла: {e}")
         return False
 
-def remove_readonly_attribute(filepath):
-    """Снимает атрибут 'только для чтения' с файла"""
-    try:
-        # Получаем текущие атрибуты файла
-        file_stat = os.stat(filepath)
-        # Добавляем право на запись
-        os.chmod(filepath, file_stat.st_mode | stat.S_IWRITE)
-        log(f"Атрибут 'только для чтения' снят с файла: {filepath}")
-        return True
-    except Exception as e:
-        log(f"Ошибка при снятии атрибута 'только для чтения': {e}")
-        return False
+def safe_read_hosts_file():
+    """Безопасно читает файл hosts с обработкой различных кодировок.
 
-def safe_read_hosts_file(*, create_if_missing: bool = True):
-    """Безопасно читает файл hosts с обработкой различных кодировок"""
+    Если файла нет, возвращает пустую строку и ничего не создаёт.
+    """
     hosts_path = HOSTS_PATH
 
     # Fast path: используем кэш если файл не менялся.
@@ -389,48 +338,11 @@ def safe_read_hosts_file(*, create_if_missing: bool = True):
     except Exception:
         pass
     
-    # ✅ НОВОЕ: Проверяем существование файла
+    # Чтение никогда не создаёт файл: создать hosts может только явная запись.
     if not hosts_path.exists():
-        if not create_if_missing:
-            log(f"Файл hosts не существует: {hosts_path}")
-            return ""
-        log(f"Файл hosts не существует, создаем новый: {hosts_path}")
-        try:
-            # Создаем директорию если её нет
-            hosts_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Создаем пустой файл hosts с базовым содержимым
-            default_content = """# Copyright (c) 1993-2009 Microsoft Corp.
-#
-# This is a sample HOSTS file used by Microsoft TCP/IP for Windows.
-#
-# This file contains the mappings of IP addresses to host names. Each
-# entry should be kept on an individual line. The IP address should
-# be placed in the first column followed by the corresponding host name.
-# The IP address and the host name should be separated by at least one
-# space.
-#
-# Additionally, comments (such as these) may be inserted on individual
-# lines or following the machine name denoted by a '#' symbol.
-#
-# For example:
-#
-#      102.54.94.97     rhino.acme.com          # source server
-#       38.25.63.10     x.acme.com              # x client host
+        log(f"Файл hosts не существует: {hosts_path}", "DEBUG")
+        return ""
 
-# localhost name resolution is handled within DNS itself.
-#	127.0.0.1       localhost
-#	::1             localhost
-"""
-            hosts_path.write_text(default_content, encoding='utf-8-sig')
-            _set_hosts_cache(default_content, _get_hosts_sig(hosts_path))
-            log("Файл hosts успешно создан с базовым содержимым")
-            return default_content
-            
-        except Exception as e:
-            log(f"Ошибка при создании файла hosts: {e}", "❌ ERROR")
-            return None
-    
     # Если файл существует, пробуем прочитать с разными кодировками
     encodings = ['utf-8', 'utf-8-sig', 'cp1251', 'cp866', 'latin1']
 
@@ -469,12 +381,11 @@ def safe_read_hosts_file(*, create_if_missing: bool = True):
 def safe_write_hosts_file(content):
     """Безопасно записывает файл hosts с правильной кодировкой"""
     try:
-        # Проверяем атрибут "только для чтения" перед записью
-        if is_file_readonly(HOSTS_PATH):
-            log("Файл hosts имеет атрибут 'только для чтения', пытаемся снять...")
-            if not remove_readonly_attribute(HOSTS_PATH):
-                log("Не удалось снять атрибут 'только для чтения'")
-                return False
+        # Защиту «только для чтения» сами не снимаем: это решает пользователь
+        # кнопкой «Восстановить права доступа».
+        if HOSTS_PATH.exists() and is_file_readonly(HOSTS_PATH):
+            log("Файл hosts защищён от записи (только чтение). Используйте кнопку «Восстановить права доступа».", "WARNING")
+            return False
 
         HOSTS_PATH.write_text(content, encoding="utf-8-sig", newline='\n')
         _set_hosts_cache(content, _get_hosts_sig(HOSTS_PATH))
@@ -629,41 +540,6 @@ class HostsManager:
         self.set_status(message)
         return success
 
-    # ------------------------- сервис -------------------------
-    def get_active_domains_map(self) -> dict[str, str]:
-        """Возвращает {domain: ip} из блока ZapretGUI в системном hosts."""
-        active_ip_map = self.get_active_domain_ip_map()
-        current_active = {
-            domain: ips[0]
-            for domain, ips in active_ip_map.items()
-            if ips
-        }
-        log(f"Найдено активных управляемых доменов: {len(current_active)}", "DEBUG")
-        return current_active
-
-    def get_active_domain_ip_map(self) -> dict[str, list[str]]:
-        """Возвращает {domain: [ip, ...]} из блока ZapretGUI в системном hosts."""
-        current_active_ips: dict[str, list[str]] = {}
-        try:
-            content = safe_read_hosts_file()
-            if content is None:
-                return current_active_ips
-
-            for domain, ip in _iter_managed_hosts_block_rows(content.splitlines(keepends=True)):
-                domain_key = (domain or "").casefold()
-                ip_value = (ip or "").strip()
-                if not domain_key or not ip_value:
-                    continue
-                values = current_active_ips.setdefault(domain_key, [])
-                if ip_value not in values:
-                    values.append(ip_value)
-
-            active_rows = sum(len(values) for values in current_active_ips.values())
-            log(f"Найдено активных управляемых hosts-записей: {active_rows}", "DEBUG")
-        except Exception as e:
-            log(f"Ошибка при чтении hosts: {e}", "ERROR")
-        return current_active_ips
-
     def set_status(self, message: str):
         self._last_status = message
         if self.status_callback:
@@ -677,40 +553,6 @@ class HostsManager:
 
     # ------------------------- проверки -------------------------
 
-    def is_proxy_domains_active(self) -> bool:
-        """Проверяет, есть ли активные управляемые записи в hosts."""
-        try:
-            return bool(self.get_active_domains_map())
-        except Exception as e:
-            log(f"Ошибка при проверке hosts: {e}")
-            return False
-
-    def is_adobe_domains_active(self) -> bool:
-        """Проверяет, есть ли активные записи Adobe в hosts"""
-        try:
-            content = safe_read_hosts_file()
-            if content is None:
-                return False
-                
-            lines = content.splitlines()
-            domains = set(ADOBE_DOMAINS.keys())
-            
-            for line in lines:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                    
-                parts = line.split()
-                if len(parts) >= 2:
-                    domain = parts[1]
-                    if domain in domains:
-                        return True
-                        
-            return False
-        except Exception as e:
-            log(f"Ошибка при проверке Adobe в hosts: {e}")
-            return False
-
     def is_hosts_file_accessible(self) -> bool:
         """Проверяет, доступен ли файл hosts для чтения и записи."""
         try:
@@ -720,41 +562,23 @@ class HostsManager:
                 log(error_msg)
                 return False
             
-            # ✅ НОВОЕ: Если файла нет, создаем его
+            # Файла нет — его создаст сама запись; пробные файлы в etc не пишем.
             if not HOSTS_PATH.exists():
-                log("Файл hosts не существует, будет создан при первой записи")
-                # Проверяем, можем ли мы создать файл
-                try:
-                    # Пробуем создать временный файл в той же директории
-                    test_file = HOSTS_PATH.parent / "test_write_permission.tmp"
-                    test_file.write_text("test", encoding="utf-8")
-                    test_file.unlink()  # Удаляем тестовый файл
-                    return True
-                except PermissionError:
-                    log("Нет прав для создания файла hosts. Требуются права администратора.")
-                    return False
-            
-            # Проверяем возможность чтения с безопасной функцией
+                log("Файл hosts не существует, будет создан при записи")
+                return True
+
             content = safe_read_hosts_file()
             if content is None:
                 return False
-                    
-            # Проверяем атрибут "только для чтения"
+
+            # Защиту «только для чтения» сами не снимаем.
             if is_file_readonly(HOSTS_PATH):
-                log("Файл hosts имеет атрибут 'только для чтения'")
-            
-            # Проверяем возможность записи (пробуем открыть в режиме добавления)
-            try:
-                with HOSTS_PATH.open("a", encoding="utf-8-sig") as f:
-                    pass
-            except PermissionError:
-                # Если не можем открыть для записи, но файл НЕ readonly, 
-                # значит действительно нет прав администратора
-                if not is_file_readonly(HOSTS_PATH):
-                    raise
-                # Если файл readonly, попробуем снять атрибут
-                log("Не удается открыть файл для записи из-за атрибута 'только для чтения'")
-            
+                log("Файл hosts защищён от записи (только чтение)", "WARNING")
+                return False
+
+            # Проверяем право записи, не меняя содержимое.
+            with HOSTS_PATH.open("a", encoding="utf-8-sig"):
+                pass
             return True
             
         except PermissionError:
@@ -765,30 +589,6 @@ class HostsManager:
             return False
         except Exception as e:
             log(f"Ошибка при проверке доступности hosts: {e}")
-            return False
-
-    def is_hosts_file_readable(self) -> bool:
-        """Проверяет, можно ли прочитать hosts без пробной записи в файл."""
-        try:
-            is_correct, error_msg = check_hosts_file_name()
-            if not is_correct:
-                log(error_msg)
-                return False
-
-            if not HOSTS_PATH.exists():
-                log("Файл hosts не существует, для статуса считаем его пустым")
-                return True
-
-            content = safe_read_hosts_file(create_if_missing=False)
-            return content is not None
-        except PermissionError:
-            log(f"Нет прав на чтение файла hosts: {HOSTS_PATH}")
-            return False
-        except FileNotFoundError:
-            log(f"Файл hosts не найден: {HOSTS_PATH}")
-            return True
-        except Exception as e:
-            log(f"Ошибка при проверке чтения hosts: {e}")
             return False
 
     def _no_perm(self):
@@ -826,7 +626,7 @@ class HostsManager:
         Возвращает (переписан ли блок, причина). Ничего не пишет, если блока
         нет, выбор не сохранён или адреса и так совпадают.
         """
-        content = safe_read_hosts_file(create_if_missing=False)
+        content = safe_read_hosts_file()
         block_rows = _iter_managed_hosts_block_rows((content or "").splitlines(keepends=True))
         allow_ipv6 = is_ipv6_available() if block_rows else True
 
@@ -905,10 +705,9 @@ class HostsManager:
                 self.set_status(f"Файл hosts обновлён: удалено {removed_count} записей")
                 return True
 
-            domain_keys = {domain.casefold() for domain, _ip in desired_rows}
-            new_lines, replaced_domains, replacement_insert_at = _remove_top_domain_entries(new_lines, domain_keys)
-
-            _insert_managed_hosts_block(new_lines, desired_rows, insert_at=replacement_insert_at)
+            # Чужие строки не трогаем: блок встаёт перед первой записью файла,
+            # поэтому Windows всё равно возьмёт адрес из него.
+            _insert_managed_hosts_block(new_lines, desired_rows)
 
             updated_content = "".join(new_lines)
             if updated_content == content:
@@ -922,8 +721,7 @@ class HostsManager:
 
             self.set_status(f"Файл hosts обновлён: применено {_format_hosts_entries_count(len(desired_rows))}")
             log(
-                f"✅ apply_domain_ip_rows: removed={removed_count}, "
-                f"replaced_top={len(replaced_domains)}, added={len(desired_rows)}",
+                f"✅ apply_domain_ip_rows: removed={removed_count}, added={len(desired_rows)}",
                 "DEBUG",
             )
             return True
@@ -1002,42 +800,6 @@ class HostsManager:
             log(f"Ошибка при добавлении Adobe доменов: {e}", "ERROR")
             return False
 
-    def clear_hosts_file(self) -> bool:
-        """Удаляет только блок ZapretGUI из системного hosts."""
-        log("🗑️ Очистка блока ZapretGUI в hosts", "DEBUG")
-        
-        if not self.is_hosts_file_accessible():
-            self.set_status("Файл hosts недоступен для изменения")
-            return False
-        
-        try:
-            content = safe_read_hosts_file()
-            if content is None:
-                return False
-
-            new_lines, removed_count = _remove_managed_hosts_block(content.splitlines(keepends=True))
-            while new_lines and new_lines[-1].strip() == "":
-                new_lines.pop()
-            if new_lines and not new_lines[-1].endswith("\n"):
-                new_lines[-1] += "\n"
-            
-            if not safe_write_hosts_file("".join(new_lines)):
-                log("Не удалось записать файл hosts после очистки блока ZapretGUI")
-                return False
-            
-            self.set_status(f"Блок ZapretGUI очищен: удалено {removed_count} записей")
-            invalidate_hosts_file_cache()
-            log(f"✅ Блок ZapretGUI в hosts очищен: удалено {removed_count} записей", "DEBUG")
-            return True
-            
-        except PermissionError:
-            log("Ошибка прав доступа при очистке hosts файла", "ERROR")
-            self._no_perm()
-            return False
-        except Exception as e:
-            log(f"Ошибка при очистке hosts файла: {e}", "ERROR")
-            return False
-        
     def remove_adobe_domains(self) -> bool:
         """Удаляет домены Adobe из hosts файла"""
         log("🔓 Удаление доменов Adobe", "DEBUG")

@@ -72,7 +72,7 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
             copy_text=Mock(),
             open_log_file=Mock(),
             open_external_link=Mock(),
-            ensure_telegram_hosts=Mock(),
+            run_telegram_hosts_action=Mock(),
             run_diagnostics=Mock(),
             append_log_line=Mock(),
             consume_auto_deeplink_request=Mock(),
@@ -411,7 +411,7 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
             copy_text=Mock(),
             open_log_file=Mock(),
             open_external_link=Mock(),
-            ensure_telegram_hosts=Mock(),
+            run_telegram_hosts_action=Mock(),
             run_diagnostics=Mock(),
             append_log_line=Mock(),
             consume_auto_deeplink_request=Mock(),
@@ -922,27 +922,191 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
         page._start_relay_check_worker.assert_called_once_with()
         self.assertFalse(page._relay_check_state.pending)
 
-    def test_ensure_hosts_pending_restarts_after_event_loop_turn(self) -> None:
+    def test_hosts_status_pending_restarts_after_event_loop_turn(self) -> None:
         import telegram_proxy.ui.page as telegram_proxy_page
         from telegram_proxy.ui.page import TelegramProxyPage
 
         page = TelegramProxyPage.__new__(TelegramProxyPage)
         page._cleanup_in_progress = False
-        _set_state(page, "ensure_hosts", runtime=SimpleNamespace(request_id=1), pending=True)
-        page._start_ensure_hosts_worker = Mock()
+        _set_state(page, "hosts", runtime=SimpleNamespace(request_id=1), pending=True)
+        page._start_hosts_status_worker = Mock()
         single_shot = Mock(side_effect=lambda _delay, _callback: None)
 
         with patch.object(telegram_proxy_page, "QTimer", SimpleNamespace(singleShot=single_shot), create=True):
-            TelegramProxyPage._on_ensure_hosts_worker_finished(page, SimpleNamespace(_request_id=1))
+            TelegramProxyPage._on_hosts_worker_finished(page, SimpleNamespace(_request_id=1))
 
         single_shot.assert_called_once()
         self.assertEqual(single_shot.call_args.args[0], 0)
-        page._start_ensure_hosts_worker.assert_not_called()
+        page._start_hosts_status_worker.assert_not_called()
 
         single_shot.call_args.args[1]()
 
-        page._start_ensure_hosts_worker.assert_called_once_with()
-        self.assertFalse(page._ensure_hosts_state.pending)
+        page._start_hosts_status_worker.assert_called_once_with()
+        self.assertFalse(page._hosts_state.pending)
+
+
+class TelegramHostsPageActionTests(unittest.TestCase):
+    """Страница меняет hosts только по кнопке; открытие страницы лишь читает файл."""
+
+    def _make_page(self):
+        import dataclasses
+
+        from telegram_proxy.ui.page import TelegramProxyPage
+
+        feature = TelegramProxyWorkerArchitectureTests._make_feature(
+            TelegramProxyWorkerArchitectureTests(),
+            manager=SimpleNamespace(),
+        )
+        # Настоящая цепочка: фасад -> команда -> telegram_hosts -> hosts.public.
+        feature = dataclasses.replace(
+            feature,
+            run_telegram_hosts_action=telegram_proxy_commands.run_telegram_hosts_action,
+        )
+        started_actions: list[str] = []
+
+        def _start_qthread_worker(*, worker_factory, bind_worker, on_finished):
+            worker = worker_factory(1)
+            started_actions.append(worker._action)
+            # Страница без Qt-инициализации не принимает сигнал напрямую,
+            # поэтому результат передаётся через обычные Python-вызовы.
+            slots: list = []
+            bind_worker(SimpleNamespace(completed=SimpleNamespace(connect=slots.append)))
+            worker.completed.connect(lambda *args: [slot(*args) for slot in slots])
+            worker.run()
+            on_finished(worker)
+
+        page = TelegramProxyPage.__new__(TelegramProxyPage)
+        page._cleanup_in_progress = False
+        page._telegram_proxy = feature
+        page._hosts_runtime = SimpleNamespace(
+            request_id=1,
+            is_running=Mock(return_value=False),
+            is_current=Mock(return_value=True),
+            start_qthread_worker=_start_qthread_worker,
+        )
+        page._hosts_state = TelegramProxyPageWorkerState(page._hosts_runtime)
+        page._hosts_status = None
+        page._hosts_error = ""
+        page._hosts_busy = False
+        page._show_success_message = Mock()
+        page._show_warning_message = Mock()
+        return page, started_actions
+
+    def _patch_worker_without_qt_parent(self):
+        # Страница создана через __new__, поэтому QThread не может взять её родителем.
+        def _create_hosts_worker(feature, request_id, *, action, parent=None):
+            return telegram_proxy_workers.TelegramHostsWorker(
+                request_id,
+                action=action,
+                run_hosts_action_fn=feature.run_telegram_hosts_action,
+            )
+
+        return patch.object(TelegramProxyFeature, "create_hosts_worker", _create_hosts_worker)
+
+    def test_page_activation_only_reads_hosts(self) -> None:
+        from telegram_proxy.ui.page import TelegramProxyPage
+
+        page, started_actions = self._make_page()
+        read = Mock(return_value="127.0.0.1 localhost\n")
+        write = Mock(return_value=True)
+
+        with (
+            self._patch_worker_without_qt_parent(),
+            patch("hosts.public.read_hosts_file", read),
+            patch("hosts.public.write_hosts_file", write),
+        ):
+            TelegramProxyPage.on_page_activated(page)
+            TelegramProxyPage.on_page_activated(page)
+
+        write.assert_not_called()
+        read.assert_called()
+        self.assertEqual(started_actions, ["status", "status"])
+        self.assertEqual(page._hosts_status.present, 0)
+        self.assertFalse(page._hosts_busy)
+        page._show_warning_message.assert_not_called()
+
+    def test_button_adds_then_removes_block(self) -> None:
+        from telegram_proxy.telegram_hosts import TELEGRAM_DOMAINS
+        from telegram_proxy.ui.page import TelegramProxyPage
+
+        page, started_actions = self._make_page()
+        hosts_text = ["127.0.0.1 localhost\n"]
+        read = Mock(side_effect=lambda: hosts_text[0])
+
+        def _write(text):
+            hosts_text[0] = text
+            return True
+
+        with (
+            self._patch_worker_without_qt_parent(),
+            patch("hosts.public.read_hosts_file", read),
+            patch("hosts.public.write_hosts_file", Mock(side_effect=_write)),
+        ):
+            TelegramProxyPage.on_page_activated(page)
+            TelegramProxyPage._on_telegram_hosts_button_clicked(page)
+            self.assertEqual(page._hosts_status.present, len(TELEGRAM_DOMAINS))
+            TelegramProxyPage._on_telegram_hosts_button_clicked(page)
+
+        self.assertEqual(started_actions, ["status", "add", "remove"])
+        self.assertEqual(hosts_text[0], "127.0.0.1 localhost\n")
+        self.assertEqual(page._hosts_status.present, 0)
+        self.assertEqual(page._show_success_message.call_count, 2)
+
+    def test_button_write_error_shows_warning_and_keeps_real_state(self) -> None:
+        from telegram_proxy.ui.page import TelegramProxyPage
+
+        page, started_actions = self._make_page()
+        with (
+            self._patch_worker_without_qt_parent(),
+            patch("hosts.public.read_hosts_file", Mock(return_value="")),
+            patch("hosts.public.write_hosts_file", Mock(side_effect=PermissionError("read-only"))),
+        ):
+            TelegramProxyPage.on_page_activated(page)
+            TelegramProxyPage._on_telegram_hosts_button_clicked(page)
+
+        self.assertEqual(started_actions, ["status", "add"])
+        page._show_warning_message.assert_called_once()
+        self.assertIn("только для чтения", page._show_warning_message.call_args.args[1])
+        self.assertEqual(page._hosts_status.present, 0)
+        self.assertFalse(page._hosts_busy)
+
+    def test_button_is_disabled_until_status_is_known(self) -> None:
+        from telegram_proxy.ui.page import TelegramProxyPage
+
+        page, started_actions = self._make_page()
+
+        TelegramProxyPage._on_telegram_hosts_button_clicked(page)
+
+        self.assertEqual(started_actions, [])
+
+
+class TelegramHostsRowPlanTests(unittest.TestCase):
+    def test_row_plan_matches_status(self) -> None:
+        from telegram_proxy.telegram_hosts import TelegramHostsStatus
+        from telegram_proxy.ui.page_runtime import build_hosts_row_plan
+
+        checking = build_hosts_row_plan(None, busy=False)
+        self.assertFalse(checking.button_enabled)
+
+        none = build_hosts_row_plan(TelegramHostsStatus(0, 30, False), busy=False)
+        self.assertTrue(none.description.startswith("Не прописаны\n"))
+        self.assertIn("web.telegram.org", none.description)
+        self.assertEqual((none.button_text, none.button_action, none.button_enabled), ("Прописать", "add", True))
+
+        partial = build_hosts_row_plan(TelegramHostsStatus(12, 30, True), busy=False)
+        self.assertTrue(partial.description.startswith("Прописаны частично: 12 из 30\n"))
+        self.assertEqual(partial.button_action, "add")
+
+        full = build_hosts_row_plan(TelegramHostsStatus(30, 30, True), busy=False)
+        self.assertTrue(full.description.startswith("Прописаны все 30\n"))
+        self.assertEqual((full.button_text, full.button_action), ("Убрать", "remove"))
+
+        busy = build_hosts_row_plan(TelegramHostsStatus(30, 30, True), busy=True)
+        self.assertFalse(busy.button_enabled)
+
+        error = build_hosts_row_plan(None, busy=False, error="нет доступа")
+        self.assertTrue(error.description.startswith("Не удалось прочитать файл hosts\n"))
+        self.assertTrue(error.button_enabled)
 
 
 if __name__ == "__main__":

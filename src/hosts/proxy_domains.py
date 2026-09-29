@@ -12,7 +12,6 @@ from hosts.catalog_repository import (
     HOSTS_PROFILE_ID,
     HostsCatalog,
     empty_catalog,
-    file_content_signature,
     load_catalog,
 )
 from settings import store as settings_store
@@ -76,10 +75,13 @@ def _recent_signature(path: Path) -> tuple[int, int] | None:
 
 
 def _path_signature(path: Path) -> tuple[int, int] | None:
+    # Дата изменения и размер: без чтения и хэширования всего файла.
+    # Содержимое проверяется при настоящей загрузке (load_catalog).
     try:
-        signature = file_content_signature(path)
-    except (OSError, ValueError):
+        stat = path.stat()
+    except OSError:
         return None
+    signature = (int(stat.st_mtime_ns), int(stat.st_size))
     _remember_recent_signature(path, signature)
     return signature
 
@@ -144,7 +146,7 @@ def invalidate_hosts_catalog_cache() -> None:
 
 
 def get_hosts_catalog_signature() -> tuple[str, int, int] | None:
-    """Return (path, content revision, file size) outside the GUI thread."""
+    """Return (path, mtime_ns, file size) outside the GUI thread."""
     path = _get_hosts_catalog_path()
     if not path.is_file():
         return None
@@ -171,19 +173,6 @@ def get_dns_profile_display_name(profile_id: str) -> str:
 
 def get_all_services() -> list[str]:
     return list(_load_catalog().service_order)
-
-
-def get_service_domain_names(service_name: str) -> list[str]:
-    entries = _load_catalog().service_entries.get(service_name, []) or []
-    result: list[str] = []
-    seen: set[str] = set()
-    for domain, _ips in entries:
-        key = domain.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(domain)
-    return result
 
 
 def get_service_domains(service_name: str) -> dict[str, str]:
@@ -266,7 +255,6 @@ def _build_services_profile_index(catalog: HostsCatalog) -> dict[str, object]:
     services = list(catalog.service_order)
     profiles = list(catalog.dns_profiles)
     available_by_service: dict[str, list[str]] = {}
-    profile_domain_maps_by_service: dict[str, dict[str, dict[str, str]]] = {}
     profile_domain_ip_candidates_by_service: dict[str, dict[str, dict[str, list[str]]]] = {}
     domain_names_by_service: dict[str, list[str]] = {}
     direct_index = _infer_direct_profile_index(catalog)
@@ -297,7 +285,6 @@ def _build_services_profile_index(catalog: HostsCatalog) -> dict[str, object]:
 
         domain_names_by_service[service_name] = domain_names
         required_domains = set(seen_domains)
-        service_maps: dict[str, dict[str, str]] = {}
         service_candidates: dict[str, dict[str, list[str]]] = {}
         available: list[str] = []
         for profile_id in profiles:
@@ -305,17 +292,13 @@ def _build_services_profile_index(catalog: HostsCatalog) -> dict[str, object]:
             if not required_domains or covered_by_profile[profile_id] != required_domains:
                 continue
             available.append(profile_id)
-            domain_map: dict[str, str] = {}
             candidates: dict[str, list[str]] = {}
             for domain_key, ip_value in rows:
-                domain_map.setdefault(domain_key, ip_value)
                 values = candidates.setdefault(domain_key, [])
                 if ip_value not in values:
                     values.append(ip_value)
-            service_maps[profile_id] = domain_map
             service_candidates[profile_id] = candidates
         available_by_service[service_name] = available
-        profile_domain_maps_by_service[service_name] = service_maps
         profile_domain_ip_candidates_by_service[service_name] = service_candidates
 
     return {
@@ -332,7 +315,6 @@ def _build_services_profile_index(catalog: HostsCatalog) -> dict[str, object]:
         "service_id_by_name": dict(catalog.service_id_by_name),
         "direct_profile": direct_profile,
         "domain_names_by_service": domain_names_by_service,
-        "profile_domain_maps_by_service": profile_domain_maps_by_service,
         "profile_domain_ip_candidates_by_service": profile_domain_ip_candidates_by_service,
     }
 
@@ -430,7 +412,6 @@ __all__ = [
     "get_service_available_dns_profiles",
     "get_service_domain_ip_map",
     "get_service_domain_ip_rows",
-    "get_service_domain_names",
     "get_service_domains",
     "get_services_profile_index",
     "invalidate_hosts_catalog_cache",

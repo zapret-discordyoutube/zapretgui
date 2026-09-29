@@ -689,7 +689,7 @@ class AccessibilityHelpersTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
 
         for relative_path in (
-            "src/hosts/ui/services_matrix.py",
+            "src/hosts/ui/page.py",
             "src/ui/combo_accessibility.py",
             "src/tray.py",
         ):

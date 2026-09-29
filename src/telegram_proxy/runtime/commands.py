@@ -6,6 +6,8 @@ import webbrowser
 from dataclasses import dataclass
 
 from telegram_proxy.runtime.plans import (
+    TELEGRAM_HOSTS_ACTIONS,
+    TelegramHostsActionResult,
     TelegramProxyActionResult,
     TelegramProxyDiagnosticsFinishPlan,
     TelegramProxyDiagnosticsPollPlan,
@@ -112,14 +114,38 @@ def copy_text(
     )
 
 
-def ensure_telegram_hosts() -> TelegramProxyActionResult:
-    try:
-        from telegram_proxy.telegram_hosts import ensure_telegram_hosts
+def run_telegram_hosts_action(action: str) -> TelegramHostsActionResult:
+    """Выполняет действие с записями Telegram в hosts и перечитывает состояние.
 
-        ensure_telegram_hosts()
-        return TelegramProxyActionResult(True, "", "", "")
-    except Exception as e:
-        return TelegramProxyActionResult(False, f"Telegram hosts check error: {e}", "", "")
+    ``status`` только читает файл. ``add`` и ``remove`` меняют его и
+    вызываются лишь по кнопке пользователя.
+    """
+    from telegram_proxy import telegram_hosts
+
+    action = str(action or "").strip()
+    if action not in TELEGRAM_HOSTS_ACTIONS:
+        return TelegramHostsActionResult(action, False, False, f"Неизвестное действие с hosts: {action}", None)
+
+    changed = False
+    message = ""
+    ok = True
+    try:
+        if action == "add":
+            changed, message = telegram_hosts.add_telegram_hosts()
+        elif action == "remove":
+            changed, message = telegram_hosts.remove_telegram_hosts()
+    except Exception as exc:
+        ok = False
+        message = str(exc) or "Не удалось изменить файл hosts"
+
+    status = None
+    try:
+        status = telegram_hosts.get_telegram_hosts_status()
+    except Exception as exc:
+        if ok:
+            ok = False
+            message = str(exc) or "Не удалось прочитать файл hosts"
+    return TelegramHostsActionResult(action, ok, bool(changed), str(message or ""), status)
 
 
 def set_enabled(enabled: bool) -> None:

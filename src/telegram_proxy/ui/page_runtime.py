@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from telegram_proxy.ui.text_plan import TELEGRAM_PROXY_SETTINGS_TEXT
+
 
 @dataclass(slots=True)
 class TelegramProxyToggleActionPlan:
@@ -65,19 +67,54 @@ class TelegramProxyStatsPlan:
     next_speed_hist_down: tuple[int, ...]
 
 
-@dataclass(slots=True)
-class TelegramProxyPageInitPlan:
-    ensure_hosts_once: bool
+@dataclass(frozen=True, slots=True)
+class TelegramHostsRowPlan:
+    description: str
+    button_text: str
+    button_action: str
+    button_accessible_name: str
+    button_enabled: bool
 
 
 def is_zapret_runtime_running(runtime_feature) -> bool:
     return bool(runtime_feature.is_running())
 
 
-def build_page_init_plan(*, runtime_initialized: bool) -> TelegramProxyPageInitPlan:
-    return TelegramProxyPageInitPlan(
-        ensure_hosts_once=not bool(runtime_initialized),
+def build_hosts_row_plan(status, *, busy: bool, error: str = "") -> TelegramHostsRowPlan:
+    """Что показать в строке «Записи Telegram в hosts».
+
+    ``status`` — TelegramHostsStatus или None, пока файл не прочитан.
+    Кнопка «Убрать» — когда прописаны все записи, иначе «Прописать».
+    Пока идёт фоновая работа или состояние ещё неизвестно, кнопка выключена.
+    """
+    text = TELEGRAM_PROXY_SETTINGS_TEXT
+    remove = False
+    known = status is not None
+    has_error = bool(str(error or "").strip())
+    if not known:
+        state = text.hosts_state_error if has_error else text.hosts_state_checking
+    else:
+        present = max(0, int(getattr(status, "present", 0) or 0))
+        total = max(0, int(getattr(status, "total", 0) or 0))
+        if total > 0 and present >= total:
+            state = text.hosts_state_all.format(present=present, total=total)
+            remove = True
+        elif present <= 0:
+            state = text.hosts_state_none
+        else:
+            state = text.hosts_state_partial.format(present=present, total=total)
+
+    can_act = known or has_error
+    return TelegramHostsRowPlan(
+        description=f"{state}\n{text.hosts_hint}",
+        button_text=text.hosts_remove_button if remove else text.hosts_add_button,
+        button_action="remove" if remove else "add",
+        button_accessible_name=(
+            text.hosts_remove_accessible_name if remove else text.hosts_add_accessible_name
+        ),
+        button_enabled=bool(can_act and not busy),
     )
+
 
 def build_status_plan(*, running: bool, restarting: bool, starting: bool, host: str, port: int) -> TelegramProxyStatusPlan:
     if restarting:

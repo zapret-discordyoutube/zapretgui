@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from threading import Lock
 from typing import Callable
 
 from ui.performance_metrics import log_ui_timing_since
@@ -12,196 +11,79 @@ from ui.performance_metrics import log_ui_timing_since
 class HostsFeature:
     refresh_applied_selection: Callable
     warm_page_data_cache: Callable
-    consume_warmed_services_catalog_plan: Callable
-    create_hosts_runtime: Callable
+    peek_page_snapshot: Callable
     get_hosts_path_str: Callable
-    invalidate_catalog_cache: Callable
-    create_selection_save_worker: Callable
-    create_selection_load_worker: Callable
-    create_state_load_worker: Callable
+    create_snapshot_worker: Callable
+    create_apply_worker: Callable
     create_open_hosts_file_worker: Callable
     create_permission_restore_worker: Callable
-    create_operation_worker: Callable
-    create_services_catalog_worker: Callable
-    create_catalog_refresh_worker: Callable
-
-
-@dataclass(frozen=True, slots=True)
-class HostsWarmedServicesCatalog:
-    plan: object
-    catalog_signature: object
-    selection: dict[str, str]
-    titles: tuple[str, str, str]
 
 
 def build_hosts_feature() -> HostsFeature:
-    warmed_lock = Lock()
-    warmed_services_catalog: HostsWarmedServicesCatalog | None = None
-
     def _public():
         from hosts import public as hosts_public
 
         return hosts_public
 
     def _warm_page_data_cache() -> bool:
-        nonlocal warmed_services_catalog
-        public = _public()
+        # Разогревает кэши каталога и hosts: первое открытие страницы
+        # получит снимок за миллисекунды. Сам снимок не хранится.
         started_at = time.perf_counter()
-        selection = dict(public.load_user_selection() or {})
-        log_ui_timing_since("warmup", "hosts", "hosts_warmup.selection.load", started_at, important=True)
-        started_at = time.perf_counter()
-        runtime = public.create_hosts_runtime()
-        log_ui_timing_since("warmup", "hosts", "hosts_warmup.runtime.create", started_at, important=True)
-        titles = ("Напрямую из hosts", "ИИ", "Остальные")
-        started_at = time.perf_counter()
-        plan = public.build_services_catalog_plan(
-            hosts_runtime=runtime,
-            current_selection=selection,
-            direct_title=titles[0],
-            ai_title=titles[1],
-            other_title=titles[2],
-        )
-        log_ui_timing_since(
-            "warmup",
-            "hosts",
-            "hosts_warmup.services_catalog_plan.build",
-            started_at,
-            important=True,
-        )
-        started_at = time.perf_counter()
-        after_signature = public.get_catalog_signature()
-        log_ui_timing_since("warmup", "hosts", "hosts_warmup.catalog_signature.after", started_at, important=True)
-        started_at = time.perf_counter()
-        with warmed_lock:
-            warmed_services_catalog = HostsWarmedServicesCatalog(
-                plan=plan,
-                catalog_signature=after_signature,
-                selection=selection,
-                titles=titles,
-            ) if after_signature is not None else None
-        log_ui_timing_since("warmup", "hosts", "hosts_warmup.cache_store", started_at, important=True)
+        _public().load_page_snapshot()
+        log_ui_timing_since("warmup", "hosts", "hosts_warmup.snapshot", started_at, important=True)
         return True
 
-    def _consume_warmed_services_catalog_plan(
-        *,
-        current_selection: dict[str, str],
-        direct_title: str,
-        ai_title: str,
-        other_title: str,
-    ) -> HostsWarmedServicesCatalog | None:
-        nonlocal warmed_services_catalog
-        titles = (str(direct_title or ""), str(ai_title or ""), str(other_title or ""))
-        with warmed_lock:
-            warmed = warmed_services_catalog
-            warmed_services_catalog = None
-        if warmed is None:
-            return None
-        if dict(current_selection or {}) != dict(warmed.selection):
-            return None
-        if titles != warmed.titles:
-            return None
-        if get_catalog_signature() != warmed.catalog_signature:
-            return None
-        return warmed
+    def _peek_page_snapshot():
+        from hosts.page_snapshot import peek_page_snapshot
 
-    load_user_selection = lambda *args, **kwargs: _public().load_user_selection(*args, **kwargs)
-    save_user_selection = lambda *args, **kwargs: _public().save_user_selection(*args, **kwargs)
-    get_hosts_state = lambda *args, **kwargs: _public().get_hosts_state(*args, **kwargs)
-    get_catalog_signature = lambda *args, **kwargs: _public().get_catalog_signature(*args, **kwargs)
-    build_services_catalog_plan = lambda *args, **kwargs: _public().build_services_catalog_plan(*args, **kwargs)
-    restore_hosts_permissions = lambda *args, **kwargs: _public().restore_hosts_permissions(*args, **kwargs)
-    open_hosts_file = lambda *args, **kwargs: _public().open_hosts_file(*args, **kwargs)
-    execute_hosts_operation = lambda *args, **kwargs: _public().execute_hosts_operation(*args, **kwargs)
+        return peek_page_snapshot()
 
-    def _create_selection_save_worker(request_id: int, selection: dict[str, str], parent=None):
-        from hosts.selection_save_worker import HostsSelectionSaveWorker
+    def _call_worker(request_id: int, call: Callable[[], object], *, name: str, parent=None):
+        from hosts.call_worker import HostsCallWorker
 
-        return HostsSelectionSaveWorker(
+        return HostsCallWorker(request_id, call, name=name, parent=parent)
+
+    def _create_snapshot_worker(request_id: int, parent=None):
+        return _call_worker(
             request_id,
-            selection,
-            save_user_selection=save_user_selection,
+            lambda: _public().load_page_snapshot(),
+            name="snapshot",
             parent=parent,
         )
 
-    def _create_selection_load_worker(request_id: int, parent=None):
-        from hosts.selection_load_worker import HostsSelectionLoadWorker
-
-        return HostsSelectionLoadWorker(
+    def _create_apply_worker(request_id: int, selection: dict[str, str], adobe: bool | None, parent=None):
+        selection = dict(selection or {})
+        return _call_worker(
             request_id,
-            load_user_selection=load_user_selection,
-            parent=parent,
-        )
-
-    def _create_state_load_worker(request_id: int, hosts_runtime, parent=None):
-        from hosts.state_load_worker import HostsStateLoadWorker
-
-        return HostsStateLoadWorker(
-            request_id,
-            hosts_runtime,
-            get_hosts_state=get_hosts_state,
+            lambda: _public().apply_hosts_draft(selection, adobe),
+            name="apply",
             parent=parent,
         )
 
     def _create_open_hosts_file_worker(request_id: int, parent=None):
-        from hosts.open_file_worker import HostsOpenFileWorker
-
-        return HostsOpenFileWorker(
+        return _call_worker(
             request_id,
-            open_hosts_file=open_hosts_file,
+            lambda: _public().open_hosts_file(),
+            name="open",
             parent=parent,
         )
 
     def _create_permission_restore_worker(request_id: int, parent=None):
-        from hosts.permission_restore_worker import HostsPermissionRestoreWorker
-
-        return HostsPermissionRestoreWorker(
+        return _call_worker(
             request_id,
-            restore_hosts_permissions=restore_hosts_permissions,
-            parent=parent,
-        )
-
-    def _create_operation_worker(*, hosts_runtime, operation: str, payload=None):
-        from hosts.operation_worker import HostsOperationWorker
-
-        return HostsOperationWorker(
-            hosts_runtime,
-            operation,
-            payload,
-            execute_hosts_operation_fn=execute_hosts_operation,
-        )
-
-    def _create_services_catalog_worker(**kwargs):
-        from hosts.services_catalog_worker import HostsServicesCatalogWorker
-
-        return HostsServicesCatalogWorker(
-            build_services_catalog_plan=build_services_catalog_plan,
-            get_catalog_signature=get_catalog_signature,
-            **kwargs,
-        )
-
-    def _create_catalog_refresh_worker(request_id: int, *, trigger: str, parent=None):
-        from hosts.catalog_refresh_worker import HostsCatalogRefreshWorker
-
-        return HostsCatalogRefreshWorker(
-            request_id,
-            trigger,
-            get_catalog_signature=get_catalog_signature,
+            lambda: _public().restore_hosts_permissions(),
+            name="restore_permissions",
             parent=parent,
         )
 
     return HostsFeature(
         refresh_applied_selection=lambda *args, **kwargs: _public().refresh_applied_selection(*args, **kwargs),
         warm_page_data_cache=_warm_page_data_cache,
-        consume_warmed_services_catalog_plan=_consume_warmed_services_catalog_plan,
-        create_hosts_runtime=lambda *args, **kwargs: _public().create_hosts_runtime(*args, **kwargs),
+        # Только память, без чтения файлов: безопасно звать из UI-потока.
+        peek_page_snapshot=lambda: _peek_page_snapshot(),
         get_hosts_path_str=lambda *args, **kwargs: _public().get_hosts_path_str(*args, **kwargs),
-        invalidate_catalog_cache=lambda *args, **kwargs: _public().invalidate_catalog_cache(*args, **kwargs),
-        create_selection_save_worker=_create_selection_save_worker,
-        create_selection_load_worker=_create_selection_load_worker,
-        create_state_load_worker=_create_state_load_worker,
+        create_snapshot_worker=_create_snapshot_worker,
+        create_apply_worker=_create_apply_worker,
         create_open_hosts_file_worker=_create_open_hosts_file_worker,
         create_permission_restore_worker=_create_permission_restore_worker,
-        create_operation_worker=_create_operation_worker,
-        create_services_catalog_worker=_create_services_catalog_worker,
-        create_catalog_refresh_worker=_create_catalog_refresh_worker,
     )

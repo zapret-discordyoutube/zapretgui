@@ -32,6 +32,24 @@ class TelegramProxyActionResult:
     info_content: str
 
 
+TELEGRAM_HOSTS_ACTIONS = ("status", "add", "remove")
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramHostsActionResult:
+    """Итог действия с записями Telegram в hosts.
+
+    ``status`` — состояние файла после действия (None, если его не удалось
+    прочитать). ``message`` — текст успеха или ошибки для пользователя.
+    """
+
+    action: str
+    ok: bool
+    changed: bool
+    message: str
+    status: object | None
+
+
 def build_diagnostics_start_plan() -> TelegramProxyDiagnosticsStartPlan:
     return TelegramProxyDiagnosticsStartPlan(
         button_enabled=False,

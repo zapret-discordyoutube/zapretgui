@@ -82,12 +82,11 @@ class AlignedSwitchButtonTests(unittest.TestCase):
     def test_hosts_switches_are_aligned(self) -> None:
         import inspect
 
-        from hosts.ui import page as hosts_page
-        from hosts.ui.sections_build import build_hosts_adobe_section
+        from hosts.ui import blocks_section
 
-        self.assertIs(inspect.signature(build_hosts_adobe_section).parameters["switch_button_cls"].default, AlignedSwitchButton)
-        self.assertIs(hosts_page.AlignedSwitchButton, AlignedSwitchButton)
-        self.assertNotIn("SwitchButton,", inspect.getsource(hosts_page).split("class ", 1)[0])
+        # Единственный тумблер страницы Hosts — «Блокировать Adobe» в разделе блоков.
+        self.assertIs(blocks_section.AlignedSwitchButton, AlignedSwitchButton)
+        self.assertNotIn("SwitchButton,", inspect.getsource(blocks_section).split("class ", 1)[0])
 
 
 if __name__ == "__main__":

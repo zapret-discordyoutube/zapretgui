@@ -68,7 +68,7 @@ def _make_feature(*, manager=None, save_runtime=None, **overrides) -> TelegramPr
         copy_text=Mock(),
         open_log_file=Mock(),
         open_external_link=Mock(),
-        ensure_telegram_hosts=Mock(),
+        run_telegram_hosts_action=Mock(),
         run_diagnostics=Mock(),
         append_log_line=Mock(),
         consume_auto_deeplink_request=Mock(),

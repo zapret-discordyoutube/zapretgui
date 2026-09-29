@@ -12,12 +12,14 @@ class HostsFileManagerTests(unittest.TestCase):
         manager = hosts_module.HostsManager()
         self.assertFalse(hasattr(manager, "apply_hosts_bootstrap_if_needed"))
 
-    def test_execute_hosts_operation_does_not_run_legacy_bootstrap(self) -> None:
+    def test_apply_draft_writes_selection_once_and_rereads_snapshot(self) -> None:
         from hosts import commands as hosts_commands
 
         calls: list[str] = []
 
         class FakeHostsManager:
+            last_status = "Файл hosts обновлён"
+
             def apply_hosts_bootstrap_if_needed(self) -> None:
                 raise AssertionError("legacy bootstrap must not run")
 
@@ -25,35 +27,48 @@ class HostsFileManagerTests(unittest.TestCase):
                 calls.append(f"apply:{service_dns.get('ChatGPT')}")
                 return True
 
-        result = hosts_commands.execute_hosts_operation(
-            FakeHostsManager(),
-            "apply_selection",
-            {"ChatGPT": "xbox_dns"},
-        )
+            def add_adobe_domains(self) -> bool:
+                calls.append("adobe:on")
+                return True
+
+            def remove_adobe_domains(self) -> bool:
+                calls.append("adobe:off")
+                return True
+
+        snapshot = object()
+        with (
+            patch.object(hosts_commands, "create_hosts_manager", return_value=FakeHostsManager()),
+            patch.object(hosts_commands, "save_user_selection", side_effect=lambda sel: calls.append(f"save:{sel}") or True),
+            patch.object(hosts_commands, "load_page_snapshot", return_value=snapshot),
+        ):
+            result = hosts_commands.apply_hosts_draft({"ChatGPT": "xbox_dns"}, adobe=True)
 
         self.assertTrue(result.success)
-        self.assertEqual(calls, ["apply:xbox_dns"])
+        self.assertIs(result.snapshot, snapshot)
+        self.assertEqual(calls, ["apply:xbox_dns", "save:{'ChatGPT': 'xbox_dns'}", "adobe:on"])
 
-    def test_get_hosts_state_uses_read_only_access_check(self) -> None:
+    def test_apply_draft_does_not_save_selection_when_write_fails(self) -> None:
         from hosts import commands as hosts_commands
 
         class FakeHostsManager:
-            def is_hosts_file_readable(self) -> bool:
-                return True
+            last_status = "Файл hosts недоступен для изменения"
 
-            def is_hosts_file_accessible(self) -> bool:
-                raise AssertionError("status refresh must not probe hosts write access")
-
-            def get_active_domains_map(self) -> dict[str, str]:
-                return {"chatgpt.com": "1.1.1.1"}
-
-            def is_adobe_domains_active(self) -> bool:
+            def apply_service_dns_selections(self, service_dns) -> bool:
                 return False
 
-        state = hosts_commands.get_hosts_state(FakeHostsManager())
+            def add_adobe_domains(self) -> bool:
+                raise AssertionError("Adobe не трогаем, если основная запись не удалась")
 
-        self.assertTrue(state.accessible)
-        self.assertEqual(state.active_domains, frozenset({"chatgpt.com"}))
+        with (
+            patch.object(hosts_commands, "create_hosts_manager", return_value=FakeHostsManager()),
+            patch.object(hosts_commands, "save_user_selection") as save,
+            patch.object(hosts_commands, "load_page_snapshot", return_value=None),
+        ):
+            result = hosts_commands.apply_hosts_draft({"ChatGPT": "xbox_dns"}, adobe=True)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.message, "Файл hosts недоступен для изменения")
+        save.assert_not_called()
 
     def test_apply_domain_rows_skips_write_when_content_is_unchanged(self) -> None:
         from hosts import hosts as hosts_module
@@ -199,7 +214,7 @@ class HostsFileManagerTests(unittest.TestCase):
         self.assertLess(written[0].index("2.2.2.2 chatgpt.com"), written[0].index("10.0.0.1 manual.example"))
         self.assertLess(written[0].index("2.2.2.2 chatgpt.com"), written[0].index("10.0.0.2 another.example"))
 
-    def test_apply_domain_rows_updates_top_domain_entry_without_adding_duplicate(self) -> None:
+    def test_apply_domain_rows_keeps_user_lines_with_same_domain(self) -> None:
         from hosts import hosts as hosts_module
 
         original = "\n".join(
@@ -230,7 +245,11 @@ class HostsFileManagerTests(unittest.TestCase):
             and not line.lstrip().startswith("#")
             and "chatgpt.com" in line.split()[1:]
         ]
-        self.assertEqual(chatgpt_lines, ["2.2.2.2 chatgpt.com", "10.0.0.3 chatgpt.com"])
+        # Строки пользователя не удаляются: блок просто встаёт выше них.
+        self.assertEqual(
+            chatgpt_lines,
+            ["2.2.2.2 chatgpt.com", "10.0.0.1 chatgpt.com", "10.0.0.3 chatgpt.com"],
+        )
         self.assertIn("10.0.0.2 another.example", written[0])
         self.assertEqual(manager.last_status, "Файл hosts обновлён: применено 1 запись")
 
@@ -295,8 +314,11 @@ class HostsFileManagerTests(unittest.TestCase):
 
         self.assertEqual(len(written), 1)
         self.assertIn("2.2.2.2 chatgpt.com", written[0])
-        self.assertIn("10.0.0.1 manual.example # keep", written[0])
-        self.assertNotIn("10.0.0.1 chatgpt.com manual.example", written[0])
+        self.assertIn("10.0.0.1 chatgpt.com manual.example # keep", written[0])
+        self.assertLess(
+            written[0].index("2.2.2.2 chatgpt.com"),
+            written[0].index("10.0.0.1 chatgpt.com manual.example"),
+        )
 
     def test_apply_service_selection_with_unknown_rows_does_not_clear_existing_block(self) -> None:
         from hosts import hosts as hosts_module
@@ -314,113 +336,42 @@ class HostsFileManagerTests(unittest.TestCase):
         self.assertEqual(written, [])
         self.assertEqual(manager.last_status, "Не найдено записей hosts для выбранных сервисов")
 
-    def test_active_domains_are_read_from_zapretgui_managed_block(self) -> None:
+    def test_reading_missing_hosts_file_does_not_create_it(self) -> None:
+        import tempfile
+        from pathlib import Path
+
         from hosts import hosts as hosts_module
 
-        content = "\n".join(
-            [
-                "9.9.9.9 outside.example",
-                "# >>> zapretgui:hosts managed begin >>>",
-                "# Generated by ZapretGUI. Do not edit this block manually.",
-                "2.2.2.2 managed.example",
-                "# <<< zapretgui:hosts managed end <<<",
-                "",
-            ]
-        )
-        manager = hosts_module.HostsManager()
-        with patch.object(hosts_module, "safe_read_hosts_file", return_value=content):
-            self.assertEqual(manager.get_active_domains_map(), {"managed.example": "2.2.2.2"})
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "etc" / "hosts"
+            with patch.object(hosts_module, "HOSTS_PATH", missing):
+                hosts_module.invalidate_hosts_file_cache()
+                self.assertEqual(hosts_module.safe_read_hosts_file(), "")
+                self.assertTrue(hosts_module.HostsManager().is_hosts_file_accessible())
+            self.assertFalse(missing.exists())
+            self.assertFalse(missing.parent.exists())
 
-    def test_active_domains_keep_top_managed_domain_entry(self) -> None:
+    def test_write_does_not_strip_read_only_protection(self) -> None:
+        import stat
+        import tempfile
+        from pathlib import Path
+
         from hosts import hosts as hosts_module
 
-        content = "\n".join(
-            [
-                "# >>> zapretgui:hosts managed begin >>>",
-                "# Generated by ZapretGUI. Do not edit this block manually.",
-                "2.2.2.2 ChatGPT.com",
-                "3.3.3.3 chatgpt.com",
-                "# <<< zapretgui:hosts managed end <<<",
-                "",
-            ]
-        )
-        manager = hosts_module.HostsManager()
-        with patch.object(hosts_module, "safe_read_hosts_file", return_value=content):
-            self.assertEqual(manager.get_active_domains_map(), {"chatgpt.com": "2.2.2.2"})
-
-    def test_active_domain_ip_map_keeps_all_managed_domain_ips(self) -> None:
-        from hosts import hosts as hosts_module
-
-        content = "\n".join(
-            [
-                "# >>> zapretgui:hosts managed begin >>>",
-                "# Generated by ZapretGUI. Do not edit this block manually.",
-                "2.2.2.2 ChatGPT.com",
-                "3.3.3.3 chatgpt.com",
-                "# <<< zapretgui:hosts managed end <<<",
-                "",
-            ]
-        )
-        manager = hosts_module.HostsManager()
-        with patch.object(hosts_module, "safe_read_hosts_file", return_value=content):
-            self.assertEqual(
-                manager.get_active_domain_ip_map(),
-                {"chatgpt.com": ["2.2.2.2", "3.3.3.3"]},
-            )
-
-    def test_services_catalog_command_uses_full_active_domain_ip_map(self) -> None:
-        from hosts import commands as hosts_commands
-
-        class FakeHostsManager:
-            def get_active_domain_ip_map(self) -> dict[str, list[str]]:
-                return {"chatgpt.com": ["2.2.2.2", "3.3.3.3"]}
-
-            def get_active_domains_map(self) -> dict[str, str]:
-                raise AssertionError("нельзя терять дополнительные IP одного домена")
-
-        with patch("hosts.page_plans.build_services_catalog_plan") as build_plan:
-            build_plan.side_effect = lambda **kwargs: kwargs["active_domains_map"]
-
-            result = hosts_commands.build_services_catalog_plan(
-                hosts_runtime=FakeHostsManager(),
-                current_selection={},
-                direct_title="Direct",
-                ai_title="AI",
-                other_title="Other",
-            )
-
-        self.assertEqual(result, {"chatgpt.com": ["2.2.2.2", "3.3.3.3"]})
-
-    def test_clear_hosts_file_removes_only_zapretgui_managed_block(self) -> None:
-        from hosts import hosts as hosts_module
-
-        original = "\n".join(
-            [
-                "# user header",
-                "10.0.0.1 manual.example",
-                "# >>> zapretgui:hosts managed begin >>>",
-                "# Generated by ZapretGUI. Do not edit this block manually.",
-                "2.2.2.2 managed.example",
-                "# <<< zapretgui:hosts managed end <<<",
-                "10.0.0.2 another.example",
-                "",
-            ]
-        )
-        written: list[str] = []
-        manager = hosts_module.HostsManager()
-        manager.is_hosts_file_accessible = lambda: True
-
-        with (
-            patch.object(hosts_module, "safe_read_hosts_file", return_value=original),
-            patch.object(hosts_module, "safe_write_hosts_file", side_effect=lambda text: written.append(text) or True),
-        ):
-            self.assertTrue(manager.clear_hosts_file())
-
-        self.assertEqual(len(written), 1)
-        self.assertIn("10.0.0.1 manual.example", written[0])
-        self.assertIn("10.0.0.2 another.example", written[0])
-        self.assertNotIn("2.2.2.2 managed.example", written[0])
-        self.assertNotIn("zapretgui:hosts managed begin", written[0])
+        with tempfile.TemporaryDirectory() as tmp:
+            hosts_path = Path(tmp) / "hosts"
+            hosts_path.write_text("10.0.0.1 manual.example\n", encoding="utf-8")
+            os.chmod(hosts_path, stat.S_IREAD)
+            try:
+                with patch.object(hosts_module, "HOSTS_PATH", hosts_path):
+                    hosts_module.invalidate_hosts_file_cache()
+                    self.assertFalse(hosts_module.safe_write_hosts_file("changed\n"))
+                    self.assertFalse(hosts_module.HostsManager().is_hosts_file_accessible())
+                self.assertFalse(os.stat(hosts_path).st_mode & stat.S_IWRITE)
+                self.assertEqual(hosts_path.read_text(encoding="utf-8"), "10.0.0.1 manual.example\n")
+            finally:
+                os.chmod(hosts_path, stat.S_IREAD | stat.S_IWRITE)
+                hosts_module.invalidate_hosts_file_cache()
 
     def test_ipv6_detection_uses_winapi_on_windows(self) -> None:
         from hosts import ipv6_detection

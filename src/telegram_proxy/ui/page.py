@@ -39,6 +39,7 @@ from telegram_proxy.ui.proxy_runtime_workflow import (
     stop_proxy_runtime,
 )
 from telegram_proxy.ui.runtime_helpers import (
+    apply_telegram_hosts_row,
     apply_ui_texts,
     refresh_pivot_texts,
     refresh_status_texts,
@@ -120,8 +121,13 @@ class TelegramProxyPage(BasePage):
         self._restart_stop_state = TelegramProxyPageWorkerState(self._restart_stop_runtime)
         self._relay_check_runtime = OneShotWorkerRuntime()
         self._relay_check_state = TelegramProxyPageWorkerState(self._relay_check_runtime)
-        self._ensure_hosts_runtime = OneShotWorkerRuntime()
-        self._ensure_hosts_state = TelegramProxyPageWorkerState(self._ensure_hosts_runtime)
+        # Записи Telegram в hosts: при открытии страницы только читаем файл,
+        # менять его можно лишь кнопкой «Прописать» / «Убрать».
+        self._hosts_runtime = OneShotWorkerRuntime()
+        self._hosts_state = TelegramProxyPageWorkerState(self._hosts_runtime)
+        self._hosts_status = None
+        self._hosts_error = ""
+        self._hosts_busy = False
         self._upstream_apply_runtime = OneShotWorkerRuntime()
         self._upstream_apply_state = TelegramProxyPageWorkerState(self._upstream_apply_runtime)
         self._open_log_file_runtime = OneShotWorkerRuntime()
@@ -143,7 +149,6 @@ class TelegramProxyPage(BasePage):
         self._initial_state_load_started_at = 0.0
         self._relay_check_gen = 0
         self._cleanup_in_progress = False
-        self._runtime_initialized = False
         self._built_panel_indexes: set[int] = set()
         self._btn_copy_logs = None
         self._btn_open_log_file = None
@@ -224,17 +229,9 @@ class TelegramProxyPage(BasePage):
         self._apply_ui_texts()
         self._log_ui_timing("telegram_proxy_ui.after_ui_built.total", started_at)
 
-    def _run_runtime_init_once(self) -> None:
-        plan = telegram_proxy_page_runtime.build_page_init_plan(
-            runtime_initialized=self._runtime_initialized,
-        )
-        if not plan.ensure_hosts_once:
-            return
-        self._runtime_initialized = True
-        self._ensure_telegram_hosts()
-
     def on_page_activated(self) -> None:
-        self._run_runtime_init_once()
+        # Только чтение hosts: страница показывает состояние, но сама файл не меняет.
+        self._request_telegram_hosts_status()
 
     def _setup_ui(self):
         started_at = time.perf_counter()
@@ -302,6 +299,7 @@ class TelegramProxyPage(BasePage):
             on_generate_mtproxy_secret=self._on_generate_mtproxy_secret,
             on_copy_fake_tls_nginx_config=self._on_copy_fake_tls_nginx_config,
             on_open_advanced_settings=self._on_open_advanced_settings,
+            on_telegram_hosts_action=self._on_telegram_hosts_button_clicked,
         )
         self._status_card = widgets.status_card
         self._status_dot = widgets.status_dot
@@ -327,6 +325,9 @@ class TelegramProxyPage(BasePage):
         self._auto_deeplink_toggle = widgets.auto_deeplink_toggle
         self._advanced_nav_row = widgets.advanced_nav_row
         self._advanced_nav_btn = widgets.advanced_nav_btn
+        self._hosts_card = widgets.hosts_card
+        self._hosts_row = widgets.hosts_row
+        self._hosts_btn = widgets.hosts_btn
 
     def _build_logs_panel(self, layout: QVBoxLayout):
         widgets = build_telegram_proxy_logs_panel(
@@ -1340,6 +1341,18 @@ class TelegramProxyPage(BasePage):
         except Exception:
             pass
 
+    def _show_warning_message(self, title: str, content: str) -> None:
+        try:
+            InfoBar.warning(
+                title=str(title or ""),
+                content=str(content or ""),
+                parent=self,
+                duration=6000,
+                position=InfoBarPosition.TOP,
+            )
+        except Exception:
+            pass
+
     def _on_open_in_telegram(self):
         """Open Telegram deep link to auto-configure Telegram."""
         url = telegram_proxy_settings.build_proxy_url(
@@ -1494,42 +1507,85 @@ class TelegramProxyPage(BasePage):
             except Exception:
                 pass
 
-    def _ensure_telegram_hosts(self):
-        """Проверяет и добавляет Telegram-записи в hosts через worker."""
-        self._worker_state("_ensure_hosts_state", "_ensure_hosts_runtime").start_or_mark_pending(self._start_ensure_hosts_worker)
+    def _request_telegram_hosts_status(self) -> None:
+        """Перечитывает записи Telegram в hosts в фоне (файл не меняется)."""
+        self._worker_state("_hosts_state", "_hosts_runtime").start_or_mark_pending(self._start_hosts_status_worker)
 
-    def _start_ensure_hosts_worker(self) -> None:
-        self._worker_state("_ensure_hosts_state", "_ensure_hosts_runtime").pending = False
+    def _on_telegram_hosts_button_clicked(self) -> None:
+        """Кнопка «Прописать» / «Убрать» — единственный путь изменить hosts."""
+        if self._worker_state("_hosts_state", "_hosts_runtime").is_busy():
+            return
+        plan = self._hosts_row_plan()
+        if not plan.button_enabled:
+            return
+        self._start_hosts_worker(plan.button_action)
+
+    def _start_hosts_status_worker(self) -> None:
+        self._start_hosts_worker("status")
+
+    def _start_hosts_worker(self, action: str) -> None:
+        self._worker_state("_hosts_state", "_hosts_runtime").pending = False
+        self._hosts_busy = True
+        self._apply_hosts_row()
+
         def bind_worker(worker) -> None:
-            worker.completed.connect(self._on_telegram_hosts_ensured)
+            worker.completed.connect(self._on_telegram_hosts_result)
 
-        self._ensure_hosts_runtime.start_qthread_worker(
-            worker_factory=lambda request_id: self._telegram_proxy.create_ensure_hosts_worker(
+        self._hosts_runtime.start_qthread_worker(
+            worker_factory=lambda request_id: self._telegram_proxy.create_hosts_worker(
                 request_id,
+                action=action,
                 parent=self,
             ),
             bind_worker=bind_worker,
-            on_finished=self._on_ensure_hosts_worker_finished,
+            on_finished=self._on_hosts_worker_finished,
         )
 
-    def _on_telegram_hosts_ensured(self, request_id: int, plan):
-        if not self._ensure_hosts_runtime.is_current(
+    def _on_telegram_hosts_result(self, request_id: int, result) -> None:
+        if not self._hosts_runtime.is_current(
             request_id,
             cleanup_in_progress=self._cleanup_in_progress,
         ):
             return
-        if plan is None:
-            return
-        if not plan.ok and plan.log_line:
-            log(plan.log_line, "WARNING")
+        self._hosts_busy = False
+        action = str(getattr(result, "action", "") or "")
+        ok = bool(getattr(result, "ok", False))
+        message = str(getattr(result, "message", "") or "")
+        status = getattr(result, "status", None)
+        self._hosts_status = status
+        self._hosts_error = "" if status is not None else (message or TELEGRAM_PROXY_SETTINGS_TEXT.hosts_state_error)
+        self._apply_hosts_row()
 
-    def _on_ensure_hosts_worker_finished(self, _worker) -> None:
-        if not self._is_current_worker_finish(self.__dict__.get("_ensure_hosts_runtime"), _worker):
+        if not ok and message:
+            log(f"Telegram hosts ({action}): {message}", "WARNING")
+        if action not in ("add", "remove"):
             return
-        self._worker_state("_ensure_hosts_state", "_ensure_hosts_runtime").schedule_after_finish(
+        if not ok:
+            self._show_warning_message(TELEGRAM_PROXY_SETTINGS_TEXT.hosts_error_title, message)
+        elif bool(getattr(result, "changed", False)):
+            self._show_success_message(TELEGRAM_PROXY_SETTINGS_TEXT.hosts_done_title, message)
+
+    def _hosts_row_plan(self):
+        return telegram_proxy_page_runtime.build_hosts_row_plan(
+            self.__dict__.get("_hosts_status"),
+            busy=bool(self.__dict__.get("_hosts_busy", False)),
+            error=str(self.__dict__.get("_hosts_error", "") or ""),
+        )
+
+    def _apply_hosts_row(self) -> None:
+        row = self.__dict__.get("_hosts_row")
+        button = self.__dict__.get("_hosts_btn")
+        if row is None and button is None:
+            return
+        apply_telegram_hosts_row(row, button, self._hosts_row_plan())
+
+    def _on_hosts_worker_finished(self, _worker) -> None:
+        if not self._is_current_worker_finish(self.__dict__.get("_hosts_runtime"), _worker):
+            return
+        self._worker_state("_hosts_state", "_hosts_runtime").schedule_after_finish(
             _worker,
             is_current_worker_finish=self._is_current_worker_finish,
-            schedule_next=self._schedule_ensure_hosts_worker_start,
+            schedule_next=self._schedule_hosts_status_worker_start,
             cleanup_in_progress=self._cleanup_in_progress,
         )
 
@@ -1547,18 +1603,12 @@ class TelegramProxyPage(BasePage):
         except (TypeError, ValueError):
             return False
 
-    def _schedule_ensure_hosts_worker_start(self) -> None:
+    def _schedule_hosts_status_worker_start(self) -> None:
         if self.__dict__.get("_cleanup_in_progress", False):
             return
-        self._worker_state("_ensure_hosts_state", "_ensure_hosts_runtime").schedule_start(
+        self._worker_state("_hosts_state", "_hosts_runtime").schedule_start(
             QTimer.singleShot,
-            self._start_ensure_hosts_worker,
-        )
-
-    def _run_scheduled_ensure_hosts_worker_start(self) -> None:
-        self._worker_state("_ensure_hosts_state", "_ensure_hosts_runtime").run_scheduled(
-            self._start_ensure_hosts_worker,
-            cleanup_in_progress=self._cleanup_in_progress,
+            self._start_hosts_status_worker,
         )
 
     def showEvent(self, event):
@@ -1601,13 +1651,13 @@ class TelegramProxyPage(BasePage):
             warning_prefix="telegram proxy diagnostics worker",
         )
         self._diag_runtime.cancel()
-        self._ensure_hosts_runtime.stop(
+        self._hosts_runtime.stop(
             blocking=False,
             log_fn=log,
             warning_prefix="telegram proxy hosts worker",
         )
-        self._ensure_hosts_runtime.cancel()
-        self._worker_state("_ensure_hosts_state", "_ensure_hosts_runtime").reset()
+        self._hosts_runtime.cancel()
+        self._worker_state("_hosts_state", "_hosts_runtime").reset()
         self._initial_state_runtime.stop(
             blocking=False,
             log_fn=log,

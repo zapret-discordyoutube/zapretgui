@@ -1,13 +1,22 @@
 # telegram_proxy/telegram_hosts.py
-"""Auto-manage Telegram domains in Windows hosts file.
+"""Записи сайтов Telegram в файле hosts Windows.
 
-Ensures all required Telegram domains point to the proven WSS relay IP.
-Called automatically when the Telegram Proxy page is opened.
-Operates independently of the shared hosts editor to avoid conflicts with DNS profile
-selections — these entries are always active and never toggled by the user.
+Блок строк «149.154.167.220 домен» нужен только браузеру: с ним открываются
+web.telegram.org, t.me, telegram.org и загрузки desktop.telegram.org.
+Самому Telegram Proxy он не нужен — прокси подключается к серверам по IP.
+
+Файл hosts меняется только по явной кнопке на странице Telegram Proxy
+(«Прописать» / «Убрать»). Открытие страницы лишь читает файл и показывает,
+сколько записей уже прописано.
+
+Модуль делится на две части:
+- чистые функции над текстом hosts (``*_text``) — их легко проверять тестами;
+- обёртки с чтением и записью файла через ``hosts.public``.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from log.log import log
 
@@ -57,77 +66,193 @@ TELEGRAM_DOMAINS: list[str] = [
 
 _TELEGRAM_DOMAINS_LOWER: set[str] = {d.lower() for d in TELEGRAM_DOMAINS}
 
+TELEGRAM_HOSTS_MARKER = "# --- Telegram Proxy (auto-managed by Zapret 2 GUI) ---"
 
-def ensure_telegram_hosts() -> tuple[bool, str]:
-    """Check Windows hosts file and add/fix Telegram entries if needed.
 
-    Returns ``(changed, message)``.
-    *changed* is ``True`` when entries were added or corrected.
+class TelegramHostsError(Exception):
+    """Файл hosts не удалось прочитать или записать. Текст — для пользователя."""
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramHostsStatus:
+    """Сколько доменов Telegram сейчас ведут на relay IP в файле hosts."""
+
+    present: int
+    total: int
+    block_present: bool
+
+    @property
+    def is_complete(self) -> bool:
+        return self.total > 0 and self.present >= self.total
+
+    @property
+    def is_empty(self) -> bool:
+        return self.present <= 0
+
+
+def _parse_entry(line: str) -> tuple[str, str] | None:
+    """Возвращает (ip, домен в нижнем регистре) для строки записи или None."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    parts = stripped.split()
+    if len(parts) < 2:
+        return None
+    return parts[0], parts[1].lower()
+
+
+def telegram_hosts_status_from_text(content: str) -> TelegramHostsStatus:
+    """Считает домены Telegram, которые по файлу hosts ведут на relay IP.
+
+    Windows берёт первую подходящую строку, поэтому для каждого домена
+    учитывается только первая запись.
     """
-    from hosts.public import read_hosts_file, write_hosts_file
-
-    content = read_hosts_file()
-    if content is None:
-        return False, "Не удалось прочитать файл hosts"
-
-    # Parse existing entries: domain (lower) -> ip
-    existing: dict[str, str] = {}
-    for line in content.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+    first_ip: dict[str, str] = {}
+    block_present = False
+    for line in str(content or "").splitlines():
+        if line.strip() == TELEGRAM_HOSTS_MARKER:
+            block_present = True
             continue
-        parts = stripped.split()
-        if len(parts) >= 2:
-            existing[parts[1].lower()] = parts[0]
+        entry = _parse_entry(line)
+        if entry is None:
+            continue
+        ip, domain = entry
+        first_ip.setdefault(domain, ip)
+    present = sum(
+        1 for domain in _TELEGRAM_DOMAINS_LOWER if first_ip.get(domain) == TELEGRAM_RELAY_IP
+    )
+    return TelegramHostsStatus(
+        present=present,
+        total=len(_TELEGRAM_DOMAINS_LOWER),
+        block_present=block_present,
+    )
 
-    # Determine what needs to change
-    missing: list[str] = []
-    wrong_ip: list[str] = []
-    for domain in TELEGRAM_DOMAINS:
-        ip = existing.get(domain.lower())
-        if ip is None:
-            missing.append(domain)
-        elif ip != TELEGRAM_RELAY_IP:
-            wrong_ip.append(domain)
 
-    if not missing and not wrong_ip:
-        log(f"Telegram hosts: все {len(TELEGRAM_DOMAINS)} записей актуальны")
-        return False, f"Все {len(TELEGRAM_DOMAINS)} Telegram записей в hosts актуальны"
+def _trim_trailing_blank_lines(lines: list[str]) -> None:
+    while lines and lines[-1].strip() == "":
+        lines.pop()
 
-    # Rebuild content: remove stale Telegram entries AND old marker comments
-    lines = content.splitlines(keepends=True)
+
+def add_telegram_hosts_to_text(content: str) -> str:
+    """Убирает старые строки доменов Telegram и дописывает блок в конец.
+
+    Строки доменов Telegram на любой IP заменяются блоком, иначе Windows
+    может взять старую запись. Повторный вызов даёт тот же текст.
+    """
     new_lines: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        # Remove our marker comment to avoid duplication
-        if stripped == "# --- Telegram Proxy (auto-managed by Zapret 2 GUI) ---":
+    for line in str(content or "").splitlines(keepends=True):
+        if line.strip() == TELEGRAM_HOSTS_MARKER:
             continue
-        if stripped and not stripped.startswith("#"):
-            parts = stripped.split()
-            if len(parts) >= 2 and parts[1].lower() in _TELEGRAM_DOMAINS_LOWER:
-                continue  # will re-add below
+        entry = _parse_entry(line)
+        if entry is not None and entry[1] in _TELEGRAM_DOMAINS_LOWER:
+            continue
         new_lines.append(line)
 
-    # Trim trailing blank lines
-    while new_lines and new_lines[-1].strip() == "":
-        new_lines.pop()
-
-    # Append Telegram block
+    _trim_trailing_blank_lines(new_lines)
     if new_lines and not new_lines[-1].endswith("\n"):
+        new_lines[-1] = new_lines[-1] + "\n"
+    if new_lines:
         new_lines.append("\n")
-    new_lines.append("\n")
-    new_lines.append("# --- Telegram Proxy (auto-managed by Zapret 2 GUI) ---\n")
+    new_lines.append(f"{TELEGRAM_HOSTS_MARKER}\n")
     for domain in TELEGRAM_DOMAINS:
         new_lines.append(f"{TELEGRAM_RELAY_IP} {domain}\n")
+    return "".join(new_lines)
 
-    if not write_hosts_file("".join(new_lines)):
-        return False, "Не удалось записать файл hosts"
 
-    parts_msg: list[str] = []
-    if missing:
-        parts_msg.append(f"добавлено {len(missing)}")
-    if wrong_ip:
-        parts_msg.append(f"исправлено {len(wrong_ip)}")
-    msg = f"Telegram hosts: {', '.join(parts_msg)}"
-    log(msg)
+def remove_telegram_hosts_from_text(content: str) -> str:
+    """Убирает строку-маркер и строки «relay IP → домен Telegram».
+
+    Остальные строки, в том числе домены Telegram на другом IP, остаются.
+    Если убирать нечего, возвращается исходный текст без изменений.
+    """
+    text = str(content or "")
+    new_lines: list[str] = []
+    removed = False
+    for line in text.splitlines(keepends=True):
+        if line.strip() == TELEGRAM_HOSTS_MARKER:
+            removed = True
+            continue
+        entry = _parse_entry(line)
+        if (
+            entry is not None
+            and entry[0] == TELEGRAM_RELAY_IP
+            and entry[1] in _TELEGRAM_DOMAINS_LOWER
+        ):
+            removed = True
+            continue
+        new_lines.append(line)
+
+    if not removed:
+        return text
+    # Пустая строка, которую добавлял блок перед маркером, не должна копиться.
+    _trim_trailing_blank_lines(new_lines)
+    if new_lines and not new_lines[-1].endswith("\n"):
+        new_lines[-1] = new_lines[-1] + "\n"
+    return "".join(new_lines)
+
+
+_WRITE_ERROR_TEXT = (
+    "Не удалось записать файл hosts: он защищён от записи (атрибут «только для чтения») "
+    "или у программы нет прав администратора. Снять защиту можно кнопкой "
+    "«Восстановить права доступа» на странице Hosts."
+)
+
+
+def _read_hosts_text() -> str:
+    from hosts.public import read_hosts_file
+
+    try:
+        content = read_hosts_file()
+    except Exception as exc:
+        raise TelegramHostsError(f"Не удалось прочитать файл hosts: {exc}") from exc
+    if content is None:
+        raise TelegramHostsError("Не удалось прочитать файл hosts")
+    return str(content)
+
+
+def _write_hosts_text(content: str) -> None:
+    from hosts.public import write_hosts_file
+
+    try:
+        written = write_hosts_file(content)
+    except Exception as exc:
+        raise TelegramHostsError(f"{_WRITE_ERROR_TEXT}\n{exc}") from exc
+    if not written:
+        raise TelegramHostsError(_WRITE_ERROR_TEXT)
+
+
+def get_telegram_hosts_status() -> TelegramHostsStatus:
+    """Только читает файл hosts и считает записи Telegram."""
+    return telegram_hosts_status_from_text(_read_hosts_text())
+
+
+def add_telegram_hosts() -> tuple[bool, str]:
+    """Прописывает блок Telegram в hosts. Возвращает ``(изменён ли файл, сообщение)``.
+
+    При ошибке чтения или записи бросает ``TelegramHostsError``.
+    """
+    content = _read_hosts_text()
+    new_content = add_telegram_hosts_to_text(content)
+    total = len(TELEGRAM_DOMAINS)
+    if new_content == content:
+        return False, f"Все {total} записей Telegram уже прописаны в hosts"
+    _write_hosts_text(new_content)
+    msg = f"Записи Telegram прописаны в hosts: {total}"
+    log(f"Telegram hosts: {msg}")
+    return True, msg
+
+
+def remove_telegram_hosts() -> tuple[bool, str]:
+    """Убирает блок Telegram из hosts. Возвращает ``(изменён ли файл, сообщение)``.
+
+    Если убирать нечего, файл не записывается. При ошибке чтения или записи
+    бросает ``TelegramHostsError``.
+    """
+    content = _read_hosts_text()
+    new_content = remove_telegram_hosts_from_text(content)
+    if new_content == content:
+        return False, "Записей Telegram в hosts нет"
+    _write_hosts_text(new_content)
+    msg = "Записи Telegram убраны из hosts"
+    log(f"Telegram hosts: {msg}")
     return True, msg
