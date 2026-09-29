@@ -346,6 +346,25 @@ def build_result_presentation(result, *, row_number: int) -> StrategyScanResultP
     )
 
 
+def count_resumable_strategies(*, target: str, scan_protocol: str, udp_games_scope: str, now: float | None = None) -> int:
+    """Сколько стратегий для этой цели уже проверено и не сработало (за память подбора).
+
+    Больше нуля — подбор может продолжить с непроверенных, и окно спросит,
+    продолжать или начать заново. Ошибка чтения истории — считаем, что нечего.
+    """
+    import time
+
+    from blockcheck.strategy_search.history import count_recent_failures, history_key
+
+    key = history_key(scan_protocol, target, udp_games_scope)
+    if not key:
+        return 0
+    try:
+        return count_recent_failures(key, now=time.time() if now is None else float(now))
+    except Exception:
+        return 0
+
+
 def plan_scan_start(
     *,
     raw_target_input: str,
@@ -515,7 +534,10 @@ def build_panel_outcome(report, result_rows: list[dict]) -> StrategyScanPanelOut
         return StrategyScanPanelOutcome(
             kind="cancelled",
             title="Подбор остановлен",
-            detail=f"Проверено стратегий: {tested}. Можно продолжить позже — повторный запуск начнёт с непроверенных.",
+            detail=(
+                f"Проверено стратегий: {tested}. При следующем запуске можно будет выбрать: "
+                "продолжить с непроверенных или начать заново."
+            ),
         )
     return StrategyScanPanelOutcome(
         kind="not_found",

@@ -16,6 +16,43 @@ class StrategyScanRunStartResult:
     status_text: str
 
 
+@dataclass(frozen=True)
+class StrategyScanResumeInfo:
+    """Что уже проверено для цели, которую собираются подбирать."""
+
+    target: str
+    tested_count: int
+
+
+def plan_strategy_scan_resume(
+    *,
+    blockcheck_feature,
+    raw_target_input: str,
+    raw_protocol_value,
+    raw_udp_scope_value,
+    mode_index: int,
+) -> StrategyScanResumeInfo:
+    """Сколько стратегий уже не сработало на этой цели — есть ли что продолжать."""
+    selection = blockcheck_feature.build_selection_state(
+        protocol_value=raw_protocol_value,
+        udp_scope_value=raw_udp_scope_value,
+        mode_index=mode_index,
+    )
+    start_plan = blockcheck_feature.plan_scan_start(
+        raw_target_input=raw_target_input,
+        scan_protocol=selection.scan_protocol,
+        udp_games_scope=selection.udp_games_scope,
+        mode=selection.mode,
+        starting_status_text="",
+    )
+    tested = blockcheck_feature.count_resumable_strategies(
+        target=start_plan.target,
+        scan_protocol=start_plan.scan_protocol,
+        udp_games_scope=start_plan.udp_games_scope,
+    )
+    return StrategyScanResumeInfo(target=start_plan.target, tested_count=int(tested or 0))
+
+
 def start_strategy_scan_run(
     *,
     blockcheck_feature,
@@ -35,6 +72,7 @@ def start_strategy_scan_run(
     on_phase_changed,
     on_continue_question,
     on_finished,
+    from_start: bool = False,
 ) -> StrategyScanRunStartResult:
     """Готовит состояние и worker подбора стратегии."""
     selection = blockcheck_feature.build_selection_state(
@@ -55,6 +93,7 @@ def start_strategy_scan_run(
         mode=start_plan.mode,
         scan_protocol=start_plan.scan_protocol,
         udp_games_scope=start_plan.udp_games_scope,
+        from_start=bool(from_start),
         parent=None,
     )
     worker.run_log_started.connect(on_run_log_started)

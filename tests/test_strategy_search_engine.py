@@ -432,6 +432,24 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(confirmed, ["good"])
         self.assertEqual(failed, ["bad"])
 
+    def test_recent_failures_go_last_unless_started_over(self) -> None:
+        candidates = [cand("a", "fake"), cand("b", "multisplit")]
+
+        class HistoryEnv(FakeEnv):
+            def load_history(self, key):
+                # «a» не сработала минуту назад — обычный запуск отодвигает её в конец.
+                return TargetHistory(failed={"a": 1_000_000.0 - 60})
+
+        _report, events = run(HistoryEnv(network=blocked_unless(), candidates=candidates))
+        self.assertEqual([result.strategy_id for result in events.results], ["b", "a"])
+
+        started_over = HistoryEnv(network=blocked_unless(), candidates=candidates)
+        _report, events = run(started_over, from_start=True)
+        self.assertEqual([result.strategy_id for result in events.results], ["a", "b"])
+        self.assertTrue(any("заново" in line for line in events.logs))
+        # История не стирается: итоги нового прохода дописываются как обычно.
+        self.assertEqual(started_over.history_saved[2], ["a", "b"])
+
     def test_forced_scan_does_not_pollute_history(self) -> None:
         env = FakeEnv(network=lambda running, n: OK, candidates=[cand("a")])
         run(env, FakeEvents(answer=True))

@@ -45,6 +45,7 @@ class StrategyScanWorker(QObject):
         scan_protocol: str = "tcp_https",
         udp_games_scope: str = "all",
         *,
+        from_start: bool = False,
         shutdown_sync: Callable[..., object],
         start_run_log: Callable[..., object],
         append_run_log: Callable[[object, str], None],
@@ -58,6 +59,7 @@ class StrategyScanWorker(QObject):
         self._mode = mode
         self._scan_protocol = scan_protocol
         self._udp_games_scope = udp_games_scope
+        self._from_start = bool(from_start)
         self._shutdown_sync = shutdown_sync
         self._start_run_log_action = start_run_log
         self._append_run_log_action = append_run_log
@@ -95,6 +97,7 @@ class StrategyScanWorker(QObject):
                     mode=self._mode,
                     udp_games_scope=self._udp_games_scope,
                     probe_host=probe_host,
+                    from_start=self._from_start,
                 )
                 report = run_strategy_search(
                     request,

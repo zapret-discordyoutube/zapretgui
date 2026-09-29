@@ -4583,6 +4583,26 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "ru": "Не проверять",
         "en": "Don't test",
     },
+    "page.strategy_scan.resume_question_title": {
+        "ru": "Подбор уже начинался",
+        "en": "The search was started before",
+    },
+    "page.strategy_scan.resume_question_text": {
+        "ru": "Для {target} уже проверено стратегий: {count} — они не сработали (подбор помнит их 14 дней).\n\n«Продолжить» — проверить следующие, ещё не проверенные стратегии.\n«Начать заново» — проверить список с самого начала, как в первый раз.",
+        "en": "Strategies already tested for {target}: {count} — they did not work (the search remembers them for 14 days).\n\n\"Continue\" tests the next strategies that have not been tried yet.\n\"Start over\" tests the list from the very beginning, like the first time.",
+    },
+    "page.strategy_scan.resume_question_continue": {
+        "ru": "Продолжить с места остановки",
+        "en": "Continue where it stopped",
+    },
+    "page.strategy_scan.resume_question_restart": {
+        "ru": "Начать заново",
+        "en": "Start over",
+    },
+    "page.strategy_scan.resume_question_cancel": {
+        "ru": "Отмена",
+        "en": "Cancel",
+    },
     "page.strategy_scan.applied": {
         "ru": "Стратегия добавлена",
         "en": "Strategy added",

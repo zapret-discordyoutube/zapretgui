@@ -25,6 +25,7 @@ from blockcheck.ui.strategy_scan_page_results_workflow import (
     apply_strategy_started_progress,
 )
 from blockcheck.strategy_scan_run_workflow import (
+    plan_strategy_scan_resume,
     request_strategy_scan_stop,
     start_strategy_scan_run,
     start_strategy_scan_worker,
@@ -492,6 +493,9 @@ class StrategyScanPage(BasePage):
         if self._strategy_scan_run_runtime.is_running():
             return
         self._cleanup_in_progress = False
+        from_start = self._ask_scan_start_choice()
+        if from_start is None:
+            return
 
         run_result = start_strategy_scan_run(
             blockcheck_feature=self._blockcheck,
@@ -511,6 +515,7 @@ class StrategyScanPage(BasePage):
             on_phase_changed=self._on_phase_changed,
             on_continue_question=self._on_continue_question,
             on_finished=self._on_finished,
+            from_start=from_start,
         )
         self._target_input.setText(run_result.target)
 
@@ -541,6 +546,75 @@ class StrategyScanPage(BasePage):
             parent=self,
             run_runtime=self._strategy_scan_run_runtime,
         )
+
+    def _ask_scan_start_choice(self) -> bool | None:
+        """Для цели уже есть проверенные стратегии: продолжить или начать заново.
+
+        Подбор помнит стратегии, которые недавно не сработали, и ставит их в
+        конец очереди, — поэтому повторный запуск идёт дальше по списку.
+        Если такие есть, пользователь выбирает сам. Возвращает True — начать
+        заново, False — продолжить (или спрашивать нечего), None — отмена.
+        """
+        try:
+            info = plan_strategy_scan_resume(
+                blockcheck_feature=self._blockcheck,
+                raw_target_input=self._target_input.text(),
+                raw_protocol_value=self._protocol_combo.currentData(),
+                raw_udp_scope_value=self._games_scope_combo.currentData() if self._games_scope_combo is not None else "all",
+                mode_index=self._mode_combo.currentIndex(),
+            )
+        except Exception:
+            logger.exception("Strategy scan resume check failed")
+            return False
+        if info.tested_count <= 0:
+            return False
+        try:
+            from qfluentwidgets import MessageBox
+            from ui.message_box_accessibility import set_message_box_button_accessibility
+
+            title = tr_catalog("page.strategy_scan.resume_question_title", default="Подбор уже начинался")
+            body = tr_catalog(
+                "page.strategy_scan.resume_question_text",
+                default=(
+                    "Для {target} уже проверено стратегий: {count} — они не сработали "
+                    "(подбор помнит их 14 дней).\n\n"
+                    "«Продолжить» — проверить следующие, ещё не проверенные стратегии.\n"
+                    "«Начать заново» — проверить список с самого начала, как в первый раз."
+                ),
+            ).format(target=info.target, count=info.tested_count)
+            box = MessageBox(title, body, self.window())
+            continue_text = tr_catalog("page.strategy_scan.resume_question_continue", default="Продолжить с места остановки")
+            restart_text = tr_catalog("page.strategy_scan.resume_question_restart", default="Начать заново")
+            box.yesButton.setText(continue_text)
+            box.cancelButton.setText(tr_catalog("page.strategy_scan.resume_question_cancel", default="Отмена"))
+            restart_button = PushButton(restart_text)
+            choice = {"restart": False}
+
+            def _restart() -> None:
+                choice["restart"] = True
+                box.accept()
+
+            restart_button.clicked.connect(_restart)
+            box.buttonLayout.insertWidget(1, restart_button)
+            set_state_text(restart_button, restart_text)
+            set_control_accessibility(
+                restart_button,
+                name="Начать подбор заново",
+                description="Проверить стратегии с начала списка, не пропуская уже проверенные.",
+            )
+            set_message_box_button_accessibility(
+                box,
+                yes_name="Продолжить подбор с места остановки",
+                yes_description="Проверить следующие стратегии, которые ещё не проверялись для этой цели.",
+                cancel_name="Отменить запуск подбора",
+                cancel_description="Подбор не запустится.",
+            )
+            if not box.exec():
+                return None
+            return bool(choice["restart"])
+        except Exception:
+            logger.exception("Strategy scan resume question failed")
+            return False
 
     def _on_stop(self):
         request_strategy_scan_stop(

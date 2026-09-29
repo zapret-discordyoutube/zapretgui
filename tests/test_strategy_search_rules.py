@@ -241,6 +241,22 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(entry["confirmed"], ["new", "old"])
         self.assertEqual(entry["failed"], {"bad": 5.0})
 
+    def test_count_recent_failures_ignores_forgotten_ones(self) -> None:
+        from blockcheck.strategy_search import history
+
+        now = 10_000_000.0
+        section = {
+            "strategy_history": {
+                "tcp_https|discord.com": {
+                    "confirmed": ["good"],
+                    "failed": {"fresh": now - 60, "old": now - FAILED_MEMORY_SECONDS - 1},
+                }
+            }
+        }
+        with patch("settings.store.get_blockcheck_settings", return_value=section):
+            self.assertEqual(history.count_recent_failures("tcp_https|discord.com", now=now), 1)
+            self.assertEqual(history.count_recent_failures("tcp_https|youtube.com", now=now), 0)
+
     def test_settings_normalize_keeps_history_shape(self) -> None:
         from settings.normalize import normalize_blockcheck
 

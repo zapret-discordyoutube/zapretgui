@@ -47,6 +47,18 @@ def load_target_history(key: str) -> TargetHistory:
     )
 
 
+def count_recent_failures(key: str, *, now: float) -> int:
+    """Сколько стратегий недавно не сработало на этой цели.
+
+    Именно они уходят в конец очереди, поэтому по этому числу окно решает,
+    есть ли что продолжать: 0 — подбор пойдёт с начала и спрашивать нечего.
+    """
+    from blockcheck.strategy_search.ordering import FAILED_MEMORY_SECONDS
+
+    failed = load_target_history(key).failed
+    return sum(1 for failed_time in failed.values() if failed_time and now - failed_time < FAILED_MEMORY_SECONDS)
+
+
 def record_results(key: str, *, confirmed: list[str], failed: list[str], now: float) -> None:
     """Дописать итоги подбора одной транзакцией.
 

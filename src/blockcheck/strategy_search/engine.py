@@ -99,6 +99,10 @@ class SearchRequest:
     # конкретный видеосервер rr*.googlevideo.com). Профиль при этом пишется
     # на цель пользователя, чтобы подошёл любой видеосервер.
     probe_host: str = ""
+    # Начать заново: не отодвигать в конец стратегии, которые недавно не
+    # сработали, а проверять в том же порядке, что и в первый раз. История
+    # при этом не стирается — новые итоги допишутся в неё как обычно.
+    from_start: bool = False
 
 
 class SearchEvents(Protocol):
@@ -223,6 +227,7 @@ class StrategySearch:
             self._events.log(
                 f"Подбор: {self._protocol_label()}, цель {self._request.target}, "
                 f"проверим {len(batch)} из {total} стратегий"
+                + (" (заново, без учёта прошлых проверок)" if self._request.from_start else "")
             )
             self._events.phase("Подготовка")
             self._env.pre_cleanup()
@@ -337,7 +342,7 @@ class StrategySearch:
         ordered = order_candidates(
             candidates,
             confirmed_ids=getattr(history, "confirmed", ()) or (),
-            failed_at=getattr(history, "failed", {}) or {},
+            failed_at={} if self._request.from_start else (getattr(history, "failed", {}) or {}),
             now=self._env.wall_time(),
         )
         if not ordered:

@@ -159,6 +159,9 @@ class BlockcheckFeature:
     def plan_scan_start(self, *args, **kwargs):
         return self._commands().plan_scan_start(*args, **kwargs)
 
+    def count_resumable_strategies(self, *args, **kwargs):
+        return self._commands().count_resumable_strategies(*args, **kwargs)
+
     def build_running_interaction_plan(self, *args, **kwargs):
         return self._commands().build_running_interaction_plan(*args, **kwargs)
 
