@@ -16,6 +16,7 @@ from ui.page_deps.system import (
     build_blockcheck_page_kwargs,
     build_dpi_settings_page_kwargs,
     build_fakes_page_kwargs,
+    build_hosts_file_page_kwargs,
     build_hosts_page_kwargs,
     build_logs_page_kwargs,
     build_network_page_kwargs,
@@ -127,7 +128,8 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
         actions=("show_page",),
     ),
     PageName.NETWORK: PageDepsSpec(build_network_page_kwargs, features=("dns",)),
-    PageName.HOSTS: PageDepsSpec(build_hosts_page_kwargs, features=("hosts",)),
+    PageName.HOSTS: PageDepsSpec(build_hosts_page_kwargs, features=("hosts",), actions=("show_page",)),
+    PageName.HOSTS_FILE: PageDepsSpec(build_hosts_file_page_kwargs, features=("hosts",), actions=("show_page",)),
     PageName.PREMIUM: PageDepsSpec(
         build_premium_page_kwargs,
         features=("premium",),

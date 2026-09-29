@@ -79,15 +79,6 @@ class AlignedSwitchButtonTests(unittest.TestCase):
         off_x = off_row._switch_button.indicator.mapTo(host, off_row._switch_button.indicator.rect().topLeft()).x()
         self.assertEqual(on_x, off_x)
 
-    def test_hosts_switches_are_aligned(self) -> None:
-        import inspect
-
-        from hosts.ui import blocks_section
-
-        # Единственный тумблер страницы Hosts — «Блокировать Adobe» в разделе блоков.
-        self.assertIs(blocks_section.AlignedSwitchButton, AlignedSwitchButton)
-        self.assertNotIn("SwitchButton,", inspect.getsource(blocks_section).split("class ", 1)[0])
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,7 @@ from ui.page_deps.types import (
     DnsPageDeps,
     DpiRuntimeActions,
     FakesPageDeps,
+    HostsFilePageDeps,
     HostsPageDeps,
     PremiumPageDeps,
     UpdateRuntimeActions,
@@ -39,10 +40,23 @@ def build_network_page_kwargs(*, page_name: PageName, dns_feature) -> dict:
     }
 
 
-def build_hosts_page_kwargs(*, page_name: PageName, hosts_feature) -> dict:
+def build_hosts_page_kwargs(*, page_name: PageName, hosts_feature, show_page) -> dict:
     _ = page_name
     return {
-        "deps": HostsPageDeps(hosts_feature=hosts_feature),
+        "deps": HostsPageDeps(
+            hosts_feature=hosts_feature,
+            open_file_page=lambda: show_page(PageName.HOSTS_FILE, allow_internal=True),
+        ),
+    }
+
+
+def build_hosts_file_page_kwargs(*, page_name: PageName, hosts_feature, show_page) -> dict:
+    _ = page_name
+    return {
+        "deps": HostsFilePageDeps(
+            hosts_feature=hosts_feature,
+            open_hosts_page=lambda: show_page(PageName.HOSTS),
+        ),
     }
 
 
@@ -337,6 +351,7 @@ __all__ = [
     "build_blockcheck_page_kwargs",
     "build_dpi_settings_page_kwargs",
     "build_fakes_page_kwargs",
+    "build_hosts_file_page_kwargs",
     "build_hosts_page_kwargs",
     "build_logs_page_kwargs",
     "build_network_page_kwargs",

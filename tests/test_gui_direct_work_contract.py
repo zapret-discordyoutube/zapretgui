@@ -54,6 +54,7 @@ ALLOWED_PROCESS_EVENTS_FILES = {
 # разделитель блока в charsAdded/charsRemoved, позиционный патчинг терял
 # вставленный из буфера текст (фантомные ошибки валидации, потеря данных).
 ALLOWED_EDITOR_TEXT_READS = {
+    "hosts/ui/file_page.py:_current_editor_text:toPlainText()",
     "presets/ui/common/preset_subpage_base.py:_current_raw_editor_text:toPlainText()",
     "presets/ui/common/raw_preset_text_editor.py:current_text:toPlainText()",
     "profile/ui/profile_setup_page.py:_current_list_file_text:toPlainText()",

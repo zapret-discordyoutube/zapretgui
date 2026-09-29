@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hosts.state import HostsApplyResult, HostsCommandResult
+from hosts.state import HostsApplyResult, HostsCommandResult, HostsFileText
 
 
 def read_hosts_file():
@@ -76,6 +76,42 @@ def apply_hosts_draft(selection: dict[str, str], adobe: bool | None = None) -> H
     except Exception as exc:
         log(f"Hosts: не удалось перечитать состояние после записи: {exc}", "WARNING")
     return HostsApplyResult(success=success, message=message, snapshot=snapshot)
+
+
+def load_hosts_text() -> HostsFileText:
+    """Весь текст hosts для редактора. Только чтение: файл не создаётся."""
+    from hosts.hosts import HOSTS_PATH, is_file_readonly, safe_read_hosts_file
+
+    exists = HOSTS_PATH.exists()
+    text = safe_read_hosts_file()
+    return HostsFileText(
+        text=text or "",
+        path=str(HOSTS_PATH),
+        exists=exists,
+        readable=text is not None,
+        read_only=bool(exists and is_file_readonly(HOSTS_PATH)),
+    )
+
+
+def save_hosts_text(text: str) -> HostsCommandResult:
+    """Записывает весь текст hosts из редактора как есть.
+
+    Защиту «только чтение» не снимает: это делает только кнопка
+    «Восстановить права».
+    """
+    from hosts.hosts import HOSTS_PATH, is_file_readonly, safe_write_hosts_file
+
+    if HOSTS_PATH.exists() and is_file_readonly(HOSTS_PATH):
+        return HostsCommandResult(
+            False,
+            "Файл hosts защищён от записи (стоит «только чтение»). Снимите защиту в меню страницы Hosts.",
+        )
+    content = str(text or "")
+    if content and not content.endswith("\n"):
+        content += "\n"
+    if not safe_write_hosts_file(content):
+        return HostsCommandResult(False, "Не удалось записать файл hosts: нет прав или файл занят.")
+    return HostsCommandResult(True, str(HOSTS_PATH), changed=True)
 
 
 def load_user_selection() -> dict[str, str]:

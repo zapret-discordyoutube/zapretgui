@@ -17,6 +17,8 @@ class HostsFeature:
     create_apply_worker: Callable
     create_open_hosts_file_worker: Callable
     create_permission_restore_worker: Callable
+    create_file_text_worker: Callable
+    create_file_save_worker: Callable
 
 
 def build_hosts_feature() -> HostsFeature:
@@ -76,6 +78,23 @@ def build_hosts_feature() -> HostsFeature:
             parent=parent,
         )
 
+    def _create_file_text_worker(request_id: int, parent=None):
+        return _call_worker(
+            request_id,
+            lambda: _public().load_hosts_text(),
+            name="file_text",
+            parent=parent,
+        )
+
+    def _create_file_save_worker(request_id: int, text: str, parent=None):
+        text = str(text or "")
+        return _call_worker(
+            request_id,
+            lambda: _public().save_hosts_text(text),
+            name="file_save",
+            parent=parent,
+        )
+
     return HostsFeature(
         refresh_applied_selection=lambda *args, **kwargs: _public().refresh_applied_selection(*args, **kwargs),
         warm_page_data_cache=_warm_page_data_cache,
@@ -86,4 +105,6 @@ def build_hosts_feature() -> HostsFeature:
         create_apply_worker=_create_apply_worker,
         create_open_hosts_file_worker=_create_open_hosts_file_worker,
         create_permission_restore_worker=_create_permission_restore_worker,
+        create_file_text_worker=_create_file_text_worker,
+        create_file_save_worker=_create_file_save_worker,
     )

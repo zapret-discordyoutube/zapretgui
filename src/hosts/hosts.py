@@ -351,7 +351,9 @@ def safe_read_hosts_file():
     sig_before = _get_hosts_sig(hosts_path)
     for encoding in encodings:
         try:
-            content = hosts_path.read_text(encoding=encoding)
+            # Запись идёт в utf-8-sig, то есть с отметкой BOM в начале. Читаем её
+            # как текст и снимаем, иначе каждая запись добавляла бы ещё одну.
+            content = hosts_path.read_text(encoding=encoding).lstrip("\ufeff")
             log(f"Файл hosts успешно прочитан с кодировкой: {encoding}")
             _set_hosts_cache(content, sig_before or _get_hosts_sig(hosts_path))
             return content

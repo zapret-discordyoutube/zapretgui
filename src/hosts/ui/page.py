@@ -2,36 +2,39 @@
 """Страница Hosts: сервисы через системный файл hosts.
 
 Как это работает:
-- при открытии страница сразу рисует готовый снимок из памяти (его заранее
-  собирает прогрев при запуске), а фоновая задача проверяет, не изменился ли
-  файл, и тихо обновляет список;
-- щелчки меняют только черновик: файл hosts не трогается;
-- панель внизу показывает, что изменится, и одной кнопкой «Применить»
-  записывает всё за один раз.
+- страница не прокручивается целиком: сверху сводка, поиск и фильтры, ниже
+  список сервисов со своей прокруткой, внизу панель черновика;
+- при открытии сразу рисуется готовый снимок из памяти (его собирает прогрев
+  при запуске), фоновая задача проверяет, не изменился ли файл;
+- щелчки меняют только черновик, файл hosts не трогается; «Применить»
+  записывает всё за один раз;
+- меню «☰» у заголовка: весь файл hosts с раскраской (отдельная страница),
+  Блокнот, блокировка Adobe (тоже через черновик) и восстановление прав.
 """
 
 from __future__ import annotations
 
 from PyQt6.QtCore import QPoint, Qt
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 from qfluentwidgets import (
     Action,
     BodyLabel,
     CaptionLabel,
     ComboBox,
+    FluentIcon,
     InfoBar,
-    PushButton,
     RoundMenu,
+    ScrollArea,
     SearchLineEdit,
     SegmentedWidget,
     TransparentPushButton,
+    TransparentToolButton,
 )
 
 from app.ui_texts import tr as tr_catalog
 from hosts.draft import MIXED, HostsDraft
 from hosts.hosts_blocks import BLOCK_ZAPRETGUI
 from hosts.page_snapshot import CATEGORY_AI, CATEGORY_DIRECT, CATEGORY_OTHER, HostsPageSnapshot
-from hosts.ui.blocks_section import HostsBlocksSection
 from hosts.ui.draft_bar import HostsDraftBar
 from hosts.ui.services_list import HostsListRow, HostsServicesList
 from ui.accessibility import set_control_accessibility, set_state_text
@@ -39,6 +42,7 @@ from ui.fluent_widgets import SettingsCard
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.pages.base_page import BasePage
 from ui.segmented_accessibility import set_segmented_items_accessibility
+from ui.smooth_scroll import apply_page_smooth_scroll_preference
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.theme_semantic import get_semantic_palette
 
@@ -57,7 +61,6 @@ _GROUP_TITLES = {
     CATEGORY_AI: ("page.hosts.group.ai", "ИИ — сами закрыты для России, нужен DNS-профиль"),
     CATEGORY_OTHER: ("page.hosts.group.other", "Остальные — через DNS-профиль"),
 }
-_BAR_MARGIN = 16
 
 
 class HostsPage(BasePage):
@@ -72,6 +75,7 @@ class HostsPage(BasePage):
             subtitle_key="page.hosts.subtitle",
         )
         self._hosts = deps.hosts_feature
+        self._open_file_page = deps.open_file_page
         self._snapshot: HostsPageSnapshot | None = None
         self._draft: HostsDraft | None = None
         self._filter = FILTER_ALL
@@ -102,6 +106,12 @@ class HostsPage(BasePage):
         return text
 
     def _build_ui(self) -> None:
+        # Прокручивается только список сервисов: вторая прокрутка всей страницы
+        # спорила бы с ним за колесо мыши.
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.verticalScrollBar().hide()
+        self._build_header()
+
         # Предупреждение о защите файла или нет доступа (скрыто, пока всё хорошо).
         self.access_card = SettingsCard(parent=self.content)
         access_row = QHBoxLayout()
@@ -112,14 +122,11 @@ class HostsPage(BasePage):
         self.access_label = BodyLabel(self.access_card)
         self.access_label.setWordWrap(True)
         access_row.addWidget(self.access_label, 1)
-        self.restore_button = PushButton(self.access_card)
-        self.restore_button.clicked.connect(self._restore_permissions)
-        access_row.addWidget(self.restore_button)
         self.access_card.main_layout.addLayout(access_row)
         self.access_card.hide()
         self.add_widget(self.access_card)
 
-        # Сводка: что сейчас прописано и две общие кнопки.
+        # Сводка: что сейчас прописано.
         self.summary_card = SettingsCard(parent=self.content)
         summary_row = QHBoxLayout()
         summary_row.setSpacing(10)
@@ -131,15 +138,10 @@ class HostsPage(BasePage):
         self.all_off_button = TransparentPushButton(self.summary_card)
         self.all_off_button.clicked.connect(self._turn_all_off)
         summary_row.addWidget(self.all_off_button)
-        self.open_button = PushButton(self.summary_card)
-        self.open_button.clicked.connect(self._open_hosts_file)
-        summary_row.addWidget(self.open_button)
         self.summary_card.main_layout.addLayout(summary_row)
         self.add_widget(self.summary_card)
 
-        self.services_title = self.add_section_title(return_widget=True, text_key="page.hosts.services")
-
-        # Панель: поиск, фильтр, DNS для всех.
+        # Поиск и фильтр.
         toolbar = QWidget(self.content)
         toolbar_layout = QHBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
@@ -159,6 +161,7 @@ class HostsPage(BasePage):
         toolbar_layout.addWidget(self.filter_bar)
         self.add_widget(toolbar)
 
+        # DNS для всех сервисов с DNS-профилем.
         dns_row = QWidget(self.content)
         dns_layout = QHBoxLayout(dns_row)
         dns_layout.setContentsMargins(0, 0, 0, 0)
@@ -174,28 +177,44 @@ class HostsPage(BasePage):
         dns_layout.addWidget(self.dns_all_hint, 1)
         self.add_widget(dns_row)
 
+        # Список сервисов со своей прокруткой занимает всё оставшееся место.
         self.services_card = SettingsCard(parent=self.content)
-        self.services_card.main_layout.setContentsMargins(4, 4, 4, 8)
-        self.services_list = HostsServicesList(self.services_card)
+        self.services_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.services_card.main_layout.setContentsMargins(4, 4, 4, 4)
+        self.services_scroll = ScrollArea(self.services_card)
+        self.services_scroll.setWidgetResizable(True)
+        self.services_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.services_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.services_scroll.viewport().setStyleSheet("background: transparent;")
+        apply_page_smooth_scroll_preference(self.services_scroll)
+        self.services_list = HostsServicesList(self.services_scroll)
         self.services_list.activated.connect(self._on_service_activated)
-        self.services_card.main_layout.addWidget(self.services_list)
-        self.add_widget(self.services_card)
+        self.services_scroll.setWidget(self.services_list)
+        self.services_card.main_layout.addWidget(self.services_scroll, 1)
+        self.add_widget(self.services_card, 1)
 
-        self.blocks_title = self.add_section_title(return_widget=True, text_key="page.hosts.blocks.title")
-        self.blocks_section = HostsBlocksSection(parent=self.content)
-        self.blocks_section.adobe_toggled.connect(self._on_adobe_toggled)
-        self.add_widget(self.blocks_section)
-
-        # Место под нижнюю панель, чтобы она не закрывала последние строки.
-        self.bottom_spacer = QWidget(self.content)
-        self.bottom_spacer.setFixedHeight(0)
-        self.add_widget(self.bottom_spacer)
-
-        self.draft_bar = HostsDraftBar(self)
+        # Панель черновика: видна, только когда есть что записать.
+        self.draft_bar = HostsDraftBar(self.content)
         self.draft_bar.apply_clicked.connect(self._apply_draft)
         self.draft_bar.cancel_clicked.connect(self._reset_draft)
         self.draft_bar.preview_toggled.connect(lambda _opened: self._render_draft_bar())
         self.draft_bar.hide()
+        self.add_widget(self.draft_bar)
+
+    def _build_header(self) -> None:
+        """Заголовок страницы и кнопка меню «☰» справа от него."""
+        header = QWidget(self.content)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(8)
+        self.vBoxLayout.removeWidget(self.title_label)
+        self.title_label.setParent(header)
+        header_layout.addWidget(self.title_label, 1)
+        self.menu_button = TransparentToolButton(FluentIcon.MENU, header)
+        self.menu_button.setFixedSize(36, 36)
+        self.menu_button.clicked.connect(self._show_page_menu)
+        header_layout.addWidget(self.menu_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.vBoxLayout.insertWidget(0, header)
 
     def _retranslate(self) -> None:
         tr = self._tr
@@ -218,8 +237,16 @@ class HostsPage(BasePage):
             )
         )
         self.all_off_button.setText(tr("page.hosts.button.all_off", "Выключить все"))
-        self.open_button.setText(tr("page.hosts.button.open", "Открыть файл"))
-        self.restore_button.setText(tr("page.hosts.button.restore_access", "Снять защиту и восстановить права"))
+        menu_name = tr("page.hosts.menu.name", "Меню страницы Hosts")
+        self.menu_button.setToolTip(menu_name)
+        set_control_accessibility(
+            self.menu_button,
+            name=menu_name,
+            description=tr(
+                "page.hosts.menu.description",
+                "Весь файл hosts, Блокнот, блокировка Adobe и восстановление прав на файл.",
+            ),
+        )
         self.draft_bar.set_texts(
             show=tr("page.hosts.draft.show_lines", "Показать строки"),
             hide=tr("page.hosts.draft.hide_lines", "Скрыть строки"),
@@ -227,7 +254,6 @@ class HostsPage(BasePage):
             apply=tr("page.hosts.draft.apply", "Применить"),
             applying=tr("page.hosts.draft.applying", "Записываю…"),
         )
-        self.blocks_section.set_translator(lambda key, default: self._tr(key, default))
         self._render()
 
     def set_ui_language(self, language: str) -> None:
@@ -241,6 +267,52 @@ class HostsPage(BasePage):
         self.services_list.update()
         self.draft_bar.update()
 
+    # ── меню «☰» ─────────────────────────────────────────────
+
+    def build_page_menu(self) -> RoundMenu:
+        """Меню страницы. Отдельным методом, чтобы его можно было проверить."""
+        tr = self._tr
+        menu = RoundMenu(parent=self)
+
+        file_action = Action(FluentIcon.DOCUMENT, tr("page.hosts.menu.file", "Весь файл hosts"), parent=menu)
+        file_action.triggered.connect(lambda _checked=False: self._open_file_page())
+        menu.addAction(file_action)
+
+        notepad_action = Action(FluentIcon.EDIT, tr("page.hosts.menu.notepad", "Открыть в Блокноте"), parent=menu)
+        notepad_action.triggered.connect(lambda _checked=False: self._open_hosts_file())
+        menu.addAction(notepad_action)
+
+        menu.addSeparator()
+
+        adobe_on = self._draft is not None and self._draft.adobe
+        adobe_text = tr("page.hosts.menu.adobe", "Блокировать активацию Adobe")
+        adobe_state = tr("page.hosts.state.on", "включён") if adobe_on else tr("page.hosts.state.off", "выключен")
+        adobe_action = Action(
+            FluentIcon.ACCEPT if adobe_on else FluentIcon.REMOVE,
+            f"{adobe_text}: {adobe_state}",
+            parent=menu,
+        )
+        adobe_action.setEnabled(self._draft is not None and not self._applying)
+        adobe_action.triggered.connect(lambda _checked=False: self._toggle_adobe())
+        menu.addAction(adobe_action)
+
+        restore_action = Action(
+            FluentIcon.SYNC,
+            tr("page.hosts.button.restore_access", "Снять защиту и восстановить права"),
+            parent=menu,
+        )
+        restore_action.setEnabled(not self._restore_runtime.is_running())
+        restore_action.triggered.connect(lambda _checked=False: self._restore_permissions())
+        menu.addAction(restore_action)
+        return menu
+
+    def _show_page_menu(self) -> None:
+        menu = self.build_page_menu()
+        point = self.menu_button.mapToGlobal(
+            QPoint(self.menu_button.width() - menu.sizeHint().width(), self.menu_button.height())
+        )
+        menu.exec(point)
+
     # ── жизненный цикл ───────────────────────────────────────
 
     def on_page_activated(self) -> None:
@@ -249,25 +321,6 @@ class HostsPage(BasePage):
             if cached is not None:
                 self._set_snapshot(cached)
         self._request_snapshot()
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self._place_draft_bar()
-
-    def _place_draft_bar(self) -> None:
-        if not self.draft_bar.isVisible():
-            self.bottom_spacer.setFixedHeight(0)
-            return
-        viewport = self.viewport().geometry()
-        width = min(viewport.width() - 2 * _BAR_MARGIN, 980)
-        self.draft_bar.setFixedWidth(max(320, width))
-        self.draft_bar.adjustSize()
-        height = self.draft_bar.sizeHint().height()
-        x = viewport.left() + (viewport.width() - self.draft_bar.width()) // 2
-        y = viewport.bottom() - height - _BAR_MARGIN
-        self.draft_bar.setGeometry(x, y, self.draft_bar.width(), height)
-        self.draft_bar.raise_()
-        self.bottom_spacer.setFixedHeight(height + _BAR_MARGIN)
 
     def cleanup(self) -> None:
         self._cleanup_in_progress = True
@@ -396,8 +449,6 @@ class HostsPage(BasePage):
     def _restore_permissions(self) -> None:
         if self._restore_runtime.is_running():
             return
-        self.restore_button.setEnabled(False)
-        self.restore_button.setText(self._tr("page.hosts.button.restoring_access", "Восстанавливаю…"))
         self._restore_runtime.start_qthread_worker(
             worker_factory=lambda request_id: self._hosts.create_permission_restore_worker(request_id, self),
             on_loaded=self._on_restore_finished,
@@ -407,8 +458,6 @@ class HostsPage(BasePage):
     def _on_restore_finished(self, request_id: int, result, error: str = "") -> None:
         if not self._restore_runtime.is_current(request_id, cleanup_in_progress=self._cleanup_in_progress):
             return
-        self.restore_button.setEnabled(True)
-        self.restore_button.setText(self._tr("page.hosts.button.restore_access", "Снять защиту и восстановить права"))
         if result is not None and getattr(result, "success", False):
             InfoBar.success(
                 title=self._tr("page.hosts.permissions.restored.title", "Права восстановлены"),
@@ -502,11 +551,10 @@ class HostsPage(BasePage):
             draft.set(entry.name, None)
         self._render()
 
-    def _on_adobe_toggled(self, checked: bool) -> None:
+    def _toggle_adobe(self) -> None:
         if self._draft is None or self._applying:
-            self._render()
             return
-        self._draft.set_adobe(bool(checked))
+        self._draft.set_adobe(not self._draft.adobe)
         self._render()
 
     def _reset_draft(self) -> None:
@@ -521,7 +569,6 @@ class HostsPage(BasePage):
         self._render_summary()
         self._render_dns_all()
         self._render_list()
-        self._render_blocks()
         self._render_draft_bar()
 
     def _render_access(self) -> None:
@@ -531,12 +578,12 @@ class HostsPage(BasePage):
         if snapshot is not None and not snapshot.readable:
             text = self._tr(
                 "page.hosts.notice.no_access",
-                "Нет доступа к файлу hosts. Часто его блокирует антивирус. Кнопка справа вернёт стандартные права Windows.",
+                "Нет доступа к файлу hosts. Часто его блокирует антивирус. Вернуть стандартные права Windows можно в меню «☰».",
             )
         elif snapshot is not None and snapshot.read_only:
             text = self._tr(
                 "page.hosts.notice.read_only",
-                "Файл hosts защищён от записи (стоит «только чтение»). Программа сама защиту не снимает — нажмите кнопку справа, если хотите менять файл.",
+                "Файл hosts защищён от записи (стоит «только чтение»). Программа сама защиту не снимает — снимите её в меню «☰», если хотите менять файл.",
             )
         self.access_card.setVisible(bool(text))
         if text:
@@ -559,7 +606,7 @@ class HostsPage(BasePage):
             if active:
                 text = self._tr(
                     "page.hosts.summary.on",
-                    "Сейчас в hosts от ZapretGUI: {lines} строк, включено сервисов: {services}",
+                    "Сейчас в hosts от ZapretGUI строк: {lines}, включено сервисов: {services}",
                     lines=lines,
                     services=services,
                 )
@@ -649,19 +696,13 @@ class HostsPage(BasePage):
             rows.append(HostsListRow(kind="empty", title=self._tr("page.hosts.empty", "Ничего не найдено")))
         self.services_list.set_rows(rows)
 
-    def _render_blocks(self) -> None:
-        if self._draft is None:
-            return
-        self.blocks_section.set_snapshot(self._draft.snapshot, adobe_value=self._draft.adobe)
-
     def _render_draft_bar(self) -> None:
         draft = self._draft
         dirty = draft is not None and (draft.is_dirty() or self._applying)
         if not dirty:
-            if self.draft_bar.isVisible():
+            if self.draft_bar.isVisibleTo(self):
                 self.draft_bar.set_preview_open(False)
                 self.draft_bar.hide()
-                self._place_draft_bar()
             return
         preview = draft.preview()
         parts = [
@@ -692,7 +733,6 @@ class HostsPage(BasePage):
         if self.draft_bar.is_preview_open():
             self.draft_bar.set_preview_text(self._preview_text(preview))
         self.draft_bar.show()
-        self._place_draft_bar()
 
     def _preview_text(self, preview) -> str:
         lines: list[str] = []

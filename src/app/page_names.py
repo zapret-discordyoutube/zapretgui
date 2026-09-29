@@ -36,6 +36,7 @@ class PageName(Enum):
     # === Настройки системы ===
     NETWORK = auto()                 # Сеть
     HOSTS = auto()                   # Разблокировка сервисов
+    HOSTS_FILE = auto()              # Весь файл hosts с раскраской (вложенная в Hosts)
     BLOCKCHECK = auto()              # BlockCheck
     WINWS_LOG_ANALYZER = auto()      # Анализ debug-лога winws2
     APPEARANCE = auto()              # Оформление

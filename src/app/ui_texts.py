@@ -1385,29 +1385,121 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Выключить все",
         "en": "Turn all off",
     },
-    "page.hosts.button.open": {
-        "ru": "Открыть файл",
-        "en": "Open file",
-    },
     "page.hosts.button.restore_access": {
         "ru": "Снять защиту и восстановить права",
         "en": "Remove protection and restore access",
     },
-    "page.hosts.button.restoring_access": {
-        "ru": "Восстанавливаю…",
-        "en": "Restoring…",
-    },
     "page.hosts.notice.read_only": {
-        "ru": "Файл hosts защищён от записи (стоит «только чтение»). Программа сама защиту не снимает — нажмите кнопку справа, если хотите менять файл.",
-        "en": "The hosts file is write-protected (read-only). The app never removes the protection by itself — press the button on the right if you want to change the file.",
+        "ru": "Файл hosts защищён от записи (стоит «только чтение»). Программа сама защиту не снимает — снимите её в меню «☰», если хотите менять файл.",
+        "en": "The hosts file is write-protected (read-only). The app never removes the protection by itself — remove it from the “☰” menu if you want to change the file.",
     },
     "page.hosts.notice.no_access": {
-        "ru": "Нет доступа к файлу hosts. Часто его блокирует антивирус. Кнопка справа вернёт стандартные права Windows.",
-        "en": "No access to the hosts file. Antivirus software often locks it. The button on the right restores the standard Windows permissions.",
+        "ru": "Нет доступа к файлу hosts. Часто его блокирует антивирус. Вернуть стандартные права Windows можно в меню «☰».",
+        "en": "No access to the hosts file. Antivirus software often locks it. The “☰” menu restores the standard Windows permissions.",
     },
     "page.hosts.search.placeholder": {
         "ru": "Найти сервис",
         "en": "Find a service",
+    },
+    "page.hosts.menu.name": {
+        "ru": "Меню страницы Hosts",
+        "en": "Hosts page menu",
+    },
+    "page.hosts.menu.description": {
+        "ru": "Весь файл hosts, Блокнот, блокировка Adobe и восстановление прав на файл.",
+        "en": "The whole hosts file, Notepad, Adobe blocking and restoring file permissions.",
+    },
+    "page.hosts.menu.file": {
+        "ru": "Весь файл hosts",
+        "en": "Whole hosts file",
+    },
+    "page.hosts.menu.notepad": {
+        "ru": "Открыть в Блокноте",
+        "en": "Open in Notepad",
+    },
+    "page.hosts.menu.adobe": {
+        "ru": "Блокировать активацию Adobe",
+        "en": "Block Adobe activation",
+    },
+    "page.hosts_file.title": {
+        "ru": "Файл hosts",
+        "en": "Hosts file",
+    },
+    "page.hosts_file.search": {
+        "ru": "Поиск по файлу hosts",
+        "en": "Search the hosts file",
+    },
+    "page.hosts_file.save": {
+        "ru": "Сохранить",
+        "en": "Save",
+    },
+    "page.hosts_file.revert": {
+        "ru": "Отменить правки",
+        "en": "Discard edits",
+    },
+    "page.hosts_file.hint": {
+        "ru": "Строки раскрашены по владельцу. Блок ZapretGUI можно править, но при следующем «Применить» на странице Hosts он перепишется по переключателям. Ctrl+F — поиск.",
+        "en": "Lines are colored by owner. You can edit the ZapretGUI block, but the next “Apply” on the Hosts page rewrites it from the switches. Ctrl+F — search.",
+    },
+    "page.hosts_file.editor": {
+        "ru": "Текст файла hosts",
+        "en": "Hosts file text",
+    },
+    "page.hosts_file.editor.description": {
+        "ru": "Весь файл hosts. Ctrl+F — поиск, Ctrl+H — замена. Изменения записываются кнопкой «Сохранить».",
+        "en": "The whole hosts file. Ctrl+F — search, Ctrl+H — replace. Changes are written with the “Save” button.",
+    },
+    "page.hosts_file.load_failed": {
+        "ru": "Не удалось прочитать hosts",
+        "en": "Could not read hosts",
+    },
+    "page.hosts_file.saved": {
+        "ru": "Сохранено",
+        "en": "Saved",
+    },
+    "page.hosts_file.saved.content": {
+        "ru": "Перезапустите браузер, чтобы изменения заработали.",
+        "en": "Restart the browser for the changes to take effect.",
+    },
+    "page.hosts_file.saved.managed": {
+        "ru": "Вы поменяли блок ZapretGUI вручную: при следующем «Применить» на странице Hosts он перепишется.",
+        "en": "You changed the ZapretGUI block by hand: the next “Apply” on the Hosts page will rewrite it.",
+    },
+    "page.hosts_file.save_failed": {
+        "ru": "Не удалось сохранить hosts",
+        "en": "Could not save hosts",
+    },
+    "page.hosts_file.notice.no_access": {
+        "ru": "Нет доступа к файлу hosts. Часто его блокирует антивирус. Восстановить права можно в меню страницы Hosts.",
+        "en": "No access to the hosts file. Antivirus software often locks it. Permissions can be restored from the Hosts page menu.",
+    },
+    "page.hosts_file.notice.read_only": {
+        "ru": "Файл защищён от записи (стоит «только чтение»). Сохранить не получится, пока защита стоит — снять её можно в меню страницы Hosts.",
+        "en": "The file is write-protected (read-only). Saving is impossible while protection is on — remove it from the Hosts page menu.",
+    },
+    "page.hosts_file.owner.zapretgui": {
+        "ru": "ZapretGUI",
+        "en": "ZapretGUI",
+    },
+    "page.hosts_file.owner.telegram": {
+        "ru": "Telegram Proxy",
+        "en": "Telegram Proxy",
+    },
+    "page.hosts_file.owner.max": {
+        "ru": "Блокировка MAX",
+        "en": "MAX blocking",
+    },
+    "page.hosts_file.owner.state_media": {
+        "ru": "Блокировка госСМИ",
+        "en": "State media blocking",
+    },
+    "page.hosts_file.owner.adobe": {
+        "ru": "Adobe",
+        "en": "Adobe",
+    },
+    "page.hosts_file.owner.user": {
+        "ru": "Ваши строки",
+        "en": "Your lines",
     },
     "page.hosts.filter.name": {
         "ru": "Какие сервисы показать",
@@ -1572,86 +1664,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.hosts.permissions.failed.title": {
         "ru": "Не удалось восстановить права",
         "en": "Could not restore access",
-    },
-    "page.hosts.blocks.title": {
-        "ru": "Что сейчас в hosts",
-        "en": "What is in hosts now",
-    },
-    "page.hosts.blocks.hint": {
-        "ru": "Всё содержимое файла по владельцам. Программа меняет только свой блок и только по кнопке «Применить».",
-        "en": "Everything in the file, grouped by owner. The app changes only its own block and only when you press “Apply”.",
-    },
-    "page.hosts.blocks.missing": {
-        "ru": "Файла hosts нет. Он появится при первой записи.",
-        "en": "There is no hosts file. It will be created on the first write.",
-    },
-    "page.hosts.blocks.unreadable": {
-        "ru": "Файл hosts не удалось прочитать.",
-        "en": "The hosts file could not be read.",
-    },
-    "page.hosts.blocks.empty": {
-        "ru": "В файле hosts нет ни одной записи.",
-        "en": "The hosts file has no entries.",
-    },
-    "page.hosts.block.lines": {
-        "ru": "строк: {count}",
-        "en": "lines: {count}",
-    },
-    "page.hosts.block.show": {
-        "ru": "Показать",
-        "en": "Show",
-    },
-    "page.hosts.block.hide": {
-        "ru": "Скрыть",
-        "en": "Hide",
-    },
-    "page.hosts.block.zapretgui.title": {
-        "ru": "ZapretGUI",
-        "en": "ZapretGUI",
-    },
-    "page.hosts.block.zapretgui.desc": {
-        "ru": "Управляется переключателями выше",
-        "en": "Controlled by the switches above",
-    },
-    "page.hosts.block.telegram.title": {
-        "ru": "Telegram Proxy",
-        "en": "Telegram Proxy",
-    },
-    "page.hosts.block.telegram.desc": {
-        "ru": "Прописывается и убирается кнопкой на странице Telegram Proxy",
-        "en": "Added and removed with a button on the Telegram Proxy page",
-    },
-    "page.hosts.block.max.title": {
-        "ru": "Блокировка MAX",
-        "en": "MAX block",
-    },
-    "page.hosts.block.max.desc": {
-        "ru": "Включается на странице управления Zapret",
-        "en": "Turned on on the Zapret control page",
-    },
-    "page.hosts.block.state_media.title": {
-        "ru": "Блокировка госСМИ",
-        "en": "State media block",
-    },
-    "page.hosts.block.state_media.desc": {
-        "ru": "Включается на странице управления Zapret",
-        "en": "Turned on on the Zapret control page",
-    },
-    "page.hosts.block.adobe.title": {
-        "ru": "Блокировка активации Adobe",
-        "en": "Adobe activation block",
-    },
-    "page.hosts.block.adobe.desc": {
-        "ru": "Переключатель справа, записывается по «Применить»",
-        "en": "Switch on the right, written on “Apply”",
-    },
-    "page.hosts.block.user.title": {
-        "ru": "Ваши строки",
-        "en": "Your lines",
-    },
-    "page.hosts.block.user.desc": {
-        "ru": "Записаны вручную или другими программами — программа их не трогает",
-        "en": "Added by hand or by other programs — the app never touches them",
     },
     "page.logs.subtitle": {
         "ru": "Просмотр логов приложения в реальном времени",
@@ -5798,6 +5810,7 @@ NAV_PAGE_TEXT_KEYS: dict[PageName, str] = {
     PageName.DPI_SETTINGS: "nav.page.dpi_settings",
     PageName.NETWORK: "nav.page.network",
     PageName.HOSTS: "nav.page.hosts",
+    PageName.HOSTS_FILE: "page.hosts_file.title",
     PageName.BLOCKCHECK: "nav.page.blockcheck",
     PageName.WINWS_LOG_ANALYZER: "nav.page.winws_log_analyzer",
     PageName.APPEARANCE: "nav.page.appearance",

@@ -107,7 +107,7 @@ class HostsDraftBar(QWidget):
         set_control_accessibility(self.preview_button, name=self.preview_button.text())
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        # Панель висит поверх списка, поэтому подложка непрозрачная.
+        # Подложка непрозрачная: панель отделена от списка над ней.
         tokens = get_theme_tokens()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
