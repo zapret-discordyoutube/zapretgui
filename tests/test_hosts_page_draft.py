@@ -490,13 +490,24 @@ class HostsPageTests(unittest.TestCase):
         )
         self.assertEqual(split_service_title("Discord"), ("Discord", ""))
 
-    def test_only_the_tiles_scroll(self) -> None:
-        from PyQt6.QtCore import Qt
-
+    def test_page_scrolls_as_a_whole(self) -> None:
         page = self._page(_manual_snapshot())
+        page.resize(900, 220)
+        page.show()
+        QApplication.processEvents()
 
-        self.assertEqual(page.verticalScrollBarPolicy(), Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.assertIs(page.services_scroll.widget(), page.tiles)
+        # Как все страницы: прокручивается сама страница, сводка уезжает
+        # вверх вместе с плитками, отдельной прокрутки у плиток нет.
+        from PyQt6.QtWidgets import QAbstractScrollArea
+
+        self.assertGreater(page.verticalScrollBar().maximum(), 0)
+        parent = page.tiles.parentWidget()
+        while parent is not None and parent is not page:
+            self.assertNotIsInstance(parent, QAbstractScrollArea)
+            parent = parent.parentWidget()
+        self.assertIs(parent, page)
+        self.assertTrue(page.content.isAncestorOf(page.tiles))
+        self.assertTrue(page.content.isAncestorOf(page.summary_card))
 
     def test_file_button_opens_file_page(self) -> None:
         page = self._page(_manual_snapshot())

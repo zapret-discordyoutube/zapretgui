@@ -26,7 +26,6 @@ from qfluentwidgets import (
     InfoBar,
     PushButton,
     RoundMenu,
-    ScrollArea,
     SearchLineEdit,
     StrongBodyLabel,
     TransparentPushButton,
@@ -45,7 +44,6 @@ from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import SettingsCard
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.pages.base_page import BasePage
-from ui.smooth_scroll import apply_page_smooth_scroll_preference
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.theme_semantic import get_semantic_palette
 
@@ -180,12 +178,11 @@ class HostsPage(BasePage):
         return text
 
     def _build_ui(self) -> None:
-        # Прокручиваются только плитки: второй прокрутки у страницы нет.
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.verticalScrollBar().hide()
+        # Страница прокручивается целиком, как все страницы: сводка уезжает
+        # вверх вместе с плитками.
         self._build_header()
 
-        # Описание и сводка сворачиваются вместе, когда плитки прокручивают.
+        # Описание и сводка.
         self.top_panel = QWidget(self.content)
         top_layout = QVBoxLayout(self.top_panel)
         top_layout.setContentsMargins(0, 0, 0, 0)
@@ -242,18 +239,10 @@ class HostsPage(BasePage):
         self._find_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._find_shortcut.activated.connect(self.open_search)
 
-        # Плитки со своей прокруткой занимают всё оставшееся место.
-        self.services_scroll = ScrollArea(self.content)
-        self.services_scroll.setWidgetResizable(True)
-        self.services_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.services_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        self.services_scroll.viewport().setStyleSheet("background: transparent;")
-        apply_page_smooth_scroll_preference(self.services_scroll)
-        self.tiles = HostsTilesGrid(self.services_scroll)
+        self.tiles = HostsTilesGrid(self.content)
         self.tiles.activated.connect(self._on_tile_activated)
-        self.services_scroll.setWidget(self.tiles)
-        self.services_scroll.verticalScrollBar().valueChanged.connect(self._on_tiles_scrolled)
-        self.add_widget(self.services_scroll, 1)
+        self.add_widget(self.tiles)
+        self.verticalScrollBar().valueChanged.connect(self._on_tiles_scrolled)
 
     def _build_header(self) -> None:
         """Заголовок и обычные кнопки справа от него."""
