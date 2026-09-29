@@ -96,7 +96,6 @@ class UserPresetsLifecycleGuardTests(unittest.TestCase):
         presets_list = _List()
         page.presets_list = presets_list
         page._cleanup_in_progress = False
-        page._presets_list_show_scheduled = False
         page._layout_resync_timer = Mock()
         page._layout_resync_delayed_timer = Mock()
         page._runtime_service = Mock()

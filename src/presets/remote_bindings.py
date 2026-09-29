@@ -100,12 +100,6 @@ def update_remote_preset_binding(scope_key: str, file_name: str, **fields) -> di
     return set_remote_preset_binding(scope_key, file_name, current)
 
 
-def delete_remote_preset_binding(scope_key: str, file_name: str) -> bool:
-    """Удаляет только привязку к источнику; uid пресета остаётся."""
-    _migrate_legacy_section_once()
-    return settings_store.delete_preset_remote_source(_normalize_scope(scope_key), file_name)
-
-
 def rename_remote_preset_binding(scope_key: str, old_file_name: str, new_file_name: str) -> bool:
     """Переименование файла пресета: uid и привязка не двигаются."""
     _migrate_legacy_section_once()
@@ -119,8 +113,3 @@ def delete_preset_identity(scope_key: str, file_name: str) -> bool:
     _migrate_legacy_section_once()
     return settings_store.delete_preset_identity(_normalize_scope(scope_key), file_name)
 
-
-def find_remote_preset_by_url(url: str) -> tuple[str, str, dict[str, Any]] | None:
-    """Ищет привязанный пресет по URL (дедупликация импорта)."""
-    _migrate_legacy_section_once()
-    return settings_store.find_preset_remote_source_by_url(url)

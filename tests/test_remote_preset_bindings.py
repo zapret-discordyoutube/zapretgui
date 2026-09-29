@@ -25,9 +25,7 @@ class RemotePresetBindingsTests(unittest.TestCase):
 
         self.assertEqual(rb.load_remote_preset_bindings("winws2"), {})
         self.assertIsNone(rb.get_remote_preset_binding("winws2", "nope.txt"))
-        self.assertFalse(rb.delete_remote_preset_binding("winws2", "nope.txt"))
         self.assertFalse(rb.rename_remote_preset_binding("winws2", "a.txt", "b.txt"))
-        self.assertIsNone(rb.find_remote_preset_by_url("https://example.com/x.txt"))
 
     def test_set_get_roundtrip_with_normalization(self):
         from presets import remote_bindings as rb
@@ -81,28 +79,6 @@ class RemotePresetBindingsTests(unittest.TestCase):
             rb.get_remote_preset_binding("winws2", "New.txt")["url"],
             "https://example.com/o.txt",
         )
-
-    def test_delete(self):
-        from presets import remote_bindings as rb
-
-        rb.set_remote_preset_binding(
-            "winws2", "Del.txt", rb.make_remote_preset_binding("https://example.com/d.txt")
-        )
-        self.assertTrue(rb.delete_remote_preset_binding("winws2", "Del.txt"))
-        self.assertIsNone(rb.get_remote_preset_binding("winws2", "Del.txt"))
-
-    def test_find_by_url_across_scopes(self):
-        from presets import remote_bindings as rb
-
-        rb.set_remote_preset_binding(
-            "winws1", "C.txt", rb.make_remote_preset_binding("https://example.com/c.txt")
-        )
-        found = rb.find_remote_preset_by_url("https://example.com/c.txt")
-        self.assertIsNotNone(found)
-        scope, file_name, binding = found
-        self.assertEqual(scope, "winws1")
-        self.assertEqual(file_name, "C.txt")
-        self.assertEqual(binding["url"], "https://example.com/c.txt")
 
     def test_preset_uid_is_stable_across_rename(self):
         from presets import remote_bindings as rb

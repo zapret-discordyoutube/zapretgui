@@ -624,40 +624,6 @@ class RuntimeCommandPort:
             set_status=set_status,
         )
 
-    def apply_selected_source_preset(
-        self,
-        *,
-        launch_method: str,
-        reason: str,
-        preset_file_name: str = "",
-    ) -> bool:
-        runtime_commands = self._runtime_commands()
-        return bool(
-            runtime_commands.request_selected_source_preset_apply(
-                runtime_feature=self.owner,
-                launch_method=launch_method,
-                reason=reason,
-                preset_file_name=preset_file_name,
-            )
-        )
-
-    def apply_preset_content(
-        self,
-        *,
-        launch_method: str,
-        reason: str,
-        profile_key: str | None = None,
-    ) -> bool:
-        runtime_commands = self._runtime_commands()
-        return bool(
-            runtime_commands.request_preset_runtime_content_apply(
-                runtime_feature=self.owner,
-                launch_method=launch_method,
-                reason=reason,
-                profile_key=profile_key,
-            )
-        )
-
     def create_preset_runtime_coordinator(self, **kwargs):
         runtime_commands = self._runtime_commands()
         return runtime_commands.create_preset_runtime_coordinator(

@@ -1053,14 +1053,6 @@ class PresetRawEditorPage(BasePage):
             return True
         return False
 
-    def _flush_pending_save(self) -> None:
-        if self._cleanup_in_progress:
-            return
-        if self._save_timer.isActive():
-            self._save_timer.stop()
-        if self._content_publish_pending:
-            self._save_file()
-
     def _run_after_raw_preset_save(self, callback) -> bool:
         if self._cleanup_in_progress:
             return False

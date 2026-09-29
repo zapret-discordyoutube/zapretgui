@@ -956,37 +956,6 @@ def set_preset_remote_source(scope: str, file_name: str, binding: dict[str, Any]
     return get_preset_remote_source(scope, file_name)
 
 
-def delete_preset_remote_source(scope: str, file_name: str) -> bool:
-    scope, file_name = _clean_scope_file(scope, file_name)
-    if not scope or not file_name:
-        return False
-    with _SETTINGS_LOCK:
-        connection = _get_connection_locked()
-        cursor = connection.execute(
-            "DELETE FROM preset_remote_sources WHERE preset_uid IN"
-            " (SELECT uid FROM presets WHERE scope=? AND file_name=?)",
-            (scope, file_name),
-        )
-        return cursor.rowcount > 0
-
-
-def find_preset_remote_source_by_url(url: str) -> tuple[str, str, dict[str, Any]] | None:
-    needle = str(url or "").strip()
-    if not needle:
-        return None
-    with _SETTINGS_LOCK:
-        connection = _get_connection_locked()
-        row = connection.execute(
-            "SELECT p.scope, p.file_name, s.* FROM preset_remote_sources s"
-            " JOIN presets p ON p.uid = s.preset_uid"
-            " WHERE s.url=?",
-            (needle,),
-        ).fetchone()
-        if row is None:
-            return None
-        return str(row["scope"]), str(row["file_name"]), _remote_source_row_to_dict(row)
-
-
 def _normalize_identity_rows(registry: object) -> dict[str, dict[str, str]]:
     result: dict[str, dict[str, str]] = {}
     if not isinstance(registry, dict):

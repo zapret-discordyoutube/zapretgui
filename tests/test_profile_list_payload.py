@@ -1754,37 +1754,6 @@ class ProfileDerivedCacheTests(unittest.TestCase):
         )
 
 
-class FolderStateHotPathTests(unittest.TestCase):
-    """Горячий цикл сборки списка не пере-нормализует состояние папок."""
-
-    def test_folder_helpers_trust_normalized_state(self) -> None:
-        import inspect
-
-        from profile.folders import profile_folder_collapsed, profile_folder_for_profile
-
-        for helper in (profile_folder_for_profile, profile_folder_collapsed):
-            source = inspect.getsource(helper)
-            self.assertNotIn(
-                "normalize_folder_state(",
-                source,
-                f"{helper.__name__} не должен нормализовать состояние на каждый вызов",
-            )
-
-    def test_folder_helper_loads_state_when_none(self) -> None:
-        from unittest.mock import patch as mock_patch
-
-        from profile import folders as folders_module
-
-        normalized = {"folders": {"youtube": {"name": "YouTube", "collapsed": True}}, "items": {}}
-        with mock_patch.object(folders_module, "load_profile_folder_state", return_value=normalized) as loader:
-            self.assertTrue(folders_module.profile_folder_collapsed("youtube", None))
-            loader.assert_called_once_with()
-        # переданный dict используется как есть, без загрузки
-        with mock_patch.object(folders_module, "load_profile_folder_state") as loader:
-            self.assertTrue(folders_module.profile_folder_collapsed("youtube", normalized))
-            loader.assert_not_called()
-
-
 class CatalogIdentityCacheTests(unittest.TestCase):
     """Identity записей каталога считается один раз на запись, не профили×каталог."""
 

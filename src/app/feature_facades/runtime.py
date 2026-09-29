@@ -192,32 +192,6 @@ class RuntimeFeature:
             set_status=set_status,
         )
 
-    def apply_selected_source_preset(
-        self,
-        *,
-        launch_method: str,
-        reason: str,
-        preset_file_name: str = "",
-    ) -> bool:
-        return self.commands.apply_selected_source_preset(
-            launch_method=launch_method,
-            reason=reason,
-            preset_file_name=preset_file_name,
-        )
-
-    def apply_preset_content(
-        self,
-        *,
-        launch_method: str,
-        reason: str,
-        profile_key: str | None = None,
-    ) -> bool:
-        return self.commands.apply_preset_content(
-            launch_method=launch_method,
-            reason=reason,
-            profile_key=profile_key,
-        )
-
     def create_preset_runtime_coordinator(self, **kwargs):
         return self.commands.create_preset_runtime_coordinator(**kwargs)
 

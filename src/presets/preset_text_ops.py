@@ -1,66 +1,9 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
-from log.log import log
 from presets.preset_contract import DEBUG_LOG_DIR, relocate_legacy_debug_log_file, strip_utf8_bom
 from settings.mode import ENGINE_WINWS2
-
-
-def _normalize_strategy_selection_value(value: object) -> str:
-    return str(value or "").strip() or "none"
-
-
-def _collect_changed_strategy_selections(current: dict | None, requested: dict | None) -> dict[str, str]:
-    current_map = {
-        str(key or "").strip().lower(): _normalize_strategy_selection_value(val)
-        for key, val in (current or {}).items()
-        if str(key or "").strip()
-    }
-    changed: dict[str, str] = {}
-    for key, value in (requested or {}).items():
-        normalized_key = str(key or "").strip().lower()
-        if not normalized_key:
-            continue
-        normalized_value = _normalize_strategy_selection_value(value)
-        if current_map.get(normalized_key, "none") == normalized_value:
-            continue
-        changed[normalized_key] = normalized_value
-    return changed
-
-
-def _log_startup_payload_metric(scope: str | None, section: str, elapsed_ms: float, *, extra: str | None = None) -> None:
-    resolved_scope = str(scope or "").strip()
-    if not resolved_scope:
-        return
-    try:
-        rounded = int(round(float(elapsed_ms)))
-    except Exception:
-        rounded = 0
-    suffix = f" ({extra})" if extra else ""
-    log(f"⏱ Startup UI Section: {resolved_scope} {section} {rounded}ms{suffix}", "⏱ STARTUP")
-
-
-def _rewrite_preset_header_name(source_text: str, preset_name: str) -> str:
-    text = (source_text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = text.splitlines()
-    replaced = False
-
-    for idx, raw in enumerate(lines):
-        stripped = raw.strip()
-        if stripped.lower().startswith("# preset:"):
-            lines[idx] = f"# Preset: {preset_name}"
-            replaced = True
-            break
-        if stripped and not stripped.startswith("#"):
-            break
-
-    if not replaced:
-        lines.insert(0, f"# Preset: {preset_name}")
-
-    rewritten = "\n".join(lines).rstrip("\n")
-    return rewritten + "\n"
 
 
 def _rewrite_preset_headers(
@@ -165,18 +108,6 @@ def validate_preset_source_text(source_text: str, *, engine: str = "") -> str:
     return ""
 
 
-def _extract_debug_log_file(source_text: str) -> str:
-    text = (source_text or "").replace("\r\n", "\n").replace("\r", "\n")
-    for raw in text.splitlines():
-        stripped = raw.strip()
-        if not stripped.lower().startswith("--debug="):
-            continue
-        value = stripped.split("=", 1)[1].strip() if "=" in stripped else ""
-        value = value.lstrip("@").replace("\\", "/").lstrip("/")
-        return value
-    return ""
-
-
 def _build_stable_debug_log_file(preset_name: str) -> str:
     safe_name = re.sub(r"[^\w.-]+", "_", str(preset_name or "").strip(), flags=re.UNICODE).strip("._")
     if not safe_name:
@@ -234,77 +165,3 @@ def _rewrite_debug_log_setting(source_text: str, preset_name: str, enabled: bool
 
     return "\n".join(cleaned).rstrip("\n") + "\n"
 
-
-def _ports_include_443(value: str) -> bool:
-    for raw_part in str(value or "").split(","):
-        part = raw_part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            try:
-                start_s, end_s = part.split("-", 1)
-                start = int(start_s.strip())
-                end = int(end_s.strip())
-            except Exception:
-                continue
-            if start <= 443 <= end:
-                return True
-            continue
-        try:
-            if int(part) == 443:
-                return True
-        except Exception:
-            continue
-    return False
-
-
-def _split_arg_lines(args_text: str) -> list[str]:
-    return [str(raw or "").strip() for raw in str(args_text or "").splitlines() if str(raw or "").strip()]
-
-
-def _join_arg_lines(lines: list[str]) -> str:
-    return "\n".join(str(line or "").strip() for line in lines if str(line or "").strip()).strip()
-
-
-def _settings_payload_to_dict(value) -> dict[str, object]:
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-    to_dict = getattr(value, "to_dict", None)
-    if callable(to_dict):
-        try:
-            data = to_dict()
-            if isinstance(data, dict):
-                return dict(data)
-        except Exception:
-            pass
-
-    payload: dict[str, object] = {}
-    for field in (
-        "enabled",
-        "blob",
-        "tls_mod",
-        "autottl_delta",
-        "autottl_min",
-        "autottl_max",
-        "tcp_flags_unset",
-        "out_range",
-        "out_range_mode",
-        "send_enabled",
-        "send_repeats",
-        "send_ip_ttl",
-        "send_ip6_ttl",
-        "send_ip_id",
-        "send_badsum",
-    ):
-        if hasattr(value, field):
-            payload[field] = getattr(value, field)
-    return payload
-
-
-def _coerce_int(value, default: int) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return int(default)

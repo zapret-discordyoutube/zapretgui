@@ -172,15 +172,6 @@ def preset_differs_from_builtin(*, presets_feature, launch_method: str | None, f
         return False
 
 
-def is_builtin_raw_preset(*, presets_feature, launch_method: str | None, file_name: str) -> bool:
-    manifest = get_raw_preset_manifest(
-        presets_feature=presets_feature,
-        launch_method=launch_method,
-        file_name=file_name,
-    )
-    return bool(manifest is not None and str(manifest.kind or "").strip().lower() == "builtin")
-
-
 def open_raw_preset_source_file(*, presets_feature, path: Path | None) -> None:
     if path is None:
         return

@@ -45,22 +45,6 @@ class ControlToggleActionStartPlan:
     start_status: str
 
 
-class ControlPresetNameRuntime:
-    def __init__(self) -> None:
-        self.preset_name_dirty = True
-
-    def mark_dirty(self) -> None:
-        self.preset_name_dirty = True
-
-    def mark_applied(self) -> None:
-        self.preset_name_dirty = False
-
-    def should_refresh(self) -> bool:
-        return bool(self.preset_name_dirty)
-
-def create_preset_name_runtime() -> ControlPresetNameRuntime:
-    return ControlPresetNameRuntime()
-
 def build_stop_button_plan(*, language: str) -> ControlStopButtonPlan:
     try:
         from settings.mode import exe_name_for_launch_method

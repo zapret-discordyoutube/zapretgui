@@ -4,7 +4,7 @@ from contextlib import contextmanager
 import threading
 from typing import Any
 
-from folders.defaults import COMMON_FOLDER_KEY, build_default_profile_folders, classify_profile_folder
+from folders.defaults import COMMON_FOLDER_KEY, build_default_profile_folders
 from folders.store import FolderLibraryStore, normalize_folder_state
 from settings import store as settings_store
 
@@ -195,86 +195,6 @@ def reset_profile_folders(folder_by_profile_key: dict[str, str] | None = None) -
         return save_profile_folder_state(state)
 
 
-def profile_folder_for_profile(profile, state: dict[str, Any] | None = None) -> tuple[str, str, int | None]:
-    # Горячий путь: доверяем уже нормализованному состоянию, None → загрузка.
-    folder_state = state if isinstance(state, dict) else load_profile_folder_state()
-    profile_key = str(getattr(profile, "persistent_key", "") or "").strip()
-    items = folder_state.get("items", {})
-    item_meta = items.get(profile_key) if isinstance(items, dict) else None
-    folder_key = ""
-    order = None
-    if isinstance(item_meta, dict):
-        folder_key = str(item_meta.get("folder_key") or "").strip()
-        try:
-            order = int(item_meta["order"]) if item_meta.get("order") is not None else None
-        except Exception:
-            order = None
-    if not folder_key:
-        folder_key = classify_profile_folder(_profile_classification_text(profile))
-    folders = folder_state.get("folders", {})
-    if not isinstance(folders, dict) or folder_key not in folders:
-        folder_key = COMMON_FOLDER_KEY
-    folder = folders.get(folder_key) if isinstance(folders, dict) else {}
-    folder_name = str(folder.get("name") or "Общие") if isinstance(folder, dict) else "Общие"
-    return folder_key, folder_name, order
-
-
-def profile_folder_collapsed(folder_key: str, state: dict[str, Any] | None = None) -> bool:
-    key = str(folder_key or "").strip()
-    # Горячий путь: доверяем уже нормализованному состоянию, None → загрузка.
-    folder_state = state if isinstance(state, dict) else load_profile_folder_state()
-    folders = folder_state.get("folders", {}) if isinstance(folder_state, dict) else {}
-    folder = folders.get(key) if isinstance(folders, dict) else None
-    return bool(folder.get("collapsed", False)) if isinstance(folder, dict) else False
-
-
-def set_profile_folder_order(profile_key: str, order: int | None) -> bool:
-    key = str(profile_key or "").strip()
-    if not key:
-        return False
-    next_order = None if order is None else max(0, int(order))
-    with profile_folder_state_lock():
-        state = load_profile_folder_state()
-        items = state.setdefault("items", {})
-        meta = items.get(key)
-        if not isinstance(meta, dict):
-            if next_order is None:
-                return False
-            meta = {"folder_key": COMMON_FOLDER_KEY, "order": None, "rating": 0}
-            items[key] = meta
-        if meta.get("order") == next_order:
-            return False
-        meta["order"] = next_order
-        save_profile_folder_state(state)
-        return True
-
-
-def set_profile_folder(profile_key: str, folder_key: str) -> bool:
-    key = str(profile_key or "").strip()
-    target_folder = str(folder_key or "").strip() or COMMON_FOLDER_KEY
-    if not key:
-        return False
-    with profile_folder_state_lock():
-        state = load_profile_folder_state()
-        folders = state.get("folders", {})
-        if not isinstance(folders, dict) or target_folder not in folders:
-            return False
-        items = state.setdefault("items", {})
-        meta = items.get(key)
-        if not isinstance(meta, dict):
-            if target_folder == COMMON_FOLDER_KEY:
-                return False
-            meta = {"folder_key": target_folder, "order": None, "rating": 0}
-            items[key] = meta
-            save_profile_folder_state(state)
-            return True
-        if str(meta.get("folder_key") or COMMON_FOLDER_KEY) == target_folder:
-            return False
-        meta["folder_key"] = target_folder
-        save_profile_folder_state(state)
-        return True
-
-
 def profile_classification_text(profile) -> str:
     """Текст для правила первичного размещения. Стабильные uid-ключи не несут
     классификационного сигнала и в текст не включаются; контентные ключи
@@ -292,9 +212,6 @@ def profile_classification_text(profile) -> str:
     return " ".join(part for part in parts if part)
 
 
-_profile_classification_text = profile_classification_text
-
-
 __all__ = [
     "create_profile_folder",
     "delete_profile_folder",
@@ -302,14 +219,10 @@ __all__ = [
     "materialize_profile_folder_items",
     "profile_classification_text",
     "move_profile_folder_by_step",
-    "profile_folder_collapsed",
-    "profile_folder_for_profile",
     "profile_folder_state_lock",
     "rename_profile_folder",
     "reset_profile_folders",
     "save_profile_folder_state",
     "set_profile_folder_collapsed",
     "set_profile_folders_collapsed",
-    "set_profile_folder",
-    "set_profile_folder_order",
 ]

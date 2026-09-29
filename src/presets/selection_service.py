@@ -56,11 +56,6 @@ class PresetSelectionService:
         set_selected_source_preset_file_name(engine, candidate)
         return candidate
 
-    def clear_selection(self, engine: str) -> None:
-        from settings.store import clear_selected_source_preset_file_name
-
-        clear_selected_source_preset_file_name(engine)
-
     def ensure_can_delete(self, engine: str, file_name: str) -> None:
         selected_file_name = self.get_selected_file_name(engine)
         candidate = str(self._preset_file_store.resolve_file_name(engine, file_name) or file_name or "").strip()

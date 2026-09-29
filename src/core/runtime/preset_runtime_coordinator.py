@@ -12,7 +12,6 @@ from log.log import log
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 
 
-PRESET_SWITCH_APPLY_DEBOUNCE_MS = 500
 PRESET_SWITCH_REFRESH_DEBOUNCE_MS = 180
 # Собственное сохранение может породить несколько fs-событий (atomic save —
 # temp+rename); подавляем их окном по времени, а не «одним событием».
@@ -107,9 +106,7 @@ class PresetRuntimeCoordinator(QObject):
         self._active_preset_file_watcher: QFileSystemWatcher | None = None
         self._active_preset_file_refresh_timer: QTimer | None = None
         self._preset_switch_refresh_timer: QTimer | None = None
-        self._preset_switch_apply_timer: QTimer | None = None
         self._active_preset_file_path: str = ""
-        self._pending_preset_apply: PendingPresetApply | None = None
         self._pending_preset_content_apply: PendingPresetApply | None = None
         self._last_active_preset_key: tuple[str, str] | None = None
         self._active_preset_revision_publish_pending = False
@@ -185,7 +182,10 @@ class PresetRuntimeCoordinator(QObject):
             launch_method=method,
             preset_file_name=selected_file_name,
         )
-        self._schedule_selected_source_preset_apply(
+        # Быстрые щелчки склеивает switch pipeline (restart_flow, debounce
+        # SELECTED_SOURCE_PRESET_APPLY_DEBOUNCE_MS): второй таймер здесь лишь
+        # добавлял полсекунды к каждому переключению.
+        self._request_selected_source_preset_apply(
             launch_method=method,
             reason="preset_switched",
             preset_file_name=selected_file_name,
@@ -260,45 +260,6 @@ class PresetRuntimeCoordinator(QObject):
             )
         except Exception:
             return
-
-    def _schedule_selected_source_preset_apply(
-        self,
-        *,
-        launch_method: str,
-        reason: str,
-        preset_file_name: str,
-        delay_ms: int = PRESET_SWITCH_APPLY_DEBOUNCE_MS,
-    ) -> None:
-        """Применяет только последний выбранный preset после короткой паузы."""
-        method = normalize_launch_method(launch_method, default="")
-        apply_reason = str(reason or "preset_switched").strip() or "preset_switched"
-        selected_file_name = str(preset_file_name or "").strip()
-        self._pending_preset_apply = PendingPresetApply(
-            launch_method=method,
-            reason=apply_reason,
-            preset_file_name=selected_file_name,
-        )
-        try:
-            timer = self._preset_switch_apply_timer
-            if timer is None:
-                timer = QTimer(self)
-                timer.setSingleShot(True)
-                timer.timeout.connect(self._apply_pending_selected_source_preset)
-                self._preset_switch_apply_timer = timer
-            timer.start(max(0, int(delay_ms)))
-        except Exception:
-            self._apply_pending_selected_source_preset()
-
-    def _apply_pending_selected_source_preset(self) -> None:
-        pending = self._pending_preset_apply
-        self._pending_preset_apply = None
-        if pending is None:
-            return
-        self._request_selected_source_preset_apply(
-            launch_method=pending.launch_method,
-            reason=pending.reason,
-            preset_file_name=pending.preset_file_name,
-        )
 
     def _schedule_preset_content_apply(
         self,

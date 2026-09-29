@@ -14,10 +14,8 @@ from profile.folders import (
     move_profile_folder_by_step,
     rename_profile_folder,
     reset_profile_folders,
-    set_profile_folder,
     set_profile_folder_collapsed,
     set_profile_folders_collapsed,
-    set_profile_folder_order,
     save_profile_folder_state,
 )
 
@@ -157,18 +155,6 @@ class ProfileFolderActionTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertTrue(state["folders"]["youtube"]["collapsed"])
         self.assertTrue(state["folders"]["discord"]["collapsed"])
-
-    def test_duplicate_profile_folder_item_metadata_skips_save(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            with patch("settings.store.MAIN_DIRECTORY", str(Path(temp_dir))):
-                self.assertTrue(set_profile_folder("profile-a", "youtube"))
-                set_profile_folder_order("profile-a", 3)
-                with patch(
-                    "profile.folders.save_profile_folder_state",
-                    side_effect=AssertionError("unchanged profile item metadata must not be saved"),
-                ):
-                    self.assertFalse(set_profile_folder("profile-a", "youtube"))
-                    self.assertFalse(set_profile_folder_order("profile-a", 3))
 
     def test_profile_reorder_renumbers_folder_from_display_order(self) -> None:
         with TemporaryDirectory() as temp_dir:

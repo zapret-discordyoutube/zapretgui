@@ -685,13 +685,17 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
 
         self.assertEqual(watched_paths, ["C:/Zapret/Dev/presets/winws2/Default v3.txt"])
         self.assertEqual(ui_state.active_revision, 1)
-        self.assertEqual(switch_calls, [])
+        # Запросы уходят сразу; склеивает их switch pipeline (restart_flow).
+        self.assertEqual(
+            switch_calls,
+            [
+                (ZAPRET2_MODE, "preset_switched", "Default v1.txt"),
+                (ZAPRET2_MODE, "preset_switched", "Default v2.txt"),
+                (ZAPRET2_MODE, "preset_switched", "Default v3.txt"),
+            ],
+        )
         self.assertEqual(refresh_calls, [])
         self.assertEqual(coordinator._preset_switch_refresh_timer.interval(), 180)
-
-        coordinator._apply_pending_selected_source_preset()
-
-        self.assertEqual(switch_calls, [(ZAPRET2_MODE, "preset_switched", "Default v3.txt")])
 
     def test_get_selected_source_path_does_not_build_launch_snapshot(self) -> None:
         import inspect
@@ -703,33 +707,9 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
         self.assertNotIn("get_launch_snapshot", source)
         self.assertIn("preset_mode_coordinator.get_selected_source_path", source)
 
-    def test_preset_switch_apply_uses_short_debounce_to_coalesce_fast_clicks(self) -> None:
-        from core.runtime.preset_runtime_coordinator import PRESET_SWITCH_APPLY_DEBOUNCE_MS, PresetRuntimeCoordinator
+    def test_preset_switch_apply_is_requested_without_second_debounce(self) -> None:
+        from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
         from settings.mode import ZAPRET2_MODE
-
-        class _Signal:
-            def __init__(self) -> None:
-                self.callback = None
-
-            def connect(self, callback) -> None:
-                self.callback = callback
-
-        class _FakeTimer:
-            instances = []
-
-            def __init__(self, *_args, **_kwargs) -> None:
-                self.timeout = _Signal()
-                self.delay_ms = None
-                _FakeTimer.instances.append(self)
-
-            def setSingleShot(self, _single_shot: bool) -> None:
-                pass
-
-            def start(self, delay_ms: int) -> None:
-                self.delay_ms = int(delay_ms)
-
-            def fire(self) -> None:
-                self.timeout.callback()
 
         switch_calls: list[tuple[str, str, str]] = []
         coordinator = PresetRuntimeCoordinator(
@@ -746,21 +726,12 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
         )
         coordinator.setup_active_preset_file_watcher = lambda: None
 
-        with patch("core.runtime.preset_runtime_coordinator.QTimer", _FakeTimer):
-            coordinator.handle_preset_switched(ZAPRET2_MODE, "Default v5.txt")
+        coordinator.handle_preset_switched(ZAPRET2_MODE, "Default v5.txt")
 
-            apply_timers = [
-                timer
-                for timer in _FakeTimer.instances
-                if getattr(timer.timeout.callback, "__name__", "") == "_apply_pending_selected_source_preset"
-            ]
-            self.assertEqual(len(apply_timers), 1)
-            self.assertEqual(apply_timers[0].delay_ms, PRESET_SWITCH_APPLY_DEBOUNCE_MS)
-            self.assertEqual(switch_calls, [])
-
-            apply_timers[0].fire()
-
+        # Раньше здесь стоял свой таймер на 500 мс поверх debounce switch
+        # pipeline (700 мс): каждое переключение ждало ~1,2 с.
         self.assertEqual(switch_calls, [(ZAPRET2_MODE, "preset_switched", "Default v5.txt")])
+        self.assertFalse(hasattr(coordinator, "_preset_switch_apply_timer"))
 
     def test_reapplying_same_preset_skips_ui_refresh_and_runtime_apply(self) -> None:
         from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
@@ -796,14 +767,10 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
         coordinator.handle_preset_switched(ZAPRET2_MODE, "Default v5.txt")
         self._app.processEvents()
 
-        self.assertEqual(switch_calls, [])
         self.assertEqual(refresh_calls, [])
         self.assertEqual(coordinator._preset_switch_refresh_timer.interval(), 180)
         coordinator._preset_switch_refresh_timer.timeout.emit()
         self.assertEqual(refresh_calls, ["refresh"])
-
-        coordinator._apply_pending_selected_source_preset()
-
         self.assertEqual(
             switch_calls,
             [
