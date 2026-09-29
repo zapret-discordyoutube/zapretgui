@@ -175,6 +175,14 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
         self.assertEqual(ui_state.content_revision, 1)
         self.assertEqual(refresh_calls, ["strategy_only"])
 
+    def _existing_preset_path(self, file_name: str) -> str:
+        """Watcher проверяет, что файл на месте: пропавший пресет не применяется."""
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        path = Path(tmp_dir.name) / file_name
+        path.write_text("--filter-tcp=443\n", encoding="utf-8")
+        return str(path)
+
     def _make_watch_coordinator(self, active_path: str, content_calls: list):
         from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
         from settings.mode import ZAPRET2_MODE
@@ -208,7 +216,7 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
     def test_external_preset_file_change_triggers_runtime_apply(self) -> None:
         from settings.mode import ZAPRET2_MODE
 
-        active_path = "C:/Zapret/Dev/presets/winws2/Default v5.txt"
+        active_path = self._existing_preset_path("Default v5.txt")
         content_calls: list[tuple[str, str, str]] = []
         coordinator = self._make_watch_coordinator(active_path, content_calls)
 
@@ -225,7 +233,7 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
     def test_own_save_fs_events_are_suppressed_by_time_window(self) -> None:
         from settings.mode import ZAPRET2_MODE
 
-        active_path = "C:/Zapret/Dev/presets/winws2/Default v5.txt"
+        active_path = self._existing_preset_path("Default v5.txt")
         content_calls: list[tuple[str, str, str]] = []
         coordinator = self._make_watch_coordinator(active_path, content_calls)
 
@@ -249,10 +257,37 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
             (ZAPRET2_MODE, "preset_file_external_change", "default v5.txt"),
         )
 
+    def test_vanished_active_preset_is_not_applied_until_it_returns(self) -> None:
+        from settings.mode import ZAPRET2_MODE
+
+        active_path = self._existing_preset_path("Vanished preset.txt")
+        content_calls: list[tuple[str, str, str]] = []
+        coordinator = self._make_watch_coordinator(active_path, content_calls)
+        coordinator._active_preset_file_watcher = SimpleNamespace(files=lambda: [], addPath=lambda _path: False)
+        coordinator._active_preset_watch_rearm_timer = SimpleNamespace(start=lambda _ms: None)
+
+        # Файл удалён/переименован в Проводнике: работающий пресет не
+        # подменяется ни пустым, ни пресетом по умолчанию.
+        Path(active_path).unlink()
+        coordinator._on_active_preset_file_changed(active_path)
+        self.assertEqual(content_calls, [])
+        self.assertEqual(coordinator._ui_state.content_revision, 0)
+
+        # Редактор сохранил «удалить и создать заново»: файл вернулся —
+        # правка доходит до runtime как обычная внешняя.
+        Path(active_path).write_text("--filter-tcp=80\n", encoding="utf-8")
+        coordinator._active_preset_file_watcher = SimpleNamespace(files=lambda: [], addPath=lambda _path: True)
+        coordinator._ensure_active_preset_watch_armed()
+        self.assertEqual(
+            content_calls,
+            [(ZAPRET2_MODE, "preset_file_external_change", "vanished preset.txt")],
+        )
+        self.assertEqual(coordinator._ui_state.content_revision, 1)
+
     def test_unpublished_own_save_does_not_trigger_external_apply(self) -> None:
         from presets.own_write_registry import mark_own_preset_write
 
-        active_path = "C:/Zapret/Dev/presets/winws2/Default v5.txt"
+        active_path = self._existing_preset_path("Default v5.txt")
         content_calls: list[tuple[str, str, str]] = []
         coordinator = self._make_watch_coordinator(active_path, content_calls)
 
@@ -277,7 +312,7 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
             self.assertFalse(was_recent_own_preset_write("other.txt"))
 
     def test_active_preset_watch_rearm_retries_after_atomic_save(self) -> None:
-        active_path = "C:/Zapret/Dev/presets/winws2/Default v5.txt"
+        active_path = self._existing_preset_path("Default v5.txt")
         content_calls: list[tuple[str, str, str]] = []
         coordinator = self._make_watch_coordinator(active_path, content_calls)
 

@@ -19,6 +19,7 @@ from presets.preset_contract import normalize_preset_source_for_save
 from presets.preset_text_ops import validate_preset_source_text
 from updater.proxy_bypass import request_get_bypass_proxy
 from updater.server_config import CONNECT_TIMEOUT, READ_TIMEOUT
+from utils.atomic_text import decode_preset_bytes
 
 MAX_REMOTE_PRESET_BYTES = 256 * 1024
 AUTO_CHECK_INTERVAL_SECONDS = 6 * 3600
@@ -147,7 +148,7 @@ def fetch_remote_preset_text(url: str, *, etag: str = "", last_modified: str = "
         if payload.startswith(b"PK\x03\x04"):
             raise RemoteSyncFetchError("Архивы не автообновляются")
         # utf-8-sig: метка BOM — часть кодировки файла, а не текста пресета.
-        text = payload.decode("utf-8-sig", errors="replace")
+        text = decode_preset_bytes(payload)
         return RemoteFetchResult(
             status_code=int(response.status_code),
             text=text,

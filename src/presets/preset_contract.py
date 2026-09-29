@@ -24,7 +24,9 @@ tests/test_preset_contract_architecture_checks.py — структура) и а�
    - удаление служебных строк шапки ``# Modified:`` и ``# ActivePreset:``;
    - переводы строк CRLF/CR -> LF, ровно один перевод строки в конце файла и
      без метки BOM в начале (BOM — часть кодировки файла, а не текста; файлы
-     пресетов читаются как utf-8-sig).
+     пресетов читаются как utf-8-sig, а старые файлы в cp1251 — как cp1251,
+     см. ``utils.atomic_text.read_preset_file_text``; пишутся всегда в UTF-8,
+     поэтому такой файл при первой записи меняет только кодировку, текст тот же).
 
    Отдельно при переименовании, дублировании, создании и импорте шапка получает
    ``# Preset: <имя>`` (и ``# PresetKind: imported`` для импорта), чтобы имя в
@@ -211,7 +213,9 @@ def _relocate_legacy_debug_log_lines(text: str) -> str:
     out: list[str] = []
     for raw in text.split("\n"):
         stripped = raw.strip()
-        if stripped.lower().startswith(f"--debug=@{LEGACY_DEBUG_LOG_PREFIX}"):
+        # Пресеты, написанные на Windows, пишут путь через «\» — сравниваем
+        # уже с прямыми слешами, иначе @logs\x.log остаётся на старом месте.
+        if stripped.replace("\\", "/").lower().startswith(f"--debug=@{LEGACY_DEBUG_LOG_PREFIX}"):
             value = stripped.split("=", 1)[1].strip().lstrip("@").replace("\\", "/")
             out.append(f"--debug=@{relocate_legacy_debug_log_file(value)}")
             continue

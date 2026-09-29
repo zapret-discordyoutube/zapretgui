@@ -18,6 +18,7 @@ from presets.file_store import PresetFileStore
 from presets.models import PresetManifest
 from presets.selection_service import PresetSelectionService
 from profile.launch_validation import preset_has_enabled_profiles_for_launch
+from utils.atomic_text import read_preset_file_text
 
 
 class PresetModeError(RuntimeError):
@@ -132,7 +133,7 @@ class PresetModeCoordinator:
             text = ""
             t_read = time.perf_counter()
             try:
-                text = preset_path.read_text(encoding="utf-8").strip()
+                text = read_preset_file_text(preset_path).strip()
             except Exception as exc:
                 raise PresetModeError(f"Failed to read selected source preset: {exc}") from exc
             self._emit_timing(timing_callback, f"{label}.read_preset_text", t_read)

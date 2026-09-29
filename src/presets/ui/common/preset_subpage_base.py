@@ -21,6 +21,7 @@ from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.message_box_accessibility import set_message_box_button_accessibility
 from ui.queued_worker_state import QueuedWorkerState
 from ui.popup_menu import exec_popup_menu
+from log.log import log
 from presets.ui.common.raw_preset_text_editor import RawPresetTextEditor
 from ui.onboarding.preset_sections import (
     build_outline,
@@ -294,6 +295,7 @@ class PresetRawEditorPage(BasePage):
         open_root,
         runtime_actions: RawPresetRuntimeActions | None,
         ui_state_store,
+        save_raw_preset_on_close=None,
     ):
         self._launch_method = str(launch_method or "").strip()
         self._title = str(title or "").strip() or "Пресет"
@@ -353,6 +355,7 @@ class PresetRawEditorPage(BasePage):
         self._create_raw_preset_save_worker_fn = create_raw_preset_save_worker
         self._create_raw_preset_activate_worker_fn = create_raw_preset_activate_worker
         self._create_raw_preset_action_worker_fn = create_raw_preset_action_worker
+        self._save_raw_preset_on_close_fn = save_raw_preset_on_close
         self._raw_text_editor = RawPresetTextEditor(
             self,
             request_save=lambda *, publish_content_changed=False: self._save_file(
@@ -2360,7 +2363,9 @@ class PresetRawEditorPage(BasePage):
     def _stop_raw_worker_runtimes(self) -> None:
         for attr, warning_prefix, blocking in (
             ("_raw_load_runtime", "raw preset load worker", False),
-            ("_raw_save_runtime", "raw preset save worker", False),
+            # Запись ждём: иначе поздно завершившийся worker перезапишет файл
+            # более старым текстом поверх синхронной записи при закрытии.
+            ("_raw_save_runtime", "raw preset save worker", True),
             ("_raw_activate_runtime", "raw preset activate worker", False),
             ("_raw_action_runtime", "raw preset action worker", False),
         ):
@@ -2370,11 +2375,51 @@ class PresetRawEditorPage(BasePage):
             runtime.stop(blocking=blocking, warning_prefix=warning_prefix)
             runtime.cancel()
 
-    def cleanup(self) -> None:
+    def _raw_preset_text_to_save_on_close(self) -> tuple[str, str] | None:
+        """(имя файла, текст), если в редакторе есть правки, которые ещё не
+        легли в файл: набранные после последнего сохранения, ждущие своей
+        очереди или сохраняемые прямо сейчас."""
+        if self.__dict__.get("_preset_path") is None:
+            return None
+        file_name = str(self.__dict__.get("_preset_file_name") or "").strip()
+        if not file_name:
+            return None
+        unsaved = bool(self._content_publish_pending)
         try:
-            self._commit_pending_content_change()
+            save_state = self._raw_preset_save_state_obj()
+            unsaved = unsaved or save_state.is_busy() or save_state.has_pending()
         except Exception:
             pass
+        try:
+            unsaved = unsaved or any(
+                str((operation or {}).get("kind") or "") == "save"
+                for operation in self._raw_preset_write_state_obj().pending
+            )
+        except Exception:
+            pass
+        if not unsaved:
+            return None
+        return file_name, self._current_raw_editor_text()
+
+    def _save_raw_preset_on_close(self, file_name: str, text: str) -> None:
+        """Синхронная запись при закрытии: event loop уже не даст worker-у
+        завершиться (тот же приём, что persist_sidebar_state). Запуск не
+        оповещается — работающий DPI не перезапускается на выходе, а
+        следующий старт прочитает файл."""
+        save = self.__dict__.get("_save_raw_preset_on_close_fn")
+        if not callable(save):
+            return
+        try:
+            save(file_name, text)
+        except Exception as exc:
+            log(f"Не удалось сохранить пресет {file_name} при закрытии: {exc}", "ERROR")
+
+    def cleanup(self) -> None:
+        text_to_save = None
+        try:
+            text_to_save = self._raw_preset_text_to_save_on_close()
+        except Exception:
+            text_to_save = None
         self._cleanup_in_progress = True
         self._raw_load_state_obj().reset()
         self._pending_raw_text_apply = None
@@ -2385,6 +2430,8 @@ class PresetRawEditorPage(BasePage):
         self._raw_preset_activation_state_obj().reset()
         self._raw_load_runtime_request_id = 0
         self._stop_raw_worker_runtimes()
+        if text_to_save is not None:
+            self._save_raw_preset_on_close(*text_to_save)
         unsubscribe = self._ui_state_unsubscribe
         if callable(unsubscribe):
             try:

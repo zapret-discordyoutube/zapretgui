@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -144,6 +145,9 @@ class PresetRuntimeCoordinator(QObject):
             timer.timeout.connect(self._run_refresh_after_switch)
             self._active_preset_file_refresh_timer = timer
 
+        if watched_path != str(self.__dict__.get("_active_preset_file_path", "") or ""):
+            # Ожидание «файл вернётся» относилось к прежнему пресету.
+            self._active_preset_change_waits_for_file = False
         self._active_preset_file_path = watched_path
         self._active_preset_watch_rearm_attempts = 0
 
@@ -563,8 +567,24 @@ class PresetRuntimeCoordinator(QObject):
         if self._consume_own_preset_file_change(path):
             return
 
+        if desired and not os.path.exists(desired):
+            # Файл удалён или переименован вне программы (или редактор
+            # сохраняет через «удалить и создать заново»). Применять нечего:
+            # пустой/чужой пресет не должен подменять работающий. Если файл
+            # вернётся, _ensure_active_preset_watch_armed доведёт правку.
+            self._active_preset_change_waits_for_file = True
+            log(
+                f"Активный пресет пропал с диска: {desired}. "
+                "DPI продолжает работать на прежних настройках",
+                "WARNING",
+            )
+            return
+
+        self._apply_external_active_preset_change(desired or path)
+
+    def _apply_external_active_preset_change(self, path: str) -> None:
         try:
-            self._publish_active_preset_content_changed(desired or path)
+            self._publish_active_preset_content_changed(path)
         except Exception:
             pass
 
@@ -581,7 +601,7 @@ class PresetRuntimeCoordinator(QObject):
             except Exception:
                 pass
 
-        self._request_external_preset_content_apply(desired or path)
+        self._request_external_preset_content_apply(path)
 
     def _request_external_preset_content_apply(self, path: str) -> None:
         """Внешняя правка выбранного пресета обязана дойти до runtime,
@@ -608,6 +628,8 @@ class PresetRuntimeCoordinator(QObject):
         try:
             if desired in (watcher.files() or []) or watcher.addPath(desired):
                 self._active_preset_watch_rearm_attempts = 0
+                if self.__dict__.pop("_active_preset_change_waits_for_file", False):
+                    self._apply_external_active_preset_change(desired)
                 return
         except Exception:
             pass

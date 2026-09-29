@@ -17,6 +17,7 @@ from profile.launch_validation import (
     preset_filter_flags_for_launch_method,
     preset_has_enabled_profiles_for_launch,
 )
+from utils.atomic_text import read_preset_file_text
 
 
 def resolve_launch_method(launch_method=None) -> str:
@@ -94,7 +95,7 @@ def validate_preset_selected_mode(selected_mode, launch_method: str, *, prepared
         content = (
             str(prepared_text or "").strip()
             if prepared_text is not None
-            else preset_path.read_text(encoding="utf-8").strip()
+            else read_preset_file_text(preset_path).strip()
         )
         if not preset_has_enabled_profiles_for_launch(method, content):
             raise RuntimeError("В выбранном preset нет включённых profile для запуска")
@@ -124,7 +125,7 @@ def validate_presets_before_launch(
             prepare_winws2_preset_text_for_launch,
         )
 
-        source_text = preset_path.read_text(encoding="utf-8", errors="replace")
+        source_text = read_preset_file_text(preset_path)
         prepared = prepare_winws2_preset_text_for_launch(
             source_text,
             source_name=preset_path.name,

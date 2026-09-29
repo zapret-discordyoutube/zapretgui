@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import wraps
+import threading
 from typing import Any
 
 from folders.defaults import COMMON_FOLDER_KEY, PINNED_FOLDER_KEY, build_default_preset_folders, classify_preset_folder
@@ -7,6 +9,22 @@ from folders.ordering import build_folder_rows, plan_item_move
 from folders.store import FolderLibraryStore, normalize_folder_state
 from settings import store as settings_store
 from settings.mode import ENGINE_WINWS1, ENGINE_WINWS2
+
+
+# Сериализует read-modify-write состояния папок пресетов: действия страницы,
+# переименование/удаление файлов и рейтинг идут из разных фоновых потоков,
+# и без блокировки одно сохранение молча затирало другое (как у профилей —
+# profile.folders.profile_folder_state_lock).
+_PRESET_FOLDER_STATE_LOCK = threading.RLock()
+
+
+def _with_preset_folder_state_lock(func):
+    @wraps(func)
+    def _locked(*args, **kwargs):
+        with _PRESET_FOLDER_STATE_LOCK:
+            return func(*args, **kwargs)
+
+    return _locked
 
 
 def load_preset_folder_state(scope_key: str) -> dict[str, Any]:
@@ -19,6 +37,7 @@ def load_preset_folder_state(scope_key: str) -> dict[str, Any]:
     return state
 
 
+@_with_preset_folder_state_lock
 def save_preset_folder_state(scope_key: str, state: dict[str, Any]) -> dict[str, Any]:
     scope = _normalize_scope(scope_key)
     default_state = build_default_preset_folders(scope)
@@ -37,6 +56,7 @@ def save_preset_folder_state(scope_key: str, state: dict[str, Any]) -> dict[str,
     return settings_store.set_folders_settings(folders)["presets"][scope]
 
 
+@_with_preset_folder_state_lock
 def create_preset_folder(scope_key: str, name: str) -> str:
     state = load_preset_folder_state(scope_key)
     scope = _normalize_scope(scope_key)
@@ -46,6 +66,7 @@ def create_preset_folder(scope_key: str, name: str) -> str:
     return folder_key
 
 
+@_with_preset_folder_state_lock
 def rename_preset_folder(scope_key: str, folder_key: str, name: str) -> bool:
     state = load_preset_folder_state(scope_key)
     scope = _normalize_scope(scope_key)
@@ -56,6 +77,7 @@ def rename_preset_folder(scope_key: str, folder_key: str, name: str) -> bool:
     return True
 
 
+@_with_preset_folder_state_lock
 def delete_preset_folder(scope_key: str, folder_key: str) -> bool:
     state = load_preset_folder_state(scope_key)
     scope = _normalize_scope(scope_key)
@@ -66,6 +88,7 @@ def delete_preset_folder(scope_key: str, folder_key: str) -> bool:
     return True
 
 
+@_with_preset_folder_state_lock
 def move_preset_folder_by_step(scope_key: str, folder_key: str, direction: int) -> bool:
     state = load_preset_folder_state(scope_key)
     scope = _normalize_scope(scope_key)
@@ -76,6 +99,7 @@ def move_preset_folder_by_step(scope_key: str, folder_key: str, direction: int) 
     return True
 
 
+@_with_preset_folder_state_lock
 def set_preset_folder_collapsed(scope_key: str, folder_key: str, collapsed: bool) -> bool:
     state = load_preset_folder_state(scope_key)
     if str(folder_key or "").strip() == PINNED_FOLDER_KEY:
@@ -101,6 +125,7 @@ def set_preset_folder_collapsed(scope_key: str, folder_key: str, collapsed: bool
     return True
 
 
+@_with_preset_folder_state_lock
 def reset_preset_folders(scope_key: str) -> dict[str, Any] | bool:
     scope = _normalize_scope(scope_key)
     default_state = build_default_preset_folders(scope)
@@ -110,6 +135,7 @@ def reset_preset_folders(scope_key: str) -> dict[str, Any] | bool:
     return save_preset_folder_state(scope, default_state)
 
 
+@_with_preset_folder_state_lock
 def move_preset_to_folder(
     scope_key: str,
     file_name: str,
@@ -151,6 +177,7 @@ def move_preset_to_folder(
     return True
 
 
+@_with_preset_folder_state_lock
 def move_preset_before(
     scope_key: str,
     source_file_name: str,
@@ -170,6 +197,7 @@ def move_preset_before(
     )
 
 
+@_with_preset_folder_state_lock
 def move_preset_after(
     scope_key: str,
     source_file_name: str,
@@ -189,6 +217,7 @@ def move_preset_after(
     )
 
 
+@_with_preset_folder_state_lock
 def move_preset_to_end(
     scope_key: str,
     file_name: str,
@@ -204,6 +233,7 @@ def move_preset_to_end(
     )
 
 
+@_with_preset_folder_state_lock
 def move_preset_by_step(
     scope_key: str,
     file_name: str,
@@ -489,6 +519,7 @@ def get_preset_item_meta(scope_key: str, file_name: str) -> dict[str, Any]:
     }
 
 
+@_with_preset_folder_state_lock
 def set_preset_rating(scope_key: str, file_name: str, rating: int, *, display_name: str = "") -> bool:
     state = load_preset_folder_state(scope_key)
     key = str(file_name or "").strip()
@@ -512,6 +543,7 @@ def set_preset_rating(scope_key: str, file_name: str, rating: int, *, display_na
     return True
 
 
+@_with_preset_folder_state_lock
 def toggle_preset_pin(scope_key: str, file_name: str, *, display_name: str = "") -> bool:
     meta = get_preset_item_meta(scope_key, file_name)
     next_value = not bool(meta.get("pinned", False))
@@ -519,6 +551,7 @@ def toggle_preset_pin(scope_key: str, file_name: str, *, display_name: str = "")
     return next_value
 
 
+@_with_preset_folder_state_lock
 def set_preset_pin(scope_key: str, file_name: str, pinned: bool, *, display_name: str = "") -> bool:
     state = load_preset_folder_state(scope_key)
     key = str(file_name or "").strip()
@@ -541,6 +574,7 @@ def set_preset_pin(scope_key: str, file_name: str, pinned: bool, *, display_name
     return True
 
 
+@_with_preset_folder_state_lock
 def rename_preset_item_meta(scope_key: str, old_file_name: str, new_file_name: str) -> bool:
     old_key = str(old_file_name or "").strip()
     new_key = str(new_file_name or "").strip()
@@ -556,6 +590,7 @@ def rename_preset_item_meta(scope_key: str, old_file_name: str, new_file_name: s
     return True
 
 
+@_with_preset_folder_state_lock
 def copy_preset_item_meta(
     scope_key: str,
     source_file_name: str,
@@ -583,6 +618,7 @@ def copy_preset_item_meta(
     return True
 
 
+@_with_preset_folder_state_lock
 def delete_preset_item_meta(scope_key: str, file_name: str) -> bool:
     key = str(file_name or "").strip()
     if not key:

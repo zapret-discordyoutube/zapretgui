@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 from core.paths import AppPaths
+from utils.atomic_text import atomic_write_text, decode_preset_bytes, read_preset_file_text
 
 from .models import PresetManifest
 
@@ -26,20 +27,21 @@ def _sanitize_file_stem(value: str) -> str:
     return sanitized[:100] or "Preset"
 
 
-# utf-8-sig: метка BOM — часть кодировки файла, а не текста пресета.
+# Метка BOM — часть кодировки файла, а не текста пресета; старые файлы в
+# cp1251 читаются как cp1251 (см. utils.atomic_text.decode_preset_bytes).
 def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8-sig", errors="replace")
+    return read_preset_file_text(path)
 
 
 def _read_header_text(path: Path) -> str:
-    lines: list[str] = []
-    with path.open("r", encoding="utf-8-sig", errors="replace") as handle:
+    lines: list[bytes] = []
+    with path.open("rb") as handle:
         for raw in handle:
             stripped = raw.strip()
-            if stripped and not stripped.startswith("#"):
+            if stripped and not stripped.removeprefix(b"\xef\xbb\xbf").startswith(b"#"):
                 break
-            lines.append(raw.rstrip("\n"))
-    return "\n".join(lines)
+            lines.append(raw.rstrip(b"\r\n"))
+    return decode_preset_bytes(b"\n".join(lines))
 
 
 def _normalize_preset_file_name_candidate(value: str) -> str:
@@ -202,6 +204,15 @@ class PresetFileStore:
         )
         destination_path = engine_paths.user_presets_dir / destination_file_name
         if src_path.exists() and src_path != destination_path:
+            # Оба пути — своя операция: исчезновение старого файла не должно
+            # выглядеть для watcher-а активного пресета как внешняя правка.
+            try:
+                from .own_write_registry import mark_own_preset_write
+
+                mark_own_preset_write(str(src_path))
+                mark_own_preset_write(str(destination_path))
+            except Exception:
+                pass
             src_path.rename(destination_path)
 
         source_text = _read_text(destination_path) if destination_path.exists() else ""
@@ -377,7 +388,7 @@ class PresetFileStore:
             mark_own_preset_write(str(path))
         except Exception:
             pass
-        path.write_text(text, encoding="utf-8", newline="\n")
+        atomic_write_text(path, text)
 
     def _manifest_path(self, engine: str, manifest: PresetManifest) -> Path:
         engine_paths = self._engine_paths(engine)

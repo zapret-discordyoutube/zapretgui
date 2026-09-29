@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-from pathlib import Path
 import time
 from typing import Callable
 
@@ -15,6 +14,7 @@ from winws_runtime.health.process_health_check import (
 )
 from winws_runtime.runtime.sync_shutdown import shutdown_runtime_sync
 from winws_runtime.runtime.system_ops import force_kill_all_winws_processes
+from utils.atomic_text import read_preset_file_text
 
 
 STARTUP_AUTOSTART_STABLE_WINDOW_SECONDS = 0.35
@@ -170,7 +170,7 @@ class PresetLaunchService:
             from winws_runtime.runners.runner_factory import get_strategy_runner
 
             try:
-                preset_text = Path(preset_path).read_text(encoding="utf-8", errors="replace")
+                preset_text = read_preset_file_text(preset_path)
             except Exception as e:
                 self.last_error_message = f"Ошибка чтения preset: {e}"
                 self._progress(self.last_error_message)

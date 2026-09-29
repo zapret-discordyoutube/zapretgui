@@ -379,15 +379,18 @@ def with_profile_raw_text(preset: Preset, profile_index: int, raw_text: str) -> 
     if not text:
         raise ValueError("profile text must not be empty")
 
-    parsed = parse_preset_text(text, engine=updated.engine, source_name=updated.source_name)
-    if len(parsed.profiles) != 1:
+    # Текст разбирается как профиль после «--new», а не как отдельный пресет:
+    # иначе ведущие «# комментарии» уходили в шапку разобранного пресета и
+    # молча пропадали при сохранении.
+    parsed = parse_preset_text(f"--new\n{text}", engine=updated.engine, source_name=updated.source_name)
+    if len(parsed.profiles) != 1 or parsed.header_lines or parsed.preamble_lines:
         raise ValueError("profile text must contain exactly one profile")
 
     replacement = deepcopy(parsed.profiles[0])
-    current_new_line = str(updated.profiles[index].new_line or "")
     replacement.index = index
     replacement.engine = updated.engine
-    replacement.new_line = str(replacement.new_line or current_new_line)
+    # Граница профиля («--new» / «--new=Имя») не часть его текста — остаётся прежней.
+    replacement.new_line = str(updated.profiles[index].new_line or "")
     updated.profiles[index] = replacement
     _ensure_profile_boundaries(updated)
     return _reparse(updated)

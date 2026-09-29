@@ -48,6 +48,25 @@ class ProfileRawEditorTests(unittest.TestCase):
         self.assertIn("--hostlist=lists/discord.txt", text)
         self.assertNotIn("--hostlist=lists/youtube.txt", text)
 
+    def test_raw_profile_text_keeps_leading_comments(self) -> None:
+        preset = parse_preset_text(
+            "--filter-tcp=80\n--lua-desync=pass\n\n--new=YT\n\n# YouTube profile\n--filter-tcp=443\n--lua-desync=pass\n",
+            engine=ENGINE_WINWS2,
+            source_name="test.txt",
+        )
+
+        updated = with_profile_raw_text(
+            preset,
+            1,
+            "# YouTube profile\n--filter-tcp=443\n--lua-desync=fake\n",
+        )
+
+        text = serialize_preset(updated)
+        # Комментарий над профилем раньше уходил в шапку разобранного текста
+        # и молча пропадал.
+        self.assertIn("\n# YouTube profile\n--filter-tcp=443\n--lua-desync=fake", text)
+        self.assertIn("--filter-tcp=80\n--lua-desync=pass", text)
+
     def test_raw_profile_text_rejects_multiple_profiles(self) -> None:
         preset = parse_preset_text(
             "--filter-tcp=80,443\n--hostlist=lists/youtube.txt\n",

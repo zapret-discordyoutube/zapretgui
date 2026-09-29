@@ -142,6 +142,14 @@ class DebugLogPathRelocationTests(unittest.TestCase):
         self.assertIn("--debug=@user/logs/Default_v1_game_filter_debug.log", result)
         self.assertNotIn("--debug=@logs/", result)
 
+    def test_legacy_debug_line_with_windows_backslash_is_relocated(self) -> None:
+        from presets.preset_contract import normalize_preset_source_for_save
+
+        legacy = VALID_PRESET_TEXT + "--debug=@logs\\Default_debug.log\n"
+        result = normalize_preset_source_for_save(legacy, "winws2")
+        self.assertIn("--debug=@user/logs/Default_debug.log", result)
+        self.assertNotIn("--debug=@logs", result)
+
     def test_absolute_debug_path_is_left_untouched(self) -> None:
         from presets.preset_contract import normalize_preset_source_for_save
 

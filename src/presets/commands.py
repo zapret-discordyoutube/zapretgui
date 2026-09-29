@@ -9,6 +9,7 @@ import sys
 from presets.file_service import PresetFileService
 from presets.state import PresetSelectionState
 from settings.mode import engine_for_launch_method, normalize_launch_method
+from utils.atomic_text import read_preset_file_text
 
 
 def _create_preset_file_service(launch_method: str, *, preset_services) -> PresetFileService:
@@ -204,8 +205,7 @@ def read_raw_preset_text(path: str | Path | None) -> tuple[str, bool]:
     source_path = Path(path)
     if not source_path.exists():
         return "", False
-    # utf-8-sig: метка BOM — часть кодировки файла, а не текста пресета.
-    return source_path.read_text(encoding="utf-8-sig", errors="replace"), True
+    return read_preset_file_text(source_path), True
 
 
 def save_preset_source_by_file_name(

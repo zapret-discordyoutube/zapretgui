@@ -197,13 +197,74 @@ class PresetSubpageUiGuardTests(unittest.TestCase):
         )
         page._raw_load_runtime.cancel.assert_called_once_with()
 
+        # Запись дожидаемся: поздний save-worker не должен перезаписать файл
+        # поверх синхронной записи при закрытии.
+        page._raw_save_runtime.stop.assert_called_once_with(
+            blocking=True,
+            warning_prefix="raw preset save worker",
+        )
+        page._raw_save_runtime.cancel.assert_called_once_with()
+
         for runtime, prefix in (
-            (page._raw_save_runtime, "raw preset save worker"),
             (page._raw_activate_runtime, "raw preset activate worker"),
             (page._raw_action_runtime, "raw preset action worker"),
         ):
             runtime.stop.assert_called_once_with(blocking=False, warning_prefix=prefix)
             runtime.cancel.assert_called_once_with()
+
+    def _make_closing_raw_editor_page(self, *, publish_pending: bool, events: list):
+        from presets.ui.common.preset_subpage_base import PresetRawEditorPage
+
+        page = PresetRawEditorPage.__new__(PresetRawEditorPage)
+        page._preset_path = "presets/winws2/My.txt"
+        page._preset_file_name = "My.txt"
+        page._raw_text_editor = SimpleNamespace(
+            content_publish_pending=publish_pending,
+            current_text=lambda: "--filter-tcp=443\n--lua-desync=fake\n",
+            cleanup=Mock(),
+        )
+        for attr in ("_raw_load_runtime", "_raw_save_runtime", "_raw_activate_runtime", "_raw_action_runtime"):
+            runtime = SimpleNamespace(
+                stop=Mock(side_effect=lambda *, blocking, warning_prefix: events.append(("stop", warning_prefix))),
+                cancel=Mock(),
+                is_running=lambda: False,
+            )
+            setattr(page, attr, runtime)
+        page._save_timer = Mock()
+        page._commit_timer = Mock()
+        page._app_event_filter_installed = False
+        page._ui_state_unsubscribe = None
+        page._save_raw_preset_on_close_fn = lambda file_name, text: events.append(("save", file_name, text))
+        return page
+
+    def test_raw_preset_cleanup_writes_unsaved_editor_text_synchronously(self) -> None:
+        from presets.ui.common.preset_subpage_base import PresetRawEditorPage
+
+        events: list = []
+        page = self._make_closing_raw_editor_page(publish_pending=True, events=events)
+
+        PresetRawEditorPage.cleanup(page)
+
+        # Правка, набранная меньше чем за секунду до закрытия, раньше уходила
+        # в асинхронную очередь, которую cleanup тут же сбрасывал.
+        self.assertIn(("save", "My.txt", "--filter-tcp=443\n--lua-desync=fake\n"), events)
+        # Сначала дожидаемся идущей записи, потом пишем свежий текст.
+        self.assertLess(
+            events.index(("stop", "raw preset save worker")),
+            events.index(("save", "My.txt", "--filter-tcp=443\n--lua-desync=fake\n")),
+        )
+
+    def test_raw_preset_cleanup_does_not_touch_file_without_local_edits(self) -> None:
+        from presets.ui.common.preset_subpage_base import PresetRawEditorPage
+
+        events: list = []
+        page = self._make_closing_raw_editor_page(publish_pending=False, events=events)
+
+        PresetRawEditorPage.cleanup(page)
+
+        # Без своих правок редактор может держать устаревший текст — писать
+        # его значило бы затереть правку, сделанную снаружи.
+        self.assertFalse([event for event in events if event[0] == "save"])
 
     def test_raw_preset_load_skips_duplicate_plain_text_update(self) -> None:
         from presets.ui.common.preset_subpage_base import PresetRawEditorPage

@@ -262,6 +262,13 @@ def build_preset_raw_editor_page_kwargs(
         "create_raw_preset_save_worker": presets_feature.create_raw_preset_save_worker,
         "create_raw_preset_activate_worker": presets_feature.create_raw_preset_activate_worker,
         "create_raw_preset_action_worker": presets_feature.create_raw_preset_action_worker,
+        "save_raw_preset_on_close": lambda file_name, text, m=method: presets_feature.save_preset_source_by_file_name(
+            m,
+            file_name,
+            text,
+            publish_content_changed=False,
+            content_change_kind="editor_save",
+        ),
         "launch_method": method,
         "title": "Пресет Zapret 2" if method == ZAPRET2_MODE else "Пресет Zapret 1",
         "runtime_actions": RawPresetRuntimeActions(

@@ -17,6 +17,7 @@ from presets.portable_archive import (
     export_preset_with_lists,
     import_portable_preset,
 )
+from utils.atomic_text import read_preset_file_text
 
 
 def _read_standard_builtin_preset(backend) -> str:
@@ -28,7 +29,7 @@ def _read_standard_builtin_preset(backend) -> str:
     source_path = engine_paths.builtin_presets_dir / file_name
     if not source_path.is_file():
         raise ValueError(f"Default built-in preset not found: {source_path}")
-    return source_path.read_text(encoding="utf-8", errors="replace")
+    return read_preset_file_text(source_path)
 
 
 def _remove_active_remote_binding_after_reset(backend, file_name: str) -> None:
@@ -151,8 +152,7 @@ def import_from_file(backend, src_path: Path, name: str | None = None):
     preset_name = str(name or src.stem or "Imported").strip() or "Imported"
     if src.suffix.lower() == ".zip":
         return import_portable_preset(backend, src, name=preset_name)
-    # utf-8-sig: метка BOM — часть кодировки файла, а не текста пресета.
-    source_text = src.read_text(encoding="utf-8-sig", errors="replace")
+    source_text = read_preset_file_text(src)
     validation_error = validate_preset_source_text(source_text, engine=backend.engine)
     if validation_error:
         raise ValueError(f"Файл не похож на пресет: {validation_error}")
