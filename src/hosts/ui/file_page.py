@@ -94,6 +94,7 @@ class HostsFilePage(BasePage):
         self._saving = False
         self._load_runtime = OneShotWorkerRuntime()
         self._save_runtime = OneShotWorkerRuntime()
+        self._notepad_runtime = OneShotWorkerRuntime()
         # Счётчики строк по владельцам — по тексту файла (загруженному или
         # сохранённому), а не на каждое нажатие: hosts бывает огромным.
         self._legend_counts: dict[str, int] = {}
@@ -144,6 +145,9 @@ class HostsFilePage(BasePage):
             self.legend[kind] = chip
             top_layout.addWidget(chip)
         top_layout.addStretch(1)
+        self.notepad_button = PushButton(FluentIcon.EDIT, "", top_row)
+        self.notepad_button.clicked.connect(self._open_in_notepad)
+        top_layout.addWidget(self.notepad_button)
         self.revert_button = PushButton(FluentIcon.CANCEL, "", top_row)
         self.revert_button.clicked.connect(self._revert)
         top_layout.addWidget(self.revert_button)
@@ -166,6 +170,8 @@ class HostsFilePage(BasePage):
         # Признак правок — флаг документа «изменён»: весь текст не читаем.
         self.editor.document().modificationChanged.connect(lambda _modified: self._render_buttons())
         self.find_controller = FindController(self.editor, self.find_bar, parent=self)
+        # Панель поиска появляется по Ctrl+F и прячется по Esc.
+        self.find_bar.hide()
         self.add_widget(self.editor, 1)
 
         self.path_label = CaptionLabel(self.content)
@@ -182,6 +188,8 @@ class HostsFilePage(BasePage):
             set_breadcrumb_accessibility(self.breadcrumb, items)
         finally:
             self.breadcrumb.blockSignals(False)
+        self.notepad_button.setText(tr("page.hosts_file.notepad", "Открыть в Блокноте"))
+        set_control_accessibility(self.notepad_button, name=tr("page.hosts_file.notepad", "Открыть в Блокноте"))
         self.save_button.setText(tr("page.hosts_file.save", "Сохранить"))
         self.revert_button.setText(tr("page.hosts_file.revert", "Отменить правки"))
         set_control_accessibility(self.save_button, name=tr("page.hosts_file.save", "Сохранить"))
@@ -232,7 +240,7 @@ class HostsFilePage(BasePage):
 
     def cleanup(self) -> None:
         self._cleanup_in_progress = True
-        for runtime in (self._load_runtime, self._save_runtime):
+        for runtime in (self._load_runtime, self._save_runtime, self._notepad_runtime):
             try:
                 runtime.stop(blocking=False, warning_prefix="Hosts file worker")
                 runtime.cancel()
@@ -344,6 +352,27 @@ class HostsFilePage(BasePage):
         InfoBar.error(
             title=self._tr("page.hosts_file.save_failed", "Не удалось сохранить hosts"),
             content=str(error or ""),
+            duration=8000,
+            parent=self.window(),
+        )
+
+    def _open_in_notepad(self) -> None:
+        if self._notepad_runtime.is_running():
+            return
+        self._notepad_runtime.start_qthread_worker(
+            worker_factory=lambda request_id: self._hosts.create_open_hosts_file_worker(request_id, self),
+            on_loaded=self._on_notepad_finished,
+            on_failed=lambda request_id, error: self._on_notepad_finished(request_id, None, error),
+        )
+
+    def _on_notepad_finished(self, request_id: int, result, error: str = "") -> None:
+        if not self._notepad_runtime.is_current(request_id, cleanup_in_progress=self._cleanup_in_progress):
+            return
+        if result is not None and getattr(result, "success", False):
+            return
+        InfoBar.error(
+            title=self._tr("page.hosts_file.notepad_failed", "Не удалось открыть Блокнот"),
+            content=error or str(getattr(result, "message", "") or ""),
             duration=8000,
             parent=self.window(),
         )

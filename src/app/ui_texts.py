@@ -1366,16 +1366,52 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Writes winws logs to the logs folder",
     },
     "page.hosts.subtitle": {
-        "ru": "Прописывает адреса сервисов в системный файл hosts. Файл меняется, только когда вы нажмёте «Применить».",
-        "en": "Writes service addresses to the system hosts file. The file changes only when you press “Apply”.",
+        "ru": "Щёлкните по плитке — адреса сервиса сразу запишутся в системный файл hosts.",
+        "en": "Click a tile — the service addresses are written to the system hosts file right away.",
+    },
+    "page.hosts.summary.writing": {
+        "ru": "записываю…",
+        "en": "writing…",
+    },
+    "page.hosts.summary.written": {
+        "ru": "записано — перезапустите браузер, чтобы изменения заработали",
+        "en": "written — restart the browser for the changes to take effect",
+    },
+    "page.hosts.button.file": {
+        "ru": "Файл hosts",
+        "en": "Hosts file",
+    },
+    "page.hosts.button.file.description": {
+        "ru": "Весь файл hosts с раскраской строк по владельцам.",
+        "en": "The whole hosts file with lines colored by owner.",
+    },
+    "page.hosts.dns_all.button": {
+        "ru": "DNS для всех",
+        "en": "DNS for all",
+    },
+    "page.hosts.adobe.title": {
+        "ru": "Блокировать активацию Adobe",
+        "en": "Block Adobe activation",
+    },
+    "page.hosts.group.blocks": {
+        "ru": "Блокировки",
+        "en": "Blocking",
+    },
+    "page.hosts_file.notepad": {
+        "ru": "Открыть в Блокноте",
+        "en": "Open in Notepad",
+    },
+    "page.hosts_file.notepad_failed": {
+        "ru": "Не удалось открыть Блокнот",
+        "en": "Could not open Notepad",
     },
     "page.hosts.loading": {
         "ru": "Загрузка…",
         "en": "Loading…",
     },
     "page.hosts.summary.on": {
-        "ru": "Сейчас в hosts от ZapretGUI строк: {lines}, включено сервисов: {services}",
-        "en": "ZapretGUI lines in hosts now: {lines}, services on: {services}",
+        "ru": "В hosts включено сервисов: {services} · строк от ZapretGUI: {lines}",
+        "en": "Services on in hosts: {services} · ZapretGUI lines: {lines}",
     },
     "page.hosts.summary.off": {
         "ru": "Сейчас ZapretGUI ничего не прописывает в hosts",
@@ -1390,36 +1426,16 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Remove protection and restore access",
     },
     "page.hosts.notice.read_only": {
-        "ru": "Файл hosts защищён от записи (стоит «только чтение»). Программа сама защиту не снимает — снимите её в меню «☰», если хотите менять файл.",
-        "en": "The hosts file is write-protected (read-only). The app never removes the protection by itself — remove it from the “☰” menu if you want to change the file.",
+        "ru": "Файл hosts защищён от записи (стоит «только чтение»). Программа сама защиту не снимает — нажмите кнопку справа, если хотите менять файл.",
+        "en": "The hosts file is write-protected (read-only). The app never removes the protection by itself — press the button on the right if you want to change the file.",
     },
     "page.hosts.notice.no_access": {
-        "ru": "Нет доступа к файлу hosts. Часто его блокирует антивирус. Вернуть стандартные права Windows можно в меню «☰».",
-        "en": "No access to the hosts file. Antivirus software often locks it. The “☰” menu restores the standard Windows permissions.",
+        "ru": "Нет доступа к файлу hosts. Часто его блокирует антивирус. Кнопка справа вернёт стандартные права Windows.",
+        "en": "No access to the hosts file. Antivirus software often locks it. The button on the right restores the standard Windows permissions.",
     },
     "page.hosts.search.placeholder": {
         "ru": "Найти сервис",
         "en": "Find a service",
-    },
-    "page.hosts.menu.name": {
-        "ru": "Меню страницы Hosts",
-        "en": "Hosts page menu",
-    },
-    "page.hosts.menu.description": {
-        "ru": "Весь файл hosts, Блокнот, блокировка Adobe и восстановление прав на файл.",
-        "en": "The whole hosts file, Notepad, Adobe blocking and restoring file permissions.",
-    },
-    "page.hosts.menu.file": {
-        "ru": "Весь файл hosts",
-        "en": "Whole hosts file",
-    },
-    "page.hosts.menu.notepad": {
-        "ru": "Открыть в Блокноте",
-        "en": "Open in Notepad",
-    },
-    "page.hosts.menu.adobe": {
-        "ru": "Блокировать активацию Adobe",
-        "en": "Block Adobe activation",
     },
     "page.hosts_file.title": {
         "ru": "Файл hosts",
@@ -1438,8 +1454,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Discard edits",
     },
     "page.hosts_file.hint": {
-        "ru": "Строки раскрашены по владельцу. Блок ZapretGUI можно править, но при следующем «Применить» на странице Hosts он перепишется по переключателям. Ctrl+F — поиск.",
-        "en": "Lines are colored by owner. You can edit the ZapretGUI block, but the next “Apply” on the Hosts page rewrites it from the switches. Ctrl+F — search.",
+        "ru": "Строки раскрашены по владельцу. Блок ZapretGUI можно править, но при следующем переключении сервиса на странице Hosts он перепишется. Ctrl+F — поиск.",
+        "en": "Lines are colored by owner. You can edit the ZapretGUI block, but the next service switch on the Hosts page rewrites it. Ctrl+F — search.",
     },
     "page.hosts_file.editor": {
         "ru": "Текст файла hosts",
@@ -1462,20 +1478,20 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Restart the browser for the changes to take effect.",
     },
     "page.hosts_file.saved.managed": {
-        "ru": "Вы поменяли блок ZapretGUI вручную: при следующем «Применить» на странице Hosts он перепишется.",
-        "en": "You changed the ZapretGUI block by hand: the next “Apply” on the Hosts page will rewrite it.",
+        "ru": "Вы поменяли блок ZapretGUI вручную: при следующем переключении сервиса на странице Hosts он перепишется.",
+        "en": "You changed the ZapretGUI block by hand: the next service switch on the Hosts page will rewrite it.",
     },
     "page.hosts_file.save_failed": {
         "ru": "Не удалось сохранить hosts",
         "en": "Could not save hosts",
     },
     "page.hosts_file.notice.no_access": {
-        "ru": "Нет доступа к файлу hosts. Часто его блокирует антивирус. Восстановить права можно в меню страницы Hosts.",
-        "en": "No access to the hosts file. Antivirus software often locks it. Permissions can be restored from the Hosts page menu.",
+        "ru": "Нет доступа к файлу hosts. Часто его блокирует антивирус. Восстановить права можно кнопкой на странице Hosts.",
+        "en": "No access to the hosts file. Antivirus software often locks it. Permissions can be restored with the button on the Hosts page.",
     },
     "page.hosts_file.notice.read_only": {
-        "ru": "Файл защищён от записи (стоит «только чтение»). Сохранить не получится, пока защита стоит — снять её можно в меню страницы Hosts.",
-        "en": "The file is write-protected (read-only). Saving is impossible while protection is on — remove it from the Hosts page menu.",
+        "ru": "Файл защищён от записи (стоит «только чтение»). Сохранить не получится, пока защита стоит — снять её можно кнопкой на странице Hosts.",
+        "en": "The file is write-protected (read-only). Saving is impossible while protection is on — remove it with the button on the Hosts page.",
     },
     "page.hosts_file.owner.zapretgui": {
         "ru": "ZapretGUI",
@@ -1501,41 +1517,9 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Ваши строки",
         "en": "Your lines",
     },
-    "page.hosts.filter.name": {
-        "ru": "Какие сервисы показать",
-        "en": "Which services to show",
-    },
-    "page.hosts.filter.all": {
-        "ru": "Все",
-        "en": "All",
-    },
-    "page.hosts.filter.on": {
-        "ru": "Включённые",
-        "en": "Enabled",
-    },
-    "page.hosts.filter.direct": {
-        "ru": "Напрямую",
-        "en": "Direct",
-    },
-    "page.hosts.filter.ai": {
-        "ru": "ИИ",
-        "en": "AI",
-    },
-    "page.hosts.filter.other": {
-        "ru": "Остальные",
-        "en": "Other",
-    },
-    "page.hosts.dns_all.label": {
-        "ru": "DNS для всех сервисов:",
-        "en": "DNS for all services:",
-    },
     "page.hosts.dns_all.hint": {
         "ru": "Ставит выбранный профиль всем сервисам с DNS-профилем. Потом любой можно поменять отдельно.",
         "en": "Sets the chosen profile for every DNS service. You can still change any of them separately.",
-    },
-    "page.hosts.dns_all.mixed": {
-        "ru": "Разные",
-        "en": "Mixed",
     },
     "page.hosts.dns_all.skipped.title": {
         "ru": "Не у всех сервисов есть этот профиль",
@@ -1578,68 +1562,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "off",
     },
     "page.hosts.state.changed": {
-        "ru": "изменено, ещё не записано",
-        "en": "changed, not written yet",
-    },
-    "page.hosts.draft.summary": {
-        "ru": "Не записано: сервисов {services}, строк +{added} / −{removed}",
-        "en": "Not written yet: {services} services, lines +{added} / −{removed}",
-    },
-    "page.hosts.draft.stale": {
-        "ru": "лишних строк в блоке ZapretGUI: {count} — уберутся при записи",
-        "en": "extra lines in the ZapretGUI block: {count} — will be removed on apply",
-    },
-    "page.hosts.draft.adobe_on": {
-        "ru": "Adobe будет заблокирован",
-        "en": "Adobe will be blocked",
-    },
-    "page.hosts.draft.adobe_off": {
-        "ru": "блокировка Adobe будет снята",
-        "en": "the Adobe block will be removed",
-    },
-    "page.hosts.draft.show_lines": {
-        "ru": "Показать строки",
-        "en": "Show lines",
-    },
-    "page.hosts.draft.hide_lines": {
-        "ru": "Скрыть строки",
-        "en": "Hide lines",
-    },
-    "page.hosts.draft.cancel": {
-        "ru": "Отменить",
-        "en": "Cancel",
-    },
-    "page.hosts.draft.apply": {
-        "ru": "Применить",
-        "en": "Apply",
-    },
-    "page.hosts.draft.applying": {
-        "ru": "Записываю…",
-        "en": "Writing…",
-    },
-    "page.hosts.preview.added": {
-        "ru": "Добавятся в блок ZapretGUI:",
-        "en": "Will be added to the ZapretGUI block:",
-    },
-    "page.hosts.preview.removed": {
-        "ru": "Удалятся из блока ZapretGUI:",
-        "en": "Will be removed from the ZapretGUI block:",
-    },
-    "page.hosts.preview.shadowed": {
-        "ru": "Ваши строки с теми же доменами останутся, но Windows возьмёт адрес из блока ZapretGUI — он выше:",
-        "en": "Your lines with the same domains stay, but Windows will use the ZapretGUI block because it comes first:",
-    },
-    "page.hosts.preview.nothing": {
-        "ru": "Строки блока ZapretGUI не меняются.",
-        "en": "The ZapretGUI block lines do not change.",
-    },
-    "page.hosts.applied.title": {
-        "ru": "Записано в hosts",
-        "en": "Written to hosts",
-    },
-    "page.hosts.applied.content": {
-        "ru": "Перезапустите браузер, чтобы изменения заработали.",
-        "en": "Restart your browser for the changes to take effect.",
+        "ru": "записывается",
+        "en": "being written",
     },
     "page.hosts.apply_failed.title": {
         "ru": "Не удалось записать hosts",
@@ -1649,17 +1573,13 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Не удалось прочитать hosts",
         "en": "Could not read hosts",
     },
-    "page.hosts.open.error.title": {
-        "ru": "Не удалось открыть hosts",
-        "en": "Could not open hosts",
-    },
     "page.hosts.permissions.restored.title": {
         "ru": "Права восстановлены",
         "en": "Access restored",
     },
     "page.hosts.permissions.restored.content": {
-        "ru": "Теперь можно нажать «Применить».",
-        "en": "You can press “Apply” now.",
+        "ru": "Теперь сервисы снова можно включать.",
+        "en": "Services can be switched on again.",
     },
     "page.hosts.permissions.failed.title": {
         "ru": "Не удалось восстановить права",

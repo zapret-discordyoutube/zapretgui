@@ -9,9 +9,10 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import QApplication
 
-from hosts.draft import HostsDraft, build_block_rows
+from hosts.draft import HostsDraft
 from hosts.hosts_blocks import (
     BLOCK_ADOBE,
     BLOCK_MAX,
@@ -106,11 +107,12 @@ def _snapshot(hosts_text: str, *, saved: dict[str, str] | None = None, ipv6: boo
 
 
 def _written_block(selection: dict[str, str], *, ipv6: bool = True) -> str:
-    rows = build_block_rows(
-        selection,
-        {key: tuple(value) for key, value in _ROWS.items()},
-        ipv6_available=ipv6,
-    )
+    """Блок ровно так, как его пишет HostsManager для этого выбора."""
+    from hosts import hosts as hosts_module
+
+    with patch.object(hosts_module, "get_service_domain_ip_rows", side_effect=lambda s, p: list(_ROWS[(s, p)])):
+        rows, _requested = hosts_module._build_service_selection_rows(selection)
+    rows, _had = hosts_module._filter_desired_hosts_rows(rows, allow_ipv6=ipv6)
     return _managed(*(f"{ip} {domain}" for domain, ip in rows))
 
 
@@ -190,22 +192,6 @@ class HostsLineClassifierTests(unittest.TestCase):
         )
 
 
-class HostsBlockRowsTests(unittest.TestCase):
-    def test_draft_builds_the_same_rows_as_hosts_manager(self) -> None:
-        from hosts import hosts as hosts_module
-
-        selection = {"Alpha": "p2", "Beta": "p1", "Direct": "hosts"}
-        with patch.object(hosts_module, "get_service_domain_ip_rows", side_effect=lambda s, p: list(_ROWS[(s, p)])):
-            manager_rows, _requested = hosts_module._build_service_selection_rows(selection)
-
-        draft_rows = build_block_rows(
-            selection,
-            {key: tuple(value) for key, value in _ROWS.items()},
-            ipv6_available=True,
-        )
-        self.assertEqual(draft_rows, manager_rows)
-
-
 class HostsPageSnapshotTests(unittest.TestCase):
     def test_every_written_selection_is_read_back_the_same(self) -> None:
         for selection in (
@@ -279,20 +265,21 @@ class HostsDraftTests(unittest.TestCase):
     def test_clicks_change_only_the_draft_until_values_match_again(self) -> None:
         draft = HostsDraft(_manual_snapshot())
 
-        self.assertFalse(draft.is_dirty())
+        self.assertFalse(draft.has_user_changes())
         self.assertTrue(draft.set("Alpha", "p1"))
-        self.assertTrue(draft.is_dirty())
-        self.assertEqual(draft.changed_services(), ["Alpha"])
-        self.assertEqual(draft.preview().added, ("1.1.1.1 alpha.example",))
+        self.assertTrue(draft.has_user_changes())
+        self.assertTrue(draft.is_changed("Alpha"))
+        self.assertTrue(draft.has_user_changes())
+        self.assertEqual(draft.selection(), {"Alpha": "p1"})
 
         self.assertTrue(draft.set("Alpha", None))
-        self.assertFalse(draft.is_dirty())
+        self.assertFalse(draft.has_user_changes())
 
     def test_unknown_profile_is_refused(self) -> None:
         draft = HostsDraft(_manual_snapshot())
 
         self.assertFalse(draft.set("Beta", "p2"))
-        self.assertFalse(draft.is_dirty())
+        self.assertFalse(draft.has_user_changes())
 
     def test_dns_for_all_skips_services_without_that_profile(self) -> None:
         draft = HostsDraft(_manual_snapshot())
@@ -303,22 +290,6 @@ class HostsDraftTests(unittest.TestCase):
         self.assertEqual(draft.value("Direct"), None)
         self.assertEqual(draft.selection(), {"Alpha": "p2"})
 
-    def test_preview_lists_removed_lines_and_user_lines_with_same_domain(self) -> None:
-        snapshot = _manual_snapshot(
-            block_lines=("3.3.3.3 beta.example",),
-            user_lines=("9.9.9.9 alpha.example",),
-            beta="p1",
-        )
-        draft = HostsDraft(snapshot)
-        draft.set("Beta", None)
-        draft.set("Alpha", "p1")
-
-        preview = draft.preview()
-
-        self.assertEqual(preview.added, ("1.1.1.1 alpha.example",))
-        self.assertEqual(preview.removed, ("3.3.3.3 beta.example",))
-        self.assertEqual(preview.shadowed, ("9.9.9.9 alpha.example",))
-
     def test_rebase_keeps_only_changes_not_yet_written(self) -> None:
         draft = HostsDraft(_manual_snapshot())
         draft.set("Alpha", "p1")
@@ -326,7 +297,8 @@ class HostsDraftTests(unittest.TestCase):
 
         draft.rebase(_manual_snapshot(block_lines=("1.1.1.1 alpha.example",), alpha="p1"))
 
-        self.assertEqual(draft.changed_services(), ["Beta"])
+        self.assertFalse(draft.is_changed("Alpha"))
+        self.assertTrue(draft.is_changed("Beta"))
 
     def test_adobe_toggle_is_part_of_the_draft(self) -> None:
         draft = HostsDraft(_manual_snapshot())
@@ -334,32 +306,8 @@ class HostsDraftTests(unittest.TestCase):
         self.assertTrue(draft.set_adobe(True))
         self.assertTrue(draft.adobe_changed)
         self.assertTrue(draft.set_adobe(False))
-        self.assertFalse(draft.is_dirty())
-
-    def test_lines_of_no_selected_service_make_the_draft_dirty(self) -> None:
-        # Строка сервиса, которого нет в каталоге, и выбранный Beta.
-        snapshot = _manual_snapshot(
-            block_lines=("3.3.3.3 beta.example", "5.5.5.5 gone.example"),
-            beta="p1",
-        )
-        draft = HostsDraft(snapshot)
-
-        self.assertEqual(draft.stale_lines, ("5.5.5.5 gone.example",))
-        self.assertTrue(draft.is_dirty())
         self.assertFalse(draft.has_user_changes())
-        self.assertEqual(draft.preview().removed, ("5.5.5.5 gone.example",))
 
-        draft.reset()
-        self.assertTrue(draft.is_dirty(), "лишние строки остаются до записи")
-
-    def test_ipv6_lines_are_not_stale_while_ipv6_is_down(self) -> None:
-        snapshot = _manual_snapshot(
-            block_lines=("4.4.4.4 direct.example", "2a00::4 direct.example"),
-            direct="hosts",
-            ipv6_available=False,
-        )
-
-        self.assertEqual(HostsDraft(snapshot).stale_lines, ())
 
 
 class HostsPageTests(unittest.TestCase):
@@ -373,78 +321,160 @@ class HostsPageTests(unittest.TestCase):
         feature = SimpleNamespace(
             peek_page_snapshot=lambda: snapshot,
             create_snapshot_worker=lambda request_id, parent=None: None,
+            create_apply_worker=lambda request_id, selection, adobe, parent=None: None,
         )
         self.opened_file_page: list[bool] = []
         page = HostsPage(
             deps=SimpleNamespace(hosts_feature=feature, open_file_page=lambda: self.opened_file_page.append(True))
         )
         self.addCleanup(page.deleteLater)
+        # Запись не запускаем по-настоящему: запоминаем, что ушло бы в файл.
+        self.writes: list[dict] = []
+        self.write_callbacks: list[dict] = []
+
+        def _start(**kwargs):
+            self.write_callbacks.append(kwargs)
+            worker_factory = kwargs["worker_factory"]
+            captured = {}
+            page._hosts.create_apply_worker = lambda request_id, selection, adobe, parent=None: captured.update(
+                selection=dict(selection), adobe=adobe
+            )
+            worker_factory(len(self.write_callbacks))
+            self.writes.append(captured)
+            return True
+
+        patcher = patch.object(page._apply_runtime, "start_qthread_worker", side_effect=_start)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        reread = patch.object(page, "_request_snapshot")
+        reread.start()
+        self.addCleanup(reread.stop)
+        current = patch.object(page._apply_runtime, "is_current", return_value=True)
+        current.start()
+        self.addCleanup(current.stop)
         page._set_snapshot(snapshot)
-        page.resize(900, 700)
+        page.resize(1000, 700)
         page.show()
         QApplication.processEvents()
         return page
 
-    def test_toggle_shows_draft_bar_and_cancel_hides_it(self) -> None:
+    def _finish_write(self, page, *, success: bool = True, snapshot=None, message: str = "") -> None:
+        callback = self.write_callbacks[-1]["on_loaded"]
+        callback(len(self.write_callbacks), SimpleNamespace(success=success, snapshot=snapshot, message=message))
+
+    def test_click_on_tile_writes_hosts_right_away(self) -> None:
         page = self._page(_manual_snapshot())
 
-        self.assertFalse(page.draft_bar.isVisible())
-        page._on_service_activated("Direct", page.mapToGlobal(page.rect().center()))
+        page._on_tile_activated("Direct", page.mapToGlobal(page.rect().center()))
 
-        self.assertTrue(page.draft_bar.isVisible())
-        self.assertTrue(page.draft_bar.cancel_button.isEnabled())
-        page._reset_draft()
-        self.assertFalse(page.draft_bar.isVisible())
+        self.assertEqual(self.writes, [{"selection": {"Direct": "hosts"}, "adobe": None}])
+        self.assertTrue(page._applying)
+        self._finish_write(page, snapshot=_manual_snapshot(block_lines=("4.4.4.4 direct.example",), direct="hosts"))
+        self.assertFalse(page._applying)
+        self.assertFalse(page._draft.has_user_changes())
+        self.assertTrue(page.tiles.tiles()[1].is_on)
 
-    def test_extra_lines_offer_apply_without_cancel(self) -> None:
+    def test_clicks_during_write_are_written_next_in_one_go(self) -> None:
+        page = self._page(_manual_snapshot())
+
+        page._on_tile_activated("Direct", QPoint())
+        page._set_service_profile("Alpha", "p1")
+        page._set_service_profile("Beta", "p1")
+
+        self.assertEqual(len(self.writes), 1)
+        self._finish_write(page, snapshot=_manual_snapshot(block_lines=("4.4.4.4 direct.example",), direct="hosts"))
+        self.assertEqual(len(self.writes), 2)
+        self.assertEqual(self.writes[1]["selection"], {"Direct": "hosts", "Alpha": "p1", "Beta": "p1"})
+
+    def test_failed_write_returns_tiles_to_file_state(self) -> None:
+        page = self._page(_manual_snapshot())
+        page._on_tile_activated("Direct", QPoint())
+
+        with patch("hosts.ui.page.InfoBar") as info_bar:
+            self._finish_write(page, success=False, message="только чтение")
+
+        info_bar.error.assert_called_once()
+        self.assertFalse(page._draft.has_user_changes())
+        self.assertFalse(page._draft.value("Direct"))
+
+    def test_turn_all_off_removes_extra_block_lines_too(self) -> None:
         page = self._page(_manual_snapshot(block_lines=("5.5.5.5 gone.example",)))
 
-        self.assertTrue(page.draft_bar.isVisible())
-        self.assertFalse(page.draft_bar.cancel_button.isEnabled())
-        self.assertIn("1", page.draft_bar.summary_label.text())
+        page._turn_all_off()
 
-    def test_snapshot_read_before_apply_does_not_replace_fresh_result(self) -> None:
+        self.assertEqual(self.writes, [{"selection": {}, "adobe": None}])
+
+    def test_adobe_tile_writes_the_block(self) -> None:
+        from hosts.ui.page import ADOBE_TILE_KEY
+
+        page = self._page(_manual_snapshot())
+
+        page._on_tile_activated(ADOBE_TILE_KEY, QPoint())
+
+        self.assertEqual(self.writes[0]["adobe"], True)
+
+    def test_search_opens_with_ctrl_f_and_hides_with_escape(self) -> None:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+
+        page = self._page(_manual_snapshot())
+        self.assertFalse(page.search_edit.isVisible())
+
+        page.tiles.setFocus()
+        QTest.keyClick(page.tiles, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
+        self.assertTrue(page.search_edit.isVisible())
+
+        page.search_edit.setText("alp")
+        self.assertEqual([tile.key for tile in page.tiles.tiles() if tile.kind == "tile"], ["Alpha"])
+        QTest.keyClick(page.search_edit, Qt.Key.Key_Escape)
+        self.assertFalse(page.search_edit.isVisible())
+        self.assertIn("Beta", [tile.key for tile in page.tiles.tiles()])
+
+    def test_profile_menu_closes_when_tiles_scroll(self) -> None:
+        page = self._page(_manual_snapshot())
+        menu = SimpleNamespace(closed=False)
+        menu.close = lambda: setattr(menu, "closed", True)
+        page._profile_menu = menu
+
+        page._on_tiles_scrolled(10)
+
+        self.assertTrue(menu.closed)
+        self.assertIsNone(page._profile_menu)
+
+    def test_summary_collapses_when_tiles_are_scrolled_down(self) -> None:
+        page = self._page(_manual_snapshot())
+        with patch("hosts.ui.page.are_live_animations_enabled", return_value=False):
+            page._on_tiles_scrolled(200)
+            self.assertFalse(page.top_panel.isVisible())
+            page._on_tiles_scrolled(0)
+            self.assertTrue(page.top_panel.isVisible())
+
+    def test_only_the_tiles_scroll(self) -> None:
+        from PyQt6.QtCore import Qt
+
+        page = self._page(_manual_snapshot())
+
+        self.assertEqual(page.verticalScrollBarPolicy(), Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.assertIs(page.services_scroll.widget(), page.tiles)
+
+    def test_file_button_opens_file_page(self) -> None:
+        page = self._page(_manual_snapshot())
+
+        page.file_button.click()
+
+        self.assertEqual(self.opened_file_page, [True])
+
+    def test_snapshot_read_before_write_does_not_replace_fresh_result(self) -> None:
         page = self._page(_manual_snapshot())
         fresh = page._snapshot
         page._snapshot_epoch = page._write_epoch
-        page._write_epoch += 1  # «Применить» записал файл, пока шло чтение.
+        page._write_epoch += 1  # запись прошла, пока шло чтение.
 
         with patch.object(page._snapshot_runtime, "is_current", return_value=True):
             page._on_snapshot_loaded(1, _manual_snapshot(block_lines=("3.3.3.3 beta.example",), beta="p1"))
 
         self.assertIs(page._snapshot, fresh)
         self.assertTrue(page._snapshot_pending)
-
-    def test_filter_bar_is_named_for_screen_reader(self) -> None:
-        from ui import segmented_accessibility
-
-        page = self._page(_manual_snapshot())
-
-        self.assertEqual(getattr(page.filter_bar, segmented_accessibility._TITLE_ATTR), "Какие сервисы показать")
-
-    def test_only_the_services_list_scrolls(self) -> None:
-        from PyQt6.QtCore import Qt
-
-        page = self._page(_manual_snapshot())
-
-        # Одна прокрутка: у страницы её нет, у списка — своя.
-        self.assertEqual(page.verticalScrollBarPolicy(), Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.assertIs(page.services_scroll.widget(), page.services_list)
-        self.assertEqual(page.verticalScrollBar().maximum(), 0)
-
-    def test_page_menu_opens_file_page_and_toggles_adobe_in_draft(self) -> None:
-        page = self._page(_manual_snapshot())
-        menu = page.build_page_menu()
-        self.addCleanup(menu.deleteLater)
-        actions = [action for action in menu.actions() if not action.isSeparator()]
-
-        self.assertEqual(len(actions), 4)
-        actions[0].trigger()
-        self.assertEqual(self.opened_file_page, [True])
-
-        actions[2].trigger()
-        self.assertTrue(page._draft.adobe_changed)
-        self.assertTrue(page.draft_bar.isVisible())
 
     def test_page_receives_narrow_feature_not_services(self) -> None:
         import dataclasses
@@ -595,6 +625,13 @@ class HostsFilePageTests(unittest.TestCase):
 
         info_bar.warning.assert_called_once()
         self.assertFalse(page.is_dirty())
+
+    def test_search_bar_waits_for_ctrl_f(self) -> None:
+        page = self._page()
+
+        self.assertTrue(page.find_bar.isHidden())
+        page.find_controller.open_panel()
+        self.assertFalse(page.find_bar.isHidden())
 
     def test_breadcrumb_leads_back_to_hosts_page(self) -> None:
         page = self._page()

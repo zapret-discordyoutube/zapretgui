@@ -1,72 +1,16 @@
-"""Черновик изменений страницы Hosts.
+"""Выбор страницы Hosts, который ещё не записан в файл.
 
-Пока пользователь щёлкает переключатели, меняется только черновик. В файл
-hosts всё записывается одной операцией по кнопке «Применить», а до этого
-черновик умеет показать точные строки, которые добавятся и удалятся.
+Каждый щелчок сразу уходит в запись, но запись идёт в фоне: пока она не
+закончилась, выбор живёт здесь, поверх последнего снимка файла. Когда
+приходит свежий снимок, то, что уже записано, из черновика уходит само.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from hosts.hosts_blocks import BLOCK_USER, BLOCK_ZAPRETGUI, mapping_domains
-from hosts.ipv6_detection import is_ipv6_address
 from hosts.page_snapshot import HostsPageSnapshot
 
 
 MIXED = "__mixed__"
-
-
-@dataclass(frozen=True, slots=True)
-class HostsDraftPreview:
-    added: tuple[str, ...]
-    removed: tuple[str, ...]
-    # Ручные строки пользователя с теми же доменами: они останутся в файле,
-    # но Windows возьмёт адрес из блока ZapretGUI, он стоит выше.
-    shadowed: tuple[str, ...]
-
-
-def build_block_rows(
-    selection: dict[str, str],
-    rows_by_service_profile: dict[tuple[str, str], tuple[tuple[str, str], ...]],
-    *,
-    ipv6_available: bool,
-) -> list[tuple[str, str]]:
-    """Строки блока ZapretGUI для выбора — те же правила, что у HostsManager.
-
-    Повтор домена у разных сервисов: побеждает сервис, выбранный позже.
-    """
-    selected_by_domain: dict[str, tuple[str, list[str]]] = {}
-    domain_order: list[str] = []
-    for service_name, profile_id in selection.items():
-        per_service: dict[str, tuple[str, list[str]]] = {}
-        per_service_order: list[str] = []
-        for domain, ip in rows_by_service_profile.get((service_name, profile_id), ()):
-            domain_key = domain.casefold()
-            item = per_service.get(domain_key)
-            if item is None:
-                per_service[domain_key] = (domain, [ip])
-                per_service_order.append(domain_key)
-            elif ip.casefold() not in {value.casefold() for value in item[1]}:
-                item[1].append(ip)
-        for domain_key in per_service_order:
-            if domain_key not in selected_by_domain:
-                domain_order.append(domain_key)
-            selected_by_domain[domain_key] = per_service[domain_key]
-
-    result: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for domain_key in domain_order:
-        domain, ips = selected_by_domain[domain_key]
-        for ip in ips:
-            if is_ipv6_address(ip) and not ipv6_available:
-                continue
-            key = (domain_key, ip.casefold())
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append((domain, ip))
-    return result
 
 
 class HostsDraft:
@@ -76,7 +20,6 @@ class HostsDraft:
         self._snapshot = snapshot
         self._overrides: dict[str, str | None] = {}
         self._adobe: bool | None = None
-        self._stale_lines = _stale_block_lines(snapshot)
 
     @property
     def snapshot(self) -> HostsPageSnapshot:
@@ -147,24 +90,8 @@ class HostsDraft:
 
     # ── состояние черновика ───────────────────────────────────
 
-    @property
-    def stale_lines(self) -> tuple[str, ...]:
-        """Лишние строки блока ZapretGUI: их нет ни у одного включённого сервиса.
-
-        Например, сервис убрали из каталога. «Применить» пересобирает блок из
-        выбора, поэтому такие строки уйдут при записи — черновик считается
-        изменённым, даже если пользователь ничего не трогал.
-        """
-        return self._stale_lines
-
     def has_user_changes(self) -> bool:
         return bool(self._overrides) or self._adobe is not None
-
-    def is_dirty(self) -> bool:
-        return self.has_user_changes() or bool(self._stale_lines)
-
-    def changed_services(self) -> list[str]:
-        return [entry.name for entry in self._snapshot.services if entry.name in self._overrides]
 
     def selection(self) -> dict[str, str]:
         """Полный итоговый выбор «сервис → профиль» в порядке каталога."""
@@ -184,7 +111,6 @@ class HostsDraft:
         overrides = dict(self._overrides)
         adobe = self._adobe
         self._snapshot = snapshot
-        self._stale_lines = _stale_block_lines(snapshot)
         self._overrides.clear()
         self._adobe = None
         for service_name, profile_id in overrides.items():
@@ -192,58 +118,5 @@ class HostsDraft:
         if adobe is not None:
             self.set_adobe(adobe)
 
-    # ── предпросмотр ──────────────────────────────────────────
 
-    def preview(self) -> HostsDraftPreview:
-        snapshot = self._snapshot
-        new_rows = build_block_rows(
-            self.selection(),
-            snapshot.rows,
-            ipv6_available=snapshot.ipv6_available,
-        )
-        new_lines = [f"{ip} {domain}" for domain, ip in new_rows]
-        current_block = snapshot.block(BLOCK_ZAPRETGUI)
-        current_lines = list(current_block.lines) if current_block is not None else []
-
-        current_keys = {_line_key(line) for line in current_lines}
-        new_keys = {_line_key(line) for line in new_lines}
-        added = tuple(line for line in new_lines if _line_key(line) not in current_keys)
-        removed = tuple(line for line in current_lines if _line_key(line) not in new_keys)
-
-        new_domains = {domain.casefold() for domain, _ip in new_rows}
-        user_block = snapshot.block(BLOCK_USER)
-        shadowed = tuple(
-            line
-            for line in (user_block.lines if user_block is not None else ())
-            if any(domain.casefold() in new_domains for domain in mapping_domains(line))
-        )
-        return HostsDraftPreview(added=added, removed=removed, shadowed=shadowed)
-
-
-def _line_key(line: str) -> str:
-    return " ".join(line.partition("#")[0].split()).casefold()
-
-
-def _stale_block_lines(snapshot: HostsPageSnapshot) -> tuple[str, ...]:
-    """Строки блока ZapretGUI, которых не будет при записи того же выбора."""
-    block = snapshot.block(BLOCK_ZAPRETGUI)
-    if block is None:
-        return ()
-    selection = {entry.name: entry.current for entry in snapshot.services if entry.current}
-    expected = {
-        _line_key(f"{ip} {domain}")
-        for domain, ip in build_block_rows(selection, snapshot.rows, ipv6_available=snapshot.ipv6_available)
-    }
-    result: list[str] = []
-    for line in block.lines:
-        if _line_key(line) in expected:
-            continue
-        ip = line.partition("#")[0].split()[0]
-        if not snapshot.ipv6_available and is_ipv6_address(ip):
-            # IPv6 мог просто ещё не подняться: такие строки лишними не считаем.
-            continue
-        result.append(line)
-    return tuple(result)
-
-
-__all__ = ["MIXED", "HostsDraft", "HostsDraftPreview", "build_block_rows"]
+__all__ = ["MIXED", "HostsDraft"]

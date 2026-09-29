@@ -4386,18 +4386,27 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertIn("self._request_snapshot()", activated_source)
 
     def test_hosts_page_file_work_runs_through_feature_workers(self) -> None:
+        from hosts.ui.file_page import HostsFilePage
+
         page_source = inspect.getsource(HostsPage)
+        file_page_source = inspect.getsource(HostsFilePage)
 
         for factory in (
             "self._hosts.create_snapshot_worker",
             "self._hosts.create_apply_worker",
-            "self._hosts.create_open_hosts_file_worker",
             "self._hosts.create_permission_restore_worker",
         ):
             self.assertIn(factory, page_source)
-        self.assertNotIn("hosts.commands", page_source)
-        self.assertNotIn("safe_read_hosts_file", page_source)
-        self.assertNotIn("safe_write_hosts_file", page_source)
+        for factory in (
+            "self._hosts.create_file_text_worker",
+            "self._hosts.create_file_save_worker",
+            "self._hosts.create_open_hosts_file_worker",
+        ):
+            self.assertIn(factory, file_page_source)
+        for source in (page_source, file_page_source):
+            self.assertNotIn("hosts.commands", source)
+            self.assertNotIn("safe_read_hosts_file", source)
+            self.assertNotIn("safe_write_hosts_file", source)
         self.assertIn("open_hosts_file", inspect.getsource(hosts_commands.open_hosts_file))
 
     def test_dns_isp_warning_settings_access_runs_through_worker(self) -> None:
