@@ -16,8 +16,6 @@ def test_keyboard_navigation_lists_do_not_use_native_single_selection() -> None:
         "src/profile/ui/profiles_list.py",
         "src/profile/ui/profile_order_list.py",
         "src/presets/ui/common/user_presets_build.py",
-        "src/dns/ui/choice_list.py",
-        "src/dns/ui/adapter_list.py",
     }
 
     for path in sorted(targets):
@@ -31,8 +29,6 @@ def test_keyboard_row_delegates_paint_focused_current_row() -> None:
         "src/profile/ui/profile_strategy_list_widget.py",
         "src/profile/ui/profile_list_delegate.py",
         "src/ui/presets_menu/delegate.py",
-        "src/dns/ui/choice_list.py",
-        "src/dns/ui/adapter_list.py",
     }
 
     for path in sorted(targets):

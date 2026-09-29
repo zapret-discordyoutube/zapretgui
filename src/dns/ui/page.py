@@ -1,2094 +1,776 @@
 # dns/ui/page.py
-"""Страница сетевых настроек - DNS, hosts, proxy"""
+"""Страница «Настройка DNS».
+
+Сверху — панель «Сейчас»: какой DNS стоит на отмеченных адаптерах, сами
+адаптеры и действия (вернуть автоматически, замерить скорость, сбросить
+кэш). Ниже — фильтр по группам и сетка плиток серверов: щелчок по плитке
+сразу применяет DNS к отмеченным адаптерам.
+
+Страница только показывает состояние и зовёт готовые действия DNS-слоя.
+Всё долгое (загрузка адаптеров, запись DNS, замер, сброс кэша, решение о
+предупреждении про DNS провайдера) идёт в фоновых дорожках
+(ui.latest_worker_lane): одна задача за раз, из новых запросов побеждает
+последний.
+"""
 
 from __future__ import annotations
 
+import re
+from textwrap import fill
 from uuid import uuid4
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QFrame,
-)
-import qtawesome as qta
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtWidgets import QApplication, QHBoxLayout, QWidget
+from qfluentwidgets import CaptionLabel, InfoBar, InfoBarPosition, PushButton, RoundMenu, SegmentedWidget
 
-from qfluentwidgets import (
-    BodyLabel, CaptionLabel, CheckBox, IndeterminateProgressBar, InfoBar,
-    InfoBarPosition, LineEdit, PushButton, RoundMenu, SettingCardGroup, StrongBodyLabel,
-)
-
+from app.ui_texts import tr as tr_catalog
+from dns import page_plans as dns_page_plans
+from dns.custom_providers import CUSTOM_DNS_CATEGORY, build_dns_providers_with_custom
+from dns.dns_providers import DNS_PROVIDERS
+from dns.ui.custom_dns_dialog import CustomDnsDialog, unique_copy_name
+from dns.ui.now_panel import AdapterChip, DnsNowPanel, NowState
+from dns.ui.provider_grid import ADD_TILE_KEY, DnsProviderGrid, DnsTile, GridTexts
+from log.log import log
 from settings.store import get_custom_dns_servers, set_custom_dns_servers
+from ui.accessibility import set_control_accessibility
 from ui.fluent_dialog import MessageBox
-from ui.pages.base_page import BasePage
-from ui.latest_value_worker_state import LatestValueWorkerState
-from ui.one_shot_worker_runtime import OneShotWorkerRuntime
-from ui.queued_worker_state import QueuedWorkerState
-from ui.widgets.win11_controls import Win11ToggleRow
-from ui.accessibility import set_control_accessibility, set_state_text
+from ui.latest_worker_lane import LatestWorkerLane
 from ui.message_box_accessibility import set_message_box_button_accessibility
-from ui.fluent_widgets import (
-    SettingsCard,
-    QuickActionsBar,
-    enable_setting_card_group_auto_height,
-    insert_widget_into_setting_card_group,
-    set_tooltip,
-)
+from ui.pages.base_page import BasePage
 from ui.popup_menu import exec_popup_menu
 from ui.presets_menu.common import fluent_icon, make_menu_action
-from ui.theme import get_cached_qta_pixmap, get_theme_tokens
-from app.ui_texts import tr as tr_catalog
-from log.log import log
 
-from dns.custom_providers import build_dns_providers_with_custom
-from dns.dns_providers import DNS_PROVIDERS
-from dns import page_plans as dns_page_plans
-from dns.ui.adapters import build_adapter_cards, refresh_adapter_cards
-from dns.ui.cards import DNSProviderCard
-from dns.ui.custom_dns_dialog import CustomDnsDialog, unique_copy_name
-from dns.ui.dns_build import build_auto_dns_ui, build_custom_dns_ui
-from dns.ui.page_build import build_network_page_shell
-from dns.ui.providers_build import build_provider_cards
-from dns.ui.tools_build import build_tools_card_ui
-from dns.ui.force_dns_ui import (
-    highlight_force_dns_card,
-    set_force_dns_toggle,
-    update_dns_selection_block_state,
-    update_force_dns_status_label,
-)
-from dns.ui.force_dns_build import build_force_dns_card_ui
-from dns.page_force_dns_workflow import (
-    apply_force_dns_status_state,
-)
-from dns.ui.isp_warning import (
-    hide_isp_warning_widget,
-    render_isp_warning_styles,
-)
-from dns.page_diagnostics_warning_workflow import (
-    accept_isp_dns_recommendation,
-    apply_connectivity_test_result,
-    cleanup_network_page,
-    dismiss_isp_dns_warning,
-    prepare_connectivity_test,
-    render_isp_warning_theme,
-    show_isp_dns_warning,
-)
-from dns.page_load_workflow import (
-    apply_loaded_page_state,
-    handle_loaded_adapters,
-    handle_loaded_dns_info,
-    run_network_runtime_init,
-)
-from dns.ui.page_runtime_helpers import (
-    build_adapter_cards_ui,
-    build_dns_choices_ui,
-    clear_dns_selection_ui,
-)
-from dns.ui.page_selection_workflow import (
-    build_dns_selection_sync_request_fn,
-)
-from dns.ui.selection import (
-    apply_dns_selection_plan_ui,
-    clear_dns_selection,
-    select_auto_dns_ui,
-    select_custom_dns_ui,
-    select_provider_dns_ui,
-    set_dns_card_selected,
-)
+
+AUTO_CHOICE = "__auto__"
+FILTER_ALL = "all"
+RECOMMENDED_PROVIDER = ("Безопасные", "Quad9")
+
+# Группы из dns_providers → ключ перевода подписи.
+GROUP_TEXT_KEYS = {
+    "Популярные": ("page.network.group.popular", "Популярные"),
+    "Безопасные": ("page.network.group.secure", "Безопасные"),
+    "Для ИИ": ("page.network.group.ai", "Для ИИ"),
+    CUSTOM_DNS_CATEGORY: ("page.network.group.custom", "Свои DNS"),
+}
+FILTER_TEXT_KEYS = {
+    FILTER_ALL: ("page.network.filter.all", "Все"),
+    CUSTOM_DNS_CATEGORY: ("page.network.filter.custom", "Свои"),
+}
+
+
+def wrap_infobar_text(content: str, *, width: int = 86) -> str:
+    """Переносит длинный текст всплывашки по фразам: InfoBar сам строки не переносит."""
+    paragraphs = []
+    for paragraph in str(content or "").split("\n\n"):
+        lines = []
+        for line in paragraph.splitlines() or [""]:
+            sentences = [part for part in re.split(r"(?<=[.!?])\s+", line.strip()) if part]
+            lines.extend(fill(sentence, width=width, break_long_words=False, break_on_hyphens=False) for sentence in sentences)
+        paragraphs.append("\n".join(lines))
+    return "\n\n".join(paragraphs)
+
 
 class NetworkPage(BasePage):
-    """Страница сетевых настроек с интегрированным DNS"""
+    """Выбор DNS-сервера для сетевых адаптеров Windows."""
 
-    adapters_loaded = pyqtSignal(list)
-    dns_info_loaded = pyqtSignal(dict)
-    test_completed = pyqtSignal(list)  # Результаты теста соединения
-    
     def __init__(self, parent=None, *, deps):
         super().__init__(
             "Настройка DNS",
-            "DNS-серверы и проверка DNS",
+            "Выберите DNS-сервер — он сразу встанет на отмеченные сетевые адаптеры.",
             parent,
             title_key="page.network.title",
             subtitle_key="page.network.subtitle",
         )
         self._dns = deps.dns_feature
-        
-        self._adapters = []
-        self._dns_info = {}
-        self._is_loading = True
-        self._ui_built = False
-        self._dns_choices_built = False
-        self._selected_provider = None
-        self._force_dns_active = False
+
+        self._custom_servers: list[dict] = get_custom_dns_servers()
+        self._providers: dict = build_dns_providers_with_custom(DNS_PROVIDERS, self._custom_servers)
+        self._adapters: list[tuple[str, str]] = []
+        self._dns_info: dict[str, dict[str, list[str]]] = {}
         self._ipv6_available = False
         self._doh_supported = False
-        self._test_in_progress = False
-        self._force_dns_status_enabled = False
-        self._force_dns_status_details_key: str | None = None
-        self._force_dns_status_details_kwargs: dict = {}
-        self._force_dns_status_details_fallback = ""
-        self._runtime_initialized = False
-        self._cleanup_in_progress = False
-        self._dns_selection_sync_queued = False
-        self._page_load_runtime = OneShotWorkerRuntime()
-        self._page_load_state = LatestValueWorkerState(
-            self._page_load_runtime,
-            empty_value=False,
+        self._loaded = False
+        self._load_started = False
+        self._closed = False
+        self._filter = FILTER_ALL
+        # Что сейчас применяется: имя сервера или AUTO_CHOICE.
+        self._pending_choice: str | None = None
+        self._measuring = False
+        self._latency: dict[str, float | None] = {}
+        self._intercepted = False
+
+        self._load_lane = LatestWorkerLane(
+            name="dns_page_load",
+            create_worker=lambda request_id, _payload: self._dns.create_page_load_worker(request_id, parent=self),
+            on_result=lambda _payload, state: self._on_page_data(state),
+            result_signal="loaded",
+            log_fn=log,
         )
-        self._connectivity_test_runtime = OneShotWorkerRuntime()
-        self._connectivity_test_state = LatestValueWorkerState(
-            self._connectivity_test_runtime,
-            empty_value=False,
+        self._apply_lane = LatestWorkerLane(
+            name="dns_apply",
+            create_worker=self._create_apply_worker,
+            on_result=self._on_apply_done,
+            on_error=self._on_apply_failed,
+            log_fn=log,
         )
-        self._force_dns_action_runtime = OneShotWorkerRuntime()
-        self._force_dns_action_state = QueuedWorkerState[dict[str, object]](
-            self._force_dns_action_runtime,
-        )
-        self._scheduled_force_dns_action_request = None
-        self._dns_flush_cache_runtime = OneShotWorkerRuntime()
-        self._dns_flush_cache_state = LatestValueWorkerState(
-            self._dns_flush_cache_runtime,
-            empty_value=False,
-        )
-        self._dns_apply_runtime = OneShotWorkerRuntime()
-        self._dns_apply_state = QueuedWorkerState[dict[str, object]](
-            self._dns_apply_runtime,
-        )
-        self._scheduled_dns_apply_request = None
-        self._dns_mutation_pending_order: list[str] = []
-        self._custom_dns_servers = get_custom_dns_servers()
-        self._dns_providers = build_dns_providers_with_custom(DNS_PROVIDERS, self._custom_dns_servers)
-        self._isp_warning_runtime = OneShotWorkerRuntime()
-        self._isp_warning_state = LatestValueWorkerState(
-            self._isp_warning_runtime,
-            empty_value=False,
-        )
-        
-        self.dns_cards = {}
-        self.adapter_cards = []
-        self._dns_category_labels: list[QLabel] = []
-        self._isp_warning = None
-        self._isp_warning_title = None
-        self._isp_warning_content = None
-        self._isp_warning_icon = None
-        self._isp_warning_accept_btn = None
-        self._isp_warning_dismiss_btn = None
-        self._auto_icon_label = None
-        self._tools_card = None
-        self._tools_actions_bar = None
-        self._tools_section_label = None
-        self._build_ui()
-        self._request_dns_selection_sync = build_dns_selection_sync_request_fn(
-            get_cleanup_in_progress_fn=lambda: self._cleanup_in_progress,
-            get_sync_queued_fn=lambda: self._dns_selection_sync_queued,
-            set_sync_queued_fn=lambda value: setattr(self, "_dns_selection_sync_queued", value),
-            schedule_fn=QTimer.singleShot,
-            get_adapter_cards_fn=lambda: self.adapter_cards,
-            get_dns_info_fn=lambda: self._dns_info,
-            providers=self._dns_providers,
-            build_dns_selection_plan_fn=lambda **kwargs: dns_page_plans.build_dns_selection_plan(
-                **kwargs,
-                normalize_alias_fn=self._dns.normalize_adapter_alias,
+        self._flush_lane = LatestWorkerLane(
+            name="dns_flush_cache",
+            create_worker=lambda request_id, _payload: self._dns.create_dns_flush_cache_worker(
+                request_id, language=self._ui_language, parent=self
             ),
-            get_selected_adapters_fn=self._get_selected_adapters,
-            apply_dns_selection_plan_ui_fn=apply_dns_selection_plan_ui,
-            get_dns_cards_fn=lambda: self.dns_cards,
-            get_auto_indicator_fn=lambda: getattr(self, "auto_indicator", None),
-            get_auto_card_fn=lambda: getattr(self, "auto_card", None),
-            get_custom_indicator_fn=lambda: getattr(self, "custom_indicator", None),
-            get_custom_card_fn=lambda: getattr(self, "custom_card", None),
-            get_custom_primary_fn=lambda: getattr(self, "custom_primary", None),
-            get_custom_secondary_fn=lambda: getattr(self, "custom_secondary", None),
-            get_indicator_on_qss_fn=DNSProviderCard.indicator_on,
-            get_indicator_off_qss_fn=DNSProviderCard.indicator_off,
-            set_card_selected_fn=self._set_dns_card_selected,
-            set_selected_provider_fn=lambda value: setattr(self, "_selected_provider", value),
+            on_result=lambda _payload, plan: self._on_flush_done(plan),
+            on_error=lambda _payload, error: self._on_flush_failed(error),
+            log_fn=log,
         )
-        self._apply_page_theme(force=True)
+        self._latency_lane = LatestWorkerLane(
+            name="dns_latency",
+            create_worker=lambda request_id, servers: self._dns.create_dns_latency_worker(
+                request_id, servers=servers, parent=self
+            ),
+            on_result=lambda _payload, report: self._on_latency_done(report),
+            on_error=lambda _payload, _error: self._on_latency_done(None),
+            log_fn=log,
+        )
+        self._isp_lane = LatestWorkerLane(
+            name="dns_isp_warning",
+            create_worker=lambda request_id, _payload: self._dns.create_isp_dns_warning_worker(
+                request_id,
+                adapters=list(self._adapters),
+                dns_info=dict(self._dns_info),
+                language=self._ui_language,
+                parent=self,
+            ),
+            on_result=lambda _payload, plan: self._show_isp_warning(plan),
+            log_fn=log,
+        )
 
-    def _dns_feature(self):
-        return self._dns
+        self._build_ui()
+        self._render()
 
-    def _tr(self, key: str, default: str) -> str:
-        return tr_catalog(key, language=self._ui_language, default=default)
+    # ── тексты ──────────────────────────────────────────────
 
-    def _confirm_action(
-        self,
-        title_key: str,
-        title_default: str,
-        confirm_key: str,
-        confirm_default: str,
-    ) -> bool:
-        if MessageBox is None:
-            return True
-        try:
-            title = self._tr(title_key, title_default)
-            body = self._tr(confirm_key, confirm_default)
-            box = MessageBox(
-                title,
-                body,
-                self.window(),
+    def _t(self, key: str, default: str, **values) -> str:
+        text = tr_catalog(key, language=self._ui_language, default=default)
+        return text.format(**values) if values else text
+
+    def _group_title(self, group: str) -> str:
+        key, default = GROUP_TEXT_KEYS.get(group, ("", group))
+        return self._t(key, default) if key else group
+
+    def _filter_title(self, group: str) -> str:
+        key, default = FILTER_TEXT_KEYS.get(group, GROUP_TEXT_KEYS.get(group, ("", group)))
+        return self._t(key, default) if key else group
+
+    def _grid_texts(self) -> GridTexts:
+        return GridTexts(
+            measuring=self._t("page.network.latency.measuring", "замер…"),
+            timeout=self._t("page.network.latency.timeout", "нет ответа"),
+            ms=self._t("page.network.latency.ms", "{ms} мс"),
+            applying=self._t("page.network.tile.applying", "применяю…"),
+            selected=self._t("page.network.tile.selected", "выбран"),
+            not_selected=self._t("page.network.tile.not_selected", "не выбран"),
+            fastest=self._t("page.network.tile.fastest", "быстрее всех"),
+            custom_hint=self._t("page.network.tile.custom_hint", "свой DNS, меню правки — клавиша меню"),
+            add=self._t("page.network.add_tile.title", "Свой DNS"),
+            grid_name=self._t("page.network.grid.name", "DNS-серверы"),
+            grid_description=self._t(
+                "page.network.grid.description",
+                "Стрелки — выбор плитки, Enter или пробел — применить DNS.",
+            ),
+        )
+
+    # ── сборка ──────────────────────────────────────────────
+
+    def _build_ui(self) -> None:
+        self.now_panel = DnsNowPanel(self.content)
+        self.now_panel.reset_clicked.connect(self._confirm_reset_to_auto)
+        self.now_panel.measure_clicked.connect(self._measure_latency)
+        self.now_panel.flush_clicked.connect(self._flush_cache)
+        self.now_panel.adapters_changed.connect(lambda _names: self._render())
+        self.add_widget(self.now_panel)
+        self.add_spacing(18)
+
+        self.filter_row = QWidget(self.content)
+        filter_layout = QHBoxLayout(self.filter_row)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
+        filter_layout.setSpacing(16)
+        self.filter_bar = SegmentedWidget(self.filter_row)
+        filter_layout.addWidget(self.filter_bar, 0, Qt.AlignmentFlag.AlignVCenter)
+        filter_layout.addStretch(1)
+        self.latency_summary = CaptionLabel("", self.filter_row)
+        self.latency_summary.hide()
+        filter_layout.addWidget(self.latency_summary, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.add_widget(self.filter_row)
+        self.add_spacing(6)
+
+        self.grid = DnsProviderGrid(self.content)
+        self.grid.activated.connect(self._choose_provider)
+        self.grid.add_clicked.connect(self._add_custom_server)
+        self.grid.context_menu_wanted.connect(self._show_custom_server_menu)
+        self.add_widget(self.grid)
+
+        self._rebuild_filter_bar()
+        self._retranslate()
+
+    def _rebuild_filter_bar(self) -> None:
+        keys = [FILTER_ALL, *self._providers.keys()]
+        if CUSTOM_DNS_CATEGORY not in keys:
+            keys.append(CUSTOM_DNS_CATEGORY)
+        if self._filter not in keys:
+            self._filter = FILTER_ALL
+        self.filter_bar.clear()
+        for key in keys:
+            self.filter_bar.addItem(
+                routeKey=key,
+                text=self._filter_title(key),
+                onClick=lambda _checked=False, value=key: self._set_filter(value),
             )
-            set_message_box_button_accessibility(
-                box,
-                yes_name=title,
-                yes_description=body,
-                cancel_name=f"Отменить действие: {title}",
-                cancel_description="Закрывает диалог без изменения DNS.",
-            )
-            return bool(box.exec())
-        except Exception:
-            return True
-
-    def _update_test_action_text(self) -> None:
-        text = (
-            self._tr("page.network.button.test.in_progress", "Проверка...")
-            if self._test_in_progress
-            else self._tr("page.network.button.test", "Тест соединения")
-        )
-        try:
-            if getattr(self, "test_btn", None) is not None:
-                self.test_btn.setText(text)
-                self.test_btn.setEnabled(not self._test_in_progress)
-        except Exception:
-            pass
-
-    def _run_runtime_init_once(self) -> None:
-        run_network_runtime_init(
-            runtime_initialized=self._runtime_initialized,
-            build_page_init_plan_fn=dns_page_plans.build_page_init_plan,
-            mark_initialized_fn=lambda: setattr(self, "_runtime_initialized", True),
-            schedule_fn=QTimer.singleShot,
-            start_loading_fn=self._start_loading,
+        self.filter_bar.setCurrentItem(self._filter)
+        set_control_accessibility(
+            self.filter_bar,
+            name=self._t("page.network.filter.name", "Группа DNS-серверов"),
+            description=self._filter_title(self._filter),
         )
 
-    def on_page_activated(self) -> None:
-        self._run_runtime_init_once()
-        if self._is_loading and not self._dns_choices_built:
-            try:
-                self.loading_bar.start()
-            except Exception:
-                pass
-
-    def on_page_hidden(self) -> None:
-        try:
-            self.loading_bar.stop()
-        except Exception:
-            pass
+    def _retranslate(self) -> None:
+        panel = self.now_panel
+        panel.eyebrow_label.setText(self._t("page.network.now.eyebrow", "Сейчас на отмеченных адаптерах"))
+        panel.reset_button.setText(self._t("page.network.button.reset", "Вернуть автоматически"))
+        panel.flush_button.setText(self._t("page.network.button.flush_dns_cache", "Сбросить кэш"))
+        panel.set_measuring(
+            self._measuring,
+            idle_text=self._t("page.network.button.measure", "Замерить скорость"),
+            busy_text=self._t("page.network.button.measure.running", "Замеряю…"),
+        )
+        panel.set_adapters_caption(
+            self._t("page.network.adapters.caption", "Применять к:"),
+            self._t("page.network.adapters.empty", "Сетевые адаптеры не найдены"),
+        )
+        self.grid.set_texts(self._grid_texts())
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
+        self._rebuild_filter_bar()
+        self._retranslate()
+        self._render()
 
-        if hasattr(self, "loading_label"):
-            self.loading_label.setText(self._tr("page.network.loading", "⏳ Загрузка..."))
+    def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
+        """Рисуемые сетка и значок берут цвета темы при отрисовке — просто перерисовать."""
+        _ = tokens, force
+        panel = getattr(self, "now_panel", None)
+        for widget in (getattr(self, "grid", None), getattr(panel, "badge", None)):
+            if widget is not None:
+                widget.update()
 
-        if hasattr(self, "custom_label"):
-            self.custom_label.setText(self._tr("page.network.custom.label", "Свой:"))
-        if hasattr(self, "custom_apply_btn"):
-            self.custom_apply_btn.setText(self._tr("page.network.custom.apply", "OK"))
-            custom_apply_name = self._tr("page.network.custom.apply.accessible_name", "Применить свой DNS")
-            custom_apply_description = self._tr(
-                "page.network.custom.apply.accessible_description",
-                "Применяет указанные DNS серверы к выбранным сетевым адаптерам.",
-            )
-            set_control_accessibility(
-                self.custom_apply_btn,
-                name=custom_apply_name,
-                description=custom_apply_description,
-            )
-            set_state_text(self.custom_apply_btn, custom_apply_name)
+    # ── жизненный цикл ──────────────────────────────────────
 
-        self._update_test_action_text()
+    def on_page_activated(self) -> None:
+        self._run_runtime_init_once()
 
-        if hasattr(self, "dns_flush_btn"):
-            self.dns_flush_btn.setText(
-                self._tr("page.network.button.flush_dns_cache", "Сбросить DNS кэш")
-            )
-            set_tooltip(
-                self.dns_flush_btn,
-                self._tr(
-                    "page.network.tools.flush_dns.description",
-                    "Очистить локальный кэш DNS Windows, если ответы или домены застряли в старом состоянии.",
-                ),
-            )
-
-        if hasattr(self, "auto_label"):
-            self.auto_label.setText(self._tr("page.network.dns.auto", "Автоматически (DHCP)"))
-
+    def _run_runtime_init_once(self) -> None:
+        """Первый показ страницы: берём заранее загруженные данные или грузим в фоне."""
+        if self._load_started or self._closed:
+            return
+        self._load_started = True
         try:
-            title_label = getattr(getattr(self, "_tools_card", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText(self._tr("page.network.section.tools", "Диагностика"))
-        except Exception:
-            pass
-
-        if hasattr(self, "force_dns_card"):
-            try:
-                title_label = getattr(self.force_dns_card, "titleLabel", None)
-                if title_label is not None:
-                    title_label.setText("")
-                    title_label.hide()
-            except Exception:
-                pass
-        if getattr(self, "force_dns_action_btn", None) is not None:
-            self._sync_force_dns_action_button(bool(self._force_dns_active))
-        if hasattr(self, "force_dns_reset_dhcp_btn"):
-            self.force_dns_reset_dhcp_btn.setText(
-                self._tr("page.network.force_dns.reset.button", "Вернуть DNS автоматически")
-            )
-            reset_description = self._tr(
-                "page.network.force_dns.action.reset.description",
-                "DNS будет снова получаться автоматически от роутера или провайдера через DHCP. Это полезно, если интернет работает нестабильно после ручной настройки DNS.",
-            )
-            set_tooltip(
-                self.force_dns_reset_dhcp_btn,
-                reset_description,
-            )
-            set_control_accessibility(
-                self.force_dns_reset_dhcp_btn,
-                name=self._tr("page.network.force_dns.reset.accessible_name", "Вернуть DNS автоматически"),
-                description=reset_description,
-            )
-        if hasattr(self, "force_dns_custom_btn"):
-            self.force_dns_custom_btn.setText(
-                self._tr("page.network.custom.button", "Добавить свой DNS")
-            )
-            custom_description = self._tr(
-                "page.network.custom.button.description",
-                "Открывает окно добавления нового DNS сервера.",
-            )
-            set_tooltip(self.force_dns_custom_btn, custom_description)
-            set_state_text(
-                self.force_dns_custom_btn,
-                self._tr("page.network.custom.button.accessible_name", "Добавить свой DNS"),
-            )
-            set_control_accessibility(
-                self.force_dns_custom_btn,
-                name=self._tr("page.network.custom.button.accessible_name", "Добавить свой DNS"),
-                description=custom_description,
-            )
-
-        if hasattr(self, "force_dns_status_label"):
-            self._update_force_dns_status(
-                self._force_dns_status_enabled,
-                self._force_dns_status_details_key,
-                details_kwargs=self._force_dns_status_details_kwargs,
-                details_fallback=self._force_dns_status_details_fallback,
-            )
-        self._apply_inline_theme_styles()
-        
-    def _build_ui(self):
-        """Строит интерфейс страницы"""
-        # ═══════════════════════════════════════════════════════════════
-        # ПРИНУДИТЕЛЬНЫЙ DNS
-        # ═══════════════════════════════════════════════════════════════
-        self._build_force_dns_card()
-        
-        self.add_spacing(12)
-        
-        # ═══════════════════════════════════════════════════════════════
-        # DNS СЕРВЕРЫ
-        # ═══════════════════════════════════════════════════════════════
-        self.add_section_title(text_key="page.network.section.dns_servers")
-
-        shell = build_network_page_shell(
-            parent=self,
-            content_parent=self.content,
-            tr_fn=self._tr,
-            add_section_title_fn=self.add_section_title,
-            body_label_cls=BodyLabel,
-            settings_card_cls=SettingsCard,
-            qvbox_layout_cls=QVBoxLayout,
-            qhbox_layout_cls=QHBoxLayout,
-            qframe_cls=QFrame,
-            line_edit_cls=LineEdit,
-            action_button_cls=PushButton,
-            indeterminate_progress_bar_cls=IndeterminateProgressBar,
-            setting_card_group_cls=SettingCardGroup,
-            quick_actions_bar_cls=QuickActionsBar,
-            insert_widget_into_setting_card_group_fn=insert_widget_into_setting_card_group,
-            build_custom_dns_ui_fn=build_custom_dns_ui,
-            build_tools_card_ui_fn=build_tools_card_ui,
-            on_apply_custom_dns=self._apply_custom_dns_quick,
-            on_test_connection=self._test_connection,
-            on_flush_dns_cache=self._confirm_flush_dns_cache,
-            set_tooltip_fn=set_tooltip,
-            dns_provider_card_cls=DNSProviderCard,
-        )
-        self.loading_card = shell.loading_card
-        self.loading_label = shell.loading_label
-        self.loading_bar = shell.loading_bar
-        self.dns_cards_container = shell.dns_cards_container
-        self.dns_cards_layout = shell.dns_cards_layout
-        self.custom_card = shell.custom_card
-        self.custom_indicator = shell.custom_indicator
-        self.custom_label = shell.custom_label
-        self.custom_primary = shell.custom_primary
-        self.custom_secondary = shell.custom_secondary
-        self.custom_apply_btn = shell.custom_apply_btn
-        self.adapters_container = shell.adapters_container
-        self.adapters_layout = shell.adapters_layout
-        self._tools_section_label = shell.tools_section_label
-        self._tools_card = shell.tools_card
-        self._tools_actions_bar = shell.tools_actions_bar
-        self.test_btn = shell.test_btn
-        self.dns_flush_btn = shell.dns_flush_btn
-
-        self.add_widget(self.loading_card)
-        self.add_widget(self.dns_cards_container)
-        self._build_dns_choices_ui()
-
-        self.add_spacing(12)
-
-        # ═══════════════════════════════════════════════════════════════
-        # СЕТЕВЫЕ АДАПТЕРЫ
-        # ═══════════════════════════════════════════════════════════════
-        self.add_section_title(text_key="page.network.section.adapters")
-        self.add_widget(self.adapters_container)
-
-        self.add_spacing(12)
-
-        # ═══════════════════════════════════════════════════════════════
-        # ДИАГНОСТИКА
-        # ═══════════════════════════════════════════════════════════════
-        self.add_widget(self._tools_card)
-        
-        # Подключаем сигналы
-        self.adapters_loaded.connect(self._on_adapters_loaded)
-        self.dns_info_loaded.connect(self._on_dns_info_loaded)
-
-    def _build_dns_choices_ui(self):
-        """Строит выбор DNS сразу, без ожидания текущих DNS Windows."""
-        result = build_dns_choices_ui(
-            cleanup_in_progress=self._cleanup_in_progress,
-            dns_choices_built=self._dns_choices_built,
-            tr_fn=self._tr,
-            settings_card_cls=SettingsCard,
-            qhbox_layout_cls=QHBoxLayout,
-            qframe_cls=QFrame,
-            strong_body_label_cls=StrongBodyLabel,
-            caption_label_cls=CaptionLabel,
-            qlabel_cls=QLabel,
-            qta_module=qta,
-            get_theme_tokens_fn=get_theme_tokens,
-            build_auto_dns_ui_fn=build_auto_dns_ui,
-            build_provider_cards_fn=build_provider_cards,
-            providers=self._dns_providers,
-            dns_cards_layout=self.dns_cards_layout,
-            on_auto_selected=self._select_auto_dns,
-            on_provider_selected=self._on_dns_selected,
-            ipv6_available=True,
-            doh_supported=self._doh_supported,
-            dns_cards_container=self.dns_cards_container,
-            custom_card=self.custom_card,
-            dns_provider_card_cls=DNSProviderCard,
-            apply_inline_theme_styles_fn=self._apply_inline_theme_styles,
-        )
-        if result is None:
-            return
-
-        self._dns_choices_built = True
-        auto_widgets = result["auto_widgets"]
-        self.auto_card = auto_widgets.card
-        self.auto_indicator = auto_widgets.indicator
-        self._auto_icon_label = auto_widgets.icon_label
-        self.auto_label = auto_widgets.title_label
-        provider_cards = result["provider_cards"]
-        self.dns_cards.update(provider_cards.dns_cards)
-        self._dns_category_labels.extend(provider_cards.category_labels)
-        try:
-            self.dns_cards_layout.custom_provider_context_requested.connect(self._show_custom_dns_provider_menu)
-        except Exception:
-            pass
-        self._update_dns_selection_state()
-        try:
-            self.loading_bar.stop()
-        except Exception:
-            pass
-        self.loading_card.hide()
-    
-    def _start_loading(self):
-        """Запускает асинхронную загрузку данных"""
-        if self._cleanup_in_progress:
-            return
-        state = self._page_load_state_obj()
-        if state.is_busy():
-            state.pending = True
-            return
-        state.pending = False
-        try:
-            cached_state = self._dns_feature().consume_warmed_page_data()
-        except Exception:
-            cached_state = None
-        if cached_state is not None:
-            self._on_page_state_loaded(cached_state)
-            return
-        self._page_load_runtime.start_qthread_worker(
-            worker_factory=lambda request_id: self._dns_feature().create_page_load_worker(
-                request_id,
-                parent=self,
-            ),
-            on_loaded=self._on_page_state_loaded_from_worker,
-            on_finished=self._on_page_load_worker_finished,
-        )
-
-    def _on_page_state_loaded_from_worker(self, request_id: int, state) -> None:
-        if not self._page_load_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        if self._page_load_state_obj().has_pending():
-            return
-        self._on_page_state_loaded(state)
-
-    def _on_page_load_worker_finished(self, _worker) -> None:
-        if not self._is_current_worker_finish(self.__dict__.get("_page_load_runtime"), _worker):
-            return
-        if self._page_load_state_obj().has_pending():
-            self._schedule_page_load_worker_start()
-
-    def _schedule_page_load_worker_start(self) -> None:
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        self._page_load_state_obj().schedule_start(
-            QTimer.singleShot,
-            self._run_scheduled_page_load_worker_start,
-            pending_when_already_scheduled=True,
-        )
-
-    def _run_scheduled_page_load_worker_start(self) -> None:
-        pending = bool(
-            self._page_load_state_obj().take_pending_for_scheduled_start(
-                cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False),
-            )
-        )
-        if not pending:
-            return
-        self._start_loading()
-    
-    def _on_page_state_loaded(self, state):
-        """Применяет готовое состояние DNS страницы в UI-потоке."""
-        if self._cleanup_in_progress:
-            return
-        try:
-            apply_loaded_page_state(
-                state=state,
-                set_ipv6_available_fn=lambda value: setattr(self, "_ipv6_available", value),
-                set_force_dns_active_fn=lambda value: setattr(self, "_force_dns_active", value),
-                set_doh_supported_fn=lambda value: setattr(self, "_doh_supported", value),
-                set_adapters_fn=lambda adapters: setattr(self, "_adapters", adapters),
-                set_dns_info_fn=lambda dns_info: setattr(self, "_dns_info", dns_info),
-                emit_adapters_loaded_fn=lambda adapters: (not self._cleanup_in_progress) and self.adapters_loaded.emit(adapters),
-                emit_dns_info_loaded_fn=lambda dns_info: (not self._cleanup_in_progress) and self.dns_info_loaded.emit(dns_info),
-            )
-            self._apply_loaded_force_dns_state()
+            warmed = self._dns.consume_warmed_page_data()
         except Exception as exc:
-            log(f"Ошибка загрузки DNS данных: {exc}", "ERROR")
-    
-    def _on_adapters_loaded(self, adapters):
-        if self._cleanup_in_progress:
+            log(f"DNS: не удалось взять заранее загруженные данные: {exc}", "DEBUG")
+            warmed = None
+        if warmed is not None:
+            self._on_page_data(warmed)
             return
-        handle_loaded_adapters(
-            adapters=adapters,
-            current_dns_info=self._dns_info,
-            ui_built=self._ui_built,
-            set_adapters_fn=lambda value: setattr(self, "_adapters", value),
-            build_dynamic_ui_fn=self._build_dynamic_ui,
-        )
-    
-    def _on_dns_info_loaded(self, dns_info):
-        if self._cleanup_in_progress:
-            return
-        handle_loaded_dns_info(
-            dns_info=dns_info,
-            current_adapters=self._adapters,
-            ui_built=self._ui_built,
-            set_dns_info_fn=lambda value: setattr(self, "_dns_info", value),
-            build_dynamic_ui_fn=self._build_dynamic_ui,
-        )
-    
-    def _build_dynamic_ui(self):
-        """Строит UI после загрузки данных"""
-        if not self._dns_choices_built:
-            self._build_dns_choices_ui()
+        self._load_lane.request()
 
-        adapter_cards = build_adapter_cards_ui(
-            cleanup_in_progress=self._cleanup_in_progress,
-            adapter_cards_built=self._ui_built,
-            adapters=self._adapters,
+    def cleanup(self) -> None:
+        self._closed = True
+        for lane in (self._load_lane, self._apply_lane, self._flush_lane, self._latency_lane, self._isp_lane):
+            lane.close()
+
+    def _on_page_data(self, state) -> None:
+        if self._closed or state is None:
+            return
+        self._adapters = [(str(name), str(desc)) for name, desc in (getattr(state, "adapters", ()) or ())]
+        self._dns_info = dict(getattr(state, "dns_info", {}) or {})
+        self._ipv6_available = bool(getattr(state, "ipv6_available", False))
+        self._doh_supported = bool(getattr(state, "doh_supported", False))
+        self._loaded = True
+        self.now_panel.set_adapters([AdapterChip(name=name) for name, _desc in self._adapters])
+        self._render()
+        self._isp_lane.request()
+
+    # ── отрисовка состояния ─────────────────────────────────
+
+    def _selected_adapters(self) -> list[str]:
+        return self.now_panel.selected_adapters()
+
+    def _current_plan(self) -> dns_page_plans.CurrentDnsPlan:
+        return dns_page_plans.build_current_dns_plan(
+            selected_adapters=self._selected_adapters(),
             dns_info=self._dns_info,
-            build_adapter_cards_fn=build_adapter_cards,
-            adapters_layout=self.adapters_layout,
-            on_state_changed=self._request_dns_selection_sync,
+            providers=self._providers,
             normalize_alias_fn=self._dns.normalize_adapter_alias,
-            adapters_container=self.adapters_container,
-        )
-        if adapter_cards is None:
-            return
-        self._ui_built = True
-        self._is_loading = False
-        self.adapter_cards = adapter_cards
-        self._check_and_show_isp_dns_warning()
-        self._apply_inline_theme_styles()
-        self._request_dns_selection_sync()
-    
-    def _clear_selection(self):
-        """Сбрасывает все выделения"""
-        clear_dns_selection_ui(
-            dns_cards=self.dns_cards,
-            auto_indicator=getattr(self, 'auto_indicator', None),
-            auto_card=getattr(self, 'auto_card', None),
-            custom_indicator=getattr(self, 'custom_indicator', None),
-            custom_card=getattr(self, 'custom_card', None),
-            indicator_off_qss=DNSProviderCard.indicator_off(),
-            clear_dns_selection_fn=clear_dns_selection,
-            set_card_selected_fn=self._set_dns_card_selected,
         )
 
-    def _set_dns_card_selected(self, card: QWidget | None, selected: bool) -> None:
-        set_dns_card_selected(card, selected)
-    
-    def _on_dns_selected(self, name: str, data: dict):
-        """Обработчик выбора DNS - сразу применяем"""
-        self._selected_provider = select_provider_dns_ui(
-            name=name,
-            dns_cards=self.dns_cards,
-            auto_indicator=getattr(self, 'auto_indicator', None),
-            auto_card=getattr(self, 'auto_card', None),
-            custom_indicator=getattr(self, 'custom_indicator', None),
-            custom_card=getattr(self, 'custom_card', None),
-            indicator_off_qss=DNSProviderCard.indicator_off(),
-            set_card_selected_fn=self._set_dns_card_selected,
-        )
-        
-        # Применяем
-        self._apply_provider_dns_quick(name, data)
-    
-    def _select_auto_dns(self):
-        """Выбор автоматического DNS"""
-        select_auto_dns_ui(
-            dns_cards=self.dns_cards,
-            auto_indicator=getattr(self, 'auto_indicator', None),
-            auto_card=getattr(self, 'auto_card', None),
-            custom_indicator=getattr(self, 'custom_indicator', None),
-            custom_card=getattr(self, 'custom_card', None),
-            indicator_on_qss=DNSProviderCard.indicator_on(),
-            indicator_off_qss=DNSProviderCard.indicator_off(),
-            set_card_selected_fn=self._set_dns_card_selected,
-        )
-        self._selected_provider = None
-        
-        # Применяем
-        self._apply_auto_dns_quick()
-    
-    def _get_selected_adapters(self) -> list:
-        """Возвращает выбранные адаптеры"""
-        return [card.adapter_name for card in self.adapter_cards if card.checkbox.isChecked()]
-    
-    def _apply_auto_dns_quick(self):
-        """Быстрое применение автоматического DNS (IPv4 + IPv6)"""
-        self._request_dns_apply("auto", adapters=self._get_selected_adapters())
-    
-    def _apply_provider_dns_quick(self, name: str, data: dict):
-        """Быстрое применение DNS провайдера"""
-        self._request_dns_apply(
-            "provider",
-            adapters=self._get_selected_adapters(),
-            name=name,
-            data=data,
-            ipv6_available=self._ipv6_available,
-        )
-    
-    def _apply_custom_dns_quick(self):
-        """Быстрое применение пользовательского DNS"""
-        primary = self.custom_primary.text().strip()
-        if not primary:
+    def _render(self) -> None:
+        if self._closed:
             return
-        
-        secondary = self.custom_secondary.text().strip() or None
-        
-        select_custom_dns_ui(
-            dns_cards=self.dns_cards,
-            auto_indicator=getattr(self, 'auto_indicator', None),
-            auto_card=getattr(self, 'auto_card', None),
-            custom_indicator=getattr(self, 'custom_indicator', None),
-            custom_card=getattr(self, 'custom_card', None),
-            indicator_on_qss=DNSProviderCard.indicator_on(),
-            indicator_off_qss=DNSProviderCard.indicator_off(),
-            set_card_selected_fn=self._set_dns_card_selected,
+        plan = self._current_plan() if self._loaded else dns_page_plans.CurrentDnsPlan(kind="none")
+        self.now_panel.set_state(self._now_state(plan))
+        self.now_panel.update_adapter_tooltips(self._adapter_tooltips())
+        self.grid.set_tiles(self._tiles(plan))
+
+    def _provider(self, name: str) -> dict | None:
+        for group in self._providers.values():
+            if name in group:
+                return group[name]
+        return None
+
+    @staticmethod
+    def _addresses_text(ipv4, ipv6) -> str:
+        parts = [" · ".join(ipv4)] if ipv4 else []
+        if ipv6:
+            parts.append("IPv6: " + " · ".join(ipv6))
+        return "   ".join(parts)
+
+    def _now_state(self, plan: dns_page_plans.CurrentDnsPlan) -> NowState:
+        pending = self._pending_choice
+        if pending is not None:
+            applying = self._t("page.network.now.applying", "Применяю…")
+            if pending == AUTO_CHOICE:
+                return NowState(self._t("page.network.dns.auto", "Автоматически (DHCP)"), applying, "fa5s.sync", busy=True)
+            data = self._provider(pending) or {}
+            return NowState(pending, applying, data.get("icon", ""), data.get("color", ""), busy=True)
+        if not self._loaded:
+            return NowState(self._t("page.network.now.loading", "Загружаю настройки сети…"), "", "fa5s.network-wired", busy=True)
+        if plan.kind == "none":
+            if not self.now_panel.adapter_names():
+                return NowState(self._t("page.network.adapters.empty", "Сетевые адаптеры не найдены"), "", "fa5s.plug")
+            return NowState(
+                self._t("page.network.now.no_adapters.title", "Адаптеры не отмечены"),
+                self._t("page.network.now.no_adapters.detail", "Отметьте адаптер ниже — выбранный DNS встанет на него."),
+                "fa5s.plug",
+            )
+        if plan.kind == "auto":
+            return NowState(
+                self._t("page.network.dns.auto", "Автоматически (DHCP)"),
+                self._t("page.network.now.auto.detail", "DNS выдаёт роутер или провайдер."),
+                "fa5s.sync",
+            )
+        if plan.kind == "mixed":
+            return NowState(
+                self._t("page.network.now.mixed.title", "На адаптерах разные DNS"),
+                self._t("page.network.now.mixed.detail", "Выберите сервер — он встанет на все отмеченные адаптеры."),
+                "fa5s.random",
+                "#d29922",
+            )
+        detail = self._addresses_text(plan.ipv4, plan.ipv6)
+        if plan.kind == "provider" and plan.provider:
+            data = self._provider(plan.provider) or {}
+            return NowState(plan.provider, detail, data.get("icon", ""), data.get("color", ""))
+        return NowState(self._t("page.network.now.custom.title", "Свой DNS"), detail, "fa5s.edit", "#22c55e")
+
+    def _adapter_tooltips(self) -> dict[str, str]:
+        tooltips: dict[str, str] = {}
+        for name, desc in self._adapters:
+            info = self._dns_info.get(self._dns.normalize_adapter_alias(name), {}) or {}
+            ipv4 = dns_page_plans.normalize_dns_list(info.get("ipv4", []))
+            ipv6 = dns_page_plans.normalize_dns_list(info.get("ipv6", []))
+            current = self._addresses_text(ipv4, ipv6) or self._t("page.network.dns.auto", "Автоматически (DHCP)")
+            tooltips[name] = "\n".join(part for part in (desc, f"DNS: {current}") if part)
+        return tooltips
+
+    def _primary_address(self, data: dict) -> str:
+        ipv4 = dns_page_plans.normalize_dns_list(data.get("ipv4", []))
+        ipv6 = dns_page_plans.normalize_dns_list(data.get("ipv6", []))
+        return ipv4[0] if ipv4 else (ipv6[0] if ipv6 else "")
+
+    def _tiles(self, plan: dns_page_plans.CurrentDnsPlan) -> list[DnsTile]:
+        current = plan.provider if plan.kind == "provider" else None
+        chosen = self._pending_choice if self._pending_choice not in (None, AUTO_CHOICE) else None
+        measured = {
+            address: value for address, value in self._latency.items() if value is not None
+        }
+        fastest_address = min(measured, key=measured.get) if measured else ""
+
+        groups = list(self._providers.items())
+        if CUSTOM_DNS_CATEGORY not in self._providers:
+            groups.append((CUSTOM_DNS_CATEGORY, {}))
+        if self._filter != FILTER_ALL:
+            groups = [(name, items) for name, items in groups if name == self._filter]
+
+        tiles: list[DnsTile] = []
+        for group, items in groups:
+            if self._filter == FILTER_ALL:
+                tiles.append(DnsTile(kind="group", title=self._group_title(group), counter=str(len(items)) if items else ""))
+            for name, data in items.items():
+                address = self._primary_address(data)
+                if self._measuring and address not in self._latency:
+                    latency, latency_ms = "measuring", 0.0
+                elif address in self._latency:
+                    value = self._latency[address]
+                    latency, latency_ms = ("ok", float(value)) if value is not None else ("timeout", 0.0)
+                else:
+                    latency, latency_ms = "", 0.0
+                ipv4 = dns_page_plans.normalize_dns_list(data.get("ipv4", []))
+                ipv6 = dns_page_plans.normalize_dns_list(data.get("ipv6", []))
+                custom = bool(data.get("custom_id"))
+                tooltip_lines = [f"{name} — {data.get('desc', '')}".rstrip(" —")]
+                if ipv4:
+                    tooltip_lines.append("IPv4: " + ", ".join(dict.fromkeys(ipv4)))
+                if ipv6:
+                    tooltip_lines.append("IPv6: " + ", ".join(dict.fromkeys(ipv6)))
+                if custom:
+                    tooltip_lines.append(self._t("page.network.tile.custom_menu", "Правая кнопка мыши — изменить или удалить"))
+                tiles.append(
+                    DnsTile(
+                        kind="provider",
+                        key=name,
+                        title=name,
+                        note=self._t("page.network.tile.custom_note", "Свой сервер") if custom else str(data.get("desc", "")),
+                        address=address,
+                        icon_name=str(data.get("icon", "")),
+                        color=str(data.get("color", "")),
+                        selected=(name == chosen) if chosen else (name == current and self._pending_choice is None),
+                        pending=name == chosen,
+                        has_ipv6=bool(ipv6),
+                        has_doh=self._doh_supported and bool(data.get("doh")),
+                        custom=custom,
+                        latency=latency,
+                        latency_ms=latency_ms,
+                        fastest=bool(fastest_address) and address == fastest_address,
+                        tooltip="\n".join(tooltip_lines),
+                    )
+                )
+            if group == CUSTOM_DNS_CATEGORY:
+                tiles.append(
+                    DnsTile(
+                        kind="add",
+                        key=ADD_TILE_KEY,
+                        title=self._t("page.network.add_tile.title", "Свой DNS"),
+                        note=self._t("page.network.add_tile.note", "Добавить свой адрес"),
+                        tooltip=self._t("page.network.custom.button.description", "Открывает окно добавления нового DNS сервера."),
+                    )
+                )
+        return tiles
+
+    def _set_filter(self, key: str) -> None:
+        self._filter = key
+        set_control_accessibility(
+            self.filter_bar,
+            name=self._t("page.network.filter.name", "Группа DNS-серверов"),
+            description=self._filter_title(key),
         )
-        
-        self._request_dns_apply(
-            "custom",
-            adapters=self._get_selected_adapters(),
-            primary=primary,
-            secondary=secondary,
+        self._render()
+
+    # ── применение DNS ──────────────────────────────────────
+
+    def _info(self, level: str, title: str, content: str = "") -> None:
+        getattr(InfoBar, level)(
+            title=title,
+            content=wrap_infobar_text(content),
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=4000 if level == "success" else 6000,
+            parent=self.window(),
         )
 
-    def _open_custom_dns_dialog(self):
-        """Открывает окно добавления нового пользовательского DNS."""
+    def _ready_adapters(self) -> list[str] | None:
+        if not self._loaded:
+            self._info("info", self._t("page.network.info.wait", "Секунду — загружаю список адаптеров"))
+            return None
+        adapters = self._selected_adapters()
+        if not adapters:
+            self._info(
+                "warning",
+                self._t("page.network.info.no_adapters.title", "Нет отмеченных адаптеров"),
+                self._t("page.network.info.no_adapters.content", "Отметьте хотя бы один адаптер в панели сверху."),
+            )
+            return None
+        return adapters
+
+    def _choose_provider(self, name: str) -> None:
+        data = self._provider(name)
+        if data is None:
+            return
+        adapters = self._ready_adapters()
+        if adapters is None:
+            return
+        self._pending_choice = name
+        self.grid.flash(name)
+        self._render()
+        self._apply_lane.request(
+            {
+                "action": "provider",
+                "adapters": adapters,
+                "name": name,
+                "data": dict(data),
+                "ipv6_available": self._ipv6_available,
+            }
+        )
+
+    def _confirm_reset_to_auto(self) -> None:
+        adapters = self._ready_adapters()
+        if adapters is None:
+            return
+        title = self._t("page.network.force_dns.reset.button", "Вернуть DNS автоматически")
+        body = self._t(
+            "page.network.force_dns.reset.confirm",
+            "Программа вернёт автоматическое получение DNS через DHCP для выбранных адаптеров. Продолжить?",
+        )
+        box = MessageBox(title, body, self.window())
+        set_message_box_button_accessibility(
+            box,
+            yes_name=title,
+            yes_description=body,
+            cancel_name=f"Отменить действие: {title}",
+            cancel_description="Закрывает диалог без изменения DNS.",
+        )
+        if not box.exec():
+            return
+        self._pending_choice = AUTO_CHOICE
+        self._render()
+        self._apply_lane.request({"action": "auto", "adapters": adapters})
+
+    def _create_apply_worker(self, request_id: int, payload: dict):
+        return self._dns.create_dns_apply_worker(
+            request_id,
+            action=str(payload.get("action") or ""),
+            adapters=list(payload.get("adapters") or []),
+            name=str(payload.get("name") or ""),
+            data=payload.get("data") or {},
+            ipv6_available=bool(payload.get("ipv6_available", False)),
+            parent=self,
+        )
+
+    def _on_apply_done(self, payload: dict, result) -> None:
+        self._pending_choice = None
+        data = result if isinstance(result, dict) else {}
+        plan = data.get("plan")
+        if isinstance(plan, dns_page_plans.NetworkProviderDnsPlan) and not plan.valid:
+            self._info("warning", self._t("page.network.error.apply.title", "DNS не применён"), plan.log_message)
+        elif plan is not None:
+            if getattr(plan, "log_message", ""):
+                log(plan.log_message, getattr(plan, "log_level", None) or "INFO")
+            failed = int(getattr(plan, "adapter_count", 0)) - int(getattr(plan, "success_count", 0))
+            if failed > 0:
+                self._info(
+                    "warning",
+                    self._t("page.network.error.apply.partial.title", "DNS встал не везде"),
+                    self._t(
+                        "page.network.error.apply.partial.content",
+                        "Не удалось изменить DNS на адаптерах: {failed} из {total}. Подробности — в логах.",
+                        failed=failed,
+                        total=plan.adapter_count,
+                    ),
+                )
+        dns_info = data.get("dns_info")
+        if isinstance(dns_info, dict):
+            self._dns_info.update(dns_info)
+        self._render()
+
+    def _on_apply_failed(self, _payload, error: str) -> None:
+        self._pending_choice = None
+        self._info("error", self._t("page.network.error.apply.title", "DNS не применён"), error)
+        self._render()
+
+    # ── сброс кэша ──────────────────────────────────────────
+
+    def _flush_cache(self) -> None:
+        self.now_panel.flush_button.setEnabled(False)
+        self._flush_lane.request()
+
+    def _on_flush_done(self, plan) -> None:
+        self.now_panel.flush_button.setEnabled(True)
+        if getattr(plan, "success", False):
+            self._info("success", self._t("page.network.info.flush_done", "Кэш DNS очищен"))
+            return
+        self._info("warning", getattr(plan, "title", "") or self._t("page.network.error.title", "Ошибка"), getattr(plan, "content", ""))
+
+    def _on_flush_failed(self, error: str) -> None:
+        self.now_panel.flush_button.setEnabled(True)
+        self._info("warning", self._t("page.network.error.title", "Ошибка"), error)
+
+    # ── замер скорости ──────────────────────────────────────
+
+    def _measure_latency(self) -> None:
+        servers = [
+            address
+            for group in self._providers.values()
+            for data in group.values()
+            if (address := self._primary_address(data)) and (":" not in address or self._ipv6_available)
+        ]
+        if not servers:
+            return
+        self._measuring = True
+        self._latency = {}
+        self._intercepted = False
+        self.now_panel.set_notice("")
+        self.latency_summary.hide()
+        self._retranslate()
+        self._render()
+        self._latency_lane.request(servers)
+
+    def _on_latency_done(self, report) -> None:
+        self._measuring = False
+        self._latency = dict(getattr(report, "results", {}) or {})
+        self._intercepted = bool(getattr(report, "intercepted", False))
+        self._retranslate()
+        self.now_panel.set_notice(
+            self._t(
+                "page.network.latency.intercepted",
+                "Похоже, DNS-запросы перехватываются по пути (провайдером или роутером): ответил даже адрес, "
+                "где DNS-сервера нет. Цифры показывают перехватчик, а не выбранные серверы.",
+            )
+            if self._intercepted
+            else ""
+        )
+        self._update_latency_summary()
+        self._render()
+
+    def _update_latency_summary(self) -> None:
+        best_name, best_ms = "", None
+        for group in self._providers.values():
+            for name, data in group.items():
+                value = self._latency.get(self._primary_address(data))
+                if value is not None and (best_ms is None or value < best_ms):
+                    best_name, best_ms = name, value
+        if not self._latency:
+            text = self._t("page.network.latency.failed", "Замер не удался")
+        elif best_ms is None:
+            text = self._t("page.network.latency.none", "Ни один сервер не ответил")
+        else:
+            text = self._t(
+                "page.network.latency.best",
+                "Быстрее всех: {name} — {ms} мс",
+                name=best_name,
+                ms=max(1, round(best_ms)),
+            )
+        self.latency_summary.setText(text)
+        self.latency_summary.show()
+
+    # ── предупреждение про DNS провайдера ───────────────────
+
+    def _show_isp_warning(self, plan) -> None:
+        if self._closed or not getattr(plan, "should_show", False):
+            return
+        bar = InfoBar.warning(
+            title=plan.title,
+            content=wrap_infobar_text(plan.content),
+            orient=Qt.Orientation.Vertical,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=10000,
+            parent=self.window(),
+        )
+        if bar is None or not plan.action_text:
+            return
+        button = PushButton(plan.action_text)
+
+        def accept() -> None:
+            bar.close()
+            group, name = RECOMMENDED_PROVIDER
+            if name in self._providers.get(group, {}):
+                self._choose_provider(name)
+
+        button.clicked.connect(accept)
+        bar.addWidget(button)
+
+    # ── свои DNS ────────────────────────────────────────────
+
+    def _save_custom_servers(self, servers: list[dict]) -> None:
+        self._custom_servers = set_custom_dns_servers(servers)
+        self._providers = build_dns_providers_with_custom(DNS_PROVIDERS, self._custom_servers)
+        self._rebuild_filter_bar()
+        self._render()
+
+    def _custom_index(self, name: str) -> int:
+        data = self._provider(name) or {}
+        custom_id = str(data.get("custom_id") or "")
+        for index, server in enumerate(self._custom_servers):
+            if custom_id and str(server.get("id") or "") == custom_id:
+                return index
+        for index, server in enumerate(self._custom_servers):
+            if str(server.get("name") or "") == name:
+                return index
+        return -1
+
+    def _add_custom_server(self) -> None:
         dialog = CustomDnsDialog(self, ipv6_available=self._ipv6_available)
         if not dialog.exec():
             return
         server = dialog.server()
-        if not server.get("id"):
-            return
-        self._custom_dns_servers = set_custom_dns_servers([*self._custom_dns_servers, server])
-        self._refresh_custom_dns_providers()
+        if server.get("id"):
+            self._save_custom_servers([*self._custom_servers, server])
 
-    def _show_custom_dns_provider_menu(self, name: str, data: dict, global_pos) -> None:
-        index = self._custom_dns_server_index(
-            custom_id=str((data or {}).get("custom_id") or ""),
-            name=name,
-        )
+    def _show_custom_server_menu(self, name: str, global_pos: QPoint) -> None:
+        index = self._custom_index(name)
         if index < 0:
             return
-
         menu = RoundMenu(parent=self)
-        action_map: dict[object, str] = {}
+        commands: dict[object, str] = {}
 
-        def add_action(text: str, *, icon_name: str, command: str):
+        def add(text: str, icon_name: str, command: str) -> None:
             action = make_menu_action(text, icon=fluent_icon(icon_name), parent=menu)
             menu.addAction(action)
-            menu_item = menu.view.item(menu.view.count() - 1)
-            if menu_item is not None:
-                menu_item.setData(Qt.ItemDataRole.AccessibleTextRole, text)
-                menu_item.setData(Qt.ItemDataRole.AccessibleDescriptionRole, text)
-            action_map[action] = command
+            item = menu.view.item(menu.view.count() - 1)
+            if item is not None:
+                item.setData(Qt.ItemDataRole.AccessibleTextRole, text)
+                item.setData(Qt.ItemDataRole.AccessibleDescriptionRole, text)
+            commands[action] = command
 
-        add_action("Редактировать", icon_name="EDIT", command="edit")
-        add_action("Создать копию", icon_name="COPY", command="duplicate")
-        add_action("Копировать DNS в буфер обмена", icon_name="COPY", command="copy")
+        add(self._t("page.network.custom.menu.edit", "Редактировать"), "EDIT", "edit")
+        add(self._t("page.network.custom.menu.duplicate", "Создать копию"), "COPY", "duplicate")
+        add(self._t("page.network.custom.menu.copy", "Копировать DNS в буфер обмена"), "COPY", "copy")
         menu.addSeparator()
-        add_action("Удалить", icon_name="DELETE", command="delete")
+        add(self._t("page.network.custom.menu.delete", "Удалить"), "DELETE", "delete")
 
-        chosen = exec_popup_menu(menu, global_pos, owner=self, capture_action=True)
-        command = action_map.get(chosen, "")
+        command = commands.get(exec_popup_menu(menu, global_pos, owner=self, capture_action=True), "")
         if command == "edit":
-            self._edit_custom_dns_server(index)
+            self._edit_custom_server(index)
         elif command == "duplicate":
-            self._duplicate_custom_dns_server(index)
+            self._duplicate_custom_server(index)
         elif command == "copy":
-            self._copy_custom_dns_server(index)
+            self._copy_custom_server(index)
         elif command == "delete":
-            self._delete_custom_dns_server(index)
+            self._save_custom_servers([s for i, s in enumerate(self._custom_servers) if i != index])
 
-    def _custom_dns_server_index(self, *, custom_id: str, name: str) -> int:
-        custom_id = str(custom_id or "").strip()
-        name = str(name or "").strip()
-        for index, server in enumerate(self._custom_dns_servers):
-            if custom_id and str(server.get("id") or "") == custom_id:
-                return index
-        for index, server in enumerate(self._custom_dns_servers):
-            if name and str(server.get("name") or "") == name:
-                return index
-        return -1
-
-    def _edit_custom_dns_server(self, index: int) -> None:
-        if not (0 <= index < len(self._custom_dns_servers)):
-            return
-        dialog = CustomDnsDialog(
-            self,
-            server=self._custom_dns_servers[index],
-            ipv6_available=self._ipv6_available,
-        )
+    def _edit_custom_server(self, index: int) -> None:
+        dialog = CustomDnsDialog(self, server=self._custom_servers[index], ipv6_available=self._ipv6_available)
         if not dialog.exec():
             return
         updated = dialog.server()
-        if not updated.get("id"):
-            return
-        servers = list(self._custom_dns_servers)
-        servers[index] = updated
-        self._custom_dns_servers = set_custom_dns_servers(servers)
-        self._refresh_custom_dns_providers()
+        if updated.get("id"):
+            servers = list(self._custom_servers)
+            servers[index] = updated
+            self._save_custom_servers(servers)
 
-    def _duplicate_custom_dns_server(self, index: int) -> None:
-        if not (0 <= index < len(self._custom_dns_servers)):
-            return
-        server = dict(self._custom_dns_servers[index])
+    def _duplicate_custom_server(self, index: int) -> None:
+        server = dict(self._custom_servers[index])
         server["id"] = f"custom-{uuid4().hex[:12]}"
         server["name"] = unique_copy_name(
             str(server.get("name") or "Свой DNS"),
-            [str(item.get("name") or "") for item in self._custom_dns_servers],
+            [str(item.get("name") or "") for item in self._custom_servers],
         )
-        self._custom_dns_servers = set_custom_dns_servers([*self._custom_dns_servers, server])
-        self._refresh_custom_dns_providers()
+        self._save_custom_servers([*self._custom_servers, server])
 
-    def _copy_custom_dns_server(self, index: int) -> None:
-        if not (0 <= index < len(self._custom_dns_servers)):
-            return
-        dns_values = [
+    def _copy_custom_server(self, index: int) -> None:
+        server = self._custom_servers[index]
+        values = [
             str(item).strip()
-            for item in [
-                *(self._custom_dns_servers[index].get("ipv4", []) or []),
-                *(self._custom_dns_servers[index].get("ipv6", []) or []),
-            ]
+            for item in [*(server.get("ipv4", []) or []), *(server.get("ipv6", []) or [])]
             if str(item).strip()
         ]
-        if not dns_values:
-            return
         clipboard = QApplication.clipboard()
-        if clipboard is not None:
-            clipboard.setText(", ".join(dns_values))
-            InfoBar.success(
-                title="DNS скопирован",
-                content="DNS адрес скопирован в буфер обмена.",
-                parent=self.window(),
-            )
-
-    def _delete_custom_dns_server(self, index: int) -> None:
-        if not (0 <= index < len(self._custom_dns_servers)):
+        if not values or clipboard is None:
             return
-        servers = [server for item_index, server in enumerate(self._custom_dns_servers) if item_index != index]
-        self._custom_dns_servers = set_custom_dns_servers(servers)
-        self._refresh_custom_dns_providers()
-
-    def _refresh_custom_dns_providers(self) -> None:
-        """Обновляет пользовательские DNS в списке провайдеров."""
-        self._dns_providers.clear()
-        self._dns_providers.update(
-            build_dns_providers_with_custom(DNS_PROVIDERS, self._custom_dns_servers)
-        )
-        self._rebuild_dns_choices_ui()
-        self._request_dns_selection_sync()
-
-    def _rebuild_dns_choices_ui(self) -> None:
-        try:
-            self.dns_cards_layout.auto_selected.disconnect()
-        except Exception:
-            pass
-        try:
-            self.dns_cards_layout.provider_selected.disconnect()
-        except Exception:
-            pass
-        try:
-            self.dns_cards_layout.custom_selected.disconnect()
-        except Exception:
-            pass
-        try:
-            self.dns_cards_layout.custom_provider_context_requested.disconnect()
-        except Exception:
-            pass
-        try:
-            self.dns_cards_layout.clear()
-        except Exception:
-            pass
-        self.dns_cards.clear()
-        self._dns_category_labels.clear()
-        self._dns_choices_built = False
-        self._build_dns_choices_ui()
-
-    def create_dns_apply_worker(
-        self,
-        request_id: int,
-        *,
-        action: str,
-        adapters,
-        name: str = "",
-        data=None,
-        primary: str = "",
-        secondary: str | None = None,
-        ipv6_available: bool = False,
-    ):
-        return self._dns_feature().create_dns_apply_worker(
-            request_id,
-            action=action,
-            adapters=adapters,
-            name=name,
-            data=data,
-            primary=primary,
-            secondary=secondary,
-            ipv6_available=ipv6_available,
-            parent=self,
+        clipboard.setText(", ".join(values))
+        self._info(
+            "success",
+            self._t("page.network.custom.copied.title", "DNS скопирован"),
+            self._t("page.network.custom.copied.content", "Адреса DNS в буфере обмена."),
         )
 
-    def _request_dns_apply(self, action: str, **payload) -> None:
-        request = {
-            "action": str(action or "").strip(),
-            **payload,
-        }
-        if self._dns_apply_state_obj().start_scheduled:
-            self._scheduled_dns_apply_request = dict(request)
-            return
-        if self._dns_mutation_action_running():
-            self._queue_dns_apply_request(request)
-            return
-        self._start_dns_apply_worker(request)
 
-    def _queue_dns_apply_request(self, payload: dict[str, object]) -> None:
-        pending = self._dns_apply_state_obj().pending
-        pending[:] = [dict(payload or {})]
-        self._mark_dns_mutation_pending("dns_apply")
-
-    def _start_dns_apply_worker(self, payload: dict[str, object]) -> None:
-        self._dns_apply_runtime.start_qthread_worker(
-            worker_factory=lambda request_id: self.create_dns_apply_worker(
-                request_id,
-                action=str(payload.get("action") or ""),
-                adapters=payload.get("adapters") or [],
-                name=str(payload.get("name") or ""),
-                data=payload.get("data") or {},
-                primary=str(payload.get("primary") or ""),
-                secondary=payload.get("secondary"),
-                ipv6_available=bool(payload.get("ipv6_available", False)),
-            ),
-            on_failed=self._on_dns_apply_failed,
-            on_finished=self._on_dns_apply_worker_finished,
-            bind_worker=self._bind_dns_apply_worker,
-        )
-
-    def _bind_dns_apply_worker(self, worker) -> None:
-        worker.completed.connect(self._on_dns_apply_finished)
-
-    def _on_dns_apply_finished(self, request_id: int, result) -> None:
-        if not self._dns_apply_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        if self._has_pending_dns_mutation_action():
-            return
-        data = result if isinstance(result, dict) else {}
-        plan = data.get("plan")
-        if plan is not None and getattr(plan, "log_message", ""):
-            log(plan.log_message, getattr(plan, "log_level", None) or "INFO")
-        dns_info = data.get("dns_info")
-        if isinstance(dns_info, dict):
-            self._apply_refreshed_adapter_dns_info(dns_info)
-
-    def _on_dns_apply_failed(self, request_id: int, error: str) -> None:
-        if not self._dns_apply_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        if self._has_pending_dns_mutation_action():
-            return
-        log(f"Ошибка применения DNS: {error}", "ERROR")
-
-    def _on_dns_apply_worker_finished(self, _worker) -> None:
-        if not self._is_current_worker_finish(self.__dict__.get("_dns_apply_runtime"), _worker):
-            return
-        self._start_next_dns_mutation_action()
-
-    def _has_pending_dns_mutation_action(self) -> bool:
-        return any(
-            (
-                self._dns_apply_state_obj().has_pending(),
-                self._force_dns_action_state_obj().has_pending(),
-                bool(self.__dict__.get("_dns_mutation_pending_order")),
-            )
-        )
-
-    def _dns_mutation_action_running(self) -> bool:
-        if self._dns_apply_state_obj().start_scheduled:
-            return True
-        if self._force_dns_action_state_obj().start_scheduled:
-            return True
-        dns_apply_runtime = self.__dict__.get("_dns_apply_runtime")
-        force_dns_runtime = self.__dict__.get("_force_dns_action_runtime")
-        return bool(
-            (dns_apply_runtime is not None and dns_apply_runtime.is_running())
-            or (force_dns_runtime is not None and force_dns_runtime.is_running())
-        )
-
-    def _start_next_dns_mutation_action(self) -> bool:
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return False
-        if self._dns_mutation_action_running():
-            return True
-        dns_apply_state = self._dns_apply_state_obj()
-        force_dns_state = self._force_dns_action_state_obj()
-        dns_apply_pending = dns_apply_state.pending
-        force_dns_pending = force_dns_state.pending
-        pending_order = self.__dict__.setdefault("_dns_mutation_pending_order", [])
-        while pending_order:
-            kind = str(pending_order.pop(0) or "")
-            if kind == "dns_apply" and dns_apply_pending:
-                pending = dns_apply_state.pop_next()
-                self._schedule_dns_apply_worker_start(dict(pending or {}))
-                return True
-            if kind == "force_dns" and force_dns_pending:
-                pending = force_dns_state.pop_next()
-                self._schedule_force_dns_action_worker_start(dict(pending or {}))
-                return True
-        if dns_apply_pending:
-            pending = dns_apply_state.pop_next()
-            self._schedule_dns_apply_worker_start(dict(pending or {}))
-            return True
-        if force_dns_pending:
-            pending = force_dns_state.pop_next()
-            self._schedule_force_dns_action_worker_start(dict(pending or {}))
-            return True
-        return False
-
-    def _mark_dns_mutation_pending(self, kind: str) -> None:
-        normalized = str(kind or "").strip()
-        if not normalized:
-            return
-        pending_order = self.__dict__.setdefault("_dns_mutation_pending_order", [])
-        pending_order[:] = [item for item in pending_order if str(item or "") != normalized]
-        pending_order.append(normalized)
-
-    def _schedule_dns_apply_worker_start(self, payload: dict[str, object]) -> None:
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        self._scheduled_dns_apply_request = dict(payload or {})
-        state = self._dns_apply_state_obj()
-        if state.start_scheduled:
-            return
-        state.start_scheduled = True
-        QTimer.singleShot(0, self._run_scheduled_dns_apply_worker_start)
-
-    def _run_scheduled_dns_apply_worker_start(self, payload: dict[str, object] | None = None) -> None:
-        self._dns_apply_state_obj().start_scheduled = False
-        if payload is None:
-            payload = self.__dict__.get("_scheduled_dns_apply_request")
-        self._scheduled_dns_apply_request = None
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        self._start_dns_apply_worker(dict(payload or {}))
-
-    def _apply_refreshed_adapter_dns_info(self, dns_info: dict) -> None:
-        if self._cleanup_in_progress:
-            return
-        try:
-            self._dns_info = dns_info
-            refresh_plan = refresh_adapter_cards(
-                adapter_cards=self.adapter_cards,
-                dns_info=dns_info,
-                build_refresh_plan_fn=lambda names, info: dns_page_plans.build_adapter_dns_refresh_plan(
-                    names,
-                    info,
-                    normalize_alias_fn=self._dns.normalize_adapter_alias,
-                ),
-            )
-
-            self._request_dns_selection_sync()
-            if refresh_plan is not None:
-                log(refresh_plan.log_message, refresh_plan.log_level)
-        except Exception as e:
-            log(f"Ошибка обновления DNS адаптеров: {e}", "WARNING")
-            import traceback
-            log(traceback.format_exc(), "DEBUG")
-    
-    def _build_force_dns_card(self):
-        """Строит виджет принудительного DNS в стиле DPI страницы"""
-        self._force_dns_active, force_dns_widgets = build_force_dns_card_ui(
-            parent=self,
-            content_parent=self.content,
-            add_section_title_fn=self.add_section_title,
-            tr_fn=self._tr,
-            add_widget_fn=self.add_widget,
-            get_theme_tokens_fn=get_theme_tokens,
-            get_force_dns_status_fn=lambda: self._force_dns_active,
-            setting_card_group_cls=SettingCardGroup,
-            caption_label_cls=CaptionLabel,
-            action_button_cls=PushButton,
-            win11_toggle_row_cls=Win11ToggleRow,
-            qwidget_cls=QWidget,
-            qvbox_layout_cls=QVBoxLayout,
-            qhbox_layout_cls=QHBoxLayout,
-            qt_namespace=Qt,
-            insert_widget_into_setting_card_group_fn=insert_widget_into_setting_card_group,
-            enable_setting_card_group_auto_height_fn=enable_setting_card_group_auto_height,
-            on_toggle=self._on_force_dns_action_clicked,
-            on_confirm_reset=self._confirm_reset_dns_to_dhcp,
-            on_custom_dns=self._open_custom_dns_dialog,
-        )
-        self.force_dns_card = force_dns_widgets.card
-        self.force_dns_action_btn = force_dns_widgets.force_button
-        self.force_dns_status_label = force_dns_widgets.status_label
-        self.force_dns_reset_dhcp_btn = force_dns_widgets.reset_button
-        self.force_dns_custom_btn = force_dns_widgets.custom_button
-
-        self._update_force_dns_status(self._force_dns_active)
-        self._update_dns_selection_state()
-
-    def _apply_loaded_force_dns_state(self) -> None:
-        if self._cleanup_in_progress:
-            return
-        if not hasattr(self, "force_dns_action_btn"):
-            return
-        self._set_force_dns_toggle(bool(self._force_dns_active))
-        self._update_force_dns_status(bool(self._force_dns_active))
-        self._update_dns_selection_state()
-
-    def _apply_inline_theme_styles(self, tokens=None) -> None:
-        theme_tokens = tokens or get_theme_tokens()
-        try:
-            for label in list(getattr(self, "_dns_category_labels", [])):
-                if label is None:
-                    continue
-                label.setStyleSheet(
-                    f"""
-                    color: {theme_tokens.fg_faint};
-                    font-size: 10px;
-                    font-weight: 600;
-                    text-transform: uppercase;
-                    letter-spacing: 1px;
-                    padding: 8px 0 4px 4px;
-                    """
-                )
-        except Exception:
-            pass
-        try:
-            self._render_isp_warning_styles(theme_tokens)
-        except Exception:
-            pass
-        try:
-            self._refresh_static_dns_card_styles(theme_tokens)
-        except Exception:
-            pass
-
-    def _refresh_static_dns_card_styles(self, tokens=None) -> None:
-        theme_tokens = tokens or get_theme_tokens()
-
-        try:
-            if self._auto_icon_label is not None:
-                self._auto_icon_label.setPixmap(
-                    get_cached_qta_pixmap('fa5s.sync', color=theme_tokens.fg_faint, size=16)
-                )
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, "auto_indicator") and self.auto_indicator is not None:
-                auto_card = getattr(self, "auto_card", None)
-                auto_selected = bool(auto_card.property("selected")) if auto_card is not None else False
-                self.auto_indicator.setStyleSheet(
-                    DNSProviderCard.indicator_on() if auto_selected else DNSProviderCard.indicator_off()
-                )
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, "custom_indicator") and self.custom_indicator is not None:
-                custom_card = getattr(self, "custom_card", None)
-                custom_selected = bool(custom_card.property("selected")) if custom_card is not None else False
-                self.custom_indicator.setStyleSheet(
-                    DNSProviderCard.indicator_on() if custom_selected else DNSProviderCard.indicator_off()
-                )
-        except Exception:
-            pass
-
-    def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
-        _ = force
-        self._apply_inline_theme_styles(tokens)
-
-    def _on_force_dns_toggled(self, enabled: bool):
-        """Обработчик переключения принудительного DNS"""
-        self._request_force_dns_action("toggle", enabled=bool(enabled))
-
-    def _on_force_dns_action_clicked(self) -> None:
-        enabled = not bool(self._force_dns_active)
-        if not self._confirm_action(
-            self._force_dns_action_button_key(enabled),
-            self._force_dns_action_button_default(enabled),
-            self._force_dns_action_confirm_key(enabled),
-            self._force_dns_action_description_for_request(enabled),
-        ):
-            return
-        self._on_force_dns_toggled(enabled)
-
-    def create_force_dns_action_worker(self, request_id: int, *, action: str, enabled=None, adapters=None):
-        return self._dns_feature().create_force_dns_action_worker(
-            request_id,
-            action=action,
-            enabled=enabled,
-            adapters=adapters,
-            language=self._ui_language,
-            parent=self,
-        )
-
-    def _request_force_dns_action(self, action: str, *, enabled=None) -> None:
-        payload = {
-            "action": str(action or "").strip(),
-            "enabled": enabled,
-        }
-        scheduled = self.__dict__.get("_scheduled_force_dns_action_request")
-        if self._force_dns_action_state_obj().start_scheduled:
-            if isinstance(scheduled, dict) and scheduled.get("action") == payload.get("action"):
-                self._scheduled_force_dns_action_request = dict(payload)
-            else:
-                self._queue_force_dns_action(payload)
-            return
-        if self._dns_mutation_action_running():
-            self._queue_force_dns_action(payload)
-            return
-        self._start_force_dns_action_worker(payload)
-
-    def _queue_force_dns_action(self, payload: dict[str, object]) -> None:
-        queued = dict(payload or {})
-        action = str(queued.get("action") or "")
-        pending = self._force_dns_action_state_obj().pending
-        if action == "toggle":
-            pending[:] = [item for item in pending if str(item.get("action") or "") != "toggle"]
-        elif queued in pending:
-            return
-        pending.append(queued)
-        self._mark_dns_mutation_pending("force_dns")
-
-    def _start_force_dns_action_worker(self, payload: dict[str, object]) -> None:
-        self._force_dns_action_runtime.start_qthread_worker(
-            worker_factory=lambda request_id: self.create_force_dns_action_worker(
-                request_id,
-                action=str(payload.get("action") or ""),
-                enabled=payload.get("enabled"),
-                adapters=self._get_selected_adapters(),
-            ),
-            on_failed=self._on_force_dns_action_failed,
-            on_finished=self._on_force_dns_action_worker_finished,
-            bind_worker=self._bind_force_dns_action_worker,
-        )
-
-    def _bind_force_dns_action_worker(self, worker) -> None:
-        worker.completed.connect(self._on_force_dns_action_finished)
-
-    def _on_force_dns_action_finished(self, request_id: int, action: str, result, context) -> None:
-        if not self._force_dns_action_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        if self._has_pending_dns_mutation_action():
-            return
-        data = result if isinstance(result, dict) else {}
-        message = str(data.get("message") or "")
-        if message:
-            log(message, "DNS")
-        if action == "toggle":
-            self._apply_force_dns_toggle_worker_result(data)
-            return
-        if action == "reset_dhcp":
-            self._apply_force_dns_reset_worker_result(data)
-
-    def _apply_force_dns_toggle_worker_result(self, data: dict[str, object]) -> None:
-        plan = data.get("plan")
-        if plan is None:
-            plan = dns_page_plans.build_force_dns_toggle_error_plan(
-                requested_enabled=bool(data.get("enabled", False))
-            )
-        self._force_dns_active = bool(plan.force_dns_active)
-        self._set_force_dns_toggle(bool(plan.final_checked))
-        details_key = plan.details_key
-        details_fallback = str(plan.details_fallback or "")
-        if details_key in {
-            "page.network.force_dns.action.enable.description",
-            "page.network.force_dns.action.disable.description",
-        }:
-            details_key = None
-            details_fallback = ""
-        self._update_force_dns_status(
-            bool(plan.force_dns_active),
-            details_key,
-            details_kwargs=dict(plan.details_kwargs or {}),
-            details_fallback=details_fallback,
-        )
-        self._update_dns_selection_state()
-        dns_info = data.get("dns_info")
-        if bool(data.get("changed", True)) and isinstance(dns_info, dict):
-            self._apply_refreshed_adapter_dns_info(dns_info)
-
-    def _apply_force_dns_reset_worker_result(self, data: dict[str, object]) -> None:
-        result_plan = data.get("plan")
-        if result_plan is None:
-            self._on_force_dns_action_failed(
-                self._force_dns_action_runtime.request_id,
-                "reset_dhcp",
-                "Пустой результат сброса DNS",
-                {},
-            )
-            return
-        self._force_dns_active = bool(result_plan.force_dns_active)
-        self._set_force_dns_toggle(bool(result_plan.force_dns_active))
-
-        if bool(result_plan.should_select_auto):
-            select_auto_dns_ui(
-                dns_cards=self.dns_cards,
-                auto_indicator=getattr(self, 'auto_indicator', None),
-                auto_card=getattr(self, 'auto_card', None),
-                custom_indicator=getattr(self, 'custom_indicator', None),
-                custom_card=getattr(self, 'custom_card', None),
-                indicator_on_qss=DNSProviderCard.indicator_on(),
-                indicator_off_qss=DNSProviderCard.indicator_off(),
-                set_card_selected_fn=self._set_dns_card_selected,
-            )
-            self._selected_provider = None
-
-        status_details_key = result_plan.status_details_key
-        if status_details_key == "page.network.force_dns.action.reset.description":
-            status_details_key = None
-        self._update_force_dns_status(bool(result_plan.force_dns_active), status_details_key)
-        self._update_dns_selection_state()
-        dns_info = data.get("dns_info")
-        if isinstance(dns_info, dict):
-            self._apply_refreshed_adapter_dns_info(dns_info)
-
-        if result_plan.infobar_level == "success":
-            InfoBar.success(
-                title=result_plan.infobar_title,
-                content=result_plan.infobar_content,
-                parent=self.window(),
-            )
-        else:
-            InfoBar.warning(
-                title=result_plan.infobar_title,
-                content=result_plan.infobar_content,
-                parent=self.window(),
-            )
-
-    def _on_force_dns_action_failed(self, request_id: int, action: str, error: str, context) -> None:
-        if not self._force_dns_action_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        if self._has_pending_dns_mutation_action():
-            return
-        log(f"Ошибка Force DNS ({action}): {error}", "ERROR")
-        if action == "toggle":
-            requested_enabled = bool((context or {}).get("enabled"))
-            plan = dns_page_plans.build_force_dns_toggle_error_plan(requested_enabled=requested_enabled)
-            self._apply_force_dns_toggle_worker_result({"plan": plan, "changed": False})
-            return
-        InfoBar.warning(
-            title=self._tr("page.network.error.title", "Ошибка"),
-            content=self._tr(
-                "page.network.error.reset_dhcp_failed",
-                "Не удалось сбросить DNS: {error}",
-            ).format(error=error),
-            parent=self.window(),
-        )
-
-    def _on_force_dns_action_worker_finished(self, _worker) -> None:
-        if not self._is_current_worker_finish(self.__dict__.get("_force_dns_action_runtime"), _worker):
-            return
-        self._start_next_dns_mutation_action()
-
-    def _schedule_force_dns_action_worker_start(self, payload: dict[str, object]) -> None:
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        self._scheduled_force_dns_action_request = dict(payload or {})
-        state = self._force_dns_action_state_obj()
-        if state.start_scheduled:
-            return
-        state.start_scheduled = True
-        QTimer.singleShot(0, self._run_scheduled_force_dns_action_worker_start)
-
-    def _run_scheduled_force_dns_action_worker_start(self, payload: dict[str, object] | None = None) -> None:
-        self._force_dns_action_state_obj().start_scheduled = False
-        if payload is None:
-            payload = self.__dict__.get("_scheduled_force_dns_action_request")
-        self._scheduled_force_dns_action_request = None
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        self._start_force_dns_action_worker(dict(payload or {}))
-
-    def create_dns_flush_cache_worker(self, request_id: int):
-        return self._dns_feature().create_dns_flush_cache_worker(
-            request_id,
-            language=self._ui_language,
-            parent=self,
-        )
-
-    def _request_dns_flush_cache(self) -> None:
-        state = self._dns_flush_cache_state_obj()
-        if state.is_busy():
-            state.pending = True
-            return
-        self._start_dns_flush_cache_worker()
-
-    def _start_dns_flush_cache_worker(self) -> None:
-        self._dns_flush_cache_runtime.start_qthread_worker(
-            worker_factory=self.create_dns_flush_cache_worker,
-            on_failed=self._on_dns_flush_cache_failed,
-            on_finished=self._on_dns_flush_cache_worker_finished,
-            bind_worker=self._bind_dns_flush_cache_worker,
-        )
-
-    def _bind_dns_flush_cache_worker(self, worker) -> None:
-        worker.completed.connect(self._on_dns_flush_cache_finished)
-
-    def _on_dns_flush_cache_finished(self, request_id: int, plan) -> None:
-        if not self._dns_flush_cache_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        if getattr(plan, "infobar_level", None) == "warning":
-            InfoBar.warning(
-                title=plan.title,
-                content=plan.content,
-                parent=self.window(),
-            )
-
-    def _on_dns_flush_cache_failed(self, request_id: int, error: str) -> None:
-        if not self._dns_flush_cache_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        plan = dns_page_plans.build_flush_dns_cache_result_plan(
-            success=False,
-            message=str(error or ""),
-            language=self._ui_language,
-        )
-        InfoBar.warning(
-            title=plan.title,
-            content=plan.content,
-            parent=self.window(),
-        )
-
-    def _on_dns_flush_cache_worker_finished(self, _worker) -> None:
-        if not self._is_current_worker_finish(self.__dict__.get("_dns_flush_cache_runtime"), _worker):
-            return
-        if self._dns_flush_cache_state_obj().has_pending() and not self._cleanup_in_progress:
-            self._dns_flush_cache_state_obj().pending = False
-            self._schedule_dns_flush_cache_worker_start()
-
-    def _page_load_state_obj(self) -> LatestValueWorkerState:
-        state = self.__dict__.get("_page_load_state")
-        runtime = self.__dict__.get("_page_load_runtime")
-        if state is None:
-            pending = bool(self.__dict__.pop("_page_load_pending", False))
-            start_scheduled = bool(self.__dict__.pop("_page_load_start_scheduled", False))
-            state = LatestValueWorkerState(
-                runtime,
-                empty_value=False,
-                pending=pending,
-                start_scheduled=start_scheduled,
-            )
-            self.__dict__["_page_load_state"] = state
-        elif getattr(state, "runtime", None) is None and runtime is not None:
-            state.runtime = runtime
-        return state
-
-    @property
-    def _page_load_pending(self) -> bool:
-        return bool(self._page_load_state_obj().pending)
-
-    @_page_load_pending.setter
-    def _page_load_pending(self, value: bool) -> None:
-        self._page_load_state_obj().pending = bool(value)
-
-    @property
-    def _page_load_start_scheduled(self) -> bool:
-        return bool(self._page_load_state_obj().start_scheduled)
-
-    @_page_load_start_scheduled.setter
-    def _page_load_start_scheduled(self, value: bool) -> None:
-        self._page_load_state_obj().start_scheduled = bool(value)
-
-    def _connectivity_test_state_obj(self) -> LatestValueWorkerState:
-        state = self.__dict__.get("_connectivity_test_state")
-        runtime = self.__dict__.get("_connectivity_test_runtime")
-        if state is None:
-            pending = bool(self.__dict__.pop("_connectivity_test_pending", False))
-            start_scheduled = bool(self.__dict__.pop("_connectivity_test_start_scheduled", False))
-            state = LatestValueWorkerState(
-                runtime,
-                empty_value=False,
-                pending=pending,
-                start_scheduled=start_scheduled,
-            )
-            self.__dict__["_connectivity_test_state"] = state
-        elif getattr(state, "runtime", None) is None and runtime is not None:
-            state.runtime = runtime
-        return state
-
-    @property
-    def _connectivity_test_pending(self) -> bool:
-        return bool(self._connectivity_test_state_obj().pending)
-
-    @_connectivity_test_pending.setter
-    def _connectivity_test_pending(self, value: bool) -> None:
-        self._connectivity_test_state_obj().pending = bool(value)
-
-    @property
-    def _connectivity_test_start_scheduled(self) -> bool:
-        return bool(self._connectivity_test_state_obj().start_scheduled)
-
-    @_connectivity_test_start_scheduled.setter
-    def _connectivity_test_start_scheduled(self, value: bool) -> None:
-        self._connectivity_test_state_obj().start_scheduled = bool(value)
-
-    def _isp_warning_state_obj(self) -> LatestValueWorkerState:
-        state = self.__dict__.get("_isp_warning_state")
-        runtime = self.__dict__.get("_isp_warning_runtime")
-        if state is None:
-            pending = bool(self.__dict__.pop("_isp_warning_pending", False))
-            start_scheduled = bool(self.__dict__.pop("_isp_warning_start_scheduled", False))
-            state = LatestValueWorkerState(
-                runtime,
-                empty_value=False,
-                pending=pending,
-                start_scheduled=start_scheduled,
-            )
-            self.__dict__["_isp_warning_state"] = state
-        elif getattr(state, "runtime", None) is None and runtime is not None:
-            state.runtime = runtime
-        return state
-
-    @property
-    def _isp_warning_pending(self) -> bool:
-        return bool(self._isp_warning_state_obj().pending)
-
-    @_isp_warning_pending.setter
-    def _isp_warning_pending(self, value: bool) -> None:
-        self._isp_warning_state_obj().pending = bool(value)
-
-    @property
-    def _isp_warning_start_scheduled(self) -> bool:
-        return bool(self._isp_warning_state_obj().start_scheduled)
-
-    @_isp_warning_start_scheduled.setter
-    def _isp_warning_start_scheduled(self, value: bool) -> None:
-        self._isp_warning_state_obj().start_scheduled = bool(value)
-
-    def _schedule_dns_flush_cache_worker_start(self) -> None:
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        state = self._dns_flush_cache_state_obj()
-        if state.start_scheduled:
-            state.pending = True
-            return
-        state.start_scheduled = True
-        QTimer.singleShot(0, self._run_scheduled_dns_flush_cache_worker_start)
-
-    def _run_scheduled_dns_flush_cache_worker_start(self) -> None:
-        self._dns_flush_cache_state_obj().start_scheduled = False
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        self._start_dns_flush_cache_worker()
-
-    def _dns_flush_cache_state_obj(self) -> LatestValueWorkerState:
-        state = self.__dict__.get("_dns_flush_cache_state")
-        runtime = self.__dict__.get("_dns_flush_cache_runtime")
-        if state is None:
-            pending = bool(self.__dict__.pop("_dns_flush_cache_pending", False))
-            start_scheduled = bool(self.__dict__.pop("_dns_flush_cache_start_scheduled", False))
-            state = LatestValueWorkerState(
-                runtime,
-                empty_value=False,
-                pending=pending,
-                start_scheduled=start_scheduled,
-            )
-            self.__dict__["_dns_flush_cache_state"] = state
-        elif getattr(state, "runtime", None) is None and runtime is not None:
-            state.runtime = runtime
-        return state
-
-    @property
-    def _dns_flush_cache_pending(self) -> bool:
-        return bool(self._dns_flush_cache_state_obj().pending)
-
-    @_dns_flush_cache_pending.setter
-    def _dns_flush_cache_pending(self, value: bool) -> None:
-        self._dns_flush_cache_state_obj().pending = bool(value)
-
-    @property
-    def _dns_flush_cache_start_scheduled(self) -> bool:
-        return bool(self._dns_flush_cache_state_obj().start_scheduled)
-
-    @_dns_flush_cache_start_scheduled.setter
-    def _dns_flush_cache_start_scheduled(self, value: bool) -> None:
-        self._dns_flush_cache_state_obj().start_scheduled = bool(value)
-
-    def _dns_apply_state_obj(self) -> QueuedWorkerState[dict[str, object]]:
-        state = self.__dict__.get("_dns_apply_state")
-        runtime = self.__dict__.get("_dns_apply_runtime")
-        if state is None:
-            pending = [
-                dict(item or {})
-                for item in list(self.__dict__.pop("_dns_apply_pending", []) or [])
-            ]
-            start_scheduled = bool(self.__dict__.pop("_dns_apply_start_scheduled", False))
-            state = QueuedWorkerState(
-                runtime,
-                pending=pending,
-                start_scheduled=start_scheduled,
-            )
-            self.__dict__["_dns_apply_state"] = state
-        elif getattr(state, "runtime", None) is None and runtime is not None:
-            state.runtime = runtime
-        return state
-
-    @property
-    def _dns_apply_pending(self) -> list[dict[str, object]]:
-        return self._dns_apply_state_obj().pending
-
-    @_dns_apply_pending.setter
-    def _dns_apply_pending(self, value: list[dict[str, object]]) -> None:
-        self._dns_apply_state_obj().pending = [
-            dict(item or {})
-            for item in list(value or [])
-        ]
-
-    @property
-    def _dns_apply_start_scheduled(self) -> bool:
-        return bool(self._dns_apply_state_obj().start_scheduled)
-
-    @_dns_apply_start_scheduled.setter
-    def _dns_apply_start_scheduled(self, value: bool) -> None:
-        self._dns_apply_state_obj().start_scheduled = bool(value)
-
-    def _force_dns_action_state_obj(self) -> QueuedWorkerState[dict[str, object]]:
-        state = self.__dict__.get("_force_dns_action_state")
-        runtime = self.__dict__.get("_force_dns_action_runtime")
-        if state is None:
-            pending = [
-                dict(item or {})
-                for item in list(self.__dict__.pop("_force_dns_action_pending", []) or [])
-            ]
-            start_scheduled = bool(self.__dict__.pop("_force_dns_action_start_scheduled", False))
-            state = QueuedWorkerState(
-                runtime,
-                pending=pending,
-                start_scheduled=start_scheduled,
-            )
-            self.__dict__["_force_dns_action_state"] = state
-        elif getattr(state, "runtime", None) is None and runtime is not None:
-            state.runtime = runtime
-        return state
-
-    @property
-    def _force_dns_action_pending(self) -> list[dict[str, object]]:
-        return self._force_dns_action_state_obj().pending
-
-    @_force_dns_action_pending.setter
-    def _force_dns_action_pending(self, value: list[dict[str, object]]) -> None:
-        self._force_dns_action_state_obj().pending = [
-            dict(item or {})
-            for item in list(value or [])
-        ]
-
-    @property
-    def _force_dns_action_start_scheduled(self) -> bool:
-        return bool(self._force_dns_action_state_obj().start_scheduled)
-
-    @_force_dns_action_start_scheduled.setter
-    def _force_dns_action_start_scheduled(self, value: bool) -> None:
-        self._force_dns_action_state_obj().start_scheduled = bool(value)
-    
-    def _set_force_dns_toggle(self, checked: bool):
-        """Устанавливает состояние переключателя без триггера сигналов"""
-        if getattr(self, "force_dns_action_btn", None) is None:
-            return
-        self._sync_force_dns_action_button(bool(checked))
-        set_force_dns_toggle(
-            self.force_dns_action_btn,
-            checked,
-            text=self._force_dns_action_button_text(bool(checked)),
-        )
-
-    def _force_dns_action_button_text(self, active: bool) -> str:
-        if active:
-            return self._tr("page.network.force_dns.action.disable.button", "Ручная настройка DNS")
-        return self._tr("page.network.force_dns.action.enable.button", "Применить выбранный DNS")
-
-    def _force_dns_action_button_key(self, enabled: bool) -> str:
-        if enabled:
-            return "page.network.force_dns.action.enable.button"
-        return "page.network.force_dns.action.disable.button"
-
-    def _force_dns_action_button_default(self, enabled: bool) -> str:
-        if enabled:
-            return "Применить выбранный DNS"
-        return "Ручная настройка DNS"
-
-    def _force_dns_action_confirm_key(self, enabled: bool) -> str:
-        if enabled:
-            return "page.network.force_dns.action.enable.confirm"
-        return "page.network.force_dns.action.disable.confirm"
-
-    def _force_dns_action_description_key(self, enabled: bool) -> str:
-        if enabled:
-            return "page.network.force_dns.action.enable.description"
-        return "page.network.force_dns.action.disable.description"
-
-    def _force_dns_action_description_for_request(self, enabled: bool) -> str:
-        return self._tr(
-            self._force_dns_action_description_key(enabled),
-            (
-                "Выберите DNS из списка или добавьте свой адрес. Программа применит его только по вашему нажатию."
-                if enabled
-                else "DNS меняется только вручную: выберите сервер, добавьте свой адрес или верните автоматическое получение через DHCP."
-            ),
-        )
-
-    def _force_dns_action_description(self, active: bool) -> str:
-        if active:
-            return self._tr(
-                "page.network.force_dns.action.disable.description",
-                "DNS меняется только вручную: выберите сервер, добавьте свой адрес или верните автоматическое получение через DHCP.",
-            )
-        return self._tr(
-            "page.network.force_dns.action.enable.description",
-            "Выберите DNS из списка или добавьте свой адрес. Программа применит его только по вашему нажатию.",
-        )
-
-    def _sync_force_dns_action_button(self, active: bool) -> None:
-        button = getattr(self, "force_dns_action_btn", None)
-        if button is None:
-            return
-        text = self._force_dns_action_button_text(active)
-        description = self._force_dns_action_description(active)
-        try:
-            button.setText(text)
-        except Exception:
-            pass
-        set_tooltip(button, description)
-        set_state_text(button, text)
-        set_control_accessibility(button, name=text, description=description)
-    
-    def _update_force_dns_status(
-        self,
-        enabled: bool,
-        details_key: str | None = None,
-        *,
-        details_kwargs: dict | None = None,
-        details_fallback: str = "",
-    ):
-        """Обновляет текст статуса для принудительного DNS"""
-        apply_force_dns_status_state(
-            has_status_label=hasattr(self, "force_dns_status_label"),
-            enabled=enabled,
-            details_key=details_key,
-            details_kwargs=details_kwargs,
-            details_fallback=details_fallback,
-            set_enabled_state_fn=lambda value: setattr(self, "_force_dns_status_enabled", value),
-            set_details_key_fn=lambda value: setattr(self, "_force_dns_status_details_key", value),
-            set_details_kwargs_fn=lambda value: setattr(self, "_force_dns_status_details_kwargs", value),
-            set_details_fallback_fn=lambda value: setattr(self, "_force_dns_status_details_fallback", value),
-            update_force_dns_status_label_fn=lambda **kwargs: update_force_dns_status_label(
-                label=self.force_dns_status_label,
-                language=self._ui_language,
-                build_status_plan_fn=dns_page_plans.build_force_dns_status_plan,
-                **kwargs,
-            ),
-        )
-    
-    def _update_dns_selection_state(self):
-        """Оставляет выбор DNS доступным в ручном режиме."""
-        update_dns_selection_block_state(
-            blocked=False,
-            dns_cards_container=getattr(self, 'dns_cards_container', None),
-            custom_card=getattr(self, 'custom_card', None),
-        )
-    
-    def _highlight_force_dns(self):
-        """Подсвечивает карточку принудительного DNS при попытке изменить DNS"""
-        highlight_force_dns_card(
-            card=getattr(self, 'force_dns_card', None),
-            get_theme_tokens_fn=get_theme_tokens,
-            schedule_fn=QTimer.singleShot,
-        )
-    
-    def _flush_dns_cache(self):
-        """Сбрасывает DNS кэш"""
-        self._request_dns_flush_cache()
-
-    def _confirm_flush_dns_cache(self):
-        if not self._confirm_action(
-            "page.network.button.flush_dns_cache",
-            "Сбросить DNS кэш",
-            "page.network.button.flush_dns_cache.confirm",
-            "Сбросить?",
-        ):
-            return
-        self._flush_dns_cache()
-
-    def _reset_dns_to_dhcp(self):
-        """Явно сбрасывает DNS на DHCP и отключает Force DNS"""
-        self._request_force_dns_action("reset_dhcp")
-
-    def _confirm_reset_dns_to_dhcp(self):
-        if not self._confirm_action(
-            "page.network.force_dns.reset.button",
-            "Вернуть DNS автоматически",
-            "page.network.force_dns.reset.confirm",
-            "DNS будет снова получаться автоматически от роутера или провайдера через DHCP. Это полезно, если интернет работает нестабильно после ручной настройки DNS.",
-        ):
-            return
-        self._reset_dns_to_dhcp()
-
-    def _test_connection(self):
-        """Тестирует соединение с интернетом"""
-        state = self._connectivity_test_state_obj()
-        if state.is_busy():
-            state.pending = True
-            return
-        state.pending = False
-        test_plan = prepare_connectivity_test(
-            cleanup_in_progress=self._cleanup_in_progress,
-            set_test_in_progress_fn=lambda value: setattr(self, "_test_in_progress", value),
-            update_test_action_text_fn=self._update_test_action_text,
-            build_connectivity_test_plan_fn=dns_page_plans.build_connectivity_test_plan,
-            language=self._ui_language,
-        )
-        if test_plan is None:
-            return
-        self._connectivity_test_runtime.start_qthread_worker(
-            worker_factory=lambda request_id: self._dns_feature().create_connectivity_test_worker(
-                request_id,
-                test_hosts=test_plan.test_hosts,
-                parent=self,
-            ),
-            on_finished=self._on_connectivity_test_worker_finished,
-            bind_worker=self._bind_connectivity_test_worker,
-        )
-
-    def _bind_connectivity_test_worker(self, worker) -> None:
-        worker.completed.connect(self._on_connectivity_test_complete)
-
-    def _on_connectivity_test_complete(self, request_id: int, results: list) -> None:
-        if not self._connectivity_test_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        self._on_test_complete(results)
-
-    def _on_connectivity_test_worker_finished(self, _worker) -> None:
-        if not self._is_current_worker_finish(self.__dict__.get("_connectivity_test_runtime"), _worker):
-            return
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        if self._connectivity_test_state_obj().has_pending():
-            self._schedule_connectivity_test_start()
-
-    def _schedule_connectivity_test_start(self) -> None:
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return
-        self._connectivity_test_state_obj().schedule_start(
-            QTimer.singleShot,
-            self._run_scheduled_connectivity_test_start,
-        )
-
-    def _run_scheduled_connectivity_test_start(self) -> None:
-        pending = bool(
-            self._connectivity_test_state_obj().take_pending_for_scheduled_start(
-                cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False),
-            )
-        )
-        if not pending:
-            return
-        self._test_connection()
-
-    def _on_test_complete(self, results: list):
-        """Вызывается из главного потока после завершения теста"""
-        apply_connectivity_test_result(
-            cleanup_in_progress=self._cleanup_in_progress,
-            results=results,
-            set_test_in_progress_fn=lambda value: setattr(self, "_test_in_progress", value),
-            update_test_action_text_fn=self._update_test_action_text,
-            build_result_plan_fn=dns_page_plans.build_connectivity_test_result_plan,
-            language=self._ui_language,
-            info_bar_cls=InfoBar,
-            parent_window=self.window(),
-        )
-
-    # ═══════════════════════════════════════════════════════════════
-    # ISP DNS предупреждение
-    # ═══════════════════════════════════════════════════════════════
-
-    def _check_and_show_isp_dns_warning(self):
-        """Показывает предупреждение если у пользователя DNS от провайдера (DHCP).
-
-        Показывается ОДИН раз за всё время установки. Решение и запись
-        ISPDNSInfoShown=1 выполняются в worker-е, GUI только рисует готовый план.
-        """
-        self._request_isp_dns_warning_plan()
-
-    def _request_isp_dns_warning_plan(self) -> None:
-        state = self._isp_warning_state_obj()
-        if state.is_busy():
-            state.pending = True
-            return
-        state.pending = False
-        self._isp_warning_runtime.start_qthread_worker(
-            worker_factory=lambda request_id: self._dns.create_isp_dns_warning_worker(
-                request_id,
-                adapters=self._adapters,
-                dns_info=self._dns_info,
-                force_dns_active=self._force_dns_active,
-                language=self._ui_language,
-                parent=self,
-            ),
-            on_failed=self._on_isp_dns_warning_plan_failed,
-            on_finished=self._on_isp_dns_warning_worker_finished,
-            bind_worker=self._bind_isp_dns_warning_worker,
-        )
-
-    def _bind_isp_dns_warning_worker(self, worker) -> None:
-        worker.completed.connect(self._on_isp_dns_warning_plan_loaded)
-
-    def _on_isp_dns_warning_plan_loaded(self, request_id: int, plan) -> None:
-        if not self._isp_warning_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        if self._isp_warning_state_obj().has_pending():
-            return
-        show_isp_dns_warning(
-            cleanup_in_progress=self._cleanup_in_progress,
-            plan=plan,
-            qpush_button_cls=PushButton,
-            qt_namespace=Qt,
-            on_accept=self._accept_isp_dns_recommendation,
-            log_fn=log,
-            info_bar_cls=InfoBar,
-            info_bar_position_cls=InfoBarPosition,
-            parent_window=self.window(),
-        )
-
-    def _on_isp_dns_warning_plan_failed(self, request_id: int, error: str) -> None:
-        if not self._isp_warning_runtime.is_current(
-            request_id,
-            cleanup_in_progress=self._cleanup_in_progress,
-        ):
-            return
-        if self._isp_warning_state_obj().has_pending():
-            return
-        log(f"Ошибка подготовки ISP DNS предупреждения: {error}", "DEBUG")
-
-    def _on_isp_dns_warning_worker_finished(self, _worker) -> None:
-        if not self._is_current_worker_finish(self.__dict__.get("_isp_warning_runtime"), _worker):
-            return
-        if self._isp_warning_state_obj().has_pending():
-            self._schedule_isp_warning_worker_start()
-
-    def _is_current_worker_finish(self, runtime, worker) -> bool:
-        if self.__dict__.get("_cleanup_in_progress", False):
-            return False
-        request_id = getattr(worker, "_request_id", None)
-        if request_id is None:
-            current_worker = getattr(runtime, "worker", None)
-            if current_worker is not None:
-                return worker is current_worker
-            return False
-        try:
-            return int(request_id) == int(getattr(runtime, "request_id", -1))
-        except (TypeError, ValueError):
-            return False
-
-    def _schedule_isp_warning_worker_start(self) -> None:
-        self._isp_warning_state_obj().schedule_start(
-            QTimer.singleShot,
-            self._run_scheduled_isp_warning_worker_start,
-            cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False),
-            pending_when_already_scheduled=True,
-        )
-
-    def _run_scheduled_isp_warning_worker_start(self) -> None:
-        pending = bool(
-            self._isp_warning_state_obj().take_pending_for_scheduled_start(
-                cleanup_in_progress=self.__dict__.get("_cleanup_in_progress", False),
-            )
-        )
-        if not pending:
-            return
-        self._request_isp_dns_warning_plan()
-
-    def _render_isp_warning_styles(self, tokens=None) -> None:
-        render_isp_warning_theme(
-            tokens=tokens,
-            get_theme_tokens_fn=get_theme_tokens,
-            render_warning_styles_fn=render_isp_warning_styles,
-            warning=getattr(self, "_isp_warning", None),
-            icon_label=self._isp_warning_icon,
-            title_label=self._isp_warning_title,
-            content_label=self._isp_warning_content,
-            accept_button=self._isp_warning_accept_btn,
-            dismiss_button=self._isp_warning_dismiss_btn,
-            qta_module=qta,
-        )
-
-    def _accept_isp_dns_recommendation(self):
-        """Применяет рекомендуемый DNS из баннера вручную."""
-        accept_isp_dns_recommendation(
-            cleanup_in_progress=self._cleanup_in_progress,
-            build_accept_plan_fn=dns_page_plans.build_accept_isp_dns_warning_plan,
-            warning=getattr(self, "_isp_warning", None),
-            hide_warning_widget_fn=hide_isp_warning_widget,
-            apply_recommended_dns_fn=self._apply_recommended_dns_from_warning,
-            log_fn=log,
-        )
-
-    def _apply_recommended_dns_from_warning(self) -> None:
-        recommended = DNS_PROVIDERS.get("Безопасные", {}).get("Quad9")
-        if recommended:
-            self._on_dns_selected("Quad9", recommended)
-
-    def _dismiss_isp_dns_warning(self):
-        """Скрывает баннер (settings.sqlite3 уже записан при показе)."""
-        dismiss_isp_dns_warning(
-            cleanup_in_progress=self._cleanup_in_progress,
-            build_dismiss_plan_fn=dns_page_plans.build_dismiss_isp_dns_warning_plan,
-            warning=getattr(self, "_isp_warning", None),
-            hide_warning_widget_fn=hide_isp_warning_widget,
-        )
-
-    def cleanup(self) -> None:
-        try:
-            self.loading_bar.stop()
-        except Exception:
-            pass
-        self._page_load_state_obj().reset()
-        self._connectivity_test_state_obj().reset()
-        self._force_dns_action_state_obj().reset()
-        self._scheduled_force_dns_action_request = None
-        self._dns_flush_cache_state_obj().reset()
-        self._dns_apply_state_obj().reset()
-        self._scheduled_dns_apply_request = None
-        self._dns_mutation_pending_order.clear()
-        self._page_load_runtime.stop(
-            blocking=False,
-            log_fn=log,
-            warning_prefix="dns_page_load_worker",
-        )
-        self._page_load_runtime.cancel()
-        self._connectivity_test_runtime.stop(
-            blocking=False,
-            log_fn=log,
-            warning_prefix="dns_connectivity_test_worker",
-        )
-        self._connectivity_test_runtime.cancel()
-        self._force_dns_action_runtime.stop(
-            blocking=False,
-            log_fn=log,
-            warning_prefix="force_dns_action_worker",
-        )
-        self._force_dns_action_runtime.cancel()
-        self._dns_flush_cache_runtime.stop(
-            blocking=False,
-            log_fn=log,
-            warning_prefix="dns_flush_cache_worker",
-        )
-        self._dns_flush_cache_runtime.cancel()
-        self._dns_apply_runtime.stop(
-            blocking=False,
-            log_fn=log,
-            warning_prefix="dns_apply_worker",
-        )
-        self._dns_apply_runtime.cancel()
-        self._isp_warning_state_obj().reset()
-        self._isp_warning_runtime.stop(
-            blocking=False,
-            log_fn=log,
-            warning_prefix="isp_dns_warning_worker",
-        )
-        self._isp_warning_runtime.cancel()
-        cleanup_network_page(
-            set_cleanup_in_progress_fn=lambda value: setattr(self, "_cleanup_in_progress", value),
-            set_test_in_progress_fn=lambda value: setattr(self, "_test_in_progress", value),
-            signal_objects={
-                "adapters_loaded": getattr(self, "adapters_loaded", None),
-                "dns_info_loaded": getattr(self, "dns_info_loaded", None),
-                "test_completed": getattr(self, "test_completed", None),
-            },
-            warning=getattr(self, "_isp_warning", None),
-            hide_warning_widget_fn=hide_isp_warning_widget,
-        )
+__all__ = ["NetworkPage"]

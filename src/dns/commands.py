@@ -37,12 +37,6 @@ def normalize_adapter_alias(alias: str) -> str:
     return _normalize_alias(alias)
 
 
-def get_force_dns_status() -> bool:
-    from dns.runtime import get_force_dns_status as _get_force_dns_status
-
-    return _get_force_dns_status()
-
-
 def is_isp_dns_warning_shown() -> bool:
     from settings.store import get_isp_dns_info_shown
 
@@ -130,31 +124,6 @@ def check_ipv6_connectivity() -> bool:
     return detect_ipv6_availability()
 
 
-def enable_force_dns(*, include_disconnected: bool = False, adapters: list[str] | None = None) -> DnsCommandResult:
-    from dns.runtime import enable_force_dns as _enable_force_dns
-
-    success, ok_count, total, message = _enable_force_dns(
-        include_disconnected=include_disconnected,
-        adapters=adapters,
-    )
-    return DnsCommandResult(
-        success=bool(success),
-        message=str(message or ""),
-        affected_count=int(ok_count or 0),
-        total_count=int(total or 0),
-    )
-
-
-def disable_force_dns(*, reset_to_auto: bool, adapters: list[str] | None = None) -> DnsCommandResult:
-    from dns.runtime import disable_force_dns as _disable_force_dns
-
-    success, message = _disable_force_dns(
-        reset_to_auto=reset_to_auto,
-        adapters=adapters,
-    )
-    return DnsCommandResult(success=bool(success), message=str(message or ""))
-
-
 def flush_dns_cache() -> DnsCommandResult:
     from dns.runtime import flush_dns_cache as _flush_dns_cache
 
@@ -228,30 +197,7 @@ def apply_provider_dns(
     )
 
 
-def apply_custom_dns(adapters: list[str], primary: str, secondary: str | None) -> DnsCommandResult:
-    from dns.runtime import apply_custom_dns as _apply_custom_dns
+def measure_dns_latency(servers: list[str]):
+    from dns.latency import measure_dns_latency as _measure_dns_latency
 
-    success_count = _apply_custom_dns(adapters, primary, secondary)
-    total = len(adapters or [])
-    return DnsCommandResult(
-        success=success_count > 0 or total == 0,
-        affected_count=int(success_count or 0),
-        total_count=total,
-    )
-
-
-def run_connectivity_test(test_hosts: list[tuple[str, str]]) -> list[tuple[str, str, bool]]:
-    from utils.windows_icmp import ping_ipv4_host_winapi
-
-    results: list[tuple[str, str, bool]] = []
-    for name, host in test_hosts:
-        try:
-            ping_result = ping_ipv4_host_winapi(
-                host,
-                count=1,
-                timeout_ms=2000,
-            )
-            results.append((name, host, ping_result.ok))
-        except Exception:
-            results.append((name, host, False))
-    return results
+    return _measure_dns_latency(servers)

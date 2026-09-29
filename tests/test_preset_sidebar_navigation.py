@@ -285,7 +285,8 @@ class PresetSidebarNavigationTests(unittest.TestCase):
         self.assertEqual(get_nav_page_label(PageName.HOSTS, language="ru"), "Редактор hosts")
         self.assertEqual(
             tr("page.network.subtitle", language="ru"),
-            "Здесь можно посмотреть текущие DNS, выбрать другие серверы и проверить, помогает ли настройка обходу блокировок.",
+            "Выберите DNS-сервер — он сразу встанет на отмеченные сетевые адаптеры. "
+            "Кнопка «Замерить скорость» покажет, какой сервер отвечает быстрее.",
         )
 
     def test_initial_sidebar_build_skips_secondary_and_hidden_other_mode_items(self) -> None:

@@ -26,134 +26,26 @@ class DnsPageLoadWorker(QThread):
         self.finished_loading.emit()
 
 
-class DnsConnectivityTestWorker(QThread):
-    completed = pyqtSignal(int, list)
+class DnsLatencyWorker(QThread):
+    """Замер скорости DNS-серверов в фоне: completed(request_id, DnsLatencyReport)."""
 
-    def __init__(self, request_id: int, run_connectivity_test_fn, test_hosts, parent=None):
+    completed = pyqtSignal(int, object)
+    failed = pyqtSignal(int, str)
+
+    def __init__(self, request_id: int, *, servers, measure_dns_latency: Callable[[list], Any], parent=None):
         super().__init__(parent)
         self._request_id = int(request_id)
-        self._run_connectivity_test_fn = run_connectivity_test_fn
-        self._test_hosts = tuple(test_hosts or ())
+        self._servers = [str(item) for item in (servers or ()) if str(item or "").strip()]
+        self._measure_dns_latency = measure_dns_latency
 
     def run(self) -> None:
         try:
-            results = self._run_connectivity_test_fn(self._test_hosts)
+            report = self._measure_dns_latency(self._servers)
         except Exception as exc:
-            log(f"DnsConnectivityTestWorker: ошибка проверки DNS: {exc}", "ERROR")
-            results = []
-        self.completed.emit(self._request_id, list(results or []))
-
-
-class DnsForceDnsActionWorker(QThread):
-    completed = pyqtSignal(int, str, object, object)
-    failed = pyqtSignal(int, str, str, object)
-
-    def __init__(
-        self,
-        request_id: int,
-        *,
-        action: str,
-        enabled: bool | None = None,
-        adapters=None,
-        language: str = "ru",
-        get_force_dns_status: Callable[[], bool],
-        enable_force_dns: Callable[..., Any],
-        disable_force_dns: Callable[..., Any],
-        refresh_dns_info: Callable[[list], Any],
-        parent=None,
-    ):
-        super().__init__(parent)
-        self._request_id = int(request_id)
-        self._action = str(action or "").strip()
-        self._enabled = None if enabled is None else bool(enabled)
-        self._adapters = list(adapters or [])
-        self._language = str(language or "ru")
-        self._get_force_dns_status = get_force_dns_status
-        self._enable_force_dns = enable_force_dns
-        self._disable_force_dns = disable_force_dns
-        self._refresh_dns_info_action = refresh_dns_info
-
-    def run(self) -> None:
-        context = {
-            "enabled": self._enabled,
-            "language": self._language,
-        }
-        try:
-            if self._action == "toggle":
-                result = self._run_toggle()
-            elif self._action == "reset_dhcp":
-                result = self._run_reset_dhcp()
-            else:
-                raise ValueError(f"Неизвестное Force DNS действие: {self._action}")
-        except Exception as exc:
-            log(f"DnsForceDnsActionWorker: действие {self._action} не выполнено: {exc}", "ERROR")
-            self.failed.emit(self._request_id, self._action, str(exc), context)
+            log(f"DnsLatencyWorker: ошибка замера скорости DNS: {exc}", "ERROR")
+            self.failed.emit(self._request_id, str(exc))
             return
-        self.completed.emit(self._request_id, self._action, result, context)
-
-    def _run_toggle(self) -> dict[str, object]:
-        from dns import page_plans as dns_page_plans
-
-        requested_enabled = bool(self._enabled)
-        current_state = bool(self._get_force_dns_status())
-        if requested_enabled == current_state:
-            plan = dns_page_plans.NetworkForceDnsTogglePlan(
-                final_checked=current_state,
-                force_dns_active=current_state,
-                details_key=None,
-                details_kwargs={},
-                details_fallback="",
-            )
-            return {"plan": plan, "message": "", "changed": False}
-
-        if requested_enabled:
-            command_result = self._enable_force_dns(
-                include_disconnected=False,
-                adapters=self._adapters,
-            )
-            plan = dns_page_plans.build_force_dns_toggle_plan(
-                requested_enabled=True,
-                success=bool(command_result.success),
-                ok_count=int(command_result.affected_count or 0),
-                total=int(command_result.total_count or 0),
-            )
-        else:
-            command_result = self._disable_force_dns(reset_to_auto=False)
-            plan = dns_page_plans.build_force_dns_toggle_plan(
-                requested_enabled=False,
-                success=bool(command_result.success),
-            )
-        return {
-            "plan": plan,
-            "message": str(command_result.message or ""),
-            "changed": True,
-            "dns_info": self._load_dns_info(),
-        }
-
-    def _run_reset_dhcp(self) -> dict[str, object]:
-        from dns import page_plans as dns_page_plans
-
-        command_result = self._disable_force_dns(
-            reset_to_auto=True,
-            adapters=self._adapters,
-        )
-        force_dns_active = bool(self._get_force_dns_status())
-        plan = dns_page_plans.build_reset_dhcp_result_plan(
-            success=bool(command_result.success),
-            message=str(command_result.message or ""),
-            force_dns_active=force_dns_active,
-            language=self._language,
-        )
-        return {
-            "plan": plan,
-            "message": str(command_result.message or ""),
-            "dns_info": self._load_dns_info(),
-        }
-
-    def _load_dns_info(self):
-        if not self._adapters:
-            return None
-        return self._refresh_dns_info_action(self._adapters)
+        self.completed.emit(self._request_id, report)
 
 
 class DnsFlushCacheWorker(QThread):
@@ -200,7 +92,6 @@ class DnsIspWarningWorker(QThread):
         *,
         adapters,
         dns_info: dict,
-        force_dns_active: bool,
         language: str = "ru",
         is_isp_dns_warning_shown: Callable[[], bool],
         mark_isp_dns_warning_shown: Callable[[], Any],
@@ -211,7 +102,6 @@ class DnsIspWarningWorker(QThread):
         self._request_id = int(request_id)
         self._adapters = list(adapters or [])
         self._dns_info = dict(dns_info or {})
-        self._force_dns_active = bool(force_dns_active)
         self._language = str(language or "ru")
         self._is_isp_dns_warning_shown = is_isp_dns_warning_shown
         self._mark_isp_dns_warning_shown = mark_isp_dns_warning_shown
@@ -224,7 +114,6 @@ class DnsIspWarningWorker(QThread):
             plan = dns_page_plans.build_isp_dns_warning_plan(
                 self._adapters,
                 self._dns_info,
-                force_dns_active=self._force_dns_active,
                 warning_already_shown=self._is_isp_dns_warning_shown(),
                 normalize_alias_fn=self._normalize_adapter_alias,
                 language=self._language,
@@ -250,12 +139,9 @@ class DnsApplyWorker(QThread):
         adapters,
         name: str = "",
         data=None,
-        primary: str = "",
-        secondary: str | None = None,
         ipv6_available: bool = False,
         apply_auto_dns: Callable[[list], Any],
         apply_provider_dns: Callable[..., Any],
-        apply_custom_dns: Callable[..., Any],
         refresh_dns_info: Callable[[list], Any],
         parent=None,
     ):
@@ -265,12 +151,9 @@ class DnsApplyWorker(QThread):
         self._adapters = list(adapters or [])
         self._name = str(name or "")
         self._data = dict(data or {})
-        self._primary = str(primary or "").strip()
-        self._secondary = None if secondary is None else str(secondary or "").strip()
         self._ipv6_available = bool(ipv6_available)
         self._apply_auto_dns = apply_auto_dns
         self._apply_provider_dns = apply_provider_dns
-        self._apply_custom_dns = apply_custom_dns
         self._refresh_dns_info = refresh_dns_info
 
     def run(self) -> None:
@@ -317,19 +200,6 @@ class DnsApplyWorker(QThread):
                 success_count=int(command_result.affected_count or 0),
                 ipv6_available=self._ipv6_available,
                 ipv6=provider_plan.ipv6,
-            )
-        elif self._action == "custom":
-            if not self._primary:
-                return {"plan": None, "dns_info": None}
-            command_result = self._apply_custom_dns(
-                self._adapters,
-                self._primary,
-                self._secondary,
-            )
-            plan = dns_page_plans.build_custom_dns_apply_result_plan(
-                primary=self._primary,
-                adapter_count=len(self._adapters),
-                success_count=int(command_result.affected_count or 0),
             )
         else:
             raise ValueError(f"Неизвестное DNS действие: {self._action}")

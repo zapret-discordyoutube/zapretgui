@@ -26,12 +26,6 @@ def _new_dns_manager():
     return DNSManager()
 
 
-def _new_force_dns_manager():
-    from dns.dns_force import DNSForceManager
-
-    return DNSForceManager()
-
-
 def _get_dns_manager():
     global _dns_manager_instance
     if _dns_manager_instance is None:
@@ -155,43 +149,6 @@ def apply_provider_dns(
             success_count += 1
     dns_manager.flush_dns_cache()
     return success_count
-
-
-def apply_custom_dns(adapters: list[str], primary: str, secondary: str | None) -> int:
-    dns_manager = _get_dns_manager()
-    success_count = 0
-    for adapter in adapters:
-        ok, _ = dns_manager.set_custom_dns(adapter, primary, secondary, "IPv4")
-        if ok:
-            success_count += 1
-    dns_manager.flush_dns_cache()
-    return success_count
-
-
-def get_force_dns_status() -> bool:
-    return False
-
-
-def enable_force_dns(
-    *,
-    include_disconnected: bool = False,
-    adapters: list[str] | None = None,
-) -> tuple[bool, int, int, str]:
-    return _new_force_dns_manager().enable_force_dns(
-        include_disconnected=include_disconnected,
-        adapters=adapters,
-    )
-
-
-def disable_force_dns(
-    *,
-    reset_to_auto: bool,
-    adapters: list[str] | None = None,
-) -> tuple[bool, str]:
-    return _new_force_dns_manager().disable_force_dns(
-        reset_to_auto=reset_to_auto,
-        adapters=adapters,
-    )
 
 
 def flush_dns_cache() -> tuple[bool, str]:

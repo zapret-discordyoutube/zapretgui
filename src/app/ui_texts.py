@@ -1666,84 +1666,16 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Prepare report",
     },
     "page.network.subtitle": {
-        "ru": "Здесь можно посмотреть текущие DNS, выбрать другие серверы и проверить, помогает ли настройка обходу блокировок.",
-        "en": "View current DNS servers, choose different servers, and check whether the setting helps bypass blocking.",
-    },
-    "page.network.section.dns_servers": {
-        "ru": "DNS Серверы",
-        "en": "DNS Servers",
-    },
-    "page.network.section.adapters": {
-        "ru": "Сетевые адаптеры",
-        "en": "Network Adapters",
-    },
-    "page.network.section.tools": {
-        "ru": "Утилиты",
-        "en": "Utilities",
-    },
-    "page.network.section.force_dns": {
-        "ru": "",
-        "en": "",
-    },
-    "page.network.loading": {
-        "ru": "⏳ Загрузка...",
-        "en": "⏳ Loading...",
-    },
-    "page.network.custom.label": {
-        "ru": "Свой:",
-        "en": "Custom:",
-    },
-    "page.network.custom.apply": {
-        "ru": "OK",
-        "en": "OK",
+        "ru": "Выберите DNS-сервер — он сразу встанет на отмеченные сетевые адаптеры. Кнопка «Замерить скорость» покажет, какой сервер отвечает быстрее.",
+        "en": "Pick a DNS server — it is applied right away to the checked network adapters. “Measure speed” shows which server answers fastest.",
     },
     "page.network.dns.auto": {
         "ru": "Автоматически (DHCP)",
         "en": "Automatic (DHCP)",
     },
-    "page.network.button.test": {
-        "ru": "Тест соединения",
-        "en": "Connection Test",
-    },
-    "page.network.button.test.in_progress": {
-        "ru": "Проверка...",
-        "en": "Checking...",
-    },
     "page.network.button.flush_dns_cache": {
         "ru": "Сбросить DNS кэш",
         "en": "Flush DNS Cache",
-    },
-    "page.network.button.flush_dns_cache.confirm": {
-        "ru": "Сбросить?",
-        "en": "Flush?",
-    },
-    "page.network.force_dns.action.enable.button": {
-        "ru": "Применить выбранный DNS",
-        "en": "Apply selected DNS",
-    },
-    "page.network.force_dns.action.disable.button": {
-        "ru": "Ручная настройка DNS",
-        "en": "Manual DNS setup",
-    },
-    "page.network.force_dns.action.enable.description": {
-        "ru": "Выберите DNS из списка или добавьте свой адрес. Программа применит его только по вашему нажатию.",
-        "en": "Choose DNS from the list or add your own address. The app applies it only when you ask.",
-    },
-    "page.network.force_dns.action.enable.confirm": {
-        "ru": "Программа применит выбранный DNS на отмеченных сетевых адаптерах. Это может помочь, если провайдер подменяет ответы DNS и сайты открываются неправильно. Продолжить?",
-        "en": "The app will apply the selected DNS to the checked network adapters. This may help when the provider tampers with DNS answers and sites open incorrectly. Continue?",
-    },
-    "page.network.force_dns.action.disable.description": {
-        "ru": "DNS меняется только вручную: выберите сервер, добавьте свой адрес или верните автоматическое получение через DHCP.",
-        "en": "DNS changes only manually: choose a server, add your own address, or restore automatic DNS through DHCP.",
-    },
-    "page.network.force_dns.action.disable.confirm": {
-        "ru": "DNS меняется только вручную. Уже прописанные адреса останутся до следующей настройки или сброса на DHCP. Продолжить?",
-        "en": "DNS changes only manually. Already applied addresses remain until the next setup or DHCP reset. Continue?",
-    },
-    "page.network.force_dns.action.reset.description": {
-        "ru": "DNS будет снова получаться автоматически от роутера или провайдера через DHCP. Это полезно, если интернет работает нестабильно после ручной настройки DNS.",
-        "en": "DNS will be received automatically from the router or provider through DHCP again. This is useful if the internet is unstable after manual DNS setup.",
     },
     "page.network.force_dns.reset.button": {
         "ru": "Вернуть DNS автоматически",
@@ -1753,22 +1685,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Программа вернёт автоматическое получение DNS через DHCP для выбранных адаптеров. DHCP — это обычный режим, когда DNS выдаёт роутер или провайдер. Продолжить?",
         "en": "The app will restore automatic DNS through DHCP for selected adapters. DHCP is the normal mode where DNS is provided by the router or provider. Continue?",
     },
-    "page.network.force_dns.status.details.enable_failed": {
-        "ru": "Не удалось включить",
-        "en": "Failed to enable",
-    },
-    "page.network.force_dns.status.details.disable_failed": {
-        "ru": "Не удалось отключить",
-        "en": "Failed to disable",
-    },
-    "page.network.force_dns.status.details.apply_error": {
-        "ru": "Ошибка применения",
-        "en": "Apply error",
-    },
-    "page.network.force_dns.status.details.dhcp_not_applied": {
-        "ru": "DHCP не применён",
-        "en": "DHCP was not applied",
-    },
     "page.network.error.title": {
         "ru": "Ошибка",
         "en": "Error",
@@ -1777,37 +1693,217 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Не удалось очистить кэш: {error}",
         "en": "Failed to flush cache: {error}",
     },
-    "page.network.error.reset_dhcp_failed": {
-        "ru": "Не удалось сбросить DNS: {error}",
-        "en": "Failed to reset DNS: {error}",
+    "page.network.now.eyebrow": {
+        "ru": "Сейчас на отмеченных адаптерах",
+        "en": "Now on the checked adapters",
     },
-    "page.network.info.title": {
-        "ru": "DNS",
-        "en": "DNS",
+    "page.network.now.loading": {
+        "ru": "Загружаю настройки сети…",
+        "en": "Loading network settings…",
     },
-    "page.network.info.dhcp_reset_all": {
-        "ru": "DNS сброшен на DHCP для всех адаптеров",
-        "en": "DNS reset to DHCP for all adapters",
+    "page.network.now.applying": {
+        "ru": "Применяю…",
+        "en": "Applying…",
     },
-    "page.network.test.host.google_dns": {
-        "ru": "Google DNS",
-        "en": "Google DNS",
+    "page.network.now.auto.detail": {
+        "ru": "DNS выдаёт роутер или провайдер.",
+        "en": "DNS is provided by your router or ISP.",
     },
-    "page.network.test.host.cloudflare_dns": {
-        "ru": "Cloudflare DNS",
-        "en": "Cloudflare DNS",
+    "page.network.now.custom.title": {
+        "ru": "Свой DNS",
+        "en": "Custom DNS",
     },
-    "page.network.test.infobar.title": {
-        "ru": "Тест соединения",
-        "en": "Connection Test",
+    "page.network.now.mixed.title": {
+        "ru": "На адаптерах разные DNS",
+        "en": "Adapters use different DNS",
     },
-    "page.network.test.infobar.all_ok": {
-        "ru": "Все проверки пройдены:\n\n{report}",
-        "en": "All checks passed:\n\n{report}",
+    "page.network.now.mixed.detail": {
+        "ru": "Выберите сервер — он встанет на все отмеченные адаптеры.",
+        "en": "Pick a server — it will be applied to all checked adapters.",
     },
-    "page.network.test.infobar.partial": {
-        "ru": "Некоторые проверки не пройдены:\n\n{report}",
-        "en": "Some checks failed:\n\n{report}",
+    "page.network.now.no_adapters.title": {
+        "ru": "Адаптеры не отмечены",
+        "en": "No adapters checked",
+    },
+    "page.network.now.no_adapters.detail": {
+        "ru": "Отметьте адаптер ниже — выбранный DNS встанет на него.",
+        "en": "Check an adapter below — the chosen DNS will be applied to it.",
+    },
+    "page.network.adapters.caption": {
+        "ru": "Применять к:",
+        "en": "Apply to:",
+    },
+    "page.network.adapters.empty": {
+        "ru": "Сетевые адаптеры не найдены",
+        "en": "No network adapters found",
+    },
+    "page.network.button.reset": {
+        "ru": "Вернуть автоматически",
+        "en": "Reset to automatic",
+    },
+    "page.network.button.measure": {
+        "ru": "Замерить скорость",
+        "en": "Measure speed",
+    },
+    "page.network.button.measure.running": {
+        "ru": "Замеряю…",
+        "en": "Measuring…",
+    },
+    "page.network.filter.name": {
+        "ru": "Группа DNS-серверов",
+        "en": "DNS server group",
+    },
+    "page.network.filter.all": {
+        "ru": "Все",
+        "en": "All",
+    },
+    "page.network.filter.custom": {
+        "ru": "Свои",
+        "en": "Custom",
+    },
+    "page.network.group.popular": {
+        "ru": "Популярные",
+        "en": "Popular",
+    },
+    "page.network.group.secure": {
+        "ru": "Безопасные",
+        "en": "Secure",
+    },
+    "page.network.group.ai": {
+        "ru": "Для ИИ",
+        "en": "For AI",
+    },
+    "page.network.group.custom": {
+        "ru": "Свои DNS",
+        "en": "Custom DNS",
+    },
+    "page.network.grid.name": {
+        "ru": "DNS-серверы",
+        "en": "DNS servers",
+    },
+    "page.network.grid.description": {
+        "ru": "Стрелки — выбор плитки, Enter или пробел — применить DNS.",
+        "en": "Arrows move between tiles, Enter or Space applies the DNS.",
+    },
+    "page.network.tile.selected": {
+        "ru": "выбран",
+        "en": "selected",
+    },
+    "page.network.tile.not_selected": {
+        "ru": "не выбран",
+        "en": "not selected",
+    },
+    "page.network.tile.applying": {
+        "ru": "применяю…",
+        "en": "applying…",
+    },
+    "page.network.tile.fastest": {
+        "ru": "быстрее всех",
+        "en": "fastest",
+    },
+    "page.network.tile.custom_note": {
+        "ru": "Свой сервер",
+        "en": "Your server",
+    },
+    "page.network.tile.custom_hint": {
+        "ru": "свой DNS, меню правки — клавиша меню",
+        "en": "custom DNS, edit menu — Menu key",
+    },
+    "page.network.tile.custom_menu": {
+        "ru": "Правая кнопка мыши — изменить или удалить",
+        "en": "Right-click to edit or delete",
+    },
+    "page.network.add_tile.title": {
+        "ru": "Свой DNS",
+        "en": "Custom DNS",
+    },
+    "page.network.add_tile.note": {
+        "ru": "Добавить свой адрес",
+        "en": "Add your own address",
+    },
+    "page.network.custom.button.description": {
+        "ru": "Открывает окно добавления нового DNS сервера.",
+        "en": "Opens a window to add a new DNS server.",
+    },
+    "page.network.custom.menu.edit": {
+        "ru": "Редактировать",
+        "en": "Edit",
+    },
+    "page.network.custom.menu.duplicate": {
+        "ru": "Создать копию",
+        "en": "Duplicate",
+    },
+    "page.network.custom.menu.copy": {
+        "ru": "Копировать DNS в буфер обмена",
+        "en": "Copy DNS to clipboard",
+    },
+    "page.network.custom.menu.delete": {
+        "ru": "Удалить",
+        "en": "Delete",
+    },
+    "page.network.custom.copied.title": {
+        "ru": "DNS скопирован",
+        "en": "DNS copied",
+    },
+    "page.network.custom.copied.content": {
+        "ru": "Адреса DNS в буфере обмена.",
+        "en": "DNS addresses are in the clipboard.",
+    },
+    "page.network.latency.measuring": {
+        "ru": "замер…",
+        "en": "measuring…",
+    },
+    "page.network.latency.timeout": {
+        "ru": "нет ответа",
+        "en": "no reply",
+    },
+    "page.network.latency.ms": {
+        "ru": "{ms} мс",
+        "en": "{ms} ms",
+    },
+    "page.network.latency.best": {
+        "ru": "Быстрее всех: {name} — {ms} мс",
+        "en": "Fastest: {name} — {ms} ms",
+    },
+    "page.network.latency.none": {
+        "ru": "Ни один сервер не ответил",
+        "en": "No server replied",
+    },
+    "page.network.latency.failed": {
+        "ru": "Замер не удался",
+        "en": "Measurement failed",
+    },
+    "page.network.latency.intercepted": {
+        "ru": "Похоже, DNS-запросы перехватываются по пути (провайдером или роутером): ответил даже адрес, где DNS-сервера нет. Цифры показывают перехватчик, а не выбранные серверы.",
+        "en": "DNS queries seem to be intercepted on the way (by your ISP or router): even an address with no DNS server replied. The numbers show the interceptor, not the chosen servers.",
+    },
+    "page.network.info.wait": {
+        "ru": "Секунду — загружаю список адаптеров",
+        "en": "One moment — loading the adapter list",
+    },
+    "page.network.info.no_adapters.title": {
+        "ru": "Нет отмеченных адаптеров",
+        "en": "No adapters checked",
+    },
+    "page.network.info.no_adapters.content": {
+        "ru": "Отметьте хотя бы один адаптер в панели сверху.",
+        "en": "Check at least one adapter in the panel above.",
+    },
+    "page.network.info.flush_done": {
+        "ru": "Кэш DNS очищен",
+        "en": "DNS cache flushed",
+    },
+    "page.network.error.apply.title": {
+        "ru": "DNS не применён",
+        "en": "DNS was not applied",
+    },
+    "page.network.error.apply.partial.title": {
+        "ru": "DNS встал не везде",
+        "en": "DNS was not applied everywhere",
+    },
+    "page.network.error.apply.partial.content": {
+        "ru": "Не удалось изменить DNS на адаптерах: {failed} из {total}. Подробности — в логах.",
+        "en": "Could not change DNS on {failed} of {total} adapters. See the logs for details.",
     },
     "page.network.isp_dns.infobar.title": {
         "ru": "DNS от провайдера",
@@ -1824,10 +1920,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.network.isp_dns.infobar.dismiss": {
         "ru": "Нет, спасибо",
         "en": "No, thanks",
-    },
-    "page.network.dns.doh_supported": {
-        "ru": "DoH",
-        "en": "DoH",
     },
     "page.orchestra.subtitle": {
         "ru": "Автоматическое обучение стратегий DPI bypass. Система находит лучшую стратегию для каждого домена (TCP: TLS/HTTP, UDP: QUIC/Discord Voice/STUN).\nЧтобы начать обучение зайдите на сайт и через несколько секунд обновите вкладку. Продолжайте это пока стратегия не будет помечена как LOCKED",

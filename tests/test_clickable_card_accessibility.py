@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QKeyEvent
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication
 
 
 class ClickableCardAccessibilityTests(unittest.TestCase):
@@ -37,60 +37,6 @@ class ClickableCardAccessibilityTests(unittest.TestCase):
 
         self.assertEqual(clicks, [True])
 
-    def test_dns_provider_card_works_from_keyboard(self) -> None:
-        from dns.ui.cards import DNSProviderCard
-
-        card = DNSProviderCard(
-            "Cloudflare",
-            {"desc": "быстрый DNS", "ipv4": ["1.1.1.1"], "ipv6": []},
-        )
-        selected: list[str] = []
-        card.selected.connect(lambda name, _data: selected.append(name))
-
-        self.assertEqual(card.focusPolicy(), Qt.FocusPolicy.StrongFocus)
-        self.assertIn("DNS Cloudflare", card.accessibleName())
-        self.assertEqual(
-            card.property("screenReaderStateText"),
-            "DNS Cloudflare, не выбран, быстрый DNS, 1.1.1.1",
-        )
-
-        card.set_selected(True)
-
-        self.assertEqual(
-            card.property("screenReaderStateText"),
-            "DNS Cloudflare, выбран, быстрый DNS, 1.1.1.1",
-        )
-
-        self._press_key(card, Qt.Key.Key_Space)
-
-        self.assertEqual(selected, ["Cloudflare"])
-
-    def test_dns_provider_card_uses_card_accent_without_indicator_widget(self) -> None:
-        from dns.ui.cards import DNSProviderCard
-
-        card = DNSProviderCard(
-            "Google DNS",
-            {
-                "desc": "надёжный",
-                "ipv4": ["8.8.8.8"],
-                "ipv6": ["2001:4860:4860::8888"],
-                "doh": "https://dns.google/dns-query",
-            },
-            show_ipv6=True,
-        )
-
-        self.assertTrue(card.testAttribute(Qt.WidgetAttribute.WA_StyledBackground))
-        self.assertFalse(hasattr(card, "indicator"))
-        self.assertLessEqual(len(card.findChildren(QWidget)), 5)
-
-        off_style = card.styleSheet()
-        card.set_selected(True)
-
-        self.assertTrue(card.property("selected"))
-        self.assertNotEqual(card.styleSheet(), off_style)
-        self.assertIn("background-color", card.styleSheet())
-        self.assertIn("border-left", card.styleSheet())
-        self.assertIn("rgba", card.styleSheet())
 
 if __name__ == "__main__":
     unittest.main()

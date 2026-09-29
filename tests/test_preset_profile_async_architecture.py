@@ -78,8 +78,6 @@ from orchestra.ui.ratings_page import OrchestraRatingsPage
 from orchestra.ui.settings_page import OrchestraSettingsPage
 from orchestra.ui.whitelist_page import OrchestraWhitelistPage
 import app.feature_facades.orchestra as orchestra_feature_facade
-import dns.page_diagnostics_warning_workflow as dns_diag_workflow
-import dns.page_load_workflow as dns_load_workflow
 import dns.ui.page as dns_page
 import dns.ui.dns_check_page as dns_check_page
 import dns.commands as dns_commands
@@ -4414,16 +4412,15 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         dns_feature_module = importlib.import_module("app.feature_facades.dns")
 
         page_source = inspect.getsource(dns_page.NetworkPage)
-        check_source = inspect.getsource(dns_page.NetworkPage._check_and_show_isp_dns_warning)
         feature_source = inspect.getsource(dns_feature_module.DnsFeature)
 
         self.assertTrue(hasattr(dns_workers, "DnsIspWarningWorker"))
         worker_source = inspect.getsource(dns_workers.DnsIspWarningWorker.run)
-        self.assertIn("_request_isp_dns_warning_plan", check_source)
-        self.assertNotIn("self._dns.is_isp_dns_warning_shown", check_source)
-        self.assertNotIn("self._dns.mark_isp_dns_warning_shown", check_source)
-        self.assertIn("_isp_warning_runtime", page_source)
-        self.assertIn("OneShotWorkerRuntime", page_source)
+        self.assertIn("self._isp_lane.request()", page_source)
+        self.assertIn("create_isp_dns_warning_worker", page_source)
+        self.assertNotIn("self._dns.is_isp_dns_warning_shown", page_source)
+        self.assertNotIn("self._dns.mark_isp_dns_warning_shown", page_source)
+        self.assertIn("LatestWorkerLane", page_source)
         self.assertIn("create_isp_dns_warning_worker", feature_source)
         self.assertIn("is_isp_dns_warning_shown", worker_source)
         self.assertIn("mark_isp_dns_warning_shown", worker_source)
@@ -4569,8 +4566,7 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
 
     def test_network_and_telegram_ui_do_not_create_python_threads(self) -> None:
         modules = (
-            dns_diag_workflow,
-            dns_load_workflow,
+            dns_page,
             telegram_diag_workflow,
             telegram_runtime_workflow,
             telegram_page,
@@ -4582,74 +4578,42 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
 
     def test_dns_page_worker_returns_state_instead_of_calling_page_method(self) -> None:
         feature_source = inspect.getsource(__import__("app.feature_facades.dns", fromlist=["build_dns_feature"]).build_dns_feature)
-        loading_source = inspect.getsource(dns_page.NetworkPage._start_loading)
         page_source = inspect.getsource(dns_page.NetworkPage)
+        init_source = inspect.getsource(dns_page.NetworkPage._run_runtime_init_once)
         worker_source = inspect.getsource(DnsPageLoadWorker)
 
         self.assertIn("create_page_load_worker", feature_source)
-        self.assertIn("create_page_load_worker", loading_source)
-        self.assertIn("start_qthread_worker", loading_source)
+        self.assertIn("create_page_load_worker", page_source)
+        self.assertIn('result_signal="loaded"', page_source)
+        self.assertIn("self._load_lane.request()", init_source)
         self.assertIn("loaded = pyqtSignal", worker_source)
         self.assertIn("self.loaded.emit", worker_source)
-        self.assertNotIn("self._load_data_fn()", worker_source)
-        self.assertNotIn("load_data_fn=self._load_data", page_source)
+        self.assertNotIn("load_page_data", page_source)
 
-    def test_network_force_dns_status_is_applied_from_page_load_worker(self) -> None:
-        build_force_source = inspect.getsource(dns_page.NetworkPage._build_force_dns_card)
-        loaded_source = inspect.getsource(dns_page.NetworkPage._on_page_state_loaded)
-        apply_source = inspect.getsource(dns_page.NetworkPage._apply_loaded_force_dns_state)
-
-        self.assertNotIn("get_force_dns_status_fn=dns_feature.get_force_dns_status", build_force_source)
-        self.assertIn("get_force_dns_status_fn=lambda: self._force_dns_active", build_force_source)
-        self.assertIn("_apply_loaded_force_dns_state()", loaded_source)
-        self.assertIn("_set_force_dns_toggle", apply_source)
-        self.assertIn("_update_force_dns_status", apply_source)
-        self.assertIn("_update_dns_selection_state", apply_source)
-
-    def test_dns_force_dns_actions_run_through_worker(self) -> None:
+    def test_dns_page_has_no_force_dns_worker(self) -> None:
         page_workers = importlib.import_module("dns.page_workers")
         feature_source = inspect.getsource(__import__("app.feature_facades.dns", fromlist=["DnsFeature"]).DnsFeature)
         page_source = inspect.getsource(dns_page.NetworkPage)
-        toggle_source = inspect.getsource(dns_page.NetworkPage._on_force_dns_toggled)
-        reset_source = inspect.getsource(dns_page.NetworkPage._reset_dns_to_dhcp)
-        toggle_result_source = inspect.getsource(dns_page.NetworkPage._apply_force_dns_toggle_worker_result)
-        reset_result_source = inspect.getsource(dns_page.NetworkPage._apply_force_dns_reset_worker_result)
 
-        self.assertTrue(hasattr(page_workers, "DnsForceDnsActionWorker"))
-        worker_source = inspect.getsource(page_workers.DnsForceDnsActionWorker)
-
-        for source in (toggle_source, reset_source):
-            self.assertIn("_request_force_dns_action", source)
-            self.assertNotIn("handle_force_dns_toggled_action", source)
-            self.assertNotIn("reset_dns_to_dhcp_action", source)
-            self.assertNotIn(".enable_force_dns(", source)
-            self.assertNotIn(".disable_force_dns(", source)
-
-        self.assertIn("create_force_dns_action_worker", feature_source)
-        self.assertIn("create_force_dns_action_worker", page_source)
-        self.assertIn("_force_dns_action_pending", page_source)
-        self.assertIn("get_force_dns_status", worker_source)
-        self.assertIn("enable_force_dns", worker_source)
-        self.assertIn("disable_force_dns", worker_source)
-        self.assertIn("refresh_dns_info", worker_source)
-        self.assertNotIn("_refresh_adapters_dns", toggle_result_source)
-        self.assertNotIn("_refresh_adapters_dns", reset_result_source)
+        self.assertFalse(hasattr(page_workers, "DnsForceDnsActionWorker"))
+        self.assertFalse(hasattr(page_workers, "DnsConnectivityTestWorker"))
+        self.assertNotIn("create_force_dns_action_worker", feature_source)
+        self.assertNotIn("force_dns_action", page_source)
+        self.assertNotIn("_force_dns_active", page_source)
 
     def test_dns_flush_cache_runs_through_worker(self) -> None:
         page_workers = importlib.import_module("dns.page_workers")
         feature_source = inspect.getsource(__import__("app.feature_facades.dns", fromlist=["DnsFeature"]).DnsFeature)
         page_source = inspect.getsource(dns_page.NetworkPage)
-        flush_source = inspect.getsource(dns_page.NetworkPage._flush_dns_cache)
+        flush_source = inspect.getsource(dns_page.NetworkPage._flush_cache)
 
         self.assertTrue(hasattr(page_workers, "DnsFlushCacheWorker"))
         worker_source = inspect.getsource(page_workers.DnsFlushCacheWorker)
 
-        self.assertIn("_request_dns_flush_cache", flush_source)
-        self.assertNotIn("flush_dns_cache_action", flush_source)
+        self.assertIn("self._flush_lane.request()", flush_source)
         self.assertNotIn(".flush_dns_cache(", flush_source)
         self.assertIn("create_dns_flush_cache_worker", feature_source)
         self.assertIn("create_dns_flush_cache_worker", page_source)
-        self.assertIn("_dns_flush_cache_pending", page_source)
         self.assertIn("_flush_dns_cache", worker_source)
         self.assertNotIn("dns_public.flush_dns_cache", worker_source)
         self.assertIn("build_flush_dns_cache_result_plan", worker_source)
@@ -4658,69 +4622,33 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         page_workers = importlib.import_module("dns.page_workers")
         feature_source = inspect.getsource(__import__("app.feature_facades.dns", fromlist=["DnsFeature"]).DnsFeature)
         page_source = inspect.getsource(dns_page.NetworkPage)
-        force_workflow = importlib.import_module("dns.page_force_dns_workflow")
 
         self.assertTrue(hasattr(page_workers, "DnsApplyWorker"))
         worker_source = inspect.getsource(page_workers.DnsApplyWorker)
 
-        for method_name, old_action in (
-            ("_apply_auto_dns_quick", "apply_auto_dns_quick"),
-            ("_apply_provider_dns_quick", "apply_provider_dns_quick"),
-            ("_apply_custom_dns_quick", "apply_custom_dns_quick"),
-        ):
+        for method_name in ("_choose_provider", "_confirm_reset_to_auto"):
             source = inspect.getsource(getattr(dns_page.NetworkPage, method_name))
-            body_source = source.split("\n", 1)[1]
-            self.assertIn("_request_dns_apply", source)
-            self.assertNotIn(f"{old_action}(", body_source)
-            self.assertNotIn(".apply_auto_dns(", body_source)
-            self.assertNotIn(".apply_provider_dns(", body_source)
-            self.assertNotIn(".apply_custom_dns(", body_source)
+            self.assertIn("self._apply_lane.request(", source)
+            self.assertNotIn(".apply_auto_dns(", source)
+            self.assertNotIn(".apply_provider_dns(", source)
 
         self.assertIn("create_dns_apply_worker", feature_source)
         self.assertIn("create_dns_apply_worker", page_source)
-        self.assertIn("_dns_apply_pending", page_source)
         self.assertIn("apply_auto_dns", worker_source)
         self.assertIn("apply_provider_dns", worker_source)
-        self.assertIn("apply_custom_dns", worker_source)
+        self.assertNotIn("apply_custom_dns", worker_source)
         self.assertIn("refresh_dns_info", worker_source)
-        self.assertFalse(hasattr(dns_page.NetworkPage, "_refresh_adapters_dns"))
         self.assertIsNone(importlib.util.find_spec("dns.page_apply_workflow"))
-        self.assertFalse(hasattr(force_workflow, "handle_force_dns_toggled_action"))
-        self.assertFalse(hasattr(force_workflow, "flush_dns_cache_action"))
-        self.assertFalse(hasattr(force_workflow, "reset_dns_to_dhcp_action"))
-
-    def test_network_loaded_adapters_do_not_wait_for_current_dns(self) -> None:
-        stored = {}
-        build_calls = []
-
-        dns_load_workflow.handle_loaded_adapters(
-            adapters=[("Ethernet", "Intel")],
-            current_dns_info={},
-            ui_built=False,
-            set_adapters_fn=lambda adapters: stored.setdefault("adapters", adapters),
-            build_dynamic_ui_fn=lambda: build_calls.append("build"),
-        )
-
-        self.assertEqual(stored["adapters"], [("Ethernet", "Intel")])
-        self.assertEqual(build_calls, ["build"])
+        self.assertIsNone(importlib.util.find_spec("dns.page_force_dns_workflow"))
 
     def test_network_page_builds_dns_choices_before_runtime_load(self) -> None:
-        build_source = inspect.getsource(dns_page.NetworkPage._build_ui)
-        choices_source = inspect.getsource(dns_page.NetworkPage._build_dns_choices_ui)
-
-        self.assertIn("self._build_dns_choices_ui()", build_source)
-        self.assertNotIn("load_page_data", choices_source)
-        self.assertNotIn("refresh_dns_info", choices_source)
-
-    def test_network_page_adds_dns_containers_before_showing_dns_choices(self) -> None:
+        init_source = inspect.getsource(dns_page.NetworkPage.__init__)
         build_source = inspect.getsource(dns_page.NetworkPage._build_ui)
 
-        choices_pos = build_source.index("self._build_dns_choices_ui()")
-        dns_container_pos = build_source.index("self.add_widget(self.dns_cards_container)")
-        custom_card_pos = build_source.index("self.custom_card = shell.custom_card")
-
-        self.assertLess(dns_container_pos, choices_pos)
-        self.assertLess(custom_card_pos, choices_pos)
+        self.assertIn("self.grid = DnsProviderGrid(self.content)", build_source)
+        self.assertLess(init_source.index("self._build_ui()"), init_source.index("self._render()"))
+        self.assertNotIn("self._load_lane.request()", init_source)
+        self.assertNotIn("refresh_dns_info", build_source)
 
     def test_telegram_diagnostics_worker_uses_progress_signal(self) -> None:
         workflow_source = inspect.getsource(telegram_diag_workflow.start_diagnostics)
