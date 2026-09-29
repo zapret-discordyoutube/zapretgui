@@ -32,6 +32,7 @@ class AboutPageAboutWidgets:
     about_app_name_label: object
     about_version_value_label: object
     update_btn: object
+    whats_new_btn: object
     about_section_subscription_label: object
     sub_status_icon: object
     sub_status_label: object
@@ -86,6 +87,7 @@ def build_about_page_about_content(
     app_version: str,
     make_section_label: Callable[[str], object],
     on_open_updates,
+    on_open_whats_new,
     on_open_premium,
     on_open_kvn_tab,
     on_open_help_tab,
@@ -128,8 +130,16 @@ def build_about_page_about_content(
         tr_fn("page.about.button.update_settings", "Настройка обновлений"),
         icon=FluentIcon.SYNC,
     )
-    apply_about_buttons_accessibility(tr_fn=tr_fn, update_btn=update_btn)
     update_btn.clicked.connect(on_open_updates)
+
+    # «Что нового»: почитать изменения установленной версии в любой момент.
+    whats_new_btn = PushButton(
+        tr_fn("page.about.button.whats_new", "Что нового"),
+        icon=FluentIcon.INFO,
+    )
+    whats_new_btn.clicked.connect(on_open_whats_new)
+    apply_about_buttons_accessibility(tr_fn=tr_fn, update_btn=update_btn, whats_new_btn=whats_new_btn)
+    version_layout.addWidget(whats_new_btn)
     version_layout.addWidget(update_btn)
 
     version_card.add_layout(version_layout)
@@ -218,6 +228,7 @@ def build_about_page_about_content(
         about_app_name_label=about_app_name_label,
         about_version_value_label=about_version_value_label,
         update_btn=update_btn,
+        whats_new_btn=whats_new_btn,
         about_section_subscription_label=about_section_subscription_label,
         sub_status_icon=sub_status_icon,
         sub_status_label=sub_status_label,

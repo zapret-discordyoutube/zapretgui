@@ -14,7 +14,7 @@ from ui.fluent_widgets import SettingsCard
 from ui.theme import get_theme_tokens
 from app.ui_texts import tr as tr_catalog
 from log.log import log
-from updater.page_actions import AutoCheckSetting, ChannelOpener
+from updater.page_actions import AutoCheckSetting, ChannelOpener, run_update_setting_write
 from updater.server_status_table_state import ServerStatusTableState
 from updater.ui.main_build import (
     build_servers_header_widgets,
@@ -40,8 +40,13 @@ from qfluentwidgets import (
 from config.build_info import APP_VERSION, CHANNEL
 
 from updater.ui.update_card import UpdateStatusCard
-from updater.ui.changelog_card import ChangelogCard
+from updater.ui.update_dialog import UpdateDialog
+from updater.ui.update_flow import UpdateFlow, UpdateOffer
 
+
+
+# Сколько раз ждать, пока страница встанет в главное окно (по 200 мс).
+_DIALOG_HOST_RETRIES = 25
 
 
 class ServersPage(BasePage):
@@ -50,6 +55,10 @@ class ServersPage(BasePage):
     Страница только показывает. Проверкой владеет ``UpdateCheckService``,
     установкой — ``UpdateInstallService``, общий итог проверки — координатор
     ``UpdaterFeature``: его видят и страница, и проверка при запуске.
+
+    Найденное обновление всегда показывается одним окном ``UpdateDialog`` —
+    как бы оно ни нашлось. Его состояние (и ход загрузки) хранит
+    ``UpdateFlow``: окно можно скрыть и открыть снова кнопкой на карточке.
     """
 
     def __init__(
@@ -83,8 +92,11 @@ class ServersPage(BasePage):
         self._cleanup_in_progress = False
         self._auto_check_enabled = False
         self._found_version = ""
-        self._found_notes = ""
         self._found_source = ""
+        self._flow = UpdateFlow(language=self._ui_language, parent=self)
+        self._update_dialog: UpdateDialog | None = None
+        # Номер итога проверки, для которого окно уже открывалось само.
+        self._auto_opened_revision = 0
         self._changelog_link_open_runtime = OneShotWorkerRuntime()
         self._changelog_link_open_runtime_worker = None
         self._changelog_link_open_state = LatestValueWorkerState(
@@ -106,10 +118,11 @@ class ServersPage(BasePage):
 
     def _connect_services(self) -> None:
         self._check_service.server_status.connect(self._on_server_status)
-        self._install_service.stage_changed.connect(self.changelog_card.set_download_status_text)
-        self._install_service.progress.connect(self.changelog_card.update_progress)
-        self._install_service.downloaded.connect(self.changelog_card.download_complete)
+        self._install_service.stage_changed.connect(self._flow.on_stage)
+        self._install_service.progress.connect(self._flow.on_progress)
+        self._install_service.downloaded.connect(self._flow.on_downloaded)
         self._install_service.failed.connect(self._on_install_failed)
+        self._flow.changed.connect(self._on_flow_changed)
         self._auto_check.loaded.connect(self._on_auto_check_loaded)
         self._channel_opener.failed.connect(self.show_update_channel_open_error)
 
@@ -121,7 +134,7 @@ class ServersPage(BasePage):
         if not self._check_service.start(language=self._ui_language):
             return
         # Строки новой проверки приходят очередью Qt уже после этого места.
-        self.changelog_card.hide()
+        self.update_card.set_details_action("")
         self.reset_server_rows()
 
     def _on_server_status(self, server_name: str, status: dict) -> None:
@@ -161,20 +174,50 @@ class ServersPage(BasePage):
         version = str(getattr(snapshot, "version", "") or "")
         if not bool(getattr(snapshot, "has_update", False)):
             self._found_version = ""
+            self._flow.clear_offer()
+            self.update_card.set_details_action("")
             self.update_card.stop_checking(False, version)
             return
 
         self._found_version = version
-        self._found_notes = str(getattr(snapshot, "release_notes", "") or "")
         self._found_source = str(getattr(snapshot, "release_source", "") or "")
+        history = tuple(getattr(snapshot, "release_history", ()) or ())
+        if not history:
+            history = (
+                {
+                    "version": version,
+                    "notes": str(getattr(snapshot, "release_notes", "") or ""),
+                    "published_at": "",
+                    "url": str(getattr(snapshot, "release_url", "") or ""),
+                },
+            )
+        self._flow.set_offer(
+            UpdateOffer(
+                version=version,
+                current_version=APP_VERSION,
+                source=self._found_source,
+                url=str(getattr(snapshot, "release_url", "") or ""),
+                history=history,
+            )
+        )
+        if self._install_service.is_busy:
+            return
         if self._found_source:
             self.update_card.show_found_update(version, self._found_source)
         else:
             self.update_card.stop_checking(True, version)
-        # Карточка установки видна при любом найденном обновлении — в том
-        # числе если при запуске нажали «Позже».
-        if not self._install_service.is_busy:
-            self.changelog_card.show_update(self._found_version, self._found_notes)
+        self.update_card.set_details_action(self._tr("page.servers.update.button.details", "Подробнее"))
+
+        # Окно открывается само один раз на каждый итог проверки. При запуске —
+        # только если пользователь не просил пропустить эту версию.
+        revision = int(getattr(snapshot, "revision", 0) or 0)
+        startup_skipped = (
+            str(getattr(snapshot, "source", "") or "") == "startup"
+            and bool(getattr(snapshot, "user_skipped", False))
+        )
+        if revision != self._auto_opened_revision and not startup_skipped:
+            self._auto_opened_revision = revision
+            self.present_update_dialog()
 
     def _show_idle_hint(self, snapshot=None) -> None:
         if snapshot is None:
@@ -200,39 +243,99 @@ class ServersPage(BasePage):
 
     # ── Установка ───────────────────────────────────────────────────────
 
-    def present_startup_update(self, version: str, release_notes: str, *, install_after_show: bool = True) -> bool:
-        """Обновление, найденное при запуске и подтверждённое пользователем."""
-        if self._cleanup_in_progress or self._install_service.is_busy or not version:
+    def present_update_dialog(self, _attempt: int = 0) -> bool:
+        """Открывает окно обновления (или поднимает уже открытое)."""
+        if self._cleanup_in_progress or self._flow.offer is None:
             return False
-        self._found_version = str(version)
-        self._found_notes = str(release_notes or "")
-        self.changelog_card.show_update(self._found_version, self._found_notes)
-        if install_after_show:
-            self._request_install_update()
+        if self._update_dialog is not None:
+            return True
+        host = self.window()
+        if host is None or host is self:
+            # Страница ещё не встала в главное окно: откроем, когда встанет.
+            if _attempt < _DIALOG_HOST_RETRIES:
+                QTimer.singleShot(200, lambda: self.present_update_dialog(_attempt + 1))
+            return False
+        dialog = UpdateDialog(host, flow=self._flow, language=self._ui_language)
+        dialog.install_clicked.connect(self._request_install_update)
+        dialog.later_clicked.connect(self._request_dismiss_update)
+        dialog.skip_clicked.connect(self._request_skip_update)
+        dialog.telegram_clicked.connect(self._open_telegram_channel)
+        dialog.link_clicked.connect(self._request_changelog_link_open)
+        dialog.finished.connect(self._on_update_dialog_finished)
+        self._update_dialog = dialog
+        dialog.open()
         return True
 
+    def _on_update_dialog_finished(self, _code: int = 0) -> None:
+        dialog, self._update_dialog = self._update_dialog, None
+        if dialog is not None:
+            dialog.deleteLater()
+        self._on_flow_changed()
+
     def _request_install_update(self) -> None:
-        if self._cleanup_in_progress or not self._found_version:
+        offer = self._flow.offer
+        if self._cleanup_in_progress or offer is None:
             return
-        if self._check_service.is_busy or not self._install_service.start(self._found_version):
+        if self._check_service.is_busy or not self._install_service.start(offer.version):
             return
-        self.changelog_card.start_download(self._found_version)
-        self.update_card.hide()
-        self.update_card.set_check_enabled(False)
+        # Новая версия покажет «Что нового» из сохранённого текста, без сети.
+        history = offer.history
+        version = offer.version
+        run_update_setting_write(
+            lambda: self._updater_feature.remember_whats_new(version, history),
+            name="updater-whats-new-remember",
+            description="текст «Что нового»",
+        )
+        self._flow.start_download()
 
     def _on_install_failed(self, error: str) -> None:
         if self._cleanup_in_progress:
             return
-        self.changelog_card.download_failed(error)
-        self.update_card.show()
-        self.update_card.show_download_error()
-        self.update_card.set_check_enabled(True)
+        self._flow.on_failed(error)
+
+    def _on_flow_changed(self) -> None:
+        """Карточка статуса повторяет, что происходит с окном обновления."""
+        if self._cleanup_in_progress:
+            return
+        flow = self._flow
+        offer = flow.offer
+        version = offer.version if offer is not None else ""
+        if flow.is_busy:
+            progress = flow.progress
+            message = progress.stage_text
+            if flow.phase == "downloading" and progress.known_size:
+                message = f"{int(progress.percent)}%  ·  {progress.size_text}"
+            self.update_card.show()
+            self.update_card.show_downloading(version, message)
+            self.update_card.set_check_enabled(False)
+            self.update_card.set_details_action(
+                "" if self._update_dialog is not None else self._tr("page.servers.update.button.show", "Показать")
+            )
+            return
+        if flow.phase == "failed":
+            self.update_card.show_download_error()
+            self.update_card.set_check_enabled(True)
+            self.update_card.set_details_action(self._tr("page.servers.update.button.details", "Подробнее"))
 
     def _request_dismiss_update(self) -> None:
         if not self._found_version:
             return
         log("Обновление отложено пользователем", "🔄 UPDATE")
         self.update_card.show_deferred(self._found_version)
+        self.update_card.set_details_action(self._tr("page.servers.update.button.details", "Подробнее"))
+
+    def _request_skip_update(self) -> None:
+        version = self._found_version
+        if not version:
+            return
+        log(f"Пользователь пропустил версию v{version}: при запуске окно не откроется", "🔄 UPDATE")
+        run_update_setting_write(
+            lambda: self._updater_feature.set_update_skipped_version(version),
+            name="updater-skip-version",
+            description="пропущенную версию",
+        )
+        self.update_card.show_deferred(version)
+        self.update_card.set_details_action(self._tr("page.servers.update.button.details", "Подробнее"))
 
     # ── Настройки и Telegram ────────────────────────────────────────────
 
@@ -315,11 +418,11 @@ class ServersPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
+        self._flow.set_language(self._ui_language)
         apply_servers_page_language(
             tr_fn=self._tr,
             ui_language=self._ui_language,
             update_card=self.update_card,
-            changelog_card=self.changelog_card,
             breadcrumb=self._breadcrumb,
             page_title_label=self._page_title_label,
             servers_title_label=self._servers_title_label,
@@ -363,19 +466,11 @@ class ServersPage(BasePage):
 
         self.add_widget(header_widgets.header_widget)
 
-        # Update status card
+        # Update status card: «Подробнее» / «Показать» открывает окно обновления.
         self.update_card = UpdateStatusCard(language=self._ui_language)
         self.update_card.check_clicked.connect(self._request_check_updates)
+        self.update_card.details_clicked.connect(lambda: self.present_update_dialog())
         self.add_widget(self.update_card)
-
-        # Changelog card (hidden by default)
-        self.changelog_card = ChangelogCard(
-            language=self._ui_language,
-            open_url=self._request_changelog_link_open,
-        )
-        self.changelog_card.install_clicked.connect(self._request_install_update)
-        self.changelog_card.dismiss_clicked.connect(self._request_dismiss_update)
-        self.add_widget(self.changelog_card)
 
         # Table header row
         self.add_widget(header_widgets.servers_header_widget)
@@ -560,6 +655,12 @@ class ServersPage(BasePage):
 
     def cleanup(self):
         self._cleanup_in_progress = True
+        dialog, self._update_dialog = self._update_dialog, None
+        if dialog is not None:
+            try:
+                dialog.reject()
+            except RuntimeError:
+                pass
         self._stop_changelog_link_open_worker()
         unsubscribe, self._unsubscribe_check = self._unsubscribe_check, None
         if callable(unsubscribe):

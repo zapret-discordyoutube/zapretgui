@@ -21,6 +21,42 @@ def set_auto_update_enabled(enabled: bool) -> None:
     set_auto_update_enabled(bool(enabled))
 
 
+def get_update_skipped_version() -> str:
+    from settings.store import get_update_skipped_version
+
+    return str(get_update_skipped_version() or "")
+
+
+def set_update_skipped_version(version: str) -> None:
+    from settings.store import set_update_skipped_version
+
+    set_update_skipped_version(str(version or ""))
+
+
+def remember_whats_new(version: str, history) -> None:
+    from updater.whats_new import remember_pending
+
+    remember_pending(version, history)
+
+
+def startup_whats_new(app_version: str) -> tuple:
+    from updater.whats_new import startup_history
+
+    return startup_history(app_version)
+
+
+def mark_whats_new_seen(version: str) -> None:
+    from updater.whats_new import mark_seen
+
+    mark_seen(version)
+
+
+def load_release_history(version: str) -> tuple:
+    from updater.whats_new import load_release_history as _load
+
+    return _load(version)
+
+
 def run_startup_update_check() -> dict:
     from updater.startup_update_check import check_for_update_sync
 

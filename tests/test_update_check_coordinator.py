@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from app.feature_facades.updater import UpdaterFeature
 from core.runtime.update_check_coordinator import UpdateCheckCoordinator
 from updater.ui.page import ServersPage
+from updater.ui.update_flow import PHASE_DOWNLOADING, PHASE_FAILED, UpdateFlow
 
 
 class UpdateCheckCoordinatorTests(unittest.TestCase):
@@ -123,7 +124,7 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
         self.assertEqual(snapshot.message, "Лимит частоты")
 
     def _page(self, feature: UpdaterFeature) -> ServersPage:
-        """Страница без виджетов: карточки и сервисы — заглушки."""
+        """Страница без виджетов: карточка, окно и сервисы — заглушки."""
         page = ServersPage.__new__(ServersPage)
         page._ui_language = "ru"
         page._cleanup_in_progress = False
@@ -133,10 +134,14 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
         page._auto_check_enabled = False
         page._idle_view_applied = False
         page._found_version = ""
-        page._found_notes = ""
         page._found_source = ""
+        page._flow = UpdateFlow()
+        # Страница без __init__: PyQt не свяжет сигнал с её методом напрямую.
+        page._flow.changed.connect(lambda: page._on_flow_changed())
+        page._update_dialog = None
+        page._auto_opened_revision = 0
         page.update_card = Mock()
-        page.changelog_card = Mock()
+        page.present_update_dialog = Mock(return_value=True)
         return page
 
     def _finish_startup(self, feature: UpdaterFeature, result: dict) -> None:
@@ -202,40 +207,100 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
 
         page.update_card.show_checked_ago.assert_called_once_with(77.0)
 
-    def test_update_found_at_startup_offers_install_on_page_after_later(self) -> None:
-        """Раньше после «Позже» на странице не было кнопки установки."""
+    _FOUND = {
+        "has_update": True,
+        "version": "21.1.5.80",
+        "release_notes": "новое",
+        "release_source": "Forgejo",
+        "release_history": (
+            {"version": "21.1.5.80", "notes": "новое", "published_at": "", "url": "https://u/80"},
+            {"version": "21.1.5.79", "notes": "старое", "published_at": "", "url": "https://u/79"},
+        ),
+        "release_url": "https://u/80",
+        "error": None,
+    }
+
+    def test_update_found_at_startup_opens_one_update_window(self) -> None:
         feature = UpdaterFeature()
-        self._finish_startup(
-            feature,
-            {
-                "has_update": True,
-                "version": "21.1.5.80",
-                "release_notes": "новое",
-                "release_source": "Forgejo",
-                "error": None,
-            },
-        )
+        self._finish_startup(feature, dict(self._FOUND))
         page = self._page(feature)
 
         feature.subscribe_update_check(page._apply_check_snapshot, emit_initial=True)
 
-        page.changelog_card.show_update.assert_called_once_with("21.1.5.80", "новое")
-        # Источник выпуска теперь доходит до карточки.
+        page.present_update_dialog.assert_called_once_with()
+        offer = page._flow.offer
+        self.assertEqual(offer.version, "21.1.5.80")
+        self.assertEqual([item["version"] for item in offer.history], ["21.1.5.80", "21.1.5.79"])
+        self.assertEqual(offer.url, "https://u/80")
         page.update_card.show_found_update.assert_called_once_with("21.1.5.80", "Forgejo")
+        # После «Позже» окно возвращается кнопкой на карточке.
+        page.update_card.set_details_action.assert_called_with("Подробнее")
 
-    def test_confirmed_startup_update_installs_immediately_without_timer(self) -> None:
-        page = self._page(UpdaterFeature())
+    def test_same_check_result_opens_window_only_once(self) -> None:
+        feature = UpdaterFeature()
+        self._finish_startup(feature, dict(self._FOUND))
+        page = self._page(feature)
+
+        page._apply_check_snapshot(feature.current_update_check_snapshot())
+        page._apply_check_snapshot(feature.current_update_check_snapshot())
+
+        page.present_update_dialog.assert_called_once_with()
+
+    def test_skipped_version_does_not_open_window_at_startup(self) -> None:
+        feature = UpdaterFeature()
+        self._finish_startup(feature, dict(self._FOUND, user_skipped=True))
+        page = self._page(feature)
+
+        feature.subscribe_update_check(page._apply_check_snapshot, emit_initial=True)
+
+        page.present_update_dialog.assert_not_called()
+        page.update_card.set_details_action.assert_called_with("Подробнее")
+
+    def test_manual_check_opens_window_even_for_skipped_version(self) -> None:
+        feature = UpdaterFeature()
+        page = self._page(feature)
+        feature.subscribe_update_check(page._apply_check_snapshot)
+
+        token = feature.begin_update_check(source="manual")
+        feature.finish_update_check(dict(self._FOUND, user_skipped=True), source="manual", token=token)
+
+        page.present_update_dialog.assert_called_once_with()
+
+    def _offer_page(self) -> ServersPage:
+        feature = UpdaterFeature()
+        self._finish_startup(feature, dict(self._FOUND))
+        page = self._page(feature)
+        page._apply_check_snapshot(feature.current_update_check_snapshot())
+        return page
+
+    def test_install_starts_download_and_remembers_whats_new(self) -> None:
+        page = self._offer_page()
         page._install_service.start.return_value = True
+        page._updater_feature = Mock()
 
-        self.assertTrue(page.present_startup_update("21.1.5.80", "новое", install_after_show=True))
+        with patch("updater.ui.page.run_update_setting_write", side_effect=lambda action, **_: action()):
+            page._request_install_update()
 
         page._install_service.start.assert_called_once_with("21.1.5.80")
-        page.changelog_card.start_download.assert_called_once_with("21.1.5.80")
+        self.assertEqual(page._flow.phase, PHASE_DOWNLOADING)
+        version, history = page._updater_feature.remember_whats_new.call_args.args
+        self.assertEqual(version, "21.1.5.80")
+        self.assertEqual(len(history), 2)
+        page.update_card.show_downloading.assert_called()
+
+    def test_skip_remembers_version(self) -> None:
+        page = self._offer_page()
+        page._updater_feature = Mock()
+
+        with patch("updater.ui.page.run_update_setting_write", side_effect=lambda action, **_: action()):
+            page._request_skip_update()
+
+        page._updater_feature.set_update_skipped_version.assert_called_once_with("21.1.5.80")
+        page.update_card.show_deferred.assert_called_once_with("21.1.5.80")
 
     def test_no_install_while_check_is_running(self) -> None:
-        page = self._page(UpdaterFeature())
+        page = self._offer_page()
         page._check_service.is_busy = True
-        page._found_version = "21.1.5.80"
 
         page._request_install_update()
 
@@ -250,11 +315,17 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
         page._check_service.start.assert_not_called()
 
     def test_install_failure_returns_check_button(self) -> None:
-        page = self._page(UpdaterFeature())
+        page = self._offer_page()
+        page._install_service.start.return_value = True
+        with patch("updater.ui.page.run_update_setting_write"):
+            page._request_install_update()
+        page.update_card.reset_mock()
 
         page._on_install_failed("Не удалось скачать обновление")
 
-        page.changelog_card.download_failed.assert_called_once_with("Не удалось скачать обновление")
+        self.assertEqual(page._flow.phase, PHASE_FAILED)
+        self.assertEqual(page._flow.progress.error_text, "Не удалось скачать обновление")
+        page.update_card.show_download_error.assert_called_once_with()
         page.update_card.set_check_enabled.assert_called_once_with(True)
 
     def test_page_cleanup_stops_services_and_unsubscribes(self) -> None:

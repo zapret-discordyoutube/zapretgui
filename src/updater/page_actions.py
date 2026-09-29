@@ -6,6 +6,8 @@ from __future__ import annotations
   запись в ``settings.sqlite3`` вне главного потока. Если переключатель
   щёлкнули несколько раз подряд, записывается последнее значение.
 * ``ChannelOpener`` — открыть Telegram-канал обновлений.
+* ``run_update_setting_write`` — записать отметку окна обновления
+  («пропустить версию», текст «Что нового» перед установкой).
 
 Потоки фоновые (daemon): закрытие программы их не ждёт.
 """
@@ -93,4 +95,16 @@ class ChannelOpener(QObject):
         threading.Thread(target=run, name="updater-channel-open", daemon=True).start()
 
 
-__all__ = ["AutoCheckSetting", "ChannelOpener"]
+def run_update_setting_write(action, *, name: str, description: str) -> None:
+    """Короткая запись в settings.sqlite3 вне главного потока."""
+
+    def run() -> None:
+        try:
+            action()
+        except Exception as exc:
+            log(f"Не удалось сохранить {description}: {exc}", "WARNING")
+
+    threading.Thread(target=run, name=name, daemon=True).start()
+
+
+__all__ = ["AutoCheckSetting", "ChannelOpener", "run_update_setting_write"]

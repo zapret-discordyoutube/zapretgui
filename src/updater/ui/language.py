@@ -29,7 +29,6 @@ def apply_servers_page_language(
     tr_fn,
     ui_language: str,
     update_card,
-    changelog_card,
     breadcrumb,
     page_title_label,
     servers_title_label,
@@ -45,7 +44,6 @@ def apply_servers_page_language(
     refresh_server_rows,
 ) -> None:
     update_card.set_ui_language(ui_language)
-    changelog_card.set_ui_language(ui_language)
 
     rebuild_servers_breadcrumb(breadcrumb, tr_fn=tr_fn)
     page_title_label.setText(tr_fn("page.servers.title", "Серверы"))

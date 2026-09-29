@@ -651,6 +651,39 @@ def normalize_updater(data: object) -> dict[str, Any]:
     return {
         "auto_check": {"last_success_at": last_success_at},
         "self_repair": normalize_self_repair(raw.get("self_repair")),
+        "skipped_version": as_clean_str(raw.get("skipped_version"), ""),
+        "whats_new": normalize_whats_new(raw.get("whats_new")),
+    }
+
+
+WHATS_NEW_HISTORY_KEPT = 40
+WHATS_NEW_NOTES_MAX_CHARS = 20000
+
+
+def normalize_whats_new(data: object) -> dict[str, Any]:
+    raw = as_dict(data)
+    pending_raw = as_dict(raw.get("pending"))
+    history: list[dict[str, str]] = []
+    raw_history = pending_raw.get("history")
+    for item in raw_history if isinstance(raw_history, list) else ():
+        entry = as_dict(item)
+        version = as_clean_str(entry.get("version"), "")
+        if not version:
+            continue
+        history.append(
+            {
+                "version": version,
+                "notes": str(entry.get("notes") or "")[:WHATS_NEW_NOTES_MAX_CHARS],
+                "published_at": as_clean_str(entry.get("published_at"), ""),
+                "url": as_clean_str(entry.get("url"), ""),
+            }
+        )
+    return {
+        "seen_version": as_clean_str(raw.get("seen_version"), ""),
+        "pending": {
+            "version": as_clean_str(pending_raw.get("version"), ""),
+            "history": history[:WHATS_NEW_HISTORY_KEPT],
+        },
     }
 
 

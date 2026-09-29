@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+"""«Что нового»: какие изменения показать и когда.
+
+Перед запуском установщика окно обновления сохраняет изменения всех
+пропущенных версий (``remember_pending``). Новая версия при первом запуске
+показывает их без сети. Если сохранённого текста нет (программу обновили
+вручную), текст выпуска берётся из Forgejo.
+
+При самой первой установке окно не показывается: пользователь ещё ничего не
+обновлял. Здесь нет Qt — функции вызываются из фоновых потоков.
+"""
+
+from typing import Any
+
+from log.log import log
+
+
+def _state() -> dict[str, Any]:
+    from settings.store import get_whats_new_state
+
+    return dict(get_whats_new_state() or {})
+
+
+def _pending_history_for(version: str, state: dict[str, Any]) -> tuple[dict[str, str], ...]:
+    pending = state.get("pending") if isinstance(state.get("pending"), dict) else {}
+    if str(pending.get("version") or "") != str(version or ""):
+        return ()
+    return tuple(dict(item) for item in pending.get("history") or () if isinstance(item, dict))
+
+
+def remember_pending(version: str, history) -> None:
+    from settings.store import set_whats_new_pending
+
+    set_whats_new_pending(str(version or ""), list(history or ()))
+
+
+def mark_seen(version: str) -> None:
+    from settings.store import set_whats_new_seen_version
+
+    set_whats_new_seen_version(str(version or ""))
+
+
+def _fetch_from_forgejo(version: str) -> tuple[dict[str, str], ...]:
+    from updater.release.forgejo import fetch_release_notes
+
+    return (fetch_release_notes(version),)
+
+
+def startup_history(app_version: str) -> tuple[dict[str, str], ...]:
+    """Что показать при запуске этой версии. Пусто — ничего не показывать.
+
+    Пустой результат, кроме случаев «уже показано», сразу отмечается как
+    показанный, иначе окно всплывало бы при каждом запуске.
+    """
+    version = str(app_version or "")
+    state = _state()
+    seen = str(state.get("seen_version") or "")
+    if seen == version:
+        return ()
+
+    history = _pending_history_for(version, state)
+    if not history and seen:
+        # Обновили не через окно (установщик вручную): берём текст из Forgejo.
+        try:
+            history = _fetch_from_forgejo(version)
+        except Exception as exc:
+            log(f"«Что нового»: не удалось получить текст выпуска {version}: {exc}", "🔁 UPDATE")
+            history = ()
+    if not history:
+        mark_seen(version)
+    return history
+
+
+def load_release_history(version: str) -> tuple[dict[str, str], ...]:
+    """Текст выпуска для кнопки «Что нового» в «О программе».
+
+    Сначала сохранённое перед установкой (там все пропущенные версии), иначе
+    Forgejo. Ошибку сети пробрасывает — окно покажет её пользователю.
+    """
+    history = _pending_history_for(version, _state())
+    if history:
+        return history
+    return _fetch_from_forgejo(version)
+
+
+__all__ = ["load_release_history", "mark_seen", "remember_pending", "startup_history"]

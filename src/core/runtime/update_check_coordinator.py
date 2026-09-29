@@ -21,6 +21,13 @@ class UpdateCheckSnapshot:
     message: str
     # Откуда пришёл найденный выпуск: Forgejo или конкретное зеркало.
     release_source: str = ""
+    # Изменения всех пропущенных версий, от новых к старым:
+    # ({"version", "notes", "published_at", "url"}, ...).
+    release_history: tuple = ()
+    # Страница выпуска на Forgejo.
+    release_url: str = ""
+    # Пользователь просил не напоминать об этой версии при запуске.
+    user_skipped: bool = False
 
 
 class UpdateCheckCoordinator:
@@ -140,6 +147,11 @@ class UpdateCheckCoordinator:
                 skipped=skipped,
                 message=str(payload.get("skip_reason") or payload.get("message") or ""),
                 release_source=str(payload.get("release_source") or "") if not error else "",
+                release_history=tuple(
+                    dict(item) for item in (payload.get("release_history") or ()) if isinstance(item, dict)
+                ) if not error else (),
+                release_url=str(payload.get("release_url") or "") if not error else "",
+                user_skipped=bool(payload.get("user_skipped")) and not error,
             )
             self._snapshot = snapshot
 

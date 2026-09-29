@@ -11,7 +11,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QWidget
 
 from app.feature_facades.updater import UpdaterFeature
 from app.page_names import PageName
@@ -67,29 +67,39 @@ class ServersPageAssemblyTests(unittest.TestCase):
 
         kwargs["check_service"]._run_check = run_check
         kwargs["install_service"]._run_install = run_install
+        # Страница стоит в окне программы: окно обновления ложится поверх него.
+        self.host = QWidget()
+        self.host.resize(1200, 800)
         self.page = ServersPage(**kwargs)
+        self.page.setParent(self.host)
+        self.host.show()
         self.addCleanup(self._close_page)
 
     def _close_page(self) -> None:
         self.page.cleanup()
-        self.page.deleteLater()
+        self.host.deleteLater()
         QApplication.instance().processEvents()
 
-    def test_manual_check_fills_table_and_offers_install_until_exit(self) -> None:
+    def _dialog(self):
+        self.assertTrue(_wait(lambda: self.page._update_dialog is not None and self.page._update_dialog.isVisible()))
+        return self.page._update_dialog
+
+    def test_manual_check_opens_update_window_and_installs_until_exit(self) -> None:
         self.page._request_check_updates()
 
         self.assertTrue(_wait(lambda: self.feature.current_update_check_snapshot().phase == "completed"))
         self.assertTrue(_wait(lambda: self.page.servers_table.rowCount() >= 1))
-        self.assertFalse(self.page.changelog_card.isHidden())
         self.assertEqual(self.page._found_source, "Forgejo")
+        dialog = self._dialog()
+        self.assertIn("новое", dialog.browser.toPlainText())
 
-        self.page.changelog_card.install_clicked.emit()
+        dialog.install_btn.click()
 
         self.assertTrue(_wait(lambda: self.request_exit.called))
         self.downloaded.assert_called_once_with()
         self.request_exit.assert_called_once_with(stop_dpi=False)
 
-    def test_startup_result_after_later_still_offers_install(self) -> None:
+    def test_startup_result_opens_window_and_details_bring_it_back_after_later(self) -> None:
         token = self.feature.begin_update_check(source="startup")
         self.feature.finish_update_check(
             {"has_update": True, "version": "999.0.0.1", "release_notes": "новое", "error": None},
@@ -97,7 +107,13 @@ class ServersPageAssemblyTests(unittest.TestCase):
             token=token,
         )
 
-        self.assertFalse(self.page.changelog_card.isHidden())
+        self._dialog().later_btn.click()
+        self.assertTrue(_wait(lambda: self.page._update_dialog is None))
+        self.assertFalse(self.page.update_card.details_btn.isHidden())
+
+        self.page.update_card.details_btn.click()
+
+        self.assertIn("новое", self._dialog().browser.toPlainText())
 
     def test_check_error_is_shown_as_error(self) -> None:
         self.page._check_service._run_check = lambda *_args, **_kwargs: CheckOutcome(None, "Forgejo: нет ответа")

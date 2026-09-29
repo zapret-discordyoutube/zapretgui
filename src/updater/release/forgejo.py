@@ -24,7 +24,7 @@ import re
 import time
 from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import requests
 
@@ -43,6 +43,7 @@ FORGEJO_REPOSITORY = "zapretdiscordyoutube/zapretgui"
 FORGEJO_API_URL = f"{FORGEJO_ORIGIN}/api/v1/repos/{FORGEJO_REPOSITORY}/releases"
 FORGEJO_REPOSITORY_API_URL = f"{FORGEJO_ORIGIN}/api/v1/repos/{FORGEJO_REPOSITORY}"
 FORGEJO_RELEASE_DOWNLOAD_PREFIX = f"/{FORGEJO_REPOSITORY}/releases/download/"
+FORGEJO_RELEASE_PAGE_PREFIX = f"{FORGEJO_ORIGIN}/{FORGEJO_REPOSITORY}/releases/tag/"
 FORGEJO_SOURCE = "Forgejo"
 RELEASES_PAGE_LIMIT = 50
 MAX_RELEASE_PAGES = 4
@@ -76,6 +77,11 @@ def _trusted_release_asset_url(url: str, *, tag_name: str, file_name: str) -> bo
         return False
     relative = decoded_path[len(expected_prefix) :]
     return relative == file_name and PurePosixPath(relative).name == relative
+
+
+def release_page_url(tag_name: str) -> str:
+    """Страница выпуска на Forgejo — для кнопки «Открыть в браузере»."""
+    return f"{FORGEJO_RELEASE_PAGE_PREFIX}{quote(str(tag_name or ''), safe='')}"
 
 
 def _parse_sha256_sidecar(text: str, *, expected_name: str) -> str:
@@ -147,6 +153,7 @@ def _candidate(release: object, channel: str) -> dict[str, Any] | None:
         "prerelease": bool(release.get("prerelease", False)),
         "name": str(release.get("name") or ""),
         "published_at": str(release.get("published_at") or ""),
+        "release_url": release_page_url(tag_name),
     }
 
 
@@ -211,6 +218,9 @@ def fetch_latest_release(channel: str) -> dict[str, Any]:
 
     release = {key: value for key, value in best.items() if key != "sidecar_url"}
     release["sha256"] = sha256
+    # Список выпусков канала уже на руках: из него окно обновления показывает
+    # изменения всех пропущенных версий, без отдельного запроса.
+    release["history"] = tuple(_history_entry(item) for item in candidates)
     release["source"] = FORGEJO_SOURCE
     release["verify_ssl"] = True
     log(
@@ -218,6 +228,43 @@ def fetch_latest_release(channel: str) -> dict[str, Any]:
         "🔄 RELEASE",
     )
     return release
+
+
+def _history_entry(candidate: dict[str, Any]) -> dict[str, str]:
+    return {
+        "version": str(candidate.get("version") or ""),
+        "notes": str(candidate.get("release_notes") or ""),
+        "published_at": str(candidate.get("published_at") or ""),
+        "url": str(candidate.get("release_url") or ""),
+    }
+
+
+def fetch_release_notes(version: str) -> dict[str, str]:
+    """Текст выпуска одной версии — для «Что нового» в уже установленной программе.
+
+    ForgejoReleaseError, если выпуска нет или Forgejo недоступен.
+    """
+    tag_name = normalize_version(version)
+    session = new_session()
+    try:
+        try:
+            payload = _get(
+                session,
+                f"{FORGEJO_API_URL}/tags/{quote(tag_name, safe='')}",
+                accept="application/json",
+            ).json()
+        except Exception as exc:
+            raise ForgejoReleaseError(f"выпуск {tag_name} недоступен — {short_error(exc)}") from exc
+    finally:
+        session.close()
+    if not isinstance(payload, dict) or payload.get("draft"):
+        raise ForgejoReleaseError(f"Forgejo не вернул выпуск {tag_name}")
+    return {
+        "version": tag_name,
+        "notes": str(payload.get("body") or ""),
+        "published_at": str(payload.get("published_at") or ""),
+        "url": release_page_url(tag_name),
+    }
 
 
 def probe_forgejo() -> float:
@@ -238,5 +285,7 @@ __all__ = [
     "FORGEJO_SOURCE",
     "ForgejoReleaseError",
     "fetch_latest_release",
+    "fetch_release_notes",
     "probe_forgejo",
+    "release_page_url",
 ]

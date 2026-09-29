@@ -5,8 +5,30 @@ from __future__ import annotations
 from ui.accessibility import set_control_accessibility, set_state_text
 
 
-def apply_about_buttons_accessibility(*, tr_fn, update_btn=None, premium_btn=None, kvn_btn=None) -> None:
+def apply_about_buttons_accessibility(
+    *,
+    tr_fn,
+    update_btn=None,
+    whats_new_btn=None,
+    premium_btn=None,
+    kvn_btn=None,
+) -> None:
     """Задаёт понятные имена кнопок вкладки «О программе» для экранного диктора."""
+
+    if whats_new_btn is not None:
+        whats_new_name = tr_fn(
+            "page.about.action.whats_new.accessible_name",
+            "Что нового в этой версии",
+        )
+        set_state_text(whats_new_btn, whats_new_name)
+        set_control_accessibility(
+            whats_new_btn,
+            name=whats_new_name,
+            description=tr_fn(
+                "page.about.action.whats_new.description",
+                "Открывает окно со списком изменений установленной версии.",
+            ),
+        )
 
     if update_btn is not None:
         update_name = tr_fn(

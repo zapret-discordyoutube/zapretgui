@@ -10,6 +10,13 @@ from main.post_startup_threading import enqueue_subsystem_task, schedule_after
 
 class _UpdateCheckBridge(QObject):
     result_ready = pyqtSignal(object)
+    whats_new_ready = pyqtSignal(object)
+
+
+# «Что нового» ждёт, пока окно программы откроется и успокоится.
+_WHATS_NEW_DELAY_MS = 1500
+_WHATS_NEW_RETRY_MS = 3000
+_WHATS_NEW_MAX_RETRIES = 20
 
 
 def install_update_check(
@@ -22,7 +29,7 @@ def install_update_check(
     update_bridge = _UpdateCheckBridge(QCoreApplication.instance())
     startup_check_token: int | None = None
 
-    def _on_update_found(version: str, release_notes: str) -> None:
+    def _on_update_found(version: str, user_skipped: bool) -> None:
         if not is_startup_host_alive(startup_host):
             return
         try:
@@ -30,20 +37,17 @@ def install_update_check(
                 set_status(f"Доступно обновление v{version}")
             except Exception:
                 pass
+            if user_skipped:
+                log(f"Обновление v{version} пропущено пользователем: окно не открывается", "🔁 UPDATE")
+                return
             from app.page_names import PageName as StartupPageName
 
-            if not startup_host.confirm_update_install(version):
-                return
-            startup_host.show_page(StartupPageName.SERVERS)
-            page = startup_host.get_loaded_page(StartupPageName.SERVERS)
-            if page is not None:
-                page.present_startup_update(
-                    version,
-                    release_notes,
-                    install_after_show=True,
-                )
+            # Окно обновления открывает сама страница «Серверы» по общему итогу
+            # проверки — одно окно на любой путь. Здесь страницу только
+            # создаём, не переходя на неё.
+            startup_host.ensure_page(StartupPageName.SERVERS)
         except Exception as exc:
-            log(f"Ошибка при показе диалога обновления: {exc}", "❌ ERROR")
+            log(f"Ошибка при показе окна обновления: {exc}", "❌ ERROR")
 
     def _on_no_update(current_version: str) -> None:
         if not is_startup_host_alive(startup_host):
@@ -116,7 +120,7 @@ def install_update_check(
         if payload.get("has_update"):
             _on_update_found(
                 str(payload.get("version") or ""),
-                str(payload.get("release_notes") or ""),
+                bool(payload.get("user_skipped")),
             )
             return
         _on_no_update(str(payload.get("version") or ""))
@@ -203,10 +207,50 @@ def install_update_check(
         except Exception as exc:
             log(f"Не удалось убрать прежний наблюдатель обновления: {exc}", "WARNING")
 
+    def _whats_new_worker() -> None:
+        try:
+            from config.build_info import APP_VERSION
+
+            history = tuple(updater_feature.startup_whats_new(APP_VERSION) or ())
+        except Exception as exc:
+            log(f"«Что нового»: не удалось подготовить окно: {exc}", "WARNING")
+            return
+        if history:
+            update_bridge.whats_new_ready.emit(history)
+
+    def _on_whats_new_ready(history: object, attempt: int = 0) -> None:
+        if not is_startup_host_alive(startup_host):
+            return
+        from config.build_info import APP_VERSION
+
+        try:
+            shown = startup_host.show_whats_new(APP_VERSION, tuple(history or ()))
+        except Exception as exc:
+            log(f"«Что нового»: не удалось показать окно: {exc}", "❌ ERROR")
+            return
+        if not shown:
+            # Окно программы свёрнуто в трей: покажем, когда его откроют.
+            if attempt < _WHATS_NEW_MAX_RETRIES:
+                schedule_after(_WHATS_NEW_RETRY_MS, lambda: _on_whats_new_ready(history, attempt + 1))
+            return
+        log(f"Показано «Что нового» для v{APP_VERSION}", "🔁 UPDATE")
+        enqueue_subsystem_task(
+            "update",
+            "WhatsNewMarkSeen",
+            lambda: updater_feature.mark_whats_new_seen(APP_VERSION),
+        )
+
+    update_bridge.whats_new_ready.connect(lambda history: _on_whats_new_ready(history))
+
     def _schedule_startup_update_check_deferred() -> None:
         if not is_startup_host_alive(startup_host):
             return
         _report_interrupted_update()
+        schedule_after(
+            _WHATS_NEW_DELAY_MS,
+            lambda: is_startup_host_alive(startup_host)
+            and enqueue_subsystem_task("update", "StartupWhatsNew", _whats_new_worker),
+        )
         enqueue_subsystem_task(
             "update",
             "LegacyUpdateWatchdogCleanup",

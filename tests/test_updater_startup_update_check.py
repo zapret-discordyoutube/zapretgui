@@ -85,5 +85,32 @@ class StartupUpdateCheckTests(unittest.TestCase):
         self.assertTrue(after_clock_change["has_update"])
 
 
+class StartupSkippedVersionTests(unittest.TestCase):
+    """«Пропустить версию» решает фоновая проверка: интерфейс не читает настройки."""
+
+    setUp = StartupUpdateCheckTests.setUp
+    _check = StartupUpdateCheckTests._check
+
+    def _found(self, skipped: str) -> dict:
+        release = {"version": "21.1.5.80", "release_notes": "новое", "source": "Forgejo"}
+        with patch("settings.store.get_update_skipped_version", return_value=skipped):
+            return self._check(ReleaseLookup(release))
+
+    def test_skipped_version_is_marked(self) -> None:
+        result = self._found("21.1.5.80")
+
+        self.assertTrue(result["has_update"])
+        self.assertTrue(result["user_skipped"])
+
+    def test_newer_version_than_skipped_is_offered_again(self) -> None:
+        self.assertFalse(self._found("21.1.5.79")["user_skipped"])
+
+    def test_found_update_carries_history(self) -> None:
+        result = self._found("")
+
+        self.assertEqual([item["version"] for item in result["release_history"]], ["21.1.5.80"])
+        self.assertTrue(result["release_url"].endswith("/releases/tag/21.1.5.80"))
+
+
 if __name__ == "__main__":
     unittest.main()

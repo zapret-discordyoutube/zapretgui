@@ -689,6 +689,18 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Настройка обновлений",
         "en": "Update Settings",
     },
+    "page.about.button.whats_new": {
+        "ru": "Что нового",
+        "en": "What's new",
+    },
+    "page.about.action.whats_new.accessible_name": {
+        "ru": "Что нового в этой версии",
+        "en": "What's new in this version",
+    },
+    "page.about.action.whats_new.description": {
+        "ru": "Открывает окно со списком изменений установленной версии.",
+        "en": "Opens the list of changes in the installed version.",
+    },
     "page.about.button.open": {
         "ru": "Открыть",
         "en": "Open",
@@ -2874,8 +2886,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Please wait, checking servers",
     },
     "page.servers.update.subtitle.available": {
-        "ru": "Установите обновление ниже или проверьте ещё раз",
-        "en": "Install the update below or check again",
+        "ru": "Нажмите «Подробнее», чтобы посмотреть изменения и установить",
+        "en": "Press «Details» to see the changes and install",
     },
     "page.servers.update.subtitle.latest_template": {
         "ru": "Установлена последняя версия {version}",
@@ -2925,45 +2937,217 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "ПРОВЕРИТЬ ВРУЧНУЮ",
         "en": "CHECK MANUALLY",
     },
-    "page.servers.changelog.title.available": {
-        "ru": "Доступно обновление",
-        "en": "Update Available",
+    "page.servers.update.button.details": {
+        "ru": "Подробнее",
+        "en": "Details",
     },
-    "page.servers.changelog.title.downloading_template": {
-        "ru": "Загрузка v{version}",
-        "en": "Downloading v{version}",
+    "page.servers.update.button.show": {
+        "ru": "Показать",
+        "en": "Show",
     },
-    "page.servers.changelog.title.installing": {
-        "ru": "Установка...",
-        "en": "Installing...",
+    "page.servers.update.title.downloading_template": {
+        "ru": "Загрузка обновления v{version}",
+        "en": "Downloading update v{version}",
     },
-    "page.servers.changelog.title.download_error": {
-        "ru": "Ошибка загрузки",
-        "en": "Download error",
+    "page.servers.update.subtitle.downloading": {
+        "ru": "Загрузка идёт в фоне",
+        "en": "Downloading in the background",
     },
-    "page.servers.changelog.button.later": {
+    "update_dialog.accessible_description": {
+        "ru": "Окно обновления: список изменений, подробности и кнопки установки.",
+        "en": "Update window: list of changes, details and install buttons.",
+    },
+    "update_dialog.button.browser": {
+        "ru": "Открыть в браузере",
+        "en": "Open in browser",
+    },
+    "update_dialog.button.browser_description": {
+        "ru": "Открывает страницу выпуска на Forgejo.",
+        "en": "Opens the release page on Forgejo.",
+    },
+    "update_dialog.button.close": {
+        "ru": "Закрыть",
+        "en": "Close",
+    },
+    "update_dialog.button.close_description": {
+        "ru": "Закрывает окно обновления.",
+        "en": "Closes the update window.",
+    },
+    "update_dialog.button.hide": {
+        "ru": "Скрыть",
+        "en": "Hide",
+    },
+    "update_dialog.button.hide_description": {
+        "ru": "Загрузка продолжится. Вернуть окно можно на странице «Серверы».",
+        "en": "The download continues. You can bring the window back on the Servers page.",
+    },
+    "update_dialog.button.hide_name": {
+        "ru": "Скрыть окно обновления",
+        "en": "Hide the update window",
+    },
+    "update_dialog.button.install": {
+        "ru": "Обновить",
+        "en": "Update",
+    },
+    "update_dialog.button.install_description": {
+        "ru": "Скачивает новую версию и запускает установщик. Программа закроется и откроется снова.",
+        "en": "Downloads the new version and runs the installer. The app will close and reopen.",
+    },
+    "update_dialog.button.install_name": {
+        "ru": "Скачать и установить обновление",
+        "en": "Download and install the update",
+    },
+    "update_dialog.button.later": {
         "ru": "Позже",
         "en": "Later",
     },
-    "page.servers.changelog.button.install": {
-        "ru": "Установить",
-        "en": "Install",
+    "update_dialog.button.later_description": {
+        "ru": "Закрывает окно. Обновление напомнит о себе при следующем запуске.",
+        "en": "Closes the window. The update will remind you on the next launch.",
     },
-    "page.servers.changelog.button.retry": {
+    "update_dialog.button.later_name": {
+        "ru": "Отложить обновление",
+        "en": "Postpone the update",
+    },
+    "update_dialog.button.retry": {
         "ru": "Повторить",
         "en": "Retry",
     },
-    "page.servers.changelog.version.transition_template": {
+    "update_dialog.button.skip": {
+        "ru": "Пропустить версию",
+        "en": "Skip this version",
+    },
+    "update_dialog.button.skip_description": {
+        "ru": "При запуске больше не напоминать об этой версии. Следующая версия снова покажет окно.",
+        "en": "Do not remind about this version on launch. The next version will show the window again.",
+    },
+    "update_dialog.button.telegram": {
+        "ru": "Telegram",
+        "en": "Telegram",
+    },
+    "update_dialog.button.telegram_description": {
+        "ru": "Все версии программы выкладываются в Telegram-канале — можно скачать вручную.",
+        "en": "Every version is posted in the Telegram channel — you can download it manually.",
+    },
+    "update_dialog.button.telegram_name": {
+        "ru": "Открыть Telegram-канал",
+        "en": "Open the Telegram channel",
+    },
+    "update_dialog.details.channel": {
+        "ru": "Канал обновлений",
+        "en": "Update channel",
+    },
+    "update_dialog.details.count": {
+        "ru": "Версий в обновлении",
+        "en": "Versions in this update",
+    },
+    "update_dialog.details.current": {
+        "ru": "Установлена",
+        "en": "Installed",
+    },
+    "update_dialog.details.source": {
+        "ru": "Источник",
+        "en": "Source",
+    },
+    "update_dialog.details.target": {
+        "ru": "Новая версия",
+        "en": "New version",
+    },
+    "update_dialog.history.accessible_description": {
+        "ru": "Что изменилось в каждой версии, от новой к старой. Ссылки открываются в браузере.",
+        "en": "What changed in each version, newest first. Links open in the browser.",
+    },
+    "update_dialog.history.accessible_name": {
+        "ru": "Список изменений",
+        "en": "List of changes",
+    },
+    "update_dialog.history.empty": {
+        "ru": "Описание изменений не опубликовано.",
+        "en": "No release notes were published.",
+    },
+    "update_dialog.stage.failed": {
+        "ru": "Загрузка прервалась",
+        "en": "The download was interrupted",
+    },
+    "update_dialog.stage.installer_starting": {
+        "ru": "Запускаем установщик, программа закроется",
+        "en": "Starting the installer, the app will close",
+    },
+    "update_dialog.stage.preparing": {
+        "ru": "Подготовка к загрузке…",
+        "en": "Preparing the download…",
+    },
+    "update_dialog.subtitle.source_template": {
+        "ru": "источник: {source}",
+        "en": "source: {source}",
+    },
+    "update_dialog.subtitle.transition_template": {
         "ru": "v{current}  →  v{target}",
         "en": "v{current}  →  v{target}",
     },
-    "page.servers.changelog.version.preparing": {
-        "ru": "Подготовка к загрузке...",
-        "en": "Preparing download...",
+    "update_dialog.subtitle.versions_template": {
+        "ru": "версий в обновлении: {count}",
+        "en": "versions in this update: {count}",
     },
-    "page.servers.changelog.version.installer_starting": {
-        "ru": "Запуск установщика, приложение закроется",
-        "en": "Starting installer, application will close",
+    "update_dialog.tab.accessible_name": {
+        "ru": "Разделы окна обновления",
+        "en": "Update window sections",
+    },
+    "update_dialog.tab.changes": {
+        "ru": "Что нового",
+        "en": "What's new",
+    },
+    "update_dialog.tab.details": {
+        "ru": "Подробности",
+        "en": "Details",
+    },
+    "update_dialog.title.available": {
+        "ru": "Доступно обновление",
+        "en": "Update available",
+    },
+    "update_dialog.title.downloading_template": {
+        "ru": "Загружаем v{version}",
+        "en": "Downloading v{version}",
+    },
+    "update_dialog.title.failed": {
+        "ru": "Не удалось загрузить обновление",
+        "en": "Could not download the update",
+    },
+    "update_dialog.title.installing": {
+        "ru": "Устанавливаем…",
+        "en": "Installing…",
+    },
+    "update_dialog.whats_new.load_error_template": {
+        "ru": "Не удалось загрузить список изменений: {error}",
+        "en": "Could not load the list of changes: {error}",
+    },
+    "update_dialog.whats_new.loading": {
+        "ru": "Загружаем список изменений…",
+        "en": "Loading the list of changes…",
+    },
+    "update_dialog.whats_new.ok": {
+        "ru": "Понятно",
+        "en": "Got it",
+    },
+    "update_dialog.whats_new.ok_description": {
+        "ru": "Закрывает окно со списком изменений.",
+        "en": "Closes the list of changes.",
+    },
+    "update_dialog.whats_new.ok_name": {
+        "ru": "Закрыть «Что нового»",
+        "en": "Close «What's new»",
+    },
+    "update_dialog.whats_new.subtitle": {
+        "ru": "Список изменений этого выпуска",
+        "en": "Changes in this release",
+    },
+    "update_dialog.whats_new.subtitle_many_template": {
+        "ru": "Версий в списке: {count}",
+        "en": "Versions listed: {count}",
+    },
+    "update_dialog.whats_new.title_template": {
+        "ru": "Что нового в v{version}",
+        "en": "What's new in v{version}",
     },
     "page.servers.changelog.progress.speed_unknown": {
         "ru": "Скорость: —",

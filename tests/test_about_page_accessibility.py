@@ -33,11 +33,17 @@ class AboutPageAccessibilityTests(unittest.TestCase):
             app_version="9.9.9",
             make_section_label=lambda text: QWidget(),
             on_open_updates=lambda: None,
+            on_open_whats_new=lambda: opened.append("whats_new"),
             on_open_premium=lambda: None,
             on_open_kvn_tab=lambda: opened.append("kvn"),
             on_open_help_tab=lambda: opened.append("help"),
         )
 
+        self.assertEqual(widgets.whats_new_btn.accessibleName(), "Что нового в этой версии")
+        self.assertIn("списком изменений", widgets.whats_new_btn.accessibleDescription())
+        widgets.whats_new_btn.click()
+        self.assertEqual(opened, ["whats_new"])
+        opened.clear()
         self.assertEqual(widgets.update_btn.accessibleName(), "Открыть настройки обновлений")
         self.assertEqual(
             widgets.update_btn.property("screenReaderStateText"),
@@ -133,6 +139,7 @@ class AboutPageAccessibilityTests(unittest.TestCase):
         page.about_app_name_label = _TextWidget()
         page.about_version_value_label = _TextWidget()
         page.update_btn = _TextWidget()
+        page.whats_new_btn = _TextWidget()
         page.about_section_subscription_label = _TextWidget()
         page.sub_desc_label = _TextWidget()
         page.premium_btn = _TextWidget()
@@ -154,6 +161,7 @@ class AboutPageAccessibilityTests(unittest.TestCase):
         )
         self.assertEqual(page.update_btn.accessible_name, "Открыть настройки обновлений")
         self.assertEqual(page.update_btn.property("screenReaderStateText"), "Открыть настройки обновлений")
+        self.assertEqual(page.whats_new_btn.accessible_name, "Что нового в этой версии")
         self.assertIn("автоматической проверки", page.update_btn.accessible_description)
         self.assertEqual(
             page.sub_desc_label.property("screenReaderStateText"),

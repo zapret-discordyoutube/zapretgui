@@ -28,26 +28,21 @@ class PostStartupHost:
         close_state = self.close_state
         return not bool(close_state.is_exiting or close_state.closing_completely)
 
-    def confirm_update_install(self, version: str) -> bool:
-        from ui.fluent_dialog import MessageBox
-        from ui.message_box_accessibility import set_message_box_button_accessibility
+    def show_whats_new(self, version: str, history) -> bool:
+        """Окно «Что нового» после обновления. False — окно программы не готово."""
+        window = self._window
+        if window is None or not window.isVisible() or window.isMinimized():
+            return False
+        from ui.navigation.text_sync import resolve_ui_language
+        from updater.ui.update_dialog import show_whats_new_dialog
 
-        body = f"Выпущена версия {version}. Скачать и установить сейчас?"
-        box = MessageBox(
-            "Доступно обновление",
-            body,
-            self._window,
+        show_whats_new_dialog(
+            window,
+            version=version,
+            history=history,
+            language=resolve_ui_language(window),
         )
-        box.yesButton.setText("Скачать и установить")
-        box.cancelButton.setText("Позже")
-        set_message_box_button_accessibility(
-            box,
-            yes_name="Скачать и установить обновление",
-            yes_description=body,
-            cancel_name="Отложить установку обновления",
-            cancel_description="Закрывает диалог без установки обновления сейчас.",
-        )
-        return bool(box.exec())
+        return True
 
     def show_page(self, page_name) -> None:
         from ui.window_adapter import show_page

@@ -17,6 +17,7 @@ from qfluentwidgets import (
     CaptionLabel,
     CardWidget,
     IndeterminateProgressRing,
+    PrimaryPushButton,
     PushButton,
     StrongBodyLabel,
 )
@@ -62,6 +63,8 @@ class UpdateStatusCard(CardWidget):
     """Карточка статуса обновлений."""
 
     check_clicked = pyqtSignal()
+    # «Подробнее» / «Показать»: открыть окно обновления.
+    details_clicked = pyqtSignal()
 
     def __init__(self, parent=None, *, language: str = "ru"):
         super().__init__(parent)
@@ -110,6 +113,13 @@ class UpdateStatusCard(CardWidget):
         text_layout.addWidget(self.subtitle_label)
 
         content_layout.addLayout(text_layout, 1)
+
+        self.details_btn = PrimaryPushButton()
+        self.details_btn.setFixedHeight(32)
+        self.details_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.details_btn.clicked.connect(self.details_clicked.emit)
+        self.details_btn.hide()
+        content_layout.addWidget(self.details_btn)
 
         self.check_btn = IndeterminateProgressPushButton()
         self.check_btn.setText(
@@ -242,6 +252,27 @@ class UpdateStatusCard(CardWidget):
         if plan.check_enabled is not None:
             self.check_btn.setEnabled(plan.check_enabled)
             self._update_accessibility()
+
+    def set_details_action(self, text: str) -> None:
+        """Кнопка открытия окна обновления; пустой текст прячет её."""
+        label = str(text or "").strip()
+        self.details_btn.setText(label)
+        self.details_btn.setVisible(bool(label))
+        set_control_accessibility(
+            self.details_btn,
+            name=label or "Окно обновления",
+            description="Открывает окно обновления со списком изменений и кнопками установки.",
+        )
+        set_state_text(self.details_btn, label or "Окно обновления: недоступно")
+
+    def show_downloading(self, version: str, message: str = "") -> None:
+        plan = plans.build_update_status_transition_plan(
+            target_state="downloading",
+            language=self._ui_language,
+            version=version,
+            message=message,
+        )
+        self._apply_transition_plan(plan)
 
     def set_check_enabled(self, enabled: bool) -> None:
         self.check_btn.setEnabled(bool(enabled))

@@ -55,6 +55,25 @@ class UpdaterFeature:
     def set_auto_update_enabled(self, enabled: bool) -> None:
         self._commands().set_auto_update_enabled(bool(enabled))
 
+    # Все методы ниже ходят в settings.sqlite3 или в сеть — только из фона.
+    def get_update_skipped_version(self) -> str:
+        return str(self._commands().get_update_skipped_version() or "")
+
+    def set_update_skipped_version(self, version: str) -> None:
+        self._commands().set_update_skipped_version(str(version or ""))
+
+    def remember_whats_new(self, version: str, history) -> None:
+        self._commands().remember_whats_new(str(version or ""), tuple(history or ()))
+
+    def startup_whats_new(self, app_version: str) -> tuple:
+        return tuple(self._commands().startup_whats_new(str(app_version or "")))
+
+    def mark_whats_new_seen(self, version: str) -> None:
+        self._commands().mark_whats_new_seen(str(version or ""))
+
+    def load_release_history(self, version: str) -> tuple:
+        return tuple(self._commands().load_release_history(str(version or "")))
+
     def create_installation_repair_worker(
         self,
         request_id: int,

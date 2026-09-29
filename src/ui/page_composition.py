@@ -155,7 +155,7 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
     ),
     PageName.ABOUT: PageDepsSpec(
         build_about_page_kwargs,
-        features=("external_actions",),
+        features=("external_actions", "updater"),
         actions=("show_page",),
         include_ui_state_store=True,
     ),

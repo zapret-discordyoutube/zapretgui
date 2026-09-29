@@ -164,8 +164,26 @@ def build_appearance_page_kwargs(
     }
 
 
-def build_about_page_kwargs(*, page_name: PageName, external_actions_feature, show_page, ui_state_store) -> dict:
+def build_about_page_kwargs(
+    *,
+    page_name: PageName,
+    external_actions_feature,
+    updater_feature,
+    show_page,
+    ui_state_store,
+) -> dict:
     _ = page_name
+
+    def _open_whats_new(parent, *, language: str = "ru") -> None:
+        from config.build_info import APP_VERSION
+        from updater.ui.update_dialog import open_whats_new_window
+
+        open_whats_new_window(
+            parent,
+            updater_feature=updater_feature,
+            version=APP_VERSION,
+            language=language,
+        )
 
     def _create_about_open_action_worker(request_id: int, *, action_name: str, parent=None):
         import about.commands as about_commands
@@ -204,6 +222,7 @@ def build_about_page_kwargs(*, page_name: PageName, external_actions_feature, sh
     return {
         "open_premium": lambda: show_page(PageName.PREMIUM),
         "open_updates": lambda: show_page(PageName.SERVERS, allow_internal=True),
+        "open_whats_new": _open_whats_new,
         "create_open_action_worker": _create_about_open_action_worker,
         "ui_state_store": ui_state_store,
     }

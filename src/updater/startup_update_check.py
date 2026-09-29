@@ -38,6 +38,15 @@ def _remember_successful_check(now: float) -> None:
         log(f"Не удалось запомнить время проверки обновлений: {exc}", "WARNING")
 
 
+def _is_skipped_by_user(version: str) -> bool:
+    from settings import store as settings_store
+
+    try:
+        return str(settings_store.get_update_skipped_version() or "") == str(version or "")
+    except Exception:
+        return False
+
+
 def _pause_left(now: float) -> float:
     elapsed = now - _last_successful_check_at()
     # Часы перевели назад: пауза считается истёкшей.
@@ -104,12 +113,18 @@ def check_for_update_sync(*, now: float | None = None) -> dict:
         }
 
     if has_update:
+        from updater.release.history import release_history_since, release_url_for
+
         log(f"Найдено обновление v{new_version} (текущая v{APP_VERSION})", "🔁 UPDATE")
         return {
             "has_update": True,
             "version": new_version,
             "release_notes": str(release.get("release_notes") or ""),
             "release_source": str(release.get("source") or ""),
+            "release_history": release_history_since(release, current_version=APP_VERSION),
+            "release_url": release_url_for(release),
+            # «Пропустить версию»: при запуске окно само не открывается.
+            "user_skipped": _is_skipped_by_user(new_version),
             "error": None,
             "release_info": release,
         }

@@ -668,6 +668,35 @@ def set_updater_settings(values: dict[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(updated["updater"])
 
 
+def get_update_skipped_version() -> str:
+    return _get_str(("updater", "skipped_version"), "")
+
+
+def set_update_skipped_version(value: str) -> bool:
+    return _set_str(("updater", "skipped_version"), str(value or ""))
+
+
+def get_whats_new_state() -> dict[str, Any]:
+    """``{"seen_version", "pending": {"version", "history"}}``."""
+    return _read_path_value(("updater", "whats_new"), {}) or {}
+
+
+def set_whats_new_seen_version(value: str) -> bool:
+    return _set_str(("updater", "whats_new", "seen_version"), str(value or ""))
+
+
+def set_whats_new_pending(version: str, history: object) -> bool:
+    entries = [dict(item) for item in (history or ()) if isinstance(item, dict)]
+    _update_settings(
+        lambda data: _set_path_value(
+            data,
+            ("updater", "whats_new", "pending"),
+            {"version": str(version or ""), "history": entries},
+        )
+    )
+    return True
+
+
 def get_last_seen_version() -> str:
     return _get_str(("program", "last_seen_version"), "")
 
@@ -1866,6 +1895,8 @@ __all__ = [
     "get_active_hosts_domains",
     "get_animations_enabled",
     "get_auto_update_enabled",
+    "get_update_skipped_version",
+    "get_whats_new_state",
     "get_background_preset",
     "get_discord_restart_enabled",
     "get_display_mode",
@@ -1958,6 +1989,9 @@ __all__ = [
     "set_active_hosts_domains",
     "set_animations_enabled",
     "set_auto_update_enabled",
+    "set_update_skipped_version",
+    "set_whats_new_pending",
+    "set_whats_new_seen_version",
     "set_background_preset",
     "set_defender_disabled_memory",
     "set_discord_restart_enabled",

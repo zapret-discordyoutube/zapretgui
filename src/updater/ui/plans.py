@@ -35,53 +35,6 @@ class UpdateStatusTransitionPlan:
 
 
 @dataclass(slots=True)
-class ChangelogUpdatePlan:
-    mode: str
-    is_downloading: bool
-    icon_kind: str
-    raw_version: str
-    download_error_text: str
-    title_text: str
-    version_text: str
-    install_text: str
-    raw_changelog: str
-    changelog_html: str
-    changelog_visible: bool
-    progress_visible: bool
-    buttons_visible: bool
-    close_visible: bool
-
-
-@dataclass(slots=True)
-class ChangelogDownloadStartPlan:
-    mode: str
-    is_downloading: bool
-    icon_kind: str
-    raw_version: str
-    title_text: str
-    version_text: str
-    progress_label_text: str
-    speed_label_text: str
-    eta_label_text: str
-    show_progress_bar: bool
-    show_indeterminate: bool
-    progress_visible: bool
-    buttons_visible: bool
-    close_visible: bool
-    download_start_time: float
-    last_bytes: int
-    last_speed_time: float
-    last_speed_bytes: int
-    smoothed_speed: float
-    download_percent: int
-    download_done_bytes: int
-    download_total_bytes: int
-    download_speed_kb: float | None
-    download_eta_seconds: float | None
-    download_error_text: str
-
-
-@dataclass(slots=True)
 class ChangelogProgressPlan:
     mode: str
     show_progress_bar: bool
@@ -102,23 +55,9 @@ class ChangelogProgressPlan:
     download_eta_seconds: float | None
 
 
-@dataclass(slots=True)
-class ChangelogTerminalPlan:
-    mode: str
-    is_downloading: bool
-    title_text: str
-    version_text: str
-    progress_value: int
-    progress_label_text: str
-    speed_label_text: str
-    eta_label_text: str
-    progress_visible: bool
-    buttons_visible: bool
-    close_visible: bool
-    install_text: str
-    icon_kind: str
-    title_color: str | None
-    error_text: str
+def update_flow_text(language: str, key: str, default: str) -> str:
+    """Тексты окна обновления: ключи ``update_dialog.*`` в ``app/ui_texts.py``."""
+    return _tr(language, f"update_dialog.{key}", default)
 
 
 def _tr(language: str, key: str, default: str) -> str:
@@ -126,18 +65,113 @@ def _tr(language: str, key: str, default: str) -> str:
 
     return tr_catalog(key, language=language, default=default)
 
-def make_links_clickable(text: str, accent_hex: str) -> str:
+_URL_RE = None
+_MONTHS_RU = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+_MONTHS_EN = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+
+
+def _linkify(escaped: str, accent_hex: str) -> str:
+    """Ссылки в уже экранированном тексте делает кликабельными."""
     import re
 
-    url_pattern = r'(https?://[^\s<>"\']+)'
+    global _URL_RE
+    if _URL_RE is None:
+        _URL_RE = re.compile(r"(https?://[^\s<>\"']+)")
 
     def replace_url(match):
         url = match.group(1)
-        while url and url[-1] in '.,;:!?)':
+        tail = ""
+        while url and url[-1] in ".,;:!?)":
+            tail = url[-1] + tail
             url = url[:-1]
-        return f'<a href="{url}" style="color: {accent_hex};">{url}</a>'
+        return f'<a href="{url}" style="color: {accent_hex}; text-decoration: none;">{url}</a>{tail}'
 
-    return re.sub(url_pattern, replace_url, text)
+    return _URL_RE.sub(replace_url, escaped)
+
+
+def format_release_date(published_at: str, language: str) -> str:
+    """``2026-09-29T21:40:30+03:00`` → «29 сентября 2026». Пусто, если не разобрать."""
+    text = str(published_at or "").strip()
+    if len(text) < 10:
+        return ""
+    try:
+        year, month, day = int(text[0:4]), int(text[5:7]), int(text[8:10])
+    except ValueError:
+        return ""
+    if not 1 <= month <= 12:
+        return ""
+    if str(language or "").lower().startswith("en"):
+        return f"{_MONTHS_EN[month - 1]} {day}, {year}"
+    return f"{day} {_MONTHS_RU[month - 1]} {year}"
+
+
+def release_notes_body_html(notes: str, *, accent_hex: str) -> str:
+    """Текст одного выпуска: строки «- …» / «• …» — список, «# …» — подзаголовок."""
+    import html
+
+    blocks: list[str] = []
+    items: list[str] = []
+
+    def flush_items() -> None:
+        if items:
+            blocks.append("<ul style='margin: 2px 0 6px 0;'>" + "".join(items) + "</ul>")
+            items.clear()
+
+    for raw_line in str(notes or "").replace("\r\n", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            flush_items()
+            continue
+        bullet = None
+        for marker in ("- ", "* ", "• ", "— ", "– "):
+            if line.startswith(marker):
+                bullet = line[len(marker):].strip()
+                break
+        if bullet is not None:
+            items.append(f"<li style='margin-bottom: 3px;'>{_linkify(html.escape(bullet), accent_hex)}</li>")
+            continue
+        flush_items()
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip()
+            blocks.append(f"<p style='margin: 8px 0 2px 0;'><b>{_linkify(html.escape(heading), accent_hex)}</b></p>")
+        else:
+            blocks.append(f"<p style='margin: 2px 0 4px 0;'>{_linkify(html.escape(line), accent_hex)}</p>")
+    flush_items()
+    return "".join(blocks)
+
+
+def release_history_html(
+    history,
+    *,
+    accent_hex: str,
+    muted_hex: str,
+    language: str,
+    empty_text: str,
+) -> str:
+    """Все выпуски окна обновления: для каждого — версия, дата и текст."""
+    import html
+
+    parts: list[str] = []
+    for entry in history or ():
+        if not isinstance(entry, dict):
+            continue
+        version = html.escape(str(entry.get("version") or ""))
+        date = html.escape(format_release_date(str(entry.get("published_at") or ""), language))
+        header = f"<span style='font-size: 15pt; font-weight: 600; color: {accent_hex};'>v{version}</span>"
+        if date:
+            header += f"<span style='color: {muted_hex};'>&nbsp;&nbsp;·&nbsp;&nbsp;{date}</span>"
+        body = release_notes_body_html(str(entry.get("notes") or ""), accent_hex=accent_hex)
+        if not body:
+            body = f"<p style='color: {muted_hex};'>{html.escape(empty_text)}</p>"
+        parts.append(f"<div style='margin-bottom: 18px;'><p style='margin: 0 0 6px 0;'>{header}</p>{body}</div>")
+    return "".join(parts)
+
 
 def build_update_status_card_plan(
     *,
@@ -165,7 +199,7 @@ def build_update_status_card_plan(
             title=tr("page.servers.update.title.available_template", "Доступно обновление v{version}").format(version=version),
             subtitle=tr(
                 "page.servers.update.subtitle.available",
-                "Установите обновление ниже или проверьте ещё раз",
+                "Нажмите «Подробнее», чтобы посмотреть изменения и установить",
             ),
             button_text=tr("page.servers.update.button.recheck", "ПРОВЕРИТЬ СНОВА"),
         )
@@ -188,6 +222,16 @@ def build_update_status_card_plan(
         return UpdateStatusCardPlan(
             title=tr("page.servers.update.title.found_template", "Найдено обновление v{version}").format(version=version),
             subtitle=tr("page.servers.update.subtitle.source_template", "Источник: {source}").format(source=source),
+            button_text=tr("page.servers.update.button.recheck", "ПРОВЕРИТЬ СНОВА"),
+        )
+    if state == "downloading":
+        return UpdateStatusCardPlan(
+            title=tr(
+                "page.servers.update.title.downloading_template",
+                "Загрузка обновления v{version}",
+            ).format(version=version),
+            subtitle=str(message or "")
+            or tr("page.servers.update.subtitle.downloading", "Загрузка идёт в фоне"),
             button_text=tr("page.servers.update.button.recheck", "ПРОВЕРИТЬ СНОВА"),
         )
     if state == "download_error":
@@ -383,6 +427,20 @@ def build_update_status_transition_plan(
             check_enabled=True,
         )
 
+    if state == "downloading":
+        return UpdateStatusTransitionPlan(
+            is_checking=False,
+            state="downloading",
+            state_version=str(version or ""),
+            state_source="",
+            state_message=str(message or ""),
+            state_elapsed=0.0,
+            icon_mode="checking",
+            loading_mode="stop",
+            stop_loading_text=tr("page.servers.update.button.recheck", "ПРОВЕРИТЬ СНОВА"),
+            check_enabled=False,
+        )
+
     if state == "download_error":
         return UpdateStatusTransitionPlan(
             is_checking=False,
@@ -464,71 +522,6 @@ def build_update_status_transition_plan(
         loading_mode="stop",
         stop_loading_text=tr("page.servers.update.button.check", "Проверить обновления"),
         check_enabled=None,
-    )
-
-def build_changelog_update_plan(
-    *,
-    version: str,
-    changelog: str,
-    app_version: str,
-    accent_hex: str,
-    language: str,
-) -> ChangelogUpdatePlan:
-    tr = lambda key, default: _tr(language, key, default)
-
-    clean_changelog = str(changelog or "")
-    if clean_changelog and len(clean_changelog) > 200:
-        clean_changelog = clean_changelog[:200] + "..."
-
-    return ChangelogUpdatePlan(
-        mode="update",
-        is_downloading=False,
-        icon_kind="update",
-        raw_version=str(version or ""),
-        download_error_text="",
-        title_text=tr("page.servers.changelog.title.available", "Доступно обновление"),
-        version_text=tr(
-            "page.servers.changelog.version.transition_template",
-            "v{current}  →  v{target}",
-        ).format(current=app_version, target=version),
-        install_text=tr("page.servers.changelog.button.install", "Установить"),
-        raw_changelog=clean_changelog,
-        changelog_html=make_links_clickable(clean_changelog, accent_hex) if clean_changelog else "",
-        changelog_visible=bool(clean_changelog),
-        progress_visible=False,
-        buttons_visible=True,
-        close_visible=True,
-    )
-
-def build_changelog_download_start_plan(*, version: str, language: str, now: float) -> ChangelogDownloadStartPlan:
-    tr = lambda key, default: _tr(language, key, default)
-
-    return ChangelogDownloadStartPlan(
-        mode="downloading",
-        is_downloading=True,
-        icon_kind="download",
-        raw_version=str(version or ""),
-        title_text=tr("page.servers.changelog.title.downloading_template", "Загрузка v{version}").format(version=version),
-        version_text=tr("page.servers.changelog.version.preparing", "Подготовка к загрузке..."),
-        progress_label_text="0%",
-        speed_label_text=tr("page.servers.changelog.progress.speed_unknown", "Скорость: —"),
-        eta_label_text=tr("page.servers.changelog.progress.eta_unknown", "Осталось: —"),
-        show_progress_bar=False,
-        show_indeterminate=True,
-        progress_visible=True,
-        buttons_visible=False,
-        close_visible=False,
-        download_start_time=float(now),
-        last_bytes=0,
-        last_speed_time=float(now),
-        last_speed_bytes=0,
-        smoothed_speed=0.0,
-        download_percent=0,
-        download_done_bytes=0,
-        download_total_bytes=0,
-        download_speed_kb=None,
-        download_eta_seconds=None,
-        download_error_text="",
     )
 
 def build_changelog_progress_plan(
@@ -655,136 +648,3 @@ def build_changelog_progress_plan(
         download_eta_seconds=next_download_eta_seconds,
     )
 
-def build_changelog_terminal_plan(
-    *,
-    kind: str,
-    language: str,
-    app_version: str,
-    raw_version: str = "",
-    download_error_text: str = "",
-    download_done_bytes: int = 0,
-    download_total_bytes: int = 0,
-    download_percent: int = 0,
-    download_speed_kb: float | None = None,
-    download_eta_seconds: float | None = None,
-) -> ChangelogTerminalPlan:
-    tr = lambda key, default: _tr(language, key, default)
-
-    if kind == "installing":
-        return ChangelogTerminalPlan(
-            mode="installing",
-            is_downloading=False,
-            title_text=tr("page.servers.changelog.title.installing", "Установка..."),
-            version_text=tr(
-                "page.servers.changelog.version.installer_starting",
-                "Запуск установщика, приложение закроется",
-            ),
-            progress_value=100,
-            progress_label_text="100%",
-            speed_label_text="",
-            eta_label_text="",
-            progress_visible=True,
-            buttons_visible=False,
-            close_visible=False,
-            install_text=tr("page.servers.changelog.button.install", "Установить"),
-            icon_kind="download",
-            title_color=None,
-            error_text="",
-        )
-
-    if kind == "failed":
-        return ChangelogTerminalPlan(
-            mode="failed",
-            is_downloading=False,
-            title_text=tr("page.servers.changelog.title.download_error", "Ошибка загрузки"),
-            version_text=(download_error_text[:80] if len(download_error_text) > 80 else download_error_text),
-            progress_value=0,
-            progress_label_text="",
-            speed_label_text="",
-            eta_label_text="",
-            progress_visible=False,
-            buttons_visible=True,
-            close_visible=True,
-            install_text=tr("page.servers.changelog.button.retry", "Повторить"),
-            icon_kind="download_error",
-            title_color="#ff6b6b",
-            error_text=(download_error_text[:80] if len(download_error_text) > 80 else download_error_text),
-        )
-
-    if kind == "downloading":
-        done_mb = download_done_bytes / (1024 * 1024)
-        total_mb = download_total_bytes / (1024 * 1024)
-        version_text = tr(
-            "page.servers.changelog.progress.downloaded_mb_template",
-            "Загружено {done:.1f} / {total:.1f} МБ",
-        ).format(done=done_mb, total=total_mb) if download_done_bytes > 0 and download_total_bytes > 0 else tr(
-            "page.servers.changelog.version.preparing",
-            "Подготовка к загрузке...",
-        )
-
-        if download_speed_kb is None:
-            speed_label_text = tr("page.servers.changelog.progress.speed_unknown", "Скорость: —")
-        elif download_speed_kb > 1024:
-            speed_label_text = tr(
-                "page.servers.changelog.progress.speed_mb_template",
-                "Скорость: {value:.1f} МБ/с",
-            ).format(value=download_speed_kb / 1024)
-        else:
-            speed_label_text = tr(
-                "page.servers.changelog.progress.speed_kb_template",
-                "Скорость: {value:.0f} КБ/с",
-            ).format(value=download_speed_kb)
-
-        if download_eta_seconds is None:
-            eta_label_text = tr("page.servers.changelog.progress.eta_unknown", "Осталось: —")
-        elif download_eta_seconds < 60:
-            eta_label_text = tr(
-                "page.servers.changelog.progress.eta_sec_template",
-                "Осталось: {seconds} сек",
-            ).format(seconds=int(download_eta_seconds))
-        else:
-            eta_label_text = tr(
-                "page.servers.changelog.progress.eta_min_template",
-                "Осталось: {minutes} мин",
-            ).format(minutes=int(download_eta_seconds / 60))
-
-        return ChangelogTerminalPlan(
-            mode="downloading",
-            is_downloading=True,
-            title_text=tr("page.servers.changelog.title.downloading_template", "Загрузка v{version}").format(
-                version=raw_version
-            ),
-            version_text=version_text,
-            progress_value=int(download_percent),
-            progress_label_text=f"{int(download_percent)}%",
-            speed_label_text=speed_label_text,
-            eta_label_text=eta_label_text,
-            progress_visible=True,
-            buttons_visible=False,
-            close_visible=False,
-            install_text=tr("page.servers.changelog.button.install", "Установить"),
-            icon_kind="download",
-            title_color=None,
-            error_text="",
-        )
-
-    return ChangelogTerminalPlan(
-        mode="update",
-        is_downloading=False,
-        title_text=tr("page.servers.changelog.title.available", "Доступно обновление"),
-        version_text=tr(
-            "page.servers.changelog.version.transition_template",
-            "v{current}  →  v{target}",
-        ).format(current=app_version, target=raw_version),
-        progress_value=0,
-        progress_label_text="",
-        speed_label_text="",
-        eta_label_text="",
-        progress_visible=False,
-        buttons_visible=True,
-        close_visible=True,
-        install_text=tr("page.servers.changelog.button.install", "Установить"),
-        icon_kind="update",
-        title_color=None,
-        error_text="",
-    )

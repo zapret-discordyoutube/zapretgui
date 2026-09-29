@@ -9,12 +9,14 @@
 - ``FunTicker`` — строка с меняющимися весёлыми фразами, пока идёт работа.
 - ``StepList`` — шаги с галочками, которые рисуются штрихом.
 - ``CounterBadge`` — счётчик, который подпрыгивает при изменении.
+- ``UpdateRunway`` — полоса загрузки с переливом, по которой бежит логотип.
 """
 
 from ui.widgets.fun.confetti import burst_confetti
 from ui.widgets.fun.counter import CounterBadge
 from ui.widgets.fun.mascot import Mascot
+from ui.widgets.fun.runway import UpdateRunway
 from ui.widgets.fun.steps import StepList
 from ui.widgets.fun.ticker import FunTicker
 
-__all__ = ["CounterBadge", "FunTicker", "Mascot", "StepList", "burst_confetti"]
+__all__ = ["CounterBadge", "FunTicker", "Mascot", "StepList", "UpdateRunway", "burst_confetti"]

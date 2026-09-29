@@ -57,6 +57,7 @@ class AboutPage(BasePage):
         open_updates,
         create_open_action_worker,
         ui_state_store,
+        open_whats_new=None,
     ):
         super().__init__(
             "О программе",
@@ -69,6 +70,7 @@ class AboutPage(BasePage):
         # UI refs (support blocks)
         self._open_premium_callback = open_premium
         self._open_updates_callback = open_updates
+        self._open_whats_new_callback = open_whats_new
         self._create_about_open_action_worker = create_open_action_worker
         self._about_open_runtime = OneShotWorkerRuntime()
         self._about_open_state = QueuedWorkerState[tuple[str, str, str]](self._about_open_runtime)
@@ -252,9 +254,13 @@ class AboutPage(BasePage):
             self.update_btn.setText(
                 tr_catalog("page.about.button.update_settings", language=self._ui_language, default="Настройка обновлений")
             )
+            self.whats_new_btn.setText(
+                tr_catalog("page.about.button.whats_new", language=self._ui_language, default="Что нового")
+            )
             apply_about_buttons_accessibility(
                 tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
                 update_btn=self.update_btn,
+                whats_new_btn=self.whats_new_btn,
             )
 
             self.about_section_subscription_label.setText(
@@ -318,6 +324,7 @@ class AboutPage(BasePage):
             app_version=APP_VERSION,
             make_section_label=lambda text: _make_section_label(text),
             on_open_updates=self._open_updates_callback,
+            on_open_whats_new=self._open_whats_new,
             on_open_premium=self._open_premium_callback,
             on_open_kvn_tab=lambda: self.switch_to_tab("kvn"),
             on_open_help_tab=lambda: self.switch_to_tab("help"),
@@ -326,6 +333,7 @@ class AboutPage(BasePage):
         self.about_app_name_label = widgets.about_app_name_label
         self.about_version_value_label = widgets.about_version_value_label
         self.update_btn = widgets.update_btn
+        self.whats_new_btn = widgets.whats_new_btn
         self.about_section_subscription_label = widgets.about_section_subscription_label
         self.sub_status_icon = widgets.sub_status_icon
         self.sub_status_label = widgets.sub_status_label
@@ -333,6 +341,10 @@ class AboutPage(BasePage):
         self.premium_btn = widgets.premium_btn
         self.kvn_btn = widgets.kvn_btn
         layout.addStretch()
+
+    def _open_whats_new(self) -> None:
+        if callable(self._open_whats_new_callback):
+            self._open_whats_new_callback(self.window(), language=self._ui_language)
 
     def update_subscription_status(self, display: PremiumDisplay):
         """Обновляет отображение статуса подписки"""

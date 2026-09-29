@@ -27,6 +27,7 @@ from config.build_info import APP_VERSION, CHANNEL
 from log.log import log
 
 from ..dpi_guard import DpiGuard
+from ..release.history import release_history_since, release_url_for
 from ..versions import compare_versions
 from .flow import CheckOutcome, run_update_check
 
@@ -46,6 +47,8 @@ def outcome_to_result(outcome: CheckOutcome, *, app_version: str = APP_VERSION) 
         "version": version if has_update else app_version,
         "release_notes": str(release.get("release_notes") or "") if has_update else "",
         "release_source": str(release.get("source") or ""),
+        "release_history": release_history_since(release, current_version=app_version) if has_update else (),
+        "release_url": release_url_for(release) if has_update else "",
         "error": None,
     }
 
