@@ -59,6 +59,11 @@ def _redirect_preset_switch_if_owner_differs(
     return True
 
 
+# Фаза «starting» без живого потока запуска — короткое окно; 200 повторов по
+# 150 мс (~30 с) страхуют от вечного ожидания, если фаза так и не сменится.
+_PRESETS_SWITCH_MAX_STARTING_WAITS = 200
+
+
 def _schedule_pending_presets_switch_retry(runtime_owner) -> None:
     """Повтор для отложенного pending switch.
 
@@ -123,11 +128,25 @@ def process_pending_presets_switch(runtime_owner) -> None:
         runtime_owner._dpi_stop_thread = None
 
     if not runtime_owner.is_running():
+        starting = str(getattr(runtime_snapshot, "phase", "") or "").strip().lower() == "starting"
+        starting_waits = int(getattr(runtime_owner, "_presets_switch_starting_waits", 0) or 0)
+        if starting and starting_waits < _PRESETS_SWITCH_MAX_STARTING_WAITS:
+            # Запуск объявлен, но его поток ещё не виден (или уже закончился,
+            # а фаза не опубликована): ждём, а не теряем переключение.
+            runtime_owner._presets_switch_starting_waits = starting_waits + 1
+            log(
+                f"Preset mode switch отложен: DPI ещё запускается, поколение {target_generation}",
+                "DEBUG",
+            )
+            _schedule_pending_presets_switch_retry(runtime_owner)
+            return
+        runtime_owner._presets_switch_starting_waits = 0
         log("Preset mode switch пропущен: DPI уже не запущен", "DEBUG")
         runtime_owner._presets_switch_completed_generation = target_generation
         runtime_owner._runtime_service().set_busy(False)
         return
 
+    runtime_owner._presets_switch_starting_waits = 0
     if _redirect_preset_switch_if_owner_differs(
         runtime_owner,
         launch_method,

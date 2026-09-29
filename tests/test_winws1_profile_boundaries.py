@@ -59,16 +59,25 @@ class Winws1ProfileBoundariesTest(unittest.TestCase):
         updated = with_profile_moved(preset, 2, 1)
         self.assertEqual(_new_lines(serialize_preset(updated)), ["--new", "--new"])
 
-    def test_winws2_still_names_unnamed_profiles(self) -> None:
-        # winws2 допускает --new=<имя>; поведение для него этим исправлением не меняется.
+    def test_winws2_keeps_unnamed_profiles_unnamed_and_named_ones_named(self) -> None:
+        # Пресет — точка истины: перемещение не дописывает безымянным профилям
+        # вычисленных подписей вроде «--new=TCP 80», а своё имя из «--new=Имя»
+        # профиль сохраняет.
+        from profile.key_resolution import build_preset_profile_key_map
+
         text = (
             "--filter-tcp=443\n--lua-desync=pass\n\n--new\n\n"
-            "--filter-tcp=80\n--lua-desync=pass\n\n--new\n\n"
+            "--filter-tcp=80\n--lua-desync=pass\n\n--new=Games\n\n"
             "--filter-udp=443\n--lua-desync=pass\n"
         )
         preset = parse_preset_text(text, engine=ENGINE_WINWS2, source_name="t.txt")
         updated = with_profile_moved(preset, 2, 1)
-        self.assertTrue(all(line.startswith("--new=") for line in _new_lines(serialize_preset(updated))))
+        self.assertEqual(_new_lines(serialize_preset(updated)), ["--new=Games", "--new"])
+        # Ключи всех профилей переносятся: выбор не перескакивает на соседа.
+        self.assertEqual(
+            build_preset_profile_key_map(preset.profiles, updated.profiles),
+            {"profile:0": "profile:0", "profile:1": "profile:2", "profile:2": "profile:1"},
+        )
 
 
 if __name__ == "__main__":

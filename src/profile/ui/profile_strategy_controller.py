@@ -50,22 +50,80 @@ class ProfileStrategyController:
     def __init__(self, page) -> None:
         self._page = page
 
+    def _current_profile_reference(self) -> str:
+        page = self._page
+        return page._profile_result_reference(page.__dict__.get("_payload"), page._profile_key)
+
+    def _effective_strategy_id(self) -> str:
+        """Стратегия, которая окажется в пресете после всех записей открытого
+        профиля: ожидающая, иначе записываемая сейчас, иначе из payload.
+
+        Сравнение щелчка только с payload теряло щелчки: при записи B щелчок
+        по A (ещё в payload) молча отбрасывался."""
+        page = self._page
+        current = self._current_profile_reference()
+        pending = str(page._strategy_apply_state_obj().pending or "").strip()
+        pending_key = str(page.__dict__.get("_strategy_apply_pending_profile_key") or "").strip()
+        if pending and pending_key in {"", current}:
+            return pending
+        running = str(page.__dict__.get("_strategy_apply_runtime_strategy_id") or "").strip()
+        running_key = str(page.__dict__.get("_strategy_apply_runtime_profile_key") or "").strip()
+        if running and running_key in {"", current}:
+            return running
+        return _current_strategy_id(page.__dict__.get("_payload"))
+
+    def _drop_pending_strategy_apply(self, profile_key: str) -> None:
+        """Отменить ожидающее применение стратегии этого профиля."""
+        page = self._page
+        state = page._strategy_apply_state_obj()
+        pending_key = str(page.__dict__.get("_strategy_apply_pending_profile_key") or "").strip()
+        if pending_key in {"", profile_key}:
+            state.pending = None
+            page.__dict__.pop("_strategy_apply_pending_profile_key", None)
+        write_state = page._profile_setup_write_state_obj()
+        write_state.pending[:] = [
+            operation
+            for operation in write_state.pending
+            if not (
+                str(operation.get("kind") or "") == "strategy_apply"
+                and str(operation.get("profile_key") or "").strip() in {"", profile_key}
+            )
+        ]
+        scheduled = page.__dict__.get("_scheduled_profile_setup_write_operation")
+        if (
+            isinstance(scheduled, dict)
+            and str(scheduled.get("kind") or "") == "strategy_apply"
+            and str(scheduled.get("profile_key") or "").strip() in {"", profile_key}
+        ):
+            page._scheduled_profile_setup_write_operation = None
+
     def _request_strategy_apply(self, strategy_id: str) -> None:
         page = self._page
         strategy_id = str(strategy_id or "").strip()
+        # Ключ фиксируется при щелчке: к выполнению отложенного применения
+        # страница может показывать уже другой профиль.
+        profile_key = self._current_profile_reference()
         if page._profile_setup_write_is_running():
-            if strategy_id != str(getattr(page, "_strategy_apply_runtime_strategy_id", "") or "").strip():
-                page._strategy_apply_state_obj().pending = strategy_id
-                page._queue_profile_setup_write_operation(
-                    {
-                        "kind": "strategy_apply",
-                        "strategy_id": strategy_id,
-                    }
-                )
+            running_strategy_id = str(getattr(page, "_strategy_apply_runtime_strategy_id", "") or "").strip()
+            running_profile_key = str(page.__dict__.get("_strategy_apply_runtime_profile_key") or "").strip()
+            if strategy_id == running_strategy_id and running_profile_key in {"", profile_key}:
+                # Вернулись к стратегии, которая пишется прямо сейчас: она и
+                # должна остаться, ожидающая после неё — отменяется.
+                self._drop_pending_strategy_apply(profile_key)
+                return
+            page._strategy_apply_state_obj().pending = strategy_id
+            page._strategy_apply_pending_profile_key = profile_key
+            page._queue_profile_setup_write_operation(
+                {
+                    "kind": "strategy_apply",
+                    "strategy_id": strategy_id,
+                    "profile_key": profile_key,
+                }
+            )
             return
         page._start_strategy_apply_worker(strategy_id)
 
-    def _start_strategy_apply_worker(self, strategy_id: str) -> None:
+    def _start_strategy_apply_worker(self, strategy_id: str, profile_key: str = "") -> None:
         page = self._page
         strategy_id = str(strategy_id or "").strip()
         if not strategy_id or not page._profile_key:
@@ -76,8 +134,10 @@ class ProfileStrategyController:
         page._strategy_apply_runtime_strategy_id = strategy_id
         # Стабильная ссылка вместо возможного "profile:N": позиционный ключ,
         # захваченный при открытии страницы, после сдвига соседей резолвится
-        # в чужой профиль — и стратегия уходит не туда.
-        profile_key = page._profile_result_reference(page.__dict__.get("_payload"), page._profile_key)
+        # в чужой профиль — и стратегия уходит не туда. Для отложенного
+        # применения ключ приходит из операции (зафиксирован при щелчке).
+        profile_key = str(profile_key or "").strip() or self._current_profile_reference()
+        page._strategy_apply_runtime_profile_key = profile_key
         runtime.start_qthread_worker(
             worker_factory=lambda _runtime_request_id: page.create_profile_strategy_apply_worker(
                 request_id,
@@ -211,17 +271,20 @@ class ProfileStrategyController:
         if not accepted:
             return
         page._strategy_apply_runtime_strategy_id = ""
+        page._strategy_apply_runtime_profile_key = ""
         if scheduled:
             return
         pending = page._strategy_apply_state_obj().pending
         page._strategy_apply_state_obj().pending = None
+        pending_profile_key = str(page.__dict__.pop("_strategy_apply_pending_profile_key", "") or "").strip()
         if pending:
-            page._schedule_profile_setup_write_operation_start(
-                {
-                    "kind": "strategy_apply",
-                    "strategy_id": str(pending or ""),
-                }
-            )
+            operation = {
+                "kind": "strategy_apply",
+                "strategy_id": str(pending or ""),
+            }
+            if pending_profile_key:
+                operation["profile_key"] = pending_profile_key
+            page._schedule_profile_setup_write_operation_start(operation)
 
     def _strategy_apply_state_obj(self) -> LatestValueWorkerState:
         page = self._page

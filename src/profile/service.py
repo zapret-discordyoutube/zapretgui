@@ -102,6 +102,14 @@ class _SelectedPresetSnapshot:
     manifest: object
 
 
+def _identity_entry(profile: Profile) -> dict[str, str]:
+    """Запись реестра идентичности — как в _update_identity_registry_for_edit."""
+    return {
+        "name": str(profile.name or "").strip(),
+        "sig": str(build_profile_logical_key(profile.match_signature) or "").strip(),
+    }
+
+
 class ProfilePresetService:
     def __init__(self, profile_services, launch_method: str = DEFAULT_LAUNCH_METHOD) -> None:
         self._profile_services = profile_services
@@ -1029,10 +1037,7 @@ class ProfilePresetService:
             registry = normalize_identity_registry(get_profile_identity_registry(self._engine))
             if edited_uid not in registry:
                 return
-            entry = {
-                "name": str(profile.name or "").strip(),
-                "sig": str(build_profile_logical_key(profile.match_signature) or "").strip(),
-            }
+            entry = _identity_entry(profile)
             if registry.get(edited_uid) != entry:
                 registry[edited_uid] = entry
                 set_profile_identity_registry(self._engine, registry)
@@ -1273,7 +1278,7 @@ class ProfilePresetService:
                 )
             return preset
 
-        return self._edit_profiles_created_from_user_profile(old_row, _update)
+        return self._edit_profiles_created_from_user_profile(old_row, _update, keep_identity=True)
 
     def delete_user_profile(self, profile_id: str) -> int:
         old_row = delete_user_profile(self._app_paths, profile_id)
@@ -1286,7 +1291,7 @@ class ProfilePresetService:
 
         return self._edit_profiles_created_from_user_profile(old_row, _delete)
 
-    def _edit_profiles_created_from_user_profile(self, row: dict[str, str], edit) -> int:
+    def _edit_profiles_created_from_user_profile(self, row: dict[str, str], edit, *, keep_identity: bool = False) -> int:
         """Правит во всех пользовательских пресетах только profile-ы, созданные
         из этого пользовательского profile.
 
@@ -1305,6 +1310,7 @@ class ProfilePresetService:
         if not callable(list_manifests) or not callable(read_source) or not callable(save_source):
             return 0
         changed_profiles = 0
+        identity_moves: dict[str, list[tuple[dict[str, str], dict[str, str]]]] = {}
         for launch_method in sorted(PRESET_LAUNCH_METHODS):
             engine = _engine_for_method(launch_method)
             for manifest in list_manifests(launch_method):
@@ -1322,11 +1328,44 @@ class ProfilePresetService:
                 ]
                 if not indexes:
                     continue
-                save_source(launch_method, file_name, serialize_preset(edit(preset, indexes)))
+                edited = edit(preset, indexes)
+                save_source(launch_method, file_name, serialize_preset(edited))
                 changed_profiles += len(indexes)
+                if keep_identity:
+                    identity_moves.setdefault(engine, []).extend(
+                        (_identity_entry(preset.profiles[index]), _identity_entry(edited.profiles[index]))
+                        for index in indexes
+                        if index < len(edited.profiles)
+                    )
+        for engine, moves in identity_moves.items():
+            self._move_identity_registry_entries(engine, moves)
         if changed_profiles:
             self._invalidate_selected_preset_snapshot()
         return changed_profiles
+
+    def _move_identity_registry_entries(
+        self,
+        engine: str,
+        moves: list[tuple[dict[str, str], dict[str, str]]],
+    ) -> None:
+        """Переименование пользовательского profile меняет и имя, и списки
+        (а значит сигнатуру) созданных из него profile-ов. Resolver не узнал
+        бы их и выдал новые uid — папка и оценки стратегий потерялись бы.
+        Поэтому записи реестра переезжают на новые (имя, сигнатура)."""
+        try:
+            registry = normalize_identity_registry(get_profile_identity_registry(engine))
+            changed = False
+            for old_entry, new_entry in moves:
+                if old_entry == new_entry:
+                    continue
+                for uid, entry in list(registry.items()):
+                    if entry == old_entry:
+                        registry[uid] = dict(new_entry)
+                        changed = True
+            if changed:
+                set_profile_identity_registry(engine, registry)
+        except Exception as exc:
+            log(f"ProfilePresetService: не удалось перенести идентичность после правки пользовательского profile: {exc}", "DEBUG")
 
     def profile_folder_reset_assignments(self) -> dict[str, str]:
         """Раскладка «по начальному правилу» для сброса папок: ключ каждого

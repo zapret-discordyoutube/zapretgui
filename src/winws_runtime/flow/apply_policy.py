@@ -9,14 +9,33 @@ PRESET_EDITOR_SAVE_APPLY_DEBOUNCE_MS = 350
 PRESET_STRATEGY_ONLY_APPLY_DEBOUNCE_MS = 2200
 
 
-def _is_launch_running(runtime_feature) -> bool:
+def _runtime_phase(runtime_feature) -> str:
+    try:
+        snapshot = runtime_feature.objects.snapshot()
+        return str(getattr(snapshot, "phase", "") or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def launch_accepts_preset_apply(runtime_feature) -> bool:
+    """DPI работает или прямо сейчас запускается.
+
+    Во время запуска worker уже прочитал прежний пресет: выбрасывать правку
+    нельзя — иначе после старта работает старый пресет, а в интерфейсе выбран
+    новый. restart_flow.process_pending_presets_switch сам дождётся конца
+    запуска и применит правку."""
     try:
         launch_runtime = runtime_feature.objects.launch_runtime
-        if launch_runtime is not None:
-            return bool(launch_runtime.is_running())
+        if launch_runtime is not None and bool(launch_runtime.is_running()):
+            return True
     except Exception as e:
         log(f"Ошибка проверки состояния DPI: {e}", "DEBUG")
-    return False
+        return False
+    return _runtime_phase(runtime_feature) == "starting"
+
+
+def _is_launch_running(runtime_feature) -> bool:
+    return launch_accepts_preset_apply(runtime_feature)
 
 
 def request_preset_runtime_content_apply(

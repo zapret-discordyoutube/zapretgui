@@ -851,6 +851,53 @@ class UserProfilesTests(unittest.TestCase):
             self.assertIn("--filter-udp=443", store.files_by_method[ZAPRET1_MODE]["three.txt"])
             self.assertIn("--ipset=lists/ipset-new-site.txt", store.files_by_method[ZAPRET1_MODE]["three.txt"])
 
+    def test_update_user_profile_keeps_profile_identity_folder_and_ratings(self) -> None:
+        from profile.models import build_profile_logical_key
+        from settings.store import get_profile_identity_registry, set_profile_identity_registry
+
+        source = "\n".join((
+            "--name=My Site",
+            "--filter-tcp=80,443",
+            "--hostlist=lists/my-site.txt",
+            "--lua-desync=pass",
+            "",
+        ))
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "system" / "templates").mkdir(parents=True)
+            (root / "system" / "templates" / "all_profiles.txt").write_text("", encoding="utf-8")
+            store = _PresetLibrary({ZAPRET2_MODE: {"one.txt": source}, ZAPRET1_MODE: {}})
+            feature = SimpleNamespace(
+                _presets_feature=store,
+                _app_paths=AppPaths(user_root=root, local_root=root),
+            )
+            old_profile = parse_preset_text(source, engine="winws2", source_name="one.txt").profiles[0]
+
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                profile_id = create_user_profile(feature._app_paths, name="My Site", protocol="tcp", ports="80,443")
+                # uid, к которому привязаны папка и оценки стратегий профиля.
+                set_profile_identity_registry(
+                    "winws2",
+                    {
+                        "uid:my-site": {
+                            "name": "My Site",
+                            "sig": build_profile_logical_key(old_profile.match_signature),
+                        }
+                    },
+                )
+                service = ProfilePresetService(feature, "zapret2_mode")
+                service.update_user_profile(profile_id, name="New Site", protocol="udp", ports="443")
+                registry = get_profile_identity_registry("winws2")
+
+            new_profile = parse_preset_text(
+                store.files_by_method[ZAPRET2_MODE]["one.txt"], engine="winws2", source_name="one.txt"
+            ).profiles[0]
+            # Имя и списки сменились, но uid остался за тем же профилем.
+            self.assertEqual(
+                registry["uid:my-site"],
+                {"name": "New Site", "sig": build_profile_logical_key(new_profile.match_signature)},
+            )
+
     def test_delete_user_profile_removes_files_and_named_profiles_from_all_presets(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

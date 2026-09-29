@@ -363,7 +363,8 @@ class ProfileSetupWriteSerializationTests(unittest.TestCase):
         page.create_profile_strategy_apply_worker.assert_not_called()
         self.assertEqual(
             page._pending_profile_setup_write_operations,
-            [{"kind": "strategy_apply", "strategy_id": "tls_fake"}],
+            # Операция помнит профиль, открытый при щелчке.
+            [{"kind": "strategy_apply", "strategy_id": "tls_fake", "profile_key": "profile-1"}],
         )
 
         page._raw_profile_save_runtime.running = False

@@ -135,6 +135,7 @@ def build_profile_setup_page_kwargs(
     profile_feature,
     show_page,
     on_profile_setup_changed,
+    ui_state_store=None,
 ) -> dict:
     method = ZAPRET2_MODE if page_name == PageName.ZAPRET2_PROFILE_SETUP else ZAPRET1_MODE
     profiles_page = (
@@ -163,6 +164,7 @@ def build_profile_setup_page_kwargs(
             profile_item,
             old_profile_key,
         ),
+        "ui_state_store": ui_state_store,
     }
 
 

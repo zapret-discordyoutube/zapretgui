@@ -1072,6 +1072,87 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
         )
         launch_runtime.restart_dpi_async.assert_not_called()
 
+    def test_preset_switch_during_dpi_start_is_forwarded_not_dropped(self) -> None:
+        from unittest.mock import Mock
+
+        from settings.mode import ZAPRET2_MODE
+        from winws_runtime.flow.apply_policy import request_preset_runtime_content_apply
+        from winws_runtime.flow.preset_switch_policy import request_selected_source_preset_apply
+
+        def _runtime_feature(phase: str):
+            launch_runtime = SimpleNamespace(
+                is_running=Mock(return_value=False),
+                switch_presets_async=Mock(),
+                restart_dpi_async=Mock(),
+            )
+            return launch_runtime, SimpleNamespace(
+                objects=SimpleNamespace(
+                    launch_runtime=launch_runtime,
+                    snapshot=lambda: SimpleNamespace(phase=phase, running=False),
+                ),
+            )
+
+        # «Старт» нажат, worker уже прочитал прежний пресет: смена пресета и
+        # правка стратегии обязаны дойти до switch pipeline, который дождётся
+        # конца запуска, а не выброситься как «DPI не запущен».
+        launch_runtime, runtime_feature = _runtime_feature("starting")
+        self.assertTrue(
+            request_selected_source_preset_apply(
+                runtime_feature=runtime_feature,
+                launch_method=ZAPRET2_MODE,
+                reason="preset_switched",
+                preset_file_name="B.txt",
+            )
+        )
+        self.assertTrue(
+            request_preset_runtime_content_apply(
+                runtime_feature=runtime_feature,
+                launch_method=ZAPRET2_MODE,
+                reason="strategy_only",
+            )
+        )
+        self.assertEqual(launch_runtime.switch_presets_async.call_count, 2)
+
+        launch_runtime, runtime_feature = _runtime_feature("stopped")
+        self.assertFalse(
+            request_selected_source_preset_apply(
+                runtime_feature=runtime_feature,
+                launch_method=ZAPRET2_MODE,
+                reason="preset_switched",
+                preset_file_name="B.txt",
+            )
+        )
+        launch_runtime.switch_presets_async.assert_not_called()
+
+    def test_pending_preset_switch_waits_while_dpi_is_starting(self) -> None:
+        from settings.mode import ZAPRET2_MODE
+        from winws_runtime.runtime import restart_flow
+
+        snapshot = SimpleNamespace(phase="starting", launch_method=ZAPRET2_MODE)
+        owner = SimpleNamespace(
+            _presets_switch_requested_generation=3,
+            _presets_switch_completed_generation=2,
+            _presets_switch_method=ZAPRET2_MODE,
+            _presets_switch_thread=None,
+            _dpi_start_thread=None,
+            _dpi_stop_thread=None,
+            is_running=lambda: False,
+            _runtime_service=lambda: SimpleNamespace(snapshot=lambda: snapshot, set_busy=Mock()),
+        )
+        retries: list[object] = []
+
+        with patch.object(restart_flow, "_schedule_pending_presets_switch_retry", retries.append):
+            restart_flow.process_pending_presets_switch(owner)
+        # Поколение не закрыто — после запуска переключение применится.
+        self.assertEqual(retries, [owner])
+        self.assertEqual(owner._presets_switch_completed_generation, 2)
+
+        snapshot.phase = "stopped"
+        with patch.object(restart_flow, "_schedule_pending_presets_switch_retry", retries.append):
+            restart_flow.process_pending_presets_switch(owner)
+        self.assertEqual(retries, [owner])
+        self.assertEqual(owner._presets_switch_completed_generation, 3)
+
     def test_preset_content_apply_does_not_validate_preset_on_ui_request_path(self) -> None:
         from pathlib import Path
         import tempfile

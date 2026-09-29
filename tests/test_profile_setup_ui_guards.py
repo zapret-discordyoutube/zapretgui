@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import Mock
 
 
 class _TextWidget:
@@ -2051,10 +2052,13 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page._enabled_save_request_id = 4
         page._enabled_checkbox = _BoolWidget(enabled=True)
+        page.reload_current_profile = Mock()
 
         ProfileSetupPageBase._on_enabled_save_failed(page, 4, "boom")
 
         self.assertEqual(page._enabled_checkbox.enabled_calls, [])
+        # Переключатель не должен остаться в положении, которого нет в пресете.
+        page.reload_current_profile.assert_called_once_with()
 
     def test_enabled_save_error_ignored_when_new_toggle_is_pending(self) -> None:
         from profile.ui.profile_setup_page import ProfileSetupPageBase

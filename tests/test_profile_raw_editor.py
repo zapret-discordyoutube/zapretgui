@@ -63,8 +63,8 @@ class ProfileRawEditorTests(unittest.TestCase):
 
         text = serialize_preset(updated)
         # Комментарий над профилем раньше уходил в шапку разобранного текста
-        # и молча пропадал.
-        self.assertIn("\n# YouTube profile\n--filter-tcp=443\n--lua-desync=fake", text)
+        # и молча пропадал; имя из «--new=YT» не заменяется автоименем.
+        self.assertIn("--new=YT\n\n# YouTube profile\n--filter-tcp=443\n--lua-desync=fake", text)
         self.assertIn("--filter-tcp=80\n--lua-desync=pass", text)
 
     def test_raw_profile_text_rejects_multiple_profiles(self) -> None:

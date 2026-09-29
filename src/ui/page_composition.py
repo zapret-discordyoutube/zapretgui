@@ -75,11 +75,13 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
         build_profile_setup_page_kwargs,
         features=("profile",),
         actions=("show_page", "on_profile_setup_changed"),
+        include_ui_state_store=True,
     ),
     PageName.ZAPRET1_PROFILE_SETUP: PageDepsSpec(
         build_profile_setup_page_kwargs,
         features=("profile",),
         actions=("show_page", "on_profile_setup_changed"),
+        include_ui_state_store=True,
     ),
     PageName.ZAPRET2_PROFILE_ORDER: PageDepsSpec(
         build_profile_order_page_kwargs,

@@ -34,6 +34,17 @@ def _page_module():
     return profile_setup_page
 
 
+def _enabled_save_target_from_operation(operation: dict) -> dict[str, str]:
+    profile_key = str(operation.get("profile_key") or "").strip()
+    if not profile_key:
+        return {}
+    return {
+        "profile_key": profile_key,
+        "filter_kind": str(operation.get("filter_kind") or ""),
+        "filter_value": str(operation.get("filter_value") or ""),
+    }
+
+
 class ProfileSetupSaveController:
     """Stateless-оркестратор write-очереди и save-подсистем страницы."""
 
@@ -61,20 +72,52 @@ class ProfileSetupSaveController:
         return False
 
     @staticmethod
+    def _profile_setup_write_operation_profile_key(operation: dict) -> str:
+        """Профиль, в который пишет операция (ключ зафиксирован при щелчке)."""
+        if str(operation.get("kind") or "") == "settings_save":
+            request = operation.get("request")
+            return str((request if isinstance(request, dict) else {}).get("profile_key") or "").strip()
+        return str(operation.get("profile_key") or "").strip()
+
+    @staticmethod
     def _profile_setup_write_operations_collide(previous: dict, queued: dict) -> bool:
         """Замещать в очереди можно только операцию над ТЕМ ЖЕ объектом.
 
-        list_file_save-операции с разными (profile_key, filter_kind,
-        filter_value) пишут в разные файлы: замещение по одному только kind
-        молча теряло флаш прежнего профиля/типа фильтра."""
+        Операции разных профилей не замещают друг друга: иначе отложенная
+        правка профиля A молча терялась, если следом шла правка профиля B.
+        list_file_save-операции с разными (filter_kind, filter_value) пишут
+        в разные файлы и тоже не замещаются."""
         if previous.get("kind") != queued.get("kind"):
+            return False
+        profile_key_of = ProfileSetupSaveController._profile_setup_write_operation_profile_key
+        if profile_key_of(previous) != profile_key_of(queued):
             return False
         if str(queued.get("kind") or "") != "list_file_save":
             return True
         return all(
             str(previous.get(field) or "") == str(queued.get(field) or "")
-            for field in ("profile_key", "filter_kind", "filter_value")
+            for field in ("filter_kind", "filter_value")
         )
+
+    def _current_profile_reference(self) -> str:
+        """Стабильная ссылка на открытый профиль — её и кладём в операцию.
+
+        Ключ берётся в момент щелчка: к моменту выполнения страница может
+        показывать уже другой профиль."""
+        page = self._page
+        return page._profile_result_reference(page.__dict__.get("_payload"), page._profile_key)
+
+    def _is_current_profile_key(self, profile_key: str) -> bool:
+        page = self._page
+        key = str(profile_key or "").strip()
+        if not key:
+            return True
+        item = getattr(page.__dict__.get("_payload"), "item", None)
+        return key in {
+            str(page._profile_key or "").strip(),
+            str(getattr(item, "key", "") or "").strip(),
+            self._current_profile_reference(),
+        }
 
     def _queue_profile_setup_write_operation(self, operation: dict[str, object]) -> None:
         page = self._page
@@ -190,11 +233,19 @@ class ProfileSetupSaveController:
             return True
         if kind == "enabled_save":
             page._pending_enabled_save = None
-            page._start_enabled_save_worker(bool(operation.get("enabled")))
+            target = _enabled_save_target_from_operation(operation)
+            if target and not self._is_current_profile_key(target["profile_key"]):
+                page._start_enabled_save_worker(bool(operation.get("enabled")), target=target)
+            else:
+                page._start_enabled_save_worker(bool(operation.get("enabled")))
             return True
         if kind == "strategy_apply":
             page._pending_strategy_apply = None
-            page._start_strategy_apply_worker(str(operation.get("strategy_id") or ""))
+            profile_key = str(operation.get("profile_key") or "").strip()
+            if profile_key and not self._is_current_profile_key(profile_key):
+                page._start_strategy_apply_worker(str(operation.get("strategy_id") or ""), profile_key=profile_key)
+            else:
+                page._start_strategy_apply_worker(str(operation.get("strategy_id") or ""))
             return True
         return False
 
@@ -227,13 +278,31 @@ class ProfileSetupSaveController:
         page._settings_save_timer.start()
 
     def _autosave_editable_settings(self) -> None:
+        request = self._settings_autosave_request()
+        if request is not None:
+            self._page._request_settings_save(request)
+
+    def _flush_settings_autosave_now(self) -> None:
+        """Выполнить ждущее автосохранение сразу, пока поля и ключ ещё
+        принадлежат открытому профилю (перед сменой профиля)."""
+        page = self._page
+        timer = page.__dict__.get("_settings_save_timer")
+        try:
+            if timer is None or not timer.isActive():
+                return
+            timer.stop()
+        except Exception:
+            return
+        self._autosave_editable_settings()
+
+    def _settings_autosave_request(self) -> dict | None:
         page = self._page
         if page._loading or not page._profile_key or not is_preset_launch_method(page.launch_method):
-            return
+            return None
         filter_value = page._filter_value.text().strip()
         filter_enabled = bool(getattr(page._payload, "editable_filter_enabled", True))
         if filter_enabled and not filter_value:
-            return
+            return None
         request = {
             "profile_key": page._profile_key,
             "filter_kind": page._current_filter_kind(),
@@ -248,8 +317,150 @@ class ProfileSetupSaveController:
             and str(getattr(payload, "in_range", "") or "x") == request["in_range"]
             and str(getattr(payload, "out_range", "") or "a") == request["out_range"]
         ):
-            return
-        page._request_settings_save(request)
+            return None
+        return request
+
+    def _profile_writes_to_save_on_close(self) -> list[dict[str, object]]:
+        """Всё, что ещё не легло в пресет: ждущее автосохранение настроек и
+        текста списка, очередь записи и отложенные значения. Для одного
+        объекта остаётся последняя операция."""
+        page = self._page
+        operations: list[dict[str, object]] = []
+        try:
+            operations.extend(dict(operation or {}) for operation in page._profile_setup_write_state_obj().pending)
+        except Exception:
+            pass
+        scheduled = page.__dict__.get("_scheduled_profile_setup_write_operation")
+        if isinstance(scheduled, dict):
+            operations.append(dict(scheduled))
+        try:
+            settings_pending = page._settings_save_state_obj().pending
+            if isinstance(settings_pending, dict):
+                operations.append({"kind": "settings_save", "request": dict(settings_pending)})
+        except Exception:
+            pass
+        try:
+            raw_pending = page._raw_profile_save_state_obj().pending
+            if raw_pending:
+                profile_key, raw_text = raw_pending
+                operations.append({"kind": "raw_profile_save", "profile_key": str(profile_key or ""), "text": raw_text})
+        except Exception:
+            pass
+        try:
+            enabled_pending = page._enabled_save_state_obj().pending
+            target = dict(page.__dict__.get("_enabled_save_pending_target") or {})
+            if enabled_pending is not None and target:
+                operations.append({"kind": "enabled_save", "enabled": bool(enabled_pending), **target})
+        except Exception:
+            pass
+        try:
+            strategy_pending = str(page._strategy_apply_state_obj().pending or "").strip()
+            strategy_key = str(page.__dict__.get("_strategy_apply_pending_profile_key") or "").strip()
+            if strategy_pending and strategy_key:
+                operations.append({"kind": "strategy_apply", "strategy_id": strategy_pending, "profile_key": strategy_key})
+        except Exception:
+            pass
+        timer = page.__dict__.get("_settings_save_timer")
+        try:
+            if timer is not None and timer.isActive():
+                request = self._settings_autosave_request()
+                if request is not None:
+                    operations.append({"kind": "settings_save", "request": request})
+        except Exception:
+            pass
+        try:
+            if not bool(page.__dict__.get("_list_file_validation_has_error", False)) and page._profile_key:
+                snapshot = page._unsaved_list_file_text()
+                if snapshot is not None:
+                    target_kind, target_value = page._list_file_target_filter()
+                    operations.append(
+                        {
+                            "kind": "list_file_save",
+                            "profile_key": self._current_profile_reference(),
+                            "text": snapshot,
+                            "filter_kind": target_kind,
+                            "filter_value": target_value,
+                        }
+                    )
+        except Exception:
+            pass
+        latest: list[dict[str, object]] = []
+        for operation in operations:
+            if not str(operation.get("kind") or ""):
+                continue
+            latest = [
+                previous for previous in latest
+                if not self._profile_setup_write_operations_collide(previous, operation)
+            ]
+            latest.append(operation)
+        return latest
+
+    def _save_profile_write_on_close(self, operation: dict[str, object]) -> None:
+        """Синхронная запись при закрытии: тот же worker, но его run()
+        выполняется прямо здесь — event loop уже не даст потоку завершиться."""
+        page = self._page
+        kind = str(operation.get("kind") or "")
+        try:
+            if kind == "settings_save":
+                request = dict(operation.get("request") or {})
+                worker = page.create_profile_settings_save_worker(
+                    0,
+                    profile_key=str(request.get("profile_key") or ""),
+                    filter_kind=str(request.get("filter_kind") or ""),
+                    filter_value=str(request.get("filter_value") or ""),
+                    in_range=str(request.get("in_range") or ""),
+                    out_range=str(request.get("out_range") or ""),
+                    parent=None,
+                )
+            elif kind == "raw_profile_save":
+                text = operation.get("text")
+                if text is None:
+                    # «Текущий текст редактора» — только для открытого профиля.
+                    if not self._is_current_profile_key(str(operation.get("profile_key") or "")):
+                        return
+                    text = page._resolve_raw_profile_save_text(None)
+                worker = page.create_profile_raw_text_save_worker(
+                    0,
+                    str(operation.get("profile_key") or ""),
+                    str(text or ""),
+                    parent=None,
+                )
+            elif kind == "enabled_save":
+                worker = page.create_profile_enabled_save_worker(
+                    0,
+                    profile_key=str(operation.get("profile_key") or ""),
+                    enabled=bool(operation.get("enabled")),
+                    filter_kind=str(operation.get("filter_kind") or ""),
+                    filter_value=str(operation.get("filter_value") or ""),
+                    parent=None,
+                )
+            elif kind == "strategy_apply":
+                worker = page.create_profile_strategy_apply_worker(
+                    0,
+                    profile_key=str(operation.get("profile_key") or ""),
+                    strategy_id=str(operation.get("strategy_id") or ""),
+                    parent=None,
+                )
+            elif kind == "list_file_save":
+                request = _page_module()._normalized_list_file_save_request(operation)
+                worker = page.create_profile_list_file_save_worker(
+                    0,
+                    request["profile_key"],
+                    request["text"],
+                    filter_kind=request["filter_kind"],
+                    filter_value=request["filter_value"],
+                    parent=None,
+                )
+            else:
+                return
+            if not self._profile_setup_write_operation_profile_key(operation):
+                return
+            worker.run()
+        except Exception as exc:
+            _page_module().log(
+                f"{page.__class__.__name__}: не удалось сохранить профиль при закрытии ({kind}): {exc}",
+                "ERROR",
+            )
 
     def _request_settings_save(self, request: dict) -> None:
         page = self._page
@@ -479,21 +690,42 @@ class ProfileSetupSaveController:
             state.runtime = runtime
         return state
 
-    def _start_enabled_save_worker(self, enabled: bool) -> None:
+    def _current_enabled_save_target(self) -> dict[str, str]:
+        page = self._page
+        try:
+            filter_kind = page._current_filter_kind()
+            filter_value = page._current_filter_value()
+        except Exception:
+            # Виджеты фильтра ещё не построены или уже удалены — берём
+            # значения из payload открытого профиля.
+            payload = page.__dict__.get("_payload")
+            filter_kind = str(getattr(payload, "editable_filter_kind", "") or "")
+            filter_value = str(getattr(payload, "editable_filter_value", "") or "")
+        return {
+            "profile_key": self._current_profile_reference(),
+            "filter_kind": filter_kind,
+            "filter_value": filter_value,
+        }
+
+    def _start_enabled_save_worker(self, enabled: bool, target: dict | None = None) -> None:
         page = self._page
         runtime = page._worker_runtime("_enabled_save_runtime")
         page._enabled_save_request_id += 1
         request_id = page._enabled_save_request_id
-        if page._enabled_checkbox is not None:
+        # Профиль и фильтр — те, что были открыты при щелчке, а не те, что
+        # открыты сейчас: отложенный переключатель уходил в чужой профиль.
+        target = dict(target or {}) or self._current_enabled_save_target()
+        if page._enabled_checkbox is not None and self._is_current_profile_key(target.get("profile_key", "")):
             _page_module().set_widget_enabled_if_changed(page._enabled_checkbox, False)
         page._enabled_save_runtime_enabled = bool(enabled)
+        page._enabled_save_runtime_profile_key = str(target.get("profile_key") or "")
         runtime.start_qthread_worker(
             worker_factory=lambda _runtime_request_id: page.create_profile_enabled_save_worker(
                 request_id,
-                profile_key=page._profile_key,
+                profile_key=str(target.get("profile_key") or ""),
                 enabled=enabled,
-                filter_kind=page._current_filter_kind(),
-                filter_value=page._current_filter_value(),
+                filter_kind=str(target.get("filter_kind") or ""),
+                filter_value=str(target.get("filter_value") or ""),
                 parent=page,
             ),
             on_loaded=page._on_enabled_save_finished,
@@ -507,6 +739,14 @@ class ProfileSetupSaveController:
         if request_id != page._enabled_save_request_id:
             return
         if page._enabled_save_state_obj().has_pending():
+            return
+        requested_key = str(page.__dict__.get("_enabled_save_runtime_profile_key") or "").strip()
+        if not self._is_current_profile_key(requested_key):
+            # Запись ушла в профиль, открытый при щелчке; страница уже
+            # показывает другой — его состояние не трогаем. Сравниваем с
+            # ЗАПРОШЕННЫМ ключом: включение шаблона возвращает новый ключ.
+            if page._enabled_checkbox is not None:
+                _page_module().set_widget_enabled_if_changed(page._enabled_checkbox, True)
             return
         payload, apply_signature = _page_module()._profile_setup_payload_and_apply_signature(payload)
         old_key = str(page._profile_key or "").strip()
@@ -545,6 +785,9 @@ class ProfileSetupSaveController:
         if page._enabled_checkbox is not None:
             _page_module().set_widget_enabled_if_changed(page._enabled_checkbox, True)
         _page_module().log(f"{page.__class__.__name__}: не удалось изменить состояние профиля: {error}", "ERROR")
+        # Переключатель уже стоит в новом положении, а в пресете — старое:
+        # показываем состояние из файла, как после неудачной стратегии.
+        page.reload_current_profile()
 
     def _on_enabled_save_worker_finished(self, worker) -> None:
         page = self._page
@@ -560,9 +803,16 @@ class ProfileSetupSaveController:
         pending = page._enabled_save_state_obj().pending
         page._enabled_save_state_obj().pending = None
         if pending is None:
+            page.__dict__.pop("_enabled_save_pending_target", None)
             return
+        target = dict(page.__dict__.get("_enabled_save_pending_target") or {})
         item = getattr(page.__dict__.get("_payload"), "item", None)
-        if item is not None and bool(getattr(item, "enabled", False)) == bool(pending):
+        if (
+            item is not None
+            and self._is_current_profile_key(target.get("profile_key", ""))
+            and bool(getattr(item, "enabled", False)) == bool(pending)
+        ):
+            page.__dict__.pop("_enabled_save_pending_target", None)
             if page._enabled_checkbox is not None:
                 _page_module().set_widget_enabled_if_changed(page._enabled_checkbox, True)
             return
@@ -586,15 +836,23 @@ class ProfileSetupSaveController:
         pending = page._enabled_save_state_obj().take_pending_for_scheduled_start(
             cleanup_in_progress=page.__dict__.get("_cleanup_in_progress", False),
         )
+        target = dict(page.__dict__.pop("_enabled_save_pending_target", None) or {})
         if pending is None:
             return
         item = getattr(page.__dict__.get("_payload"), "item", None)
-        if item is not None and bool(getattr(item, "enabled", False)) == bool(pending):
+        if (
+            item is not None
+            and self._is_current_profile_key(target.get("profile_key", ""))
+            and bool(getattr(item, "enabled", False)) == bool(pending)
+        ):
             if page._enabled_checkbox is not None:
                 _page_module().set_widget_enabled_if_changed(page._enabled_checkbox, True)
             return
         enabled = bool(pending)
-        page._start_enabled_save_worker(bool(enabled))
+        if target and not self._is_current_profile_key(target.get("profile_key", "")):
+            page._start_enabled_save_worker(bool(enabled), target=target)
+        else:
+            page._start_enabled_save_worker(bool(enabled))
 
     def _enabled_save_state_obj(self) -> LatestValueWorkerState:
         page = self._page

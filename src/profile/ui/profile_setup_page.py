@@ -365,6 +365,7 @@ class ProfileSetupPageBase(BasePage):
         open_profiles,
         open_root,
         on_profile_changed,
+        ui_state_store=None,
     ):
         super().__init__(
             title="",
@@ -386,6 +387,17 @@ class ProfileSetupPageBase(BasePage):
         self._open_root = open_root
         self._on_profile_changed_callback = on_profile_changed
         self._profile_key = ""
+        self._profile_payload_stale = False
+        self._ui_state_unsubscribe = None
+        if ui_state_store is not None:
+            # Пресет правят и в обход этой страницы (редактор текста, список
+            # профилей, автосинк): открытый заново тот же профиль должен
+            # показать файл, а не прежний payload.
+            self._ui_state_unsubscribe = ui_state_store.subscribe(
+                self._on_preset_revision_changed,
+                fields={"active_preset_revision", "preset_content_revision"},
+                emit_initial=False,
+            )
         self._loading = False
         self._setup_load_runtime = OneShotWorkerRuntime()
         self._setup_load_request_id = 0
@@ -1570,12 +1582,21 @@ class ProfileSetupPageBase(BasePage):
     def _on_user_profile_delete_worker_finished(self, _worker) -> None:
         return self._user_profile_controller_obj()._on_user_profile_delete_worker_finished(_worker)
 
+    def _on_preset_revision_changed(self, _state, _changed) -> None:
+        self._profile_payload_stale = True
+
     def show_profile(self, profile_key: str) -> None:
         next_key = str(profile_key or "").strip()
         current_key = str(self._profile_key or "").strip()
-        if next_key and next_key == current_key and self._payload is not None:
+        stale = bool(self.__dict__.get("_profile_payload_stale", False))
+        if next_key and next_key == current_key and self._payload is not None and not stale:
             return
+        self._profile_payload_stale = False
         if next_key != current_key:
+            # Ждущее автосохранение полей (350 мс) — правка СТАРОГО профиля:
+            # отправляем её сейчас, пока поля и ключ ещё его. Иначе таймер
+            # срабатывал уже с ключом нового профиля и значениями старого.
+            self._save_controller_obj()._flush_settings_autosave_now()
             self._flush_list_file_autosave_before_switch(current_key)
             self._payload = None
             self._pending_profile_setup_payload_apply = None
@@ -2480,19 +2501,24 @@ class ProfileSetupPageBase(BasePage):
         item = getattr(self.__dict__.get("_payload"), "item", None)
         if not runtime.is_running() and item is not None and bool(getattr(item, "enabled", False)) == enabled:
             return
+        # Профиль и фильтр фиксируются при щелчке: пока запрос ждёт очереди,
+        # пользователь может открыть другой профиль.
+        target = self._save_controller_obj()._current_enabled_save_target()
         if worker_state.is_busy():
             if self.__dict__.get("_enabled_save_runtime_enabled") != enabled:
                 worker_state.pending = enabled
+                self._enabled_save_pending_target = target
             return
         if self._profile_setup_write_is_running():
             if self.__dict__.get("_enabled_save_runtime_enabled") != enabled:
                 worker_state.pending = enabled
-                self._queue_profile_setup_write_operation({"kind": "enabled_save", "enabled": enabled})
+                self._enabled_save_pending_target = target
+                self._queue_profile_setup_write_operation({"kind": "enabled_save", "enabled": enabled, **target})
             return
         self._start_enabled_save_worker(enabled)
 
-    def _start_enabled_save_worker(self, enabled: bool) -> None:
-        return self._save_controller_obj()._start_enabled_save_worker(enabled)
+    def _start_enabled_save_worker(self, enabled: bool, target: dict | None = None) -> None:
+        return self._save_controller_obj()._start_enabled_save_worker(enabled, target=target)
 
     def _on_enabled_save_finished(self, request_id: int, profile_key: str, enabled: bool, payload=None) -> None:
         return self._save_controller_obj()._on_enabled_save_finished(request_id, profile_key, enabled, payload)
@@ -2544,7 +2570,7 @@ class ProfileSetupPageBase(BasePage):
         item = getattr(getattr(self, "_payload", None), "item", None)
         if bool(getattr(item, "in_preset", False)) and not bool(getattr(item, "enabled", False)):
             return
-        if strategy_id == _current_strategy_id(self._payload):
+        if strategy_id == self._strategy_controller_obj()._effective_strategy_id():
             return
         self._mark_strategy_selection_pending(strategy_id)
         self._request_strategy_apply(strategy_id)
@@ -2552,8 +2578,8 @@ class ProfileSetupPageBase(BasePage):
     def _request_strategy_apply(self, strategy_id: str) -> None:
         return self._strategy_controller_obj()._request_strategy_apply(strategy_id)
 
-    def _start_strategy_apply_worker(self, strategy_id: str) -> None:
-        return self._strategy_controller_obj()._start_strategy_apply_worker(strategy_id)
+    def _start_strategy_apply_worker(self, strategy_id: str, profile_key: str = "") -> None:
+        return self._strategy_controller_obj()._start_strategy_apply_worker(strategy_id, profile_key=profile_key)
 
     def _on_strategy_apply_finished(
         self,
@@ -2646,6 +2672,19 @@ class ProfileSetupPageBase(BasePage):
     _strategy_feedback_save_start_scheduled = _worker_start_scheduled_property("_strategy_feedback_save_state_obj")
 
     def cleanup(self) -> None:
+        unsubscribe = self.__dict__.get("_ui_state_unsubscribe")
+        self._ui_state_unsubscribe = None
+        if callable(unsubscribe):
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+        # Собираем несохранённое ДО сброса очередей: закрытие окна через
+        # долю секунды после правки раньше молча теряло её.
+        try:
+            writes_to_save = self._save_controller_obj()._profile_writes_to_save_on_close()
+        except Exception:
+            writes_to_save = []
         self._cleanup_in_progress = True
         language = self.__dict__.get("_raw_profile_language")
         if language is not None:
@@ -2711,8 +2750,15 @@ class ProfileSetupPageBase(BasePage):
             runtime.stop(blocking=blocking, log_fn=log, warning_prefix=warning_prefix)
             runtime.cancel()
         self._strategy_apply_runtime_strategy_id = ""
+        self._strategy_apply_runtime_profile_key = ""
+        self._strategy_apply_pending_profile_key = ""
+        self._enabled_save_pending_target = None
         self._enabled_save_runtime_enabled = None
         self._setup_load_runtime_request_id = 0
+        # Идущие записи уже дождались (runtime.stop(blocking=True) выше) —
+        # теперь поверх них ложится то, что ещё ждало очереди.
+        for operation in writes_to_save:
+            self._save_controller_obj()._save_profile_write_on_close(operation)
         try:
             super().cleanup()
         except Exception:

@@ -6,7 +6,7 @@ import re
 from settings.mode import ENGINE_WINWS1, ENGINE_WINWS2
 
 from .models import EngineName, Preset, Profile, ProfileSegment
-from .parser import parse_preset_text
+from .parser import _name_from_new_line, parse_preset_text
 from .strategy_shape import PAYLOAD_OPTION, RANGE_OPTIONS, strategy_shape, union_payload
 
 
@@ -389,8 +389,12 @@ def with_profile_raw_text(preset: Preset, profile_index: int, raw_text: str) -> 
     replacement = deepcopy(parsed.profiles[0])
     replacement.index = index
     replacement.engine = updated.engine
-    # Граница профиля («--new» / «--new=Имя») не часть его текста — остаётся прежней.
-    replacement.new_line = str(updated.profiles[index].new_line or "")
+    # Граница профиля («--new» / «--new=Имя») не часть его текста — остаётся
+    # прежней, вместе с именем, записанным в ней.
+    current_new_line = str(updated.profiles[index].new_line or "")
+    replacement.new_line = current_new_line
+    if not str(replacement.name or "").strip():
+        replacement.name = _name_from_new_line(current_new_line)
     updated.profiles[index] = replacement
     _ensure_profile_boundaries(updated)
     return _reparse(updated)
@@ -499,8 +503,12 @@ def _ensure_profile_boundaries(preset: Preset) -> None:
             # ("option doesn't take an argument -- new"). Имя профиля в winws1 — только --comment.
             profile.new_line = "--new"
             continue
-        name =str(profile.name or profile.display_name or f"profile {index + 1}").strip() or f"profile {index + 1}"
-        profile.new_line = f"--new={name}"
+        # Только собственное имя профиля (из «--new=Имя»). Отображаемое имя
+        # («TCP 443 • hostlist …») — вычисляемая подпись интерфейса: её запись
+        # в файл незаметно меняла пресет, «замораживала» подпись и сдвигала
+        # ключи безымянных профилей после перемещения/удаления соседей.
+        name = str(profile.name or "").strip()
+        profile.new_line = f"--new={name}" if name else "--new"
 
 
 def _ensure_profile_name_directive(profile: Profile, engine: EngineName) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from log.log import log
 from settings.mode import is_preset_launch_method, normalize_launch_method
+from winws_runtime.flow.apply_policy import launch_accepts_preset_apply
 
 
 SELECTED_SOURCE_PRESET_APPLY_DEBOUNCE_MS = 700
@@ -24,7 +25,7 @@ def request_selected_source_preset_apply(
         return False
 
     try:
-        if not launch_runtime.is_running():
+        if not launch_accepts_preset_apply(runtime_feature):
             phase = ""
             running = False
             try:
