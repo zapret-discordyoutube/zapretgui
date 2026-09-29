@@ -40,12 +40,6 @@ def install_startup_audit(*args, **kwargs):
     return install(*args, **kwargs)
 
 
-def install_dns_startup(*args, **kwargs):
-    from main.post_startup_dns import install_dns_startup as install
-
-    return install(*args, **kwargs)
-
-
 def install_dns_address_migration(*args, **kwargs):
     from main.post_startup_dns_migration import install_dns_address_migration as install
 
@@ -158,7 +152,6 @@ class PostStartupDeps:
     log_startup_metric: Any
     start_proxy_if_enabled_async: Any
     startup_lists_check: Any
-    apply_dns_on_startup_async: Any
     install_tray_post_startup: Any
     updater_feature: Any
     request_installation_repair: Any = None
@@ -211,12 +204,6 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
     install_lists_check(
         startup_host,
         startup_lists_check=deps.startup_lists_check,
-        log_startup_metric=deps.log_startup_metric,
-    )
-    install_dns_startup(
-        startup_host,
-        apply_dns_on_startup_async=deps.apply_dns_on_startup_async,
-        set_status=deps.set_status,
         log_startup_metric=deps.log_startup_metric,
     )
     install_dns_address_migration(

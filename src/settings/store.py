@@ -26,7 +26,6 @@ from settings.mode import (
 from settings.normalize import (
     as_clean_str as _as_clean_str,
     as_dict as _as_dict,
-    as_int as _as_int,
     normalize_askey as _normalize_askey,
     normalize_hex_secret as _normalize_hex_secret,
     normalize_settings as _normalize_settings,
@@ -1342,6 +1341,16 @@ def set_kaspersky_warning_disabled(value: bool) -> bool:
     return _set_bool(("warnings", "disable_kaspersky_warning"), value)
 
 
+def get_custom_dns_servers() -> list[dict[str, Any]]:
+    value = _read_path_value(("dns", "custom_servers"), [])
+    return value if isinstance(value, list) else []
+
+
+def set_custom_dns_servers(value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    updated = _update_settings(lambda data: _set_path_value(data, ("dns", "custom_servers"), value))
+    return copy.deepcopy(updated["dns"]["custom_servers"])
+
+
 def get_isp_dns_info_shown() -> bool:
     return _get_bool(("warnings", "isp_dns_info_shown"), False)
 
@@ -1364,47 +1373,6 @@ def get_onboarding_tour_done() -> bool:
 
 def set_onboarding_tour_done(value: bool) -> bool:
     return _set_bool(("warnings", "onboarding_tour_done"), value)
-
-
-def get_force_dns_enabled() -> bool:
-    return _get_bool(("dns", "force_dns_enabled"), False)
-
-
-def set_force_dns_enabled(value: bool) -> bool:
-    return _set_bool(("dns", "force_dns_enabled"), value)
-
-
-def get_dns_crash_count() -> int:
-    return _get_int(("dns", "dns_crash_count"), 0)
-
-
-def set_dns_crash_count(value: int) -> bool:
-    return _set_int(("dns", "dns_crash_count"), value)
-
-
-def get_custom_dns_servers() -> list[dict[str, Any]]:
-    value = _read_path_value(("dns", "custom_servers"), [])
-    return value if isinstance(value, list) else []
-
-
-def set_custom_dns_servers(value: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    updated = _update_settings(lambda data: _set_path_value(data, ("dns", "custom_servers"), value))
-    return copy.deepcopy(updated["dns"]["custom_servers"])
-
-
-def increment_dns_crash_count() -> int:
-    updated = _update_settings(
-        lambda data: _set_path_value(
-            data,
-            ("dns", "dns_crash_count"),
-            _as_int(_get_path_value(data, ("dns", "dns_crash_count"), 0), 0, minimum=0) + 1,
-        )
-    )
-    return int(updated["dns"]["dns_crash_count"])
-
-
-def reset_dns_crash_count() -> bool:
-    return _set_int(("dns", "dns_crash_count"), 0)
 
 
 def get_active_hosts_domains() -> set[str]:
@@ -1901,14 +1869,12 @@ __all__ = [
     "get_background_preset",
     "get_discord_restart_enabled",
     "get_display_mode",
-    "get_dns_crash_count",
     "get_custom_dns_servers",
     "get_dpi_autostart",
     "get_editor_smooth_scroll_enabled",
     "get_live_animations_enabled",
     "get_defender_disabled_memory",
     "get_follow_windows_accent",
-    "get_force_dns_enabled",
     "get_folders_settings",
     "get_garland_enabled",
     "get_gui_autostart_enabled",
@@ -1977,7 +1943,6 @@ __all__ = [
     "get_window_geometry",
     "get_window_opacity",
     "get_windows_system_accent",
-    "increment_dns_crash_count",
     "prepare_settings_database",
     "read_settings",
     "remove_active_hosts_domain",
@@ -1986,7 +1951,6 @@ __all__ = [
     "remove_orchestra_user_blocked_target",
     "remove_orchestra_user_locked",
     "remove_orchestra_whitelist_domain",
-    "reset_dns_crash_count",
     "reset_premium_appearance",
     "reset_self_repair_attempts",
     "reset_settings",
@@ -1998,13 +1962,11 @@ __all__ = [
     "set_defender_disabled_memory",
     "set_discord_restart_enabled",
     "set_display_mode",
-    "set_dns_crash_count",
     "set_custom_dns_servers",
     "set_dpi_autostart",
     "set_editor_smooth_scroll_enabled",
     "set_live_animations_enabled",
     "set_follow_windows_accent",
-    "set_force_dns_enabled",
     "set_folders_settings",
     "set_garland_enabled",
     "set_gui_autostart_enabled",

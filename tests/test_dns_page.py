@@ -10,27 +10,32 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import QApplication
 
+from dataclasses import replace
+
 from dns import page_plans
+from dns.adapters import DnsAdapter
 from dns.dns_providers import DNS_PROVIDERS
 from dns.latency import DnsLatencyReport
 from dns.state import DnsState
 
+ETH = "{00000000-0000-0000-0000-000000000009}"
+WIFI = "{00000000-0000-0000-0000-000000000012}"
+SPARE = "{00000000-0000-0000-0000-000000000020}"
 
-STATE = DnsState(
-    adapters=(("Ethernet", "Intel I219-V"), ("Wi-Fi", "Intel AX201")),
-    dns_info={
-        "Ethernet": {"ipv4": ["1.1.1.1", "1.0.0.1"], "ipv6": ["2606:4700:4700::1111"]},
-        "Wi-Fi": {"ipv4": [], "ipv6": []},
-    },
-    ipv6_available=False,
-    doh_supported=True,
+ETHERNET = DnsAdapter(
+    ETH, "Ethernet", "Intel I219-V", "ethernet", connected=True, internet=True,
+    static_ipv4=("1.1.1.1", "1.0.0.1"), static_ipv6=("2606:4700:4700::1111",),
 )
+WIFI_ADAPTER = DnsAdapter(WIFI, "Wi-Fi", "Intel AX201", "wifi", connected=True, internet=False, auto_ipv4=("192.168.1.1",))
+# Отключённый адаптер виден, но не отмечен.
+SPARE_ADAPTER = DnsAdapter(SPARE, "Ethernet 2", "Realtek", "ethernet", connected=False, internet=False)
+
+STATE = DnsState(adapters=(ETHERNET, WIFI_ADAPTER, SPARE_ADAPTER), ipv6_available=False, doh_supported=True)
 
 
 def _feature(state=STATE):
     return SimpleNamespace(
         consume_warmed_page_data=Mock(return_value=state),
-        normalize_adapter_alias=lambda name: name,
         create_page_load_worker=Mock(),
         create_dns_apply_worker=Mock(),
         create_dns_flush_cache_worker=Mock(),
@@ -97,7 +102,11 @@ class DnsPageTests(unittest.TestCase):
 
         page._load_lane.request.assert_not_called()
         page._isp_lane.request.assert_called_once_with()
-        self.assertEqual(page.now_panel.adapter_names(), ["Ethernet", "Wi-Fi"])
+        self.assertEqual(page.now_panel.adapter_keys(), [ETH, WIFI, SPARE])
+        chips = page.now_panel._chips
+        self.assertEqual(chips[ETH].text(), "Ethernet · интернет")
+        self.assertEqual(chips[SPARE].text(), "Ethernet 2 · не подключён")
+        self.assertEqual([chips[key].isChecked() for key in (ETH, WIFI, SPARE)], [True, True, False])
         page.on_page_activated()
         page._dns.consume_warmed_page_data.assert_called_once_with()
 
@@ -120,52 +129,44 @@ class DnsPageTests(unittest.TestCase):
         page = self._page()
 
         self.assertEqual(page.now_panel.title_label.text(), "На адаптерах разные DNS")
-        page.now_panel._chips["Wi-Fi"].setChecked(False)
+        page.now_panel._chips[WIFI].setChecked(False)
         self.assertEqual(page.now_panel.title_label.text(), "Cloudflare")
         self.assertIn("1.1.1.1 · 1.0.0.1", page.now_panel.detail_label.text())
         selected = [tile.key for tile in self._provider_tiles(page) if tile.selected]
         self.assertEqual(selected, ["Cloudflare"])
 
-        page.now_panel._chips["Ethernet"].setChecked(False)
-        page.now_panel._chips["Wi-Fi"].setChecked(True)
+        page.now_panel._chips[ETH].setChecked(False)
+        page.now_panel._chips[WIFI].setChecked(True)
         self.assertEqual(page.now_panel.title_label.text(), "Автоматически (DHCP)")
-        page.now_panel._chips["Wi-Fi"].setChecked(False)
+        page.now_panel._chips[WIFI].setChecked(False)
         self.assertEqual(page.now_panel.title_label.text(), "Адаптеры не отмечены")
 
     def test_current_dns_plan_matches_providers(self) -> None:
         providers = {"G": {"Only6": {"ipv4": [], "ipv6": ["2a00::1"]}, "Q": {"ipv4": ["9.9.9.9"], "ipv6": []}}}
+        base = DnsAdapter("{A}", "A", "", "ethernet", True, False)
 
-        def plan(info):
-            return page_plans.build_current_dns_plan(
-                selected_adapters=["A", "B"],
-                dns_info=info,
-                providers=providers,
-                normalize_alias_fn=lambda name: name,
-            )
+        def plan(*static):
+            adapters = [replace(base, static_ipv4=tuple(v4), static_ipv6=tuple(v6)) for v4, v6 in static]
+            return page_plans.build_current_dns_plan(adapters=adapters, providers=providers)
 
-        self.assertEqual(plan({"A": {"ipv4": [], "ipv6": ["2a00::1"]}, "B": {"ipv6": ["2a00::1"]}}).provider, "Only6")
-        self.assertEqual(plan({"A": {"ipv4": ["9.9.9.9", "1.2.3.4"]}, "B": {"ipv4": ["9.9.9.9"]}}).provider, "Q")
-        self.assertEqual(plan({"A": {"ipv4": ["10.0.0.1"]}, "B": {"ipv4": ["10.0.0.1"]}}).kind, "custom")
-        self.assertEqual(plan({"A": {"ipv4": ["10.0.0.1"]}, "B": {}}).kind, "mixed")
-        self.assertEqual(plan({}).kind, "auto")
-        self.assertEqual(
-            page_plans.build_current_dns_plan(
-                selected_adapters=[], dns_info={}, providers=providers, normalize_alias_fn=str
-            ).kind,
-            "none",
-        )
+        self.assertEqual(plan(([], ["2a00::1"]), ([], ["2a00::1"])).provider, "Only6")
+        self.assertEqual(plan((["9.9.9.9", "1.2.3.4"], []), (["9.9.9.9"], [])).provider, "Q")
+        self.assertEqual(plan((["10.0.0.1"], []), (["10.0.0.1"], [])).kind, "custom")
+        self.assertEqual(plan((["10.0.0.1"], []), ([], [])).kind, "mixed")
+        self.assertEqual(plan(([], []), ([], [])).kind, "auto")
+        self.assertEqual(plan().kind, "none")
 
     # ── применение ──────────────────────────────────────────
 
     def test_choosing_server_applies_it_to_checked_adapters_only(self) -> None:
         page = self._page()
-        page.now_panel._chips["Wi-Fi"].setChecked(False)
+        page.now_panel._chips[WIFI].setChecked(False)
 
         page.grid.activated.emit("Google DNS")
 
         payload = page._apply_lane.request.call_args.args[0]
         self.assertEqual(payload["action"], "provider")
-        self.assertEqual(payload["adapters"], ["Ethernet"])
+        self.assertEqual(payload["adapters"], [ETH])
         self.assertEqual(payload["name"], "Google DNS")
         self.assertEqual(payload["data"]["ipv4"][0], "8.8.8.8")
         self.assertFalse(payload["ipv6_available"])
@@ -173,24 +174,41 @@ class DnsPageTests(unittest.TestCase):
         self.assertEqual(pending, ["Google DNS"])
         self.assertEqual(page.now_panel.detail_label.text(), "Применяю…")
 
-        plan = page_plans.build_provider_dns_apply_result_plan(
-            name="Google DNS", adapter_count=1, success_count=1, ipv6_available=False, ipv6=[]
-        )
-        page._on_apply_done(payload, {"plan": plan, "dns_info": {"Ethernet": {"ipv4": ["8.8.8.8", "8.8.4.4"], "ipv6": []}}})
+        plan = page_plans.build_provider_dns_apply_result_plan(name="Google DNS", adapter_count=1, success_count=1, ipv6=[])
+        google = replace(ETHERNET, static_ipv4=("8.8.8.8", "8.8.4.4"), static_ipv6=())
+        page._on_apply_done(payload, {"plan": plan, "state": replace(STATE, adapters=(google, WIFI_ADAPTER, SPARE_ADAPTER))})
 
         self.assertIsNone(page._pending_choice)
         self.assertEqual(page.now_panel.title_label.text(), "Google DNS")
         self.info_bar.warning.assert_not_called()
 
+    def test_refreshed_adapters_keep_user_checks(self) -> None:
+        page = self._page()
+        page.now_panel._chips[WIFI].setChecked(False)
+        page.now_panel._chips[SPARE].setChecked(True)
+
+        page._on_apply_done({}, {"plan": None, "state": STATE})
+
+        chips = page.now_panel._chips
+        self.assertEqual([chips[key].isChecked() for key in (ETH, WIFI, SPARE)], [True, False, True])
+
+    def test_isp_warning_looks_only_at_connected_adapters(self) -> None:
+        self.assertTrue(page_plans.should_show_isp_dns_warning([WIFI_ADAPTER, SPARE_ADAPTER], warning_already_shown=False))
+        self.assertFalse(page_plans.should_show_isp_dns_warning([WIFI_ADAPTER], warning_already_shown=True))
+        self.assertFalse(page_plans.should_show_isp_dns_warning([ETHERNET, WIFI_ADAPTER], warning_already_shown=False))
+        self.assertFalse(page_plans.should_show_isp_dns_warning([SPARE_ADAPTER], warning_already_shown=False))
+
     def test_partial_apply_and_errors_are_reported(self) -> None:
         page = self._page()
-        plan = page_plans.build_auto_dns_apply_result_plan(adapter_count=2, success_count=1)
+        plan = page_plans.build_auto_dns_apply_result_plan(adapter_count=2, success_count=1, error="«Wi-Fi»: ошибка Windows 5")
 
-        page._on_apply_done({}, {"plan": plan, "dns_info": None})
-        self.assertIn("1 из 2", self.info_bar.warning.call_args.kwargs["content"])
+        page._on_apply_done({}, {"plan": plan, "state": None})
+        content = self.info_bar.warning.call_args.kwargs["content"]
+        self.assertIn("1 из 2", content)
+        self.assertIn("«Wi-Fi»: ошибка Windows 5", content)
 
         invalid = page_plans.build_provider_dns_plan(name="X", data={"ipv4": [], "ipv6": ["2a00::1"]}, ipv6_available=False)
-        page._on_apply_done({}, {"plan": invalid, "dns_info": None})
+        page._on_apply_done({}, {"plan": invalid, "state": None})
         self.assertIn("нет DNS адресов", self.info_bar.warning.call_args.kwargs["content"])
 
         page._pending_choice = "Quad9"
@@ -236,7 +254,7 @@ class DnsPageTests(unittest.TestCase):
         boxes[0].yesButton.setAccessibleName.assert_called_with(boxes[0].title)
         boxes[0].cancelButton.setAccessibleName.assert_called_with(f"Отменить действие: {boxes[0].title}")
         payload = page._apply_lane.request.call_args.args[0]
-        self.assertEqual(payload, {"action": "auto", "adapters": ["Ethernet", "Wi-Fi"]})
+        self.assertEqual(payload, {"action": "auto", "adapters": [ETH, WIFI]})
         self.assertEqual(page.now_panel.title_label.text(), "Автоматически (DHCP)")
         self.assertEqual(page.now_panel.detail_label.text(), "Применяю…")
 
@@ -294,12 +312,7 @@ class DnsPageTests(unittest.TestCase):
         page = self._page()
         bar = Mock()
         self.info_bar.warning.return_value = bar
-        plan = page_plans.build_isp_dns_warning_plan(
-            [("Wi-Fi", "")],
-            {"Wi-Fi": {"ipv4": []}},
-            warning_already_shown=False,
-            normalize_alias_fn=lambda name: name,
-        )
+        plan = page_plans.build_isp_dns_warning_plan([WIFI_ADAPTER], warning_already_shown=False)
 
         page._show_isp_warning(plan)
 

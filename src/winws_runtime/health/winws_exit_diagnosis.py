@@ -577,16 +577,9 @@ def _probe_service_disabled_cause() -> Tuple[str, str, Optional[str]]:
 def _check_network_adapters() -> bool:
     """Return True if at least one network adapter is enabled/up."""
     try:
-        from dns.public import get_network_adapters_native
+        from dns.winapi import list_interfaces
 
-        adapters = get_network_adapters_native()
-        for adapter in adapters:
-            adapter_type = int(adapter.get("type") or 0)
-            if adapter_type == 24:  # MIB_IF_TYPE_LOOPBACK
-                continue
-            if adapter.get("index") or adapter.get("adapter_name") or adapter.get("name"):
-                return True
-        return False
+        return any(interface.connected for interface in list_interfaces())
     except Exception:
         return True  # assume OK on failure
 

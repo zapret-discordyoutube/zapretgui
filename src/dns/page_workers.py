@@ -1,3 +1,10 @@
+"""Фоновые воркеры страницы DNS.
+
+Каждый воркер получает готовое действие DNS-слоя (callable из фасада),
+выполняет его вне UI-потока и отдаёт результат сигналом с request_id.
+Виджеты воркеры не трогают.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -9,21 +16,24 @@ from log.log import log
 
 
 class DnsPageLoadWorker(QThread):
-    loaded = pyqtSignal(int, object)
-    finished_loading = pyqtSignal()
+    """Загрузка состояния страницы: loaded(request_id, DnsState)."""
 
-    def __init__(self, request_id: int, load_page_data_fn, parent=None):
+    loaded = pyqtSignal(int, object)
+    failed = pyqtSignal(int, str)
+
+    def __init__(self, request_id: int, load_state: Callable[[], Any], parent=None):
         super().__init__(parent)
         self._request_id = int(request_id)
-        self._load_page_data_fn = load_page_data_fn
+        self._load_state = load_state
 
     def run(self) -> None:
         try:
-            state = self._load_page_data_fn()
-            self.loaded.emit(self._request_id, state)
+            state = self._load_state()
         except Exception as exc:
-            log(f"DnsPageLoadWorker: ошибка загрузки DNS страницы: {exc}", "ERROR")
-        self.finished_loading.emit()
+            log(f"DnsPageLoadWorker: не удалось загрузить адаптеры: {exc}", "ERROR")
+            self.failed.emit(self._request_id, str(exc))
+            return
+        self.loaded.emit(self._request_id, state)
 
 
 class DnsLatencyWorker(QThread):
@@ -83,6 +93,8 @@ class DnsFlushCacheWorker(QThread):
 
 
 class DnsIspWarningWorker(QThread):
+    """Решает, показать ли совет про DNS провайдера (один раз за установку)."""
+
     completed = pyqtSignal(int, object)
     failed = pyqtSignal(int, str)
 
@@ -91,21 +103,17 @@ class DnsIspWarningWorker(QThread):
         request_id: int,
         *,
         adapters,
-        dns_info: dict,
         language: str = "ru",
         is_isp_dns_warning_shown: Callable[[], bool],
         mark_isp_dns_warning_shown: Callable[[], Any],
-        normalize_adapter_alias: Callable[[str], str],
         parent=None,
     ):
         super().__init__(parent)
         self._request_id = int(request_id)
-        self._adapters = list(adapters or [])
-        self._dns_info = dict(dns_info or {})
+        self._adapters = tuple(adapters or ())
         self._language = str(language or "ru")
         self._is_isp_dns_warning_shown = is_isp_dns_warning_shown
         self._mark_isp_dns_warning_shown = mark_isp_dns_warning_shown
-        self._normalize_adapter_alias = normalize_adapter_alias
 
     def run(self) -> None:
         from dns import page_plans as dns_page_plans
@@ -113,9 +121,7 @@ class DnsIspWarningWorker(QThread):
         try:
             plan = dns_page_plans.build_isp_dns_warning_plan(
                 self._adapters,
-                self._dns_info,
                 warning_already_shown=self._is_isp_dns_warning_shown(),
-                normalize_alias_fn=self._normalize_adapter_alias,
                 language=self._language,
             )
             if plan.should_show:
@@ -128,6 +134,8 @@ class DnsIspWarningWorker(QThread):
 
 
 class DnsApplyWorker(QThread):
+    """Применяет DNS и перечитывает адаптеры: completed(request_id, {"plan", "state"})."""
+
     completed = pyqtSignal(int, object)
     failed = pyqtSignal(int, str)
 
@@ -140,21 +148,21 @@ class DnsApplyWorker(QThread):
         name: str = "",
         data=None,
         ipv6_available: bool = False,
-        apply_auto_dns: Callable[[list], Any],
-        apply_provider_dns: Callable[..., Any],
-        refresh_dns_info: Callable[[list], Any],
+        apply_dns: Callable[..., Any],
+        reset_to_auto: Callable[[list], Any],
+        load_state: Callable[[], Any],
         parent=None,
     ):
         super().__init__(parent)
         self._request_id = int(request_id)
         self._action = str(action or "").strip()
-        self._adapters = list(adapters or [])
+        self._adapters = [str(item) for item in (adapters or ()) if str(item or "").strip()]
         self._name = str(name or "")
         self._data = dict(data or {})
         self._ipv6_available = bool(ipv6_available)
-        self._apply_auto_dns = apply_auto_dns
-        self._apply_provider_dns = apply_provider_dns
-        self._refresh_dns_info = refresh_dns_info
+        self._apply_dns = apply_dns
+        self._reset_to_auto = reset_to_auto
+        self._load_state = load_state
 
     def run(self) -> None:
         try:
@@ -169,13 +177,14 @@ class DnsApplyWorker(QThread):
         from dns import page_plans as dns_page_plans
 
         if not self._adapters:
-            return {"plan": None, "dns_info": None}
+            return {"plan": None, "state": None}
 
         if self._action == "auto":
-            command_result = self._apply_auto_dns(self._adapters)
+            command_result = self._reset_to_auto(self._adapters)
             plan = dns_page_plans.build_auto_dns_apply_result_plan(
                 adapter_count=len(self._adapters),
                 success_count=int(command_result.affected_count or 0),
+                error=str(command_result.message or ""),
             )
         elif self._action == "provider":
             provider_plan = dns_page_plans.build_provider_dns_plan(
@@ -184,29 +193,16 @@ class DnsApplyWorker(QThread):
                 ipv6_available=self._ipv6_available,
             )
             if not provider_plan.valid:
-                return {
-                    "plan": provider_plan,
-                    "dns_info": None,
-                }
-            command_result = self._apply_provider_dns(
-                self._adapters,
-                provider_plan.ipv4,
-                provider_plan.ipv6,
-                ipv6_available=self._ipv6_available,
-            )
+                return {"plan": provider_plan, "state": None}
+            command_result = self._apply_dns(self._adapters, provider_plan.ipv4, provider_plan.ipv6)
             plan = dns_page_plans.build_provider_dns_apply_result_plan(
                 name=self._name,
                 adapter_count=len(self._adapters),
                 success_count=int(command_result.affected_count or 0),
-                ipv6_available=self._ipv6_available,
                 ipv6=provider_plan.ipv6,
+                error=str(command_result.message or ""),
             )
         else:
             raise ValueError(f"Неизвестное DNS действие: {self._action}")
 
-        dns_info = self._refresh_dns_info(self._adapters) if getattr(plan, "should_refresh", False) else None
-        return {
-            "plan": plan,
-            "dns_info": dns_info,
-            "adapters": self._adapters,
-        }
+        return {"plan": plan, "state": self._load_state()}

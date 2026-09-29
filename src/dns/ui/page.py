@@ -85,8 +85,8 @@ class NetworkPage(BasePage):
 
         self._custom_servers: list[dict] = get_custom_dns_servers()
         self._providers: dict = build_dns_providers_with_custom(DNS_PROVIDERS, self._custom_servers)
-        self._adapters: list[tuple[str, str]] = []
-        self._dns_info: dict[str, dict[str, list[str]]] = {}
+        # Адаптеры из DNS-слоя (dns.adapters.DnsAdapter), опознаются по GUID.
+        self._adapters: tuple = ()
         self._ipv6_available = False
         self._doh_supported = False
         self._loaded = False
@@ -135,8 +135,7 @@ class NetworkPage(BasePage):
             name="dns_isp_warning",
             create_worker=lambda request_id, _payload: self._dns.create_isp_dns_warning_worker(
                 request_id,
-                adapters=list(self._adapters),
-                dns_info=dict(self._dns_info),
+                adapters=tuple(self._adapters),
                 language=self._ui_language,
                 parent=self,
             ),
@@ -290,26 +289,48 @@ class NetworkPage(BasePage):
     def _on_page_data(self, state) -> None:
         if self._closed or state is None:
             return
-        self._adapters = [(str(name), str(desc)) for name, desc in (getattr(state, "adapters", ()) or ())]
-        self._dns_info = dict(getattr(state, "dns_info", {}) or {})
+        self._apply_state(state)
+        self._isp_lane.request()
+
+    def _apply_state(self, state) -> None:
+        """Новый снимок адаптеров; отметки уже известных адаптеров сохраняются."""
+        known = self.now_panel.adapter_keys()
+        self._adapters = tuple(getattr(state, "adapters", ()) or ())
         self._ipv6_available = bool(getattr(state, "ipv6_available", False))
         self._doh_supported = bool(getattr(state, "doh_supported", False))
         self._loaded = True
-        self.now_panel.set_adapters([AdapterChip(name=name) for name, _desc in self._adapters])
+        if [adapter.guid for adapter in self._adapters] != known or not known:
+            self.now_panel.set_adapters([self._adapter_chip(adapter) for adapter in self._adapters])
         self._render()
-        self._isp_lane.request()
+
+    def _adapter_chip(self, adapter) -> AdapterChip:
+        if adapter.internet:
+            status = self._t("page.network.adapter.internet", "интернет")
+        elif not adapter.connected:
+            status = self._t("page.network.adapter.disconnected", "не подключён")
+        else:
+            status = ""
+        return AdapterChip(
+            key=adapter.guid,
+            text=f"{adapter.name} · {status}" if status else adapter.name,
+            kind=adapter.kind,
+            checked=adapter.connected,
+        )
 
     # ── отрисовка состояния ─────────────────────────────────
 
     def _selected_adapters(self) -> list[str]:
+        """GUID отмеченных адаптеров."""
         return self.now_panel.selected_adapters()
+
+    def _selected_adapter_objects(self) -> list:
+        selected = set(self._selected_adapters())
+        return [adapter for adapter in self._adapters if adapter.guid in selected]
 
     def _current_plan(self) -> dns_page_plans.CurrentDnsPlan:
         return dns_page_plans.build_current_dns_plan(
-            selected_adapters=self._selected_adapters(),
-            dns_info=self._dns_info,
+            adapters=self._selected_adapter_objects(),
             providers=self._providers,
-            normalize_alias_fn=self._dns.normalize_adapter_alias,
         )
 
     def _render(self) -> None:
@@ -344,7 +365,7 @@ class NetworkPage(BasePage):
         if not self._loaded:
             return NowState(self._t("page.network.now.loading", "Загружаю настройки сети…"), "", "fa5s.network-wired", busy=True)
         if plan.kind == "none":
-            if not self.now_panel.adapter_names():
+            if not self.now_panel.adapter_keys():
                 return NowState(self._t("page.network.adapters.empty", "Сетевые адаптеры не найдены"), "", "fa5s.plug")
             return NowState(
                 self._t("page.network.now.no_adapters.title", "Адаптеры не отмечены"),
@@ -352,9 +373,11 @@ class NetworkPage(BasePage):
                 "fa5s.plug",
             )
         if plan.kind == "auto":
+            detail = self._t("page.network.now.auto.detail", "DNS выдаёт роутер или провайдер.")
+            addresses = self._addresses_text(plan.ipv4, plan.ipv6)
             return NowState(
                 self._t("page.network.dns.auto", "Автоматически (DHCP)"),
-                self._t("page.network.now.auto.detail", "DNS выдаёт роутер или провайдер."),
+                f"{detail}   {addresses}" if addresses else detail,
                 "fa5s.sync",
             )
         if plan.kind == "mixed":
@@ -372,12 +395,14 @@ class NetworkPage(BasePage):
 
     def _adapter_tooltips(self) -> dict[str, str]:
         tooltips: dict[str, str] = {}
-        for name, desc in self._adapters:
-            info = self._dns_info.get(self._dns.normalize_adapter_alias(name), {}) or {}
-            ipv4 = dns_page_plans.normalize_dns_list(info.get("ipv4", []))
-            ipv6 = dns_page_plans.normalize_dns_list(info.get("ipv6", []))
-            current = self._addresses_text(ipv4, ipv6) or self._t("page.network.dns.auto", "Автоматически (DHCP)")
-            tooltips[name] = "\n".join(part for part in (desc, f"DNS: {current}") if part)
+        auto = self._t("page.network.dns.auto", "Автоматически (DHCP)")
+        for adapter in self._adapters:
+            if adapter.is_automatic:
+                addresses = self._addresses_text(adapter.auto_ipv4, adapter.auto_ipv6)
+                current = f"{auto}: {addresses}" if addresses else auto
+            else:
+                current = self._addresses_text(adapter.static_ipv4, adapter.static_ipv6)
+            tooltips[adapter.guid] = "\n".join(part for part in (adapter.description, f"DNS: {current}") if part)
         return tooltips
 
     def _primary_address(self, data: dict) -> str:
@@ -558,17 +583,25 @@ class NetworkPage(BasePage):
                 self._info(
                     "warning",
                     self._t("page.network.error.apply.partial.title", "DNS встал не везде"),
-                    self._t(
-                        "page.network.error.apply.partial.content",
-                        "Не удалось изменить DNS на адаптерах: {failed} из {total}. Подробности — в логах.",
-                        failed=failed,
-                        total=plan.adapter_count,
+                    "\n\n".join(
+                        part
+                        for part in (
+                            self._t(
+                                "page.network.error.apply.partial.content",
+                                "Не удалось изменить DNS на адаптерах: {failed} из {total}.",
+                                failed=failed,
+                                total=plan.adapter_count,
+                            ),
+                            str(getattr(plan, "error", "") or ""),
+                        )
+                        if part
                     ),
                 )
-        dns_info = data.get("dns_info")
-        if isinstance(dns_info, dict):
-            self._dns_info.update(dns_info)
-        self._render()
+        state = data.get("state")
+        if state is not None:
+            self._apply_state(state)
+        else:
+            self._render()
 
     def _on_apply_failed(self, _payload, error: str) -> None:
         self._pending_choice = None

@@ -13,25 +13,19 @@ def _read(path: str) -> str:
 
 
 class DnsManualModeTests(unittest.TestCase):
-    def test_force_dns_setting_defaults_to_disabled(self) -> None:
-        schema = ast.parse(_read("src/settings/schema.py"))
-        default_dns = next(
-            node
-            for node in schema.body
-            if isinstance(node, ast.FunctionDef) and node.name == "default_dns"
-        )
-        return_node = next(node for node in ast.walk(default_dns) if isinstance(node, ast.Return))
-        defaults = ast.literal_eval(return_node.value)
-        self.assertIs(defaults["force_dns_enabled"], False)
+    def test_force_dns_settings_are_gone(self) -> None:
+        from settings import schema, store
 
-        store_source = _read("src/settings/store.py")
-        self.assertIn('return _get_bool(("dns", "force_dns_enabled"), False)', store_source)
+        self.assertEqual(schema.default_dns(), {"custom_servers": []})
+        for name in ("get_force_dns_enabled", "set_force_dns_enabled", "get_dns_crash_count", "increment_dns_crash_count"):
+            self.assertFalse(hasattr(store, name), name)
 
-    def test_startup_dns_apply_is_disabled(self) -> None:
-        worker_source = _read("src/dns/dns_worker.py")
+    def test_program_does_not_touch_dns_on_startup(self) -> None:
+        post_startup = _read("src/main/post_startup.py")
 
-        self.assertIn("DNS startup apply disabled: manual mode only", worker_source)
-        self.assertNotIn("QTimer.singleShot(3000, delayed_apply)", worker_source)
+        self.assertNotIn("install_dns_startup", post_startup)
+        self.assertNotIn("apply_dns_on_startup", post_startup)
+        self.assertFalse((ROOT / "src/dns/dns_worker.py").exists())
 
     def test_dns_page_has_no_forced_dns_mode(self) -> None:
         page_source = _read("src/dns/ui/page.py")

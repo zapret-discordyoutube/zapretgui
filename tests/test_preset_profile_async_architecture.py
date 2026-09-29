@@ -4634,10 +4634,10 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
 
         self.assertIn("create_dns_apply_worker", feature_source)
         self.assertIn("create_dns_apply_worker", page_source)
-        self.assertIn("apply_auto_dns", worker_source)
-        self.assertIn("apply_provider_dns", worker_source)
+        self.assertIn("self._apply_dns(", worker_source)
+        self.assertIn("self._reset_to_auto(", worker_source)
         self.assertNotIn("apply_custom_dns", worker_source)
-        self.assertIn("refresh_dns_info", worker_source)
+        self.assertIn("self._load_state()", worker_source)
         self.assertIsNone(importlib.util.find_spec("dns.page_apply_workflow"))
         self.assertIsNone(importlib.util.find_spec("dns.page_force_dns_workflow"))
 

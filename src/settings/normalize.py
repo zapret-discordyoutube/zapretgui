@@ -407,10 +407,7 @@ def normalize_telegram_proxy(data: object) -> dict[str, Any]:
 
 def normalize_dns(data: object) -> dict[str, Any]:
     raw = as_dict(data)
-    defaults = schema.default_dns()
     return {
-        "force_dns_enabled": as_bool(raw.get("force_dns_enabled"), defaults["force_dns_enabled"]),
-        "dns_crash_count": as_int(raw.get("dns_crash_count"), defaults["dns_crash_count"], minimum=0),
         "custom_servers": normalize_custom_dns_servers(raw.get("custom_servers")),
     }
 

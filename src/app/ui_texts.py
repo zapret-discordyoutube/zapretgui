@@ -1753,6 +1753,14 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Отметьте адаптер ниже — выбранный DNS встанет на него.",
         "en": "Check an adapter below — the chosen DNS will be applied to it.",
     },
+    "page.network.adapter.internet": {
+        "ru": "интернет",
+        "en": "internet",
+    },
+    "page.network.adapter.disconnected": {
+        "ru": "не подключён",
+        "en": "disconnected",
+    },
     "page.network.adapters.caption": {
         "ru": "Применять к:",
         "en": "Apply to:",
@@ -1926,8 +1934,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "DNS was not applied everywhere",
     },
     "page.network.error.apply.partial.content": {
-        "ru": "Не удалось изменить DNS на адаптерах: {failed} из {total}. Подробности — в логах.",
-        "en": "Could not change DNS on {failed} of {total} adapters. See the logs for details.",
+        "ru": "Не удалось изменить DNS на адаптерах: {failed} из {total}.",
+        "en": "Could not change DNS on {failed} of {total} adapters.",
     },
     "page.network.isp_dns.infobar.title": {
         "ru": "DNS от провайдера",

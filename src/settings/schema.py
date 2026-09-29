@@ -145,8 +145,6 @@ def default_telegram_proxy() -> dict[str, Any]:
 
 def default_dns() -> dict[str, Any]:
     return {
-        "force_dns_enabled": False,
-        "dns_crash_count": 0,
         "custom_servers": [],
     }
 

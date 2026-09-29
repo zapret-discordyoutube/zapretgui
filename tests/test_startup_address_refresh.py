@@ -81,43 +81,6 @@ class DnsAddressMigrationPlanTests(unittest.TestCase):
             self.assertIn(new, offered)
 
 
-class DnsAddressMigrationRunTests(unittest.TestCase):
-    def test_only_adapters_with_old_addresses_are_rewritten(self) -> None:
-        from dns.address_migration import migrate_outdated_dns_addresses
-
-        class FakeManager:
-            def __init__(self) -> None:
-                self.dns = {
-                    ("Ethernet", "IPv4"): ["84.21.189.133", "64.188.98.242"],
-                    ("Ethernet", "IPv6"): ["2a12:bec4:1460:d5::2"],
-                    ("Wi-Fi", "IPv4"): ["1.1.1.1"],
-                    ("Wi-Fi", "IPv6"): [],
-                }
-                self.writes: list[tuple[str, list[str], str]] = []
-
-            def get_network_adapters_fast(self, include_ignored=False, include_disconnected=True):
-                return [("Ethernet", "Intel"), ("Wi-Fi", "Realtek")]
-
-            def get_current_dns(self, adapter_name, address_family="IPv4"):
-                return list(self.dns[(adapter_name, address_family)])
-
-            def set_dns_servers(self, adapter_name, dns_list, address_family="IPv4"):
-                self.writes.append((adapter_name, list(dns_list), address_family))
-                return True, "OK"
-
-        manager = FakeManager()
-        changes = migrate_outdated_dns_addresses(manager)
-
-        self.assertEqual(
-            manager.writes,
-            [
-                ("Ethernet", ["95.216.204.218", "80.253.249.40"], "IPv4"),
-                ("Ethernet", ["2a01:4f9:c014:6dac::1"], "IPv6"),
-            ],
-        )
-        self.assertEqual(len(changes), 2)
-
-
 class HostsAppliedSelectionRefreshDecisionTests(unittest.TestCase):
     def _decide(self, **kwargs):
         from hosts.hosts import decide_applied_selection_refresh
@@ -308,7 +271,6 @@ class StartupAddressRefreshInstallTests(unittest.TestCase):
             log_startup_metric=log_startup_metric,
             start_proxy_if_enabled_async=Mock(),
             startup_lists_check=Mock(),
-            apply_dns_on_startup_async=Mock(),
             install_tray_post_startup=Mock(),
             updater_feature=Mock(),
         )

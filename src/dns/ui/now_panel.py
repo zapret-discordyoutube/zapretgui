@@ -48,7 +48,11 @@ class NowState:
 
 @dataclass(frozen=True, slots=True)
 class AdapterChip:
-    name: str
+    """Таблетка адаптера. key — GUID адаптера, text — что написано на кнопке."""
+
+    key: str
+    text: str
+    kind: str = "ethernet"
     tooltip: str = ""
     checked: bool = True
 
@@ -140,7 +144,8 @@ class DnsNowPanel(SimpleCardWidget):
         adapters_box = QHBoxLayout()
         adapters_box.setSpacing(10)
         self.adapters_caption = CaptionLabel("Применять к:", self)
-        adapters_box.addWidget(self.adapters_caption, 0, Qt.AlignmentFlag.AlignVCenter)
+        adapters_box.addWidget(self.adapters_caption, 0, Qt.AlignmentFlag.AlignTop)
+        self.adapters_caption.setFixedHeight(32)
         self.adapters_host = QWidget(self)
         self.adapters_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.adapters_flow = FlowLayout(self.adapters_host, needAni=False)
@@ -154,7 +159,7 @@ class DnsNowPanel(SimpleCardWidget):
         self.measure_button = PushButton(FluentIcon.SPEED_HIGH, "Замерить скорость", self)
         self.flush_button = PushButton(FluentIcon.BROOM, "Сбросить кэш", self)
         for button in (self.reset_button, self.measure_button, self.flush_button):
-            bottom.addWidget(button, 0, Qt.AlignmentFlag.AlignBottom)
+            bottom.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(bottom)
 
         self.notice_label = CaptionLabel("", self)
@@ -216,34 +221,40 @@ class DnsNowPanel(SimpleCardWidget):
     # ── адаптеры ────────────────────────────────────────────
 
     def set_adapters(self, chips: list[AdapterChip]) -> None:
+        """Пересобирает таблетки; отметки уже известных адаптеров сохраняются."""
+        previous = {key: chip.isChecked() for key, chip in self._chips.items()}
         for chip in self._chips.values():
             self.adapters_flow.removeWidget(chip)
             chip.deleteLater()
         self._chips = {}
         for item in chips:
-            chip = PillPushButton(item.name, self.adapters_host)
+            icon = FluentIcon.WIFI if item.kind == "wifi" else FluentIcon.CONNECT
+            chip = PillPushButton(icon, item.text, self.adapters_host)
             chip.setCheckable(True)
-            chip.setChecked(item.checked)
-            if item.tooltip:
-                set_tooltip(chip, item.tooltip)
+            chip.setChecked(previous.get(item.key, item.checked))
+            chip.setProperty("adapterName", item.text)
+            set_tooltip(chip, item.tooltip)
             chip.toggled.connect(self._on_chip_toggled)
             self._sync_chip_accessibility(chip, item.tooltip)
             self.adapters_flow.addWidget(chip)
-            self._chips[item.name] = chip
+            self._chips[item.key] = chip
         self.adapters_caption.setText(self._adapters_caption_text if chips else self._adapters_empty_text)
 
     def update_adapter_tooltips(self, tooltips: dict[str, str]) -> None:
-        for name, chip in self._chips.items():
-            tooltip = tooltips.get(name, "")
+        for key, chip in self._chips.items():
+            tooltip = tooltips.get(key, "")
             set_tooltip(chip, tooltip)
-            chip.setProperty("dnsTooltip", tooltip)
             self._sync_chip_accessibility(chip, tooltip)
 
     def selected_adapters(self) -> list[str]:
-        return [name for name, chip in self._chips.items() if chip.isChecked()]
+        """GUID отмеченных адаптеров."""
+        return [key for key, chip in self._chips.items() if chip.isChecked()]
 
-    def adapter_names(self) -> list[str]:
+    def adapter_keys(self) -> list[str]:
         return list(self._chips)
+
+    def chip(self, key: str) -> PillPushButton | None:
+        return self._chips.get(key)
 
     def _on_chip_toggled(self, _checked: bool) -> None:
         chip = self.sender()

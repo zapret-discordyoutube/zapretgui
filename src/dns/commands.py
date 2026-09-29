@@ -3,38 +3,10 @@ from __future__ import annotations
 from dns.state import DnsCommandResult, DnsState
 
 
-def _to_dns_state(data) -> DnsState:
-    return DnsState(
-        adapters=tuple(data.adapters),
-        dns_info=dict(data.dns_info),
-        ipv6_available=bool(data.ipv6_available),
-        force_dns_enabled=bool(data.force_dns_active),
-        doh_supported=bool(getattr(data, "doh_supported", False)),
-    )
-
-
-def apply_dns_on_startup_async(status_callback=None):
-    from dns.dns_worker import apply_dns_on_startup_async as _apply_dns_on_startup_async
-
-    return _apply_dns_on_startup_async(status_callback=status_callback)
-
-
 def migrate_outdated_dns_addresses():
     from dns.address_migration import migrate_outdated_dns_addresses as _migrate
 
     return _migrate()
-
-
-def get_network_adapters_native():
-    from dns.dns_core import get_network_adapters_native as _get_network_adapters_native
-
-    return _get_network_adapters_native()
-
-
-def normalize_adapter_alias(alias: str) -> str:
-    from dns.dns_core import _normalize_alias
-
-    return _normalize_alias(alias)
 
 
 def is_isp_dns_warning_shown() -> bool:
@@ -118,83 +90,40 @@ def save_dns_check_results(*, file_path: str, plain_text: str):
         )
 
 
-def check_ipv6_connectivity() -> bool:
-    from dns.runtime import detect_ipv6_availability
+def load_state() -> DnsState:
+    from dns.runtime import load_state as _load_state
 
-    return detect_ipv6_availability()
+    return _load_state()
+
+
+def warm_state() -> DnsState:
+    from dns.runtime import warm_state as _warm_state
+
+    return _warm_state()
+
+
+def consume_warmed_state() -> DnsState | None:
+    from dns.runtime import consume_warmed_state as _consume_warmed_state
+
+    return _consume_warmed_state()
+
+
+def apply_dns(adapters: list[str], ipv4: list[str], ipv6: list[str]) -> DnsCommandResult:
+    from dns.runtime import apply_dns as _apply_dns
+
+    return _apply_dns(adapters, ipv4, ipv6)
+
+
+def reset_to_auto(adapters: list[str]) -> DnsCommandResult:
+    from dns.runtime import reset_to_auto as _reset_to_auto
+
+    return _reset_to_auto(adapters)
 
 
 def flush_dns_cache() -> DnsCommandResult:
     from dns.runtime import flush_dns_cache as _flush_dns_cache
 
-    success, message = _flush_dns_cache()
-    return DnsCommandResult(success=bool(success), message=str(message or ""))
-
-
-def get_dns_state() -> DnsState:
-    from dns.runtime import load_page_data as _load_page_data
-
-    return _to_dns_state(_load_page_data())
-
-
-def load_page_data() -> DnsState:
-    return get_dns_state()
-
-
-def warm_page_data_cache() -> DnsState:
-    from dns.runtime import warm_page_data_cache as _warm_page_data_cache
-
-    return _to_dns_state(_warm_page_data_cache())
-
-
-def consume_warmed_page_data() -> DnsState | None:
-    from dns.runtime import consume_warmed_page_data as _consume_warmed_page_data
-
-    data = _consume_warmed_page_data()
-    if data is None:
-        return None
-    return _to_dns_state(data)
-
-
-def refresh_dns_info(adapter_names: list[str]) -> dict[str, dict[str, list[str]]]:
-    from dns.runtime import refresh_dns_info as _refresh_dns_info
-
-    return _refresh_dns_info(adapter_names)
-
-
-def apply_auto_dns(adapters: list[str]) -> DnsCommandResult:
-    from dns.runtime import apply_auto_dns as _apply_auto_dns
-
-    success_count = _apply_auto_dns(adapters)
-    total = len(adapters or [])
-    return DnsCommandResult(
-        success=success_count > 0 or total == 0,
-        affected_count=int(success_count or 0),
-        total_count=total,
-    )
-
-
-def apply_provider_dns(
-    adapters: list[str],
-    ipv4: list[str],
-    ipv6: list[str],
-    *,
-    ipv6_available: bool,
-) -> DnsCommandResult:
-    from dns.runtime import apply_provider_dns as _apply_provider_dns
-
-    success_count = _apply_provider_dns(
-        adapters,
-        ipv4,
-        ipv6,
-        ipv6_available=ipv6_available,
-    )
-    total = len(adapters or [])
-    return DnsCommandResult(
-        success=success_count > 0 or total == 0,
-        affected_count=int(success_count or 0),
-        total_count=total,
-    )
+    return _flush_dns_cache()
 
 
 def measure_dns_latency(servers: list[str]):

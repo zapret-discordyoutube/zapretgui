@@ -56,9 +56,9 @@ def build_internet_cleanup_commands(
 
 def _flush_dns_cache_native() -> bool:
     try:
-        from dns.dns_core import flush_dns_cache_native
+        from dns.winapi import flush_resolver_cache
 
-        return bool(flush_dns_cache_native())
+        return bool(flush_resolver_cache())
     except Exception as exc:
         log(f"Не удалось очистить DNS-кэш через WinAPI: {exc}", "DEBUG")
         return False

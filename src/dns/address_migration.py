@@ -54,37 +54,39 @@ def plan_dns_server_migration(
     return result if replaced_any else None
 
 
-def migrate_outdated_dns_addresses(dns_manager=None, replacements: Mapping[str, str] | None = None) -> list[str]:
-    """Меняет старые адреса провайдеров на всех поддерживаемых адаптерах.
+def migrate_outdated_dns_addresses(replacements: Mapping[str, str] | None = None) -> list[str]:
+    """Меняет старые адреса провайдеров на адаптерах страницы DNS.
 
-    Возвращает список изменений в виде строк для лога.
+    Трогает только адреса, прописанные вручную; автоматические (DHCP) не
+    меняются. Возвращает список изменений в виде строк для лога.
     """
+    from dns import runtime, winapi
+
     if replacements is None:
         from dns.dns_providers import OUTDATED_DNS_ADDRESS_REPLACEMENTS
 
         replacements = OUTDATED_DNS_ADDRESS_REPLACEMENTS
-    if dns_manager is None:
-        from dns.dns_core import DNSManager
 
-        dns_manager = DNSManager()
+    from dns.dns_providers import doh_templates
 
+    templates = doh_templates() if winapi.is_doh_supported() else None
     changes: list[str] = []
-    for adapter_name, _description in dns_manager.get_network_adapters_fast(
-        include_ignored=False,
-        include_disconnected=True,
-    ):
-        for family in ("IPv4", "IPv6"):
-            current = list(dns_manager.get_current_dns(adapter_name, family) or [])
-            new_servers = plan_dns_server_migration(current, replacements)
+    for adapter in runtime.adapters_with_static_dns():
+        for ipv6, current in ((False, adapter.static_ipv4), (True, adapter.static_ipv6)):
+            new_servers = plan_dns_server_migration(list(current), replacements)
             if new_servers is None:
                 continue
-            success, message = dns_manager.set_dns_servers(adapter_name, new_servers, family)
-            summary = f"{adapter_name} ({family}): {', '.join(current)} -> {', '.join(new_servers)}"
-            if success:
-                log(f"DNS: старые адреса провайдера заменены на новые: {summary}", "INFO")
-                changes.append(summary)
-            else:
-                log(f"DNS: не удалось заменить старые адреса провайдера: {summary}: {message}", "WARNING")
+            family = "IPv6" if ipv6 else "IPv4"
+            summary = f"{adapter.name} ({family}): {', '.join(current)} -> {', '.join(new_servers)}"
+            try:
+                winapi.write_dns(adapter.guid, new_servers, ipv6=ipv6, doh_templates=templates)
+            except winapi.DnsWinApiError as exc:
+                log(f"DNS: не удалось заменить старые адреса провайдера: {summary}: {exc}", "WARNING")
+                continue
+            log(f"DNS: старые адреса провайдера заменены на новые: {summary}", "INFO")
+            changes.append(summary)
+    if changes:
+        winapi.flush_resolver_cache()
     return changes
 
 

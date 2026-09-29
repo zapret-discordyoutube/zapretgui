@@ -1,28 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+from dns.adapters import DnsAdapter
 
 
 @dataclass(frozen=True, slots=True)
 class DnsState:
-    """Текущий снимок DNS-страницы.
+    """Снимок DNS-слоя для страницы: адаптеры с их DNS, есть ли IPv6 и DoH."""
 
-    Это не UI-состояние виджетов, а данные DNS-слоя: адаптеры, текущие DNS,
-    доступность IPv6 и состояние принудительного DNS.
-    """
-
-    adapters: tuple[tuple[str, str], ...] = ()
-    dns_info: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    adapters: tuple[DnsAdapter, ...] = ()
     ipv6_available: bool = False
-    force_dns_enabled: bool = False
     doh_supported: bool = False
-    active_profile: str = ""
-    last_message: str = ""
-    error: str = ""
-
-    @property
-    def adapters_count(self) -> int:
-        return len(self.adapters)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,4 +20,3 @@ class DnsCommandResult:
     message: str = ""
     affected_count: int = 0
     total_count: int = 0
-    error: str = ""

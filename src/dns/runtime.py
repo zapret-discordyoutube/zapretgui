@@ -1,155 +1,125 @@
+"""DNS-слой программы: состояние адаптеров и действия над ними.
+
+Цепочка: dns.winapi (вызовы Windows) → dns.adapters (какие адаптеры наши)
+→ этот модуль (что сделать) → dns.commands (публичные команды для фасада).
+
+Адаптеры опознаются по GUID. Всё здесь блокирующее и вызывается только из
+фоновых воркеров.
+"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
 from threading import RLock
 
+from dns import winapi
+from dns.adapters import DnsAdapter, build_dns_adapters, is_dns_adapter
+from dns.dns_providers import doh_templates
+from dns.state import DnsCommandResult, DnsState
 from log.log import log
 
-
-@dataclass(slots=True)
-class NetworkPageData:
-    adapters: list[tuple[str, str]]
-    dns_info: dict[str, dict[str, list[str]]]
-    ipv6_available: bool
-    force_dns_active: bool
-    doh_supported: bool = False
+_warmed_state: DnsState | None = None
+_warmed_lock = RLock()
 
 
-_dns_manager_instance = None
-_warmed_page_data_cache: NetworkPageData | None = None
-_warmed_page_data_lock = RLock()
+# ── состояние ─────────────────────────────────────────────────────────────
 
 
-def _new_dns_manager():
-    from dns.dns_core import DNSManager
-
-    return DNSManager()
-
-
-def _get_dns_manager():
-    global _dns_manager_instance
-    if _dns_manager_instance is None:
-        _dns_manager_instance = _new_dns_manager()
-    return _dns_manager_instance
-
-
-def detect_ipv6_availability() -> bool:
-    try:
-        from dns.dns_force import DNSForceManager
-
-        return bool(DNSForceManager.check_ipv6_connectivity())
-    except Exception as exc:
-        log(f"Ошибка проверки IPv6 у провайдера: {exc}", "DEBUG")
-        return False
-
-
-def detect_doh_support() -> bool:
-    try:
-        from dns.dns_core import is_doh_supported
-
-        return bool(is_doh_supported())
-    except Exception as exc:
-        log(f"Ошибка проверки поддержки DoH: {exc}", "DEBUG")
-        return False
-
-
-def load_page_data() -> NetworkPageData:
-    ipv6_available = detect_ipv6_availability()
-
-    from dns.dns_force import ensure_default_force_dns
-
-    dns_manager = _get_dns_manager()
-    adapters = dns_manager.get_network_adapters_fast(
-        include_ignored=False,
-        include_disconnected=True,
-    )
-    adapter_names = [name for name, _ in adapters]
-    dns_info = dns_manager.get_all_dns_info_fast(adapter_names)
-
-    ensure_default_force_dns()
-    force_dns_active = False
-
-    return NetworkPageData(
-        adapters=adapters,
-        dns_info=dns_info,
-        ipv6_available=ipv6_available,
-        force_dns_active=force_dns_active,
-        doh_supported=detect_doh_support(),
+def load_state() -> DnsState:
+    """Адаптеры для страницы DNS с их текущими DNS, наличие IPv6 и DoH."""
+    interfaces = winapi.list_interfaces()
+    route = winapi.internet_route()
+    static = {}
+    for interface in interfaces:
+        if not is_dns_adapter(interface, route):
+            continue
+        try:
+            static[interface.guid] = winapi.read_static_dns(interface.guid)
+        except winapi.DnsWinApiError as exc:
+            log(f"DNS: не удалось прочитать DNS адаптера «{interface.name}»: {exc}", "WARNING")
+    return DnsState(
+        adapters=build_dns_adapters(interfaces, route, static),
+        ipv6_available=route.has_ipv6,
+        doh_supported=winapi.is_doh_supported(),
     )
 
 
-def store_warmed_page_data(state: NetworkPageData) -> NetworkPageData:
-    global _warmed_page_data_cache
-    with _warmed_page_data_lock:
-        _warmed_page_data_cache = state
+def warm_state() -> DnsState:
+    """Загружает состояние заранее (после запуска), чтобы страница открылась сразу."""
+    global _warmed_state
+    state = load_state()
+    with _warmed_lock:
+        _warmed_state = state
     return state
 
 
-def clear_warmed_page_data_cache() -> None:
-    global _warmed_page_data_cache
-    with _warmed_page_data_lock:
-        _warmed_page_data_cache = None
-
-
-def consume_warmed_page_data() -> NetworkPageData | None:
-    global _warmed_page_data_cache
-    with _warmed_page_data_lock:
-        state = _warmed_page_data_cache
-        _warmed_page_data_cache = None
+def consume_warmed_state() -> DnsState | None:
+    """Отдаёт заранее загруженное состояние один раз."""
+    global _warmed_state
+    with _warmed_lock:
+        state, _warmed_state = _warmed_state, None
     return state
 
 
-def warm_page_data_cache() -> NetworkPageData:
-    return store_warmed_page_data(load_page_data())
+# ── действия ──────────────────────────────────────────────────────────────
 
 
-def refresh_dns_info(adapter_names: list[str]) -> dict[str, dict[str, list[str]]]:
-    return _get_dns_manager().get_all_dns_info_fast(adapter_names)
+def apply_dns(guids: list[str], ipv4: list[str], ipv6: list[str]) -> DnsCommandResult:
+    """Прописывает DNS отмеченным адаптерам; пустые списки — вернуть автоматические.
+
+    Обе версии протокола пишутся всегда: если у сервера нет IPv6-адресов,
+    IPv6 возвращается в автоматический режим, чтобы на адаптере не осталось
+    IPv6-адресов прежнего сервера.
+
+    Пишем только адаптерам, которые сейчас есть на странице: Windows молча
+    принимает любой GUID и заводит под него ветку реестра, поэтому
+    исчезнувший адаптер надо отсечь до записи.
+    """
+    guids = list(dict.fromkeys(str(item or "").strip() for item in guids if str(item or "").strip()))
+    names = {adapter.guid: adapter.name for adapter in load_state().adapters}
+    templates = doh_templates() if winapi.is_doh_supported() else None
+    errors: list[str] = []
+    for guid in guids:
+        if guid not in names:
+            errors.append(f"адаптер {guid} не найден — он отключён или удалён")
+            continue
+        try:
+            winapi.write_dns(guid, ipv4, ipv6=False, doh_templates=templates)
+            winapi.write_dns(guid, ipv6, ipv6=True, doh_templates=templates)
+        except (winapi.DnsWinApiError, ValueError) as exc:
+            errors.append(f"«{names[guid]}»: {exc}")
+    if len(errors) < len(guids):
+        winapi.flush_resolver_cache()
+    message = "; ".join(errors)
+    if message:
+        log(f"DNS: {message}", "WARNING")
+    return DnsCommandResult(
+        success=not errors,
+        message=message,
+        affected_count=len(guids) - len(errors),
+        total_count=len(guids),
+    )
 
 
-def apply_auto_dns(adapters: list[str]) -> int:
-    dns_manager = _get_dns_manager()
-    success_count = 0
-    for adapter in adapters:
-        ok_v4, _ = dns_manager.set_auto_dns(adapter, "IPv4")
-        ok_v6, _ = dns_manager.set_auto_dns(adapter, "IPv6")
-        if ok_v4 and ok_v6:
-            success_count += 1
-    dns_manager.flush_dns_cache()
-    return success_count
+def reset_to_auto(guids: list[str]) -> DnsCommandResult:
+    return apply_dns(guids, [], [])
 
 
-def apply_provider_dns(
-    adapters: list[str],
-    ipv4: list[str],
-    ipv6: list[str],
-    *,
-    ipv6_available: bool,
-) -> int:
-    dns_manager = _get_dns_manager()
-    success_count = 0
-    for adapter in adapters:
-        ok_v4 = True
-        if ipv4:
-            ok_v4, _ = dns_manager.set_custom_dns(
-                adapter,
-                ipv4[0],
-                ipv4[1] if len(ipv4) > 1 else None,
-                "IPv4",
-            )
-        ok_v6 = True
-        if ipv6_available and ipv6:
-            ok_v6, _ = dns_manager.set_custom_dns(
-                adapter,
-                ipv6[0],
-                ipv6[1] if len(ipv6) > 1 else None,
-                "IPv6",
-            )
-        if ok_v4 and ok_v6:
-            success_count += 1
-    dns_manager.flush_dns_cache()
-    return success_count
+def flush_dns_cache() -> DnsCommandResult:
+    if winapi.flush_resolver_cache():
+        return DnsCommandResult(success=True)
+    return DnsCommandResult(success=False, message="Windows не смогла очистить кэш DNS")
 
 
-def flush_dns_cache() -> tuple[bool, str]:
-    return _get_dns_manager().flush_dns_cache()
+def adapters_with_static_dns() -> tuple[DnsAdapter, ...]:
+    return tuple(adapter for adapter in load_state().adapters if not adapter.is_automatic)
+
+
+__all__ = [
+    "adapters_with_static_dns",
+    "apply_dns",
+    "consume_warmed_state",
+    "flush_dns_cache",
+    "load_state",
+    "reset_to_auto",
+    "warm_state",
+]

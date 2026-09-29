@@ -1,40 +1,18 @@
 from __future__ import annotations
 
-import ast
+import importlib.util
 import inspect
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, Mock, patch
 
 from app.feature_facades.dns import build_dns_feature
 from dns import commands as dns_commands
-from dns import dns_check_plans, dns_check_worker, dns_worker, page_workers
+from dns import dns_check_plans, dns_check_worker, page_workers
 from dns.ui.dns_check_page import DNSCheckPage
 
 
 class DnsWorkerArchitectureTests(unittest.TestCase):
-    def test_force_dns_defaults_use_quad9_and_dns_sb(self) -> None:
-        source = Path("src/dns/dns_force.py").read_text(encoding="utf-8")
-        module = ast.parse(source)
-        class_body = next(
-            node.body
-            for node in module.body
-            if isinstance(node, ast.ClassDef) and node.name == "DNSForceManager"
-        )
-        constants = {
-            assign.targets[0].id: ast.literal_eval(assign.value)
-            for assign in class_body
-            if isinstance(assign, ast.Assign)
-            and len(assign.targets) == 1
-            and isinstance(assign.targets[0], ast.Name)
-        }
-
-        self.assertEqual(constants["DNS_PRIMARY"], "9.9.9.9")
-        self.assertEqual(constants["DNS_SECONDARY"], "185.222.222.222")
-        self.assertEqual(constants["DNS_PRIMARY_V6"], "2620:fe::fe")
-        self.assertEqual(constants["DNS_SECONDARY_V6"], "2a09::")
-
     def test_network_action_workers_receive_feature_action_callables(self) -> None:
         feature_source = inspect.getsource(build_dns_feature)
         worker_source = "\n".join(
@@ -55,25 +33,23 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
 
         for expected in (
             "flush_dns_cache=flush_dns_cache",
-            "apply_auto_dns=apply_auto_dns",
-            "apply_provider_dns=apply_provider_dns",
-            "refresh_dns_info=refresh_dns_info",
+            "apply_dns=apply_dns",
+            "reset_to_auto=reset_to_auto",
+            "load_state=load_state",
             "measure_dns_latency=measure_dns_latency",
             "is_isp_dns_warning_shown=is_isp_dns_warning_shown",
             "mark_isp_dns_warning_shown=mark_isp_dns_warning_shown",
-            "normalize_adapter_alias=feature.normalize_adapter_alias",
         ):
             self.assertIn(expected, feature_source)
 
         for expected in (
             "_flush_dns_cache",
-            "_apply_auto_dns",
-            "_apply_provider_dns",
-            "_refresh_dns_info",
+            "_apply_dns",
+            "_reset_to_auto",
+            "_load_state",
             "_measure_dns_latency",
             "_is_isp_dns_warning_shown",
             "_mark_isp_dns_warning_shown",
-            "_normalize_adapter_alias",
         ):
             self.assertIn(expected, worker_source)
 
@@ -370,28 +346,19 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
         self.assertFalse(page._check_pending)
         page.start_check.assert_called_once_with()
 
-    def test_startup_dns_apply_uses_one_shot_runtime(self) -> None:
-        module_source = inspect.getsource(dns_worker)
-        async_source = inspect.getsource(dns_worker.apply_dns_on_startup_async)
-        cleanup_source = inspect.getsource(dns_worker._cleanup_startup_worker)
-
-        self.assertIn("_startup_runtime = OneShotWorkerRuntime()", module_source)
-        self.assertIn("DNS startup apply disabled: manual mode only", async_source)
-        self.assertIn("return False", async_source)
-        self.assertNotIn("_startup_runtime.start_qthread_worker", async_source)
-        self.assertNotIn("QTimer.singleShot", async_source)
-        self.assertIn("_startup_runtime.stop", cleanup_source)
-        self.assertIn("_startup_runtime.cancel", cleanup_source)
-        self.assertNotIn("_startup_worker = None", module_source)
-        self.assertNotIn("global _startup_worker", async_source)
-        self.assertNotIn("worker.start()", async_source)
-        self.assertNotIn("worker.deleteLater()", cleanup_source)
+    def test_dns_layer_has_no_force_or_startup_dns(self) -> None:
+        for module in ("dns.dns_core", "dns.dns_force", "dns.dns_worker", "main.post_startup_dns"):
+            with self.subTest(module=module):
+                self.assertIsNone(importlib.util.find_spec(module))
 
     def test_dns_feature_does_not_expose_heavy_direct_commands(self) -> None:
         feature = build_dns_feature()
 
         for attr_name in (
             "load_page_data",
+            "load_state",
+            "apply_dns",
+            "reset_to_auto",
             "refresh_dns_info",
             "apply_auto_dns",
             "apply_provider_dns",

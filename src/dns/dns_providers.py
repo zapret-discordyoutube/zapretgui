@@ -105,8 +105,45 @@ DNS_PROVIDERS = {
             "color": "#2196f3",
             "doh": "https://dns.malw.link/dns-query"
         },
+        # Адреса — у официального имени DoH dns.astracat.network: опубликованный
+        # на сайте 85.209.2.112 на обычные DNS-запросы не отвечает (проверено 2026-09-29).
+        "AstraCat": {
+            "ipv4": ["135.106.217.200", "135.106.197.22"],
+            "ipv6": [],
+            "desc": "ChatGPT, без рекламы",
+            "icon": "fa5s.cat",
+            "color": "#ff7043",
+            "doh": "https://dns.astracat.network/dns-query"
+        },
+        # Российская пара из официального geohide.ru/static/metadata/servers.json.
+        # Подменяет ответы только для сайтов из своего списка (ChatGPT, Grok, Notion…).
+        "GeoHide": {
+            "ipv4": ["193.233.112.67", "193.233.112.68"],
+            "ipv6": [],
+            "desc": "ChatGPT, Grok, Notion",
+            "icon": "fa5s.globe-europe",
+            "color": "#26a69a",
+            "doh": "https://geohide.ru/dns-query"
+        },
     }
 }
+
+def doh_templates() -> dict[str, str]:
+    """{адрес сервера: шаблон DoH} для всех серверов списка (IPv4 и IPv6).
+
+    Windows 11 по этим шаблонам сама шифрует DNS-запросы к известным
+    серверам, а при недоступности DoH откатывается на обычный DNS.
+    """
+    templates: dict[str, str] = {}
+    for group in DNS_PROVIDERS.values():
+        for data in group.values():
+            template = str(data.get("doh") or "").strip()
+            if not template:
+                continue
+            for address in (*data.get("ipv4", ()), *data.get("ipv6", ())):
+                templates.setdefault(str(address).strip(), template)
+    return templates
+
 
 # Старые адреса DNS из списка выше и их новые замены.
 # Если пользователь когда-то выбрал этот DNS и адрес остался в настройках
