@@ -34,8 +34,8 @@ def apply_strategy_started_progress(
     set_state_text(status_label, f"Статус подбора стратегии: {progress_plan.status_text}")
 
 
-def append_scan_log(*, log_edit, message: str) -> None:
-    log_edit.append(message)
+def append_scan_log(*, log_lines, message: str) -> None:
+    log_lines.append(str(message or ""))
 
 
 def apply_phase_change(*, status_label, phase: str) -> None:

@@ -5,9 +5,8 @@ import html
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QHBoxLayout
-from PyQt6.QtGui import QFont, QTextCursor
 
-from ui.pages.base_page import BasePage, ScrollBlockingTextEdit
+from ui.pages.base_page import BasePage
 from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 import dns.dns_check_plans as dns_check_page_plans
@@ -15,6 +14,7 @@ from ui.fluent_widgets import SettingsCard, set_tooltip
 from ui.theme import get_theme_tokens
 from ui.theme_semantic import get_semantic_palette
 from ui.accessibility import set_control_accessibility, set_state_text
+from ui.log_report_dialog import show_log_report_dialog
 from app.ui_texts import tr as tr_catalog
 
 from qfluentwidgets import (
@@ -24,7 +24,6 @@ from qfluentwidgets import (
     PrimaryPushButton,
     PushButton,
     CaptionLabel,
-    TransparentPushButton,
 )
 
 from dns.ui.dns_check_widgets import DnsDomainsView, DnsSummaryPanel
@@ -43,7 +42,9 @@ class DNSCheckPage(BasePage):
         )
         self._dns = dns_feature
         self._open_dns_settings = open_dns_settings
-        self._log_expanded = False
+        # Строки подробного лога: (текст, цветовая роль). HTML собирается при
+        # открытии окна, чтобы цвета соответствовали текущей теме.
+        self._results_log_entries: list[tuple[str, str]] = []
         self._cleanup_in_progress = False
         self._check_runtime = OneShotWorkerRuntime()
         self._check_state = LatestValueWorkerState(
@@ -88,15 +89,17 @@ class DNSCheckPage(BasePage):
     def _update_action_button_state_text(self) -> None:
         self._set_action_button_state_text(self.check_button, "Начать полную проверку DNS")
         self._set_action_button_state_text(self.save_button, "Сохранить результаты проверки DNS")
+        log_button = self.__dict__.get("log_button")
+        if log_button is not None:
+            self._set_action_button_state_text(log_button, "Открыть подробный лог проверки DNS")
     
     def _build_ui(self):
         """Создаёт интерфейс страницы.
 
         Страница живёт во вкладке BlockCheck, поэтому без шапок у карточек,
         карточки «Что проверяем» и подписи «Действия»: кнопки и статус — одна
-        строка, под ней отчёт.
+        строка, под ней итог. Подробный лог открывается в отдельном окне.
         """
-        tokens = get_theme_tokens()
         self.control_card = SettingsCard()
         row = QHBoxLayout()
         row.setSpacing(10)
@@ -131,6 +134,24 @@ class DNSCheckPage(BasePage):
         )
         row.addSpacing(8)
         row.addWidget(self.status_label, 1)
+
+        self.log_button = PushButton(
+            tr_catalog("page.dns_check.button.log", language=self._ui_language, default="Подробный лог"),
+            icon=FluentIcon.DOCUMENT,
+        )
+        log_description = self._action_description(
+            "page.dns_check.action.log.description",
+            "Открыть текстовый отчёт проверки: какие адреса пришли и почему решено именно так.",
+        )
+        set_tooltip(self.log_button, log_description)
+        set_control_accessibility(
+            self.log_button,
+            name="Открыть подробный лог проверки DNS",
+            description=log_description,
+        )
+        self.log_button.setEnabled(False)
+        self.log_button.clicked.connect(self._open_log)
+        row.addWidget(self.log_button)
 
         self.save_button = PushButton(
             tr_catalog("page.dns_check.button.save", language=self._ui_language, default="Сохранить результаты"),
@@ -167,56 +188,39 @@ class DNSCheckPage(BasePage):
         self.domains_card.setVisible(False)
         self.layout.addWidget(self.domains_card)
 
-        # Подробный лог — свёрнут, его можно сохранить в файл.
-        self.results_card = SettingsCard()
-        log_header = QHBoxLayout()
-        self.log_toggle_btn = TransparentPushButton("Подробный лог", icon=FluentIcon.CHEVRON_RIGHT_MED)
-        set_control_accessibility(
-            self.log_toggle_btn,
-            name="Показать подробный лог проверки DNS",
-            description="Текстовый отчёт проверки: какие адреса пришли и почему решено именно так.",
-        )
-        self.log_toggle_btn.clicked.connect(self._toggle_log)
-        log_header.addWidget(self.log_toggle_btn)
-        log_header.addStretch(1)
-        self.results_card.add_layout(log_header)
-        self.result_text = ScrollBlockingTextEdit()
-        self.result_text.setReadOnly(True)
-        self.result_text.setFont(QFont("Consolas", 10))
-        self.result_text.setMinimumHeight(300)
-        set_control_accessibility(
-            self.result_text,
-            name="Результаты проверки DNS",
-            description="Здесь появляется текстовый отчёт DNS-проверки.",
-        )
-        set_state_text(self.result_text, "Результаты проверки DNS: проверка ещё не запускалась")
-        self.result_text.setStyleSheet(
-            f"""
-            QTextEdit {{
-                background-color: {tokens.surface_bg};
-                color: {tokens.fg};
-                border: 1px solid {tokens.surface_border};
-                border-radius: 6px;
-                padding: 12px;
-            }}
-            """
-        )
-        self.result_text.setVisible(False)
-        self.results_card.add_widget(self.result_text)
-        self.layout.addWidget(self.results_card)
         self.layout.addStretch()
 
-    def _toggle_log(self) -> None:
-        self._log_expanded = not self._log_expanded
-        self.result_text.setVisible(self._log_expanded)
-        self.log_toggle_btn.setText("Скрыть подробный лог" if self._log_expanded else "Подробный лог")
-        self.log_toggle_btn.setIcon(FluentIcon.CHEVRON_DOWN_MED if self._log_expanded else FluentIcon.CHEVRON_RIGHT_MED)
-        name = "Скрыть подробный лог проверки DNS" if self._log_expanded else "Показать подробный лог проверки DNS"
-        set_control_accessibility(
-            self.log_toggle_btn,
-            name=name,
+    def _open_log(self) -> None:
+        show_log_report_dialog(
+            self.window(),
+            title="Подробный лог проверки DNS",
+            text=self._resolve_save_results_text(None),
+            html=self._build_results_log_html(),
+            empty_text="Проверка ещё не запускалась.",
             description="Текстовый отчёт проверки: какие адреса пришли и почему решено именно так.",
         )
+
+    def _build_results_log_html(self) -> str:
+        tokens = get_theme_tokens()
+        semantic = get_semantic_palette()
+        role_map = {
+            "success": semantic.success,
+            "error": semantic.error,
+            "warning": semantic.warning,
+            "blocked": "#e91e63",
+            "accent": tokens.accent_hex,
+            "faint": tokens.fg_faint,
+            "normal": tokens.fg,
+        }
+        lines = []
+        for text, role in self._results_log_entries:
+            color = role_map.get(role, tokens.fg)
+            lines.append(f'<span style="color: {color};">{html.escape(text)}</span>')
+        return f'<div style="white-space: pre-wrap;">{"<br>".join(lines)}</div>'
+
+    def _set_log_available(self, available: bool) -> None:
+        self.log_button.setEnabled(bool(available))
+        self._update_action_button_state_text()
 
     def _set_status(self, text: str, *, tone: str, bold: bool) -> None:
         tokens = get_theme_tokens()
@@ -250,22 +254,7 @@ class DNSCheckPage(BasePage):
 
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
-        tokens = tokens or get_theme_tokens()
-        try:
-            self.result_text.setStyleSheet(
-                f"""
-                QTextEdit {{
-                    background-color: {tokens.surface_bg};
-                    color: {tokens.fg};
-                    border: 1px solid {tokens.surface_border};
-                    border-radius: 6px;
-                    padding: 12px;
-                }}
-                """
-            )
-        except Exception:
-            pass
-
+        _ = tokens
         try:
             self._set_status(self.status_label.text(), tone=self._status_tone, bold=self._status_bold)
         except Exception:
@@ -280,9 +269,9 @@ class DNSCheckPage(BasePage):
         state.pending = False
         self._cleanup_in_progress = False
         
-        self.result_text.clear()
-        set_state_text(self.result_text, "Результаты проверки DNS: проверка ещё не запускалась")
         self._clear_results_plain_text_cache()
+        self._results_log_entries = []
+        self._set_log_available(False)
         self.summary_panel.set_pending()
         self.domains_view.clear()
         self.domains_card.setVisible(False)
@@ -310,33 +299,11 @@ class DNSCheckPage(BasePage):
         if self._cleanup_in_progress:
             return
         self._append_results_plain_text_cache(text)
-        tokens = get_theme_tokens()
-        semantic = get_semantic_palette()
         plan = dns_check_page_plans.build_result_line_plan(text)
-        role_map = {
-            "success": semantic.success,
-            "error": semantic.error,
-            "warning": semantic.warning,
-            "blocked": "#e91e63",
-            "accent": tokens.accent_hex,
-            "faint": tokens.fg_faint,
-            "normal": tokens.fg,
-        }
-        color = role_map.get(plan.color_role, tokens.fg)
-        
-        safe_text = html.escape(str(text or ""))
-        formatted_text = f'<span style="color: {color};">{safe_text}</span>'
-        
-        # Добавляем в текстовое поле
-        cursor = self.result_text.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(formatted_text + "<br>")
-        
-        # Автопрокрутка
-        self.result_text.verticalScrollBar().setValue(
-            self.result_text.verticalScrollBar().maximum()
-        )
-    
+        self._results_log_entries.append((str(text or ""), plan.color_role))
+        if not self.log_button.isEnabled():
+            self._set_log_available(True)
+
     def on_check_finished(self, request_id: int, results):
         """Обработчик завершения проверки."""
         if not self._check_runtime.is_current(

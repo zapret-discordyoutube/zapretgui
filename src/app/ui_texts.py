@@ -1225,6 +1225,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Начать проверку",
         "en": "Start check",
     },
+    "page.dns_check.button.log": {
+        "ru": "Подробный лог",
+        "en": "Detailed log",
+    },
     "page.dns_check.button.save": {
         "ru": "Сохранить результаты",
         "en": "Save results",

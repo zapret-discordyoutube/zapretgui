@@ -8,7 +8,6 @@ from blockcheck.strategy_scan_state import (
     StrategyScanFinishPlan,
     StrategyScanInteractionPlan,
     StrategyScanLanguagePlan,
-    StrategyScanLogExpandPlan,
     StrategyScanNotificationPlan,
     StrategyScanProgressPlan,
     StrategyScanProtocolUiPlan,
@@ -154,31 +153,12 @@ def mode_hint_text(index: int, *, language: str | None = None) -> str:
     return tr_catalog(key, language=language, default=default)
 
 
-def build_log_expand_plan(*, expanded: bool, language: str) -> StrategyScanLogExpandPlan:
-    """Лог раскрывается внутри своей карточки, остальная вкладка остаётся на месте."""
-    return StrategyScanLogExpandPlan(
-        control_visible=True,
-        warning_visible=True,
-        results_visible=True,
-        log_min_height=200,
-        log_max_height=360,
-        button_text=_log_button_text(expanded, language),
-    )
-
-
-def _log_button_text(expanded: bool, language: str | None) -> str:
-    if expanded:
-        return tr_catalog("page.strategy_scan.collapse_log", language=language, default="Скрыть подробный лог")
-    return tr_catalog("page.strategy_scan.expand_log", language=language, default="Подробный лог")
-
-
-def build_language_plan(*, language: str, log_expanded: bool) -> StrategyScanLanguagePlan:
+def build_language_plan(*, language: str) -> StrategyScanLanguagePlan:
     def _tr(key: str, default: str) -> str:
         return tr_catalog(key, language=language, default=default)
 
     return StrategyScanLanguagePlan(
-        log_caption=_tr("page.strategy_scan.log", "Подробный лог"),
-        expand_log_text=_log_button_text(log_expanded, language),
+        log_button_text=_tr("page.strategy_scan.log", "Подробный лог"),
         protocol_label=_tr("page.strategy_scan.protocol", "Что должно заработать?"),
         target_label=_tr("page.strategy_scan.target", "Какой сайт проверить:"),
         mode_label=_tr("page.strategy_scan.mode", "Тщательность:"),

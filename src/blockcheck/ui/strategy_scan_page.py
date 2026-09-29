@@ -5,6 +5,7 @@ Tests strategies one by one through winws2 + HTTPS probe.
 """
 
 import logging
+from collections import deque
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer
@@ -32,10 +33,11 @@ from blockcheck.strategy_scan_run_workflow import (
 )
 from blockcheck.ui.strategy_scan_page_runtime_helpers import (
     apply_language_plan_ui,
-    apply_log_expand_state,
     set_support_status,
 )
 from ui.latest_value_worker_state import LatestValueWorkerState
+from ui.log_limits import BLOCKCHECK_LOG_VIEW_MAX_LINES
+from ui.log_report_dialog import show_log_report_dialog
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.popup_menu import exec_popup_menu
 from ui.accessibility import set_control_accessibility, set_state_text
@@ -98,7 +100,8 @@ class StrategyScanPage(BasePage):
         self._games_scope_label: QLabel | None = None
         self._games_scope_combo = None
         self._udp_scope_hint_label: QLabel | None = None
-        self._log_caption = None
+        # Подробный лог подбора; показывается в отдельном окне по кнопке.
+        self._log_lines: deque[str] = deque(maxlen=BLOCKCHECK_LOG_VIEW_MAX_LINES)
         self._result_objects: list = []
         self._scan_panel = None
         self._protocol_label = None
@@ -207,20 +210,17 @@ class StrategyScanPage(BasePage):
         self.add_widget(self._scan_panel)
         self.add_widget(self._results_card)
 
-        # ── Подробный лог (свёрнут) ──
-        self._log_expanded = False
+        # ── Подробный лог (в отдельном окне) и обращение ──
         log_widgets = build_strategy_scan_log_section(
             tr_fn=lambda key, default: tr_catalog(key, default=default),
             push_button_cls=PushButton,
-            on_toggle_log_expand=self._toggle_log_expand,
+            on_open_log=self._open_log,
             on_prepare_support=self._prepare_support_from_strategy_scan,
         )
         self._log_card = log_widgets.log_card
-        self._log_caption = log_widgets.log_caption
-        self._expand_log_btn = log_widgets.expand_log_btn
+        self._log_btn = log_widgets.log_btn
         self._support_status_label = log_widgets.support_status_label
         self._prepare_support_btn = log_widgets.prepare_support_btn
-        self._log_edit = log_widgets.log_edit
         self.add_widget(self._log_card)
 
         self._update_control_accessibility()
@@ -234,18 +234,18 @@ class StrategyScanPage(BasePage):
         self._mode_hint_label.setText(mode_hint_text(self._mode_combo.currentIndex(), language=self._ui_language))
 
     # ------------------------------------------------------------------
-    # Log expand / collapse
+    # Log
     # ------------------------------------------------------------------
 
-    def _toggle_log_expand(self):
-        """Показать или скрыть подробный лог (он раскрывается в своей карточке)."""
-        self._log_expanded = not self._log_expanded
-        apply_log_expand_state(
-            blockcheck_feature=self._blockcheck,
-            expanded=self._log_expanded,
-            language=self._ui_language,
-            log_edit=self._log_edit,
-            expand_log_btn=self._expand_log_btn,
+    def _open_log(self) -> None:
+        """Подробный лог открывается в отдельном окне; во время подбора — снимок на момент открытия."""
+        show_log_report_dialog(
+            self.window(),
+            title="Подробный лог подбора стратегии",
+            text="\n".join(self._log_lines),
+            empty_text="Подбор ещё не запускался.",
+            description="Технический лог подбора стратегии — он нужен для обращения в поддержку.",
+            scroll_to_end=True,
         )
 
     # ------------------------------------------------------------------
@@ -470,8 +470,7 @@ class StrategyScanPage(BasePage):
         apply_language_plan_ui(
             blockcheck_feature=self._blockcheck,
             language=language,
-            log_expanded=self._log_expanded,
-            expand_log_btn=self._expand_log_btn,
+            log_btn=self._log_btn,
             protocol_label=self._protocol_label,
             mode_label=self._mode_label,
             mode_combo=self._mode_combo,
@@ -523,8 +522,7 @@ class StrategyScanPage(BasePage):
         self._results_card.setVisible(False)
         self._result_rows.clear()
         self._result_objects.clear()
-        self._log_edit.clear()
-        set_state_text(self._log_edit, "Подробный лог подбора стратегии: пока нет записей")
+        self._log_lines.clear()
         self._set_support_status("")
 
         self._scan_target = run_result.target
@@ -775,7 +773,7 @@ class StrategyScanPage(BasePage):
         if self._cleanup_in_progress:
             return
         append_scan_log(
-            log_edit=self._log_edit,
+            log_lines=self._log_lines,
             message=message,
         )
 

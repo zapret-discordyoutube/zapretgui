@@ -1,47 +1,17 @@
-"""Смена языка и раскрытие лога на вкладке «Подбор стратегии»."""
+"""Смена языка на вкладке «Подбор стратегии»."""
 
 from __future__ import annotations
 
-from qfluentwidgets import FluentIcon
-
 from app.ui_texts import tr as tr_catalog
-from ui.accessibility import set_control_accessibility, set_state_text
+from ui.accessibility import set_state_text
 from ui.fluent_widgets import set_tooltip
-
-
-def apply_log_expand_state(
-    *,
-    blockcheck_feature,
-    expanded: bool,
-    language: str,
-    log_edit,
-    expand_log_btn,
-) -> None:
-    """Лог раскрывается внутри своей карточки; остальная вкладка остаётся на месте."""
-    plan = blockcheck_feature.build_log_expand_plan(expanded=expanded, language=language)
-    log_edit.setMinimumHeight(plan.log_min_height)
-    log_edit.setMaximumHeight(plan.log_max_height)
-    log_edit.setVisible(bool(expanded))
-    expand_log_btn.setText(plan.button_text)
-    try:
-        expand_log_btn.setIcon(FluentIcon.CHEVRON_DOWN_MED if expanded else FluentIcon.CHEVRON_RIGHT_MED)
-    except Exception:
-        pass
-    name = "Скрыть подробный лог подбора стратегии" if expanded else "Показать подробный лог подбора стратегии"
-    set_control_accessibility(
-        expand_log_btn,
-        name=name,
-        description="Технический лог подбора — он нужен для обращения в поддержку.",
-    )
-    set_state_text(expand_log_btn, name)
 
 
 def apply_language_plan_ui(
     *,
     blockcheck_feature,
     language: str,
-    log_expanded: bool,
-    expand_log_btn,
+    log_btn,
     protocol_label,
     mode_label,
     mode_combo,
@@ -54,8 +24,8 @@ def apply_language_plan_ui(
     games_scope_combo,
     quick_domain_btn,
 ) -> None:
-    plan = blockcheck_feature.build_language_plan(language=language, log_expanded=log_expanded)
-    expand_log_btn.setText(plan.expand_log_text)
+    plan = blockcheck_feature.build_language_plan(language=language)
+    log_btn.setText(plan.log_button_text)
     for label, text in (
         (protocol_label, plan.protocol_label),
         (mode_label, plan.mode_label),

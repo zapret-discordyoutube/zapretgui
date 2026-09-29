@@ -15,16 +15,6 @@ from dns.ui.dns_check_page import DNSCheckPage
 from dns.ui.page import NetworkPage
 
 
-class _PlainTextResult:
-    def __init__(self, text: str) -> None:
-        self._text = str(text)
-        self.read_calls = 0
-
-    def toPlainText(self) -> str:  # noqa: N802
-        self.read_calls += 1
-        return self._text
-
-
 class DnsWorkerArchitectureTests(unittest.TestCase):
     def test_force_dns_defaults_use_quad9_and_dns_sb(self) -> None:
         source = Path("src/dns/dns_force.py").read_text(encoding="utf-8")
@@ -1135,26 +1125,23 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
         page._save_runtime = SimpleNamespace(is_running=Mock(return_value=True), start_qthread_worker=Mock())
         page._save_results_pending = None
         page._save_results_start_scheduled = False
-        page.result_text = _PlainTextResult("latest dns report")
+        page._results_plain_text_cache = "latest dns report"
 
         DNSCheckPage._start_save_results_worker(page, file_path="first.txt", plain_text=None)
 
-        self.assertEqual(page.result_text.read_calls, 0)
         page._save_runtime.start_qthread_worker.assert_not_called()
         self.assertEqual(page._save_results_pending, {"file_path": "first.txt", "plain_text": None})
 
-    def test_dns_check_save_uses_cached_result_text_without_reading_widget(self) -> None:
+    def test_dns_check_save_uses_cached_result_text(self) -> None:
         page = DNSCheckPage.__new__(DNSCheckPage)
         page._save_runtime = SimpleNamespace(is_running=Mock(return_value=False), start_qthread_worker=Mock())
         page._save_results_pending = None
         page._save_results_start_scheduled = False
         page._results_plain_text_cache = "cached dns report"
-        page.result_text = _PlainTextResult("widget dns report")
         page.create_dns_check_save_worker = Mock(return_value="worker")
 
         DNSCheckPage._start_save_results_worker(page, file_path="first.txt", plain_text=None)
 
-        self.assertEqual(page.result_text.read_calls, 0)
         page._save_runtime.start_qthread_worker.assert_called_once()
         worker_factory = page._save_runtime.start_qthread_worker.call_args.kwargs["worker_factory"]
 
@@ -1290,14 +1277,14 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
         page = DNSCheckPage.__new__(DNSCheckPage)
         page._check_runtime = SimpleNamespace(is_running=Mock(return_value=True))
         page._check_pending = False
-        page.result_text = Mock()
+        page._set_log_available = Mock()
         page._apply_interaction_state = Mock()
         page._set_status = Mock()
 
         DNSCheckPage.start_check(page)
 
         self.assertTrue(page._check_pending)
-        page.result_text.clear.assert_not_called()
+        page._set_log_available.assert_not_called()
         page._apply_interaction_state.assert_not_called()
         page._set_status.assert_not_called()
 

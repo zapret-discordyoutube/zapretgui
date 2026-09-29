@@ -186,9 +186,6 @@ class BlockcheckFeature:
     def build_apply_error_plan(self, *args, **kwargs):
         return self._commands().build_apply_error_plan(*args, **kwargs)
 
-    def build_log_expand_plan(self, *args, **kwargs):
-        return self._commands().build_log_expand_plan(*args, **kwargs)
-
     def build_language_plan(self, *args, **kwargs):
         return self._commands().build_language_plan(*args, **kwargs)
 

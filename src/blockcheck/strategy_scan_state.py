@@ -120,19 +120,8 @@ class StrategyScanInteractionPlan:
 
 
 @dataclass(slots=True)
-class StrategyScanLogExpandPlan:
-    control_visible: bool
-    warning_visible: bool
-    results_visible: bool
-    log_min_height: int
-    log_max_height: int
-    button_text: str
-
-
-@dataclass(slots=True)
 class StrategyScanLanguagePlan:
-    log_caption: str
-    expand_log_text: str
+    log_button_text: str
     protocol_label: str
     target_label: str
     mode_label: str

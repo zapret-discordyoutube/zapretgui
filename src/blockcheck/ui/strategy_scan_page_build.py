@@ -6,23 +6,20 @@
    и большая кнопка «Найти рабочую стратегию».
 2. Панель хода и итога с талисманом (``ScanProgressPanel``).
 3. Результаты: найденные стратегии и свёрнутые группы остальных.
-4. Подробный лог — свёрнут, раскрывается по строке «Подробный лог».
+4. Строка «Подробный лог» (открывается в отдельном окне) и «Подготовить обращение».
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QHBoxLayout
-from qfluentwidgets import CaptionLabel, FluentIcon, TransparentPushButton
+from qfluentwidgets import CaptionLabel, FluentIcon
 
 from blockcheck.strategy_scan_page_plans import MODE_ITEMS, PROTOCOL_ITEMS, PROTOCOL_TILE_DETAILS
 from blockcheck.ui.strategy_scan_widgets import ChoiceRadios, ChoiceTiles, ScanProgressPanel, StrategyResultsView
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import SettingsCard, set_tooltip
-from ui.log_limits import BLOCKCHECK_LOG_VIEW_MAX_LINES, apply_text_line_limit
-from ui.pages.base_page import ScrollBlockingTextEdit
 
 
 @dataclass(slots=True)
@@ -55,11 +52,9 @@ class StrategyScanResultsWidgets:
 @dataclass(slots=True)
 class StrategyScanLogWidgets:
     log_card: object
-    log_caption: object
-    expand_log_btn: object
+    log_btn: object
     support_status_label: object
     prepare_support_btn: object
-    log_edit: object
 
 
 def _set_action_accessibility(widget, *, name: str, description: str) -> None:
@@ -234,20 +229,18 @@ def build_strategy_scan_results_section(*, on_apply_best) -> StrategyScanResults
     )
 
 
-def build_strategy_scan_log_section(*, tr_fn, push_button_cls, on_toggle_log_expand, on_prepare_support) -> StrategyScanLogWidgets:
+def build_strategy_scan_log_section(*, tr_fn, push_button_cls, on_open_log, on_prepare_support) -> StrategyScanLogWidgets:
     log_card = SettingsCard()
 
     log_header = QHBoxLayout()
-    expand_log_btn = TransparentPushButton(tr_fn("page.strategy_scan.log", "Подробный лог"), icon=FluentIcon.CHEVRON_RIGHT_MED)
+    log_btn = push_button_cls(tr_fn("page.strategy_scan.log", "Подробный лог"), icon=FluentIcon.DOCUMENT)
     _set_action_accessibility(
-        expand_log_btn,
-        name="Показать подробный лог подбора стратегии",
-        description="Раскрывает технический лог подбора — он нужен для обращения в поддержку.",
+        log_btn,
+        name="Открыть подробный лог подбора стратегии",
+        description="Открывает технический лог подбора в отдельном окне — он нужен для обращения в поддержку.",
     )
-    expand_log_btn.clicked.connect(on_toggle_log_expand)
-    log_header.addWidget(expand_log_btn)
-    # Подпись лога живёт в самой кнопке раскрытия.
-    log_caption = None
+    log_btn.clicked.connect(on_open_log)
+    log_header.addWidget(log_btn)
     support_status_label = CaptionLabel("")
     support_status_label.setWordWrap(True)
     set_state_text(support_status_label, "Статус обращения по подбору стратегии: нет статуса")
@@ -266,26 +259,9 @@ def build_strategy_scan_log_section(*, tr_fn, push_button_cls, on_toggle_log_exp
     log_header.addWidget(prepare_support_btn)
     log_card.add_layout(log_header)
 
-    log_edit = ScrollBlockingTextEdit()
-    set_control_accessibility(
-        log_edit,
-        name="Подробный лог подбора стратегии",
-        description="Здесь появляется подробный текстовый лог подбора стратегии.",
-    )
-    set_state_text(log_edit, "Подробный лог подбора стратегии: пока нет записей")
-    log_edit.setReadOnly(True)
-    log_edit.setMinimumHeight(200)
-    log_edit.setMaximumHeight(360)
-    log_edit.setFont(QFont("Consolas", 9))
-    apply_text_line_limit(log_edit, BLOCKCHECK_LOG_VIEW_MAX_LINES)
-    log_edit.setVisible(False)
-    log_card.add_widget(log_edit)
-
     return StrategyScanLogWidgets(
         log_card=log_card,
-        log_caption=log_caption,
-        expand_log_btn=expand_log_btn,
+        log_btn=log_btn,
         support_status_label=support_status_label,
         prepare_support_btn=prepare_support_btn,
-        log_edit=log_edit,
     )
