@@ -213,11 +213,14 @@ def switch_presets_async(runtime_owner, launch_method: str | None = None, *, del
         runtime_owner.restart_dpi_async()
         return
 
-    if _redirect_preset_switch_if_owner_differs(runtime_owner, method):
-        return
-
+    # Сначала debounce, потом смена владельца: иначе при чужом владельце
+    # (запущен zapret1, выбран пресет zapret2) каждый щелчок сразу начинал
+    # полный stop+start, минуя склейку быстрых щелчков.
     if int(delay_ms or 0) > 0:
         _schedule_debounced_presets_switch(runtime_owner, method, int(delay_ms))
+        return
+
+    if _redirect_preset_switch_if_owner_differs(runtime_owner, method):
         return
 
     _cancel_debounced_presets_switch(runtime_owner)

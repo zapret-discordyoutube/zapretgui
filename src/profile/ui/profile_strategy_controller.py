@@ -167,10 +167,30 @@ class ProfileStrategyController:
         # Страница могла принять persistent-ссылку уже после старта запроса —
         # позиционный ключ того же профиля не повод выбрасывать результат.
         item_key = str(getattr(getattr(page.__dict__.get("_payload"), "item", None), "key", "") or "").strip()
-        if requested not in {current, item_key}:
+        if requested not in {current, item_key, self._current_profile_reference()}:
+            # Стратегия записана в профиль, открытый при щелчке, а страница уже
+            # показывает другой: её не трогаем, но список профилей узнаёт о
+            # записи (он пропускает ревизии strategy_only и ждёт этот сигнал).
+            result_item = getattr(
+                _page_module()._profile_setup_payload_and_apply_signature(payload)[0] if payload is not None else None,
+                "item",
+                None,
+            )
+            written_key = str(profile_key or requested).strip()
+            if written_key:
+                if result_item is not None:
+                    page._on_profile_changed_callback(written_key, "strategy", result_item)
+                else:
+                    page._on_profile_changed_callback(written_key, "strategy")
             return
         pending_strategy_id = str(page._strategy_apply_state_obj().pending or "").strip()
-        if pending_strategy_id and pending_strategy_id != str(strategy_id or "").strip():
+        pending_profile_key = str(page.__dict__.get("_strategy_apply_pending_profile_key") or "").strip()
+        # Ожидающая стратегия ДРУГОГО профиля не делает этот результат устаревшим.
+        if (
+            pending_strategy_id
+            and pending_profile_key in {"", current, item_key, self._current_profile_reference()}
+            and pending_strategy_id != str(strategy_id or "").strip()
+        ):
             return
         apply_result = _page_module()._profile_setup_apply_result_from_worker_result(payload)
         result_payload, apply_signature = (

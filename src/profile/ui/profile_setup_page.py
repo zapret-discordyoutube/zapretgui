@@ -2504,6 +2504,12 @@ class ProfileSetupPageBase(BasePage):
         # Профиль и фильтр фиксируются при щелчке: пока запрос ждёт очереди,
         # пользователь может открыть другой профиль.
         target = self._save_controller_obj()._current_enabled_save_target()
+        running_profile_key = str(self.__dict__.get("_enabled_save_runtime_profile_key") or "").strip()
+        if worker_state.is_busy() and running_profile_key not in {"", target["profile_key"]}:
+            # Пишется переключатель ДРУГОГО профиля: общий слот «последнее
+            # значение» его бы вытеснил — ставим операцию в очередь по профилю.
+            self._queue_profile_setup_write_operation({"kind": "enabled_save", "enabled": enabled, **target})
+            return
         if worker_state.is_busy():
             if self.__dict__.get("_enabled_save_runtime_enabled") != enabled:
                 worker_state.pending = enabled
@@ -2743,11 +2749,12 @@ class ProfileSetupPageBase(BasePage):
             "_strategy_feedback_save_request_id",
         ):
             setattr(self, attr, int(getattr(self, attr, 0) or 0) + 1)
+        terminated = False
         for attr, warning_prefix, blocking in _PROFILE_SETUP_CLEANUP_RUNTIMES:
             runtime = self.__dict__.get(attr)
             if runtime is None:
                 continue
-            runtime.stop(blocking=blocking, log_fn=log, warning_prefix=warning_prefix)
+            terminated = bool(runtime.stop(blocking=blocking, log_fn=log, warning_prefix=warning_prefix)) or terminated
             runtime.cancel()
         self._strategy_apply_runtime_strategy_id = ""
         self._strategy_apply_runtime_profile_key = ""
@@ -2756,7 +2763,12 @@ class ProfileSetupPageBase(BasePage):
         self._enabled_save_runtime_enabled = None
         self._setup_load_runtime_request_id = 0
         # Идущие записи уже дождались (runtime.stop(blocking=True) выше) —
-        # теперь поверх них ложится то, что ещё ждало очереди.
+        # теперь поверх них ложится то, что ещё ждало очереди. Если запись
+        # пришлось прервать, её замки могли остаться занятыми: синхронная
+        # запись подвесила бы закрытие, поэтому ждущие правки только в лог.
+        if terminated and writes_to_save:
+            log(f"{self.__class__.__name__}: {len(writes_to_save)} правок профиля не сохранены при закрытии: запись зависла и была прервана", "WARNING")
+            writes_to_save = []
         for operation in writes_to_save:
             self._save_controller_obj()._save_profile_write_on_close(operation)
         try:

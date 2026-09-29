@@ -99,6 +99,21 @@ class ProfileSetupSaveController:
             for field in ("filter_kind", "filter_value")
         )
 
+    def _notify_other_profile_written(self, profile_key: str, change_kind: str, payload=None) -> None:
+        """Запись ушла в профиль, который страница уже не показывает."""
+        page = self._page
+        key = str(profile_key or "").strip()
+        if not key:
+            return
+        result_payload = (
+            _page_module()._profile_setup_payload_and_apply_signature(payload)[0] if payload is not None else None
+        )
+        item = getattr(result_payload, "item", None)
+        if item is not None:
+            page._on_profile_changed_callback(key, change_kind, item)
+        else:
+            page._on_profile_changed_callback(key, change_kind)
+
     def _current_profile_reference(self) -> str:
         """Стабильная ссылка на открытый профиль — её и кладём в операцию.
 
@@ -321,43 +336,65 @@ class ProfileSetupSaveController:
         return request
 
     def _profile_writes_to_save_on_close(self) -> list[dict[str, object]]:
-        """Всё, что ещё не легло в пресет: ждущее автосохранение настроек и
-        текста списка, очередь записи и отложенные значения. Для одного
-        объекта остаётся последняя операция."""
+        """Всё, что ещё не легло в пресет, в порядке появления: запланированная
+        операция, очередь, отложенные значения (только если их операции в
+        очереди нет), затем самое свежее — ждущее автосохранение полей и
+        текст списка. Для одного объекта остаётся последняя операция."""
         page = self._page
         operations: list[dict[str, object]] = []
-        try:
-            operations.extend(dict(operation or {}) for operation in page._profile_setup_write_state_obj().pending)
-        except Exception:
-            pass
+
+        def _add(operation: dict[str, object], *, only_if_absent: bool = False) -> None:
+            if not str(operation.get("kind") or ""):
+                return
+            if only_if_absent and any(
+                self._profile_setup_write_operations_collide(previous, operation) for previous in operations
+            ):
+                return
+            operations[:] = [
+                previous for previous in operations
+                if not self._profile_setup_write_operations_collide(previous, operation)
+            ]
+            operations.append(operation)
+
         scheduled = page.__dict__.get("_scheduled_profile_setup_write_operation")
         if isinstance(scheduled, dict):
-            operations.append(dict(scheduled))
+            _add(dict(scheduled))
+        try:
+            for operation in page._profile_setup_write_state_obj().pending:
+                _add(dict(operation or {}))
+        except Exception:
+            pass
         try:
             settings_pending = page._settings_save_state_obj().pending
             if isinstance(settings_pending, dict):
-                operations.append({"kind": "settings_save", "request": dict(settings_pending)})
+                _add({"kind": "settings_save", "request": dict(settings_pending)}, only_if_absent=True)
         except Exception:
             pass
         try:
             raw_pending = page._raw_profile_save_state_obj().pending
             if raw_pending:
                 profile_key, raw_text = raw_pending
-                operations.append({"kind": "raw_profile_save", "profile_key": str(profile_key or ""), "text": raw_text})
+                _add(
+                    {"kind": "raw_profile_save", "profile_key": str(profile_key or ""), "text": raw_text},
+                    only_if_absent=True,
+                )
         except Exception:
             pass
         try:
             enabled_pending = page._enabled_save_state_obj().pending
             target = dict(page.__dict__.get("_enabled_save_pending_target") or {})
             if enabled_pending is not None and target:
-                operations.append({"kind": "enabled_save", "enabled": bool(enabled_pending), **target})
+                _add({"kind": "enabled_save", "enabled": bool(enabled_pending), **target}, only_if_absent=True)
         except Exception:
             pass
         try:
             strategy_pending = str(page._strategy_apply_state_obj().pending or "").strip()
             strategy_key = str(page.__dict__.get("_strategy_apply_pending_profile_key") or "").strip()
             if strategy_pending and strategy_key:
-                operations.append({"kind": "strategy_apply", "strategy_id": strategy_pending, "profile_key": strategy_key})
+                _add(
+                    {"kind": "strategy_apply", "strategy_id": strategy_pending, "profile_key": strategy_key},
+                    only_if_absent=True,
+                )
         except Exception:
             pass
         timer = page.__dict__.get("_settings_save_timer")
@@ -365,7 +402,7 @@ class ProfileSetupSaveController:
             if timer is not None and timer.isActive():
                 request = self._settings_autosave_request()
                 if request is not None:
-                    operations.append({"kind": "settings_save", "request": request})
+                    _add({"kind": "settings_save", "request": request})
         except Exception:
             pass
         try:
@@ -373,7 +410,7 @@ class ProfileSetupSaveController:
                 snapshot = page._unsaved_list_file_text()
                 if snapshot is not None:
                     target_kind, target_value = page._list_file_target_filter()
-                    operations.append(
+                    _add(
                         {
                             "kind": "list_file_save",
                             "profile_key": self._current_profile_reference(),
@@ -384,16 +421,7 @@ class ProfileSetupSaveController:
                     )
         except Exception:
             pass
-        latest: list[dict[str, object]] = []
-        for operation in operations:
-            if not str(operation.get("kind") or ""):
-                continue
-            latest = [
-                previous for previous in latest
-                if not self._profile_setup_write_operations_collide(previous, operation)
-            ]
-            latest.append(operation)
-        return latest
+        return operations
 
     def _save_profile_write_on_close(self, operation: dict[str, object]) -> None:
         """Синхронная запись при закрытии: тот же worker, но его run()
@@ -479,6 +507,7 @@ class ProfileSetupSaveController:
         runtime = page._worker_runtime("_settings_save_runtime")
         page._settings_save_request_id += 1
         request_id = page._settings_save_request_id
+        page._settings_save_runtime_profile_key = str(request.get("profile_key") or "")
         runtime.start_qthread_worker(
             worker_factory=lambda _runtime_request_id: page.create_profile_settings_save_worker(
                 request_id,
@@ -502,6 +531,12 @@ class ProfileSetupSaveController:
         if page._settings_save_state_obj().has_pending():
             return
         old_saved_key, new_saved_key = profile_save_result_keys(saved_keys)
+        requested_key = str(page.__dict__.get("_settings_save_runtime_profile_key") or "").strip()
+        if not self._is_current_profile_key(requested_key):
+            # Сохранены поля профиля, с которого уже ушли (флаш при смене
+            # профиля): страницу не переключаем обратно, только список.
+            self._notify_other_profile_written(new_saved_key or requested_key, "settings", payload)
+            return
         payload, apply_signature = _page_module()._profile_setup_payload_and_apply_signature(payload)
         new_key = page._profile_result_reference(payload, new_saved_key)
         previous_key = str(page._profile_key or "").strip()
@@ -588,6 +623,7 @@ class ProfileSetupSaveController:
         runtime = page._worker_runtime("_raw_profile_save_runtime")
         page._raw_profile_save_request_id += 1
         request_id = page._raw_profile_save_request_id
+        page._raw_profile_save_runtime_profile_key = str(profile_key or "")
         raw_text = page._resolve_raw_profile_save_text(raw_text)
         if page._raw_profile_save_button is not None:
             _page_module().set_widget_enabled_if_changed(page._raw_profile_save_button, False)
@@ -611,6 +647,10 @@ class ProfileSetupSaveController:
         if page._raw_profile_save_state_obj().has_pending():
             return
         old_saved_key, new_saved_key = profile_save_result_keys(saved_keys)
+        requested_key = str(page.__dict__.get("_raw_profile_save_runtime_profile_key") or "").strip()
+        if not self._is_current_profile_key(requested_key):
+            self._notify_other_profile_written(new_saved_key or requested_key, "raw_profile", payload)
+            return
         payload, apply_signature = _page_module()._profile_setup_payload_and_apply_signature(payload)
         previous_key = str(page._profile_key or "").strip()
         old_key = old_saved_key or previous_key
@@ -743,10 +783,12 @@ class ProfileSetupSaveController:
         requested_key = str(page.__dict__.get("_enabled_save_runtime_profile_key") or "").strip()
         if not self._is_current_profile_key(requested_key):
             # Запись ушла в профиль, открытый при щелчке; страница уже
-            # показывает другой — его состояние не трогаем. Сравниваем с
-            # ЗАПРОШЕННЫМ ключом: включение шаблона возвращает новый ключ.
+            # показывает другой — его состояние не трогаем, а список профилей
+            # уведомляем. Сравниваем с ЗАПРОШЕННЫМ ключом: включение шаблона
+            # возвращает новый ключ.
             if page._enabled_checkbox is not None:
                 _page_module().set_widget_enabled_if_changed(page._enabled_checkbox, True)
+            self._notify_other_profile_written(profile_key or requested_key, "enabled" if enabled else "disabled", payload)
             return
         payload, apply_signature = _page_module()._profile_setup_payload_and_apply_signature(payload)
         old_key = str(page._profile_key or "").strip()

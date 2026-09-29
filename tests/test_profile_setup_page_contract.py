@@ -6887,7 +6887,10 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
         page._mark_strategy_selection_pending.assert_not_called()
         page.reload_current_profile.assert_not_called()
-        page._on_profile_changed_callback.assert_not_called()
+        # Открытый профиль не трогаем, но строка записанного профиля в списке
+        # должна обновиться: список пропускает ревизии strategy_only.
+        page._on_profile_changed_callback.assert_called_once_with("profile-1", "strategy")
+        self.assertEqual(page._profile_key, "profile-2")
 
     def test_strategy_apply_finish_passes_updated_item_to_preset_page(self) -> None:
         updated_item = SimpleNamespace(strategy_id="tls_fake", in_preset=True, enabled=True)

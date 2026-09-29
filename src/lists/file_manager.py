@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from lists.core.paths import get_lists_dir
+from utils.atomic_text import read_preset_file_text
 
 LISTS_FOLDER = get_lists_dir()
 
@@ -131,7 +132,7 @@ def _preset_list_file_names(active_preset_path: str) -> set[str]:
     try:
         from lists.core.layered_files import safe_list_file_name
 
-        text = Path(active_preset_path).read_text(encoding="utf-8", errors="replace")
+        text = read_preset_file_text(active_preset_path)
     except Exception:
         return set()
 

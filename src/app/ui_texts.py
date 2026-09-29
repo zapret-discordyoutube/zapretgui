@@ -4391,42 +4391,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Настройка профиля",
         "en": "Profile setup",
     },
-    "page.winws2_profile_setup.preset_dialog.create.title": {
-        "ru": "Создать пресет",
-        "en": "Create preset",
-    },
-    "page.winws2_profile_setup.preset_dialog.rename.title": {
-        "ru": "Переименовать пресет",
-        "en": "Rename preset",
-    },
-    "page.winws2_profile_setup.preset_dialog.rename.current_name": {
-        "ru": "Текущее имя: {name}",
-        "en": "Current name: {name}",
-    },
-    "page.winws2_profile_setup.preset_dialog.name_label": {
-        "ru": "Название",
-        "en": "Name",
-    },
-    "page.winws2_profile_setup.preset_dialog.name_placeholder": {
-        "ru": "Введите название пресета...",
-        "en": "Enter preset name...",
-    },
-    "page.winws2_profile_setup.preset_dialog.button.create": {
-        "ru": "Создать",
-        "en": "Create",
-    },
-    "page.winws2_profile_setup.preset_dialog.button.rename": {
-        "ru": "Переименовать",
-        "en": "Rename",
-    },
-    "page.winws2_profile_setup.preset_dialog.button.cancel": {
-        "ru": "Отмена",
-        "en": "Cancel",
-    },
-    "page.winws2_profile_setup.preset_dialog.error.empty": {
-        "ru": "Введите название пресета",
-        "en": "Enter preset name",
-    },
     "page.winws2_profile_setup.breadcrumb.control": {
         "ru": "Управление",
         "en": "Control",

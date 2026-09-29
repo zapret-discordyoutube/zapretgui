@@ -1120,6 +1120,29 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
         self.assertEqual(retries, [owner])
         self.assertEqual(owner._presets_switch_completed_generation, 3)
 
+    def test_owner_redirect_happens_after_debounce(self) -> None:
+        from settings.mode import ZAPRET2_MODE
+        from winws_runtime.runtime import restart_flow
+
+        owner = SimpleNamespace(
+            _runtime_service=lambda: SimpleNamespace(snapshot=lambda: SimpleNamespace(launch_method=ZAPRET2_MODE)),
+            restart_dpi_async=Mock(),
+        )
+        redirect = Mock(return_value=True)
+        scheduled: list[tuple[str, int]] = []
+
+        with patch.object(restart_flow, "_redirect_preset_switch_if_owner_differs", redirect), patch.object(
+            restart_flow,
+            "_schedule_debounced_presets_switch",
+            lambda _owner, method, delay: scheduled.append((method, delay)),
+        ):
+            restart_flow.switch_presets_async(owner, ZAPRET2_MODE, delay_ms=700)
+
+        # Быстрые щелчки при чужом владельце склеиваются, а не запускают
+        # полный stop+start на каждом щелчке.
+        self.assertEqual(scheduled, [(ZAPRET2_MODE, 700)])
+        redirect.assert_not_called()
+
     def test_preset_content_apply_does_not_validate_preset_on_ui_request_path(self) -> None:
         from pathlib import Path
         import tempfile

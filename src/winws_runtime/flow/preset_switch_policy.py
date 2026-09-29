@@ -37,7 +37,7 @@ def request_selected_source_preset_apply(
                 running = False
             log(
                 f"Применение выбранного source preset пропущено: DPI не запущен ({method}, phase={phase or 'unknown'}, running={running})",
-                "WARNING",
+                "DEBUG",
             )
             return False
     except Exception as e:

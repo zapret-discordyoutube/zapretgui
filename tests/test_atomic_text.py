@@ -122,6 +122,21 @@ class ReadPresetFileTextTests(unittest.TestCase):
         self.assertNotIn("�", text)
 
 
+class DecodePresetBytesTests(unittest.TestCase):
+    def test_one_broken_byte_does_not_turn_utf8_file_into_cp1251(self) -> None:
+        from utils.atomic_text import decode_preset_bytes
+
+        text = decode_preset_bytes("# Мой пресет\n--hostlist=lists/мой.txt\n".encode("utf-8") + b"\xd0")
+
+        # Раньше весь файл читался как cp1251: «РњРѕР№ РїСЂРµСЃРµС‚».
+        self.assertTrue(text.startswith("# Мой пресет\n--hostlist=lists/мой.txt\n"))
+
+    def test_real_cp1251_file_is_still_detected(self) -> None:
+        from utils.atomic_text import decode_preset_bytes
+
+        self.assertEqual(decode_preset_bytes("# Мой пресет\n".encode("cp1251")), "# Мой пресет\n")
+
+
 class PresetFileStoreEncodingAndWriteTests(unittest.TestCase):
     def setUp(self) -> None:
         from core.paths import AppPaths
@@ -160,6 +175,42 @@ class PresetFileStoreEncodingAndWriteTests(unittest.TestCase):
         # (иначе watcher активного пресета перезапускал DPI лишний раз).
         self.assertTrue(was_recent_own_preset_write("Old name unique.txt"))
         self.assertTrue(was_recent_own_preset_write("New name unique.txt"))
+
+
+class SharedFolderSettingsLockTests(unittest.TestCase):
+    def test_preset_and_profile_folders_share_one_settings_lock(self) -> None:
+        # Обе стороны пишут целиком одну секцию «folders»: под разными
+        # замками параллельная запись одной откатывала правку другой.
+        from presets import folders as preset_folders
+        from profile import folders as profile_folders
+
+        self.assertIs(preset_folders._PRESET_FOLDER_STATE_LOCK, profile_folders._PROFILE_FOLDER_STATE_LOCK)
+
+
+class WorkerRuntimeStopTests(unittest.TestCase):
+    def test_stop_reports_forced_termination(self) -> None:
+        from unittest.mock import Mock
+
+        from ui.one_shot_worker_runtime import OneShotWorkerRuntime
+
+        runtime = OneShotWorkerRuntime()
+        hung = Mock()
+        hung.isRunning.return_value = True
+        hung.wait.return_value = False
+        del hung.is_running
+        del hung.stop
+        runtime.thread = hung
+
+        self.assertTrue(runtime.stop(blocking=True))
+        hung.terminate.assert_called_once_with()
+
+        finished = Mock()
+        finished.isRunning.return_value = True
+        finished.wait.return_value = True
+        del finished.is_running
+        del finished.stop
+        runtime.thread = finished
+        self.assertFalse(runtime.stop(blocking=True))
 
 
 if __name__ == "__main__":

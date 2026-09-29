@@ -234,12 +234,14 @@ class OneShotWorkerRuntime:
         terminate_wait_ms: int = 500,
         log_fn: Callable[[str, str], None] | None = None,
         warning_prefix: str = "Worker",
-    ) -> None:
+    ) -> bool:
+        """Останавливает worker. True — поток пришлось прервать terminate():
+        он мог оставить занятыми замки, писать после этого синхронно опасно."""
         if self.is_queued():
             # Воркер ещё не стартовал: снимаем его из очереди, иначе гейт
             # запустит уже никому не нужную работу.
             self._discard_queued_start()
-            return
+            return False
 
         worker = self.worker
         thread = self.thread
@@ -258,7 +260,7 @@ class OneShotWorkerRuntime:
 
         target = thread or worker
         if target is None:
-            return
+            return False
         try:
             if hasattr(target, "is_running"):
                 running_state = getattr(target, "is_running")
@@ -268,13 +270,13 @@ class OneShotWorkerRuntime:
         except (AttributeError, RuntimeError):
             self.worker = None
             self.thread = None
-            return
+            return False
         if not running:
             if self.worker is worker:
                 self.worker = None
             if self.thread is thread:
                 self.thread = None
-            return
+            return False
 
         quit_fn = getattr(target, "quit", None)
         if callable(quit_fn):
@@ -289,6 +291,8 @@ class OneShotWorkerRuntime:
                     target.wait(terminate_wait_ms)
                 except Exception:
                     pass
+                return True
+        return False
 
     def cancel(self) -> None:
         self.request_id += 1

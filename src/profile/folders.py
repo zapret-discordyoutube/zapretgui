@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-import threading
 from typing import Any
 
 from folders.defaults import COMMON_FOLDER_KEY, build_default_profile_folders
+from folders.state_lock import FOLDERS_SETTINGS_LOCK
 from folders.store import FolderLibraryStore, normalize_folder_state
 from settings import store as settings_store
 
@@ -12,7 +12,7 @@ from .identity import is_profile_uid
 
 # Сериализует read-modify-write состояния папок: воркеры перемещения и
 # folder-действия страницы работают из разных потоков.
-_PROFILE_FOLDER_STATE_LOCK = threading.RLock()
+_PROFILE_FOLDER_STATE_LOCK = FOLDERS_SETTINGS_LOCK
 
 
 @contextmanager

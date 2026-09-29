@@ -191,8 +191,11 @@ class PresetSubpageUiGuardTests(unittest.TestCase):
 
         PresetRawEditorPage._stop_raw_worker_runtimes(page)
 
+        from log.log import log
+
         page._raw_load_runtime.stop.assert_called_once_with(
             blocking=False,
+            log_fn=log,
             warning_prefix="raw preset load worker",
         )
         page._raw_load_runtime.cancel.assert_called_once_with()
@@ -201,6 +204,7 @@ class PresetSubpageUiGuardTests(unittest.TestCase):
         # поверх синхронной записи при закрытии.
         page._raw_save_runtime.stop.assert_called_once_with(
             blocking=True,
+            log_fn=log,
             warning_prefix="raw preset save worker",
         )
         page._raw_save_runtime.cancel.assert_called_once_with()
@@ -209,7 +213,7 @@ class PresetSubpageUiGuardTests(unittest.TestCase):
             (page._raw_activate_runtime, "raw preset activate worker"),
             (page._raw_action_runtime, "raw preset action worker"),
         ):
-            runtime.stop.assert_called_once_with(blocking=False, warning_prefix=prefix)
+            runtime.stop.assert_called_once_with(blocking=False, log_fn=log, warning_prefix=prefix)
             runtime.cancel.assert_called_once_with()
 
     def _make_closing_raw_editor_page(self, *, publish_pending: bool, events: list):
@@ -225,7 +229,7 @@ class PresetSubpageUiGuardTests(unittest.TestCase):
         )
         for attr in ("_raw_load_runtime", "_raw_save_runtime", "_raw_activate_runtime", "_raw_action_runtime"):
             runtime = SimpleNamespace(
-                stop=Mock(side_effect=lambda *, blocking, warning_prefix: events.append(("stop", warning_prefix))),
+                stop=Mock(side_effect=lambda *, blocking, log_fn=None, warning_prefix: events.append(("stop", warning_prefix))),
                 cancel=Mock(),
                 is_running=lambda: False,
             )
@@ -253,6 +257,19 @@ class PresetSubpageUiGuardTests(unittest.TestCase):
             events.index(("stop", "raw preset save worker")),
             events.index(("save", "My.txt", "--filter-tcp=443\n--lua-desync=fake\n")),
         )
+
+    def test_raw_preset_cleanup_skips_sync_write_after_forced_termination(self) -> None:
+        from presets.ui.common.preset_subpage_base import PresetRawEditorPage
+
+        events: list = []
+        page = self._make_closing_raw_editor_page(publish_pending=True, events=events)
+        page._raw_save_runtime.stop = Mock(return_value=True)
+
+        PresetRawEditorPage.cleanup(page)
+
+        # Прерванный поток мог держать замки записи: синхронная запись
+        # подвесила бы закрытие окна.
+        self.assertFalse([event for event in events if event[0] == "save"])
 
     def test_raw_preset_cleanup_does_not_touch_file_without_local_edits(self) -> None:
         from presets.ui.common.preset_subpage_base import PresetRawEditorPage

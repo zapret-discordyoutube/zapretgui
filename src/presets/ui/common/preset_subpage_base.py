@@ -2352,7 +2352,9 @@ class PresetRawEditorPage(BasePage):
         except Exception:
             pass
 
-    def _stop_raw_worker_runtimes(self) -> None:
+    def _stop_raw_worker_runtimes(self) -> bool:
+        """True — какой-то worker пришлось прервать принудительно."""
+        terminated = False
         for attr, warning_prefix, blocking in (
             ("_raw_load_runtime", "raw preset load worker", False),
             # Запись ждём: иначе поздно завершившийся worker перезапишет файл
@@ -2364,8 +2366,9 @@ class PresetRawEditorPage(BasePage):
             runtime = self.__dict__.get(attr)
             if runtime is None:
                 continue
-            runtime.stop(blocking=blocking, warning_prefix=warning_prefix)
+            terminated = bool(runtime.stop(blocking=blocking, log_fn=log, warning_prefix=warning_prefix)) or terminated
             runtime.cancel()
+        return terminated
 
     def _raw_preset_text_to_save_on_close(self) -> tuple[str, str] | None:
         """(имя файла, текст), если в редакторе есть правки, которые ещё не
@@ -2421,9 +2424,14 @@ class PresetRawEditorPage(BasePage):
         self._raw_preset_save_state_obj().reset()
         self._raw_preset_activation_state_obj().reset()
         self._raw_load_runtime_request_id = 0
-        self._stop_raw_worker_runtimes()
+        terminated = self._stop_raw_worker_runtimes()
         if text_to_save is not None:
-            self._save_raw_preset_on_close(*text_to_save)
+            if terminated:
+                # Прерванный поток мог держать замки записи: синхронная запись
+                # подвесила бы закрытие навсегда. Правку теряем, но с записью в лог.
+                log(f"Пресет {text_to_save[0]} не сохранён при закрытии: запись зависла и была прервана", "WARNING")
+            else:
+                self._save_raw_preset_on_close(*text_to_save)
         unsubscribe = self._ui_state_unsubscribe
         if callable(unsubscribe):
             try:

@@ -53,6 +53,7 @@ from winws_runtime.runtime.system_ops import (
     get_all_winws_process_pids,
     get_process_pids_by_name,
 )
+from utils.atomic_text import read_preset_file_text
 
 
 _WINDOWS_ABS_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
@@ -549,8 +550,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                     return cached
 
             try:
-                with open(p, "r", encoding="utf-8", errors="replace") as f:
-                    source_content = f.read()
+                source_content = read_preset_file_text(p)
             except Exception:
                 return PreparedPresetArtifact(p, cache_key, "", tuple(), False, f"Preset файл не найден: {p}")
 
@@ -592,8 +592,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             return False
 
         try:
-            with open(p, "r", encoding="utf-8", errors="replace") as f:
-                source_content = f.read()
+            source_content = read_preset_file_text(p)
         except Exception:
             return False
 

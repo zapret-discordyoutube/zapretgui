@@ -1414,7 +1414,9 @@ class PresetsFeature:
             # Привязка осталась от удалённого файла — обычный импорт пересоздаст пресет.
             return None
 
-        new_text = Path(file_path).read_text(encoding="utf-8-sig", errors="replace")
+        from utils.atomic_text import read_preset_file_text
+
+        new_text = read_preset_file_text(file_path)
         validation_error = validate_preset_source_text(new_text, engine=scope)
         if validation_error:
             raise ValueError(f"Файл не похож на пресет: {validation_error}")

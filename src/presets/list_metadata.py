@@ -4,6 +4,8 @@ from datetime import datetime
 from pathlib import Path
 import re
 
+from utils.atomic_text import read_preset_file_text
+
 
 _DESCRIPTION_HEADER_RE = re.compile(r"#\s*Description:\s*(.*)", re.IGNORECASE)
 _ICON_COLOR_HEADER_RE = re.compile(r"#\s*IconColor:\s*(.+)", re.IGNORECASE)
@@ -53,23 +55,24 @@ def read_preset_list_metadata(path: Path) -> dict[str, str]:
         pass
 
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            for raw in handle:
-                stripped = raw.strip()
-                if not stripped:
-                    continue
-                if not stripped.startswith("#"):
-                    break
+        # Файлы пресетов маленькие: читаем целиком по общему правилу
+        # кодировки (utf-8-sig, иначе cp1251), шапку разбираем построчно.
+        for raw in read_preset_file_text(path).split("\n"):
+            stripped = raw.strip()
+            if not stripped:
+                continue
+            if not stripped.startswith("#"):
+                break
 
-                desc_match = _DESCRIPTION_HEADER_RE.match(stripped)
-                if desc_match:
-                    result["description"] = desc_match.group(1).strip()
-                    continue
+            desc_match = _DESCRIPTION_HEADER_RE.match(stripped)
+            if desc_match:
+                result["description"] = desc_match.group(1).strip()
+                continue
 
-                icon_color_match = _ICON_COLOR_HEADER_RE.match(stripped)
-                if icon_color_match:
-                    result["icon_color"] = icon_color_match.group(1).strip()
-                    continue
+            icon_color_match = _ICON_COLOR_HEADER_RE.match(stripped)
+            if icon_color_match:
+                result["icon_color"] = icon_color_match.group(1).strip()
+                continue
     except Exception:
         pass
 

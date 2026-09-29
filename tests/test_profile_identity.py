@@ -192,6 +192,27 @@ class ProfileIdentityServiceTests(unittest.TestCase):
                 )
                 self.assertEqual(result, (uid, uid))
 
+    def test_first_profile_raw_text_with_leading_comment_is_saved(self) -> None:
+        text = "\n".join(("--filter-tcp=443", "--lua-desync=pass", ""))
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                service, store = self._service(text, root)
+                preset, _manifest = service.load_selected_preset()
+                uid = preset.profiles[0].persistent_key
+
+                # У первого профиля нет строки --new: ведущий комментарий по
+                # формату уходит в шапку пресета. Это не ошибка записи.
+                result = service.update_profile_raw_text(
+                    uid,
+                    "\n".join(("# заметка", "--filter-tcp=443", "--lua-desync=fake")),
+                )
+                self.assertIsNotNone(result)
+                saved = service.load_selected_preset()[0]
+                from profile.serializer import serialize_preset
+
+                self.assertIn("# заметка\n--filter-tcp=443\n--lua-desync=fake", serialize_preset(saved))
+
     def test_classification_change_does_not_move_profile_after_first_placement(self) -> None:
         text = "\n".join(("--name=Просто профиль", "--filter-tcp=443", "--lua-desync=pass", ""))
         with TemporaryDirectory() as temp_dir:

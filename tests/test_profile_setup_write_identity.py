@@ -185,6 +185,100 @@ class ProfileSetupWriteIdentityTests(unittest.TestCase):
         ProfileSetupPageBase.show_profile(page, "uid:A")
         page.reload_current_profile.assert_called_once_with()
 
+    def test_strategy_result_is_applied_when_pending_strategy_belongs_to_other_profile(self) -> None:
+        page = _page_with_running_write("uid:A", strategy_id="s0")
+        page._strategy_apply_request_id = 5
+        page._pending_strategy_apply = "Y"
+        page._strategy_apply_pending_profile_key = "uid:B"
+        page._schedule_profile_setup_payload_apply = Mock()
+        page._on_profile_changed_callback = Mock()
+        page.reload_current_profile = Mock()
+        new_payload = _payload("uid:A", "W")
+        applied = SimpleNamespace(status="applied", should_reload=False, blob_warnings=())
+
+        with patch(
+            "profile.ui.profile_setup_page._profile_setup_apply_result_from_worker_result",
+            return_value=applied,
+        ), patch(
+            "profile.ui.profile_setup_page._profile_setup_payload_and_apply_signature",
+            return_value=(new_payload, None),
+        ):
+            ProfileSetupPageBase._on_strategy_apply_finished(page, 5, "uid:A", "uid:A", "W", object())
+
+        # Ожидающая стратегия профиля B не делает результат для A устаревшим.
+        self.assertIs(page._payload, new_payload)
+        page._on_profile_changed_callback.assert_called_once_with("uid:A", "strategy", new_payload.item)
+
+    def test_strategy_written_to_other_profile_notifies_profile_list(self) -> None:
+        page = _page_with_running_write("uid:B")
+        page._strategy_apply_request_id = 5
+        page._on_profile_changed_callback = Mock()
+        written_payload = _payload("uid:A", "W")
+
+        with patch(
+            "profile.ui.profile_setup_page._profile_setup_payload_and_apply_signature",
+            return_value=(written_payload, None),
+        ):
+            ProfileSetupPageBase._on_strategy_apply_finished(page, 5, "uid:A", "uid:A", "W", object())
+
+        # Страница показывает B и не трогает его, а строка A в списке обновится.
+        self.assertEqual(page._profile_key, "uid:B")
+        page._on_profile_changed_callback.assert_called_once_with("uid:A", "strategy", written_payload.item)
+
+    def test_settings_result_for_left_profile_does_not_switch_page_back(self) -> None:
+        page = _page_with_running_write("uid:B")
+        page._settings_save_request_id = 3
+        page._settings_save_runtime_profile_key = "uid:A"
+        page._pending_settings_save = None
+        page._schedule_profile_setup_payload_apply = Mock()
+        page._on_profile_changed_callback = Mock()
+        written_payload = _payload("uid:A")
+
+        with patch(
+            "profile.ui.profile_setup_page._profile_setup_payload_and_apply_signature",
+            return_value=(written_payload, None),
+        ):
+            ProfileSetupPageBase._on_settings_save_finished(page, 3, ("uid:A", "uid:A"), object())
+
+        self.assertEqual(page._profile_key, "uid:B")
+        page._schedule_profile_setup_payload_apply.assert_not_called()
+        page._on_profile_changed_callback.assert_called_once_with("uid:A", "settings", written_payload.item)
+
+    def test_enabled_toggle_of_other_profile_is_queued_not_merged_into_one_slot(self) -> None:
+        page = _page_with_running_write("uid:B")
+        page._raw_profile_save_runtime.running = False
+        page._enabled_save_runtime.running = True
+        page._enabled_save_runtime_enabled = False
+        page._enabled_save_runtime_profile_key = "uid:A"
+        page._current_filter_kind = lambda: "hostlist"
+        page._current_filter_value = lambda: "lists/b.txt"
+        page._payload.item.enabled = True
+
+        ProfileSetupPageBase._on_enabled_changed(page, 0)
+
+        self.assertIsNone(page._pending_enabled_save)
+        self.assertEqual(
+            page._profile_setup_write_state_obj().pending,
+            [{"kind": "enabled_save", "enabled": False, "profile_key": "uid:B", "filter_kind": "hostlist", "filter_value": "lists/b.txt"}],
+        )
+
+    def test_close_keeps_chronological_order_of_pending_writes(self) -> None:
+        page = _page_with_running_write("uid:A")
+        page._profile_setup_write_state_obj().pending.extend(
+            [
+                {"kind": "strategy_apply", "strategy_id": "S", "profile_key": "uid:A"},
+                {"kind": "raw_profile_save", "profile_key": "uid:A", "text": "--lua-desync=fake"},
+            ]
+        )
+        page._pending_raw_profile_save = ("uid:A", "--lua-desync=fake")
+        page._pending_strategy_apply = "S"
+        page._strategy_apply_pending_profile_key = "uid:A"
+
+        operations = ProfileSetupPageBase._save_controller_obj(page)._profile_writes_to_save_on_close()
+
+        # Текст, набранный после щелчка по стратегии, ложится последним.
+        self.assertEqual([op["kind"] for op in operations], ["strategy_apply", "raw_profile_save"])
+
     def test_close_writes_queued_strategy_synchronously(self) -> None:
         page = _page_with_running_write("uid:A")
         ProfileSetupPageBase._request_strategy_apply(page, "tls_fake")

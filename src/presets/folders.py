@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from functools import wraps
-import threading
 from typing import Any
 
 from folders.defaults import COMMON_FOLDER_KEY, PINNED_FOLDER_KEY, build_default_preset_folders, classify_preset_folder
 from folders.ordering import build_folder_rows, plan_item_move
+from folders.state_lock import FOLDERS_SETTINGS_LOCK
 from folders.store import FolderLibraryStore, normalize_folder_state
 from settings import store as settings_store
 from settings.mode import ENGINE_WINWS1, ENGINE_WINWS2
@@ -13,9 +13,9 @@ from settings.mode import ENGINE_WINWS1, ENGINE_WINWS2
 
 # Сериализует read-modify-write состояния папок пресетов: действия страницы,
 # переименование/удаление файлов и рейтинг идут из разных фоновых потоков,
-# и без блокировки одно сохранение молча затирало другое (как у профилей —
-# profile.folders.profile_folder_state_lock).
-_PRESET_FOLDER_STATE_LOCK = threading.RLock()
+# и без блокировки одно сохранение молча затирало другое. Замок общий с
+# папками профилей (folders.state_lock): обе стороны пишут одну секцию.
+_PRESET_FOLDER_STATE_LOCK = FOLDERS_SETTINGS_LOCK
 
 
 def _with_preset_folder_state_lock(func):

@@ -43,6 +43,7 @@ from winws_runtime.health.silent_exit_probe import (
 )
 from winws_runtime.health.winws_output import relevant_error_line
 from winws_runtime.runtime.system_ops import get_process_pids_by_name
+from utils.atomic_text import read_preset_file_text
 
 
 class Winws1StrategyRunner(StrategyRunnerBase):
@@ -140,8 +141,7 @@ class Winws1StrategyRunner(StrategyRunnerBase):
                     return cached
 
             try:
-                with open(p, "r", encoding="utf-8", errors="replace") as f:
-                    source_text = f.read()
+                source_text = read_preset_file_text(p)
             except Exception as e:
                 return PreparedPresetArtifact(p, None, "", tuple(), False, f"Не удалось прочитать preset файл: {e}")
 

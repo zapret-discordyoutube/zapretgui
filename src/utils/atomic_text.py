@@ -74,7 +74,22 @@ def read_preset_file_text(path) -> str:
 
 
 def decode_preset_bytes(raw: bytes) -> str:
+    """UTF-8, а cp1251 — только если файл по сути не UTF-8.
+
+    Один битый байт в UTF-8 файле (обрезанный символ, вставка из другого
+    файла) не повод читать весь файл как cp1251: иначе вся кириллица
+    превратилась бы в «РњРѕР№», и следующее сохранение закрепило бы это.
+    Кириллица в cp1251 почти никогда не складывается в корректные
+    многобайтные последовательности UTF-8, поэтому признак надёжный:
+    сравниваем, сколько не-ASCII символов UTF-8 прочитал правильно и сколько
+    пришлось заменить."""
     try:
         return raw.decode("utf-8-sig")
     except UnicodeDecodeError:
-        return raw.decode("cp1251", errors="replace")
+        pass
+    as_utf8 = raw.decode("utf-8-sig", errors="replace")
+    replaced = as_utf8.count("\ufffd")
+    decoded_non_ascii = sum(1 for char in as_utf8 if ord(char) > 127) - replaced
+    if decoded_non_ascii >= replaced:
+        return as_utf8
+    return raw.decode("cp1251", errors="replace")

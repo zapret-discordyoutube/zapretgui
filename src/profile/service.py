@@ -999,7 +999,12 @@ class ProfilePresetService:
         if profile_raw_text(preset.profiles[index]) == normalized_text:
             return old_persistent_key, old_persistent_key
         preset = with_profile_raw_text(preset, index, raw_text)
-        if self._commit_preset(preset, expect=_expect_profile_raw_text(index, normalized_text)):
+        # Сверяем с тем, как текст ляжет в файл после разбора, а не с вводом:
+        # ведущий «# комментарий» первого профиля (у него нет строки --new)
+        # по формату относится к шапке пресета — он сохраняется там, и это не
+        # «файл не совпал после записи».
+        expected_text = profile_raw_text(preset.profiles[index]) if index < len(preset.profiles) else normalized_text
+        if self._commit_preset(preset, expect=_expect_profile_raw_text(index, expected_text)):
             return None
         return self._profile_edit_result(preset, index, old_persistent_key)
 
