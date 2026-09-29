@@ -45,8 +45,10 @@ from updater.ui.update_flow import UpdateFlow, UpdateOffer
 
 
 
-# Сколько раз ждать, пока страница встанет в главное окно (по 200 мс).
-_DIALOG_HOST_RETRIES = 25
+# Окно обновления ложится поверх окна программы. Пока оно скрыто в трее или
+# свёрнуто, окно обновления ждёт: иначе всплыло бы само по себе, без хозяина.
+_DIALOG_WAIT_INTERVAL_MS = 1000
+_DIALOG_WAIT_MAX_TICKS = 20 * 60
 
 
 class ServersPage(BasePage):
@@ -97,6 +99,11 @@ class ServersPage(BasePage):
         self._update_dialog: UpdateDialog | None = None
         # Номер итога проверки, для которого окно уже открывалось само.
         self._auto_opened_revision = 0
+        # Таймер принадлежит странице и умирает вместе с ней.
+        self._dialog_wait_timer = QTimer(self)
+        self._dialog_wait_timer.setInterval(_DIALOG_WAIT_INTERVAL_MS)
+        self._dialog_wait_timer.timeout.connect(self._retry_present_update_dialog)
+        self._dialog_wait_ticks = 0
         self._changelog_link_open_runtime = OneShotWorkerRuntime()
         self._changelog_link_open_runtime_worker = None
         self._changelog_link_open_state = LatestValueWorkerState(
@@ -243,18 +250,23 @@ class ServersPage(BasePage):
 
     # ── Установка ───────────────────────────────────────────────────────
 
-    def present_update_dialog(self, _attempt: int = 0) -> bool:
+    def present_update_dialog(self) -> bool:
         """Открывает окно обновления (или поднимает уже открытое)."""
         if self._cleanup_in_progress or self._flow.offer is None:
+            self._dialog_wait_timer.stop()
             return False
         if self._update_dialog is not None:
+            self._dialog_wait_timer.stop()
             return True
         host = self.window()
-        if host is None or host is self:
-            # Страница ещё не встала в главное окно: откроем, когда встанет.
-            if _attempt < _DIALOG_HOST_RETRIES:
-                QTimer.singleShot(200, lambda: self.present_update_dialog(_attempt + 1))
+        if host is None or host is self or not host.isVisible() or host.isMinimized():
+            # Окно программы в трее, свёрнуто или страница ещё не встала в
+            # него: откроем, когда окно покажут.
+            if not self._dialog_wait_timer.isActive():
+                self._dialog_wait_ticks = 0
+                self._dialog_wait_timer.start()
             return False
+        self._dialog_wait_timer.stop()
         dialog = UpdateDialog(host, flow=self._flow, language=self._ui_language)
         dialog.install_clicked.connect(self._request_install_update)
         dialog.later_clicked.connect(self._request_dismiss_update)
@@ -265,6 +277,14 @@ class ServersPage(BasePage):
         self._update_dialog = dialog
         dialog.open()
         return True
+
+    def _retry_present_update_dialog(self) -> None:
+        self._dialog_wait_ticks += 1
+        if self._dialog_wait_ticks > _DIALOG_WAIT_MAX_TICKS:
+            # Долго не открывали: обновление ждёт на карточке «Подробнее».
+            self._dialog_wait_timer.stop()
+            return
+        self.present_update_dialog()
 
     def _on_update_dialog_finished(self, _code: int = 0) -> None:
         dialog, self._update_dialog = self._update_dialog, None
@@ -469,7 +489,7 @@ class ServersPage(BasePage):
         # Update status card: «Подробнее» / «Показать» открывает окно обновления.
         self.update_card = UpdateStatusCard(language=self._ui_language)
         self.update_card.check_clicked.connect(self._request_check_updates)
-        self.update_card.details_clicked.connect(lambda: self.present_update_dialog())
+        self.update_card.details_clicked.connect(self.present_update_dialog)
         self.add_widget(self.update_card)
 
         # Table header row
@@ -655,6 +675,7 @@ class ServersPage(BasePage):
 
     def cleanup(self):
         self._cleanup_in_progress = True
+        self._dialog_wait_timer.stop()
         dialog, self._update_dialog = self._update_dialog, None
         if dialog is not None:
             try:

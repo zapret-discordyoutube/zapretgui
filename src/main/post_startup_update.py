@@ -16,7 +16,8 @@ class _UpdateCheckBridge(QObject):
 # «Что нового» ждёт, пока окно программы откроется и успокоится.
 _WHATS_NEW_DELAY_MS = 1500
 _WHATS_NEW_RETRY_MS = 3000
-_WHATS_NEW_MAX_RETRIES = 20
+# Программа могла запуститься в трей: ждём до 20 минут, пока окно откроют.
+_WHATS_NEW_MAX_RETRIES = 400
 
 
 def install_update_check(

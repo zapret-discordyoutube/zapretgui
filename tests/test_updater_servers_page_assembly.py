@@ -115,6 +115,24 @@ class ServersPageAssemblyTests(unittest.TestCase):
 
         self.assertIn("новое", self._dialog().browser.toPlainText())
 
+    def test_window_waits_while_app_is_hidden_in_tray(self) -> None:
+        """Окно обновления не всплывает без хозяина: ждёт, пока программу откроют."""
+        self.host.hide()
+        token = self.feature.begin_update_check(source="startup")
+        self.feature.finish_update_check(
+            {"has_update": True, "version": "999.0.0.1", "release_notes": "новое", "error": None},
+            source="startup",
+            token=token,
+        )
+        QApplication.instance().processEvents()
+        self.assertIsNone(self.page._update_dialog)
+        self.assertTrue(self.page._dialog_wait_timer.isActive())
+
+        self.host.show()
+
+        self.assertIn("новое", self._dialog().browser.toPlainText())
+        self.assertFalse(self.page._dialog_wait_timer.isActive())
+
     def test_check_error_is_shown_as_error(self) -> None:
         self.page._check_service._run_check = lambda *_args, **_kwargs: CheckOutcome(None, "Forgejo: нет ответа")
 

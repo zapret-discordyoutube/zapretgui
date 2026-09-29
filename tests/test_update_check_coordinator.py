@@ -140,6 +140,7 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
         page._flow.changed.connect(lambda: page._on_flow_changed())
         page._update_dialog = None
         page._auto_opened_revision = 0
+        page._dialog_wait_timer = Mock()
         page.update_card = Mock()
         page.present_update_dialog = Mock(return_value=True)
         return page
