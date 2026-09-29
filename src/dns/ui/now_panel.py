@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
+import math
+
+from PyQt6.QtCore import QPointF, QSize, Qt, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -21,15 +23,16 @@ from qfluentwidgets import (
     CaptionLabel,
     FlowLayout,
     FluentIcon,
-    IndeterminateProgressRing,
     PillPushButton,
     PushButton,
     SimpleCardWidget,
     SubtitleLabel,
     isDarkTheme,
+    themeColor,
 )
 
-from dns.ui.provider_grid import badge_color
+from dns.ui.provider_grid import badge_color, ease_out_cubic, paint_glow, paint_orbit
+from ui.animation_policy import are_live_animations_enabled
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import set_tooltip, style_semantic_caption_label
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens
@@ -58,35 +61,118 @@ class AdapterChip:
 
 
 class _Badge(QWidget):
-    """Крупный значок текущего DNS в круге его цвета."""
+    """Крупный значок текущего DNS в круге его цвета.
 
-    SIZE = 52
+    Светится мягким ореолом своего цвета. Пока DNS применяется, вокруг бежит
+    дуга. При смене сервера значок переворачивается, как монетка (на обороте
+    уже новый), и от него расходится вспышка свечения.
+    """
+
+    CIRCLE = 52
+    BOX = 72
+    FLIP_MS = 900
+    SPIN_PERIOD_MS = 900
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._icon_name = "fa5s.globe"
         self._color = ""
-        self.setFixedSize(self.SIZE, self.SIZE)
+        self._old_icon_name = ""
+        self._old_color = ""
+        self._flip = -1.0
+        self._spin_angle = 0.0
+        self.setFixedSize(self.BOX, self.BOX)
+        self._flip_anim = QVariantAnimation(self)
+        self._flip_anim.setStartValue(0.0)
+        self._flip_anim.setEndValue(1.0)
+        self._flip_anim.setDuration(self.FLIP_MS)
+        self._flip_anim.valueChanged.connect(self._on_flip_value)
+        self._flip_anim.finished.connect(self._on_flip_finished)
+        self._spin_anim = QVariantAnimation(self)
+        self._spin_anim.setStartValue(0.0)
+        self._spin_anim.setEndValue(360.0)
+        self._spin_anim.setDuration(self.SPIN_PERIOD_MS)
+        self._spin_anim.setLoopCount(-1)
+        self._spin_anim.valueChanged.connect(self._on_spin_value)
 
     def set_icon(self, icon_name: str, color: str) -> None:
-        self._icon_name = icon_name or "fa5s.globe"
-        self._color = color or ""
+        icon_name = icon_name or "fa5s.globe"
+        color = color or ""
+        if (icon_name, color) == (self._icon_name, self._color):
+            return
+        self._old_icon_name, self._old_color = self._icon_name, self._color
+        self._icon_name, self._color = icon_name, color
+        if are_live_animations_enabled() and self.isVisible():
+            self._flip_anim.stop()
+            self._flip_anim.start()
+        self.update()
+
+    def set_busy(self, busy: bool) -> None:
+        busy = bool(busy) and are_live_animations_enabled()
+        if busy and not self.is_busy():
+            self._spin_anim.start()
+        elif not busy and self.is_busy():
+            self._spin_anim.stop()
+            self._spin_angle = 0.0
+            self.update()
+
+    def is_busy(self) -> bool:
+        return self._spin_anim.state() == QVariantAnimation.State.Running
+
+    def is_flipping(self) -> bool:
+        return self._flip_anim.state() == QVariantAnimation.State.Running
+
+    def _on_flip_value(self, value) -> None:
+        self._flip = float(value)
+        self.update()
+
+    def _on_flip_finished(self) -> None:
+        self._flip = -1.0
+        self.update()
+
+    def _on_spin_value(self, value) -> None:
+        self._spin_angle = float(value)
         self.update()
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         tokens = get_theme_tokens()
-        color = badge_color(self._color, tokens, isDarkTheme())
-        back = QColor(color)
-        back.setAlpha(52 if isDarkTheme() else 38)
+        dark = isDarkTheme()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        center = QPointF(self.BOX / 2, self.BOX / 2)
+        half = self.CIRCLE / 2
+        flipping = self._flip >= 0.0
+        # Первая половина переворота — старый значок, вторая — новый.
+        first_half = flipping and self._flip < 0.5
+        icon_name = self._old_icon_name if first_half else self._icon_name
+        color = badge_color(self._old_color if first_half else self._color, tokens, dark)
+
+        paint_glow(painter, center, half + 9, color, 0.45 if dark else 0.3)
+        if flipping and self._flip >= 0.5:
+            burst = ease_out_cubic((self._flip - 0.5) / 0.5)
+            paint_glow(painter, center, half + 4 + 14 * burst, color, 1.3 * (1.0 - burst))
+
+        painter.save()
+        painter.translate(center)
+        if flipping:
+            # Ширина монетки: 1 → 0 (ребро) → 1, с лёгким подскоком в конце.
+            width = abs(math.cos(math.pi * min(self._flip / 0.6, 1.0)))
+            if self._flip >= 0.6:
+                width = 1.0 + 0.08 * math.sin(math.pi * (self._flip - 0.6) / 0.4)
+            painter.scale(max(width, 0.02), 1.0 + 0.04 * (1.0 - width))
+        back = QColor(color)
+        back.setAlpha(52 if dark else 38)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(back)
-        painter.drawEllipse(QRectF(0, 0, self.SIZE, self.SIZE))
+        painter.drawEllipse(QPointF(0, 0), half, half)
         icon_size = 24
-        pixmap = get_cached_qta_pixmap(self._icon_name, color=color.name(), size=icon_size)
-        offset = (self.SIZE - icon_size) // 2
-        painter.drawPixmap(offset, offset, pixmap)
+        pixmap = get_cached_qta_pixmap(icon_name, color=color.name(), size=icon_size)
+        painter.drawPixmap(-icon_size // 2, -icon_size // 2, pixmap)
+        painter.restore()
+
+        if self.is_busy():
+            paint_orbit(painter, center, half + 4, self._spin_angle, QColor(themeColor()), span=120.0, width=2.6)
         painter.end()
 
 
@@ -104,17 +190,20 @@ class DnsNowPanel(SimpleCardWidget):
         self._adapters_caption_text = "Применять к:"
         self._adapters_empty_text = "Сетевые адаптеры не найдены"
 
+        # Вокруг круга значка 10 px под свечение: внешний отступ на столько же меньше.
+        glow_pad = (_Badge.BOX - _Badge.CIRCLE) // 2
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 16)
-        root.setSpacing(14)
+        root.setContentsMargins(20 - glow_pad, 18 - glow_pad, 20, 16)
+        root.setSpacing(14 - glow_pad)
 
         # ── что стоит сейчас ──
         head = QHBoxLayout()
-        head.setSpacing(16)
+        head.setSpacing(16 - glow_pad)
         self.badge = _Badge(self)
         head.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
 
         text = QVBoxLayout()
+        text.setContentsMargins(0, glow_pad, 0, 0)
         text.setSpacing(2)
         self.eyebrow_label = CaptionLabel("Сейчас на отмеченных адаптерах", self)
         self.eyebrow_label.setTextColor(QColor(0, 0, 0, 115), QColor(255, 255, 255, 125))
@@ -123,11 +212,6 @@ class DnsNowPanel(SimpleCardWidget):
         title_row.setSpacing(10)
         self.title_label = SubtitleLabel("", self)
         title_row.addWidget(self.title_label)
-        self.busy_ring = IndeterminateProgressRing(self, start=False)
-        self.busy_ring.setFixedSize(18, 18)
-        self.busy_ring.setStrokeWidth(2)
-        self.busy_ring.hide()
-        title_row.addWidget(self.busy_ring, 0, Qt.AlignmentFlag.AlignVCenter)
         title_row.addStretch(1)
         text.addLayout(title_row)
         self.detail_label = BodyLabel("", self)
@@ -140,6 +224,7 @@ class DnsNowPanel(SimpleCardWidget):
 
         # ── адаптеры и действия ──
         bottom = QHBoxLayout()
+        bottom.setContentsMargins(glow_pad, 0, 0, 0)
         bottom.setSpacing(12)
         adapters_box = QHBoxLayout()
         adapters_box.setSpacing(10)
@@ -166,6 +251,7 @@ class DnsNowPanel(SimpleCardWidget):
         self.notice_label.setWordWrap(True)
         style_semantic_caption_label(self.notice_label, tone="warning")
         self.notice_label.hide()
+        self.notice_label.setContentsMargins(glow_pad, 0, 0, 0)
         root.addWidget(self.notice_label)
 
         self.reset_button.clicked.connect(self.reset_clicked)
@@ -196,11 +282,7 @@ class DnsNowPanel(SimpleCardWidget):
         self.detail_label.setText(state.detail)
         self.detail_label.setVisible(bool(state.detail))
         self.badge.set_icon(state.icon_name, state.color)
-        self.busy_ring.setVisible(state.busy)
-        if state.busy:
-            self.busy_ring.start()
-        else:
-            self.busy_ring.stop()
+        self.badge.set_busy(state.busy)
         summary = f"Сейчас DNS: {state.title}" + (f", {state.detail}" if state.detail else "")
         set_control_accessibility(self, name="Текущий DNS", description=summary)
         set_state_text(self.title_label, summary)

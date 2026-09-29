@@ -8,14 +8,24 @@
 
 Щелчок или Enter/пробел выбирает сервер, правая кнопка мыши (или клавиша
 меню) на своём DNS открывает меню правки.
+
+Движение (только при включённых «лёгких анимациях»):
+- пока DNS применяется, вокруг значка сервера бежит дуга, в углу крутится
+  маленький индикатор;
+- когда DNS встал, значок делает полный оборот, от него расходится свечение
+  цвета сервера, галочка «выпрыгивает»;
+- у выбранного сервера значок мягко светится всегда.
+Анимации — QVariantAnimation (общий выключатель анимаций подменяет только
+QPropertyAnimation) и перерисовывают лишь свои плитки.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath
+from PyQt6.QtCore import QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QVariantAnimation, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QRadialGradient
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 from qfluentwidgets import FluentIcon, getFont, isDarkTheme, themeColor
 
@@ -25,6 +35,55 @@ from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
 
 
 ADD_TILE_KEY = "__add__"
+
+SPIN_PERIOD_MS = 900
+SETTLE_MS = 950
+
+
+def ease_out_cubic(t: float) -> float:
+    t = min(max(t, 0.0), 1.0)
+    return 1.0 - (1.0 - t) ** 3
+
+
+def pop_scale(t: float) -> float:
+    """Галочка «выпрыгивает»: 0 → чуть больше 1 → 1 за первые 55 % времени."""
+    t = min(max(t / 0.55, 0.0), 1.0)
+    back = 2.2
+    t -= 1.0
+    return 1.0 + (back + 1.0) * t ** 3 + back * t ** 2
+
+
+def paint_glow(painter: QPainter, center: QPointF, radius: float, color: QColor, strength: float) -> None:
+    """Мягкое круглое свечение: цвет в центре, прозрачность к краю."""
+    if radius <= 0 or strength <= 0:
+        return
+    gradient = QRadialGradient(center, radius)
+    inner = QColor(color)
+    inner.setAlphaF(min(1.0, 0.55 * strength))
+    middle = QColor(color)
+    middle.setAlphaF(min(1.0, 0.22 * strength))
+    outer = QColor(color)
+    outer.setAlphaF(0.0)
+    gradient.setColorAt(0.0, inner)
+    gradient.setColorAt(0.55, middle)
+    gradient.setColorAt(1.0, outer)
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(gradient)
+    painter.drawEllipse(center, radius, radius)
+    painter.restore()
+
+
+def paint_orbit(painter: QPainter, center: QPointF, radius: float, angle: float, color: QColor, *, span: float = 110.0, width: float = 2.2) -> None:
+    """Дуга, бегущая по кругу: angle — текущий поворот в градусах."""
+    pen = QPen(color, width)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.save()
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    box = QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2)
+    painter.drawArc(box, int(-angle * 16), int(span * 16))
+    painter.restore()
 
 # Пороги цветной точки замера, мс.
 LATENCY_FAST_MS = 50
@@ -150,6 +209,23 @@ class DnsProviderGrid(QWidget):
         self._flash_anim.setDuration(self.FLASH_MS)
         self._flash_anim.valueChanged.connect(self._on_flash_value)
         self._flash_anim.finished.connect(self._on_flash_finished)
+        # Вращение, пока DNS применяется: бесконечный круг 0→360°.
+        self._spin_angle = 0.0
+        self._spin_anim = QVariantAnimation(self)
+        self._spin_anim.setStartValue(0.0)
+        self._spin_anim.setEndValue(360.0)
+        self._spin_anim.setDuration(SPIN_PERIOD_MS)
+        self._spin_anim.setLoopCount(-1)
+        self._spin_anim.valueChanged.connect(self._on_spin_value)
+        # «DNS встал»: оборот значка, свечение, галочка.
+        self._settle: dict[str, float] = {}
+        self._settle_anim = QVariantAnimation(self)
+        self._settle_anim.setStartValue(0.0)
+        self._settle_anim.setEndValue(1.0)
+        self._settle_anim.setDuration(SETTLE_MS)
+        self._settle_anim.setEasingCurve(QEasingCurve.Type.Linear)
+        self._settle_anim.valueChanged.connect(self._on_settle_value)
+        self._settle_anim.finished.connect(self._on_settle_finished)
         self.setObjectName("dnsProviderGrid")
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -172,13 +248,60 @@ class DnsProviderGrid(QWidget):
 
     def set_tiles(self, tiles: list[DnsTile]) -> None:
         cursor_key = self._key_at(self._cursor)
+        was_pending = {tile.key for tile in self._tiles if tile.pending}
+        landed = [tile.key for tile in tiles if tile.key in was_pending and tile.selected and not tile.pending]
         self._tiles = list(tiles)
         self._hover = -1
         self._pressed = -1
         self._relayout()
         self._cursor = self._index_of(cursor_key)
         self._sync_accessibility()
+        self._sync_spin()
+        for key in landed:
+            self.settle(key)
         self.update()
+
+    def is_spinning(self) -> bool:
+        return self._spin_anim.state() == QVariantAnimation.State.Running
+
+    def settling_keys(self) -> list[str]:
+        return list(self._settle)
+
+    def settle(self, key: str) -> None:
+        """DNS встал: значок делает оборот, расходится свечение, выпрыгивает галочка."""
+        if not key or not are_live_animations_enabled():
+            return
+        self._settle[key] = 0.0
+        self._settle_anim.stop()
+        self._settle_anim.start()
+
+    def _sync_spin(self) -> None:
+        spinning = any(tile.pending for tile in self._tiles) and are_live_animations_enabled()
+        if spinning and not self.is_spinning():
+            self._spin_anim.start()
+        elif not spinning and self.is_spinning():
+            self._spin_anim.stop()
+            self._spin_angle = 0.0
+
+    def _on_spin_value(self, value) -> None:
+        self._spin_angle = float(value)
+        for index, tile in enumerate(self._tiles):
+            if tile.pending and index < len(self._rects):
+                self.update(self._rects[index])
+
+    def _on_settle_value(self, value) -> None:
+        for key in list(self._settle):
+            self._settle[key] = float(value)
+            index = self._index_of(key)
+            if index >= 0:
+                self.update(self._rects[index])
+
+    def _on_settle_finished(self) -> None:
+        keys, self._settle = list(self._settle), {}
+        for key in keys:
+            index = self._index_of(key)
+            if index >= 0:
+                self.update(self._rects[index])
 
     def flash(self, key: str) -> None:
         """Плитка коротко вспыхивает акцентом — выбор принят."""
@@ -316,22 +439,53 @@ class DnsProviderGrid(QWidget):
         painter.drawPath(path)
 
     def _paint_badge(self, painter: QPainter, center_x: int, center_y: int, tile: DnsTile, tokens, dark: bool) -> None:
-        """Значок сервера в мягком круге его фирменного цвета."""
+        """Значок сервера в мягком круге его цвета, со свечением и движением."""
         color = badge_color(tile.color, tokens, dark)
+        center = QPointF(center_x, center_y)
+        half = self._BADGE / 2
+        settle = self._settle.get(tile.key)
+
+        # Свечение: мягкое у выбранного сервера, вспышка — когда DNS только что встал.
+        if tile.selected:
+            paint_glow(painter, center, half + 10, color, 0.55 if dark else 0.4)
+        if settle is not None:
+            burst = ease_out_cubic(settle)
+            paint_glow(painter, center, half + 6 + 26 * burst, color, 1.4 * (1.0 - settle))
+            ring = QColor(color)
+            ring.setAlphaF(max(0.0, 0.8 * (1.0 - burst)))
+            painter.save()
+            painter.setPen(QPen(ring, 1.6))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(center, half + 16 * burst, half + 16 * burst)
+            painter.restore()
+
         back = QColor(color)
         back.setAlpha(46 if dark else 34)
-        half = self._BADGE / 2
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(back)
-        painter.drawEllipse(QRectF(center_x - half, center_y - half, self._BADGE, self._BADGE))
+        painter.drawEllipse(center, half, half)
+
         icon = get_cached_qta_pixmap(tile.icon_name or "fa5s.server", color=color.name(), size=self._ICON)
-        painter.drawPixmap(center_x - self._ICON // 2, center_y - self._ICON // 2, icon)
+        painter.save()
+        painter.translate(center)
+        if settle is not None:
+            painter.rotate(360.0 * ease_out_cubic(settle))
+            scale = 1.0 + 0.18 * math.sin(math.pi * min(settle / 0.6, 1.0))
+            painter.scale(scale, scale)
+        painter.drawPixmap(-self._ICON // 2, -self._ICON // 2, icon)
+        painter.restore()
+
+        if tile.pending:
+            paint_orbit(painter, center, half + 3, self._spin_angle, QColor(themeColor()))
 
     def _paint_provider(self, painter: QPainter, index: int, rect: QRect, tile: DnsTile, tokens, dark: bool) -> None:
         painter.save()
         self._paint_card(painter, index, rect, tile, dark)
         pad = self._PAD
+        # Свечение не выходит за карточку: перерисовывается только её прямоугольник.
+        painter.setClipPath(self._card_path(rect))
         self._paint_badge(painter, rect.left() + pad + self._BADGE // 2, rect.top() + pad + self._BADGE // 2, tile, tokens, dark)
+        painter.setClipping(False)
 
         text_left = rect.left() + pad + self._BADGE + 12
         right = rect.right() - pad
@@ -361,20 +515,30 @@ class DnsProviderGrid(QWidget):
         painter.restore()
 
     def _paint_mark(self, painter: QPainter, area: QRect, tile: DnsTile) -> None:
-        """Галочка выбранного сервера; пока DNS применяется — пустое кольцо."""
+        """Галочка выбранного сервера; пока DNS применяется — крутящийся индикатор."""
         accent = QColor(themeColor())
         box = QRectF(area).adjusted(1, 1, -1, -1)
         if tile.pending:
-            pen_color = QColor(accent)
-            painter.setPen(pen_color)
+            faint = QColor(accent)
+            faint.setAlphaF(0.25)
+            painter.setPen(QPen(faint, 2.0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(box)
+            painter.drawEllipse(box.adjusted(1, 1, -1, -1))
+            paint_orbit(painter, box.center(), box.width() / 2 - 1, self._spin_angle * 1.6, accent, span=100.0, width=2.0)
             return
+        settle = self._settle.get(tile.key)
+        painter.save()
+        if settle is not None:
+            scale = max(0.0, pop_scale(settle))
+            painter.translate(box.center())
+            painter.scale(scale, scale)
+            painter.translate(-box.center())
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(accent)
         painter.drawEllipse(box)
         check = box.adjusted(4, 4, -4, -4)
         FluentIcon.ACCEPT.render(painter, check, fill="#000000" if isDarkTheme() else "#ffffff")
+        painter.restore()
 
     def _paint_footer(self, painter: QPainter, area: QRect, tile: DnsTile, tokens, dark: bool) -> None:
         """Нижняя строка: адрес, метки IPv6/DoH и скорость справа."""
@@ -642,6 +806,10 @@ __all__ = [
     "DnsTile",
     "GridTexts",
     "badge_color",
+    "ease_out_cubic",
+    "paint_glow",
+    "paint_orbit",
+    "pop_scale",
     "latency_text",
     "tile_accessible_text",
 ]

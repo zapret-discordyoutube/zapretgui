@@ -56,6 +56,8 @@ class DnsPageTests(unittest.TestCase):
             patch("dns.ui.page.get_custom_dns_servers", side_effect=lambda: list(self.custom_servers)),
             patch("dns.ui.page.set_custom_dns_servers", side_effect=self._save_servers),
             patch("dns.ui.page.InfoBar"),
+            patch("dns.ui.now_panel.are_live_animations_enabled", return_value=True),
+            patch("dns.ui.provider_grid.are_live_animations_enabled", return_value=True),
         ]
         for item in patches:
             started = item.start()
@@ -94,7 +96,7 @@ class DnsPageTests(unittest.TestCase):
         self.assertEqual(len(self._provider_tiles(page)), total)
         self.assertEqual(page.grid.tiles()[-1].kind, "add")
         self.assertEqual(page.now_panel.title_label.text(), "Загружаю настройки сети…")
-        self.assertFalse(page.now_panel.busy_ring.isHidden())
+        self.assertTrue(page.now_panel.badge.is_busy())
         page._load_lane.request.assert_not_called()
 
     def test_warmed_data_is_used_without_loading_again(self) -> None:
@@ -172,6 +174,8 @@ class DnsPageTests(unittest.TestCase):
         self.assertFalse(payload["ipv6_available"])
         pending = [tile.key for tile in self._provider_tiles(page) if tile.pending]
         self.assertEqual(pending, ["Google DNS"])
+        self.assertTrue(page.grid.is_spinning())
+        self.assertTrue(page.now_panel.badge.is_busy())
         self.assertEqual(page.now_panel.detail_label.text(), "Применяю…")
 
         plan = page_plans.build_provider_dns_apply_result_plan(name="Google DNS", adapter_count=1, success_count=1, ipv6=[])
@@ -180,6 +184,10 @@ class DnsPageTests(unittest.TestCase):
 
         self.assertIsNone(page._pending_choice)
         self.assertEqual(page.now_panel.title_label.text(), "Google DNS")
+        # DNS встал: дуга остановилась, значок сервера делает оборот со свечением.
+        self.assertFalse(page.grid.is_spinning())
+        self.assertFalse(page.now_panel.badge.is_busy())
+        self.assertEqual(page.grid.settling_keys(), ["Google DNS"])
         self.info_bar.warning.assert_not_called()
 
     def test_refreshed_adapters_keep_user_checks(self) -> None:
