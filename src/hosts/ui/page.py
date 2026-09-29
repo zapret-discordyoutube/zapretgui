@@ -13,8 +13,10 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt
-from PyQt6.QtGui import QColor
+from dataclasses import replace
+
+from PyQt6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt
+from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -38,7 +40,8 @@ from app.ui_texts import tr as tr_catalog
 from hosts.draft import MIXED, HostsDraft
 from hosts.hosts_blocks import BLOCK_ZAPRETGUI
 from hosts.page_snapshot import CATEGORY_AI, CATEGORY_DIRECT, CATEGORY_OTHER, HostsPageSnapshot
-from hosts.ui.services_tiles import HostsTile, HostsTilesGrid, split_service_title
+from hosts.ui.profile_icons import profile_icon
+from hosts.ui.services_tiles import HostsChoice, HostsTile, HostsTilesGrid, split_service_title
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import SettingsCard
@@ -46,6 +49,7 @@ from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.pages.base_page import BasePage
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.theme_semantic import get_semantic_palette
+from ui.widgets.stagger_float_in import skip_float_in
 
 
 ADOBE_TILE_KEY = "__adobe__"
@@ -161,7 +165,8 @@ class HostsPage(BasePage):
         self._apply_force_pending = False
         self._just_written = False
         self._restore_runtime = OneShotWorkerRuntime()
-        self._profile_menu: RoundMenu | None = None
+        # Меню «DNS для всех» пересобирается, только когда меняется его содержимое.
+        self._dns_all_menu_key: tuple | None = None
 
         self._build_ui()
         self._retranslate()
@@ -240,9 +245,12 @@ class HostsPage(BasePage):
         self._find_shortcut.activated.connect(self.open_search)
 
         self.tiles = HostsTilesGrid(self.content)
+        # Сетка — один высокий виджет: анимация «выплывания» перерисовывала бы
+        # её целиком на каждом кадре. Плитки появляются сразу.
+        skip_float_in(self.tiles)
         self.tiles.activated.connect(self._on_tile_activated)
+        self.tiles.profile_chosen.connect(self._set_service_profile)
         self.add_widget(self.tiles)
-        self.verticalScrollBar().valueChanged.connect(self._on_tiles_scrolled)
 
     def _build_header(self) -> None:
         """Заголовок и обычные кнопки справа от него."""
@@ -317,11 +325,6 @@ class HostsPage(BasePage):
             if event.key() == Qt.Key.Key_Escape:
                 self.close_search()
                 return True
-        menu = getattr(self, "_profile_menu", None)
-        if menu is not None and watched is menu and event.type() == QEvent.Type.Wheel:
-            # Меню профиля не висит над уехавшими плитками.
-            self._close_profile_menu()
-            return True
         return super().eventFilter(watched, event)
 
     # ── жизненный цикл ───────────────────────────────────────
@@ -333,13 +336,8 @@ class HostsPage(BasePage):
                 self._set_snapshot(cached)
         self._request_snapshot()
 
-    def on_page_hidden(self) -> None:
-        self._close_profile_menu()
-        super().on_page_hidden()
-
     def cleanup(self) -> None:
         self._cleanup_in_progress = True
-        self._close_profile_menu()
         for runtime in (self._snapshot_runtime, self._apply_runtime, self._restore_runtime):
             try:
                 runtime.stop(blocking=False, warning_prefix="Hosts worker")
@@ -415,7 +413,7 @@ class HostsPage(BasePage):
         self._write_epoch += 1
         selection = draft.selection()
         adobe = draft.adobe if draft.adobe_changed else None
-        self._render()
+        self._render_changes()
         self._apply_runtime.start_qthread_worker(
             worker_factory=lambda request_id: self._hosts.create_apply_worker(request_id, selection, adobe, self),
             on_loaded=self._on_apply_finished,
@@ -452,7 +450,7 @@ class HostsPage(BasePage):
             self._render()
         if self._snapshot_pending and not self._applying:
             self._request_snapshot()
-        self._render()
+        self._render_changes()
 
     def _on_apply_failed(self, request_id: int, error: str) -> None:
         if not self._apply_runtime.is_current(request_id, cleanup_in_progress=self._cleanup_in_progress):
@@ -508,7 +506,8 @@ class HostsPage(BasePage):
         self._search = str(text or "").strip().casefold()
         self._render_tiles()
 
-    def _on_tile_activated(self, key: str, global_pos: QPoint) -> None:
+    def _on_tile_activated(self, key: str) -> None:
+        """Тумблер: сервис «напрямую» или блокировка Adobe."""
         draft = self._draft
         if draft is None:
             return
@@ -517,53 +516,21 @@ class HostsPage(BasePage):
             self._after_change(key)
             return
         entry = draft.snapshot.service(key)
-        if entry is None or entry.unavailable_reason:
+        if entry is None or entry.unavailable_reason or not entry.is_direct:
             return
-        if entry.is_direct:
-            draft.set(key, None if draft.value(key) else (entry.profiles[0] if entry.profiles else None))
-            self._after_change(key)
-            return
-        self._show_profile_menu(key, global_pos)
+        draft.set(key, None if draft.value(key) else (entry.profiles[0] if entry.profiles else None))
+        self._after_change(key)
 
     def _after_change(self, key: str = "") -> None:
         self.tiles.flash(key)
-        self._render()
+        self._render_changes()
         self._commit()
 
-    def _show_profile_menu(self, service_name: str, global_pos: QPoint) -> None:
-        draft = self._draft
-        if draft is None:
-            return
-        entry = draft.snapshot.service(service_name)
-        if entry is None:
-            return
-        self._close_profile_menu()
-        labels = dict(draft.snapshot.dns_profiles)
-        current = draft.value(service_name)
-        menu = RoundMenu(parent=self)
-        choices = [(None, self._tr("page.hosts.profile.off", "Выкл."))]
-        choices += [(profile_id, labels.get(profile_id, profile_id)) for profile_id in entry.profiles]
-        for profile_id, label in choices:
-            action = Action(FluentIcon.ACCEPT, label, parent=menu) if profile_id == current else Action(label, parent=menu)
-            action.triggered.connect(
-                lambda _checked=False, name=service_name, value=profile_id: self._set_service_profile(name, value)
-            )
-            menu.addAction(action)
-        menu.installEventFilter(self)
-        self._profile_menu = menu
-        menu.exec(global_pos)
-
-    def _close_profile_menu(self) -> None:
-        menu, self._profile_menu = self._profile_menu, None
-        if menu is None:
-            return
-        try:
-            menu.close()
-        except RuntimeError:
-            pass
-
-    def _on_tiles_scrolled(self, _value: int) -> None:
-        self._close_profile_menu()
+    def _render_changes(self) -> None:
+        """После щелчка меняются только плитки, сводка и «DNS для всех»."""
+        self._render_summary()
+        self._render_dns_all()
+        self._render_tiles()
 
     def _set_service_profile(self, service_name: str, profile_id) -> None:
         if self._draft is not None and self._draft.set(service_name, profile_id):
@@ -592,7 +559,7 @@ class HostsPage(BasePage):
         for entry in draft.snapshot.services:
             draft.set(entry.name, None)
         block = draft.snapshot.block(BLOCK_ZAPRETGUI)
-        self._render()
+        self._render_changes()
         # Запись и тогда, когда всё уже выключено: уберутся лишние строки блока.
         self._commit(force=block is not None)
 
@@ -670,14 +637,27 @@ class HostsPage(BasePage):
         if draft is None:
             return
         common = draft.dns_common_value()
-        menu = RoundMenu(parent=self.dns_all_button)
         items = [(None, self._tr("page.hosts.profile.off", "Выкл."))] + list(draft.snapshot.dns_profiles)
-        for profile_id, label in items:
+        menu_key = (tuple(items), common)
+        if menu_key == self._dns_all_menu_key:
+            return
+        self._dns_all_menu_key = menu_key
+        menu = RoundMenu(parent=self.dns_all_button)
+        for position, (profile_id, label) in enumerate(items):
             selected = common != MIXED and common == profile_id
-            action = Action(FluentIcon.ACCEPT, label, parent=menu) if selected else Action(label, parent=menu)
+            if selected:
+                action = Action(FluentIcon.ACCEPT, label, parent=menu)
+            elif profile_id is None:
+                action = Action(label, parent=menu)
+            else:
+                icon_name, color = profile_icon(profile_id, position - 1)
+                action = Action(QIcon(get_cached_qta_pixmap(icon_name, color=color, size=16)), label, parent=menu)
             action.triggered.connect(lambda _checked=False, value=profile_id: self._set_all_dns(value))
             menu.addAction(action)
+        old_menu = self.dns_all_button.menu()
         self.dns_all_button.setMenu(menu)
+        if old_menu is not None:
+            old_menu.deleteLater()
 
     def _render_tiles(self) -> None:
         draft = self._draft
@@ -690,6 +670,10 @@ class HostsPage(BasePage):
         off_state = self._tr("page.hosts.state.off", "выключен")
         ipv6_hint = self._tr("page.hosts.hint.ipv6", "Нужен IPv6 — сейчас его нет")
         writing_text = self._tr("page.hosts.state.changed", "записывается")
+        all_choices = tuple(
+            HostsChoice(profile_id, label, *profile_icon(profile_id, position))
+            for position, (profile_id, label) in enumerate(draft.snapshot.dns_profiles)
+        )
         grouped: dict[str, list[HostsTile]] = {CATEGORY_DIRECT: [], CATEGORY_AI: [], CATEGORY_OTHER: []}
         for entry in draft.snapshot.services:
             if self._search and self._search not in entry.name.casefold():
@@ -701,10 +685,8 @@ class HostsPage(BasePage):
                 note = ipv6_hint
             if entry.is_direct:
                 state = on_state if value else off_state
-                combo_text = ""
             else:
                 state = labels.get(value, value) if value else off_label
-                combo_text = "" if entry.unavailable_reason else state
             accessible = f"{entry.name}: {state}" + (f", {writing_text}" if pending else "")
             grouped.setdefault(entry.category, []).append(
                 HostsTile(
@@ -716,7 +698,11 @@ class HostsPage(BasePage):
                     icon_color=entry.icon_color,
                     is_on=bool(value),
                     has_switch=entry.is_direct and not entry.unavailable_reason,
-                    combo_text=combo_text,
+                    choices=() if entry.is_direct or entry.unavailable_reason else tuple(
+                        replace(choice, available=choice.profile_id in entry.profiles) for choice in all_choices
+                    ),
+                    selected=None if entry.is_direct else value,
+                    state_text="" if entry.is_direct else state,
                     pending=pending,
                     enabled=not entry.unavailable_reason,
                     accessible_text=accessible,
@@ -732,7 +718,9 @@ class HostsPage(BasePage):
             counter = self._tr("page.hosts.group.counter", "{on} из {total}", on=on_count, total=len(items))
             hint_key, hint_default = _GROUP_HINTS[category]
             counter = f"{counter}  ·  {self._tr(hint_key, hint_default)}"
-            tiles.append(HostsTile(kind="group", title=self._tr(key, default), counter=counter))
+            # У групп с DNS-профилями справа легенда: какая иконка — какой провайдер.
+            legend = all_choices if any(item.has_choices for item in items) else ()
+            tiles.append(HostsTile(kind="group", title=self._tr(key, default), counter=counter, legend=legend))
             tiles.extend(items)
 
         adobe_title = self._tr("page.hosts.adobe.title", "Блокировать активацию Adobe")

@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6 import QtCore
 from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import QApplication
 
@@ -365,7 +366,7 @@ class HostsPageTests(unittest.TestCase):
     def test_click_on_tile_writes_hosts_right_away(self) -> None:
         page = self._page(_manual_snapshot())
 
-        page._on_tile_activated("Direct", page.mapToGlobal(page.rect().center()))
+        page._on_tile_activated("Direct")
 
         self.assertEqual(self.writes, [{"selection": {"Direct": "hosts"}, "adobe": None}])
         self.assertTrue(page._applying)
@@ -377,7 +378,7 @@ class HostsPageTests(unittest.TestCase):
     def test_clicks_during_write_are_written_next_in_one_go(self) -> None:
         page = self._page(_manual_snapshot())
 
-        page._on_tile_activated("Direct", QPoint())
+        page._on_tile_activated("Direct")
         page._set_service_profile("Alpha", "p1")
         page._set_service_profile("Beta", "p1")
 
@@ -388,7 +389,7 @@ class HostsPageTests(unittest.TestCase):
 
     def test_failed_write_returns_tiles_to_file_state(self) -> None:
         page = self._page(_manual_snapshot())
-        page._on_tile_activated("Direct", QPoint())
+        page._on_tile_activated("Direct")
 
         with patch("hosts.ui.page.InfoBar") as info_bar:
             self._finish_write(page, success=False, message="только чтение")
@@ -409,7 +410,7 @@ class HostsPageTests(unittest.TestCase):
 
         page = self._page(_manual_snapshot())
 
-        page._on_tile_activated(ADOBE_TILE_KEY, QPoint())
+        page._on_tile_activated(ADOBE_TILE_KEY)
 
         self.assertEqual(self.writes[0]["adobe"], True)
 
@@ -430,22 +431,12 @@ class HostsPageTests(unittest.TestCase):
         self.assertFalse(page.search_edit.isVisible())
         self.assertIn("Beta", [tile.key for tile in page.tiles.tiles()])
 
-    def test_profile_menu_closes_when_tiles_scroll(self) -> None:
-        page = self._page(_manual_snapshot())
-        menu = SimpleNamespace(closed=False)
-        menu.close = lambda: setattr(menu, "closed", True)
-        page._profile_menu = menu
-
-        page._on_tiles_scrolled(10)
-
-        self.assertTrue(menu.closed)
-        self.assertIsNone(page._profile_menu)
-
     def test_summary_stays_visible_when_tiles_are_scrolled(self) -> None:
         page = self._page(_manual_snapshot())
         with patch("hosts.ui.page.are_live_animations_enabled", return_value=False):
-            page._on_tiles_scrolled(200)
-        # Сводка стоит на месте: прокручиваются только плитки под ней.
+            page.verticalScrollBar().setValue(200)
+            QApplication.processEvents()
+        # Сводка не прячется анимацией: уезжает вверх вместе со страницей.
         self.assertFalse(page.top_panel.isHidden())
         self.assertEqual(page.top_panel.maximumHeight(), 16777215)
 
@@ -470,16 +461,91 @@ class HostsPageTests(unittest.TestCase):
         # Надпись целиком, в одну строку, без обрезки по ширине.
         self.assertGreaterEqual(status.sizeHint().width(), status.label.fontMetrics().horizontalAdvance(status.text()))
 
-    def test_tiles_use_switch_for_direct_and_profile_field_for_dns(self) -> None:
+    def test_tiles_use_switch_for_direct_and_profile_icons_for_dns(self) -> None:
         page = self._page(_manual_snapshot(beta="p1"))
         tiles = {tile.key: tile for tile in page.tiles.tiles() if tile.kind == "tile"}
 
         self.assertTrue(tiles["Direct"].has_switch)
-        self.assertEqual(tiles["Direct"].combo_text, "")
+        self.assertFalse(tiles["Direct"].has_choices)
         self.assertFalse(tiles["Alpha"].has_switch)
-        self.assertEqual(tiles["Alpha"].combo_text, "Выкл.")
-        self.assertEqual(tiles["Beta"].combo_text, "Профиль 1")
+        # Иконки всех профилей по порядку; у Beta профиля p2 нет — место пустое.
+        self.assertEqual([c.profile_id for c in tiles["Alpha"].choices], ["p1", "p2"])
+        self.assertEqual([c.available for c in tiles["Beta"].choices], [True, False])
+        self.assertEqual([c.label for c in tiles["Alpha"].choices], ["Профиль 1", "Профиль 2"])
+        self.assertIsNone(tiles["Alpha"].selected)
+        self.assertEqual(tiles["Alpha"].state_text, "Выкл.")
+        self.assertEqual(tiles["Beta"].selected, "p1")
+        self.assertEqual(tiles["Beta"].state_text, "Профиль 1")
         self.assertTrue(tiles["Beta"].is_on)
+        # У группы DNS-сервисов — легенда иконок.
+        groups = [tile for tile in page.tiles.tiles() if tile.kind == "group"]
+        self.assertTrue(any(group.legend for group in groups))
+
+    def _click(self, page, point) -> None:
+        from PyQt6.QtCore import Qt as _Qt
+        from PyQt6.QtTest import QTest as _QTest
+
+        _QTest.mouseClick(page.tiles, _Qt.MouseButton.LeftButton, _Qt.KeyboardModifier.NoModifier, point)
+        QApplication.processEvents()
+
+    def test_click_on_profile_icon_writes_and_second_click_turns_off(self) -> None:
+        page = self._page(_manual_snapshot())
+        icon = page.tiles.choice_rect("Alpha", "p2")
+        self.assertFalse(icon.isNull())
+
+        self._click(page, icon.center())
+        self.assertEqual(self.writes[-1]["selection"], {"Alpha": "p2"})
+
+        self._finish_write(page, snapshot=_manual_snapshot(block_lines=("1.1.1.1 alpha.example", "2.2.2.2 alpha.example"), alpha="p2"))
+        self._click(page, page.tiles.choice_rect("Alpha", "p2").center())
+        self.assertEqual(self.writes[-1]["selection"], {})
+
+    def test_click_on_tile_body_or_missing_profile_does_nothing(self) -> None:
+        page = self._page(_manual_snapshot())
+        rect = page.tiles.tile_rect("Alpha")
+        self._click(page, rect.topRight() + QPoint(-20, 20))
+        beta = page.tiles.tile_rect("Beta")
+        missing = page.tiles._choice_rect(beta, 1)
+        self._click(page, missing.center())
+        self.assertEqual(self.writes, [])
+
+    def test_mouse_click_does_not_scroll_the_page(self) -> None:
+        page = self._page(_manual_snapshot())
+        page.resize(1000, 260)
+        QApplication.processEvents()
+        bar = page.verticalScrollBar()
+        self.assertGreater(bar.maximum(), 0)
+        bar.setValue(0)
+        rect = page.tiles.tile_rect("Beta")
+        page.tiles.setFocus(QtCore.Qt.FocusReason.MouseFocusReason)
+        self._click(page, page.tiles._choice_rect(rect, 0).center())
+        self.assertEqual(bar.value(), 0)
+
+    def test_enter_cycles_profiles_on_dns_tile(self) -> None:
+        from PyQt6.QtCore import Qt as _Qt
+        from PyQt6.QtTest import QTest as _QTest
+
+        page = self._page(_manual_snapshot(alpha="p1"))
+        page.tiles._set_cursor(page.tiles._index_of("Alpha"), ensure_visible=False)
+        chosen = []
+        page.tiles.profile_chosen.connect(lambda key, value: chosen.append((key, value)))
+        _QTest.keyClick(page.tiles, _Qt.Key.Key_Return)
+        self.assertEqual(chosen, [("Alpha", "p2")])
+
+    def test_unchanged_tiles_are_not_redrawn(self) -> None:
+        page = self._page(_manual_snapshot())
+        grid = page.tiles
+        grid.grab()
+        drawn = grid.rendered_tiles
+        self.assertGreater(drawn, 0)
+        grid.grab()
+        self.assertEqual(grid.rendered_tiles, drawn)
+        # Щелчок по иконке перерисовывает только изменившуюся плитку.
+        with patch("hosts.ui.services_tiles.are_live_animations_enabled", return_value=False):
+            self._click(page, grid.choice_rect("Alpha", "p1").center())
+        before = grid.rendered_tiles
+        grid.grab()
+        self.assertLessEqual(grid.rendered_tiles - before, 2)
 
     def test_note_in_brackets_moves_to_second_line(self) -> None:
         from hosts.ui.services_tiles import split_service_title

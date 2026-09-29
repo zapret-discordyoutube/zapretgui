@@ -1,12 +1,14 @@
 """Плитки сервисов страницы Hosts: одна рисуемая сетка вместо сотен виджетов.
 
 Плитка выглядит как карточка qfluentwidgets (CardWidget): те же фон, рамка,
-скругление и шрифты. Сверху значок и название, под ним пояснение. Справа у
-сервисов «напрямую» — тумблер, как SwitchButton; у сервисов с DNS-профилем
-второй строкой — поле выбора профиля, как ComboBox. Включённая плитка мягко
-подкрашена акцентом, без рамок. Щелчок по плитке сразу меняет выбор
-(страница записывает hosts), у DNS-сервисов открывается меню профиля прямо
-под полем.
+скругление и шрифты. Сверху значок и название. У сервисов «напрямую» справа
+тумблер в стиле переключателя qfluentwidgets, а под названием — пояснение. У сервисов с
+DNS-профилем под названием ряд иконок провайдеров: щелчок по иконке сразу
+выбирает профиль, щелчок по выбранной — выключает, полное имя — в подсказке.
+Включённая плитка мягко подкрашена акцентом, без рамок.
+
+Каждая плитка рисуется один раз в готовую картинку; прокрутка и перерисовка
+только копируют картинки, пока плитка не изменилась.
 """
 
 from __future__ import annotations
@@ -14,13 +16,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import QSizePolicy, QWidget
-from qfluentwidgets import FluentIcon, getFont, isDarkTheme, themeColor
+from qfluentwidgets import getFont, isDarkTheme, themeColor
 
 from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
+
+
+@dataclass(frozen=True, slots=True)
+class HostsChoice:
+    """Один DNS-профиль в ряду иконок плитки."""
+
+    profile_id: str
+    label: str
+    icon_name: str
+    color: str
+    # Профиль есть у этого сервиса. Недоступный не рисуется, но место
+    # остаётся, чтобы иконки стояли ровными столбцами по всей странице.
+    available: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,27 +54,36 @@ class HostsTile:
     is_on: bool = False
     # Плитка с тумблером (сервисы «напрямую», Adobe).
     has_switch: bool = False
-    # Плитка с полем профиля: текст поля («XBOX DNS», «Выкл.»).
-    combo_text: str = ""
+    # Плитка с DNS-профилем: ряд иконок всех профилей каталога.
+    choices: tuple[HostsChoice, ...] = ()
+    selected: str | None = None
+    # Справа от названия у DNS-плитки: имя выбранного профиля или «Выкл.».
+    state_text: str = ""
     pending: bool = False
     enabled: bool = True
     accessible_text: str = ""
+    # У заголовка группы DNS-сервисов: легенда «иконка — провайдер».
+    legend: tuple[HostsChoice, ...] = ()
 
     @property
-    def has_combo(self) -> bool:
-        return bool(self.combo_text)
+    def has_choices(self) -> bool:
+        return bool(self.choices)
 
 
 class HostsTilesGrid(QWidget):
     """Сетка плиток. Данные задаёт страница через set_tiles()."""
 
-    # (ключ плитки, точка на экране под полем профиля — для меню)
-    activated = pyqtSignal(str, QPoint)
+    # Тумблер: сервис «напрямую» или Adobe (ключ плитки).
+    activated = pyqtSignal(str)
+    # Иконка профиля: (ключ сервиса, id профиля или None — выключить).
+    profile_chosen = pyqtSignal(str, object)
 
     TILE_MIN_WIDTH = 250
     TILE_HEIGHT = 78
     GAP = 8
     GROUP_HEIGHT = 40
+    # Строка легенды под заголовком группы DNS-сервисов.
+    LEGEND_HEIGHT = 24
     # Место справа под полосу прокрутки, чтобы она не лежала на плитках.
     SCROLLBAR_GUTTER = 14
     FLASH_MS = 520
@@ -67,7 +91,10 @@ class HostsTilesGrid(QWidget):
     _ICON = 20
     _PAD = 14
     _SWITCH = QSize(40, 20)
-    _COMBO_HEIGHT = 28
+    _CHOICE = 24
+    _CHOICE_ICON = 13
+    _CHOICE_GAP = 6
+    _LEGEND_ICON = 13
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -75,8 +102,10 @@ class HostsTilesGrid(QWidget):
         self._rects: list[QRect] = []
         self._columns = 1
         self._hover = -1
+        self._hover_choice = -1
         self._cursor = -1
         self._pressed = -1
+        self._pressed_choice = -1
         self._flash: dict[str, float] = {}
         self._flash_anim = QVariantAnimation(self)
         self._flash_anim.setStartValue(1.0)
@@ -84,6 +113,14 @@ class HostsTilesGrid(QWidget):
         self._flash_anim.setDuration(self.FLASH_MS)
         self._flash_anim.valueChanged.connect(self._on_flash_value)
         self._flash_anim.finished.connect(self._on_flash_finished)
+        # Готовые картинки плиток: ключ — всё, от чего зависит вид плитки.
+        self._pixmaps: dict[tuple, QPixmap] = {}
+        # Сколько плиток нарисовано заново (а не взято готовыми) — для тестов.
+        self.rendered_tiles = 0
+        self._title_font = getFont(14)
+        self._title_font_on = getFont(14, QFont.Weight.DemiBold)
+        self._caption_font = getFont(12)
+        self._header_font = getFont(14, QFont.Weight.DemiBold)
         self.setObjectName("hostsTilesGrid")
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -97,12 +134,28 @@ class HostsTilesGrid(QWidget):
 
     def set_tiles(self, tiles: list[HostsTile]) -> None:
         cursor_key = self._key_at(self._cursor)
-        self._tiles = list(tiles)
+        tiles = list(tiles)
+        if tiles == self._tiles:
+            return
+        # Перерисовываются только изменившиеся плитки.
+        old_by_key = {tile.key: (tile, QRect(rect)) for tile, rect in zip(self._tiles, self._rects) if tile.key}
+        old_layout = [(tile.kind, tile.key) for tile in self._tiles]
+        self._tiles = tiles
         self._hover = -1
+        self._hover_choice = -1
         self._pressed = -1
+        self._pressed_choice = -1
         self._relayout()
         self._cursor = self._index_of(cursor_key)
-        self.update()
+        in_use = {tile for tile in self._tiles}
+        self._pixmaps = {key: pixmap for key, pixmap in self._pixmaps.items() if key[0] in in_use}
+        if old_layout != [(tile.kind, tile.key) for tile in self._tiles]:
+            self.update()
+            return
+        for tile, rect in zip(self._tiles, self._rects):
+            previous = old_by_key.get(tile.key)
+            if previous is None or previous[0] != tile or previous[1] != rect:
+                self.update(rect)
 
     def flash(self, key: str) -> None:
         """Плитка коротко подсвечивается акцентом — выбор принят."""
@@ -115,6 +168,16 @@ class HostsTilesGrid(QWidget):
     def tile_rect(self, key: str) -> QRect:
         index = self._index_of(key)
         return QRect(self._rects[index]) if index >= 0 else QRect()
+
+    def choice_rect(self, key: str, profile_id: str) -> QRect:
+        """Где на сетке иконка профиля (для тестов и подсказок)."""
+        index = self._index_of(key)
+        if index < 0:
+            return QRect()
+        for slot, choice in enumerate(self._tiles[index].choices):
+            if choice.profile_id == profile_id:
+                return self._choice_rect(self._rects[index], slot)
+        return QRect()
 
     # ── раскладка ────────────────────────────────────────────
 
@@ -140,8 +203,9 @@ class HostsTilesGrid(QWidget):
                 column = 0
             if tile.kind == "group" and y:
                 y += 12
-            self._rects.append(QRect(0, y, width, self.GROUP_HEIGHT))
-            y += self.GROUP_HEIGHT
+            height = self.GROUP_HEIGHT + (self.LEGEND_HEIGHT if tile.legend else 0)
+            self._rects.append(QRect(0, y, width, height))
+            y += height
         if column:
             y += self.TILE_HEIGHT
         height = max(y, self.GROUP_HEIGHT)
@@ -175,6 +239,16 @@ class HostsTilesGrid(QWidget):
                 return index
         return -1
 
+    def _choice_at(self, index: int, point: QPoint) -> int:
+        """Номер иконки профиля под точкой (только доступные), иначе -1."""
+        if not self._is_clickable(index):
+            return -1
+        tile, rect = self._tiles[index], self._rects[index]
+        for slot, choice in enumerate(tile.choices):
+            if choice.available and self._choice_rect(rect, slot).contains(point):
+                return slot
+        return -1
+
     def _is_clickable(self, index: int) -> bool:
         return 0 <= index < len(self._tiles) and self._tiles[index].kind == "tile" and self._tiles[index].enabled
 
@@ -185,16 +259,23 @@ class HostsTilesGrid(QWidget):
         size = self._SWITCH
         return QRect(rect.right() - self._PAD - size.width(), rect.top() + self._PAD, size.width(), size.height())
 
-    def _combo_rect(self, rect: QRect) -> QRect:
-        left = rect.left() + self._PAD
-        width = min(rect.width() - 2 * self._PAD, 190)
-        return QRect(left, rect.bottom() - self._PAD - self._COMBO_HEIGHT + 4, width, self._COMBO_HEIGHT)
+    def _choice_rect(self, rect: QRect, slot: int) -> QRect:
+        size = self._CHOICE
+        left = rect.left() + self._PAD + slot * (size + self._CHOICE_GAP)
+        return QRect(left, rect.bottom() - self._PAD - size + 3, size, size)
+
+    def _visible_slots(self, rect: QRect) -> int:
+        """Сколько иконок влезает в ширину плитки."""
+        room = rect.width() - 2 * self._PAD + self._CHOICE_GAP
+        return max(0, room // (self._CHOICE + self._CHOICE_GAP))
 
     # ── отрисовка ────────────────────────────────────────────
 
     def paintEvent(self, event) -> None:  # noqa: N802
         tokens = get_theme_tokens()
         dark = isDarkTheme()
+        accent = QColor(themeColor()).name()
+        dpr = self.devicePixelRatioF()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         dirty = event.rect()
@@ -203,29 +284,78 @@ class HostsTilesGrid(QWidget):
                 continue
             tile = self._tiles[index]
             if tile.kind == "tile":
-                self._paint_tile(painter, index, rect, tile, tokens, dark)
+                painter.drawPixmap(rect.topLeft(), self._tile_pixmap(index, rect, tile, tokens, dark, accent, dpr))
             else:
                 self._paint_header(painter, rect, tile, tokens)
         painter.end()
 
+    def _tile_state(self, index: int) -> tuple:
+        hovered = index == self._hover or (index == self._cursor and self.hasFocus())
+        return (
+            hovered,
+            index == self._pressed,
+            self._hover_choice if index == self._hover else -1,
+            self._pressed_choice if index == self._pressed else -1,
+        )
+
+    def _tile_pixmap(self, index: int, rect: QRect, tile: HostsTile, tokens, dark: bool, accent: str, dpr: float) -> QPixmap:
+        flash = self._flash.get(tile.key, 0.0)
+        key = (tile, rect.width(), rect.height(), self._tile_state(index), dark, accent, dpr, round(flash, 2))
+        cached = self._pixmaps.get(key) if flash <= 0 else None
+        if cached is not None:
+            return cached
+        pixmap = QPixmap(int(rect.width() * dpr), int(rect.height() * dpr))
+        pixmap.setDevicePixelRatio(dpr)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self._paint_tile(painter, index, QRect(0, 0, rect.width(), rect.height()), tile, tokens, dark)
+        painter.end()
+        self.rendered_tiles += 1
+        if flash <= 0:
+            self._pixmaps[key] = pixmap
+        return pixmap
+
     def _paint_header(self, painter: QPainter, rect: QRect, tile: HostsTile, tokens) -> None:
         # Как StrongBodyLabel: 14 px, полужирный; счётчик — приглушённый.
-        title_font = getFont(14, QFont.Weight.DemiBold)
+        title_font = self._header_font
         painter.setFont(title_font)
         painter.setPen(to_qcolor(tokens.fg))
-        area = rect.adjusted(2, 0, 0, -8)
+        title_area = QRect(rect.left(), rect.top(), rect.width(), self.GROUP_HEIGHT)
+        area = title_area.adjusted(2, 0, 0, -8)
         align = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
         painter.drawText(area, align, tile.title)
         if tile.counter:
             offset = QFontMetrics(title_font).horizontalAdvance(tile.title) + 10
-            painter.setFont(getFont(12))
+            painter.setFont(self._caption_font)
             painter.setPen(to_qcolor(tokens.fg_faint))
             painter.drawText(area.adjusted(offset, 0, 0, -1), align, tile.counter)
+        if tile.legend:
+            legend_area = QRect(rect.left() + 2, title_area.bottom() - 4, rect.width() - 2, self.LEGEND_HEIGHT)
+            self._paint_legend(painter, legend_area, tile.legend, tokens)
+
+    def _paint_legend(self, painter: QPainter, area: QRect, legend: tuple[HostsChoice, ...], tokens) -> None:
+        """Под заголовком группы: «иконка название» всех провайдеров, в одну строку."""
+        metrics = QFontMetrics(self._caption_font)
+        icon = self._LEGEND_ICON
+        painter.setFont(self._caption_font)
+        painter.setPen(to_qcolor(tokens.fg_muted))
+        left = area.left()
+        for choice in legend:
+            width = icon + 5 + metrics.horizontalAdvance(choice.label)
+            if left + width > area.right():
+                break
+            pixmap = get_cached_qta_pixmap(choice.icon_name, color=choice.color, size=icon)
+            painter.drawPixmap(left, area.top() + (area.height() - icon) // 2, pixmap)
+            text_rect = QRect(left + icon + 5, area.top(), width - icon - 5 + 2, area.height())
+            painter.drawText(text_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), choice.label)
+            left += width + 16
 
     def _card_colors(self, index: int, tile: HostsTile, dark: bool) -> tuple[QColor, QColor, QColor | None]:
         """Фон и рамка — как у CardWidget; включённая подкрашена акцентом."""
         hovered = index == self._hover or (index == self._cursor and self.hasFocus())
-        pressed = index == self._pressed
+        # Нажатие по иконке профиля не «продавливает» всю карточку.
+        pressed = index == self._pressed and self._pressed_choice < 0
         if dark:
             fill = QColor(255, 255, 255, 8 if pressed else (21 if hovered else 13))
             border = QColor(255, 255, 255, 18 if pressed else (13 if hovered else 0))
@@ -270,12 +400,30 @@ class HostsTilesGrid(QWidget):
         right_edge = rect.right() - pad
         if tile.has_switch:
             right_edge = self._switch_rect(rect).left() - 10
+        elif tile.has_choices:
+            # Справа от названия — выбранный профиль или «записываю…».
+            state = self._pending_text() if tile.pending else tile.state_text
+            if state:
+                metrics = QFontMetrics(self._caption_font)
+                state_width = min(metrics.horizontalAdvance(state) + 2, (rect.width() - 2 * pad) // 2)
+                state_rect = QRect(right_edge - state_width, rect.top() + pad - 2, state_width, 22)
+                painter.setFont(self._caption_font)
+                if tile.pending or tile.is_on:
+                    painter.setPen(QColor(themeColor()))
+                else:
+                    painter.setPen(to_qcolor(tokens.fg_muted))
+                painter.drawText(
+                    state_rect,
+                    int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                    metrics.elidedText(state, Qt.TextElideMode.ElideRight, state_width),
+                )
+                right_edge = state_rect.left() - 10
 
         # Название: как BodyLabel, 14 px; лишнее — многоточием (полное — в подсказке).
-        title_font = getFont(14, QFont.Weight.DemiBold if tile.is_on else QFont.Weight.Normal)
+        title_font = self._title_font_on if tile.is_on else self._title_font
         painter.setFont(title_font)
         painter.setPen(to_qcolor(tokens.fg))
-        title_rect = QRect(text_left, rect.top() + pad - 2, right_edge - text_left, 22)
+        title_rect = QRect(text_left, rect.top() + pad - 2, max(0, right_edge - text_left), 22)
         painter.drawText(
             title_rect,
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
@@ -285,39 +433,64 @@ class HostsTilesGrid(QWidget):
         if tile.has_switch:
             self._paint_switch(painter, self._switch_rect(rect), tile, dark)
 
-        # Вторая строка: поле профиля или пояснение (как CaptionLabel, 12 px).
-        if tile.has_combo:
-            self._paint_combo(painter, self._combo_rect(rect), tile, tokens, dark)
-            if tile.pending:
-                combo = self._combo_rect(rect)
-                self._paint_caption(painter, QRect(combo.right() + 10, combo.top(), rect.right() - pad - combo.right() - 10, combo.height()), self._pending_text(), accent=True)
+        # Вторая строка: иконки профилей или пояснение (как CaptionLabel, 12 px).
+        if tile.has_choices:
+            self._paint_choices(painter, index, rect, tile, dark)
         else:
             caption_rect = QRect(text_left, rect.top() + pad + 22, rect.right() - pad - text_left, 20)
             if tile.pending:
-                self._paint_caption(painter, caption_rect, self._pending_text(), accent=True)
+                self._paint_caption(painter, caption_rect, self._pending_text(), tokens, accent=True)
             elif tile.note:
-                self._paint_caption(painter, caption_rect, tile.note)
+                self._paint_caption(painter, caption_rect, tile.note, tokens)
         painter.restore()
 
     @staticmethod
     def _pending_text() -> str:
         return "записываю…"
 
-    def _paint_caption(self, painter: QPainter, area: QRect, text: str, *, accent: bool = False) -> None:
+    def _paint_caption(self, painter: QPainter, area: QRect, text: str, tokens, *, accent: bool = False) -> None:
         if area.width() <= 8:
             return
-        tokens = get_theme_tokens()
-        font = getFont(12)
-        painter.setFont(font)
+        painter.setFont(self._caption_font)
         painter.setPen(QColor(themeColor()) if accent else to_qcolor(tokens.fg_muted))
         painter.drawText(
             area,
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            QFontMetrics(font).elidedText(text, Qt.TextElideMode.ElideRight, area.width()),
+            QFontMetrics(self._caption_font).elidedText(text, Qt.TextElideMode.ElideRight, area.width()),
         )
 
+    def _paint_choices(self, painter: QPainter, index: int, rect: QRect, tile: HostsTile, dark: bool) -> None:
+        """Ряд иконок профилей. Интерфейс безрамочный: выбранная выделена только
+        мягкой заливкой цвета провайдера и значком в полном цвете, без обводки."""
+        hover_slot = self._hover_choice if index == self._hover else -1
+        pressed_slot = self._pressed_choice if index == self._pressed else -1
+        muted = QColor(255, 255, 255, 110) if dark else QColor(0, 0, 0, 95)
+        for slot, choice in enumerate(tile.choices[: self._visible_slots(rect)]):
+            if not choice.available:
+                continue
+            area = QRectF(self._choice_rect(rect, slot))
+            selected = choice.profile_id == tile.selected
+            color = QColor(choice.color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            if selected:
+                back = QColor(color)
+                back.setAlpha(86 if dark else 60)
+            elif slot == pressed_slot:
+                back = QColor(255, 255, 255, 10) if dark else QColor(0, 0, 0, 14)
+            elif slot == hover_slot:
+                back = QColor(255, 255, 255, 26) if dark else QColor(0, 0, 0, 10)
+            else:
+                back = QColor(255, 255, 255, 12) if dark else QColor(0, 0, 0, 6)
+            painter.setBrush(back)
+            painter.drawEllipse(area)
+            icon_color = choice.color if (selected or slot == hover_slot) else muted.name(QColor.NameFormat.HexArgb)
+            size = self._CHOICE_ICON
+            pixmap = get_cached_qta_pixmap(choice.icon_name, color=icon_color, size=size)
+            offset = (self._CHOICE - size) // 2
+            painter.drawPixmap(int(area.left()) + offset, int(area.top()) + offset, pixmap)
+
     def _paint_switch(self, painter: QPainter, area: QRect, tile: HostsTile, dark: bool) -> None:
-        """Тумблер в цветах SwitchButton."""
+        """Тумблер в цветах переключателя qfluentwidgets."""
         box = QRectF(area).adjusted(1, 1, -1, -1)
         radius = box.height() / 2
         if tile.is_on:
@@ -336,34 +509,6 @@ class HostsTilesGrid(QWidget):
         painter.setBrush(knob)
         painter.drawEllipse(QRectF(knob_x, box.center().y() - 6, 12, 12))
 
-    def _paint_combo(self, painter: QPainter, area: QRect, tile: HostsTile, tokens, dark: bool) -> None:
-        """Поле профиля в цветах ComboBox: подложка, рамка, стрелка вниз."""
-        box = QRectF(area).adjusted(0.5, 0.5, -0.5, -0.5)
-        if dark:
-            back = QColor(255, 255, 255, 15)
-            edge = QColor(255, 255, 255, 14)
-        else:
-            back = QColor(255, 255, 255, 179)
-            edge = QColor(0, 0, 0, 19)
-        painter.setPen(edge)
-        painter.setBrush(back)
-        painter.drawRoundedRect(box, 5, 5)
-
-        font = getFont(13)
-        painter.setFont(font)
-        painter.setPen(QColor(themeColor()) if tile.is_on else to_qcolor(tokens.fg_muted))
-        text_area = QRect(area.left() + 10, area.top(), area.width() - 40, area.height())
-        painter.drawText(
-            text_area,
-            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            QFontMetrics(font).elidedText(tile.combo_text, Qt.TextElideMode.ElideRight, text_area.width()),
-        )
-        arrow = QRectF(area.right() - 22, area.center().y() - 4, 9, 9)
-        if dark:
-            FluentIcon.ARROW_DOWN.render(painter, arrow)
-        else:
-            FluentIcon.ARROW_DOWN.render(painter, arrow, fill="#646464")
-
     def _on_flash_value(self, value) -> None:
         for key in list(self._flash):
             self._flash[key] = float(value)
@@ -378,55 +523,106 @@ class HostsTilesGrid(QWidget):
             if index >= 0:
                 self.update(self._rects[index])
 
-    # ── мышь и клавиатура ────────────────────────────────────
+    # ── действия ─────────────────────────────────────────────
+
+    def _choose(self, index: int, slot: int) -> None:
+        """Иконка профиля: выбрать; уже выбранная — выключить."""
+        tile = self._tiles[index]
+        choice = tile.choices[slot]
+        if not choice.available:
+            return
+        value = None if choice.profile_id == tile.selected else choice.profile_id
+        self.profile_chosen.emit(tile.key, value)
+
+    def _cycle(self, index: int) -> None:
+        """С клавиатуры: следующий профиль по кругу, после последнего — выкл."""
+        tile = self._tiles[index]
+        available = [choice.profile_id for choice in tile.choices if choice.available]
+        if not available:
+            return
+        if tile.selected in available:
+            position = available.index(tile.selected) + 1
+            value = available[position] if position < len(available) else None
+        else:
+            value = available[0]
+        self.profile_chosen.emit(tile.key, value)
 
     def _activate(self, index: int) -> None:
+        """Enter/Пробел: тумблер переключается, DNS-профиль — следующий."""
         if not self._is_clickable(index):
             return
-        self._set_cursor(index)
-        tile, rect = self._tiles[index], self._rects[index]
-        anchor = self._combo_rect(rect).bottomLeft() if tile.has_combo else rect.bottomLeft()
-        self.activated.emit(tile.key, self.mapToGlobal(anchor + QPoint(0, 4)))
+        tile = self._tiles[index]
+        if tile.has_choices:
+            self._cycle(index)
+        elif tile.has_switch:
+            self.activated.emit(tile.key)
+
+    # ── мышь и клавиатура ────────────────────────────────────
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
-            index = self.index_at(event.position().toPoint())
+            point = event.position().toPoint()
+            index = self.index_at(point)
             if self._is_clickable(index):
                 self._pressed = index
+                self._pressed_choice = self._choice_at(index, point)
                 self.update(self._rects[index])
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
             pressed, self._pressed = self._pressed, -1
+            pressed_choice, self._pressed_choice = self._pressed_choice, -1
             if 0 <= pressed < len(self._rects):
                 self.update(self._rects[pressed])
-            index = self.index_at(event.position().toPoint())
-            if index == pressed:
-                self._activate(index)
+            point = event.position().toPoint()
+            index = self.index_at(point)
+            if index == pressed and self._is_clickable(index):
+                # Щелчок мышью не прокручивает страницу к плитке.
+                self._set_cursor(index, ensure_visible=False)
+                tile = self._tiles[index]
+                if tile.has_choices:
+                    slot = self._choice_at(index, point)
+                    if slot >= 0 and slot == pressed_choice:
+                        self._choose(index, slot)
+                elif tile.has_switch:
+                    self.activated.emit(tile.key)
             event.accept()
             return
         super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
-        index = self.index_at(event.position().toPoint())
-        self._set_hover(index if self._is_clickable(index) else -1)
-        self.setCursor(Qt.CursorShape.PointingHandCursor if self._hover >= 0 else Qt.CursorShape.ArrowCursor)
-        if index >= 0:
-            tile = self._tiles[index]
-            self.setToolTip(f"{tile.title}\n{tile.note}" if tile.note else tile.title)
-        else:
+        point = event.position().toPoint()
+        index = self.index_at(point)
+        hover = index if self._is_clickable(index) else -1
+        slot = self._choice_at(hover, point) if hover >= 0 else -1
+        self._set_hover(hover, slot)
+        tile = self._tiles[index] if index >= 0 else None
+        clickable = tile is not None and hover >= 0 and (slot >= 0 or tile.has_switch)
+        self.setCursor(Qt.CursorShape.PointingHandCursor if clickable else Qt.CursorShape.ArrowCursor)
+        if tile is None:
             self.setToolTip("")
+        elif slot >= 0:
+            choice = tile.choices[slot]
+            if choice.profile_id == tile.selected:
+                self.setToolTip(f"{choice.label} — выбран, щёлкните, чтобы выключить")
+            else:
+                self.setToolTip(choice.label)
+        else:
+            self.setToolTip(f"{tile.title}\n{tile.note}" if tile.note else tile.title)
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
-        self._set_hover(-1)
+        self._set_hover(-1, -1)
         super().leaveEvent(event)
 
     def focusInEvent(self, event) -> None:  # noqa: N802
         if not self._is_clickable(self._cursor):
             clickable = self._clickable()
-            self._set_cursor(clickable[0] if clickable else -1)
+            # К плитке прокручиваем только при переходе с клавиатуры (Tab),
+            # а не когда фокус пришёл от щелчка мышью.
+            by_keyboard = event.reason() in (Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason)
+            self._set_cursor(clickable[0] if clickable else -1, ensure_visible=by_keyboard)
         super().focusInEvent(event)
 
     def focusOutEvent(self, event) -> None:  # noqa: N802
@@ -441,6 +637,17 @@ class HostsTilesGrid(QWidget):
             self._activate(self._cursor)
             event.accept()
             return
+        if Qt.Key.Key_0 <= key <= Qt.Key.Key_9 and self._is_clickable(self._cursor):
+            tile = self._tiles[self._cursor]
+            if tile.has_choices:
+                number = key - Qt.Key.Key_0
+                if number == 0:
+                    if tile.selected is not None:
+                        self.profile_chosen.emit(tile.key, None)
+                elif number <= len(tile.choices) and tile.choices[number - 1].available:
+                    self._choose(self._cursor, number - 1)
+                event.accept()
+                return
         steps = {
             Qt.Key.Key_Right: 1,
             Qt.Key.Key_Left: -1,
@@ -459,15 +666,15 @@ class HostsTilesGrid(QWidget):
             return
         super().keyPressEvent(event)
 
-    def _set_hover(self, index: int) -> None:
-        if index == self._hover:
+    def _set_hover(self, index: int, slot: int = -1) -> None:
+        if index == self._hover and slot == self._hover_choice:
             return
-        old, self._hover = self._hover, index
-        for value in (old, index):
+        old, self._hover, self._hover_choice = self._hover, index, slot
+        for value in {old, index}:
             if 0 <= value < len(self._rects):
                 self.update(self._rects[value])
 
-    def _set_cursor(self, index: int) -> None:
+    def _set_cursor(self, index: int, *, ensure_visible: bool = True) -> None:
         if index == self._cursor:
             return
         old, self._cursor = self._cursor, index
@@ -477,7 +684,8 @@ class HostsTilesGrid(QWidget):
         if 0 <= index < len(self._tiles):
             tile = self._tiles[index]
             set_control_accessibility(self, name="Сервисы hosts", description=tile.accessible_text or tile.title)
-            self._ensure_visible(index)
+            if ensure_visible:
+                self._ensure_visible(index)
 
     def _ensure_visible(self, index: int) -> None:
         """Прокручивает список к плитке под клавиатурным курсором."""
@@ -491,7 +699,7 @@ class HostsTilesGrid(QWidget):
         parent.ensureVisible(center.x(), center.y(), 0, rect.height() // 2 + self.GAP)
 
 
-__all__ = ["HostsTile", "HostsTilesGrid", "split_service_title"]
+__all__ = ["HostsChoice", "HostsTile", "HostsTilesGrid", "split_service_title"]
 
 
 def split_service_title(name: str) -> tuple[str, str]:
