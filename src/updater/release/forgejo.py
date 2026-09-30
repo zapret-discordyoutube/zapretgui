@@ -267,6 +267,28 @@ def fetch_release_notes(version: str) -> dict[str, str]:
     }
 
 
+def fetch_recent_release_history(channel: str, *, up_to_version: str) -> tuple[dict[str, str], ...]:
+    """Выпуски канала не новее ``up_to_version`` — для «Что нового» без сохранённого текста.
+
+    Один запрос списка, без файлов суммы. ForgejoReleaseError, если Forgejo
+    недоступен или выпусков нет.
+    """
+    selected = normalize_update_channel(channel)
+    session = new_session()
+    try:
+        try:
+            candidates = _list_candidates(session, selected)
+        except ForgejoReleaseError:
+            raise
+        except Exception as exc:
+            raise ForgejoReleaseError(f"список выпусков недоступен — {short_error(exc)}") from exc
+    finally:
+        session.close()
+    if not candidates:
+        raise ForgejoReleaseError(f"нет выпусков канала {selected}")
+    return tuple(_history_entry(item) for item in candidates)
+
+
 def probe_forgejo() -> float:
     """Свежая проверка доступности API Forgejo. Время ответа в секундах."""
     started = time.monotonic()
@@ -285,6 +307,7 @@ __all__ = [
     "FORGEJO_SOURCE",
     "ForgejoReleaseError",
     "fetch_latest_release",
+    "fetch_recent_release_history",
     "fetch_release_notes",
     "probe_forgejo",
     "release_page_url",

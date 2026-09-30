@@ -3037,6 +3037,14 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Список изменений",
         "en": "List of changes",
     },
+    "update_dialog.history.earlier": {
+        "ru": "Ранее",
+        "en": "Earlier",
+    },
+    "update_dialog.history.new_badge": {
+        "ru": "новое",
+        "en": "new",
+    },
     "update_dialog.history.empty": {
         "ru": "Описание изменений не опубликовано.",
         "en": "No release notes were published.",

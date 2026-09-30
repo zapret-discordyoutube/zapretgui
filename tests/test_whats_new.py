@@ -74,6 +74,18 @@ class WhatsNewStartupTests(unittest.TestCase):
         self.assertEqual(history[0]["version"], "2.0")
 
 
+class WhatsNewForgejoFallbackTests(unittest.TestCase):
+    def test_forgejo_fallback_shows_last_releases_with_this_one_new(self) -> None:
+        entries = tuple({"version": f"2.{n}", "notes": str(n)} for n in range(0, 15))
+        with patch("updater.release.forgejo.fetch_recent_release_history", return_value=entries):
+            history = whats_new._fetch_from_forgejo("2.12")
+
+        self.assertEqual(history[0]["version"], "2.12")
+        self.assertTrue(history[0]["is_new"])
+        self.assertEqual(len(history), 10)
+        self.assertFalse(any(item["is_new"] for item in history[1:]))
+
+
 class WhatsNewAboutButtonTests(unittest.TestCase):
     def test_about_uses_saved_history_first(self) -> None:
         saved = ({"version": "2.0", "notes": "сохранено"},)
@@ -120,6 +132,8 @@ class WhatsNewSettingsTests(unittest.TestCase):
         self.assertEqual(pending["version"], "2.0")
         self.assertEqual(len(pending["history"]), 1)
         self.assertEqual(len(pending["history"][0]["notes"]), 20000)
+        # Сохранённое до отметки «новое» считается новым.
+        self.assertTrue(pending["history"][0]["is_new"])
 
     def test_missing_section_gets_empty_defaults(self) -> None:
         normalized = normalize_updater({})

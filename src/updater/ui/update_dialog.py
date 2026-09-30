@@ -170,6 +170,9 @@ class _ReleaseDialogBase(MessageBoxBase):
             muted_hex=tokens.fg_muted,
             language=self._language,
             empty_text=self._history_empty_text,
+            badge_fg_hex=tokens.accent_fg,
+            new_badge_text=self._t("history.new_badge", "новое"),
+            earlier_text=self._t("history.earlier", "Ранее"),
         )
         self.browser.setHtml(html)
         plain = " ".join(
@@ -445,7 +448,7 @@ class UpdateDialog(_ReleaseDialogBase):
                 current=current, target=version
             )
         ]
-        count = len(offer.history) if offer is not None else 0
+        count = plans.count_new_versions(offer.history) if offer is not None else 0
         if count > 1:
             parts.append(self._t("subtitle.versions_template", "версий в обновлении: {count}").format(count=count))
         if offer is not None and offer.source:
@@ -463,7 +466,7 @@ class UpdateDialog(_ReleaseDialogBase):
             (self._t("details.target", "Новая версия"), f"v{offer.version}"),
             (self._t("details.channel", "Канал обновлений"), channel),
             (self._t("details.source", "Источник"), offer.source or "—"),
-            (self._t("details.count", "Версий в обновлении"), str(max(len(offer.history), 1))),
+            (self._t("details.count", "Версий в обновлении"), str(max(plans.count_new_versions(offer.history), 1))),
         )
         muted = get_theme_tokens().fg_muted
         html = "".join(
@@ -582,7 +585,7 @@ class WhatsNewDialog(_ReleaseDialogBase):
         self.ticker.stop()
         self.mascot.set_mood(MOOD_HAPPY)
         super().set_history(history)
-        count = len(self._history)
+        count = plans.count_new_versions(self._history)
         self.subtitle_label.setText(
             self._t("whats_new.subtitle_many_template", "Изменения за {count} {versions}").format(
                 count=count, versions=plans.versions_word(count, self._language)

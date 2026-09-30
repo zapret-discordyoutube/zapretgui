@@ -119,6 +119,35 @@ class ReleaseHistoryHtmlTests(unittest.TestCase):
         self.assertNotIn("<script>", html)
         self.assertIn("&lt;img", html)
 
+    def test_new_versions_on_top_and_earlier_section_below(self) -> None:
+        html = plans.release_history_html(
+            (
+                {"version": "2.1", "notes": "a", "is_new": True},
+                {"version": "2.0", "notes": "b", "is_new": False},
+            ),
+            accent_hex="#123456",
+            muted_hex="#999999",
+            language="ru",
+            empty_text="пусто",
+        )
+
+        self.assertLess(html.index("v2.1"), html.index("новое"))
+        self.assertLess(html.index("новое"), html.index("Ранее"))
+        self.assertLess(html.index("Ранее"), html.index("v2.0"))
+        self.assertEqual(plans.count_new_versions(({"is_new": True}, {"is_new": False}, {})), 2)
+
+    def test_all_new_has_no_badges_or_earlier_section(self) -> None:
+        html = plans.release_history_html(
+            ({"version": "2.1", "notes": "a"}, {"version": "2.0", "notes": "b"}),
+            accent_hex="#123456",
+            muted_hex="#999999",
+            language="ru",
+            empty_text="пусто",
+        )
+
+        self.assertNotIn("новое", html)
+        self.assertNotIn("Ранее", html)
+
     def test_empty_notes_say_so(self) -> None:
         html = plans.release_history_html(
             ({"version": "2.1", "notes": ""},), accent_hex="#000", muted_hex="#999", language="en", empty_text="No notes"

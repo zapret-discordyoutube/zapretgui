@@ -41,10 +41,36 @@ def mark_seen(version: str) -> None:
     set_whats_new_seen_version(str(version or ""))
 
 
-def _fetch_from_forgejo(version: str) -> tuple[dict[str, str], ...]:
-    from updater.release.forgejo import fetch_release_notes
+def _fetch_from_forgejo(version: str) -> tuple[dict, ...]:
+    """Последние выпуски канала до этой версии; новой считается она сама."""
+    from config.build_info import CHANNEL
+    from updater.release.forgejo import fetch_recent_release_history
+    from updater.release.history import recent_history
 
-    return (fetch_release_notes(version),)
+    entries = fetch_recent_release_history(CHANNEL, up_to_version=version)
+    history = recent_history(entries, up_to_version=version, new_after_version=_previous_version(entries, version))
+    if not history:
+        raise LookupError(f"выпуск {version} не найден среди выпусков канала")
+    return history
+
+
+def _previous_version(entries, version: str) -> str:
+    """Версия прямо перед ``version``: всё, что новее неё, — «новое»."""
+    from updater.versions import version_key
+
+    try:
+        top = version_key(version)
+    except ValueError:
+        return ""
+    older = []
+    for item in entries or ():
+        try:
+            key = version_key(str(item.get("version") or ""))
+        except (ValueError, AttributeError):
+            continue
+        if key < top:
+            older.append((key, str(item.get("version") or "")))
+    return max(older)[1] if older else ""
 
 
 def startup_history(app_version: str) -> tuple[dict[str, str], ...]:

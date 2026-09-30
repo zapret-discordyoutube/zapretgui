@@ -14,7 +14,7 @@ from test_updater_forgejo_release import _FakeForgejo, _release, _Response
 from updater.check.service import outcome_to_result
 from updater.check.flow import CheckOutcome
 from updater.release import forgejo
-from updater.release.history import release_history_since
+from updater.release.history import recent_history, release_history_since
 
 
 class ForgejoHistoryTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class ForgejoHistoryTests(unittest.TestCase):
         # Один запрос списка и один файл суммы — история ничего не добавила.
         self.assertEqual(len(fake.requested), 2)
 
-    def test_history_keeps_only_skipped_versions_newest_first(self) -> None:
+    def test_history_marks_skipped_versions_new_and_adds_earlier_ones(self) -> None:
         release = {
             "version": "21.1.5.80",
             "release_notes": "80",
@@ -44,9 +44,23 @@ class ForgejoHistoryTests(unittest.TestCase):
             ),
         }
 
-        history = release_history_since(release, current_version="21.1.5.77")
+        history = release_history_since(release, current_version="21.1.5.78")
 
-        self.assertEqual([item["version"] for item in history], ["21.1.5.80", "21.1.5.79", "21.1.5.78"])
+        self.assertEqual(
+            [(item["version"], item["is_new"]) for item in history],
+            [("21.1.5.80", True), ("21.1.5.79", True), ("21.1.5.78", False), ("21.1.5.77", False)],
+        )
+
+    def test_history_is_ten_releases_but_never_drops_skipped_ones(self) -> None:
+        entries = tuple({"version": f"1.0.{n}", "notes": str(n)} for n in range(1, 31))
+
+        few_skipped = recent_history(entries, up_to_version="1.0.30", new_after_version="1.0.28")
+        many_skipped = recent_history(entries, up_to_version="1.0.30", new_after_version="1.0.10")
+
+        self.assertEqual(len(few_skipped), 10)
+        self.assertEqual(sum(item["is_new"] for item in few_skipped), 2)
+        self.assertEqual(len(many_skipped), 20)
+        self.assertTrue(all(item["is_new"] for item in many_skipped))
 
     def test_mirror_release_without_history_shows_itself(self) -> None:
         release = {"version": "21.1.5.80", "release_notes": "с зеркала", "published_at": "2026-09-30"}

@@ -165,24 +165,57 @@ def release_history_html(
     muted_hex: str,
     language: str,
     empty_text: str,
+    badge_fg_hex: str = "#000000",
+    new_badge_text: str = "новое",
+    earlier_text: str = "Ранее",
 ) -> str:
-    """Все выпуски окна обновления: для каждого — версия, дата и текст."""
+    """Выпуски для окна обновления и «Что нового»: версия, дата и текст.
+
+    Новые для пользователя (``is_new``; без флага — новые) идут сверху с
+    пометкой, предыдущие — под заголовком «Ранее», приглушённо. Если все
+    выпуски новые, пометок и заголовка нет.
+    """
     import html
 
-    parts: list[str] = []
-    for entry in history or ():
-        if not isinstance(entry, dict):
-            continue
+    entries = [entry for entry in history or () if isinstance(entry, dict)]
+    fresh = [entry for entry in entries if entry.get("is_new", True)]
+    earlier = [entry for entry in entries if not entry.get("is_new", True)]
+    mixed = bool(fresh) and bool(earlier)
+
+    def block(entry: dict, *, is_new: bool) -> str:
         version = html.escape(str(entry.get("version") or ""))
         date = html.escape(format_release_date(str(entry.get("published_at") or ""), language))
-        header = f"<span style='font-size: 15pt; font-weight: 600; color: {accent_hex};'>v{version}</span>"
+        if is_new:
+            header = f"<span style='font-size: 15pt; font-weight: 600; color: {accent_hex};'>v{version}</span>"
+        else:
+            header = f"<span style='font-size: 13pt; font-weight: 600; color: {muted_hex};'>v{version}</span>"
+        if is_new and mixed:
+            header += (
+                f"&nbsp;&nbsp;<span style='background-color: {accent_hex}; color: {badge_fg_hex}; "
+                f"font-size: 8pt; font-weight: 600;'>&nbsp;{html.escape(new_badge_text)}&nbsp;</span>"
+            )
         if date:
             header += f"<span style='color: {muted_hex};'>&nbsp;&nbsp;·&nbsp;&nbsp;{date}</span>"
-        body = release_notes_body_html(str(entry.get("notes") or ""), accent_hex=accent_hex)
+        body = release_notes_body_html(str(entry.get("notes") or ""), accent_hex=accent_hex if is_new else muted_hex)
         if not body:
             body = f"<p style='color: {muted_hex};'>{html.escape(empty_text)}</p>"
-        parts.append(f"<div style='margin-bottom: 18px;'><p style='margin: 0 0 6px 0;'>{header}</p>{body}</div>")
+        tone = "" if is_new else f" color: {muted_hex};"
+        return f"<div style='margin-bottom: 18px;{tone}'><p style='margin: 0 0 6px 0;'>{header}</p>{body}</div>"
+
+    parts = [block(entry, is_new=True) for entry in fresh]
+    if earlier:
+        if fresh:
+            parts.append(
+                f"<p style='margin: 10px 0 12px 0; font-size: 11pt; font-weight: 600; color: {muted_hex};'>"
+                f"{html.escape(earlier_text)}</p>"
+            )
+        parts.extend(block(entry, is_new=not fresh) for entry in earlier)
     return "".join(parts)
+
+
+def count_new_versions(history) -> int:
+    """Сколько версий в списке новые для пользователя (без флага — новые)."""
+    return sum(1 for entry in history or () if isinstance(entry, dict) and entry.get("is_new", True))
 
 
 def build_update_status_card_plan(

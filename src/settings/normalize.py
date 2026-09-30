@@ -676,6 +676,8 @@ def normalize_whats_new(data: object) -> dict[str, Any]:
                 "notes": str(entry.get("notes") or "")[:WHATS_NEW_NOTES_MAX_CHARS],
                 "published_at": as_clean_str(entry.get("published_at"), ""),
                 "url": as_clean_str(entry.get("url"), ""),
+                # Сохранённое до этого флага считалось целиком новым.
+                "is_new": bool(entry.get("is_new", True)),
             }
         )
     return {
