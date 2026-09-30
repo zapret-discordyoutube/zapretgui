@@ -168,6 +168,7 @@ def release_history_html(
     badge_fg_hex: str = "#000000",
     new_badge_text: str = "новое",
     earlier_text: str = "Ранее",
+    new_badge_image: tuple[str, int, int] | None = None,
 ) -> str:
     """Выпуски для окна обновления и «Что нового»: версия, дата и текст.
 
@@ -190,10 +191,19 @@ def release_history_html(
         else:
             header = f"<span style='font-size: 13pt; font-weight: 600; color: {muted_hex};'>v{version}</span>"
         if is_new and mixed:
-            header += (
-                f"&nbsp;&nbsp;<span style='background-color: {accent_hex}; color: {badge_fg_hex}; "
-                f"font-size: 8pt; font-weight: 600;'>&nbsp;{html.escape(new_badge_text)}&nbsp;</span>"
-            )
+            if new_badge_image is not None:
+                # Скруглённая метка — картинка: движок текста Qt не умеет
+                # скругления и отступы у надписей.
+                src, width, height = new_badge_image
+                header += (
+                    f"&nbsp;&nbsp;<img src='{html.escape(src)}' width='{int(width)}' height='{int(height)}' "
+                    f"style='vertical-align: middle;' alt='{html.escape(new_badge_text)}'>"
+                )
+            else:
+                header += (
+                    f"&nbsp;&nbsp;<span style='color: {accent_hex}; font-size: 9pt; font-weight: 600;'>"
+                    f"{html.escape(new_badge_text)}</span>"
+                )
         if date:
             header += f"<span style='color: {muted_hex};'>&nbsp;&nbsp;·&nbsp;&nbsp;{date}</span>"
         body = release_notes_body_html(str(entry.get("notes") or ""), accent_hex=accent_hex if is_new else muted_hex)

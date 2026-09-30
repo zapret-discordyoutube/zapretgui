@@ -322,6 +322,19 @@ class WhatsNewDialogTests(_DialogCase):
         self.assertEqual(dialog.subtitle_label.text(), "Изменения за 2 версии")
         self.assertFalse(dialog.browser_btn.isHidden())
 
+    def test_new_badge_is_a_rounded_picture_not_a_flat_block(self) -> None:
+        history = (
+            {"version": "2.1", "notes": "a", "is_new": True},
+            {"version": "2.0", "notes": "b", "is_new": False},
+        )
+        dialog = WhatsNewDialog(self.host, version="2.1", history=history)
+        self.addCleanup(dialog.deleteLater)
+
+        html = dialog.browser.toHtml()
+
+        self.assertIn("zapret-badge://new/", html)
+        self.assertNotIn("background-color", html.split("Ранее")[0])
+
     def test_error_still_links_to_release_page(self) -> None:
         dialog = WhatsNewDialog(self.host, version="2.1", loading=True)
         self.addCleanup(dialog.deleteLater)

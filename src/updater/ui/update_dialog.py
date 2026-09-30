@@ -15,7 +15,8 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QRectF, QTimer, QUrl, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QTextDocument
 from PyQt6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
@@ -162,6 +163,38 @@ class _ReleaseDialogBase(MessageBoxBase):
         self._history = tuple(item for item in history or () if isinstance(item, dict))
         self._render_history()
 
+    def _new_badge(self, accent_hex: str) -> tuple[str, int, int]:
+        """Метка «новое»: мягкая «таблетка» цвета акцента, чёткая на любом масштабе."""
+        text = self._t("history.new_badge", "новое")
+        font = QFont(self.browser.font())
+        font.setPointSizeF(8.5)
+        font.setWeight(QFont.Weight.DemiBold)
+        metrics = QFontMetricsF(font)
+        height = int(round(metrics.height() + 4))
+        width = int(round(metrics.horizontalAdvance(text) + 16))
+        ratio = max(float(self.browser.devicePixelRatioF() or 1.0), 1.0)
+        image = QImage(int(width * ratio), int(height * ratio), QImage.Format.Format_ARGB32_Premultiplied)
+        image.setDevicePixelRatio(ratio)
+        image.fill(Qt.GlobalColor.transparent)
+        accent = QColor(accent_hex)
+        painter = QPainter(image)
+        painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
+        fill = QColor(accent)
+        fill.setAlphaF(0.18)
+        border = QColor(accent)
+        border.setAlphaF(0.45)
+        painter.setPen(QPen(border, 1.0))
+        painter.setBrush(fill)
+        rect = QRectF(0.5, 0.5, width - 1.0, height - 1.0)
+        painter.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        painter.setPen(accent)
+        painter.setFont(font)
+        painter.drawText(QRectF(0, 0, width, height), int(Qt.AlignmentFlag.AlignCenter), text)
+        painter.end()
+        url = f"zapret-badge://new/{accent.name().lstrip('#')}"
+        self.browser.document().addResource(QTextDocument.ResourceType.ImageResource, QUrl(url), image)
+        return url, width, height
+
     def _render_history(self) -> None:
         tokens = get_theme_tokens()
         html = plans.release_history_html(
@@ -173,6 +206,7 @@ class _ReleaseDialogBase(MessageBoxBase):
             badge_fg_hex=tokens.accent_fg,
             new_badge_text=self._t("history.new_badge", "новое"),
             earlier_text=self._t("history.earlier", "Ранее"),
+            new_badge_image=self._new_badge(tokens.accent_hex),
         )
         self.browser.setHtml(html)
         plain = " ".join(
