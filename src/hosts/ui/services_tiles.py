@@ -606,7 +606,11 @@ class HostsTilesGrid(QWidget):
             if tile.pending:
                 self._paint_caption(painter, caption_rect, self._pending_text(), tokens, accent=True)
             elif tile.note:
-                self._paint_caption(painter, caption_rect, tile.note, tokens)
+                # Длинное пояснение — в две строки, многоточие только если не влезло и в них.
+                lines = wrap_two_lines(tile.note, QFontMetrics(self._caption_font), caption_rect.width())
+                for number, line in enumerate(lines):
+                    line_rect = QRect(text_left, rect.top() + pad + 19 + 16 * number, caption_rect.width(), 17)
+                    self._paint_caption(painter, line_rect, line, tokens)
         painter.restore()
 
     @staticmethod
@@ -931,7 +935,28 @@ class HostsTilesGrid(QWidget):
         parent.ensureVisible(center.x(), center.y(), 0, rect.height() // 2 + self.GAP)
 
 
-__all__ = ["HostsChoice", "HostsTile", "HostsTilesGrid", "split_service_title"]
+__all__ = ["HostsChoice", "HostsTile", "HostsTilesGrid", "split_service_title", "wrap_two_lines"]
+
+
+def wrap_two_lines(text: str, metrics: QFontMetrics, width: int) -> list[str]:
+    """Переносит текст по словам не больше чем на две строки; вторая — с многоточием."""
+    words = str(text or "").split()
+    if not words or width <= 8:
+        return []
+    first = words[0]
+    rest_index = 1
+    for index in range(1, len(words)):
+        candidate = f"{first} {words[index]}"
+        if metrics.horizontalAdvance(candidate) > width:
+            break
+        first, rest_index = candidate, index + 1
+    if metrics.horizontalAdvance(first) > width:
+        # Одно слово шире строки: режем его многоточием, второй строки нет.
+        return [metrics.elidedText(" ".join(words), Qt.TextElideMode.ElideRight, width)]
+    rest = " ".join(words[rest_index:])
+    if not rest:
+        return [first]
+    return [first, metrics.elidedText(rest, Qt.TextElideMode.ElideRight, width)]
 
 
 def split_service_title(name: str) -> tuple[str, str]:
