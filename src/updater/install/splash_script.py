@@ -12,7 +12,10 @@ from __future__ import annotations
 
 * Никаких файлов из каталога установки: логотип, тексты и цвета лежат в
   ``restart_splash.json`` и PNG рядом с состоянием обновления.
-* Окно не поверх всех: сообщение об ошибке установщика должно быть видно.
+* Пока старая программа на экране, окно стоит поверх всех: иначе защита
+  Windows от кражи фокуса могла поставить его позади Zapret, и после её
+  закрытия наверх вышло бы чужое окно. Как только старая программа
+  закрылась, «поверх всех» снимается — сообщение установщика должно быть видно.
 * Этап берётся из ``handoff.json`` наблюдателя (prepared → launched →
   succeeded); ``failed`` или пропавшая запись — окно сразу уходит, сообщение
   покажет наблюдатель.
@@ -71,6 +74,7 @@ try {
     Add-Type -Namespace ZapretRestartSplash -Name Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
 '@
     $native = [ZapretRestartSplash.Native]
     [void]$native::SetProcessDPIAware()
@@ -150,6 +154,8 @@ $S = @{
     Shown        = $false
     Snapshot     = (-not [string]::IsNullOrWhiteSpace($SnapshotPath))
     TickErrors   = 0
+    OldAlive     = $true
+    OldCheckedAt = -1.0
 }
 
 function Next-Joke {
@@ -213,6 +219,31 @@ function Test-NewAppWindow {
     return $false
 }
 
+function Bring-ToFront([string]$why) {
+    $ok = $false
+    try {
+        $form.Activate()
+        $form.BringToFront()
+        if ($null -ne $native) { $ok = [bool]$native::SetForegroundWindow($form.Handle) }
+    } catch { }
+    Write-Line "На передний план ($why): $ok"
+}
+
+function Watch-OldApp {
+    # Старая программа закрылась — «поверх всех» больше не нужно: установщик
+    # может показать сообщение об ошибке, и оно должно быть видно.
+    $now = $S.Clock.Elapsed.TotalSeconds
+    if (-not $S.OldAlive -or ($now - $S.OldCheckedAt) -lt 0.25) { return }
+    $S.OldCheckedAt = $now
+    $alive = $false
+    try { $alive = [bool](Get-Process -Id ([int]$spec.old_pid) -ErrorAction SilentlyContinue) } catch { }
+    if ($alive -and $now -lt 60) { return }
+    $S.OldAlive = $false
+    $form.TopMost = $false
+    Write-Line "Старая версия закрылась ($([int]($now * 1000)) мс), окно больше не поверх всех"
+    Bring-ToFront 'старая версия закрылась'
+}
+
 function Poll-State {
     $now = $S.Clock.Elapsed.TotalSeconds
     $state = Read-HandoffState
@@ -227,6 +258,7 @@ function Poll-State {
         }
     }
     if ($S.Snapshot) { return }
+    Watch-OldApp
     if (Test-AppReady) { Start-Closing $false 'новая версия открылась' ; return }
     if ($now - $S.LastWindowCheck -ge 1.0) {
         $S.LastWindowCheck = $now
@@ -428,7 +460,8 @@ $form = New-Object System.Windows.Forms.Form
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 $form.ShowInTaskbar = $true
-$form.TopMost = $false
+# Поверх всех — только пока старая программа на экране (см. Watch-OldApp).
+$form.TopMost = (-not $S.Snapshot)
 $form.Text = [string]$spec.texts.window_title
 $form.BackColor = $C.Background
 # Прозрачность — только украшение: где её нет (удалённый сеанс, служба),
@@ -482,7 +515,8 @@ $form.Add_Shown({
     if ($null -ne $native) {
         try { $round = 2; [void]$native::DwmSetWindowAttribute($form.Handle, 33, [ref]$round, 4) } catch { }
     }
-    $form.Activate()
+    Write-Line "Место окна: $($form.Bounds)"
+    Bring-ToFront 'показ'
     if (-not $S.Snapshot) {
         $shownPath = [string]$spec.shown_path
         if ($shownPath) {

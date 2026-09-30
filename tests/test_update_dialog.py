@@ -127,6 +127,14 @@ class ReleaseHistoryHtmlTests(unittest.TestCase):
         self.assertIn("No notes", html)
 
 
+class VersionsWordTests(unittest.TestCase):
+    def test_russian_plural(self) -> None:
+        cases = {2: "версии", 4: "версии", 5: "версий", 11: "версий", 12: "версий", 21: "версию", 22: "версии", 25: "версий"}
+        for count, word in cases.items():
+            self.assertEqual(plans.versions_word(count, "ru"), word, count)
+        self.assertEqual(plans.versions_word(3, "en"), "versions")
+
+
 class _DialogCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -246,6 +254,27 @@ class UpdateDialogTests(_DialogCase):
         self.assertTrue(_wait(lambda: flow.receivers(flow.changed) == before))
 
 
+class DialogHeaderTests(_DialogCase):
+    def test_title_block_is_centered_on_logo_not_hanging_below(self) -> None:
+        """Раньше значок был выше текста и свисал ниже подписи — «съехал вниз»."""
+        from PyQt6.QtCore import QPoint
+
+        dialog = WhatsNewDialog(self.host, version="2.1", history=_HISTORY)
+        dialog.open()
+        self.addCleanup(dialog.deleteLater)
+        _wait(lambda: dialog.titles_box.height() > 0)
+
+        mascot = dialog.mascot
+        logo_top = mascot.mapTo(dialog.widget, QPoint(0, 0)).y() + mascot.logo_top()
+        logo_side = mascot.height() - 2 - mascot.logo_top()
+        box = dialog.titles_box
+        box_top = box.mapTo(dialog.widget, QPoint(0, 0)).y()
+
+        self.assertLessEqual(abs((box_top + box.height() / 2) - (logo_top + logo_side / 2)), 2)
+        # Значок не выше блока текста больше чем на пару пикселей.
+        self.assertLessEqual(logo_side - box.height(), 2)
+
+
 class WhatsNewDialogTests(_DialogCase):
     def test_loading_then_history(self) -> None:
         dialog = WhatsNewDialog(self.host, version="2.1", loading=True)
@@ -261,6 +290,7 @@ class WhatsNewDialogTests(_DialogCase):
         self.assertFalse(dialog.ticker.is_running())
         self.assertIn("v2.0", dialog.browser.toPlainText())
         self.assertIn("2.1", dialog.title_label.text())
+        self.assertEqual(dialog.subtitle_label.text(), "Изменения за 2 версии")
         self.assertFalse(dialog.browser_btn.isHidden())
 
     def test_error_still_links_to_release_page(self) -> None:

@@ -171,6 +171,21 @@ def wait_for_splash_shown(
     return shown_path.exists()
 
 
+def _allow_splash_foreground() -> None:
+    """Разрешает окну-продолжению выйти на передний план.
+
+    Защита Windows от кражи фокуса ставит окно фонового процесса позади
+    активного: окно-продолжение оказалось бы за Zapret, и после её закрытия
+    наверх вышло бы чужое окно. Активное окно (наше) вправе передать фокус.
+    """
+    try:
+        import ctypes
+
+        ctypes.windll.user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
+    except Exception:
+        pass
+
+
 def show_restart_splash(
     spec: RestartSplashSpec | None,
     *,
@@ -185,6 +200,7 @@ def show_restart_splash(
     except Exception as exc:
         log(f"Окно-продолжение не подготовлено: {exc}", SPLASH_LOG_LEVEL)
         return False
+    _allow_splash_foreground()
     if not spawn(command):
         log("Окно-продолжение не запустилось", SPLASH_LOG_LEVEL)
         return False

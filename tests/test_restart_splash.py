@@ -72,6 +72,14 @@ class PrepareSplashTests(_StateDirCase):
         self.assertIn("-STA", command)
         self.assertEqual(command[command.index("-StatePath") + 1], str(self.state_dir / paths.HANDOFF_STATE_NAME))
 
+    def test_window_is_allowed_to_take_focus_before_start(self) -> None:
+        order: list[str] = []
+
+        with patch.object(splash, "_allow_splash_foreground", side_effect=lambda: order.append("allow")):
+            splash.show_restart_splash(_spec(), spawn=lambda _cmd: order.append("spawn") or True, wait=lambda _p: True)
+
+        self.assertEqual(order, ["allow", "spawn"])
+
     def test_show_waits_for_window_and_never_raises(self) -> None:
         spawned: list[tuple] = []
 
@@ -213,8 +221,14 @@ class SplashScriptContractTests(unittest.TestCase):
         script = render_splash_script()
 
         self.assertNotRegex(script, r"@[A-Z_]+@")
-        # Не поверх всех: сообщение об ошибке установщика должно быть видно.
-        self.assertIn("$form.TopMost = $false", script)
+        # Поверх всех — только пока старая программа на экране: иначе защита
+        # от кражи фокуса ставила окно позади неё. Потом — обычное окно,
+        # чтобы сообщение установщика было видно.
+        self.assertIn("$form.TopMost = (-not $S.Snapshot)", script)
+        self.assertIn("function Watch-OldApp", script)
+        watch = script[script.index("function Watch-OldApp"):script.index("function Poll-State")]
+        self.assertIn("$form.TopMost = $false", watch)
+        self.assertIn("Watch-OldApp", script[script.index("function Poll-State"):])
         # Неудача установки или отменённое обновление — окно уходит сразу.
         self.assertIn("'failed'    { Start-Closing $true", script)
         self.assertIn("'обновление отменено'", script)

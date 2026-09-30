@@ -95,6 +95,18 @@ def _linkify(escaped: str, accent_hex: str) -> str:
     return _URL_RE.sub(replace_url, escaped)
 
 
+def versions_word(count: int, language: str) -> str:
+    """«2 версии», «5 версий», «21 версию» — по правилам русского языка."""
+    n = abs(int(count))
+    if str(language or "").lower().startswith("en"):
+        return "version" if n == 1 else "versions"
+    if n % 10 == 1 and n % 100 != 11:
+        return "версию"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return "версии"
+    return "версий"
+
+
 def format_release_date(published_at: str, language: str) -> str:
     """``2026-09-29T21:40:30+03:00`` → «29 сентября 2026». Пусто, если не разобрать."""
     text = str(published_at or "").strip()

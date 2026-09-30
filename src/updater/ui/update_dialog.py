@@ -48,6 +48,9 @@ from updater.ui.update_flow import (
     UpdateFlow,
 )
 
+# Значок в шапке примерно с высоту заголовка и подписи: крупнее — и он
+# свисает ниже текста, глаз читает это как «логотип съехал вниз».
+_HEADER_LOGO_SIZE = 44
 _MIN_WIDTH = 720
 _MIN_HEIGHT = 440
 _MAX_WIDTH = 1180
@@ -88,21 +91,32 @@ class _ReleaseDialogBase(MessageBoxBase):
 
         header = QHBoxLayout()
         header.setSpacing(14)
-        self.mascot = Mascot(self.widget, size=52)
+        self.mascot = Mascot(self.widget, size=_HEADER_LOGO_SIZE)
         header.addWidget(self.mascot, 0, Qt.AlignmentFlag.AlignTop)
-        titles = QVBoxLayout()
+        # Заголовок и подпись центрируются по самому значку: над значком у
+        # талисмана — запас под прыжок, поэтому колонка начинается с этого
+        # запаса, а блок текста высотой со значок держит строки посередине.
+        # Никаких подобранных отступов — шрифт и масштаб экрана не сбивают.
+        titles_column = QVBoxLayout()
+        titles_column.setContentsMargins(0, 0, 0, 0)
+        titles_column.setSpacing(0)
+        titles_column.addSpacing(self.mascot.logo_top())
+        self.titles_box = QWidget(self.widget)
+        self.titles_box.setMinimumHeight(_HEADER_LOGO_SIZE)
+        titles = QVBoxLayout(self.titles_box)
+        titles.setContentsMargins(0, 0, 0, 0)
         titles.setSpacing(2)
-        # Над значком талисмана — запас под прыжок. Заголовок встаёт вровень
-        # с самим значком, а не с верхним краем виджета.
-        titles.setContentsMargins(0, self.mascot.logo_top(), 0, 0)
-        self.title_label = SubtitleLabel("", self.widget)
+        titles.addStretch(1)
+        self.title_label = SubtitleLabel("", self.titles_box)
         self.title_label.setWordWrap(True)
         titles.addWidget(self.title_label)
-        self.subtitle_label = CaptionLabel("", self.widget)
+        self.subtitle_label = CaptionLabel("", self.titles_box)
         self.subtitle_label.setWordWrap(True)
         titles.addWidget(self.subtitle_label)
         titles.addStretch(1)
-        header.addLayout(titles, 1)
+        titles_column.addWidget(self.titles_box)
+        titles_column.addStretch(1)
+        header.addLayout(titles_column, 1)
         self.viewLayout.addLayout(header)
 
         self.browser = TextBrowser(self.widget)
@@ -570,7 +584,9 @@ class WhatsNewDialog(_ReleaseDialogBase):
         super().set_history(history)
         count = len(self._history)
         self.subtitle_label.setText(
-            self._t("whats_new.subtitle_many_template", "Версий в списке: {count}").format(count=count)
+            self._t("whats_new.subtitle_many_template", "Изменения за {count} {versions}").format(
+                count=count, versions=plans.versions_word(count, self._language)
+            )
             if count > 1
             else self._t("whats_new.subtitle", "Список изменений этого выпуска")
         )

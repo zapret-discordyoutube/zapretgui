@@ -3146,8 +3146,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Changes in this release",
     },
     "update_dialog.whats_new.subtitle_many_template": {
-        "ru": "Версий в списке: {count}",
-        "en": "Versions listed: {count}",
+        "ru": "Изменения за {count} {versions}",
+        "en": "Changes in {count} {versions}",
     },
     "update_dialog.whats_new.title_template": {
         "ru": "Что нового в v{version}",
