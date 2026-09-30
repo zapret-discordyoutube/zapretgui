@@ -113,6 +113,10 @@ class HostsTilesGrid(QWidget):
     _RADIUS = 5.0
     _ICON = 20
     _PAD = 14
+    # Строки названия и пояснения: шаг строк и отступ пояснения от верха.
+    _TITLE_LINE = 20
+    _NOTE_TOP = 19
+    _NOTE_LINE = 16
     _SWITCH = QSize(40, 20)
     _CHOICE = 24
     _CHOICE_ICON = 13
@@ -313,33 +317,64 @@ class HostsTilesGrid(QWidget):
 
     # ── раскладка ────────────────────────────────────────────
 
+    def _note_text_width(self, tile_width: int) -> int:
+        return tile_width - 2 * self._PAD - self._ICON - 10
+
+    def _title_lines(self, tile: HostsTile, tile_width: int) -> list[str]:
+        """Название по словам в строки. Считаем полужирным шрифтом, чтобы
+        высота плитки не прыгала при включении тумблера."""
+        if tile.has_choices:
+            return [tile.title]
+        width = self._note_text_width(tile_width)
+        first = width - (self._SWITCH.width() + 10) if tile.has_switch else width
+        return wrap_lines(tile.title, QFontMetrics(self._title_font_on), width, first_width=first) or [tile.title]
+
+    def _tile_height(self, tile: HostsTile, tile_width: int) -> int:
+        """Длинные название и пояснение видны целиком: плитка становится выше."""
+        if tile.has_choices:
+            return self.TILE_HEIGHT
+        extra_title = self._TITLE_LINE * (len(self._title_lines(tile, tile_width)) - 1)
+        if not tile.note:
+            return max(self.TILE_HEIGHT, self._PAD + extra_title + self._TITLE_LINE + self._PAD)
+        lines = wrap_lines(tile.note, QFontMetrics(self._caption_font), self._note_text_width(tile_width))
+        return max(self.TILE_HEIGHT, self._PAD + extra_title + self._NOTE_TOP + self._NOTE_LINE * len(lines) + self._PAD - 2)
+
     def _relayout(self) -> None:
         width = max(self.width() - self.SCROLLBAR_GUTTER, self.TILE_MIN_WIDTH)
         columns = max(1, (width + self.GAP) // (self.TILE_MIN_WIDTH + self.GAP))
         tile_width = (width - self.GAP * (columns - 1)) // columns
         self._columns = columns
-        self._rects = []
+        self._rects = [QRect() for _tile in self._tiles]
         y = 0
-        column = 0
-        for tile in self._tiles:
+        row: list[int] = []
+
+        def close_row() -> None:
+            # Все плитки ряда одной высоты — по самой длинной подписи в ряду.
+            nonlocal y
+            if not row:
+                return
+            height = max(self._tile_height(self._tiles[index], tile_width) for index in row)
+            for column, index in enumerate(row):
+                self._rects[index] = QRect(column * (tile_width + self.GAP), y, tile_width, height)
+            y += height + self.GAP
+            row.clear()
+
+        for index, tile in enumerate(self._tiles):
             if tile.kind == "tile":
-                if column >= columns:
-                    column = 0
-                    y += self.TILE_HEIGHT + self.GAP
-                x = column * (tile_width + self.GAP)
-                self._rects.append(QRect(x, y, tile_width, self.TILE_HEIGHT))
-                column += 1
+                if len(row) >= columns:
+                    close_row()
+                row.append(index)
                 continue
-            if column:
-                y += self.TILE_HEIGHT + self.GAP
-                column = 0
+            if row:
+                close_row()
             if tile.kind == "group" and y:
                 y += 12
             height = self.GROUP_HEIGHT + (self.LEGEND_HEIGHT if tile.legend else 0)
-            self._rects.append(QRect(0, y, width, height))
+            self._rects[index] = QRect(0, y, width, height)
             y += height
-        if column:
-            y += self.TILE_HEIGHT
+        if row:
+            close_row()
+            y -= self.GAP
         height = max(y, self.GROUP_HEIGHT)
         if self.height() != height:
             self.setFixedHeight(height)
@@ -588,12 +623,17 @@ class HostsTilesGrid(QWidget):
         title_font = self._title_font_on if tile.is_on else self._title_font
         painter.setFont(title_font)
         painter.setPen(to_qcolor(tokens.fg))
-        title_rect = QRect(text_left, rect.top() + pad - 2, max(0, right_edge - text_left), 22)
-        painter.drawText(
-            title_rect,
-            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            QFontMetrics(title_font).elidedText(tile.title, Qt.TextElideMode.ElideRight, title_rect.width()),
-        )
+        title_lines = self._title_lines(tile, rect.width())
+        for number, line in enumerate(title_lines):
+            # Тумблер занимает только первую строку, дальше название во всю ширину.
+            line_right = right_edge if number == 0 else rect.right() - pad
+            title_rect = QRect(text_left, rect.top() + pad - 2 + self._TITLE_LINE * number, max(0, line_right - text_left), 22)
+            painter.drawText(
+                title_rect,
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                QFontMetrics(title_font).elidedText(line, Qt.TextElideMode.ElideRight, title_rect.width()),
+            )
+        title_shift = self._TITLE_LINE * (len(title_lines) - 1)
 
         if tile.has_switch:
             self._paint_switch(painter, self._switch_rect(rect), tile, dark)
@@ -602,15 +642,16 @@ class HostsTilesGrid(QWidget):
         if tile.has_choices:
             self._paint_choices(painter, index, rect, tile, dark)
         else:
-            caption_rect = QRect(text_left, rect.top() + pad + 22, rect.right() - pad - text_left, 20)
+            caption_rect = QRect(text_left, rect.top() + pad + 22 + title_shift, rect.right() - pad - text_left, 20)
             if tile.pending:
                 self._paint_caption(painter, caption_rect, self._pending_text(), tokens, accent=True)
             elif tile.note:
-                # Длинное пояснение — в две строки, многоточие только если не влезло и в них.
-                lines = wrap_two_lines(tile.note, QFontMetrics(self._caption_font), caption_rect.width())
+                # Пояснение переносится по словам целиком: высоту плитки задал _relayout.
+                note_width = self._note_text_width(rect.width())
+                lines = wrap_lines(tile.note, QFontMetrics(self._caption_font), note_width)
                 for number, line in enumerate(lines):
-                    line_rect = QRect(text_left, rect.top() + pad + 19 + 16 * number, caption_rect.width(), 17)
-                    self._paint_caption(painter, line_rect, line, tokens)
+                    top = rect.top() + pad + title_shift + self._NOTE_TOP + self._NOTE_LINE * number
+                    self._paint_caption(painter, QRect(text_left, top, note_width, self._NOTE_LINE + 1), line, tokens)
         painter.restore()
 
     @staticmethod
@@ -935,28 +976,64 @@ class HostsTilesGrid(QWidget):
         parent.ensureVisible(center.x(), center.y(), 0, rect.height() // 2 + self.GAP)
 
 
-__all__ = ["HostsChoice", "HostsTile", "HostsTilesGrid", "split_service_title", "wrap_two_lines"]
+__all__ = ["HostsChoice", "HostsTile", "HostsTilesGrid", "split_service_title", "wrap_lines"]
 
 
-def wrap_two_lines(text: str, metrics: QFontMetrics, width: int) -> list[str]:
-    """Переносит текст по словам не больше чем на две строки; вторая — с многоточием."""
-    words = str(text or "").split()
-    if not words or width <= 8:
-        return []
-    first = words[0]
-    rest_index = 1
-    for index in range(1, len(words)):
-        candidate = f"{first} {words[index]}"
-        if metrics.horizontalAdvance(candidate) > width:
-            break
-        first, rest_index = candidate, index + 1
-    if metrics.horizontalAdvance(first) > width:
-        # Одно слово шире строки: режем его многоточием, второй строки нет.
-        return [metrics.elidedText(" ".join(words), Qt.TextElideMode.ElideRight, width)]
-    rest = " ".join(words[rest_index:])
-    if not rest:
-        return [first]
-    return [first, metrics.elidedText(rest, Qt.TextElideMode.ElideRight, width)]
+def _split_long_word(word: str, metrics: QFontMetrics, width: int) -> list[str]:
+    """Слово шире строки: режем после «/» (загрузки/картинки), иначе по буквам."""
+    pieces: list[str] = []
+    current = ""
+    parts = [part + "/" for part in word.split("/")[:-1]] + [word.split("/")[-1]]
+    for part in (part for part in parts if part):
+        if metrics.horizontalAdvance(current + part) <= width:
+            current += part
+            continue
+        if current:
+            pieces.append(current)
+            current = ""
+        for char in part:
+            if current and metrics.horizontalAdvance(current + char) > width:
+                pieces.append(current)
+                current = ""
+            current += char
+    if current:
+        pieces.append(current)
+    return pieces
+
+
+def wrap_lines(text: str, metrics: QFontMetrics, width: int, first_width: int | None = None) -> list[str]:
+    """Переносит текст по словам, весь текст виден.
+
+    first_width — ширина первой строки, если она короче остальных (справа
+    от первой строки стоит тумблер).
+    """
+    width = max(8, int(width))
+    lines: list[str] = []
+    current = ""
+
+    def limit() -> int:
+        return max(8, int(first_width)) if first_width is not None and not lines else width
+
+    # (кусок, приклеен ли к предыдущему без пробела): куски разрезанного длинного слова.
+    words: list[tuple[str, bool]] = []
+    for word in str(text or "").split():
+        pieces = _split_long_word(word, metrics, width) if metrics.horizontalAdvance(word) > width else [word]
+        words.extend((piece, index > 0) for index, piece in enumerate(pieces))
+    for word, glued in words:
+        glue = "" if glued or not current else " "
+        candidate = current + glue + word
+        if current and metrics.horizontalAdvance(candidate) > limit():
+            lines.append(current)
+            current = word
+        elif not current and metrics.horizontalAdvance(word) > limit():
+            # Слово не лезет в укороченную первую строку — начнём со следующей.
+            lines.append("")
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
 
 
 def split_service_title(name: str) -> tuple[str, str]:
