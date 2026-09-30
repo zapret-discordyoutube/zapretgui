@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import time
+
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from log.log import log
 from settings.mode import is_orchestra_launch_method, is_preset_launch_method
 from winws_runtime.runtime.sync_shutdown import shutdown_runtime_sync
+from ui.performance_metrics import log_ui_timing_since
 
 
 class PresetLaunchStopWorker(QObject):
@@ -35,37 +38,43 @@ class PresetLaunchStopWorker(QObject):
         return exe_path_for_launch_method(self.launch_method)
 
     def run(self):
+        _metric_started_at = time.perf_counter()
         try:
-            self.progress.emit("Остановка DPI...")
+            try:
+                self.progress.emit("Остановка DPI...")
 
-            runtime_api = self._runtime_api
-            process_running = runtime_api.has_residual_processes(silent=True)
-            if (not process_running) and not self.force_cleanup:
-                self.progress.emit("DPI уже остановлен")
-                self.finished.emit(True, "DPI уже был остановлен")
-                return
-            if not process_running and self.force_cleanup:
-                self.progress.emit("Очищаем состояние предыдущего режима...")
+                runtime_api = self._runtime_api
+                process_running = runtime_api.has_residual_processes(silent=True)
+                if (not process_running) and not self.force_cleanup:
+                    self.progress.emit("DPI уже остановлен")
+                    self.finished.emit(True, "DPI уже был остановлен")
+                    return
+                if not process_running and self.force_cleanup:
+                    self.progress.emit("Очищаем состояние предыдущего режима...")
 
-            self.progress.emit("Завершение процессов...")
+                self.progress.emit("Завершение процессов...")
 
-            if is_orchestra_launch_method(self.launch_method):
-                success = self._stop_orchestra()
-            elif is_preset_launch_method(self.launch_method):
-                success = self._stop_preset_mode()
-            else:
-                success = self._stop_preset_mode()
+                if is_orchestra_launch_method(self.launch_method):
+                    success = self._stop_orchestra()
+                elif is_preset_launch_method(self.launch_method):
+                    success = self._stop_preset_mode()
+                else:
+                    success = self._stop_preset_mode()
 
-            if success:
-                self.progress.emit("DPI успешно остановлен")
-                self.finished.emit(True, "")
-            else:
-                self.finished.emit(False, "Не удалось полностью остановить процесс")
+                if success:
+                    self.progress.emit("DPI успешно остановлен")
+                    self.finished.emit(True, "")
+                else:
+                    self.finished.emit(False, "Не удалось полностью остановить процесс")
 
-        except Exception as e:
-            error_msg = f"Ошибка остановки DPI: {str(e)}"
-            log(error_msg, "❌ ERROR")
-            self.finished.emit(False, error_msg)
+            except Exception as e:
+                error_msg = f"Ошибка остановки DPI: {str(e)}"
+                log(error_msg, "❌ ERROR")
+                self.finished.emit(False, error_msg)
+        finally:
+            # Замер горячего действия (переключение/сохранение/стратегия/старт):
+            # по журналу видно, сколько оно реально длится у пользователя.
+            log_ui_timing_since("worker", "dpi", "dpi_stop.run", _metric_started_at, important=True)
 
     def _stop_preset_mode(self):
         try:
@@ -116,68 +125,74 @@ class PresetSwitchWorker(QObject):
         return exe_path_for_launch_method(self.launch_method)
 
     def run(self):
+        _metric_started_at = time.perf_counter()
         try:
-            if not is_preset_launch_method(self.launch_method):
-                self.finished.emit(
-                    False,
-                    f"Неподдерживаемый метод preset switch: {self.launch_method}",
-                    self.generation,
+            try:
+                if not is_preset_launch_method(self.launch_method):
+                    self.finished.emit(
+                        False,
+                        f"Неподдерживаемый метод preset switch: {self.launch_method}",
+                        self.generation,
+                        self.launch_method,
+                        False,
+                    )
+                    return
+
+                if not bool(self._is_generation_current(self.generation)):
+                    self.finished.emit(True, "", self.generation, self.launch_method, True)
+                    return
+
+                self.progress.emit("Применяем пресет...")
+
+                from winws_runtime.runners.runner_factory import get_strategy_runner
+
+                snapshot = self._presets_feature.get_launch_snapshot(
                     self.launch_method,
-                    False,
+                    require_filters=True,
                 )
-                return
+                preset = snapshot.to_launch_preset()
 
-            if not bool(self._is_generation_current(self.generation)):
-                self.finished.emit(True, "", self.generation, self.launch_method, True)
-                return
+                if not bool(self._is_generation_current(self.generation)):
+                    self.finished.emit(True, "", self.generation, self.launch_method, True)
+                    return
 
-            self.progress.emit("Применяем пресет...")
-
-            from winws_runtime.runners.runner_factory import get_strategy_runner
-
-            snapshot = self._presets_feature.get_launch_snapshot(
-                self.launch_method,
-                require_filters=True,
-            )
-            preset = snapshot.to_launch_preset()
-
-            if not bool(self._is_generation_current(self.generation)):
-                self.finished.emit(True, "", self.generation, self.launch_method, True)
-                return
-
-            runner = get_strategy_runner(self._get_winws_exe())
-            success = bool(
-                runner.switch_preset_file_fast(
-                    str(preset.preset_path),
-                    preset.display_name,
-                    is_current=lambda: bool(self._is_generation_current(self.generation)),
+                runner = get_strategy_runner(self._get_winws_exe())
+                success = bool(
+                    runner.switch_preset_file_fast(
+                        str(preset.preset_path),
+                        preset.display_name,
+                        is_current=lambda: bool(self._is_generation_current(self.generation)),
+                    )
                 )
-            )
 
-            if success:
-                # PID нужен и stale-финишу: устаревшее поколение могло уже
-                # переключить процесс, и snapshot обязан узнать нового владельца.
-                try:
-                    runner_snapshot = runner.get_runner_state_snapshot()
-                    pid = getattr(runner_snapshot, "pid", None)
-                    self.started_pid = pid if isinstance(pid, int) else None
-                except Exception:
-                    self.started_pid = None
+                if success:
+                    # PID нужен и stale-финишу: устаревшее поколение могло уже
+                    # переключить процесс, и snapshot обязан узнать нового владельца.
+                    try:
+                        runner_snapshot = runner.get_runner_state_snapshot()
+                        pid = getattr(runner_snapshot, "pid", None)
+                        self.started_pid = pid if isinstance(pid, int) else None
+                    except Exception:
+                        self.started_pid = None
 
-            if not bool(self._is_generation_current(self.generation)):
-                self.finished.emit(success, "", self.generation, self.launch_method, True)
-                return
+                if not bool(self._is_generation_current(self.generation)):
+                    self.finished.emit(success, "", self.generation, self.launch_method, True)
+                    return
 
-            if not success:
-                short_error = str(getattr(runner, "last_error", "") or "").strip()
-                if not short_error:
-                    short_error = "Не удалось применить выбранный пресет"
-                self.finished.emit(False, short_error, self.generation, self.launch_method, False)
-                return
+                if not success:
+                    short_error = str(getattr(runner, "last_error", "") or "").strip()
+                    if not short_error:
+                        short_error = "Не удалось применить выбранный пресет"
+                    self.finished.emit(False, short_error, self.generation, self.launch_method, False)
+                    return
 
-            self.finished.emit(True, "", self.generation, self.launch_method, False)
-        except Exception as e:
-            self.finished.emit(False, str(e), self.generation, self.launch_method, False)
+                self.finished.emit(True, "", self.generation, self.launch_method, False)
+            except Exception as e:
+                self.finished.emit(False, str(e), self.generation, self.launch_method, False)
+        finally:
+            # Замер горячего действия (переключение/сохранение/стратегия/старт):
+            # по журналу видно, сколько оно реально длится у пользователя.
+            log_ui_timing_since("worker", "dpi", "preset_switch.run", _metric_started_at, important=True)
 
 
 class StopAndExitWorker(QObject):

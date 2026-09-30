@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import time
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from log.log import log
+from ui.performance_metrics import log_ui_timing_since
 
 
 class RawPresetLoadWorker(QThread):
@@ -47,22 +50,28 @@ class RawPresetSaveWorker(QThread):
         self._publish_content_changed = bool(publish_content_changed)
 
     def run(self) -> None:
+        _metric_started_at = time.perf_counter()
         try:
-            result = self._save_text(
-                file_name=self._file_name,
-                source_text=self._source_text,
-                publish_content_changed=self._publish_content_changed,
+            try:
+                result = self._save_text(
+                    file_name=self._file_name,
+                    source_text=self._source_text,
+                    publish_content_changed=self._publish_content_changed,
+                )
+            except Exception as exc:
+                log(f"RawPresetSaveWorker: не удалось сохранить preset: {exc}", "ERROR")
+                self.failed.emit(self._request_id, str(exc))
+                return
+            self.saved.emit(
+                self._request_id,
+                self._file_name,
+                result,
+                self._publish_content_changed,
             )
-        except Exception as exc:
-            log(f"RawPresetSaveWorker: не удалось сохранить preset: {exc}", "ERROR")
-            self.failed.emit(self._request_id, str(exc))
-            return
-        self.saved.emit(
-            self._request_id,
-            self._file_name,
-            result,
-            self._publish_content_changed,
-        )
+        finally:
+            # Замер горячего действия (переключение/сохранение/стратегия/старт):
+            # по журналу видно, сколько оно реально длится у пользователя.
+            log_ui_timing_since("worker", "presets", "preset_save.run", _metric_started_at, important=True)
 
 
 class RawPresetActionWorker(QThread):

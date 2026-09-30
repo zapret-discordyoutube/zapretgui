@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from log.log import log
 from profile.list_file_editor import count_profile_list_entries
 from profile.setup_apply_signature import profile_setup_payload_apply_signature
+from ui.performance_metrics import log_ui_timing_since
 
 
 def _profile_setup_load_result(payload, *, apply_result=None):
@@ -207,27 +209,33 @@ class ProfileSettingsSaveWorker(QThread):
         self._out_range = str(out_range or "").strip()
 
     def run(self) -> None:
+        _metric_started_at = time.perf_counter()
         try:
-            old_profile_key, new_profile_key = profile_save_result_keys(
-                self._save_settings(
-                    profile_key=self._profile_key,
-                    filter_kind=self._filter_kind,
-                    filter_value=self._filter_value,
-                    in_range=self._in_range,
-                    out_range=self._out_range,
+            try:
+                old_profile_key, new_profile_key = profile_save_result_keys(
+                    self._save_settings(
+                        profile_key=self._profile_key,
+                        filter_kind=self._filter_kind,
+                        filter_value=self._filter_value,
+                        in_range=self._in_range,
+                        out_range=self._out_range,
+                    )
                 )
-            )
-            payload = self._load_profile(str(new_profile_key or self._profile_key))
-            if payload is None and new_profile_key and new_profile_key != self._profile_key:
-                # persistent-ссылка нового ключа может не резолвиться
-                # (ключи пересобираются при сохранении) — успешное сохранение
-                # не должно падать в failed: повтор по исходному ключу запроса.
-                payload = self._load_profile(self._profile_key)
-        except Exception as exc:
-            log(f"ProfileSettingsSaveWorker: не удалось сохранить настройки profile: {exc}", "ERROR")
-            self.failed.emit(self._request_id, str(exc))
-            return
-        self.saved.emit(self._request_id, (old_profile_key, new_profile_key), _profile_setup_load_result(payload))
+                payload = self._load_profile(str(new_profile_key or self._profile_key))
+                if payload is None and new_profile_key and new_profile_key != self._profile_key:
+                    # persistent-ссылка нового ключа может не резолвиться
+                    # (ключи пересобираются при сохранении) — успешное сохранение
+                    # не должно падать в failed: повтор по исходному ключу запроса.
+                    payload = self._load_profile(self._profile_key)
+            except Exception as exc:
+                log(f"ProfileSettingsSaveWorker: не удалось сохранить настройки profile: {exc}", "ERROR")
+                self.failed.emit(self._request_id, str(exc))
+                return
+            self.saved.emit(self._request_id, (old_profile_key, new_profile_key), _profile_setup_load_result(payload))
+        finally:
+            # Замер горячего действия (переключение/сохранение/стратегия/старт):
+            # по журналу видно, сколько оно реально длится у пользователя.
+            log_ui_timing_since("worker", "profile", "settings_save.run", _metric_started_at, important=True)
 
 
 class ProfileRawTextSaveWorker(QThread):
@@ -290,25 +298,31 @@ class ProfileEnabledSaveWorker(QThread):
         self._filter_value = str(filter_value or "").strip()
 
     def run(self) -> None:
+        _metric_started_at = time.perf_counter()
         try:
-            profile_key = self._set_enabled(
-                profile_key=self._profile_key,
-                enabled=self._enabled,
-                filter_kind=self._filter_kind,
-                filter_value=self._filter_value,
-            )
-        except Exception as exc:
-            log(f"ProfileEnabledSaveWorker: не удалось изменить состояние profile: {exc}", "ERROR")
-            self.failed.emit(self._request_id, str(exc))
-            return
-        payload = None
-        clean_profile_key = str(profile_key or "").strip()
-        if clean_profile_key:
             try:
-                payload = self._load_profile(clean_profile_key)
+                profile_key = self._set_enabled(
+                    profile_key=self._profile_key,
+                    enabled=self._enabled,
+                    filter_kind=self._filter_kind,
+                    filter_value=self._filter_value,
+                )
             except Exception as exc:
-                log(f"ProfileEnabledSaveWorker: не удалось обновить payload profile: {exc}", "DEBUG")
-        self.saved.emit(self._request_id, clean_profile_key, self._enabled, _profile_setup_load_result(payload))
+                log(f"ProfileEnabledSaveWorker: не удалось изменить состояние profile: {exc}", "ERROR")
+                self.failed.emit(self._request_id, str(exc))
+                return
+            payload = None
+            clean_profile_key = str(profile_key or "").strip()
+            if clean_profile_key:
+                try:
+                    payload = self._load_profile(clean_profile_key)
+                except Exception as exc:
+                    log(f"ProfileEnabledSaveWorker: не удалось обновить payload profile: {exc}", "DEBUG")
+            self.saved.emit(self._request_id, clean_profile_key, self._enabled, _profile_setup_load_result(payload))
+        finally:
+            # Замер горячего действия (переключение/сохранение/стратегия/старт):
+            # по журналу видно, сколько оно реально длится у пользователя.
+            log_ui_timing_since("worker", "profile", "enabled_save.run", _metric_started_at, important=True)
 
 
 class ProfilePresetProfileActionWorker(QThread):
@@ -699,28 +713,34 @@ class ProfileStrategyApplyWorker(QThread):
         self._strategy_id = str(strategy_id or "").strip()
 
     def run(self) -> None:
+        _metric_started_at = time.perf_counter()
         try:
-            result = self._apply_strategy(profile_key=self._profile_key, strategy_id=self._strategy_id)
-        except Exception as exc:
-            log(f"ProfileStrategyApplyWorker: не удалось применить готовую стратегию: {exc}", "ERROR")
-            self.failed.emit(self._request_id, str(exc))
-            return
-        profile_key = str(getattr(result, "profile_key", "") or "").strip()
-        payload = None
-        profile_payload_changed = getattr(result, "profile_payload_changed", None)
-        should_load_profile = profile_payload_changed is None or bool(profile_payload_changed)
-        if profile_key and should_load_profile:
             try:
-                payload = self._load_profile(profile_key)
+                result = self._apply_strategy(profile_key=self._profile_key, strategy_id=self._strategy_id)
             except Exception as exc:
-                log(f"ProfileStrategyApplyWorker: не удалось загрузить обновлённый profile payload: {exc}", "DEBUG")
-        self.applied.emit(
-            self._request_id,
-            self._profile_key,
-            profile_key,
-            self._strategy_id,
-            _profile_setup_load_result(payload, apply_result=result),
-        )
+                log(f"ProfileStrategyApplyWorker: не удалось применить готовую стратегию: {exc}", "ERROR")
+                self.failed.emit(self._request_id, str(exc))
+                return
+            profile_key = str(getattr(result, "profile_key", "") or "").strip()
+            payload = None
+            profile_payload_changed = getattr(result, "profile_payload_changed", None)
+            should_load_profile = profile_payload_changed is None or bool(profile_payload_changed)
+            if profile_key and should_load_profile:
+                try:
+                    payload = self._load_profile(profile_key)
+                except Exception as exc:
+                    log(f"ProfileStrategyApplyWorker: не удалось загрузить обновлённый profile payload: {exc}", "DEBUG")
+            self.applied.emit(
+                self._request_id,
+                self._profile_key,
+                profile_key,
+                self._strategy_id,
+                _profile_setup_load_result(payload, apply_result=result),
+            )
+        finally:
+            # Замер горячего действия (переключение/сохранение/стратегия/старт):
+            # по журналу видно, сколько оно реально длится у пользователя.
+            log_ui_timing_since("worker", "profile", "strategy_apply.run", _metric_started_at, important=True)
 
 
 class ProfileStrategyFeedbackSaveWorker(QThread):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -13,6 +14,7 @@ from winws_runtime.runtime.preset_launch_service import (
     PresetLaunchService,
     ensure_required_files_fast,
 )
+from ui.performance_metrics import log_ui_timing_since
 
 
 @dataclass(frozen=True)
@@ -63,34 +65,40 @@ class PresetLaunchStartWorker(QObject):
         )
 
     def run(self):
+        _metric_started_at = time.perf_counter()
         try:
-            if self._prepare_request:
-                # Вся подготовка читает preset/settings и поэтому обязана
-                # выполняться здесь, а не в обработчике команды GUI.
-                from winws_runtime.flow.start_preparation import prepare_start_request
+            try:
+                if self._prepare_request:
+                    # Вся подготовка читает preset/settings и поэтому обязана
+                    # выполняться здесь, а не в обработчике команды GUI.
+                    from winws_runtime.flow.start_preparation import prepare_start_request
 
-                request, warnings = prepare_start_request(
-                    self.selected_mode,
-                    self.launch_method,
-                    presets_feature=self._runtime_feature.dependencies.presets_feature,
-                    skip_preset_prevalidation=bool(self._startup_autostart),
-                    defer_preset_snapshot=bool(self._startup_autostart),
+                    request, warnings = prepare_start_request(
+                        self.selected_mode,
+                        self.launch_method,
+                        presets_feature=self._runtime_feature.dependencies.presets_feature,
+                        skip_preset_prevalidation=bool(self._startup_autostart),
+                        defer_preset_snapshot=bool(self._startup_autostart),
+                    )
+                    self.selected_mode = request.selected_mode
+                    self.launch_method = request.launch_method
+                    self.mode_name = request.mode_name
+                    self.method_name = request.method_name
+                    self.warnings = list(warnings or [])
+
+                result = self._build_launch_service().run()
+                self.selected_mode = result.selected_mode
+                pid = getattr(result, "pid", None)
+                self.started_pid = pid if isinstance(pid, int) else None
+                self._last_error_message = str(result.error_message or "").strip()
+                self.finished.emit(bool(result.success), "" if result.success else self._last_error_message)
+            except Exception as e:
+                exe_path = getattr(self.launch_runtime_api, "expected_exe_path", "")
+                self._last_error_message = publish_startup_diagnosis(
+                    diagnose_startup_error(e, exe_path)
                 )
-                self.selected_mode = request.selected_mode
-                self.launch_method = request.launch_method
-                self.mode_name = request.mode_name
-                self.method_name = request.method_name
-                self.warnings = list(warnings or [])
-
-            result = self._build_launch_service().run()
-            self.selected_mode = result.selected_mode
-            pid = getattr(result, "pid", None)
-            self.started_pid = pid if isinstance(pid, int) else None
-            self._last_error_message = str(result.error_message or "").strip()
-            self.finished.emit(bool(result.success), "" if result.success else self._last_error_message)
-        except Exception as e:
-            exe_path = getattr(self.launch_runtime_api, "expected_exe_path", "")
-            self._last_error_message = publish_startup_diagnosis(
-                diagnose_startup_error(e, exe_path)
-            )
-            self.finished.emit(False, self._last_error_message)
+                self.finished.emit(False, self._last_error_message)
+        finally:
+            # Замер горячего действия (переключение/сохранение/стратегия/старт):
+            # по журналу видно, сколько оно реально длится у пользователя.
+            log_ui_timing_since("worker", "dpi", "dpi_start.run", _metric_started_at, important=True)

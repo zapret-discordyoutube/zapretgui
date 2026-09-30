@@ -80,7 +80,14 @@ def classify_preset_folder(name: object, scope_key: object = "winws2") -> str:
 
 
 def classify_profile_folder(text: object) -> str:
-    value = str(text or "").strip().lower()
+    return _classify_profile_folder_text(str(text or "").strip().lower())
+
+
+# Чистая функция текста: при каждой сборке списка профилей она прогоняла
+# десятки регулярных выражений по каждому профилю (~60% времени повторной
+# сборки). Тексты профилей повторяются от сборки к сборке — запоминаем.
+@lru_cache(maxsize=4096)
+def _classify_profile_folder_text(value: str) -> str:
     if not value:
         return COMMON_FOLDER_KEY
     if _has_any_token(value, ("youtube", "googlevideo", "ytimg")):

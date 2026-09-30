@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import time
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from log.log import log
+from ui.performance_metrics import log_ui_timing_since
 
 
 class UserPresetActivateWorker(QThread):
@@ -17,16 +20,22 @@ class UserPresetActivateWorker(QThread):
         self._display_name = str(display_name or self._file_name).strip()
 
     def run(self) -> None:
+        _metric_started_at = time.perf_counter()
         try:
-            result = self._activate_preset(
-                file_name=self._file_name,
-                display_name=self._display_name,
-            )
-        except Exception as exc:
-            log(f"UserPresetActivateWorker: не удалось активировать preset: {exc}", "ERROR")
-            self.failed.emit(self._request_id, str(exc))
-            return
-        self.activated.emit(self._request_id, result)
+            try:
+                result = self._activate_preset(
+                    file_name=self._file_name,
+                    display_name=self._display_name,
+                )
+            except Exception as exc:
+                log(f"UserPresetActivateWorker: не удалось активировать preset: {exc}", "ERROR")
+                self.failed.emit(self._request_id, str(exc))
+                return
+            self.activated.emit(self._request_id, result)
+        finally:
+            # Замер горячего действия (переключение/сохранение/стратегия/старт):
+            # по журналу видно, сколько оно реально длится у пользователя.
+            log_ui_timing_since("worker", "presets", "preset_activate.run", _metric_started_at, important=True)
 
 
 class UserPresetItemActionWorker(QThread):
