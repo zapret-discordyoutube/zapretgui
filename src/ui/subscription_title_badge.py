@@ -22,6 +22,7 @@ from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import set_tooltip
 from ui.theme_semantic import get_semantic_palette
+from ui.title_badge_paint import badge_qss, badge_shape, current_theme_name, paint_badge_body
 from ui.widgets.star_glyph import paint_star
 
 
@@ -77,20 +78,18 @@ def build_title_badge_texts(display: PremiumDisplay, *, language: str | None) ->
     )
 
 
-def _badge_qss(*, is_premium: bool, theme_name: str) -> str:
+def _badge_colors(*, is_premium: bool, theme_name: str) -> tuple[str, str, str]:
+    """Цвета значка: текст, фон, фон при наведении."""
     palette = get_semantic_palette(theme_name)
     if is_premium:
-        fg, bg, bg_hover = palette.premium_fg, palette.premium_bg, palette.premium_bg_hover
-    else:
-        fg, bg, bg_hover = palette.neutral_badge_fg, palette.neutral_badge_bg, palette.neutral_badge_bg_hover
-    selector = f"#{SUBSCRIPTION_TITLE_BADGE_OBJECT_NAME}"
-    return (
-        f"{selector} {{ color: {fg}; background: {bg}; border: none; border-radius: 4px; "
-        f"padding: 0px 8px 0px {PREMIUM_STAR_LEFT + PREMIUM_STAR_SIZE + 4 if is_premium else 8}px; "
-        "font-size: 10px; font-weight: 600; }"
-        f"{selector}:hover {{ background: {bg_hover}; }}"
-        f"{selector}:pressed {{ background: {bg}; }}"
-    )
+        return palette.premium_fg, palette.premium_bg, palette.premium_bg_hover
+    return palette.neutral_badge_fg, palette.neutral_badge_bg, palette.neutral_badge_bg_hover
+
+
+def _badge_qss(*, is_premium: bool, theme_name: str) -> str:
+    fg, _bg, _hover = _badge_colors(is_premium=is_premium, theme_name=theme_name)
+    left = PREMIUM_STAR_LEFT + PREMIUM_STAR_SIZE + 4 if is_premium else 8
+    return badge_qss(f"#{SUBSCRIPTION_TITLE_BADGE_OBJECT_NAME}", fg=fg, left_padding=left)
 
 
 class SubscriptionTitleBadge(TransparentPushButton):
@@ -223,6 +222,12 @@ class SubscriptionTitleBadge(TransparentPushButton):
                 self._schedule_shine(PREMIUM_SHINE_FIRST_DELAY_MS)
 
     def paintEvent(self, event) -> None:  # noqa: N802
+        _fg, background, hover = _badge_colors(
+            is_premium=self._display.is_premium,
+            theme_name=current_theme_name(),
+        )
+        # Фон со сглаженными углами — до текста кнопки.
+        paint_badge_body(self, background=background, hover_background=hover)
         super().paintEvent(event)
         if not self._display.is_premium:
             return
@@ -233,8 +238,7 @@ class SubscriptionTitleBadge(TransparentPushButton):
         glow = math.sin(math.pi * min(1.0, t / 0.35)) if t < 0.35 else (1.0 - (t - 0.35) / 0.65) ** 1.5
         glow = max(0.0, glow) if t > 0.0 else 0.0
         body = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        shape = QPainterPath()
-        shape.addRoundedRect(body, 4, 4)
+        shape = badge_shape(self)
         gold = QColor(PREMIUM_GLOW_GOLD)
 
         if glow > 0.0:
