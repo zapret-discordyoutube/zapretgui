@@ -73,6 +73,46 @@ def _previous_version(entries, version: str) -> str:
     return max(older)[1] if older else ""
 
 
+def _with_earlier(version: str, pending: tuple[dict, ...]) -> tuple[dict, ...]:
+    """Добирает к сохранённому тексту предыдущие выпуски («Ранее»).
+
+    Старые версии сохраняли перед установкой только пропущенные выпуски.
+    Если в записи нет раздела «Ранее» и выпусков меньше десяти, он берётся
+    из списка выпусков Forgejo. Нет сети — показываем сохранённое как есть.
+    """
+    from updater.release.history import RECENT_HISTORY_LIMIT, recent_history
+    from updater.versions import version_key
+
+    if not pending:
+        return pending
+    if len(pending) >= RECENT_HISTORY_LIMIT or any(not item.get("is_new", True) for item in pending):
+        return pending
+    try:
+        from config.build_info import CHANNEL
+        from updater.release.forgejo import fetch_recent_release_history
+
+        remote = fetch_recent_release_history(CHANNEL, up_to_version=version)
+    except Exception as exc:
+        log(f"«Что нового»: раздел «Ранее» недоступен: {exc}", "🔁 UPDATE")
+        return pending
+    new_versions = []
+    for item in pending:
+        try:
+            new_versions.append(version_key(str(item.get("version") or "")))
+        except ValueError:
+            continue
+    if not new_versions:
+        return pending
+    oldest_new = ".".join(str(part) for part in min(new_versions))
+    # Сохранённый текст идёт первым: при совпадении версий побеждает он.
+    combined = recent_history(
+        tuple(pending) + tuple(remote),
+        up_to_version=version,
+        new_after_version=_previous_version(remote, oldest_new),
+    )
+    return combined or pending
+
+
 def startup_history(app_version: str) -> tuple[dict[str, str], ...]:
     """Что показать при запуске этой версии. Пусто — ничего не показывать.
 
@@ -85,7 +125,7 @@ def startup_history(app_version: str) -> tuple[dict[str, str], ...]:
     if seen == version:
         return ()
 
-    history = _pending_history_for(version, state)
+    history = _with_earlier(version, _pending_history_for(version, state))
     if not history and seen:
         # Обновили не через окно (установщик вручную): берём текст из Forgejo.
         try:
@@ -104,7 +144,7 @@ def load_release_history(version: str) -> tuple[dict[str, str], ...]:
     Сначала сохранённое перед установкой (там все пропущенные версии), иначе
     Forgejo. Ошибку сети пробрасывает — окно покажет её пользователю.
     """
-    history = _pending_history_for(version, _state())
+    history = _with_earlier(version, _pending_history_for(version, _state()))
     if history:
         return history
     return _fetch_from_forgejo(version)

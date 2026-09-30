@@ -22,6 +22,7 @@ class WhatsNewStartupTests(unittest.TestCase):
             patch.object(whats_new, "_state", return_value=state),
             patch.object(whats_new, "mark_seen", side_effect=marked.append),
             patch.object(whats_new, "_fetch_from_forgejo", side_effect=fetch),
+            patch.object(whats_new, "_with_earlier", side_effect=lambda _v, pending: pending),
         ):
             history = whats_new.startup_history("2.0")
         return history, marked
@@ -86,12 +87,52 @@ class WhatsNewForgejoFallbackTests(unittest.TestCase):
         self.assertFalse(any(item["is_new"] for item in history[1:]))
 
 
+class WhatsNewEarlierTopUpTests(unittest.TestCase):
+    """Старые версии сохраняли только пропущенные выпуски — «Ранее» добирается."""
+
+    def test_short_saved_history_gets_earlier_releases(self) -> None:
+        saved = ({"version": "2.12", "notes": "сохранено"},)
+        remote = tuple({"version": f"2.{n}", "notes": f"forgejo {n}"} for n in range(0, 15))
+        with patch("updater.release.forgejo.fetch_recent_release_history", return_value=remote):
+            history = whats_new._with_earlier("2.12", saved)
+
+        self.assertEqual(len(history), 10)
+        self.assertEqual(history[0]["notes"], "сохранено")
+        self.assertTrue(history[0]["is_new"])
+        self.assertEqual([item["version"] for item in history[1:3]], ["2.11", "2.10"])
+        self.assertFalse(any(item["is_new"] for item in history[1:]))
+
+    def test_about_button_shows_earlier_for_old_saved_text(self) -> None:
+        state = _state(seen="2.11", pending_version="2.12", history=({"version": "2.12", "notes": "x"},))
+        remote = tuple({"version": f"2.{n}", "notes": ""} for n in range(15))
+        with (
+            patch.object(whats_new, "_state", return_value=state),
+            patch("updater.release.forgejo.fetch_recent_release_history", return_value=remote),
+        ):
+            self.assertEqual(len(whats_new.load_release_history("2.12")), 10)
+            self.assertEqual(len(whats_new.startup_history("2.12")), 10)
+
+    def test_complete_history_and_offline_are_left_as_is(self) -> None:
+        complete = ({"version": "2.12", "is_new": True}, {"version": "2.11", "is_new": False})
+        with patch("updater.release.forgejo.fetch_recent_release_history") as fetch:
+            self.assertEqual(whats_new._with_earlier("2.12", complete), complete)
+        fetch.assert_not_called()
+
+        saved = ({"version": "2.12"},)
+        with (
+            patch("updater.release.forgejo.fetch_recent_release_history", side_effect=ConnectionError("нет сети")),
+            patch.object(whats_new, "log"),
+        ):
+            self.assertEqual(whats_new._with_earlier("2.12", saved), saved)
+
+
 class WhatsNewAboutButtonTests(unittest.TestCase):
     def test_about_uses_saved_history_first(self) -> None:
         saved = ({"version": "2.0", "notes": "сохранено"},)
         with (
             patch.object(whats_new, "_state", return_value=_state(pending_version="2.0", history=saved)),
             patch.object(whats_new, "_fetch_from_forgejo") as fetch,
+            patch.object(whats_new, "_with_earlier", side_effect=lambda _v, pending: pending),
         ):
             history = whats_new.load_release_history("2.0")
 
@@ -157,7 +198,8 @@ class WhatsNewStoreTests(unittest.TestCase):
             self.assertEqual(state["pending"]["version"], "2.1")
             self.assertEqual(state["pending"]["history"][0]["notes"], "новое")
             # Отметка «показано» не стирает сохранённый текст: он нужен «О программе».
-            self.assertEqual(whats_new.load_release_history("2.1")[0]["notes"], "новое")
+            with patch.object(whats_new, "_with_earlier", side_effect=lambda _v, pending: pending):
+                self.assertEqual(whats_new.load_release_history("2.1")[0]["notes"], "новое")
 
 
 if __name__ == "__main__":
