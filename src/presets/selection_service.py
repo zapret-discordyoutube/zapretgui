@@ -152,10 +152,9 @@ class PresetSelectionService:
         with self._state_lock:
             fallback = self._active_fallbacks.pop(key, None)
         changed = previous.casefold() != str(selected or "").casefold()
-        # Явный выбор закрывает подмену; если он совпал с запасным, то
-        # действующий пресет не сменился — событие не нужно.
-        if fallback is not None and fallback[1].casefold() == str(selected or "").casefold():
-            return
+        # Явный выбор закрывает подмену. Даже если выбран сам запасной пресет,
+        # событие нужно: работающий DPI мог остаться на прежних настройках, и
+        # щелчок по запасному должен его на него перевести.
         if changed or fallback is not None:
             self._notify(key, selected, SELECTION_REASON_USER)
 

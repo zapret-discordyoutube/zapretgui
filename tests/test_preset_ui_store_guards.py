@@ -146,6 +146,21 @@ class PresetUiStoreGuardTests(unittest.TestCase):
         self.assertEqual(fallbacks, [("gone.txt", "Default.txt")])
         self.assertEqual(switched, ["gone.txt"])
 
+    def test_restored_file_is_reported_even_if_it_was_last_sent_name(self) -> None:
+        from presets.selection_service import SELECTION_REASON_FALLBACK, SELECTION_REASON_RESTORED
+
+        store = PresetUiStore(ENGINE_WINWS2, SimpleNamespace(), selection_service=SimpleNamespace())
+        switched: list[str] = []
+        store.preset_switched.connect(switched.append)
+        store.notify_preset_switched("A.txt")
+        store.notify_selection_changed("B.txt", SELECTION_REASON_FALLBACK, "A.txt")
+
+        # A — последнее отправленное имя, но страницы показывают запасной B:
+        # возврат A нельзя отбрасывать как дубль.
+        store.notify_selection_changed("A.txt", SELECTION_REASON_RESTORED)
+
+        self.assertEqual(switched, ["A.txt", "A.txt"])
+
 
 if __name__ == "__main__":
     unittest.main()

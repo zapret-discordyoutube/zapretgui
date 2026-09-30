@@ -178,12 +178,18 @@ class PresetRuntimeCoordinator(QObject):
         active_key = (method, selected_file_name.lower())
         active_changed = self._last_active_preset_key != active_key
         self._last_active_preset_key = active_key
+        previous_projection = self.__dict__.get("_active_preset_projection")
         self._active_preset_projection = (method, selected_file_name)
         if not active_changed:
             log(
                 f"Повторное переключение на тот же preset пропущено: {selected_file_name}",
                 "DEBUG",
             )
+            if previous_projection != self._active_preset_projection:
+                # Runtime уже на этом пресете, а страницам показывали запасной
+                # (вернулся пропавший файл): обновляем только показ.
+                self._publish_active_preset_revision_deferred()
+                self.schedule_refresh_after_preset_switch()
             return
         log(f"Пресет переключен: {selected_file_name}", "INFO")
         self._schedule_active_preset_file_watcher_setup(
@@ -229,7 +235,9 @@ class PresetRuntimeCoordinator(QObject):
                 )
         except Exception:
             pass
-        self._last_active_preset_key = (method, used.lower())
+        # _last_active_preset_key не трогаем: это пресет, на котором реально
+        # работает runtime. Запасной — только показ; иначе щелчок по нему
+        # считался бы «уже выбран», и DPI нельзя было бы на него перевести.
         self._active_preset_projection = (method, used)
         self._publish_active_preset_revision_deferred()
         self.schedule_refresh_after_preset_switch()

@@ -64,11 +64,18 @@ class PresetUiStore(QObject):
 
     def notify_selection_changed(self, file_name: str, reason: str, detail: str = "") -> None:
         """Событие PresetSelectionService: единая точка смены выбора."""
-        from .selection_service import SELECTION_REASON_FALLBACK
+        from .selection_service import SELECTION_REASON_FALLBACK, SELECTION_REASON_USER
 
         if reason == SELECTION_REASON_FALLBACK:
             # Работающий DPI не переключаем на запасной пресет сам по себе:
             # только сообщаем (страницы покажут запасной активным).
             self.preset_selection_fallback.emit(str(detail or ""), str(file_name or ""))
+            return
+        if reason != SELECTION_REASON_USER or not self._selected_source_file_name:
+            # Возврат файла: имя может совпасть с последним отправленным
+            # (до подмены) — всё равно сообщаем, иначе страницы и runtime
+            # остались бы на показанном запасном.
+            self._selected_source_file_name = str(file_name or "").strip() or None
+            self.preset_switched.emit(self._selected_source_file_name or "")
             return
         self.notify_preset_switched(file_name)

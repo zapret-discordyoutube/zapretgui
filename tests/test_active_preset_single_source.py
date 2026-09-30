@@ -76,7 +76,9 @@ class SelectionEventsTests(unittest.TestCase):
         # заставило бы runtime перезапустить тот же пресет.
         self.assertEqual(fx.events, [])
 
-    def test_clicking_fallback_closes_substitution_without_extra_switch(self) -> None:
+    def test_clicking_fallback_closes_substitution_and_switches_runtime(self) -> None:
+        from presets.selection_service import SELECTION_REASON_USER
+
         with tempfile.TemporaryDirectory() as temp_dir, patch("settings.store.MAIN_DIRECTORY", temp_dir):
             fx = _SelectionFixture(Path(temp_dir))
             fx.write("B.txt")
@@ -88,8 +90,9 @@ class SelectionEventsTests(unittest.TestCase):
 
             fx.selection.select_preset_file_name_fast("winws2", "B.txt")
 
-        # Действующий пресет не сменился (работал B) — событие не нужно.
-        self.assertEqual(fx.events, [])
+        # Работающий DPI мог остаться на прежних настройках — щелчок по
+        # запасному должен перевести его на запасной.
+        self.assertEqual(fx.events, [("winws2", "B.txt", SELECTION_REASON_USER, "")])
 
 
 class CoordinatorFallbackTests(unittest.TestCase):
@@ -99,6 +102,7 @@ class CoordinatorFallbackTests(unittest.TestCase):
         store = SimpleNamespace(set_last_status_message=Mock())
         coordinator = PresetRuntimeCoordinator.__new__(PresetRuntimeCoordinator)
         coordinator._ui_state_store = store
+        coordinator._last_active_preset_key = ("zapret2_mode", "gone.txt")
         coordinator._is_current_preset_method = lambda _method: True
         coordinator._publish_active_preset_revision_deferred = Mock()
         coordinator.schedule_refresh_after_preset_switch = Mock()
@@ -111,8 +115,47 @@ class CoordinatorFallbackTests(unittest.TestCase):
         self.assertIn("Default v5", message)
         self.assertEqual(coordinator._active_preset_projection, ("zapret2_mode", "Default v5.txt"))
         coordinator._publish_active_preset_revision_deferred.assert_called_once_with()
-        # Работающий DPI сам по себе не переключаем на запасной.
+        # Работающий DPI сам по себе не переключаем на запасной, и помним,
+        # на чём он реально работает — иначе щелчок по запасному был бы «уже выбран».
         coordinator._request_selected_source_preset_apply.assert_not_called()
+        self.assertEqual(coordinator._last_active_preset_key, ("zapret2_mode", "gone.txt"))
+
+    def test_click_on_fallback_after_substitution_applies_it(self) -> None:
+        from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
+
+        coordinator = PresetRuntimeCoordinator.__new__(PresetRuntimeCoordinator)
+        coordinator._ui_state_store = SimpleNamespace(set_last_status_message=Mock())
+        coordinator._last_active_preset_key = ("zapret2_mode", "gone.txt")
+        coordinator._is_current_preset_method = lambda _method: True
+        coordinator._publish_active_preset_revision_deferred = Mock()
+        coordinator.schedule_refresh_after_preset_switch = Mock()
+        coordinator._schedule_active_preset_file_watcher_setup = Mock()
+        coordinator._request_selected_source_preset_apply = Mock()
+
+        PresetRuntimeCoordinator.handle_selection_fallback(coordinator, "zapret2_mode", "gone.txt", "Default v5.txt")
+        PresetRuntimeCoordinator.handle_preset_switched(coordinator, "zapret2_mode", "Default v5.txt")
+
+        coordinator._request_selected_source_preset_apply.assert_called_once()
+
+    def test_returned_file_updates_display_without_restart(self) -> None:
+        from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
+
+        coordinator = PresetRuntimeCoordinator.__new__(PresetRuntimeCoordinator)
+        coordinator._ui_state_store = SimpleNamespace(set_last_status_message=Mock())
+        coordinator._last_active_preset_key = ("zapret2_mode", "gone.txt")
+        coordinator._is_current_preset_method = lambda _method: True
+        coordinator._publish_active_preset_revision_deferred = Mock()
+        coordinator.schedule_refresh_after_preset_switch = Mock()
+        coordinator._request_selected_source_preset_apply = Mock()
+
+        PresetRuntimeCoordinator.handle_selection_fallback(coordinator, "zapret2_mode", "gone.txt", "Default v5.txt")
+        coordinator._publish_active_preset_revision_deferred.reset_mock()
+        # Файл вернулся: DPI и так работал на нём — только показ.
+        PresetRuntimeCoordinator.handle_preset_switched(coordinator, "zapret2_mode", "gone.txt")
+
+        coordinator._request_selected_source_preset_apply.assert_not_called()
+        coordinator._publish_active_preset_revision_deferred.assert_called_once_with()
+        self.assertEqual(coordinator._active_preset_projection, ("zapret2_mode", "gone.txt"))
 
 
 class RawEditorHeaderTests(unittest.TestCase):
