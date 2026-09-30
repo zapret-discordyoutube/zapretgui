@@ -3078,8 +3078,12 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Installing v{version}",
     },
     "update_dialog.restart.stage.starting": {
-        "ru": "Запускаем новую версию",
-        "en": "Starting the new version",
+        "ru": "Открываем новую версию",
+        "en": "Opening the new version",
+    },
+    "update_dialog.restart.files_template": {
+        "ru": "{done} из {total} файлов",
+        "en": "{done} of {total} files",
     },
     "update_dialog.restart.footer": {
         "ru": "Окно закроется само, когда откроется новая версия",

@@ -53,12 +53,23 @@ class RestartSplashSpec:
     stages: tuple[str, str, str]
     footer: str
     window_title: str
+    # «{done} из {total} файлов» — ход копирования на этапе установки.
+    files_template: str = "{done} из {total} файлов"
     jokes: tuple[str, ...] = ()
     colors: dict = field(default_factory=dict)
     font_family: str = "Segoe UI"
     logo_png: bytes = b""
 
-    def to_payload(self, *, logo_path: str, shown_path: str, ready_path: str, log_path: str) -> dict:
+    def to_payload(
+        self,
+        *,
+        logo_path: str,
+        shown_path: str,
+        ready_path: str,
+        log_path: str,
+        setup_log_path: str = "",
+        expected_files: int = 0,
+    ) -> dict:
         return {
             "x": int(self.x),
             "y": int(self.y),
@@ -70,6 +81,7 @@ class RestartSplashSpec:
                 "stages": [str(item) for item in self.stages],
                 "footer": str(self.footer),
                 "window_title": str(self.window_title),
+                "files_template": str(self.files_template),
             },
             "jokes": [str(item) for item in self.jokes if str(item or "").strip()],
             "colors": {str(key): str(value) for key, value in dict(self.colors).items()},
@@ -80,6 +92,9 @@ class RestartSplashSpec:
             "log_path": str(log_path),
             "app_process_name": APP_PROCESS_NAME,
             "old_pid": int(os.getpid()),
+            # Журнал установщика: по нему окно считает скопированные файлы.
+            "setup_log_path": str(setup_log_path),
+            "expected_files": max(int(expected_files), 0),
         }
 
 
@@ -102,6 +117,53 @@ def _remove(path: Path) -> None:
         path.unlink()
     except FileNotFoundError:
         pass
+
+
+INSTALLER_FILE_ENTRY = "-- File entry --"
+INSTALLER_SUCCESS_LINE = "Installation process succeeded."
+# Папки с данными пользователя и журналами установщик не ставит — в оценку
+# числа файлов установки они не входят.
+_NOT_INSTALLED_DIRS = frozenset({"user", "logs", "log", "update_cache"})
+
+
+def _count_log_file_entries(setup_log: Path) -> int:
+    """Сколько файлов поставила прошлая удачная установка (0 — неизвестно)."""
+    try:
+        text = setup_log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 0
+    if INSTALLER_SUCCESS_LINE not in text:
+        return 0
+    return text.count(INSTALLER_FILE_ENTRY)
+
+
+def _count_installed_files(root: Path, *, limit: int = 20000) -> int:
+    count = 0
+    for base, dirs, files in os.walk(root):
+        if Path(base) == root:
+            dirs[:] = [name for name in dirs if name.lower() not in _NOT_INSTALLED_DIRS]
+        count += len(files)
+        if count >= limit:
+            break
+    return count
+
+
+def estimate_installer_files(*, setup_log: Path, install_root: Path | None) -> int:
+    """Сколько файлов скопирует установщик — для честной полосы прогресса.
+
+    Точнее всего журнал прошлого автообновления: установщик тот же. Иначе —
+    число файлов программы на диске. 0 — неизвестно: окно покажет бегущий
+    отрезок вместо процентов.
+    """
+    from_log = _count_log_file_entries(setup_log)
+    if from_log > 0:
+        return from_log
+    if install_root is None:
+        return 0
+    try:
+        return _count_installed_files(install_root)
+    except OSError:
+        return 0
 
 
 def build_splash_command(*, script_path: Path, spec_path: Path, state_path: Path) -> tuple[str, ...]:
@@ -139,11 +201,14 @@ def prepare_restart_splash(spec: RestartSplashSpec) -> tuple[str, ...]:
         _atomic_write(logo_path, bytes(spec.logo_png))
     else:
         _remove(logo_path)
+    setup_log = paths.setup_log_path()
     payload = spec.to_payload(
         logo_path=str(logo_path) if spec.logo_png else "",
         shown_path=str(shown_path),
         ready_path=str(ready_path),
         log_path=str(paths.restart_splash_log_path()),
+        setup_log_path=str(setup_log),
+        expected_files=estimate_installer_files(setup_log=setup_log, install_root=_install_root()),
     )
     _atomic_write(spec_path, json.dumps(payload, ensure_ascii=False, indent=1).encode("utf-8"))
     # С BOM: Windows PowerShell 5.1 без него читает русский текст в ANSI.
@@ -153,6 +218,15 @@ def prepare_restart_splash(spec: RestartSplashSpec) -> tuple[str, ...]:
         spec_path=spec_path,
         state_path=paths.handoff_state_path(),
     )
+
+
+def _install_root() -> Path | None:
+    try:
+        from config.runtime_layout import APPLICATION_PATHS
+
+        return Path(APPLICATION_PATHS.root)
+    except Exception:
+        return None
 
 
 def wait_for_splash_shown(
@@ -236,6 +310,7 @@ def mark_update_app_ready(version: str) -> bool:
 __all__ = [
     "RestartSplashSpec",
     "build_splash_command",
+    "estimate_installer_files",
     "mark_update_app_ready",
     "prepare_restart_splash",
     "show_restart_splash",

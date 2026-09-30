@@ -111,6 +111,38 @@ class PrepareSplashTests(_StateDirCase):
         )
 
 
+class InstallerProgressTests(_StateDirCase):
+    """Полоса честная: ход копирования — по журналу установщика."""
+
+    def test_expected_files_come_from_last_successful_install_log(self) -> None:
+        log = self.state_dir / paths.SETUP_LOG_NAME
+        log.write_text("Starting the installation process.\n" + "-- File entry --\n" * 682 + "Installation process succeeded.\n", encoding="utf-8")
+
+        self.assertEqual(splash.estimate_installer_files(setup_log=log, install_root=None), 682)
+
+    def test_failed_log_falls_back_to_files_on_disk_without_user_data(self) -> None:
+        log = self.state_dir / paths.SETUP_LOG_NAME
+        log.write_text("-- File entry --\n" * 5, encoding="utf-8")  # без «succeeded» — не в счёт
+        root = self.state_dir / "root"
+        (root / "_internal").mkdir(parents=True)
+        (root / "user").mkdir()
+        for name in ("a", "b", "c"):
+            (root / "_internal" / name).write_text("x")
+        (root / "user" / "settings.sqlite3").write_text("x")
+
+        self.assertEqual(splash.estimate_installer_files(setup_log=log, install_root=root), 3)
+        self.assertEqual(splash.estimate_installer_files(setup_log=self.state_dir / "нет.log", install_root=None), 0)
+
+    def test_spec_tells_window_where_installer_log_is(self) -> None:
+        with patch.object(splash, "_install_root", return_value=None):
+            splash.prepare_restart_splash(_spec())
+
+        payload = json.loads((self.state_dir / paths.RESTART_SPLASH_SPEC_NAME).read_text(encoding="utf-8"))
+        self.assertEqual(payload["setup_log_path"], str(self.state_dir / paths.SETUP_LOG_NAME))
+        self.assertIn("expected_files", payload)
+        self.assertIn("{done}", payload["texts"]["files_template"])
+
+
 class InstallFlowSplashTests(unittest.TestCase):
     def _run(self, *, started: bool, show_splash) -> None:
         from updater.download import flow
@@ -245,6 +277,17 @@ class SplashScriptContractTests(unittest.TestCase):
         self.assertNotRegex(script, r"\[Math\]::(?:Min|Max)\(\s*\d+\s*,")
         self.assertIn("Set-FormOpacity ([Math]::Min(1.0, $S.Opacity + 0.16))", script)
         self.assertIn("Появление не завершилось само", script)
+        # Полоса по настоящему ходу: журнал установщика, без выдуманного
+        # роста по времени; установка кончилась — 95 %, дальше «почти конец».
+        self.assertIn("function Read-SetupLog", script)
+        self.assertIn("-- File entry --", script)
+        self.assertIn("Starting the installation process.", script)
+        self.assertIn("Installation process succeeded.", script)
+        fill = script[script.index("function Target-Fill"):script.index("function Draw-Frame")]
+        self.assertIn("return -1.0", fill)
+        self.assertIn("0.05 + 0.85 * $share", fill)
+        self.assertIn("return 0.95 + 0.04", fill)
+        self.assertNotIn("/ 22.0", fill)
         # Ничего не берёт из каталога установки: он как раз заменяется.
         self.assertNotIn("_internal", SPLASH_SCRIPT_TEMPLATE)
 

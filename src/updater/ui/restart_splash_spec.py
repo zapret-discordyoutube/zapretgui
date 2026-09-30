@@ -124,10 +124,11 @@ def build_restart_splash_spec(
         stages=(
             t("stage.closing", "Закрываем старую версию"),
             t("stage.installing_template", "Устанавливаем v{version}").format(version=target_version),
-            t("stage.starting", "Запускаем новую версию"),
+            t("stage.starting", "Открываем новую версию"),
         ),
         footer=t("footer", "Окно закроется само, когда откроется новая версия"),
         window_title=t("window_title", "Zapret — обновление"),
+        files_template=t("files_template", "{done} из {total} файлов"),
         jokes=tuple(fun_phrases("restarting", language)),
         colors=splash_colors(get_theme_tokens()),
         logo_png=_logo_png(),

@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QObject, QRectF, QTimer, QUrl, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QTextDocument
+from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QTextDocument
 from PyQt6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
@@ -164,7 +164,7 @@ class _ReleaseDialogBase(MessageBoxBase):
         self._render_history()
 
     def _new_badge(self, accent_hex: str) -> tuple[str, int, int]:
-        """Метка «новое»: мягкая «таблетка» цвета акцента, чёткая на любом масштабе."""
+        """Метка «новое»: мягкая «таблетка» цвета акцента без рамки, чёткая на любом масштабе."""
         text = self._t("history.new_badge", "новое")
         font = QFont(self.browser.font())
         font.setPointSizeF(8.5)
@@ -180,12 +180,11 @@ class _ReleaseDialogBase(MessageBoxBase):
         painter = QPainter(image)
         painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
         fill = QColor(accent)
-        fill.setAlphaF(0.18)
-        border = QColor(accent)
-        border.setAlphaF(0.45)
-        painter.setPen(QPen(border, 1.0))
+        fill.setAlphaF(0.2)
+        # Без рамки — только мягкий фон цвета акцента.
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
-        rect = QRectF(0.5, 0.5, width - 1.0, height - 1.0)
+        rect = QRectF(0.0, 0.0, float(width), float(height))
         painter.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
         painter.setPen(accent)
         painter.setFont(font)

@@ -159,6 +159,16 @@ $S = @{
     TickErrors   = 0
     OldAlive     = $true
     OldCheckedAt = -1.0
+    # Ход установки — из журнала установщика (см. Read-SetupLog).
+    Expected     = [int]$spec.expected_files
+    LogIsNew     = $false
+    LogOffset    = [long]0
+    LogTail      = ''
+    FilesDone    = 0
+    InstallStarted   = $false
+    InstallSucceeded = $false
+    LogClosed    = $false
+    Indeterminate = $false
 }
 
 function Next-Joke {
@@ -247,8 +257,58 @@ function Watch-OldApp {
     Bring-ToFront 'старая версия закрылась'
 }
 
+function Read-SetupLog {
+    # Установщик пишет журнал по ходу работы: каждая строка «-- File entry --»
+    # — один скопированный файл. Читаем только новое, файл не блокируем.
+    $path = [string]$spec.setup_log_path
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path)) { return }
+    if (-not $S.LogIsNew) {
+        # Журнал прошлой установки не в счёт: ждём свежий.
+        try { $written = (Get-Item -LiteralPath $path).LastWriteTime } catch { return }
+        if (-not $S.Snapshot -and $written -le $S.StartedAt) { return }
+        $S.LogIsNew = $true
+        $S.LogOffset = [long]0
+    }
+    $chunk = ''
+    $fs = $null
+    try {
+        $fs = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]'ReadWrite, Delete')
+        if ($fs.Length -lt $S.LogOffset) {
+            # Файл начали заново — считаем заново.
+            $S.LogOffset = [long]0; $S.FilesDone = 0; $S.LogTail = ''
+        }
+        if ($fs.Length -eq $S.LogOffset) { return }
+        [void]$fs.Seek($S.LogOffset, [System.IO.SeekOrigin]::Begin)
+        $reader = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8, $false, 65536, $true)
+        $chunk = $reader.ReadToEnd()
+        $S.LogOffset = $fs.Position
+        $reader.Dispose()
+    } catch {
+        return
+    } finally {
+        if ($null -ne $fs) { $fs.Dispose() }
+    }
+    $text = $S.LogTail + $chunk
+    $cut = $text.LastIndexOf("`n")
+    if ($cut -lt 0) { $S.LogTail = $text; return }
+    $S.LogTail = $text.Substring($cut + 1)
+    $complete = $text.Substring(0, $cut)
+    $S.FilesDone += ([regex]::Matches($complete, [regex]::Escape('-- File entry --'))).Count
+    if ($complete.Contains('Starting the installation process.')) {
+        if (-not $S.InstallStarted) { Write-Line "Установщик начал копировать файлы (ожидается $($S.Expected))" }
+        $S.InstallStarted = $true
+    }
+    if ($complete.Contains('Installation process succeeded.')) {
+        $S.InstallStarted = $true
+        if (-not $S.InstallSucceeded) { Write-Line "Установщик скопировал файлы: $($S.FilesDone)" }
+        $S.InstallSucceeded = $true
+    }
+    if ($complete.Contains('Log closed.')) { $S.LogClosed = $true }
+}
+
 function Poll-State {
     $now = $S.Clock.Elapsed.TotalSeconds
+    Read-SetupLog
     $state = Read-HandoffState
     switch ($state) {
         'prepared'  { Set-Stage 0 }
@@ -285,13 +345,28 @@ function New-RoundedPath([System.Drawing.RectangleF]$rect, [single]$radius) {
     return $path
 }
 
+# Полоса честная: проценты — только там, где известен настоящий ход.
+#   закрываем старую версию        0–5 %
+#   установщик готовится           бегущий отрезок (хода не видно)
+#   копирование файлов             5–90 % — по числу скопированных файлов
+#   установщик завершает           90–95 %
+#   открываем новую версию         95–100 %, «почти конец»
+# -1 — хода не видно: окно рисует бегущий отрезок вместо процентов.
 function Target-Fill {
     $now = $S.Clock.Elapsed.TotalSeconds
-    switch ($S.Stage) {
-        0 { return 0.12 }
-        1 { return 0.15 + 0.72 * (1 - [Math]::Exp(-($now - $S.StageSince) / 22.0)) }
-        default { return 1.0 }
+    if ($S.Closing -and -not $S.CloseFast) { return 1.0 }
+    if ($S.Stage -ge 2) { return 0.95 + 0.04 * (1 - [Math]::Exp(-($now - $S.StageSince) / 1.5)) }
+    if ($S.InstallSucceeded) {
+        if ($S.LogClosed) { return 0.94 }
+        return 0.92
     }
+    if ($S.InstallStarted) {
+        if ($S.Expected -le 0) { return -1.0 }
+        $share = [Math]::Min(1.0, $S.FilesDone / [double]$S.Expected)
+        return 0.05 + 0.85 * $share
+    }
+    if ($S.Stage -ge 1) { return -1.0 }
+    return 0.05 * (1 - [Math]::Exp(-$now / 1.2))
 }
 
 function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
@@ -361,7 +436,15 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
             $font = $F.Stage; $brush = $muted
         }
         $textY = $cy - $font.GetHeight($g) / 2
-        $g.DrawString([string]$stages[$i], $font, $brush, ($left + 32 * $k), $textY)
+        $label = [string]$stages[$i]
+        $g.DrawString($label, $font, $brush, ($left + 32 * $k), $textY)
+        if ($i -eq 1 -and $S.Stage -eq 1 -and $S.InstallStarted -and $S.Expected -gt 0) {
+            # Настоящий ход копирования рядом с этапом: «312 из 682 файлов».
+            $done = [Math]::Min($S.FilesDone, $S.Expected)
+            $counter = ([string]$spec.texts.files_template).Replace('{done}', [string]$done).Replace('{total}', [string]$S.Expected)
+            $labelWidth = $g.MeasureString($label, $font).Width
+            $g.DrawString("·  $counter", $F.Sub, $muted, ($left + 32 * $k + $labelWidth + 6 * $k), ($cy - $F.Sub.GetHeight($g) / 2))
+        }
         $y += 36 * $k
     }
     $y += 34 * $k
@@ -378,20 +461,28 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
     $g.FillPath($trackBrush, $trackPath)
     $trackBrush.Dispose(); $trackPath.Dispose()
 
-    $fillWidth = [single]([Math]::Max(0.0, $trackWidth * $S.Fill))
+    if ($S.Indeterminate) {
+        # Хода не видно: отрезок бегает туда-обратно, логотип — вместе с ним.
+        $bounce = 0.5 - 0.5 * [Math]::Cos(2 * [Math]::PI * (($now % 2.2) / 2.2))
+        $fillWidth = [single]($trackWidth * 0.28)
+        $fillLeft = [single]($trackLeft + ($trackWidth - $fillWidth) * $bounce)
+    } else {
+        $fillWidth = [single]([Math]::Max(0.0, $trackWidth * $S.Fill))
+        $fillLeft = [single]$trackLeft
+    }
     if ($fillWidth -gt 1) {
-        $fillRect = New-Object System.Drawing.RectangleF($trackLeft, $trackTop, $fillWidth, $trackHeight)
+        $fillRect = New-Object System.Drawing.RectangleF($fillLeft, $trackTop, $fillWidth, $trackHeight)
         $fillPath = New-RoundedPath $fillRect ($trackHeight / 2)
         $dark = [System.Drawing.Color]::FromArgb(255, [int]($C.Accent.R * 0.85), [int]($C.Accent.G * 0.85), [int]($C.Accent.B * 0.85))
         $light = [System.Drawing.Color]::FromArgb(255, [int][Math]::Min(255.0, $C.Accent.R + 60.0), [int][Math]::Min(255.0, $C.Accent.G + 60.0), [int][Math]::Min(255.0, $C.Accent.B + 60.0))
-        $gradRect = New-Object System.Drawing.RectangleF(($trackLeft - 1), $trackTop, ($fillWidth + 2), $trackHeight)
+        $gradRect = New-Object System.Drawing.RectangleF(($fillLeft - 1), $trackTop, ($fillWidth + 2), $trackHeight)
         $grad = New-Object System.Drawing.Drawing2D.LinearGradientBrush($gradRect, $dark, $light, [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
         $g.FillPath($grad, $fillPath)
         $grad.Dispose()
         if ($S.Fill -lt 0.999) {
             $band = [single]([Math]::Max($fillWidth * 0.35, 40 * $k))
             $phase = ($now % 1.6) / 1.6
-            $center = $trackLeft - $band + ($fillWidth + 2 * $band) * $phase
+            $center = $fillLeft - $band + ($fillWidth + 2 * $band) * $phase
             $shineRect = New-Object System.Drawing.RectangleF(($center - $band), $trackTop, (2 * $band), $trackHeight)
             $shine = New-Object System.Drawing.Drawing2D.LinearGradientBrush($shineRect, [System.Drawing.Color]::FromArgb(0, 255, 255, 255), [System.Drawing.Color]::FromArgb(0, 255, 255, 255), [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
             $blend = New-Object System.Drawing.Drawing2D.ColorBlend(3)
@@ -408,7 +499,11 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
     }
 
     # Логотип бежит по краю закрашенной части: подскок, покачивание, след.
-    $runnerX = $trackLeft + $fillWidth
+    if ($S.Indeterminate) {
+        $runnerX = $fillLeft + $fillWidth / 2
+    } else {
+        $runnerX = $trackLeft + $fillWidth
+    }
     $hop = 0.0; $angle = 0.0; $squash = 1.0
     if ($S.DoneJumpAt -ge 0) {
         $t = ($now - $S.DoneJumpAt) / 1.1
@@ -546,8 +641,14 @@ $timer.Add_Tick({
         if ($now - $S.LastPoll -ge 0.25) { $S.LastPoll = $now; Poll-State }
         if ($now - $S.JokeAt -ge 2.8) { Next-Joke }
         $target = Target-Fill
-        $S.Fill = $S.Fill + ($target - $S.Fill) * 0.12
-        if ($S.Stage -ge 2 -and $S.Fill -ge 0.995 -and $S.DoneJumpAt -lt 0) { $S.Fill = 1.0; $S.DoneJumpAt = $now }
+        if ($target -lt 0) {
+            $S.Indeterminate = $true
+        } else {
+            $S.Indeterminate = $false
+            $S.Fill = $S.Fill + ($target - $S.Fill) * 0.18
+        }
+        # Установка закончена — логотип радостно подпрыгивает.
+        if ($S.InstallSucceeded -and $S.Fill -ge 0.9 -and $S.DoneJumpAt -lt 0) { $S.DoneJumpAt = $now }
         if ($S.Closing) {
             $fade = if ($S.CloseFast) { 0.15 } else { 0.35 }
             $left = 1 - ($now - $S.ClosingAt) / $fade
