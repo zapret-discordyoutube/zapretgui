@@ -114,7 +114,24 @@ class LaunchTitleBadgeBindingTests(unittest.TestCase):
         layout = window.titleBar.hBoxLayout
         subscription = window.titleBar.findChild(SubscriptionTitleBadge)
         launch = window.titleBar.findChild(LaunchTitleBadge)
-        self.assertEqual(layout.indexOf(launch), layout.indexOf(subscription) + 1)
+        # Между значками только промежуток, других элементов нет.
+        self.assertEqual(layout.indexOf(launch), layout.indexOf(subscription) + 2)
+        self.assertIsNotNone(layout.itemAt(layout.indexOf(subscription) + 1).spacerItem())
+
+    def test_badges_have_visible_gap(self) -> None:
+        from ui.window_state_binder import TITLE_BADGE_GAP
+
+        window = self._make_window()
+        store = MainWindowStateStore()
+        bind_window_ui_state(window, store, launch_control=Mock())
+        subscription = window.titleBar.findChild(SubscriptionTitleBadge)
+        subscription.show()
+        launch = window.titleBar.findChild(LaunchTitleBadge)
+        window.titleBar.hBoxLayout.activate()
+        self._app.processEvents()
+
+        gap = launch.geometry().left() - subscription.geometry().right() - 1
+        self.assertGreaterEqual(gap, TITLE_BADGE_GAP)
 
     def test_no_badge_without_launch_control(self) -> None:
         window = self._make_window()

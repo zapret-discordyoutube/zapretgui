@@ -129,6 +129,10 @@ LAUNCH_BADGE_FIELDS = frozenset(
 )
 
 
+# Промежуток между значками подписки и состояния Zapret в заголовке окна.
+TITLE_BADGE_GAP = 8
+
+
 def _launch_badge_insert_index(window, layout) -> int:
     subscription_badge = window.titleBar.findChild(SubscriptionTitleBadge)
     if subscription_badge is not None:
@@ -150,7 +154,12 @@ def bind_launch_title_badge(window, ui_state_store, launch_control) -> LaunchTit
         return existing
 
     badge = LaunchTitleBadge(title_bar, language_provider=lambda: _window_language(window))
-    layout.insertWidget(_launch_badge_insert_index(window, layout), badge)
+    index = _launch_badge_insert_index(window, layout)
+    if title_bar.findChild(SubscriptionTitleBadge) is not None:
+        # Промежуток между «PREMIUM» и «Работает», чтобы значки не слипались.
+        layout.insertSpacing(index, TITLE_BADGE_GAP)
+        index += 1
+    layout.insertWidget(index, badge)
     badge.clicked.connect(lambda _checked=False: launch_control.toggle())
 
     def _sync_search_width() -> None:
