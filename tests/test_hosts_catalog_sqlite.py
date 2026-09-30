@@ -81,7 +81,12 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.09.29.1")
+        self.assertEqual(catalog.catalog_version, "2026.09.30.1")
+        # У каждого сервиса свой значок, а не запасной глобус.
+        self.assertEqual(
+            [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
+            [],
+        )
         self.assertEqual(len(catalog.content_sha256), 64)
         self.assertEqual(len(catalog.service_order), 73)
         self.assertEqual(len(catalog.dns_profiles), 8)
