@@ -39,6 +39,16 @@ _RU: dict[str, tuple[str, ...]] = {
         "Выдра споткнулась. Бывает с лучшими из нас",
         "Байты разбежались. Попробуем собрать ещё раз?",
     ),
+    "restarting": (
+        "Старая версия передаёт дела новой…",
+        "Выдра переезжает в новый дом",
+        "Меняем колёса прямо на ходу",
+        "Новая версия уже надевает кроссовки",
+        "Раскладываем свежие файлы по полочкам",
+        "Пять секунд — полёт нормальный",
+        "Старая версия машет платочком",
+        "Проверяем, что ничего не забыли в старой квартире",
+    ),
     "whats_new": (
         "Листаем свежий список изменений…",
         "Достаём заметки к выпуску…",
@@ -67,6 +77,12 @@ _EN: dict[str, tuple[str, ...]] = {
     "failed": (
         "The otter tripped. Happens to the best of us",
         "Bytes ran away. Shall we try again?",
+    ),
+    "restarting": (
+        "The old version hands over to the new one…",
+        "The otter is moving into a new home",
+        "Changing the wheels on the go",
+        "The new version is lacing up its sneakers",
     ),
     "whats_new": (
         "Flipping through the fresh changelog…",

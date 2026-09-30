@@ -44,7 +44,8 @@ class PostStartupUpdateContractTests(unittest.TestCase):
 
         startup_host = SimpleNamespace(
             startup_post_init_ready=object(),
-            startup_state=SimpleNamespace(post_init_ready=True),
+            startup_interactive_ready=object(),
+            startup_state=SimpleNamespace(post_init_ready=True, interactive_logged=True),
             is_alive=Mock(return_value=True),
             ensure_page=Mock(),
             show_whats_new=Mock(return_value=True),
@@ -82,6 +83,7 @@ class _Feature:
         self.result = result
         self.whats_new = whats_new
         self.seen: list[str] = []
+        self.ready: list[str] = []
 
     def is_auto_update_enabled(self) -> bool:
         return True
@@ -101,6 +103,10 @@ class _Feature:
     def mark_whats_new_seen(self, version: str) -> None:
         self.seen.append(version)
 
+    def mark_update_app_ready(self, version: str) -> bool:
+        self.ready.append(version)
+        return True
+
 
 class PostStartupUpdateWindowTests(unittest.TestCase):
     """Одно окно обновления: путь при запуске больше не спрашивает сам."""
@@ -112,7 +118,8 @@ class PostStartupUpdateWindowTests(unittest.TestCase):
 
         host = SimpleNamespace(
             startup_post_init_ready=object(),
-            startup_state=SimpleNamespace(post_init_ready=True),
+            startup_interactive_ready=object(),
+            startup_state=SimpleNamespace(post_init_ready=True, interactive_logged=True),
             is_alive=Mock(return_value=True),
             ensure_page=Mock(),
             show_whats_new=Mock(return_value=True),
@@ -153,6 +160,15 @@ class PostStartupUpdateWindowTests(unittest.TestCase):
 
         host.show_whats_new.assert_called_once_with(APP_VERSION, history)
         self.assertEqual(feature.seen, [APP_VERSION])
+
+    def test_new_version_tells_restart_window_it_opened(self) -> None:
+        from config.build_info import APP_VERSION
+
+        feature = _Feature({"has_update": False, "version": APP_VERSION, "error": None})
+
+        self._run(feature)
+
+        self.assertEqual(feature.ready, [APP_VERSION])
 
     def test_nothing_new_shows_no_window(self) -> None:
         host = self._run(_Feature({"has_update": False, "version": "1.0", "error": None}))

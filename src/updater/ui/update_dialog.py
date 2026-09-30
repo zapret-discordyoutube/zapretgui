@@ -92,6 +92,9 @@ class _ReleaseDialogBase(MessageBoxBase):
         header.addWidget(self.mascot, 0, Qt.AlignmentFlag.AlignTop)
         titles = QVBoxLayout()
         titles.setSpacing(2)
+        # Над значком талисмана — запас под прыжок. Заголовок встаёт вровень
+        # с самим значком, а не с верхним краем виджета.
+        titles.setContentsMargins(0, self.mascot.logo_top(), 0, 0)
         self.title_label = SubtitleLabel("", self.widget)
         self.title_label.setWordWrap(True)
         titles.addWidget(self.title_label)

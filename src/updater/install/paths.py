@@ -25,6 +25,14 @@ HANDOFF_STATE_NAME = "handoff.json"
 SETUP_LOG_NAME = "setup.log"
 WATCHDOG_SCRIPT_NAME = "watchdog.ps1"
 WATCHDOG_LOG_NAME = "watchdog.log"
+# Окно-продолжение: держит окно обновления на экране, пока старая программа
+# закрыта, а новая ещё не открылась (см. ``splash``).
+RESTART_SPLASH_SCRIPT_NAME = "restart_splash.ps1"
+RESTART_SPLASH_SPEC_NAME = "restart_splash.json"
+RESTART_SPLASH_LOGO_NAME = "restart_splash_logo.png"
+RESTART_SPLASH_SHOWN_NAME = "restart_splash.shown"
+RESTART_SPLASH_LOG_NAME = "restart_splash.log"
+UPDATE_APP_READY_NAME = "app_ready.json"
 # Имя скрипта наблюдателя в прежних версиях. Нужно только затем, чтобы найти
 # и остановить зависший старый наблюдатель после первого обновления.
 LEGACY_WATCHDOG_SCRIPT_NAME = "update_watchdog.ps1"
@@ -204,12 +212,42 @@ def watchdog_log_path() -> Path:
     return update_state_dir() / WATCHDOG_LOG_NAME
 
 
+def restart_splash_script_path() -> Path:
+    return update_state_dir() / RESTART_SPLASH_SCRIPT_NAME
+
+
+def restart_splash_spec_path() -> Path:
+    return update_state_dir() / RESTART_SPLASH_SPEC_NAME
+
+
+def restart_splash_logo_path() -> Path:
+    return update_state_dir() / RESTART_SPLASH_LOGO_NAME
+
+
+def restart_splash_shown_path() -> Path:
+    return update_state_dir() / RESTART_SPLASH_SHOWN_NAME
+
+
+def restart_splash_log_path() -> Path:
+    return update_state_dir() / RESTART_SPLASH_LOG_NAME
+
+
+def update_app_ready_path() -> Path:
+    return update_state_dir() / UPDATE_APP_READY_NAME
+
+
 __all__ = [
     "CACHED_INSTALLER_META_NAME",
     "CACHED_INSTALLER_NAME",
     "HANDOFF_STATE_NAME",
     "LEGACY_WATCHDOG_SCRIPT_NAME",
+    "RESTART_SPLASH_LOGO_NAME",
+    "RESTART_SPLASH_LOG_NAME",
+    "RESTART_SPLASH_SCRIPT_NAME",
+    "RESTART_SPLASH_SHOWN_NAME",
+    "RESTART_SPLASH_SPEC_NAME",
     "SETUP_LOG_NAME",
+    "UPDATE_APP_READY_NAME",
     "WATCHDOG_LOG_NAME",
     "WATCHDOG_SCRIPT_NAME",
     "build_harden_commands",
@@ -220,7 +258,13 @@ __all__ = [
     "legacy_watchdog_script_path",
     "preferred_update_state_dir",
     "reset_update_state_dir_cache",
+    "restart_splash_log_path",
+    "restart_splash_logo_path",
+    "restart_splash_script_path",
+    "restart_splash_shown_path",
+    "restart_splash_spec_path",
     "setup_log_path",
+    "update_app_ready_path",
     "update_state_dir",
     "watchdog_log_path",
     "watchdog_script_path",

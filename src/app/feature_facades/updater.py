@@ -71,6 +71,10 @@ class UpdaterFeature:
     def mark_whats_new_seen(self, version: str) -> None:
         self._commands().mark_whats_new_seen(str(version or ""))
 
+    def mark_update_app_ready(self, version: str) -> bool:
+        """Новая версия открылась: окно-продолжение обновления может гаснуть."""
+        return bool(self._commands().mark_update_app_ready(str(version or "")))
+
     def load_release_history(self, version: str) -> tuple:
         return tuple(self._commands().load_release_history(str(version or "")))
 

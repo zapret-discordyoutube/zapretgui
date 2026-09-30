@@ -1,0 +1,227 @@
+from __future__ import annotations
+
+"""Окно-продолжение: обновление видно на экране от загрузки до новой версии.
+
+Цепочка:
+
+1. Старая программа передала установку наблюдателю и вызывает
+   ``show_restart_splash``: здесь раскладываются ``restart_splash.json``,
+   PNG логотипа и скрипт, запускается PowerShell, и приложение коротко ждёт
+   метку «окно показано». Только после неё старое окно закрывается — пустого
+   промежутка нет.
+2. Окно само следит за ``handoff.json`` наблюдателя и меняет этапы.
+3. Новая версия после показа своего окна вызывает ``mark_update_app_ready``,
+   и окно-продолжение гаснет.
+
+Любая неудача здесь только пишется в журнал: обновление важнее красоты.
+Модуль без Qt — его вызывает фоновый поток установки.
+"""
+
+import json
+import os
+import tempfile
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from log.log import log
+
+from . import paths, watchdog
+from .splash_script import render_splash_script
+
+
+SPLASH_LOG_LEVEL = "🔁 UPDATE"
+# Сколько старая программа ждёт, пока окно-продолжение встанет на место.
+# Холодный PowerShell обычно укладывается в секунду; дольше не держим —
+# установка важнее.
+SPLASH_SHOWN_TIMEOUT_SECONDS = 4.0
+SPLASH_SHOWN_POLL_SECONDS = 0.1
+APP_PROCESS_NAME = "Zapret"
+
+
+@dataclass(frozen=True, slots=True)
+class RestartSplashSpec:
+    """Что и где показать. Координаты — физические пиксели экрана."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+    title: str
+    subtitle: str
+    stages: tuple[str, str, str]
+    footer: str
+    window_title: str
+    jokes: tuple[str, ...] = ()
+    colors: dict = field(default_factory=dict)
+    font_family: str = "Segoe UI"
+    logo_png: bytes = b""
+
+    def to_payload(self, *, logo_path: str, shown_path: str, ready_path: str, log_path: str) -> dict:
+        return {
+            "x": int(self.x),
+            "y": int(self.y),
+            "width": int(self.width),
+            "height": int(self.height),
+            "texts": {
+                "title": str(self.title),
+                "subtitle": str(self.subtitle),
+                "stages": [str(item) for item in self.stages],
+                "footer": str(self.footer),
+                "window_title": str(self.window_title),
+            },
+            "jokes": [str(item) for item in self.jokes if str(item or "").strip()],
+            "colors": {str(key): str(value) for key, value in dict(self.colors).items()},
+            "font_family": str(self.font_family or "Segoe UI"),
+            "logo_path": str(logo_path),
+            "shown_path": str(shown_path),
+            "ready_path": str(ready_path),
+            "log_path": str(log_path),
+            "app_process_name": APP_PROCESS_NAME,
+            "old_pid": int(os.getpid()),
+        }
+
+
+def _atomic_write(target: Path, data: bytes) -> None:
+    descriptor, temporary = tempfile.mkstemp(prefix=f"{target.name}.", suffix=".tmp", dir=str(target.parent))
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(data)
+        os.replace(temporary, target)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def _remove(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def build_splash_command(*, script_path: Path, spec_path: Path, state_path: Path) -> tuple[str, ...]:
+    return (
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-STA",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script_path),
+        "-SpecPath",
+        str(spec_path),
+        "-StatePath",
+        str(state_path),
+    )
+
+
+def prepare_restart_splash(spec: RestartSplashSpec) -> tuple[str, ...]:
+    """Раскладывает файлы окна и возвращает команду запуска."""
+    state_dir = paths.update_state_dir()
+    state_dir.mkdir(parents=True, exist_ok=True)
+    script_path = paths.restart_splash_script_path()
+    spec_path = paths.restart_splash_spec_path()
+    logo_path = paths.restart_splash_logo_path()
+    shown_path = paths.restart_splash_shown_path()
+    ready_path = paths.update_app_ready_path()
+
+    # Старые метки от прошлого обновления не должны ни погасить окно, ни
+    # обмануть ожидание «показано».
+    _remove(shown_path)
+    _remove(ready_path)
+    if spec.logo_png:
+        _atomic_write(logo_path, bytes(spec.logo_png))
+    else:
+        _remove(logo_path)
+    payload = spec.to_payload(
+        logo_path=str(logo_path) if spec.logo_png else "",
+        shown_path=str(shown_path),
+        ready_path=str(ready_path),
+        log_path=str(paths.restart_splash_log_path()),
+    )
+    _atomic_write(spec_path, json.dumps(payload, ensure_ascii=False, indent=1).encode("utf-8"))
+    # С BOM: Windows PowerShell 5.1 без него читает русский текст в ANSI.
+    _atomic_write(script_path, render_splash_script().encode("utf-8-sig"))
+    return build_splash_command(
+        script_path=script_path,
+        spec_path=spec_path,
+        state_path=paths.handoff_state_path(),
+    )
+
+
+def wait_for_splash_shown(
+    shown_path: Path,
+    *,
+    timeout_seconds: float = SPLASH_SHOWN_TIMEOUT_SECONDS,
+    poll_seconds: float = SPLASH_SHOWN_POLL_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> bool:
+    deadline = monotonic() + float(timeout_seconds)
+    while monotonic() < deadline:
+        if shown_path.exists():
+            return True
+        sleep(poll_seconds)
+    return shown_path.exists()
+
+
+def show_restart_splash(
+    spec: RestartSplashSpec | None,
+    *,
+    spawn: Callable[[Sequence[str]], bool] = watchdog.spawn_background,
+    wait: Callable[[Path], bool] = wait_for_splash_shown,
+) -> bool:
+    """Показывает окно-продолжение. True — окно подтвердило, что стоит на экране."""
+    if spec is None:
+        return False
+    try:
+        command = prepare_restart_splash(spec)
+    except Exception as exc:
+        log(f"Окно-продолжение не подготовлено: {exc}", SPLASH_LOG_LEVEL)
+        return False
+    if not spawn(command):
+        log("Окно-продолжение не запустилось", SPLASH_LOG_LEVEL)
+        return False
+    if wait(paths.restart_splash_shown_path()):
+        log("Окно-продолжение на экране: старая версия закрывается", SPLASH_LOG_LEVEL)
+        return True
+    log("Окно-продолжение не отозвалось вовремя — закрываемся без него", SPLASH_LOG_LEVEL)
+    return False
+
+
+def mark_update_app_ready(version: str) -> bool:
+    """Новая версия открылась: окно-продолжение может гаснуть.
+
+    Пишется, только если окно-продолжение ждёт (лежит его spec) — в обычный
+    запуск программы каталог состояния не трогается.
+    """
+    try:
+        if not paths.restart_splash_spec_path().exists():
+            return False
+        ready_path = paths.update_app_ready_path()
+        _atomic_write(
+            ready_path,
+            json.dumps({"version": str(version or ""), "pid": os.getpid(), "at": time.time()}).encode("utf-8"),
+        )
+        # Отметка времени — главный сигнал для окна: сверяется с его запуском.
+        os.utime(ready_path, None)
+        return True
+    except Exception as exc:
+        log(f"Метка «новая версия открылась» не записана: {exc}", SPLASH_LOG_LEVEL)
+        return False
+
+
+__all__ = [
+    "RestartSplashSpec",
+    "build_splash_command",
+    "mark_update_app_ready",
+    "prepare_restart_splash",
+    "show_restart_splash",
+    "wait_for_splash_shown",
+]

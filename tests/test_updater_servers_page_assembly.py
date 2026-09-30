@@ -58,7 +58,7 @@ class ServersPageAssemblyTests(unittest.TestCase):
             emit_row("Forgejo API", {"status": "online", "response_time": 0.01, "update_source": True})
             return CheckOutcome({"version": "999.0.0.1", "release_notes": "новое", "source": "Forgejo"})
 
-        def run_install(_version, *, token, dpi, on_stage, on_progress, on_downloaded):
+        def run_install(_version, *, token, dpi, on_stage, on_progress, on_downloaded, splash=None):
             on_stage("Скачивание обновления…")
             on_progress(100, 10, 10)
             on_downloaded()

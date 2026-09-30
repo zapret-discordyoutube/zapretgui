@@ -296,7 +296,10 @@ class ServersPage(BasePage):
         offer = self._flow.offer
         if self._cleanup_in_progress or offer is None:
             return
-        if self._check_service.is_busy or not self._install_service.start(offer.version):
+        if self._check_service.is_busy:
+            return
+        splash = self._build_restart_splash_spec(offer)
+        if not self._install_service.start(offer.version, splash=splash):
             return
         # Новая версия покажет «Что нового» из сохранённого текста, без сети.
         history = offer.history
@@ -307,6 +310,24 @@ class ServersPage(BasePage):
             description="текст «Что нового»",
         )
         self._flow.start_download()
+
+    def _build_restart_splash_spec(self, offer):
+        """Окно-продолжение встанет на место окна обновления, пока версия меняется."""
+        try:
+            from updater.ui.restart_splash_spec import build_restart_splash_spec
+
+            dialog = self._update_dialog
+            return build_restart_splash_spec(
+                self.window(),
+                dialog_widget=getattr(dialog, "widget", None),
+                current_version=offer.current_version,
+                target_version=offer.version,
+                language=self._ui_language,
+            )
+        except Exception as exc:
+            # Без окна-продолжения обновление всё равно пройдёт.
+            log(f"Окно-продолжение не подготовлено: {exc}", "🔄 UPDATE")
+            return None
 
     def _on_install_failed(self, error: str) -> None:
         if self._cleanup_in_progress:

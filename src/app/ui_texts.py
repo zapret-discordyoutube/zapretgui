@@ -3077,6 +3077,34 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Подготовка к загрузке…",
         "en": "Preparing the download…",
     },
+    "update_dialog.restart.title_template": {
+        "ru": "Обновляем Zapret до v{version}",
+        "en": "Updating Zapret to v{version}",
+    },
+    "update_dialog.restart.subtitle_template": {
+        "ru": "v{current}  →  v{target}   ·   программа откроется сама",
+        "en": "v{current}  →  v{target}   ·   the app will reopen by itself",
+    },
+    "update_dialog.restart.stage.closing": {
+        "ru": "Закрываем старую версию",
+        "en": "Closing the old version",
+    },
+    "update_dialog.restart.stage.installing_template": {
+        "ru": "Устанавливаем v{version}",
+        "en": "Installing v{version}",
+    },
+    "update_dialog.restart.stage.starting": {
+        "ru": "Запускаем новую версию",
+        "en": "Starting the new version",
+    },
+    "update_dialog.restart.footer": {
+        "ru": "Окно закроется само, когда откроется новая версия",
+        "en": "This window closes by itself when the new version opens",
+    },
+    "update_dialog.restart.window_title": {
+        "ru": "Zapret — обновление",
+        "en": "Zapret — update",
+    },
     "update_dialog.subtitle.source_template": {
         "ru": "источник: {source}",
         "en": "source: {source}",

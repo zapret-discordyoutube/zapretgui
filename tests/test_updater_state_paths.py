@@ -186,8 +186,10 @@ class InstallerArgumentsTests(unittest.TestCase):
             arguments = self._arguments(Path(temp_dir) / "state")
 
         self.assertNotIn("/SUPPRESSMSGBOXES", arguments)
-        self.assertNotIn("/VERYSILENT", arguments)
-        self.assertIn("/SILENT", arguments)
+        # Своей полоски у установщика нет — ход показывает окно-продолжение,
+        # а сообщения об ошибках без /SUPPRESSMSGBOXES видны и так.
+        self.assertIn("/VERYSILENT", arguments)
+        self.assertNotIn("/SILENT", arguments)
 
     def test_installer_keeps_unattended_flags_and_logs_outside_install_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

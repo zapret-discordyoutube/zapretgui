@@ -57,6 +57,12 @@ def load_release_history(version: str) -> tuple:
     return _load(version)
 
 
+def mark_update_app_ready(version: str) -> bool:
+    from updater.install.splash import mark_update_app_ready as _mark
+
+    return bool(_mark(version))
+
+
 def run_startup_update_check() -> dict:
     from updater.startup_update_check import check_for_update_sync
 

@@ -384,7 +384,7 @@ class UpdateInstallServiceTests(unittest.TestCase):
         actions = dpi.actions()
         launched = Mock()
 
-        def run_install(_version, *, token, dpi, on_stage, on_progress, on_downloaded):
+        def run_install(_version, *, token, dpi, on_stage, on_progress, on_downloaded, splash=None):
             on_stage("Скачивание обновления…")
             on_downloaded()
             dpi.stop(reason="updater_installer_handoff", update_runtime_state=False)
@@ -438,7 +438,7 @@ class DpiRestoreThreadTests(unittest.TestCase):
         self.assertEqual(len(dpi.stops), 1)
 
     def test_failed_install_restores_dpi_on_main_thread(self) -> None:
-        def run_install(_version, *, token, dpi, on_stage, on_progress, on_downloaded):
+        def run_install(_version, *, token, dpi, on_stage, on_progress, on_downloaded, splash=None):
             try:
                 dpi.stop(reason="updater_download_connectivity", update_runtime_state=False)
                 raise UpdatePipelineError("нет сети")

@@ -282,7 +282,9 @@ class UpdateCheckCoordinatorTests(unittest.TestCase):
         with patch("updater.ui.page.run_update_setting_write", side_effect=lambda action, **_: action()):
             page._request_install_update()
 
-        page._install_service.start.assert_called_once_with("21.1.5.80")
+        page._install_service.start.assert_called_once()
+        # Окно-продолжение проверяется в test_restart_splash.
+        self.assertEqual(page._install_service.start.call_args.args, ("21.1.5.80",))
         self.assertEqual(page._flow.phase, PHASE_DOWNLOADING)
         version, history = page._updater_feature.remember_whats_new.call_args.args
         self.assertEqual(version, "21.1.5.80")

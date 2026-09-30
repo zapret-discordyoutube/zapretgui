@@ -69,13 +69,15 @@ def installer_arguments(*, log_name: str = paths.SETUP_LOG_NAME) -> tuple[str, .
 
     ``/SUPPRESSMSGBOXES`` здесь недопустим: в Inno он означает ответ Abort в
     ситуациях Abort/Retry, то есть превращает сбой распаковки в молчаливый
-    выход без единого сообщения. ``/SILENT`` вместо ``/VERYSILENT`` оставляет
-    пользователю полосу прогресса и текст любой ошибки установщика.
+    выход без единого сообщения. Без него сообщения об ошибках установщик
+    показывает и в ``/VERYSILENT``. Своё окно прогресса ему не нужно: ход
+    обновления показывает окно-продолжение (``splash``), и вторая полоска
+    поверх него только мешала бы.
     """
     setup_log = paths.setup_log_path(log_name)
     return (
         "/AUTOUPDATE",
-        "/SILENT",
+        "/VERYSILENT",
         "/NORESTART",
         "/NOCANCEL",
         "/CLOSEAPPLICATIONS",

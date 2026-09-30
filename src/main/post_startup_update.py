@@ -266,6 +266,24 @@ def install_update_check(
             lambda: is_startup_host_alive(startup_host) and _schedule_startup_update_check(),
         )
 
+    def _mark_update_app_ready() -> None:
+        # Если эту версию только что поставило обновление, его окно-продолжение
+        # ещё на экране: сообщаем, что новая версия открылась, и оно гаснет.
+        from config.build_info import APP_VERSION
+
+        try:
+            if updater_feature.mark_update_app_ready(APP_VERSION):
+                log("Окну обновления сообщено: новая версия открылась", "🔁 UPDATE")
+        except Exception as exc:
+            log(f"Не удалось сообщить окну обновления о запуске: {exc}", "WARNING")
+
+    bind_startup_gate(
+        startup_host.startup_interactive_ready,
+        lambda: is_startup_host_alive(startup_host)
+        and enqueue_subsystem_task("update", "UpdateAppReadyMark", _mark_update_app_ready),
+        is_ready=lambda: bool(startup_host.startup_state.interactive_logged),
+    )
+
     bind_startup_gate(
         startup_host.startup_post_init_ready,
         _schedule_startup_update_check_deferred,

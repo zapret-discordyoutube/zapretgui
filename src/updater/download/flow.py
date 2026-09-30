@@ -28,6 +28,7 @@ from ..install.launcher import (
     stage_installer,
     start_supervised_installation,
 )
+from ..install.splash import RestartSplashSpec, show_restart_splash
 from ..release.resolver import lookup_latest_release
 from ..release_contract import ReleaseArtifactMetadata
 from ..versions import compare_versions, normalize_version
@@ -150,6 +151,8 @@ def run_update_install(
     on_progress: Callable[[int, int, int], None] | None = None,
     on_downloaded: Callable[[], None] = lambda: None,
     start_installation: Callable[[InstallerHandoff], bool] = start_supervised_installation,
+    splash: RestartSplashSpec | None = None,
+    show_splash: Callable[[RestartSplashSpec | None], bool] = show_restart_splash,
 ) -> None:
     """Скачивает, проверяет и передаёт установщик наблюдателю.
 
@@ -185,6 +188,14 @@ def run_update_install(
         if not start_installation(handoff):
             raise UpdatePipelineError("Не удалось запустить установщик")
         launched = True
+        # Окно-продолжение встаёт на место окна обновления до закрытия
+        # программы: пустого экрана между версиями нет. Его сбой обновлению
+        # не мешает — наблюдатель уже ведёт установку.
+        if splash is not None:
+            try:
+                show_splash(splash)
+            except Exception as exc:
+                log(f"Окно-продолжение не показано: {exc}", UPDATE_LOG_LEVEL)
     except UpdatePipelineError:
         raise
     except Exception as exc:

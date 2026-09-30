@@ -1841,10 +1841,12 @@ class BuildResourceLayoutTests(unittest.TestCase):
         self.assertNotIn("'/VERYSILENT'", auto_update)
         self.assertNotIn("'/NORESTART'", auto_update)
         self.assertIn('"/AUTOUPDATE",', update_pipeline)
-        # /SUPPRESSMSGBOXES означает ответ Abort в ситуациях Abort/Retry:
-        # с ним сбой распаковки проходил молча, без единого сообщения.
-        self.assertIn('"/SILENT",', update_pipeline)
-        self.assertNotIn('"/VERYSILENT",', update_pipeline)
+        # Ход обновления показывает окно-продолжение, поэтому своя полоска
+        # установщика не нужна. /SUPPRESSMSGBOXES означает ответ Abort в
+        # ситуациях Abort/Retry: с ним сбой распаковки проходил молча, без
+        # единого сообщения — без него ошибки видны и в /VERYSILENT.
+        self.assertIn('"/VERYSILENT",', update_pipeline)
+        self.assertNotIn('"/SILENT",', update_pipeline)
         self.assertNotIn('"/SUPPRESSMSGBOXES",', update_pipeline)
         self.assertNotIn('"/RESTARTAPPLICATIONS",', update_pipeline)
         self.assertIn('f"/DIR={APPLICATION_PATHS.root}"', update_pipeline)
