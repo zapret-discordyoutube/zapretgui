@@ -1176,7 +1176,9 @@ class UserPresetsPageBase(BasePage):
     def _on_preset_bulk_action_finished(self, request_id: int, action: str, result, _context) -> None:
         if request_id != int(getattr(self, "_preset_bulk_action_request_id", 0) or 0):
             return
-        if self._has_pending_preset_write_action():
+        # Каждый импорт — отдельный файл: его результат (и ошибка) нужен всегда.
+        # «Отложить до конца очереди» имеет смысл только для «Сбросить все».
+        if action != "import" and self._has_pending_preset_write_action():
             return
         log(str(getattr(result, "log_message", "") or ""), str(getattr(result, "log_level", "") or "INFO"))
         structure_changed = bool(getattr(result, "structure_changed", False))
@@ -1210,7 +1212,7 @@ class UserPresetsPageBase(BasePage):
     def _on_preset_bulk_action_failed(self, request_id: int, action: str, error: str, _context) -> None:
         if request_id != int(getattr(self, "_preset_bulk_action_request_id", 0) or 0):
             return
-        if self._has_pending_preset_write_action():
+        if action != "import" and self._has_pending_preset_write_action():
             return
         log(f"Ошибка массового действия preset ({action}): {error}", "ERROR")
         error_key = "error.import_exception" if action == "import" else "error.reset_all_exception"
@@ -1353,6 +1355,13 @@ class UserPresetsPageBase(BasePage):
         if is_collapsed is None:
             self._request_preset_folder_action("toggle_collapsed", folder_key=folder_key)
             return
+        # Сразу показываем результат щелчка: модель обновлялась только после
+        # воркера, и быстрый двойной щелчок читал старое состояние — оба
+        # щелчка превращались в одно «свернуть», папка «застревала».
+        self._apply_preset_folder_state_locally(
+            "set_collapsed",
+            {"folder_key": folder_key, "collapsed": not is_collapsed},
+        )
         self._request_preset_folder_action("set_collapsed", folder_key=folder_key, collapsed=not is_collapsed)
 
     def _current_preset_folder_collapsed(self, folder_key: str) -> bool | None:
@@ -1522,6 +1531,10 @@ class UserPresetsPageBase(BasePage):
             )
             return
         if bool(result):
+            if str(action or "") == "set_collapsed" and self._current_preset_folder_collapsed(
+                str(context.get("folder_key") or "")
+            ) == bool(context.get("collapsed", False)):
+                return  # уже показано сразу по щелчку
             if self._apply_preset_folder_state_locally(str(action or ""), context):
                 return
             self._refresh_presets_view_from_cache()
@@ -1543,6 +1556,13 @@ class UserPresetsPageBase(BasePage):
         if request_id != int(getattr(self, "_preset_folder_action_request_id", 0) or 0):
             return
         log(f"{self.__class__.__name__}: не удалось выполнить действие папки preset ({action}): {error}", "ERROR")
+        context = dict(_context or {})
+        if str(action or "") == "set_collapsed" and str(context.get("folder_key") or ""):
+            # Сворачивание было показано сразу — запись не удалась, возвращаем.
+            self._apply_preset_folder_state_locally(
+                "set_collapsed",
+                {"folder_key": context.get("folder_key"), "collapsed": not bool(context.get("collapsed", False))},
+            )
 
     def _on_preset_folder_action_worker_finished(self, worker) -> None:
         self._schedule_next_preset_write_action_after_finish("_preset_folder_action_request_id", worker)
@@ -2179,6 +2199,10 @@ class UserPresetsPageBase(BasePage):
             current_name=str(pending.get("current_name") or ""),
             new_name=str(pending.get("new_name") or ""),
             from_current=bool(pending.get("from_current")),
+            # Импорт по ссылке: без них повторно поставленный в очередь импорт
+            # терял привязку к источнику и автообновление.
+            source_url=str(pending.get("source_url") or ""),
+            auto_update=bool(pending.get("auto_update")),
         )
         return True
 

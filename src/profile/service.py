@@ -102,6 +102,19 @@ class _SelectedPresetSnapshot:
     manifest: object
 
 
+# Поля размещения строки в списке (папка, порядок): их знает только полная
+# сборка списка с мета-данными папок. Элемент, пересобранный после смены
+# стратегии, строится без них — берём из строки, которую он заменяет.
+_LIST_PLACEMENT_FIELDS = ("group", "group_name", "order", "group_rank", "group_collapsed")
+
+
+def _with_list_placement_of(item: ProfileListItem, current: ProfileListItem) -> ProfileListItem:
+    try:
+        return replace(item, **{field: getattr(current, field) for field in _LIST_PLACEMENT_FIELDS})
+    except Exception:
+        return item
+
+
 def _identity_entry(profile: Profile) -> dict[str, str]:
     """Запись реестра идентичности — как в _update_identity_registry_for_edit."""
     return {
@@ -1590,39 +1603,40 @@ class ProfilePresetService:
             self._invalidate_profile_list_snapshot()
 
     def _replace_profile_list_snapshot_item(self, profile_key: str, item: ProfileListItem) -> bool:
-        payload = self._profile_list_snapshot
-        if payload is None:
-            if not self._profile_list_snapshots_by_revision:
-                return True
-            payload = next(reversed(self._profile_list_snapshots_by_revision.values()))
-        clean_profile_key = str(profile_key or "").strip()
-        replacement_keys = {
-            clean_profile_key,
-            str(getattr(item, "key", "") or "").strip(),
-            str(getattr(item, "persistent_key", "") or "").strip(),
-        }
-        replacement_keys.discard("")
-        items: list[ProfileListItem] = []
-        replaced = False
-        for current in tuple(getattr(payload, "items", ()) or ()):
-            current_keys = {
-                str(getattr(current, "key", "") or "").strip(),
-                str(getattr(current, "persistent_key", "") or "").strip(),
+        with self._profile_list_lock:
+            payload = self._profile_list_snapshot
+            if payload is None:
+                # Снимок другой ревизии подставлять под текущую нельзя: False
+                # сбросит прежние снимки, и список пересоберётся честно.
+                return not self._profile_list_snapshots_by_revision
+            clean_profile_key = str(profile_key or "").strip()
+            replacement_keys = {
+                clean_profile_key,
+                str(getattr(item, "key", "") or "").strip(),
+                str(getattr(item, "persistent_key", "") or "").strip(),
             }
-            current_keys.discard("")
-            if not replaced and replacement_keys & current_keys:
-                items.append(item)
-                replaced = True
-                continue
-            items.append(current)
-        if not replaced:
-            return False
-        list_revision = self._current_profile_list_revision()
-        updated_payload = replace(payload, items=tuple(items))
-        self._profile_list_snapshot = updated_payload
-        self._profile_list_snapshot_revision = list_revision
-        self._remember_profile_list_snapshot(list_revision, updated_payload)
-        return True
+            replacement_keys.discard("")
+            items: list[ProfileListItem] = []
+            replaced = False
+            for current in tuple(getattr(payload, "items", ()) or ()):
+                current_keys = {
+                    str(getattr(current, "key", "") or "").strip(),
+                    str(getattr(current, "persistent_key", "") or "").strip(),
+                }
+                current_keys.discard("")
+                if not replaced and replacement_keys & current_keys:
+                    items.append(_with_list_placement_of(item, current))
+                    replaced = True
+                    continue
+                items.append(current)
+            if not replaced:
+                return False
+            list_revision = self._current_profile_list_revision()
+            updated_payload = replace(payload, items=tuple(items))
+            self._profile_list_snapshot = updated_payload
+            self._profile_list_snapshot_revision = list_revision
+            self._remember_profile_list_snapshot(list_revision, updated_payload)
+            return True
 
     def _current_selected_preset_file_name(self) -> str:
         file_name_getter = getattr(self._presets, "get_selected_source_preset_file_name", None)

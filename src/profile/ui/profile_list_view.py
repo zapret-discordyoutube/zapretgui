@@ -149,7 +149,7 @@ class ProfileListView(ListView):
             if not isinstance(marker, dict):
                 continue
             try:
-                row = int(marker.get("row", -1) or -1)
+                row = int(marker.get("row", -1))
             except Exception:
                 continue
             if row < 0 or row >= model.rowCount():

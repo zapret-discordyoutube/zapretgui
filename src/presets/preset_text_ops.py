@@ -6,6 +6,18 @@ from presets.preset_contract import DEBUG_LOG_DIR, relocate_legacy_debug_log_fil
 from settings.mode import ENGINE_WINWS2
 
 
+def _split_preset_lines(text: str) -> list[str]:
+    """Строки пресета так же, как их видит парсер: только по «\\n».
+
+    str.splitlines() режет ещё и по \\x0b, \\x0c, \\x85, \\u2028 — строка с
+    таким символом внутри значения выглядела бы для этих функций иначе, чем
+    для парсера и запуска. Хвостовой перевод строки не даёт пустой строки."""
+    lines = str(text or "").split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
 def _rewrite_preset_headers(
     source_text: str,
     preset_name: str,
@@ -13,7 +25,7 @@ def _rewrite_preset_headers(
     preset_kind: str | None = None,
 ) -> str:
     text = strip_utf8_bom(source_text).replace("\r\n", "\n").replace("\r", "\n")
-    lines = text.splitlines()
+    lines = _split_preset_lines(text)
 
     header_end = 0
     for idx, raw in enumerate(lines):
@@ -86,7 +98,7 @@ def validate_preset_source_text(source_text: str, *, engine: str = "") -> str:
     option_lines = 0
     has_wf_filter = False
     has_lua_desync = False
-    for line_no, raw in enumerate(text.splitlines(), start=1):
+    for line_no, raw in enumerate(_split_preset_lines(text), start=1):
         stripped = raw.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -138,7 +150,7 @@ def _default_debug_insert_index(lines: list[str]) -> int:
 
 def _rewrite_debug_log_setting(source_text: str, preset_name: str, enabled: bool) -> str:
     text = (source_text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = text.splitlines()
+    lines = _split_preset_lines(text)
 
     existing_value = ""
     existing_insert_at: int | None = None

@@ -96,9 +96,27 @@ def layered_list_file(lists_root: Path, file_name: str) -> LayeredListFile:
     )
 
 
+_WINDOWS_FORBIDDEN_NAME_CHARS = frozenset('<>:"|?*')
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+)
+
+
 def safe_list_file_name(value: str) -> str:
+    """Имя файла списка или "" для недопустимого на Windows.
+
+    Кроме «.»/«..» и путей отсекаются имена, которые Windows не создаст как
+    обычный файл: «a.txt:stream» (альтернативный поток NTFS), CON/NUL/COM1…,
+    символы <>:"|?* и точка/пробел в конце. Такие имена могли прийти из
+    чужого ZIP-архива пресета."""
     name = PureWindowsPath(str(value or "").replace("\\", "/")).name.strip()
     if not name or name in {".", ".."}:
+        return ""
+    if any(char in _WINDOWS_FORBIDDEN_NAME_CHARS or ord(char) < 32 for char in name):
+        return ""
+    if name.endswith((".", " ")):
+        return ""
+    if name.split(".", 1)[0].strip().upper() in _WINDOWS_RESERVED_NAMES:
         return ""
     return name
 

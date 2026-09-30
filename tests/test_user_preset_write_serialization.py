@@ -732,7 +732,9 @@ class UserPresetWriteSerializationTests(unittest.TestCase):
             patch("presets.ui.common.user_presets_page.log") as log_mock,
         ):
             UserPresetsPageBase._on_preset_edit_action_failed(page, 2, "rename", "old edit", {})
-            UserPresetsPageBase._on_preset_bulk_action_failed(page, 3, "import", "old bulk", {})
+            # Импорт — отдельный файл, его ошибка показывается всегда;
+            # откладывается только результат «Сбросить все».
+            UserPresetsPageBase._on_preset_bulk_action_failed(page, 3, "reset_all", "old bulk", {})
             UserPresetsPageBase._on_preset_item_action_failed(page, 4, "delete", "old item")
 
         error.assert_not_called()
@@ -804,7 +806,7 @@ class UserPresetWriteSerializationTests(unittest.TestCase):
                 edit_result,
                 {"current_name": "Old.txt", "new_name": "Renamed.txt"},
             )
-            UserPresetsPageBase._on_preset_bulk_action_finished(page, 3, "import", bulk_result, {})
+            UserPresetsPageBase._on_preset_bulk_action_finished(page, 3, "reset_all", bulk_result, {})
             UserPresetsPageBase._on_preset_storage_action_finished(
                 page,
                 4,

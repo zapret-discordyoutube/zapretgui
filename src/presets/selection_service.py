@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from settings.mode import DEFAULT_PRESET_FILE_NAME_BY_ENGINE
+
 from .models import PresetManifest
 from .file_store import PresetFileStore
 
@@ -57,9 +59,17 @@ class PresetSelectionService:
         return candidate
 
     def ensure_can_delete(self, engine: str, file_name: str) -> None:
-        selected_file_name = self.get_selected_file_name(engine)
         candidate = str(self._preset_file_store.resolve_file_name(engine, file_name) or file_name or "").strip()
-        if selected_file_name and selected_file_name.strip().lower() == candidate.lower():
+        # Нельзя удалить ни сохранённый выбор, ни запасной пресет, который
+        # сейчас работает вместо пропавшего файла (его интерфейс и показывает
+        # активным).
+        protected = {str(self.get_selected_file_name(engine) or "").strip().lower()}
+        if self.get_selected_manifest(engine) is None:
+            fallback = self._fallback_manifest(engine, DEFAULT_PRESET_FILE_NAME_BY_ENGINE.get(engine, ""))
+            if fallback is not None:
+                protected.add(str(fallback.file_name or "").strip().lower())
+        protected.discard("")
+        if candidate.lower() in protected:
             raise ValueError("Cannot delete the selected source preset")
 
     def ensure_selected_manifest(self, engine: str, preferred_file_name: str | None = None) -> PresetManifest | None:
@@ -75,21 +85,25 @@ class PresetSelectionService:
         if current is not None:
             return current
 
-        fallback = None
-        preferred_key = str(preferred_file_name or "").strip()
-        if preferred_key:
-            fallback = self._preset_file_store.get_manifest(engine, preferred_key)
+        fallback = self._fallback_manifest(engine, preferred_file_name)
         if fallback is None:
-            manifests = self._preset_file_store.list_manifests(engine)
-            if not manifests:
-                return None
-            fallback = manifests[0]
+            return None
 
         missing_file_name = str(get_selected_source_preset_file_name(engine) or "").strip()
         if not missing_file_name:
             return self.select_preset(engine, fallback.file_name)
         self._report_selection_fallback(engine, missing_file_name, fallback)
         return fallback
+
+    def _fallback_manifest(self, engine: str, preferred_file_name: str | None) -> PresetManifest | None:
+        """Запасной пресет без побочных эффектов: предпочитаемый, иначе первый."""
+        preferred_key = str(preferred_file_name or "").strip()
+        if preferred_key:
+            preferred = self._preset_file_store.get_manifest(engine, preferred_key)
+            if preferred is not None:
+                return preferred
+        manifests = self._preset_file_store.list_manifests(engine)
+        return manifests[0] if manifests else None
 
     def _report_selection_fallback(self, engine: str, missing_file_name: str, fallback: PresetManifest) -> None:
         key = (str(engine or ""), missing_file_name.lower(), str(fallback.file_name or "").lower())

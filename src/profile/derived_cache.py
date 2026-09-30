@@ -1,7 +1,8 @@
 """Контентно-производные данные профиля и их кэш.
 
 Ядро (`ProfileDerivedCore`) считается только из текста профиля и каталогов стратегий,
-поэтому ключуется по (engine, подпись каталогов, сырой текст профиля) и переживает
+поэтому ключуется по (engine, подпись каталогов, сырой текст и имя профиля,
+отпечаток папки списков) и переживает
 смену пресета/ревизии: неизменённый профиль не пересчитывается. Контекстные поля
 (порядок, папка, enabled, rating) сюда не входят — их накладывает сборка списка.
 """
@@ -11,6 +12,9 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 from functools import lru_cache
+import os
+from pathlib import Path
+import time
 from typing import Any
 
 from settings.mode import ENGINE_WINWS2
@@ -74,12 +78,38 @@ def build_profile_derived_core(
     )
 
 
+_LISTS_SIGNATURE_TTL_SEC = 0.5
+
+
 class ProfileDerivedCache:
     """LRU контентных ядер. Не потокобезопасен: вызывающий держит лок сервиса."""
 
     def __init__(self, limit: int = PROFILE_DERIVED_CACHE_LIMIT) -> None:
         self._entries: OrderedDict[tuple[object, ...], ProfileDerivedCore] = OrderedDict()
         self._limit = max(1, int(limit))
+        self._lists_signature_value: tuple[object, ...] = ()
+        self._lists_signature_at = -1.0
+
+    def _lists_signature(self, app_paths) -> tuple[object, ...]:
+        """Отпечаток папки lists и её подпапок: mtime меняется при создании и
+        удалении файла списка. Запоминается на полсекунды — сборка списка
+        из сотни профилей не должна опрашивать диск сотню раз."""
+        now = time.monotonic()
+        if 0.0 <= now - self._lists_signature_at < _LISTS_SIGNATURE_TTL_SEC:
+            return self._lists_signature_value
+        lists_root = Path(str(getattr(app_paths, "user_root", "") or "")) / "lists"
+        signature: list[object] = []
+        try:
+            signature.append(lists_root.stat().st_mtime_ns)
+            with os.scandir(lists_root) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        signature.append((entry.name, entry.stat(follow_symlinks=False).st_mtime_ns))
+        except OSError:
+            signature.append(None)
+        self._lists_signature_value = tuple(sorted(signature, key=repr))
+        self._lists_signature_at = now
+        return self._lists_signature_value
 
     def core_for(
         self,
@@ -90,7 +120,17 @@ class ProfileDerivedCache:
         app_paths,
     ) -> ProfileDerivedCore:
         raw_text = profile_raw_text(profile)
-        cache_key = (profile.engine, catalogs_signature, raw_text)
+        # Имя профиля не входит в raw_text (оно в «--new=Имя»), а от него
+        # зависит роль «исключения»; доступность hostlist/ipset зависит от
+        # файлов списков на диске. Без них ядро оставалось бы устаревшим.
+        cache_key = (
+            profile.engine,
+            catalogs_signature,
+            raw_text,
+            str(profile.name or ""),
+            str(profile.display_name or ""),
+            self._lists_signature(app_paths),
+        )
         cached = self._entries.get(cache_key)
         if cached is not None:
             self._entries.move_to_end(cache_key)

@@ -328,6 +328,13 @@ class PresetsFeature:
     def get_selected_source_preset_file_name(self, launch_method: str) -> str:
         return self._commands().get_selected_source_preset_file_name(launch_method, preset_services=self._preset_services())
 
+    def get_stored_source_preset_file_name(self, launch_method: str) -> str:
+        """Выбор, сохранённый в настройках (файла может уже не быть)."""
+        from settings.mode import engine_for_launch_method
+
+        selection = self._preset_services().preset_selection_service
+        return str(selection.get_selected_file_name(engine_for_launch_method(launch_method)) or "").strip()
+
     def is_selected_source_preset_file(self, launch_method: str, file_name: str) -> bool:
         selected = str(self.get_selected_source_preset_file_name(launch_method) or "").strip()
         candidate = str(file_name or "").strip()
@@ -759,7 +766,10 @@ class PresetsFeature:
             preset_display_name = str(display_name or preset_file_name).strip() or preset_file_name
             try:
                 try:
-                    selected_file_name = str(self.get_selected_source_preset_file_name(launch_method) or "").strip()
+                    # Сохранённый выбор, а не действующий: если выбранный файл
+                    # пропал и работает запасной пресет, щелчок по запасному
+                    # должен закрепить его, а не считаться «уже выбран».
+                    selected_file_name = self.get_stored_source_preset_file_name(launch_method)
                 except Exception:
                     selected_file_name = ""
                 if selected_file_name and selected_file_name.casefold() == preset_file_name.casefold():

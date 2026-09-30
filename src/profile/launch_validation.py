@@ -13,8 +13,16 @@ def preset_filter_flags_for_launch_method(launch_method: str) -> tuple[str, ...]
 
 
 def preset_has_required_filter_flags(launch_method: str, text: str) -> bool:
-    content = str(text or "")
-    return any(flag in content for flag in preset_filter_flags_for_launch_method(launch_method))
+    # Только строки-аргументы: «# --wf-tcp-out=443» в комментарии winws не
+    # получает, и пресет без настоящего фильтра не должен считаться готовым.
+    flags = preset_filter_flags_for_launch_method(launch_method)
+    for raw in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if any(flag in stripped for flag in flags):
+            return True
+    return False
 
 
 def preset_has_enabled_profiles(launch_method: str, text: str) -> bool:

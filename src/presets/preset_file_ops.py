@@ -14,6 +14,7 @@ from presets.preset_text_ops import (
 )
 from presets.portable_archive import (
     PresetImportResult,
+    _unique_preset_name,
     export_preset_with_lists,
     import_portable_preset,
 )
@@ -93,6 +94,7 @@ def rename_by_file_name(backend, file_name: str, new_name: str):
         raise ValueError(f"Built-in preset cannot be renamed: {manifest.name}")
     was_selected = backend.is_selected_file_name(manifest.file_name)
     source_text = backend.read_source_text_by_file_name(manifest.file_name)
+    new_name = _unique_preset_name(backend, new_name, exclude_file_name=manifest.file_name)
     renamed = backend.preset_file_store.rename_preset(backend.engine, manifest.file_name, new_name)
     rewritten = _rewrite_preset_headers(
         source_text,
@@ -121,6 +123,7 @@ def duplicate_by_file_name(backend, file_name: str, new_name: str):
     if manifest is None:
         raise ValueError(f"Preset not found: {file_name}")
     source_text = backend.read_source_text_by_file_name(manifest.file_name)
+    new_name = _unique_preset_name(backend, new_name)
     rewritten = _rewrite_preset_headers(
         source_text,
         new_name,
@@ -138,6 +141,7 @@ def duplicate_by_file_name(backend, file_name: str, new_name: str):
 
 def create_preset(backend, name: str, *, from_current: bool = True):
     source_text = backend.read_selected_source_text() if from_current else _read_standard_builtin_preset(backend)
+    name = _unique_preset_name(backend, name)
     rewritten = _rewrite_preset_headers(source_text, name)
     rewritten = backend.normalize_source_text(rewritten)
     created = backend.preset_file_store.create_preset(backend.engine, name, rewritten)
@@ -156,6 +160,7 @@ def import_from_file(backend, src_path: Path, name: str | None = None):
     validation_error = validate_preset_source_text(source_text, engine=backend.engine)
     if validation_error:
         raise ValueError(f"Файл не похож на пресет: {validation_error}")
+    preset_name = _unique_preset_name(backend, preset_name)
     rewritten = _rewrite_preset_headers(
         source_text,
         preset_name,

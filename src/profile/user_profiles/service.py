@@ -44,17 +44,21 @@ def create_user_profile(paths: AppPaths, *, name: str, protocol: str, ports: str
         profiles = dict(section.get("profiles") or {})
         _validate_unique_profile_name(profiles, system_names, clean_name)
         profile_id = _unique_profile_id(profiles, _slugify(clean_name))
-        hostlist_had_entries = _user_list_file_has_entries(lists_root, f"{profile_id}.txt")
-        create_profile_user_list_file(lists_root, f"{profile_id}.txt")
-        create_profile_user_list_file(lists_root, f"ipset-{profile_id}.txt")
+        # Имя файлов уникально среди файлов ВСЕХ профилей, а не только id:
+        # профиль, переименованный из «a» в «b», уже владеет b.txt — новый
+        # профиль «b» делил бы с ним списки, а удаление одного стирало бы их у обоих.
+        file_stem = _unique_file_stem(profiles, profile_id)
+        hostlist_had_entries = _user_list_file_has_entries(lists_root, f"{file_stem}.txt")
+        create_profile_user_list_file(lists_root, f"{file_stem}.txt")
+        create_profile_user_list_file(lists_root, f"ipset-{file_stem}.txt")
         if not hostlist_had_entries:
-            write_profile_user_list_text(lists_root, f"{profile_id}.txt", _DEFAULT_HOSTLIST_TEXT)
+            write_profile_user_list_text(lists_root, f"{file_stem}.txt", _DEFAULT_HOSTLIST_TEXT)
         profiles[profile_id] = {
             "name": clean_name,
             "protocol": clean_protocol,
             "ports": clean_ports,
-            "hostlist": f"lists/{profile_id}.txt",
-            "ipset": f"lists/ipset-{profile_id}.txt",
+            "hostlist": f"lists/{file_stem}.txt",
+            "ipset": f"lists/ipset-{file_stem}.txt",
         }
         section["version"] = 1
         section["profiles"] = profiles
@@ -132,6 +136,15 @@ def delete_user_profile(paths: AppPaths, profile_id: str) -> dict[str, str]:
     return row
 
 
+def _log_skipped_user_profile(profile_id: object, exc: Exception) -> None:
+    try:
+        from log.log import log
+
+        log(f"Пользовательский profile {profile_id} пропущен: повреждённая запись ({exc})", "WARNING")
+    except Exception:
+        pass
+
+
 def _row_fields(row: dict) -> dict[str, str]:
     return {
         field: str(row.get(field) or "").strip()
@@ -144,12 +157,15 @@ def load_user_profile_templates(paths: AppPaths, engine: EngineName | str) -> di
     profiles = get_user_profiles_settings().get("profiles") or {}
     result: dict[str, Profile] = {}
     for profile_id, row in sorted(profiles.items()):
-        text = _profile_text(row, engine=normalized_engine)
-        if not text:
-            continue
+        # Одна повреждённая запись в настройках не должна ронять загрузку
+        # всех шаблонов (а с ней и список профилей).
         try:
+            text = _profile_text(row, engine=normalized_engine)
+            if not text:
+                continue
             preset = parse_preset_text(text, engine=normalized_engine, source_name="user_profiles")
-        except Exception:
+        except Exception as exc:
+            _log_skipped_user_profile(profile_id, exc)
             continue
         if preset.profiles:
             result[f"user:{profile_id}"] = preset.profiles[0]

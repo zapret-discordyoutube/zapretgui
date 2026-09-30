@@ -51,6 +51,8 @@ class PresetWriteQueue:
         profile_key = page._profile_reference_for(profile_key)
         if not profile_key:
             return
+        if self._refuse_action_on_stale_list():
+            return
         if self._profile_preset_write_operation_running():
             self._queue_profile_preset_write_operation(
                 "context",
@@ -72,6 +74,8 @@ class PresetWriteQueue:
         page = self._page
         source_profile_key = str(source_profile_key or "").strip()
         if not source_profile_key:
+            return
+        if self._refuse_action_on_stale_list():
             return
         if self._profile_preset_write_operation_running():
             self._queue_profile_preset_write_operation(
@@ -218,10 +222,39 @@ class PresetWriteQueue:
     def _displayed_preset_file_name(self) -> str:
         return str(self._page.__dict__.get("_displayed_preset_file_name", "") or "").strip()
 
+    def _active_preset_file_name(self) -> str:
+        store = self._page.__dict__.get("_ui_state_store")
+        if store is None:
+            return ""
+        try:
+            return str(getattr(store.snapshot(), "active_preset_file_name", "") or "").strip()
+        except Exception:
+            return ""
+
+    def _list_is_stale(self) -> bool:
+        """Активный пресет уже другой, а список ещё показывает прежний."""
+        active = self._active_preset_file_name().lower()
+        displayed = self._displayed_preset_file_name().lower()
+        return bool(active and displayed and active != displayed)
+
+    def _refuse_action_on_stale_list(self) -> bool:
+        # Сервис пишет в пресет, выбранный В МОМЕНТ записи: действие над
+        # строкой прежнего пресета ушло бы в новый.
+        if not self._list_is_stale():
+            return False
+        log(
+            f"{self._page.__class__.__name__}: список profile ещё обновляется после смены пресета — действие не выполнено",
+            "INFO",
+        )
+        return True
+
     def _operation_targets_other_preset(self, operation: dict[str, object]) -> bool:
         stamped = str(operation.get("preset_file_name") or "").strip().lower()
-        displayed = self._displayed_preset_file_name().lower()
-        return bool(stamped and displayed and stamped != displayed)
+        if not stamped:
+            return False
+        current = {self._displayed_preset_file_name().lower(), self._active_preset_file_name().lower()}
+        current.discard("")
+        return any(name != stamped for name in current)
 
     def _drop_preset_bound_operations(self) -> None:
         """Сменился активный пресет: ждущие операции над профилями прежнего

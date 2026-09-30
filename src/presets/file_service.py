@@ -43,6 +43,17 @@ def _with_final_newline(text: str) -> str:
     return text if text.endswith("\n") else f"{text}\n"
 
 
+def _log_meta_failure(what: str, exc: Exception) -> None:
+    """Сопутствующая мета пресета не обновилась: сам файл уже изменён,
+    а закреп/оценка/папка/привязка остались на старом имени."""
+    try:
+        from log.log import log
+
+        log(f"Пресеты: не удалось обновить данные {what}: {exc}", "WARNING")
+    except Exception:
+        pass
+
+
 @dataclass(frozen=True)
 class PresetContractMigrationResult:
     """Итог разового перевода пресетов пользователя (preset_contract, пункт 6)."""
@@ -108,8 +119,8 @@ class PresetFileService:
             from presets.folders import rename_preset_item_meta
 
             rename_preset_item_meta(self._folder_scope_key(), old_file_name, new_file_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_meta_failure("папок/закрепа/оценки при переименовании", exc)
 
     def _copy_folder_item_meta(
         self,
@@ -120,32 +131,32 @@ class PresetFileService:
             from presets.folders import copy_preset_item_meta
 
             copy_preset_item_meta(self._folder_scope_key(), source_file_name, new_file_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_meta_failure("папок/оценки при копировании", exc)
 
     def _delete_folder_item_meta(self, preset_file_name: str) -> None:
         try:
             from presets.folders import delete_preset_item_meta
 
             delete_preset_item_meta(self._folder_scope_key(), preset_file_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_meta_failure("папок/оценки при удалении", exc)
 
     def _rename_remote_binding_meta(self, old_file_name: str, new_file_name: str) -> None:
         try:
             from presets.remote_bindings import rename_remote_preset_binding
 
             rename_remote_preset_binding(self.engine, old_file_name, new_file_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_meta_failure("привязки к источнику при переименовании", exc)
 
     def _delete_remote_binding_meta(self, preset_file_name: str) -> None:
         try:
             from presets.remote_bindings import delete_preset_identity
 
             delete_preset_identity(self.engine, preset_file_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_meta_failure("привязки к источнику при удалении", exc)
 
     def _carry_remote_sync_hash(self, file_name: str, old_text: str, new_text: str) -> None:
         """Разовый перевод — действие программы, а не правка пользователя.
@@ -217,7 +228,10 @@ class PresetFileService:
     def get_selected_manifest(self) -> PresetManifest | None:
         try:
             return self.preset_mode_coordinator.get_selected_source_manifest(self.launch_method)
-        except Exception:
+        except Exception as exc:
+            # «Не выбран» — только следствие; причину (нет пресетов, ошибка
+            # чтения настроек) нужно видеть в журнале.
+            _log_meta_failure("определения выбранного пресета", exc)
             return None
 
     def get_selected_file_name(self) -> str:

@@ -58,9 +58,10 @@ def launch_args_from_preset_text(content: str) -> list[str]:
     файла, а не текста пресета: str.strip() его не убирает, и без явного
     снятия он прилипал бы к первой опции. Проверка пресета снимает его так же.
     """
-    text = str(content or "").lstrip("\ufeff")
+    text = str(content or "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     args: list[str] = []
-    for raw in text.splitlines():
+    # Только «\n», как у парсера: splitlines() делил бы ещё по \x0b/\x85/\u2028.
+    for raw in text.split("\n"):
         stripped = raw.strip()
         if not stripped:
             continue

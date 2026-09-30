@@ -33,6 +33,9 @@ _LIST_OPTION_KINDS = {
     "--ipset": "ipset",
     "--ipset-exclude": "ipset",
 }
+# Разделитель опций в одной строке — как _INLINE_OPTION_SPLIT_RE в
+# profile.winws2_preset_source, но с захватом, чтобы собрать строку обратно.
+_INLINE_OPTION_SPLIT_KEEP_RE = re.compile(r"((?<=\S)\s+(?=--))")
 _LIST_LINE_RE = re.compile(
     r"^(?P<indent>\s*)(?P<option>--(?:hostlist|hostlist-exclude|ipset|ipset-exclude))"
     r"\s*=\s*(?P<value>.*?)(?P<trailing>\s*)$",
@@ -85,6 +88,14 @@ class PresetImportResult:
         return self.manifest.storage_scope
 
 
+
+def _unique_preset_name(backend, name: str, *, exclude_file_name: str | None = None) -> str:
+    """Имя, свободное и в списке, и среди файлов (см. PresetFileStore.unique_preset_name)."""
+    unique = getattr(getattr(backend, "preset_file_store", None), "unique_preset_name", None)
+    if not callable(unique):
+        return name
+    return unique(backend.engine, name, exclude_file_name=exclude_file_name)
+
 def export_preset_with_lists(backend, file_name: str, dest_path: Path) -> PresetExportResult:
     source_text = backend.read_source_text_by_file_name(file_name)
     lists_root = Path(backend.app_paths.user_root) / "lists"
@@ -135,6 +146,7 @@ def import_portable_preset(backend, src_path: Path, *, name: str) -> PresetImpor
                 f"ZIP содержит lists/{item.file_name}, но пресет не ссылается на него как на {item.kind}."
             )
     preset_name = str(name or Path(src_path).stem or "Imported").strip() or "Imported"
+    preset_name = _unique_preset_name(backend, preset_name)
     lists_root = Path(backend.app_paths.user_root) / "lists"
     replacements, writes = _plan_list_imports(lists_root, list_files)
     rewritten = _rewrite_list_file_references(source_text, replacements)
@@ -355,27 +367,41 @@ def _rewrite_list_file_references(source_text: str, replacements: dict[str, str]
     replacement_keys = {key.casefold(): value for key, value in replacements.items()}
     output: list[str] = []
     for raw in str(source_text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        match = _LIST_LINE_RE.match(raw)
-        if match is None:
-            output.append(raw)
-            continue
-        values = []
-        changed = False
-        for value in _split_list_values(match.group("value")):
-            file_name = safe_list_file_name(value.lstrip("@"))
-            replacement = replacement_keys.get(file_name.casefold()) if file_name else None
-            if replacement and replacement.casefold() != file_name.casefold():
-                values.append(f"lists/{replacement}")
-                changed = True
+        pieces = _line_option_pieces(raw)
+        rewritten: list[str] = []
+        for piece in pieces:
+            match = _LIST_LINE_RE.match(piece)
+            if match is None:
+                rewritten.append(piece)
+                continue
+            values = []
+            changed = False
+            for value in _split_list_values(match.group("value")):
+                file_name = safe_list_file_name(value.lstrip("@"))
+                replacement = replacement_keys.get(file_name.casefold()) if file_name else None
+                if replacement and replacement.casefold() != file_name.casefold():
+                    values.append(f"lists/{replacement}")
+                    changed = True
+                else:
+                    values.append(value)
+            if changed:
+                rewritten.append(
+                    f"{match.group('indent')}{match.group('option')}={','.join(values)}{match.group('trailing')}"
+                )
             else:
-                values.append(value)
-        if changed:
-            output.append(
-                f"{match.group('indent')}{match.group('option')}={','.join(values)}{match.group('trailing')}"
-            )
-        else:
-            output.append(raw)
+                rewritten.append(piece)
+        output.append("".join(rewritten))
     return "\n".join(output)
+
+
+def _line_option_pieces(raw: str) -> list[str]:
+    """Строка пресета, поделённая на опции тем же правилом, что у парсера и
+    запуска («--a=x --b=y» — две опции), с сохранёнными разделителями:
+    "".join(pieces) == raw. Иначе значение `--hostlist=a.txt --filter-tcp=443`
+    целиком принималось за имя файла, и ссылка не переписывалась."""
+    if raw.lstrip().startswith("#"):
+        return [raw]
+    return _INLINE_OPTION_SPLIT_KEEP_RE.split(raw)
 
 
 def _list_file_names_from_value(value: str) -> tuple[str, ...]:
@@ -393,14 +419,15 @@ def _split_list_values(value: str) -> tuple[str, ...]:
 
 
 def _reference_file_name(source_text: str, wanted_key: str) -> str:
-    for raw in str(source_text or "").splitlines():
-        match = _LIST_LINE_RE.match(raw)
-        if match is None:
-            continue
-        for value in _split_list_values(match.group("value")):
-            file_name = safe_list_file_name(value.lstrip("@"))
-            if file_name and file_name.casefold() == wanted_key:
-                return file_name
+    for raw in str(source_text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        for piece in _line_option_pieces(raw):
+            match = _LIST_LINE_RE.match(piece)
+            if match is None:
+                continue
+            for value in _split_list_values(match.group("value")):
+                file_name = safe_list_file_name(value.lstrip("@"))
+                if file_name and file_name.casefold() == wanted_key:
+                    return file_name
     return ""
 
 
@@ -435,7 +462,10 @@ def _visible_list_text(paths) -> str:
 def _merge_list_text(current: str, incoming: str) -> str:
     lines: list[str] = []
     seen: set[str] = set()
-    for raw in (*str(current or "").splitlines(), *str(incoming or "").splitlines()):
+    for raw in (
+        *str(current or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"),
+        *str(incoming or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"),
+    ):
         line = raw.strip()
         if not line:
             continue

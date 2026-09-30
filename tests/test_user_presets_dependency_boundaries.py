@@ -632,7 +632,7 @@ class UserPresetsDependencyBoundaryTests(unittest.TestCase):
             ],
         )
 
-    def test_duplicate_user_presets_folder_action_is_queued_once(self) -> None:
+    def test_duplicate_user_presets_folder_action_keeps_each_step(self) -> None:
         from presets.ui.common.user_presets_page import UserPresetsPageBase
 
         page = UserPresetsPageBase.__new__(UserPresetsPageBase)
@@ -654,7 +654,16 @@ class UserPresetsDependencyBoundaryTests(unittest.TestCase):
         page._preset_folder_action_runtime.start_qthread_worker.assert_not_called()
         self.assertEqual(
             page._preset_folder_action_pending,
+            # Относительные шаги: два щелчка «вниз» — два шага, а не один.
             [
+                {
+                    "action": "move",
+                    "folder_key": "favorites",
+                    "name": "Preset.txt",
+                    "direction": 1,
+                    "collapsed": False,
+                    "context_extra": {"source": "menu"},
+                },
                 {
                     "action": "move",
                     "folder_key": "favorites",

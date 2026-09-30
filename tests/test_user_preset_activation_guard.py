@@ -138,7 +138,7 @@ class UserPresetActivationGuardTests(unittest.TestCase):
         feature = PresetsFeature()
 
         with (
-            patch.object(PresetsFeature, "get_selected_source_preset_file_name", return_value="Default.txt"),
+            patch.object(PresetsFeature, "get_stored_source_preset_file_name", return_value="Default.txt"),
             patch.object(PresetsFeature, "activate_preset_file") as activate_preset_file,
         ):
             worker = feature.create_preset_activate_worker(
@@ -159,7 +159,7 @@ class UserPresetActivationGuardTests(unittest.TestCase):
         feature = PresetsFeature()
 
         with (
-            patch.object(PresetsFeature, "get_selected_source_preset_file_name", side_effect=RuntimeError("settings busy")),
+            patch.object(PresetsFeature, "get_stored_source_preset_file_name", side_effect=RuntimeError("settings busy")),
             patch.object(PresetsFeature, "activate_preset_file") as activate_preset_file,
         ):
             worker = feature.create_preset_activate_worker(

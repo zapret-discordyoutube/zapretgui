@@ -259,8 +259,14 @@ def _preserve_missing_winws2_strategy_filters(engine: EngineName, profile: Profi
         _split_option(line)[0].strip().lower()
         for line in strategy_lines
     }
-    preserved: list[str] = []
+    # Фильтры, стоящие ДО первой строки стратегии, — они и задают, к чему
+    # применяется начало стратегии. Из подряд идущих одноимённых действует
+    # последний (как в winws2), поэтому берём последний, а не первый; фильтры
+    # следующих веток (после первого --lua-desync) к новой стратегии не относятся.
+    leading: dict[str, str] = {}
     for segment in profile.segments:
+        if segment.kind == "strategy":
+            break
         if segment.kind != "strategy_filter":
             continue
         name = str(segment.name or "").strip().lower()
@@ -268,9 +274,9 @@ def _preserve_missing_winws2_strategy_filters(engine: EngineName, profile: Profi
             continue
         text = str(segment.text or "").strip()
         if text:
-            preserved.append(text)
-            provided.add(name)
-    return [*preserved, *strategy_lines]
+            leading.pop(name, None)
+            leading[name] = text
+    return [*leading.values(), *strategy_lines]
 
 
 def append_profile_from_template(

@@ -107,8 +107,8 @@ class ProfileFolderController:
         action = str(queued.get("action") or "")
         folder_key = str(queued.get("folder_key") or "")
         pending = page._profile_folder_action_state_obj().pending
-        if action == "move" and queued in pending:
-            return
+        # Одинаковые «move» не схлопываем: это относительные шаги, три нажатия
+        # «папку вверх» — три шага, а не один.
         if action == "set_collapsed" and folder_key:
             pending[:] = [
                 item
