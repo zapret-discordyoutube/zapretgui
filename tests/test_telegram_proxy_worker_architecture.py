@@ -1,5 +1,6 @@
 import inspect
 import unittest
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -507,15 +508,14 @@ class TelegramProxyWorkerArchitectureTests(unittest.TestCase):
         copy_text = Mock(return_value=SimpleNamespace(ok=False, log_line=""))
         page = TelegramProxyPage.__new__(TelegramProxyPage)
         page._log_edit = LogEdit()
-        page._log_text_cache = "one\ntwo\n"
-        page._log_text_line_count = 2
+        page._log_text_cache_lines = deque(["one", "two"])
         page._telegram_proxy = SimpleNamespace(copy_text=copy_text)
 
         with patch.object(telegram_proxy_page_module, "InfoBar", None):
             TelegramProxyPage._on_copy_all_logs(page)
 
         copy_text.assert_called_once_with(
-            "one\ntwo\n",
+            "one\ntwo",
             success_title="Скопировано",
             success_content="2 строк",
         )

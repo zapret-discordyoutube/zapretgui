@@ -8,6 +8,7 @@ port configuration, and quick-setup deep link for Telegram.
 from __future__ import annotations
 
 import time
+from collections import deque
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from PyQt6.QtWidgets import (
@@ -15,6 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ui.pages.base_page import BasePage
+from ui.log_limits import TELEGRAM_PROXY_LOG_VIEW_MAX_LINES
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.performance_metrics import log_ui_timing_since
 from telegram_proxy.ui.build import (
@@ -154,8 +156,7 @@ class TelegramProxyPage(BasePage):
         self._btn_open_log_file = None
         self._btn_clear_logs = None
         self._log_edit = None
-        self._log_text_cache = ""
-        self._log_text_line_count = 0
+        self._log_text_cache_lines = deque(maxlen=TELEGRAM_PROXY_LOG_VIEW_MAX_LINES)
         self._diag_desc_label = None
         self._btn_run_diag = None
         self._btn_copy_diag = None
@@ -604,7 +605,7 @@ class TelegramProxyPage(BasePage):
             cleanup_in_progress=self._cleanup_in_progress,
         )
 
-    # -- Log display (throttled via QTimer, no trimming) --
+    # -- Log display (throttled via QTimer; widget and copy cache keep the last N lines) --
 
     def _flush_log_buffer(self):
         """Called every 500ms by QTimer. Drains new lines from ProxyLogger."""
@@ -629,15 +630,7 @@ class TelegramProxyPage(BasePage):
             sb.setValue(sb.maximum())
 
     def _append_log_text_cache(self, lines) -> None:
-        normalized_lines = [str(line or "") for line in lines]
-        if not normalized_lines:
-            return
-        chunk = "\n".join(normalized_lines)
-        if self._log_text_cache:
-            self._log_text_cache = f"{self._log_text_cache}\n{chunk}"
-        else:
-            self._log_text_cache = chunk
-        self._log_text_line_count += len(normalized_lines)
+        self._log_text_cache_lines.extend(str(line or "") for line in lines)
 
     def _append_log_line(self, msg: str):
         """Append a single line to the log."""
@@ -720,11 +713,11 @@ class TelegramProxyPage(BasePage):
     def _on_copy_all_logs(self):
         if self._log_edit is None:
             return
-        text = str(self.__dict__.get("_log_text_cache", "") or "")
+        lines = self._log_text_cache_lines
         plan = self._telegram_proxy.copy_text(
-            text,
+            "\n".join(lines),
             success_title="Скопировано",
-            success_content=f"{int(self.__dict__.get('_log_text_line_count', 0) or 0)} строк",
+            success_content=f"{len(lines)} строк",
         )
         if plan.ok and InfoBar is not None:
             try:
@@ -826,8 +819,7 @@ class TelegramProxyPage(BasePage):
     def _on_clear_logs(self):
         if self._log_edit is not None:
             self._log_edit.clear()
-        self._log_text_cache = ""
-        self._log_text_line_count = 0
+        self._log_text_cache_lines.clear()
 
     # -- Handlers --
 

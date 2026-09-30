@@ -116,7 +116,7 @@ def exec_popup_menu(
     capture_action: bool = False,
     monitor_global_mouse: bool = False,
 ) -> object | None:
-    """Показывает popup-меню и закрывает его при потере активности."""
+    """Показывает одноразовое popup-меню, закрывает его при потере активности и удаляет после закрытия."""
 
     chosen_action: dict[str, object | None] = {"value": None}
     finished = {"value": False}
@@ -226,5 +226,12 @@ def exec_popup_menu(
                 mouse_watch_timer.stop()
             except Exception:
                 pass
+        # Меню создаётся на каждый показ с родителем-страницей или окном, а
+        # RoundMenu сам себя не удаляет: без этого каждое открытие оставляло бы
+        # в памяти меню со всеми пунктами до закрытия программы.
+        try:
+            menu.deleteLater()
+        except RuntimeError:
+            pass
 
     return chosen_action["value"]

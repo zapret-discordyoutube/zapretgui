@@ -1257,6 +1257,7 @@ class CodeEditor(PlainTextEdit):
         if not fixes:
             return False
         menu = RoundMenu(parent=self)
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         for fix in fixes:
             menu.addAction(
                 QAction(str(fix.title), menu, triggered=lambda _checked=False, f=fix: self.apply_quick_fix(f))
@@ -1273,6 +1274,7 @@ class CodeEditor(PlainTextEdit):
         if not self.textCursor().hasSelection():
             self.setTextCursor(cursor)
         menu = _CodeEditorContextMenu(self, self.quick_fixes_at_cursor())
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         menu.exec(event.globalPos())
 
     def apply_quick_fix(self, fix) -> bool:

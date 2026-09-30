@@ -20,6 +20,7 @@
 """
 
 import json
+import time
 from typing import Dict, Optional, Callable, Set, List
 
 from log.log import log
@@ -35,13 +36,18 @@ from settings.store import (
     remove_orchestra_locked_target,
     remove_orchestra_user_locked,
     set_orchestra_history,
-    set_orchestra_history_for_target,
+    set_orchestra_history_for_targets,
     set_orchestra_locked_map,
     set_orchestra_locked_strategy,
     set_orchestra_user_locked,
 )
 from orchestra.ignored_targets import is_orchestra_ignored_target
 
+
+# Как часто накопленная история SUCCESS/FAIL пишется в settings.sqlite3.
+# Каждая запись перечитывает и копирует весь документ настроек, поэтому
+# писать на каждое событие winws2 слишком дорого по памяти и диску.
+HISTORY_FLUSH_INTERVAL_SECONDS = 10.0
 
 # Все 9 askey профилей
 ASKEY_ALL = ["tls", "http", "quic", "discord", "wireguard", "mtproto", "dns", "stun", "unknown"]
@@ -89,6 +95,9 @@ class LockedStrategiesManager:
 
         # История стратегий: {hostname: {strategy: {successes, failures}}}
         self.strategy_history: Dict[str, Dict[str, Dict[str, int]]] = {}
+        # Цели, чья история изменилась после последней записи в базу.
+        self._dirty_history_targets: Set[str] = set()
+        self._history_flushed_at = time.monotonic()
 
         # Менеджер заблокированных стратегий (для проверки конфликтов)
         self.blocked_manager = blocked_manager
@@ -379,6 +388,7 @@ class LockedStrategiesManager:
 
             # Очищаем историю
             self.strategy_history.clear()
+            self._dirty_history_targets.clear()
 
             if self.output_callback:
                 self.output_callback("[INFO] Данные обучения и история сброшены")
@@ -482,6 +492,8 @@ class LockedStrategiesManager:
                     continue
                 sanitized[domain] = strategies
             set_orchestra_history(sanitized)
+            self._dirty_history_targets.clear()
+            self._history_flushed_at = time.monotonic()
             log(f"Сохранена история для {len(self.strategy_history)} доменов", "DEBUG")
         except Exception as e:
             log(f"Ошибка сохранения истории: {e}", "ERROR")
@@ -498,7 +510,7 @@ class LockedStrategiesManager:
             'successes': successes,
             'failures': failures
         }
-        set_orchestra_history_for_target(hostname, self.strategy_history[hostname])
+        self._mark_history_dirty(hostname)
 
     def increment_history(self, hostname: str, strategy: int, is_success: bool):
         """Инкрементирует счётчик успехов или неудач для домена/стратегии"""
@@ -515,7 +527,30 @@ class LockedStrategiesManager:
             self.strategy_history[hostname][strat_key]['successes'] += 1
         else:
             self.strategy_history[hostname][strat_key]['failures'] += 1
-        set_orchestra_history_for_target(hostname, self.strategy_history[hostname])
+        self._mark_history_dirty(hostname)
+
+    def _mark_history_dirty(self, hostname: str) -> None:
+        self._dirty_history_targets.add(hostname)
+        if time.monotonic() - self._history_flushed_at >= HISTORY_FLUSH_INTERVAL_SECONDS:
+            self.flush_history()
+
+    def flush_history(self) -> None:
+        """Пишет в базу историю только изменившихся целей одной транзакцией."""
+        dirty = self._dirty_history_targets
+        self._dirty_history_targets = set()
+        self._history_flushed_at = time.monotonic()
+        items = {
+            hostname: self.strategy_history[hostname]
+            for hostname in dirty
+            if hostname in self.strategy_history
+        }
+        if not items:
+            return
+        try:
+            set_orchestra_history_for_targets(items)
+        except Exception as e:
+            self._dirty_history_targets |= dirty
+            log(f"Ошибка сохранения истории: {e}", "ERROR")
 
     def get_history_for_domain(self, hostname: str) -> dict:
         """Возвращает историю стратегий для домена с рейтингами"""

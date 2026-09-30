@@ -28,6 +28,37 @@ class FluentAppWindowChromeTests(unittest.TestCase):
         self.assertEqual(margins.right(), 0)
         self.assertEqual(margins.bottom(), 0)
 
+    def test_background_image_is_decoded_once_downscaled_and_released(self) -> None:
+        import tempfile
+        from unittest.mock import patch
+
+        from PyQt6.QtGui import QColor, QPixmap
+
+        from ui import fluent_app_window
+
+        window = ZapretFluentWindow()
+        window.resize(800, 600)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "bg.png")
+            big = QPixmap(4000, 3000)
+            big.fill(QColor("red"))
+            self.assertTrue(big.save(path))
+
+            window.set_background_image(path)
+            source = window._bg_source.size()
+            self.assertLessEqual(source.width(), 2560)
+            self.assertLessEqual(source.height(), 1600)
+
+            with patch.object(fluent_app_window, "QPixmap", wraps=QPixmap) as pixmap_cls:
+                window.resize(900, 700)
+                window._rescale_bg()
+            loaded_from_disk = [call for call in pixmap_cls.call_args_list if call.args and isinstance(call.args[0], str)]
+            self.assertEqual(loaded_from_disk, [])
+
+        window.set_background_image(None)
+        self.assertIsNone(window._bg_source)
+        self.assertTrue(window._bg_label.pixmap().isNull())
+
     def test_window_chrome_has_no_legacy_border_radius_or_handle_hooks(self) -> None:
         source = inspect.getsource(ZapretFluentWindow)
 

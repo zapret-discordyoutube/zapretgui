@@ -1827,18 +1827,23 @@ def get_orchestra_history_for_target(target: str) -> dict[str, Any]:
     return copy.deepcopy(get_orchestra_history().get(lookup_key, {}))
 
 
-def set_orchestra_history_for_target(target: str, data: dict[str, Any]) -> bool:
-    lookup_key = _normalize_lookup_key(target)
-    if not lookup_key:
-        return False
+def set_orchestra_history_for_targets(items: dict[str, dict[str, Any]]) -> int:
+    """Записывает историю нескольких целей одной транзакцией."""
+    normalized_items = {
+        lookup_key: _as_dict(data)
+        for target, data in _as_dict(items).items()
+        if (lookup_key := _normalize_lookup_key(target))
+    }
+    if not normalized_items:
+        return 0
 
     def _mutator(settings: dict[str, Any]) -> None:
         history = _as_dict(_get_path_value(settings, ("orchestra", "history"), {}))
-        history[lookup_key] = _as_dict(data)
+        history.update(normalized_items)
         _set_path_value(settings, ("orchestra", "history"), history)
 
     _update_settings(_mutator)
-    return True
+    return len(normalized_items)
 
 
 def remove_orchestra_history_target(target: str) -> bool:
@@ -1982,7 +1987,7 @@ __all__ = [
     "set_orchestra_auto_restart_on_discord_fail",
     "set_orchestra_discord_fails_for_restart",
     "set_orchestra_history",
-    "set_orchestra_history_for_target",
+    "set_orchestra_history_for_targets",
     "set_orchestra_keep_debug_file",
     "set_orchestra_lock_successes",
     "set_orchestra_locked_map",

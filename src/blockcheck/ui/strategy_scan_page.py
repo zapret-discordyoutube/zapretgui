@@ -571,7 +571,7 @@ class StrategyScanPage(BasePage):
         if info.tested_count <= 0:
             return False
         try:
-            from qfluentwidgets import MessageBox
+            from ui.fluent_dialog import MessageBox
             from ui.message_box_accessibility import set_message_box_button_accessibility
 
             title = tr_catalog("page.strategy_scan.resume_question_title", default="Подбор уже начинался")
@@ -735,7 +735,7 @@ class StrategyScanPage(BasePage):
         proceed = False
         if not self._cleanup_in_progress:
             try:
-                from qfluentwidgets import MessageBox
+                from ui.fluent_dialog import MessageBox
                 from ui.message_box_accessibility import set_message_box_button_accessibility
 
                 title = tr_catalog("page.strategy_scan.baseline_question_title", default="Подбирать нечего")

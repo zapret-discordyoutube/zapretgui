@@ -66,6 +66,15 @@ class _ManagedMaskDialogLifecycle:
             return super().exec()
         finally:
             self._detach_mask_event_filter()
+            # Диалог создаётся на каждый показ с родителем-страницей, а
+            # qfluentwidgets его не удаляет: без этого каждый показ оставлял бы
+            # в памяти окно со всеми виджетами до закрытия программы.
+            # deleteLater отложен до возврата в цикл событий, поэтому вызывающий
+            # код ещё успевает прочитать поля диалога после exec().
+            try:
+                self.deleteLater()
+            except RuntimeError:
+                pass
 
 
 class MessageBoxBase(_ManagedMaskDialogLifecycle, _QFluentMessageBoxBase):

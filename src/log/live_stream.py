@@ -38,6 +38,12 @@ class LiveLogBridge(QObject):
             # QObject уже удаляется; подписка будет снята в close()/cleanup().
             pass
 
+    def take_snapshot(self) -> LiveLogSnapshot:
+        """Отдаёт стартовый снимок один раз, чтобы мост не держал копию журнала."""
+        snapshot = self.snapshot
+        self.snapshot = LiveLogSnapshot("", snapshot.last_sequence, False)
+        return snapshot
+
     def close(self) -> None:
         token = self._subscription_token
         self._subscription_token = None
@@ -46,6 +52,13 @@ class LiveLogBridge(QObject):
         try:
             self.new_text.disconnect()
         except (TypeError, RuntimeError):
+            pass
+        self.snapshot = LiveLogSnapshot("", self.snapshot.last_sequence, False)
+        # Мост создаётся с parent=страница журнала: без удаления каждый заход
+        # на страницу оставлял бы живой объект до закрытия программы.
+        try:
+            self.deleteLater()
+        except RuntimeError:
             pass
 
 

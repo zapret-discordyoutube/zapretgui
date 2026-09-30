@@ -61,6 +61,10 @@ MAX_ORCHESTRA_LOGS = 10
 # Максимальный размер лог-файла (1 ГБ) - при превышении файл очищается
 MAX_LOG_SIZE_BYTES = 1024 * 1024 * 1024
 
+# Сколько байт с конца лога читать для просмотра: окно всё равно держит
+# только последние строки, а сам файл бывает сотни мегабайт.
+LOG_VIEW_MAX_BYTES = 1024 * 1024
+
 # Интервал проверки размера файла (каждые N строк)
 LOG_SIZE_CHECK_INTERVAL = 1000
 
@@ -644,12 +648,13 @@ class OrchestraRunner:
         else:
             return f"{size / (1024 * 1024):.1f} MB"
 
-    def get_log_content(self, log_id: str) -> Optional[str]:
+    def get_log_content(self, log_id: str, max_bytes: int = LOG_VIEW_MAX_BYTES) -> Optional[str]:
         """
-        Возвращает содержимое лог-файла по ID.
+        Возвращает конец лог-файла по ID (не больше max_bytes).
 
         Args:
             log_id: ID лога
+            max_bytes: сколько байт читать с конца файла
 
         Returns:
             Содержимое файла или None
@@ -659,8 +664,16 @@ class OrchestraRunner:
             return None
 
         try:
-            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-                return f.read()
+            with open(log_path, 'rb') as f:
+                size = os.fstat(f.fileno()).st_size
+                start = max(0, size - max(0, int(max_bytes)))
+                f.seek(start)
+                data = f.read()
+            if start:
+                # Первая строка обрезана посередине — отбрасываем её.
+                newline = data.find(b"\n")
+                data = data[newline + 1:] if newline >= 0 else b""
+            return data.decode('utf-8', errors='replace')
         except Exception as e:
             log(f"Ошибка чтения лога {log_id}: {e}", "DEBUG")
             return None

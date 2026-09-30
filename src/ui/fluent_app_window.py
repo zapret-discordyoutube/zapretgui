@@ -11,7 +11,7 @@ from qfluentwidgets import (
 from qfluentwidgets import NavigationWidget
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel
 from PyQt6.QtGui import QPixmap, QPainter, QColor
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QEvent, QSize, Qt
 
 from config.build_info import APP_VERSION
 
@@ -218,16 +218,34 @@ class ZapretFluentWindow(FluentWindow):
     # Background image support (for РКН Тян preset)
     # ------------------------------------------------------------------
 
+    # Фон больше экрана не нужен: исходник уменьшается один раз при загрузке.
+    _BG_SOURCE_MAX_SIZE = QSize(2560, 1600)
+
     def set_background_image(self, path: str | None) -> None:
         """Set a full-window background image (dimmed). Pass None to hide."""
         if not hasattr(self, '_bg_label'):
             self._bg_label = QLabel(self)
             self._bg_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             self._bg_rawpath = None
+            self._bg_source = None
         if path is None:
+            # Прячем и отпускаем картинки, чтобы выключенный фон не занимал память.
             self._bg_label.hide()
+            self._bg_label.clear()
             self._bg_rawpath = None
+            self._bg_source = None
             return
+        if path != self._bg_rawpath or self._bg_source is None:
+            source = QPixmap(path)
+            if source.isNull():
+                return
+            if source.width() > self._BG_SOURCE_MAX_SIZE.width() or source.height() > self._BG_SOURCE_MAX_SIZE.height():
+                source = source.scaled(
+                    self._BG_SOURCE_MAX_SIZE,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            self._bg_source = source
         self._bg_rawpath = path
         self._rescale_bg()
         self._bg_label.lower()
@@ -235,12 +253,10 @@ class ZapretFluentWindow(FluentWindow):
 
     def _rescale_bg(self) -> None:
         """Rescale and dim the background image to current window size."""
-        if not (hasattr(self, '_bg_label') and getattr(self, '_bg_rawpath', None)):
+        source = getattr(self, '_bg_source', None)
+        if not hasattr(self, '_bg_label') or source is None:
             return
-        pm = QPixmap(self._bg_rawpath)
-        if pm.isNull():
-            return
-        pm = pm.scaled(
+        pm = source.scaled(
             self.size(),
             Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             Qt.TransformationMode.SmoothTransformation,

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from app.feature_facades.logs import LogsFeature
 from log.commands import build_file_read_plan
@@ -84,10 +84,12 @@ class LogPageRuntimeTests(unittest.TestCase):
 
     def test_live_source_applies_memory_snapshot_without_file_reader(self) -> None:
         bridge = SimpleNamespace(
-            snapshot=SimpleNamespace(
-                text="history\n",
-                last_sequence=12,
-                reset_required=True,
+            take_snapshot=Mock(
+                return_value=SimpleNamespace(
+                    text="history\n",
+                    last_sequence=12,
+                    reset_required=True,
+                )
             )
         )
         clear_view = Mock()
@@ -115,6 +117,27 @@ class LogPageRuntimeTests(unittest.TestCase):
         clear_view.assert_called_once_with()
         append_text.assert_called_once_with("history\n")
         set_cursor.assert_called_once_with(12)
+        bridge.take_snapshot.assert_called_once_with()
+
+    def test_closed_live_bridge_drops_snapshot_and_deletes_itself(self) -> None:
+        from log import live_stream
+        from log.log import LiveLogSnapshot
+
+        fake_logger = SimpleNamespace(
+            open_live_subscription=Mock(return_value=(5, LiveLogSnapshot("x" * 4096, 9, True))),
+            close_live_subscription=Mock(),
+        )
+        with patch.object(live_stream, "global_logger", fake_logger):
+            bridge = live_stream.LiveLogBridge(after_sequence=None, on_new_text=Mock())
+            first = bridge.take_snapshot()
+            self.assertEqual(len(first.text), 4096)
+            self.assertEqual(bridge.snapshot.text, "")
+            with patch.object(bridge, "deleteLater") as delete_later:
+                bridge.close()
+
+        fake_logger.close_live_subscription.assert_called_once_with(5)
+        delete_later.assert_called_once_with()
+        self.assertEqual(bridge.snapshot.text, "")
 
     def test_log_file_name_is_cached_before_management_tab_exists(self) -> None:
         page = LogsPage.__new__(LogsPage)

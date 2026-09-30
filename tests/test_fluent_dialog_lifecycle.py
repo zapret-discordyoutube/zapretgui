@@ -159,6 +159,21 @@ class FluentDialogLifecycleTests(unittest.TestCase):
         self.assertIn((dialog.windowMask, dialog), removed)
         self.assertIn((dialog.widget, dialog), removed)
 
+    def test_closed_dialog_is_deleted_instead_of_staying_in_parent(self) -> None:
+        from PyQt6.QtCore import QCoreApplication, QEvent
+
+        parent = self._parent()
+        dialog = MessageBox("Проверка", "Текст", parent)
+        destroyed: list[bool] = []
+        dialog.destroyed.connect(lambda *_: destroyed.append(True))
+
+        QTimer.singleShot(0, dialog.reject)
+        self.assertEqual(dialog.exec(), 0)
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+
+        self.assertEqual(destroyed, [True])
+        self.assertNotIn(dialog, parent.findChildren(MessageBox))
+
     def test_application_does_not_import_unmanaged_message_boxes(self) -> None:
         offenders: list[str] = []
         for path in (ROOT / "src").rglob("*.py"):

@@ -348,6 +348,9 @@ class HostsTilesGrid(QWidget):
         super().resizeEvent(event)
         if event.oldSize().width() != event.size().width():
             self._relayout()
+            # Картинки плиток старой ширины больше не понадобятся.
+            sizes = {(rect.width(), rect.height()) for rect in self._rects}
+            self._pixmaps = {key: pixmap for key, pixmap in self._pixmaps.items() if (key[1], key[2]) in sizes}
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(self.TILE_MIN_WIDTH * 3, self.height())
@@ -458,6 +461,9 @@ class HostsTilesGrid(QWidget):
         painter.end()
         self.rendered_tiles += 1
         if not live:
+            if len(self._pixmaps) >= max(64, len(self._tiles) * 4):
+                # Смена темы, акцента или масштаба экрана копит новые ключи.
+                self._pixmaps.clear()
             self._pixmaps[key] = pixmap
         return pixmap
 

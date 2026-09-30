@@ -57,6 +57,28 @@ class SettingsSqliteStoreTests(unittest.TestCase):
             self.assertEqual(user_version, 1)
             self.assertFalse((root / "user" / "settings.json").exists())
 
+    def test_orchestra_history_for_several_targets_is_written_in_one_update(self) -> None:
+        from settings import store as settings_store
+
+        with TemporaryDirectory() as temp_dir:
+            with patch("settings.store.MAIN_DIRECTORY", temp_dir):
+                settings_store.prepare_settings_database()
+                settings_store.set_orchestra_history({"old.com": {"1": {"successes": 1, "failures": 0}}})
+                with patch.object(settings_store, "_update_settings", wraps=settings_store._update_settings) as update:
+                    written = settings_store.set_orchestra_history_for_targets(
+                        {
+                            "YouTube.com": {"2": {"successes": 3, "failures": 1}},
+                            "discord.com": {"4": {"successes": 0, "failures": 2}},
+                        }
+                    )
+                history = settings_store.get_orchestra_history()
+                settings_store.close_settings_database()
+
+        self.assertEqual(written, 2)
+        self.assertEqual(update.call_count, 1)
+        self.assertEqual(set(history), {"old.com", "youtube.com", "discord.com"})
+        self.assertEqual(history["youtube.com"]["2"], {"successes": 3, "failures": 1})
+
     def test_cache_refreshes_after_another_connection_commits(self) -> None:
         from settings import store as settings_store
 

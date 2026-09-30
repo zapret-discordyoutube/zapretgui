@@ -50,7 +50,7 @@ def start_live_log_source(
             after_sequence=None if should_reset_view else after_sequence,
             on_new_text=on_new_text,
         )
-        snapshot = bridge.snapshot
+        snapshot = bridge.take_snapshot()
         set_bridge_fn(bridge)
         if should_reset_view or snapshot.reset_required:
             clear_log_view_fn()

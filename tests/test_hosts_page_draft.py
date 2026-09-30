@@ -627,6 +627,17 @@ class HostsPageTests(unittest.TestCase):
         grid.grab()
         self.assertLessEqual(grid.rendered_tiles - before, 2)
 
+    def test_tile_pixmap_cache_does_not_grow_while_window_is_resized(self) -> None:
+        page = self._page(_manual_snapshot())
+        grid = page.tiles
+        grid.grab()
+        one_width = len(grid._pixmaps)
+        self.assertGreater(one_width, 0)
+        for width in range(620, 1020, 20):
+            grid.resize(width, grid.height())
+            grid.grab()
+        self.assertLessEqual(len(grid._pixmaps), one_width)
+
     def test_note_in_brackets_moves_to_second_line(self) -> None:
         from hosts.ui.services_tiles import split_service_title
 
