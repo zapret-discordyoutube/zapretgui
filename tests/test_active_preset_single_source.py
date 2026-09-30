@@ -158,6 +158,41 @@ class CoordinatorFallbackTests(unittest.TestCase):
         self.assertEqual(coordinator._active_preset_projection, ("zapret2_mode", "gone.txt"))
 
 
+class RestoredSelectionTests(unittest.TestCase):
+    def test_restored_file_is_applied_even_if_last_switch_had_its_name(self) -> None:
+        from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
+
+        coordinator = PresetRuntimeCoordinator.__new__(PresetRuntimeCoordinator)
+        coordinator._ui_state_store = None
+        # Последнее переключение было на X; пока X не было, DPI перезапустился
+        # на запасном D — координатор этого не видел.
+        coordinator._last_active_preset_key = ("zapret2_mode", "x.txt")
+        coordinator._is_current_preset_method = lambda _method: True
+        coordinator._publish_active_preset_revision_deferred = Mock()
+        coordinator.schedule_refresh_after_preset_switch = Mock()
+        coordinator._schedule_active_preset_file_watcher_setup = Mock()
+        coordinator._request_selected_source_preset_apply = Mock()
+
+        PresetRuntimeCoordinator.handle_selection_restored(coordinator, "zapret2_mode", "X.txt")
+
+        coordinator._request_selected_source_preset_apply.assert_called_once()
+
+    def test_store_announces_restore_before_switch(self) -> None:
+        from presets.selection_service import SELECTION_REASON_RESTORED
+        from presets.ui_store import PresetUiStore
+
+        store = PresetUiStore("winws2", SimpleNamespace(), selection_service=SimpleNamespace())
+        order: list[str] = []
+        store.preset_selection_restored.connect(lambda name: order.append(f"restored:{name}"))
+        store.preset_switched.connect(lambda name: order.append(f"switched:{name}"))
+
+        store.notify_selection_changed("X.txt", SELECTION_REASON_RESTORED)
+
+        # Сначала runtime применяет вернувшийся файл, потом обычное
+        # «переключено» отсекается как дубль.
+        self.assertEqual(order, ["restored:X.txt", "switched:X.txt"])
+
+
 class RawEditorHeaderTests(unittest.TestCase):
     def test_header_follows_selection_made_elsewhere_in_same_mode_only(self) -> None:
         from presets.ui.common.preset_subpage_base import PresetRawEditorPage

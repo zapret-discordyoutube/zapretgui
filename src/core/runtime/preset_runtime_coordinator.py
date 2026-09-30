@@ -242,6 +242,16 @@ class PresetRuntimeCoordinator(QObject):
         self._publish_active_preset_revision_deferred()
         self.schedule_refresh_after_preset_switch()
 
+    def handle_selection_restored(self, launch_method: str, preset_file_name: str) -> None:
+        """Вернулся выбранный файл. На чём сейчас работает runtime — неизвестно
+        (мог перезапуститься на запасном), поэтому применяем без сравнения с
+        последним переключением. Одинаковый конфиг runner распознаёт сам."""
+        method = normalize_launch_method(launch_method, default="")
+        if not self._is_current_preset_method(method):
+            return
+        self._last_active_preset_key = None
+        self.handle_preset_switched(method, preset_file_name)
+
     def handle_preset_identity_changed(self, launch_method: str, preset_file_name: str) -> None:
         method = normalize_launch_method(launch_method, default="")
         if not self._is_current_preset_method(method):

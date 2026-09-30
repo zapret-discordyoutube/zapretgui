@@ -24,6 +24,10 @@ class PresetUiStore(QObject):
     # (пропавший файл, запасной файл): выбранный пресет не найден, для запуска
     # используется запасной; выбор в настройках не меняется.
     preset_selection_fallback = pyqtSignal(str, str)
+    # Вернулся выбранный файл: runtime обязан перейти на него, даже если
+    # «последнее переключение» у него уже это имя (DPI мог перезапуститься
+    # на запасном, пока файла не было).
+    preset_selection_restored = pyqtSignal(str)
 
     def __init__(
         self,
@@ -64,13 +68,15 @@ class PresetUiStore(QObject):
 
     def notify_selection_changed(self, file_name: str, reason: str, detail: str = "") -> None:
         """Событие PresetSelectionService: единая точка смены выбора."""
-        from .selection_service import SELECTION_REASON_FALLBACK, SELECTION_REASON_USER
+        from .selection_service import SELECTION_REASON_FALLBACK, SELECTION_REASON_RESTORED, SELECTION_REASON_USER
 
         if reason == SELECTION_REASON_FALLBACK:
             # Работающий DPI не переключаем на запасной пресет сам по себе:
             # только сообщаем (страницы покажут запасной активным).
             self.preset_selection_fallback.emit(str(detail or ""), str(file_name or ""))
             return
+        if reason == SELECTION_REASON_RESTORED:
+            self.preset_selection_restored.emit(str(file_name or ""))
         if reason != SELECTION_REASON_USER or not self._selected_source_file_name:
             # Возврат файла: имя может совпасть с последним отправленным
             # (до подмены) — всё равно сообщаем, иначе страницы и runtime
