@@ -39,6 +39,7 @@ from app.ui_texts import tr as tr_catalog
 from log.log import log
 
 from orchestra.ignored_targets import is_orchestra_ignored_target
+from orchestra.ui.rows_window import RowsWindow, matching_items
 
 
 class BlockedDomainRow(QFrame):
@@ -460,6 +461,11 @@ class OrchestraBlockedPage(BasePage):
         self.rows_layout.setContentsMargins(0, 8, 0, 0)
         self.rows_layout.setSpacing(4)
         list_layout.addWidget(self.rows_container)
+
+        # Строятся только первые ряды, подходящие под поиск (сначала
+        # пользовательские); остальные — по кнопке «Показать ещё».
+        self._rows_window = RowsWindow(self, on_refresh=self._refresh_blocked_list, tr=self._tr)
+        list_layout.addWidget(self._rows_window.button)
 
         # Храним ссылки на ряды для быстрого доступа
         self._blocked_rows: list[BlockedDomainRow] = []
@@ -957,6 +963,12 @@ class OrchestraBlockedPage(BasePage):
 
         user_items = snapshot.user_items
         default_items = snapshot.default_items
+        search = self.search_input.text()
+        user_matched = matching_items(user_items, search, lambda item: item.hostname)
+        default_matched = matching_items(default_items, search, lambda item: item.hostname)
+        limit = self._rows_window.limit
+        user_shown = user_matched[:limit]
+        default_shown = default_matched[: max(0, limit - len(user_shown))]
 
         if user_items:
             user_header = QLabel(
@@ -969,7 +981,7 @@ class OrchestraBlockedPage(BasePage):
             user_header.setProperty("blockedSection", "user")
             self.rows_layout.addWidget(user_header)
 
-            for item in user_items:
+            for item in user_shown:
                 row = BlockedDomainRow(
                     item.hostname,
                     item.strategy,
@@ -1004,7 +1016,7 @@ class OrchestraBlockedPage(BasePage):
             default_header.setProperty("blockedSection", "default")
             self.rows_layout.addWidget(default_header)
 
-            for item in default_items:
+            for item in default_shown:
                 row = BlockedDomainRow(
                     item.hostname,
                     item.strategy,
@@ -1019,20 +1031,16 @@ class OrchestraBlockedPage(BasePage):
                 self._blocked_rows.append(row)
 
         self._update_count()
-        self._apply_filter()
+        self._rows_window.update_button(
+            shown=len(user_shown) + len(default_shown),
+            total=len(user_matched) + len(default_matched),
+        )
 
         self._apply_page_theme()
 
     def _filter_list(self, text: str):
-        """Фильтрует список по введённому тексту"""
-        self._apply_filter()
-
-    def _apply_filter(self):
-        """Применяет текущий фильтр к рядам"""
-        search = self.search_input.text().lower().strip()
-        for row in self._blocked_rows:
-            hostname = row.hostname.lower()
-            row.setVisible(search in hostname if search else True)
+        """Перестраивает список по введённому тексту (с задержкой на набор)"""
+        self._rows_window.on_search_changed()
 
     def _on_row_strategy_changed(self, hostname: str, old_strategy: int, new_strategy: int, askey: str):
         """Автосохранение при изменении стратегии в SpinBox"""
@@ -1151,6 +1159,9 @@ class OrchestraBlockedPage(BasePage):
     def cleanup(self) -> None:
         self._cleanup_in_progress = True
         self._refresh_loading = False
+        rows_window = self.__dict__.get("_rows_window")
+        if rows_window is not None:
+            rows_window.stop()
         self._snapshot_load_state_obj().reset()
         self._snapshot_load_runtime.stop(
             blocking=False,

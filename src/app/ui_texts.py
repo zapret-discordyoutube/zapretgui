@@ -2309,6 +2309,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Измените номер стратегии и она автоматически сохранится",
         "en": "Change strategy number and it will be saved automatically",
     },
+    "page.orchestra.rows.show_more": {
+        "ru": "Показать ещё {count} (скрыто {hidden})",
+        "en": "Show {count} more ({hidden} hidden)",
+    },
     "page.orchestra.locked.row.unlock.tooltip": {
         "ru": "Разлочить",
         "en": "Unlock",

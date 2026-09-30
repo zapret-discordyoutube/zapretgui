@@ -41,6 +41,7 @@ from app.ui_texts import tr as tr_catalog
 from log.log import log
 
 from orchestra.ignored_targets import is_orchestra_ignored_target
+from orchestra.ui.rows_window import RowsWindow, matching_items
 
 
 class LockedDomainRow(QFrame):
@@ -361,6 +362,11 @@ class OrchestraLockedPage(BasePage):
         self.rows_layout.setContentsMargins(0, 8, 0, 0)
         self.rows_layout.setSpacing(4)
         list_layout.addWidget(self.rows_container)
+
+        # Строятся только первые ряды, подходящие под поиск; остальные —
+        # по кнопке «Показать ещё».
+        self._rows_window = RowsWindow(self, on_refresh=self._refresh_locked_list, tr=self._tr)
+        list_layout.addWidget(self._rows_window.button)
 
         # Храним ссылки на ряды для быстрого доступа
         self._domain_rows = {}
@@ -859,9 +865,11 @@ class OrchestraLockedPage(BasePage):
 
         snapshot = self._orchestra.current_locked_snapshot()
         self._all_locked_data = [(item.domain, item.strategy, item.askey) for item in snapshot.items]
+        matched = matching_items(snapshot.items, self.search_input.text(), lambda item: item.domain)
+        shown = matched[: self._rows_window.limit]
 
-        # Создаём ряды для каждого домена
-        for item in snapshot.items:
+        # Создаём ряды только для показываемой части списка
+        for item in shown:
             row = LockedDomainRow(
                 item.domain,
                 item.strategy,
@@ -873,18 +881,11 @@ class OrchestraLockedPage(BasePage):
             self.rows_layout.addWidget(row)
 
         self._update_count()
-        self._apply_filter()
+        self._rows_window.update_button(shown=len(shown), total=len(matched))
 
     def _filter_list(self, text: str):
-        """Фильтрует список по введённому тексту"""
-        self._apply_filter()
-
-    def _apply_filter(self):
-        """Применяет текущий фильтр к рядам"""
-        search = self.search_input.text().lower().strip()
-        for key, row in self._domain_rows.items():
-            domain = row.domain.lower()
-            row.setVisible(search in domain if search else True)
+        """Перестраивает список по введённому тексту (с задержкой на набор)"""
+        self._rows_window.on_search_changed()
 
     def _on_row_strategy_changed(self, domain: str, new_strategy: int, askey: str):
         """Автосохранение при изменении стратегии в SpinBox"""
@@ -983,6 +984,9 @@ class OrchestraLockedPage(BasePage):
     def cleanup(self) -> None:
         self._cleanup_in_progress = True
         self._refresh_loading = False
+        rows_window = self.__dict__.get("_rows_window")
+        if rows_window is not None:
+            rows_window.stop()
         self._snapshot_load_state_obj().reset()
         self._snapshot_load_runtime.stop(
             blocking=False,
