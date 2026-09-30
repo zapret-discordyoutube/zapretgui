@@ -14,8 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import math
+import time
 
-from PyQt6.QtCore import QPointF, QSize, Qt, QVariantAnimation, pyqtSignal
+from PyQt6.QtCore import QPointF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -31,7 +32,7 @@ from qfluentwidgets import (
     themeColor,
 )
 
-from dns.ui.provider_grid import badge_color, ease_out_cubic, paint_glow, paint_orbit
+from dns.ui.provider_grid import CHARGE_MS, FRAME_MS, badge_color, comet_geometry, ease_out_cubic, paint_comet, paint_glow
 from ui.animation_policy import are_live_animations_enabled
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import set_tooltip, style_semantic_caption_label
@@ -64,14 +65,14 @@ class _Badge(QWidget):
     """Крупный значок текущего DNS в круге его цвета.
 
     Светится мягким ореолом своего цвета. Пока DNS применяется, вокруг бежит
-    дуга. При смене сервера значок переворачивается, как монетка (на обороте
-    уже новый), и от него расходится вспышка свечения.
+    комета и всегда замыкает круг, даже если DNS встал мгновенно. При смене
+    сервера значок переворачивается, как монетка (на обороте уже новый), и
+    от него расходится вспышка свечения.
     """
 
     CIRCLE = 52
     BOX = 72
     FLIP_MS = 900
-    SPIN_PERIOD_MS = 900
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -80,7 +81,9 @@ class _Badge(QWidget):
         self._old_icon_name = ""
         self._old_color = ""
         self._flip = -1.0
-        self._spin_angle = 0.0
+        self._clock = time.monotonic
+        self._busy_since: float | None = None
+        self._busy_wanted = False
         self.setFixedSize(self.BOX, self.BOX)
         self._flip_anim = QVariantAnimation(self)
         self._flip_anim.setStartValue(0.0)
@@ -88,12 +91,9 @@ class _Badge(QWidget):
         self._flip_anim.setDuration(self.FLIP_MS)
         self._flip_anim.valueChanged.connect(self._on_flip_value)
         self._flip_anim.finished.connect(self._on_flip_finished)
-        self._spin_anim = QVariantAnimation(self)
-        self._spin_anim.setStartValue(0.0)
-        self._spin_anim.setEndValue(360.0)
-        self._spin_anim.setDuration(self.SPIN_PERIOD_MS)
-        self._spin_anim.setLoopCount(-1)
-        self._spin_anim.valueChanged.connect(self._on_spin_value)
+        self._ticker = QTimer(self)
+        self._ticker.setInterval(FRAME_MS)
+        self._ticker.timeout.connect(self._tick)
 
     def set_icon(self, icon_name: str, color: str) -> None:
         icon_name = icon_name or "fa5s.globe"
@@ -108,16 +108,23 @@ class _Badge(QWidget):
         self.update()
 
     def set_busy(self, busy: bool) -> None:
-        busy = bool(busy) and are_live_animations_enabled()
-        if busy and not self.is_busy():
-            self._spin_anim.start()
-        elif not busy and self.is_busy():
-            self._spin_anim.stop()
-            self._spin_angle = 0.0
-            self.update()
+        """Комета вокруг значка; после снятия занятости она дожимает круг до конца."""
+        self._busy_wanted = bool(busy) and are_live_animations_enabled()
+        if self._busy_wanted and self._busy_since is None:
+            self._busy_since = self._clock()
+            self._ticker.start()
+        self._tick()
 
     def is_busy(self) -> bool:
-        return self._spin_anim.state() == QVariantAnimation.State.Running
+        """Видна ли сейчас комета."""
+        return self._busy_since is not None
+
+    def _tick(self) -> None:
+        if self._busy_since is not None and not self._busy_wanted:
+            if (self._clock() - self._busy_since) * 1000.0 >= CHARGE_MS:
+                self._busy_since = None
+                self._ticker.stop()
+        self.update()
 
     def is_flipping(self) -> bool:
         return self._flip_anim.state() == QVariantAnimation.State.Running
@@ -128,10 +135,6 @@ class _Badge(QWidget):
 
     def _on_flip_finished(self) -> None:
         self._flip = -1.0
-        self.update()
-
-    def _on_spin_value(self, value) -> None:
-        self._spin_angle = float(value)
         self.update()
 
     def paintEvent(self, _event) -> None:  # noqa: N802
@@ -171,8 +174,9 @@ class _Badge(QWidget):
         painter.drawPixmap(-icon_size // 2, -icon_size // 2, pixmap)
         painter.restore()
 
-        if self.is_busy():
-            paint_orbit(painter, center, half + 4, self._spin_angle, QColor(themeColor()), span=120.0, width=2.6)
+        if self._busy_since is not None:
+            head, tail, _looping = comet_geometry((self._clock() - self._busy_since) * 1000.0)
+            paint_comet(painter, center, half + 4, head, tail, QColor(themeColor()), width=2.8, head_radius=3.2)
         painter.end()
 
 

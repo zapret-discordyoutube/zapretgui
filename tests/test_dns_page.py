@@ -174,7 +174,7 @@ class DnsPageTests(unittest.TestCase):
         self.assertFalse(payload["ipv6_available"])
         pending = [tile.key for tile in self._provider_tiles(page) if tile.pending]
         self.assertEqual(pending, ["Google DNS"])
-        self.assertTrue(page.grid.is_spinning())
+        self.assertTrue(page.grid.is_charging("Google DNS"))
         self.assertTrue(page.now_panel.badge.is_busy())
         self.assertEqual(page.now_panel.detail_label.text(), "Применяю…")
 
@@ -184,9 +184,11 @@ class DnsPageTests(unittest.TestCase):
 
         self.assertIsNone(page._pending_choice)
         self.assertEqual(page.now_panel.title_label.text(), "Google DNS")
-        # DNS встал: дуга остановилась, значок сервера делает оборот со свечением.
-        self.assertFalse(page.grid.is_spinning())
-        self.assertFalse(page.now_panel.badge.is_busy())
+        # DNS встал мгновенно: комета сначала замыкает круг, потом значок делает оборот.
+        self.assertTrue(page.grid.is_charging("Google DNS"))
+        page.grid._clock = lambda: 10**9
+        page.grid._tick()
+        self.assertFalse(page.grid.is_charging())
         self.assertEqual(page.grid.settling_keys(), ["Google DNS"])
         self.info_bar.warning.assert_not_called()
 

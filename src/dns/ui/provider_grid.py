@@ -10,10 +10,12 @@
 меню) на своём DNS открывает меню правки.
 
 Движение (только при включённых «лёгких анимациях»):
-- пока DNS применяется, вокруг значка сервера бежит дуга, в углу крутится
-  маленький индикатор;
-- когда DNS встал, значок делает полный оборот, от него расходится свечение
-  цвета сервера, галочка «выпрыгивает»;
+- «зарядка»: по щелчку от верхней точки значка по кругу бежит комета
+  (яркая голова со свечением и тающий хвост) и всегда проходит полный круг
+  за CHARGE_MS — даже если Windows записала DNS за доли секунды. Если
+  запись дольше, комета кружит дальше, пока DNS не встанет;
+- круг замкнулся и DNS встал — значок делает полный оборот, от него
+  расходится свечение цвета сервера, галочка «выпрыгивает»;
 - у выбранного сервера значок мягко светится всегда.
 Анимации — QVariantAnimation (общий выключатель анимаций подменяет только
 QPropertyAnimation) и перерисовывают лишь свои плитки.
@@ -22,9 +24,10 @@ QPropertyAnimation) и перерисовывают лишь свои плитк
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QVariantAnimation, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QRadialGradient
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 from qfluentwidgets import FluentIcon, getFont, isDarkTheme, themeColor
@@ -36,7 +39,11 @@ from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
 
 ADD_TILE_KEY = "__add__"
 
-SPIN_PERIOD_MS = 900
+# Комета проходит полный круг за это время, как бы быстро ни встал DNS.
+CHARGE_MS = 650
+# После полного круга, пока DNS ещё пишется, комета делает оборот за это время.
+ORBIT_PERIOD_MS = 800
+FRAME_MS = 16
 SETTLE_MS = 950
 
 
@@ -74,16 +81,63 @@ def paint_glow(painter: QPainter, center: QPointF, radius: float, color: QColor,
     painter.restore()
 
 
-def paint_orbit(painter: QPainter, center: QPointF, radius: float, angle: float, color: QColor, *, span: float = 110.0, width: float = 2.2) -> None:
-    """Дуга, бегущая по кругу: angle — текущий поворот в градусах."""
-    pen = QPen(color, width)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+def ease_in_out(t: float) -> float:
+    t = min(max(t, 0.0), 1.0)
+    return 0.5 - 0.5 * math.cos(math.pi * t)
+
+
+def comet_geometry(elapsed_ms: float) -> tuple[float, float, bool]:
+    """(угол головы от 12 часов по часовой, длина хвоста в градусах, круг пройден).
+
+    Первые CHARGE_MS голова разгоняется от 12 часов и проходит полный круг,
+    хвост тянется за ней от старта. Дальше комета кружит с хвостом 140°.
+    """
+    if elapsed_ms < CHARGE_MS:
+        head = 360.0 * ease_in_out(elapsed_ms / CHARGE_MS)
+        return head, max(head, 1.0), False
+    turns = (elapsed_ms - CHARGE_MS) / ORBIT_PERIOD_MS
+    return (360.0 * turns) % 360.0, 140.0, True
+
+
+def paint_comet(
+    painter: QPainter,
+    center: QPointF,
+    radius: float,
+    head_deg: float,
+    tail_deg: float,
+    color: QColor,
+    *,
+    width: float = 2.4,
+    head_radius: float = 2.8,
+) -> None:
+    """Комета по кругу: тающий хвост из коротких отрезков и яркая голова со свечением.
+
+    Углы — от 12 часов по часовой стрелке.
+    """
+    steps = max(6, int(tail_deg / 6))
     painter.save()
-    painter.setPen(pen)
     painter.setBrush(Qt.BrushStyle.NoBrush)
     box = QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2)
-    painter.drawArc(box, int(-angle * 16), int(span * 16))
+    for step in range(steps):
+        share = (step + 1) / steps  # 0 — кончик хвоста, 1 — у головы
+        segment_end = head_deg - tail_deg * (1.0 - share)
+        segment = tail_deg / steps + 0.8
+        faded = QColor(color)
+        faded.setAlphaF(min(1.0, 0.08 + 0.92 * share ** 1.6))
+        pen = QPen(faded, width * (0.55 + 0.45 * share))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        # В Qt 0° — 3 часа, против часовой; переводим «от 12 по часовой».
+        painter.drawArc(box, int((90.0 - segment_end) * 16), int(segment * 16))
+    radians = math.radians(90.0 - head_deg)
+    head = QPointF(center.x() + radius * math.cos(radians), center.y() - radius * math.sin(radians))
+    paint_glow(painter, head, head_radius * 3.2, color, 1.4)
+    painter.setPen(Qt.PenStyle.NoPen)
+    tip = QColor(color).lighter(135)
+    painter.setBrush(tip)
+    painter.drawEllipse(head, head_radius, head_radius)
     painter.restore()
+
 
 # Пороги цветной точки замера, мс.
 LATENCY_FAST_MS = 50
@@ -209,14 +263,14 @@ class DnsProviderGrid(QWidget):
         self._flash_anim.setDuration(self.FLASH_MS)
         self._flash_anim.valueChanged.connect(self._on_flash_value)
         self._flash_anim.finished.connect(self._on_flash_finished)
-        # Вращение, пока DNS применяется: бесконечный круг 0→360°.
-        self._spin_angle = 0.0
-        self._spin_anim = QVariantAnimation(self)
-        self._spin_anim.setStartValue(0.0)
-        self._spin_anim.setEndValue(360.0)
-        self._spin_anim.setDuration(SPIN_PERIOD_MS)
-        self._spin_anim.setLoopCount(-1)
-        self._spin_anim.valueChanged.connect(self._on_spin_value)
+        # «Зарядка» кометой: ключ → момент начала; кадры идут от QTimer.
+        self._clock = time.monotonic
+        self._charging: dict[str, float] = {}
+        # DNS уже встал, но комета ещё не замкнула круг: оборот — после.
+        self._landed: set[str] = set()
+        self._ticker = QTimer(self)
+        self._ticker.setInterval(FRAME_MS)
+        self._ticker.timeout.connect(self._tick)
         # «DNS встал»: оборот значка, свечение, галочка.
         self._settle: dict[str, float] = {}
         self._settle_anim = QVariantAnimation(self)
@@ -248,21 +302,18 @@ class DnsProviderGrid(QWidget):
 
     def set_tiles(self, tiles: list[DnsTile]) -> None:
         cursor_key = self._key_at(self._cursor)
-        was_pending = {tile.key for tile in self._tiles if tile.pending}
-        landed = [tile.key for tile in tiles if tile.key in was_pending and tile.selected and not tile.pending]
         self._tiles = list(tiles)
         self._hover = -1
         self._pressed = -1
         self._relayout()
         self._cursor = self._index_of(cursor_key)
         self._sync_accessibility()
-        self._sync_spin()
-        for key in landed:
-            self.settle(key)
+        self._sync_charging()
         self.update()
 
-    def is_spinning(self) -> bool:
-        return self._spin_anim.state() == QVariantAnimation.State.Running
+    def is_charging(self, key: str | None = None) -> bool:
+        """Идёт ли «зарядка» кометой (у плитки key или у любой)."""
+        return key in self._charging if key else bool(self._charging)
 
     def settling_keys(self) -> list[str]:
         return list(self._settle)
@@ -275,19 +326,54 @@ class DnsProviderGrid(QWidget):
         self._settle_anim.stop()
         self._settle_anim.start()
 
-    def _sync_spin(self) -> None:
-        spinning = any(tile.pending for tile in self._tiles) and are_live_animations_enabled()
-        if spinning and not self.is_spinning():
-            self._spin_anim.start()
-        elif not spinning and self.is_spinning():
-            self._spin_anim.stop()
-            self._spin_angle = 0.0
+    def _sync_charging(self) -> None:
+        if not are_live_animations_enabled():
+            self._charging.clear()
+            self._landed.clear()
+            self._ticker.stop()
+            return
+        now = self._clock()
+        by_key = {tile.key: tile for tile in self._tiles if tile.kind == "provider"}
+        for key, tile in by_key.items():
+            if tile.pending and key not in self._charging:
+                self._charging[key] = now
+                self._landed.discard(key)
+        for key in list(self._charging):
+            tile = by_key.get(key)
+            if tile is not None and tile.pending:
+                continue
+            if tile is not None and tile.selected:
+                self._landed.add(key)  # DNS встал — оборот, когда круг замкнётся
+            else:
+                self._charging.pop(key, None)  # не получилось или плитки больше нет
+                self._landed.discard(key)
+        self._finish_charged(now)
+        if self._charging and not self._ticker.isActive():
+            self._ticker.start()
+        elif not self._charging:
+            self._ticker.stop()
 
-    def _on_spin_value(self, value) -> None:
-        self._spin_angle = float(value)
-        for index, tile in enumerate(self._tiles):
-            if tile.pending and index < len(self._rects):
+    def _finish_charged(self, now: float) -> None:
+        for key in list(self._landed):
+            if (now - self._charging.get(key, now)) * 1000.0 >= CHARGE_MS:
+                self._charging.pop(key, None)
+                self._landed.discard(key)
+                self.settle(key)
+                index = self._index_of(key)
+                if index >= 0:
+                    self.update(self._rects[index])
+
+    def _tick(self) -> None:
+        self._finish_charged(self._clock())
+        for key in self._charging:
+            index = self._index_of(key)
+            if index >= 0:
                 self.update(self._rects[index])
+        if not self._charging:
+            self._ticker.stop()
+
+    def _looks_pending(self, tile: DnsTile) -> bool:
+        return tile.pending or tile.key in self._charging
 
     def _on_settle_value(self, value) -> None:
         for key in list(self._settle):
@@ -475,8 +561,10 @@ class DnsProviderGrid(QWidget):
         painter.drawPixmap(-self._ICON // 2, -self._ICON // 2, icon)
         painter.restore()
 
-        if tile.pending:
-            paint_orbit(painter, center, half + 3, self._spin_angle, QColor(themeColor()))
+        started = self._charging.get(tile.key)
+        if started is not None:
+            head, tail, _looping = comet_geometry((self._clock() - started) * 1000.0)
+            paint_comet(painter, center, half + 3.5, head, tail, QColor(themeColor()))
 
     def _paint_provider(self, painter: QPainter, index: int, rect: QRect, tile: DnsTile, tokens, dark: bool) -> None:
         painter.save()
@@ -490,7 +578,8 @@ class DnsProviderGrid(QWidget):
         text_left = rect.left() + pad + self._BADGE + 12
         right = rect.right() - pad
         mark_width = 0
-        if tile.selected or tile.pending:
+        looks_pending = self._looks_pending(tile)
+        if tile.selected or looks_pending:
             mark_width = 26
             self._paint_mark(painter, QRect(right - 18, rect.top() + pad, 18, 18), tile)
 
@@ -503,28 +592,27 @@ class DnsProviderGrid(QWidget):
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             QFontMetrics(title_font).elidedText(tile.title, Qt.TextElideMode.ElideRight, title_rect.width()),
         )
-        note = self._texts.applying if tile.pending else tile.note
+        note = self._texts.applying if looks_pending else tile.note
         self._paint_text(
             painter,
             QRect(text_left, rect.top() + pad + 19, right - text_left - mark_width, 18),
             note,
             size=12,
-            color=QColor(themeColor()) if tile.pending else to_qcolor(tokens.fg_muted),
+            color=QColor(themeColor()) if looks_pending else to_qcolor(tokens.fg_muted),
         )
         self._paint_footer(painter, QRect(rect.left() + pad, rect.bottom() - pad - 17, rect.width() - 2 * pad, 18), tile, tokens, dark)
         painter.restore()
 
     def _paint_mark(self, painter: QPainter, area: QRect, tile: DnsTile) -> None:
-        """Галочка выбранного сервера; пока DNS применяется — крутящийся индикатор."""
+        """Галочка выбранного сервера; пока DNS применяется — пустое кольцо-гнездо."""
         accent = QColor(themeColor())
         box = QRectF(area).adjusted(1, 1, -1, -1)
-        if tile.pending:
+        if self._looks_pending(tile):
             faint = QColor(accent)
-            faint.setAlphaF(0.25)
-            painter.setPen(QPen(faint, 2.0))
+            faint.setAlphaF(0.35)
+            painter.setPen(QPen(faint, 1.6))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(box.adjusted(1, 1, -1, -1))
-            paint_orbit(painter, box.center(), box.width() / 2 - 1, self._spin_angle * 1.6, accent, span=100.0, width=2.0)
             return
         settle = self._settle.get(tile.key)
         painter.save()
@@ -808,7 +896,8 @@ __all__ = [
     "badge_color",
     "ease_out_cubic",
     "paint_glow",
-    "paint_orbit",
+    "comet_geometry",
+    "paint_comet",
     "pop_scale",
     "latency_text",
     "tile_accessible_text",

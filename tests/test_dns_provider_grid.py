@@ -156,6 +156,8 @@ class DnsProviderGridMotionTests(unittest.TestCase):
         grid = DnsProviderGrid()
         self.addCleanup(grid.deleteLater)
         grid.resize(560, 100)
+        self.now = [100.0]
+        grid._clock = lambda: self.now[0]
         return grid
 
     @staticmethod
@@ -165,19 +167,39 @@ class DnsProviderGridMotionTests(unittest.TestCase):
             for key in ("Cloudflare", "Google DNS")
         ]
 
-    def test_orbit_spins_only_while_dns_is_applied_then_icon_settles(self) -> None:
+    def test_fast_apply_still_draws_full_circle_before_settle(self) -> None:
+        from dns.ui.provider_grid import CHARGE_MS
+
         grid = self._grid()
         grid.set_tiles(self._tiles(selected="Cloudflare"))
-        self.assertFalse(grid.is_spinning())
+        self.assertFalse(grid.is_charging())
 
         grid.set_tiles(self._tiles(pending="Google DNS"))
-        self.assertTrue(grid.is_spinning())
+        self.assertTrue(grid.is_charging("Google DNS"))
+
+        # Windows записала DNS за 0,1 с: комета ещё не замкнула круг — оборота нет.
+        self.now[0] += 0.1
+        grid.set_tiles(self._tiles(selected="Google DNS"))
+        self.assertTrue(grid.is_charging("Google DNS"))
         self.assertEqual(grid.settling_keys(), [])
+        self.assertEqual(grid.tile("Google DNS").pending, False)
+
+        self.now[0] += CHARGE_MS / 1000.0
+        grid._tick()
+        self.assertFalse(grid.is_charging())
+        self.assertEqual(grid.settling_keys(), ["Google DNS"])
+
+    def test_slow_apply_keeps_circling_and_settles_right_away(self) -> None:
+        grid = self._grid()
+        grid.set_tiles(self._tiles(pending="Google DNS"))
+
+        self.now[0] += 3.0
+        grid._tick()
+        self.assertTrue(grid.is_charging("Google DNS"))
 
         grid.set_tiles(self._tiles(selected="Google DNS"))
-        self.assertFalse(grid.is_spinning())
+        self.assertFalse(grid.is_charging())
         self.assertEqual(grid.settling_keys(), ["Google DNS"])
-        self.assertFalse(grid.grab().isNull())
 
     def test_failed_apply_does_not_play_settle(self) -> None:
         grid = self._grid()
@@ -186,21 +208,31 @@ class DnsProviderGridMotionTests(unittest.TestCase):
         grid.set_tiles(self._tiles(selected="Cloudflare"))
 
         self.assertEqual(grid.settling_keys(), [])
-        self.assertFalse(grid.is_spinning())
+        self.assertFalse(grid.is_charging())
 
     def test_no_motion_when_live_animations_are_off(self) -> None:
         grid = self._grid(enabled=False)
         grid.set_tiles(self._tiles(pending="Google DNS"))
-        self.assertFalse(grid.is_spinning())
+        self.assertFalse(grid.is_charging())
 
         grid.set_tiles(self._tiles(selected="Google DNS"))
         self.assertEqual(grid.settling_keys(), [])
 
+    def test_comet_runs_one_full_circle_then_orbits(self) -> None:
+        from dns.ui.provider_grid import CHARGE_MS, comet_geometry
+
+        self.assertEqual(comet_geometry(0.0)[0], 0.0)
+        self.assertAlmostEqual(comet_geometry(CHARGE_MS / 2)[0], 180.0, places=3)
+        head, tail, looping = comet_geometry(CHARGE_MS - 1)
+        self.assertGreater(head, 359.0)
+        self.assertFalse(looping)
+        self.assertEqual(comet_geometry(CHARGE_MS + 200)[1:], (140.0, True))
+
     def test_every_motion_frame_paints(self) -> None:
         grid = self._grid()
         grid.set_tiles(self._tiles(pending="Google DNS"))
-        for angle in (0.0, 120.0, 359.0):
-            grid._on_spin_value(angle)
+        for step in (0.0, 0.2, 0.5, 0.9, 2.0):
+            self.now[0] = 100.0 + step
             self.assertFalse(grid.grab().isNull())
         grid.set_tiles(self._tiles(selected="Google DNS"))
         for progress in (0.0, 0.3, 0.6, 1.0):
@@ -245,14 +277,22 @@ class DnsNowBadgeMotionTests(unittest.TestCase):
         badge.set_icon("fa5s.bolt", "#f48120")
         self.assertFalse(badge.is_flipping())
 
-    def test_orbit_runs_while_busy(self) -> None:
+    def test_comet_finishes_its_circle_after_busy_ends(self) -> None:
+        from dns.ui.provider_grid import CHARGE_MS
+
         badge = self._badge()
+        now = [10.0]
+        badge._clock = lambda: now[0]
 
         badge.set_busy(True)
         self.assertTrue(badge.is_busy())
-        badge._on_spin_value(90.0)
+        now[0] += 0.1
         self.assertFalse(badge.grab().isNull())
         badge.set_busy(False)
+        self.assertTrue(badge.is_busy())  # круг ещё не замкнут
+
+        now[0] += CHARGE_MS / 1000.0
+        badge._tick()
         self.assertFalse(badge.is_busy())
 
     def test_badge_stays_still_when_animations_are_off(self) -> None:
