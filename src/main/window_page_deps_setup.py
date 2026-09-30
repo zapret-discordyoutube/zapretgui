@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-def build_window_page_deps_sources(*, features, state, page_actions) -> PageDepsSources:
+def build_window_page_deps_sources(*, features, state, page_actions, launch_control=None) -> PageDepsSources:
     from ui.page_deps.common import PageDepsSources
 
     return PageDepsSources(
@@ -26,6 +26,7 @@ def build_window_page_deps_sources(*, features, state, page_actions) -> PageDeps
         ui_state_store=state.ui,
         actions={
             "after_launch_method_changed": page_actions.after_launch_method_changed,
+            "launch_control": launch_control,
             "notify": page_actions.notify,
             "on_animations_changed": page_actions.on_animations_changed,
             "on_background_preset_changed": page_actions.on_background_preset_changed,
@@ -66,8 +67,15 @@ def attach_window_ui_root(window, *, features, state, page_actions) -> None:
     )
 
     t_construct = _time.perf_counter()
+    launch_control = _build_window_launch_control(
+        window,
+        features=features,
+        state=state,
+        page_actions=page_actions,
+    )
     runtime_bootstrap_deps = WindowRuntimeBootstrapDeps(
         runtime_feature=features.runtime,
+        launch_control=launch_control,
         presets_feature=features.presets,
         profile_feature=features.profile,
         ui_state_store=state.ui,
@@ -81,6 +89,7 @@ def attach_window_ui_root(window, *, features, state, page_actions) -> None:
             features=features,
             state=state,
             page_actions=page_actions,
+            launch_control=launch_control,
         ),
         runtime_bootstrap_deps,
     )
@@ -88,6 +97,36 @@ def attach_window_ui_root(window, *, features, state, page_actions) -> None:
         "StartupWindowUiRootConstruct",
         f"{(_time.perf_counter() - t_construct) * 1000:.0f}ms",
     )
+
+
+def _build_window_launch_control(window, *, features, state, page_actions):
+    """Один пульт пуска/остановки на окно: для страниц, заголовка и трея."""
+    from app.page_names import PageName
+    from ui.launch_control import build_launch_control
+
+    def _stop_conflicting_checks() -> bool:
+        from ui.window_adapter import send_page_command
+
+        return bool(
+            send_page_command(
+                window,
+                PageName.BLOCKCHECK,
+                "stop_runtime_conflicting_checks",
+                {"source": "dpi_start"},
+                ensure=False,
+            )
+        )
+
+    launch_control = build_launch_control(
+        runtime_feature=features.runtime,
+        ui_state_store=state.ui,
+        stop_conflicting_checks=_stop_conflicting_checks,
+        set_status=page_actions.set_status,
+        request_exit=page_actions.request_exit,
+        parent=window,
+    )
+    features.tray.configure(launch_control=launch_control)
+    return launch_control
 
 
 __all__ = ["attach_window_ui_root", "build_window_page_deps_sources"]

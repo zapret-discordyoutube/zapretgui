@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from settings.mode import EXE_NAME_WINWS1, ZAPRET1_MODE
+from settings.mode import ZAPRET1_MODE
 from app.ui_texts import tr as tr_catalog
 import presets.ui.control.control_runtime as control_runtime
 from presets.ui.control.control_page_runtime_shared import (
@@ -41,25 +41,20 @@ def apply_program_settings_snapshot(
     )
 
 
-def apply_status_plan(plan, *, status_title, status_desc, status_dot, start_btn, stop_winws_btn, stop_and_exit_btn) -> None:
+def apply_status_plan(plan, *, status_title, status_desc, status_dot, close_btn) -> None:
     apply_status_plan_shared(
         plan,
         status_title=status_title,
         status_desc=status_desc,
         status_dot=status_dot,
-        start_btn=start_btn,
-        stop_winws_btn=stop_winws_btn,
-        stop_and_exit_btn=stop_and_exit_btn,
-        update_stop_button_text=lambda: None,
+        close_btn=close_btn,
     )
 
 
 def apply_winws1_pages_language(
     *,
     language: str,
-    start_btn,
-    stop_winws_btn,
-    stop_and_exit_btn,
+    close_btn,
     program_settings_card,
     auto_dpi_toggle,
     gui_autostart_toggle,
@@ -81,19 +76,13 @@ def apply_winws1_pages_language(
     update_status,
 ) -> None:
     set_button_text_accessibility(
-        start_btn,
-        tr_catalog("page.winws1_control.button.start", language=language, default="Запустить Zapret"),
-        description="Запускает обход блокировок в выбранном режиме.",
-    )
-    set_button_text_accessibility(
-        stop_winws_btn,
-        tr_catalog("page.winws1_control.button.stop_winws", language=language, default=f"Остановить {EXE_NAME_WINWS1}"),
-        description="Останавливает запущенный процесс обхода блокировок.",
-    )
-    set_button_text_accessibility(
-        stop_and_exit_btn,
-        tr_catalog("page.winws1_control.button.stop_and_exit", language=language, default="Остановить и закрыть"),
-        description="Останавливает обход блокировок и закрывает программу.",
+        close_btn,
+        tr_catalog("launch.action.close_app", language=language, default="Закрыть программу"),
+        description=tr_catalog(
+            "launch.action.close_app.description",
+            language=language,
+            default="Остановить Zapret и закрыть программу",
+        ),
     )
 
     program_settings_card.titleLabel.setText(

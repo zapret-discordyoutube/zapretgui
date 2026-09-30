@@ -19,9 +19,9 @@ def build_control_page_kwargs(
     page_name: PageName,
     presets_feature,
     profile_feature,
-    runtime_feature,
     program_settings_feature,
     external_actions_feature,
+    launch_control,
     set_status,
     request_exit,
     open_connection_test,
@@ -34,7 +34,6 @@ def build_control_page_kwargs(
         create_additional_settings_save_worker,
         create_top_summary_worker,
     )
-    from presets.ui.control.control_page_shared import ControlRuntimeActions
 
     if page_name == PageName.ZAPRET2_MODE_CONTROL:
         user_presets_page = PageName.ZAPRET2_USER_PRESETS
@@ -74,12 +73,7 @@ def build_control_page_kwargs(
         "create_top_summary_worker": _create_top_summary_worker,
         "create_additional_settings_load_worker": profile_feature.create_additional_settings_load_worker,
         "create_additional_settings_save_worker": _create_additional_settings_save_worker,
-        "runtime_actions": ControlRuntimeActions(
-            start=runtime_feature.start,
-            stop=runtime_feature.stop,
-            stop_and_exit=runtime_feature.stop_and_exit,
-            is_available=runtime_feature.is_available,
-        ),
+        "launch_control": launch_control,
         "create_program_settings_save_worker": program_settings_feature.create_program_settings_save_worker,
         "create_program_settings_load_worker": program_settings_feature.create_program_settings_load_worker,
         "create_program_settings_admin_check_worker": program_settings_feature.create_program_settings_admin_check_worker,

@@ -151,17 +151,14 @@ class ControlStatusDotPulseTests(unittest.TestCase):
                 description="Обход блокировок активен",
                 dot_color="#6ccb5f",
                 pulsing=pulsing,
-                show_start=False,
-                show_stop_only=True,
-                show_stop_and_exit=True,
+                clickable=True,
+                action_name="Остановить Zapret",
+                show_close=True,
             ),
             status_title=_TextTarget(),
             status_desc=_TextTarget(),
             status_dot=dot,
-            start_btn=_VisibleTarget(),
-            stop_winws_btn=_VisibleTarget(),
-            stop_and_exit_btn=_VisibleTarget(),
-            update_stop_button_text=lambda: None,
+            close_btn=_VisibleTarget(),
         )
         return dot
 
@@ -190,17 +187,14 @@ class ControlStatusDotPulseTests(unittest.TestCase):
                 description="Не удалось запустить процесс обхода блокировок",
                 dot_color="#f5c04d",
                 pulsing=False,
-                show_start=True,
-                show_stop_only=False,
-                show_stop_and_exit=False,
+                clickable=True,
+                action_name="Запустить Zapret",
+                show_close=False,
             ),
             status_title=status_title,
             status_desc=status_desc,
             status_dot=_StatusDot(),
-            start_btn=_VisibleTarget(),
-            stop_winws_btn=_VisibleTarget(),
-            stop_and_exit_btn=_VisibleTarget(),
-            update_stop_button_text=lambda: None,
+            close_btn=_VisibleTarget(),
         )
 
         self.assertEqual(status_title.accessible_name, "Статус Zapret: Ошибка запуска")
@@ -230,17 +224,14 @@ class ControlStatusDotPulseTests(unittest.TestCase):
                 description="Не удалось запустить процесс обхода блокировок",
                 dot_color="#f5c04d",
                 pulsing=False,
-                show_start=True,
-                show_stop_only=False,
-                show_stop_and_exit=False,
+                clickable=True,
+                action_name="Запустить Zapret",
+                show_close=False,
             ),
             status_title=_TextTarget(),
             status_desc=_TextTarget(),
             status_dot=status_dot,
-            start_btn=_VisibleTarget(),
-            stop_winws_btn=_VisibleTarget(),
-            stop_and_exit_btn=_VisibleTarget(),
-            update_stop_button_text=lambda: None,
+            close_btn=_VisibleTarget(),
         )
 
         self.assertEqual(status_dot.accessible_name, "Индикатор состояния Zapret: Ошибка запуска")
@@ -258,47 +249,35 @@ class ControlStatusDotPulseTests(unittest.TestCase):
             description="Обход блокировок активен",
             dot_color="#6ccb5f",
             pulsing=True,
-            show_start=False,
-            show_stop_only=True,
-            show_stop_and_exit=True,
+            clickable=True,
+            action_name="Остановить Zapret",
+            show_close=True,
         )
         status_title = _TextTarget()
         status_desc = _TextTarget()
         status_dot = _StatusDot()
-        start_btn = _VisibleTarget()
-        stop_winws_btn = _VisibleTarget()
-        stop_and_exit_btn = _VisibleTarget()
-        update_stop_button_text = Mock()
+        close_btn = _VisibleTarget()
 
         apply_status_plan(
             plan,
             status_title=status_title,
             status_desc=status_desc,
             status_dot=status_dot,
-            start_btn=start_btn,
-            stop_winws_btn=stop_winws_btn,
-            stop_and_exit_btn=stop_and_exit_btn,
-            update_stop_button_text=update_stop_button_text,
+            close_btn=close_btn,
         )
         status_title.setText = Mock(side_effect=AssertionError("same status must not rewrite title"))
         status_desc.setText = Mock(side_effect=AssertionError("same status must not rewrite description"))
         status_dot.set_color = Mock(side_effect=AssertionError("same status must not rewrite dot color"))
         status_dot.start_pulse = Mock(side_effect=AssertionError("same status must not restart pulse"))
         status_dot.stop_pulse = Mock(side_effect=AssertionError("same status must not stop pulse"))
-        start_btn.setVisible = Mock(side_effect=AssertionError("same status must not rewrite start visibility"))
-        stop_winws_btn.setVisible = Mock(side_effect=AssertionError("same status must not rewrite stop visibility"))
-        stop_and_exit_btn.setVisible = Mock(side_effect=AssertionError("same status must not rewrite exit visibility"))
-        update_stop_button_text.side_effect = AssertionError("same status must not rewrite stop button text")
+        close_btn.setVisible = Mock(side_effect=AssertionError("same status must not rewrite close visibility"))
 
         self.assertTrue(apply_status_plan(
             plan,
             status_title=status_title,
             status_desc=status_desc,
             status_dot=status_dot,
-            start_btn=start_btn,
-            stop_winws_btn=stop_winws_btn,
-            stop_and_exit_btn=stop_and_exit_btn,
-            update_stop_button_text=update_stop_button_text,
+            close_btn=close_btn,
         ))
 
         status_title.setText.assert_not_called()
@@ -306,9 +285,7 @@ class ControlStatusDotPulseTests(unittest.TestCase):
         status_dot.set_color.assert_not_called()
         status_dot.start_pulse.assert_not_called()
         status_dot.stop_pulse.assert_not_called()
-        start_btn.setVisible.assert_not_called()
-        stop_winws_btn.setVisible.assert_not_called()
-        stop_and_exit_btn.setVisible.assert_not_called()
+        close_btn.setVisible.assert_not_called()
 
     def test_apply_status_plan_skips_unchanged_text_and_visibility_when_dot_changes(self) -> None:
         from presets.ui.control.control_page_runtime_shared import apply_status_plan
@@ -319,9 +296,9 @@ class ControlStatusDotPulseTests(unittest.TestCase):
             description="Обход блокировок активен",
             dot_color="#6ccb5f",
             pulsing=True,
-            show_start=False,
-            show_stop_only=True,
-            show_stop_and_exit=True,
+            clickable=True,
+            action_name="Остановить Zapret",
+            show_close=True,
         )
         second_plan = SimpleNamespace(
             phase="running",
@@ -329,50 +306,38 @@ class ControlStatusDotPulseTests(unittest.TestCase):
             description="Обход блокировок активен",
             dot_color="#7aa7ff",
             pulsing=True,
-            show_start=False,
-            show_stop_only=True,
-            show_stop_and_exit=True,
+            clickable=True,
+            action_name="Остановить Zapret",
+            show_close=True,
         )
         status_title = _WidgetStateTarget(text="Zapret работает")
         status_desc = _WidgetStateTarget(text="Обход блокировок активен")
         status_dot = _StatusDot()
-        start_btn = _WidgetStateTarget(visible=False)
-        stop_winws_btn = _WidgetStateTarget(visible=True)
-        stop_and_exit_btn = _WidgetStateTarget(visible=True)
+        close_btn = _WidgetStateTarget(visible=True)
 
         apply_status_plan(
             first_plan,
             status_title=status_title,
             status_desc=status_desc,
             status_dot=status_dot,
-            start_btn=start_btn,
-            stop_winws_btn=stop_winws_btn,
-            stop_and_exit_btn=stop_and_exit_btn,
-            update_stop_button_text=lambda: None,
+            close_btn=close_btn,
         )
         status_title.text_calls.clear()
         status_desc.text_calls.clear()
-        start_btn.visible_calls.clear()
-        stop_winws_btn.visible_calls.clear()
-        stop_and_exit_btn.visible_calls.clear()
+        close_btn.visible_calls.clear()
 
         apply_status_plan(
             second_plan,
             status_title=status_title,
             status_desc=status_desc,
             status_dot=status_dot,
-            start_btn=start_btn,
-            stop_winws_btn=stop_winws_btn,
-            stop_and_exit_btn=stop_and_exit_btn,
-            update_stop_button_text=lambda: None,
+            close_btn=close_btn,
         )
 
         self.assertEqual(status_dot.color, "#7aa7ff")
         self.assertEqual(status_title.text_calls, [])
         self.assertEqual(status_desc.text_calls, [])
-        self.assertEqual(start_btn.visible_calls, [])
-        self.assertEqual(stop_winws_btn.visible_calls, [])
-        self.assertEqual(stop_and_exit_btn.visible_calls, [])
+        self.assertEqual(close_btn.visible_calls, [])
 
     def test_last_status_message_skips_duplicate_render(self) -> None:
         from presets.ui.control.control_page_runtime_shared import apply_last_status_message
@@ -558,6 +523,75 @@ class ControlStatusDotPulseTests(unittest.TestCase):
 
         self.assertTrue(winws1_plan.pulsing)
         self.assertTrue(winws2_plan.pulsing)
+
+    def test_status_dot_is_a_switch_in_every_phase_except_stopping(self) -> None:
+        from presets.ui.control import control_runtime
+        from presets.ui.control.zapret2 import page_runtime as zapret2_page_runtime
+
+        expectations = {
+            "running": (True, "Остановить Zapret", True),
+            "starting": (True, "Остановить Zapret", True),
+            "autostart_pending": (True, "Остановить Zapret", True),
+            "stopping": (False, "Zapret останавливается", False),
+            "failed": (True, "Запустить Zapret", False),
+            "stopped": (True, "Запустить Zapret", False),
+        }
+        for build in (control_runtime.build_status_plan, zapret2_page_runtime.build_status_plan):
+            for phase, (clickable, action_name, show_close) in expectations.items():
+                with self.subTest(build=build.__module__, phase=phase):
+                    plan = build(state=phase, last_error="", language="ru")
+                    self.assertEqual(plan.clickable, clickable)
+                    self.assertEqual(plan.action_name, action_name)
+                    self.assertEqual(plan.show_close, show_close)
+
+    def test_stopped_status_tells_to_click_the_dot(self) -> None:
+        from presets.ui.control.zapret2 import page_runtime as zapret2_page_runtime
+
+        plan = zapret2_page_runtime.build_status_plan(state="stopped", last_error="", language="ru")
+
+        self.assertIn("точку", plan.description)
+        self.assertNotIn("«Запустить»", plan.description)
+
+    def test_apply_status_plan_passes_switch_state_to_dot(self) -> None:
+        from presets.ui.control.control_page_runtime_shared import apply_status_plan
+
+        class _SwitchDot(_StatusDot):
+            def __init__(self) -> None:
+                super().__init__()
+                self.click_enabled: list[bool] = []
+                self.description = ""
+
+            def set_click_enabled(self, enabled: bool) -> None:
+                self.click_enabled.append(bool(enabled))
+
+            def accessibleDescription(self) -> str:  # noqa: N802
+                return self.description
+
+            def setAccessibleDescription(self, text: str) -> None:  # noqa: N802
+                self.description = str(text)
+
+        dot = _SwitchDot()
+        close_btn = _VisibleTarget()
+        apply_status_plan(
+            SimpleNamespace(
+                phase="stopping",
+                title="Zapret останавливается",
+                description="Завершаем процесс",
+                dot_color="#f5a623",
+                pulsing=True,
+                clickable=False,
+                action_name="Zapret останавливается",
+                show_close=False,
+            ),
+            status_title=_TextTarget(),
+            status_desc=_TextTarget(),
+            status_dot=dot,
+            close_btn=close_btn,
+        )
+
+        self.assertEqual(dot.click_enabled, [False])
+        self.assertEqual(dot.description, "Zapret останавливается")
+        self.assertFalse(close_btn.visible)
 
 
 if __name__ == "__main__":

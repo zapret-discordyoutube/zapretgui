@@ -10,10 +10,7 @@ from PyQt6.QtCore import QTimer
 
 from ui.pages.base_page import BasePage
 from settings.mode import ZAPRET2_MODE
-from presets.ui.control.zapret2.build import (
-    build_winws2_pages_management_section,
-    build_winws2_pages_status_section,
-)
+from presets.ui.control.zapret2.build import build_winws2_pages_status_section
 from presets.ui.control.zapret2.runtime_helpers import (
     apply_additional_settings_state,
     apply_profile_language,
@@ -29,7 +26,6 @@ from presets.ui.control.control_page_shared import (
 )
 from presets.ui.control.control_page_runtime_shared import (
     apply_last_status_message,
-    set_button_text_accessibility,
     set_enabled_if_changed,
     set_loading_status_accessibility,
     set_progress_active_if_changed,
@@ -45,7 +41,7 @@ from ui.widgets.soft_visibility import set_visible_softly
 from qfluentwidgets import (
     CaptionLabel, StrongBodyLabel,
     IndeterminateProgressBar,
-    PrimaryPushButton, PushButton, SettingCardGroup, PushSettingCard,
+    SettingCardGroup, PushSettingCard, TransparentPushButton,
 )
 
 if TYPE_CHECKING:
@@ -94,7 +90,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         create_top_summary_worker,
         create_additional_settings_load_worker,
         create_additional_settings_save_worker,
-        runtime_actions,
+        launch_control,
         create_program_settings_save_worker,
         create_program_settings_load_worker,
         create_program_settings_admin_check_worker,
@@ -128,7 +124,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self._create_top_summary_worker = create_top_summary_worker
         self._create_additional_settings_load_worker = create_additional_settings_load_worker
         self._create_additional_settings_save_worker = create_additional_settings_save_worker
-        self._runtime_actions = runtime_actions
+        self._launch_control = launch_control
         self._create_program_settings_save_worker = create_program_settings_save_worker
         self._create_program_settings_load_worker = create_program_settings_load_worker
         self._create_program_settings_admin_check_worker = create_program_settings_admin_check_worker
@@ -183,6 +179,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.folder_btn = None
         self.docs_btn = None
         self._build_ui()
+        self._bind_launch_control()
         self.bind_ui_state_store(ui_state_store)
         self._after_ui_built()
         _log_startup_winws2_control_metric("__init__.total", (_time.perf_counter() - _t_init) * 1000)
@@ -408,40 +405,22 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
             strong_body_label_cls=StrongBodyLabel,
             caption_label_cls=CaptionLabel,
+            indeterminate_progress_bar_cls=IndeterminateProgressBar,
+            close_button_cls=TransparentPushButton,
+            on_toggle=self._toggle_dpi,
+            on_close=self._stop_and_exit,
+            parent=self,
         )
         self.status_section_label = status_widgets.section_label
         self.status_card = status_widgets.card
         self.status_dot = status_widgets.status_dot
         self.status_title = status_widgets.status_title
         self.status_desc = status_widgets.status_desc
+        self.close_btn = status_widgets.close_btn
+        self.progress_bar = status_widgets.progress_bar
+        self.loading_label = status_widgets.loading_label
         self.add_widget(status_widgets.card)
         _log_startup_winws2_control_metric("_build_ui.status_card", (_time.perf_counter() - _t_status) * 1000)
-
-        self.add_spacing(16)
-
-        # Управление
-        _t_control = _time.perf_counter()
-        management_widgets = build_winws2_pages_management_section(
-            add_section_title=self.add_section_title,
-            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
-            caption_label_cls=CaptionLabel,
-            indeterminate_progress_bar_cls=IndeterminateProgressBar,
-            big_action_button_cls=PrimaryPushButton,
-            stop_button_cls=PushButton,
-            on_start=self._start_dpi,
-            on_stop=self._stop_dpi,
-            on_stop_and_exit=self._stop_and_exit,
-            parent=self,
-        )
-        self.control_section_label = management_widgets.section_label
-        self.control_card_card = management_widgets.card
-        self.start_btn = management_widgets.start_btn
-        self.stop_winws_btn = management_widgets.stop_winws_btn
-        self.stop_and_exit_btn = management_widgets.stop_and_exit_btn
-        self.progress_bar = management_widgets.progress_bar
-        self.loading_label = management_widgets.loading_label
-        self.add_widget(management_widgets.card)
-        _log_startup_winws2_control_metric("_build_ui.control_card", (_time.perf_counter() - _t_control) * 1000)
         _t_settings_sections = _time.perf_counter()
         self._build_settings_sections()
         _log_startup_winws2_control_metric(
@@ -813,14 +792,6 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
     def _on_tray_close_mode_changed(self, mode: str) -> None:
         self._request_program_settings_save("tray_close_mode", str(mode or "normal"))
 
-    def _update_stop_winws_button_text(self):
-        plan = _zapret2_page_runtime().build_stop_button_plan(language=self._ui_language)
-        set_button_text_accessibility(
-            self.stop_winws_btn,
-            plan.text,
-            description="Останавливает запущенный процесс обхода блокировок.",
-        )
-
     def set_loading(self, loading: bool, text: str = ""):
         set_progress_active_if_changed(self.progress_bar, loading)
         set_visible_softly(self.progress_bar, loading)
@@ -828,9 +799,8 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         set_text_if_changed(self.loading_label, text)
         set_loading_status_accessibility(self.loading_label, active=loading, text=text)
 
-        set_enabled_if_changed(self.start_btn, not loading)
-        set_enabled_if_changed(self.stop_winws_btn, not loading)
-        set_enabled_if_changed(self.stop_and_exit_btn, not loading)
+        self.status_dot.set_click_locked(loading)
+        set_enabled_if_changed(self.close_btn, not loading)
 
     def bind_ui_state_store(self, store: MainWindowStateStore) -> None:
         bind_control_ui_state_store(
@@ -953,15 +923,11 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             status_title=self.status_title,
             status_desc=self.status_desc,
             status_dot=self.status_dot,
-            start_btn=self.start_btn,
-            stop_winws_btn=self.stop_winws_btn,
-            stop_and_exit_btn=self.stop_and_exit_btn,
-            update_stop_button_text=self._update_stop_winws_button_text,
+            close_btn=self.close_btn,
         )
 
     def update_strategy(self, name: str):
         _ = name
-        self._update_stop_winws_button_text()
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
@@ -979,8 +945,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             self._refresh_last_status_message()
         apply_profile_language(
             language=self._ui_language,
-            start_btn=self.start_btn,
-            stop_and_exit_btn=self.stop_and_exit_btn,
+            close_btn=self.close_btn,
             test_card=self.test_card,
             internet_cleanup_card=self.internet_cleanup_card,
             folder_card=self.folder_card,
@@ -998,7 +963,6 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             discord_restart_toggle=self.discord_restart_toggle,
             wssize_toggle=self.wssize_toggle,
             debug_log_toggle=self.debug_log_toggle,
-            update_stop_button_text=self._update_stop_winws_button_text,
         )
 
     def _open_fakes(self) -> None:

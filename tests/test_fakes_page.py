@@ -64,7 +64,7 @@ def test_only_zapret2_control_page_gets_open_fakes():
             page_name=page_name,
             presets_feature=Mock(),
             profile_feature=Mock(),
-            runtime_feature=Mock(),
+            launch_control=Mock(),
             program_settings_feature=Mock(),
             external_actions_feature=Mock(),
             set_status=Mock(),

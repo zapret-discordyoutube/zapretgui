@@ -11,6 +11,8 @@ from PyQt6.QtCore import QTimer
 
 from app.page_names import PageName
 from donater.premium_display import premium_display_from_ui_state
+from ui.launch_control import launch_phase_from_state
+from ui.launch_title_badge import LaunchTitleBadge
 from ui.navigation.text_sync import resolve_ui_language
 from ui.subscription_title_badge import SubscriptionTitleBadge
 from ui.window_adapter import show_page, sync_titlebar_search_width
@@ -118,16 +120,92 @@ def bind_premium_appearance(premium_appearance, ui_state_store):
     )
 
 
-def bind_window_ui_state(window, ui_state_store) -> None:
-    """Все подписки окна на store (сейчас — только метка подписки в titleBar)."""
+LAUNCH_BADGE_FIELDS = frozenset(
+    {
+        "launch_phase",
+        "launch_running",
+        "launch_method",
+    }
+)
+
+
+def _launch_badge_insert_index(window, layout) -> int:
+    subscription_badge = window.titleBar.findChild(SubscriptionTitleBadge)
+    if subscription_badge is not None:
+        badge_index = layout.indexOf(subscription_badge)
+        if badge_index >= 0:
+            return badge_index + 1
+    return _subscription_badge_insert_index(window, layout)
+
+
+def bind_launch_title_badge(window, ui_state_store, launch_control) -> LaunchTitleBadge | None:
+    """Ставит метку состояния Zapret после метки подписки: видна в любом разделе."""
+    title_bar = getattr(window, "titleBar", None)
+    layout = getattr(title_bar, "hBoxLayout", None)
+    if title_bar is None or layout is None or launch_control is None:
+        return None
+
+    existing = title_bar.findChild(LaunchTitleBadge)
+    if existing is not None:
+        return existing
+
+    badge = LaunchTitleBadge(title_bar, language_provider=lambda: _window_language(window))
+    layout.insertWidget(_launch_badge_insert_index(window, layout), badge)
+    badge.clicked.connect(lambda _checked=False: launch_control.toggle())
+
+    def _sync_search_width() -> None:
+        if not sip.isdeleted(window):
+            sync_titlebar_search_width(window)
+
+    def _on_ui_state_changed(state, _changed_fields: frozenset[str]) -> None:
+        if sip.isdeleted(badge):
+            return
+        changed = badge.set_state(
+            phase=launch_phase_from_state(state),
+            launch_method=str(getattr(state, "launch_method", "") or ""),
+        )
+        if changed:
+            QTimer.singleShot(0, _sync_search_width)
+
+    unsubscribe = ui_state_store.subscribe(
+        _on_ui_state_changed,
+        fields=LAUNCH_BADGE_FIELDS,
+        emit_initial=True,
+    )
+
+    def _unsubscribe_on_destroy(*_args) -> None:
+        try:
+            unsubscribe()
+        except Exception:
+            pass
+
+    badge.destroyed.connect(_unsubscribe_on_destroy)
+    return badge
+
+
+def retranslate_launch_title_badge(window) -> None:
+    title_bar = getattr(window, "titleBar", None)
+    if title_bar is None:
+        return
+    badge = title_bar.findChild(LaunchTitleBadge)
+    if badge is not None and badge.retranslate():
+        sync_titlebar_search_width(window)
+
+
+def bind_window_ui_state(window, ui_state_store, *, launch_control=None) -> None:
+    """Все подписки окна на store: метки подписки и состояния Zapret в titleBar."""
     bind_subscription_title_badge(window, ui_state_store)
+    bind_launch_title_badge(window, ui_state_store, launch_control)
 
 
 __all__ = [
+    "LAUNCH_BADGE_FIELDS",
     "PREMIUM_APPEARANCE_FIELDS",
     "SUBSCRIPTION_BADGE_FIELDS",
+    "bind_launch_title_badge",
     "bind_premium_appearance",
     "bind_subscription_title_badge",
     "bind_window_ui_state",
+    "retranslate_launch_title_badge",
     "retranslate_subscription_title_badge",
 ]

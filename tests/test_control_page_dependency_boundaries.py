@@ -43,13 +43,15 @@ class ControlPageDependencyBoundaryTests(unittest.TestCase):
             self.assertNotIn("create_program_settings_system_status_load_worker", init_source)
             self.assertIn("create_program_settings_admin_check_worker", init_source)
             self.assertIn("create_external_open_url_worker", init_source)
-            self.assertIn("runtime_actions", init_source)
+            self.assertIn("launch_control", init_source)
+            self.assertNotIn("runtime_actions", init_source)
 
         shared_source = inspect.getsource(control_page_shared.ControlPageActionMixin)
         windows_source = inspect.getsource(windows_features_runtime.ControlPageWindowsFeatureMixin)
 
         self.assertNotIn("self._runtime_feature.", shared_source)
-        self.assertIn("self._runtime_actions.", shared_source)
+        self.assertIn("self._launch_control.", shared_source)
+        self.assertNotIn("self._runtime_actions.", shared_source)
         self.assertNotIn("self._program_settings.", shared_source)
         self.assertNotIn("self._external_actions.", shared_source)
         self.assertNotIn("self._program_settings.", windows_source)
@@ -58,13 +60,13 @@ class ControlPageDependencyBoundaryTests(unittest.TestCase):
         external_actions = Mock()
         presets = Mock()
         profile = Mock()
-        runtime = Mock()
+        launch_control = Mock()
         start_onboarding_tour = Mock()
         kwargs = build_control_page_kwargs(
             page_name=PageName.ZAPRET2_MODE_CONTROL,
             presets_feature=presets,
             profile_feature=profile,
-            runtime_feature=runtime,
+            launch_control=launch_control,
             program_settings_feature=program_settings,
             external_actions_feature=external_actions,
             set_status=Mock(),
@@ -86,10 +88,9 @@ class ControlPageDependencyBoundaryTests(unittest.TestCase):
         )
         self.assertNotIn("set_wssize_enabled", kwargs)
         self.assertNotIn("set_debug_log_enabled", kwargs)
-        self.assertIs(kwargs["runtime_actions"].start, runtime.start)
-        self.assertIs(kwargs["runtime_actions"].stop, runtime.stop)
-        self.assertIs(kwargs["runtime_actions"].stop_and_exit, runtime.stop_and_exit)
-        self.assertIs(kwargs["runtime_actions"].is_available, runtime.is_available)
+        # Пуск и остановка — только через единый пульт, без доступа ко всему runtime.
+        self.assertIs(kwargs["launch_control"], launch_control)
+        self.assertNotIn("runtime_actions", kwargs)
         self.assertIs(kwargs["create_external_open_url_worker"], external_actions.create_open_url_worker)
         self.assertIs(
             kwargs["create_program_settings_save_worker"],

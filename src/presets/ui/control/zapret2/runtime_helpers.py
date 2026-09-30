@@ -41,24 +41,20 @@ def apply_additional_settings_state(state, *, discord_restart_toggle, wssize_tog
         set_toggle_checked(debug_log_toggle, bool(state.debug_log_enabled))
 
 
-def apply_status_plan(plan, *, status_title, status_desc, status_dot, start_btn, stop_winws_btn, stop_and_exit_btn, update_stop_button_text) -> None:
+def apply_status_plan(plan, *, status_title, status_desc, status_dot, close_btn) -> None:
     apply_status_plan_shared(
         plan,
         status_title=status_title,
         status_desc=status_desc,
         status_dot=status_dot,
-        start_btn=start_btn,
-        stop_winws_btn=stop_winws_btn,
-        stop_and_exit_btn=stop_and_exit_btn,
-        update_stop_button_text=update_stop_button_text,
+        close_btn=close_btn,
     )
 
 
 def apply_profile_language(
     *,
     language: str,
-    start_btn,
-    stop_and_exit_btn,
+    close_btn,
     test_card,
     internet_cleanup_card,
     folder_card,
@@ -76,17 +72,15 @@ def apply_profile_language(
     discord_restart_toggle,
     wssize_toggle,
     debug_log_toggle,
-    update_stop_button_text,
 ) -> None:
     set_button_text_accessibility(
-        start_btn,
-        tr_catalog("page.winws2_control.button.start", language=language, default="Запустить Zapret"),
-        description="Запускает обход блокировок в выбранном режиме.",
-    )
-    set_button_text_accessibility(
-        stop_and_exit_btn,
-        tr_catalog("page.winws2_control.button.stop_and_exit", language=language, default="Остановить и закрыть программу"),
-        description="Останавливает обход блокировок и закрывает программу.",
+        close_btn,
+        tr_catalog("launch.action.close_app", language=language, default="Закрыть программу"),
+        description=tr_catalog(
+            "launch.action.close_app.description",
+            language=language,
+            default="Остановить Zapret и закрыть программу",
+        ),
     )
     if additional_settings_notice is not None:
         additional_settings_notice.setText(
@@ -200,8 +194,6 @@ def apply_profile_language(
             ),
             description=fakes_desc,
         )
-
-    update_stop_button_text()
 
     discord_restart_toggle.set_texts(
         tr_catalog("page.dpi_settings.discord_restart.title", language=language, default="Перезапуск Discord"),

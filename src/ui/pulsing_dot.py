@@ -2,8 +2,18 @@ from __future__ import annotations
 
 import math
 
-from PyQt6.QtCore import QElapsedTimer, QEasingCurve, QEvent, QPointF, QRectF, Qt, QTimer, QVariantAnimation
-from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtCore import (
+    QElapsedTimer,
+    QEasingCurve,
+    QEvent,
+    QPointF,
+    QRectF,
+    Qt,
+    QTimer,
+    QVariantAnimation,
+    pyqtSignal,
+)
+from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 
 from ui.animation_policy import are_live_animations_enabled
@@ -231,14 +241,149 @@ FLOW_LANES = (
 )
 
 
+# В режиме кнопки точка крупнее, чтобы в неё поместился значок питания,
+# а при наведении мягко разгорается свечение (без рамок: интерфейс frameless).
+BUTTON_CORE_RATIO = 0.30
+HOVER_FADE_MS = 160
+PRESS_SCALE = 0.9
+
+
 class PacketFlowIndicator(PulsingDot):
-    """Точка состояния, сквозь которую бегают пакеты, пока процесс работает."""
+    """Точка состояния, сквозь которую бегают пакеты, пока процесс работает.
+
+    После set_clickable(True) точка становится выключателем: внутри появляется
+    значок питания, по клику испускается clicked. Enter и Пробел подключает
+    общий ui.accessibility.enable_keyboard_click через метод click().
+    """
+
+    clicked = pyqtSignal()
 
     def __init__(self, parent=None, *, size: int = 32, width: int = FLOW_WIDTH):
         super().__init__(parent, size=size)
         self.setFixedSize(max(int(width), self.height()), self.height())
         self._flow_time = 0.0
         self._flow_origin = 0.0
+        self._clickable = False
+        self._click_enabled = True
+        self._click_locked = False
+        self._hovered = False
+        self._pressed = False
+        self._hover_t = 0.0
+        self._hover_fade = QVariantAnimation(self)
+        self._hover_fade.setDuration(HOVER_FADE_MS)
+        self._hover_fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._hover_fade.valueChanged.connect(self._on_hover_value)
+
+    # ---- режим кнопки --------------------------------------------------
+
+    def set_clickable(self, clickable: bool) -> None:
+        self._clickable = bool(clickable)
+        self.setMouseTracking(self._clickable)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus if self._clickable else Qt.FocusPolicy.NoFocus)
+        self._sync_cursor()
+        self.update()
+
+    def is_clickable(self) -> bool:
+        return self._clickable
+
+    def set_click_enabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._click_enabled:
+            return
+        self._click_enabled = enabled
+        if not enabled:
+            self._pressed = False
+        self._sync_cursor()
+        self._animate_hover()
+        self.update()
+
+    def set_click_locked(self, locked: bool) -> None:
+        """Временная блокировка, пока идёт загрузка. Не спорит с set_click_enabled."""
+        locked = bool(locked)
+        if locked == self._click_locked:
+            return
+        self._click_locked = locked
+        if locked:
+            self._pressed = False
+        self._sync_cursor()
+        self._animate_hover()
+        self.update()
+
+    def is_click_enabled(self) -> bool:
+        return self._clickable and self._click_enabled and not self._click_locked
+
+    def click(self) -> None:
+        """Нажатие точки (в том числе с клавиатуры через enable_keyboard_click)."""
+        if self.is_click_enabled():
+            self.clicked.emit()
+
+    def _sync_cursor(self) -> None:
+        if self.is_click_enabled():
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.unsetCursor()
+
+    def _hover_target(self) -> float:
+        return 1.0 if (self._hovered or self.hasFocus()) and self.is_click_enabled() else 0.0
+
+    def _animate_hover(self) -> None:
+        target = self._hover_target()
+        if abs(target - self._hover_t) < 0.001:
+            return
+        self._hover_fade.stop()
+        if self.isVisible() and are_live_animations_enabled():
+            self._hover_fade.setStartValue(self._hover_t)
+            self._hover_fade.setEndValue(target)
+            self._hover_fade.start()
+        else:
+            self._hover_t = target
+            self.update()
+
+    def _on_hover_value(self, value) -> None:
+        try:
+            self._hover_t = float(value)
+        except (TypeError, ValueError):
+            return
+        self.update()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        super().enterEvent(event)
+        if self._clickable:
+            self._hovered = True
+            self._animate_hover()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        if self._clickable:
+            self._hovered = False
+            self._pressed = False
+            self._animate_hover()
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        self._animate_hover()
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        super().focusOutEvent(event)
+        self._animate_hover()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if self.is_click_enabled() and event.button() == Qt.MouseButton.LeftButton:
+            self._pressed = True
+            self.update()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if self._pressed and event.button() == Qt.MouseButton.LeftButton:
+            self._pressed = False
+            self.update()
+            event.accept()
+            if self.rect().contains(event.position().toPoint()):
+                self.click()
+            return
+        super().mouseReleaseEvent(event)
 
     def _start_beat(self) -> None:
         if self._can_animate():
@@ -295,6 +440,11 @@ class PacketFlowIndicator(PulsingDot):
                     painter.drawRoundedRect(QRectF(x - 3.0, y - 1.5, 6.0, 3.0), 1.5, 1.5)
         flash = min(1.0, flash) if self.is_beating() else 0.0
 
+        if self._clickable:
+            self._paint_button_core(painter, center, side, flash)
+            painter.end()
+            return
+
         glow = QColor(self._shown_color)
         glow.setAlphaF(0.35 + 0.3 * flash)
         painter.setBrush(glow)
@@ -308,3 +458,35 @@ class PacketFlowIndicator(PulsingDot):
         shine = max(2.0, side * 0.09375) / 2
         painter.drawEllipse(QPointF(center.x() - shine, center.y() - shine - 1), shine, shine)
         painter.end()
+
+    def _paint_button_core(self, painter: QPainter, center: QPointF, side: float, flash: float) -> None:
+        hover = self._hover_t
+        core_r = side * BUTTON_CORE_RATIO * (PRESS_SCALE if self._pressed else 1.0)
+
+        # Свечение: при наведении шире и ярче — так видно, что точку можно нажать.
+        glow = QColor(self._shown_color)
+        glow.setAlphaF(min(1.0, 0.28 + 0.25 * flash + 0.22 * hover))
+        painter.setBrush(glow)
+        glow_r = core_r + max(2.0, side * 0.07) * (1.0 + 0.5 * flash + 0.9 * hover)
+        painter.drawEllipse(center, glow_r, glow_r)
+
+        painter.setBrush(self._shown_color)
+        painter.drawEllipse(center, core_r, core_r)
+
+        # Значок питания: разомкнутое кольцо и вертикальная черта сверху.
+        icon_alpha = 0.92 if self.is_click_enabled() else 0.45
+        pen = QPen(QColor(255, 255, 255, round(255 * icon_alpha)))
+        pen.setWidthF(max(1.4, side * 0.045))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        ring_r = core_r * 0.5
+        ring = QRectF(center.x() - ring_r, center.y() - ring_r, ring_r * 2, ring_r * 2)
+        # Qt считает углы в 1/16 градуса от «трёх часов» против часовой стрелки;
+        # разрыв кольца сверху — 70°.
+        painter.drawArc(ring, (90 + 35) * 16, (360 - 70) * 16)
+        painter.drawLine(
+            QPointF(center.x(), center.y() - ring_r * 1.25),
+            QPointF(center.x(), center.y() - ring_r * 0.2),
+        )
+        painter.setPen(Qt.PenStyle.NoPen)

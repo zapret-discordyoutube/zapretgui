@@ -165,10 +165,7 @@ def apply_status_plan(
     status_title,
     status_desc,
     status_dot,
-    start_btn,
-    stop_winws_btn,
-    stop_and_exit_btn,
-    update_stop_button_text,
+    close_btn,
 ) -> bool:
     plan_key = (
         str(getattr(plan, "phase", "") or ""),
@@ -176,9 +173,9 @@ def apply_status_plan(
         str(getattr(plan, "description", "") or ""),
         str(getattr(plan, "dot_color", "") or ""),
         bool(getattr(plan, "pulsing", False)),
-        bool(getattr(plan, "show_start", False)),
-        bool(getattr(plan, "show_stop_only", False)),
-        bool(getattr(plan, "show_stop_and_exit", False)),
+        bool(getattr(plan, "clickable", False)),
+        str(getattr(plan, "action_name", "") or ""),
+        bool(getattr(plan, "show_close", False)),
     )
     if getattr(status_dot, "_last_control_status_plan_key", None) == plan_key:
         return plan.phase == "running"
@@ -194,12 +191,29 @@ def apply_status_plan(
         status_dot.start_pulse()
     else:
         status_dot.stop_pulse()
-    # Кнопки меняются местами мягко: уходящая затухает, новая проявляется.
-    set_visible_softly(start_btn, plan.show_start)
-    update_stop_button_text()
-    set_visible_softly(stop_winws_btn, plan.show_stop_only)
-    set_visible_softly(stop_and_exit_btn, plan.show_stop_and_exit)
+    # Точка — выключатель: описание для диктора и подсказка говорят, что сделает нажатие.
+    set_click_enabled = getattr(status_dot, "set_click_enabled", None)
+    if callable(set_click_enabled):
+        set_click_enabled(bool(plan.clickable))
+    if plan.action_name:
+        if plan.clickable:
+            set_accessible_description(status_dot, f"{plan.action_name}. Нажмите Enter или Пробел.")
+        else:
+            set_accessible_description(status_dot, plan.action_name)
+        _set_tooltip_if_changed(status_dot, plan.action_name)
+    set_visible_softly(close_btn, plan.show_close)
     return plan.phase == "running"
+
+
+def _set_tooltip_if_changed(widget, text: str) -> None:
+    try:
+        if widget.toolTip() == text:
+            return
+    except Exception:
+        return
+    from ui.fluent_widgets import set_tooltip
+
+    set_tooltip(widget, text)
 
 
 def status_message_dot_color(message: str) -> str:

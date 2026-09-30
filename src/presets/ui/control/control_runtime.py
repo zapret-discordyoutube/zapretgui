@@ -2,13 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from settings.mode import EXE_NAME_WINWS1
-
-
-@dataclass(slots=True)
-class ControlStopButtonPlan:
-    text: str
-
 
 @dataclass(slots=True)
 class ControlRuntimeState:
@@ -23,9 +16,11 @@ class ControlStatusPlan:
     description: str
     dot_color: str
     pulsing: bool
-    show_start: bool
-    show_stop_only: bool
-    show_stop_and_exit: bool
+    # Точка статуса — это выключатель. clickable=False, пока идёт остановка.
+    clickable: bool
+    # Что сделает нажатие на точку: имя для диктора и подсказка.
+    action_name: str
+    show_close: bool
 
 
 @dataclass(slots=True)
@@ -44,32 +39,6 @@ class ControlToggleActionStartPlan:
     confirmations: tuple[ControlConfirmationDialogPlan, ...]
     start_status: str
 
-
-def build_stop_button_plan(*, language: str) -> ControlStopButtonPlan:
-    try:
-        from settings.mode import exe_name_for_launch_method
-        from ui.workflows.common import get_current_launch_method
-
-        from app.ui_texts import tr as tr_catalog
-
-        method = get_current_launch_method(default="")
-        exe_name = exe_name_for_launch_method(method)
-        template = tr_catalog(
-            "page.control.button.stop_only_template",
-            language=language,
-            default="Остановить только {exe_name}",
-        )
-        return ControlStopButtonPlan(text=template.format(exe_name=exe_name))
-    except Exception:
-        from app.ui_texts import tr as tr_catalog
-
-        return ControlStopButtonPlan(
-            text=tr_catalog(
-                "page.control.button.stop_only_winws",
-                language=language,
-                default=f"Остановить только {EXE_NAME_WINWS1}",
-            )
-        )
 
 def resolve_runtime_state(*, snapshot_state=None, last_known_dpi_running: bool = False) -> ControlRuntimeState:
     if snapshot_state is not None:
@@ -98,77 +67,111 @@ def short_dpi_error(last_error: str) -> str:
         return first_line
     return first_line[:157] + "..."
 
+STATUS_COLOR_RUNNING = "#6ccb5f"
+STATUS_COLOR_BUSY = "#f5a623"
+STATUS_COLOR_STOPPED = "#ff6b6b"
+
+
 def build_status_plan(*, state: str | bool, last_error: str, language: str) -> ControlStatusPlan:
+    return build_status_plan_for(
+        text_prefix="page.control",
+        state=state,
+        last_error=last_error,
+        language=language,
+        autostart_description="Ждём завершения стартовой инициализации перед запуском",
+    )
+
+
+def build_status_plan_for(
+    *,
+    text_prefix: str,
+    state: str | bool,
+    last_error: str,
+    language: str,
+    autostart_description: str,
+) -> ControlStatusPlan:
+    """План карточки «Статус работы»: тексты, цвет точки и что делает нажатие на неё."""
     from app.ui_texts import tr as tr_catalog
 
     phase = str(state or "").strip().lower()
     if phase not in {"autostart_pending", "starting", "running", "stopping", "failed", "stopped"}:
         phase = "running" if bool(state) else "stopped"
 
+    stop_name = tr_catalog("launch.action.stop", language=language, default="Остановить Zapret")
+    start_name = tr_catalog("launch.action.start", language=language, default="Запустить Zapret")
+
     if phase == "running":
         return ControlStatusPlan(
             phase=phase,
-            title=tr_catalog("page.control.status.running", language=language, default="Zapret работает"),
-            description=tr_catalog("page.control.status.bypass_active", language=language, default="Обход блокировок активен"),
-            dot_color="#6ccb5f",
+            title=tr_catalog(f"{text_prefix}.status.running", language=language, default="Zapret работает"),
+            description=tr_catalog(
+                f"{text_prefix}.status.bypass_active",
+                language=language,
+                default="Обход блокировок активен · нажмите на точку, чтобы остановить",
+            ),
+            dot_color=STATUS_COLOR_RUNNING,
             pulsing=True,
-            show_start=False,
-            show_stop_only=True,
-            show_stop_and_exit=True,
+            clickable=True,
+            action_name=stop_name,
+            show_close=True,
         )
     if phase == "autostart_pending":
         return ControlStatusPlan(
             phase=phase,
             title="Автозапуск Zapret запланирован",
-            description="Ждём завершения стартовой инициализации перед запуском",
-            dot_color="#f5a623",
+            description=autostart_description,
+            dot_color=STATUS_COLOR_BUSY,
             pulsing=True,
-            show_start=False,
-            show_stop_only=False,
-            show_stop_and_exit=False,
+            clickable=True,
+            action_name=stop_name,
+            show_close=True,
         )
     if phase == "starting":
         return ControlStatusPlan(
             phase=phase,
             title="Zapret запускается",
             description="Ждём подтверждение процесса winws",
-            dot_color="#f5a623",
+            dot_color=STATUS_COLOR_BUSY,
             pulsing=True,
-            show_start=False,
-            show_stop_only=False,
-            show_stop_and_exit=False,
+            clickable=True,
+            action_name=stop_name,
+            show_close=True,
         )
     if phase == "stopping":
         return ControlStatusPlan(
             phase=phase,
             title="Zapret останавливается",
             description="Завершаем процесс и освобождаем WinDivert",
-            dot_color="#f5a623",
+            dot_color=STATUS_COLOR_BUSY,
             pulsing=True,
-            show_start=False,
-            show_stop_only=False,
-            show_stop_and_exit=False,
+            clickable=False,
+            action_name=tr_catalog("launch.action.stopping", language=language, default="Zapret останавливается"),
+            show_close=False,
         )
     if phase == "failed":
         return ControlStatusPlan(
             phase=phase,
             title="Ошибка запуска Zapret",
             description=short_dpi_error(last_error) or "Процесс не подтвердился или завершился сразу",
-            dot_color="#ff6b6b",
+            dot_color=STATUS_COLOR_STOPPED,
             pulsing=False,
-            show_start=True,
-            show_stop_only=False,
-            show_stop_and_exit=False,
+            clickable=True,
+            action_name=start_name,
+            show_close=False,
         )
     return ControlStatusPlan(
         phase="stopped",
-        title=tr_catalog("page.control.status.stopped", language=language, default="Zapret остановлен"),
-        description=tr_catalog("page.control.status.press_start", language=language, default="Нажмите «Запустить» для активации"),
-        dot_color="#ff6b6b",
+        title=tr_catalog(f"{text_prefix}.status.stopped", language=language, default="Zapret остановлен"),
+        description=tr_catalog(
+            f"{text_prefix}.status.press_start",
+            language=language,
+            default="Нажмите на точку, чтобы запустить",
+        ),
+        dot_color=STATUS_COLOR_STOPPED,
         pulsing=False,
-        show_start=True,
-        show_stop_only=False,
-        show_stop_and_exit=False,
+        clickable=True,
+        action_name=start_name,
+        show_close=False,
     )
 
 def build_defender_toggle_start_plan(*, disable: bool, language: str, is_admin: bool) -> ControlToggleActionStartPlan:

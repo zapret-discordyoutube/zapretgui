@@ -12,10 +12,9 @@ from PyQt6.QtWidgets import QApplication, QWidget
 from qfluentwidgets import (
     CaptionLabel,
     IndeterminateProgressBar,
-    PrimaryPushButton,
-    PushButton,
     PushSettingCard,
     StrongBodyLabel,
+    TransparentPushButton,
 )
 
 
@@ -136,54 +135,79 @@ class ControlAccessibilityTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
-    def test_management_buttons_have_screen_reader_names_and_descriptions(self) -> None:
-        from presets.ui.control.shared_builders import build_mode_management_section_common
-
-        _card, start_btn, stop_btn, stop_exit_btn, progress, loading = build_mode_management_section_common(
-            tr_fn=lambda _key, default: default,
-            caption_label_cls=CaptionLabel,
-            indeterminate_progress_bar_cls=IndeterminateProgressBar,
-            big_action_button_cls=PrimaryPushButton,
-            stop_button_cls=PushButton,
-            start_key="start",
-            start_default="Запустить Zapret",
-            stop_key="stop",
-            stop_default="Остановить winws.exe",
-            stop_exit_key="stop_exit",
-            stop_exit_default="Остановить и закрыть",
-            on_start=lambda: None,
-            on_stop=lambda: None,
-            on_stop_and_exit=lambda: None,
-            parent=QWidget(),
-        )
-
-        self.assertEqual(start_btn.accessibleName(), "Запустить Zapret")
-        self.assertEqual(start_btn.property("screenReaderStateText"), "Запустить Zapret")
-        self.assertIn("Запускает", start_btn.accessibleDescription())
-        self.assertEqual(stop_btn.accessibleName(), "Остановить winws.exe")
-        self.assertEqual(stop_btn.property("screenReaderStateText"), "Остановить winws.exe")
-        self.assertIn("Останавливает", stop_btn.accessibleDescription())
-        self.assertEqual(stop_exit_btn.accessibleName(), "Остановить и закрыть")
-        self.assertEqual(stop_exit_btn.property("screenReaderStateText"), "Остановить и закрыть")
-        self.assertIn("закрывает программу", stop_exit_btn.accessibleDescription())
-        self.assertEqual(progress.accessibleName(), "Ход запуска Zapret: не выполняется")
-        self.assertEqual(progress.property("screenReaderStateText"), "Ход запуска Zapret: не выполняется")
-        self.assertIn("Показывает", progress.accessibleDescription())
-        self.assertEqual(loading.accessibleName(), "Статус запуска Zapret: нет активного запуска")
-        self.assertEqual(loading.property("screenReaderStateText"), "Статус запуска Zapret: нет активного запуска")
-
-    def test_status_dot_has_initial_screen_reader_state(self) -> None:
+    def _build_status_section(self, *, on_toggle=None, on_close=None):
         from presets.ui.control.shared_builders import build_mode_status_section_common
 
-        _card, status_dot, _title, _desc = build_mode_status_section_common(
+        parent = QWidget()
+        self.addCleanup(parent.deleteLater)
+        widgets = build_mode_status_section_common(
             tr_fn=lambda _key, default: default,
             strong_body_label_cls=StrongBodyLabel,
             caption_label_cls=CaptionLabel,
+            indeterminate_progress_bar_cls=IndeterminateProgressBar,
+            close_button_cls=TransparentPushButton,
             checking_key="checking",
             checking_default="Проверка состояния",
             detecting_key="detecting",
             detecting_default="Определяем текущий статус",
+            on_toggle=on_toggle or (lambda: None),
+            on_close=on_close or (lambda: None),
+            parent=parent,
         )
+        widgets.card.setParent(parent)
+        return widgets
+
+    def test_status_card_controls_have_screen_reader_names_and_descriptions(self) -> None:
+        widgets = self._build_status_section()
+
+        self.assertEqual(widgets.close_btn.accessibleName(), "Закрыть программу")
+        self.assertEqual(widgets.close_btn.property("screenReaderStateText"), "Закрыть программу")
+        self.assertIn("закрыть программу", widgets.close_btn.accessibleDescription())
+        self.assertFalse(widgets.close_btn.isVisibleTo(widgets.card))
+        self.assertIn("запустить или остановить", widgets.status_dot.accessibleDescription())
+        self.assertEqual(widgets.progress_bar.accessibleName(), "Ход запуска Zapret: не выполняется")
+        self.assertEqual(
+            widgets.progress_bar.property("screenReaderStateText"),
+            "Ход запуска Zapret: не выполняется",
+        )
+        self.assertIn("Показывает", widgets.progress_bar.accessibleDescription())
+        self.assertEqual(widgets.loading_label.accessibleName(), "Статус запуска Zapret: нет активного запуска")
+        self.assertEqual(
+            widgets.loading_label.property("screenReaderStateText"),
+            "Статус запуска Zapret: нет активного запуска",
+        )
+
+    def test_status_dot_switch_works_from_keyboard_and_respects_lock(self) -> None:
+        toggled: list[bool] = []
+        widgets = self._build_status_section(on_toggle=lambda: toggled.append(True))
+        dot = widgets.status_dot
+
+        self.assertTrue(dot.is_click_enabled())
+        self.assertEqual(dot.focusPolicy(), Qt.FocusPolicy.StrongFocus)
+        QApplication.sendEvent(dot, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Space, Qt.KeyboardModifier.NoModifier))
+        self.assertEqual(toggled, [True])
+
+        dot.set_click_locked(True)
+        dot.click()
+        dot.set_click_locked(False)
+        dot.set_click_enabled(False)
+        dot.click()
+        self.assertEqual(toggled, [True])
+
+        dot.set_click_enabled(True)
+        dot.click()
+        self.assertEqual(toggled, [True, True])
+
+    def test_status_close_button_calls_close_action(self) -> None:
+        closed: list[bool] = []
+        widgets = self._build_status_section(on_close=lambda: closed.append(True))
+
+        widgets.close_btn.click()
+
+        self.assertEqual(closed, [True])
+
+    def test_status_dot_has_initial_screen_reader_state(self) -> None:
+        status_dot = self._build_status_section().status_dot
 
         self.assertEqual(status_dot.accessibleName(), "Индикатор состояния Zapret: состояние пока не загружено")
         self.assertEqual(
@@ -192,25 +216,15 @@ class ControlAccessibilityTests(unittest.TestCase):
         )
 
     def test_status_section_has_initial_screen_reader_text(self) -> None:
-        from presets.ui.control.shared_builders import build_mode_status_section_common
+        widgets = self._build_status_section()
 
-        status_card, _status_dot, status_title, status_desc = build_mode_status_section_common(
-            tr_fn=lambda _key, default: default,
-            strong_body_label_cls=StrongBodyLabel,
-            caption_label_cls=CaptionLabel,
-            checking_key="checking",
-            checking_default="Проверка состояния",
-            detecting_key="detecting",
-            detecting_default="Определяем текущий статус",
-        )
-
-        self.assertEqual(status_card.accessibleName(), "Проверка состояния: Определяем текущий статус")
+        self.assertEqual(widgets.card.accessibleName(), "Проверка состояния: Определяем текущий статус")
         self.assertEqual(
-            status_card.property("screenReaderStateText"),
+            widgets.card.property("screenReaderStateText"),
             "Проверка состояния: Определяем текущий статус",
         )
-        self.assertEqual(status_title.accessibleName(), "Статус Zapret: Проверка состояния")
-        self.assertEqual(status_desc.accessibleName(), "Описание состояния Zapret: Определяем текущий статус")
+        self.assertEqual(widgets.status_title.accessibleName(), "Статус Zapret: Проверка состояния")
+        self.assertEqual(widgets.status_desc.accessibleName(), "Описание состояния Zapret: Определяем текущий статус")
 
     def test_last_status_message_dot_has_initial_screen_reader_state(self) -> None:
         from presets.ui.control.shared_builders import build_last_status_message_card_common
@@ -243,41 +257,6 @@ class ControlAccessibilityTests(unittest.TestCase):
         )
         self.assertEqual(widgets.title_label.accessibleName(), "Раздел статуса Zapret: Последнее сообщение")
         self.assertEqual(widgets.message_label.accessibleName(), "Последнее сообщение Zapret: Пока нет новых сообщений")
-
-    def test_stop_button_loads_square_stop_icon_after_first_paint(self) -> None:
-        from presets.ui.control.shared_builders import build_mode_management_section_common
-
-        scheduled: list[tuple[int, object]] = []
-        with patch(
-            "presets.ui.control.shared_builders.get_themed_qta_icon",
-            return_value=QIcon(),
-        ) as get_icon, patch(
-            "presets.ui.control.shared_builders.QTimer.singleShot",
-            side_effect=lambda delay_ms, callback: scheduled.append((delay_ms, callback)),
-        ):
-            build_mode_management_section_common(
-                tr_fn=lambda _key, default: default,
-                caption_label_cls=CaptionLabel,
-                indeterminate_progress_bar_cls=IndeterminateProgressBar,
-                big_action_button_cls=PrimaryPushButton,
-                stop_button_cls=PushButton,
-                start_key="start",
-                start_default="Запустить Zapret",
-                stop_key="stop",
-                stop_default="Остановить winws.exe",
-                stop_exit_key="stop_exit",
-                stop_exit_default="Остановить и закрыть",
-                on_start=lambda: None,
-                on_stop=lambda: None,
-                on_stop_and_exit=lambda: None,
-                parent=QWidget(),
-            )
-
-            get_icon.assert_not_called()
-            self.assertEqual(len(scheduled), 1)
-            self.assertGreaterEqual(scheduled[0][0], 200)
-            scheduled[0][1]()
-            get_icon.assert_called_once_with("fa5s.stop")
 
     def test_push_setting_card_button_has_specific_screen_reader_name(self) -> None:
         from presets.ui.control.shared_builders import ACTION_CARD_BUTTON_WIDTH, build_push_setting_card_common
@@ -328,23 +307,18 @@ class ControlAccessibilityTests(unittest.TestCase):
     def test_winws1_language_refresh_updates_control_button_screen_reader_names(self) -> None:
         from presets.ui.control.zapret1.runtime_helpers import apply_winws1_pages_language
 
-        start_btn = _ButtonTarget()
-        stop_btn = _ButtonTarget()
-        stop_exit_btn = _ButtonTarget()
+        close_btn = _ButtonTarget()
 
         apply_winws1_pages_language(
             **_language_refresh_kwargs(),
-            start_btn=start_btn,
-            stop_winws_btn=stop_btn,
-            stop_and_exit_btn=stop_exit_btn,
+            close_btn=close_btn,
             refresh_preset_name=lambda: None,
             get_current_dpi_runtime_state=lambda: ("stopped", ""),
             update_status=lambda _phase, _last_error: None,
         )
 
-        self.assertEqual(start_btn.accessibleName(), "Запустить Zapret")
-        self.assertEqual(stop_btn.accessibleName(), "Остановить winws.exe")
-        self.assertEqual(stop_exit_btn.accessibleName(), "Остановить и закрыть")
+        self.assertEqual(close_btn.accessibleName(), "Закрыть программу")
+        self.assertIn("закрыть программу", close_btn.accessibleDescription())
 
     def test_winws1_language_refresh_updates_extra_action_button_screen_reader_names(self) -> None:
         from presets.ui.control.zapret1.runtime_helpers import apply_winws1_pages_language
@@ -352,9 +326,7 @@ class ControlAccessibilityTests(unittest.TestCase):
         kwargs = _language_refresh_kwargs()
         apply_winws1_pages_language(
             **kwargs,
-            start_btn=_ButtonTarget(),
-            stop_winws_btn=_ButtonTarget(),
-            stop_and_exit_btn=_ButtonTarget(),
+            close_btn=_ButtonTarget(),
             refresh_preset_name=lambda: None,
             get_current_dpi_runtime_state=lambda: ("stopped", ""),
             update_status=lambda _phase, _last_error: None,
@@ -376,18 +348,16 @@ class ControlAccessibilityTests(unittest.TestCase):
     def test_winws2_language_refresh_updates_control_button_screen_reader_names(self) -> None:
         from presets.ui.control.zapret2.runtime_helpers import apply_profile_language
 
-        start_btn = _ButtonTarget()
-        stop_exit_btn = _ButtonTarget()
+        close_btn = _ButtonTarget()
 
         apply_profile_language(
             **_language_refresh_kwargs(),
-            start_btn=start_btn,
-            stop_and_exit_btn=stop_exit_btn,
-            update_stop_button_text=lambda: None,
+            close_btn=close_btn,
+            fakes_card=None,
         )
 
-        self.assertEqual(start_btn.accessibleName(), "Запустить Zapret")
-        self.assertEqual(stop_exit_btn.accessibleName(), "Остановить и закрыть программу")
+        self.assertEqual(close_btn.accessibleName(), "Закрыть программу")
+        self.assertIn("закрыть программу", close_btn.accessibleDescription())
 
     def test_winws2_language_refresh_updates_extra_action_button_screen_reader_names(self) -> None:
         from presets.ui.control.zapret2.runtime_helpers import apply_profile_language
@@ -395,9 +365,8 @@ class ControlAccessibilityTests(unittest.TestCase):
         kwargs = _language_refresh_kwargs()
         apply_profile_language(
             **kwargs,
-            start_btn=_ButtonTarget(),
-            stop_and_exit_btn=_ButtonTarget(),
-            update_stop_button_text=lambda: None,
+            close_btn=_ButtonTarget(),
+            fakes_card=None,
         )
 
         self.assertEqual(kwargs["test_card"].button.accessibleName(), "Открыть тест соединения")

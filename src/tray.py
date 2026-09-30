@@ -8,12 +8,20 @@ import sys
 import time
 from ctypes import wintypes
 
-from PyQt6.QtCore import QTimer, QPoint
-from PyQt6.QtGui import QCursor, QFontMetrics
-from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QWidget
-from qfluentwidgets import RoundMenu, Action, FluentIcon
+from PyQt6.QtCore import QPoint, QPointF, QSize, Qt, QTimer
+from PyQt6.QtGui import QColor, QCursor, QIcon, QImage, QPainter
+from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox
+from qfluentwidgets import Action, CheckableMenu, FluentIcon, MenuIndicatorType, RoundMenu
 
+from ui.launch_control import (
+    BUSY_LAUNCH_PHASES,
+    mode_label_for_launch_method,
+    normalize_launch_phase,
+    phase_color,
+    toggle_action_for_phase,
+)
 from ui.message_box_accessibility import set_message_box_button_accessibility
+from ui.widgets.tray_status_header import TrayStatusHeader
 
 try:
     from log.log import log
@@ -22,10 +30,17 @@ except Exception:
     def log(*args, **kwargs):  # type: ignore[no-redef]
         return None
 
+try:
+    from app.ui_texts import tr as tr_catalog
+except Exception:
+    def tr_catalog(_key, *, language=None, default=""):  # type: ignore[no-redef]
+        return default
+
 if sys.platform == "win32":
     user32 = ctypes.windll.user32
     shell32 = ctypes.windll.shell32
     kernel32 = ctypes.windll.kernel32
+    gdi32 = ctypes.windll.gdi32
     _PTR_IS_64 = ctypes.sizeof(ctypes.c_void_p) == 8
     WPARAM = ctypes.c_uint64 if _PTR_IS_64 else ctypes.c_uint
     LPARAM = ctypes.c_int64 if _PTR_IS_64 else ctypes.c_long
@@ -42,7 +57,6 @@ if sys.platform == "win32":
     NIM_ADD = 0x00000000
     NIM_MODIFY = 0x00000001
     NIM_DELETE = 0x00000002
-    NIM_SETFOCUS = 0x00000003
     NIM_SETVERSION = 0x00000004
 
     NIF_MESSAGE = 0x00000001
@@ -56,42 +70,23 @@ if sys.platform == "win32":
     NIIF_INFO = 0x00000001
 
     WM_APP = 0x8000
-    WM_NULL = 0x0000
     WM_DESTROY = 0x0002
     WM_CLOSE = 0x0010
     WM_CONTEXTMENU = 0x007B
     WM_LBUTTONUP = 0x0202
     WM_RBUTTONUP = 0x0205
     WM_LBUTTONDBLCLK = 0x0203
-    VK_LBUTTON = 0x01
-    VK_RBUTTON = 0x02
 
     NIN_SELECT = WM_USER = 0x0400
     NIN_KEYSELECT = WM_USER + 1
 
-    MF_STRING = 0x00000000
-    MF_SEPARATOR = 0x00000800
-    MF_POPUP = 0x00000010
-    MF_GRAYED = 0x00000001
-
-    TPM_LEFTALIGN = 0x0000
-    TPM_BOTTOMALIGN = 0x0020
-    TPM_RIGHTBUTTON = 0x0002
-    TPM_RETURNCMD = 0x0100
-    TPM_NONOTIFY = 0x0080
-
     IDI_APPLICATION = 32512
     CW_USEDEFAULT = 0x80000000
+    SM_CXSMICON = 49
+    BI_RGB = 0
+    DIB_RGB_COLORS = 0
 
     TRAY_CALLBACK_MESSAGE = WM_APP + 100
-
-    CMD_SHOW_WINDOW = 1001
-    CMD_HIDE_TO_TRAY = 1002
-    CMD_TG_PROXY_TOGGLE = 1003
-    CMD_OPEN_CONSOLE = 1004
-    CMD_EXIT_ONLY = 1005
-    CMD_EXIT_AND_STOP = 1006
-    CMD_OPACITY_BASE = 1100
 
 
     class GUID(ctypes.Structure):
@@ -157,17 +152,34 @@ if sys.platform == "win32":
         ]
 
 
-    class POINT(ctypes.Structure):
+    class BITMAPINFOHEADER(ctypes.Structure):
         _fields_ = [
-            ("x", ctypes.c_long),
-            ("y", ctypes.c_long),
+            ("biSize", wintypes.DWORD),
+            ("biWidth", ctypes.c_long),
+            ("biHeight", ctypes.c_long),
+            ("biPlanes", wintypes.WORD),
+            ("biBitCount", wintypes.WORD),
+            ("biCompression", wintypes.DWORD),
+            ("biSizeImage", wintypes.DWORD),
+            ("biXPelsPerMeter", ctypes.c_long),
+            ("biYPelsPerMeter", ctypes.c_long),
+            ("biClrUsed", wintypes.DWORD),
+            ("biClrImportant", wintypes.DWORD),
+        ]
+
+
+    class ICONINFO(ctypes.Structure):
+        _fields_ = [
+            ("fIcon", wintypes.BOOL),
+            ("xHotspot", wintypes.DWORD),
+            ("yHotspot", wintypes.DWORD),
+            ("hbmMask", wintypes.HBITMAP),
+            ("hbmColor", wintypes.HBITMAP),
         ]
 
 
     kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
     kernel32.GetModuleHandleW.restype = wintypes.HMODULE
-    user32.CreatePopupMenu.restype = wintypes.HMENU
-    user32.TrackPopupMenu.restype = wintypes.UINT
     user32.RegisterWindowMessageW.argtypes = [wintypes.LPCWSTR]
     user32.RegisterWindowMessageW.restype = wintypes.UINT
     user32.LoadImageW.argtypes = [
@@ -183,6 +195,14 @@ if sys.platform == "win32":
     user32.LoadIconW.restype = wintypes.HICON
     user32.DestroyIcon.argtypes = [wintypes.HICON]
     user32.DestroyIcon.restype = wintypes.BOOL
+    user32.CreateIconIndirect.argtypes = [ctypes.POINTER(ICONINFO)]
+    user32.CreateIconIndirect.restype = wintypes.HICON
+    user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+    user32.GetSystemMetrics.restype = ctypes.c_int
+    user32.GetDC.argtypes = [wintypes.HWND]
+    user32.GetDC.restype = wintypes.HDC
+    user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+    user32.ReleaseDC.restype = ctypes.c_int
     user32.RegisterClassExW.argtypes = [ctypes.POINTER(WNDCLASSEXW)]
     user32.RegisterClassExW.restype = wintypes.ATOM
     user32.UnregisterClassW.argtypes = [wintypes.LPCWSTR, wintypes.HINSTANCE]
@@ -206,10 +226,19 @@ if sys.platform == "win32":
     user32.DestroyWindow.restype = wintypes.BOOL
     user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, WPARAM, LPARAM]
     user32.DefWindowProcW.restype = LRESULT
-    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
-    user32.GetAsyncKeyState.restype = ctypes.c_short
-    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, WPARAM, LPARAM]
-    user32.PostMessageW.restype = wintypes.BOOL
+    gdi32.CreateDIBSection.argtypes = [
+        wintypes.HDC,
+        ctypes.POINTER(BITMAPINFOHEADER),
+        wintypes.UINT,
+        ctypes.POINTER(ctypes.c_void_p),
+        wintypes.HANDLE,
+        wintypes.DWORD,
+    ]
+    gdi32.CreateDIBSection.restype = wintypes.HBITMAP
+    gdi32.CreateBitmap.argtypes = [ctypes.c_int, ctypes.c_int, wintypes.UINT, wintypes.UINT, ctypes.c_void_p]
+    gdi32.CreateBitmap.restype = wintypes.HBITMAP
+    gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+    gdi32.DeleteObject.restype = wintypes.BOOL
     shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
     shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 
@@ -226,10 +255,6 @@ def _truncate_text(value: str, max_length: int) -> str:
 
 def _loword(value: int) -> int:
     return int(value) & 0xFFFF
-
-
-def _hiword(value: int) -> int:
-    return (int(value) >> 16) & 0xFFFF
 
 
 def _signed_word(value: int) -> int:
@@ -265,37 +290,160 @@ def _make_menu_action(text: str, *, icon=None, parent=None):
     return action
 
 
-def _widget_contains_global_pos(widget: QWidget, global_pos: QPoint | None) -> bool:
-    if global_pos is None:
-        return False
+# ---- иконка трея с точкой состояния ----------------------------------------
 
-    try:
-        top_left = widget.mapToGlobal(widget.rect().topLeft())
-        bottom_right = widget.mapToGlobal(widget.rect().bottomRight())
-        return (
-            top_left.x() <= global_pos.x() <= bottom_right.x()
-            and top_left.y() <= global_pos.y() <= bottom_right.y()
+# Точка в правом нижнем углу логотипа: примерно 40% стороны. Вокруг неё логотип
+# «вырезается» прозрачным кольцом — так точка читается и на светлой, и на тёмной
+# панели задач, как значки-наклейки самой Windows.
+STATUS_DOT_RADIUS_RATIO = 0.2
+STATUS_DOT_CUTOUT_RATIO = 0.075
+
+
+def tray_icon_dot_color(phase: str) -> str | None:
+    """Цвет точки на иконке трея. Когда Zapret остановлен, точки нет вовсе."""
+    color = phase_color(phase)
+    if normalize_launch_phase(phase) == "failed":
+        # Ошибка видна в меню и уведомлениях; на иконке красная точка
+        # «мозолила бы глаза» до следующего запуска.
+        return None
+    return color
+
+
+def render_status_icon_image(base: QImage, color: str | None, size: int) -> QImage:
+    """Рисует логотип размера size×size и, если задан цвет, точку состояния в углу."""
+    size = max(8, int(size))
+    image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    if not base.isNull():
+        scaled = base.scaled(
+            size,
+            size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
         )
-    except Exception:
-        return False
+        painter.drawImage(
+            QPointF((size - scaled.width()) / 2, (size - scaled.height()) / 2),
+            scaled,
+        )
+    if color:
+        radius = size * STATUS_DOT_RADIUS_RATIO
+        cutout = radius + max(1.0, size * STATUS_DOT_CUTOUT_RATIO)
+        center = QPointF(size - radius - 0.5, size - radius - 0.5)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        painter.setBrush(Qt.GlobalColor.black)
+        painter.drawEllipse(center, cutout, cutout)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        painter.setBrush(QColor(color))
+        painter.drawEllipse(center, radius, radius)
+    painter.end()
+    return image
 
 
-def _global_mouse_button_down(vk_code: int) -> bool:
-    if sys.platform != "win32":
-        return False
+def _tray_icon_size() -> int:
+    if sys.platform == "win32":
+        try:
+            size = int(user32.GetSystemMetrics(SM_CXSMICON))
+            if size > 0:
+                return size
+        except Exception:
+            pass
+    return 16
+
+
+def _hicon_from_image(image: QImage):
+    """QImage → HICON: 32-битная картинка с альфа-каналом через CreateIconIndirect."""
+    if sys.platform != "win32" or image.isNull():
+        return None
+
+    argb = image.convertToFormat(QImage.Format.Format_ARGB32)
+    width, height = argb.width(), argb.height()
+    header = BITMAPINFOHEADER()
+    header.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+    header.biWidth = width
+    header.biHeight = -height  # строки сверху вниз, как в QImage
+    header.biPlanes = 1
+    header.biBitCount = 32
+    header.biCompression = BI_RGB
+
+    bits = ctypes.c_void_p()
+    hdc = user32.GetDC(None)
+    try:
+        color_bitmap = gdi32.CreateDIBSection(hdc, ctypes.byref(header), DIB_RGB_COLORS, ctypes.byref(bits), None, 0)
+    finally:
+        user32.ReleaseDC(None, hdc)
+    if not color_bitmap or not bits.value:
+        return None
 
     try:
-        return bool(user32.GetAsyncKeyState(int(vk_code)) & 0x8000)
-    except Exception:
-        return False
+        pixels = argb.constBits()
+        pixels.setsize(argb.sizeInBytes())
+        row_bytes = width * 4
+        source = bytes(pixels)
+        if argb.bytesPerLine() == row_bytes:
+            ctypes.memmove(bits, source, row_bytes * height)
+        else:
+            for row in range(height):
+                start = row * argb.bytesPerLine()
+                ctypes.memmove(bits.value + row * row_bytes, source[start:start + row_bytes], row_bytes)
+
+        # Монохромная маска из нулей: прозрачность задаёт альфа-канал цветной части.
+        mask_stride = ((width + 15) // 16) * 2
+        mask_bits = ctypes.create_string_buffer(mask_stride * height)
+        mask_bitmap = gdi32.CreateBitmap(width, height, 1, 1, mask_bits)
+        try:
+            info = ICONINFO()
+            info.fIcon = True
+            info.hbmMask = mask_bitmap
+            info.hbmColor = color_bitmap
+            return user32.CreateIconIndirect(ctypes.byref(info)) or None
+        finally:
+            if mask_bitmap:
+                gdi32.DeleteObject(mask_bitmap)
+    finally:
+        gdi32.DeleteObject(color_bitmap)
+
+
+# ---- тексты ---------------------------------------------------------------
+
+_STATUS_DEFAULTS = {
+    "running": "работает",
+    "starting": "запускается",
+    "stopping": "останавливается",
+    "stopped": "остановлен",
+    "failed": "ошибка запуска",
+}
+
+
+def tray_status_text(phase: str, *, language: str | None = None) -> str:
+    key = normalize_launch_phase(phase)
+    if key == "autostart_pending":
+        key = "starting"
+    return tr_catalog(f"tray.status.{key}", language=language, default=_STATUS_DEFAULTS[key])
+
+
+def build_tray_tooltip(*, phase: str, launch_method: str, preset_name: str, language: str | None = None) -> str:
+    mode = mode_label_for_launch_method(launch_method)
+    lines = [f"{mode} — {tray_status_text(phase, language=language)}"]
+    if preset_name:
+        lines.append(
+            tr_catalog("tray.tooltip.preset", language=language, default="Пресет: {preset}").format(preset=preset_name)
+        )
+    return "\n".join(lines)
 
 
 class SystemTrayManager:
     """Windows-first менеджер системного трея.
 
-    Production-путь для Windows теперь один:
-    native tray icon через Shell_NotifyIcon без Qt-tray слоя.
+    Production-путь для Windows один: native tray icon через Shell_NotifyIcon
+    без Qt-tray слоя. Меню — RoundMenu из qfluentwidgets.
     """
+
+    MENU_MIN_WIDTH = 300
+    STOPPED_NOTIFY_DELAY_MS = 1500
 
     def __init__(self, window_port, icon_path, app_version, *, tray_feature):
         self.window_port = window_port
@@ -305,14 +453,19 @@ class SystemTrayManager:
         self._icon_visible = False
         self._tray_hint_shown_this_session = False
         self._menu = None
-        self._show_window_action = None
-        self._tg_proxy_action = None
-        self._exit_stop_action = None
-        self._tray_menu_min_width = 336
-        self._tray_submenu_min_width = 252
+        self._header = None
+        self._launch_action = None
         self._toggle_request_pending = False
         self._last_toggle_monotonic = 0.0
         self._icon_handle = None
+        self._status_icon_handles: dict[str, object] = {}
+        self._status_icon_key = ""
+        self._base_icon_image: QImage | None = None
+        self._tooltip = ""
+        self._launch_phase = ""
+        self._launch_method = ""
+        self._preset_name = ""
+        self._stopped_notify_timer = None
         self._message_window = None
         self._taskbar_created_message = None
         self._class_name = f"Zapret2TrayWindow_{os.getpid()}_{id(self):x}"
@@ -356,6 +509,11 @@ class SystemTrayManager:
         except Exception:
             return None
 
+    # ---- native иконка --------------------------------------------------
+
+    def _current_icon_handle(self):
+        return self._status_icon_handles.get(self._status_icon_key) or self._icon_handle
+
     def _build_notify_icon_data(self, flags: int) -> NOTIFYICONDATAW:
         data = NOTIFYICONDATAW()
         data.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
@@ -363,8 +521,8 @@ class SystemTrayManager:
         data.uID = 1
         data.uFlags = flags
         data.uCallbackMessage = TRAY_CALLBACK_MESSAGE
-        data.hIcon = self._icon_handle
-        data.szTip = _truncate_text(f"Zapret2 v{self.app_version}", 128)
+        data.hIcon = self._current_icon_handle()
+        data.szTip = _truncate_text(self._tooltip or f"Zapret2 v{self.app_version}", 128)
         return data
 
     @property
@@ -385,6 +543,12 @@ class SystemTrayManager:
         else:
             log("Не удалось добавить native tray icon", "WARNING")
 
+    def _modify_icon(self) -> None:
+        if sys.platform != "win32" or not self._hwnd or not self._icon_visible:
+            return
+        data = self._build_notify_icon_data(NIF_ICON | NIF_TIP | NIF_SHOWTIP)
+        shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(data))
+
     def recreate_icon(self) -> None:
         self.hide_icon()
         self._add_icon()
@@ -398,6 +562,7 @@ class SystemTrayManager:
         self._icon_visible = False
 
     def cleanup(self) -> None:
+        self._cancel_stopped_notification()
         self.hide_icon()
 
         window = self._message_window
@@ -407,13 +572,127 @@ class SystemTrayManager:
             if getattr(window, "_class_registered", False):
                 self._message_window = window
 
-        icon_handle = self._icon_handle
+        handles = [self._icon_handle, *self._status_icon_handles.values()]
         self._icon_handle = None
-        if sys.platform == "win32" and icon_handle:
-            try:
-                user32.DestroyIcon(icon_handle)
-            except Exception:
-                pass
+        self._status_icon_handles = {}
+        self._status_icon_key = ""
+        if sys.platform == "win32":
+            for handle in handles:
+                if not handle:
+                    continue
+                try:
+                    user32.DestroyIcon(handle)
+                except Exception:
+                    pass
+
+    def _status_icon_handle_for(self, color: str | None):
+        if not color:
+            return None
+        cached = self._status_icon_handles.get(color)
+        if cached:
+            return cached
+        if self._base_icon_image is None:
+            self._base_icon_image = QIcon(self.icon_path).pixmap(QSize(64, 64)).toImage()
+        image = render_status_icon_image(self._base_icon_image, color, _tray_icon_size())
+        handle = _hicon_from_image(image)
+        if handle:
+            self._status_icon_handles[color] = handle
+        return handle
+
+    # ---- состояние запуска -------------------------------------------
+
+    def apply_launch_status(self, *, phase: str, launch_method: str, preset_name: str) -> None:
+        """Обновляет иконку, подсказку и уведомления по новой фазе запуска."""
+        previous_phase = self._launch_phase
+        phase = normalize_launch_phase(phase)
+        self._launch_phase = phase
+        self._launch_method = str(launch_method or "")
+        self._preset_name = str(preset_name or "")
+
+        color = tray_icon_dot_color(phase)
+        icon_key = color or ""
+        if icon_key and not self._status_icon_handle_for(color):
+            icon_key = ""
+        tooltip = build_tray_tooltip(
+            phase=phase,
+            launch_method=self._launch_method,
+            preset_name=self._preset_name,
+            language=self._language(),
+        )
+        if icon_key != self._status_icon_key or tooltip != self._tooltip:
+            self._status_icon_key = icon_key
+            self._tooltip = tooltip
+            self._modify_icon()
+
+        if previous_phase and previous_phase != phase:
+            self._notify_launch_transition(previous_phase, phase)
+        if self._menu is not None and self._menu.isVisible():
+            self._refresh_open_menu()
+
+    def _notify_launch_transition(self, previous_phase: str, phase: str) -> None:
+        if phase in {"starting", "autostart_pending", "running"}:
+            # Перезапуск: «остановлен» сразу сменился запуском — не шумим.
+            self._cancel_stopped_notification()
+        if self._is_window_visible():
+            return
+        language = self._language()
+        if phase == "running" and previous_phase in {"starting", "autostart_pending"}:
+            if self._preset_name:
+                body = tr_catalog(
+                    "tray.notify.started.body",
+                    language=language,
+                    default="Обход блокировок активен · пресет: {preset}",
+                ).format(preset=self._preset_name)
+            else:
+                body = tr_catalog(
+                    "tray.notify.started.body_no_preset",
+                    language=language,
+                    default="Обход блокировок активен",
+                )
+            self.show_notification(
+                tr_catalog("tray.notify.started.title", language=language, default="Zapret запущен"),
+                body,
+            )
+        elif phase == "stopped" and previous_phase == "stopping":
+            self._schedule_stopped_notification()
+
+    def _schedule_stopped_notification(self) -> None:
+        self._cancel_stopped_notification()
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(self._show_stopped_notification)
+        timer.start(self.STOPPED_NOTIFY_DELAY_MS)
+        self._stopped_notify_timer = timer
+
+    def _cancel_stopped_notification(self) -> None:
+        timer = self._stopped_notify_timer
+        self._stopped_notify_timer = None
+        if timer is not None:
+            timer.stop()
+
+    def _show_stopped_notification(self) -> None:
+        self._stopped_notify_timer = None
+        if self._launch_phase != "stopped" or self._is_window_visible():
+            return
+        language = self._language()
+        self.show_notification(
+            tr_catalog("tray.notify.stopped.title", language=language, default="Zapret остановлен"),
+            tr_catalog("tray.notify.stopped.body", language=language, default="Обход блокировок выключен"),
+        )
+
+    def _is_window_visible(self) -> bool:
+        try:
+            return bool(self.window_port.is_visible())
+        except Exception:
+            return False
+
+    def _language(self) -> str | None:
+        try:
+            return self.window_port.ui_language() or None
+        except Exception:
+            return None
+
+    # ---- клики по иконке -----------------------------------------------
 
     def _handle_native_callback(self, callback_code: int, anchor_x: int | None = None, anchor_y: int | None = None) -> None:
         if callback_code == WM_CONTEXTMENU:
@@ -451,36 +730,23 @@ class SystemTrayManager:
 
         self.show_window()
 
-    def _build_menu_state(self) -> dict:
-        is_visible = False
-        is_launch_running = self._is_launch_running()
-        launch_phase = self._launch_phase()
-        tg_label = "Telegram Proxy: выкл"
+    # ---- меню ------------------------------------------------------------
 
-        is_visible = self.window_port.is_visible()
-
+    def show_context_menu(self, anchor_x: int | None = None, anchor_y: int | None = None) -> None:
+        current = self._menu
         try:
-            tg_label = self._tray_feature.telegram_proxy_label()
+            if current is not None and current.isVisible():
+                return
         except Exception:
             pass
 
-        return {
-            "is_visible": is_visible,
-            "is_launch_running": is_launch_running,
-            "launch_phase": launch_phase,
-            "tg_proxy_label": tg_label,
-        }
-
-    def show_context_menu(self, anchor_x: int | None = None, anchor_y: int | None = None) -> None:
-        menu = self._ensure_qt_menu()
-        state = self._build_menu_state()
-        self._apply_menu_style(menu)
-        self._sync_menu_state(state)
-        self._update_menu_widths(menu)
-
+        # Меню собирается заново при каждом открытии: RoundMenu не умеет прятать
+        # пункты и переименовывать подменю, а так в нём всегда актуальное состояние.
+        menu = self._build_menu()
+        self._menu = menu
+        # Список пресетов перечитывается в фоне: новые пресеты появятся к следующему открытию.
         try:
-            if menu.isVisible():
-                return
+            self._tray_feature.refresh_preset_snapshot()
         except Exception:
             pass
 
@@ -489,67 +755,105 @@ class SystemTrayManager:
             self.window_port.exec_popup_menu(menu, position)
         except Exception as e:
             log(f"Не удалось показать tray menu: {e}", "WARNING")
+        finally:
+            if self._menu is menu:
+                self._menu = None
+                self._header = None
+                self._launch_action = None
+            try:
+                menu.deleteLater()
+            except Exception:
+                pass
 
-    def _ensure_qt_menu(self) -> QMenu:
-        menu = getattr(self, "_menu", None)
-        if menu is not None:
-            return menu
+    def _menu_launch_phase(self) -> str:
+        try:
+            return normalize_launch_phase(self._tray_feature.launch_phase())
+        except Exception:
+            return normalize_launch_phase(self._launch_phase)
+
+    def _menu_snapshot(self):
+        try:
+            return self._tray_feature.preset_snapshot()
+        except Exception:
+            return None
+
+    def _build_menu(self) -> QMenu:
+        language = self._language()
+        phase = self._menu_launch_phase()
+        snapshot = self._menu_snapshot()
 
         menu = self.window_port.create_menu()
-        self._menu = menu
         try:
-            menu.setMinimumWidth(self._tray_menu_min_width)
+            menu.setMinimumWidth(self.MENU_MIN_WIDTH)
         except Exception:
             pass
 
+        # Шапка: состояние Zapret и пресет. Клик по ней открывает окно.
+        header = TrayStatusHeader()
+        header.setFixedWidth(self.MENU_MIN_WIDTH - 12)
+        header.setFixedHeight(52)
+        self._header = header
+        self._sync_header(phase, snapshot, language)
+        if isinstance(menu, RoundMenu):
+            menu.addWidget(header, selectable=True, onClick=self.show_window)
+            menu.addSeparator()
+
+        # Главное действие — первым: запустить или остановить.
+        launch_action = _make_menu_action("", parent=menu)
+        self._launch_action = launch_action
+        self._sync_launch_action(phase, language)
+        launch_action.triggered.connect(self._on_launch_action)
+        menu.addAction(launch_action)
+
+        if phase == "running":
+            restart_action = _make_menu_action(
+                tr_catalog("tray.menu.restart", language=language, default="Перезапустить"),
+                icon=_fluent_icon("SYNC"),
+                parent=menu,
+            )
+            restart_action.triggered.connect(lambda _checked=False: self._tray_feature.restart_dpi())
+            menu.addAction(restart_action)
+
+        preset_menu = self._build_preset_menu(menu, snapshot, language)
+        if preset_menu is not None:
+            menu.addMenu(preset_menu)
+
+        menu.addSeparator()
+
+        window_visible = self._is_window_visible()
         show_window_action = _make_menu_action(
-            "Показать",
-            icon=_fluent_icon("PLAY"),
+            tr_catalog("tray.menu.hide", language=language, default="Скрыть в трей")
+            if window_visible
+            else tr_catalog("tray.menu.show", language=language, default="Показать окно"),
+            icon=_fluent_icon("VIEW"),
             parent=menu,
         )
         show_window_action.triggered.connect(self._toggle_primary_visibility_action)
         menu.addAction(show_window_action)
-        self._show_window_action = show_window_action
 
-        opacity_title = (
-            "Эффект акрилика окна"
+        try:
+            tg_label = self._tray_feature.telegram_proxy_label()
+        except Exception:
+            tg_label = "Telegram Proxy"
+        tg_proxy_action = _make_menu_action(tg_label, icon=_fluent_icon("SEND"), parent=menu)
+        tg_proxy_action.triggered.connect(self._toggle_tg_proxy)
+        menu.addAction(tg_proxy_action)
+
+        opacity_menu = RoundMenu(
+            tr_catalog("tray.menu.acrylic", language=language, default="Эффект акрилика окна")
             if self._is_windows_11_or_newer()
-            else "Прозрачность окна"
+            else tr_catalog("tray.menu.opacity", language=language, default="Прозрачность окна"),
+            parent=menu,
         )
-        opacity_menu = RoundMenu(parent=menu)
-        try:
-            opacity_menu.setMinimumWidth(self._tray_submenu_min_width)
-        except Exception:
-            pass
-        try:
-            opacity_menu.setTitle(opacity_title)
-        except Exception:
-            pass
-        try:
-            opacity_menu.setIcon(_fluent_icon("PALETTE"))
-        except Exception:
-            pass
-        menu.addMenu(opacity_menu)
+        opacity_menu.setIcon(_fluent_icon("PALETTE"))
         for value, title in self._opacity_presets():
             action = _make_menu_action(title, parent=opacity_menu)
             action.triggered.connect(lambda checked=False, v=value: self._set_window_opacity(v))
             opacity_menu.addAction(action)
-
-        menu.addSeparator()
-
-        tg_proxy_action = _make_menu_action(
-            "Telegram Proxy: выкл",
-            icon=_fluent_icon("SEND"),
-            parent=menu,
-        )
-        tg_proxy_action.triggered.connect(self._toggle_tg_proxy)
-        menu.addAction(tg_proxy_action)
-        self._tg_proxy_action = tg_proxy_action
-
-        menu.addSeparator()
+        menu.addMenu(opacity_menu)
 
         console_action = _make_menu_action(
-            "Консоль",
+            tr_catalog("tray.menu.console", language=language, default="Консоль"),
             icon=_fluent_icon("COMMAND_PROMPT"),
             parent=menu,
         )
@@ -558,79 +862,98 @@ class SystemTrayManager:
 
         menu.addSeparator()
 
-        exit_only_action = _make_menu_action(
-            "Выход",
+        exit_action = _make_menu_action(
+            tr_catalog("tray.menu.exit", language=language, default="Выход"),
             icon=_fluent_icon("RETURN"),
             parent=menu,
         )
-        exit_only_action.triggered.connect(self.exit_only)
-        menu.addAction(exit_only_action)
+        exit_action.triggered.connect(self.exit_only)
+        menu.addAction(exit_action)
 
         exit_stop_action = _make_menu_action(
-            "Выход и остановить",
+            tr_catalog("tray.menu.exit_stop", language=language, default="Выход и остановить"),
             icon=_fluent_icon("POWER_BUTTON"),
             parent=menu,
         )
         exit_stop_action.triggered.connect(self.exit_and_stop)
+        exit_stop_action.setEnabled(phase in {"autostart_pending", "starting", "running", "stopping"})
         menu.addAction(exit_stop_action)
-        self._exit_stop_action = exit_stop_action
 
         return menu
 
-    def _sync_menu_state(self, state: dict) -> None:
-        if self._show_window_action is not None:
-            self._show_window_action.setText("Скрыть в трей" if state["is_visible"] else "Показать")
+    def _build_preset_menu(self, parent_menu, snapshot, language: str | None):
+        from settings.mode import is_preset_launch_method
 
-        if self._tg_proxy_action is not None:
-            self._tg_proxy_action.setText(state["tg_proxy_label"])
-
-        if self._exit_stop_action is not None:
-            active_phases = {"autostart_pending", "starting", "running", "stopping"}
-            self._exit_stop_action.setEnabled(
-                bool(state["is_launch_running"]) or str(state.get("launch_phase") or "").strip().lower() in active_phases
+        if snapshot is None or not is_preset_launch_method(snapshot.launch_method):
+            return None
+        title = tr_catalog("tray.menu.preset", language=language, default="Пресет")
+        preset_menu = CheckableMenu(title, parent=parent_menu, indicatorType=MenuIndicatorType.RADIO)
+        preset_menu.setIcon(_fluent_icon("BOOK_SHELF"))
+        if not snapshot.presets:
+            empty = _make_menu_action(
+                tr_catalog("tray.menu.presets_empty", language=language, default="Пресетов пока нет"),
+                parent=preset_menu,
             )
+            empty.setEnabled(False)
+            preset_menu.addAction(empty)
+            return preset_menu
+        for file_name, display_name in snapshot.presets:
+            action = _make_menu_action(display_name, parent=preset_menu)
+            action.setCheckable(True)
+            action.setChecked(snapshot.is_selected(file_name))
+            action.triggered.connect(
+                lambda _checked=False, f=file_name, d=display_name: self._activate_preset(f, d)
+            )
+            preset_menu.addAction(action)
+        return preset_menu
 
-    def _update_menu_widths(self, menu: QMenu) -> None:
-        try:
-            self._apply_menu_min_width(menu, base_width=self._tray_menu_min_width)
-        except Exception:
-            pass
+    def _sync_header(self, phase: str, snapshot, language: str | None) -> None:
+        header = self._header
+        if header is None:
+            return
+        launch_method = self._launch_method or ("" if snapshot is None else snapshot.launch_method)
+        preset_name = self._preset_name or ("" if snapshot is None else snapshot.selected_display_name)
+        mode = mode_label_for_launch_method(launch_method)
+        header.set_status(
+            title=f"{mode} · {tray_status_text(phase, language=language)}",
+            preset=preset_name,
+            color=phase_color(phase),
+        )
 
-        try:
-            for action in menu.actions():
-                submenu = action.menu()
-                if submenu is not None:
-                    self._apply_menu_min_width(submenu, base_width=self._tray_submenu_min_width)
-        except Exception:
-            pass
+    def _sync_launch_action(self, phase: str, language: str | None) -> None:
+        action = self._launch_action
+        if action is None:
+            return
+        next_step = toggle_action_for_phase(phase)
+        if phase == "stopping":
+            text = tr_catalog("tray.menu.stopping", language=language, default="Zapret останавливается…")
+            icon = _fluent_icon("PAUSE")
+        elif next_step == "stop" and phase in BUSY_LAUNCH_PHASES:
+            text = tr_catalog("tray.menu.stop", language=language, default="Остановить Zapret")
+            icon = _fluent_icon("CANCEL")
+        elif next_step == "stop":
+            text = tr_catalog("tray.menu.stop", language=language, default="Остановить Zapret")
+            icon = _fluent_icon("PAUSE")
+        else:
+            text = tr_catalog("tray.menu.start", language=language, default="Запустить Zapret")
+            icon = _fluent_icon("PLAY")
+        action.setText(text)
+        if icon is not None:
+            action.setIcon(icon)
+        action.setEnabled(bool(next_step))
 
-    def _apply_menu_min_width(self, menu: QMenu, *, base_width: int) -> None:
-        metrics = QFontMetrics(menu.font())
-        widest_text = 0
+    def _refresh_open_menu(self) -> None:
+        """Открытое меню живо: шапка и главный пункт следуют за фазой запуска."""
+        language = self._language()
+        phase = self._menu_launch_phase()
+        self._sync_header(phase, self._menu_snapshot(), language)
+        self._sync_launch_action(phase, language)
 
-        for action in menu.actions():
-            try:
-                text = str(action.text() or "")
-            except Exception:
-                text = ""
-            if not text:
-                continue
-            widest_text = max(widest_text, metrics.horizontalAdvance(text))
+    def _on_launch_action(self) -> None:
+        self._tray_feature.toggle_dpi()
 
-        # Запас под иконку, внутренние отступы, стрелку подменю и
-        # особенности first-show layout у RoundMenu.
-        calculated_width = int(widest_text + 170)
-        min_width = max(int(base_width), calculated_width)
-
-        try:
-            menu.setMinimumWidth(min_width)
-        except Exception:
-            pass
-
-        try:
-            menu.adjustSize()
-        except Exception:
-            pass
+    def _activate_preset(self, file_name: str, display_name: str) -> None:
+        self._tray_feature.activate_preset(file_name, display_name)
 
     def _toggle_primary_visibility_action(self) -> None:
         try:
@@ -682,67 +1005,7 @@ class SystemTrayManager:
 
         return QPoint(x, y)
 
-    def _apply_menu_style(self, menu: QMenu):
-        if isinstance(menu, RoundMenu):
-            return
-
-        try:
-            from qfluentwidgets import isDarkTheme, themeColor
-
-            is_light = not isDarkTheme()
-            accent = themeColor().name()
-        except Exception:
-            is_light = False
-            accent = "#60cdff"
-
-        if is_light:
-            bg_color = "#f3f3f3"
-            text_color = "#111111"
-            hover_bg = "rgba(0, 0, 0, 0.08)"
-            border_color = "rgba(0, 0, 0, 0.18)"
-            separator_color = "rgba(0, 0, 0, 0.10)"
-        else:
-            bg_color = "#1e1e1e"
-            text_color = "#f5f5f5"
-            hover_bg = "rgba(255, 255, 255, 0.08)"
-            border_color = "rgba(255, 255, 255, 0.16)"
-            separator_color = "rgba(255, 255, 255, 0.10)"
-
-        menu.setStyleSheet(
-            f"""
-            QMenu {{
-                background-color: {bg_color};
-                color: {text_color};
-                border: 1px solid {border_color};
-                border-radius: 8px;
-                padding: 6px 0px;
-            }}
-            QMenu::item {{
-                background-color: transparent;
-                color: {text_color};
-                padding: 7px 16px 7px 10px;
-                margin: 2px 6px;
-                border-radius: 6px;
-            }}
-            QMenu::item:selected {{
-                background-color: {hover_bg};
-                border-left: 2px solid {accent};
-                padding-left: 8px;
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background-color: {separator_color};
-                margin: 5px 10px;
-            }}
-            """
-        )
-
-    def _set_focus_to_tray(self) -> None:
-        if sys.platform != "win32" or not self._hwnd:
-            return
-
-        data = self._build_notify_icon_data(0)
-        shell32.Shell_NotifyIconW(NIM_SETFOCUS, ctypes.byref(data))
+    # ---- уведомления и действия ---------------------------------------
 
     def show_notification(self, title, message, msec=5000):
         if sys.platform != "win32" or not self._hwnd or not self._icon_visible:
@@ -863,12 +1126,6 @@ class SystemTrayManager:
 
     def _set_window_opacity(self, value: int) -> None:
         self._tray_feature.apply_window_opacity(int(value))
-
-    def _is_launch_running(self) -> bool:
-        return bool(self._tray_feature.launch_state()[0])
-
-    def _launch_phase(self) -> str:
-        return str(self._tray_feature.launch_state()[1] or "").strip().lower()
 
     def _is_windows_11_or_newer(self) -> bool:
         try:

@@ -35,8 +35,9 @@ from ui.page_deps.types import DnsPageDeps, HostsPageDeps, PremiumPageDeps
 PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
     PageName.ZAPRET2_MODE_CONTROL: PageDepsSpec(
         build_control_page_kwargs,
-        features=("presets", "profile", "runtime", "program_settings", "external_actions"),
+        features=("presets", "profile", "program_settings", "external_actions"),
         actions=(
+            "launch_control",
             "set_status",
             "request_exit",
             "open_connection_test",
@@ -48,8 +49,9 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
     ),
     PageName.ZAPRET1_MODE_CONTROL: PageDepsSpec(
         build_control_page_kwargs,
-        features=("presets", "profile", "runtime", "program_settings", "external_actions"),
+        features=("presets", "profile", "program_settings", "external_actions"),
         actions=(
+            "launch_control",
             "set_status",
             "request_exit",
             "open_connection_test",

@@ -5,10 +5,7 @@ from PyQt6.QtCore import QTimer
 
 from ui.pages.base_page import BasePage
 from settings.mode import EXE_NAME_WINWS1, ZAPRET1_MODE
-from presets.ui.control.zapret1.build import (
-    build_winws1_pages_management_section,
-    build_winws1_pages_status_section,
-)
+from presets.ui.control.zapret1.build import build_winws1_pages_status_section
 from presets.ui.control.zapret1.sections_build import (
     build_winws1_pages_settings_sections,
 )
@@ -45,7 +42,7 @@ from ui.widgets.soft_visibility import set_visible_softly
 from qfluentwidgets import (
     CaptionLabel, StrongBodyLabel,
     IndeterminateProgressBar, InfoBar,
-    PrimaryPushButton, PushButton, PushSettingCard, SettingCardGroup,
+    PushSettingCard, SettingCardGroup, TransparentPushButton,
 )
 
 
@@ -65,7 +62,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         create_top_summary_worker,
         create_additional_settings_load_worker,
         create_additional_settings_save_worker,
-        runtime_actions,
+        launch_control,
         create_program_settings_save_worker,
         create_program_settings_load_worker,
         create_program_settings_admin_check_worker,
@@ -94,7 +91,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self._create_top_summary_worker = create_top_summary_worker
         self._create_additional_settings_load_worker = create_additional_settings_load_worker
         self._create_additional_settings_save_worker = create_additional_settings_save_worker
-        self._runtime_actions = runtime_actions
+        self._launch_control = launch_control
         self._create_program_settings_save_worker = create_program_settings_save_worker
         self._create_program_settings_load_worker = create_program_settings_load_worker
         self._create_program_settings_admin_check_worker = create_program_settings_admin_check_worker
@@ -145,6 +142,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.folder_card = None
         self.docs_card = None
         self._build_ui()
+        self._bind_launch_control()
         self.bind_ui_state_store(ui_state_store)
         self._refresh_preset_name()
 
@@ -189,34 +187,21 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
             strong_body_label_cls=StrongBodyLabel,
             caption_label_cls=CaptionLabel,
+            indeterminate_progress_bar_cls=IndeterminateProgressBar,
+            close_button_cls=TransparentPushButton,
+            on_toggle=self._toggle_dpi,
+            on_close=self._stop_and_exit,
+            parent=self,
         )
         self.status_card = status_widgets.card
         self.status_dot = status_widgets.status_dot
         self.status_title = status_widgets.status_title
         self.status_desc = status_widgets.status_desc
+        self.close_btn = status_widgets.close_btn
+        self.progress_bar = status_widgets.progress_bar
+        self.loading_label = status_widgets.loading_label
         self.add_widget(status_widgets.card)
 
-        self.add_spacing(16)
-
-        # ── Управление ─────────────────────────────────────────────────────
-        self.add_section_title(text_key="page.winws1_control.section.management")
-        management_widgets = build_winws1_pages_management_section(
-            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
-            caption_label_cls=CaptionLabel,
-            indeterminate_progress_bar_cls=IndeterminateProgressBar,
-            big_action_button_cls=PrimaryPushButton,
-            stop_button_cls=PushButton,
-            on_start=self._start_dpi,
-            on_stop=self._stop_dpi,
-            on_stop_and_exit=self._stop_and_exit,
-            parent=self,
-        )
-        self.start_btn = management_widgets.start_btn
-        self.stop_winws_btn = management_widgets.stop_winws_btn
-        self.stop_and_exit_btn = management_widgets.stop_and_exit_btn
-        self.progress_bar = management_widgets.progress_bar
-        self.loading_label = management_widgets.loading_label
-        self.add_widget(management_widgets.card)
         self._build_settings_sections()
         self._attach_program_settings_runtime()
         self._schedule_additional_settings_reload(force=True)
@@ -745,9 +730,8 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         set_visible_softly(self.loading_label, loading and bool(text))
         set_text_if_changed(self.loading_label, text)
         set_loading_status_accessibility(self.loading_label, active=loading, text=text)
-        set_enabled_if_changed(self.start_btn, not loading)
-        set_enabled_if_changed(self.stop_winws_btn, not loading)
-        set_enabled_if_changed(self.stop_and_exit_btn, not loading)
+        self.status_dot.set_click_locked(loading)
+        set_enabled_if_changed(self.close_btn, not loading)
 
     def bind_ui_state_store(self, store: MainWindowStateStore) -> None:
         bind_control_ui_state_store(
@@ -882,9 +866,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             status_title=self.status_title,
             status_desc=self.status_desc,
             status_dot=self.status_dot,
-            start_btn=self.start_btn,
-            stop_winws_btn=self.stop_winws_btn,
-            stop_and_exit_btn=self.stop_and_exit_btn,
+            close_btn=self.close_btn,
         )
 
     def update_strategy(self, name: str):
@@ -909,9 +891,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             self._refresh_last_status_message()
         apply_winws1_pages_language(
             language=self._ui_language,
-            start_btn=self.start_btn,
-            stop_winws_btn=self.stop_winws_btn,
-            stop_and_exit_btn=self.stop_and_exit_btn,
+            close_btn=self.close_btn,
             program_settings_card=self.program_settings_card,
             auto_dpi_toggle=self.auto_dpi_toggle,
             gui_autostart_toggle=self.gui_autostart_toggle,

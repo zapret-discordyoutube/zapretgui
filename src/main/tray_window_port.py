@@ -36,6 +36,18 @@ class TrayWindowPort:
             "",
         )
 
+    def ui_language(self) -> str:
+        try:
+            from ui.navigation.text_sync import resolve_ui_language
+            from ui.window_ui_session import get_window_ui_session
+
+            session = get_window_ui_session(self._window)
+            if session is not None:
+                return str(session.ui_language or "")
+            return str(resolve_ui_language(self._window) or "")
+        except Exception:
+            return ""
+
     def is_visible(self) -> bool:
         try:
             return bool(self._window.isVisible())

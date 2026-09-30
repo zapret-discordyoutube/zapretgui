@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from PyQt6.QtCore import QTimer
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from presets.ui.control.control_page_runtime_shared import set_toggle_checked
 from ui.queued_worker_state import QueuedWorkerState
@@ -12,142 +11,43 @@ if TYPE_CHECKING:
     from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 
 
-RUNTIME_START_RETRY_MS = 250
-RUNTIME_START_MAX_RETRIES = 24
-RUNTIME_START_CONFLICT_STOP_MAX_RETRIES = 240
-
-
-@dataclass(frozen=True, slots=True)
-class ControlRuntimeActions:
-    start: Callable[[], object]
-    stop: Callable[[], object]
-    stop_and_exit: Callable[[], object]
-    is_available: Callable[[], object]
-
-
 class ControlPageActionMixin:
-    """Общие действия для страниц управления."""
+    """Общие действия для страниц управления.
 
-    def _start_dpi(self) -> None:
-        if self._request_runtime_conflicting_checks_stop():
-            self._queue_runtime_start_retry(
-                "Останавливаем подбор стратегии перед запуском Zapret...",
-                reason="conflict_stop",
-            )
+    Сами пуск и остановка живут в едином пульте ui.launch_control.LaunchControl:
+    страница только передаёт ему нажатия.
+    """
+
+    def _bind_launch_control(self) -> None:
+        control = getattr(self, "_launch_control", None)
+        signal = getattr(control, "preparingChanged", None)
+        if signal is None:
             return
-        if not self._runtime_start_available():
-            self._queue_runtime_start_retry()
-            return
-        self._runtime_actions.start()
-
-    def _runtime_start_available(self) -> bool:
-        available = getattr(self._runtime_actions, "is_available", None)
-        if callable(available):
-            try:
-                return bool(available())
-            except Exception:
-                return False
-        return False
-
-    def _request_runtime_conflicting_checks_stop(self) -> bool:
         try:
-            window_getter = getattr(self, "window", None)
-            window = window_getter() if callable(window_getter) else None
-            if window is None:
-                return False
-            from app.page_names import PageName
-            from ui.window_adapter import send_page_command
-
-            return bool(
-                send_page_command(
-                    window,
-                    PageName.BLOCKCHECK,
-                    "stop_runtime_conflicting_checks",
-                    {"source": "dpi_start"},
-                    ensure=False,
-                )
-            )
+            signal.connect(self._on_launch_preparing_changed)
         except Exception:
-            return False
+            pass
+        if bool(getattr(control, "is_preparing", lambda: False)()):
+            self._on_launch_preparing_changed(True, control.preparing_text())
 
-    def _queue_runtime_start_retry(self, message: str = "Подготовка запуска...", *, reason: str = "runtime") -> None:
-        if bool(getattr(self, "_runtime_start_retry_pending", False)):
+    def _on_launch_preparing_changed(self, active: bool, text: str) -> None:
+        if bool(getattr(self, "_cleanup_in_progress", False)):
             return
-        self._runtime_start_retry_pending = True
-        self._runtime_start_retry_count = 0
-        self._runtime_start_retry_reason = str(reason or "runtime")
-        self._show_runtime_preparing_state(message)
-        QTimer.singleShot(RUNTIME_START_RETRY_MS, self._retry_start_dpi_after_runtime_ready)
-
-    def _show_runtime_preparing_state(self, message: str = "Подготовка запуска...") -> None:
-        message = str(message or "").strip() or "Подготовка запуска..."
         set_loading = getattr(self, "set_loading", None)
         if callable(set_loading):
-            set_loading(True, message)
-        set_status = getattr(self, "_set_status", None)
-        if callable(set_status):
-            set_status(message)
+            set_loading(bool(active), str(text or ""))
 
-    def _retry_start_dpi_after_runtime_ready(self) -> None:
-        if bool(getattr(self, "_cleanup_in_progress", False)):
-            self._runtime_start_retry_pending = False
-            return
+    def _toggle_dpi(self) -> None:
+        self._launch_control.toggle()
 
-        if self._request_runtime_conflicting_checks_stop():
-            retries = int(getattr(self, "_runtime_start_retry_count", 0)) + 1
-            self._runtime_start_retry_count = retries
-            if retries >= RUNTIME_START_CONFLICT_STOP_MAX_RETRIES:
-                self._runtime_start_retry_pending = False
-                set_loading = getattr(self, "set_loading", None)
-                if callable(set_loading):
-                    set_loading(False, "")
-                set_status = getattr(self, "_set_status", None)
-                if callable(set_status):
-                    set_status("Подбор стратегии ещё останавливается. Дождитесь остановки и запустите Zapret снова.")
-                return
-            QTimer.singleShot(RUNTIME_START_RETRY_MS, self._retry_start_dpi_after_runtime_ready)
-            return
-
-        if self._runtime_start_available():
-            self._runtime_start_retry_pending = False
-            set_loading = getattr(self, "set_loading", None)
-            if callable(set_loading):
-                set_loading(False, "")
-            self._runtime_actions.start()
-            return
-
-        retries = int(getattr(self, "_runtime_start_retry_count", 0)) + 1
-        self._runtime_start_retry_count = retries
-        if retries >= RUNTIME_START_MAX_RETRIES:
-            self._runtime_start_retry_pending = False
-            set_loading = getattr(self, "set_loading", None)
-            if callable(set_loading):
-                set_loading(False, "")
-            set_status = getattr(self, "_set_status", None)
-            if callable(set_status):
-                set_status("Запуск ещё не готов. Попробуйте ещё раз через пару секунд.")
-            return
-
-        QTimer.singleShot(RUNTIME_START_RETRY_MS, self._retry_start_dpi_after_runtime_ready)
+    def _start_dpi(self) -> None:
+        self._launch_control.start()
 
     def _stop_dpi(self) -> None:
-        self._runtime_actions.stop()
+        self._launch_control.stop()
 
     def _stop_and_exit(self) -> None:
-        from log.log import log
-        from PyQt6.QtWidgets import QApplication
-
-        log("Остановка winws и закрытие программы...", "INFO")
-
-        request_exit = getattr(self, "_request_exit_callback", None)
-        if callable(request_exit):
-            request_exit(stop_dpi=True)
-            return
-
-        if self._runtime_actions.stop_and_exit():
-            return
-
-        QApplication.quit()
+        self._launch_control.stop_and_exit()
 
     def _start_onboarding_tour(self) -> None:
         handler = getattr(self, "_start_onboarding_tour_callback", None)
@@ -157,11 +57,7 @@ class ControlPageActionMixin:
     def onboarding_target(self, name: str):
         """Цели обучающего тура на главной странице режима."""
         if name == "start":
-            for attr in ("start_btn", "stop_winws_btn"):
-                button = getattr(self, attr, None)
-                if button is not None and button.isVisible():
-                    return button
-            return getattr(self, "start_btn", None)
+            return getattr(self, "status_dot", None)
         if name == "status":
             return getattr(self, "status_card", None)
         if name == "preset":

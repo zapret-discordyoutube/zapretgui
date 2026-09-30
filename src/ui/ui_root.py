@@ -76,7 +76,11 @@ class WindowUiRoot:
         started_at = time.perf_counter()
         init_navigation(self._window)
         _metric("StartupWindowUiRootNavigation", started_at)
-        bind_window_ui_state(self._window, self._runtime_bootstrap_deps.ui_state_store)
+        bind_window_ui_state(
+            self._window,
+            self._runtime_bootstrap_deps.ui_state_store,
+            launch_control=self._runtime_bootstrap_deps.launch_control,
+        )
         started_at = time.perf_counter()
         finalize_page_stack_bootstrap(self._window)
         _metric("StartupWindowUiRootStack", started_at)

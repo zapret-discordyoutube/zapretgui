@@ -19,6 +19,7 @@ from presets.ui_bindings import bind_preset_stores_to_runtime
 @dataclass(frozen=True, slots=True)
 class WindowRuntimeBootstrapDeps:
     runtime_feature: Any
+    launch_control: Any
     presets_feature: Any
     profile_feature: Any
     ui_state_store: Any

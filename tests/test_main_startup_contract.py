@@ -1221,10 +1221,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             "from presets.ui.common.user_presets_page_runtime import UserPresetsRuntimeActions",
             inspect.getsource(page_deps_presets.build_user_presets_page_kwargs),
         )
-        self.assertIn(
-            "from presets.ui.control.control_page_shared import ControlRuntimeActions",
-            inspect.getsource(page_deps_presets.build_control_page_kwargs),
-        )
 
     def test_app_features_defers_feature_facades_imports_to_type_checking(self) -> None:
         import inspect
@@ -2247,40 +2243,39 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         routed_show_page.assert_called_once_with(window, PageName.SERVERS, allow_internal=True)
 
     def test_control_start_waits_until_runtime_is_available(self) -> None:
-        from presets.ui.control import control_page_shared
-        from presets.ui.control.control_page_shared import ControlPageActionMixin
+        from ui import launch_control as launch_control_module
+        from ui.launch_control import LaunchControl
 
-        class Page(ControlPageActionMixin):
-            def __init__(self) -> None:
-                self.loading_calls: list[tuple[bool, str]] = []
-                self.status_calls: list[str] = []
-                self._runtime_actions = SimpleNamespace(
-                    is_available=Mock(side_effect=[False, False, True]),
-                    start=Mock(return_value=True),
-                )
-                self._set_status_callback = self.status_calls.append
-
-            def set_loading(self, loading: bool, text: str = "") -> None:
-                self.loading_calls.append((loading, text))
-
-        page = Page()
+        status_calls: list[str] = []
+        runtime = SimpleNamespace(
+            is_available=Mock(side_effect=[False, False, True]),
+            start=Mock(return_value=True),
+        )
+        control = LaunchControl(
+            runtime_feature=runtime,
+            ui_state_store=SimpleNamespace(snapshot=lambda: SimpleNamespace(launch_phase="stopped", launch_running=False)),
+            set_status=status_calls.append,
+        )
+        preparing_calls: list[tuple[bool, str]] = []
+        control.preparingChanged.connect(lambda active, text: preparing_calls.append((active, text)))
         scheduled: list[object] = []
 
         with patch.object(
-            control_page_shared.QTimer,
+            launch_control_module.QTimer,
             "singleShot",
             side_effect=lambda _delay_ms, callback: scheduled.append(callback),
         ):
-            page._start_dpi()
+            control.start()
             self.assertEqual(len(scheduled), 1)
             scheduled.pop(0)()
             self.assertEqual(len(scheduled), 1)
             scheduled.pop(0)()
 
-        page._runtime_actions.start.assert_called_once_with()
-        self.assertIn((True, "Подготовка запуска..."), page.loading_calls)
-        self.assertEqual(page.loading_calls[-1], (False, ""))
-        self.assertIn("Подготовка запуска...", page.status_calls)
+        runtime.start.assert_called_once_with()
+        self.assertIn((True, "Подготовка запуска..."), preparing_calls)
+        self.assertEqual(preparing_calls[-1], (False, ""))
+        self.assertIn("Подготовка запуска...", status_calls)
+        self.assertFalse(control.is_preparing())
 
     def test_post_startup_tasks_install_hosts_page_warmup(self) -> None:
         from main import post_startup

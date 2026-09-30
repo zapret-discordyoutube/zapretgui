@@ -28,24 +28,51 @@ class LastStatusMessageWidgets:
     message_label: object
 
 
+@dataclass(slots=True)
+class ModeStatusWidgets:
+    card: object
+    status_dot: object
+    status_title: object
+    status_desc: object
+    close_btn: object
+    progress_bar: object
+    loading_label: object
+
+
+STATUS_DOT_SIZE = 40
+
+
 def build_mode_status_section_common(
     *,
     tr_fn,
     strong_body_label_cls,
     caption_label_cls,
+    indeterminate_progress_bar_cls,
+    close_button_cls,
     checking_key: str,
     checking_default: str,
     detecting_key: str,
     detecting_default: str,
-):
+    on_toggle,
+    on_close,
+    parent=None,
+) -> ModeStatusWidgets:
+    """Карточка «Статус работы». Точка в ней — выключатель Zapret."""
     status_card = CardWidget()
     status_layout = QHBoxLayout(status_card)
-    status_layout.setContentsMargins(16, 14, 16, 14)
+    status_layout.setContentsMargins(16, 12, 16, 12)
     status_layout.setSpacing(16)
 
-    status_dot = PacketFlowIndicator()
+    status_dot = PacketFlowIndicator(size=STATUS_DOT_SIZE)
+    status_dot.set_clickable(True)
+    status_dot.clicked.connect(on_toggle)
+    # set_control_accessibility сам подключает Enter/Пробел к status_dot.click().
+    set_control_accessibility(
+        status_dot,
+        description=tr_fn("launch.dot.description", "Нажмите на точку, чтобы запустить или остановить Zapret"),
+    )
     set_state_text(status_dot, "Индикатор состояния Zapret: состояние пока не загружено")
-    status_layout.addWidget(status_dot)
+    status_layout.addWidget(status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
 
     status_text = QVBoxLayout()
     status_text.setContentsMargins(0, 0, 0, 0)
@@ -65,9 +92,44 @@ def build_mode_status_section_common(
 
     status_text.addWidget(status_title)
     status_text.addWidget(status_desc)
+
+    progress_bar = indeterminate_progress_bar_cls(parent)
+    progress_bar.setVisible(False)
+    set_control_accessibility(
+        progress_bar,
+        name="Ход запуска Zapret: не выполняется",
+        description="Показывает, что запуск или остановка Zapret выполняется.",
+    )
+    set_state_text(progress_bar, "Ход запуска Zapret: не выполняется")
+    status_text.addSpacing(4)
+    status_text.addWidget(progress_bar)
+
+    loading_label = caption_label_cls("")
+    loading_label.setVisible(False)
+    set_state_text(loading_label, "Статус запуска Zapret: нет активного запуска")
+    status_text.addWidget(loading_label)
     status_layout.addLayout(status_text, 1)
 
-    return status_card, status_dot, status_title, status_desc
+    close_text = tr_fn("launch.action.close_app", "Закрыть программу")
+    close_btn = close_button_cls(FluentIcon.POWER_BUTTON, close_text)
+    set_control_accessibility(
+        close_btn,
+        description=tr_fn("launch.action.close_app.description", "Остановить Zapret и закрыть программу"),
+    )
+    set_state_text(close_btn, close_text)
+    close_btn.clicked.connect(on_close)
+    close_btn.setVisible(False)
+    status_layout.addWidget(close_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    return ModeStatusWidgets(
+        card=status_card,
+        status_dot=status_dot,
+        status_title=status_title,
+        status_desc=status_desc,
+        close_btn=close_btn,
+        progress_bar=progress_bar,
+        loading_label=loading_label,
+    )
 
 
 def build_last_status_message_card_common(
@@ -117,105 +179,6 @@ def build_last_status_message_card_common(
         title_label=title_label,
         message_label=message_label,
     )
-
-
-def build_mode_management_section_common(
-    *,
-    tr_fn,
-    caption_label_cls,
-    indeterminate_progress_bar_cls,
-    big_action_button_cls,
-    stop_button_cls,
-    start_key: str,
-    start_default: str,
-    stop_key: str,
-    stop_default: str,
-    stop_exit_key: str,
-    stop_exit_default: str,
-    on_start,
-    on_stop,
-    on_stop_and_exit,
-    parent,
-):
-    control_card = CardWidget()
-    content_layout = QVBoxLayout(control_card)
-    content_layout.setContentsMargins(16, 16, 16, 16)
-    content_layout.setSpacing(12)
-
-    buttons_layout = QHBoxLayout()
-    buttons_layout.setSpacing(12)
-
-    start_text = tr_fn(start_key, start_default)
-    start_btn = big_action_button_cls(
-        start_text,
-        icon=FluentIcon.PLAY,
-    )
-    set_control_accessibility(
-        start_btn,
-        description="Запускает обход блокировок в выбранном режиме.",
-    )
-    set_state_text(start_btn, start_text)
-    start_btn.clicked.connect(on_start)
-    buttons_layout.addWidget(start_btn)
-
-    stop_text = tr_fn(stop_key, stop_default)
-    stop_winws_btn = stop_button_cls(stop_text)
-    set_control_accessibility(
-        stop_winws_btn,
-        description="Останавливает запущенный процесс обхода блокировок.",
-    )
-    set_state_text(stop_winws_btn, stop_text)
-    stop_winws_btn.clicked.connect(on_stop)
-    stop_winws_btn.setVisible(False)
-    schedule_stop_button_icon(stop_winws_btn)
-    buttons_layout.addWidget(stop_winws_btn)
-
-    stop_exit_text = tr_fn(stop_exit_key, stop_exit_default)
-    stop_and_exit_btn = stop_button_cls(
-        stop_exit_text,
-        icon=FluentIcon.POWER_BUTTON,
-    )
-    set_control_accessibility(
-        stop_and_exit_btn,
-        description="Останавливает обход блокировок и закрывает программу.",
-    )
-    set_state_text(stop_and_exit_btn, stop_exit_text)
-    stop_and_exit_btn.clicked.connect(on_stop_and_exit)
-    stop_and_exit_btn.setVisible(False)
-    buttons_layout.addWidget(stop_and_exit_btn)
-
-    buttons_layout.addStretch()
-    content_layout.addLayout(buttons_layout)
-
-    progress_bar = indeterminate_progress_bar_cls(parent)
-    progress_bar.setVisible(False)
-    set_control_accessibility(
-        progress_bar,
-        name="Ход запуска Zapret: не выполняется",
-        description="Показывает, что запуск или остановка Zapret выполняется.",
-    )
-    set_state_text(progress_bar, "Ход запуска Zapret: не выполняется")
-    content_layout.addWidget(progress_bar)
-
-    loading_label = caption_label_cls("")
-    loading_label.setVisible(False)
-    set_state_text(loading_label, "Статус запуска Zapret: нет активного запуска")
-    content_layout.addWidget(loading_label)
-
-    return control_card, start_btn, stop_winws_btn, stop_and_exit_btn, progress_bar, loading_label
-
-
-def schedule_stop_button_icon(button, *, delay_ms: int = 250) -> None:
-    def _apply_icon() -> None:
-        try:
-            button.setIcon(get_themed_qta_icon("fa5s.stop"))
-        except Exception:
-            pass
-
-    try:
-        QTimer.singleShot(delay_ms, _apply_icon)
-    except Exception:
-        _apply_icon()
 
 
 def build_onboarding_tour_card_common(*, push_setting_card_cls, tr_fn, on_click, parent=None):

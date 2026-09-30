@@ -234,12 +234,12 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Zapret stopped",
     },
     "page.control.status.bypass_active": {
-        "ru": "Обход блокировок активен",
-        "en": "Bypass is active",
+        "ru": "Обход блокировок активен · нажмите на точку, чтобы остановить",
+        "en": "Bypass is active · click the dot to stop",
     },
     "page.control.status.press_start": {
-        "ru": "Нажмите «Запустить» для активации",
-        "en": "Press Start to activate",
+        "ru": "Нажмите на точку, чтобы запустить",
+        "en": "Click the dot to start",
     },
     "page.control.last_message.title": {
         "ru": "Последнее сообщение",
@@ -248,18 +248,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.control.last_message.empty": {
         "ru": "Пока нет новых сообщений",
         "en": "No new messages yet",
-    },
-    "page.control.button.start": {
-        "ru": "Запустить Zapret",
-        "en": "Start Zapret",
-    },
-    "page.control.button.stop_only_winws": {
-        "ru": f"Остановить только {EXE_NAME_WINWS1}",
-        "en": f"Stop only {EXE_NAME_WINWS1}",
-    },
-    "page.control.button.stop_and_exit": {
-        "ru": "Остановить и закрыть программу",
-        "en": "Stop and close application",
     },
     "page.control.strategy.not_selected": {
         "ru": "Не выбрана",
@@ -372,18 +360,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.winws1_control.status.press_start": {
         "ru": "Нажмите «Запустить» для активации",
         "en": "Press Start to activate",
-    },
-    "page.winws1_control.button.start": {
-        "ru": "Запустить Zapret",
-        "en": "Start Zapret",
-    },
-    "page.winws1_control.button.stop_winws": {
-        "ru": f"Остановить {EXE_NAME_WINWS1}",
-        "en": f"Stop {EXE_NAME_WINWS1}",
-    },
-    "page.winws1_control.button.stop_and_exit": {
-        "ru": "Остановить и закрыть",
-        "en": "Stop and close",
     },
     "page.winws1_control.preset.not_selected": {
         "ru": "Не выбран",
@@ -3281,10 +3257,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Статус работы",
         "en": "Service Status",
     },
-    "page.winws1_control.section.management": {
-        "ru": "Управление Zapret 1",
-        "en": "Zapret 1 Control",
-    },
     "page.winws1_control.section.presets": {
         "ru": "Пресеты и настройка пресета",
         "en": "Presets and preset setup",
@@ -3822,10 +3794,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Статус работы",
         "en": "Service Status",
     },
-    "page.winws2_control.section.management": {
-        "ru": "Управление Zapret 2",
-        "en": "Zapret 2 Control",
-    },
     "page.winws2_control.section.preset_switch": {
         "ru": "Сменить пресет обхода блокировок",
         "en": "Switch Bypass Preset",
@@ -3863,28 +3831,12 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Zapret stopped",
     },
     "page.winws2_control.status.bypass_active": {
-        "ru": "Обход блокировок активен",
-        "en": "Bypass is active",
+        "ru": "Обход блокировок активен · нажмите на точку, чтобы остановить",
+        "en": "Bypass is active · click the dot to stop",
     },
     "page.winws2_control.status.press_start": {
-        "ru": "Нажмите «Запустить» для активации",
-        "en": "Press Start to activate",
-    },
-    "page.winws2_control.button.start": {
-        "ru": "Запустить Zapret",
-        "en": "Start Zapret",
-    },
-    "page.winws2_control.button.stop_only_winws": {
-        "ru": f"Остановить только {EXE_NAME_WINWS1}",
-        "en": f"Stop only {EXE_NAME_WINWS1}",
-    },
-    "page.winws2_control.button.stop_only_template": {
-        "ru": "Остановить только {exe_name}",
-        "en": "Stop only {exe_name}",
-    },
-    "page.winws2_control.button.stop_and_exit": {
-        "ru": "Остановить и закрыть программу",
-        "en": "Stop and close app",
+        "ru": "Нажмите на точку, чтобы запустить",
+        "en": "Click the dot to start",
     },
     "page.winws2_control.button.my_presets": {
         "ru": "Мои пресеты",
@@ -4607,10 +4559,6 @@ TEXTS: dict[str, dict[str, str]] = {
 
 
 TEXTS_EXTRA: dict[str, dict[str, str]] = {
-    "page.control.button.stop_only_template": {
-        "ru": "Остановить только {exe_name}",
-        "en": "Stop only {exe_name}",
-    },
     "page.control.strategy.more_template": {
         "ru": "+{count} ещё",
         "en": "+{count} more",
@@ -4904,6 +4852,170 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
     "common.premium.days_unit.many": {
         "ru": "дней",
         "en": "days",
+    },
+    "launch.action.start": {
+        "ru": "Запустить Zapret",
+        "en": "Start Zapret",
+    },
+    "launch.action.stop": {
+        "ru": "Остановить Zapret",
+        "en": "Stop Zapret",
+    },
+    "launch.action.stopping": {
+        "ru": "Zapret останавливается",
+        "en": "Zapret is stopping",
+    },
+    "launch.action.close_app": {
+        "ru": "Закрыть программу",
+        "en": "Close app",
+    },
+    "launch.action.close_app.description": {
+        "ru": "Остановить Zapret и закрыть программу",
+        "en": "Stop Zapret and close the app",
+    },
+    "launch.dot.description": {
+        "ru": "Нажмите на точку, чтобы запустить или остановить Zapret",
+        "en": "Click the dot to start or stop Zapret",
+    },
+    "launch.badge.running": {
+        "ru": "Работает",
+        "en": "Running",
+    },
+    "launch.badge.starting": {
+        "ru": "Запуск…",
+        "en": "Starting…",
+    },
+    "launch.badge.stopping": {
+        "ru": "Остановка…",
+        "en": "Stopping…",
+    },
+    "launch.badge.stopped": {
+        "ru": "Остановлен",
+        "en": "Stopped",
+    },
+    "launch.badge.failed": {
+        "ru": "Ошибка",
+        "en": "Error",
+    },
+    "launch.badge.tooltip.running": {
+        "ru": "{mode} работает · нажмите, чтобы остановить",
+        "en": "{mode} is running · click to stop",
+    },
+    "launch.badge.tooltip.starting": {
+        "ru": "{mode} запускается · нажмите, чтобы остановить",
+        "en": "{mode} is starting · click to stop",
+    },
+    "launch.badge.tooltip.stopping": {
+        "ru": "{mode} останавливается…",
+        "en": "{mode} is stopping…",
+    },
+    "launch.badge.tooltip.stopped": {
+        "ru": "{mode} остановлен · нажмите, чтобы запустить",
+        "en": "{mode} is stopped · click to start",
+    },
+    "launch.badge.tooltip.failed": {
+        "ru": "Ошибка запуска {mode} · нажмите, чтобы попробовать снова",
+        "en": "{mode} failed to start · click to try again",
+    },
+    "tray.status.running": {
+        "ru": "работает",
+        "en": "running",
+    },
+    "tray.status.starting": {
+        "ru": "запускается",
+        "en": "starting",
+    },
+    "tray.status.stopping": {
+        "ru": "останавливается",
+        "en": "stopping",
+    },
+    "tray.status.stopped": {
+        "ru": "остановлен",
+        "en": "stopped",
+    },
+    "tray.status.failed": {
+        "ru": "ошибка запуска",
+        "en": "failed to start",
+    },
+    "tray.tooltip.preset": {
+        "ru": "Пресет: {preset}",
+        "en": "Preset: {preset}",
+    },
+    "tray.menu.start": {
+        "ru": "Запустить Zapret",
+        "en": "Start Zapret",
+    },
+    "tray.menu.stop": {
+        "ru": "Остановить Zapret",
+        "en": "Stop Zapret",
+    },
+    "tray.menu.starting": {
+        "ru": "Zapret запускается…",
+        "en": "Zapret is starting…",
+    },
+    "tray.menu.stopping": {
+        "ru": "Zapret останавливается…",
+        "en": "Zapret is stopping…",
+    },
+    "tray.menu.restart": {
+        "ru": "Перезапустить",
+        "en": "Restart",
+    },
+    "tray.menu.preset": {
+        "ru": "Пресет",
+        "en": "Preset",
+    },
+    "tray.menu.presets_empty": {
+        "ru": "Пресетов пока нет",
+        "en": "No presets yet",
+    },
+    "tray.menu.show": {
+        "ru": "Показать окно",
+        "en": "Show window",
+    },
+    "tray.menu.hide": {
+        "ru": "Скрыть в трей",
+        "en": "Hide to tray",
+    },
+    "tray.menu.opacity": {
+        "ru": "Прозрачность окна",
+        "en": "Window transparency",
+    },
+    "tray.menu.acrylic": {
+        "ru": "Эффект акрилика окна",
+        "en": "Window acrylic effect",
+    },
+    "tray.menu.console": {
+        "ru": "Консоль",
+        "en": "Console",
+    },
+    "tray.menu.exit": {
+        "ru": "Выход",
+        "en": "Exit",
+    },
+    "tray.menu.exit_stop": {
+        "ru": "Выход и остановить",
+        "en": "Stop and exit",
+    },
+    "tray.notify.started.title": {
+        "ru": "Zapret запущен",
+        "en": "Zapret started",
+    },
+    "tray.notify.started.body": {
+        "ru": "Обход блокировок активен · пресет: {preset}",
+        "en": "Bypass is active · preset: {preset}",
+    },
+    "tray.notify.started.body_no_preset": {
+        "ru": "Обход блокировок активен",
+        "en": "Bypass is active",
+    },
+    "tray.notify.stopped.title": {
+        "ru": "Zapret остановлен",
+        "en": "Zapret stopped",
+    },
+    "tray.notify.stopped.body": {
+        "ru": "Обход блокировок выключен",
+        "en": "Bypass is off",
     },
     "titlebar.subscription.free": {
         "ru": "FREE",
@@ -5229,23 +5341,23 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
         ),
     },
     "onboarding.step.start.title": {
-        "ru": "Кнопка запуска",
-        "en": "Start button",
+        "ru": "Выключатель обхода",
+        "en": "Bypass switch",
     },
     "onboarding.step.start.body": {
         "ru": (
-            "Включает обход: программа запускает движок с выбранным пресетом. Пока движок работает, "
-            "обход действует не только в браузере, а во всей системе — в Discord, играх и других "
-            "программах, но только для того трафика, который описан в профилях пресета.\n\n"
-            "Когда обход включён, здесь появятся кнопки, чтобы остановить только движок или "
-            "остановить его и закрыть программу."
+            "Точка — это выключатель. Нажмите на неё, и программа запустит движок с выбранным пресетом. "
+            "Пока движок работает, обход действует не только в браузере, а во всей системе — в Discord, "
+            "играх и других программах, но только для того трафика, который описан в профилях пресета.\n\n"
+            "Повторное нажатие останавливает обход. То же самое можно сделать меткой статуса в заголовке "
+            "окна — она видна в любом разделе — или из меню значка в трее."
         ),
         "en": (
-            "Turns the bypass on: the app starts the engine with the selected preset. While the engine "
-            "runs, the bypass works system-wide, not only in the browser — in Discord, games and other "
+            "The dot is a switch. Click it and the app starts the engine with the selected preset. While the "
+            "engine runs, the bypass works system-wide, not only in the browser — in Discord, games and other "
             "programs, but only for the traffic described in the preset profiles.\n\n"
-            "When the bypass is on, buttons appear here to stop only the engine or to stop it and "
-            "close the app."
+            "Click it again to stop the bypass. You can also do this with the status badge in the window "
+            "title — it is visible in every section — or from the tray icon menu."
         ),
     },
     "onboarding.step.status.title": {
