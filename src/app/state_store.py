@@ -25,6 +25,9 @@ class AppUiState:
     window_opacity: int = 100
     active_preset_revision: int = 0
     active_preset_file_name: str = ""
+    # Режим, к которому относится active_preset_file_name: store общий для
+    # zapret1 и zapret2, и без режима имя одного сравнивалось бы с пресетом другого.
+    active_preset_launch_method: str = ""
     preset_content_revision: int = 0
     preset_structure_revision: int = 0
     mode_revision: int = 0
@@ -190,11 +193,12 @@ class MainWindowStateStore:
     def set_window_opacity_value(self, value: int) -> bool:
         return self.update(window_opacity=max(0, min(100, int(value))))
 
-    def bump_active_preset_revision(self, *, file_name: str = "") -> bool:
+    def bump_active_preset_revision(self, *, file_name: str = "", launch_method: str = "") -> bool:
         current = self.snapshot().active_preset_revision
         return self.update(
             active_preset_revision=int(current) + 1,
             active_preset_file_name=str(file_name or "").strip(),
+            active_preset_launch_method=str(launch_method or "").strip(),
         )
 
     def bump_preset_content_revision(self, *, content_change_kind: str = "") -> bool:

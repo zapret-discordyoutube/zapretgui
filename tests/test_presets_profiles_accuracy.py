@@ -309,7 +309,9 @@ class ReviewFollowUpTests(unittest.TestCase):
 
         page = PresetSetupPageBase.__new__(PresetSetupPageBase)
         page._displayed_preset_file_name = "A.txt"
-        page._ui_state_store = SimpleNamespace(snapshot=lambda: SimpleNamespace(active_preset_file_name="b.txt"))
+        page._ui_state_store = SimpleNamespace(
+            snapshot=lambda: SimpleNamespace(active_preset_file_name="B.txt", active_preset_launch_method="zapret2_mode")
+        )
         page._profile_reference_for = lambda key: key
         queue = PresetWriteQueue(page)
         queue._start_profile_context_action_worker = Mock()
@@ -319,6 +321,26 @@ class ReviewFollowUpTests(unittest.TestCase):
         queue._request_profile_context_action("delete", "uid:1")
 
         queue._start_profile_context_action_worker.assert_not_called()
+
+    def test_preset_of_other_mode_does_not_block_list_actions(self) -> None:
+        from profile.ui.preset_setup_page import Zapret1PresetSetupPage
+        from profile.ui.preset_write_queue import PresetWriteQueue
+
+        # Store общий: последним переключали пресет zapret2, а открыт список
+        # zapret1 со своим пресетом — это не «устаревший список».
+        page = Zapret1PresetSetupPage.__new__(Zapret1PresetSetupPage)
+        page._displayed_preset_file_name = "Default v1.txt"
+        page._ui_state_store = SimpleNamespace(
+            snapshot=lambda: SimpleNamespace(active_preset_file_name="Default v5.txt", active_preset_launch_method="zapret2_mode")
+        )
+        page._profile_reference_for = lambda key: key
+        queue = PresetWriteQueue(page)
+        queue._start_profile_context_action_worker = Mock()
+        queue._profile_preset_write_operation_running = lambda: False
+
+        queue._request_profile_context_action("delete", "uid:1")
+
+        queue._start_profile_context_action_worker.assert_called_once()
 
     def test_scan_with_locked_file_is_not_cached(self) -> None:
         from core.paths import AppPaths

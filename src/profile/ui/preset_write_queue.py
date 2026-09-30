@@ -227,9 +227,16 @@ class PresetWriteQueue:
         if store is None:
             return ""
         try:
-            return str(getattr(store.snapshot(), "active_preset_file_name", "") or "").strip()
+            state = store.snapshot()
         except Exception:
             return ""
+        # Имя другого режима (store общий для zapret1 и zapret2) к этому
+        # списку не относится; без режима — не знаем, не сравниваем.
+        method = str(getattr(state, "active_preset_launch_method", "") or "").strip().lower()
+        own = str(getattr(self._page, "launch_method", "") or "").strip().lower()
+        if not method or not own or method != own:
+            return ""
+        return str(getattr(state, "active_preset_file_name", "") or "").strip()
 
     def _list_is_stale(self) -> bool:
         """Активный пресет уже другой, а список ещё показывает прежний."""

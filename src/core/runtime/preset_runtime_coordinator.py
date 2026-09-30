@@ -109,6 +109,8 @@ class PresetRuntimeCoordinator(QObject):
         self._active_preset_file_path: str = ""
         self._pending_preset_content_apply: PendingPresetApply | None = None
         self._last_active_preset_key: tuple[str, str] | None = None
+        # (режим, имя файла в исходном регистре) — то, что публикуется в store.
+        self._active_preset_projection: tuple[str, str] | None = None
         self._active_preset_revision_publish_pending = False
         self._active_preset_file_watcher_setup_pending = False
         self._pending_active_preset_watch: PendingPresetWatch | None = None
@@ -171,6 +173,7 @@ class PresetRuntimeCoordinator(QObject):
         active_key = (method, selected_file_name.lower())
         active_changed = self._last_active_preset_key != active_key
         self._last_active_preset_key = active_key
+        self._active_preset_projection = (method, selected_file_name)
         if not active_changed:
             log(
                 f"Повторное переключение на тот же preset пропущено: {selected_file_name}",
@@ -207,6 +210,7 @@ class PresetRuntimeCoordinator(QObject):
         selected_file_name = str(preset_file_name or "").strip()
         if selected_file_name:
             self._last_active_preset_key = (method, selected_file_name.lower())
+            self._active_preset_projection = (method, selected_file_name)
         self._schedule_active_preset_file_watcher_setup(
             launch_method=method,
             preset_file_name=selected_file_name,
@@ -348,14 +352,20 @@ class PresetRuntimeCoordinator(QObject):
         try:
             store = self._ui_state_store
             if store is not None:
-                last_key = self._last_active_preset_key
-                file_name = str(last_key[1] or "") if isinstance(last_key, tuple) and len(last_key) > 1 else ""
+                projection = self.__dict__.get("_active_preset_projection")
+                if not isinstance(projection, tuple) or len(projection) < 2:
+                    last_key = self._last_active_preset_key
+                    projection = last_key if isinstance(last_key, tuple) and len(last_key) > 1 else ("", "")
+                method, file_name = str(projection[0] or ""), str(projection[1] or "")
                 try:
-                    store.bump_active_preset_revision(file_name=file_name)
+                    store.bump_active_preset_revision(file_name=file_name, launch_method=method)
                 except TypeError as exc:
-                    if "file_name" not in str(exc):
+                    if "launch_method" in str(exc):
+                        store.bump_active_preset_revision(file_name=file_name)
+                    elif "file_name" in str(exc):
+                        store.bump_active_preset_revision()
+                    else:
                         raise
-                    store.bump_active_preset_revision()
         except Exception:
             pass
 

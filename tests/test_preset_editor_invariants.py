@@ -138,10 +138,15 @@ class ActivationOnlyReloadSkipTests(unittest.TestCase):
         coordinator = PresetRuntimeCoordinator.__new__(PresetRuntimeCoordinator)
         coordinator._ui_state_store = store
         coordinator._last_active_preset_key = ("zapret2_mode", "default v1.txt")
+        coordinator._active_preset_projection = ("zapret2_mode", "Default v1.txt")
 
         PresetRuntimeCoordinator._publish_active_preset_revision_now(coordinator)
 
-        self.assertEqual(store.bump_active_preset_revision.call_args.kwargs, {"file_name": "default v1.txt"})
+        # Имя в исходном регистре и режим: store общий для zapret1 и zapret2.
+        self.assertEqual(
+            store.bump_active_preset_revision.call_args.kwargs,
+            {"file_name": "Default v1.txt", "launch_method": "zapret2_mode"},
+        )
 
 
 class ExternalReloadCoalescingTests(unittest.TestCase):

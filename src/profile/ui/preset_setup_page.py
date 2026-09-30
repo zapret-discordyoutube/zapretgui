@@ -548,6 +548,10 @@ class PresetSetupPageBase(BasePage):
             return
         if not (changed & {"active_preset_revision", "preset_content_revision"}):
             return
+        if "active_preset_revision" in changed and not ("preset_content_revision" in changed) and self._activation_is_for_other_mode(_state):
+            # Пресет переключили в другом режиме (store общий для zapret1 и
+            # zapret2): этот список и его очередь это не затрагивает.
+            return
         if "preset_content_revision" in changed:
             change_kind = str(getattr(_state, "preset_content_change_kind", "") or "").strip()
             if change_kind == "strategy_only":
@@ -562,6 +566,11 @@ class PresetSetupPageBase(BasePage):
         self._deferred_profile_payload_apply = None
         self._profile_payload_dirty = True
         self._schedule_profiles_payload_reload_after_preset_switch()
+
+    def _activation_is_for_other_mode(self, state) -> bool:
+        method = str(getattr(state, "active_preset_launch_method", "") or "").strip().lower()
+        own = str(getattr(self, "launch_method", "") or "").strip().lower()
+        return bool(method and own and method != own)
 
     def _activation_targets_displayed_preset(self, state) -> bool:
         """Активация уже отображаемого пресета не требует перегрузки списка."""
