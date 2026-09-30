@@ -1587,6 +1587,11 @@ class ProfilePresetService:
         self._profile_list_snapshot_revision = None
         self._profile_list_snapshots_by_revision.clear()
         self._profile_sources_cache.clear()
+        # Полусекундная память отпечатка папки списков не должна пережить
+        # явный сброс: иначе только что созданный файл списка не виден.
+        forget = getattr(self.__dict__.get("_profile_derived_cache"), "forget_lists_signature", None)
+        if callable(forget):
+            forget()
 
     def _refresh_strategy_only_snapshots(self, profile_key: str) -> None:
         clean_profile_key = str(profile_key or "").strip()

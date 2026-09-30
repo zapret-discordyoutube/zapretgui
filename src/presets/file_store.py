@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import re
+import time
 
 from core.paths import AppPaths
 from utils.atomic_text import atomic_write_text, decode_preset_bytes, read_preset_file_text
@@ -44,7 +45,17 @@ def _read_header_text(path: Path) -> str:
     return decode_preset_bytes(b"\n".join(lines))
 
 
+_DEGRADED_SCAN_TTL_SEC = 2.0
+_LOGGED_UNREADABLE_PRESETS: set[str] = set()
+
+
 def _log_unreadable_preset(path: Path, exc: Exception) -> None:
+    # Один раз на файл: постоянно недоступный файл иначе писал бы в лог при
+    # каждом пересканировании.
+    key = str(path).lower()
+    if key in _LOGGED_UNREADABLE_PRESETS:
+        return
+    _LOGGED_UNREADABLE_PRESETS.add(key)
     try:
         from log.log import log
 
@@ -130,8 +141,14 @@ class PresetFileStore:
         candidate = base
         counter = 2
         while candidate.casefold() in taken_names or _file_taken(candidate):
-            candidate = f"{base} ({counter})"
+            suffix = f" ({counter})"
+            # Имя файла обрезается до 100 символов (_sanitize_file_stem): без
+            # укорачивания основы длинное «имя (2)» давало тот же файл, что и
+            # «имя», и цикл никогда не заканчивался.
+            candidate = f"{base[: max(1, 100 - len(suffix))].rstrip()}{suffix}"
             counter += 1
+            if counter > 10_000:
+                raise ValueError(f"Не удалось подобрать свободное имя для пресета: {base}")
         return candidate
 
     def read_source_text(self, engine: str, file_name: str) -> str:
@@ -283,14 +300,25 @@ class PresetFileStore:
         normalized_engine = str(engine or "").strip().lower()
         cache_key = self._current_manifest_cache_key(normalized_engine)
         cached_entry = self._manifest_cache.get(normalized_engine)
-        if cache_key is not None and cached_entry is not None and cached_entry[0] == cache_key:
-            return list(cached_entry[1])
+        if cache_key is not None and cached_entry is not None:
+            if cached_entry[0] == cache_key or cached_entry[0] == (
+                *cache_key,
+                ("degraded", int(time.monotonic() // _DEGRADED_SCAN_TTL_SEC)),
+            ):
+                return list(cached_entry[1])
 
         self._scan_degraded = False
         manifests = self._scan_manifests_from_files(engine)
         if self.__dict__.get("_scan_degraded"):
             # Какой-то файл был заблокирован: его запись неполная (имя из
-            # имени файла). В кэш не кладём — следующий вызов перечитает.
+            # имени файла). Кэшируем ненадолго — чтобы горячие пути не
+            # перечитывали папку на каждый вызов, но разблокированный файл
+            # скоро получил настоящее имя.
+            if cache_key is not None:
+                self._manifest_cache[normalized_engine] = (
+                    (*cache_key, ("degraded", int(time.monotonic() // _DEGRADED_SCAN_TTL_SEC))),
+                    list(manifests),
+                )
             return manifests
         # Ключ — снятый ДО сканирования: файл, созданный во время сканирования,
         # сменит ключ, и следующий вызов пересканирует. Ключ, снятый после,

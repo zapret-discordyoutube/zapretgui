@@ -278,7 +278,12 @@ def _clean_ports(value: object, protocol: str = "tcp") -> str:
 def _slugify(value: str) -> str:
     text = value.strip().lower().translate(_RU_TRANSLIT)
     text = _SLUG_RE.sub("-", text).strip("-")
-    return text or "profile"
+    text = text or "profile"
+    # Имя профиля «con», «nul», «com1»… дало бы имя файла-устройства Windows:
+    # такой список не создать. Меняем основу, а не отказываем пользователю.
+    if not safe_list_file_name(f"{text}.txt"):
+        text = f"{text}-profile"
+    return text
 
 
 def _unique_profile_id(profiles: dict, base: str) -> str:

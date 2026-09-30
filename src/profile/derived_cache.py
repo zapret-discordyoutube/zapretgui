@@ -90,6 +90,9 @@ class ProfileDerivedCache:
         self._lists_signature_value: tuple[object, ...] = ()
         self._lists_signature_at = -1.0
 
+    def forget_lists_signature(self) -> None:
+        self._lists_signature_at = -1.0
+
     def _lists_signature(self, app_paths) -> tuple[object, ...]:
         """Отпечаток папки lists и её подпапок: mtime меняется при создании и
         удалении файла списка. Запоминается на полсекунды — сборка списка

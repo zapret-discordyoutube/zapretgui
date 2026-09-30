@@ -146,6 +146,55 @@ class PresetStoreNamingTests(unittest.TestCase):
         self.assertEqual(self.store.unique_preset_name("winws2", "x", exclude_file_name="X.txt"), "x")
 
 
+class LongAndReservedNamesTests(unittest.TestCase):
+    def test_unique_name_for_long_taken_name_terminates(self) -> None:
+        from core.paths import AppPaths
+        from presets.file_store import PresetFileStore, _sanitize_file_stem
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = PresetFileStore(AppPaths(user_root=root / "user", local_root=root / "local"))
+            user_dir = store._engine_paths("winws2").user_presets_dir
+            user_dir.mkdir(parents=True, exist_ok=True)
+            long_name = "A" * 105
+            (user_dir / f"{_sanitize_file_stem(long_name)}.txt").write_text("# Preset: x\n", encoding="utf-8")
+
+            # Раньше «AAA…A (2)» обрезалось до того же имени файла — цикл без конца.
+            unique = store.unique_preset_name("winws2", long_name)
+
+        self.assertTrue(unique.endswith(" (2)"))
+        self.assertLessEqual(len(_sanitize_file_stem(unique)), 100)
+
+    def test_user_profile_named_like_windows_device_gets_valid_list_files(self) -> None:
+        from core.paths import AppPaths
+        from profile.user_profiles import create_user_profile
+        from settings.store import get_user_profiles_settings
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                profile_id = create_user_profile(AppPaths(user_root=root, local_root=root), name="con", protocol="tcp", ports="443")
+                row = get_user_profiles_settings()["profiles"][profile_id]
+
+        self.assertNotEqual(row["hostlist"].lower(), "lists/con.txt")
+
+    def test_list_invalidation_forgets_lists_signature_memo(self) -> None:
+        from profile.derived_cache import ProfileDerivedCache
+        from profile.service import ProfilePresetService
+
+        service = ProfilePresetService.__new__(ProfilePresetService)
+        service._profile_list_snapshot = None
+        service._profile_list_snapshot_revision = None
+        service._profile_list_snapshots_by_revision = {}
+        service._profile_sources_cache = {}
+        service._profile_derived_cache = ProfileDerivedCache()
+        service._profile_derived_cache._lists_signature_at = 10**9
+
+        service._invalidate_profile_list_snapshot()
+
+        self.assertLess(service._profile_derived_cache._lists_signature_at, 0)
+
+
 class SelectionFallbackGuardsTests(unittest.TestCase):
     def test_fallback_preset_in_use_cannot_be_deleted(self) -> None:
         from core.paths import AppPaths
@@ -361,10 +410,15 @@ class ReviewFollowUpTests(unittest.TestCase):
                     raise PermissionError(13, "locked")
                 return real_read(path)
 
-            with patch.object(file_store_module, "_read_header_text", _read):
+            clock = {"now": 1000.0}
+            with patch.object(file_store_module, "_read_header_text", _read), patch.object(
+                file_store_module.time, "monotonic", lambda: clock["now"]
+            ):
                 self.assertEqual(store.get_manifest("winws2", "Locked.txt").name, "Locked")
                 locked["on"] = False
-                # Файл разблокирован, папка не менялась — имя должно стать настоящим.
+                # Файл разблокирован, папка не менялась: неполная запись живёт
+                # недолго, а не до следующего изменения папки.
+                clock["now"] += 5.0
                 self.assertEqual(store.get_manifest("winws2", "Locked.txt").name, "Настоящее имя")
 
     def test_in_place_row_update_supersedes_running_filter(self) -> None:
