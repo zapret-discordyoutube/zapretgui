@@ -1273,6 +1273,23 @@ class PresetRawEditorPage(BasePage):
         self._raw_editor_text_snapshot = value
         return True
 
+    def _apply_active_preset_projection(self, state) -> None:
+        """Шапка «Активный пресет» следует за выбором, сделанным где угодно
+        (список, трей, подмена пропавшего файла), а не только за загрузкой
+        этой страницы. Store общий для режимов — берём только свой."""
+        method = str(getattr(state, "active_preset_launch_method", "") or "").strip().lower()
+        file_name = str(getattr(state, "active_preset_file_name", "") or "").strip()
+        own = str(self.__dict__.get("_launch_method", "") or "").strip().lower()
+        if not method or not file_name or method != own:
+            return
+        if file_name.casefold() == self._current_selected_file_name().casefold():
+            return
+        self._apply_raw_preset_active_state(file_name)
+        try:
+            self._refresh_header()
+        except Exception:
+            pass
+
     def _apply_raw_preset_active_state(self, file_name: str, name: str = "") -> None:
         active_file_name = str(file_name or "").strip()
         self._active_preset_file_name = active_file_name
@@ -1756,6 +1773,8 @@ class PresetRawEditorPage(BasePage):
                 "active_preset_revision",
             })
         )
+        if "active_preset_revision" in changed:
+            self._apply_active_preset_projection(state)
         if runtime_toggle_changed:
             self._render_runtime_toggle(state)
         if footer_status_changed:

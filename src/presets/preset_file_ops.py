@@ -112,7 +112,7 @@ def rename_by_file_name(backend, file_name: str, new_name: str):
         updated.file_name,
     )
     if was_selected:
-        backend.preset_selection_service.select_preset(backend.engine, updated.file_name)
+        backend.preset_selection_service.select_preset(backend.engine, updated.file_name, same_preset_renamed=True)
         backend.notify_preset_identity_changed(updated.file_name)
         backend._refresh_selected_source_preset()
     return updated

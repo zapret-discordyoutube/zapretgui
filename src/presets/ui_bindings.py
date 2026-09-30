@@ -28,6 +28,11 @@ def bind_preset_stores_to_runtime(*, presets_feature, preset_runtime) -> None:
                 file_name,
                 reason=reason,
             ),
+            on_selection_fallback=lambda missing, used, m=method: preset_runtime.handle_selection_fallback(
+                m,
+                missing,
+                used,
+            ),
         )
 
     preset_runtime.setup_active_preset_file_watcher()

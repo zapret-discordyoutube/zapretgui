@@ -64,6 +64,7 @@ def connect_preset_signals(
     on_identity_changed=None,
     on_content_changed=None,
     on_content_changed_with_reason=None,
+    on_selection_fallback=None,
 ) -> None:
     store = _create_preset_file_service(launch_method, preset_services=preset_services)._ui_store()
     if callable(on_changed):
@@ -76,6 +77,8 @@ def connect_preset_signals(
         store.preset_content_changed.connect(on_content_changed)
     if callable(on_content_changed_with_reason):
         store.preset_content_changed_with_reason.connect(on_content_changed_with_reason)
+    if callable(on_selection_fallback):
+        store.preset_selection_fallback.connect(on_selection_fallback)
 
 
 def get_selection_state(

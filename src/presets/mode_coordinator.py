@@ -11,9 +11,7 @@ from settings.mode import (
     ENGINE_BY_LAUNCH_METHOD,
     normalize_launch_method,
 )
-from settings import store as settings_store
 
-from presets.cache_signatures import path_stat_signature
 from presets.file_store import PresetFileStore
 from presets.models import PresetManifest
 from presets.selection_service import PresetSelectionService
@@ -82,7 +80,6 @@ class PresetModeCoordinator:
         self._app_paths = app_paths
         self._preset_selection_service = preset_selection_service
         self._preset_file_store = preset_file_store
-        self._selected_manifest_cache: dict[str, tuple[tuple[object, ...], PresetManifest]] = {}
 
     def ensure_launch_preset(
         self,
@@ -241,18 +238,9 @@ class PresetModeCoordinator:
                 f"Искали здесь: {self._preset_search_paths_text(engine)}."
             )
 
-        t_cache_key = time.perf_counter()
-        cache_key = self._selected_manifest_cache_key(method, engine, manifest.file_name)
-        self._emit_timing(timing_callback, f"{label}.cache_key", t_cache_key)
-        t_cache_lookup = time.perf_counter()
-        cached_manifest = self._selected_manifest_from_cache(method, cache_key)
-        self._emit_timing(timing_callback, f"{label}.cache_lookup", t_cache_lookup)
-        if cached_manifest is not None:
-            self._emit_timing(timing_callback, f"{label}.total", started_at)
-            return cached_manifest
-
-        if cache_key is not None:
-            self._selected_manifest_cache[method] = (cache_key, manifest)
+        # Отдельный кэш выбранного манифеста здесь был копией: ensure выше уже
+        # отдал манифест (списки кэшируются в PresetFileStore), а кэш лишь
+        # возвращал тот же объект ценой stat() файла и чтения ревизии настроек.
         self._emit_timing(timing_callback, f"{label}.total", started_at)
         return manifest
 
@@ -282,44 +270,6 @@ class PresetModeCoordinator:
             timing_callback(str(section or ""), max(0.0, (time.perf_counter() - started_at) * 1000.0))
         except Exception:
             pass
-
-    def _selected_manifest_cache_key(
-        self,
-        launch_method: str,
-        engine: str,
-        selected_file_name: str,
-    ) -> tuple[object, ...] | None:
-        candidate = str(selected_file_name or "").strip()
-        if not candidate:
-            return None
-
-        try:
-            preset_path = self._preset_file_store.get_source_path(engine, candidate)
-        except Exception:
-            return None
-
-        return (
-            self._normalize_method(launch_method),
-            engine,
-            candidate.lower(),
-            settings_store.get_settings_revision(),
-            *path_stat_signature(preset_path),
-        )
-
-    def _selected_manifest_from_cache(
-        self,
-        launch_method: str,
-        cache_key: tuple[object, ...] | None,
-    ) -> PresetManifest | None:
-        if cache_key is None:
-            return None
-        cached = self._selected_manifest_cache.get(self._normalize_method(launch_method))
-        if cached is None:
-            return None
-        cached_key, manifest = cached
-        if cached_key == cache_key:
-            return manifest
-        return None
 
     def _get_source_preset_path(self, engine: str, file_name: str) -> Path:
         return self._preset_file_store.get_source_path(engine, file_name)

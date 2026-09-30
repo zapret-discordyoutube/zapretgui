@@ -844,6 +844,16 @@ def check_ui_state_store_writer_ownership(files: list[Path]) -> list[Problem]:
             "mode revision должен писать только runtime method switch flow",
             {"src/winws_runtime/runtime/method_switch_flow.py"},
         ),
+        (
+            re.compile(r"\bset_selected_source_preset_file_name\s*\("),
+            "выбранный пресет пишет только PresetSelectionService: он же единственный источник событий о смене выбора",
+            {"src/presets/selection_service.py", "src/settings/store.py"},
+        ),
+        (
+            re.compile(r"\b_selected_manifest_cache\b"),
+            "копия выбранного пресета запрещена: источник — PresetSelectionService поверх настроек",
+            set(),
+        ),
     )
 
     problems: list[Problem] = []

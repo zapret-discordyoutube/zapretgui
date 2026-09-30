@@ -22,13 +22,26 @@ def create_preset_services(app_paths) -> PresetServicesBundle:
 
     preset_file_store = PresetFileStore(app_paths)
     preset_selection_service = PresetSelectionService(preset_file_store)
+    stores = {
+        ENGINE_WINWS2: PresetUiStore(ENGINE_WINWS2, preset_file_store, preset_selection_service),
+        ENGINE_WINWS1: PresetUiStore(ENGINE_WINWS1, preset_file_store, preset_selection_service),
+    }
+
+    def _on_selection_changed(engine: str, file_name: str, reason: str, detail: str) -> None:
+        store = stores.get(str(engine or "").strip().lower())
+        if store is not None:
+            store.notify_selection_changed(file_name, reason, detail)
+
+    # Любая смена выбора (в т.ч. подмена пропавшего файла и его возврат)
+    # доходит до сигналов — копии «активного пресета» не отстают от настроек.
+    preset_selection_service.add_listener(_on_selection_changed)
     return PresetServicesBundle(
         app_paths=app_paths,
         preset_mode_coordinator=PresetModeCoordinator(app_paths, preset_selection_service, preset_file_store),
         preset_file_store=preset_file_store,
         preset_selection_service=preset_selection_service,
-        preset_store_winws2=PresetUiStore(ENGINE_WINWS2, preset_file_store, preset_selection_service),
-        preset_store_winws1=PresetUiStore(ENGINE_WINWS1, preset_file_store, preset_selection_service),
+        preset_store_winws2=stores[ENGINE_WINWS2],
+        preset_store_winws1=stores[ENGINE_WINWS1],
     )
 
 

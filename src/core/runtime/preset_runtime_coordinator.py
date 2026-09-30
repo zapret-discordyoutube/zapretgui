@@ -74,6 +74,11 @@ class PresetWatchPathResolveWorker(QThread):
         return ""
 
 
+
+def _preset_display_stem(file_name: str) -> str:
+    text = str(file_name or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+    return text[:-4] if text.lower().endswith(".txt") else text
+
 class PresetRuntimeCoordinator(QObject):
     """Координирует применение выбранного source preset вне UI-страниц.
 
@@ -199,6 +204,34 @@ class PresetRuntimeCoordinator(QObject):
                 self._publish_active_preset_revision_deferred()
         except Exception:
             pass
+        self.schedule_refresh_after_preset_switch()
+
+    def handle_selection_fallback(self, launch_method: str, missing_file_name: str, used_file_name: str) -> None:
+        """Выбранный пресет не найден, для запуска взят запасной.
+
+        Пользователю — сообщение; страницам — запасной как активный. Работающий
+        DPI сам по себе не переключаем: он продолжает на прежних настройках,
+        а следующий запуск возьмёт запасной (или вернувшийся выбранный)."""
+        method = normalize_launch_method(launch_method, default="")
+        if not self._is_current_preset_method(method):
+            return
+        used = str(used_file_name or "").strip()
+        if not used:
+            return
+        missing_name = _preset_display_stem(missing_file_name)
+        used_name = _preset_display_stem(used)
+        try:
+            store = self._ui_state_store
+            if store is not None:
+                store.set_last_status_message(
+                    f"Пресет «{missing_name}» не найден — используется «{used_name}». "
+                    "Вернётся файл — вернётся и выбор."
+                )
+        except Exception:
+            pass
+        self._last_active_preset_key = (method, used.lower())
+        self._active_preset_projection = (method, used)
+        self._publish_active_preset_revision_deferred()
         self.schedule_refresh_after_preset_switch()
 
     def handle_preset_identity_changed(self, launch_method: str, preset_file_name: str) -> None:

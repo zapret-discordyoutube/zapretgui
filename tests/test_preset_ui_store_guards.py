@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 
 from PyQt6.QtWidgets import QApplication
 
-from presets.models import PresetManifest
 from presets.ui_store import PresetUiStore
 from settings.mode import ENGINE_WINWS2
 
@@ -114,115 +114,37 @@ class PresetUiStoreGuardTests(unittest.TestCase):
         self.assertEqual(identity_emitted, ["Default v5.txt"])
         self.assertEqual(preset_file_store.source_path_calls, 0)
 
-    def test_refresh_does_not_emit_presets_changed_when_metadata_is_unchanged(self) -> None:
-        manifests = [
-            PresetManifest(
-                file_name="Default v5.txt",
-                name="Default v5",
-                updated_at="1",
-                kind="builtin",
-            )
-        ]
-
+    def test_notify_presets_changed_only_emits(self) -> None:
+        # Хранилище сигналов больше не держит копию списка и выбора: смена
+        # списка — только сигнал, без чтения пресетов в GUI-пути.
         class _PresetFileStore:
             def list_manifests(self, _engine):
-                return list(manifests)
+                raise AssertionError("notify must not list preset manifests")
 
-        class _SelectionService:
-            def get_selected_file_name(self, _engine):
-                return "Default v5.txt"
+        store = PresetUiStore(ENGINE_WINWS2, _PresetFileStore(), selection_service=SimpleNamespace())
+        emitted: list[bool] = []
+        store.presets_changed.connect(lambda: emitted.append(True))
 
-        store = PresetUiStore(
-            ENGINE_WINWS2,
-            _PresetFileStore(),
-            selection_service=_SelectionService(),
-        )
-        emitted: list[str] = []
-        store.presets_changed.connect(lambda: emitted.append("changed"))
-
-        store.list_manifests()
-        store.refresh()
-        manifests.append(
-            PresetManifest(
-                file_name="Other.txt",
-                name="Other",
-                updated_at="1",
-                kind="user",
-            )
-        )
-        store.refresh()
-
-        self.assertEqual(emitted, ["changed"])
-
-    def test_notify_presets_changed_invalidates_metadata_cache_and_emits(self) -> None:
-        manifests = [
-            PresetManifest(
-                file_name="Default v5.txt",
-                name="Default v5",
-                updated_at="1",
-                kind="builtin",
-            )
-        ]
-
-        class _PresetFileStore:
-            def list_manifests(self, _engine):
-                return list(manifests)
-
-        class _SelectionService:
-            def get_selected_file_name(self, _engine):
-                return "Default v5.txt"
-
-        store = PresetUiStore(
-            ENGINE_WINWS2,
-            _PresetFileStore(),
-            selection_service=_SelectionService(),
-        )
-        emitted: list[str] = []
-        store.presets_changed.connect(lambda: emitted.append("changed"))
-
-        store.list_manifests()
         store.notify_presets_changed()
 
-        self.assertEqual(emitted, ["changed"])
-        self.assertFalse(store._loaded)
+        self.assertEqual(emitted, [True])
 
-    def test_notify_presets_changed_does_not_reload_metadata_synchronously(self) -> None:
-        manifests = [
-            PresetManifest(
-                file_name="Default v5.txt",
-                name="Default v5",
-                updated_at="1",
-                kind="builtin",
-            )
-        ]
+    def test_selection_fallback_is_reported_without_switch_signal(self) -> None:
+        from presets.selection_service import SELECTION_REASON_FALLBACK, SELECTION_REASON_RESTORED
 
-        class _PresetFileStore:
-            fail_next_list = False
+        store = PresetUiStore(ENGINE_WINWS2, SimpleNamespace(), selection_service=SimpleNamespace())
+        switched: list[str] = []
+        fallbacks: list[tuple[str, str]] = []
+        store.preset_switched.connect(switched.append)
+        store.preset_selection_fallback.connect(lambda missing, used: fallbacks.append((missing, used)))
 
-            def list_manifests(self, _engine):
-                if self.fail_next_list:
-                    raise AssertionError("notify must not list preset manifests in GUI signal path")
-                return list(manifests)
+        store.notify_selection_changed("Default.txt", SELECTION_REASON_FALLBACK, "gone.txt")
+        store.notify_selection_changed("gone.txt", SELECTION_REASON_RESTORED)
 
-        class _SelectionService:
-            def get_selected_file_name(self, _engine):
-                return "Default v5.txt"
-
-        preset_file_store = _PresetFileStore()
-        store = PresetUiStore(
-            ENGINE_WINWS2,
-            preset_file_store,
-            selection_service=_SelectionService(),
-        )
-        emitted: list[str] = []
-        store.presets_changed.connect(lambda: emitted.append("changed"))
-
-        store.list_manifests()
-        preset_file_store.fail_next_list = True
-        store.notify_presets_changed()
-
-        self.assertEqual(emitted, ["changed"])
-        self.assertFalse(store._loaded)
+        # Подмена — только сообщение (работающий DPI сам не переключаем),
+        # возврат файла — обычное переключение обратно.
+        self.assertEqual(fallbacks, [("gone.txt", "Default.txt")])
+        self.assertEqual(switched, ["gone.txt"])
 
 
 if __name__ == "__main__":
