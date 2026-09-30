@@ -3433,7 +3433,10 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertTrue(hasattr(external_workers, "ExternalOpenUrlWorker"))
         worker_source = inspect.getsource(external_workers.ExternalOpenUrlWorker.run)
 
-        self.assertIn("open_url=self._request_changelog_link_open", build_source)
+        # Ссылки из окна обновления («Что нового», «Открыть в браузере») идут
+        # в тот же фоновый обработчик страницы, что и раньше из карточки.
+        present_source = inspect.getsource(ServersPage.present_update_dialog)
+        self.assertIn("dialog.link_clicked.connect(self._request_changelog_link_open)", present_source)
         self.assertNotIn("open_url=self._external_actions.open_url", build_source)
         self.assertIn("create_changelog_link_open_worker", page_source)
         self.assertNotIn("external_actions_feature", init_source)

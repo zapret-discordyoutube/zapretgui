@@ -179,7 +179,7 @@ class DNSCheckPage(BasePage):
         self._update_action_button_state_text()
         self.layout.addWidget(self.control_card)
 
-        # Итог с выдрой и список доменов.
+        # Итог с медоедом и список доменов.
         self.summary_panel = DnsSummaryPanel(on_open_dns_settings=self._open_dns_settings)
         self.layout.addWidget(self.summary_panel)
         self.domains_card = SettingsCard()

@@ -179,7 +179,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
 
         header = QHBoxLayout()
         header.setSpacing(12)
-        # Выдра-талисман: работает, пока идёт проверка, и реагирует на итог.
+        # Медоед-талисман: работает, пока идёт проверка, и реагирует на итог.
         self.mascot = Mascot(self, size=44)
         header.addWidget(self.mascot, 0, Qt.AlignmentFlag.AlignTop)
         titles = QVBoxLayout()
@@ -252,7 +252,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self._clear_problems()
         self._set_state(
             "idle",
-            "Выдра готова проверить вашу сеть",
+            "Медоед готов проверить вашу сеть",
             "Нажмите «Проверить»: посмотрим, какие сайты открываются, и подскажем, что делать с остальными.",
         )
 

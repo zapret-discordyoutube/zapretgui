@@ -411,7 +411,7 @@ class ScanProgressPanel(_HeightKeeper, SimpleCardWidget):
         self._running = False
         self._happy_timer.stop()
         self.mascot.set_mood(MOOD_IDLE)
-        self._set_title("Выдра готова искать обход")
+        self._set_title("Медоед готов искать обход")
         self.status_label.setText(
             hint
             or "Выберите, что должно заработать, и нажмите «Найти рабочую стратегию». "
@@ -457,7 +457,7 @@ class ScanProgressPanel(_HeightKeeper, SimpleCardWidget):
             self.progress_bar.setValue(max(0, min(total, index)))
 
     def note_found(self, count: int) -> None:
-        """Нашлась ещё одна надёжная стратегия: счётчик подпрыгивает, выдра радуется."""
+        """Нашлась ещё одна надёжная стратегия: счётчик подпрыгивает, медоед радуется."""
         self.found_badge.set_value(count)
         if self._running:
             self.mascot.set_mood(MOOD_HAPPY)
