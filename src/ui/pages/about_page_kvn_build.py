@@ -80,9 +80,8 @@ class _FeatureTile(CardWidget):
 def _keep_natural_height(widget: QWidget) -> None:
     """Группа не растягивается по высоте.
 
-    Вкладки лежат в одном QStackedWidget и получают высоту самой длинной
-    («Справка»); растягиваемые группы делили бы лишнее место и оставляли
-    пустоту между разделами.
+    Если вкладке достанется лишняя высота, её заберёт растяжка в конце,
+    а не промежутки между разделами.
     """
     widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 

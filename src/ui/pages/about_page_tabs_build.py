@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget
+from PyQt6.QtWidgets import QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
 from qfluentwidgets import SegmentedWidget
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.segmented_accessibility import set_segmented_items_accessibility
@@ -61,6 +61,21 @@ class AboutPageTabsWidgets:
     kvn_layout: QVBoxLayout
 
 
+def fit_stack_to_current_tab(stacked_widget: QStackedWidget) -> None:
+    """Высота стопки вкладок — по текущей вкладке, а не по самой длинной.
+
+    QStackedWidget берёт наибольшую высоту из всех вкладок, и под короткой
+    вкладкой («Zapret KVN») оставалась пустота высотой со «Справку». Скрытые
+    вкладки с Ignored по вертикали в этот расчёт не попадают.
+    """
+    current = stacked_widget.currentWidget()
+    for i in range(stacked_widget.count()):
+        tab = stacked_widget.widget(i)
+        vertical = QSizePolicy.Policy.Preferred if tab is current else QSizePolicy.Policy.Ignored
+        tab.setSizePolicy(QSizePolicy.Policy.Preferred, vertical)
+    stacked_widget.updateGeometry()
+
+
 def _make_tab_widget() -> tuple[QWidget, QVBoxLayout]:
     tab = QWidget()
     layout = QVBoxLayout(tab)
@@ -100,6 +115,8 @@ def build_about_page_tabs(*, tr_fn, on_switch_tab) -> AboutPageTabsWidgets:
     stacked_widget.addWidget(about_tab)
     stacked_widget.addWidget(help_tab)
     stacked_widget.addWidget(kvn_tab)
+    fit_stack_to_current_tab(stacked_widget)
+    stacked_widget.currentChanged.connect(lambda _index: fit_stack_to_current_tab(stacked_widget))
 
     return AboutPageTabsWidgets(
         tabs_pivot=tabs_pivot,
