@@ -268,6 +268,19 @@ def sync_remote_preset(
             },
         )
 
+    # Загрузка идёт секунды: пользователь мог поправить или удалить файл за
+    # это время. Проверка «правили локально» выше сделана ДО сети — без
+    # повторной сверки запись молча затёрла бы свежую правку.
+    latest_text = read_current_text()
+    if latest_text is None:
+        return RemoteSyncOutcome(status=STATUS_ERROR, detail="Файл пресета удалён во время синхронизации")
+    if not force and comparison_hash(latest_text) != comparison_hash(current_text):
+        return RemoteSyncOutcome(
+            status=STATUS_DETACHED,
+            detail="Пресет изменён во время обновления — автообновление приостановлено",
+            binding_updates={"detached": True, "checked_at": now_iso},
+        )
+
     remote_hash = comparison_hash(fetched.text)
     saved_text = save_text(fetched.text)
     # Запись могла нормализовать текст (normalize_source_text) — хэш считаем

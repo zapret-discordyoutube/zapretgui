@@ -970,7 +970,9 @@ class ProfileStrategyListWidget(QWidget):
             states=states,
             current_strategy_id=current_strategy_id,
             search_text=search_text,
-            parent=self,
+            # Без родителя — см. ProfilesList._start_view_state_worker: виджет
+            # удаляется вместе со страницей профиля, пока фильтр ещё считает.
+            parent=None,
         )
 
     def _on_strategy_filter_loaded(self, request_id: int, plan: ProfileStrategyListPlan) -> None:

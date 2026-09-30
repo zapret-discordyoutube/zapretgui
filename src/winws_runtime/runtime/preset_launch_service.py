@@ -204,7 +204,14 @@ class PresetLaunchService:
                 self._progress(short)
                 return False
         except Exception as e:
-            log(f"Не удалось проверить preset перед остановкой предыдущего процесса: {e}", "DEBUG")
+            # Проверка сама упала: неизвестно, запустится ли новый пресет.
+            # Останавливать работающий DPI вслепую нельзя — пользователь
+            # остался бы вообще без обхода. Прежний процесс работает дальше.
+            message = f"Не удалось проверить пресет перед переключением: {e}"
+            log(message, "WARNING")
+            self.last_error_message = message
+            self._progress(message)
+            return False
         return True
 
     def _has_previous_process(self) -> bool:

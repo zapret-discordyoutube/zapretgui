@@ -132,6 +132,7 @@ class PresetWriteQueue:
         name: str = "",
         protocol: str = "",
         ports: str = "",
+        preset_file_name: str | None = None,
     ) -> None:
         page = self._page
         if str(kind or "").strip() == "move":
@@ -205,7 +206,36 @@ class PresetWriteQueue:
                     and str(pending.get("source_profile_key") or "") == source_profile_key_to_replace
                 )
             ]
+        if operation["kind"] != "user_profile":
+            # Операция над профилем относится к пресету, открытому при щелчке:
+            # сервис берёт «выбранный пресет» в момент выполнения, и после
+            # переключения удаление/перемещение ушло бы в другой пресет.
+            stamp = self._displayed_preset_file_name() if preset_file_name is None else str(preset_file_name or "")
+            if stamp:
+                operation["preset_file_name"] = stamp
         page._profile_preset_write_state_obj().append(operation)
+
+    def _displayed_preset_file_name(self) -> str:
+        return str(self._page.__dict__.get("_displayed_preset_file_name", "") or "").strip()
+
+    def _operation_targets_other_preset(self, operation: dict[str, object]) -> bool:
+        stamped = str(operation.get("preset_file_name") or "").strip().lower()
+        displayed = self._displayed_preset_file_name().lower()
+        return bool(stamped and displayed and stamped != displayed)
+
+    def _drop_preset_bound_operations(self) -> None:
+        """Сменился активный пресет: ждущие операции над профилями прежнего
+        пресета выполнять нельзя — их ключи в новом пресете чужие."""
+        page = self._page
+        pending_operations = page._profile_preset_write_state_obj().pending
+        dropped = [op for op in pending_operations if str(op.get("kind") or "") != "user_profile"]
+        if not dropped:
+            return
+        pending_operations[:] = [op for op in pending_operations if str(op.get("kind") or "") == "user_profile"]
+        log(
+            f"{page.__class__.__name__}: пресет переключён — отменено ожидающих действий над profile: {len(dropped)}",
+            "INFO",
+        )
 
     def _pop_next_profile_preset_write_operation(self) -> dict[str, object] | None:
         pending_operations = self._page._profile_preset_write_state_obj().pending
@@ -249,6 +279,7 @@ class PresetWriteQueue:
             name=str(pending.get("name") or ""),
             protocol=str(pending.get("protocol") or ""),
             ports=str(pending.get("ports") or ""),
+            preset_file_name=pending.get("preset_file_name") if "preset_file_name" in pending else None,
         )
         return True
 
@@ -297,6 +328,13 @@ class PresetWriteQueue:
         if self._profile_preset_write_operation_running():
             self._queue_profile_preset_write_operation_from_dict(pending)
             return False
+        if pending.get("kind") in {"context", "move"} and self._operation_targets_other_preset(pending):
+            log(
+                f"{page.__class__.__name__}: действие над profile пресета "
+                f"{pending.get('preset_file_name')} пропущено — открыт другой пресет",
+                "INFO",
+            )
+            return self._start_next_profile_preset_write_operation()
         if pending.get("kind") == "context":
             self._start_profile_context_action_worker(
                 str(pending.get("action") or ""),

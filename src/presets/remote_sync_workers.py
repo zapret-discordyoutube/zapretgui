@@ -101,9 +101,15 @@ def sync_remote_preset_by_file_name(presets_feature, launch_method: str, file_na
             force=force,
         )
         if outcome.binding_updates:
-            updated_binding = dict(binding)
-            updated_binding.update(outcome.binding_updates)
-            set_remote_preset_binding(scope, file_name, updated_binding)
+            # Привязку перечитываем: за время загрузки её могли отвязать,
+            # выключить автообновление, сменить ссылку или переименовать
+            # пресет. Снимок до сети вернул бы всё это назад (и создал бы
+            # привязку для уже несуществующего имени).
+            latest_binding = get_remote_preset_binding(scope, file_name)
+            if latest_binding is not None and str(latest_binding.get("url") or "") == str(binding.get("url") or ""):
+                updated_binding = dict(latest_binding)
+                updated_binding.update(outcome.binding_updates)
+                set_remote_preset_binding(scope, file_name, updated_binding)
         return outcome
     finally:
         _release(scope, file_name)

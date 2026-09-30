@@ -558,6 +558,7 @@ class PresetSetupPageBase(BasePage):
             return
         if self._activation_targets_displayed_preset(_state):
             return
+        self._write_queue_obj()._drop_preset_bound_operations()
         self._deferred_profile_payload_apply = None
         self._profile_payload_dirty = True
         self._schedule_profiles_payload_reload_after_preset_switch()

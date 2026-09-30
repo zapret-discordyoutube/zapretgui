@@ -842,7 +842,11 @@ class ProfilesList(QWidget):
                 group_expanded=group_expanded,
                 folder_state=folder_state,
                 move_requests=move_requests,
-                parent=self,
+                # Без родителя: список пересоздаётся (смена пресета, пустой
+                # пресет), и удаление родителя вместе с работающим QThread
+                # роняло программу («QThread: Destroyed while thread is still
+                # running»). Живым воркер держит гейт до finished, затем deleteLater.
+                parent=None,
             ),
             on_loaded=self._on_view_state_loaded,
             on_failed=self._on_view_state_failed,

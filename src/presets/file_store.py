@@ -44,6 +44,15 @@ def _read_header_text(path: Path) -> str:
     return decode_preset_bytes(b"\n".join(lines))
 
 
+def _log_unreadable_preset(path: Path, exc: Exception) -> None:
+    try:
+        from log.log import log
+
+        log(f"Не удалось прочитать шапку пресета {path.name}: {exc}", "WARNING")
+    except Exception:
+        pass
+
+
 def _normalize_preset_file_name_candidate(value: str) -> str:
     text = str(value or "").strip()
     if not text:
@@ -265,7 +274,16 @@ class PresetFileStore:
             ("user", engine_paths.user_presets_dir),
         ):
             for preset_path in sorted(presets_dir.glob("*.txt"), key=lambda p: p.name.lower()):
-                header_text = _read_header_text(preset_path)
+                if not preset_path.is_file():
+                    continue
+                try:
+                    header_text = _read_header_text(preset_path)
+                except OSError as exc:
+                    # Файл заблокирован антивирусом/редактором или это папка
+                    # с именем *.txt: один такой файл не должен ронять весь
+                    # список пресетов — показываем его по имени файла.
+                    _log_unreadable_preset(preset_path, exc)
+                    header_text = ""
                 display_name = self._extract_name(header_text, preset_path.stem)
                 updated_at = self._file_time_to_iso(preset_path) or _now_iso()
                 preset_kind = self._extract_preset_kind(header_text)

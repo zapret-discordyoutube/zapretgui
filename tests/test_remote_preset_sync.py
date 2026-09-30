@@ -171,6 +171,38 @@ class SyncRemotePresetTests(unittest.TestCase):
         fetch.assert_not_called()
         save.assert_not_called()
 
+    def test_edit_made_during_download_is_not_overwritten(self):
+        # Проверка «правили локально» идёт до сети; пока файл качался,
+        # пользователь сохранил правку — её нельзя затирать.
+        edited = VALID_WINWS2_TEXT + "--filter-tcp=8080\n"
+        reads = iter([VALID_WINWS2_TEXT, edited])
+        save = Mock(return_value=None)
+        outcome = sync_remote_preset(
+            _binding(),
+            engine="winws2",
+            read_current_text=lambda: next(reads),
+            fetch=Mock(return_value=RemoteFetchResult(status_code=200, text=UPDATED_WINWS2_TEXT)),
+            save_text=save,
+            now_iso=NOW_ISO,
+        )
+        self.assertEqual(outcome.status, STATUS_DETACHED)
+        self.assertTrue(outcome.binding_updates["detached"])
+        save.assert_not_called()
+
+    def test_file_deleted_during_download_is_not_recreated(self):
+        reads = iter([VALID_WINWS2_TEXT, None])
+        save = Mock(return_value=None)
+        outcome = sync_remote_preset(
+            _binding(),
+            engine="winws2",
+            read_current_text=lambda: next(reads),
+            fetch=Mock(return_value=RemoteFetchResult(status_code=200, text=UPDATED_WINWS2_TEXT)),
+            save_text=save,
+            now_iso=NOW_ISO,
+        )
+        self.assertEqual(outcome.status, STATUS_ERROR)
+        save.assert_not_called()
+
     def test_detached_binding_is_skipped(self):
         edited = VALID_WINWS2_TEXT + "--filter-tcp=8080\n"
         outcome, save = _sync(_binding(detached=True), current_text=edited)
