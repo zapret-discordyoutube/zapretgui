@@ -91,8 +91,11 @@ function Get-Color([string]$value, [string]$fallback) {
     return [System.Drawing.ColorTranslator]::FromHtml($fallback)
 }
 
+# Внимание: [Math]::Min/Max с целым литералом (1, 0, 255) PowerShell вызывает
+# в целочисленном варианте и молча округляет дробное: Min(1, 0.16) = 0.
+# Именно так окно оставалось полностью прозрачным. Только 1.0, 0.0, 255.0.
 function With-Alpha([System.Drawing.Color]$color, [double]$alpha) {
-    $a = [int][Math]::Max(0, [Math]::Min(255, [Math]::Round(255 * $alpha)))
+    $a = [int][Math]::Max(0.0, [Math]::Min(255.0, [Math]::Round(255.0 * $alpha)))
     return [System.Drawing.Color]::FromArgb($a, $color.R, $color.G, $color.B)
 }
 
@@ -380,7 +383,7 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
         $fillRect = New-Object System.Drawing.RectangleF($trackLeft, $trackTop, $fillWidth, $trackHeight)
         $fillPath = New-RoundedPath $fillRect ($trackHeight / 2)
         $dark = [System.Drawing.Color]::FromArgb(255, [int]($C.Accent.R * 0.85), [int]($C.Accent.G * 0.85), [int]($C.Accent.B * 0.85))
-        $light = [System.Drawing.Color]::FromArgb(255, [int][Math]::Min(255, $C.Accent.R + 60), [int][Math]::Min(255, $C.Accent.G + 60), [int][Math]::Min(255, $C.Accent.B + 60))
+        $light = [System.Drawing.Color]::FromArgb(255, [int][Math]::Min(255.0, $C.Accent.R + 60.0), [int][Math]::Min(255.0, $C.Accent.G + 60.0), [int][Math]::Min(255.0, $C.Accent.B + 60.0))
         $gradRect = New-Object System.Drawing.RectangleF(($trackLeft - 1), $trackTop, ($fillWidth + 2), $trackHeight)
         $grad = New-Object System.Drawing.Drawing2D.LinearGradientBrush($gradRect, $dark, $light, [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
         $g.FillPath($grad, $fillPath)
@@ -419,7 +422,7 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
         $angle = 9 * [Math]::Sin([Math]::PI * ($now % 1.04) / 0.52) + 6
         $squash = 1 - 0.07 * (1 - [Math]::Abs([Math]::Sin([Math]::PI * $stride)))
         for ($i = 1; $i -le 5; $i++) {
-            $dotBrush = New-Object System.Drawing.SolidBrush((With-Alpha $C.Accent ([Math]::Max(0, 0.5 - $i * 0.09))))
+            $dotBrush = New-Object System.Drawing.SolidBrush((With-Alpha $C.Accent ([Math]::Max(0.0, 0.5 - $i * 0.09))))
             $dr = [single]((3.2 - $i * 0.4) * $k)
             $dx = $runnerX - ($logoSize * 0.35 + $i * 7 * $k)
             $dy = $trackTop - 5 * $k + [Math]::Sin($now * 11 + $i) * 1.5 * $k
@@ -488,8 +491,8 @@ foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
 if (-not $visible -or $bounds.Width -lt 200 -or $bounds.Height -lt 150) {
     # Место окна обновления за пределами экранов: по центру основного.
     $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-    $w = [int][Math]::Min([Math]::Max($bounds.Width, 720), $area.Width - 40)
-    $h = [int][Math]::Min([Math]::Max($bounds.Height, 460), $area.Height - 40)
+    $w = [int][Math]::Min([Math]::Max([double]$bounds.Width, 720.0), $area.Width - 40.0)
+    $h = [int][Math]::Min([Math]::Max([double]$bounds.Height, 460.0), $area.Height - 40.0)
     $bounds = New-Object System.Drawing.Rectangle(($area.X + ($area.Width - $w) / 2), ($area.Y + ($area.Height - $h) / 2), $w, $h)
 }
 $form.Bounds = $bounds
@@ -551,7 +554,15 @@ $timer.Add_Tick({
             if ($left -le 0) { $timer.Stop(); $form.Close(); return }
             Set-FormOpacity ([Math]::Min($S.Opacity, $left))
         } elseif ($S.Opacity -lt 1) {
-            Set-FormOpacity ([Math]::Min(1, $S.Opacity + 0.16))
+            Set-FormOpacity ([Math]::Min(1.0, $S.Opacity + 0.16))
+            if ($S.Opacity -lt 1 -and $now -gt 1.5) {
+                # Появление застряло: окно должно быть видно, а не красиво.
+                Set-FormOpacity 1.0
+                Write-Line 'Появление не завершилось само — окно показано сразу'
+            }
+            if ($S.Opacity -ge 1 -and $S.OpacityWorks) {
+                try { Write-Line ("Окно проявилось: Opacity={0}" -f $form.Opacity) } catch { }
+            }
         }
         if ($S.Snapshot -and $now * 1000 -ge $SnapshotAfterMs) {
             $timer.Stop()

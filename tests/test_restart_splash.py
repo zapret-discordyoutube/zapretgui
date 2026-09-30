@@ -240,6 +240,11 @@ class SplashScriptContractTests(unittest.TestCase):
         self.assertIn("[System.Windows.Forms.Application]::Exit()", script)
         # Прозрачность — только украшение: её сбой не мешает закрытию.
         self.assertIn("function Set-FormOpacity", script)
+        # [Math]::Min(1, 0.16) в PowerShell — целочисленный вызов, равный 0:
+        # так окно навсегда оставалось прозрачным. Только дробные литералы.
+        self.assertNotRegex(script, r"\[Math\]::(?:Min|Max)\(\s*\d+\s*,")
+        self.assertIn("Set-FormOpacity ([Math]::Min(1.0, $S.Opacity + 0.16))", script)
+        self.assertIn("Появление не завершилось само", script)
         # Ничего не берёт из каталога установки: он как раз заменяется.
         self.assertNotIn("_internal", SPLASH_SCRIPT_TEMPLATE)
 
