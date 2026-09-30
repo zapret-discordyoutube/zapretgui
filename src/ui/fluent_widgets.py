@@ -30,6 +30,21 @@ from qfluentwidgets import (
 )
 
 
+class _OwnedToolTipFilter(ToolTipFilter):
+    """ToolTipFilter, чьё окно подсказки удаляется вместе с виджетом.
+
+    qfluentwidgets создаёт окно подсказки с родителем «главное окно», а не
+    виджет: после удаления виджета (строки списка, чипы и т.п.) окно
+    подсказки оставалось бы в памяти до закрытия программы.
+    """
+
+    def _createToolTip(self):  # noqa: N802 (qfluentwidgets API)
+        tooltip = super()._createToolTip()
+        # Фильтр — ребёнок виджета и умирает вместе с ним.
+        self.destroyed.connect(tooltip.deleteLater)
+        return tooltip
+
+
 # ---------------------------------------------------------------------------
 # set_tooltip — installs qfluentwidgets ToolTipFilter + sets tooltip text
 # ---------------------------------------------------------------------------
@@ -74,7 +89,7 @@ def set_tooltip(widget, text: str, *, position=None, delay: int = 300) -> None:
     # Install only once — skip if already done for this widget.
     if getattr(widget, "_fluent_tooltip_filter", None) is None:
         pos = position if position is not None else ToolTipPosition.TOP
-        f = ToolTipFilter(widget, showDelay=delay, position=pos)
+        f = _OwnedToolTipFilter(widget, showDelay=delay, position=pos)
         widget.installEventFilter(f)
         widget._fluent_tooltip_filter = f  # type: ignore[attr-defined]
 

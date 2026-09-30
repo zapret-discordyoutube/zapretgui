@@ -428,13 +428,17 @@ def _sync_theme_mode_to_qfluent(theme_name: str, window=None) -> None:
     window: if provided, also applies window background.
     """
     try:
-        from qfluentwidgets import setTheme, Theme
+        from qfluentwidgets import qconfig, setTheme, Theme
         if str(theme_name) == "system":
-            setTheme(Theme.AUTO)
+            target = Theme.AUTO
         elif str(theme_name) == "light":
-            setTheme(Theme.LIGHT)
+            target = Theme.LIGHT
         else:
-            setTheme(Theme.DARK)
+            target = Theme.DARK
+        # setTheme заново разбирает и применяет стили ко всем живым
+        # fluent-виджетам — при том же режиме это лишняя работа.
+        if qconfig.themeMode.value != target:
+            setTheme(target)
 
         if window is not None:
             apply_window_background(window)

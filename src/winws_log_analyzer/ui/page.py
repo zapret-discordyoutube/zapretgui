@@ -164,6 +164,9 @@ class WinwsLogAnalyzerPage(BasePage):
     def _start_parse(self, path: str) -> None:
         ui = self._ui
         self._runtime.stop(blocking=False)
+        # Старый разбор больше не нужен: не держим два журнала в памяти сразу.
+        self._result = None
+        self._refresh_connections_table()
         ui.path_label.setText(path)
         set_tooltip(ui.path_label, path)
         ui.summary_label.setVisible(False)
@@ -295,7 +298,9 @@ class WinwsLogAnalyzerPage(BasePage):
             ui.packets_table.setRowCount(0)
             return
         title = conn.hostname or f"{conn.remote_ip}:{conn.remote_port}"
-        suffix = f" (показаны первые {len(conn.packets)})" if conn.packets_truncated else ""
+        suffix = (
+            f" (показаны {len(conn.packets)}: начало и конец соединения)" if conn.packets_truncated else ""
+        )
         ui.packets_title.setText(f"Пакеты соединения {title} — {conn.packets_total}{suffix}")
         table = ui.packets_table
         table.setUpdatesEnabled(False)

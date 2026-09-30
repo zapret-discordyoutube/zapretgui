@@ -101,6 +101,36 @@ class QFluentSignalGuardsTests(unittest.TestCase):
             "мёртвый виджет должен вычищаться из диспетчера",
         )
 
+    def test_registry_forgets_widget_without_theme_change(self) -> None:
+        import gc
+
+        import ui.qfluent_signal_guards as guards
+        from qfluentwidgets import BodyLabel
+
+        registry = guards._label_registry
+        _emit_theme_changed()
+        gc.collect()
+        before = len(registry)
+        from PyQt6.QtCore import QCoreApplication, QEvent
+
+        def create_and_delete_batch() -> None:
+            # Родитель нужен, чтобы метки не были окнами: conftest держит окна
+            # живыми до конца теста.
+            parent = QWidget()
+            for _ in range(50):
+                BodyLabel("x", parent)
+            sip.delete(parent)
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+            self._app.processEvents()
+            gc.collect()
+
+        # PyQt отпускает прокси-слоты удалённых виджетов в цикле событий,
+        # поэтому ненадолго может задержаться последняя пачка, но не все
+        # созданные метки.
+        for _ in range(4):
+            create_and_delete_batch()
+        self.assertLessEqual(len(registry) - before, 50, "без смены темы реестр не должен расти")
+
     def test_live_card_still_receives_theme_updates(self) -> None:
         from qfluentwidgets import CardWidget
 

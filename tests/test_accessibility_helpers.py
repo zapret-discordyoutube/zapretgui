@@ -755,7 +755,7 @@ class AccessibilityHelpersTests(unittest.TestCase):
         widget = _Widget()
         widget.installEventFilter = lambda _filter: None
 
-        with patch("ui.fluent_widgets.ToolTipFilter", return_value=object()):
+        with patch("ui.fluent_widgets._OwnedToolTipFilter", return_value=object()):
             set_tooltip(widget, "Открывает папку с логами.")
 
         self.assertEqual(widget.tooltip, "Открывает папку с логами.")
@@ -769,7 +769,7 @@ class AccessibilityHelpersTests(unittest.TestCase):
         widget = _Widget("")
         widget.installEventFilter = lambda _filter: None
 
-        with patch("ui.fluent_widgets.ToolTipFilter", return_value=object()):
+        with patch("ui.fluent_widgets._OwnedToolTipFilter", return_value=object()):
             set_tooltip(widget, "Создать новый preset")
 
         self.assertEqual(widget.accessible_name, "Создать новый preset")

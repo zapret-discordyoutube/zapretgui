@@ -58,5 +58,27 @@ class OrchestraHistoryFlushTests(unittest.TestCase):
         self.write.assert_not_called()
 
 
+    def test_history_keeps_recent_and_locked_targets_within_limit(self) -> None:
+        self.manager.locked_by_askey["quic"]["1.1.1.1"] = 4
+        with patch.object(manager_module, "MAX_HISTORY_TARGETS", 100), patch.object(
+            manager_module, "set_orchestra_history"
+        ) as save_all:
+            self.manager.increment_history("1.1.1.1", 4, is_success=True)
+            for index in range(150):
+                self.manager.increment_history(f"10.0.0.{index}", 1, is_success=True)
+            # Давняя цель снова встретилась — она свежая и не должна пропасть.
+            self.manager.increment_history("10.0.0.5", 1, is_success=True)
+            for index in range(150, 200):
+                self.manager.increment_history(f"10.0.0.{index}", 1, is_success=True)
+
+        history = self.manager.strategy_history
+        self.assertLessEqual(len(history), 100)
+        self.assertIn("1.1.1.1", history)
+        self.assertIn("10.0.0.5", history)
+        self.assertIn("10.0.0.199", history)
+        self.assertNotIn("10.0.0.0", history)
+        save_all.assert_called()
+
+
 if __name__ == "__main__":
     unittest.main()

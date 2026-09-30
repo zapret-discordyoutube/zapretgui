@@ -616,7 +616,14 @@ class LogParser:
             if not proto_key:
                 proto_key = self._get_proto_key()
 
-            self.last_applied[(host_key, proto_key)] = strategy
+            # Порядок ключей — от давних к свежим: при переполнении
+            # выбрасываются давно не встречавшиеся цели (для UDP это сырые IP).
+            applied_key = (host_key, proto_key)
+            self.last_applied.pop(applied_key, None)
+            self.last_applied[applied_key] = strategy
+            if len(self.last_applied) > 4000:
+                for key in list(self.last_applied)[:2000]:
+                    del self.last_applied[key]
             self.last_host_by_proto[proto_key] = host_key
             self.current_host = host_key
 

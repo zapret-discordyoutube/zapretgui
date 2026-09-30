@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections import deque
 from collections.abc import Callable
 from typing import TextIO
 
@@ -30,7 +31,13 @@ from .models import (
     WinwsLogParseResult,
 )
 
-DEFAULT_MAX_PACKETS_PER_CONNECTION = 5000
+# Сколько пакетов соединения хранить для таблицы: первая половина — начало
+# соединения (рукопожатие, SNI, профиль), вторая — его конец. Счётчики и
+# вердикты считаются по всем пакетам.
+DEFAULT_MAX_PACKETS_PER_CONNECTION = 200
+# Общий предел хранимых пакетов на весь журнал: отладочный журнал winws2
+# бывает в сотни мегабайт, а каждый пакет — отдельный объект в памяти.
+DEFAULT_MAX_RETAINED_PACKETS = 200_000
 
 # Как часто (в строках) дёргать progress_cb/cancel_cb.
 _CALLBACK_LINE_INTERVAL = 2000
@@ -82,8 +89,18 @@ _VERDICT_MAP = {
 class WinwsLogParser:
     """Построчный конечный автомат: преамбула → пакетные блоки."""
 
-    def __init__(self, *, max_packets_per_connection: int = DEFAULT_MAX_PACKETS_PER_CONNECTION):
-        self._max_packets = max_packets_per_connection
+    def __init__(
+        self,
+        *,
+        max_packets_per_connection: int = DEFAULT_MAX_PACKETS_PER_CONNECTION,
+        max_retained_packets: int = DEFAULT_MAX_RETAINED_PACKETS,
+    ):
+        max_packets = max(1, int(max_packets_per_connection))
+        self._head_packets = max(1, max_packets // 2)
+        self._tail_packets = max_packets - self._head_packets
+        self._retained_left = max(0, int(max_retained_packets))
+        # Хвост последних пакетов соединения; склеивается с началом в finish().
+        self._tails: dict[tuple[str, str, int], deque[PacketRecord]] = {}
         self._result = WinwsLogParseResult()
         self._profiles: dict[int, tuple[str, list[str]]] = {}
         self._hostlists: list[tuple[str, int]] = []
@@ -270,13 +287,31 @@ class WinwsLogParser:
         for lua_name in pkt.lua_applied:
             if lua_name not in conn.lua_applied:
                 conn.lua_applied = conn.lua_applied + (lua_name,)
-        if len(conn.packets) < self._max_packets:
+        self._retain_packet(key, conn, pkt)
+
+    def _retain_packet(self, key: tuple[str, str, int], conn: ConnectionRecord, pkt: PacketRecord) -> None:
+        if len(conn.packets) < self._head_packets and self._retained_left > 0:
             conn.packets.append(pkt)
-        else:
-            conn.packets_truncated = True
+            self._retained_left -= 1
+            return
+        conn.packets_truncated = True
+        if self._tail_packets <= 0:
+            return
+        tail = self._tails.get(key)
+        if tail is None:
+            tail = self._tails[key] = deque(maxlen=self._tail_packets)
+        if len(tail) < self._tail_packets:
+            if self._retained_left <= 0:
+                return
+            self._retained_left -= 1
+        # Полный хвост вытесняет старый пакет — общий счёт не растёт.
+        tail.append(pkt)
 
     def finish(self) -> WinwsLogParseResult:
         self._close_current()
+        for key, tail in self._tails.items():
+            self._connections[key].packets.extend(tail)
+        self._tails.clear()
         self._result.profiles = {
             profile_id: f"{name or 'noname'}: {', '.join(funcs)}"
             for profile_id, (name, funcs) in sorted(self._profiles.items())

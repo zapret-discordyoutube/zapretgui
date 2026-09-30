@@ -35,18 +35,20 @@ class _ThemeSubscriberRegistry:
 
     Держит weakref'ы: обёртка виджета с C++-родителем живёт, пока жив
     C++-объект (sip держит ссылку при передаче владения), поэтому живые
-    виджеты из реестра не выпадают. Мёртвые (умерла обёртка или C++)
+    виджеты из реестра не выпадают. Запись об умершей обёртке удаляется
+    сразу её weakref-обратным вызовом — иначе без смены темы список рос бы
+    с каждым созданным виджетом. Обёртки с уже удалённым C++-объектом
     вычищаются при следующей эмиссии.
     """
 
     def __init__(self, name: str, invoke) -> None:
         self._name = name
         self._invoke = invoke
-        self._refs: list[weakref.ref] = []
+        self._refs: set[weakref.ref] = set()
 
     def register(self, widget) -> None:
         try:
-            self._refs.append(weakref.ref(widget))
+            self._refs.add(weakref.ref(widget, self._refs.discard))
         except TypeError:
             pass
 
@@ -56,17 +58,18 @@ class _ThemeSubscriberRegistry:
     def on_theme_changed(self, *_args) -> None:
         from PyQt6 import sip
 
-        alive: list[weakref.ref] = []
-        for ref in self._refs:
+        for ref in list(self._refs):
             widget = ref()
             if widget is None:
+                self._refs.discard(ref)
                 continue
             try:
                 if sip.isdeleted(widget):
+                    self._refs.discard(ref)
                     continue
             except TypeError:
+                self._refs.discard(ref)
                 continue
-            alive.append(ref)
             try:
                 self._invoke(widget)
             except RuntimeError:
@@ -75,7 +78,6 @@ class _ThemeSubscriberRegistry:
                 continue
             except Exception as exc:  # noqa: BLE001 — смена темы не должна падать
                 log(f"Ошибка theme-обновления {self._name}: {exc}", "DEBUG")
-        self._refs = alive
 
 
 _card_registry: _ThemeSubscriberRegistry | None = None

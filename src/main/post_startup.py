@@ -22,6 +22,10 @@ def install_cpu_diagnostic(*args, **kwargs):
     return install(*args, **kwargs)
 
 
+def install_idle_memory_trim(startup_host) -> None:
+    startup_host.install_idle_memory_trim()
+
+
 def install_global_exception_handler(*args, **kwargs):
     from main.post_startup_diagnostics import install_global_exception_handler as install
 
@@ -277,6 +281,7 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
         startup_host,
         log_startup_metric=deps.log_startup_metric,
     )
+    install_idle_memory_trim(startup_host)
     install_cpu_diagnostic()
     install_qt_event_diagnostic_probe()
     install_startup_audit()

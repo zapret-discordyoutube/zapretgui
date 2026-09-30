@@ -162,5 +162,21 @@ class ThemeManagerPersistenceTests(unittest.TestCase):
         self.assertIsNone(manager._theme_persist_runtime_worker)
 
 
+class ThemeModeSyncTests(unittest.TestCase):
+    def test_same_theme_mode_does_not_restyle_all_widgets(self) -> None:
+        from unittest.mock import patch
+
+        from qfluentwidgets import Theme, qconfig
+
+        from ui import theme as theme_module
+
+        with patch("qfluentwidgets.setTheme") as set_theme:
+            qconfig.themeMode.value = Theme.DARK
+            theme_module._sync_theme_mode_to_qfluent("dark")
+            set_theme.assert_not_called()
+            theme_module._sync_theme_mode_to_qfluent("light")
+            set_theme.assert_called_once_with(Theme.LIGHT)
+
+
 if __name__ == "__main__":
     unittest.main()

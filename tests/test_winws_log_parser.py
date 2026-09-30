@@ -11,6 +11,7 @@ from winws_log_analyzer.models import (
     VERDICT_UNMODIFIED,
 )
 from winws_log_analyzer.parser import (
+    WinwsLogParser,
     parse_winws_log_file,
     parse_winws_log_stream,
 )
@@ -229,6 +230,30 @@ def test_truncation_limit():
     assert conn.packets_total == 5
     assert len(conn.packets) == 2
     assert conn.packets_truncated
+    # Хранятся начало и конец соединения.
+    assert [pkt.packet_id for pkt in conn.packets] == [0, 4]
+
+
+def test_retained_packets_have_global_limit():
+    block = (
+        "packet: id={i} len=80 outbound IPv6=0 IPChecksum=1 TCPChecksum=1 UDPChecksum=1 IfIdx=8.0\n"
+        "IP4: 10.0.0.1 => 1.2.3.{c} proto=tcp ttl=128 sport=1000 dport=443 flags=A seq=1 ack_seq=0\n"
+        "packet: id={i} reinject unmodified\n\n"
+    )
+    text = "".join(
+        block.replace("{i}", str(conn * 100 + i)).replace("{c}", str(conn))
+        for conn in range(10)
+        for i in range(20)
+    )
+    parser = WinwsLogParser(max_packets_per_connection=10, max_retained_packets=25)
+    for line_no, line in enumerate(io.StringIO(text), start=1):
+        parser.feed_line(line, line_no)
+    result = parser.finish()
+
+    assert result.packets_total == 200
+    assert len(result.connections) == 10
+    assert all(conn.packets_total == 20 for conn in result.connections)
+    assert sum(len(conn.packets) for conn in result.connections) <= 25
 
 
 def test_progress_and_cancel(tmp_path):

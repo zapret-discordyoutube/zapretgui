@@ -741,6 +741,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_update_check"),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
+            patch.object(post_startup, "install_idle_memory_trim"),
             patch.object(post_startup, "install_qt_event_diagnostic_probe"),
             patch.object(post_startup, "install_global_exception_handler"),
             patch.object(post_startup, "install_startup_audit") as install_audit,
@@ -2316,6 +2317,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_update_check"),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
+            patch.object(post_startup, "install_idle_memory_trim"),
             patch.object(post_startup, "install_qt_event_diagnostic_probe"),
             patch.object(post_startup, "install_global_exception_handler"),
         ):
@@ -2364,6 +2366,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_update_check"),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
+            patch.object(post_startup, "install_idle_memory_trim"),
             patch.object(post_startup, "install_qt_event_diagnostic_probe"),
             patch.object(post_startup, "install_global_exception_handler"),
             patch.object(post_startup, "install_startup_audit"),
@@ -2412,6 +2415,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_update_check"),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
+            patch.object(post_startup, "install_idle_memory_trim"),
             patch.object(post_startup, "install_qt_event_diagnostic_probe"),
             patch.object(post_startup, "install_global_exception_handler"),
         ):
@@ -2468,6 +2472,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_update_check"),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
+            patch.object(post_startup, "install_idle_memory_trim"),
             patch.object(post_startup, "install_qt_event_diagnostic_probe"),
             patch.object(post_startup, "install_global_exception_handler"),
         ):
@@ -2527,6 +2532,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_update_check"),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
+            patch.object(post_startup, "install_idle_memory_trim"),
             patch.object(post_startup, "install_qt_event_diagnostic_probe"),
             patch.object(post_startup, "install_global_exception_handler"),
         ):
@@ -2619,6 +2625,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_update_check"),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
+            patch.object(post_startup, "install_idle_memory_trim"),
             patch.object(post_startup, "install_qt_event_diagnostic_probe"),
             patch.object(post_startup, "install_global_exception_handler"),
         ):
@@ -2671,6 +2678,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_update_check"),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
+            patch.object(post_startup, "install_idle_memory_trim"),
             patch.object(post_startup, "install_qt_event_diagnostic_probe"),
             patch.object(post_startup, "install_global_exception_handler"),
         ):

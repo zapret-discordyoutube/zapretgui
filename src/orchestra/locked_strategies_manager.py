@@ -49,6 +49,12 @@ from orchestra.ignored_targets import is_orchestra_ignored_target
 # писать на каждое событие winws2 слишком дорого по памяти и диску.
 HISTORY_FLUSH_INTERVAL_SECONDS = 10.0
 
+# Сколько целей держать в истории. Для UDP целью бывает сырой IP, поэтому
+# без предела история росла бы с каждым новым адресом. При переполнении
+# выбрасываются давно не встречавшиеся цели (кроме закреплённых) с запасом
+# в 10%, чтобы чистка не шла на каждом событии.
+MAX_HISTORY_TARGETS = 3000
+
 # Все 9 askey профилей
 ASKEY_ALL = ["tls", "http", "quic", "discord", "wireguard", "mtproto", "dns", "stun", "unknown"]
 
@@ -481,6 +487,7 @@ class LockedStrategiesManager:
         except Exception as e:
             log(f"Ошибка загрузки истории: {e}", "DEBUG")
             self.strategy_history = {}
+        self._enforce_history_limit()
 
     def save_history(self):
         """Сохраняет историю стратегий в settings.sqlite3."""
@@ -502,11 +509,8 @@ class LockedStrategiesManager:
         """Обновляет историю для домена/стратегии (полная замена значений)"""
         if self._is_ignored_hostname(hostname):
             return
-        if hostname not in self.strategy_history:
-            self.strategy_history[hostname] = {}
-
-        strat_key = str(strategy)
-        self.strategy_history[hostname][strat_key] = {
+        entry = self._touch_history(hostname)
+        entry[str(strategy)] = {
             'successes': successes,
             'failures': failures
         }
@@ -516,21 +520,47 @@ class LockedStrategiesManager:
         """Инкрементирует счётчик успехов или неудач для домена/стратегии"""
         if self._is_ignored_hostname(hostname):
             return
-        if hostname not in self.strategy_history:
-            self.strategy_history[hostname] = {}
-
-        strat_key = str(strategy)
-        if strat_key not in self.strategy_history[hostname]:
-            self.strategy_history[hostname][strat_key] = {'successes': 0, 'failures': 0}
-
+        entry = self._touch_history(hostname)
+        counters = entry.setdefault(str(strategy), {'successes': 0, 'failures': 0})
         if is_success:
-            self.strategy_history[hostname][strat_key]['successes'] += 1
+            counters['successes'] += 1
         else:
-            self.strategy_history[hostname][strat_key]['failures'] += 1
+            counters['failures'] += 1
         self._mark_history_dirty(hostname)
+
+    def _touch_history(self, hostname: str) -> dict:
+        """Переносит цель в конец истории: порядок ключей — от давних к свежим."""
+        entry = self.strategy_history.pop(hostname, None)
+        if entry is None:
+            entry = {}
+        self.strategy_history[hostname] = entry
+        return entry
+
+    def _enforce_history_limit(self) -> None:
+        if len(self.strategy_history) <= MAX_HISTORY_TARGETS:
+            return
+        to_evict = len(self.strategy_history) - MAX_HISTORY_TARGETS + MAX_HISTORY_TARGETS // 10
+        protected: set[str] = set()
+        for askey in ASKEY_ALL:
+            protected.update(self.locked_by_askey[askey])
+            protected.update(self.user_locked_by_askey[askey])
+        evicted = 0
+        for hostname in list(self.strategy_history):
+            if evicted >= to_evict:
+                break
+            if hostname in protected:
+                continue
+            del self.strategy_history[hostname]
+            self._dirty_history_targets.discard(hostname)
+            evicted += 1
+        if evicted:
+            log(f"История оркестратора: убрано {evicted} давно не встречавшихся целей", "DEBUG")
+            # Полная перезапись убирает выброшенные цели и из базы.
+            self.save_history()
 
     def _mark_history_dirty(self, hostname: str) -> None:
         self._dirty_history_targets.add(hostname)
+        self._enforce_history_limit()
         if time.monotonic() - self._history_flushed_at >= HISTORY_FLUSH_INTERVAL_SECONDS:
             self.flush_history()
 

@@ -1142,7 +1142,13 @@ class OrchestraRunner:
                             host_key = f"{host}:{strat}"
                             if not hasattr(self, '_success_counts'):
                                 self._success_counts = {}
-                            self._success_counts[host_key] = self._success_counts.get(host_key, 0) + 1
+                            # Порядок ключей — от давних к свежим; при переполнении
+                            # выбрасываются давно не встречавшиеся цели.
+                            count = self._success_counts.pop(host_key, 0) + 1
+                            self._success_counts[host_key] = count
+                            if len(self._success_counts) > 6000:
+                                for stale_key in list(self._success_counts)[:3000]:
+                                    del self._success_counts[stale_key]
 
                             lock_threshold = 1 if is_udp else 3
                             if self._success_counts[host_key] >= lock_threshold:

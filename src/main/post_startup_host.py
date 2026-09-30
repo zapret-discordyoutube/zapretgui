@@ -24,6 +24,12 @@ class PostStartupHost:
     def startup_post_init_ready(self):
         return self._window.startup_post_init_ready
 
+    def install_idle_memory_trim(self) -> None:
+        """Чистит память, пока окно долго скрыто в трее или свёрнуто."""
+        from ui.idle_memory_trim import install_idle_memory_trim
+
+        install_idle_memory_trim(self._window)
+
     def is_alive(self) -> bool:
         close_state = self.close_state
         return not bool(close_state.is_exiting or close_state.closing_completely)
