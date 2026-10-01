@@ -22,6 +22,7 @@ from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPi
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 from qfluentwidgets import getFont, isDarkTheme, themeColor
 
+from profile.ui.profile_icon import profile_icon_pixmap
 from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
@@ -579,7 +580,8 @@ class HostsTilesGrid(QWidget):
 
         pad = self._PAD
         icon_color = (tile.icon_color or tokens.icon_fg) if tile.is_on else tokens.icon_fg_muted
-        icon = get_cached_qta_pixmap(tile.icon_name or "fa5s.globe", color=icon_color, size=self._ICON)
+        # Значок сервиса: фирменный логотип ("simple:<имя>") или значок из шрифта.
+        icon = profile_icon_pixmap(tile.icon_name or "fa5s.globe", color=icon_color, size=self._ICON)
         angle, glow_alpha, glow_color = self._icon_motion(tile, self._now())
         if glow_alpha > 0 or angle:
             # Переключили: иконка сервиса качается и светится.

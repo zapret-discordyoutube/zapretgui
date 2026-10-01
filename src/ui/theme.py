@@ -4,8 +4,8 @@ import re
 import sys
 from collections import OrderedDict
 from dataclasses import dataclass
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
-from PyQt6.QtGui import QPixmap, QColor, QIcon
+from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QPainter, QPixmap, QColor, QIcon
 from config.runtime_layout import APPLICATION_PATHS
 from log.log import log
 from settings.appearance_backgrounds import (
@@ -993,6 +993,43 @@ def resolve_icon_color(color=None, *, theme_name: str | None = None, muted_fallb
     return parsed.name(QColor.NameFormat.HexArgb)
 
 
+def _render_qta_pixmap(qta, icon_name: str, color, size: int) -> QPixmap:
+    """Рисует значок в квадрате size×size так, чтобы он поместился целиком.
+
+    qtawesome подбирает размер шрифта по высоте квадрата. У широких значков
+    (геймпад, сеть, Discord) рисунок шире своей высоты, и края срезались
+    границей квадрата. Такой значок рисуем чуть мельче — по ширине.
+    """
+    icon = qta.icon(icon_name, color=color)
+    glyph_width = _qta_glyph_width(icon, size)
+    if glyph_width <= size:
+        return icon.pixmap(size, size)
+    for shrink in (0, 1, 2):
+        scale_factor = (size - shrink) / glyph_width
+        icon = qta.icon(icon_name, color=color, scale_factor=scale_factor)
+        if _qta_glyph_width(icon, size) <= size:
+            break
+    return icon.pixmap(size, size)
+
+
+def _qta_glyph_width(icon: QIcon, size: int) -> int:
+    """Настоящая ширина рисунка значка: рисуем на широком холсте, где резать нечему."""
+    canvas = QPixmap(size * 3, size)
+    canvas.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(canvas)
+    try:
+        icon.paint(painter, canvas.rect())
+    finally:
+        painter.end()
+    image = canvas.toImage()
+    columns = [
+        x
+        for x in range(image.width())
+        if any(image.pixelColor(x, y).alpha() > 8 for y in range(image.height()))
+    ]
+    return columns[-1] - columns[0] + 1 if columns else 0
+
+
 def get_cached_qta_pixmap(
     icon_name: str,
     *,
@@ -1017,7 +1054,7 @@ def get_cached_qta_pixmap(
         return QPixmap(cached)
 
     try:
-        pixmap = qta.icon(icon_name, color=resolved_color).pixmap(safe_size, safe_size)
+        pixmap = _render_qta_pixmap(qta, icon_name, resolved_color, safe_size)
     except Exception:
         return QPixmap()
 

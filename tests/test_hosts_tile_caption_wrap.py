@@ -5,11 +5,13 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtGui import QFontMetrics
+from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtGui import QFontMetrics, QPainter, QPixmap
 from PyQt6.QtWidgets import QApplication
 from qfluentwidgets import getFont
 
 from hosts.ui.services_tiles import HostsTile, HostsTilesGrid, split_service_title, wrap_lines
+from ui.theme import get_cached_qta_pixmap
 
 YOUTUBE = "YouTube (иногда может не работать с ним! Отключите тумблер если YouTube не работает с пресетами)"
 FLOWSEAL = "Решение от Flowseal для стабильной работы голосовых серверов в Discord"
@@ -71,6 +73,63 @@ class HostsTileRowHeightTests(unittest.TestCase):
         self.assertEqual(second_row, {HostsTilesGrid.TILE_HEIGHT})
         self.assertGreater(grid.tile_rect("d").top(), grid.tile_rect("a").bottom())
         self.assertFalse(grid.grab().isNull())
+
+
+def _ink_size(pixmap: QPixmap) -> tuple[int, int]:
+    """Ширина и высота закрашенной части картинки."""
+    image = pixmap.toImage()
+    points = [
+        (x, y)
+        for x in range(image.width())
+        for y in range(image.height())
+        if image.pixelColor(x, y).alpha() > 8
+    ]
+    xs = [x for x, _y in points]
+    ys = [y for _x, y in points]
+    return max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+
+
+class HostsTileIconTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def test_wide_font_icon_is_not_cut_by_its_square(self) -> None:
+        import qtawesome as qta
+
+        for name in ("fa5s.gamepad", "fa5s.network-wired"):
+            for size in (13, 20):
+                with self.subTest(name=name, size=size):
+                    # Обычный размер значка — на широком холсте, где резать нечему.
+                    roomy = QPixmap(size * 3, size)
+                    roomy.fill(Qt.GlobalColor.transparent)
+                    painter = QPainter(roomy)
+                    qta.icon(name, color="#ffffff").paint(painter, QRect(0, 0, size * 3, size))
+                    painter.end()
+                    natural_width, natural_height = _ink_size(roomy)
+                    self.assertGreater(natural_width, size, "значок не широкий — тест ничего не проверяет")
+
+                    pixmap = get_cached_qta_pixmap(name, color="#ffffff", size=size)
+                    self.assertEqual((pixmap.width(), pixmap.height()), (size, size))
+                    # Срезанный значок сохраняет прежнюю высоту; уместившийся — уменьшен целиком.
+                    _width, height = _ink_size(pixmap)
+                    self.assertLess(height, natural_height)
+
+    def test_tile_draws_brand_logo_from_bundle(self) -> None:
+        import profile.ui.profile_icon as profile_icon
+
+        profile_icon._PROFILE_PIXMAP_CACHE.clear()
+        grid = HostsTilesGrid()
+        self.addCleanup(grid.deleteLater)
+        grid.resize(820, 100)
+        grid.set_tiles([
+            HostsTile(kind="tile", key="a", title="Discord", has_switch=True, icon_name="simple:discord:DI"),
+        ])
+        self.assertFalse(grid.grab().isNull())
+
+        kinds = {(key[0], key[1]) for key in profile_icon._PROFILE_PIXMAP_CACHE}
+        self.assertIn(("simple", "discord"), kinds)
+        self.assertFalse(any(kind == "initials" for kind, _value in kinds))
 
 
 if __name__ == "__main__":

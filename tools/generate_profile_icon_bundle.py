@@ -1,8 +1,10 @@
-"""Генератор бандла simple-иконок для профилей.
+"""Генератор бандла simple-иконок для профилей и сервисов Hosts.
 
 Извлекает из пакета simplepycons ТОЛЬКО те SVG, которые реально используются
-каталогом иконок профилей (profile/icons.py), и записывает их в сгенерированный
-модуль src/profile/ui/simple_icons_bundle.py.
+каталогом иконок профилей (profile/icons.py) и готовым каталогом Hosts
+(private_zapretgui/resources/system/hosts_catalog.sqlite3, столбец
+services.icon_name), и записывает их в сгенерированный модуль
+src/profile/ui/simple_icons_bundle.py.
 
 Зачем: импорт simplepycons тянет ~3400 модулей (~2.6с и десятки МБ памяти),
 поэтому в рантайме приложения он не используется вообще. simplepycons нужен
@@ -12,11 +14,13 @@
     PYTHONPATH=src python tools/generate_profile_icon_bundle.py
 
 После добавления нового сервиса с иконкой "simple:<slug>:<fallback>" в
-profile/icons.py — перезапустить генератор. Тест
-tests/test_profile_icon_bundle.py упадёт, если бандл не покрывает каталог.
+profile/icons.py или в каталог Hosts — перезапустить генератор. Тесты
+tests/test_profile_icon_bundle.py и tests/test_hosts_catalog_sqlite.py упадут,
+если бандл не покрывает каталоги.
 """
 from __future__ import annotations
 
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -26,12 +30,15 @@ if str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
 
 BUNDLE_PATH = PROJECT_SRC / "profile" / "ui" / "simple_icons_bundle.py"
+HOSTS_CATALOG_PATH = (
+    PROJECT_ROOT.parent / "private_zapretgui" / "resources" / "system" / "hosts_catalog.sqlite3"
+)
 
-_HEADER = '''"""Бандл simple-иконок профилей. СГЕНЕРИРОВАНО — НЕ редактировать вручную.
+_HEADER = '''"""Бандл simple-иконок профилей и сервисов Hosts. СГЕНЕРИРОВАНО — НЕ редактировать вручную.
 
 Источник: пакет simplepycons (Simple Icons, CC0). Здесь лежат только SVG,
-которые реально используются каталогом profile/icons.py — благодаря этому
-рантайм не импортирует simplepycons (~3400 модулей, ~2.6с).
+которые реально используются каталогом profile/icons.py и каталогом Hosts —
+благодаря этому рантайм не импортирует simplepycons (~3400 модулей, ~2.6с).
 
 Регенерация: PYTHONPATH=src python tools/generate_profile_icon_bundle.py
 """
@@ -49,21 +56,36 @@ __all__ = ["SIMPLE_ICON_SVGS"]
 '''
 
 
+def _simple_slug(icon_name: str) -> str:
+    if not icon_name.startswith("simple:"):
+        return ""
+    slug = icon_name.removeprefix("simple:").partition(":")[0]
+    return slug.strip().lower().replace("-", "")
+
+
+def collect_hosts_catalog_slugs() -> set[str]:
+    """Собирает simple-слаги сервисов из готового каталога Hosts."""
+    if not HOSTS_CATALOG_PATH.is_file():
+        raise FileNotFoundError(f"Не найден каталог Hosts: {HOSTS_CATALOG_PATH}")
+    connection = sqlite3.connect(HOSTS_CATALOG_PATH.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        rows = connection.execute("SELECT DISTINCT icon_name FROM services").fetchall()
+    finally:
+        connection.close()
+    return {slug for row in rows if (slug := _simple_slug(str(row[0] or "")))}
+
+
 def collect_catalog_slugs() -> list[str]:
-    """Собирает уникальные simple-слаги из каталога иконок профилей."""
+    """Собирает уникальные simple-слаги из каталогов иконок профилей и Hosts."""
     import profile.icons as profile_icons
 
-    slugs: set[str] = set()
+    slugs: set[str] = collect_hosts_catalog_slugs()
     for attr_name in dir(profile_icons):
         attr = getattr(profile_icons, attr_name)
         if not isinstance(attr, dict):
             continue
         for value in attr.values():
-            icon_name = str(getattr(value, "icon_name", "") or "")
-            if not icon_name.startswith("simple:"):
-                continue
-            slug = icon_name.removeprefix("simple:").partition(":")[0]
-            slug = slug.strip().lower().replace("-", "")
+            slug = _simple_slug(str(getattr(value, "icon_name", "") or ""))
             if slug:
                 slugs.add(slug)
     return sorted(slugs)

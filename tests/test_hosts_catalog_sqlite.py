@@ -81,12 +81,24 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.09.30.1")
+        self.assertEqual(catalog.catalog_version, "2026.10.01.1")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
             [],
         )
+        # Фирменные логотипы ("simple:<имя>:<буквы>") лежат в бандле; иначе вместо
+        # логотипа нарисуется квадрат с буквами. После правки значков в каталоге:
+        # PYTHONPATH=src python tools/generate_profile_icon_bundle.py
+        from profile.ui.simple_icons_bundle import SIMPLE_ICON_SVGS
+
+        simple_slugs = {
+            icon.removeprefix("simple:").partition(":")[0]
+            for icon, _color in catalog.service_icons.values()
+            if icon.startswith("simple:")
+        }
+        self.assertIn("discord", simple_slugs)
+        self.assertEqual(sorted(simple_slugs - set(SIMPLE_ICON_SVGS)), [])
         self.assertEqual(len(catalog.content_sha256), 64)
         self.assertEqual(len(catalog.service_order), 73)
         self.assertEqual(len(catalog.dns_profiles), 8)
@@ -355,7 +367,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertEqual(index["services"][0], "ChatGPT & Sora (OpenAI)")
         self.assertEqual(index["category_by_service"]["ChatGPT & Sora (OpenAI)"], "ai")
         self.assertEqual(index["category_by_service"]["Discord"], "direct")
-        self.assertEqual(index["icon_by_service"]["Discord"], ("fa5b.discord", "#5865f2"))
+        self.assertEqual(index["icon_by_service"]["Discord"], ("simple:discord:DI", "#5865f2"))
 
     def test_profile_index_is_cached_until_explicit_invalidation(self) -> None:
         with patch.object(
