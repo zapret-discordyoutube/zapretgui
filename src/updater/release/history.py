@@ -4,12 +4,13 @@ from __future__ import annotations
 
 Forgejo отдаёт список выпусков канала целиком (``release["history"]``).
 Показываются все версии, которые пользователь пропустил (``is_new``), и
-предыдущие выпуски до десяти — раздел «Ранее». Зеркала знают только
-последний выпуск — тогда история состоит из него одного.
+предыдущие выпуски — раздел «Ранее»: до десяти в Dev и до трёх в Stable.
+Зеркала знают только последний выпуск — тогда история состоит из него одного.
 """
 
 from typing import Any
 
+from ..channel_utils import is_dev_update_channel
 from ..versions import version_key
 from .forgejo import release_page_url
 
@@ -17,6 +18,18 @@ from .forgejo import release_page_url
 # Сколько выпусков показывать: новые для пользователя — все, остальное
 # добирается предыдущими выпусками до этого числа (раздел «Ранее»).
 RECENT_HISTORY_LIMIT = 10
+# Текст выпуска Stable — статья обо всём, что изменилось с прошлого Stable,
+# поэтому десять таких подряд читать невозможно.
+STABLE_HISTORY_LIMIT = 3
+
+
+def history_limit(channel: str | None = None) -> int:
+    """Сколько выпусков показывать; без ``channel`` — канал этой сборки."""
+    if channel is None:
+        from config.build_info import CHANNEL
+
+        channel = CHANNEL
+    return RECENT_HISTORY_LIMIT if is_dev_update_channel(channel) else STABLE_HISTORY_LIMIT
 
 
 def _entry(version: str, notes: str, published_at: str, url: str, *, is_new: bool) -> dict:
@@ -34,13 +47,16 @@ def recent_history(
     *,
     up_to_version: str,
     new_after_version: str,
-    limit: int = RECENT_HISTORY_LIMIT,
+    limit: int | None = None,
 ) -> tuple[dict, ...]:
     """Выпуски ``<= up_to_version``, от новых к старым.
 
     Новые для пользователя (``> new_after_version``) попадают все и помечены
-    ``is_new``; предыдущие добирают список до ``limit``.
+    ``is_new``; предыдущие добирают список до ``limit`` (по умолчанию — по
+    каналу сборки).
     """
+    if limit is None:
+        limit = history_limit()
     try:
         top_key = version_key(up_to_version)
     except ValueError:
@@ -73,7 +89,7 @@ def recent_history(
 
 
 def release_history_since(release: dict[str, Any], *, current_version: str) -> tuple[dict, ...]:
-    """История для окна обновления: пропущенные версии и предыдущие до 10.
+    """История для окна обновления: пропущенные версии и предыдущие до лимита канала.
 
     Пропущенные (``current_version < v <= release.version``) помечены
     ``is_new``. Зеркало или Forgejo без строки предлагаемой версии — она всё
@@ -111,4 +127,11 @@ def release_url_for(release: dict[str, Any]) -> str:
     return release_page_url(version) if version else ""
 
 
-__all__ = ["RECENT_HISTORY_LIMIT", "recent_history", "release_history_since", "release_url_for"]
+__all__ = [
+    "RECENT_HISTORY_LIMIT",
+    "STABLE_HISTORY_LIMIT",
+    "history_limit",
+    "recent_history",
+    "release_history_since",
+    "release_url_for",
+]

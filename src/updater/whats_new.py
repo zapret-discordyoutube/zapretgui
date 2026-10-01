@@ -77,15 +77,15 @@ def _with_earlier(version: str, pending: tuple[dict, ...]) -> tuple[dict, ...]:
     """Добирает к сохранённому тексту предыдущие выпуски («Ранее»).
 
     Старые версии сохраняли перед установкой только пропущенные выпуски.
-    Если в записи нет раздела «Ранее» и выпусков меньше десяти, он берётся
+    Если в записи нет раздела «Ранее» и выпусков меньше лимита канала, он берётся
     из списка выпусков Forgejo. Нет сети — показываем сохранённое как есть.
     """
-    from updater.release.history import RECENT_HISTORY_LIMIT, recent_history
+    from updater.release.history import history_limit, recent_history
     from updater.versions import version_key
 
     if not pending:
         return pending
-    if len(pending) >= RECENT_HISTORY_LIMIT or any(not item.get("is_new", True) for item in pending):
+    if len(pending) >= history_limit() or any(not item.get("is_new", True) for item in pending):
         return pending
     try:
         from config.build_info import CHANNEL
