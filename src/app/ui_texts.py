@@ -545,6 +545,142 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "DNS подмена",
         "en": "DNS Spoofing",
     },
+    "page.blockcheck.tab.domain_lookup": {
+        "ru": "Проверка домена",
+        "en": "Domain Lookup",
+    },
+    "page.domain_lookup.title": {
+        "ru": "Проверка домена",
+        "en": "Domain Lookup",
+    },
+    "page.domain_lookup.subtitle": {
+        "ru": "Пинг, адреса с разных DNS-серверов и домены на том же адресе",
+        "en": "Ping, addresses from different DNS servers and domains on the same address",
+    },
+    "page.domain_lookup.placeholder": {
+        "ru": "Домен или IP-адрес: example.com, 1.2.3.4",
+        "en": "Domain or IP address: example.com, 1.2.3.4",
+    },
+    "page.domain_lookup.input.name": {
+        "ru": "Домен или IP-адрес для проверки",
+        "en": "Domain or IP address to check",
+    },
+    "page.domain_lookup.input.description": {
+        "ru": "Введите домен, адрес или ссылку и нажмите «Проверить».",
+        "en": "Enter a domain, address or link and press Check.",
+    },
+    "page.domain_lookup.button.start": {
+        "ru": "Проверить",
+        "en": "Check",
+    },
+    "page.domain_lookup.button.start.name": {
+        "ru": "Проверить домен",
+        "en": "Check domain",
+    },
+    "page.domain_lookup.button.start.description": {
+        "ru": "Пропинговать адрес, спросить его у разных DNS-серверов и найти домены на том же адресе.",
+        "en": "Ping the address, ask different DNS servers for it and find domains on the same address.",
+    },
+    "page.domain_lookup.button.stop": {
+        "ru": "Остановить",
+        "en": "Stop",
+    },
+    "page.domain_lookup.button.stop.name": {
+        "ru": "Остановить проверку домена",
+        "en": "Stop domain check",
+    },
+    "page.domain_lookup.button.stop.description": {
+        "ru": "Прервать проверку; останется то, что уже успели узнать.",
+        "en": "Interrupt the check; what was already found stays.",
+    },
+    "page.domain_lookup.button.report": {
+        "ru": "Отчёт",
+        "en": "Report",
+    },
+    "page.domain_lookup.button.report.name": {
+        "ru": "Открыть отчёт проверки домена",
+        "en": "Open domain check report",
+    },
+    "page.domain_lookup.button.report.description": {
+        "ru": "Открыть полный текст проверки — его можно скопировать.",
+        "en": "Open the full text of the check — it can be copied.",
+    },
+    "page.domain_lookup.external": {
+        "ru": "Искать соседей по адресу через внешние сервисы (адрес будет отправлен на их сайты)",
+        "en": "Look up neighbours via external services (the address is sent to their sites)",
+    },
+    "page.domain_lookup.external.description": {
+        "ru": "Список доменов на том же адресе дают сторонние сервисы. Без галочки наружу ничего не уходит: остаются обратное имя, сертификат и владелец сети.",
+        "en": "The list of domains on the same address comes from third-party services. Without this option nothing is sent out: reverse name, certificate and network owner remain.",
+    },
+    "page.domain_lookup.section.ping": {
+        "ru": "Пинг и сеть",
+        "en": "Ping and network",
+    },
+    "page.domain_lookup.section.dns": {
+        "ru": "Адреса с разных DNS-серверов",
+        "en": "Addresses from different DNS servers",
+    },
+    "page.domain_lookup.section.neighbors": {
+        "ru": "Кто ещё на этом адресе",
+        "en": "Who else is on this address",
+    },
+    "page.domain_lookup.column.server": {
+        "ru": "DNS-сервер",
+        "en": "DNS server",
+    },
+    "page.domain_lookup.column.address": {
+        "ru": "Адрес сервера",
+        "en": "Server address",
+    },
+    "page.domain_lookup.column.answer": {
+        "ru": "Ответ",
+        "en": "Answer",
+    },
+    "page.domain_lookup.column.time": {
+        "ru": "Время",
+        "en": "Time",
+    },
+    "page.domain_lookup.table.name": {
+        "ru": "Ответы DNS-серверов",
+        "en": "DNS server answers",
+    },
+    "page.domain_lookup.table.description": {
+        "ru": "Для каждого сервера: какие адреса он назвал и за сколько.",
+        "en": "For each server: which addresses it returned and how fast.",
+    },
+    "page.domain_lookup.neighbors.name": {
+        "ru": "Домены на том же адресе",
+        "en": "Domains on the same address",
+    },
+    "page.domain_lookup.neighbors.description": {
+        "ru": "Списки доменов по источникам.",
+        "en": "Domain lists grouped by source.",
+    },
+    "page.domain_lookup.status.ready": {
+        "ru": "Введите домен или IP-адрес и нажмите «Проверить».",
+        "en": "Enter a domain or IP address and press Check.",
+    },
+    "page.domain_lookup.status.empty": {
+        "ru": "Введите домен или IP-адрес.",
+        "en": "Enter a domain or IP address.",
+    },
+    "page.domain_lookup.status.failed": {
+        "ru": "Проверка не удалась",
+        "en": "Check failed",
+    },
+    "page.domain_lookup.report.title": {
+        "ru": "Отчёт проверки домена",
+        "en": "Domain check report",
+    },
+    "page.domain_lookup.report.empty": {
+        "ru": "Проверка ещё не запускалась.",
+        "en": "The check has not been run yet.",
+    },
+    "page.domain_lookup.report.description": {
+        "ru": "Полный текст проверки: пинг, ответы DNS-серверов и домены на адресе.",
+        "en": "Full text of the check: ping, DNS server answers and domains on the address.",
+    },
     "page.blockcheck.start": {
         "ru": "Проверить",
         "en": "Check",

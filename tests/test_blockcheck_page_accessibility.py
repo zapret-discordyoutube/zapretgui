@@ -85,7 +85,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.addCleanup(page.deleteLater)
 
         self.assertEqual(page._tabs_pivot.accessibleName(), "Раздел BlockCheck, выбрано: BlockCheck")
-        self.assertIn("BlockCheck, Подбор стратегии или DNS подмена", page._tabs_pivot.accessibleDescription())
+        self.assertIn("BlockCheck, Подбор стратегии, Проверка домена или DNS подмена", page._tabs_pivot.accessibleDescription())
         self.assertEqual(
             page._scope_combo.accessibleName(),
             "Что проверить BlockCheck, выбрано: Все сайты",
@@ -126,7 +126,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         page = _make_page()
         self.addCleanup(page.deleteLater)
 
-        self.assertEqual(page.TAB_ORDER, ("blockcheck", "strategy_scan", "dns_spoofing"))
+        self.assertEqual(page.TAB_ORDER, ("blockcheck", "strategy_scan", "domain_lookup", "dns_spoofing"))
         self.assertEqual(page._normalize_tab_key("diagnostics"), "blockcheck")
         self.assertEqual(page._normalize_tab_key("connection"), "blockcheck")
 

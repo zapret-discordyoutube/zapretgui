@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 from utils.net_resolve import DNSTimeoutError, resolve_addrinfo, resolve_ipv4
 
 from blockcheck.config import (
+    KNOWN_BLOCK_IP_OWNERS,
     KNOWN_BLOCK_IPS,
     PREFLIGHT_DNS_TIMEOUT,
     PREFLIGHT_HTTP_TIMEOUT,
@@ -57,18 +58,7 @@ _VERDICT_RU = {
 }
 
 # Идентификация провайдера по IP-заглушке
-_BLOCK_IP_PROVIDERS: dict[str, str] = {
-    "195.82.146.214": "Ростелеком",
-    "81.19.72.32": "МТС",
-    "213.180.193.250": "Билайн",
-    "217.169.80.229": "Мегафон",
-    "62.33.207.196": "РКН",
-    "62.33.207.197": "РКН",
-    "62.33.207.198": "РКН",
-    "127.0.0.1": "loopback",
-    "0.0.0.0": "null-route",
-    "10.10.10.10": "внутренняя заглушка",
-}
+_BLOCK_IP_PROVIDERS: dict[str, str] = KNOWN_BLOCK_IP_OWNERS
 
 
 def _identify_provider(ip: str) -> str:
