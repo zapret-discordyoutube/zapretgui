@@ -194,42 +194,42 @@ class RealEnvironment:
         self._needs_readiness_check = True
 
     def recover_after_crash(self) -> None:
-        from winws_runtime.runtime.system_ops import standard_windivert_cleanup_runtime
+        from winws_runtime.runtime.system_ops import stop_own_winws_processes_runtime
 
         try:
-            standard_windivert_cleanup_runtime(sleep_seconds=max(0.8, self.strategy_pause_seconds()))
+            stop_own_winws_processes_runtime()
         except Exception:
-            logger.debug("WinDivert cleanup after crash failed", exc_info=True)
+            logger.debug("winws stop after crash failed", exc_info=True)
+        # Пауза нужна только при Kaspersky: это не ожидание готовности, а
+        # разрядка между запусками, чтобы фильтры антивируса успели отработать.
+        pause = self.strategy_pause_seconds()
+        if pause > 0:
+            time.sleep(pause)
         self._needs_readiness_check = True
 
     def _ensure_windivert_ready(self) -> None:
-        """WinDivert готов к запуску? Ошибка 1058 (служба отключена) — стоп подбора."""
-        from winws_runtime.health.windivert_diagnostics import describe_windivert_readiness_failure
-        from winws_runtime.runtime.system_ops import (
-            aggressive_windivert_cleanup_runtime,
-            wait_for_windivert_spawn_ready_runtime,
-        )
+        """Служба драйвера не застряла? Если застряла — подбор невозможен."""
+        from winws_runtime.health.windivert_diagnostics import ensure_windivert_ready_before_spawn
+        from winws_runtime.runtime.system_ops import recover_windivert_runtime
 
         try:
-            probe = wait_for_windivert_spawn_ready_runtime(max_wait_seconds=3.0, poll_interval=0.25)
+            result = ensure_windivert_ready_before_spawn()
         except Exception:
-            logger.debug("WinDivert readiness probe failed", exc_info=True)
+            logger.debug("WinDivert driver service check failed", exc_info=True)
             return
-        if getattr(probe, "ready", False):
+        if result.ready:
             return
-        self._log(f"  WinDivert не готов (ошибка {getattr(probe, 'error_code', None)}), чищу...")
+        self._log(f"  Служба драйвера WinDivert не готова ({result.blocker}), восстанавливаю...")
         try:
-            aggressive_windivert_cleanup_runtime()
-            probe = wait_for_windivert_spawn_ready_runtime(max_wait_seconds=5.0, poll_interval=0.25)
+            recover_windivert_runtime()
+            result = ensure_windivert_ready_before_spawn()
         except Exception:
             logger.debug("WinDivert recovery failed", exc_info=True)
-        if getattr(probe, "ready", False):
-            self._log("  WinDivert готов после чистки")
+        if result.ready:
+            self._log("  Служба драйвера WinDivert готова после восстановления")
             return
-        description = describe_windivert_readiness_failure(probe)
-        if int(getattr(probe, "error_code", 0) or 0) == 1058:
-            raise ScanFatal(description, STOP_WINWS)
-        self._log(f"  {description}")
+        # Пока служба застряла, не запустится ни одна стратегия.
+        raise ScanFatal(result.description, STOP_WINWS)
 
     def strategy_pause_seconds(self) -> float:
         if self._pause is None:

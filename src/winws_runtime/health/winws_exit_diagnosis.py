@@ -35,7 +35,6 @@ from winws_runtime.health.windivert_diagnostics import (
     _ERROR_SERVICE_DEPENDENCY_FAIL,
     _ERROR_SERVICE_DISABLED,
     _ERROR_SERVICE_DOES_NOT_EXIST,
-    _WINDIVERT_DRIVER_SERVICE_NAMES,
     describe_windivert_conflict_hint,
     format_windows_error_code,
 )
@@ -46,7 +45,7 @@ class WinDivertDiagnosis:
     """Structured result of WinDivert error diagnosis."""
     cause: str                        # Human-readable cause
     solution: str                     # What the user should do
-    auto_fix: Optional[str] = None   # Action ID: "enable_adapters", "enable_bfe", "enable_driver", None
+    auto_fix: Optional[str] = None   # Action ID: "enable_adapters", "enable_bfe", "cleanup_driver", None
     severity: str = "critical"        # "critical" | "warning"
     exit_code: int = 0                # Original exit code
     win32_error: Optional[int] = None # Mapped Win32 error (may differ from exit_code)
@@ -504,13 +503,15 @@ def _probe_service_disabled_cause() -> Tuple[str, str, Optional[str]]:
             "enable_bfe",
         )
 
-    # Check 3: WinDivert/Monkey service explicitly disabled
-    disabled_driver = _find_disabled_windivert_driver_service()
-    if disabled_driver:
+    # Check 3: запись службы драйвера застряла после остановки
+    stuck_driver = _find_stuck_windivert_driver_service()
+    if stuck_driver:
         return (
-            f"Служба драйвера WinDivert ({disabled_driver}) отключена в системе",
-            "Выполните аварийную очистку драйвера и повторите запуск",
-            "cleanup_driver",
+            f"Запись службы драйвера WinDivert ({stuck_driver}) осталась после остановки: "
+            "её держит открытой другая программа",
+            "Закройте окно «Службы», Process Hacker, Process Explorer и другие программы "
+            "обхода блокировок и повторите запуск; если не поможет — перезагрузите компьютер",
+            None,
         )
 
     # Check 4: Kaspersky after a real WinDivert start failure.
@@ -631,29 +632,27 @@ def _check_secure_boot() -> bool:
         return False  # key doesn't exist = Secure Boot not available
 
 
-def _find_disabled_windivert_driver_service() -> Optional[str]:
-    """Return disabled WinDivert-compatible service name, if present."""
-    try:
-        import winreg
+def _find_stuck_windivert_driver_service() -> Optional[str]:
+    """Имя службы драйвера, запись которой застряла после остановки.
 
-        for service_name in _WINDIVERT_DRIVER_SERVICE_NAMES:
-            try:
-                with winreg.OpenKey(
-                    winreg.HKEY_LOCAL_MACHINE,
-                    fr"SYSTEM\CurrentControlSet\Services\{service_name}",
-                    0,
-                    winreg.KEY_READ,
-                ) as key:
-                    start_value, _ = winreg.QueryValueEx(key, "Start")
-                    if int(start_value) == 4:
-                        return service_name
-            except FileNotFoundError:
+    Застрявшая запись — «остановлена и отключена»: драйвер уже выгружен, а
+    запись, помеченная на удаление, осталась, потому что её хэндл держит
+    какая-то программа. Запустить такую службу нельзя (ошибка 1058).
+
+    Одного «отключена» для такого вывода мало: у РАБОТАЮЩЕГО драйвера запись
+    тоже «отключена и помечена на удаление» — так его помечает сама
+    библиотека WinDivert сразу после запуска.
+    """
+    try:
+        from winws_runtime.engine import winapi
+        from winws_runtime.engine.driver import DRIVER_SERVICE_NAMES
+
+        for service_name in DRIVER_SERVICE_NAMES:
+            info = winapi.query_service(service_name)
+            if info is None:
                 continue
+            if info.state == winapi.SERVICE_STOPPED and info.start_type == winapi.SERVICE_DISABLED:
+                return service_name
         return None
     except Exception:
         return None
-
-
-def _check_windivert_driver_disabled() -> bool:
-    """Return True if any WinDivert-compatible service start type is DISABLED."""
-    return _find_disabled_windivert_driver_service() is not None

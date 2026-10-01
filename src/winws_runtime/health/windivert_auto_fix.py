@@ -4,8 +4,6 @@
 import subprocess
 from typing import Tuple
 
-from winws_runtime.health.windivert_diagnostics import _WINDIVERT_DRIVER_SERVICE_NAMES
-
 
 def execute_windivert_auto_fix(action: str) -> Tuple[bool, str]:
     """Execute an auto-fix action. Returns (success, message)."""
@@ -15,8 +13,6 @@ def execute_windivert_auto_fix(action: str) -> Tuple[bool, str]:
         return _fix_enable_bfe()
     elif action == "cleanup_driver":
         return _fix_cleanup_driver()
-    elif action == "enable_driver":
-        return _fix_enable_driver()
     return False, f"Неизвестное действие: {action}"
 
 
@@ -54,35 +50,26 @@ def _fix_enable_bfe() -> Tuple[bool, str]:
         return False, f"Ошибка: {e}"
 
 
-def _fix_enable_driver() -> Tuple[bool, str]:
-    """Set WinDivert service start type to demand."""
-    try:
-        changed = False
-        last_error = ""
-        for service_name in _WINDIVERT_DRIVER_SERVICE_NAMES:
-            result = subprocess.run(
-                ["sc", "config", service_name, "start=", "demand"],
-                capture_output=True, text=True, timeout=5, creationflags=0x08000000,
-            )
-            if result.returncode == 0:
-                changed = True
-            elif result.stderr:
-                last_error = result.stderr[:200]
-        if changed:
-            return True, "Служба драйвера WinDivert переключена на ручной запуск. Попробуйте запустить снова"
-        return False, f"Не удалось изменить настройки: {last_error}"
-    except Exception as e:
-        return False, f"Ошибка: {e}"
-
-
 def _fix_cleanup_driver() -> Tuple[bool, str]:
-    """Run hard WinDivert/Monkey cleanup through the runtime WinAPI path."""
+    """Останавливает свои winws и выгружает драйвер, если им никто не пользуется."""
     try:
-        from winws_runtime.runtime.system_ops import aggressive_windivert_cleanup_runtime
+        from winws_runtime.runtime.system_ops import (
+            ensure_windivert_driver_startable_runtime,
+            release_windivert_driver_runtime,
+            stop_own_winws_processes_runtime,
+        )
 
-        ok = aggressive_windivert_cleanup_runtime()
-        if ok:
-            return True, "Драйвер WinDivert очищен через WinAPI. Попробуйте запустить снова"
-        return False, "Не удалось полностью очистить драйвер WinDivert. Закройте ZapretGUI и запустите от администратора"
+        if not stop_own_winws_processes_runtime():
+            return False, "Не удалось завершить процессы winws. Перезагрузите компьютер"
+
+        released = release_windivert_driver_runtime()
+        if released.stuck:
+            return False, released.message
+
+        preflight = ensure_windivert_driver_startable_runtime()
+        if not preflight.ok:
+            return False, preflight.message
+
+        return True, "Драйвер WinDivert освобождён. Попробуйте запустить снова"
     except Exception as e:
         return False, f"Ошибка очистки драйвера WinDivert: {e}"

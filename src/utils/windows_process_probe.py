@@ -94,26 +94,40 @@ def iter_process_names_winapi() -> list[str]:
     return [name for _, name in iter_process_records_winapi()]
 
 
-def iter_process_records_winapi() -> list[tuple[int, str]]:
-    """Перечисляет пары (pid, имя процесса) напрямую через Toolhelp Snapshot."""
+class ProcessSnapshotError(OSError):
+    """Windows не отдала список процессов: это отказ, а не «процессов нет»."""
+
+
+def iter_process_records_winapi_strict() -> list[tuple[int, str]]:
+    """Пары (pid, имя процесса); при отказе снимка бросает ProcessSnapshotError.
+
+    Нужна там, где по списку принимается решение «останавливать больше нечего»:
+    пустой список из-за сбоя снимка нельзя принимать за отсутствие процессов.
+    """
     if (
         _CreateToolhelp32Snapshot is None
         or _Process32FirstW is None
         or _Process32NextW is None
         or _CloseHandle is None
     ):
-        return []
+        raise ProcessSnapshotError("Toolhelp API недоступен")
 
+    ctypes.set_last_error(0)
     snapshot = _CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
     if not snapshot or snapshot == INVALID_HANDLE_VALUE:
-        return []
+        raise ProcessSnapshotError(
+            f"CreateToolhelp32Snapshot failed with Windows error {ctypes.get_last_error()}"
+        )
 
     records: list[tuple[int, str]] = []
     try:
         entry = PROCESSENTRY32W()
         entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        ctypes.set_last_error(0)
         if not _Process32FirstW(snapshot, ctypes.byref(entry)):
-            return records
+            raise ProcessSnapshotError(
+                f"Process32FirstW failed with Windows error {ctypes.get_last_error()}"
+            )
 
         while True:
             name = str(entry.szExeFile or "").strip()
@@ -125,6 +139,18 @@ def iter_process_records_winapi() -> list[tuple[int, str]]:
         _CloseHandle(snapshot)
 
     return records
+
+
+def iter_process_records_winapi() -> list[tuple[int, str]]:
+    """Перечисляет пары (pid, имя процесса) напрямую через Toolhelp Snapshot.
+
+    Нестрогий вариант для диагностики: при отказе снимка возвращает пустой
+    список. Для решений об остановке использовать строгий вариант выше.
+    """
+    try:
+        return iter_process_records_winapi_strict()
+    except ProcessSnapshotError:
+        return []
 
 
 def iter_process_module_paths_winapi(pid: int, *, max_snapshot_attempts: int = 3) -> list[str]:

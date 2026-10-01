@@ -53,7 +53,22 @@ from orchestra.locked_strategies_manager import (
     UDP_ASKEYS,
     PROTO_TO_ASKEY,
 )
+from winws_runtime.engine.process_control import stop_process, wait_process_exit
+from winws_runtime.engine.startup import (
+    DEFAULT_READY_TIMEOUT_SECONDS,
+    DEFAULT_SETTLE_SECONDS,
+    READY_MARKER,
+)
+
 LISTS_FOLDER = get_lists_dir()
+
+# Строка, которой winws2 сообщает, что драйвер открыт и перехват начался.
+_ENGINE_READY_MARKER = READY_MARKER.decode("ascii")
+# Верхние границы ожиданий. Это не паузы: ожидание заканчивается сразу, как
+# только наступает событие (готовность, выход процесса, конец потока чтения).
+_STARTUP_READY_TIMEOUT_SEC = DEFAULT_READY_TIMEOUT_SECONDS
+_PROCESS_STOP_TIMEOUT_SEC = 5.0
+_READER_JOIN_TIMEOUT_SEC = 2.0
 
 # Максимальное количество лог-файлов оркестратора
 MAX_ORCHESTRA_LOGS = 10
@@ -237,6 +252,11 @@ class OrchestraRunner:
         self.running_process: Optional[subprocess.Popen] = None
         self.output_thread: Optional[threading.Thread] = None
         self.stop_event = threading.Event()
+        # Подтверждение запуска: поток чтения вывода взводит событие, когда
+        # winws2 сообщил о готовности или когда его вывод закончился (процесс
+        # умер). start() ждёт именно это событие, а не фиксированную паузу.
+        self._startup_signal = threading.Event()
+        self._startup_ready = False
 
         # Менеджеры стратегий
         self.blocked_manager = BlockedStrategiesManager()
@@ -910,6 +930,9 @@ class OrchestraRunner:
         parser = LogParser()
         history_save_counter = 0
         log_line_counter = 0  # Счётчик строк для периодической проверки размера файла
+        # Событие этого запуска: следующий start() создаст новое, и поток
+        # прошлого запуска не сможет взвести чужое.
+        startup_signal = self._startup_signal
 
         # Открываем файл для записи сырого debug лога (для отправки в техподдержку)
         log_file = None
@@ -933,6 +956,10 @@ class OrchestraRunner:
                     timestamp = datetime.now().strftime("%H:%M:%S")
 
                     self._remember_output_line(line)
+
+                    if not startup_signal.is_set() and _ENGINE_READY_MARKER in line:
+                        self._startup_ready = True
+                        startup_signal.set()
 
                     # Записываем в debug лог
                     if log_file:
@@ -1289,6 +1316,9 @@ class OrchestraRunner:
                 log(f"Read output error: {e}", "DEBUG")
                 log(f"Traceback: {traceback.format_exc()}", "DEBUG")
             finally:
+                # Вывод закончился — процесс завершается. Будим start(), если
+                # он ещё ждёт подтверждения запуска.
+                startup_signal.set()
                 # Закрываем лог-файл
                 if log_file:
                     try:
@@ -1473,6 +1503,8 @@ class OrchestraRunner:
 
         # Сбрасываем stop event
         self.stop_event.clear()
+        self._startup_signal = threading.Event()
+        self._startup_ready = False
 
         # Генерируем learned-strategies.lua для предзагрузки в strategy-stats.lua
         learned_lua = self._generate_learned_lua()
@@ -1516,46 +1548,53 @@ class OrchestraRunner:
             self.output_thread = threading.Thread(target=self._read_output, daemon=True)
             self.output_thread.start()
 
-            # Подтверждаем, что процесс пережил стартовое окно.
-            startup_alive_sec = 1.2
-            startup_timeout_sec = 3.0
-            deadline = self.last_start_attempt_ts + startup_timeout_sec
+            # Подтверждение запуска — строка готовности из вывода winws2.
+            # Ожидание прерывается сразу и при смерти процесса: поток чтения
+            # взводит событие, когда вывод закончился.
+            signaled = self._startup_signal.wait(_STARTUP_READY_TIMEOUT_SEC)
+            if self._startup_ready:
+                # Строка печатается до загрузки Lua-скриптов: если они не
+                # загрузятся, процесс умрёт в этом окне.
+                exited = wait_process_exit(self.running_process, DEFAULT_SETTLE_SECONDS)
+            else:
+                exited = wait_process_exit(
+                    self.running_process,
+                    _PROCESS_STOP_TIMEOUT_SEC if signaled else 0.0,
+                )
 
-            while time.monotonic() < deadline:
-                if not self.running_process:
-                    self.last_start_error = "Оркестратор не создал процесс"
-                    log(self.last_start_error, "ERROR")
-                    return False
-
+            if exited:
                 exit_code = self.running_process.poll()
-                if exit_code is not None:
-                    uptime_sec = max(0.0, time.monotonic() - self.last_start_attempt_ts)
-                    reason = self._guess_start_failure_reason(exit_code)
-                    diagnostics = self._build_startup_diagnostics(exit_code, uptime_sec)
-                    self.last_start_error = (
-                        f"Оркестратор завершился сразу после запуска (код: {exit_code}, "
-                        f"аптайм: {uptime_sec:.1f}с). Причина: {reason}"
-                    )
-                    self.last_exit_info = {
-                        "exit_code": int(exit_code),
-                        "uptime_sec": round(uptime_sec, 2),
-                        "reason": reason,
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "config_path": self.last_launch_config_path,
-                        "command": list(self.last_launch_command),
-                        "recent_output": self._get_recent_output_tail(8),
-                    }
-                    log(self.last_start_error, "ERROR")
-                    if self.output_callback:
-                        self.output_callback(f"[❌ ERROR] {self.last_start_error}")
-                    self._emit_startup_diagnostics(diagnostics)
-                    self.running_process = None
-                    return False
+                if exit_code is None:
+                    exit_code = -1
+                uptime_sec = max(0.0, time.monotonic() - self.last_start_attempt_ts)
+                reason = self._guess_start_failure_reason(exit_code)
+                diagnostics = self._build_startup_diagnostics(exit_code, uptime_sec)
+                self.last_start_error = (
+                    f"Оркестратор завершился сразу после запуска (код: {exit_code}, "
+                    f"аптайм: {uptime_sec:.1f}с). Причина: {reason}"
+                )
+                self.last_exit_info = {
+                    "exit_code": int(exit_code),
+                    "uptime_sec": round(uptime_sec, 2),
+                    "reason": reason,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "config_path": self.last_launch_config_path,
+                    "command": list(self.last_launch_command),
+                    "recent_output": self._get_recent_output_tail(8),
+                }
+                log(self.last_start_error, "ERROR")
+                if self.output_callback:
+                    self.output_callback(f"[❌ ERROR] {self.last_start_error}")
+                self._emit_startup_diagnostics(diagnostics)
+                self.running_process = None
+                return False
 
-                if time.monotonic() - self.last_start_attempt_ts >= startup_alive_sec:
-                    break
-
-                time.sleep(0.1)
+            if not self._startup_ready:
+                log(
+                    f"winws2 жив, но не сообщил о готовности за {_STARTUP_READY_TIMEOUT_SEC:g} с; "
+                    "считаем запуск оркестратора состоявшимся",
+                    "WARNING",
+                )
 
             log(f"Оркестратор запущен (PID: {self.running_process.pid})", "INFO")
 
@@ -1587,12 +1626,21 @@ class OrchestraRunner:
         try:
             self.stop_event.set()
 
-            self.running_process.terminate()
-            try:
-                self.running_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.running_process.kill()
-                self.running_process.wait()
+            process = self.running_process
+            if not stop_process(process, timeout=_PROCESS_STOP_TIMEOUT_SEC):
+                log(
+                    f"winws2 оркестратора не завершился за {_PROCESS_STOP_TIMEOUT_SEC:g} с "
+                    f"(PID: {getattr(process, 'pid', '?')})",
+                    "ERROR",
+                )
+                return False
+
+            # Процесс вышел — его вывод закончился, поток чтения дочитывает
+            # остаток и завершается. Дожидаемся его, чтобы следующий запуск
+            # не начался при живом читателе прошлого.
+            reader = self.output_thread
+            if reader is not None and reader is not threading.current_thread():
+                reader.join(timeout=_READER_JOIN_TIMEOUT_SEC)
 
             # Сохраняем стратегии и историю
             self.locked_manager.save()
@@ -1640,10 +1688,8 @@ class OrchestraRunner:
                 log("Не удалось остановить оркестратор для перезапуска", "ERROR")
                 return False
 
-        # Небольшая пауза для освобождения ресурсов
-        import time
-        time.sleep(0.5)
-
+        # Паузы между остановкой и запуском нет: stop() вернулся только
+        # после подтверждённого выхода процесса.
         if not self.start():
             log("Не удалось запустить оркестратор после остановки", "ERROR")
             return False

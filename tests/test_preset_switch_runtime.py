@@ -387,14 +387,14 @@ class Winws2PresetSwitchTests(unittest.TestCase):
                 side_effect=lambda *_args, **_kwargs: calls.append("stop_old")
             )
             runner._stop_process_only_locked = Mock()
-            runner._perform_standard_windivert_cleanup = Mock()
+            runner._stop_own_engine_processes = Mock()
             runner._ensure_windivert_ready_before_spawn = Mock(return_value=True)
 
             self.assertTrue(runner.switch_preset_file_fast(str(preset_path), "Selected"))
 
             self.assertEqual(calls, ["spawn", "stop_old"])
             runner._stop_process_only_locked.assert_not_called()
-            runner._perform_standard_windivert_cleanup.assert_not_called()
+            runner._stop_own_engine_processes.assert_not_called()
             runner._ensure_windivert_ready_before_spawn.assert_not_called()
             runner._spawn_process_locked.assert_called_once()
             spawned_artifact = runner._spawn_process_locked.call_args.args[0]
@@ -423,10 +423,10 @@ class Winws2PresetSwitchTests(unittest.TestCase):
                 )
             )
             runner._spawn_process_locked = Mock(return_value=True)
-            runner._perform_standard_windivert_cleanup = Mock()
+            runner._stop_own_engine_processes = Mock()
             runner._ensure_windivert_ready_before_spawn = Mock(return_value=True)
 
-            with patch("winws_runtime.runners.zapret2_runner.get_all_winws_process_pids", return_value=[]):
+            with patch("winws_runtime.runners.zapret2_runner.has_own_winws_process", return_value=False):
                 self.assertTrue(runner.switch_preset_file_fast(str(preset_path), "Selected"))
 
     def test_winws2_fast_switch_rebuilds_artifact_if_preset_changes_before_spawn(self) -> None:
@@ -443,7 +443,7 @@ class Winws2PresetSwitchTests(unittest.TestCase):
             runner.running_process = Mock()
             runner._preset_file_path = ""
             runner._set_last_error = Mock()
-            runner._perform_standard_windivert_cleanup = Mock()
+            runner._stop_own_engine_processes = Mock()
             runner._ensure_windivert_ready_before_spawn = Mock(return_value=True)
 
             def compile_artifact(path: str):
@@ -470,7 +470,7 @@ class Winws2PresetSwitchTests(unittest.TestCase):
 
             runner._refresh_artifact_if_source_changed_locked = Mock(side_effect=refresh_artifact)
 
-            with patch("winws_runtime.runners.zapret2_runner.get_all_winws_process_pids", return_value=[]):
+            with patch("winws_runtime.runners.zapret2_runner.has_own_winws_process", return_value=False):
                 self.assertTrue(runner.switch_preset_file_fast(str(preset_path), "Selected"))
 
             self.assertEqual(runner._compile_preset_artifact.call_count, 2)
@@ -511,7 +511,7 @@ class Winws2PresetSwitchTests(unittest.TestCase):
             runner._spawn_process_locked = Mock(return_value=False)
             runner._stop_previous_process_after_handoff_locked = Mock()
             runner._stop_process_only_locked = Mock()
-            runner._perform_standard_windivert_cleanup = Mock()
+            runner._stop_own_engine_processes = Mock()
 
             self.assertFalse(runner.switch_preset_file_fast(str(preset_path), "Selected"))
 
@@ -536,9 +536,8 @@ class Winws2PresetSwitchTests(unittest.TestCase):
             runner._last_spawn_exit_code = None
             runner._last_spawn_stderr = ""
             runner._set_last_error = Mock()
-            runner._perform_standard_windivert_cleanup = Mock()
-            runner._aggressive_windivert_cleanup = Mock()
-            runner._wait_after_aggressive_windivert_cleanup = Mock()
+            runner._stop_own_engine_processes = Mock()
+            runner._recover_windivert = Mock()
             runner._ensure_windivert_ready_before_spawn = Mock(return_value=True)
             runner._compile_preset_artifact = Mock(
                 return_value=SimpleNamespace(
@@ -563,7 +562,7 @@ class Winws2PresetSwitchTests(unittest.TestCase):
 
             self.assertEqual(runner._spawn_process_locked.call_count, 2)
             runner._start_from_preset_file_locked.assert_not_called()
-            runner._aggressive_windivert_cleanup.assert_called_once()
+            runner._recover_windivert.assert_called_once()
 
     def test_fast_switch_retries_winws2_dll_init_failure_inside_switch(self) -> None:
         from winws_runtime.runners.zapret2_runner import Winws2StrategyRunner
@@ -580,9 +579,8 @@ class Winws2PresetSwitchTests(unittest.TestCase):
             runner._last_spawn_exit_code = None
             runner._last_spawn_stderr = ""
             runner._set_last_error = Mock()
-            runner._perform_standard_windivert_cleanup = Mock()
-            runner._aggressive_windivert_cleanup = Mock()
-            runner._wait_after_aggressive_windivert_cleanup = Mock()
+            runner._stop_own_engine_processes = Mock()
+            runner._recover_windivert = Mock()
             runner._ensure_windivert_ready_before_spawn = Mock(return_value=True)
             runner._compile_preset_artifact = Mock(
                 return_value=SimpleNamespace(
@@ -607,7 +605,7 @@ class Winws2PresetSwitchTests(unittest.TestCase):
 
             self.assertEqual(runner._spawn_process_locked.call_count, 2)
             runner._start_from_preset_file_locked.assert_not_called()
-            runner._aggressive_windivert_cleanup.assert_called_once()
+            runner._recover_windivert.assert_called_once()
 
     def test_winws2_handoff_retries_dll_init_failure_before_stopping_old_process(self) -> None:
         from winws_runtime.runners.zapret2_runner import Winws2StrategyRunner
@@ -664,7 +662,8 @@ class Winws2PresetSwitchTests(unittest.TestCase):
                 "Old",
                 "old.txt",
             )
-            sleep.assert_called_once()
+            # Повтор идёт сразу: пауза на частоту этого сбоя не влияет.
+            sleep.assert_not_called()
 
     def test_fast_switch_retries_winws1_conflict_inside_switch_without_full_start_fallback(self) -> None:
         from winws_runtime.runners.zapret1_runner import Winws1StrategyRunner
@@ -747,8 +746,7 @@ class Winws2PresetSwitchTests(unittest.TestCase):
             runner._stop_process_only_locked = Mock(side_effect=change_preset_before_spawn)
             runner._spawn_process_locked = Mock(return_value=True)
 
-            with patch("winws_runtime.runners.zapret1_runner.get_process_pids_by_name", return_value=[]):
-                self.assertTrue(runner.switch_preset_file_fast(str(preset_path), "Selected"))
+            self.assertTrue(runner.switch_preset_file_fast(str(preset_path), "Selected"))
 
             self.assertEqual(runner._compile_preset_artifact.call_count, 2)
             spawned_artifact = runner._spawn_process_locked.call_args.args[0]

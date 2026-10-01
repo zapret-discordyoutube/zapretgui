@@ -1,6 +1,10 @@
 """
 Утилита для остановки процессов через Windows API.
-Канонический путь для завершения процессов в runtime-слое.
+
+Процессы движка winws здесь не останавливаются: для них есть
+``winws_runtime.engine.process_control``, который завершает только процессы из
+папки программы и подтверждает выход по хэндлу. Завершать winws по одному
+лишь имени нельзя — так убивалась чужая копия запрета.
 """
 
 import ctypes
@@ -8,7 +12,6 @@ from ctypes import wintypes
 from log.log import log
 
 from typing import List
-from settings.mode import ALL_WINWS_EXE_NAMES, EXE_NAME_WINWS1, EXE_NAME_WINWS2
 from utils.windows_process_probe import iter_process_records_winapi
 
 # Windows API константы
@@ -134,85 +137,6 @@ def kill_process_by_name(process_name: str, kill_all: bool = True) -> int:
     return killed_count
 
 
-def kill_winws_all(max_retries: int = 3, retry_delay: float = 0.5) -> bool:
-    """
-    Завершает все процессы winws.exe и winws2.exe.
-    Проверяет что процессы действительно завершены и делает повторные попытки.
-
-    Args:
-        max_retries: Максимальное количество попыток
-        retry_delay: Задержка между попытками в секундах
-
-    Returns:
-        True если все процессы успешно завершены
-    """
-    import time
-
-    for attempt in range(1, max_retries + 1):
-        total_killed = 0
-
-        for exe_name in ALL_WINWS_EXE_NAMES:
-            total_killed += kill_process_by_name(exe_name, kill_all=True)
-
-        if total_killed > 0:
-            log(f"✅ Завершено {total_killed} процессов winws (попытка {attempt})", "INFO")
-
-        # Проверяем, что процессы действительно завершены
-        time.sleep(0.2)  # Небольшая пауза для обновления списка процессов
-
-        remaining_winws = get_process_pids(EXE_NAME_WINWS1)
-        remaining_winws2 = get_process_pids(EXE_NAME_WINWS2)
-
-        if not remaining_winws and not remaining_winws2:
-            if total_killed > 0:
-                log(f"✅ Всего завершено {total_killed} процессов winws (подтверждено)", "INFO")
-            else:
-                log("Процессы winws не найдены", "DEBUG")
-            return True
-
-        # Есть ещё живые процессы
-        remaining_count = len(remaining_winws) + len(remaining_winws2)
-        log(f"⚠ Осталось {remaining_count} процессов winws после попытки {attempt}", "WARNING")
-
-        if attempt < max_retries:
-            log(f"Повторная попытка через {retry_delay}с...", "DEBUG")
-            time.sleep(retry_delay)
-
-    # После всех попыток ещё раз проверяем
-    remaining_winws = get_process_pids(EXE_NAME_WINWS1)
-    remaining_winws2 = get_process_pids(EXE_NAME_WINWS2)
-
-    if remaining_winws or remaining_winws2:
-        all_remaining = remaining_winws + remaining_winws2
-        log(f"❌ Не удалось завершить процессы winws: PIDs={all_remaining}", "ERROR")
-        return False
-
-    return True
-
-
-def is_process_running(process_name: str) -> bool:
-    """
-    Быстрая проверка запущен ли процесс.
-    
-    Args:
-        process_name: Имя процесса
-        
-    Returns:
-        True если процесс найден
-    """
-    process_name_lower = str(process_name or "").strip().lower()
-    
-    try:
-        for _pid, proc_name in iter_process_records_winapi():
-            normalized = str(proc_name or "").strip().lower()
-            if normalized == process_name_lower:
-                return True
-    except Exception as e:
-        log(f"Ошибка проверки процесса {process_name}: {e}", "DEBUG")
-    
-    return False
-
-
 def get_process_pids(process_name: str) -> List[int]:
     """
     Возвращает список PID всех процессов с указанным именем.
@@ -235,34 +159,3 @@ def get_process_pids(process_name: str) -> List[int]:
         log(f"Ошибка получения PID {process_name}: {e}", "DEBUG")
     
     return pids
-
-
-def kill_winws_force() -> bool:
-    """
-    Агрессивное завершение всех процессов winws через один WinAPI-путь.
-    Используется когда обычные методы не работают.
-
-    Returns:
-        True если все процессы завершены
-    """
-    import time
-
-    # Быстрая проверка - если процессов нет, сразу выходим
-    if not get_process_pids(EXE_NAME_WINWS1) and not get_process_pids(EXE_NAME_WINWS2):
-        log("Процессы winws не найдены", "DEBUG")
-        return True
-
-    kill_winws_all(max_retries=3, retry_delay=0.3)
-
-    # 2. Проверяем остались ли процессы
-    remaining = get_process_pids(EXE_NAME_WINWS1) + get_process_pids(EXE_NAME_WINWS2)
-
-    if not remaining:
-        return True
-
-    if remaining:
-        log(f"❌ Не удалось завершить процессы winws: PIDs={remaining}", "ERROR")
-        return False
-
-    log("✅ Процессы winws завершены через WinAPI", "INFO")
-    return True

@@ -87,120 +87,101 @@ class KasperskyProbeTests(unittest.TestCase):
         probe.assert_called_once()
 
 
-class AggressiveCleanupKasperskySafeTests(unittest.TestCase):
-    def _run_cleanup(self, *, kaspersky: bool, settled: bool = True):
+class DriverReleaseKasperskySafeTests(unittest.TestCase):
+    """Выгрузка драйвера WinDivert рядом с фильтрами Kaspersky запрещена.
+
+    Принудительная выгрузка драйвера при активных WFP-фильтрах Kaspersky
+    провоцировала синий экран в tcpip.sys, поэтому при этом антивирусе
+    драйвер остаётся загруженным на любом пути, где программа его выгружает.
+    """
+
+    def _release(self, *, kaspersky=False, kaspersky_error=None, engines=()):
+        from winws_runtime.engine import winapi
         from winws_runtime.runtime import system_ops
 
+        running_driver = winapi.ServiceInfo(
+            "Monkey",
+            winapi.SERVICE_RUNNING,
+            winapi.SERVICE_DISABLED,
+            r"\??\C:\Zapret\Dev\exe\Monkey64.sys",
+        )
+        state = {"info": running_driver}
+
+        def query_service(name):
+            return state["info"] if name == "Monkey" else None
+
+        def send_service_stop(name):
+            state["info"] = None
+            return winapi.SERVICE_STOPPED
+
+        probe = patch(
+            "utils.antivirus_probe.is_kaspersky_present",
+            side_effect=kaspersky_error,
+            return_value=kaspersky,
+        )
         with (
-            patch.object(system_ops, "_is_kaspersky_present_safe", return_value=kaspersky),
-            patch.object(system_ops, "force_kill_all_winws_processes", return_value=True) as force_kill,
-            patch.object(
-                system_ops, "wait_for_windivert_cleanup_settle_runtime", return_value=settled
-            ) as settle,
-            patch.object(system_ops, "unload_known_windivert_drivers_runtime", return_value=True) as unload,
-            patch.object(system_ops, "stop_and_delete_runtime_services", return_value=True) as stop_delete,
-            patch.object(
-                system_ops, "clear_stopped_windivert_delete_flags_runtime", return_value=True
-            ) as clear_flags,
-            patch.object(
-                system_ops, "restore_known_windivert_services_demand_start_runtime", return_value=True
-            ) as restore_start,
-            patch.object(system_ops.time, "sleep"),
+            probe,
+            patch.object(winapi, "query_service", side_effect=query_service),
+            patch.object(winapi, "send_service_stop", side_effect=send_service_stop) as stop,
+            patch.object(system_ops, "list_engine_processes", return_value=list(engines)),
+            patch.object(system_ops, "own_windivert_roots", return_value=[r"C:\Zapret\Dev"]),
         ):
-            result = system_ops.aggressive_windivert_cleanup_runtime()
+            result = system_ops.release_windivert_driver_runtime()
+        return result, stop
 
-        return result, {
-            "force_kill": force_kill,
-            "settle": settle,
-            "unload": unload,
-            "stop_delete": stop_delete,
-            "clear_flags": clear_flags,
-            "restore_start": restore_start,
-        }
+    def test_kaspersky_blocks_driver_unload(self) -> None:
+        from winws_runtime.engine import driver
 
-    def test_kaspersky_skips_driver_unload_and_service_deletion(self) -> None:
-        result, mocks = self._run_cleanup(kaspersky=True)
+        result, stop = self._release(kaspersky=True)
 
-        self.assertTrue(result)
-        mocks["unload"].assert_not_called()
-        mocks["stop_delete"].assert_not_called()
-        mocks["clear_flags"].assert_called_once()
-        mocks["restore_start"].assert_called_once()
-        self.assertGreaterEqual(mocks["force_kill"].call_count, 2)
+        self.assertEqual(result.outcome, driver.RELEASE_SKIPPED_ANTIVIRUS)
+        stop.assert_not_called()
 
-    def test_without_kaspersky_unload_and_deletion_happen(self) -> None:
-        result, mocks = self._run_cleanup(kaspersky=False)
+    def test_without_kaspersky_unused_driver_is_unloaded(self) -> None:
+        from winws_runtime.engine import driver
 
-        self.assertTrue(result)
-        mocks["unload"].assert_called_once()
-        mocks["stop_delete"].assert_called()
+        result, stop = self._release(kaspersky=False)
 
-    def test_settle_wait_runs_before_driver_unload(self) -> None:
+        self.assertEqual(result.outcome, driver.RELEASE_RELEASED)
+        stop.assert_called_once_with("Monkey")
+
+    def test_kaspersky_detection_failure_blocks_driver_unload(self) -> None:
+        # Сбой детекта трактуется в безопасную сторону: цена ошибки — синий
+        # экран, цена осторожности — драйвер, оставшийся загруженным.
+        from winws_runtime.engine import driver
+
+        result, stop = self._release(kaspersky_error=RuntimeError("probe broken"))
+
+        self.assertEqual(result.outcome, driver.RELEASE_SKIPPED_ANTIVIRUS)
+        stop.assert_not_called()
+
+    def test_driver_in_use_is_checked_before_antivirus(self) -> None:
+        from winws_runtime.engine import driver
+
+        result, stop = self._release(kaspersky=True, engines=[(4321, "winws2.exe")])
+
+        self.assertEqual(result.outcome, driver.RELEASE_SKIPPED_IN_USE)
+        stop.assert_not_called()
+
+    def test_recovery_after_failed_start_respects_kaspersky(self) -> None:
+        # Восстановление после сбоя запуска идёт через ту же выгрузку.
+        from winws_runtime.engine import driver
         from winws_runtime.runtime import system_ops
 
-        call_order: list[str] = []
-
+        released = driver.DriverReleaseResult(driver.RELEASE_SKIPPED_ANTIVIRUS, service="Monkey")
         with (
-            patch.object(system_ops, "_is_kaspersky_present_safe", return_value=False),
-            patch.object(system_ops, "force_kill_all_winws_processes", return_value=True),
+            patch.object(system_ops, "stop_own_winws_processes_runtime", return_value=True),
+            patch.object(system_ops, "release_windivert_driver_runtime", return_value=released) as release,
             patch.object(
                 system_ops,
-                "wait_for_windivert_cleanup_settle_runtime",
-                side_effect=lambda **kw: call_order.append("settle") or True,
+                "ensure_windivert_driver_startable_runtime",
+                return_value=driver.DriverPreflight(ok=True),
             ),
-            patch.object(
-                system_ops,
-                "unload_known_windivert_drivers_runtime",
-                side_effect=lambda: call_order.append("unload") or True,
-            ),
-            patch.object(system_ops, "stop_and_delete_runtime_services", return_value=True),
-            patch.object(system_ops, "clear_stopped_windivert_delete_flags_runtime", return_value=True),
-            patch.object(
-                system_ops, "restore_known_windivert_services_demand_start_runtime", return_value=True
-            ),
-            patch.object(system_ops.time, "sleep"),
         ):
-            system_ops.aggressive_windivert_cleanup_runtime()
+            recovered = system_ops.recover_windivert_runtime()
 
-        self.assertIn("settle", call_order)
-        self.assertIn("unload", call_order)
-        self.assertLess(call_order.index("settle"), call_order.index("unload"))
-
-    def test_pre_unload_settle_timeout_does_not_fail_cleanup(self) -> None:
-        from winws_runtime.runtime import system_ops
-
-        settle_results = iter([False, True])
-
-        with (
-            patch.object(system_ops, "_is_kaspersky_present_safe", return_value=False),
-            patch.object(system_ops, "force_kill_all_winws_processes", return_value=True),
-            patch.object(
-                system_ops,
-                "wait_for_windivert_cleanup_settle_runtime",
-                side_effect=lambda **kw: next(settle_results),
-            ),
-            patch.object(system_ops, "unload_known_windivert_drivers_runtime", return_value=True) as unload,
-            patch.object(system_ops, "stop_and_delete_runtime_services", return_value=True),
-            patch.object(system_ops, "clear_stopped_windivert_delete_flags_runtime", return_value=True),
-            patch.object(
-                system_ops, "restore_known_windivert_services_demand_start_runtime", return_value=True
-            ),
-            patch.object(system_ops.time, "sleep"),
-        ):
-            result = system_ops.aggressive_windivert_cleanup_runtime()
-
-        self.assertTrue(result)
-        unload.assert_called_once()
-
-    def test_kaspersky_detection_failure_falls_back_to_full_cleanup(self) -> None:
-        from winws_runtime.runtime import system_ops
-
-        with patch(
-            "utils.antivirus_probe.is_kaspersky_present", side_effect=RuntimeError("probe broken")
-        ):
-            self.assertFalse(system_ops._is_kaspersky_present_safe())
-
-
+        self.assertTrue(recovered)
+        release.assert_called_once_with()
 
 if __name__ == "__main__":
     unittest.main()

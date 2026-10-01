@@ -14,6 +14,7 @@ from settings.mode import (
     exe_path_for_launch_method,
 )
 from utils.windows_process_probe import iter_process_records_winapi
+from winws_runtime.engine.process_control import normalize_image_path as _normalize_path
 
 _WINWS_NAMES = ALL_WINWS_EXE_NAMES
 _WINWS_NAME_SET = frozenset(_WINWS_NAMES)
@@ -55,25 +56,6 @@ else:  # pragma: no cover - import safety for non-Windows environments
     _OpenProcess = None
     _QueryFullProcessImageNameW = None
     _CloseHandle = None
-
-
-def _normalize_path(path: str) -> str:
-    text = str(path or "").strip()
-    if not text:
-        return ""
-    if text.startswith("\\\\?\\UNC\\"):
-        text = "\\\\" + text[8:]
-    elif text.startswith("\\\\?\\"):
-        text = text[4:]
-    elif text.startswith("\\??\\UNC\\"):
-        text = "\\\\" + text[8:]
-    elif text.startswith("\\??\\"):
-        text = text[4:]
-    try:
-        text = os.path.abspath(text)
-    except Exception:
-        pass
-    return os.path.normcase(text)
 
 
 def get_expected_winws_paths() -> dict[str, str]:

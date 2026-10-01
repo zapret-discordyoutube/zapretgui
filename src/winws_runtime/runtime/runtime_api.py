@@ -1,5 +1,4 @@
 import os
-import time
 from typing import Optional, Callable
 
 from log.log import log
@@ -10,10 +9,8 @@ from .process_probe import (
     is_expected_winws_running,
 )
 from .system_ops import (
-    cleanup_windivert_services_runtime,
-    has_any_winws_process,
-    restore_known_windivert_services_demand_start_runtime,
-    stop_all_winws_processes,
+    release_windivert_driver_runtime,
+    stop_own_winws_processes_runtime,
 )
 
 
@@ -68,31 +65,17 @@ class PresetLaunchRuntimeApi:
             return False
 
     def has_residual_processes(self, silent: bool = False) -> bool:
-        """Проверка остаточных winws/winws2 процессов.
+        """Остались ли процессы winws/winws2 из папки программы.
 
-        Сначала используем канонический probe именно для процессов текущего проекта.
-        Если он ничего не видит, дополнительно делаем fallback-проверку по имени
-        процесса. Это нужно для stop/restart pipeline: очистка должна быть честной
-        даже в моменты, когда канонический probe ещё не догнал переходное состояние.
+        Считаются только свои процессы — те, чей полный путь совпадает с
+        exe этого проекта. Чужой winws (другая копия запрета) программа не
+        останавливает, поэтому и «остатком» он не является: иначе остановка
+        вечно докладывала бы «не удалось остановить».
         """
-        canonical_running = bool(self.is_any_running(silent=True))
-        if canonical_running:
-            if not silent:
-                log(f"Residual {WINWS_ENGINE_FAMILY_LABEL} detected via canonical probe", "DEBUG")
-            return True
-
-        try:
-            residual_running = bool(has_any_winws_process())
-            if not silent:
-                log(
-                    f"{WINWS_ENGINE_FAMILY_LABEL} residual state → {residual_running} (name fallback)",
-                    "DEBUG",
-                )
-            return residual_running
-        except Exception as e:
-            if not silent:
-                log(f"Residual process fallback error: {e}", "DEBUG")
-            return False
+        running = bool(self.is_any_running(silent=True))
+        if not silent:
+            log(f"Residual {WINWS_ENGINE_FAMILY_LABEL} → {running} (WinAPI canonical)", "DEBUG")
+        return running
 
     def is_expected_running(self, silent: bool = False) -> bool:
         """
@@ -113,33 +96,33 @@ class PresetLaunchRuntimeApi:
             return False
 
     def cleanup_windivert_service(self) -> bool:
-        """Мягкая stop-cleanup стадия для обычного stop/restart.
+        """Выгружает драйвер WinDivert после полной остановки обхода.
 
-        Здесь нельзя деинсталлировать WinDivert из SCM на каждом обычном stop.
-        Иначе следующий старт зависит от повторной авто-установки драйвера и
-        начинает сам себе создавать плавающие 1060/1058 гонки.
+        Вызывается, когда обход остановлен окончательно (кнопка «Стоп», выход
+        из программы, обновление), но не при перезапуске и не при смене
+        пресета. Драйвер выгружается, только если им никто не пользуется.
 
-        Также нельзя останавливать уже запущенную driver-service запись: на
-        некоторых системах `Monkey` остаётся Running/Disabled, и после stop
-        следующий WinDivertOpen получает 1058.
+        Возвращает False, только если служба драйвера застряла.
         """
         try:
-            return bool(restore_known_windivert_services_demand_start_runtime())
+            result = release_windivert_driver_runtime()
         except Exception as e:
-            log(f"Ошибка очистки службы: {e}", "⚠ WARNING")
+            log(f"Ошибка выгрузки драйвера WinDivert: {e}", "⚠ WARNING")
             return False
+        if result.stuck and result.message:
+            log(result.message, "WARNING")
+        return not result.stuck
 
     def stop_all_processes(self) -> bool:
-        """Останавливает все процессы DPI через Win API"""
-        log("Останавливаем все процессы winws через Win API...", "INFO")
+        """Останавливает свои процессы DPI. True — выход всех подтверждён."""
+        log("Останавливаем процессы winws из папки программы...", "INFO")
 
+        ok = False
         try:
-            stop_all_winws_processes()
+            ok = bool(stop_own_winws_processes_runtime())
         except Exception as e:
             log(f"Ошибка остановки через Win API: {e}", "⚠ WARNING")
 
-        time.sleep(0.3)
-        ok = not self.has_residual_processes(silent=True)
         log("Все процессы остановлены" if ok else f"{WINWS_ENGINE_FAMILY_LABEL} ещё работает",
             "✅ SUCCESS" if ok else "⚠ WARNING")
         return ok

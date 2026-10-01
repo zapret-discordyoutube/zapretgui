@@ -3,7 +3,7 @@
 
 Реализация распилена по подмодулям:
 - ``windivert_diagnostics`` — единая таблица Win32-кодов, describe-функции,
-  pre-spawn readiness gate;
+  проверку службы драйвера перед запуском;
 - ``winws_exit_diagnosis`` — диагностика кодов завершения winws/winws2;
 - ``windivert_auto_fix`` — безопасные auto-fix действия;
 - ``startup_error_diagnosis`` — диагностика исключений при запуске;
@@ -31,7 +31,6 @@ from winws_runtime.health.windivert_diagnostics import (  # noqa: F401
     _ERROR_SERVICE_DISABLED,
     _ERROR_SERVICE_DOES_NOT_EXIST,
     _ERROR_SERVICE_MARKED_FOR_DELETE,
-    _WINDIVERT_DRIVER_SERVICE_NAMES,
     describe_windivert_error,
 )
 from winws_runtime.health.antivirus_detection import (  # noqa: F401
@@ -48,10 +47,9 @@ from winws_runtime.health.winws_exit_diagnosis import (  # noqa: F401
     _check_bfe_service,
     _check_network_adapters,
     _check_secure_boot,
-    _check_windivert_driver_disabled,
     _check_windivert_files,
     _extract_relevant_error_line,
-    _find_disabled_windivert_driver_service,
+    _find_stuck_windivert_driver_service,
     _probe_service_disabled_cause,
     diagnose_winws_exit,
     format_winws_exit_diagnosis,
@@ -60,7 +58,6 @@ from winws_runtime.health.windivert_auto_fix import (  # noqa: F401
     _fix_cleanup_driver,
     _fix_enable_adapters,
     _fix_enable_bfe,
-    _fix_enable_driver,
     execute_windivert_auto_fix,
 )
 from winws_runtime.health.startup_error_diagnosis import (  # noqa: F401

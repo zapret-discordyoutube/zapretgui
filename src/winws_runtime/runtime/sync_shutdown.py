@@ -113,7 +113,7 @@ def shutdown_runtime_sync(
         orchestra_feature = runtime_feature.dependencies.orchestra_feature
         if orchestra_feature is not None:
             try:
-                orchestra_feature.stop_runner()
+                stop_ok = bool(orchestra_feature.stop_runner()) and stop_ok
             except Exception as e:
                 stop_ok = False
                 log(f"Ошибка остановки оркестратора при синхронном завершении: {e}", "DEBUG")

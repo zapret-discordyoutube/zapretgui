@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-import time
 from typing import Callable
 
 from log.log import log
@@ -13,7 +12,6 @@ from winws_runtime.health.process_health_check import (
     publish_startup_diagnosis,
 )
 from winws_runtime.runtime.sync_shutdown import shutdown_runtime_sync
-from winws_runtime.runtime.system_ops import force_kill_all_winws_processes
 from utils.atomic_text import read_preset_file_text
 
 
@@ -227,6 +225,9 @@ class PresetLaunchService:
             return
 
         self._progress("Останавливаем предыдущий процесс...")
+        # Остановка подтверждается сигналом Windows о выходе процесса, поэтому
+        # пауз после неё нет: если процесс не вышел, это ошибка, а не повод
+        # подождать ещё.
         shutdown_result = shutdown_runtime_sync(
             runtime_feature=self._runtime_feature,
             reason=f"preset_launch_service_prelaunch:{self.launch_method}",
@@ -235,25 +236,8 @@ class PresetLaunchService:
             update_runtime_state=False,
             keep_runner=True,
         )
-        if not shutdown_result.still_running:
-            time.sleep(0.5)
-            return
-
-        max_wait = 10
-        for attempt in range(max_wait):
-            time.sleep(0.5)
-            if not self.launch_runtime_api.has_residual_processes(silent=True):
-                log(f"✅ Предыдущий процесс остановлен (попытка {attempt + 1})", "DEBUG")
-                break
-        else:
-            log("⚠️ Процесс не остановился за 5 секунд, принудительное завершение...", "WARNING")
-            try:
-                force_kill_all_winws_processes()
-                time.sleep(1)
-            except Exception as e:
-                log(f"Ошибка kill_winws_force: {e}", "DEBUG")
-
-        time.sleep(0.5)
+        if shutdown_result.still_running:
+            log("⚠️ Предыдущий процесс winws не остановился", "WARNING")
 
     def _resolve_presets_payload(self) -> tuple[str, str] | None:
         mode_param = self.selected_mode
@@ -354,7 +338,6 @@ class PresetLaunchService:
                             f"Оркестратор не стартовал (попытка {attempt}/{attempts}). Повторяем...",
                             "WARNING",
                         )
-                    time.sleep(0.7)
                     continue
 
                 if start_reason:

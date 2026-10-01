@@ -19,7 +19,7 @@ from typing import Optional, TypeVar
 from log.log import log
 from settings.mode import ENGINE_WINWS2, ZAPRET2_MODE
 
-from .runner_base import StrategyRunnerBase, _ERROR_SERVICE_MARKED_FOR_DELETE
+from .runner_base import StrategyRunnerBase, _PROCESS_STOP_TIMEOUT_SECONDS
 from .spawn_failure import (
     STATUS_DLL_INIT_FAILED,
     classify_spawn_failure,
@@ -29,13 +29,10 @@ from .preset_runner_support import (
     PreparedPresetArtifact,
     PresetRunnerState,
     PresetRunnerStateMachine,
-    is_process_alive_with_expected_name,
     launch_args_from_preset_text,
     preset_cache_key,
     prune_at_config_cache,
     remember_cache_entry,
-    wait_for_process_exit,
-    wait_for_process_stable_start,
 )
 from .constants import CREATE_NO_WINDOW
 from winws_runtime.health.process_health_check import (
@@ -48,19 +45,23 @@ from winws_runtime.health.silent_exit_probe import (
     probe_silent_exit,
 )
 from winws_runtime.health.winws_output import relevant_error_line
-from winws_runtime.runtime.system_ops import (
-    find_stale_windivert_delete_pending_services_runtime,
-    get_all_winws_process_pids,
-    get_process_pids_by_name,
+from winws_runtime.engine.process_control import stop_process
+from winws_runtime.engine.startup import (
+    DEFAULT_SETTLE_SECONDS,
+    REASON_ALIVE_WITHOUT_MARKER,
+    wait_engine_ready,
 )
+from winws_runtime.runtime.system_ops import has_own_winws_process
 from utils.atomic_text import read_preset_file_text
 
 
 _WINDOWS_ABS_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
 _STATUS_DLL_INIT_FAILED = STATUS_DLL_INIT_FAILED
-_TRANSIENT_DRY_RUN_RETRY_DELAY_SEC = 0.75
-_TRANSIENT_DRY_RUN_RETRY_DELAYS_SEC = (_TRANSIENT_DRY_RUN_RETRY_DELAY_SEC, 2.0)
-_PRESET_SWITCH_AFTER_DRY_RUN_SETTLE_SEC = 0.15
+# Сколько раз повторять запуск winws2 при сбое инициализации процесса
+# (0xC0000142). Замер на живой Windows: сбой случается примерно раз на 200
+# запусков, от паузы перед запуском не зависит (с паузой 0,15 с — та же
+# частота), а немедленный повтор проходит. Поэтому повтор без пауз.
+_TRANSIENT_DRY_RUN_RETRIES = 2
 # Сколько символов стартового вывода winws2 попадает в общий лог при отказе.
 _STARTUP_OUTPUT_LOG_LIMIT = 2000
 _DIRECT_NETWORK_RESTORE_STABLE_WINDOW_SEC = 0.3
@@ -435,21 +436,6 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         return os.path.join(self._winws2_startup_output_dir(), f"winws2_startup_{digest}.log")
 
     @staticmethod
-    def _read_startup_output_file(path: str) -> str:
-        try:
-            with open(path, "rb") as f:
-                data = f.read(64 * 1024)
-            return data.decode("utf-8", errors="replace").strip()
-        except Exception:
-            return ""
-
-    def read_post_mortem_output(self) -> str:
-        path = str(self._last_startup_output_path or "")
-        if not path:
-            return ""
-        return self._read_startup_output_file(path)
-
-    @staticmethod
     def _summarize_startup_output(output: str) -> str:
         """Строка вывода winws2, годная для показа пользователю.
 
@@ -607,52 +593,43 @@ class Winws2StrategyRunner(StrategyRunnerBase):
     def _stop_process_only_locked(self) -> bool:
         """
         Stops only the running winws2 process.
+
+        Возвращает True, если процесс был и его выход подтверждён.
         """
         try:
-            cleanup_needed = False
-            had_running_process = False
-            if self.running_process and self.is_running():
-                had_running_process = True
-                pid = self.running_process.pid
-                strategy_name = self.current_launch_label or "unknown"
-                self._set_runner_state_locked(
-                    PresetRunnerState.STOPPING,
-                    preset_path=str(self._preset_file_path or ""),
-                    strategy_name=str(strategy_name),
-                    pid=pid,
-                    reason="stop_process_only",
+            process = self.running_process
+            if not (process and self.is_running()):
+                return False
+
+            pid = process.pid
+            strategy_name = self.current_launch_label or "unknown"
+            self._set_runner_state_locked(
+                PresetRunnerState.STOPPING,
+                preset_path=str(self._preset_file_path or ""),
+                strategy_name=str(strategy_name),
+                pid=pid,
+                reason="stop_process_only",
+            )
+
+            log(f"Preset switch: stopping process '{strategy_name}' (PID: {pid})", "INFO")
+
+            stopped = stop_process(process, timeout=_PROCESS_STOP_TIMEOUT_SECONDS)
+            if stopped:
+                log(f"Process stopped for preset switch, exit confirmed (PID: {pid})", "SUCCESS")
+            else:
+                log(
+                    f"Процесс winws2 не завершился за {_PROCESS_STOP_TIMEOUT_SECONDS:g} с (PID: {pid})",
+                    "ERROR",
                 )
 
-                log(f"Preset switch: stopping process '{strategy_name}' (PID: {pid})", "INFO")
-
-                # Soft stop
-                self.running_process.terminate()
-
-                if wait_for_process_exit(self.running_process, timeout=3.0):
-                    log(f"Process stopped for preset switch (PID: {pid})", "SUCCESS")
-                else:
-                    log("Soft stop timeout, force killing for preset switch", "WARNING")
-                    self.running_process.kill()
-                    cleanup_needed = not wait_for_process_exit(self.running_process, timeout=1.0)
-
-                self.running_process = None
-                self._set_runner_state_locked(
-                    PresetRunnerState.IDLE,
-                    preset_path=str(self._preset_file_path or ""),
-                    strategy_name=str(strategy_name),
-                    reason="stop_completed",
-                )
-
-                if not cleanup_needed:
-                    try:
-                        cleanup_needed = bool(get_process_pids_by_name(os.path.basename(self.winws_exe)))
-                    except Exception:
-                        cleanup_needed = False
-
-            if cleanup_needed:
-                log("Preset switch fallback cleanup: detected lingering winws process", "DEBUG")
-                self._kill_all_winws_processes()
-            return had_running_process or cleanup_needed
+            self.running_process = None
+            self._set_runner_state_locked(
+                PresetRunnerState.IDLE,
+                preset_path=str(self._preset_file_path or ""),
+                strategy_name=str(strategy_name),
+                reason="stop_completed",
+            )
+            return stopped
         except Exception as e:
             log(f"Error stopping process for preset switch: {e}", "ERROR")
             return False
@@ -746,13 +723,6 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                 reason="stale_state_recovered_before_spawn",
             )
 
-    def _spawn_readiness_check_locked(self, process: subprocess.Popen) -> bool:
-        try:
-            pid = int(process.pid)
-        except Exception:
-            return False
-        return is_process_alive_with_expected_name(pid, self.winws_exe)
-
     def _refresh_artifact_if_source_changed_locked(
         self,
         artifact: PreparedPresetArtifact,
@@ -833,12 +803,6 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             f"(код {cls._format_exit_code(exit_code)})"
         )
 
-    def _wait_after_successful_dry_run_before_spawn(self, *, preset_switch: bool) -> None:
-        # The dry-run winws2 process has just exited; spawning the real one
-        # immediately after sometimes hits STATUS_DLL_INIT_FAILED (0xC0000142),
-        # so every launch path gets a short settle pause, not only preset switch.
-        time.sleep(_PRESET_SWITCH_AFTER_DRY_RUN_SETTLE_SEC)
-
     def _run_preset_dry_run_locked(
         self,
         artifact: PreparedPresetArtifact,
@@ -852,8 +816,8 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             return True
 
         cmd = [self.winws_exe, *dry_run_artifact.launch_args]
-        retry_delays = _TRANSIENT_DRY_RUN_RETRY_DELAYS_SEC
-        for attempt in range(len(retry_delays) + 1):
+        attempts = _TRANSIENT_DRY_RUN_RETRIES + 1
+        for attempt in range(attempts):
             try:
                 result = subprocess.run(
                     cmd,
@@ -897,18 +861,15 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             if self._last_spawn_exit_code == 0:
                 return True
             if (
-                attempt < len(retry_delays)
+                attempt < attempts - 1
                 and self._should_retry_dry_run_exit_code(self._last_spawn_exit_code)
             ):
-                retry_delay = retry_delays[attempt]
                 log(
                     "Preset dry-run hit transient Windows process init error "
                     f"(code: {self._last_spawn_exit_code}), "
-                    f"retrying attempt {attempt + 2}/{len(retry_delays) + 1} "
-                    f"after {retry_delay:g}s",
+                    f"retrying attempt {attempt + 2}/{attempts}",
                     "WARNING",
                 )
-                time.sleep(retry_delay)
                 continue
             break
 
@@ -972,18 +933,13 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         label = str(strategy_name or "previous")
         log(f"Preset switch handoff: stopping previous process '{label}' (PID: {pid})", "INFO")
         try:
-            process.terminate()
-            if wait_for_process_exit(process, timeout=3.0):
-                log(f"Previous preset process stopped after handoff (PID: {pid})", "SUCCESS")
+            if stop_process(process, timeout=_PROCESS_STOP_TIMEOUT_SECONDS):
+                log(f"Previous preset process stopped after handoff, exit confirmed (PID: {pid})", "SUCCESS")
                 return
-
-            log("Previous preset process soft stop timeout after handoff, force killing", "WARNING")
-            process.kill()
-            if not wait_for_process_exit(process, timeout=1.0):
-                log(
-                    f"Previous preset process did not exit after handoff kill (PID: {pid}, preset={preset_path})",
-                    "WARNING",
-                )
+            log(
+                f"Previous preset process did not exit after handoff (PID: {pid}, preset={preset_path})",
+                "ERROR",
+            )
         except Exception as exc:
             log(f"Error stopping previous process after preset handoff: {exc}", "WARNING")
 
@@ -1070,7 +1026,6 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             notify_failure=notify_failure,
         ):
             return False
-        self._wait_after_successful_dry_run_before_spawn(preset_switch=preset_switch)
 
         try:
             startup_output_path = self._startup_output_path_for_artifact(artifact)
@@ -1115,13 +1070,28 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             self._last_spawn_exit_code = None
             self._last_spawn_stderr = ""
 
-            stable_ok = wait_for_process_stable_start(
+            # Подтверждение запуска — строка готовности из вывода самого winws2,
+            # а не «процесс прожил секунду». Без файла вывода подтвердить
+            # готовность нечем: остаётся проверка, что процесс не умер сразу.
+            start_outcome = wait_engine_ready(
                 self.running_process,
-                readiness_check=lambda: self._spawn_readiness_check_locked(self.running_process),
-                stable_window=stable_start_window_seconds,
+                startup_output_path if startup_output_file is not None else "",
+                settle=min(float(stable_start_window_seconds), DEFAULT_SETTLE_SECONDS),
+                alive_window=stable_start_window_seconds,
             )
 
-            if stable_ok:
+            if start_outcome.started:
+                if start_outcome.reason == REASON_ALIVE_WITHOUT_MARKER:
+                    log(
+                        f"{ENGINE_WINWS2} жив, но не сообщил о готовности за "
+                        f"{start_outcome.elapsed:.1f} с; считаем запуск состоявшимся",
+                        "WARNING",
+                    )
+                else:
+                    log(
+                        f"{ENGINE_WINWS2} подтвердил готовность за {start_outcome.elapsed:.2f} с",
+                        "DEBUG",
+                    )
                 self._set_runner_state_locked(
                     PresetRunnerState.RUNNING,
                     preset_path=artifact.preset_path,
@@ -1136,7 +1106,14 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                 self._start_process_exit_watcher(self.running_process)
                 return True
 
-            exit_code = self.running_process.returncode
+            exit_code = self.running_process.poll()
+            if exit_code is None:
+                # Сюда попадает только завершившийся процесс; если он всё же
+                # жив, его нельзя терять — останавливаем с подтверждением.
+                stop_process(self.running_process, timeout=_PROCESS_STOP_TIMEOUT_SECONDS)
+                exit_code = self.running_process.poll()
+            if exit_code is None:
+                exit_code = -1
             lifetime_seconds = max(0.0, time.monotonic() - spawned_at)
             # A single failed attempt is not yet a failed operation: retries may
             # follow, so log at WARNING and defer user-facing publication to
@@ -1154,8 +1131,6 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                 log(f"Strategy '{strategy_name}' exited immediately (code: {exit_code})", "WARNING")
 
             stderr_output = self._read_startup_output_file(startup_output_path)
-            if not stderr_output:
-                stderr_output = self._read_process_startup_output(self.running_process)
             startup_summary = self._summarize_startup_output(stderr_output)
             if startup_summary:
                 log(f"Error: {startup_summary[:500]}", "WARNING")
@@ -1315,10 +1290,6 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                         "Повторяем запуск перед остановкой старого процесса",
                         "WARNING",
                     )
-                    time.sleep(_TRANSIENT_DRY_RUN_RETRY_DELAY_SEC)
-                    if callable(is_current) and not bool(is_current()):
-                        log("Fast preset switch retry skipped after wait: request is stale", "DEBUG")
-                        return True
                     self._preset_file_path = preset_path
                     retry_artifact = self._artifact_for_handoff_locked(
                         self._refresh_artifact_if_source_changed_locked(artifact)
@@ -1361,7 +1332,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         if self._should_retry_fast_switch_spawn_exit_code(exit_code):
             log(
                 f"{self._format_windows_process_init_failure(exit_code)}. "
-                "Повторяем запуск после очистки состояния WinDivert",
+                "Повторяем запуск после восстановления WinDivert",
                 "WARNING",
             )
         else:
@@ -1446,21 +1417,18 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             self._stop_process_only_locked()
             cleanup_required = True
 
-        try:
-            active_winws_pids = get_all_winws_process_pids()
-        except Exception:
-            active_winws_pids = []
-
-        if active_winws_pids:
+        # Свои winws, которых этот runner не держит (остались от прошлого
+        # запуска программы). Чужие winws из других папок нас не касаются.
+        if has_own_winws_process():
             cleanup_required = True
 
         return cleanup_required
 
     def _perform_cleanup_before_spawn_locked(self, *, cleanup_required: bool) -> None:
         if cleanup_required:
-            self._perform_standard_windivert_cleanup()
+            self._stop_own_engine_processes()
         else:
-            log("Fast start: cleanup skipped (no active winws processes)", "DEBUG")
+            log("Fast start: cleanup skipped (no own winws processes)", "DEBUG")
 
     # Историческая формулировка zapret2 для системной ошибки без ретрая.
     _WINDIVERT_SYSTEM_ERROR_NO_RETRY_LOG_MESSAGE = "WinDivert system error detected — retry will not help"
@@ -1474,7 +1442,11 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         stable_start_window_seconds: float,
         cleanup_required: bool = False,
     ) -> bool:
-        """Hook общей retry-оркестрации: повторный запуск winws2 с полной очисткой."""
+        """Hook общей retry-оркестрации: повторный запуск winws2 после восстановления.
+
+        `force_cleanup=True` вместе с `retry_count > 0` означает повтор после
+        сбоя, связанного с драйвером: перед запуском выполняется восстановление.
+        """
         return self._start_from_preset_file_locked(
             preset_path,
             strategy_name,
@@ -1482,53 +1454,6 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             retry_count=retry_count + 1,
             stable_start_window_seconds=stable_start_window_seconds,
         )
-
-    def _retry_hook_before_transient_locked(
-        self,
-        preset_path: str,
-        strategy_name: str,
-        *,
-        exit_code: int,
-        transient_service_retry: bool,
-        retry_count: int,
-        stable_start_window_seconds: float,
-        cleanup_required: bool = False,
-    ):
-        """Hook: обработка stale delete-pending служб WinDivert у winws2."""
-        process_init_retry = (
-            retry_count == 0
-            and self._should_retry_fast_switch_spawn_exit_code(exit_code)
-        )
-
-        stale_services: list[str] = []
-        if retry_count == 0:
-            try:
-                stale_services = find_stale_windivert_delete_pending_services_runtime()
-            except Exception:
-                stale_services = []
-        delete_pending_codes = {_ERROR_SERVICE_MARKED_FOR_DELETE, _ERROR_SERVICE_MARKED_FOR_DELETE & 0xFF}
-        if stale_services and (transient_service_retry or process_init_retry or exit_code in delete_pending_codes):
-            log(
-                "WinDivert service stayed stale after failed winws2 start; "
-                f"retrying with aggressive cleanup: {','.join(stale_services)}",
-                "WARNING",
-            )
-            return self._relaunch_after_failed_spawn_locked(
-                preset_path,
-                strategy_name,
-                retry_count=retry_count,
-                stable_start_window_seconds=stable_start_window_seconds,
-            )
-
-        if stale_services:
-            log(
-                "WinDivert service stayed stale after failed winws2 start; "
-                f"cleaning without retry: {','.join(stale_services)}",
-                "WARNING",
-            )
-            self._aggressive_windivert_cleanup()
-
-        return None
 
     def _retry_hook_after_transient_locked(
         self,
@@ -1542,14 +1467,17 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         cleanup_required: bool = False,
     ):
         """Hook: winws2 один раз повторяет DLL-init провал (0xC0000142) и
-        молчаливое завершение с кодом 1 (симметрично winws1)."""
+        молчаливое завершение с кодом 1 (симметрично winws1).
+
+        Оба случая — разовые сбои самого запуска процесса: драйвер и его
+        служба тут ни при чём, поэтому повтор идёт сразу, без восстановления.
+        """
         if retry_count == 0 and self._should_retry_fast_switch_spawn_exit_code(exit_code):
             log(
-                f"{self._format_windows_process_init_failure(exit_code)}. "
-                "Повторяем запуск после очистки состояния WinDivert",
+                f"{self._format_windows_process_init_failure(exit_code)}. Повторяем запуск",
                 "WARNING",
             )
-            return self._relaunch_after_failed_spawn_locked(
+            return self._respawn_after_transient_process_failure_locked(
                 preset_path,
                 strategy_name,
                 retry_count=retry_count,
@@ -1560,13 +1488,29 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                 "Winws2 exited with code 1 without diagnostic output after dry-run passed; retrying once",
                 "WARNING",
             )
-            return self._relaunch_after_failed_spawn_locked(
+            return self._respawn_after_transient_process_failure_locked(
                 preset_path,
                 strategy_name,
                 retry_count=retry_count,
                 stable_start_window_seconds=stable_start_window_seconds,
             )
         return None
+
+    def _respawn_after_transient_process_failure_locked(
+        self,
+        preset_path: str,
+        strategy_name: str,
+        *,
+        retry_count: int,
+        stable_start_window_seconds: float,
+    ) -> bool:
+        return self._start_from_preset_file_locked(
+            preset_path,
+            strategy_name,
+            force_cleanup=False,
+            retry_count=retry_count + 1,
+            stable_start_window_seconds=stable_start_window_seconds,
+        )
 
     def _retry_hook_conflict_and_tail_locked(
         self,
@@ -1585,7 +1529,7 @@ class Winws2StrategyRunner(StrategyRunnerBase):
             and retry_count == 0
             and self._is_windivert_conflict_error(stderr_output, exit_code)
         ):
-            log("WinDivert conflict detected, retrying with full cleanup", "WARNING")
+            log("WinDivert conflict detected, retrying after recovery", "WARNING")
             return self._start_from_preset_file_locked(
                 preset_path,
                 strategy_name,
@@ -1624,12 +1568,16 @@ class Winws2StrategyRunner(StrategyRunnerBase):
                 self._set_last_error("Preset содержит ссылки на отсутствующие файлы", notify=False)
             return False
 
-        cleanup_required = self._resolve_cleanup_required_before_spawn(
-            force_cleanup=force_cleanup,
-        )
-        self._perform_cleanup_before_spawn_locked(cleanup_required=cleanup_required)
-        if retry_count > 0:
-            self._wait_after_aggressive_windivert_cleanup()
+        if force_cleanup and retry_count > 0:
+            # Повтор после сбоя, связанного с драйвером: свои winws остановлены
+            # с подтверждением, неиспользуемый драйвер выгружен.
+            cleanup_required = True
+            self._recover_windivert()
+        else:
+            cleanup_required = self._resolve_cleanup_required_before_spawn(
+                force_cleanup=force_cleanup,
+            )
+            self._perform_cleanup_before_spawn_locked(cleanup_required=cleanup_required)
         if not self._ensure_windivert_ready_before_spawn():
             return self._fail_spawn_for_windivert_readiness(context="spawn")
 

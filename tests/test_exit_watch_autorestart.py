@@ -127,10 +127,14 @@ class ExitWatcherTests(unittest.TestCase):
             )
             fake_process = SimpleNamespace(pid=1234, returncode=None)
 
+            from winws_runtime.engine.startup import REASON_READY, EngineStartOutcome
+
             with (
                 patch("winws_runtime.runners.zapret2_runner.subprocess.Popen", return_value=fake_process),
-                patch("winws_runtime.runners.zapret2_runner.wait_for_process_stable_start", return_value=True),
-                patch("winws_runtime.runners.zapret2_runner.time.sleep"),
+                patch(
+                    "winws_runtime.runners.zapret2_runner.wait_engine_ready",
+                    return_value=EngineStartOutcome(True, REASON_READY, True, 0.03),
+                ),
             ):
                 self.assertTrue(
                     runner._spawn_process_locked(artifact, "Preset", preset_switch=False)

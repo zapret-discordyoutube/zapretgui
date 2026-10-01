@@ -70,8 +70,7 @@ def _make_winws2_runner(tmp_dir: str):
     )
     runner._resolve_cleanup_required_before_spawn = Mock(return_value=False)
     runner._perform_cleanup_before_spawn_locked = Mock()
-    runner._aggressive_windivert_cleanup = Mock()
-    runner._wait_after_aggressive_windivert_cleanup = Mock()
+    runner._recover_windivert = Mock()
     runner._ensure_windivert_ready_before_spawn = Mock(return_value=True)
     return runner
 
@@ -283,10 +282,6 @@ class Winws2QuietRetryPublicationTests(unittest.TestCase):
             with (
                 patch("winws_runtime.runners.zapret2_runner.log", recorder),
                 patch("winws_runtime.runners.runner_base.log", recorder),
-                patch(
-                    "winws_runtime.runners.zapret2_runner.find_stale_windivert_delete_pending_services_runtime",
-                    return_value=[],
-                ),
             ):
                 success = runner.start_from_preset_file(str(preset_path), "Preset")
 
@@ -319,10 +314,6 @@ class Winws2QuietRetryPublicationTests(unittest.TestCase):
             with (
                 patch("winws_runtime.runners.zapret2_runner.log", recorder),
                 patch("winws_runtime.runners.runner_base.log", recorder),
-                patch(
-                    "winws_runtime.runners.zapret2_runner.find_stale_windivert_delete_pending_services_runtime",
-                    return_value=[],
-                ),
             ):
                 success = runner.start_from_preset_file(str(preset_path), "Preset")
 
@@ -352,21 +343,21 @@ class Winws2QuietRetryPublicationTests(unittest.TestCase):
         runner._launch_error_callback.assert_called_once()
         runner._runner_failure_callback.assert_called_once()
 
-    def test_settle_pause_applies_to_normal_start(self) -> None:
-        """AC4: post-dry-run settle pause is no longer preset-switch-only."""
-        from winws_runtime.runners.zapret2_runner import (
-            _PRESET_SWITCH_AFTER_DRY_RUN_SETTLE_SEC,
-            Winws2StrategyRunner,
-        )
+    def test_runner_has_no_blind_pauses(self) -> None:
+        """Между пробным и боевым запуском паузы нет.
 
-        runner = object.__new__(Winws2StrategyRunner)
-        with patch("winws_runtime.runners.zapret2_runner.time.sleep") as sleep_mock:
-            runner._wait_after_successful_dry_run_before_spawn(preset_switch=False)
-        sleep_mock.assert_called_once_with(_PRESET_SWITCH_AFTER_DRY_RUN_SETTLE_SEC)
+        Замер на живой Windows: сбой инициализации процесса (0xC0000142)
+        случается примерно раз на 200 запусков независимо от паузы (с паузой
+        0,15 с частота та же), а немедленный повтор проходит. Поэтому пауза
+        убрана, а повтор остался.
+        """
+        import inspect
 
-        with patch("winws_runtime.runners.zapret2_runner.time.sleep") as sleep_mock:
-            runner._wait_after_successful_dry_run_before_spawn(preset_switch=True)
-        sleep_mock.assert_called_once_with(_PRESET_SWITCH_AFTER_DRY_RUN_SETTLE_SEC)
+        from winws_runtime.runners import zapret2_runner
+        from winws_runtime.runners.zapret2_runner import Winws2StrategyRunner
+
+        self.assertFalse(hasattr(Winws2StrategyRunner, "_wait_after_successful_dry_run_before_spawn"))
+        self.assertNotIn("time.sleep", inspect.getsource(zapret2_runner))
 
     def test_fast_switch_failure_never_notifies(self) -> None:
         """AC6: fast switch failures surface via last_error only."""

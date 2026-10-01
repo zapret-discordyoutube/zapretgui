@@ -100,16 +100,27 @@ class SyncShutdownPrelaunchTests(unittest.TestCase):
                 runtime_feature=SimpleNamespace(),
                 runtime_api=SimpleNamespace(has_residual_processes=Mock(return_value=True)),
             )
-            with (
-                patch(
-                    "winws_runtime.runtime.preset_launch_service.shutdown_runtime_sync",
-                    return_value=SimpleNamespace(still_running=False),
-                ) as shutdown,
-                patch("winws_runtime.runtime.preset_launch_service.time.sleep"),
-            ):
+            with patch(
+                "winws_runtime.runtime.preset_launch_service.shutdown_runtime_sync",
+                return_value=SimpleNamespace(still_running=False),
+            ) as shutdown:
                 service._stop_previous_process_if_needed(skip_stop=False, process_running=True)
 
         self.assertTrue(shutdown.call_args.kwargs["keep_runner"])
+        # Остановка внутри перезапуска драйвер не выгружает.
+        self.assertFalse(shutdown.call_args.kwargs["include_cleanup"])
+        self.assertFalse(shutdown.call_args.kwargs["cleanup_services"])
+
+    def test_prelaunch_stop_has_no_blind_pauses(self) -> None:
+        # Остановка подтверждается выходом процесса; пауз «на всякий случай»
+        # после неё быть не должно.
+        import inspect
+
+        from winws_runtime.runtime import preset_launch_service
+
+        source = inspect.getsource(preset_launch_service)
+        self.assertNotIn("time.sleep", source)
+        self.assertFalse(hasattr(preset_launch_service, "time"))
 
 
 if __name__ == "__main__":

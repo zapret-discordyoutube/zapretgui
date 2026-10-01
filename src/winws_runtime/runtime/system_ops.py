@@ -1,28 +1,42 @@
+"""Действия runtime-слоя над процессами winws и драйвером WinDivert.
+
+Тонкая прослойка между раннерами и нижним слоем ``winws_runtime.engine``:
+здесь решается, ЧЬИ процессы и ЧЕЙ драйвер считать своими (пути установки,
+антивирус), а сами действия с подтверждением выполняет engine.
+"""
+
 from __future__ import annotations
 
 import ctypes
 import os
-import time
 from dataclasses import dataclass
 
 from config.runtime_layout import APPLICATION_PATHS
 from log.log import log
-from settings.mode import EXE_NAME_WINWS1, EXE_NAME_WINWS2
+from settings.mode import ALL_WINWS_EXE_NAMES
 
+from winws_runtime.engine.driver import (
+    DEFAULT_WAIT_SECONDS as DEFAULT_DRIVER_WAIT_SECONDS,
+    DRIVER_SERVICE_NAMES,
+    RELEASE_ERROR,
+    DriverPreflight,
+    DriverReleaseResult,
+    ensure_driver_startable,
+    release_driver_if_unused,
+)
+from winws_runtime.engine.process_control import (
+    list_engine_processes,
+    stop_engine_processes,
+)
 
 # Канонические Win32-коды ошибок WinDivert живут в едином центре диагностики.
 from winws_runtime.health.windivert_diagnostics import (  # noqa: E402
-    _ERROR_SERVICE_DISABLED,
     _ERROR_SERVICE_DOES_NOT_EXIST,
-    _ERROR_SERVICE_MARKED_FOR_DELETE,
 )
 
-_KNOWN_WINDIVERT_DRIVERS = ("WinDivert", "WinDivert14", "WinDivert64", "Monkey")
-_KNOWN_WINDIVERT_SERVICES = ("WinDivert", "WinDivert14", "WinDivert64", "windivert", "Monkey")
-_SERVICE_STOPPED = 0x00000001
-_SERVICE_STOP_PENDING = 0x00000003
-_SERVICE_RUNNING = 0x00000004
-_SERVICE_DISABLED = 0x00000004
+# Имена службы драйвера — единственный список, остальные модули берут его отсюда.
+_KNOWN_WINDIVERT_SERVICES = DRIVER_SERVICE_NAMES
+_ALL_WINWS_EXE_NAMES = tuple(ALL_WINWS_EXE_NAMES)
 _WINDIVERT_LAYER_NETWORK = 0
 _WINDIVERT_LAYER_REFLECT = 4
 _WINDIVERT_FLAG_SNIFF = 1
@@ -38,43 +52,57 @@ class WinDivertRuntimeProbeResult:
     stage: str = ""
 
 
-def get_process_pids_by_name(process_name: str) -> list[int]:
+def own_engine_exe_paths() -> list[str]:
+    """Полные пути к winws.exe и winws2.exe нашей установки."""
+    from winws_runtime.runtime.process_probe import get_expected_winws_paths
+
+    return list(get_expected_winws_paths().values())
+
+
+def own_windivert_roots() -> list[str]:
+    """Папки нашей установки, в которых может лежать файл драйвера."""
+    roots: list[str] = []
+    for candidate in (APPLICATION_PATHS.root, APPLICATION_PATHS.exe_dir):
+        text = str(candidate or "").strip()
+        if text and text not in roots:
+            roots.append(text)
+    return roots
+
+
+def stop_own_winws_processes_runtime(*, timeout: float = 5.0) -> bool:
+    """Завершает процессы winws из нашей папки. True — выход всех подтверждён.
+
+    Чужие winws (другая копия запрета) не трогаются: убивать по одному только
+    имени процесса нельзя.
+    """
     try:
-        from utils.process_killer import get_process_pids
-
-        return list(get_process_pids(process_name) or [])
+        return bool(stop_engine_processes(own_engine_exe_paths(), timeout=timeout).ok)
     except Exception as e:
-        log(f"Ошибка получения PID процесса {process_name}: {e}", "DEBUG")
-        return []
-
-
-def get_all_winws_process_pids() -> list[int]:
-    return get_process_pids_by_name(EXE_NAME_WINWS1) + get_process_pids_by_name(EXE_NAME_WINWS2)
-
-
-def has_any_winws_process() -> bool:
-    return bool(get_all_winws_process_pids())
-
-
-def force_kill_all_winws_processes() -> bool:
-    try:
-        from utils.process_killer import kill_winws_force
-
-        return bool(kill_winws_force())
-    except Exception as e:
-        log(f"Ошибка force kill winws: {e}", "DEBUG")
+        log(f"Ошибка остановки процессов winws: {e}", "WARNING")
         return False
 
 
-def _is_kaspersky_present_safe() -> bool:
-    """Детект Kaspersky для cleanup; ошибка детекта = вести себя как раньше."""
+def has_own_winws_process() -> bool:
+    """Жив ли хотя бы один winws из нашей папки."""
     try:
-        from utils.antivirus_probe import is_kaspersky_present
+        from winws_runtime.runtime.process_probe import get_canonical_winws_process_pids
 
-        return bool(is_kaspersky_present())
+        return bool(get_canonical_winws_process_pids())
     except Exception as e:
-        log(f"Ошибка детекта Kaspersky: {e}", "DEBUG")
+        log(f"Ошибка проверки процессов winws: {e}", "DEBUG")
         return False
+
+
+def _is_kaspersky_present_strict() -> bool:
+    """Детект Kaspersky для выгрузки драйвера: ошибка детекта пробрасывается.
+
+    Слой драйвера трактует сбой детекта в безопасную сторону — драйвер не
+    выгружается: принудительная выгрузка рядом с фильтрами Kaspersky
+    провоцировала синий экран в tcpip.sys.
+    """
+    from utils.antivirus_probe import is_kaspersky_present
+
+    return bool(is_kaspersky_present())
 
 
 def kill_process_by_pid_runtime(pid: int, *, wait_timeout_ms: int = 3000) -> bool:
@@ -87,102 +115,78 @@ def kill_process_by_pid_runtime(pid: int, *, wait_timeout_ms: int = 3000) -> boo
         return False
 
 
-def stop_all_winws_processes() -> bool:
-    try:
-        from utils.process_killer import kill_winws_all
+def ensure_windivert_driver_startable_runtime(
+    *,
+    wait_seconds: float = DEFAULT_DRIVER_WAIT_SECONDS,
+) -> DriverPreflight:
+    """Проверяет перед запуском, что служба драйвера не застряла.
 
-        return bool(kill_winws_all())
-    except Exception as e:
-        log(f"Ошибка остановки всех winws процессов: {e}", "DEBUG")
-        return False
-
-
-def cleanup_windivert_services_runtime() -> bool:
-    try:
-        from utils.service_manager import cleanup_windivert_services
-
-        return bool(cleanup_windivert_services())
-    except Exception as e:
-        log(f"Ошибка cleanup_windivert_services: {e}", "DEBUG")
-        return False
-
-
-def stop_known_windivert_services_runtime() -> bool:
-    ok = True
-    try:
-        from utils.service_manager import stop_service
-
-        for service_name in _KNOWN_WINDIVERT_SERVICES:
-            try:
-                ok = bool(stop_service(service_name)) and ok
-            except Exception:
-                ok = False
-    except Exception as e:
-        log(f"Ошибка остановки WinDivert service без удаления: {e}", "DEBUG")
-        return False
-    return ok
-
-
-def get_known_windivert_service_states_runtime() -> dict[str, int | None]:
-    try:
-        from utils.service_manager import get_service_state
-
-        return {service_name: get_service_state(service_name) for service_name in _KNOWN_WINDIVERT_SERVICES}
-    except Exception as e:
-        log(f"Ошибка чтения состояний WinDivert service: {e}", "DEBUG")
-        return {service_name: None for service_name in _KNOWN_WINDIVERT_SERVICES}
-
-
-def get_known_windivert_service_registry_flags_runtime() -> dict[str, dict[str, int | None]]:
-    try:
-        from utils.service_manager import get_service_registry_flags
-
-        return {service_name: get_service_registry_flags(service_name) for service_name in _KNOWN_WINDIVERT_SERVICES}
-    except Exception as e:
-        log(f"Ошибка чтения реестра WinDivert service: {e}", "DEBUG")
-        return {service_name: {"start": None, "delete_flag": None} for service_name in _KNOWN_WINDIVERT_SERVICES}
-
-
-def find_stale_windivert_delete_pending_services_runtime() -> list[str]:
-    """Ищет редкий SCM-хвост: driver-service зависла, отключена и уже DeleteFlag=1."""
-    states = get_known_windivert_service_states_runtime()
-    registry_flags = get_known_windivert_service_registry_flags_runtime()
-    stale: list[str] = []
-
-    for service_name in _KNOWN_WINDIVERT_SERVICES:
-        state = states.get(service_name)
-        flags = registry_flags.get(service_name) or {}
-        start_type = flags.get("start")
-        delete_flag = flags.get("delete_flag")
-        if (
-            start_type == _SERVICE_DISABLED
-            and int(delete_flag or 0) == 1
-            and state in (_SERVICE_RUNNING, _SERVICE_STOP_PENDING, None)
-        ):
-            stale.append(service_name)
-
-    return stale
-
-
-def find_blocking_windivert_registry_services_runtime() -> list[str]:
-    """Ищет WinDivert-службы, которые точно блокируют новый старт.
-
-    WinDivertOpen иногда возвращает 1058 даже после того, как `Start` уже
-    восстановлен в ручной запуск. Поэтому перед тем как блокировать запуск
-    настоящего winws2, проверяем сам реестр: если нет Disabled/DeleteFlag,
-    пробник не должен быть единственным источником отказа.
+    Только чтение. Если драйвер как раз выгружается, ждёт до ``wait_seconds``.
     """
-    registry_flags = get_known_windivert_service_registry_flags_runtime()
-    blocking: list[str] = []
+    try:
+        return ensure_driver_startable(own_roots=own_windivert_roots(), wait_seconds=wait_seconds)
+    except Exception as e:
+        # Проверка не должна мешать запуску: причину отказа назовёт сам winws.
+        log(f"Ошибка проверки службы драйвера WinDivert: {e}", "DEBUG")
+        return DriverPreflight(ok=True)
 
-    for service_name in _KNOWN_WINDIVERT_SERVICES:
-        flags = registry_flags.get(service_name) or {}
-        start_type = flags.get("start")
-        delete_flag = flags.get("delete_flag")
-        if start_type == _SERVICE_DISABLED or int(delete_flag or 0) == 1:
-            blocking.append(service_name)
 
-    return blocking
+def release_windivert_driver_runtime(
+    *,
+    wait_seconds: float = DEFAULT_DRIVER_WAIT_SECONDS,
+) -> DriverReleaseResult:
+    """Выгружает драйвер WinDivert, если им никто не пользуется.
+
+    Вызывается после полной остановки обхода (кнопка «Стоп», выход из
+    программы, обновление), но не при перезапуске и не при смене пресета:
+    между запусками драйвер остаётся загруженным, и следующий winws открывает
+    его напрямую.
+    """
+    try:
+        return release_driver_if_unused(
+            own_roots=own_windivert_roots(),
+            engine_in_use=_any_winws_process_alive_strict,
+            antivirus_blocks_unload=_is_kaspersky_present_strict,
+            wait_seconds=wait_seconds,
+        )
+    except Exception as e:
+        log(f"Ошибка выгрузки драйвера WinDivert: {e}", "WARNING")
+        return DriverReleaseResult(RELEASE_ERROR, message=str(e))
+
+
+def _any_winws_process_alive_strict() -> bool:
+    """Жив ли хоть один winws — свой или чужой. Сбой снимка пробрасывается.
+
+    Драйвером пользуется любой winws, не только наш, поэтому здесь проверка
+    по имени. Сбой снимка слой драйвера трактует как «занят».
+    """
+    return bool(list_engine_processes(_ALL_WINWS_EXE_NAMES))
+
+
+def recover_windivert_runtime() -> bool:
+    """Приводит движок и драйвер в исходное состояние после сбоя запуска.
+
+    Порядок следует из того, как на самом деле застревает служба драйвера:
+
+    1. Завершить свои winws с подтверждением выхода. Пока жив хоть один,
+       драйвер занят; если его в этот момент останавливали, он висит в
+       «останавливается» именно из-за них.
+    2. Выгрузить драйвер, если им больше никто не пользуется, — следующий
+       запуск поставит его заново из нашей папки.
+    3. Убедиться, что запись службы не застряла.
+
+    Реестр не правится, пометка удаления не снимается, тип запуска не
+    меняется: такие «лечения» и создавали застрявшую запись.
+    """
+    log("Восстановление после сбоя запуска: останавливаем свои winws и освобождаем драйвер", "INFO")
+    stopped = stop_own_winws_processes_runtime()
+    released = release_windivert_driver_runtime()
+    preflight = ensure_windivert_driver_startable_runtime()
+    if released.stuck and released.message:
+        log(released.message, "WARNING")
+    if not preflight.ok and preflight.message:
+        log(preflight.message, "WARNING")
+    return bool(stopped and preflight.ok and not released.stuck)
 
 
 def _iter_windivert_dll_candidates_runtime() -> list[str]:
@@ -297,339 +301,3 @@ def probe_windivert_state_runtime() -> WinDivertRuntimeProbeResult:
     )
 
 
-def unload_known_windivert_drivers_runtime() -> bool:
-    ok = True
-    try:
-        from utils.service_manager import unload_driver
-
-        for driver in _KNOWN_WINDIVERT_DRIVERS:
-            try:
-                unload_driver(driver)
-            except Exception:
-                ok = False
-    except Exception as e:
-        log(f"Ошибка выгрузки драйверов WinDivert: {e}", "DEBUG")
-        return False
-    return ok
-
-
-def stop_and_delete_runtime_services(*, retry_count: int = 3) -> bool:
-    ok = True
-    try:
-        from utils.service_manager import stop_and_delete_service
-
-        for service_name in _KNOWN_WINDIVERT_SERVICES:
-            try:
-                ok = bool(stop_and_delete_service(service_name, retry_count=retry_count)) and ok
-            except Exception:
-                ok = False
-    except Exception as e:
-        log(f"Ошибка stop_and_delete runtime services: {e}", "DEBUG")
-        return False
-    return ok
-
-
-def restore_known_windivert_services_demand_start_runtime() -> bool:
-    """Возвращает оставшиеся WinDivert-службы из Disabled в ручной запуск.
-
-    Иногда Windows не удаляет старую driver-service запись сразу. Если такая
-    запись осталась отключённой, следующий WinDivertOpen получает 1058.
-    Ручной запуск не стартует драйвер сам по себе, но разрешает WinDivert
-    поднять его при следующем открытии фильтра.
-    """
-    ok = True
-    try:
-        from utils.service_manager import set_service_demand_start
-
-        for service_name in _KNOWN_WINDIVERT_SERVICES:
-            try:
-                ok = bool(set_service_demand_start(service_name)) and ok
-            except Exception:
-                ok = False
-    except Exception as e:
-        log(f"Ошибка восстановления типа запуска WinDivert services: {e}", "DEBUG")
-        return False
-    return ok
-
-
-def clear_stopped_windivert_delete_flags_runtime() -> bool:
-    """Снимает зависший DeleteFlag у уже остановленных WinDivert-служб."""
-    ok = True
-    states = get_known_windivert_service_states_runtime()
-    registry_flags = get_known_windivert_service_registry_flags_runtime()
-    try:
-        from utils.service_manager import clear_service_delete_flag
-
-        for service_name in _KNOWN_WINDIVERT_SERVICES:
-            flags = registry_flags.get(service_name) or {}
-            if int(flags.get("delete_flag") or 0) != 1:
-                continue
-            state = states.get(service_name)
-            if state in (_SERVICE_RUNNING, _SERVICE_STOP_PENDING):
-                continue
-            try:
-                ok = bool(clear_service_delete_flag(service_name)) and ok
-            except Exception:
-                ok = False
-    except Exception as e:
-        log(f"Ошибка очистки DeleteFlag WinDivert services: {e}", "DEBUG")
-        return False
-    return ok
-
-
-def stop_and_delete_named_service(service_name: str, *, retry_count: int = 3) -> bool:
-    try:
-        from utils.service_manager import stop_and_delete_service
-
-        return bool(stop_and_delete_service(service_name, retry_count=retry_count))
-    except Exception as e:
-        log(f"Ошибка stop_and_delete_service для {service_name}: {e}", "DEBUG")
-        return False
-
-
-def standard_windivert_cleanup_runtime(*, sleep_seconds: float = 0.8) -> bool:
-    """Обычная cleanup-стадия перед новым стартом.
-
-    Здесь нельзя останавливать или удалять WinDivert service из SCM на каждом
-    обычном запуске. Если service уже запущен, но его тип запуска в Windows
-    остался Disabled, остановка ломает следующий временный запуск с 1058.
-    Для обычного restart/start достаточно:
-    - вернуть service в ручной запуск, если это возможно;
-    - добить старые winws-процессы;
-    - дать Windows короткую паузу на закрытие process-owned filter handle.
-
-    Удаление service-объектов оставляем только для аварийной aggressive cleanup.
-    """
-    log("Cleaning up previous winws processes...", "DEBUG")
-    ok = True
-    ok = restore_known_windivert_services_demand_start_runtime() and ok
-    ok = force_kill_all_winws_processes() and ok
-    time.sleep(max(0.0, float(sleep_seconds)))
-    return ok
-
-
-def aggressive_windivert_cleanup_runtime() -> bool:
-    log("Performing aggressive WinDivert cleanup via Win API...", "INFO")
-    kaspersky_present = _is_kaspersky_present_safe()
-    ok = True
-    ok = force_kill_all_winws_processes() and ok
-
-    # Принудительная выгрузка драйвера, пока ядро не закрыло filter handles,
-    # провоцирует BSOD в tcpip.sys при активных WFP-фильтрах антивируса.
-    # Ждём реального завершения (нет winws-процессов, службы не RUNNING),
-    # таймаут не считается ошибкой cleanup — просто идём дальше.
-    settled = wait_for_windivert_cleanup_settle_runtime(
-        max_wait_seconds=5.0,
-        poll_interval=0.25,
-        retry_cleanup=False,
-    )
-    if not settled:
-        log("WinDivert не стабилизировался перед выгрузкой драйвера (timeout)", "WARNING")
-
-    if kaspersky_present:
-        log(
-            "Обнаружен Kaspersky: пропускаем выгрузку драйвера WinDivert и удаление служб, "
-            "чтобы не провоцировать конфликт с фильтрами антивируса",
-            "INFO",
-        )
-        ok = clear_stopped_windivert_delete_flags_runtime() and ok
-        ok = restore_known_windivert_services_demand_start_runtime() and ok
-        ok = force_kill_all_winws_processes() and ok
-        log("Aggressive cleanup completed (Kaspersky-safe mode)", "INFO")
-        return ok
-
-    ok = unload_known_windivert_drivers_runtime() and ok
-    time.sleep(0.2)
-    services_removed = stop_and_delete_runtime_services(retry_count=3)
-    if services_removed:
-        ok = services_removed and ok
-    else:
-        ok = clear_stopped_windivert_delete_flags_runtime() and ok
-        ok = restore_known_windivert_services_demand_start_runtime() and ok
-        services_removed = bool(stop_and_delete_runtime_services(retry_count=2))
-        if services_removed:
-            ok = services_removed and ok
-    time.sleep(0.3)
-    ok = force_kill_all_winws_processes() and ok
-    ok = wait_for_windivert_cleanup_settle_runtime(
-        max_wait_seconds=5.0,
-        poll_interval=0.25,
-        retry_cleanup=services_removed,
-    ) and ok
-    log("Aggressive cleanup completed", "INFO")
-    return ok
-
-
-def wait_for_windivert_cleanup_settle_runtime(
-    *,
-    max_wait_seconds: float = 4.0,
-    poll_interval: float = 0.2,
-    retry_cleanup: bool = False,
-) -> bool:
-    """Ждёт, пока WinDivert cleanup реально стабилизируется.
-
-    Условия готовности:
-    - нет процессов winws/winws2;
-    - в обычном cleanup ни одна известная WinDivert-служба не находится в RUNNING/STOP_PENDING;
-    - в аварийном cleanup служебные записи WinDivert/Monkey реально исчезли из SCM;
-    - состояние подтверждено несколько раз подряд.
-    """
-    deadline = time.monotonic() + max(0.0, float(max_wait_seconds))
-    interval = max(0.05, float(poll_interval))
-    stable_checks = 0
-
-    while time.monotonic() < deadline:
-        process_pids = get_all_winws_process_pids()
-        service_states = get_known_windivert_service_states_runtime()
-        if retry_cleanup:
-            busy_services = {
-                name: state
-                for name, state in service_states.items()
-                if state is not None
-            }
-        else:
-            busy_services = {
-                name: state
-                for name, state in service_states.items()
-                if state in (_SERVICE_RUNNING, _SERVICE_STOP_PENDING)
-            }
-        if not process_pids and not busy_services:
-            stable_checks += 1
-            if stable_checks >= 2:
-                return True
-        else:
-            stable_checks = 0
-            if retry_cleanup:
-                if process_pids:
-                    force_kill_all_winws_processes()
-                if busy_services:
-                    stop_and_delete_runtime_services(retry_count=1)
-                unload_known_windivert_drivers_runtime()
-
-        time.sleep(interval)
-
-    process_pids = get_all_winws_process_pids()
-    service_states = get_known_windivert_service_states_runtime()
-    if retry_cleanup:
-        busy_services = {
-            name: state
-            for name, state in service_states.items()
-            if state is not None
-        }
-    else:
-        busy_services = {
-            name: state
-            for name, state in service_states.items()
-            if state in (_SERVICE_RUNNING, _SERVICE_STOP_PENDING)
-        }
-    log(
-        "WinDivert cleanup settle timeout: "
-        f"pids={process_pids or []}, "
-        f"busy_services={busy_services or {}}",
-        "WARNING",
-    )
-    return False
-
-
-def wait_for_windivert_spawn_ready_runtime(
-    *,
-    max_wait_seconds: float = 4.0,
-    poll_interval: float = 0.25,
-) -> WinDivertRuntimeProbeResult:
-    """Ждёт, пока WinDivert будет готов к обычному NETWORK-open перед spawn.
-
-    В отличие от cleanup-settle, здесь `probe.ready` уже является главным
-    условием, потому что сейчас нас интересует именно готовность к новому
-    запуску, а не просто завершённость stop/cleanup.
-    """
-    deadline = time.monotonic() + max(0.0, float(max_wait_seconds))
-    interval = max(0.05, float(poll_interval))
-    last_probe = WinDivertRuntimeProbeResult(installed=True, ready=True, error_code=None, stage="initial")
-    restored_service_start_type = False
-    unloaded_drivers_before_bypass = False
-
-    while time.monotonic() < deadline:
-        last_probe = probe_windivert_state_runtime()
-        stale_services = find_stale_windivert_delete_pending_services_runtime()
-        if stale_services:
-            service_list = ",".join(stale_services)
-            log(
-                "WinDivert service is still unloading after stop; "
-                f"allowing winws2 to perform the real driver open: {service_list}",
-                "INFO",
-            )
-            return WinDivertRuntimeProbeResult(
-                installed=True,
-                ready=True,
-                error_code=_ERROR_SERVICE_MARKED_FOR_DELETE,
-                stage=f"stale_delete_pending_bypassed:{service_list}",
-            )
-        if last_probe.ready:
-            return last_probe
-
-        blocking_services = find_blocking_windivert_registry_services_runtime()
-        if (
-            int(last_probe.error_code or 0)
-            in (_ERROR_SERVICE_DISABLED, _ERROR_SERVICE_DOES_NOT_EXIST)
-            and not blocking_services
-        ):
-            # Зомби-состояние после недавнего stop: записи SCM уже нет, но драйвер
-            # ещё жив — старт winws2 в этот момент падает с 0xC0000142. Один раз
-            # делаем ту же выгрузку, что и retry-путь; на свежей системе это no-op.
-            if not unloaded_drivers_before_bypass:
-                unloaded_drivers_before_bypass = True
-                unload_known_windivert_drivers_runtime()
-                reprobe = probe_windivert_state_runtime()
-                if reprobe.ready:
-                    return reprobe
-                last_probe = reprobe
-                if int(last_probe.error_code or 0) not in (
-                    _ERROR_SERVICE_DISABLED,
-                    _ERROR_SERVICE_DOES_NOT_EXIST,
-                ):
-                    time.sleep(interval)
-                    continue
-            log(
-                "WinDivert readiness probe did not find a ready driver, but service registry is clean; "
-                "allowing winws2 to perform the real driver open",
-                "WARNING",
-            )
-            return WinDivertRuntimeProbeResult(
-                installed=last_probe.installed,
-                ready=True,
-                error_code=last_probe.error_code,
-                stage="network_open_probe_bypassed:registry_clean",
-            )
-
-        if int(last_probe.error_code or 0) == _ERROR_SERVICE_DISABLED and not restored_service_start_type:
-            restored_service_start_type = True
-            log("WinDivert service disabled during readiness probe; restoring manual start", "WARNING")
-            restored_ok = restore_known_windivert_services_demand_start_runtime()
-            if not restored_ok:
-                log(
-                    "WinDivert service start type restore failed; administrator rights may be required",
-                    "WARNING",
-                )
-            if restored_ok and not find_blocking_windivert_registry_services_runtime():
-                log(
-                    "WinDivert readiness probe still reports 1058 after restore, but service registry is clean; "
-                    "allowing winws2 to perform the real driver open",
-                    "WARNING",
-                )
-                return WinDivertRuntimeProbeResult(
-                    installed=last_probe.installed,
-                    ready=True,
-                    error_code=last_probe.error_code,
-                    stage="network_open_probe_bypassed:registry_clean",
-                )
-        time.sleep(interval)
-
-    log(
-        "WinDivert spawn readiness timeout: "
-        f"installed={last_probe.installed}, "
-        f"ready={last_probe.ready}, "
-        f"error={last_probe.error_code}, "
-        f"stage={last_probe.stage}",
-        "WARNING",
-    )
-    return last_probe

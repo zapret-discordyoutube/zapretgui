@@ -66,8 +66,9 @@ class OrchestraFeature:
         if runner is None:
             return True
         try:
-            runner.stop()
-            return True
+            # stop() сообщает, подтверждён ли выход процесса: результат нельзя
+            # заменять на «успех».
+            return bool(runner.stop())
         except Exception:
             return False
 

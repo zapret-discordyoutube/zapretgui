@@ -135,33 +135,84 @@ class RealEnvironmentTests(unittest.TestCase):
         with patch("utils.antivirus_probe.is_kaspersky_present", side_effect=OSError("boom")):
             self.assertEqual(environment.strategy_pause_seconds(), environment.KASPERSKY_STRATEGY_COOLDOWN_SECONDS)
 
-    def test_windivert_readiness_is_checked_before_first_start_only(self) -> None:
+    def test_driver_service_is_checked_before_first_start_only(self) -> None:
         env = self.make_env()
-        ready = SimpleNamespace(ready=True, error_code=None, stage="ready")
+        ready = SimpleNamespace(ready=True, blocker="", description="")
         with (
-            patch("winws_runtime.runtime.system_ops.wait_for_windivert_spawn_ready_runtime", return_value=ready) as wait,
+            patch(
+                "winws_runtime.health.windivert_diagnostics.ensure_windivert_ready_before_spawn",
+                return_value=ready,
+            ) as check,
             patch.object(env, "_winws2_path", return_value="winws2.exe"),
             patch("builtins.open"),
         ):
             env.start_session("cfg")
             env.start_session("cfg")
-        self.assertEqual(wait.call_count, 1)
+        self.assertEqual(check.call_count, 1)
 
-    def test_windivert_service_disabled_1058_stops_the_scan(self) -> None:
+    def test_stuck_driver_service_stops_the_scan(self) -> None:
+        # Пока служба драйвера застряла, не запустится ни одна стратегия.
         env = self.make_env()
-        blocked = SimpleNamespace(ready=False, error_code=1058, stage="open")
+        blocked = SimpleNamespace(
+            ready=False,
+            blocker="stuck_entry",
+            description="Запись службы драйвера WinDivert (Monkey) осталась после остановки",
+        )
         with (
-            patch("winws_runtime.runtime.system_ops.wait_for_windivert_spawn_ready_runtime", return_value=blocked),
-            patch("winws_runtime.runtime.system_ops.aggressive_windivert_cleanup_runtime"),
             patch(
-                "winws_runtime.health.windivert_diagnostics.describe_windivert_readiness_failure",
-                return_value="служба WinDivert отключена",
+                "winws_runtime.health.windivert_diagnostics.ensure_windivert_ready_before_spawn",
+                return_value=blocked,
             ),
+            patch("winws_runtime.runtime.system_ops.recover_windivert_runtime") as recover,
             patch.object(env, "_winws2_path", return_value="winws2.exe"),
         ):
             with self.assertRaises(ScanFatal) as raised:
                 env.start_session("cfg")
         self.assertIn("WinDivert", str(raised.exception))
+        recover.assert_called_once_with()
+
+    def test_driver_service_recovers_before_the_scan(self) -> None:
+        env = self.make_env()
+        blocked = SimpleNamespace(ready=False, blocker="stop_pending", description="выгружается")
+        ready = SimpleNamespace(ready=True, blocker="", description="")
+        with (
+            patch(
+                "winws_runtime.health.windivert_diagnostics.ensure_windivert_ready_before_spawn",
+                side_effect=[blocked, ready],
+            ),
+            patch("winws_runtime.runtime.system_ops.recover_windivert_runtime") as recover,
+            patch.object(env, "_winws2_path", return_value="winws2.exe"),
+            patch("builtins.open"),
+        ):
+            env.start_session("cfg")
+        recover.assert_called_once_with()
+
+    def test_recover_after_crash_stops_only_own_engines_without_blind_pause(self) -> None:
+        from blockcheck.strategy_search import environment
+
+        env = self.make_env()
+        with (
+            patch("winws_runtime.runtime.system_ops.stop_own_winws_processes_runtime") as stop_own,
+            patch.object(env, "strategy_pause_seconds", return_value=0.0),
+            patch.object(environment.time, "sleep") as sleep,
+        ):
+            env.recover_after_crash()
+        stop_own.assert_called_once_with()
+        sleep.assert_not_called()
+
+    def test_recover_after_crash_keeps_kaspersky_cooldown(self) -> None:
+        from blockcheck.strategy_search import environment
+
+        env = self.make_env()
+        with (
+            patch("winws_runtime.runtime.system_ops.stop_own_winws_processes_runtime"),
+            patch.object(
+                env, "strategy_pause_seconds", return_value=environment.KASPERSKY_STRATEGY_COOLDOWN_SECONDS
+            ),
+            patch.object(environment.time, "sleep") as sleep,
+        ):
+            env.recover_after_crash()
+        sleep.assert_called_once_with(environment.KASPERSKY_STRATEGY_COOLDOWN_SECONDS)
 
     def test_cleanup_marks_scan_guard_and_stops_zapret(self) -> None:
         calls = []

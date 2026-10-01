@@ -99,8 +99,7 @@ def _make_winws2_runner(tmp_dir: str):
     )
     runner._resolve_cleanup_required_before_spawn = Mock(return_value=False)
     runner._perform_cleanup_before_spawn_locked = Mock()
-    runner._aggressive_windivert_cleanup = Mock()
-    runner._wait_after_aggressive_windivert_cleanup = Mock()
+    runner._recover_windivert = Mock()
     runner._ensure_windivert_ready_before_spawn = Mock(return_value=True)
     return runner
 
@@ -552,10 +551,6 @@ class Winws2SilentExitPublicationTests(unittest.TestCase):
                     "winws_runtime.runners.zapret2_runner.probe_silent_exit",
                     return_value=_report_with_confirmed_fact(),
                 ),
-                patch(
-                    "winws_runtime.runners.zapret2_runner.find_stale_windivert_delete_pending_services_runtime",
-                    return_value=[],
-                ),
             ):
                 success = runner.start_from_preset_file(str(preset_path), "Preset")
 
@@ -585,10 +580,6 @@ class Winws2SilentExitPublicationTests(unittest.TestCase):
             with (
                 patch("winws_runtime.runners.zapret2_runner.log", recorder),
                 patch("winws_runtime.runners.runner_base.log", recorder),
-                patch(
-                    "winws_runtime.runners.zapret2_runner.find_stale_windivert_delete_pending_services_runtime",
-                    return_value=[],
-                ),
             ):
                 success = runner.start_from_preset_file(str(preset_path), "Preset")
 

@@ -11,26 +11,22 @@ import hashlib
 import shlex
 import subprocess
 import threading
-import time
 from typing import Optional
 from log.log import log
 
 from settings.mode import EXE_NAME_WINWS1, ZAPRET1_MODE
 
 from .constants import CREATE_NO_WINDOW
-from .runner_base import StrategyRunnerBase
+from .runner_base import StrategyRunnerBase, _PROCESS_STOP_TIMEOUT_SECONDS
 from .spawn_failure import is_silent_exit
 from .preset_runner_support import (
     PreparedPresetArtifact,
     PresetRunnerState,
     PresetRunnerStateMachine,
     launch_args_from_preset_text,
-    is_process_alive_with_expected_name,
     preset_cache_key,
     prune_at_config_cache,
     remember_cache_entry,
-    wait_for_process_exit,
-    wait_for_process_stable_start,
 )
 from winws_runtime.health.process_health_check import (
     check_common_crash_causes,
@@ -42,7 +38,12 @@ from winws_runtime.health.silent_exit_probe import (
     probe_silent_exit,
 )
 from winws_runtime.health.winws_output import relevant_error_line
-from winws_runtime.runtime.system_ops import get_process_pids_by_name
+from winws_runtime.engine.process_control import stop_process
+from winws_runtime.engine.startup import (
+    DEFAULT_SETTLE_SECONDS,
+    REASON_ALIVE_WITHOUT_MARKER,
+    wait_engine_ready,
+)
 from utils.atomic_text import read_preset_file_text
 
 
@@ -178,44 +179,38 @@ class Winws1StrategyRunner(StrategyRunnerBase):
         return None
 
     def _stop_process_only_locked(self) -> None:
-        """Stops only the current winws.exe process without heavy driver/service cleanup."""
+        """Stops only the current winws.exe process; the driver stays loaded."""
         try:
-            cleanup_needed = False
-            if self.running_process and self.is_running():
-                pid = self.running_process.pid
-                strategy_name = self.current_launch_label or "unknown"
-                self._set_runner_state_locked(
-                    PresetRunnerState.STOPPING,
-                    preset_path=str(self._preset_file_path or ""),
-                    strategy_name=str(strategy_name),
-                    pid=pid,
-                    reason="stop_process_only",
-                )
-                log(f"Fast switch: stopping '{strategy_name}' (PID: {pid})", "INFO")
+            process = self.running_process
+            if not (process and self.is_running()):
+                return
 
-                self.running_process.terminate()
-                if not wait_for_process_exit(self.running_process, timeout=3.0):
-                    log("Fast switch: soft stop timeout, force killing", "WARNING")
-                    self.running_process.kill()
-                    cleanup_needed = not wait_for_process_exit(self.running_process, timeout=1.0)
+            pid = process.pid
+            strategy_name = self.current_launch_label or "unknown"
+            self._set_runner_state_locked(
+                PresetRunnerState.STOPPING,
+                preset_path=str(self._preset_file_path or ""),
+                strategy_name=str(strategy_name),
+                pid=pid,
+                reason="stop_process_only",
+            )
+            log(f"Fast switch: stopping '{strategy_name}' (PID: {pid})", "INFO")
 
-                self.running_process = None
-                self._set_runner_state_locked(
-                    PresetRunnerState.IDLE,
-                    preset_path=str(self._preset_file_path or ""),
-                    strategy_name=str(strategy_name),
-                    reason="stop_completed",
+            if stop_process(process, timeout=_PROCESS_STOP_TIMEOUT_SECONDS):
+                log(f"Fast switch: process stopped, exit confirmed (PID: {pid})", "SUCCESS")
+            else:
+                log(
+                    f"Процесс winws не завершился за {_PROCESS_STOP_TIMEOUT_SECONDS:g} с (PID: {pid})",
+                    "ERROR",
                 )
 
-                if not cleanup_needed:
-                    try:
-                        cleanup_needed = bool(get_process_pids_by_name(os.path.basename(self.winws_exe)))
-                    except Exception:
-                        cleanup_needed = False
-
-            if cleanup_needed:
-                log("Fast switch fallback cleanup: detected lingering winws process", "DEBUG")
-                self._kill_all_winws_processes()
+            self.running_process = None
+            self._set_runner_state_locked(
+                PresetRunnerState.IDLE,
+                preset_path=str(self._preset_file_path or ""),
+                strategy_name=str(strategy_name),
+                reason="stop_completed",
+            )
         except Exception as e:
             log(f"Fast switch: error stopping process: {e}", "ERROR")
 
@@ -224,12 +219,16 @@ class Winws1StrategyRunner(StrategyRunnerBase):
         self.current_launch_label = None
         self.current_strategy_args = None
 
-    def _spawn_readiness_check_locked(self, process: subprocess.Popen) -> bool:
-        try:
-            pid = int(process.pid)
-        except Exception:
-            return False
-        return is_process_alive_with_expected_name(pid, self.winws_exe)
+    def _winws1_startup_output_dir(self) -> str:
+        return os.path.join(str(self.work_dir or ""), "user", "tmp", "winws1_startup_output")
+
+    def _startup_output_path_for_artifact(self, artifact: PreparedPresetArtifact) -> str:
+        digest_source = (
+            f"{os.path.abspath(str(artifact.preset_path or ''))}\0"
+            f"{' '.join(str(arg or '') for arg in artifact.launch_args)}"
+        ).encode("utf-8", "surrogatepass")
+        digest = hashlib.sha1(digest_source).hexdigest()[:20]
+        return os.path.join(self._winws1_startup_output_dir(), f"winws1_startup_{digest}.log")
 
     def _refresh_artifact_if_source_changed_locked(
         self,
@@ -420,32 +419,65 @@ class Winws1StrategyRunner(StrategyRunnerBase):
 
         try:
             cmd = [self.winws_exe, *artifact.launch_args]
+
+            # Вывод winws идёт в файл: по нему подтверждается готовность и
+            # разбирается причина отказа. Раньше он выбрасывался целиком, и
+            # диагностика по тексту ошибки для winws не работала.
+            startup_output_path = self._startup_output_path_for_artifact(artifact)
+            self._last_startup_output_path = startup_output_path
+            startup_output_file = None
+            startup_stdout = subprocess.DEVNULL
+            startup_stderr = subprocess.DEVNULL
+            try:
+                os.makedirs(os.path.dirname(startup_output_path), exist_ok=True)
+                startup_output_file = open(startup_output_path, "wb")
+                startup_stdout = startup_output_file
+                startup_stderr = startup_output_file
+            except Exception as exc:
+                log(f"Не удалось открыть файл стартового вывода winws: {exc}", "DEBUG")
+
             self._set_runner_state_locked(
                 PresetRunnerState.STARTING,
                 preset_path=artifact.preset_path,
                 strategy_name=strategy_name,
                 reason="start_from_preset",
             )
-            self.running_process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                startupinfo=self._create_startup_info(),
-                creationflags=CREATE_NO_WINDOW,
-                cwd=self.work_dir
-            )
+            try:
+                self.running_process = subprocess.Popen(
+                    cmd,
+                    stdout=startup_stdout,
+                    stderr=startup_stderr,
+                    stdin=subprocess.DEVNULL,
+                    startupinfo=self._create_startup_info(),
+                    creationflags=CREATE_NO_WINDOW,
+                    cwd=self.work_dir
+                )
+            finally:
+                if startup_output_file is not None:
+                    try:
+                        startup_output_file.close()
+                    except Exception:
+                        pass
 
             self.current_launch_label = strategy_name
             self.current_strategy_args = list(artifact.launch_args)
             self._last_spawn_exit_code = None
             self._last_spawn_stderr = ""
 
-            if wait_for_process_stable_start(
+            # Подтверждение запуска — строка готовности из вывода самого winws.
+            start_outcome = wait_engine_ready(
                 self.running_process,
-                readiness_check=lambda: self._spawn_readiness_check_locked(self.running_process),
-                stable_window=stable_start_window_seconds,
-            ):
+                startup_output_path if startup_output_file is not None else "",
+                settle=min(float(stable_start_window_seconds), DEFAULT_SETTLE_SECONDS),
+                alive_window=stable_start_window_seconds,
+            )
+            if start_outcome.started:
+                if start_outcome.reason == REASON_ALIVE_WITHOUT_MARKER:
+                    log(
+                        f"{EXE_NAME_WINWS1} жив, но не сообщил о готовности за "
+                        f"{start_outcome.elapsed:.1f} с; считаем запуск состоявшимся",
+                        "WARNING",
+                    )
                 self._set_runner_state_locked(
                     PresetRunnerState.RUNNING,
                     preset_path=artifact.preset_path,
@@ -461,11 +493,18 @@ class Winws1StrategyRunner(StrategyRunnerBase):
                 self._start_process_exit_watcher(self.running_process)
                 return True
 
-            exit_code = self.running_process.returncode
+            exit_code = self.running_process.poll()
+            if exit_code is None:
+                # Сюда попадает только завершившийся процесс; если он всё же
+                # жив, его нельзя терять — останавливаем с подтверждением.
+                stop_process(self.running_process, timeout=_PROCESS_STOP_TIMEOUT_SECONDS)
+                exit_code = self.running_process.poll()
+            if exit_code is None:
+                exit_code = -1
             # A single failed attempt is not yet a failed operation: retries may
             # follow, so log at WARNING and defer user-facing publication to
             # _publish_final_launch_failure at the end of the whole operation.
-            stderr_output = self._read_process_startup_output(self.running_process)
+            stderr_output = self._read_startup_output_file(startup_output_path)
             if stderr_output:
                 log(f"Error: {stderr_output[:500]}", "WARNING")
 
@@ -634,10 +673,10 @@ class Winws1StrategyRunner(StrategyRunnerBase):
 
     def _prepare_cleanup_before_spawn_locked(self, *, retry_count: int) -> None:
         if retry_count > 0:
-            self._aggressive_windivert_cleanup()
-            self._wait_after_aggressive_windivert_cleanup()
+            # Повтор после сбоя запуска: свои winws остановлены, драйвер свободен.
+            self._recover_windivert()
         else:
-            self._perform_standard_windivert_cleanup()
+            self._stop_own_engine_processes()
 
     def _relaunch_after_failed_spawn_locked(
         self,

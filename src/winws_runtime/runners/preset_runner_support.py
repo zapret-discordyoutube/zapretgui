@@ -5,31 +5,7 @@ from enum import Enum
 import hashlib
 import os
 import re
-import subprocess
-import time
-from typing import Callable
 
-from log.log import log
-
-
-try:
-    import psutil  # type: ignore[import-not-found]
-except Exception:  # pragma: no cover - local test environments may not ship psutil
-    class _PsutilStub:
-        class NoSuchProcess(Exception):
-            pass
-
-        class AccessDenied(Exception):
-            pass
-
-        class ZombieProcess(Exception):
-            pass
-
-        class Process:
-            def __init__(self, *_args, **_kwargs):
-                raise _PsutilStub.NoSuchProcess()
-
-    psutil = _PsutilStub()
 
 
 _INLINE_ARG_SPLIT_RE = re.compile(r"(?<=\S)\s+(?=--)")
@@ -252,65 +228,3 @@ def prune_at_config_cache(
             os.remove(path)
         except OSError:
             pass
-
-
-def wait_for_process_exit(process: subprocess.Popen, timeout: float = 3.0, probe_interval: float = 0.02) -> bool:
-    deadline = time.perf_counter() + max(0.05, float(timeout))
-    while time.perf_counter() < deadline:
-        if process.poll() is not None:
-            return True
-        time.sleep(max(0.005, float(probe_interval)))
-    return process.poll() is not None
-
-
-def wait_for_process_stable_start(
-    process: subprocess.Popen,
-    readiness_check: Callable[[], bool] | None = None,
-    *,
-    stable_window: float = 1.0,
-) -> bool:
-    startup_timeout = 2.5
-    stable_window = max(0.05, float(stable_window))
-    probe_interval = 0.05
-
-    start_time = time.perf_counter()
-    ready_since: float | None = None
-
-    while (time.perf_counter() - start_time) < startup_timeout:
-        if process.poll() is not None:
-            return False
-
-        is_ready = False
-        if readiness_check is not None:
-            try:
-                is_ready = bool(readiness_check())
-            except Exception:
-                is_ready = False
-        else:
-            is_ready = True
-
-        if is_ready:
-            if ready_since is None:
-                ready_since = time.perf_counter()
-            elif (time.perf_counter() - ready_since) >= stable_window:
-                return True
-        else:
-            ready_since = None
-
-        time.sleep(probe_interval)
-
-    return False
-
-
-def is_process_alive_with_expected_name(pid: int, exe_path: str) -> bool:
-    try:
-        process = psutil.Process(int(pid))
-        name = str(process.name() or "").lower()
-        expected = os.path.basename(str(exe_path or "")).lower()
-        if expected and name != expected:
-            return False
-        return process.is_running()
-    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-        return False
-    except Exception:
-        return False

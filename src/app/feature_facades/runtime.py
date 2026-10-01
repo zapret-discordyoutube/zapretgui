@@ -132,8 +132,15 @@ class RuntimeFeature:
         self,
         *,
         force_cleanup: bool = False,
-        cleanup_services: bool = False,
+        cleanup_services: bool = True,
     ) -> bool:
+        """Останавливает обход по просьбе пользователя.
+
+        Это окончательная остановка, а не шаг перезапуска, поэтому после неё
+        драйвер WinDivert выгружается (если им никто не пользуется) и его
+        служба исчезает из системы. Перезапуск и смена режима идут другим
+        путём и драйвер не трогают.
+        """
         return self.commands.stop(
             force_cleanup=force_cleanup,
             cleanup_services=cleanup_services,

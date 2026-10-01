@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import re
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -143,14 +144,33 @@ class OrchestraRunnerLaunchTests(unittest.TestCase):
         runner._generate_whitelist_file = MagicMock(return_value=True)
         runner._cleanup_old_logs = MagicMock(return_value=0)
         runner._create_startup_info = MagicMock(return_value=None)
-        runner._read_output = MagicMock()
+        self._stub_reader(runner, ready=True)
         return runner
 
-    def _fake_process(self):
+    @staticmethod
+    def _stub_reader(runner, *, ready: bool) -> None:
+        """Подменяет поток чтения вывода winws2.
+
+        ready=True — winws2 сообщил о готовности; ready=False — его вывод
+        закончился без строки готовности (процесс умер при запуске).
+        """
+
+        def _fake_read_output() -> None:
+            runner._startup_ready = bool(ready)
+            runner._startup_signal.set()
+
+        runner._read_output = MagicMock(side_effect=_fake_read_output)
+
+    def _fake_process(self, *, alive: bool = True, exit_code: int = 1):
         process = MagicMock()
-        process.poll.return_value = None
         process.pid = 4242
         process.stdout = io.StringIO("")
+        if alive:
+            process.poll.return_value = None
+            process.wait.side_effect = subprocess.TimeoutExpired("winws2", 0)
+        else:
+            process.poll.return_value = exit_code
+            process.wait.return_value = exit_code
         return process
 
     def test_start_keeps_shipped_config_untouched_and_passes_nothing_after_at_file(self) -> None:
@@ -175,6 +195,84 @@ class OrchestraRunnerLaunchTests(unittest.TestCase):
             self.assertIn("--lua-init=@user/lua/learned-strategies.lua", runtime_lines)
             self.assertEqual([line for line in runtime_lines if line.startswith("--debug")], ["--debug=1"])
             self.assertIn("--lua-desync=fake:blob=tls1:strategy=1", runtime_lines)
+
+    def test_start_is_confirmed_by_ready_line_not_by_a_fixed_pause(self) -> None:
+        from orchestra import orchestra_runner as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp))
+            Path(runner.config_path).write_text(SHIPPED_CONFIG, encoding="utf-8")
+            process = self._fake_process()
+
+            with (
+                patch.object(module.subprocess, "Popen", return_value=process),
+                patch.object(module.time, "sleep") as sleep,
+            ):
+                self.assertTrue(runner.start(), runner.last_start_error)
+
+            sleep.assert_not_called()
+            # После строки готовности — одно окно на ошибки Lua-скриптов,
+            # и это ожидание на хэндле процесса.
+            process.wait.assert_called_once_with(timeout=module.DEFAULT_SETTLE_SECONDS)
+
+    def test_start_fails_at_once_when_winws_dies_before_ready_line(self) -> None:
+        from orchestra import orchestra_runner as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp))
+            Path(runner.config_path).write_text(SHIPPED_CONFIG, encoding="utf-8")
+            self._stub_reader(runner, ready=False)
+            process = self._fake_process(alive=False, exit_code=34)
+
+            with (
+                patch.object(module.subprocess, "Popen", return_value=process),
+                patch.object(module.time, "sleep") as sleep,
+            ):
+                self.assertFalse(runner.start())
+
+            sleep.assert_not_called()
+            self.assertIsNone(runner.running_process)
+            self.assertIn("34", runner.last_start_error)
+
+    def test_stop_reports_failure_when_process_does_not_exit(self) -> None:
+        from orchestra import orchestra_runner as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp))
+            process = self._fake_process()
+            runner.running_process = process
+
+            with patch.object(module, "stop_process", return_value=False) as stop:
+                self.assertFalse(runner.stop())
+
+            stop.assert_called_once_with(process, timeout=module._PROCESS_STOP_TIMEOUT_SEC)
+            # Процесс не вышел — терять его нельзя.
+            self.assertIs(runner.running_process, process)
+
+    def test_stop_is_confirmed_by_process_exit(self) -> None:
+        from orchestra import orchestra_runner as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp))
+            runner.running_process = self._fake_process()
+            runner.locked_manager = MagicMock()
+            runner.locked_manager.locked_by_askey = {"tls": {}}
+            runner.locked_manager.strategy_history = {}
+
+            with patch.object(module, "stop_process", return_value=True):
+                self.assertTrue(runner.stop())
+
+            self.assertIsNone(runner.running_process)
+
+    def test_restart_has_no_pause_between_stop_and_start(self) -> None:
+        import inspect
+
+        from orchestra import orchestra_runner as module
+
+        # stop() возвращается после подтверждённого выхода процесса, поэтому
+        # пауза «для освобождения ресурсов» перед start() не нужна.
+        self.assertNotIn("sleep", inspect.getsource(module.OrchestraRunner.restart))
+        self.assertNotIn("time.sleep", inspect.getsource(module.OrchestraRunner.start))
 
     def test_start_fails_without_spawn_when_runtime_config_cannot_be_written(self) -> None:
         from orchestra import orchestra_runner as module

@@ -225,26 +225,5 @@ class DynamicLaunchAdviceTests(unittest.TestCase):
             self.assertIsNone(launch_conflicts.build_launch_conflict_advice())
 
 
-class ReadinessErrorConflictSuffixTests(unittest.TestCase):
-    def test_conflict_hint_is_appended_to_readiness_error(self) -> None:
-        from winws_runtime.health import windivert_diagnostics
-
-        hint = "Возможный конфликт: GoodbyeDPI.exe (PID 1234, C:\\GoodbyeDPI\\GoodbyeDPI.exe) держит WinDivert — закройте эту программу"
-
-        with patch.object(launch_conflicts, "build_windivert_conflict_hint", return_value=hint):
-            message = windivert_diagnostics.describe_windivert_readiness_failure(None)
-
-        self.assertIn("WinDivert ещё не готов к открытию фильтра", message)
-        self.assertIn("GoodbyeDPI.exe", message)
-
-    def test_error_stays_clean_without_conflicts(self) -> None:
-        from winws_runtime.health import windivert_diagnostics
-
-        with patch.object(launch_conflicts, "build_windivert_conflict_hint", return_value=None):
-            message = windivert_diagnostics.describe_windivert_readiness_failure(None)
-
-        self.assertEqual(message, "WinDivert ещё не готов к открытию фильтра")
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -46,6 +46,11 @@ class PresetLaunchStopWorker(QObject):
                 runtime_api = self._runtime_api
                 process_running = runtime_api.has_residual_processes(silent=True)
                 if (not process_running) and not self.force_cleanup:
+                    if self.cleanup_services:
+                        # Процесс уже не работает (например, упал), но драйвер
+                        # WinDivert мог остаться загруженным. Окончательная
+                        # остановка убирает и его.
+                        runtime_api.cleanup_windivert_service()
                     self.progress.emit("DPI уже остановлен")
                     self.finished.emit(True, "DPI уже был остановлен")
                     return

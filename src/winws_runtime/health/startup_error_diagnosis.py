@@ -98,11 +98,11 @@ def diagnose_startup_error(error: Exception, exe_path: str = None) -> str:
             diagnostics.append(f"❌ Причина: Уже запущен процесс winws (PID: {running_winws})")
             diagnostics.append("   Пытаемся автоматически завершить...")
 
-            # Пробуем автоматически завершить
+            # Пробуем автоматически завершить (только процессы из нашей папки)
             try:
-                from winws_runtime.runtime.system_ops import force_kill_all_winws_processes
+                from winws_runtime.runtime.system_ops import stop_own_winws_processes_runtime
 
-                if force_kill_all_winws_processes():
+                if stop_own_winws_processes_runtime():
                     diagnostics.append("   ✅ Процесс завершён. Попробуйте запустить снова")
                 else:
                     diagnostics.append("   ❌ Не удалось завершить процесс")
@@ -113,21 +113,11 @@ def diagnose_startup_error(error: Exception, exe_path: str = None) -> str:
 
             return "\n".join(diagnostics)
 
-        # Не смогли определить точную причину - пробуем агрессивную очистку
-        diagnostics.append("❌ Причина не определена, выполняем агрессивную очистку...")
-
-        # Пробуем агрессивную очистку всего
-        try:
-            from winws_runtime.runtime.system_ops import aggressive_windivert_cleanup_runtime
-
-            aggressive_windivert_cleanup_runtime()
-
-            diagnostics.append("   ✅ Очистка выполнена. Попробуйте запустить снова")
-        except Exception as cleanup_err:
-            diagnostics.append(f"   ⚠ Ошибка очистки: {cleanup_err}")
-
-        diagnostics.append("")
-        diagnostics.append("   Если ошибка повторяется:")
+        # Точную причину установить не удалось. Диагностика только называет
+        # возможные причины: менять состояние системы «на всякий случай» —
+        # не её дело.
+        diagnostics.append("❌ Причина не определена")
+        diagnostics.append("   Возможные решения:")
         diagnostics.append("   1. Добавьте папку программы в исключения антивируса")
         diagnostics.append("   2. Перезагрузите компьютер")
         return "\n".join(diagnostics)
