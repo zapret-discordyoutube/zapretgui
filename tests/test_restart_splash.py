@@ -220,6 +220,7 @@ class SplashSpecTests(unittest.TestCase):
         from PyQt6.QtWidgets import QWidget
 
         from updater.ui.restart_splash_spec import build_restart_splash_spec
+        from updater.ui.fun_texts import phrases as fun_phrases
 
         host = QWidget()
         host.resize(1000, 800)
@@ -237,7 +238,7 @@ class SplashSpecTests(unittest.TestCase):
         self.assertIn("v2.0", spec.title)
         self.assertIn("v1.9", spec.subtitle)
         self.assertEqual(len(spec.stages), 3)
-        self.assertTrue(spec.jokes)
+        self.assertCountEqual(spec.jokes, fun_phrases("restarting", "ru"))
 
         hidden = build_restart_splash_spec(
             host, dialog_widget=None, current_version="1.9", target_version="2.0", language="en"

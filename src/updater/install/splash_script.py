@@ -134,7 +134,6 @@ try {
 
 $stages = @($spec.texts.stages)
 $jokes = @($spec.jokes | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
-$random = New-Object System.Random
 
 # Изменяемое состояние живёт в таблице: обработчики событий WinForms видят её
 # без путаницы областей видимости PowerShell.
@@ -154,6 +153,7 @@ $S = @{
     Joke         = ''
     PrevJoke     = ''
     JokeAt       = -10.0
+    JokeIndex    = 0
     Shown        = $false
     Snapshot     = (-not [string]::IsNullOrWhiteSpace($SnapshotPath))
     TickErrors   = 0
@@ -172,11 +172,11 @@ $S = @{
 }
 
 function Next-Joke {
+    # Шутки уже перемешаны программой: идём по кругу, без повторов подряд.
     if ($jokes.Count -eq 0) { return }
-    $choices = @($jokes | Where-Object { [string]$_ -ne $S.Joke })
-    if ($choices.Count -eq 0) { $choices = $jokes }
     $S.PrevJoke = $S.Joke
-    $S.Joke = [string]$choices[$random.Next($choices.Count)]
+    $S.Joke = [string]$jokes[$S.JokeIndex % $jokes.Count]
+    $S.JokeIndex++
     $S.JokeAt = $S.Clock.Elapsed.TotalSeconds
 }
 

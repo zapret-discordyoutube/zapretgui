@@ -1,8 +1,9 @@
 """Строка с весёлыми фразами, пока идёт работа.
 
 Фразы меняются раз в несколько секунд: старая уплывает вверх и тает, новая
-выплывает снизу. Подряд одна и та же фраза не повторяется. Без «живых
-анимаций» фразы меняются без движения. Остановленный тикер ничего не делает.
+выплывает снизу. Фразы идут в случайном порядке, и ни одна не повторяется,
+пока не прозвучали все остальные. Без «живых анимаций» фразы меняются без
+движения. Остановленный тикер ничего не делает.
 """
 
 from __future__ import annotations
@@ -33,6 +34,8 @@ class FunTicker(QWidget):
         self.setFixedHeight(QFontMetrics(font).height() + 8)
         self._rng = random.Random(seed)
         self._phrases: list[str] = []
+        # Ещё не показанные фразы текущего круга, в перемешанном порядке.
+        self._bag: list[str] = []
         self._text = ""
         self._previous = ""
         self._t = 1.0
@@ -63,6 +66,7 @@ class FunTicker(QWidget):
         if cleaned == self._phrases:
             return
         self._phrases = cleaned
+        self._bag = []
         if self.is_running():
             self.next_phrase()
 
@@ -80,8 +84,13 @@ class FunTicker(QWidget):
     def next_phrase(self) -> None:
         if not self._phrases:
             return
-        choices = [item for item in self._phrases if item != self._text] or self._phrases
-        self._set_text(self._rng.choice(choices), animate=True)
+        if not self._bag:
+            self._bag = list(self._phrases)
+            self._rng.shuffle(self._bag)
+            # На стыке кругов только что показанная фраза не идёт первой.
+            if len(self._bag) > 1 and self._bag[-1] == self._text:
+                self._bag[0], self._bag[-1] = self._bag[-1], self._bag[0]
+        self._set_text(self._bag.pop(), animate=True)
 
     def _set_text(self, text: str, *, animate: bool) -> None:
         self._previous = self._text

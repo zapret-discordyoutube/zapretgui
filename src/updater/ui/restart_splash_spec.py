@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import random
+
 from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, QPoint, QRect
 from PyQt6.QtGui import QColor, QGuiApplication
 from PyQt6.QtWidgets import QApplication, QWidget
@@ -80,6 +82,12 @@ def _logo_png(side: int = _LOGO_SIDE) -> bytes:
     return bytes(data)
 
 
+def _shuffled(items) -> list[str]:
+    items = list(items)
+    random.shuffle(items)
+    return items
+
+
 def _place(dialog_widget: QWidget | None, host: QWidget) -> QRect:
     """Место окна обновления; у скрытого окна — такое же по центру программы."""
     if dialog_widget is not None and dialog_widget.isVisible():
@@ -129,7 +137,9 @@ def build_restart_splash_spec(
         footer=t("footer", "Окно закроется само, когда откроется новая версия"),
         window_title=t("window_title", "Zapret — обновление"),
         files_template=t("files_template", "{done} из {total} файлов"),
-        jokes=tuple(fun_phrases("restarting", language)),
+        # Окно показывает шутки по порядку: перемешиваем здесь, чтобы каждое
+        # обновление начиналось с другой и они не повторялись.
+        jokes=tuple(_shuffled(fun_phrases("restarting", language))),
         colors=splash_colors(get_theme_tokens()),
         logo_png=_logo_png(),
     )

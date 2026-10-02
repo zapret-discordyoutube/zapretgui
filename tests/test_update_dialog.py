@@ -385,6 +385,18 @@ class FunTextsTests(unittest.TestCase):
             self.assertTrue(phrases(kind, "en"), kind)
         self.assertNotEqual(phrases("downloading", "ru"), phrases("downloading", "en"))
 
+    def test_joke_pools_are_big_unique_and_fit_one_line(self) -> None:
+        # Чтобы от обновления к обновлению текст был разный, наборы большие;
+        # окно-продолжение не переносит строки, поэтому фразы короткие.
+        minimum = {"preparing": 10, "downloading": 20, "installing": 10, "failed": 6, "restarting": 15, "whats_new": 6}
+        for language in ("ru", "en"):
+            for kind, count in minimum.items():
+                pool = phrases(kind, language)
+                self.assertGreaterEqual(len(pool), count, (language, kind))
+                self.assertEqual(len(pool), len(set(pool)), (language, kind))
+                for phrase in pool:
+                    self.assertLessEqual(len(phrase), 70, phrase)
+
 
 if __name__ == "__main__":
     unittest.main()

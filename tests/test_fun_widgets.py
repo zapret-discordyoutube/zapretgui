@@ -96,6 +96,29 @@ class TickerTests(unittest.TestCase):
         self.assertFalse(ticker.is_running())
         self.assertEqual(ticker.text(), "готово")
 
+    def test_ticker_shows_every_phrase_once_before_repeating(self) -> None:
+        phrases = [f"фраза {index}" for index in range(12)]
+        for seed in range(20):
+            ticker = FunTicker(seed=seed)
+            self.addCleanup(ticker.deleteLater)
+            ticker.set_phrases(phrases)
+            shown = []
+            for _ in range(len(phrases) * 3):
+                ticker.next_phrase()
+                if shown:
+                    self.assertNotEqual(ticker.text(), shown[-1])
+                shown.append(ticker.text())
+            for start in range(0, len(shown), len(phrases)):
+                self.assertCountEqual(shown[start : start + len(phrases)], phrases)
+
+    def test_single_phrase_ticker_keeps_showing_it(self) -> None:
+        ticker = FunTicker(seed=1)
+        self.addCleanup(ticker.deleteLater)
+        ticker.set_phrases(["одна"])
+        for _ in range(3):
+            ticker.next_phrase()
+            self.assertEqual(ticker.text(), "одна")
+
     def test_empty_ticker_does_not_start(self) -> None:
         ticker = FunTicker()
         self.addCleanup(ticker.deleteLater)
