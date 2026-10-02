@@ -4,6 +4,7 @@
 import time
 
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QColor
 
 from qfluentwidgets import BodyLabel, InfoBar, SubtitleLabel
 
@@ -63,6 +64,20 @@ from ui.accessibility import set_state_text
 def _premium_action_runtime_running(page) -> bool:
     runtime = getattr(page, "__dict__", {}).get("_premium_action_runtime")
     return bool(runtime is not None and runtime.is_running())
+
+
+def _set_days_label_color(label, field: str) -> None:
+    """Задаёт цвет надписи сразу для обеих тем.
+
+    Fluent-надпись сама переключает цвет при смене темы. Обычный
+    setStyleSheet она при этом затирает своим стилем, поэтому цвет
+    задаётся только так. *_text — тёмные оттенки для светлой темы: яркие
+    success/warning/error на светлом фоне почти не читаются.
+    """
+    label.setTextColor(
+        QColor(getattr(get_semantic_palette("light"), field)),
+        QColor(getattr(get_semantic_palette("dark"), field)),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -214,7 +229,6 @@ class PremiumPage(BasePage):
         )
 
     def _render_days_label(self) -> None:
-        semantic = get_semantic_palette()
         kind = self._days_state_kind
         days = self._days_state_value
 
@@ -223,26 +237,26 @@ class PremiumPage(BasePage):
                 self._tr("page.premium.days_label.normal", "Осталось дней: {days}", days=days)
             )
             set_state_text(self.days_label, f"Осталось дней Premium: {days}")
-            self.days_label.setStyleSheet(f"color: {semantic.success};")
+            _set_days_label_color(self.days_label, "success_text")
             return
         if kind == "warning":
             self.days_label.setText(
                 self._tr("page.premium.days_label.warning", "⚠️ Осталось дней: {days}", days=days)
             )
             set_state_text(self.days_label, f"Осталось дней Premium: {days}")
-            self.days_label.setStyleSheet(f"color: {semantic.warning};")
+            _set_days_label_color(self.days_label, "warning_text")
             return
         if kind == "urgent":
             self.days_label.setText(
                 self._tr("page.premium.days_label.urgent", "⚠️ Срочно продлите! Осталось: {days}", days=days)
             )
             set_state_text(self.days_label, f"Premium срочно нужно продлить, осталось дней: {days}")
-            self.days_label.setStyleSheet(f"color: {semantic.error};")
+            _set_days_label_color(self.days_label, "error_text")
             return
 
         self.days_label.setText("")
         set_state_text(self.days_label, "Premium-подписка не активна")
-        self.days_label.setStyleSheet("")
+        self.days_label.setTextColor()
 
     def _set_activation_status(
         self,
