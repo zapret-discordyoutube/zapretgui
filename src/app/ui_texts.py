@@ -190,7 +190,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Detecting process state",
     },
     "page.control.summary.preset.caption": {
-        "ru": "Текущий preset",
+        "ru": "Текущий пресет",
         "en": "Current preset",
     },
     "page.control.summary.profiles.caption": {

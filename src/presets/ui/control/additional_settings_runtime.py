@@ -26,11 +26,14 @@ class ControlTopSummaryState:
         preset_tooltip: str,
         profile_count: int | None,
         profile_tab_visible: bool = True,
+        profile_icons: tuple[tuple[str, str], ...] = (),
     ):
         self.preset_text = str(preset_text or "")
         self.preset_tooltip = str(preset_tooltip or "")
         self.profile_count = profile_count
         self.profile_tab_visible = bool(profile_tab_visible)
+        # Значки сервисов из включённых профилей: (имя значка, цвет).
+        self.profile_icons = tuple(profile_icons or ())
 
 
 def create_additional_settings_worker(request_id: int, create_load_worker, *, launch_method: str, parent=None):
@@ -73,6 +76,7 @@ def create_top_summary_worker(
     *,
     launch_method: str,
     get_enabled_profile_count_fallback=None,
+    get_enabled_profile_icons_snapshot=None,
     parent=None,
 ):
     clean_launch_method = str(launch_method or "").strip()
@@ -105,6 +109,13 @@ def create_top_summary_worker(
             except Exception as exc:
                 log(f"ControlTopSummaryWorker: не удалось пересчитать количество profile: {exc}", "DEBUG")
 
+        profile_icons: tuple[tuple[str, str], ...] = ()
+        if callable(get_enabled_profile_icons_snapshot):
+            try:
+                profile_icons = tuple(get_enabled_profile_icons_snapshot(clean_launch_method) or ())
+            except Exception as exc:
+                log(f"ControlTopSummaryWorker: не удалось прочитать значки profile: {exc}", "DEBUG")
+
         profile_tab_visible = True
         if callable(read_selected_preset_source):
             try:
@@ -122,6 +133,7 @@ def create_top_summary_worker(
             preset_tooltip=preset_tooltip,
             profile_count=profile_count,
             profile_tab_visible=profile_tab_visible,
+            profile_icons=profile_icons,
         )
 
     return ControlTopSummaryWorker(

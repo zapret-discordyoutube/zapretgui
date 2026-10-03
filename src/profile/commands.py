@@ -43,6 +43,10 @@ def get_enabled_profile_count_snapshot(profile_services, launch_method: str) -> 
     return _profile_preset_service(profile_services, launch_method).get_enabled_profile_count_snapshot()
 
 
+def get_enabled_profile_icons_snapshot(profile_services, launch_method: str):
+    return _profile_preset_service(profile_services, launch_method).get_enabled_profile_icons_snapshot()
+
+
 def get_profile_strategy_display_state(profile_services, launch_method: str, max_items: int = 2):
     return _profile_preset_service(profile_services, launch_method).get_profile_strategy_display_state(max_items=max_items)
 

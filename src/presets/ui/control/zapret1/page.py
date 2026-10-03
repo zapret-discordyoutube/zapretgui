@@ -543,6 +543,9 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         if callable(profiles_visible_setter):
             profiles_visible_setter(bool(getattr(state, "profile_tab_visible", True)))
         summary.set_profile_count(profile_count)
+        profile_icons_setter = getattr(summary, "set_profile_icons", None)
+        if callable(profile_icons_setter):
+            profile_icons_setter(getattr(state, "profile_icons", ()))
         if profile_count is None:
             self._schedule_top_summary_profile_retry()
         else:

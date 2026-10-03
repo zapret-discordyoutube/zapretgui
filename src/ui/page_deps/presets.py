@@ -52,6 +52,7 @@ def build_control_page_kwargs(
             presets_feature.read_selected_preset_source,
             launch_method=method,
             get_enabled_profile_count_fallback=profile_feature.count_enabled_profiles,
+            get_enabled_profile_icons_snapshot=profile_feature.get_enabled_profile_icons_snapshot,
             parent=parent,
         )
 

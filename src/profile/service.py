@@ -547,6 +547,38 @@ class ProfilePresetService:
             return None
         return int(details.get("enabled_profile_count") or 0)
 
+    def get_enabled_profile_icons_snapshot(self) -> tuple[tuple[str, str], ...] | None:
+        """Значки включённых профилей без повторов: (имя значка, цвет), в порядке списка.
+
+        Профилей может быть десятки на один сервис (YouTube TCP, YouTube QUIC...),
+        поэтому одинаковые значки схлопываются. None — список профилей ещё не загружен.
+        """
+        payload = self._profile_list_snapshot
+        if payload is None:
+            return None
+        current_file_name = self._current_selected_preset_file_name()
+        payload_file_name = str(getattr(payload, "selected_preset_file_name", "") or "").strip()
+        if current_file_name and payload_file_name and current_file_name != payload_file_name:
+            return None
+
+        from profile.icons import resolve_profile_icon
+
+        seen: set[str] = set()
+        named: list[tuple[str, str]] = []
+        generic: list[tuple[str, str]] = []
+        for item in payload.items:
+            if not (item.in_preset and item.enabled):
+                continue
+            icon = resolve_profile_icon(item.display_name, item.match_lines)
+            if icon.icon_name in seen:
+                continue
+            seen.add(icon.icon_name)
+            # Узнаваемые значки сервисов идут раньше значков-инициалов.
+            (generic if icon.icon_name.startswith("profile-initials:") else named).append(
+                (icon.icon_name, icon.color)
+            )
+        return tuple(named + generic)
+
     def get_profile_selection_details(self, *, selected_profile_key: str = "", max_items: int = 2) -> dict[str, Any]:
         payload = self._profile_list_snapshot
         if payload is None:

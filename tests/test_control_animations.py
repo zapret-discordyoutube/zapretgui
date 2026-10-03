@@ -16,6 +16,7 @@ import ui.widgets.bypass_scene as scene_module
 import ui.widgets.fun.mascot as mascot_module
 import ui.widgets.motion_icon as motion_module
 import ui.widgets.soft_visibility as soft_module
+import ui.widgets.tile_grid as tile_module
 from ui.widgets.soft_visibility import set_visible_softly, soft_visibility_target
 from donater.premium_display import TIER_ACTIVE, TIER_FREE, PremiumDisplay
 from presets.ui.control.status_hero_card import StatusHeroCard
@@ -482,6 +483,115 @@ class ControlTopSummaryAnimationTests(unittest.TestCase):
         self.summary.set_premium(PremiumDisplay(tier=TIER_ACTIVE))
         self.assertIsNotNone(star._glow)
         self.assertEqual(star.gesture(), GESTURE_BOUNCE)
+
+
+class ControlTopSummaryTilesTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def setUp(self) -> None:
+        self._enabled = True
+        for module in (summary_module, motion_module, tile_module):
+            patcher = mock.patch.object(module, "are_live_animations_enabled", side_effect=lambda: self._enabled)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.summary = ControlTopSummaryWidget(language="ru", mode_value="Zapret 2")
+        self.host = _host(self, self.summary)
+        self.host.resize(1200, 200)
+        self.summary.set_preset("Default v1")
+        self.summary.set_profile_count(70)
+
+    ICONS = (
+        ("simple:youtube:YT", "#FF0000"),
+        ("simple:discord:DI", "#5865F2"),
+        ("simple:telegram:TG", "#229ED9"),
+    )
+
+    def test_summary_items_are_tiles_and_only_links_are_clickable(self) -> None:
+        self.host.show()
+        QApplication.processEvents()
+        items = (self.summary.preset_item, self.summary.profiles_item, self.summary.mode_item, self.summary.premium_item)
+
+        self.assertEqual([item.is_clickable() for item in items], [True, True, False, True])
+        self.assertEqual(self.summary.columns(), 4)
+        self.assertEqual({item.height() for item in items}, {summary_module.TILE_ROW_HEIGHT})
+        self.assertGreater(self.summary.preset_item.width(), self.summary.mode_item.width())
+
+    def test_tiles_wrap_into_two_rows_in_a_narrow_window(self) -> None:
+        self.host.resize(560, 300)
+        self.host.show()
+        QApplication.processEvents()
+
+        self.assertEqual(self.summary.columns(), 2)
+        self.assertEqual(self.summary.mode_item.y(), summary_module.TILE_ROW_HEIGHT + 12)
+
+    def test_hidden_profiles_tile_frees_its_place(self) -> None:
+        self.host.show()
+        QApplication.processEvents()
+        self.summary.set_profiles_visible(False)
+        QApplication.processEvents()
+
+        self.assertEqual(self.summary.columns(), 3)
+
+    def test_long_preset_name_is_cut_with_ellipsis_and_kept_in_tooltip(self) -> None:
+        long_name = "Очень длинное имя пресета для проверки обрезки " * 3
+        self.host.show()
+        QApplication.processEvents()
+        self.summary.set_preset(long_name.strip())
+        item = self.summary.preset_item
+
+        self.assertTrue(item._value_label.text().endswith("…"))
+        self.assertEqual(item.toolTip(), long_name.strip())
+        self.assertIn(long_name.strip(), item.accessibleName())
+
+        self.summary.set_preset("Default v1")
+        self.assertEqual(item._value_label.text(), "Default v1")
+        self.assertEqual(item.toolTip(), "")
+
+    def test_profile_icons_pop_in_when_visible(self) -> None:
+        self.host.show()
+        QApplication.processEvents()
+        self.summary.set_profile_icons(self.ICONS)
+        item = self.summary.profiles_item
+
+        self.assertEqual(item.icon_strip(), self.ICONS)
+        self.assertEqual(item._strip_pop.state(), item._strip_pop.State.Running)
+        self.assertEqual(item._strip_t, 0.0)
+
+        # Тот же набор значков заново не анимируется.
+        item._strip_pop.setCurrentTime(item._strip_pop.duration())
+        self.summary.set_profile_icons(list(self.ICONS))
+        self.assertNotEqual(item._strip_pop.state(), item._strip_pop.State.Running)
+        self.assertEqual(item._strip_t, 1.0)
+
+    def test_profile_icons_appear_at_once_when_hidden_or_animations_off(self) -> None:
+        self.summary.set_profile_icons(self.ICONS)
+        self.assertIsNone(self.summary.profiles_item._strip_pop)
+        self.assertEqual(self.summary.profiles_item._strip_t, 1.0)
+
+        self._enabled = False
+        self.host.show()
+        self.summary.set_profile_icons(self.ICONS[:2])
+        self.assertIsNone(self.summary.profiles_item._strip_pop)
+        self.assertEqual(self.summary.profiles_item._strip_t, 1.0)
+
+    def test_strip_takes_only_the_free_room_and_paints(self) -> None:
+        self.host.show()
+        QApplication.processEvents()
+        item = self.summary.profiles_item
+        many = tuple((f"profile-initials:{index}", "#3B82F6") for index in range(12))
+        self.summary.set_profile_icons(many)
+
+        capacity = item.strip_capacity()
+        self.assertGreater(capacity, 0)
+        self.assertLessEqual(capacity, summary_module.STRIP_MAX_ICONS)
+
+        item._strip_t = 0.5
+        image = QPixmap(item.size())
+        image.fill(QColor(0, 0, 0, 0))
+        item.render(image)
+        self.assertFalse(image.isNull())
 
 
 class ControlTopSummaryPendingChangeTests(unittest.TestCase):

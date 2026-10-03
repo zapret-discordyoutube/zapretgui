@@ -74,6 +74,9 @@ class ProfileFeature:
     def get_enabled_profile_count_snapshot(self, launch_method: str) -> int | None:
         return self._commands().get_enabled_profile_count_snapshot(self, launch_method)
 
+    def get_enabled_profile_icons_snapshot(self, launch_method: str):
+        return self._commands().get_enabled_profile_icons_snapshot(self, launch_method)
+
     def get_profile_strategy_display_state(self, launch_method: str, max_items: int = 2):
         return self._commands().get_profile_strategy_display_state(self, launch_method, max_items=max_items)
 

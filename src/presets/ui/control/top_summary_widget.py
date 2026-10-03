@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QEasingCurve, QRectF, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter
-from PyQt6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QVBoxLayout
 
-from qfluentwidgets import CaptionLabel, FlowLayout, StrongBodyLabel, SubtitleLabel
+from qfluentwidgets import CaptionLabel, StrongBodyLabel, SubtitleLabel, isDarkTheme
 
 from app.ui_texts import tr as tr_catalog
 from donater.premium_display import TIER_UNKNOWN, PremiumDisplay
@@ -12,6 +12,7 @@ from presets.ui.control.top_summary_plan import build_premium_summary, build_pro
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
 from ui.widgets.motion_icon import MotionIcon
+from ui.widgets.tile_grid import CHEVRON_ROOM, SoftTile, TileGrid
 
 
 # Число профилей не перескакивает, а быстро «докручивается» до нового значения.
@@ -26,6 +27,16 @@ CHANGE_HIGHLIGHT_ALPHA = 0.22
 # Если изменение случилось на другой странице, его показывают при возврате
 # на главную — с небольшой паузой, чтобы переход страницы успел закончиться.
 PENDING_CHANGE_DELAY_MS = 220
+# Плитки сводки: поля внутри плитки, наименьшая ширина и высота ряда.
+TILE_MARGIN_X = 14
+TILE_MARGIN_Y = 10
+TILE_MIN_WIDTH = 170
+TILE_ROW_HEIGHT = 72
+# Ряд значков сервисов в плитке «Профили»: значки выскакивают по очереди.
+STRIP_ICON_SIZE = 18
+STRIP_STEP = 24
+STRIP_MAX_ICONS = 6
+STRIP_POP_MS = 520
 
 
 def set_visible_if_changed(widget, visible: bool) -> bool:
@@ -54,8 +65,8 @@ def set_text_if_changed(widget, text: str) -> bool:
     return True
 
 
-class ControlTopSummaryItem(QWidget):
-    clicked = pyqtSignal()
+class ControlTopSummaryItem(SoftTile):
+    """Плитка сводки: значок, подпись и значение. Нажимаемая ведёт в свой раздел."""
 
     def __init__(
         self,
@@ -66,9 +77,12 @@ class ControlTopSummaryItem(QWidget):
         initial_icon_delay_ms: int = 0,
         parent=None,
     ):
-        super().__init__(parent)
+        super().__init__(parent, clickable=clickable)
         self._icon_name = str(icon_name or "fa5s.circle")
-        self._clickable = bool(clickable)
+        self._shown_value = ""
+        self._strip: tuple[tuple[str, str], ...] = ()
+        self._strip_t = 1.0
+        self._strip_pop = None
         self._last_texts: tuple[str, str, str] | None = None
         self._last_icon_theme_key: tuple[str, str] | None = None
         self._icon_override = None
@@ -76,17 +90,13 @@ class ControlTopSummaryItem(QWidget):
         self._caption_label = CaptionLabel(self)
         self._value_label = SubtitleLabel(self) if prominent else StrongBodyLabel(self)
         self._details_label = CaptionLabel(self)
-        self._details_label.setWordWrap(True)
         self._details_label.setVisible(False)
 
-        if self._clickable:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
         layout = QHBoxLayout(self)
-        # Снизу небольшой запас под акцентную черту при смене значения.
-        layout.setContentsMargins(0, 0, 0, 3)
-        layout.setSpacing(10)
+        # Справа место под стрелку, которая проявляется при наведении.
+        right = TILE_MARGIN_X + (CHEVRON_ROOM if clickable else 0)
+        layout.setContentsMargins(TILE_MARGIN_X, TILE_MARGIN_Y, right, TILE_MARGIN_Y)
+        layout.setSpacing(12)
         layout.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
         text_layout = QVBoxLayout()
@@ -95,9 +105,9 @@ class ControlTopSummaryItem(QWidget):
         text_layout.addWidget(self._caption_label)
         text_layout.addWidget(self._value_label)
         text_layout.addWidget(self._details_label)
+        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(text_layout, 1)
 
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self._theme_refresh = None
         delay_ms = max(0, int(initial_icon_delay_ms or 0))
         self._schedule_icon_refresh(delay_ms)
@@ -116,9 +126,9 @@ class ControlTopSummaryItem(QWidget):
         caption_text, value_text, details_text = next_texts
         set_text_if_changed(self._caption_label, caption_text)
         set_visible_if_changed(self._caption_label, bool(caption_text.strip()))
-        set_text_if_changed(self._value_label, value_text)
-        set_text_if_changed(self._details_label, details_text)
+        self._shown_value = value_text
         set_visible_if_changed(self._details_label, bool(details_text.strip()))
+        self._fit_texts()
         accessible_parts = []
         if caption_text.strip():
             accessible_parts.append(f"{caption_text}: {value_text}")
@@ -130,7 +140,7 @@ class ControlTopSummaryItem(QWidget):
             accessible_text = ", ".join(accessible_parts)
             description = (
                 "Нажмите Enter или Пробел, чтобы открыть связанный раздел."
-                if self._clickable
+                if self.is_clickable()
                 else None
             )
             set_control_accessibility(self, name=accessible_text, description=description)
@@ -148,9 +158,121 @@ class ControlTopSummaryItem(QWidget):
         self.__dict__["_icon_override"] = pixmap
         self._icon_label.setPixmap(pixmap)
 
+    def set_icon_strip(self, icons) -> None:
+        """Ряд маленьких значков справа: (имя значка, цвет). Новые выскакивают по очереди."""
+        strip = tuple((str(name or ""), str(color or "")) for name, color in (icons or ()) if name)
+        if strip == self._strip:
+            return
+        self._strip = strip
+        self._strip_t = 1.0
+        if strip and are_live_animations_enabled() and self.isVisible():
+            pop = self._strip_pop
+            if pop is None:
+                pop = QVariantAnimation(self)
+                pop.setStartValue(0.0)
+                pop.setEndValue(1.0)
+                pop.setDuration(STRIP_POP_MS)
+                pop.valueChanged.connect(self._on_strip_pop_value)
+                self._strip_pop = pop
+            pop.stop()
+            self._strip_t = 0.0
+            pop.start()
+        self.update()
+
+    def icon_strip(self) -> tuple[tuple[str, str], ...]:
+        return self._strip
+
+    def _on_strip_pop_value(self, value) -> None:
+        try:
+            self._strip_t = float(value)
+        except (TypeError, ValueError):
+            return
+        self.update()
+
+    def strip_capacity(self) -> int:
+        """Сколько значков помещается между текстом и правым краем плитки."""
+        metrics_width = max(
+            self._caption_label.fontMetrics().horizontalAdvance(self._caption_label.text()),
+            self._value_label.fontMetrics().horizontalAdvance(self._value_label.text()),
+        )
+        text_right = self._value_label.geometry().left() + metrics_width + 14
+        strip_right = self.width() - TILE_MARGIN_X - (CHEVRON_ROOM if self.is_clickable() else 0)
+        return max(0, min(STRIP_MAX_ICONS, int((strip_right - text_right) // STRIP_STEP)))
+
+    def _paint_icon_strip(self, painter: QPainter) -> None:
+        capacity = self.strip_capacity()
+        if not self._strip or capacity <= 0:
+            return
+        from profile.ui.profile_icon import profile_icon_pixmap
+
+        # Если все значки не помещаются, последнее место занимает подпись «+N».
+        hidden = len(self._strip) - capacity
+        shown = self._strip[: capacity - 1] if hidden > 0 else self._strip[:capacity]
+        hidden = len(self._strip) - len(shown)
+        slots = len(shown) + (1 if hidden > 0 else 0)
+        strip_right = self.width() - TILE_MARGIN_X - (CHEVRON_ROOM if self.is_clickable() else 0)
+        left = strip_right - slots * STRIP_STEP + (STRIP_STEP - STRIP_ICON_SIZE)
+        center_y = self.height() / 2
+        if hidden > 0:
+            painter.setOpacity(min(1.0, self._strip_t * 1.4))
+            painter.setFont(self._caption_label.font())
+            painter.setPen(QColor(255, 255, 255, 165) if isDarkTheme() else QColor(0, 0, 0, 150))
+            painter.drawText(
+                QRectF(left + len(shown) * STRIP_STEP - 3, 0, STRIP_STEP + 6, self.height()),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                f"+{hidden}",
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
+        for index, (icon_name, color) in enumerate(shown):
+            # Каждый следующий значок выскакивает чуть позже предыдущего.
+            local = min(1.0, max(0.0, (self._strip_t * (1.0 + 0.12 * len(shown)) - 0.12 * index)))
+            if local <= 0.0:
+                continue
+            # Выскакивает с небольшим перелётом и садится на место.
+            scale = 1.0 + 2.70158 * (local - 1.0) ** 3 + 1.70158 * (local - 1.0) ** 2
+            pixmap = profile_icon_pixmap(icon_name, color=color, size=STRIP_ICON_SIZE)
+            if pixmap.isNull():
+                continue
+            side = STRIP_ICON_SIZE * scale
+            center_x = left + index * STRIP_STEP + STRIP_ICON_SIZE / 2
+            painter.setOpacity(min(1.0, local * 1.6))
+            painter.drawPixmap(
+                QRectF(center_x - side / 2, center_y - side / 2, side, side), pixmap, QRectF(pixmap.rect())
+            )
+        painter.setOpacity(1.0)
+
     def show_value_frame(self, value: str) -> None:
         """Промежуточный кадр анимации: меняет только видимый текст значения."""
+        self._shown_value = str(value or "")
+        self._fit_texts()
+
+    def _fit_texts(self) -> None:
+        """Длинное значение (имя пресета) не вылезает из плитки: обрезается с «…»."""
+        value = self._shown_value
+        details = self._last_texts[2] if self._last_texts else ""
+        tooltip = ""
+        if self.isVisible():
+            room = self.width() - self._value_label.geometry().left() - self.layout().contentsMargins().right()
+            if room > 20:
+                fitted = self._value_label.fontMetrics().elidedText(value, Qt.TextElideMode.ElideRight, room)
+                if fitted != value:
+                    tooltip = self._last_texts[1] if self._last_texts else value
+                    value = fitted
+                details = self._details_label.fontMetrics().elidedText(details, Qt.TextElideMode.ElideRight, room)
         set_text_if_changed(self._value_label, value)
+        set_text_if_changed(self._details_label, details)
+        if self.toolTip() != tooltip:
+            from ui.fluent_widgets import set_tooltip
+
+            set_tooltip(self, tooltip)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._fit_texts()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._fit_texts()
 
     def bounce_icon(self) -> None:
         self._icon_label.bounce()
@@ -207,10 +329,21 @@ class ControlTopSummaryItem(QWidget):
         if pop is not None and pop.state() != QVariantAnimation.State.Stopped:
             pop.stop()
             self._on_change_pop_finished()
+        strip_pop = self._strip_pop
+        if strip_pop is not None:
+            strip_pop.stop()
+        self._strip_t = 1.0
         super().hideEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         super().paintEvent(event)
+        if self._strip:
+            strip_painter = QPainter(self)
+            strip_painter.setRenderHints(
+                QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform
+            )
+            self._paint_icon_strip(strip_painter)
+            strip_painter.end()
         t = float(self.__dict__.get("_change_t", 0.0) or 0.0)
         if t <= 0.0:
             return
@@ -240,18 +373,6 @@ class ControlTopSummaryItem(QWidget):
         painter.drawRoundedRect(QRectF(target.left(), bar_y, target.width() * sweep, 2.0), 1.0, 1.0)
         painter.end()
 
-    def mousePressEvent(self, event):  # noqa: N802
-        if self._clickable and event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(event)
-
-    def keyPressEvent(self, event):  # noqa: N802
-        if self._clickable and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
-            self.clicked.emit()
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
     def _refresh_icon(self, tokens=None) -> None:
         from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 
@@ -280,13 +401,13 @@ class ControlTopSummaryItem(QWidget):
         self._refresh_icon()
 
 
-class ControlTopSummaryWidget(QWidget):
+class ControlTopSummaryWidget(TileGrid):
     presetClicked = pyqtSignal()
     profilesClicked = pyqtSignal()
     premiumClicked = pyqtSignal()
 
     def __init__(self, *, language: str, mode_value: str, initial_icon_delay_ms: int = 0, parent=None):
-        super().__init__(parent)
+        super().__init__(parent, min_tile_width=TILE_MIN_WIDTH, spacing=12, row_height=TILE_ROW_HEIGHT)
         self._language = str(language or "ru")
         self._mode_value = str(mode_value or "")
         self._preset_value = ""
@@ -324,18 +445,11 @@ class ControlTopSummaryWidget(QWidget):
         self.profiles_item.clicked.connect(self.profilesClicked.emit)
         self.premium_item.clicked.connect(self.premiumClicked.emit)
 
-        layout = FlowLayout(self, needAni=False, isTight=True)
-        layout.setContentsMargins(0, 2, 0, 0)
-        layout.setHorizontalSpacing(36)
-        layout.setVerticalSpacing(14)
-        layout.addWidget(self.preset_item)
-        layout.addWidget(self.profiles_item)
-        layout.addWidget(self.mode_item)
-        layout.addWidget(self.premium_item)
-
-        self.preset_item.setMinimumWidth(260)
-        for item in (self.profiles_item, self.mode_item, self.premium_item):
-            item.setMinimumWidth(120)
+        # Плитка пресета шире остальных: в ней самое длинное значение.
+        self.add_tile(self.preset_item, weight=1.9)
+        self.add_tile(self.profiles_item, weight=1.4)
+        self.add_tile(self.mode_item, weight=0.85)
+        self.add_tile(self.premium_item, weight=1.05)
 
         self._profile_roll = QVariantAnimation(self)
         self._profile_roll.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -393,6 +507,10 @@ class ControlTopSummaryWidget(QWidget):
             if self._pending_roll_from is None:
                 self._pending_roll_from = previous
             self._remember_pending(self.profiles_item)
+
+    def set_profile_icons(self, icons) -> None:
+        """Значки сервисов из включённых профилей — видно, что именно разблокировано."""
+        self.profiles_item.set_icon_strip(icons)
 
     def _can_play_now(self) -> bool:
         if not are_live_animations_enabled() or not self.isVisible():
@@ -490,7 +608,7 @@ class ControlTopSummaryWidget(QWidget):
     def retranslate(self) -> None:
         language = self._language
         self.preset_item.set_texts(
-            caption=tr_catalog("page.control.summary.preset.caption", language=language, default="Текущий preset"),
+            caption=tr_catalog("page.control.summary.preset.caption", language=language, default="Текущий пресет"),
             value=self._preset_value
             or tr_catalog("page.winws2_control.preset.not_selected", language=language, default="Не выбран"),
         )
