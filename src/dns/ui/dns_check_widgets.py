@@ -15,6 +15,7 @@ from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SimpleCardWidget
 
 from blockcheck.ui.check_results import _HeightKeeper, tone_color
 from ui.accessibility import set_control_accessibility, set_state_text
+from ui.fluent_widgets import set_tooltip
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.fun import FunTicker, Mascot, burst_confetti
@@ -208,12 +209,12 @@ class _DomainRow(QWidget):
         reason = str(item.get("reason") or "")
         self.detail_label = CaptionLabel(f"DNS системы: {system_ips} · эталон: {reference_ips}", self)
         self.detail_label.setWordWrap(True)
-        self.detail_label.setToolTip(reason)
+        set_tooltip(self.detail_label, reason)
         texts.addWidget(self.detail_label)
         layout.addLayout(texts, 1)
         verdict = _STATE_VIEW[self._state][2]
         self.verdict_label = CaptionLabel(verdict, self)
-        self.verdict_label.setToolTip(reason)
+        set_tooltip(self.verdict_label, reason)
         layout.addWidget(self.verdict_label, 0, Qt.AlignmentFlag.AlignTop)
         set_state_text(self, f"{host}: {verdict}. {reason}".strip())
         self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)

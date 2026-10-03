@@ -185,6 +185,14 @@ def ensure_qt_runtime() -> QApplication:
         "StartupQtComboPopupGuard",
         f"{(_time.perf_counter() - t_combo_guard) * 1000:.0f}ms",
     )
+    t_tooltip_guard = _time.perf_counter()
+    from ui.native_tooltip_guard import install_native_tooltip_guard
+
+    install_native_tooltip_guard(app)
+    emit_startup_metric(
+        "StartupQtNativeToolTipGuard",
+        f"{(_time.perf_counter() - t_tooltip_guard) * 1000:.0f}ms",
+    )
     t_animation = _time.perf_counter()
     _install_animation_py314_compat()
     emit_startup_metric(

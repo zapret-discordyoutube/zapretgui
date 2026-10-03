@@ -20,6 +20,7 @@ from qfluentwidgets import (
 
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import QuickActionsBar, RefreshButton
+from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips
 
 FAKES_COLUMNS = ["Имя", "Файл", "Тип", "SNI", "Используется", "Описание"]
 
@@ -118,6 +119,7 @@ def build_fakes_page_ui(page) -> SimpleNamespace:
     # --- Таблица ---
     ui.table = TableWidget(page.content)
     _configure_table(ui.table)
+    install_fluent_item_tooltips(ui.table)
     set_control_accessibility(
         ui.table,
         name="Таблица фейков",

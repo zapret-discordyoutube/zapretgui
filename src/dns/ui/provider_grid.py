@@ -34,6 +34,7 @@ from qfluentwidgets import FluentIcon, getFont, isDarkTheme, themeColor
 
 from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
+from ui.fluent_widgets import set_area_tooltip
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
 
 
@@ -798,7 +799,7 @@ class DnsProviderGrid(QWidget):
         index = self.index_at(event.position().toPoint())
         self._set_hover(index)
         self.setCursor(Qt.CursorShape.PointingHandCursor if index >= 0 else Qt.CursorShape.ArrowCursor)
-        self.setToolTip(self._tiles[index].tooltip if index >= 0 else "")
+        set_area_tooltip(self, self._tiles[index].tooltip if index >= 0 else "")
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802

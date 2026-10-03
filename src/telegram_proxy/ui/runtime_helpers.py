@@ -116,14 +116,15 @@ def apply_upstream_runtime_state(row, state, default_description: str) -> None:
     if row is None:
         return
     title = TELEGRAM_PROXY_SETTINGS_TEXT.upstream_preset_title
+    # set_tooltip пишет текст подсказки и в описание для экранного диктора,
+    # поэтому set_texts идёт после него: описанием остаётся текст строки.
     if state is None:
+        set_tooltip(row, "")
         row.set_texts(title, str(default_description or ""))
-        row.setToolTip("")
         return
-    text = format_upstream_runtime_state(state)
-    row.set_texts(title, text)
     reason = str(getattr(state, "reason", "") or "").strip()
-    row.setToolTip(reason or "Фактический SOCKS-сервер, который сейчас использует Telegram Proxy.")
+    set_tooltip(row, reason or "Фактический SOCKS-сервер, который сейчас использует Telegram Proxy.")
+    row.set_texts(title, format_upstream_runtime_state(state))
 
 
 def apply_telegram_hosts_row(row, button, plan) -> None:

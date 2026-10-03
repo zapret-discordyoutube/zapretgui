@@ -39,6 +39,9 @@ class FluentItemToolTipController(QObject):
         if self._tooltip is not None:
             self._tooltip.hide()
 
+    def is_visible(self) -> bool:
+        return self._tooltip is not None and self._tooltip.isVisible()
+
     def eventFilter(self, obj, event):  # noqa: N802
         _ = obj
         if event.type() in {

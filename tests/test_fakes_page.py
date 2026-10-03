@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, Mock
 
 from app.page_names import PageName
+from ui.widgets.fluent_item_tooltip import FLUENT_ITEM_TOOLTIP_ROLE
 
 
 def test_fakes_page_is_nested_winws2_page():
@@ -140,7 +141,7 @@ def test_page_fills_table_and_runs_actions_through_workers():
         assert table.rowCount() == 3
         assert table.item(0, 0).text() == "tls_google"
         # В подсказке ячейки «Файл» — полное значение.
-        assert table.item(0, 1).toolTip() == table.item(0, 1).text()
+        assert table.item(0, 1).data(FLUENT_ITEM_TOOLTIP_ROLE) == table.item(0, 1).text()
         assert table.item(0, 4).text() == "3 стратегии"
         assert table.item(1, 4).text() == "не используется"
         assert table.item(2, 0).text() == "mine  · свой"

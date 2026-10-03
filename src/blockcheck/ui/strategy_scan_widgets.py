@@ -32,6 +32,7 @@ from qfluentwidgets import (
 from blockcheck.ui.check_results import _HeightKeeper, tone_color
 from ui.accessibility import enable_keyboard_click, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
+from ui.fluent_widgets import set_tooltip
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.fun import CounterBadge, FunTicker, Mascot, StepList, burst_confetti
@@ -525,7 +526,7 @@ class _ResultRow(QWidget):
         self.icon.setFixedSize(18, 18)
         layout.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignVCenter)
         self.name_label = BodyLabel(presentation.strategy_name, self)
-        self.name_label.setToolTip(presentation.strategy_tooltip)
+        set_tooltip(self.name_label, presentation.strategy_tooltip)
         layout.addWidget(self.name_label, 1)
         # У найденных — «Работает 3/3», у остальных — сразу причина словами.
         status_text = presentation.status_text
@@ -533,7 +534,7 @@ class _ResultRow(QWidget):
             status_text = presentation.status_tooltip.split(": ", 1)[-1] if verdict == "unstable" else presentation.status_tooltip
             status_text = f"{presentation.status_text} · {status_text}" if verdict == "unstable" else status_text
         self.status_label = CaptionLabel(status_text, self)
-        self.status_label.setToolTip(presentation.status_tooltip)
+        set_tooltip(self.status_label, presentation.status_tooltip)
         layout.addWidget(self.status_label, 0)
         self.time_label = CaptionLabel(
             f"{presentation.time_text} мс" if presentation.time_text not in ("", "—") else "",

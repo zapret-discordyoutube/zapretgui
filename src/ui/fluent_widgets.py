@@ -94,6 +94,19 @@ def set_tooltip(widget, text: str, *, position=None, delay: int = 300) -> None:
         widget._fluent_tooltip_filter = f  # type: ignore[attr-defined]
 
 
+def set_area_tooltip(widget, text: str) -> None:
+    """Подсказка для виджета, где текст зависит от места под курсором.
+
+    Так делают плитки, которые рисуют сами себя: при движении мыши они
+    сообщают текст для области под курсором. ``set_tooltip`` тут не подходит —
+    он показывает подсказку над всем виджетом. Текст показывает
+    ``ui.native_tooltip_guard`` fluent-подсказкой у курсора.
+    """
+    value = str(text or "")
+    if str(widget.toolTip()) != value:
+        widget.setToolTip(value)
+
+
 # ---------------------------------------------------------------------------
 # SettingsCard — wraps qfluentwidgets CardWidget
 # ---------------------------------------------------------------------------

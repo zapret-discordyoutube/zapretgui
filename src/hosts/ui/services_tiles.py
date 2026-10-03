@@ -25,6 +25,7 @@ from qfluentwidgets import getFont, isDarkTheme, themeColor
 from profile.ui.profile_icon import profile_icon_pixmap
 from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
+from ui.fluent_widgets import set_area_tooltip
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
 from ui.widgets.stagger_float_in import (
     FLOAT_IN_DURATION_MS,
@@ -880,15 +881,15 @@ class HostsTilesGrid(QWidget):
         clickable = tile is not None and hover >= 0 and (slot >= 0 or tile.has_switch)
         self.setCursor(Qt.CursorShape.PointingHandCursor if clickable else Qt.CursorShape.ArrowCursor)
         if tile is None:
-            self.setToolTip("")
+            set_area_tooltip(self, "")
         elif slot >= 0:
             choice = tile.choices[slot]
             if choice.profile_id == tile.selected:
-                self.setToolTip(f"{choice.label} — выбран, щёлкните, чтобы выключить")
+                set_area_tooltip(self, f"{choice.label} — выбран, щёлкните, чтобы выключить")
             else:
-                self.setToolTip(choice.label)
+                set_area_tooltip(self, choice.label)
         else:
-            self.setToolTip(f"{tile.title}\n{tile.note}" if tile.note else tile.title)
+            set_area_tooltip(self, f"{tile.title}\n{tile.note}" if tile.note else tile.title)
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802

@@ -29,7 +29,7 @@ import re
 from PyQt6 import sip
 from PyQt6.QtCore import QElapsedTimer, QEvent, QPoint, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient, QShortcut
-from PyQt6.QtWidgets import QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSizePolicy, QToolTip, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -59,6 +59,7 @@ from ui.onboarding.steps import (
     is_widget_shown,
     target_widget,
 )
+from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 
 
 OVERLAY_OBJECT_NAME = "onboardingTourOverlay"
@@ -159,6 +160,7 @@ class _ProgressDots(QWidget):
         self._glow = 0.0
         self._hover = -1
         self._titles: list[str] = []
+        self._tooltip = FluentItemToolTipController(self)
         self.setFixedHeight(16)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMouseTracking(True)
@@ -276,9 +278,9 @@ class _ProgressDots(QWidget):
             self._hover = index
             self.update()
             if 0 <= index < len(self._titles):
-                QToolTip.showText(event.globalPosition().toPoint(), f"{index + 1}. {self._titles[index]}", self)
+                self._tooltip.show_text(f"{index + 1}. {self._titles[index]}", event.globalPosition().toPoint())
             else:
-                QToolTip.hideText()
+                self._tooltip.hide()
         event.accept()
 
     def leaveEvent(self, event):  # noqa: N802 (Qt override)

@@ -16,6 +16,7 @@ from ui.fluent_dialog import MessageBox
 from ui.message_box_accessibility import set_message_box_button_accessibility
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.pages.base_page import BasePage
+from ui.widgets.fluent_item_tooltip import set_fluent_item_tooltip
 
 from .build import BLOB_LINE_PLACEHOLDER, SHIPPED_FAKE_HINT, USER_FAKE_HINT, build_fakes_page_ui
 from .dialogs import AddUserFakeDialog
@@ -273,9 +274,9 @@ class FakesPage(BasePage):
             if column == 1 and row.file_missing:
                 item.setForeground(_MISSING_COLOR)
             if column == 1:
-                item.setToolTip(full_file_label)
+                set_fluent_item_tooltip(item, full_file_label)
             elif column == 5:
-                item.setToolTip(value)
+                set_fluent_item_tooltip(item, value)
             self._ui.table.setItem(index, column, item)
 
     def _selected_row(self):

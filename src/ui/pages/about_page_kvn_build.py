@@ -17,7 +17,7 @@ from qfluentwidgets import (
 )
 
 from ui.accessibility import set_control_accessibility, set_state_text
-from ui.fluent_widgets import insert_widget_into_setting_card_group
+from ui.fluent_widgets import insert_widget_into_setting_card_group, set_tooltip
 from ui.pages.about_page_kvn_accessibility import set_kvn_card_accessibility
 from ui.theme import get_cached_qta_pixmap, get_themed_qta_icon
 from ui.widgets.motion_icon import MotionIcon
@@ -133,7 +133,7 @@ def _build_hero(*, tokens, on_open_kvn_bot) -> tuple[QFrame, TurningGlobe, Shimm
     bot_btn.setMinimumWidth(170)
     set_state_text(bot_btn, "Купить подписку Zapret KVN")
     set_control_accessibility(bot_btn, name="Купить подписку Zapret KVN", description=BOT_DESCRIPTION)
-    bot_btn.setToolTip(BOT_DESCRIPTION)
+    set_tooltip(bot_btn, BOT_DESCRIPTION)
     bot_btn.clicked.connect(on_open_kvn_bot)
     hero_row.addWidget(bot_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 

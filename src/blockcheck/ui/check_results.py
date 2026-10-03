@@ -18,7 +18,7 @@ from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SimpleCardWidget
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
-from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips
+from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips, set_fluent_item_tooltip
 from ui.widgets.fun import FunTicker, Mascot, burst_confetti
 from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 from ui.widgets.stagger_float_in import float_in
@@ -399,7 +399,7 @@ class BlockcheckSitesTable(TableWidget):
         self.insertRow(row)
         for column, text in enumerate((name, result_text, details)):
             item = QTableWidgetItem(text)
-            item.setToolTip(tooltip or details)
+            set_fluent_item_tooltip(item, tooltip or details)
             self.setItem(row, column, item)
         self._levels.append(level)
 

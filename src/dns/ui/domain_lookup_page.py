@@ -33,7 +33,7 @@ from ui.pages.base_page import BasePage, ScrollBlockingPlainTextEdit
 from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.theme_semantic import get_semantic_palette
-from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips
+from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips, set_fluent_item_tooltip
 
 
 def _tone_color(tone: str) -> str:
@@ -121,7 +121,7 @@ class DnsAnswersTable(TableWidget):
                     item = QTableWidgetItem()
                     self.setItem(index, column, item)
                 item.setText(text)
-                item.setToolTip(row.tooltip)
+                set_fluent_item_tooltip(item, row.tooltip)
         self._apply_theme_refresh()
         self._fit_height()
         problems = sum(1 for level in self._levels if level in ("warn", "fail"))
