@@ -205,6 +205,25 @@ class BypassSceneTests(unittest.TestCase):
                 self.assertFalse(scene._rest_timer.isActive())
                 self.assertEqual(scene._open_t, 1.0 if phase == "running" else 0.0)
 
+    def test_flow_frames_are_announced_only_while_running(self) -> None:
+        frames: list[float] = []
+        scene = self._scene("starting")
+        scene.flowFrame.connect(frames.append)
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=500):
+            scene._on_beat_frame()
+        self.assertEqual(frames, [])
+
+        scene.set_phase("running")
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=500):
+            scene._on_beat_frame()
+        self.assertEqual(len(frames), 1)
+        self.assertAlmostEqual(frames[0], scene._flow_time)
+
+        scene.set_phase("stopped")
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=500):
+            scene._on_beat_frame()
+        self.assertEqual(len(frames), 1)
+
     def test_frames_repaint_only_lanes_wall_and_button(self) -> None:
         scene = self._scene("running")
         region = scene._motion_region().boundingRect()
@@ -398,6 +417,71 @@ class StatusHeroCardTests(unittest.TestCase):
 
         self.assertFalse(card.is_wave_playing())
         self.assertEqual(card.tint(), QColor("#6ccb5f"))
+
+    def _flow_frame(self, scene, elapsed_ms: int) -> None:
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=elapsed_ms):
+            scene._on_beat_frame()
+
+    def test_glow_shimmers_on_scene_frames_only_while_running(self) -> None:
+        card, scene, _mascot = self._card()
+        card.show()
+        scene.set_phase("starting")
+        self._flow_frame(scene, 400)
+        self.assertFalse(card.is_shimmering())
+
+        scene.set_phase("running")
+        self._flow_frame(scene, 400)
+        self.assertTrue(card.is_shimmering())
+        self.assertAlmostEqual(card._shimmer_t, scene._flow_time)
+
+        scene.set_phase("stopping")
+        self.assertFalse(card.is_shimmering())
+
+    def test_glow_lives_only_behind_the_scene(self) -> None:
+        card, scene, _mascot = self._card()
+        scene.move(16, 14)
+        card.show()
+        area = card.shimmer_rect()
+
+        self.assertEqual(area.left(), 0)
+        self.assertGreater(area.right(), scene.geometry().right())
+        self.assertLess(area.right(), card.width() // 2)
+        self.assertEqual(area.height(), card.height())
+
+    def test_glow_stops_when_hidden_or_animations_are_off(self) -> None:
+        card, scene, _mascot = self._card()
+        card.show()
+        scene.set_phase("running")
+        self._flow_frame(scene, 400)
+        self.assertTrue(card.is_shimmering())
+        card.hide()
+        self.assertFalse(card.is_shimmering())
+
+        self._enabled = False
+        card.show()
+        self._flow_frame(scene, 800)
+        self.assertFalse(card.is_shimmering())
+
+    def test_glow_spots_are_drawn_once_and_reused(self) -> None:
+        hero_module._SPOT_CACHE.clear()
+        first = hero_module._spot_pixmap(QColor("#6ccb5f"), 120, 1.0)
+        again = hero_module._spot_pixmap(QColor("#6ccb5f"), 120, 1.0)
+
+        self.assertEqual(first.cacheKey(), again.cacheKey())
+        self.assertEqual(len(hero_module._SPOT_CACHE), 1)
+        self.assertEqual(first.width(), 240)
+
+        card, scene, _mascot = self._card()
+        card.show()
+        scene.set_color("#6ccb5f")
+        scene.set_phase("running")
+        for elapsed in (400, 2400, 5200):
+            self._flow_frame(scene, elapsed)
+            image = QPixmap(card.size())
+            image.fill(QColor(0, 0, 0, 0))
+            card.render(image)
+        # Два пятна — два оттенка, сколько бы кадров ни прошло.
+        self.assertEqual(len(hero_module._SPOT_CACHE), 3)
 
     def test_paints_tint_and_wave(self) -> None:
         card, scene, _mascot = self._card()

@@ -39,6 +39,8 @@ MASCOT_SIZE = 40
 ENDPOINT_ROOM = 34
 # Полный вдох и выдох спокойного талисмана, секунды.
 BREATH_PERIOD_S = 3.6
+# Период, с которым дышит ореол работающей кнопки, секунды.
+HALO_PERIOD_S = 2.8
 LANE_GAP = 6
 RAW_COLOR = QColor(150, 156, 168)
 
@@ -89,6 +91,9 @@ class BypassScene(PulsingDot):
     phaseChanged = pyqtSignal(str)
     # Итоговый цвет кнопки сменился: карточка красит им свой фон.
     colorChanged = pyqtSignal(str)
+    # Кадр потока при работающем обходе (время потока в секундах): по нему
+    # карточка двигает своё свечение, не заводя собственный таймер.
+    flowFrame = pyqtSignal(float)
 
     def __init__(self, parent=None, *, width: int = SCENE_WIDTH):
         super().__init__(parent, size=SCENE_HEIGHT)
@@ -386,6 +391,7 @@ class BypassScene(PulsingDot):
             self._flow_time = self._flow_origin + self._beat_clock.elapsed() / 1000.0
             if self._phase == "running":
                 self._mascot.set_breath(math.sin(2 * math.pi * self._flow_time / BREATH_PERIOD_S))
+                self.flowFrame.emit(self._flow_time)
             self.update(self._motion_region())
             return
         phase = self._beat_clock.elapsed() / BLOCKED_BURST_MS
@@ -461,6 +467,9 @@ class BypassScene(PulsingDot):
             impact = self._paint_blocked(painter, center, left, top, gate, color)
 
         self._paint_wall(painter, center, color, open_t, impact)
+        if self._phase == "running" and self.is_beating():
+            # Ореол работающей кнопки мягко дышит.
+            impact = 0.5 + 0.5 * math.sin(2 * math.pi * self._flow_time / HALO_PERIOD_S)
         self._paint_button(painter, center, impact)
         if self._phase in BUSY_PHASES:
             self._paint_spinner(painter, center, color)

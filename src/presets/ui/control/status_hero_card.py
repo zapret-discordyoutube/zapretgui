@@ -4,14 +4,23 @@
 оранжевый — запуск, красный — остановлен) и светлеет к правому краю.
 Когда Zapret включился, от кнопки по карточке расходится волна.
 
-Цвет и волна — короткие анимации по событию: в покое карточка не рисует
-кадров.
+Пока Zapret работает, свечение живое: за сценой навстречу друг другу плавно
+ходят два пятна света разных оттенков (зелёный уходит в бирюзовый и в
+салатовый), и там, где они сходятся, цвет переливается. Своего таймера на
+это нет — карточка рисует по кадрам сцены, которые и так идут, и только под
+сценой, где фон всё равно перерисовывается. Сами пятна нарисованы один раз
+в готовые картинки, кадр — это два наложения картинки.
+
+Цвет и волна — короткие анимации по событию. Без работающего обхода, при
+скрытой странице и при выключенных «живых анимациях» карточка кадров не рисует.
 """
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QEasingCurve, QEvent, QPoint, QPointF, QRectF, Qt, QVariantAnimation
-from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath
+import math
+
+from PyQt6.QtCore import QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, Qt, QVariantAnimation
+from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPixmap, QRadialGradient
 
 from qfluentwidgets import CardWidget, isDarkTheme
 
@@ -24,6 +33,52 @@ WAVE_MS = 900
 TINT_ALPHA_DARK = 0.17
 TINT_ALPHA_LIGHT = 0.13
 WAVE_ALPHA = 0.26
+# Живое свечение при работающем обходе: два пятна света, каждое со своим
+# оттенком, периодом хода туда-обратно и периодом разгорания (секунды).
+SHIMMER_HUE_SWING = 34
+SHIMMER_SPOTS = (
+    # (сдвиг оттенка, период хода, период разгорания, откуда, куда — в долях ширины)
+    (SHIMMER_HUE_SWING, 7.0, 3.1, 0.34, 0.66),
+    (-SHIMMER_HUE_SWING, 9.5, 4.3, 0.66, 0.34),
+)
+# Радиус пятна в долях ширины области свечения: у её правого края пятно уже гаснет.
+SHIMMER_RADIUS = 0.34
+# Запас справа от сцены, который тоже захватывает свечение.
+SHIMMER_PAD = 26
+_SPOT_CACHE: dict[tuple[str, int, float], QPixmap] = {}
+
+
+def _spot_pixmap(color: QColor, radius: int, ratio: float) -> QPixmap:
+    """Круглое пятно света, гаснущее к краю. Рисуется один раз на цвет и размер."""
+    key = (color.name(), radius, ratio)
+    pixmap = _SPOT_CACHE.get(key)
+    if pixmap is None:
+        side = int(radius * 2 * ratio)
+        pixmap = QPixmap(side, side)
+        pixmap.setDevicePixelRatio(ratio)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        clear = QColor(color)
+        clear.setAlphaF(0.0)
+        gradient = QRadialGradient(QPointF(radius, radius), radius)
+        gradient.setColorAt(0.0, color)
+        gradient.setColorAt(0.55, QColor(color.red(), color.green(), color.blue(), 110))
+        gradient.setColorAt(1.0, clear)
+        painter = QPainter(pixmap)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(gradient)
+        painter.drawRect(QRectF(0, 0, radius * 2, radius * 2))
+        painter.end()
+        if len(_SPOT_CACHE) > 12:
+            _SPOT_CACHE.clear()
+        _SPOT_CACHE[key] = pixmap
+    return pixmap
+
+
+def _shift_hue(color: QColor, degrees: float) -> QColor:
+    hue, saturation, value, _alpha = color.getHsv()
+    if hue < 0:
+        return QColor(color)
+    return QColor.fromHsv(int(hue + degrees) % 360, saturation, value)
 
 
 def _mix(a: QColor, b: QColor, t: float) -> QColor:
@@ -46,6 +101,8 @@ class StatusHeroCard(CardWidget):
         self._wave_color = QColor()
         self._scene = None
         self._phase = ""
+        # None — свечение неподвижно; иначе время потока сцены в секундах.
+        self._shimmer_t: float | None = None
 
         # QVariantAnimation, а не QPropertyAnimation: при выключенных
         # анимациях WinUI общий fallback подменяет QPropertyAnimation.start.
@@ -76,9 +133,30 @@ class StatusHeroCard(CardWidget):
         self._scene = scene
         scene.colorChanged.connect(self.set_tint)
         scene.phaseChanged.connect(self._on_scene_phase_changed)
+        scene.flowFrame.connect(self._on_scene_flow_frame)
+
+    def shimmer_rect(self) -> QRect:
+        """Область за сценой, где живёт свечение: только её и перерисовываем."""
+        scene = self._scene
+        right = scene.geometry().right() + SHIMMER_PAD if scene is not None else 0
+        return QRect(0, 0, max(0, min(self.width(), right)), self.height())
+
+    def is_shimmering(self) -> bool:
+        return self._shimmer_t is not None
+
+    def _on_scene_flow_frame(self, flow_time: float) -> None:
+        self._shimmer_t = float(flow_time)
+        self.update(self.shimmer_rect())
+
+    def _stop_shimmer(self) -> None:
+        if self._shimmer_t is not None:
+            self._shimmer_t = None
+            self.update()
 
     def _on_scene_phase_changed(self, phase: str) -> None:
         previous, self._phase = self._phase, phase
+        if phase != "running":
+            self._stop_shimmer()
         scene = self._scene
         if scene is not None and phase == "running" and previous and previous != "running":
             self.play_wave(scene.mapTo(self, scene.gate_center()), scene.target_color().name())
@@ -140,6 +218,7 @@ class StatusHeroCard(CardWidget):
             self._tint = QColor(self._tint_to)
         self._wave.stop()
         self._wave_t = 0.0
+        self._shimmer_t = None
         super().hideEvent(event)
 
     def changeEvent(self, event) -> None:  # noqa: N802
@@ -156,13 +235,10 @@ class StatusHeroCard(CardWidget):
             return
         rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
         radius = float(self.borderRadius)
-        clip = QPainterPath()
-        clip.addRoundedRect(rect, radius, radius)
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setClipPath(clip)
 
         strength = TINT_ALPHA_DARK if isDarkTheme() else TINT_ALPHA_LIGHT
         near = QColor(self._tint)
@@ -174,9 +250,35 @@ class StatusHeroCard(CardWidget):
         gradient.setColorAt(0.55, far)
         gradient.setColorAt(1.0, far)
         painter.setBrush(gradient)
-        painter.drawRect(rect)
+        # Скруглённая фигура вместо обрезки по контуру: обрезка со сглаживанием
+        # в несколько раз дороже, а кадры свечения идут постоянно.
+        painter.drawRoundedRect(rect, radius, radius)
+
+        shimmer_t = self._shimmer_t
+        area = self.shimmer_rect()
+        if shimmer_t is not None and area.width() > 0:
+            spot_radius = max(8, int(area.width() * SHIMMER_RADIUS))
+            ratio = self.devicePixelRatioF() or 1.0
+            center_y = rect.center().y()
+            # Пятна гаснут раньше, чем доходят до скруглённых углов: хватает
+            # дешёвой обрезки по прямоугольнику.
+            painter.setClipRect(rect)
+            for hue, drift_s, pulse_s, start, end in SHIMMER_SPOTS:
+                # Пятно плавно ходит между двумя точками и слегка разгорается.
+                drift = 0.5 - 0.5 * math.cos(2 * math.pi * shimmer_t / drift_s)
+                pulse = 0.72 + 0.28 * math.sin(2 * math.pi * shimmer_t / pulse_s)
+                center_x = area.width() * (start + (end - start) * drift)
+                painter.setOpacity(min(1.0, strength * 2.1 * pulse))
+                painter.drawPixmap(
+                    QPointF(center_x - spot_radius, center_y - spot_radius),
+                    _spot_pixmap(_shift_hue(QColor(self._tint), hue), spot_radius, ratio),
+                )
+            painter.setOpacity(1.0)
 
         if self._wave_t > 0.0:
+            clip = QPainterPath()
+            clip.addRoundedRect(rect, radius, radius)
+            painter.setClipPath(clip)
             wave = QColor(self._wave_color)
             wave.setAlphaF(WAVE_ALPHA * (1.0 - self._wave_t) ** 1.5)
             painter.setBrush(wave)
