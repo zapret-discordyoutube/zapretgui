@@ -11,7 +11,7 @@ from donater.premium_display import TIER_UNKNOWN, PremiumDisplay
 from presets.ui.control.top_summary_plan import build_premium_summary, build_profiles_value
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
-from ui.widgets.line_icons import line_icon_pixmap
+from ui.widgets.icon_loop import icon_loop_conductor
 from ui.widgets.motion_icon import MotionIcon
 from ui.widgets.tile_grid import CHEVRON_ROOM, SoftTile, TileGrid
 
@@ -382,15 +382,12 @@ class ControlTopSummaryItem(SoftTile):
             return
         theme_tokens = tokens or get_theme_tokens()
         accent_hex = str(getattr(theme_tokens, "accent_hex", "") or "") or "#5caee8"
-        ratio = float(self.devicePixelRatioF() or 1.0)
-        icon_key = (self._icon_name, accent_hex, ratio)
+        icon_key = (self._icon_name, accent_hex)
         if self.__dict__.get("_last_icon_theme_key") == icon_key:
             return
         self.__dict__["_last_icon_theme_key"] = icon_key
         # Свой значок из линий (ui.widgets.line_icons), а не шрифтовой: чёткий на любом масштабе.
-        self._icon_label.setPixmap(
-            line_icon_pixmap(self._icon_name, color=accent_hex, size=SUMMARY_ICON_SIZE, ratio=ratio)
-        )
+        self._icon_label.set_line_icon(self._icon_name, color=accent_hex, size=SUMMARY_ICON_SIZE)
 
     def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
         if force:
@@ -448,6 +445,12 @@ class ControlTopSummaryWidget(TileGrid):
         self.preset_item.clicked.connect(self.presetClicked.emit)
         self.profiles_item.clicked.connect(self.profilesClicked.emit)
         self.premium_item.clicked.connect(self.premiumClicked.emit)
+
+        # Значки плиток по очереди играют свои короткие жесты; звезда Premium
+        # не в очереди — она поблёскивает сама. Очередь общая со страницей.
+        conductor = icon_loop_conductor(parent if parent is not None else self)
+        for item in (self.preset_item, self.profiles_item, self.mode_item):
+            conductor.register(item._icon_label)
 
         # Плитка пресета шире остальных: в ней самое длинное значение.
         self.add_tile(self.preset_item, weight=1.9)

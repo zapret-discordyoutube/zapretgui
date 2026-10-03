@@ -17,6 +17,7 @@ from qfluentwidgets.common.font import setFont
 
 from ui.accessibility import set_state_text
 from ui.widgets.action_tile import ActionTile
+from ui.widgets.icon_loop import icon_loop_conductor
 from ui.widgets.tile_grid import TileGrid
 
 
@@ -119,6 +120,7 @@ def build_quick_actions(
     setFont(title_label, 20)
     set_state_text(title_label, f"Раздел страницы: {title_text}")
     grid = TileGrid(parent, min_tile_width=QUICK_ACTION_MIN_WIDTH, spacing=12)
+    conductor = icon_loop_conductor(parent if parent is not None else grid)
     tiles: dict[str, ActionTile] = {}
     for spec in quick_action_specs(text_prefix):
         tile = ActionTile(
@@ -131,6 +133,8 @@ def build_quick_actions(
         )
         tile.clicked.connect(handlers[spec.key])
         grid.add_tile(tile)
+        # Значки плиток по очереди играют свои жесты — в общей очереди со сводкой.
+        conductor.register(tile.icon_widget())
         tiles[spec.key] = tile
     return QuickActionWidgets(
         title_label=title_label,

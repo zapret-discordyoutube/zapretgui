@@ -1,4 +1,8 @@
-"""Небольшой значок с короткими жестами: подпрыгнуть и поблёскивать.
+"""Небольшой значок с короткими жестами: подпрыгнуть, поблёскивать и «ожить».
+
+Значок из набора ``ui.widgets.line_icons`` (``set_line_icon``) умеет ещё и
+свой собственный жест — ``play_loop``: папка приоткрывается, стрелка делает
+оборот и т. д. Когда его играть, решает ``IconLoopConductor``.
 
 Значок стоит на месте, пока ничего не происходит. Жест длится доли секунды
 и запускается только по событию (изменилось значение) или по редкому
@@ -23,6 +27,8 @@ DEFAULT_TWINKLE_INTERVAL_MS = 9000
 GESTURE_NONE = ""
 GESTURE_BOUNCE = "bounce"
 GESTURE_TWINKLE = "twinkle"
+GESTURE_LOOP = "loop"
+LOOP_DURATION_MS = 950
 
 
 class MotionIcon(QWidget):
@@ -37,6 +43,7 @@ class MotionIcon(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self._pixmap = QPixmap()
+        self._line_icon: tuple[str, QColor, int] | None = None
         self._glow: QColor | None = None
         self._gesture = GESTURE_NONE
         self._t = 0.0
@@ -58,7 +65,31 @@ class MotionIcon(QWidget):
 
     def setPixmap(self, pixmap: QPixmap) -> None:  # noqa: N802 (как у QLabel)
         self._pixmap = QPixmap(pixmap)
+        self._line_icon = None
         self.update()
+
+    def set_line_icon(self, name: str, *, color: str, size: int) -> None:
+        """Значок из нарисованного набора: в покое — готовая картинка, в жесте — кадры."""
+        from ui.widgets.line_icons import line_icon_pixmap
+
+        ratio = float(self.devicePixelRatioF() or 1.0)
+        self._pixmap = line_icon_pixmap(name, color=color, size=size, ratio=ratio)
+        self._line_icon = (str(name), QColor(color), int(size))
+        self.update()
+
+    def can_loop(self) -> bool:
+        from ui.widgets.line_icons import ANIMATED_LINE_ICONS
+
+        return self._line_icon is not None and self._line_icon[0] in ANIMATED_LINE_ICONS
+
+    def play_loop(self) -> bool:
+        """Сыграть собственный жест значка. False — сейчас нельзя (скрыт, занят, нет жеста)."""
+        if not self.can_loop() or not self._can_animate():
+            return False
+        if self._anim.state() == QVariantAnimation.State.Running:
+            return False
+        self._play(GESTURE_LOOP, LOOP_DURATION_MS)
+        return True
 
     def pixmap(self) -> QPixmap:
         return QPixmap(self._pixmap)
@@ -192,7 +223,14 @@ class MotionIcon(QWidget):
             painter.setBrush(gradient)
             painter.drawEllipse(center, radius, radius)
 
-        if not self._pixmap.isNull():
+        if self._gesture == GESTURE_LOOP and self._line_icon is not None:
+            # Кадр жеста рисуется линиями прямо здесь; в покое — готовая картинка.
+            from ui.widgets.line_icons import paint_line_icon
+
+            name, color, size = self._line_icon
+            half = size / 2.0
+            paint_line_icon(painter, name, QRectF(center.x() - half, center.y() - half, size, size), color, self._t)
+        elif not self._pixmap.isNull():
             dpr = self._pixmap.devicePixelRatio() or 1.0
             w = self._pixmap.width() / dpr
             h = self._pixmap.height() / dpr

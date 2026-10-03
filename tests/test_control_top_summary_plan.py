@@ -80,7 +80,7 @@ class ControlTopSummaryPlanTests(unittest.TestCase):
             from PyQt6.QtWidgets import QApplication
             from presets.ui.control import top_summary_widget
             from presets.ui.control.top_summary_widget import ControlTopSummaryItem
-            import ui.theme as theme
+            import ui.widgets.line_icons as line_icons
 
             self.__class__._app = QApplication.instance() or QApplication([])
             scheduled: list[tuple[int, object]] = []
@@ -93,9 +93,9 @@ class ControlTopSummaryPlanTests(unittest.TestCase):
                     "singleShot",
                     side_effect=lambda delay_ms, callback: scheduled.append((delay_ms, callback)),
                 ),
-                patch.object(theme, "get_cached_qta_pixmap", Mock(return_value=pixmap)) as icon_cache,
+                patch.object(line_icons, "line_icon_pixmap", Mock(return_value=pixmap)) as icon_cache,
             ):
-                item = ControlTopSummaryItem(icon_name="fa5s.star", initial_icon_delay_ms=250)
+                item = ControlTopSummaryItem(icon_name="star", initial_icon_delay_ms=250)
 
                 icon_cache.assert_not_called()
                 self.assertEqual(len(scheduled), 1)
@@ -111,21 +111,14 @@ class ControlTopSummaryPlanTests(unittest.TestCase):
         from presets.ui.control.top_summary_widget import ControlTopSummaryItem
 
         item = ControlTopSummaryItem.__new__(ControlTopSummaryItem)
-        item._icon_name = "fa5s.star"
+        item._icon_name = "star"
         item._icon_label = Mock()
-        pixmap = object()
         tokens = SimpleNamespace(accent_hex="#8ab4f8")
 
-        with patch("ui.theme.get_cached_qta_pixmap", return_value=pixmap) as icon_cache:
-            ControlTopSummaryItem._refresh_icon(item, tokens)
-            item._icon_label.setPixmap = Mock(
-                side_effect=AssertionError("same top summary icon must not repaint")
-            )
+        ControlTopSummaryItem._refresh_icon(item, tokens)
+        ControlTopSummaryItem._refresh_icon(item, tokens)
 
-            ControlTopSummaryItem._refresh_icon(item, tokens)
-
-        icon_cache.assert_called_once_with("fa5s.star", color="#8ab4f8", size=22)
-        item._icon_label.setPixmap.assert_not_called()
+        item._icon_label.set_line_icon.assert_called_once_with("star", color="#8ab4f8", size=24)
 
     def test_top_summary_skips_same_preset_render(self) -> None:
         with patch.dict("os.environ", {"QT_QPA_PLATFORM": "offscreen"}):

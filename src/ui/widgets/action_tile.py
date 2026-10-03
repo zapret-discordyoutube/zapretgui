@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QVBoxLayout
 from qfluentwidgets import CaptionLabel, StrongBodyLabel, isDarkTheme
 
 from ui.accessibility import set_control_accessibility, set_state_text
-from ui.widgets.line_icons import line_icon_pixmap
 from ui.widgets.motion_icon import MotionIcon
 from ui.widgets.tile_grid import SoftTile
 
@@ -130,15 +129,11 @@ class ActionTile(SoftTile):
     def _apply_icon(self, tokens=None, force: bool = False) -> None:
         _ = tokens, force
         # Свой значок из линий (ui.widgets.line_icons) в цвет плитки.
-        self._icon.setPixmap(
-            line_icon_pixmap(
-                self._icon_name,
-                color=self.shown_icon_color().name(),
-                size=ACTION_ICON_SIZE,
-                ratio=float(self.devicePixelRatioF() or 1.0),
-            )
-        )
+        self._icon.set_line_icon(self._icon_name, color=self.shown_icon_color().name(), size=ACTION_ICON_SIZE)
         self.update()
+
+    def icon_widget(self) -> MotionIcon:
+        return self._icon
 
     def _start_icon(self) -> None:
         # Тема сменилась — значок перерисовывается в подходящий ей оттенок.
