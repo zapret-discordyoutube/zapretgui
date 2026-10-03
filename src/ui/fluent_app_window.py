@@ -11,7 +11,7 @@ from qfluentwidgets import (
 from qfluentwidgets import NavigationWidget
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel
 from PyQt6.QtGui import QPixmap, QPainter, QColor
-from PyQt6.QtCore import QEvent, QSize, Qt
+from PyQt6.QtCore import QAbstractAnimation, QEvent, QSize, Qt
 
 from config.build_info import APP_VERSION
 
@@ -180,6 +180,23 @@ class ZapretFluentWindow(FluentWindow):
         except Exception:
             pass
         return super()._normalBackgroundColor()
+
+    def _updateBackgroundColor(self) -> None:  # noqa: N802
+        """Не перерисовывает всё окно, когда цвет фона не изменился.
+
+        qfluentwidgets зовёт это на каждый вход и уход курсора, щелчок и
+        получение фокуса окном и каждый раз запускает анимацию цвета; её
+        кадры вызывают update() всего окна. У окна нет отдельных цветов для
+        наведения и нажатия, поэтому почти всегда цвет прежний, а окно со
+        всеми страницами и боковым меню перерисовывалось впустую.
+        """
+        try:
+            idle = self.backgroundColorAni.state() != QAbstractAnimation.State.Running
+            if idle and QColor(self.backgroundColor) == QColor(self._normalBackgroundColor()):
+                return
+        except Exception:
+            pass
+        super()._updateBackgroundColor()
 
     def set_tint_overlay(self, r: int, g: int, b: int, alpha: int) -> None:
         """Update the Mica tint color (painted below content, above Mica backdrop).

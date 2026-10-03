@@ -59,6 +59,34 @@ class FluentAppWindowChromeTests(unittest.TestCase):
         self.assertIsNone(window._bg_source)
         self.assertTrue(window._bg_label.pixmap().isNull())
 
+    def test_cursor_enter_leave_does_not_repaint_whole_window(self) -> None:
+        # qfluentwidgets на вход/уход курсора, щелчок и фокус запускает анимацию
+        # цвета фона окна, и каждый её кадр перерисовывает всё окно. Цвет при
+        # этом тот же: замер на win10 — 15.6% ядра при 10 переходах в секунду.
+        from unittest.mock import patch
+
+        from PyQt6.QtCore import QEvent, QPointF
+        from PyQt6.QtGui import QColor, QEnterEvent
+
+        window = ZapretFluentWindow()
+        self.addCleanup(window.deleteLater)
+        point = QPointF(10.0, 10.0)
+
+        with patch.object(window, "update") as repaint:
+            for _ in range(5):
+                window.enterEvent(QEnterEvent(point, point, point))
+                window.leaveEvent(QEvent(QEvent.Type.Leave))
+            QApplication.processEvents()
+            repaint.assert_not_called()
+
+            # Настоящая смена цвета (сила тонировки окна) по-прежнему доходит.
+            with patch.object(window, "isMicaEffectEnabled", return_value=True):
+                window.set_tint_overlay(10, 20, 30, 200)
+                window.backgroundColorAni.setCurrentTime(window.backgroundColorAni.duration())
+                QApplication.processEvents()
+                repaint.assert_called()
+                self.assertEqual(QColor(window.backgroundColor), QColor(10, 20, 30, 200))
+
     def test_window_chrome_has_no_legacy_border_radius_or_handle_hooks(self) -> None:
         source = inspect.getsource(ZapretFluentWindow)
 
