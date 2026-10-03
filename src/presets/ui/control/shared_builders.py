@@ -272,6 +272,9 @@ def build_push_setting_card_common(
         parent,
     )
     card.setProperty("noDrag", True)
+    # Тот же размер значка, что у строк-переключателей (Win11ToggleRow), иначе
+    # значок мельче, а заголовок сдвинут на пару пикселей относительно соседей.
+    card.setIconSize(18, 18)
     accessible_name = button_accessible_name or _push_setting_button_accessible_name(button_text, title_text)
     set_state_text(card, accessible_name)
     set_control_accessibility(card, name=accessible_name, description=content_text)

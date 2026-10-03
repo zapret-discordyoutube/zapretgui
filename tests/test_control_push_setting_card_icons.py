@@ -31,6 +31,18 @@ class ControlPushSettingCardIconTests(unittest.TestCase):
 
         self.assertFalse(card.button.icon().isNull())
 
+    def test_push_setting_card_icon_has_same_size_as_toggle_rows(self) -> None:
+        card = build_push_setting_card_common(
+            push_setting_card_cls=PushSettingCard,
+            button_text="Открыть",
+            icon=QIcon(),
+            title_text="Фейки",
+            content_text="",
+            on_click=lambda: None,
+        )
+
+        self.assertEqual((card.iconLabel.width(), card.iconLabel.height()), (18, 18))
+
     def test_action_card_buttons_have_same_width_for_different_text(self) -> None:
         open_card = build_push_setting_card_common(
             push_setting_card_cls=PushSettingCard,

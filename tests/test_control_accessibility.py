@@ -99,6 +99,9 @@ class _PushSettingCardTarget(_CardTarget):
     def setProperty(self, _name: str, _value: object) -> None:  # noqa: N802
         pass
 
+    def setIconSize(self, _width: int, _height: int) -> None:  # noqa: N802
+        pass
+
 
 class _ToggleTarget:
     def set_texts(self, _title: str, _description: str) -> None:
