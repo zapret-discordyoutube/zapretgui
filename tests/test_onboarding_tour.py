@@ -712,6 +712,66 @@ class TechniqueIllustrationTests(unittest.TestCase):
             host.close()
             host.deleteLater()
 
+    def test_pause_button_freezes_frame_and_resumes_from_it(self) -> None:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+
+        from ui.onboarding import illustrations
+
+        host = QWidget()
+        host.resize(600, 300)
+        host.show()
+        try:
+            illustration = self._illustration(host)
+            illustration.show()
+            with patch("ui.onboarding.illustrations.are_live_animations_enabled", return_value=True):
+                illustration.set_scene("tcpseg")
+                button = illustration.pause_button
+                self.assertTrue(button.isVisible())
+                self.assertEqual(button.geometry().topRight(), illustration.rect().topRight())
+
+                illustration.set_phase(0.3)
+                QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+                self.assertTrue(illustration.is_paused())
+                self.assertFalse(illustration.is_animating())
+                self.assertEqual(illustration.phase(), 0.3)
+                self.assertEqual(button.toolTip(), "Продолжить анимацию")
+
+                # Продолжение идёт с того же кадра, а не с начала круга.
+                QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+                self.assertFalse(illustration.is_paused())
+                self.assertTrue(illustration.is_animating())
+                self.assertEqual(button.toolTip(), "Остановить анимацию")
+                with patch.object(illustration._clock, "elapsed", return_value=int(0.1 * illustrations.PERIOD_MS)):
+                    illustration._on_tick()
+                self.assertAlmostEqual(illustration.phase(), 0.4, places=3)
+
+                # Следующий шаг: новая схема идёт сама, с начала.
+                illustration.set_paused(True)
+                illustration.set_scene("fake")
+                self.assertFalse(illustration.is_paused())
+                self.assertTrue(illustration.is_animating())
+                self.assertEqual(illustration.phase(), 0.0)
+        finally:
+            host.close()
+            host.deleteLater()
+
+    def test_pause_button_hidden_when_animations_are_off(self) -> None:
+        host = QWidget()
+        host.resize(600, 300)
+        host.show()
+        try:
+            illustration = self._illustration(host)
+            illustration.show()
+            with patch("ui.onboarding.illustrations.are_live_animations_enabled", return_value=False):
+                illustration.set_scene("fake")
+                self.assertFalse(illustration.pause_button.isVisible())
+                illustration.set_paused(True)
+                self.assertFalse(illustration.is_paused())
+        finally:
+            host.close()
+            host.deleteLater()
+
     def test_without_animations_shows_still_frame_with_result(self) -> None:
         from ui.onboarding.illustrations import STATIC_PHASE
 

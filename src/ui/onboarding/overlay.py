@@ -1247,7 +1247,7 @@ class OnboardingOverlay(QWidget):
         card = self._card
         buttons = [
             button
-            for button in (card.skip_button, card.back_button, card.next_button)
+            for button in (card.illustration.pause_button, card.skip_button, card.back_button, card.next_button)
             if button.isVisible() and button.isEnabled()
         ]
         if not buttons:

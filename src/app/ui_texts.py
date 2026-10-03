@@ -5966,6 +5966,8 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     "onboarding.scene.check": {"ru": "проверка", "en": "inspection"},
     "onboarding.scene.junk": {"ru": "мусор", "en": "junk"},
     "onboarding.scene.one_packet": {"ru": "один пакет", "en": "one packet"},
+    "onboarding.scene.pause": {"ru": "Остановить анимацию", "en": "Pause the animation"},
+    "onboarding.scene.resume": {"ru": "Продолжить анимацию", "en": "Resume the animation"},
     "onboarding.scene.syn_data": {"ru": "SYN + данные", "en": "SYN + data"},
     "onboarding.scene.bubble.blocked": {"ru": "Узнал — блок!", "en": "Recognised — blocked!"},
     "onboarding.scene.bubble.fake": {"ru": "google.com — пропущу", "en": "google.com — let it pass"},

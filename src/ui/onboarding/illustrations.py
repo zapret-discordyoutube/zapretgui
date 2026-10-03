@@ -18,6 +18,9 @@
 Сцены повторяются по кругу. Все переходы (появление реплики, вспышка у
 сайта, падение подделок) заканчиваются до STATIC_PHASE: когда анимации в
 системе выключены, рисуется этот неподвижный кадр с итогом.
+
+В углу схемы есть кнопка паузы: анимацию можно остановить на любом кадре и
+спокойно рассмотреть. На следующем шаге схема снова идёт сама.
 """
 
 from __future__ import annotations
@@ -26,12 +29,13 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer
+from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, QSize, Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
-from qfluentwidgets import isDarkTheme, themeColor
+from qfluentwidgets import FluentIcon, TransparentToolButton, isDarkTheme, themeColor
 
 from ui.animation_policy import are_live_animations_enabled
+from ui.fluent_widgets import set_tooltip
 
 
 PERIOD_MS = 5600
@@ -52,6 +56,7 @@ ABSORB = 0.1  # хвост пути, на котором настоящая пл
 PULSE = 0.08  # кольцо вокруг сайта, когда всё дошло
 SHAKE = 0.07  # плашка трясётся, упёршись в блок
 DISCARD = 0.1  # сайт отбрасывает мусор
+PAUSE_BUTTON_SIZE = 28
 
 BLOCK_RED = QColor(232, 17, 35)
 PASS_GREEN = QColor(60, 179, 113)
@@ -237,13 +242,23 @@ class TechniqueIllustration(QWidget):
         self._tr = tr_fn
         self._scene_key = ""
         self._phase = STATIC_PHASE
+        self._paused = False
+        # С какого места круга идёт отсчёт после снятия с паузы, мс.
+        self._clock_offset_ms = 0.0
         self._clock = QElapsedTimer()
         self._timer = QTimer(self)
         self._timer.setInterval(FRAME_MS)
         self._timer.timeout.connect(self._on_tick)
         self.setFixedHeight(ILLUSTRATION_HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        # Пауза — в правом верхнем углу: там на схеме пусто.
+        self.pause_button = TransparentToolButton(FluentIcon.PAUSE, self)
+        self.pause_button.setFixedSize(PAUSE_BUTTON_SIZE, PAUSE_BUTTON_SIZE)
+        self.pause_button.setIconSize(QSize(12, 12))
+        self.pause_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pause_button.clicked.connect(self.toggle_paused)
+        self.pause_button.hide()
+        self._sync_pause_button()
 
     # ── публичное ─────────────────────────────────────────────────────
 
@@ -259,6 +274,26 @@ class TechniqueIllustration(QWidget):
 
     def is_animating(self) -> bool:
         return self._timer.isActive()
+
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def set_paused(self, paused: bool) -> None:
+        """Остановить схему на текущем кадре или пустить дальше с него же."""
+        paused = bool(paused)
+        if paused == self._paused or not self._can_animate():
+            return
+        self._paused = paused
+        if paused:
+            self._timer.stop()
+        else:
+            self._clock_offset_ms = self._phase * PERIOD_MS
+            self._clock.start()
+            self._timer.start()
+        self._sync_pause_button()
+
+    def toggle_paused(self) -> None:
+        self.set_paused(not self._paused)
 
     def phase(self) -> float:
         return self._phase
@@ -278,8 +313,21 @@ class TechniqueIllustration(QWidget):
         super().hideEvent(event)
         self._timer.stop()
 
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        self.pause_button.move(self.width() - self.pause_button.width(), 0)
+
+    def _can_animate(self) -> bool:
+        return bool(self._scene_key) and self.isVisible() and are_live_animations_enabled()
+
     def _restart(self) -> None:
-        animate = bool(self._scene_key) and self.isVisible() and are_live_animations_enabled()
+        """Новая схема или новый показ: круг идёт с начала, пауза снята."""
+        animate = self._can_animate()
+        self._paused = False
+        self._clock_offset_ms = 0.0
+        # Без анимаций кадр один и ставить на паузу нечего — кнопка не нужна.
+        self.pause_button.setVisible(animate)
+        self._sync_pause_button()
         if not animate:
             self._timer.stop()
             self._phase = STATIC_PHASE
@@ -292,8 +340,17 @@ class TechniqueIllustration(QWidget):
 
     def _on_tick(self) -> None:
         elapsed = self._clock.elapsed() if self._clock.isValid() else 0
-        self._phase = (elapsed % PERIOD_MS) / PERIOD_MS
+        self._phase = ((self._clock_offset_ms + elapsed) % PERIOD_MS) / PERIOD_MS
         self.update()
+
+    def _sync_pause_button(self) -> None:
+        if self._paused:
+            icon, text = FluentIcon.PLAY, self._tr("onboarding.scene.resume", "Продолжить анимацию")
+        else:
+            icon, text = FluentIcon.PAUSE, self._tr("onboarding.scene.pause", "Остановить анимацию")
+        self.pause_button.setIcon(icon)
+        self.pause_button.setAccessibleName(text)
+        set_tooltip(self.pause_button, text)
 
     # ── отрисовка ─────────────────────────────────────────────────────
 
