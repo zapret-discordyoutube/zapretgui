@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from presets.ui.control.shared_builders import (
-    build_deferred_themed_push_setting_card_common,
-    build_onboarding_tour_card_common,
-)
+from presets.ui.control.shared_builders import build_deferred_themed_push_setting_card_common
 from presets.ui.control.windows_features.build import build_state_media_block_toggle, build_windows_feature_toggles
 from ui.fluent_widgets import build_additional_settings_section, enable_setting_card_group_auto_height
 
@@ -27,13 +24,6 @@ class Zapret2SettingsBuildWidgets:
     discord_restart_toggle: object | None
     wssize_toggle: object | None
     debug_log_toggle: object | None
-    extra_section_label: object | None
-    extra_card: object
-    test_card: object
-    internet_cleanup_card: object
-    folder_card: object
-    docs_card: object
-    tour_card: object
     state_media_block_toggle: object
 
 
@@ -55,11 +45,6 @@ def build_winws2_pages_settings_sections(
     on_discord_restart_changed,
     on_wssize_toggled,
     on_debug_log_toggled,
-    on_open_connection_test,
-    on_open_internet_cleanup,
-    on_open_folder,
-    on_open_docs,
-    on_open_onboarding_tour,
     on_open_fakes,
 ) -> Zapret2SettingsBuildWidgets:
     program_settings_title = tr_fn("page.winws2_control.section.program_settings", "Настройки программы")
@@ -102,11 +87,18 @@ def build_winws2_pages_settings_sections(
         on_max_blocker_toggled=on_max_blocker_toggled,
     )
 
+    state_media_block_toggle = build_state_media_block_toggle(
+        tr_fn=tr_fn,
+        win11_toggle_row_cls=win11_toggle_row_cls,
+        on_state_media_block_toggled=on_state_media_block_toggled,
+    )
+
     program_settings_card.addSettingCard(gui_autostart_toggle)
     program_settings_card.addSettingCard(auto_dpi_toggle)
     program_settings_card.addSettingCard(tray_close_mode_combo)
     program_settings_card.addSettingCard(windows_feature_toggles.defender_toggle)
     program_settings_card.addSettingCard(windows_feature_toggles.max_block_toggle)
+    program_settings_card.addSettingCard(state_media_block_toggle)
 
     enable_setting_card_group_auto_height(program_settings_card)
 
@@ -173,77 +165,6 @@ def build_winws2_pages_settings_sections(
         action_rows=[fakes_card],
     )
 
-    extra_section_label = None
-    extra_card = setting_card_group_cls(
-        tr_fn("page.winws2_control.section.additional", "Дополнительные действия"),
-        content_parent,
-    )
-    test_card = build_deferred_themed_push_setting_card_common(
-        push_setting_card_cls=push_setting_card_cls,
-        button_text=tr_fn("page.winws2_control.button.open", "Открыть"),
-        icon_name="fa5s.wifi",
-        icon_color="#60cdff",
-        title_text=tr_fn("page.winws2_control.button.connection_test", "Тест соединения"),
-        content_text=tr_fn("page.winws2_control.button.connection_test.desc", "Проверить доступность сети и состояние обхода"),
-        on_click=on_open_connection_test,
-        button_accessible_name=tr_fn("page.winws2_control.button.connection_test.accessible_name", "Открыть тест соединения"),
-        parent=content_parent,
-    )
-    internet_cleanup_card = build_deferred_themed_push_setting_card_common(
-        push_setting_card_cls=push_setting_card_cls,
-        button_text=tr_fn("page.control.internet_cleanup.button", "Сбросить"),
-        icon_name="fa5s.network-wired",
-        icon_color="#4cc38a",
-        title_text=tr_fn("page.control.internet_cleanup.title", "Сбросить сеть Windows"),
-        content_text=tr_fn(
-            "page.control.internet_cleanup.desc",
-            "Очистить DNS, proxy, Winsock и сетевые параметры. Может понадобиться перезагрузка",
-        ),
-        on_click=on_open_internet_cleanup,
-        button_accessible_name=tr_fn("page.control.internet_cleanup.accessible_name", "Сбросить сеть Windows"),
-        parent=content_parent,
-    )
-    folder_card = build_deferred_themed_push_setting_card_common(
-        push_setting_card_cls=push_setting_card_cls,
-        button_text=tr_fn("page.winws2_control.button.open", "Открыть"),
-        icon_name="fa5s.folder-open",
-        icon_color="#f5c04d",
-        title_text=tr_fn("page.winws2_control.button.open_folder", "Открыть папку"),
-        content_text=tr_fn("page.winws2_control.button.open_folder.desc", "Перейти в папку программы и служебных файлов"),
-        on_click=on_open_folder,
-        button_accessible_name=tr_fn("page.winws2_control.button.open_folder.accessible_name", "Открыть папку программы"),
-        parent=content_parent,
-    )
-    docs_card = build_deferred_themed_push_setting_card_common(
-        push_setting_card_cls=push_setting_card_cls,
-        button_text=tr_fn("page.winws2_control.button.open", "Открыть"),
-        icon_name="fa5s.book",
-        icon_color="#8ab4f8",
-        title_text=tr_fn("page.winws2_control.button.documentation", "Документация"),
-        content_text=tr_fn("page.winws2_control.button.documentation.desc", "Открыть справку и описание возможностей"),
-        on_click=on_open_docs,
-        button_accessible_name=tr_fn("page.winws2_control.button.documentation.accessible_name", "Открыть документацию"),
-        parent=content_parent,
-    )
-    tour_card = build_onboarding_tour_card_common(
-        push_setting_card_cls=push_setting_card_cls,
-        tr_fn=tr_fn,
-        on_click=on_open_onboarding_tour,
-        parent=content_parent,
-    )
-    state_media_block_toggle = build_state_media_block_toggle(
-        tr_fn=tr_fn,
-        win11_toggle_row_cls=win11_toggle_row_cls,
-        on_state_media_block_toggled=on_state_media_block_toggled,
-    )
-    extra_card.addSettingCard(tour_card)
-    extra_card.addSettingCard(test_card)
-    extra_card.addSettingCard(internet_cleanup_card)
-    extra_card.addSettingCard(folder_card)
-    extra_card.addSettingCard(docs_card)
-    extra_card.addSettingCard(state_media_block_toggle)
-    enable_setting_card_group_auto_height(extra_card)
-
     return Zapret2SettingsBuildWidgets(
         program_settings_section_label=program_settings_section_label,
         program_settings_card=program_settings_card,
@@ -258,12 +179,5 @@ def build_winws2_pages_settings_sections(
         discord_restart_toggle=discord_restart_toggle,
         wssize_toggle=wssize_toggle,
         debug_log_toggle=debug_log_toggle,
-        extra_section_label=extra_section_label,
-        extra_card=extra_card,
-        test_card=test_card,
-        internet_cleanup_card=internet_cleanup_card,
-        folder_card=folder_card,
-        docs_card=docs_card,
-        tour_card=tour_card,
         state_media_block_toggle=state_media_block_toggle,
     )

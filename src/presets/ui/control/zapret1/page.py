@@ -36,6 +36,7 @@ from presets.ui.control.control_page_shared import (
     cleanup_control_page_subscriptions,
 )
 from app.ui_texts import tr as tr_catalog
+from presets.ui.control.quick_actions import build_quick_actions
 from presets.ui.control.top_summary_widget import ControlTopSummaryWidget
 from log.log import log
 
@@ -43,7 +44,7 @@ from ui.widgets.soft_visibility import set_visible_softly
 from qfluentwidgets import (
     CaptionLabel, StrongBodyLabel,
     IndeterminateProgressBar, InfoBar,
-    PushSettingCard, SettingCardGroup, TransparentPushButton,
+    SettingCardGroup, TransparentPushButton,
 )
 
 
@@ -109,6 +110,8 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self._create_external_open_url_worker = create_external_open_url_worker
         self._start_onboarding_tour_callback = start_onboarding_tour
         self.onboarding_tour_card = None
+        self.quick_actions_title = None
+        self.quick_actions_grid = None
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._program_settings_runtime_unsubscribe = None
@@ -134,11 +137,6 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.last_status_message_dot = None
         self.last_status_message_title = None
         self.last_status_message_label = None
-        self.extra_card = None
-        self.test_btn = None
-        self.internet_cleanup_btn = None
-        self.folder_btn = None
-        self.docs_btn = None
         self.test_card = None
         self.internet_cleanup_card = None
         self.folder_card = None
@@ -204,6 +202,29 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.top_summary.premiumClicked.connect(self._open_premium_callback)
         self.add_widget(self.top_summary)
 
+        # Быстрые действия плитками: обучение, тест соединения, сброс сети, папка, документация.
+        self.add_spacing(24)
+        quick_actions = build_quick_actions(
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            text_prefix="page.winws1_control",
+            on_open_onboarding_tour=self._start_onboarding_tour,
+            on_open_connection_test=self._open_connection_test,
+            on_open_internet_cleanup=self._on_internet_cleanup_clicked,
+            on_open_folder=self._open_folder,
+            on_open_docs=self._open_docs,
+            parent=self.content,
+        )
+        self.quick_actions_title = quick_actions.title_label
+        self.quick_actions_grid = quick_actions.grid
+        self.add_widget(self.quick_actions_title)
+        self.add_spacing(12)
+        self.onboarding_tour_card = quick_actions.tour_card
+        self.test_card = quick_actions.test_card
+        self.internet_cleanup_card = quick_actions.internet_cleanup_card
+        self.folder_card = quick_actions.folder_card
+        self.docs_card = quick_actions.docs_card
+        self.add_widget(self.quick_actions_grid)
+
         self._build_settings_sections()
         self._attach_program_settings_runtime()
         self._schedule_additional_settings_reload(force=True)
@@ -216,7 +237,6 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             add_section_title=self.add_section_title,
             tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
             content_parent=self.content,
-            push_setting_card_cls=PushSettingCard,
             setting_card_group_cls=SettingCardGroup,
             win11_toggle_row_cls=Win11ToggleRow,
             win11_combo_row_cls=Win11ComboRow,
@@ -229,11 +249,6 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             on_discord_restart_changed=self._on_discord_restart_changed,
             on_wssize_toggled=self._on_wssize_toggled,
             on_debug_log_toggled=self._on_debug_log_toggled,
-            on_open_connection_test=self._open_connection_test,
-            on_open_internet_cleanup=self._on_internet_cleanup_clicked,
-            on_open_folder=self._open_folder,
-            on_open_docs=self._open_docs,
-            on_open_onboarding_tour=self._start_onboarding_tour,
         )
         self.program_settings_section_label = section_widgets.program_settings_section_label
         self.program_settings_card = section_widgets.program_settings_card
@@ -242,6 +257,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.tray_close_mode_combo = section_widgets.tray_close_mode_combo
         self.defender_toggle = section_widgets.defender_toggle
         self.max_block_toggle = section_widgets.max_block_toggle
+        self.state_media_block_toggle = section_widgets.state_media_block_toggle
         self.add_widget(self.program_settings_card)
 
         self.add_spacing(16)
@@ -265,19 +281,6 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.add_widget(self.last_status_message_card)
         self._refresh_last_status_message()
 
-        self.add_spacing(16)
-        self.extra_card = section_widgets.extra_card
-        self.test_card = section_widgets.test_card
-        self.internet_cleanup_card = section_widgets.internet_cleanup_card
-        self.folder_card = section_widgets.folder_card
-        self.docs_card = section_widgets.docs_card
-        self.onboarding_tour_card = section_widgets.tour_card
-        self.state_media_block_toggle = section_widgets.state_media_block_toggle
-        self.test_btn = self.test_card.button
-        self.internet_cleanup_btn = self.internet_cleanup_card.button
-        self.folder_btn = self.folder_card.button
-        self.docs_btn = self.docs_card.button
-        self.add_widget(self.extra_card)
 
     def _attach_program_settings_runtime(self) -> None:
         self._attach_program_settings_runtime_fn(
@@ -913,6 +916,8 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             internet_cleanup_card=self.internet_cleanup_card,
             folder_card=self.folder_card,
             docs_card=self.docs_card,
+            tour_card=self.onboarding_tour_card,
+            quick_actions_title=self.quick_actions_title,
             additional_settings_card=self.additional_settings_card,
             additional_settings_notice=self.additional_settings_notice,
             discord_restart_toggle=self.discord_restart_toggle,

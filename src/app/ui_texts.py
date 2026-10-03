@@ -189,6 +189,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Определение состояния процесса",
         "en": "Detecting process state",
     },
+    "page.control.section.quick_actions": {
+        "ru": "Быстрые действия",
+        "en": "Quick actions",
+    },
     "page.control.summary.preset.caption": {
         "ru": "Текущий пресет",
         "en": "Current preset",
@@ -444,10 +448,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.winws1_control.advanced.debug_log.desc": {
         "ru": "Записывает логи winws в папку logs",
         "en": "Writes winws logs to the logs folder",
-    },
-    "page.winws1_control.section.additional": {
-        "ru": "Дополнительные действия",
-        "en": "Additional actions",
     },
     "page.winws1_control.button.connection_test": {
         "ru": "Тест соединения",
@@ -3974,10 +3974,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Дополнительные настройки",
         "en": "Additional Settings",
     },
-    "page.winws2_control.section.additional": {
-        "ru": "Дополнительно",
-        "en": "Additional",
-    },
     "page.winws2_control.status.checking": {
         "ru": "Проверка...",
         "en": "Checking...",
@@ -6313,26 +6309,26 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
         "ru": (
             "Нажмите «Запустить Zapret» и откройте нужный сайт. Не открылся — попробуйте другой пресет "
             "или другую стратегию в профилях.\n\n"
-            "Эту экскурсию можно пройти ещё раз кнопкой «Показать» на этой карточке."
+            "Эту экскурсию можно пройти ещё раз: нажмите на эту плитку."
         ),
         "en": (
             "Press Start Zapret and open the site you need. If it does not open, try another preset or "
             "another strategy in the profiles.\n\n"
-            "You can take this tour again with the Show button on this card."
+            "You can take this tour again: just click this tile."
         ),
     },
     "onboarding.step.finish.body_no_target": {
         "ru": (
             "Запустите обход и откройте нужный сайт. Не открылся — попробуйте другой пресет или другую "
             "стратегию в профилях.\n\n"
-            "Эту экскурсию можно пройти ещё раз кнопкой «Показать» на главной странице режимов "
-            "Zapret 1 и Zapret 2."
+            "Эту экскурсию можно пройти ещё раз плиткой «Как пользоваться программой» на главной "
+            "странице режимов Zapret 1 и Zapret 2."
         ),
         "en": (
             "Start the bypass and open the site you need. If it does not open, try another preset or "
             "another strategy in the profiles.\n\n"
-            "You can take this tour again with the Show button on the main page in Zapret 1 and "
-            "Zapret 2 modes."
+            "You can take this tour again with the “How to use the app” tile on the main page in "
+            "Zapret 1 and Zapret 2 modes."
         ),
     },
     "page.control.onboarding_tour.title": {
@@ -6340,10 +6336,9 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
         "en": "How to use the app",
     },
     "page.control.onboarding_tour.desc": {
-        "ru": "Пошаговая экскурсия: как устроен Zapret, что такое пресеты, профили и стратегии и где что находится",
-        "en": "A step-by-step tour: how Zapret works, what presets, profiles and strategies are and where everything is",
+        "ru": "Пошаговая экскурсия: пресеты, профили и стратегии",
+        "en": "A step-by-step tour: presets, profiles and strategies",
     },
-    "page.control.onboarding_tour.button": {"ru": "Показать", "en": "Show"},
     "page.control.onboarding_tour.accessible_name": {
         "ru": "Показать обучающий тур",
         "en": "Show the guided tour",

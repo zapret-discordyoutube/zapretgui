@@ -264,17 +264,8 @@ class ControlPageWindowsFeatureMixin:
 
         self._request_internet_cleanup()
 
-    def _internet_cleanup_button(self):
-        card = getattr(self, "internet_cleanup_card", None)
-        return getattr(card, "button", None)
-
     def _set_internet_cleanup_enabled(self, enabled: bool) -> None:
-        button = self._internet_cleanup_button()
-        if button is not None:
-            try:
-                button.setEnabled(bool(enabled))
-            except Exception:
-                pass
+        # Плитка «Сбросить сеть Windows» бледнеет и не нажимается, пока сброс идёт.
         card = getattr(self, "internet_cleanup_card", None)
         if card is not None:
             try:

@@ -196,25 +196,6 @@ def build_last_status_message_card_common(
     )
 
 
-def build_onboarding_tour_card_common(*, push_setting_card_cls, tr_fn, on_click, parent=None):
-    """Карточка «Как пользоваться программой»: повтор обучающего тура."""
-    return build_deferred_themed_push_setting_card_common(
-        push_setting_card_cls=push_setting_card_cls,
-        button_text=tr_fn("page.control.onboarding_tour.button", "Показать"),
-        icon_name="fa5s.graduation-cap",
-        icon_color="#b39ddb",
-        title_text=tr_fn("page.control.onboarding_tour.title", "Как пользоваться программой"),
-        content_text=tr_fn(
-            "page.control.onboarding_tour.desc",
-            "Пошаговая экскурсия: как устроен Zapret, что такое пресеты, профили и стратегии и где что находится",
-        ),
-        on_click=on_click,
-        button_icon_name=FluentIcon.PLAY,
-        button_accessible_name=tr_fn("page.control.onboarding_tour.accessible_name", "Показать обучающий тур"),
-        parent=parent,
-    )
-
-
 def build_deferred_themed_push_setting_card_common(
     *,
     push_setting_card_cls,

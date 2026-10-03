@@ -153,11 +153,20 @@ class ControlPageImmediateStartupTests(unittest.TestCase):
         import presets.ui.control.zapret1.sections_build as zapret1_sections
         import presets.ui.control.zapret2.sections_build as zapret2_sections
 
+        # Карточка «Фейки» есть только в Zapret 2; её значок рисуется после первого показа.
+        self.assertIn("build_deferred_themed_push_setting_card_common", inspect.getsource(zapret2_sections))
         for module in (zapret1_sections, zapret2_sections):
             with self.subTest(module=module.__name__):
-                source = inspect.getsource(module)
-                self.assertIn("build_deferred_themed_push_setting_card_common", source)
-                self.assertNotIn("get_themed_qta_icon", source)
+                self.assertNotIn("get_themed_qta_icon", inspect.getsource(module))
+
+    def test_quick_action_tiles_defer_their_icons(self) -> None:
+        import inspect
+
+        import ui.widgets.action_tile as action_tile
+
+        source = inspect.getsource(action_tile.ActionTile.__init__)
+        self.assertIn("QTimer.singleShot(ACTION_ICON_DELAY_MS, self._apply_icon)", source)
+        self.assertNotIn("get_cached_qta_pixmap", source)
 
 
 if __name__ == "__main__":

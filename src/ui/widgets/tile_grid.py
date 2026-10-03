@@ -62,9 +62,14 @@ class SoftTile(QWidget):
         return self._hover_t
 
     def accent_color(self) -> QColor:
+        """Цвет подсветки и стрелки; плитка может задать свой."""
         from ui.theme import get_theme_tokens
 
         return QColor(str(getattr(get_theme_tokens(), "accent_hex", "") or "#5caee8"))
+
+    def chevron_center_y(self) -> float:
+        """На какой высоте рисовать стрелку «›»."""
+        return self.height() / 2
 
     # ---- наведение и нажатие -------------------------------------------
 
@@ -187,7 +192,7 @@ class SoftTile(QWidget):
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             x = rect.right() - 15.0 + 4.0 * (strength - 1.0)
-            y = rect.center().y()
+            y = self.chevron_center_y()
             painter.drawPolyline([QPointF(x - 3.5, y - 5.0), QPointF(x + 1.5, y), QPointF(x - 3.5, y + 5.0)])
         painter.setPen(Qt.PenStyle.NoPen)
 
@@ -257,10 +262,7 @@ class TileGrid(QWidget):
             width = max(0, self.width())
             y = 0
             for row in self._rows(tiles, width) if width > 0 else []:
-                height = self._row_height or max(
-                    max(tile.sizeHint().height(), tile.minimumSizeHint().height(), tile.minimumHeight())
-                    for tile, _tile_width in row
-                )
+                height = self._row_height or max(self._tile_height(tile, tile_width) for tile, tile_width in row)
                 x = 0
                 for tile, tile_width in row:
                     tile.setGeometry(QRect(x, y, tile_width, height))
@@ -271,6 +273,13 @@ class TileGrid(QWidget):
                 self.setFixedHeight(total)
         finally:
             self._in_relayout = False
+
+    @staticmethod
+    def _tile_height(tile: QWidget, width: int) -> int:
+        # Плитка с переносом текста выше, когда она у́же.
+        if tile.hasHeightForWidth():
+            return max(tile.heightForWidth(width), tile.minimumHeight())
+        return max(tile.sizeHint().height(), tile.minimumSizeHint().height(), tile.minimumHeight())
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(max(self._min_tile_width, self.width()), self.maximumHeight())

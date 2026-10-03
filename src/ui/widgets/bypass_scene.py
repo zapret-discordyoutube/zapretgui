@@ -62,8 +62,8 @@ BLOCKED_REST_MS = 3200
 BLOCKED_PACKET_DELAYS = (0.0, 0.14, 0.28)
 BLOCKED_FLIGHT = 0.62
 SHAKE_MS = 460
-# Сцена крупнее точки, поэтому кадры чуть реже: 25 в секунду хватает для плавности.
-SCENE_FRAME_MS = 40
+# Сцена крупнее точки, поэтому кадры реже: 20 в секунду хватает для плавности.
+SCENE_FRAME_MS = 50
 
 BUSY_PHASES = frozenset({"autostart_pending", "starting", "stopping"})
 KNOWN_PHASES = frozenset({"running", "failed", "stopped"}) | BUSY_PHASES
@@ -109,6 +109,8 @@ class BypassScene(PulsingDot):
         self._mascot.move(0, SCENE_HEIGHT // 2 - (self._mascot.height() - 2 - MASCOT_SIZE // 2))
         self._flinched = False
 
+        # Политика фокуса обычного виджета: к ней сцена вернётся, если перестанет быть кнопкой.
+        self._plain_focus_policy = self.focusPolicy()
         self._phase = ""
         self._flow_time = 0.0
         self._flow_origin = 0.0
@@ -227,7 +229,7 @@ class BypassScene(PulsingDot):
     def set_clickable(self, clickable: bool) -> None:
         self._clickable = bool(clickable)
         self.setMouseTracking(self._clickable)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus if self._clickable else Qt.FocusPolicy.NoFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus if self._clickable else self._plain_focus_policy)
         self._sync_cursor()
         self.update()
 
