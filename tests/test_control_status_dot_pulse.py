@@ -544,12 +544,12 @@ class ControlStatusDotPulseTests(unittest.TestCase):
                     self.assertEqual(plan.action_name, action_name)
                     self.assertEqual(plan.show_close, show_close)
 
-    def test_stopped_status_tells_to_click_the_dot(self) -> None:
+    def test_stopped_status_tells_to_click_the_button(self) -> None:
         from presets.ui.control.zapret2 import page_runtime as zapret2_page_runtime
 
         plan = zapret2_page_runtime.build_status_plan(state="stopped", last_error="", language="ru")
 
-        self.assertIn("точку", plan.description)
+        self.assertIn("на кнопку", plan.description)
         self.assertNotIn("«Запустить»", plan.description)
 
     def test_apply_status_plan_passes_switch_state_to_dot(self) -> None:
@@ -592,6 +592,33 @@ class ControlStatusDotPulseTests(unittest.TestCase):
         self.assertEqual(dot.click_enabled, [False])
         self.assertEqual(dot.description, "Zapret останавливается")
         self.assertFalse(close_btn.visible)
+
+    def test_apply_status_plan_passes_phase_to_the_real_scene(self) -> None:
+        from PyQt6.QtGui import QColor
+        from PyQt6.QtWidgets import QApplication
+
+        from presets.ui.control.control_page_runtime_shared import apply_status_plan
+        from presets.ui.control.zapret2 import page_runtime as zapret2_page_runtime
+        from ui.widgets.bypass_scene import BypassScene
+
+        _app = QApplication.instance() or QApplication([])
+        scene = BypassScene()
+        self.addCleanup(scene.deleteLater)
+        scene.set_clickable(True)
+
+        for phase, clickable in (("starting", True), ("running", True), ("stopping", False), ("failed", True)):
+            with self.subTest(phase=phase):
+                plan = zapret2_page_runtime.build_status_plan(state=phase, last_error="", language="ru")
+                apply_status_plan(
+                    plan,
+                    status_title=_TextTarget(),
+                    status_desc=_TextTarget(),
+                    status_dot=scene,
+                    close_btn=_VisibleTarget(),
+                )
+                self.assertEqual(scene.phase(), phase)
+                self.assertEqual(scene.target_color(), QColor(plan.dot_color))
+                self.assertEqual(scene.is_click_enabled(), clickable)
 
 
 if __name__ == "__main__":

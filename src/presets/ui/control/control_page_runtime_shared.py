@@ -187,11 +187,15 @@ def apply_status_plan(
     set_state_text(status_desc, f"Описание состояния Zapret: {plan.description}")
     set_state_text(status_dot, f"Индикатор состояния Zapret: {plan.title}")
     status_dot.set_color(plan.dot_color)
+    # Сцена в карточке рисует фазу по-своему: стена, ожидание или поток пакетов.
+    set_phase = getattr(status_dot, "set_phase", None)
+    if callable(set_phase):
+        set_phase(plan.phase)
     if plan.pulsing:
         status_dot.start_pulse()
     else:
         status_dot.stop_pulse()
-    # Точка — выключатель: описание для диктора и подсказка говорят, что сделает нажатие.
+    # Кнопка в сцене — выключатель: описание для диктора и подсказка говорят, что сделает нажатие.
     set_click_enabled = getattr(status_dot, "set_click_enabled", None)
     if callable(set_click_enabled):
         set_click_enabled(bool(plan.clickable))

@@ -12,9 +12,12 @@ from presets.ui.control.control_page_runtime_shared import (
     BUTTON_ICON_TEXT_GAP_PROPERTY,
     set_button_text_accessibility,
 )
-from ui.pulsing_dot import PulsingDot, PacketFlowIndicator
+from presets.ui.control.status_hero_card import StatusHeroCard
+from ui.pulsing_dot import PulsingDot
 from ui.accessibility import enable_keyboard_click, set_control_accessibility, set_state_text
 from ui.theme import get_themed_qta_icon
+from ui.widgets.bypass_scene import BypassScene
+from ui.widgets.fun.mascot import Mascot
 
 
 ACTION_CARD_BUTTON_WIDTH = 156
@@ -37,9 +40,10 @@ class ModeStatusWidgets:
     close_btn: object
     progress_bar: object
     loading_label: object
+    mascot: object
 
 
-STATUS_DOT_SIZE = 40
+STATUS_MASCOT_SIZE = 44
 
 
 def build_mode_status_section_common(
@@ -57,19 +61,19 @@ def build_mode_status_section_common(
     on_close,
     parent=None,
 ) -> ModeStatusWidgets:
-    """Карточка «Статус работы». Точка в ней — выключатель Zapret."""
-    status_card = CardWidget()
+    """Карточка «Статус работы». Кнопка в стене сцены — выключатель Zapret."""
+    status_card = StatusHeroCard()
     status_layout = QHBoxLayout(status_card)
-    status_layout.setContentsMargins(16, 12, 16, 12)
-    status_layout.setSpacing(16)
+    status_layout.setContentsMargins(16, 14, 16, 14)
+    status_layout.setSpacing(18)
 
-    status_dot = PacketFlowIndicator(size=STATUS_DOT_SIZE)
+    status_dot = BypassScene(status_card)
     status_dot.set_clickable(True)
     status_dot.clicked.connect(on_toggle)
     # set_control_accessibility сам подключает Enter/Пробел к status_dot.click().
     set_control_accessibility(
         status_dot,
-        description=tr_fn("launch.dot.description", "Нажмите на точку, чтобы запустить или остановить Zapret"),
+        description=tr_fn("launch.dot.description", "Нажмите на кнопку, чтобы запустить или остановить Zapret"),
     )
     set_state_text(status_dot, "Индикатор состояния Zapret: состояние пока не загружено")
     status_layout.addWidget(status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -110,6 +114,11 @@ def build_mode_status_section_common(
     status_text.addWidget(loading_label)
     status_layout.addLayout(status_text, 1)
 
+    # Талисман показывает состояние настроением: спокоен, суетится, грустит.
+    mascot = Mascot(status_card, size=STATUS_MASCOT_SIZE)
+    status_layout.addWidget(mascot, 0, Qt.AlignmentFlag.AlignVCenter)
+    status_card.bind_scene(status_dot, mascot)
+
     close_text = tr_fn("launch.action.close_app", "Закрыть программу")
     close_btn = close_button_cls(FluentIcon.POWER_BUTTON, close_text)
     set_control_accessibility(
@@ -129,6 +138,7 @@ def build_mode_status_section_common(
         close_btn=close_btn,
         progress_bar=progress_bar,
         loading_label=loading_label,
+        mascot=mascot,
     )
 
 

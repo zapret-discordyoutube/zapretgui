@@ -169,20 +169,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         return True
 
     def _build_ui(self):
-        self.top_summary = ControlTopSummaryWidget(
-            language=self._ui_language,
-            mode_value="Zapret 1",
-            initial_icon_delay_ms=250,
-            parent=self.content,
-        )
-        self.top_summary.presetClicked.connect(self._open_presets_callback)
-        self.top_summary.profilesClicked.connect(self._open_preset_setup_page)
-        self.top_summary.premiumClicked.connect(self._open_premium_callback)
-        self.add_widget(self.top_summary)
-        self.add_spacing(16)
-
-        # ── Статус работы ──────────────────────────────────────────────────
-        self.add_section_title(text_key="page.winws1_control.section.status")
+        # Статус работы — главный блок страницы: сцена с выключателем наверху.
         status_widgets = build_winws1_pages_status_section(
             tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
             strong_body_label_cls=StrongBodyLabel,
@@ -201,6 +188,18 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.progress_bar = status_widgets.progress_bar
         self.loading_label = status_widgets.loading_label
         self.add_widget(status_widgets.card)
+        self.add_spacing(16)
+
+        self.top_summary = ControlTopSummaryWidget(
+            language=self._ui_language,
+            mode_value="Zapret 1",
+            initial_icon_delay_ms=250,
+            parent=self.content,
+        )
+        self.top_summary.presetClicked.connect(self._open_presets_callback)
+        self.top_summary.profilesClicked.connect(self._open_preset_setup_page)
+        self.top_summary.premiumClicked.connect(self._open_premium_callback)
+        self.add_widget(self.top_summary)
 
         self._build_settings_sections()
         self._attach_program_settings_runtime()

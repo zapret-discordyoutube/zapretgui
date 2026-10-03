@@ -16,9 +16,9 @@ class ControlStatusPlan:
     description: str
     dot_color: str
     pulsing: bool
-    # Точка статуса — это выключатель. clickable=False, пока идёт остановка.
+    # Кнопка в сцене статуса — это выключатель. clickable=False, пока идёт остановка.
     clickable: bool
-    # Что сделает нажатие на точку: имя для диктора и подсказка.
+    # Что сделает нажатие на кнопку: имя для диктора и подсказка.
     action_name: str
     show_close: bool
 
@@ -90,7 +90,7 @@ def build_status_plan_for(
     language: str,
     autostart_description: str,
 ) -> ControlStatusPlan:
-    """План карточки «Статус работы»: тексты, цвет точки и что делает нажатие на неё."""
+    """План карточки «Статус работы»: тексты, цвет кнопки и что делает нажатие на неё."""
     from app.ui_texts import tr as tr_catalog
 
     phase = str(state or "").strip().lower()
@@ -107,7 +107,7 @@ def build_status_plan_for(
             description=tr_catalog(
                 f"{text_prefix}.status.bypass_active",
                 language=language,
-                default="Обход блокировок активен · нажмите на точку, чтобы остановить",
+                default="Обход блокировок активен · нажмите на кнопку, чтобы остановить",
             ),
             dot_color=STATUS_COLOR_RUNNING,
             pulsing=True,
@@ -165,7 +165,7 @@ def build_status_plan_for(
         description=tr_catalog(
             f"{text_prefix}.status.press_start",
             language=language,
-            default="Нажмите на точку, чтобы запустить",
+            default="Нажмите на кнопку, чтобы запустить",
         ),
         dot_color=STATUS_COLOR_STOPPED,
         pulsing=False,

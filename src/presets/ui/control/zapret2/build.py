@@ -9,7 +9,6 @@ from presets.ui.control.shared_builders import build_mode_status_section_common
 
 @dataclass(slots=True)
 class Zapret2StatusWidgets:
-    section_label: object
     card: object
     status_dot: object
     status_title: object
@@ -21,7 +20,6 @@ class Zapret2StatusWidgets:
 
 def build_winws2_pages_status_section(
     *,
-    add_section_title,
     tr_fn,
     strong_body_label_cls,
     caption_label_cls,
@@ -31,7 +29,6 @@ def build_winws2_pages_status_section(
     on_close,
     parent,
 ) -> Zapret2StatusWidgets:
-    section_label = add_section_title(return_widget=True, text_key="page.winws2_control.section.status")
     widgets = build_mode_status_section_common(
         tr_fn=tr_fn,
         strong_body_label_cls=strong_body_label_cls,
@@ -48,7 +45,6 @@ def build_winws2_pages_status_section(
     )
 
     return Zapret2StatusWidgets(
-        section_label=section_label,
         card=widgets.card,
         status_dot=widgets.status_dot,
         status_title=widgets.status_title,

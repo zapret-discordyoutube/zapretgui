@@ -234,12 +234,12 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Zapret stopped",
     },
     "page.control.status.bypass_active": {
-        "ru": "Обход блокировок активен · нажмите на точку, чтобы остановить",
-        "en": "Bypass is active · click the dot to stop",
+        "ru": "Обход блокировок активен · нажмите на кнопку, чтобы остановить",
+        "en": "Bypass is active · click the button to stop",
     },
     "page.control.status.press_start": {
-        "ru": "Нажмите на точку, чтобы запустить",
-        "en": "Click the dot to start",
+        "ru": "Нажмите на кнопку, чтобы запустить",
+        "en": "Click the button to start",
     },
     "page.control.last_message.title": {
         "ru": "Последнее сообщение",
@@ -3405,10 +3405,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": f"Настройка и запуск Zapret 1 ({EXE_NAME_WINWS1}). В «Мои пресеты» выбирается пресет, а в «Настройка пресета» меняются профили и выбранные для них готовые стратегии.",
         "en": f"Configure and launch Zapret 1 ({EXE_NAME_WINWS1}). My presets selects a preset; preset setup changes profiles and ready strategies.",
     },
-    "page.winws1_control.section.status": {
-        "ru": "Статус работы",
-        "en": "Service Status",
-    },
     "page.winws1_control.section.presets": {
         "ru": "Пресеты и настройка пресета",
         "en": "Presets and preset setup",
@@ -3942,10 +3938,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Настройка и запуск Zapret 2. В «Мои пресеты» выбирается пресет, а в «Настройка пресета» меняются профили и выбранные для них готовые стратегии.",
         "en": "Configure and launch Zapret 2. My presets selects a preset; preset setup changes profiles and ready strategies.",
     },
-    "page.winws2_control.section.status": {
-        "ru": "Статус работы",
-        "en": "Service Status",
-    },
     "page.winws2_control.section.preset_switch": {
         "ru": "Сменить пресет обхода блокировок",
         "en": "Switch Bypass Preset",
@@ -3983,12 +3975,12 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Zapret stopped",
     },
     "page.winws2_control.status.bypass_active": {
-        "ru": "Обход блокировок активен · нажмите на точку, чтобы остановить",
-        "en": "Bypass is active · click the dot to stop",
+        "ru": "Обход блокировок активен · нажмите на кнопку, чтобы остановить",
+        "en": "Bypass is active · click the button to stop",
     },
     "page.winws2_control.status.press_start": {
-        "ru": "Нажмите на точку, чтобы запустить",
-        "en": "Click the dot to start",
+        "ru": "Нажмите на кнопку, чтобы запустить",
+        "en": "Click the button to start",
     },
     "page.winws2_control.button.my_presets": {
         "ru": "Мои пресеты",
@@ -5050,8 +5042,8 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
         "en": "Stop Zapret and close the app",
     },
     "launch.dot.description": {
-        "ru": "Нажмите на точку, чтобы запустить или остановить Zapret",
-        "en": "Click the dot to start or stop Zapret",
+        "ru": "Нажмите на кнопку, чтобы запустить или остановить Zapret",
+        "en": "Click the button to start or stop Zapret",
     },
     "launch.badge.running": {
         "ru": "Работает",
@@ -5346,8 +5338,8 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
         "en": "Live animations",
     },
     "page.appearance.performance.live_animations.description": {
-        "ru": "Логотип, точка статуса, сводка на главной и кнопки запуска коротко оживают при изменениях. Почти не нагружает процессор",
-        "en": "The logo, status dot, home summary and start buttons briefly come alive on changes. Almost no CPU load",
+        "ru": "Логотип, сцена статуса и сводка на главной, кнопки запуска оживают при изменениях. Почти не нагружает процессор",
+        "en": "The logo, the home status scene and summary, and start buttons come alive on changes. Almost no CPU load",
     },
     "page.appearance.performance.editor_scroll.title": {
         "ru": "Плавная прокрутка редакторов",
@@ -5522,14 +5514,18 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     },
     "onboarding.step.start.body": {
         "ru": (
-            "Точка — это выключатель. Нажмите на неё, и программа запустит движок с выбранным пресетом. "
+            "Круглая кнопка в стене — это выключатель. Пока обход выключен, пакеты разбиваются о стену "
+            "блокировки. Нажмите на кнопку, и программа запустит движок с выбранным пресетом: пакеты пойдут "
+            "сквозь стену к сайтам. "
             "Пока движок работает, обход действует не только в браузере, а во всей системе — в Discord, "
             "играх и других программах, но только для того трафика, который описан в профилях пресета.\n\n"
             "Повторное нажатие останавливает обход. То же самое можно сделать меткой статуса в заголовке "
             "окна — она видна в любом разделе — или из меню значка в трее."
         ),
         "en": (
-            "The dot is a switch. Click it and the app starts the engine with the selected preset. While the "
+            "The round button in the wall is a switch. While the bypass is off, packets crash into the "
+            "blocking wall. Click the button and the app starts the engine with the selected preset: packets "
+            "go through the wall to the sites. While the "
             "engine runs, the bypass works system-wide, not only in the browser — in Discord, games and other "
             "programs, but only for the traffic described in the preset profiles.\n\n"
             "Click it again to stop the bypass. You can also do this with the status badge in the window "

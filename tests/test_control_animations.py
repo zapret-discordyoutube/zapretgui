@@ -9,14 +9,20 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
+import presets.ui.control.status_hero_card as hero_module
 import presets.ui.control.top_summary_widget as summary_module
 import ui.pulsing_dot as dot_module
+import ui.widgets.bypass_scene as scene_module
+import ui.widgets.fun.mascot as mascot_module
 import ui.widgets.motion_icon as motion_module
 import ui.widgets.soft_visibility as soft_module
 from ui.widgets.soft_visibility import set_visible_softly, soft_visibility_target
 from donater.premium_display import TIER_ACTIVE, TIER_FREE, PremiumDisplay
+from presets.ui.control.status_hero_card import StatusHeroCard, mascot_mood_for_phase
 from presets.ui.control.top_summary_widget import ControlTopSummaryWidget
-from ui.pulsing_dot import PacketFlowIndicator, PulsingDot
+from ui.pulsing_dot import PulsingDot
+from ui.widgets.bypass_scene import BypassScene
+from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD, Mascot
 from ui.widgets.motion_icon import GESTURE_BOUNCE, MotionIcon
 
 
@@ -111,77 +117,254 @@ class PulsingDotTests(unittest.TestCase):
         self.assertEqual(dot._shown_color, QColor("#4caf50"))
 
 
-class PacketFlowIndicatorTests(unittest.TestCase):
+class BypassSceneTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
     def setUp(self) -> None:
         self._enabled = True
-        patcher = mock.patch.object(dot_module, "are_live_animations_enabled", side_effect=lambda: self._enabled)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for module in (dot_module, scene_module, hero_module):
+            patcher = mock.patch.object(module, "are_live_animations_enabled", side_effect=lambda: self._enabled)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
-    def test_flow_is_continuous_without_rest_pause(self) -> None:
-        flow = PacketFlowIndicator()
-        _host(self, flow).show()
-        self.assertEqual(flow.width(), dot_module.FLOW_WIDTH)
+    def _scene(self, phase: str = "") -> BypassScene:
+        scene = BypassScene()
+        _host(self, scene).show()
+        if phase:
+            scene.set_phase(phase)
+        return scene
 
-        flow.start_pulse()
-        with mock.patch.object(flow._beat_clock, "elapsed", return_value=dot_module.BEAT_DURATION_MS * 3):
-            flow._on_beat_frame()
+    def test_running_flow_is_continuous_without_rest_pause(self) -> None:
+        scene = self._scene("running")
+        self.assertTrue(scene.is_beating())
 
-        self.assertTrue(flow.is_beating())
-        self.assertFalse(flow._rest_timer.isActive())
-        self.assertGreater(flow._flow_time, 0.0)
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=scene_module.BLOCKED_BURST_MS * 3):
+            scene._on_beat_frame()
 
-    def test_flow_stops_when_hidden_or_stopped(self) -> None:
-        flow = PacketFlowIndicator()
-        host = _host(self, flow)
-        flow.start_pulse()
-        self.assertFalse(flow.is_beating())
+        self.assertTrue(scene.is_beating())
+        self.assertFalse(scene._rest_timer.isActive())
+        self.assertGreater(scene._flow_time, 0.0)
+
+    def test_stopped_scene_fires_a_burst_and_then_rests_without_frames(self) -> None:
+        scene = self._scene("stopped")
+        self.assertTrue(scene.is_beating())
+
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=scene_module.BLOCKED_BURST_MS // 2):
+            scene._on_beat_frame()
+        self.assertTrue(scene.is_beating())
+        self.assertAlmostEqual(scene._pulse_phase, 0.5, places=2)
+
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=scene_module.BLOCKED_BURST_MS + 1):
+            scene._on_beat_frame()
+        self.assertFalse(scene.is_beating())
+        self.assertTrue(scene._rest_timer.isActive())
+        self.assertEqual(scene._rest_timer.interval(), scene_module.BLOCKED_REST_MS)
+
+    def test_stop_pulse_keeps_the_stopped_scene_alive(self) -> None:
+        scene = self._scene("stopped")
+        scene.stop_pulse()
+        self.assertTrue(scene.is_beating() or scene._rest_timer.isActive())
+
+    def test_no_frames_before_the_phase_is_known(self) -> None:
+        scene = self._scene()
+        scene.start_pulse()
+        self.assertFalse(scene.is_beating())
+        self.assertFalse(scene._rest_timer.isActive())
+
+    def test_scene_stops_when_hidden(self) -> None:
+        scene = BypassScene()
+        host = _host(self, scene)
+        scene.set_phase("running")
+        self.assertFalse(scene.is_beating())
 
         host.show()
-        self.assertTrue(flow.is_beating())
+        self.assertTrue(scene.is_beating())
         host.hide()
-        self.assertFalse(flow.is_beating())
+        self.assertFalse(scene.is_beating())
+        self.assertFalse(scene._rest_timer.isActive())
 
-        host.show()
-        flow.stop_pulse()
-        self.assertFalse(flow.is_beating())
-        self.assertFalse(flow._rest_timer.isActive())
-
-    def test_flow_halts_on_next_frame_when_animations_turn_off(self) -> None:
-        flow = PacketFlowIndicator()
-        _host(self, flow).show()
-        flow.start_pulse()
-        self.assertTrue(flow.is_beating())
+    def test_scene_halts_on_next_frame_when_animations_turn_off(self) -> None:
+        scene = self._scene("running")
+        self.assertTrue(scene.is_beating())
 
         self._enabled = False
-        flow._on_beat_frame()
+        scene._on_beat_frame()
 
-        self.assertFalse(flow.is_beating())
-        self.assertFalse(flow._rest_timer.isActive())
+        self.assertFalse(scene.is_beating())
+        self.assertFalse(scene._rest_timer.isActive())
 
-    def test_no_flow_when_animations_are_disabled(self) -> None:
+    def test_no_frames_when_animations_are_disabled(self) -> None:
         self._enabled = False
-        flow = PacketFlowIndicator()
-        _host(self, flow).show()
+        for phase in ("running", "stopped", "starting"):
+            with self.subTest(phase=phase):
+                scene = self._scene(phase)
+                self.assertFalse(scene.is_beating())
+                self.assertFalse(scene._rest_timer.isActive())
+                self.assertEqual(scene._open_t, 1.0 if phase == "running" else 0.0)
 
-        flow.start_pulse()
+    def test_frames_repaint_only_lanes_wall_and_button(self) -> None:
+        scene = self._scene("running")
+        region = scene._motion_region().boundingRect()
+        self.assertGreater(region.left(), 0)
+        self.assertLess(region.right(), scene.width() - 1)
 
-        self.assertTrue(flow._is_pulsing)
-        self.assertFalse(flow.is_beating())
+    def test_wall_opens_only_while_running(self) -> None:
+        scene = self._scene("stopped")
+        self.assertEqual(scene._open_target(), 0.0)
+        scene.set_phase("starting")
+        self.assertEqual(scene._open_target(), 0.0)
+        scene.set_phase("running")
+        self.assertEqual(scene._open_target(), 1.0)
+        self.assertEqual(scene._wall_fade.state(), scene._wall_fade.State.Running)
 
-    def test_paints_running_and_stopped_states(self) -> None:
-        flow = PacketFlowIndicator()
-        flow.set_color("#6ccb5f")
-        for pulsing in (True, False):
-            flow._is_pulsing = pulsing
-            image = QPixmap(flow.size())
+    def test_failure_shakes_only_when_it_happens_on_screen(self) -> None:
+        first = self._scene("failed")
+        self.assertNotEqual(first._shake.state(), first._shake.State.Running)
+
+        scene = self._scene("starting")
+        scene.set_phase("failed")
+        self.assertEqual(scene._shake.state(), scene._shake.State.Running)
+
+    def test_only_the_button_is_clickable(self) -> None:
+        from PyQt6.QtCore import QPointF
+
+        scene = self._scene("stopped")
+        scene.set_clickable(True)
+        clicks = []
+        scene.clicked.connect(lambda: clicks.append(1))
+
+        self.assertTrue(scene._is_over_button(QPointF(scene.gate_center())))
+        self.assertFalse(scene._is_over_button(QPointF(12, scene.height() / 2)))
+
+        scene.set_click_locked(True)
+        scene.click()
+        self.assertEqual(clicks, [])
+        scene.set_click_locked(False)
+        scene.set_click_enabled(False)
+        scene.click()
+        self.assertEqual(clicks, [])
+        scene.set_click_enabled(True)
+        scene.click()
+        self.assertEqual(clicks, [1])
+
+    def test_signals_report_phase_and_final_color_once(self) -> None:
+        scene = self._scene()
+        phases, colors = [], []
+        scene.phaseChanged.connect(phases.append)
+        scene.colorChanged.connect(colors.append)
+
+        scene.set_color("#6ccb5f")
+        scene.set_color("#6ccb5f")
+        scene.set_phase("running")
+        scene.set_phase("running")
+        scene.set_phase("что-то новое")
+
+        self.assertEqual(colors, ["#6ccb5f"])
+        self.assertEqual(phases, ["running", "stopped"])
+
+    def test_paints_every_phase(self) -> None:
+        scene = BypassScene()
+        scene.set_clickable(True)
+        scene.set_color("#6ccb5f")
+        for phase in ("stopped", "failed", "autostart_pending", "starting", "running", "stopping"):
+            scene.set_phase(phase)
+            scene._pulse_phase = 0.7
+            scene._flow_time = 1.3
+            image = QPixmap(scene.sizeHint())
             image.fill(QColor(0, 0, 0, 0))
-            flow.render(image)
+            scene.render(image)
             self.assertFalse(image.isNull())
+
+
+class StatusHeroCardTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def setUp(self) -> None:
+        self._enabled = True
+        for module in (dot_module, scene_module, hero_module, mascot_module):
+            patcher = mock.patch.object(module, "are_live_animations_enabled", side_effect=lambda: self._enabled)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _card(self):
+        card = StatusHeroCard()
+        scene = BypassScene(card)
+        mascot = Mascot(card, size=44)
+        card.bind_scene(scene, mascot)
+        card.resize(900, 104)
+        self.addCleanup(card.deleteLater)
+        return card, scene, mascot
+
+    def test_mascot_mood_follows_phase(self) -> None:
+        self.assertEqual(mascot_mood_for_phase("running"), MOOD_IDLE)
+        self.assertEqual(mascot_mood_for_phase("running", "starting"), MOOD_HAPPY)
+        self.assertEqual(mascot_mood_for_phase("running", "running"), MOOD_IDLE)
+        self.assertEqual(mascot_mood_for_phase("starting", "stopped"), MOOD_BUSY)
+        self.assertEqual(mascot_mood_for_phase("stopping", "running"), MOOD_BUSY)
+        self.assertEqual(mascot_mood_for_phase("failed", "starting"), MOOD_SAD)
+        self.assertEqual(mascot_mood_for_phase("stopped", "stopping"), MOOD_ALARM)
+
+    def test_card_takes_color_and_mood_from_scene(self) -> None:
+        card, scene, mascot = self._card()
+        scene.set_color("#f5a623")
+        scene.set_phase("starting")
+
+        self.assertEqual(card.tint(), QColor("#f5a623"))
+        self.assertEqual(mascot.mood(), MOOD_BUSY)
+
+    def test_wave_plays_only_when_bypass_turns_on_in_view(self) -> None:
+        card, scene, mascot = self._card()
+        card.show()
+        # Программа открылась, а Zapret уже работает: это не «только что включился».
+        scene.set_phase("running")
+        self.assertFalse(card.is_wave_playing())
+        self.assertEqual(mascot.mood(), MOOD_IDLE)
+
+        scene.set_phase("starting")
+        self.assertFalse(card.is_wave_playing())
+        scene.set_color("#6ccb5f")
+        scene.set_phase("running")
+        self.assertTrue(card.is_wave_playing())
+        self.assertEqual(mascot.mood(), MOOD_HAPPY)
+
+        card.hide()
+        self.assertFalse(card.is_wave_playing())
+
+    def test_no_wave_and_instant_color_without_live_animations(self) -> None:
+        self._enabled = False
+        card, scene, _mascot = self._card()
+        card.show()
+        scene.set_color("#f5a623")
+        scene.set_phase("starting")
+        scene.set_color("#6ccb5f")
+        scene.set_phase("running")
+
+        self.assertFalse(card.is_wave_playing())
+        self.assertEqual(card.tint(), QColor("#6ccb5f"))
+
+    def test_mascot_hides_on_a_narrow_card(self) -> None:
+        card, _scene, mascot = self._card()
+        card.show()
+        card.resize(hero_module.MASCOT_MIN_CARD_WIDTH + 60, 104)
+        QApplication.processEvents()
+        self.assertFalse(mascot.isHidden())
+        card.resize(hero_module.MASCOT_MIN_CARD_WIDTH - 60, 104)
+        QApplication.processEvents()
+        self.assertTrue(mascot.isHidden())
+
+    def test_paints_tint_and_wave(self) -> None:
+        card, scene, _mascot = self._card()
+        card.show()
+        scene.set_color("#6ccb5f")
+        card._wave_t = 0.4
+        image = QPixmap(card.size())
+        image.fill(QColor(0, 0, 0, 0))
+        card.render(image)
+        self.assertFalse(image.isNull())
 
 
 class MotionIconTests(unittest.TestCase):

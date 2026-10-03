@@ -384,6 +384,29 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
 
     def _build_ui(self):
         _t_total = _time.perf_counter()
+        # Статус работы — главный блок страницы: сцена с выключателем наверху.
+        _t_status = _time.perf_counter()
+        status_widgets = build_winws2_pages_status_section(
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            strong_body_label_cls=StrongBodyLabel,
+            caption_label_cls=CaptionLabel,
+            indeterminate_progress_bar_cls=IndeterminateProgressBar,
+            close_button_cls=TransparentPushButton,
+            on_toggle=self._toggle_dpi,
+            on_close=self._stop_and_exit,
+            parent=self,
+        )
+        self.status_card = status_widgets.card
+        self.status_dot = status_widgets.status_dot
+        self.status_title = status_widgets.status_title
+        self.status_desc = status_widgets.status_desc
+        self.close_btn = status_widgets.close_btn
+        self.progress_bar = status_widgets.progress_bar
+        self.loading_label = status_widgets.loading_label
+        self.add_widget(status_widgets.card)
+        _log_startup_winws2_control_metric("_build_ui.status_card", (_time.perf_counter() - _t_status) * 1000)
+        self.add_spacing(16)
+
         _t_top_summary = _time.perf_counter()
         self.top_summary = ControlTopSummaryWidget(
             language=self._ui_language,
@@ -396,31 +419,6 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.top_summary.premiumClicked.connect(self._open_premium_callback)
         self.add_widget(self.top_summary)
         _log_startup_winws2_control_metric("_build_ui.top_summary", (_time.perf_counter() - _t_top_summary) * 1000)
-        self.add_spacing(16)
-
-        # Статус работы
-        _t_status = _time.perf_counter()
-        status_widgets = build_winws2_pages_status_section(
-            add_section_title=self.add_section_title,
-            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
-            strong_body_label_cls=StrongBodyLabel,
-            caption_label_cls=CaptionLabel,
-            indeterminate_progress_bar_cls=IndeterminateProgressBar,
-            close_button_cls=TransparentPushButton,
-            on_toggle=self._toggle_dpi,
-            on_close=self._stop_and_exit,
-            parent=self,
-        )
-        self.status_section_label = status_widgets.section_label
-        self.status_card = status_widgets.card
-        self.status_dot = status_widgets.status_dot
-        self.status_title = status_widgets.status_title
-        self.status_desc = status_widgets.status_desc
-        self.close_btn = status_widgets.close_btn
-        self.progress_bar = status_widgets.progress_bar
-        self.loading_label = status_widgets.loading_label
-        self.add_widget(status_widgets.card)
-        _log_startup_winws2_control_metric("_build_ui.status_card", (_time.perf_counter() - _t_status) * 1000)
         _t_settings_sections = _time.perf_counter()
         self._build_settings_sections()
         _log_startup_winws2_control_metric(
