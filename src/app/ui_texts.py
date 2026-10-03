@@ -5965,6 +5965,7 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     "onboarding.scene.site": {"ru": "Сайт", "en": "Site"},
     "onboarding.scene.check": {"ru": "проверка", "en": "inspection"},
     "onboarding.scene.junk": {"ru": "мусор", "en": "junk"},
+    "onboarding.scene.one_packet": {"ru": "один пакет", "en": "one packet"},
     "onboarding.scene.syn_data": {"ru": "SYN + данные", "en": "SYN + data"},
     "onboarding.scene.bubble.blocked": {"ru": "Узнал — блок!", "en": "Recognised — blocked!"},
     "onboarding.scene.bubble.fake": {"ru": "google.com — пропущу", "en": "google.com — let it pass"},
@@ -6090,15 +6091,15 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     },
     "onboarding.step.technique_tcpseg.body": {
         "ru": (
-            "Кусок данных уходит отдельным пакетом, а с приёмом seqovl к нему спереди приклеивается "
-            "мусор. Сайт мусор отбрасывает, а проверка может принять его за начало сообщения и "
-            "пропустить.\n\n"
+            "Кусок данных уходит отдельным пакетом, а с приёмом seqovl в этот же пакет спереди "
+            "приклеивается мусор. Сайт мусор отбрасывает, а проверка может принять его за начало "
+            "сообщения и пропустить.\n\n"
             "В готовых стратегиях этот приём встречается как seqovl — например, «multisplit seqovl700»."
         ),
         "en": (
-            "A piece of data is sent as a separate packet, and with seqovl some junk is glued in "
-            "front of it. The site drops the junk, while the inspection may take it for the start "
-            "of the message and let it pass.\n\n"
+            "A piece of data is sent as a separate packet, and with seqovl some junk is glued to "
+            "the front of that same packet. The site drops the junk, while the inspection may take "
+            "it for the start of the message and let it pass.\n\n"
             "In ready strategies this trick shows up as seqovl — for example, \"multisplit seqovl700\"."
         ),
     },

@@ -9,6 +9,11 @@
 - die — поддельная плашка проходит проверку и гаснет, не дойдя до сайта;
 - discard — мусор доезжает до сайта вместе с данными, и сайт его отбрасывает.
 
+Плашки едут слева направо, поэтому правее — значит раньше: правая плашка
+первой попадает в проверку и первой приходит на сайт. Просвет между плашками
+означает отдельные пакеты. Части одного пакета нарисованы слитно, одной
+плашкой из двух половин с подписью «один пакет» (мусор seqovl в tcpseg).
+
 Так видно главное: проверка провайдера видит одно, а сайт получает другое.
 Сцены повторяются по кругу. Все переходы (появление реплики, вспышка у
 сайта, падение подделок) заканчиваются до STATIC_PHASE: когда анимации в
@@ -47,8 +52,6 @@ ABSORB = 0.1  # хвост пути, на котором настоящая пл
 PULSE = 0.08  # кольцо вокруг сайта, когда всё дошло
 SHAKE = 0.07  # плашка трясётся, упёршись в блок
 DISCARD = 0.1  # сайт отбрасывает мусор
-# Просвет между склеенными плашками одного пакета, px.
-GLUE_GAP = 2.0
 
 BLOCK_RED = QColor(232, 17, 35)
 PASS_GREEN = QColor(60, 179, 113)
@@ -67,7 +70,7 @@ class Packet:
     fate: str = "pass"  # pass | blocked | die | discard
     # Текст после проверки: у сайта лишнее выпадает (oob, syndata).
     text_after_gate: str = ""
-    # Плашка едет вплотную впереди следующей: это один пакет (мусор seqovl в tcpseg).
+    # Плашка слита со следующей в один пакет и едет в нём первой (мусор seqovl в tcpseg).
     glued_to_next: bool = False
 
 
@@ -202,8 +205,12 @@ class ChipFrame:
     alpha: float = 1.0
     scale: float = 1.0
     angle: float = 0.0
-    # Плашка склеена со следующей в один пакет.
+    # Плашка-начало слитого пакета: следующая плашка едет вплотную за ней.
     glued: bool = False
+    # С какой стороны плашка слита с соседней: там край прямой, без скругления.
+    flat: str = ""  # "" | left | right
+    # Ширина плашки на дорожке, px: по ней считаются просветы.
+    width: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,22 +341,6 @@ class TechniqueIllustration(QWidget):
     def _blocked_x(layout: _Layout, chip_width: float) -> float:
         return layout.gate_rect.left() - chip_width / 2 - 6
 
-    @staticmethod
-    def _path(scene: Scene, index: int, layout: _Layout, chips: list[float]) -> tuple[int, float, float]:
-        """Путь плашки: (чья плашка ведёт, откуда ведущая стартует, отставание от неё).
-
-        Склеенная пара едет как один пакет: ведёт настоящая плашка, мусор
-        держится вплотную слева. Пара стартует целиком правее «Вы».
-        """
-        packets = scene.packets
-        if packets[index].glued_to_next and index + 1 < len(packets):
-            back = chips[index + 1] / 2 + chips[index] / 2 + GLUE_GAP
-            return index + 1, layout.start_x + back, back
-        if index and packets[index - 1].glued_to_next:
-            back = chips[index] / 2 + chips[index - 1] / 2 + GLUE_GAP
-            return index, layout.start_x + back, 0.0
-        return index, layout.start_x, 0.0
-
     def scene_times(self, scene: Scene | None = None) -> SceneTimes:
         """Ключевые моменты круга для сцены (по умолчанию — текущей)."""
         scene = scene or SCENES[self._scene_key]
@@ -358,17 +349,16 @@ class TechniqueIllustration(QWidget):
         return self._scene_times(scene, layout, chips)
 
     def _scene_times(self, scene: Scene, layout: _Layout, chips: list[float]) -> SceneTimes:
-        starts = tuple(self._start_times(scene, chips, max(1.0, layout.end_x - layout.start_x)))
+        span = max(1.0, layout.end_x - layout.start_x)
+        starts = tuple(self._start_times(scene, chips, span))
         trigger = scene.packets[scene.bubble_trigger]
-        lead, x_from, back = self._path(scene, scene.bubble_trigger, layout, chips)
-        span = max(1.0, layout.end_x - x_from)
         if trigger.fate == "blocked":
             # Реплика и обрыв — ровно когда плашка упирается в проверку.
             target = self._blocked_x(layout, chips[scene.bubble_trigger])
         else:
             # Реплика — когда середина плашки в середине проверки.
             target = layout.gate_x
-        verdict = starts[lead] + TRAVEL * _clamp01((target + back - x_from) / span)
+        verdict = starts[scene.bubble_trigger] + TRAVEL * _clamp01((target - layout.start_x) / span)
         arrivals = [starts[i] + TRAVEL for i, packet in enumerate(scene.packets) if packet.fate == "pass"]
         site_done = max(arrivals) if (scene.site_result and arrivals) else None
         ends = [verdict + max(POP, SHAKE)]
@@ -395,16 +385,27 @@ class TechniqueIllustration(QWidget):
     def _chip_frames(
         self, scene: Scene, phase: float, layout: _Layout, chips: list[float], times: SceneTimes
     ) -> list[ChipFrame]:
+        span = layout.end_x - layout.start_x
         frames: list[ChipFrame] = []
         for index, packet in enumerate(scene.packets):
-            lead, x_from, back = self._path(scene, index, layout, chips)
-            raw = (phase - times.starts[lead]) / TRAVEL
+            raw = (phase - times.starts[index]) / TRAVEL
             if raw <= 0.0:
                 continue
-            x = x_from + (layout.end_x - x_from) * min(raw, 1.0) - back
+            x = layout.start_x + span * min(raw, 1.0)
             appear = _ease_out(raw * TRAVEL / APPEAR)
             alpha, scale, dy, angle = appear, 0.85 + 0.15 * appear, 0.0, 0.0
-            glued = lead != index and raw < 1.0
+            # Пакет слит, пока его начало не доехало до сайта.
+            glued = packet.glued_to_next and index + 1 < len(scene.packets) and raw < 1.0
+            behind_glued = index > 0 and scene.packets[index - 1].glued_to_next
+            flat = ""
+            if glued:
+                flat = "left"
+            elif behind_glued and phase < times.starts[index - 1] + TRAVEL:
+                flat = "right"
+            if glued or behind_glued:
+                scale = 1.0  # половины одного пакета не расходятся при появлении
+            if behind_glued:
+                alpha = 1.0  # вторая половина выезжает из-за «Вы» сразу плотной, как первая
             if packet.fate == "blocked":
                 wall = self._blocked_x(layout, chips[index])
                 if x >= wall:
@@ -418,14 +419,12 @@ class TechniqueIllustration(QWidget):
                 alpha *= 1.0 - gone
                 dy, scale, angle = 12.0 * gone, scale * (1.0 - 0.2 * gone), 14.0 * gone
             elif packet.fate == "discard" and raw >= 1.0:
-                # Данные вошли в сайт, а мусор сайт отбрасывает: он докатывается
-                # до входа и падает с дорожки.
-                t = _clamp01((phase - times.starts[lead] - TRAVEL) / DISCARD)
-                door = layout.end_x - chips[index] / 2
-                x += (door - x) * _ease_out(t / 0.35)
-                gone = _ease_in((t - 0.35) / 0.65)
-                alpha *= 1.0 - gone
-                dy, scale, angle = 16.0 * gone, scale * (1.0 - 0.15 * gone), -16.0 * gone
+                # Мусор приехал первым, и сайт его отбрасывает: он падает с дорожки
+                # у входа, а данные следом входят внутрь.
+                t = _clamp01((phase - times.starts[index] - TRAVEL) / DISCARD)
+                drop = _ease_out(t)
+                alpha *= 1.0 - _ease_in(t)
+                dy, scale, angle = 30.0 * drop, scale * (1.0 - 0.15 * t), 18.0 * drop
             elif packet.fate == "pass":
                 if raw >= 1.0:
                     continue  # дошла — дальше её показывает итог у сайта
@@ -435,7 +434,7 @@ class TechniqueIllustration(QWidget):
             if alpha <= 0.01:
                 continue
             label = self._packet_label(packet, x > layout.gate_x)
-            frames.append(ChipFrame(index, label, packet.kind, x, dy, alpha, scale, angle, glued))
+            frames.append(ChipFrame(index, label, packet.kind, x, dy, alpha, scale, angle, glued, flat, chips[index]))
         return frames
 
     def _paint_scene(self, painter: QPainter, scene: Scene, phase: float) -> None:
@@ -488,18 +487,15 @@ class TechniqueIllustration(QWidget):
         if times.site_done is not None:
             self._paint_pulse(painter, layout.site_rect, (phase - times.site_done) / PULSE)
 
-        # Плашки: сначала общая рамка склеенного пакета, потом сами плашки.
         # Плашки выезжают из-за края «Вы», а не рисуются поверх него.
         painter.save()
         painter.setClipRect(QRectF(layout.you_rect.right() + 1, 0, self.width(), self.height()))
         painter.setFont(chip_font)
-        by_index = {frame.index: frame for frame in frames}
-        for frame in frames:
-            partner = by_index.get(frame.index + 1)
-            if frame.glued and partner is not None:
-                self._paint_glue_frame(painter, frame, partner, chips, layout.track_y, colors, fade)
         for frame in frames:
             self._paint_chip(painter, metrics, frame, layout.track_y, frame.alpha * fade, colors)
+        for frame in frames:
+            if frame.glued:
+                self._paint_one_packet_caption(painter, frame, chips, layout, colors, fade)
         painter.restore()
 
         # Реплика проверки.
@@ -522,8 +518,11 @@ class TechniqueIllustration(QWidget):
         moment = 0.0
         for index, packet in enumerate(scene.packets):
             previous = scene.packets[index - 1] if index else None
-            if previous is not None and not previous.glued_to_next:
-                gap = chips[index - 1] / 2 + chips[index] / 2 + CHIP_GAP
+            if previous is not None:
+                # Отдельные пакеты идут с просветом, части одного пакета — вплотную.
+                gap = chips[index - 1] / 2 + chips[index] / 2
+                if not previous.glued_to_next:
+                    gap += CHIP_GAP
                 moment += gap / max(1.0, track) * TRAVEL
             moment += packet.delay
             starts.append(moment)
@@ -622,18 +621,38 @@ class TechniqueIllustration(QWidget):
         painter.drawRoundedRect(rect.adjusted(-grow, -grow, grow, grow), 10 + grow, 10 + grow)
         painter.restore()
 
-    def _paint_glue_frame(self, painter, frame: ChipFrame, partner: ChipFrame, chips, track_y, colors, fade) -> None:
-        """Мусор и данные — один пакет: обводим их общей рамкой."""
-        left = frame.x - chips[frame.index] / 2 - 4
-        right = partner.x + chips[partner.index] / 2 * partner.scale + 4
-        rect = QRectF(left, track_y - 16, right - left, 32)
-        color = QColor(colors["muted"])
+    def _paint_one_packet_caption(self, painter, frame: ChipFrame, chips, layout: _Layout, colors, fade) -> None:
+        """Подпись под слитой плашкой: мусор и данные — один пакет."""
+        right = frame.x + chips[frame.index] / 2
+        left = frame.x - chips[frame.index] / 2 - chips[frame.index + 1]
+        font = QFont(self.font())
+        font.setPointSizeF(max(7.0, font.pointSizeF() - 1.5))
         painter.save()
-        painter.setOpacity(min(frame.alpha, partner.alpha) * fade * 0.8)
-        painter.setPen(QPen(color, 1.2))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(rect, 10, 10)
+        # Гаснет на подъезде к сайту: там пакет распадается.
+        painter.setOpacity(frame.alpha * fade * _clamp01((layout.end_x - frame.x) / 24.0))
+        painter.setFont(font)
+        painter.setPen(colors["muted"])
+        painter.drawText(
+            QRectF(left, layout.track_y + 14, right - left, 16),
+            Qt.AlignmentFlag.AlignCenter,
+            self._tr("onboarding.scene.one_packet", "один пакет"),
+        )
         painter.restore()
+
+    @staticmethod
+    def _chip_shape(rect: QRectF, radius: float, flat: str) -> QPainterPath:
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        if flat:
+            half = QRectF(rect)
+            if flat == "left":
+                half.setRight(rect.center().x())
+            else:
+                half.setLeft(rect.center().x())
+            square = QPainterPath()
+            square.addRect(half)
+            path = path.united(square)
+        return path
 
     def _paint_chip(self, painter, metrics, frame: ChipFrame, track_y: float, alpha: float, colors) -> None:
         text, kind = frame.label, frame.kind
@@ -651,9 +670,14 @@ class TechniqueIllustration(QWidget):
             glow.setAlpha(50)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(glow)
-            painter.drawRoundedRect(rect.adjusted(-3, -3, 3, 3), 10, 10)
+            halo = rect.adjusted(-3, -3, 3, 3)
+            if frame.flat == "right":
+                halo.setRight(rect.right())
+            elif frame.flat == "left":
+                halo.setLeft(rect.left())
+            painter.drawPath(self._chip_shape(halo, 10, frame.flat))
             painter.setBrush(fill)
-            painter.drawRoundedRect(rect, 7, 7)
+            painter.drawPath(self._chip_shape(rect, 7, frame.flat))
             text_color = _readable_text_on(fill)
         else:
             base = FAKE_AMBER if kind == "fake" else JUNK_GREY
@@ -661,7 +685,7 @@ class TechniqueIllustration(QWidget):
             fill.setAlpha(60)
             painter.setBrush(fill)
             painter.setPen(QPen(base, 1.5, Qt.PenStyle.DashLine))
-            painter.drawRoundedRect(rect, 7, 7)
+            painter.drawPath(self._chip_shape(rect, 7, frame.flat))
             text_color = colors["text"]
         if "#" in text:
             self._paint_oob_text(painter, metrics, text, rect, text_color)

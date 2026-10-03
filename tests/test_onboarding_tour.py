@@ -631,9 +631,10 @@ class TechniqueIllustrationTests(unittest.TestCase):
         finally:
             host.deleteLater()
 
-    def test_tcpseg_junk_rides_with_data_to_site_and_is_dropped_there(self) -> None:
-        # seqovl: мусор приклеен спереди в том же пакете. Проверку он проходит
-        # вместе с данными, а отбрасывает его уже сайт.
+    def test_tcpseg_junk_leads_one_packet_and_site_drops_it(self) -> None:
+        # seqovl: мусор приклеен в начало того же пакета. На схеме правее —
+        # значит раньше, поэтому мусор едет справа от данных, вплотную к ним,
+        # первым входит в проверку, а отбрасывает его уже сайт.
         from ui.onboarding.illustrations import DISCARD, TRAVEL
 
         host = QWidget()
@@ -641,19 +642,47 @@ class TechniqueIllustrationTests(unittest.TestCase):
             illustration = self._illustration(host)
             illustration.set_scene("tcpseg")
             times = illustration.scene_times()
-            arrival = times.starts[1] + TRAVEL
+            junk_arrival = times.starts[0] + TRAVEL
+            data_arrival = times.starts[1] + TRAVEL
+            self.assertLess(junk_arrival, data_arrival)
 
-            frames = {frame.index: frame for frame in illustration.chip_frames(arrival - TRAVEL * 0.2)}
+            # У проверки: реплика звучит, когда в середине проверки мусор, а данные ещё не дошли.
+            frames = {frame.index: frame for frame in illustration.chip_frames(times.verdict)}
             junk, data = frames[0], frames[1]
-            self.assertGreater(junk.x, illustration.width() / 2)  # уже за проверкой
+            self.assertAlmostEqual(junk.x, illustration.width() / 2, delta=1.0)
+            self.assertLess(data.x, junk.x)
+            # Один пакет: половины слиты без просвета, не как отдельные пакеты.
             self.assertTrue(junk.glued)
-            self.assertAlmostEqual(junk.alpha, 1.0)
-            self.assertLess(junk.x, data.x)  # спереди, то есть левее данных
+            self.assertEqual((junk.flat, data.flat), ("left", "right"))
+            self.assertAlmostEqual(junk.x - data.x, (junk.width + data.width) / 2)
 
-            frames = {frame.index: frame for frame in illustration.chip_frames(arrival + DISCARD * 0.2)}
-            self.assertNotIn(1, frames)  # данные вошли в сайт
-            self.assertIn(0, frames)  # мусор ещё у входа
-            self.assertNotIn(0, {frame.index for frame in illustration.chip_frames(arrival + DISCARD + 0.01)})
+            # После проверки мусор не гаснет по дороге, как подделка.
+            frames = {frame.index: frame for frame in illustration.chip_frames(junk_arrival - TRAVEL * 0.1)}
+            self.assertAlmostEqual(frames[0].alpha, 1.0)
+            self.assertAlmostEqual(frames[0].dy, 0.0)
+
+            # У сайта: мусор падает с дорожки, данные входят следом.
+            frames = {frame.index: frame for frame in illustration.chip_frames(junk_arrival + DISCARD * 0.5)}
+            self.assertGreater(frames[0].dy, 0.0)
+            self.assertFalse(frames[0].glued)
+            self.assertEqual(frames[1].flat, "")
+            self.assertEqual(illustration.chip_frames(max(junk_arrival + DISCARD, data_arrival) + 0.01), [])
+        finally:
+            host.deleteLater()
+
+    def test_separate_packets_keep_a_gap(self) -> None:
+        # Просвет на схеме = отдельные пакеты: подделка в fake не слита с настоящим.
+        from ui.onboarding.illustrations import CHIP_GAP
+
+        host = QWidget()
+        try:
+            illustration = self._illustration(host)
+            illustration.set_scene("fake")
+            times = illustration.scene_times()
+            frames = {frame.index: frame for frame in illustration.chip_frames(times.starts[1] + 0.1)}
+            fake, real = frames[0], frames[1]
+            self.assertGreaterEqual(fake.x - real.x - (fake.width + real.width) / 2, CHIP_GAP)
+            self.assertEqual((fake.flat, real.flat, fake.glued), ("", "", False))
         finally:
             host.deleteLater()
 
