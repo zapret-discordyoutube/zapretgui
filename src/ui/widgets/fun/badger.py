@@ -14,6 +14,11 @@
   стискивается, когда медоед вздрагивает;
 - ухо дёргается, когда медоед оглядывается или пугается.
 
+Сцена обхода (``BypassScene``) сама знает, где сейчас летят пакеты, и через
+``set_scene_pose`` подсказывает медоеду, что делать: раскрыть пасть навстречу
+пакету и сомкнуть её, когда тот пойман, или хлопнуть лапой с молнией. Эта
+подсказка складывается с обычными жестами.
+
 Настроения, жесты и правила экономии процессора те же, что у ``Mascot``:
 кадры идут только во время жеста или моргания, а между ними стоит
 одиночный таймер.
@@ -37,6 +42,10 @@ BLINK_PAUSE_MIN_MS = 2400
 BLINK_PAUSE_MAX_MS = 5600
 DOUBLE_BLINK_CHANCE = 0.25
 
+# Ширина виджета в долях размера: узкая, чтобы пакеты пропадали у самой морды,
+# а не за невидимым полем рядом с ней.
+BODY_WIDTH_RATIO = 1.12
+
 # Лапа с молнией в покое чуть покачивается в такт дыханию (градусы).
 PAW_BREATH_SWING = 7.0
 
@@ -51,6 +60,11 @@ class DrawnBadger(Mascot):
 
     def __init__(self, parent=None, *, size: int = 44) -> None:
         super().__init__(parent, size=size)
+        self.setFixedSize(int(self._side * BODY_WIDTH_RATIO), self.height())
+        # Подсказка от сцены: насколько раскрыта пасть, поворот лапы и блик на молнии.
+        self._scene_jaw = 0.0
+        self._scene_paw = 0.0
+        self._scene_glow = 0.0
         self._blink = 0.0
         self._blink_left = 0
         self._blink_anim = QVariantAnimation(self)
@@ -62,6 +76,25 @@ class DrawnBadger(Mascot):
         self._blink_timer = QTimer(self)
         self._blink_timer.setSingleShot(True)
         self._blink_timer.timeout.connect(self.blink)
+
+    # ---- подсказка от сцены ---------------------------------------------
+
+    def set_scene_pose(self, jaw: float, paw: float, glow: float) -> None:
+        """Пасть, лапа и блик, которые нужны сцене в этот кадр (нули — без подсказки)."""
+        jaw = max(-1.0, min(1.2, float(jaw)))
+        paw = max(-30.0, min(40.0, float(paw)))
+        glow = max(0.0, min(1.0, float(glow)))
+        if (
+            abs(jaw - self._scene_jaw) < 0.02
+            and abs(paw - self._scene_paw) < 0.4
+            and abs(glow - self._scene_glow) < 0.02
+        ):
+            return
+        self._scene_jaw, self._scene_paw, self._scene_glow = jaw, paw, glow
+        self.update()
+
+    def scene_pose(self) -> tuple[float, float, float]:
+        return self._scene_jaw, self._scene_paw, self._scene_glow
 
     # ---- моргание ------------------------------------------------------
 
@@ -170,10 +203,10 @@ class DrawnBadger(Mascot):
             blink=blink,
             eye_open=self._eye_size(),
             look=self.look_offset(),
-            jaw=jaw,
-            paw=paw,
+            jaw=jaw + self._scene_jaw,
+            paw=paw + self._scene_paw,
             ear=ear,
-            bolt_glow=glow,
+            bolt_glow=max(glow, self._scene_glow),
         )
 
     def look_offset(self) -> float:

@@ -298,32 +298,68 @@ class BypassSceneTests(unittest.TestCase):
         scene.set_phase("running")
         self.assertEqual(scene.mascot().mood(), MOOD_HAPPY)
 
-    def test_mascot_stands_in_the_scene_left_of_the_lanes(self) -> None:
+    def test_mascot_stands_in_the_middle_of_the_scene(self) -> None:
         scene = self._scene("stopped")
         mascot = scene.mascot()
-        left, right, _top, _bottom = scene._lanes()
+        left, right, top, bottom = scene._lanes()
 
         self.assertIs(mascot.parent(), scene)
-        self.assertLessEqual(mascot.geometry().right(), left)
+        # По ширине медоед посередине, по высоте — тоже (по самому значку, а не по запасу над ним).
+        self.assertAlmostEqual(mascot.geometry().center().x(), scene.width() / 2, delta=1.5)
+        box_top = mascot.y() + mascot.height() - 2 - scene_module.MASCOT_SIZE
+        self.assertAlmostEqual(box_top + scene_module.MASCOT_SIZE / 2, scene.height() / 2, delta=1.5)
         self.assertGreaterEqual(mascot.geometry().top(), 0)
         self.assertLessEqual(mascot.geometry().bottom(), scene.height())
-        # Кнопка стоит посередине дорожек, а не посередине виджета.
+        # Дорожки начинаются у морды: сверху пасть, снизу лапа с «Z».
+        self.assertEqual(left, mascot.geometry().right() + 1)
+        self.assertLess(top, bottom)
+        # Кнопка стоит между медоедом и сайтами.
         self.assertEqual(scene.gate_center().x(), round((left + right) / 2))
+        self.assertGreater(scene.gate_center().x() - scene_module.BUTTON_RADIUS - 3.0, left)
 
-    def test_mascot_tosses_packets_and_flinches_when_they_bounce(self) -> None:
+    def test_mascot_stays_centered_when_the_scene_is_stretched(self) -> None:
+        scene = self._scene("stopped")
+        scene.resize(scene_module.SCENE_MIN_WIDTH + 100, scene.height())
+        self.assertAlmostEqual(scene.mascot().geometry().center().x(), scene.width() / 2, delta=1.5)
+
+    def test_mascot_tosses_packets_when_a_burst_starts(self) -> None:
+        scene = self._scene("stopped")
+        self.assertEqual(scene.mascot().gesture(), GESTURE_TOSS)
+
+    def test_mouth_catches_the_first_packet_and_paw_swats_the_second(self) -> None:
         scene = self._scene("stopped")
         mascot = scene.mascot()
-        self.assertEqual(mascot.gesture(), GESTURE_TOSS)
+        starts, span = scene_module.BLOCKED_PACKET_STARTS, scene_module.BLOCKED_PACKET_SPAN
+        back = scene_module.BLOCKED_BACK_END
 
-        before = int(scene_module.BLOCKED_BURST_MS * (scene_module.FIRST_IMPACT_PHASE - 0.05))
-        with mock.patch.object(scene._beat_clock, "elapsed", return_value=before):
+        # Вот-вот поймает: пасть раскрыта, лапа спокойна.
+        near = starts[0] + back * span - 0.01
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=int(scene_module.BLOCKED_BURST_MS * near)):
             scene._on_beat_frame()
-        self.assertEqual(mascot.gesture(), GESTURE_TOSS)
+        jaw, paw, _glow = mascot.scene_pose()
+        self.assertGreater(jaw, 0.5)
+        self.assertLessEqual(paw, 1.0)
 
-        after = int(scene_module.BLOCKED_BURST_MS * (scene_module.FIRST_IMPACT_PHASE + 0.05))
-        with mock.patch.object(scene._beat_clock, "elapsed", return_value=after):
+        # Второй пакет возвращается к лапе: она хлопает, по молнии бежит блик, пасть не работает.
+        swat = starts[1] + (back + (1.0 - back) * 0.3) * span
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=int(scene_module.BLOCKED_BURST_MS * swat)):
             scene._on_beat_frame()
-        self.assertEqual(mascot.gesture(), MOOD_ALARM)
+        jaw, paw, glow = mascot.scene_pose()
+        self.assertGreater(paw, 10.0)
+        self.assertGreater(glow, 0.0)
+        self.assertLess(abs(jaw), 0.5)
+
+    def test_scene_pose_resets_when_the_burst_ends_or_frames_stop(self) -> None:
+        scene = self._scene("stopped")
+        mascot = scene.mascot()
+        mascot.set_scene_pose(1.0, 20.0, 0.5)
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=scene_module.BLOCKED_BURST_MS + 1):
+            scene._on_beat_frame()
+        self.assertEqual(mascot.scene_pose(), (0.0, 0.0, 0.0))
+
+        mascot.set_scene_pose(1.0, 20.0, 0.5)
+        scene._halt()
+        self.assertEqual(mascot.scene_pose(), (0.0, 0.0, 0.0))
 
     def test_sad_mascot_does_not_toss_after_a_failed_start(self) -> None:
         scene = self._scene("starting")
@@ -332,9 +368,28 @@ class BypassSceneTests(unittest.TestCase):
         self.assertEqual(mascot.mood(), MOOD_SAD)
         self.assertNotEqual(mascot.gesture(), GESTURE_TOSS)
 
-        with mock.patch.object(scene._beat_clock, "elapsed", return_value=int(scene_module.BLOCKED_BURST_MS * 0.9)):
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=int(scene_module.BLOCKED_BURST_MS * 0.5)):
             scene._on_beat_frame()
-        self.assertNotEqual(mascot.gesture(), MOOD_ALARM)
+        self.assertEqual(mascot.scene_pose(), (0.0, 0.0, 0.0))
+
+    def test_mouth_opens_for_a_response_and_paw_flicks_for_an_outgoing_packet(self) -> None:
+        scene = self._scene("running")
+        left, right, _top, _bottom = scene._lanes()
+        scene._flow_time = 0.0
+        speed, offsets = scene_module.FLOW_LANES[0][1:]
+        # Ответ у самой пасти: пасть раскрыта.
+        scene._flow_time = ((right - (left + 6.0)) / (right - left + scene_module.EAT_DEPTH) - offsets[0]) * (right - left + scene_module.EAT_DEPTH) / speed
+        jaw, _paw, _glow = scene._flow_pose(left, right, 1.0)
+        self.assertGreater(jaw, 0.5)
+        # Закрытые ворота: ответов нет, пасть не раскрывается.
+        self.assertLessEqual(scene._flow_pose(left, right, 0.0)[0], 0.0)
+
+        scene._flow_time = 0.0
+        paw_offsets = scene_module.FLOW_LANES[1][2]
+        self.assertTrue(any(
+            (setattr(scene, "_flow_time", step * 0.05), scene._flow_pose(left, right, 1.0)[1])[1] > 5.0
+            for step in range(120)
+        ), paw_offsets)
 
     def test_calm_mascot_breathes_with_the_flow_frames(self) -> None:
         scene = self._scene("running")

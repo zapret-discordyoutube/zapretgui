@@ -1,21 +1,26 @@
 """Сцена обхода для карточки «Статус работы».
 
-Слева талисман-медоед (это Zapret на вашем компьютере), справа сайты,
-посередине стена блокировки, а в стене — круглая кнопка питания: это и есть
-выключатель Zapret.
+Посередине стоит талисман-медоед (это Zapret на вашем компьютере). Слева
+компьютер, справа сайты, а между медоедом и сайтами — стена блокировки с
+круглой кнопкой питания: это и есть выключатель Zapret. Медоед смотрит на
+стену; у него два «приёмника» пакетов: пасть (верхняя дорожка) и лапа с
+молнией «Z» (нижняя дорожка).
 
-- Zapret остановлен: медоед замахивается и кидает пакеты, они разбиваются о
-  стену и отскакивают, медоед вздрагивает. Ответы не приходят.
+- Zapret остановлен: медоед лапой с «Z» кидает пакеты в стену, они
+  отскакивают обратно, и он их встречает: один ловит пастью, другой
+  отбивает лапой. Ответов от сайтов нет.
 - Запуск не удался: то же самое, но медоед грустит и уже ничего не кидает.
-- Идёт запуск или остановка: пакеты доходят до стены и ждут, вокруг кнопки
-  бегает дуга, медоед суетится.
+- Идёт запуск или остановка: пакеты из-под лапы долетают до стены и ждут,
+  вокруг кнопки бегает дуга, медоед суетится.
 - Zapret работает: стена бледнеет, пакеты проходят сквозь кнопку и
-  окрашиваются в её цвет, по нижней дорожке летят ответы. Медоед радостно
-  подпрыгивает в момент включения, а потом спокойно дышит и оглядывается.
+  окрашиваются в её цвет. Лапа с «Z» выпускает их к сайтам, а ответы от сайтов
+  медоед ловит пастью. Радостно подпрыгивает в момент включения, а потом
+  спокойно дышит и оглядывается.
 
 Кадры идут, только пока сцена видна, окно не свёрнуто и включены «живые
 анимации». В остановленном состоянии это короткий залп и пауза (таймер
 между залпами одиночный), а на ходу перерисовываются только дорожки и кнопка.
+Пасть и лапу медоеда сцена двигает сама по положению пакетов, без своих таймеров.
 """
 
 from __future__ import annotations
@@ -37,14 +42,20 @@ SCENE_HEIGHT = 76
 QWIDGETSIZE_MAX = (1 << 24) - 1
 SCENE_WIDTH = 330
 SCENE_MIN_WIDTH = 240
-MASCOT_SIZE = 46
-# Место под значок сайтов справа; слева стоит талисман.
+MASCOT_SIZE = 44
+# Высота пасти и лапы с «Z» на значке медоеда (доля его размера от верха):
+# на этих высотах идут дорожки пакетов.
+MOUTH_LANE = 0.34
+PAW_LANE = 0.62
+# Место под значки по краям: слева компьютер, справа сайты.
 ENDPOINT_ROOM = 34
+# Пакет входит в пасть и «рождается» из лапы чуть глубже края медоеда, px.
+EAT_DEPTH = 12.0
+BIRTH_DEPTH = 8.0
 # Полный вдох и выдох спокойного талисмана, секунды.
 BREATH_PERIOD_S = 3.6
 # Период, с которым дышит ореол работающей кнопки, секунды.
 HALO_PERIOD_S = 2.8
-LANE_GAP = 6
 RAW_COLOR = QColor(150, 156, 168)
 
 BUTTON_RADIUS = 15.0
@@ -65,23 +76,51 @@ COMET_SEGMENTS = 14
 COMET_SPEED_DEG = 300.0
 
 # (направление, скорость в px/с, сдвиги пакетов вдоль дорожки в долях длины)
+# Верхняя дорожка — ответы к пасти, нижняя — пакеты из-под лапы с «Z».
 FLOW_LANES = (
-    (1, 46.0, (0.0, 0.31, 0.47, 0.78)),
     (-1, 36.0, (0.12, 0.58, 0.66)),
+    (1, 46.0, (0.0, 0.31, 0.47, 0.78)),
 )
-# Залп о стену: три пакета вылетают один за другим.
-BLOCKED_BURST_MS = 1500
-BLOCKED_REST_MS = 3200
-BLOCKED_PACKET_DELAYS = (0.0, 0.14, 0.28)
-BLOCKED_FLIGHT = 0.62
+# Пакеты от компьютера идут к медоеду сзади (слева), по обеим дорожкам.
+INBOUND_LANES = (
+    (40.0, (0.0, 0.5)),
+    (40.0, (0.25, 0.75)),
+)
+# Залп о стену: медоед кидает три пакета один за другим.
+BLOCKED_BURST_MS = 2300
+BLOCKED_REST_MS = 3700
+# Когда (в долях залпа) вылетает каждый пакет и сколько длится его путь.
+BLOCKED_PACKET_STARTS = (0.13, 0.33, 0.53)
+BLOCKED_PACKET_SPAN = 0.36
+# Доли пути пакета: долетел до стены / вернулся к медоеду (дальше — поймали или отбили).
+BLOCKED_OUT = 0.42
+BLOCKED_BACK_END = 0.88
+# Кто что делает с вернувшимся пакетом: пасть ловит, лапа отбивает.
+BLOCKED_FATES = ("mouth", "paw", "mouth")
+# Как долго отбитый пакет улетает прочь: на этом отрезке он ещё виден.
+SWAT_REACH = 26.0
 SHAKE_MS = 460
 # Сцена крупнее точки, поэтому кадры реже: 20 в секунду хватает для плавности.
 SCENE_FRAME_MS = 50
 
 BUSY_PHASES = frozenset({"autostart_pending", "starting", "stopping"})
 KNOWN_PHASES = frozenset({"running", "failed", "stopped"}) | BUSY_PHASES
-# Доля залпа, на которой первый пакет долетает до стены.
-FIRST_IMPACT_PHASE = BLOCKED_FLIGHT * (1.0 - BLOCKED_PACKET_DELAYS[-1])
+# Доля залпа, на которой первый пакет возвращается к медоеду.
+FIRST_CATCH_PHASE = BLOCKED_PACKET_STARTS[0] + BLOCKED_BACK_END * BLOCKED_PACKET_SPAN
+
+
+def _smooth(k: float) -> float:
+    k = max(0.0, min(1.0, k))
+    return k * k * (3.0 - 2.0 * k)
+
+
+def _chomp(c: float) -> float:
+    """Пасть после того, как пакет пойман: быстро захлопывается и расслабляется (c: 0..1)."""
+    if c <= 0.0:
+        return 1.0
+    if c < 0.5:
+        return 1.0 - 1.4 * _smooth(c / 0.5)
+    return -0.4 * (1.0 - _smooth((c - 0.5) / 0.5))
 
 
 def mascot_mood_for_phase(phase: str, previous: str = "") -> str:
@@ -120,9 +159,8 @@ class BypassScene(PulsingDot):
         # Талисман — участник сцены: это он отправляет пакеты к сайтам.
         # Нарисованный медоед: моргает и двигает лапами, а не только поворачивается целиком.
         self._mascot = DrawnBadger(self, size=MASCOT_SIZE)
-        # Стоит на «полу» сцены: лапы у нижнего края, голова выше дорожек.
-        self._mascot.move(0, SCENE_HEIGHT - self._mascot.height() - 1)
-        self._flinched = False
+        # Стоит строго посередине сцены; сами дорожки привязаны к его пасти и лапе.
+        self._place_mascot()
 
         # Политика фокуса обычного виджета: к ней сцена вернётся, если перестанет быть кнопкой.
         self._plain_focus_policy = self.focusPolicy()
@@ -180,6 +218,19 @@ class BypassScene(PulsingDot):
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(self._preferred_width, SCENE_HEIGHT)
+
+    def _place_mascot(self) -> None:
+        """Ставит медоеда по центру сцены: и по ширине, и по высоте самого значка."""
+        mascot = self._mascot
+        box_top = mascot.height() - 2 - MASCOT_SIZE
+        mascot.move(
+            (self.width() - mascot.width()) // 2,
+            max(0, (self.height() - MASCOT_SIZE) // 2 - box_top),
+        )
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._place_mascot()
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802
         return QSize(SCENE_MIN_WIDTH, SCENE_HEIGHT)
@@ -465,13 +516,19 @@ class BypassScene(PulsingDot):
             return False
         return are_live_animations_enabled()
 
+    def _halt(self) -> None:
+        super()._halt()
+        # Кадры встали: пасть и лапа возвращаются в покой.
+        mascot = self.__dict__.get("_mascot")
+        if mascot is not None:
+            mascot.set_scene_pose(0.0, 0.0, 0.0)
+
     def _start_beat(self) -> None:
         if self._can_animate():
             if self._is_flowing():
                 # Поток продолжается с того места, где остановился, без рывка.
                 self._flow_origin = self._flow_time
             else:
-                self._flinched = False
                 if self._phase == "stopped":
                     # Новый залп: медоед замахивается и кидает пакеты в стену.
                     self._mascot.react(GESTURE_TOSS)
@@ -486,6 +543,8 @@ class BypassScene(PulsingDot):
             return
         if self._is_flowing():
             self._flow_time = self._flow_origin + self._beat_clock.elapsed() / 1000.0
+            left, right, _top, _bottom = self._lanes()
+            self._mascot.set_scene_pose(*self._flow_pose(left, right, self._open_t))
             if self._phase == "running":
                 self._mascot.set_breath(math.sin(2 * math.pi * self._flow_time / BREATH_PERIOD_S))
                 self.flowFrame.emit(self._flow_time)
@@ -494,36 +553,48 @@ class BypassScene(PulsingDot):
         phase = self._beat_clock.elapsed() / BLOCKED_BURST_MS
         if phase < 1.0:
             self._pulse_phase = phase
-            if phase >= FIRST_IMPACT_PHASE and not self._flinched:
-                # Первый пакет разбился о стену: медоед вздрагивает.
-                self._flinched = True
-                if self._phase == "stopped":
-                    self._mascot.react(MOOD_ALARM)
+            # Грустный медоед после сорванного запуска ничего не кидает и не ловит.
+            if self._phase == "stopped":
+                self._mascot.set_scene_pose(*self._blocked_pose(phase))
             self.update(self._motion_region())
             return
         self._beat.stop()
         self._pulse_phase = 0.0
+        self._mascot.set_scene_pose(0.0, 0.0, 0.0)
         self.update(self._motion_region())
         if self._can_animate():
             self._rest_timer.start(BLOCKED_REST_MS)
 
     def _lanes(self) -> tuple[float, float, float, float]:
-        """(левый край дорожек, правый край, y верхней дорожки, y нижней)."""
-        center_y = self.height() / 2
+        """(правый край медоеда — отсюда дорожки к сайтам, правый край дорожек,
+        y пасти — верхняя дорожка, y лапы с «Z» — нижняя)."""
+        mascot = self._mascot
+        box_top = mascot.y() + mascot.height() - 2 - MASCOT_SIZE
         return (
-            float(self._mascot.width() + 2),
+            float(mascot.geometry().right() + 1),
             float(self.width() - ENDPOINT_ROOM),
-            center_y - LANE_GAP,
-            center_y + LANE_GAP,
+            box_top + MOUTH_LANE * MASCOT_SIZE,
+            box_top + PAW_LANE * MASCOT_SIZE,
         )
 
+    def _inbound_span(self) -> tuple[float, float]:
+        """Отрезок слева: от компьютера до медоеда."""
+        return float(ENDPOINT_ROOM - 4), float(self._mascot.geometry().left())
+
     def _motion_region(self) -> QRegion:
-        """Что меняется от кадра к кадру: полоса дорожек, стена и кнопка."""
+        """Что меняется от кадра к кадру: дорожки по обе стороны от медоеда, стена и кнопка.
+
+        Сам медоед в область не входит: он перерисовывается только когда
+        меняется его поза (иначе каждый кадр перерисовывался бы весь значок).
+        """
         left, right, top, bottom = self._lanes()
-        lanes = QRect(int(left) - 2, int(top) - 12, int(right - left) + 4, int(bottom - top) + 24)
+        from_x, to_x = self._inbound_span()
+        y, height = int(top) - 12, int(bottom - top) + 24
+        region = QRegion(QRect(int(left), y, int(right - left) + 2, height))
+        region |= QRegion(QRect(int(from_x), y, int(to_x - from_x), height))
         center = self.gate_center()
         wall = QRect(center.x() - 8, 0, 16, self.height())
-        return QRegion(lanes) | QRegion(self.button_rect()) | QRegion(wall)
+        return region | QRegion(self.button_rect()) | QRegion(wall)
 
     # ---- отрисовка -----------------------------------------------------
 
@@ -543,23 +614,30 @@ class BypassScene(PulsingDot):
         open_t = self._open_t
         color = self._shown_color
 
-        self._paint_globe(painter, center, color, open_t)
+        self._paint_endpoints(painter, center, color, open_t)
 
         track = QColor(RAW_COLOR)
         track.setAlphaF(0.16)
         painter.setBrush(track)
+        # Дорожки слева (от компьютера) и справа (от лапы к стене): без обхода
+        # пути за стеной нет, поэтому за ней дорожки бледнеют.
+        from_x, to_x = self._inbound_span()
+        for y in (top, bottom):
+            painter.drawRect(QRectF(from_x, y - 0.5, to_x - from_x, 1.0))
         painter.drawRect(QRectF(left, top - 0.5, right - left, 1.0))
-        # Нижняя дорожка — путь ответов: без обхода она обрывается у стены.
-        back = QColor(RAW_COLOR)
-        back.setAlphaF(0.16 * (0.35 + 0.65 * open_t))
-        painter.setBrush(back)
         painter.drawRect(QRectF(left, bottom - 0.5, right - left, 1.0))
+        beyond = QColor(RAW_COLOR)
+        beyond.setAlphaF(0.16 * (1.0 - open_t))
+        painter.setBrush(beyond)
+        for y in (top, bottom):
+            painter.drawRect(QRectF(center.x() + gate, y - 0.5, right - center.x() - gate, 1.0))
 
         impact = 0.0
         if self._is_flowing():
+            self._paint_inbound(painter, from_x, to_x, (top, bottom))
             self._paint_stream(painter, center, left, right, (top, bottom), gate, color, open_t)
         elif self._phase:
-            impact = self._paint_blocked(painter, center, left, top, gate, color)
+            impact = self._paint_blocked(painter, center, left, top, bottom, gate, color)
 
         self._paint_wall(painter, center, color, open_t, impact)
         if self._phase == "running" and self.is_beating():
@@ -571,13 +649,14 @@ class BypassScene(PulsingDot):
             self._paint_spinner(painter, center, color)
         painter.end()
 
-    def _paint_globe(self, painter: QPainter, center: QPointF, color: QColor, open_t: float) -> None:
+    def _paint_endpoints(self, painter: QPainter, center: QPointF, color: QColor, open_t: float) -> None:
         pen = QPen(RAW_COLOR)
         pen.setWidthF(1.6)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
-        # Сайты: глобус. Когда обход работает, он загорается цветом кнопки.
+        # Сайты — глобус, ваш компьютер — монитор. Когда обход работает, оба
+        # загораются цветом кнопки.
         globe = QColor(
             round(RAW_COLOR.red() + (color.red() - RAW_COLOR.red()) * open_t),
             round(RAW_COLOR.green() + (color.green() - RAW_COLOR.green()) * open_t),
@@ -592,6 +671,10 @@ class BypassScene(PulsingDot):
             QPointF(globe_center.x() - 10.0, globe_center.y()),
             QPointF(globe_center.x() + 10.0, globe_center.y()),
         )
+        screen = QPointF(15.0, center.y() - 1.5)
+        painter.drawRoundedRect(QRectF(screen.x() - 9.0, screen.y() - 6.5, 18.0, 13.0), 2.2, 2.2)
+        painter.drawLine(QPointF(screen.x(), screen.y() + 6.5), QPointF(screen.x(), screen.y() + 9.5))
+        painter.drawLine(QPointF(screen.x() - 4.5, screen.y() + 9.5), QPointF(screen.x() + 4.5, screen.y() + 9.5))
         painter.setPen(Qt.PenStyle.NoPen)
 
     @staticmethod
@@ -607,24 +690,48 @@ class BypassScene(PulsingDot):
         painter.setBrush(body)
         painter.drawRoundedRect(QRectF(x - 3.5, y - 1.75, 7.0, 3.5), 1.75, 1.75)
 
+    def _flow_x(self, direction: int, speed: float, offset: float, left: float, right: float) -> float:
+        """Где сейчас пакет на дорожке справа от медоеда.
+
+        Ответы (``direction < 0``) едут до пасти и чуть глубже — «внутрь»;
+        пакеты из-под лапы (``direction > 0``) рождаются чуть глубже края лапы.
+        Без анимаций поток стоит на месте.
+        """
+        if direction < 0:
+            span = right - left + EAT_DEPTH
+            u = (self._flow_time * speed / span + offset) % 1.0
+            return right - u * span
+        start = left - BIRTH_DEPTH
+        span = right - start
+        u = (self._flow_time * speed / span + offset) % 1.0
+        return start + u * span
+
+    def _paint_inbound(self, painter, from_x: float, to_x: float, lanes_y) -> None:
+        """Пакеты от компьютера идут к медоеду и тают у его спины."""
+        length = to_x - from_x
+        if length <= 0.0:
+            return
+        for (speed, offsets), y in zip(INBOUND_LANES, lanes_y):
+            for offset in offsets:
+                u = (self._flow_time * speed / length + offset) % 1.0
+                x = from_x + u * length
+                alpha = min(1.0, min(x - from_x, to_x - x) / 12.0)
+                self._paint_packet(painter, x, y, RAW_COLOR, alpha, 1)
+
     def _paint_stream(self, painter, center, left, right, lanes_y, gate, color, through: float) -> None:
-        """Поток пакетов. ``through`` — насколько открыты ворота (0..1).
+        """Поток пакетов справа от медоеда. ``through`` — насколько открыты ворота (0..1).
 
         Пакеты всегда летят по тем же местам, что и при работающем обходе,
         поэтому при открытии ворот ничего не перескакивает: пакеты у стены
-        просто начинают проходить сквозь проём, а за стеной и на обратной
-        дорожке (ответы) поток проявляется вместе с воротами. При закрытии —
+        просто начинают проходить сквозь проём, а за стеной и на дорожке
+        ответов поток проявляется вместе с воротами. При закрытии —
         наоборот, тает.
         """
-        length = right - left
         stop = center.x() - gate
         for (direction, speed, offsets), y in zip(FLOW_LANES, lanes_y):
             for offset in offsets:
-                # Без анимаций пакеты стоят на месте: «работает» всё равно
-                # отличается от «остановлен» не только цветом.
-                u = (self._flow_time * speed / length + offset) % 1.0
-                x = left + u * length if direction > 0 else right - u * length
-                alpha = min(1.0, min(x - left, right - x) / 12.0)
+                x = self._flow_x(direction, speed, offset, left, right)
+                alpha = max(0.0, min(1.0, min(x - left, right - x) / 12.0))
                 if direction < 0:
                     # Ответы от сайтов идут, только пока ворота открыты.
                     alpha *= through
@@ -638,30 +745,104 @@ class BypassScene(PulsingDot):
                     tint = RAW_COLOR
                 self._paint_packet(painter, x, y, tint, alpha, direction)
 
-    def _paint_blocked(self, painter, center, left, top, gate, color) -> float:
-        """Залп о стену. Возвращает силу удара (0..1) — от неё вздрагивает стена."""
+    def _flow_pose(self, left: float, right: float, through: float) -> tuple[float, float, float]:
+        """Пасть, лапа и блик медоеда по положению пакетов в потоке."""
+        jaw = paw = glow = 0.0
+        for direction, speed, offsets in FLOW_LANES:
+            for offset in offsets:
+                x = self._flow_x(direction, speed, offset, left, right)
+                if direction < 0:
+                    d = x - left
+                    if d >= 26.0 or d <= -EAT_DEPTH:
+                        continue
+                    # Пакет подлетает — пасть раскрывается; съеден — хлопок и расслабление.
+                    value = _chomp(-d / EAT_DEPTH) if d <= 0.0 else _smooth((26.0 - d) / 20.0)
+                    value *= through
+                    if abs(value) > abs(jaw):
+                        jaw = value
+                else:
+                    s = (x - (left - BIRTH_DEPTH)) / 22.0
+                    if 0.0 <= s < 1.0:
+                        # Лапа выпускает пакет: взмах и блик по молнии.
+                        paw = max(paw, 16.0 * math.sin(math.pi * s))
+                        glow = max(glow, s)
+        return jaw, paw, glow
+
+    def _blocked_leg(self, index: int, phase: float):
+        """Где на своём пути пакет ``index``: (u, k), либо ``None``, если его сейчас нет.
+
+        ``u`` — доля всего пути (0..1), ``k`` — доля обратного пути от стены к медоеду
+        (меньше 0 — летит к стене, больше 1 — уже пойман или отбит).
+        """
+        u = (phase - BLOCKED_PACKET_STARTS[index]) / BLOCKED_PACKET_SPAN
+        if u <= 0.0 or u >= 1.0:
+            return None
+        return u, (u - BLOCKED_OUT) / (BLOCKED_BACK_END - BLOCKED_OUT)
+
+    def _blocked_pose(self, phase: float) -> tuple[float, float, float]:
+        """Пасть и лапа медоеда в залпе: бросок, встреча пакета и поимка или отбивание."""
+        jaw = paw = glow = 0.0
+
+        def take(current: float, value: float) -> float:
+            return value if abs(value) > abs(current) else current
+
+        for index, fate in enumerate(BLOCKED_FATES):
+            leg = self._blocked_leg(index, phase)
+            if leg is None:
+                continue
+            u, k = leg
+            if index > 0 and u < 0.2:
+                # Первый бросок делает жест «бросок» самого медоеда, остальные — взмах лапой.
+                paw = take(paw, 18.0 * math.sin(math.pi * u / 0.2))
+            if k <= 0.0:
+                continue
+            after = (u - BLOCKED_BACK_END) / (1.0 - BLOCKED_BACK_END)
+            if fate == "mouth":
+                jaw = take(jaw, _smooth((k - 0.45) / 0.55) if after <= 0.0 else _chomp(after))
+            elif after <= 0.0:
+                # Лапа отводится назад, готовясь хлопнуть.
+                paw = take(paw, -8.0 * _smooth((k - 0.3) / 0.7))
+            else:
+                swing = -8.0 + 38.0 * _smooth(after / 0.35) if after < 0.35 else 30.0 * (1.0 - _smooth((after - 0.35) / 0.65))
+                paw = take(paw, swing)
+                glow = max(glow, math.sin(math.pi * min(1.0, after)))
+        return jaw, paw, glow
+
+    def _paint_blocked(self, painter, center, left, top, bottom, gate, color) -> float:
+        """Залп о стену. Возвращает силу удара (0..1) — от неё вздрагивает стена.
+
+        Пакет вылетает из-под лапы (нижняя дорожка), бьётся о стену и летит
+        назад красным. Потом либо взлетает к пасти и пропадает в ней, либо
+        лапа хлопает по нему и отбрасывает прочь.
+        """
         phase = self._pulse_phase if self.is_beating() else 0.0
         if phase <= 0.0:
             return 0.0
         hit = center.x() - gate
         impact = 0.0
-        for index, delay in enumerate(BLOCKED_PACKET_DELAYS):
-            t = (phase - delay) / (1.0 - BLOCKED_PACKET_DELAYS[-1])
-            if t <= 0.0 or t >= 1.0:
+        for index, fate in enumerate(BLOCKED_FATES):
+            leg = self._blocked_leg(index, phase)
+            if leg is None:
                 continue
-            if t < BLOCKED_FLIGHT:
-                k = t / BLOCKED_FLIGHT
-                x = left + (hit - left) * k * k
-                self._paint_packet(painter, x, top, RAW_COLOR, min(1.0, (x - left) / 12.0), 1)
+            u, k = leg
+            if u < BLOCKED_OUT:
+                f = u / BLOCKED_OUT
+                x = left + (hit - left) * f * f
+                self._paint_packet(painter, x, bottom, RAW_COLOR, max(0.0, min(1.0, (x - left) / 12.0)), 1)
                 continue
-            # Отскок: пакет краснеет, отлетает назад дугой и гаснет.
-            k = (t - BLOCKED_FLIGHT) / (1.0 - BLOCKED_FLIGHT)
-            impact = max(impact, 1.0 - k)
-            back = 1.0 - (1.0 - k) ** 2
-            side = -1.0 if index % 2 == 0 else 1.0
-            x = hit - 20.0 * back
-            y = top + side * 9.0 * math.sin(math.pi * 0.5 * back)
-            self._paint_packet(painter, x, y, color, 1.0 - k, -1)
+            impact = max(impact, 1.0 - min(1.0, (u - BLOCKED_OUT) / 0.25))
+            if k <= 1.0:
+                # Назад к медоеду: к пасти по дуге вверх или прямо к лапе.
+                x = hit + (left - hit) * k
+                y = bottom + (top - bottom) * _smooth(k) if fate == "mouth" else bottom
+                alpha = max(0.0, min(1.0, (x - left) / 10.0))
+                self._paint_packet(painter, x, y, color, alpha, -1)
+            elif fate == "paw":
+                # Отбитый пакет улетает вверх и вправо и гаснет.
+                after = (u - BLOCKED_BACK_END) / (1.0 - BLOCKED_BACK_END)
+                x = left + SWAT_REACH * after
+                y = bottom - 14.0 * math.sin(0.5 * math.pi * after)
+                self._paint_packet(painter, x, y, color, 1.0 - after, 1)
         return impact
 
     def _paint_wall(self, painter, center, color, open_t: float, impact: float) -> None:
