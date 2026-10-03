@@ -506,6 +506,22 @@ class OrchestraAccessibilityTests(unittest.TestCase):
             page._update_status(page.STATE_LEARNING)
             restyle.assert_called_once()
 
+    def test_theme_refresh_reapplies_status_color(self) -> None:
+        # Смена темы перекрашивает метку в приглушённый цвет; цвет состояния
+        # обязан вернуться, хотя само состояние не менялось.
+        page = OrchestraPage(
+            orchestra_feature=_OrchestraFeatureStub(),
+            is_runtime_running=lambda: False,
+        )
+        self.addCleanup(page.deleteLater)
+        page._update_status(page.STATE_RUNNING)
+        running_style = page.status_label.styleSheet()
+        self.assertIn("#4CAF50", running_style)
+
+        page._apply_page_theme(force=True)
+
+        self.assertEqual(page.status_label.styleSheet(), running_style)
+
     def test_status_update_exposes_status_as_screen_reader_state(self) -> None:
         page = OrchestraPage(
             orchestra_feature=_OrchestraFeatureStub(),

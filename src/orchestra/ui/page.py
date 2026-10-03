@@ -262,6 +262,9 @@ class OrchestraPage(BasePage):
         if self.status_label is not None:
             # Final state color is applied by _update_status.
             self.status_label.setStyleSheet(f"color: {tokens.fg_muted}; font-size: 14px;")
+            # Стиль метки только что заменён: статус обязан примениться заново,
+            # даже если текст и цвет состояния те же (RUNNING одинаков в обеих темах).
+            self._status_applied_key = None
 
         if self._info_label is not None:
             self._info_label.setContentsMargins(0, 8, 0, 0)
