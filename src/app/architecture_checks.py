@@ -792,7 +792,7 @@ def check_runtime_state_writers(files: list[Path]) -> list[Problem]:
     }
     pattern = re.compile(
         r"\b(?:update|replace|setattr)\s*\([^)]*(?:launch_phase|launch_running|"
-        r"launch_busy|launch_busy_text|launch_last_error)"
+        r"launch_running_since|launch_busy|launch_busy_text|launch_last_error)"
     )
     return _scan_lines(
         files,

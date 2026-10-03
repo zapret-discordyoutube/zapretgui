@@ -16,6 +16,7 @@ class Zapret2StatusWidgets:
     close_btn: object
     progress_bar: object
     loading_label: object
+    uptime_label: object
 
 
 def build_winws2_pages_status_section(
@@ -52,4 +53,5 @@ def build_winws2_pages_status_section(
         close_btn=widgets.close_btn,
         progress_bar=widgets.progress_bar,
         loading_label=widgets.loading_label,
+        uptime_label=widgets.uptime_label,
     )

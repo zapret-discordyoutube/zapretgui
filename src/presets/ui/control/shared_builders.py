@@ -13,6 +13,7 @@ from presets.ui.control.control_page_runtime_shared import (
     set_button_text_accessibility,
 )
 from presets.ui.control.status_hero_card import StatusHeroCard
+from presets.ui.control.uptime_label import UptimeLabel
 from ui.pulsing_dot import PulsingDot
 from ui.accessibility import enable_keyboard_click, set_control_accessibility, set_state_text
 from ui.theme import get_themed_qta_icon
@@ -41,6 +42,7 @@ class ModeStatusWidgets:
     progress_bar: object
     loading_label: object
     mascot: object
+    uptime_label: object
 
 
 STATUS_MASCOT_SIZE = 44
@@ -94,7 +96,15 @@ def build_mode_status_section_common(
     if desc_text:
         set_state_text(status_desc, f"Описание состояния Zapret: {desc_text}")
 
-    status_text.addWidget(status_title)
+    # Рядом с заголовком — сколько обход уже работает («· 2 ч 14 мин»).
+    uptime_label = UptimeLabel(status_card)
+    title_row = QHBoxLayout()
+    title_row.setContentsMargins(0, 0, 0, 0)
+    title_row.setSpacing(8)
+    title_row.addWidget(status_title)
+    title_row.addWidget(uptime_label, 0, Qt.AlignmentFlag.AlignBottom)
+    title_row.addStretch(1)
+    status_text.addLayout(title_row)
     status_text.addWidget(status_desc)
 
     progress_bar = indeterminate_progress_bar_cls(parent)
@@ -139,6 +149,7 @@ def build_mode_status_section_common(
         progress_bar=progress_bar,
         loading_label=loading_label,
         mascot=mascot,
+        uptime_label=uptime_label,
     )
 
 

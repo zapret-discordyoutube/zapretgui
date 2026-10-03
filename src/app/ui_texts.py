@@ -233,6 +233,26 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Zapret остановлен",
         "en": "Zapret stopped",
     },
+    "page.control.status.uptime.under_minute": {
+        "ru": "меньше минуты",
+        "en": "under a minute",
+    },
+    "page.control.status.uptime.minutes": {
+        "ru": "{minutes} мин",
+        "en": "{minutes} min",
+    },
+    "page.control.status.uptime.hours": {
+        "ru": "{hours} ч {minutes} мин",
+        "en": "{hours} h {minutes} min",
+    },
+    "page.control.status.uptime.days": {
+        "ru": "{days} д {hours} ч",
+        "en": "{days} d {hours} h",
+    },
+    "page.control.status.uptime.accessible": {
+        "ru": "Обход работает: {uptime}",
+        "en": "Bypass has been running for {uptime}",
+    },
     "page.control.status.bypass_active": {
         "ru": "Обход блокировок активен · нажмите на кнопку, чтобы остановить",
         "en": "Bypass is active · click the button to stop",

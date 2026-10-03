@@ -52,10 +52,18 @@ if hasattr(ctypes, "WinDLL"):
     _CloseHandle = _kernel32.CloseHandle
     _CloseHandle.argtypes = [wintypes.HANDLE]
     _CloseHandle.restype = wintypes.BOOL
+
+    _GetProcessTimes = _kernel32.GetProcessTimes
+    _GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    _GetProcessTimes.restype = wintypes.BOOL
 else:  # pragma: no cover - import safety for non-Windows environments
     _OpenProcess = None
     _QueryFullProcessImageNameW = None
     _CloseHandle = None
+    _GetProcessTimes = None
+
+# FILETIME считает сотни наносекунд с 1601 года; до начала Unix-времени их столько.
+_FILETIME_UNIX_EPOCH = 116444736000000000
 
 
 def get_expected_winws_paths() -> dict[str, str]:
@@ -88,6 +96,33 @@ def _query_process_image_path(pid: int) -> str:
         if not _QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
             return ""
         return _normalize_path(buffer.value[: size.value] or buffer.value)
+    finally:
+        _CloseHandle(handle)
+
+
+def filetime_to_unix_seconds(low: int, high: int) -> float:
+    ticks = (int(high) << 32) | int(low)
+    if ticks <= _FILETIME_UNIX_EPOCH:
+        return 0.0
+    return (ticks - _FILETIME_UNIX_EPOCH) / 10_000_000
+
+
+def query_process_start_time(pid: int) -> float:
+    """Когда Windows создала процесс (секунды Unix); 0.0 — узнать не удалось."""
+    if _OpenProcess is None or _GetProcessTimes is None or _CloseHandle is None:
+        return 0.0
+
+    handle = _OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if not handle:
+        return 0.0
+
+    try:
+        created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
+        if not _GetProcessTimes(
+            handle, ctypes.byref(created), ctypes.byref(exited), ctypes.byref(kernel), ctypes.byref(user)
+        ):
+            return 0.0
+        return filetime_to_unix_seconds(created.dwLowDateTime, created.dwHighDateTime)
     finally:
         _CloseHandle(handle)
 

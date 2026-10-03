@@ -209,6 +209,15 @@ def apply_status_plan(
     return plan.phase == "running"
 
 
+def apply_running_since(uptime_label, state) -> None:
+    """Передаёт подписи времени работы момент запуска обхода из общего состояния."""
+    if uptime_label is None:
+        return
+    phase = str(getattr(state, "launch_phase", "") or "").strip().lower()
+    since = float(getattr(state, "launch_running_since", 0.0) or 0.0)
+    uptime_label.set_running_since(since if phase == "running" else 0.0)
+
+
 def _set_tooltip_if_changed(widget, text: str) -> None:
     try:
         if widget.toolTip() == text:

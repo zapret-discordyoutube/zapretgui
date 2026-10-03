@@ -13,6 +13,8 @@ class AppUiState:
     launch_busy: bool = False
     launch_busy_text: str = ""
     launch_last_error: str = ""
+    # Когда заработал обход (секунды Unix). 0.0 — сейчас не работает.
+    launch_running_since: float = 0.0
     last_status_message: str = ""
     current_strategy_summary: str = ""
     preset_content_change_kind: str = ""

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any, Mapping
 
 from app.state_store import AppUiState, MainWindowStateStore
 from settings.mode import ALL_WINWS_EXE_NAMES, normalize_launch_method
-from winws_runtime.runtime.process_probe import is_winws_process_pid_alive
+from winws_runtime.runtime.process_probe import is_winws_process_pid_alive, query_process_start_time
 
 _UNSET = object()
 
@@ -73,6 +74,8 @@ class LaunchRuntimeService:
         - писать в него должен `LaunchRuntimeService`, а не страницы и не window mixin;
         - публичный snapshot сервиса содержит поля, реально нужные внешним читателям:
           `launch_method`, `phase`, `running`, `last_error`, `pid`;
+        - `launch_running_since` (с какого момента обход работает) пишется вместе с
+          фазой и читается страницей управления прямо из store;
         - `pid` экспортируется только через runtime snapshot. Он не хранится
           в общем UI store и не становится пользовательской настройкой;
         - технические поля мониторинга процесса (`expected_process`, `missing_probe_count`)
@@ -220,8 +223,28 @@ class LaunchRuntimeService:
                 phase="running",
                 running=True,
                 last_error="",
+                running_since=self._resolve_running_since(next_pid),
             )
         )
+
+    def _resolve_running_since(self, pid: int | None) -> float:
+        """С какого момента считать время работы обхода.
+
+        Точнее всего — время создания процесса winws: оно верно, даже если
+        программу открыли, когда обход уже шёл. Если Windows его не отдала,
+        берём момент, когда программа впервые увидела обход работающим.
+        """
+        now = time.time()
+        if isinstance(pid, int):
+            started = query_process_start_time(pid)
+            if 0.0 < started <= now:
+                return started
+        store = self._store()
+        if store is not None:
+            state = store.snapshot()
+            if state.launch_running and state.launch_running_since > 0.0:
+                return state.launch_running_since
+        return now
 
     def mark_start_failed(self, error: str) -> bool:
         self._set_tracking_state(pid=None, missing_probe_count=0)
@@ -268,6 +291,7 @@ class LaunchRuntimeService:
             phase=phase,
             running=bool(running),
             last_error="",
+            running_since=self._resolve_running_since(None) if running else 0.0,
         )
         if launch_method is not None:
             changes["launch_method"] = normalize_launch_method(launch_method, default="")
@@ -360,11 +384,14 @@ class LaunchRuntimeService:
         phase: str,
         running: bool,
         last_error: str,
+        running_since: float = 0.0,
     ) -> dict[str, object]:
         return {
             "launch_phase": str(phase or "stopped").strip().lower() or "stopped",
             "launch_running": bool(running),
             "launch_last_error": str(last_error or "").strip(),
+            # Вне фазы «работает» времени работы нет.
+            "launch_running_since": float(running_since) if running else 0.0,
         }
 
     def _set_tracking_state(

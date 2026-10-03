@@ -26,6 +26,7 @@ from presets.ui.control.control_page_shared import (
 )
 from presets.ui.control.control_page_runtime_shared import (
     apply_last_status_message,
+    apply_running_since,
     set_enabled_if_changed,
     set_loading_status_accessibility,
     set_progress_active_if_changed,
@@ -150,6 +151,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self._startup_showevent_profile_logged = False
         self._refresh_runtime = create_refresh_runtime()
         self.top_summary = None
+        self.uptime_label = None
         self.program_settings_card = None
         self.gui_autostart_toggle = None
         self.auto_dpi_toggle = None
@@ -403,6 +405,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.close_btn = status_widgets.close_btn
         self.progress_bar = status_widgets.progress_bar
         self.loading_label = status_widgets.loading_label
+        self.uptime_label = status_widgets.uptime_label
         self.add_widget(status_widgets.card)
         _log_startup_winws2_control_metric("_build_ui.status_card", (_time.perf_counter() - _t_status) * 1000)
         self.add_spacing(16)
@@ -808,6 +811,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             fields={
                 "launch_phase",
                 "launch_running",
+                "launch_running_since",
                 "launch_busy",
                 "launch_busy_text",
                 "launch_last_error",
@@ -845,6 +849,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             or bool(changed & {
                 "launch_phase",
                 "launch_running",
+                "launch_running_since",
                 "launch_busy",
                 "launch_busy_text",
                 "launch_last_error",
@@ -878,6 +883,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
                 state.launch_phase or ("running" if state.launch_running else "stopped"),
                 str(state.launch_last_error or ""),
             )
+            apply_running_since(self.__dict__.get("uptime_label"), state)
             if runtime is not None and not preset_apply_busy:
                 if runtime.take_top_summary_preset_apply_reload():
                     try:
@@ -929,6 +935,8 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
+        if self.uptime_label is not None:
+            self.uptime_label.set_language(self._ui_language)
         if self.top_summary is not None:
             self.top_summary.set_language(self._ui_language)
             self._refresh_top_summary()
