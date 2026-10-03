@@ -611,6 +611,52 @@ class TechniqueIllustrationTests(unittest.TestCase):
         finally:
             host.deleteLater()
 
+    def test_still_frame_shows_settled_scene(self) -> None:
+        # Без анимаций виден один кадр STATIC_PHASE: к нему все переходы
+        # (реплика, вспышка у сайта, падение подделок и мусора) уже закончились.
+        from ui.onboarding.illustrations import FADE_FROM, SCENES, STATIC_PHASE
+
+        host = QWidget()
+        try:
+            illustration = self._illustration(host)
+            for width in (460, 532, 580):
+                illustration.resize(width, illustration.height())
+                for key in SCENES:
+                    illustration.set_scene(key)
+                    self.assertLessEqual(illustration.scene_times().settled, STATIC_PHASE, f"{key} @ {width}")
+                    illustration.set_phase(STATIC_PHASE)
+                    still = illustration.grab().toImage()
+                    illustration.set_phase(FADE_FROM - 0.001)
+                    self.assertEqual(still, illustration.grab().toImage(), f"{key} @ {width}")
+        finally:
+            host.deleteLater()
+
+    def test_tcpseg_junk_rides_with_data_to_site_and_is_dropped_there(self) -> None:
+        # seqovl: мусор приклеен спереди в том же пакете. Проверку он проходит
+        # вместе с данными, а отбрасывает его уже сайт.
+        from ui.onboarding.illustrations import DISCARD, TRAVEL
+
+        host = QWidget()
+        try:
+            illustration = self._illustration(host)
+            illustration.set_scene("tcpseg")
+            times = illustration.scene_times()
+            arrival = times.starts[1] + TRAVEL
+
+            frames = {frame.index: frame for frame in illustration.chip_frames(arrival - TRAVEL * 0.2)}
+            junk, data = frames[0], frames[1]
+            self.assertGreater(junk.x, illustration.width() / 2)  # уже за проверкой
+            self.assertTrue(junk.glued)
+            self.assertAlmostEqual(junk.alpha, 1.0)
+            self.assertLess(junk.x, data.x)  # спереди, то есть левее данных
+
+            frames = {frame.index: frame for frame in illustration.chip_frames(arrival + DISCARD * 0.2)}
+            self.assertNotIn(1, frames)  # данные вошли в сайт
+            self.assertIn(0, frames)  # мусор ещё у входа
+            self.assertNotIn(0, {frame.index for frame in illustration.chip_frames(arrival + DISCARD + 0.01)})
+        finally:
+            host.deleteLater()
+
     def test_every_illustrated_step_uses_a_known_scene(self) -> None:
         from ui.onboarding.illustrations import SCENES
         from ui.onboarding.steps import TOUR_STEPS

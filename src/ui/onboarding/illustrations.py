@@ -6,20 +6,23 @@
 
 - pass — плашка доходит до сайта;
 - blocked — проверка узнаёт имя и обрывает соединение;
-- die — поддельная плашка проходит проверку и гаснет, не дойдя до сайта.
+- die — поддельная плашка проходит проверку и гаснет, не дойдя до сайта;
+- discard — мусор доезжает до сайта вместе с данными, и сайт его отбрасывает.
 
 Так видно главное: проверка провайдера видит одно, а сайт получает другое.
-Сцены повторяются по кругу. Когда анимации в системе выключены, рисуется
-один неподвижный кадр с итогом.
+Сцены повторяются по кругу. Все переходы (появление реплики, вспышка у
+сайта, падение подделок) заканчиваются до STATIC_PHASE: когда анимации в
+системе выключены, рисуется этот неподвижный кадр с итогом.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 from qfluentwidgets import isDarkTheme, themeColor
 
@@ -37,6 +40,15 @@ FADE_FROM = 0.9
 STATIC_PHASE = 0.86
 # Просвет между соседними плашками на дорожке, px.
 CHIP_GAP = 10.0
+# Длительности переходов, доля круга.
+POP = 0.05  # появление реплики, итога и красного креста
+APPEAR = 0.08  # плашка выходит от «Вы»
+ABSORB = 0.1  # хвост пути, на котором настоящая плашка входит в сайт
+PULSE = 0.08  # кольцо вокруг сайта, когда всё дошло
+SHAKE = 0.07  # плашка трясётся, упёршись в блок
+DISCARD = 0.1  # сайт отбрасывает мусор
+# Просвет между склеенными плашками одного пакета, px.
+GLUE_GAP = 2.0
 
 BLOCK_RED = QColor(232, 17, 35)
 PASS_GREEN = QColor(60, 179, 113)
@@ -52,10 +64,10 @@ class Packet:
     # Пауза перед отправкой сверх обычного просвета, доля круга.
     delay: float = 0.0
     kind: str = "real"  # real | fake | junk | syn
-    fate: str = "pass"  # pass | blocked | die
+    fate: str = "pass"  # pass | blocked | die | discard
     # Текст после проверки: у сайта лишнее выпадает (oob, syndata).
     text_after_gate: str = ""
-    # Плашка едет вплотную впереди следующей (мусор seqovl в tcpseg).
+    # Плашка едет вплотную впереди следующей: это один пакет (мусор seqovl в tcpseg).
     glued_to_next: bool = False
 
 
@@ -120,7 +132,7 @@ SCENES: dict[str, Scene] = {
     ),
     "tcpseg": Scene(
         packets=(
-            Packet("junk", kind="junk", fate="die", glued_to_next=True),
+            Packet("junk", kind="junk", fate="discard", glued_to_next=True),
             Packet("youtube.com"),
         ),
         bubble_key="junk",
@@ -141,6 +153,68 @@ SCENES: dict[str, Scene] = {
         bubble_trigger=0,
     ),
 }
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _ease_out(t: float) -> float:
+    t = _clamp01(t)
+    return 1.0 - (1.0 - t) ** 3
+
+
+def _ease_in(t: float) -> float:
+    t = _clamp01(t)
+    return t * t
+
+
+def _ease_out_back(t: float) -> float:
+    """Быстро вырастает с лёгким перелётом — «выскакивает»."""
+    t = _clamp01(t)
+    c1 = 1.70158
+    return 1.0 + (c1 + 1.0) * (t - 1.0) ** 3 + c1 * (t - 1.0) ** 2
+
+
+@dataclass(frozen=True, slots=True)
+class _Layout:
+    you_rect: QRectF
+    gate_rect: QRectF
+    site_rect: QRectF
+    start_x: float
+    end_x: float
+    track_y: float
+
+    @property
+    def gate_x(self) -> float:
+        return self.gate_rect.center().x()
+
+
+@dataclass(frozen=True, slots=True)
+class ChipFrame:
+    """Где и как нарисовать одну плашку в данный момент."""
+
+    index: int
+    label: str
+    kind: str
+    x: float
+    dy: float = 0.0
+    alpha: float = 1.0
+    scale: float = 1.0
+    angle: float = 0.0
+    # Плашка склеена со следующей в один пакет.
+    glued: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SceneTimes:
+    starts: tuple[float, ...]
+    # Когда проверка подаёт реплику (и, для блока, обрывает соединение).
+    verdict: float
+    # Когда сайт собрал итог; None — не соберёт.
+    site_done: float | None
+    # Когда всё на схеме замирает до следующего круга.
+    settled: float
 
 
 def _readable_text_on(fill: QColor) -> QColor:
@@ -239,102 +313,207 @@ class TechniqueIllustration(QWidget):
             "accent": QColor(themeColor()),
         }
 
-    def _paint_scene(self, painter: QPainter, scene: Scene, phase: float) -> None:
-        colors = self._palette()
+    def _layout(self) -> _Layout:
         width = float(self.width())
         node_w, gate_w = 78.0, 100.0
         track_y = 70.0
         you_rect = QRectF(4, track_y - 26, node_w, 52)
         site_rect = QRectF(width - 4 - node_w, track_y - 26, node_w, 52)
         gate_rect = QRectF(width / 2 - gate_w / 2, track_y - 36, gate_w, 72)
-        start_x = you_rect.right() + 8
-        end_x = site_rect.left() - 8
-        gate_x = gate_rect.center().x()
+        return _Layout(you_rect, gate_rect, site_rect, you_rect.right() + 8, site_rect.left() - 8, track_y)
 
+    def _chip_font(self) -> QFont:
+        font = QFont(self.font())
+        font.setPointSizeF(max(7.5, font.pointSizeF() - 1.0))
+        return font
+
+    def _chip_widths(self, scene: Scene, metrics: QFontMetrics) -> list[float]:
+        return [self._chip_width(metrics, self._packet_label(packet, False)) for packet in scene.packets]
+
+    @staticmethod
+    def _blocked_x(layout: _Layout, chip_width: float) -> float:
+        return layout.gate_rect.left() - chip_width / 2 - 6
+
+    @staticmethod
+    def _path(scene: Scene, index: int, layout: _Layout, chips: list[float]) -> tuple[int, float, float]:
+        """Путь плашки: (чья плашка ведёт, откуда ведущая стартует, отставание от неё).
+
+        Склеенная пара едет как один пакет: ведёт настоящая плашка, мусор
+        держится вплотную слева. Пара стартует целиком правее «Вы».
+        """
+        packets = scene.packets
+        if packets[index].glued_to_next and index + 1 < len(packets):
+            back = chips[index + 1] / 2 + chips[index] / 2 + GLUE_GAP
+            return index + 1, layout.start_x + back, back
+        if index and packets[index - 1].glued_to_next:
+            back = chips[index] / 2 + chips[index - 1] / 2 + GLUE_GAP
+            return index, layout.start_x + back, 0.0
+        return index, layout.start_x, 0.0
+
+    def scene_times(self, scene: Scene | None = None) -> SceneTimes:
+        """Ключевые моменты круга для сцены (по умолчанию — текущей)."""
+        scene = scene or SCENES[self._scene_key]
+        layout = self._layout()
+        chips = self._chip_widths(scene, QFontMetrics(self._chip_font()))
+        return self._scene_times(scene, layout, chips)
+
+    def _scene_times(self, scene: Scene, layout: _Layout, chips: list[float]) -> SceneTimes:
+        starts = tuple(self._start_times(scene, chips, max(1.0, layout.end_x - layout.start_x)))
+        trigger = scene.packets[scene.bubble_trigger]
+        lead, x_from, back = self._path(scene, scene.bubble_trigger, layout, chips)
+        span = max(1.0, layout.end_x - x_from)
+        if trigger.fate == "blocked":
+            # Реплика и обрыв — ровно когда плашка упирается в проверку.
+            target = self._blocked_x(layout, chips[scene.bubble_trigger])
+        else:
+            # Реплика — когда середина плашки в середине проверки.
+            target = layout.gate_x
+        verdict = starts[lead] + TRAVEL * _clamp01((target + back - x_from) / span)
+        arrivals = [starts[i] + TRAVEL for i, packet in enumerate(scene.packets) if packet.fate == "pass"]
+        site_done = max(arrivals) if (scene.site_result and arrivals) else None
+        ends = [verdict + max(POP, SHAKE)]
+        for index, packet in enumerate(scene.packets):
+            if packet.fate == "die":
+                # Подделка гаснет на полпути от проверки до сайта.
+                ends.append(starts[index] + TRAVEL)
+            elif packet.fate == "discard":
+                ends.append(starts[index] + TRAVEL + DISCARD)
+        if site_done is not None:
+            ends.append(site_done + max(POP, PULSE))
+        return SceneTimes(starts=starts, verdict=verdict, site_done=site_done, settled=max(ends))
+
+    def chip_frames(self, phase: float) -> list[ChipFrame]:
+        """Плашки текущей сцены в момент phase (для тестов и снимков)."""
+        scene = SCENES.get(self._scene_key)
+        if scene is None:
+            return []
+        layout = self._layout()
+        chips = self._chip_widths(scene, QFontMetrics(self._chip_font()))
+        times = self._scene_times(scene, layout, chips)
+        return self._chip_frames(scene, phase, layout, chips, times)
+
+    def _chip_frames(
+        self, scene: Scene, phase: float, layout: _Layout, chips: list[float], times: SceneTimes
+    ) -> list[ChipFrame]:
+        frames: list[ChipFrame] = []
+        for index, packet in enumerate(scene.packets):
+            lead, x_from, back = self._path(scene, index, layout, chips)
+            raw = (phase - times.starts[lead]) / TRAVEL
+            if raw <= 0.0:
+                continue
+            x = x_from + (layout.end_x - x_from) * min(raw, 1.0) - back
+            appear = _ease_out(raw * TRAVEL / APPEAR)
+            alpha, scale, dy, angle = appear, 0.85 + 0.15 * appear, 0.0, 0.0
+            glued = lead != index and raw < 1.0
+            if packet.fate == "blocked":
+                wall = self._blocked_x(layout, chips[index])
+                if x >= wall:
+                    x = wall
+                    shake = _clamp01((phase - times.verdict) / SHAKE)
+                    if shake < 1.0:
+                        x += math.sin(shake * math.pi * 5) * 5.0 * (1.0 - shake)
+            elif packet.fate == "die" and x > layout.gate_x:
+                # Подделка проседает, кренится и гаснет между проверкой и сайтом.
+                gone = _ease_in((x - layout.gate_x) / max(1.0, (layout.end_x - layout.gate_x) * 0.55))
+                alpha *= 1.0 - gone
+                dy, scale, angle = 12.0 * gone, scale * (1.0 - 0.2 * gone), 14.0 * gone
+            elif packet.fate == "discard" and raw >= 1.0:
+                # Данные вошли в сайт, а мусор сайт отбрасывает: он докатывается
+                # до входа и падает с дорожки.
+                t = _clamp01((phase - times.starts[lead] - TRAVEL) / DISCARD)
+                door = layout.end_x - chips[index] / 2
+                x += (door - x) * _ease_out(t / 0.35)
+                gone = _ease_in((t - 0.35) / 0.65)
+                alpha *= 1.0 - gone
+                dy, scale, angle = 16.0 * gone, scale * (1.0 - 0.15 * gone), -16.0 * gone
+            elif packet.fate == "pass":
+                if raw >= 1.0:
+                    continue  # дошла — дальше её показывает итог у сайта
+                absorb = _clamp01((raw - (1.0 - ABSORB)) / ABSORB)
+                alpha *= 1.0 - _ease_in(absorb)
+                scale *= 1.0 - 0.3 * absorb
+            if alpha <= 0.01:
+                continue
+            label = self._packet_label(packet, x > layout.gate_x)
+            frames.append(ChipFrame(index, label, packet.kind, x, dy, alpha, scale, angle, glued))
+        return frames
+
+    def _paint_scene(self, painter: QPainter, scene: Scene, phase: float) -> None:
+        colors = self._palette()
+        layout = self._layout()
+        chip_font = self._chip_font()
+        metrics = QFontMetrics(chip_font)
+        chips = self._chip_widths(scene, metrics)
+        times = self._scene_times(scene, layout, chips)
+        frames = self._chip_frames(scene, phase, layout, chips, times)
         fade = 1.0 if phase < FADE_FROM else max(0.0, 1.0 - (phase - FADE_FROM) / (1.0 - FADE_FROM))
+        blocked = 0.0 if scene.site_result else _ease_out((phase - times.verdict) / POP)
+        done = 0.0 if times.site_done is None else _ease_out((phase - times.site_done) / POP)
 
         # Дорожка.
-        pen = QPen(colors["track"], 2, Qt.PenStyle.DashLine)
-        painter.setPen(pen)
-        painter.drawLine(QPointF(you_rect.right(), track_y), QPointF(site_rect.left(), track_y))
-
-        chip_font = QFont(self.font())
-        chip_font.setPointSizeF(max(7.5, chip_font.pointSizeF() - 1.0))
-        metrics = QFontMetrics(chip_font)
-        chips = [self._chip_width(metrics, self._packet_label(packet, False)) for packet in scene.packets]
-        starts = self._start_times(scene, chips, end_x - start_x)
-
-        trigger_start = starts[scene.bubble_trigger]
-        blocked = scene.site_result == "" and phase >= trigger_start + TRAVEL * 0.5
-        site_done = bool(scene.site_result) and all(
-            phase >= starts[index] + TRAVEL
-            for index, packet in enumerate(scene.packets)
-            if packet.fate == "pass"
+        painter.setPen(QPen(colors["track"], 2, Qt.PenStyle.DashLine))
+        painter.drawLine(
+            QPointF(layout.you_rect.right(), layout.track_y), QPointF(layout.site_rect.left(), layout.track_y)
         )
 
-        self._paint_node(painter, you_rect, self._tr("onboarding.scene.you", "Вы"), colors, None)
-        gate_tint = BLOCK_RED if blocked else None
+        self._paint_node(painter, layout.you_rect, self._tr("onboarding.scene.you", "Вы"), colors, None)
         # Подпись провайдера — в верхней части блока: плашки едут ниже и её не закрывают.
         self._paint_node(
             painter,
-            gate_rect,
+            layout.gate_rect,
             self._tr("onboarding.scene.provider", "Провайдер"),
             colors,
-            gate_tint,
-            text_rect=QRectF(gate_rect.left(), gate_rect.top() + 2, gate_rect.width(), 20),
+            BLOCK_RED if blocked > 0.0 else None,
+            tint_strength=blocked * fade,
+            text_rect=QRectF(layout.gate_rect.left(), layout.gate_rect.top() + 2, layout.gate_rect.width(), 20),
         )
+        self._paint_scan(painter, layout, frames, chips, phase, colors)
         painter.setPen(colors["muted"])
         small = QFont(self.font())
         small.setPointSizeF(max(7.0, small.pointSizeF() - 1.5))
         painter.setFont(small)
         painter.drawText(
-            QRectF(gate_rect.left(), gate_rect.bottom() + 2, gate_rect.width(), 16),
+            QRectF(layout.gate_rect.left(), layout.gate_rect.bottom() + 2, layout.gate_rect.width(), 16),
             Qt.AlignmentFlag.AlignCenter,
             self._tr("onboarding.scene.check", "проверка"),
         )
         self._paint_node(
             painter,
-            site_rect,
+            layout.site_rect,
             self._tr("onboarding.scene.site", "Сайт"),
             colors,
-            PASS_GREEN if site_done else None,
+            PASS_GREEN if done > 0.0 else None,
+            tint_strength=done * fade,
         )
+        if times.site_done is not None:
+            self._paint_pulse(painter, layout.site_rect, (phase - times.site_done) / PULSE)
 
-        # Плашки.
+        # Плашки: сначала общая рамка склеенного пакета, потом сами плашки.
+        # Плашки выезжают из-за края «Вы», а не рисуются поверх него.
+        painter.save()
+        painter.setClipRect(QRectF(layout.you_rect.right() + 1, 0, self.width(), self.height()))
         painter.setFont(chip_font)
-        for index, packet in enumerate(scene.packets):
-            progress = (phase - starts[index]) / TRAVEL
-            if progress <= 0.0:
-                continue
-            progress = min(progress, 1.0)
-            x = start_x + (end_x - start_x) * progress
-            if packet.fate == "blocked":
-                x = min(x, gate_rect.left() - chips[index] / 2 - 6)
-            if packet.glued_to_next and index + 1 < len(scene.packets):
-                x -= chips[index + 1] / 2 + chips[index] / 2 + 1
-            past_gate = x > gate_x
-            alpha = min(1.0, progress / 0.06) * fade
-            if packet.fate == "die" and past_gate:
-                # Поддельная плашка гаснет между проверкой и сайтом.
-                span = (end_x - gate_x) * 0.55
-                alpha *= max(0.0, 1.0 - (x - gate_x) / max(1.0, span))
-            if packet.fate == "pass" and progress >= 1.0:
-                continue  # дошла — дальше её показывает итог у сайта
-            if alpha <= 0.01:
-                continue
-            label = self._packet_label(packet, past_gate)
-            self._paint_chip(painter, metrics, label, packet.kind, QPointF(x, track_y), alpha, colors)
+        by_index = {frame.index: frame for frame in frames}
+        for frame in frames:
+            partner = by_index.get(frame.index + 1)
+            if frame.glued and partner is not None:
+                self._paint_glue_frame(painter, frame, partner, chips, layout.track_y, colors, fade)
+        for frame in frames:
+            self._paint_chip(painter, metrics, frame, layout.track_y, frame.alpha * fade, colors)
+        painter.restore()
 
         # Реплика проверки.
-        if phase >= trigger_start + TRAVEL * 0.5:
-            self._paint_bubble(painter, scene, gate_rect, colors, fade)
+        if phase >= times.verdict:
+            self._paint_bubble(painter, scene, layout.gate_rect, colors, fade, (phase - times.verdict) / POP)
 
         # Итог у сайта.
-        if site_done:
+        if done > 0.0:
             painter.setFont(chip_font)
-            self._paint_result(painter, metrics, scene.site_result, site_rect, colors, fade)
-        if blocked:
-            self._paint_cross(painter, QPointF(gate_rect.left() - 4, track_y), fade)
+            self._paint_result(painter, metrics, scene.site_result, layout.site_rect, colors, fade * done, done)
+        if blocked > 0.0:
+            self._paint_cross(
+                painter, QPointF(layout.gate_rect.left() - 4, layout.track_y), fade, (phase - times.verdict) / POP
+            )
 
     @staticmethod
     def _start_times(scene: Scene, chips: list[float], track: float) -> list[float]:
@@ -370,14 +549,14 @@ class TechniqueIllustration(QWidget):
         colors,
         tint: QColor | None,
         *,
+        tint_strength: float = 1.0,
         text_rect: QRectF | None = None,
     ) -> None:
         fill = QColor(colors["node"])
         border = QColor(colors["node_border"])
         if tint is not None:
-            fill = QColor(tint)
-            fill.setAlpha(46)
-            border = QColor(tint)
+            fill = self._mix(fill, QColor(tint.red(), tint.green(), tint.blue(), 46), tint_strength)
+            border = self._mix(border, QColor(tint), tint_strength)
         painter.setPen(QPen(border, 1.5))
         painter.setBrush(fill)
         painter.drawRoundedRect(rect, 10, 10)
@@ -387,14 +566,92 @@ class TechniqueIllustration(QWidget):
         painter.setFont(font)
         painter.drawText(text_rect or rect, Qt.AlignmentFlag.AlignCenter, text)
 
-    def _paint_chip(self, painter, metrics, text, kind, center: QPointF, alpha: float, colors) -> None:
-        width = self._chip_width(metrics, text)
-        rect = QRectF(center.x() - width / 2, center.y() - 12, width, 24)
+    @staticmethod
+    def _mix(a: QColor, b: QColor, k: float) -> QColor:
+        k = _clamp01(k)
+        return QColor(
+            round(a.red() + (b.red() - a.red()) * k),
+            round(a.green() + (b.green() - a.green()) * k),
+            round(a.blue() + (b.blue() - a.blue()) * k),
+            round(a.alpha() + (b.alpha() - a.alpha()) * k),
+        )
+
+    def _paint_scan(self, painter, layout: _Layout, frames, chips, phase: float, colors) -> None:
+        """Пока плашка внутри проверки, блок подсвечен и по нему бегает луч."""
+        gate = layout.gate_rect
+        reach = gate.width() / 2
+        glow = 0.0
+        for frame in frames:
+            near = 1.0 - abs(frame.x - layout.gate_x) / (reach + chips[frame.index] / 2)
+            glow = max(glow, _clamp01(near) * frame.alpha)
+        if glow <= 0.01:
+            return
+        accent = QColor(colors["accent"])
         painter.save()
+        fill = QColor(accent)
+        fill.setAlpha(round(34 * glow))
+        border = QColor(accent)
+        border.setAlpha(round(200 * glow))
+        painter.setPen(QPen(border, 1.5))
+        painter.setBrush(fill)
+        painter.drawRoundedRect(gate, 10, 10)
+        sweep = 0.5 - 0.5 * math.cos(phase * math.tau * 9)
+        x = gate.left() + 10 + (gate.width() - 20) * sweep
+        beam = QLinearGradient(x, gate.top() + 22, x, gate.bottom() - 6)
+        edge = QColor(accent)
+        edge.setAlpha(0)
+        mid = QColor(accent)
+        mid.setAlpha(round(220 * glow))
+        beam.setColorAt(0.0, edge)
+        beam.setColorAt(0.5, mid)
+        beam.setColorAt(1.0, edge)
+        painter.setPen(QPen(QBrush(beam), 2))
+        painter.drawLine(QPointF(x, gate.top() + 22), QPointF(x, gate.bottom() - 6))
+        painter.restore()
+
+    def _paint_pulse(self, painter, rect: QRectF, t: float) -> None:
+        """Кольцо расходится от сайта, когда он собрал итог."""
+        if not 0.0 < t < 1.0:
+            return
+        grow = 12.0 * _ease_out(t)
+        ring = QColor(PASS_GREEN)
+        ring.setAlpha(round(170 * (1.0 - t)))
+        painter.save()
+        painter.setPen(QPen(ring, 2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(rect.adjusted(-grow, -grow, grow, grow), 10 + grow, 10 + grow)
+        painter.restore()
+
+    def _paint_glue_frame(self, painter, frame: ChipFrame, partner: ChipFrame, chips, track_y, colors, fade) -> None:
+        """Мусор и данные — один пакет: обводим их общей рамкой."""
+        left = frame.x - chips[frame.index] / 2 - 4
+        right = partner.x + chips[partner.index] / 2 * partner.scale + 4
+        rect = QRectF(left, track_y - 16, right - left, 32)
+        color = QColor(colors["muted"])
+        painter.save()
+        painter.setOpacity(min(frame.alpha, partner.alpha) * fade * 0.8)
+        painter.setPen(QPen(color, 1.2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(rect, 10, 10)
+        painter.restore()
+
+    def _paint_chip(self, painter, metrics, frame: ChipFrame, track_y: float, alpha: float, colors) -> None:
+        text, kind = frame.label, frame.kind
+        width = self._chip_width(metrics, text)
+        rect = QRectF(-width / 2, -12, width, 24)
+        painter.save()
+        painter.translate(frame.x, track_y + frame.dy)
+        painter.rotate(frame.angle)
+        painter.scale(frame.scale, frame.scale)
         painter.setOpacity(alpha)
         if kind == "real" or kind == "syn":
             fill = QColor(colors["accent"])
+            # Мягкое свечение под настоящей плашкой.
+            glow = QColor(fill)
+            glow.setAlpha(50)
             painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(glow)
+            painter.drawRoundedRect(rect.adjusted(-3, -3, 3, 3), 10, 10)
             painter.setBrush(fill)
             painter.drawRoundedRect(rect, 7, 7)
             text_color = _readable_text_on(fill)
@@ -422,25 +679,31 @@ class TechniqueIllustration(QWidget):
             painter.drawText(QPointF(x, baseline), char)
             x += metrics.horizontalAdvance(char)
 
-    def _paint_bubble(self, painter, scene: Scene, gate_rect: QRectF, colors, fade: float) -> None:
+    def _paint_bubble(self, painter, scene: Scene, gate_rect: QRectF, colors, fade: float, t: float) -> None:
         text = self._tr(f"onboarding.scene.bubble.{scene.bubble_key}", scene.bubble_key)
         tone = {"block": BLOCK_RED, "confused": FAKE_AMBER}.get(scene.bubble_tone, PASS_GREEN)
         font = QFont(self.font())
         font.setPointSizeF(max(7.5, font.pointSizeF() - 1.0))
         painter.save()
-        painter.setOpacity(fade)
+        painter.setOpacity(fade * _ease_out(t))
         painter.setFont(font)
         metrics = QFontMetrics(font)
         width = metrics.horizontalAdvance(text) + 18
         rect = QRectF(gate_rect.center().x() - width / 2, 2, width, 24)
         rect.moveLeft(max(0.0, min(rect.left(), self.width() - width)))
+        tip_x = gate_rect.center().x()
+        # Реплика выскакивает из блока проверки: растёт от кончика хвостика.
+        grow = 0.6 + 0.4 * _ease_out_back(t)
+        anchor = QPointF(tip_x, rect.bottom() + 6)
+        painter.translate(anchor)
+        painter.scale(grow, grow)
+        painter.translate(-anchor)
         fill = QColor(tone)
         fill.setAlpha(40)
         painter.setBrush(fill)
         painter.setPen(QPen(tone, 1.2))
         path = QPainterPath()
         path.addRoundedRect(rect, 8, 8)
-        tip_x = gate_rect.center().x()
         path.moveTo(tip_x - 5, rect.bottom())
         path.lineTo(tip_x, rect.bottom() + 6)
         path.lineTo(tip_x + 5, rect.bottom())
@@ -449,12 +712,13 @@ class TechniqueIllustration(QWidget):
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
         painter.restore()
 
-    def _paint_result(self, painter, metrics, text, site_rect: QRectF, colors, fade: float) -> None:
+    def _paint_result(self, painter, metrics, text, site_rect: QRectF, colors, alpha: float, t: float) -> None:
         label = f"✓ {text}"
         width = self._chip_width(metrics, label)
-        rect = QRectF(site_rect.right() - width, site_rect.bottom() + 20, width, 24)
+        # Итог выезжает снизу вверх под сайтом.
+        rect = QRectF(site_rect.right() - width, site_rect.bottom() + 20 + 8 * (1.0 - t), width, 24)
         painter.save()
-        painter.setOpacity(fade)
+        painter.setOpacity(alpha)
         fill = QColor(PASS_GREEN)
         fill.setAlpha(50)
         painter.setBrush(fill)
@@ -464,15 +728,17 @@ class TechniqueIllustration(QWidget):
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
         painter.restore()
 
-    def _paint_cross(self, painter, center: QPointF, fade: float) -> None:
+    def _paint_cross(self, painter, center: QPointF, fade: float, t: float) -> None:
+        size = 9.0 * _ease_out_back(t)
+        if size <= 0.1:
+            return
         painter.save()
-        painter.setOpacity(fade)
+        painter.setOpacity(fade * _ease_out(t))
         painter.setPen(QPen(BLOCK_RED, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        size = 9.0
         x, y = center.x(), center.y() + 30
         painter.drawLine(QPointF(x - size, y - size), QPointF(x + size, y + size))
         painter.drawLine(QPointF(x - size, y + size), QPointF(x + size, y - size))
         painter.restore()
 
 
-__all__ = ["ILLUSTRATION_HEIGHT", "SCENES", "TechniqueIllustration"]
+__all__ = ["ILLUSTRATION_HEIGHT", "SCENES", "ChipFrame", "SceneTimes", "TechniqueIllustration"]
