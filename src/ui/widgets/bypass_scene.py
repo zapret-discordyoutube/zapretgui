@@ -51,8 +51,18 @@ BUTTON_RADIUS = 15.0
 HOVER_FADE_MS = 160
 PRESS_SCALE = 0.9
 WALL_HALF_HEIGHT = 33.0
-WALL_FADE_MS = 420
 WALL_BLOCKS = 3
+# Ворота в стене: кирпичи разъезжаются вверх и вниз, ближний к кнопке — первым.
+GATE_OPEN_MS = 760
+GATE_CLOSE_MS = 640
+GATE_SLIDE = 4.5
+GATE_STAGGER = 0.16
+# «Вздох» кнопки: при включении от неё расходится кольцо, при остановке — сходится.
+POP_MS = 680
+# Комета вокруг кнопки, пока идёт запуск или остановка.
+COMET_SPAN_DEG = 210.0
+COMET_SEGMENTS = 14
+COMET_SPEED_DEG = 300.0
 
 # (направление, скорость в px/с, сдвиги пакетов вдоль дорожки в долях длины)
 FLOW_LANES = (
@@ -135,10 +145,20 @@ class BypassScene(PulsingDot):
         self._hover_fade.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._hover_fade.valueChanged.connect(self._on_hover_value)
 
+        # Ход ворот линейный: пружинистость каждому кирпичу добавляет _brick_shift.
         self._wall_fade = QVariantAnimation(self)
-        self._wall_fade.setDuration(WALL_FADE_MS)
-        self._wall_fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._wall_fade.setDuration(GATE_OPEN_MS)
         self._wall_fade.valueChanged.connect(self._on_wall_value)
+        self._gate_opening = True
+
+        self._pop = QVariantAnimation(self)
+        self._pop.setStartValue(0.0)
+        self._pop.setEndValue(1.0)
+        self._pop.setDuration(POP_MS)
+        self._pop.valueChanged.connect(self._on_pop_value)
+        self._pop.finished.connect(self._on_pop_finished)
+        self._pop_t = 0.0
+        self._pop_up = True
 
         self._shake = QVariantAnimation(self)
         self._shake.setStartValue(0.0)
@@ -189,6 +209,11 @@ class BypassScene(PulsingDot):
         self._phase = phase
         self._mascot.set_mood(mascot_mood_for_phase(phase, previous))
         self._animate_wall()
+        if previous and self.isVisible() and are_live_animations_enabled():
+            if phase == "running" and previous != "running":
+                self._play_pop(up=True)
+            elif phase == "stopping" and previous == "running":
+                self._play_pop(up=False)
         # Встряска — только когда запуск сорвался на глазах, а не при первом показе.
         if phase == "failed" and previous and self.isVisible() and are_live_animations_enabled():
             self._shake.stop()
@@ -216,11 +241,57 @@ class BypassScene(PulsingDot):
         target = self._open_target()
         self._wall_fade.stop()
         if self.isVisible() and are_live_animations_enabled() and abs(target - self._open_t) > 0.001:
+            self._gate_opening = target > self._open_t
+            span = abs(target - self._open_t)
+            full = GATE_OPEN_MS if self._gate_opening else GATE_CLOSE_MS
+            self._wall_fade.setDuration(max(1, round(full * span)))
             self._wall_fade.setStartValue(self._open_t)
             self._wall_fade.setEndValue(target)
             self._wall_fade.start()
         else:
             self._open_t = target
+
+    def is_gate_moving(self) -> bool:
+        return self._wall_fade.state() == QVariantAnimation.State.Running
+
+    def _brick_progress(self, row: int) -> float:
+        """Насколько открыт кирпич ``row`` (0 — у кнопки): 0 — на месте, 1 — отъехал."""
+        span = 1.0 - (WALL_BLOCKS - 1) * GATE_STAGGER
+        return max(0.0, min(1.0, (self._open_t - row * GATE_STAGGER) / span))
+
+    def _brick_shift(self, row: int) -> float:
+        """Сдвиг кирпича наружу с пружинкой: при открытии — перелёт, при закрытии — отскок."""
+        k = self._brick_progress(row)
+        if k <= 0.0 or k >= 1.0:
+            return k
+        if self._gate_opening:
+            c1 = 1.70158
+            return 1.0 + (c1 + 1.0) * (k - 1.0) ** 3 + c1 * (k - 1.0) ** 2
+        # Закрытие: кирпич едет на место, касается и чуть подскакивает обратно.
+        q = 1.0 - k
+        if q < 0.78:
+            return 1.0 - (q / 0.78) ** 2
+        return 0.14 * math.sin(math.pi * (q - 0.78) / 0.22)
+
+    def _play_pop(self, *, up: bool) -> None:
+        self._pop_up = bool(up)
+        self._pop.stop()
+        self._pop_t = 0.0
+        self._pop.start()
+
+    def is_popping(self) -> bool:
+        return self._pop.state() == QVariantAnimation.State.Running
+
+    def _on_pop_value(self, value) -> None:
+        try:
+            self._pop_t = float(value)
+        except (TypeError, ValueError):
+            return
+        self.update()
+
+    def _on_pop_finished(self) -> None:
+        self._pop_t = 0.0
+        self.update()
 
     def _on_wall_value(self, value) -> None:
         try:
@@ -239,6 +310,14 @@ class BypassScene(PulsingDot):
     def _on_shake_finished(self) -> None:
         self._shake_t = 0.0
         self.update()
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        # Скрытую сцену доводим до конечного вида: переходы не доигрываются впустую.
+        self._wall_fade.stop()
+        self._open_t = self._open_target()
+        self._pop.stop()
+        self._pop_t = 0.0
+        super().hideEvent(event)
 
     # ---- режим кнопки --------------------------------------------------
 
@@ -477,10 +556,8 @@ class BypassScene(PulsingDot):
         painter.drawRect(QRectF(left, bottom - 0.5, right - left, 1.0))
 
         impact = 0.0
-        if self._phase == "running":
-            self._paint_flow(painter, center, left, right, (top, bottom), color)
-        elif self._phase in BUSY_PHASES:
-            self._paint_waiting(painter, center, left, top, gate)
+        if self._is_flowing():
+            self._paint_stream(painter, center, left, right, (top, bottom), gate, color, open_t)
         elif self._phase:
             impact = self._paint_blocked(painter, center, left, top, gate, color)
 
@@ -488,6 +565,7 @@ class BypassScene(PulsingDot):
         if self._phase == "running" and self.is_beating():
             # Ореол работающей кнопки мягко дышит.
             impact = 0.5 + 0.5 * math.sin(2 * math.pi * self._flow_time / HALO_PERIOD_S)
+        self._paint_pop_ring(painter, center, color)
         self._paint_button(painter, center, impact)
         if self._phase in BUSY_PHASES:
             self._paint_spinner(painter, center, color)
@@ -529,28 +607,36 @@ class BypassScene(PulsingDot):
         painter.setBrush(body)
         painter.drawRoundedRect(QRectF(x - 3.5, y - 1.75, 7.0, 3.5), 1.75, 1.75)
 
-    def _paint_flow(self, painter, center, left, right, lanes_y, color) -> None:
+    def _paint_stream(self, painter, center, left, right, lanes_y, gate, color, through: float) -> None:
+        """Поток пакетов. ``through`` — насколько открыты ворота (0..1).
+
+        Пакеты всегда летят по тем же местам, что и при работающем обходе,
+        поэтому при открытии ворот ничего не перескакивает: пакеты у стены
+        просто начинают проходить сквозь проём, а за стеной и на обратной
+        дорожке (ответы) поток проявляется вместе с воротами. При закрытии —
+        наоборот, тает.
+        """
         length = right - left
+        stop = center.x() - gate
         for (direction, speed, offsets), y in zip(FLOW_LANES, lanes_y):
             for offset in offsets:
                 # Без анимаций пакеты стоят на месте: «работает» всё равно
                 # отличается от «остановлен» не только цветом.
                 u = (self._flow_time * speed / length + offset) % 1.0
                 x = left + u * length if direction > 0 else right - u * length
-                edge = min(1.0, min(x - left, right - x) / 12.0)
-                passed = x > center.x() if direction > 0 else True
-                self._paint_packet(painter, x, y, color if passed else RAW_COLOR, edge, direction)
-
-    def _paint_waiting(self, painter, center, left, top, gate) -> None:
-        # Пакеты доходят до стены и тают: дальше их пока не пускают.
-        stop = center.x() - gate
-        length = stop - left
-        direction, speed, offsets = FLOW_LANES[0]
-        for offset in offsets:
-            u = (self._flow_time * speed * 0.7 / length + offset) % 1.0
-            x = left + u * length
-            alpha = min(1.0, (x - left) / 12.0) * min(1.0, (stop - x) / 22.0)
-            self._paint_packet(painter, x, top, RAW_COLOR, alpha, direction)
+                alpha = min(1.0, min(x - left, right - x) / 12.0)
+                if direction < 0:
+                    # Ответы от сайтов идут, только пока ворота открыты.
+                    alpha *= through
+                    tint = color
+                elif x > center.x():
+                    alpha *= through
+                    tint = color
+                else:
+                    # До стены пакет серый; у закрытой стены он тает и ждёт.
+                    alpha *= max(through, min(1.0, max(0.0, stop - x) / 22.0))
+                    tint = RAW_COLOR
+                self._paint_packet(painter, x, y, tint, alpha, direction)
 
     def _paint_blocked(self, painter, center, left, top, gate, color) -> float:
         """Залп о стену. Возвращает силу удара (0..1) — от неё вздрагивает стена."""
@@ -586,23 +672,60 @@ class BypassScene(PulsingDot):
             round(color.green() + (RAW_COLOR.green() - color.green()) * open_t),
             round(color.blue() + (RAW_COLOR.blue() - color.blue()) * open_t),
         )
-        wall.setAlphaF(min(1.0, (0.7 - 0.48 * open_t) + 0.3 * impact))
-        painter.setBrush(wall)
+        base_alpha = min(1.0, (0.7 - 0.48 * open_t) + 0.3 * impact)
         half_width = 3.5 + 1.0 * impact
+        busy = self._phase in BUSY_PHASES
         # Блоки идут от кнопки к краям сцены; ближний к кнопке прячется под ней.
         step = (WALL_HALF_HEIGHT - BUTTON_RADIUS) / WALL_BLOCKS
         for sign in (-1.0, 1.0):
             for row in range(WALL_BLOCKS):
-                near = BUTTON_RADIUS + 3.0 + row * step
-                height = step - 2.0
+                moved = self._brick_shift(row)
+                shift = moved * GATE_SLIDE * (1.0 + 0.6 * row)
+                near = BUTTON_RADIUS + 3.0 + row * step + shift
+                # Отъехавший кирпич чуть сжимается — ворота не вылезают за край сцены.
+                height = (step - 2.0) * (1.0 - 0.3 * max(0.0, min(1.0, moved)))
                 y = center.y() + near if sign > 0 else center.y() - near - height
+                brick = QColor(wall)
+                alpha = base_alpha
+                if busy:
+                    # Пока идёт запуск или остановка, кирпичи по очереди мерцают:
+                    # от кнопки к краям бежит волна, будто стена «заряжается».
+                    wave = 0.5 + 0.5 * math.sin(2 * math.pi * 1.3 * self._flow_time - row * 1.1)
+                    alpha = min(1.0, alpha * (0.55 + 0.6 * wave))
+                brick.setAlphaF(alpha)
+                painter.setBrush(brick)
                 painter.drawRoundedRect(
                     QRectF(center.x() - half_width, y, half_width * 2, height), 1.5, 1.5
                 )
 
+    def _pop_scale(self) -> float:
+        t = self._pop_t
+        if t <= 0.0:
+            return 1.0
+        # Включение: кнопка набирает воздух и мягко оседает. Остановка: выдох внутрь.
+        swell = math.sin(math.pi * min(1.0, t / 0.55)) * (1.0 - 0.4 * t)
+        return 1.0 + (0.17 if self._pop_up else -0.12) * swell
+
+    def _paint_pop_ring(self, painter: QPainter, center: QPointF, color: QColor) -> None:
+        t = self._pop_t
+        if t <= 0.0:
+            return
+        ease = 1.0 - (1.0 - t) ** 3
+        # Включение — кольцо расходится от кнопки; остановка — сходится к ней.
+        reach = 26.0
+        radius = BUTTON_RADIUS + (reach * ease if self._pop_up else reach * (1.0 - ease))
+        ring = QColor(color)
+        ring.setAlphaF(0.65 * (1.0 - t) if self._pop_up else 0.55 * math.sin(math.pi * t))
+        pen = QPen(ring)
+        pen.setWidthF(2.4 * (1.0 - t) + 0.6)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(center, radius, radius)
+        painter.setPen(Qt.PenStyle.NoPen)
+
     def _paint_button(self, painter: QPainter, center: QPointF, impact: float) -> None:
         hover = self._hover_t if self._clickable else 0.0
-        core_r = BUTTON_RADIUS * (PRESS_SCALE if self._pressed else 1.0)
+        core_r = BUTTON_RADIUS * (PRESS_SCALE if self._pressed else 1.0) * self._pop_scale()
 
         # Свечение: при наведении шире и ярче — так видно, что кнопку можно нажать.
         glow = QColor(self._shown_color)
@@ -635,15 +758,35 @@ class BypassScene(PulsingDot):
         painter.setPen(Qt.PenStyle.NoPen)
 
     def _paint_spinner(self, painter: QPainter, center: QPointF, color: QColor) -> None:
-        pen = QPen(color)
-        pen.setWidthF(2.0)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
+        """Комета вокруг кнопки: яркая голова и тающий хвост, под ней — бледная дорожка."""
         radius = BUTTON_RADIUS + 6.5
         arc = QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2)
-        start = -(self._flow_time * 260.0) % 360.0
-        painter.drawArc(arc, round(start * 16), 100 * 16)
+        pen = QPen(color)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        track = QColor(color)
+        track.setAlphaF(0.14)
+        pen.setColor(track)
+        pen.setWidthF(1.6)
+        painter.setPen(pen)
+        painter.drawEllipse(center, radius, radius)
+
+        # Запуск — по часовой стрелке, остановка — против: видно, что идёт обратный процесс.
+        clockwise = self._phase != "stopping"
+        turn = self._flow_time * COMET_SPEED_DEG
+        # Qt считает углы против часовой стрелки; голова кометы — в начале отрезка.
+        head = (-turn if clockwise else turn) % 360.0
+        piece = COMET_SPAN_DEG / COMET_SEGMENTS
+        for index in range(COMET_SEGMENTS):
+            fade = 1.0 - index / COMET_SEGMENTS
+            segment = QColor(color)
+            segment.setAlphaF(0.95 * fade * fade)
+            pen.setColor(segment)
+            pen.setWidthF(1.2 + 1.6 * fade)
+            painter.setPen(pen)
+            start = head + index * piece if clockwise else head - (index + 1) * piece
+            painter.drawArc(arc, round(start * 16), round(piece * 16) + 8)
         painter.setPen(Qt.PenStyle.NoPen)
 
 

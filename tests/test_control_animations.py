@@ -347,6 +347,106 @@ class BypassSceneTests(unittest.TestCase):
         self.assertGreater(scale_y, 1.0)
         self.assertLess(scale_x, 1.0)
 
+    def test_gate_opens_inner_bricks_first_with_overshoot(self) -> None:
+        scene = self._scene("starting")
+        scene.set_phase("running")
+        self.assertTrue(scene.is_gate_moving())
+        self.assertTrue(scene._gate_opening)
+        self.assertEqual(scene._wall_fade.duration(), scene_module.GATE_OPEN_MS)
+
+        scene._open_t = 0.3
+        self.assertGreater(scene._brick_progress(0), scene._brick_progress(2))
+        # Пружинка: где-то по ходу кирпич перелетает дальше конечного места.
+        self.assertTrue(any(
+            (setattr(scene, "_open_t", value), scene._brick_shift(0))[1] > 1.0
+            for value in (0.6, 0.7, 0.8, 0.9)
+        ))
+        scene._open_t = 1.0
+        self.assertEqual([scene._brick_shift(row) for row in range(scene_module.WALL_BLOCKS)], [1.0, 1.0, 1.0])
+
+    def test_gate_closes_outer_bricks_first_and_lands_with_a_bounce(self) -> None:
+        scene = self._scene("running")
+        scene._wall_fade.stop()
+        scene._open_t = 1.0
+        scene.set_phase("stopping")
+        self.assertFalse(scene._gate_opening)
+        self.assertEqual(scene._wall_fade.duration(), scene_module.GATE_CLOSE_MS)
+
+        scene._open_t = 0.3
+        self.assertLess(scene._brick_progress(2), scene._brick_progress(0))
+        scene._open_t = 0.02
+        self.assertGreater(scene._brick_shift(0), 0.0)
+        scene._open_t = 0.0
+        self.assertEqual(scene._brick_shift(0), 0.0)
+
+    def test_button_breathes_out_on_start_and_in_on_stop(self) -> None:
+        scene = self._scene("running")
+        self.assertFalse(scene.is_popping())
+
+        scene.set_phase("stopping")
+        self.assertTrue(scene.is_popping())
+        self.assertFalse(scene._pop_up)
+        scene._pop.setCurrentTime(scene._pop.duration() // 4)
+        self.assertLess(scene._pop_scale(), 1.0)
+
+        scene.set_phase("stopped")
+        scene.set_phase("starting")
+        scene.set_phase("running")
+        self.assertTrue(scene._pop_up)
+        scene._pop.setCurrentTime(scene._pop.duration() // 4)
+        self.assertGreater(scene._pop_scale(), 1.0)
+        scene._pop.setCurrentTime(scene._pop.duration())
+        self.assertEqual(scene._pop_scale(), 1.0)
+
+    def test_hidden_scene_jumps_to_the_final_look(self) -> None:
+        scene = BypassScene()
+        host = _host(self, scene)
+        host.show()
+        scene.set_phase("starting")
+        scene.set_phase("running")
+        self.assertTrue(scene.is_gate_moving() and scene.is_popping())
+
+        host.hide()
+        self.assertFalse(scene.is_gate_moving())
+        self.assertFalse(scene.is_popping())
+        self.assertEqual(scene._open_t, 1.0)
+
+    def _stream(self, scene, through: float) -> list[tuple[float, float, int]]:
+        drawn: list[tuple[float, float, int]] = []
+        center = scene_module.QPointF(scene.gate_center())
+        left, right, top, bottom = scene._lanes()
+        with mock.patch.object(
+            scene, "_paint_packet", side_effect=lambda _p, x, _y, _c, alpha, direction: drawn.append((x, alpha, direction))
+        ):
+            scene._paint_stream(None, center, left, right, (top, bottom), scene_module.BUTTON_RADIUS + 3.0, QColor("#6ccb5f"), through)
+        return drawn
+
+    def test_packets_keep_their_places_when_the_gate_opens(self) -> None:
+        scene = self._scene("starting")
+        scene._flow_time = 1.7
+        closed = self._stream(scene, 0.0)
+        opened = self._stream(scene, 1.0)
+
+        self.assertEqual([x for x, _a, _d in closed], [x for x, _a, _d in opened])
+        center_x = scene.gate_center().x()
+        for x, alpha, direction in closed:
+            if direction < 0 or x > center_x:
+                # Ворота закрыты: за стеной и на обратной дорожке пакетов не видно.
+                self.assertEqual(alpha, 0.0)
+        self.assertTrue(any(alpha > 0.0 for x, alpha, direction in opened if direction < 0))
+
+    def test_comet_spins_both_ways_and_paints(self) -> None:
+        scene = BypassScene()
+        scene.set_clickable(True)
+        for phase in ("starting", "stopping"):
+            scene.set_phase(phase)
+            scene._flow_time = 0.4
+            scene._pop_t = 0.3
+            image = QPixmap(scene.sizeHint())
+            image.fill(QColor(0, 0, 0, 0))
+            scene.render(image)
+            self.assertFalse(image.isNull())
+
     def test_paints_every_phase(self) -> None:
         scene = BypassScene()
         scene.set_clickable(True)
