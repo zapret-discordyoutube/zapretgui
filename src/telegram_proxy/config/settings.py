@@ -115,12 +115,6 @@ def normalize_proxy_mode(mode: object) -> str:
     return "socks5"
 
 
-def effective_upstream_enabled(mode: object, enabled: object) -> bool:
-    if normalize_proxy_mode(mode) == "mtproxy":
-        return True
-    return bool(enabled)
-
-
 def normalize_pool_size(value: object) -> int:
     try:
         number = int(value)
@@ -180,10 +174,7 @@ def _settings_state_from_data(data: dict, upstream_catalog: UpstreamCatalog) -> 
         host=normalize_host(raw.get("host")),
         port=normalize_port(raw.get("port")),
         mode=mode,
-        upstream_enabled=effective_upstream_enabled(
-            mode,
-            raw.get("upstream_enabled", defaults.upstream_enabled),
-        ),
+        upstream_enabled=bool(raw.get("upstream_enabled", defaults.upstream_enabled)),
         upstream_host=upstream_host,
         upstream_port=upstream_port,
         upstream_preset_id=upstream_preset_id,
@@ -254,11 +245,9 @@ def set_proxy_enabled(enabled: bool) -> None:
 def set_proxy_mode(mode: object) -> str:
     normalized = normalize_proxy_mode(mode)
     try:
-        from settings.store import set_tg_proxy_mode, set_tg_proxy_upstream_enabled
+        from settings.store import set_tg_proxy_mode
 
         set_tg_proxy_mode(normalized)
-        if normalized == "mtproxy":
-            set_tg_proxy_upstream_enabled(True)
     except Exception:
         pass
     return normalized
@@ -494,7 +483,6 @@ def build_dc_endpoint_overrides() -> dict[int, str]:
 def load_upstream_test_target() -> tuple | None:
     try:
         from settings.store import (
-            get_tg_proxy_mode,
             get_tg_proxy_upstream_enabled,
             get_tg_proxy_upstream_host,
             get_tg_proxy_upstream_pass,
@@ -503,7 +491,7 @@ def load_upstream_test_target() -> tuple | None:
             get_tg_proxy_upstream_user,
         )
 
-        if not effective_upstream_enabled(get_tg_proxy_mode(), get_tg_proxy_upstream_enabled()):
+        if not get_tg_proxy_upstream_enabled():
             return None
 
         preset_id = str(get_tg_proxy_upstream_preset_id() or "").strip()
@@ -545,7 +533,6 @@ def build_upstream_config():
     try:
         from telegram_proxy.proxy.routing import UpstreamProxyConfig, UpstreamProxyEndpoint
         from settings.store import (
-            get_tg_proxy_mode,
             get_tg_proxy_upstream_enabled,
             get_tg_proxy_upstream_host,
             get_tg_proxy_upstream_mode,
@@ -556,7 +543,7 @@ def build_upstream_config():
             get_tg_proxy_upstream_user,
         )
 
-        if not effective_upstream_enabled(get_tg_proxy_mode(), get_tg_proxy_upstream_enabled()):
+        if not get_tg_proxy_upstream_enabled():
             return None
 
         preset_id = str(get_tg_proxy_upstream_preset_id() or "").strip()

@@ -36,12 +36,13 @@ class TelegramProxyUpstreamCatalogTest(unittest.TestCase):
         self.assertEqual(schema_defaults["upstream_user"], "")
         self.assertEqual(schema_defaults["upstream_pass"], "")
 
-    def test_mtproxy_mode_forces_external_socks_enabled_in_state_and_runtime(self) -> None:
+    def test_mtproxy_mode_keeps_external_socks_switched_off(self) -> None:
         from settings.normalize import normalize_telegram_proxy
         from telegram_proxy.config.settings import (
             DEFAULT_UPSTREAM_PORT,
             _settings_state_from_data,
             build_upstream_config,
+            load_upstream_test_target,
             set_proxy_mode,
         )
         from telegram_proxy.config.upstream_catalog import UpstreamCatalog, UpstreamPresetResolver
@@ -71,18 +72,32 @@ class TelegramProxyUpstreamCatalogTest(unittest.TestCase):
             }
         }
 
-        self.assertTrue(normalize_telegram_proxy(data["telegram_proxy"])["upstream_enabled"])
+        self.assertFalse(normalize_telegram_proxy(data["telegram_proxy"])["upstream_enabled"])
         state = _settings_state_from_data(data, UpstreamCatalog(build_presets=catalog_fixture))
-        self.assertTrue(state.upstream_enabled)
+        self.assertFalse(state.upstream_enabled)
 
         from unittest.mock import patch
 
-        with (
-            patch(
-                "telegram_proxy.config.settings.UpstreamPresetResolver.load_from_runtime",
-                return_value=UpstreamPresetResolver(catalog_fixture),
-            ),
-            patch("settings.store.read_settings", return_value=data),
+        from settings import store as settings_store
+
+        # Настоящее хранилище (каталог теста изолирован в conftest): выключенный
+        # внешний прокси не должен попадать ни в работающий прокси, ни в проверку.
+        settings_store.set_tg_proxy_mode("mtproxy")
+        settings_store.set_tg_proxy_upstream_enabled(False)
+        with patch(
+            "telegram_proxy.config.settings.UpstreamPresetResolver.load_from_runtime",
+            return_value=UpstreamPresetResolver(catalog_fixture),
+        ):
+            upstream = build_upstream_config()
+            test_target = load_upstream_test_target()
+
+        self.assertIsNone(upstream)
+        self.assertIsNone(test_target)
+
+        settings_store.set_tg_proxy_upstream_enabled(True)
+        with patch(
+            "telegram_proxy.config.settings.UpstreamPresetResolver.load_from_runtime",
+            return_value=UpstreamPresetResolver(catalog_fixture),
         ):
             upstream = build_upstream_config()
 
@@ -99,7 +114,34 @@ class TelegramProxyUpstreamCatalogTest(unittest.TestCase):
         ):
             self.assertEqual(set_proxy_mode("mtproxy"), "mtproxy")
 
-        self.assertEqual(saved, [("mode", "mtproxy"), ("upstream_enabled", True)])
+        # Смена режима меняет только режим: выбор пользователя про внешний
+        # прокси она не трогает.
+        self.assertEqual(saved, [("mode", "mtproxy")])
+
+    def test_switched_off_external_proxy_survives_restart_in_both_modes(self) -> None:
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+
+        from settings import store as settings_store
+
+        for mode in ("mtproxy", "socks5"):
+            with self.subTest(mode=mode), TemporaryDirectory() as temp_dir:
+                with patch("settings.store.MAIN_DIRECTORY", temp_dir):
+                    settings_store.close_settings_database()
+                    settings_store.prepare_settings_database()
+                    try:
+                        settings_store.set_tg_proxy_mode(mode)
+                        settings_store.set_tg_proxy_upstream_enabled(False)
+                        # Закрытие и повторное открытие базы — как выход из программы.
+                        settings_store.close_settings_database()
+                        settings_store.prepare_settings_database()
+                        self.assertFalse(settings_store.get_tg_proxy_upstream_enabled())
+                        self.assertEqual(settings_store.get_tg_proxy_mode(), mode)
+
+                        settings_store.set_tg_proxy_upstream_enabled(True)
+                        self.assertTrue(settings_store.get_tg_proxy_upstream_enabled())
+                    finally:
+                        settings_store.close_settings_database()
 
     def test_bundled_socks_proxy_is_first_choice(self) -> None:
         from telegram_proxy.config.upstream_catalog import MANUAL_PRESET_ID, UpstreamCatalog

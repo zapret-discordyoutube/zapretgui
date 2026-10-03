@@ -302,6 +302,34 @@ class SessionScenarioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(proxy.stats.upstream_connections, 1)
         writer.close()
 
+    async def test_external_proxy_switched_off_on_the_fly_leaves_mtproxy_on_wss(self) -> None:
+        requests: list[tuple[str, int]] = []
+        socks = await serve_fake_socks_telegram(requests)
+        self.addAsyncCleanup(self._close_server, socks)
+        socks_port = socks.sockets[0].getsockname()[1]
+        upstream = UpstreamProxyConfig(
+            enabled=True, host="127.0.0.1", port=socks_port, mode="always", preset_id="ee", preset_name="Estonia"
+        )
+        proxy = await self._start(mode="mtproxy", mtproxy_secret=SECRET_HEX, upstream_config=upstream)
+
+        # Пользователь выключил «Использовать внешний прокси»: настройки отдают None.
+        proxy.apply_upstream_config(None)
+        self.assertFalse(proxy._upstream.enabled)
+        self.assertIsNone(proxy._upstream_runtime.current_endpoint())
+
+        self.sockets.clear()
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        header, to_server, from_server = make_client_header(b"\xdd" * 4, -4, bytes.fromhex(SECRET_HEX))
+        packet = rpc_packet(28)
+        writer.write(header + to_server.update(encode_packet(PADDED, packet)))
+        await writer.drain()
+
+        answers = await self._read_packets(reader, from_server, PADDED, 1)
+        self.assertEqual(answers, [answer_for(packet)])
+        writer.close()
+        self.assertEqual(requests, [])
+        self.assertEqual(proxy.stats.upstream_connections, 0)
+
     async def test_stop_does_not_wait_for_live_telegram_connection(self) -> None:
         proxy = TelegramWSProxy(port=0, pool_size=0, mode="socks5", on_log=self.logs.append)
         await proxy.start()
