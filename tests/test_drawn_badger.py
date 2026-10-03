@@ -10,7 +10,8 @@ from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 import ui.widgets.fun.mascot as mascot_module
-from ui.widgets.fun.badger import BLINK_PAUSE_MAX_MS, BLINK_PAUSE_MIN_MS, PAW_REST, DrawnBadger
+from ui.widgets.fun.badger import BLINK_PAUSE_MAX_MS, BLINK_PAUSE_MIN_MS, DrawnBadger
+from ui.widgets.fun.logo_badger import BadgerPose, paint_logo_badger
 from ui.widgets.fun.mascot import GESTURE_TOSS, MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 
 
@@ -68,35 +69,71 @@ class DrawnBadgerTests(unittest.TestCase):
         self.assertNotEqual(badger._blink_anim.state(), badger._blink_anim.State.Running)
         self.assertFalse(badger.is_blink_scheduled())
 
-    def test_paws_follow_mood_and_gestures(self) -> None:
+    def test_parts_follow_mood_and_gestures(self) -> None:
         badger, _host = self._badger(shown=False)
-        self.assertEqual(badger.paw_angles(), (PAW_REST, PAW_REST))
+        rest = badger.logo_pose()
+        self.assertEqual((rest.paw, rest.jaw, rest.ear, rest.bolt_glow), (0.0, 0.0, 0.0, 0.0))
 
-        # Спокойное дыхание раскачивает лапы в разные стороны.
+        # Спокойное дыхание покачивает лапу с молнией и чуть приоткрывает пасть.
         badger._breath = 1.0
-        left, right = badger.paw_angles()
-        self.assertGreater(left, PAW_REST)
-        self.assertLess(right, PAW_REST)
+        self.assertGreater(badger.logo_pose().paw, 0.0)
+        self.assertGreater(badger.logo_pose().jaw, 0.0)
         badger._breath = 0.0
 
-        # Замах: правая лапа (к стене) уходит высоко вверх.
-        badger._gesture, badger._t = GESTURE_TOSS, 0.35
-        self.assertGreater(badger.paw_angles()[1], 150.0)
+        # Бросок: сначала замах вниз, потом рывок вверх, пасть отпускает.
+        badger._gesture, badger._t = GESTURE_TOSS, 0.25
+        self.assertLess(badger.logo_pose().paw, 0.0)
+        badger._t = 0.55
+        self.assertGreater(badger.logo_pose().paw, 20.0)
+        self.assertGreater(badger.logo_pose().jaw, 0.3)
 
-        # Радость: обе лапы вверх.
-        badger._gesture, badger._t = MOOD_HAPPY, 0.4
-        self.assertTrue(all(angle > 120.0 for angle in badger.paw_angles()))
+        # Радость: пасть настежь, молния вверх, по ней бежит блик, глаз жмурится.
+        badger._gesture, badger._t = MOOD_HAPPY, 0.5
+        happy = badger.logo_pose()
+        self.assertGreater(happy.jaw, 0.9)
+        self.assertGreater(happy.paw, 20.0)
+        self.assertAlmostEqual(happy.bolt_glow, 0.5)
+        self.assertGreater(happy.blink, 0.8)
 
-        # Суета: лапы перебирают по очереди.
-        badger._gesture, badger._t = MOOD_BUSY, 0.125
-        left, right = badger.paw_angles()
-        self.assertNotAlmostEqual(left, right)
+        # Суета: челюсть жуёт — в разные моменты то открыта, то сомкнута.
+        badger._gesture = MOOD_BUSY
+        badger._t = 0.125
+        open_jaw = badger.logo_pose().jaw
+        badger._t = 0.375
+        self.assertGreater(open_jaw, 0.0)
+        self.assertLess(badger.logo_pose().jaw, 0.0)
+
+        # Вздрогнул: ухо прижато, челюсть стиснута.
+        badger._gesture, badger._t = MOOD_ALARM, 0.5
+        flinch = badger.logo_pose()
+        self.assertLess(flinch.ear, -10.0)
+        self.assertLess(flinch.jaw, -0.5)
 
         badger._gesture, badger._t = "", 0.0
         badger._mood = MOOD_SAD
-        self.assertTrue(all(angle < PAW_REST for angle in badger.paw_angles()))
-        badger._mood = MOOD_ALARM
-        self.assertTrue(all(angle > PAW_REST + 40.0 for angle in badger.paw_angles()))
+        sad = badger.logo_pose()
+        self.assertLess(sad.paw, 0.0)
+        self.assertLess(sad.eye_open, 0.6)
+
+    def test_logo_parts_really_move(self) -> None:
+        from PyQt6.QtCore import QRectF
+        from PyQt6.QtGui import QImage, QPainter
+
+        def frame(pose: BadgerPose) -> QImage:
+            image = QImage(100, 100, QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            paint_logo_badger(painter, pose)
+            painter.end()
+            return image
+
+        rest = frame(BadgerPose())
+        for changed in (
+            BadgerPose(blink=1.0), BadgerPose(look=1.0), BadgerPose(jaw=1.0), BadgerPose(paw=20.0),
+            BadgerPose(ear=-12.0), BadgerPose(bolt_glow=0.5), BadgerPose(eye_open=0.5),
+        ):
+            with self.subTest(pose=changed):
+                self.assertNotEqual(frame(changed), rest)
 
     def test_eyes_show_the_mood_and_watch_the_wall(self) -> None:
         badger, _host = self._badger(shown=False)

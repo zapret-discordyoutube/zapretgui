@@ -1,17 +1,18 @@
-"""Медоед, нарисованный кодом: моргает, смотрит по сторонам и машет лапами.
+"""Медоед с логотипа программы, у которого двигаются части.
 
 У обычного талисмана (``Mascot``) вместо тела картинка значка программы:
-её можно только поворачивать и подбрасывать целиком. Здесь медоед собран
-из частей — тело, голова с белой «шапкой», уши, глаза, мордочка и две
-передние лапы, — поэтому каждая часть двигается сама:
+её можно только поворачивать и подбрасывать целиком. Здесь медоед с
+логотипа собран из отдельных частей (``ui.widgets.fun.logo_badger``), и
+каждая часть двигается сама:
 
-- глаза моргают раз в несколько секунд (иногда дважды подряд) и смотрят
+- глаз моргает раз в несколько секунд (иногда дважды подряд) и смотрит
   туда, что сейчас происходит: на стену, когда медоед кидает пакеты, или
   по сторонам, когда он суетится;
-- лапы качаются в такт дыханию, замахиваются при броске, по очереди
-  перебирают, пока идёт запуск, и радостно взлетают вверх при включении;
-- грустный медоед прикрывает глаза и опускает лапы, насторожённый —
-  широко открывает глаза и прижимает лапы к груди.
+- лапа с молнией «Z» покачивается в такт дыханию, замахивается при броске
+  и радостно поднимается при включении обхода, а по молнии пробегает блик;
+- челюсть жуёт, пока идёт запуск, широко раскрывается от радости и
+  стискивается, когда медоед вздрагивает;
+- ухо дёргается, когда медоед оглядывается или пугается.
 
 Настроения, жесты и правила экономии процессора те же, что у ``Mascot``:
 кадры идут только во время жеста или моргания, а между ними стоит
@@ -23,20 +24,12 @@ from __future__ import annotations
 import math
 import random
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, QVariantAnimation
-from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
+from PyQt6.QtCore import QTimer, QVariantAnimation
+from PyQt6.QtGui import QPainter
 
+from ui.widgets.fun.logo_badger import BadgerPose, paint_logo_badger
 from ui.widgets.fun.mascot import GESTURE_TOSS, MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_SAD, Mascot
 
-
-# Цвета фирменного синего медоеда со значка программы.
-BODY_LIGHT = QColor("#3b9cff")
-BODY_DARK = QColor("#0b4fc0")
-CAP_LIGHT = QColor("#e9f5ff")
-CAP_DARK = QColor("#9fd2ff")
-MUZZLE = QColor("#7cc0ff")
-INK = QColor("#0a1f44")
-PAW_DARK = QColor("#0a3f9c")
 
 # Моргание: закрыть и открыть глаза; пауза между морганиями — случайная.
 BLINK_MS = 190
@@ -44,11 +37,8 @@ BLINK_PAUSE_MIN_MS = 2400
 BLINK_PAUSE_MAX_MS = 5600
 DOUBLE_BLINK_CHANCE = 0.25
 
-# Лапа висит вниз при угле 0; положительный угол уводит кисть к середине тела.
-PAW_REST = 14.0
-SHOULDER_Y = 60.0
-SHOULDER_X = 15.0
-ARM_LENGTH = 15.0
+# Лапа с молнией в покое чуть покачивается в такт дыханию (градусы).
+PAW_BREATH_SWING = 7.0
 
 
 def _ease_in_out(t: float) -> float:
@@ -135,41 +125,56 @@ class DrawnBadger(Mascot):
 
     # ---- позы частей ---------------------------------------------------
 
-    def paw_angles(self) -> tuple[float, float]:
-        """Углы левой и правой лапы в градусах (0 — висит вниз)."""
+    def logo_pose(self) -> BadgerPose:
+        """Положение частей медоеда с логотипа для текущего настроения и жеста."""
         t = self._t
         g = self._gesture
-        left = right = PAW_REST
+        bump = math.sin(math.pi * t) if g else 0.0
+        paw = PAW_BREATH_SWING * self._breath
+        jaw = 0.25 * max(0.0, self._breath)
+        ear = 0.0
+        glow = 0.0
+        blink = self._blink
         if g == MOOD_BUSY:
-            # Перебирает лапами по очереди.
-            swing = 34.0 * math.sin(2 * math.pi * t * 2)
-            return PAW_REST + 20.0 + swing, PAW_REST + 20.0 - swing
-        if g == MOOD_HAPPY:
-            # Обе лапы взлетают вверх и машут.
-            up = math.sin(math.pi * min(1.0, t / 0.8))
-            wave = 18.0 * math.sin(2 * math.pi * t * 3) * up
-            return PAW_REST + 150.0 * up + wave, PAW_REST + 150.0 * up - wave
-        if g == GESTURE_TOSS:
-            # Правая лапа (к стене) замахивается за голову и резко бросает вперёд.
-            if t < 0.35:
-                right = PAW_REST + 160.0 * _ease_in_out(t / 0.35)
+            # Жуёт и перебирает лапой, пока идёт запуск или остановка.
+            jaw = 0.55 * math.sin(4.0 * math.pi * t)
+            paw = 10.0 * math.sin(4.0 * math.pi * t)
+            ear = 6.0 * math.sin(2.0 * math.pi * t)
+        elif g == MOOD_HAPPY:
+            # Широко раскрывает пасть, поднимает молнию, по ней бежит блик, жмурится.
+            jaw = 1.0 * bump
+            paw = 26.0 * bump
+            glow = t
+            blink = max(blink, 0.85 * bump)
+        elif g == GESTURE_TOSS:
+            # Бросок: замах вниз, рывок вверх и отпускание — пасть приоткрывается.
+            if t < 0.3:
+                paw = -9.0 * _ease_in_out(t / 0.3)
             elif t < 0.55:
-                right = PAW_REST + 160.0 - 210.0 * _ease_in_out((t - 0.35) / 0.2)
+                paw = -9.0 + 39.0 * _ease_in_out((t - 0.3) / 0.25)
             else:
-                right = PAW_REST - 50.0 + 50.0 * _ease_in_out((t - 0.55) / 0.45)
-            return PAW_REST + 10.0, right
-        if g == MOOD_ALARM:
-            # Вздрогнул: лапы дёрнулись к груди.
-            jolt = math.sin(math.pi * t)
-            return PAW_REST + 70.0 * jolt, PAW_REST + 70.0 * jolt
-        if self._mood == MOOD_SAD:
-            return 2.0, 2.0
-        if self._mood == MOOD_ALARM:
-            # Насторожился: лапы прижаты к груди.
-            return PAW_REST + 55.0, PAW_REST + 55.0
-        # Спокоен: лапы чуть покачиваются в такт дыханию.
-        sway = 13.0 * self._breath
-        return left + sway, right - sway
+                paw = 30.0 * (1.0 - _ease_in_out((t - 0.55) / 0.45))
+            jaw = 0.7 * math.sin(math.pi * min(1.0, max(0.0, (t - 0.35) / 0.5)))
+        elif g == MOOD_ALARM:
+            # Вздрогнул: ухо прижато, челюсть стиснута.
+            ear = -14.0 * bump
+            jaw = -0.8 * bump
+            paw = 8.0 * bump
+        elif g == "look":
+            ear = 8.0 * math.sin(2.0 * math.pi * t)
+        elif self._mood == MOOD_SAD:
+            jaw, paw, ear = -0.6, -8.0, 10.0
+        elif self._mood == MOOD_ALARM:
+            jaw, ear = -0.3, -6.0
+        return BadgerPose(
+            blink=blink,
+            eye_open=self._eye_size(),
+            look=self.look_offset(),
+            jaw=jaw,
+            paw=paw,
+            ear=ear,
+            bolt_glow=glow,
+        )
 
     def look_offset(self) -> float:
         """Куда смотрят зрачки: -1 влево, 1 вправо (к стене и сайтам)."""
@@ -183,15 +188,18 @@ class DrawnBadger(Mascot):
         return 0.25
 
     def eye_openness(self) -> float:
-        """Насколько открыты глаза: 0 — закрыты, 1 — обычно, больше 1 — широко."""
+        """Насколько открыт глаз: 0 — закрыт, 1 — обычно, больше 1 — широко."""
         if self._gesture == MOOD_HAPPY:
             return 0.0
-        base = 1.0
+        return self._eye_size() * (1.0 - self._blink)
+
+    def _eye_size(self) -> float:
+        """Размер глаза без моргания: грустный прикрывает, испуганный округляет."""
         if self._mood == MOOD_SAD:
-            base = 0.45
-        elif self._mood == MOOD_ALARM or self._gesture == MOOD_ALARM:
-            base = 1.18
-        return base * (1.0 - self._blink)
+            return 0.5
+        if self._mood == MOOD_ALARM or self._gesture == MOOD_ALARM:
+            return 1.18
+        return 1.0
 
     def set_breath(self, value: float) -> None:
         # Дыхание двигает и лапы, поэтому перерисовываем его и при чуть меньшем шаге.
@@ -221,146 +229,8 @@ class DrawnBadger(Mascot):
         painter.end()
 
     def paint_badger(self, painter: QPainter) -> None:
-        """Рисует медоеда в квадрате 100×100 (низ лап — на y=100)."""
-        painter.setPen(Qt.PenStyle.NoPen)
-        left_paw, right_paw = self.paw_angles()
-
-        # Задние лапы и тело.
-        painter.setBrush(PAW_DARK)
-        painter.drawEllipse(QPointF(35.0, 96.0), 11.0, 5.0)
-        painter.drawEllipse(QPointF(65.0, 96.0), 11.0, 5.0)
-        body = QLinearGradient(QPointF(30.0, 45.0), QPointF(70.0, 98.0))
-        body.setColorAt(0.0, BODY_LIGHT)
-        body.setColorAt(1.0, BODY_DARK)
-        painter.setBrush(body)
-        path = QPainterPath()
-        path.moveTo(50.0, 44.0)
-        path.cubicTo(74.0, 44.0, 82.0, 66.0, 79.0, 82.0)
-        path.cubicTo(77.0, 95.0, 64.0, 98.0, 50.0, 98.0)
-        path.cubicTo(36.0, 98.0, 23.0, 95.0, 21.0, 82.0)
-        path.cubicTo(18.0, 66.0, 26.0, 44.0, 50.0, 44.0)
-        painter.drawPath(path)
-        # Светлая «мантия» медоеда спускается от головы по бокам спины.
-        mantle_side = QLinearGradient(QPointF(50.0, 44.0), QPointF(50.0, 92.0))
-        mantle_side.setColorAt(0.0, CAP_DARK)
-        mantle_side.setColorAt(1.0, QColor(CAP_DARK.red(), CAP_DARK.green(), CAP_DARK.blue(), 0))
-        painter.setBrush(mantle_side)
-        for sign in (-1.0, 1.0):
-            stripe = QPainterPath()
-            stripe.moveTo(50.0 + sign * 22.0, 46.0)
-            stripe.cubicTo(50.0 + sign * 31.0, 54.0, 50.0 + sign * 31.0, 74.0, 50.0 + sign * 27.0, 90.0)
-            stripe.cubicTo(50.0 + sign * 26.0, 74.0, 50.0 + sign * 24.0, 58.0, 50.0 + sign * 17.0, 48.0)
-            stripe.closeSubpath()
-            painter.drawPath(stripe)
-        belly = QColor(MUZZLE)
-        belly.setAlphaF(0.45)
-        painter.setBrush(belly)
-        painter.drawEllipse(QPointF(50.0, 78.0), 14.0, 16.0)
-
-        # Голова: маленькие ушки, тёмная морда и светлая «шапка» сверху до бровей.
-        for ex in (29.0, 71.0):
-            painter.setBrush(BODY_DARK)
-            painter.drawEllipse(QPointF(ex, 21.0), 6.0, 6.0)
-            painter.setBrush(MUZZLE)
-            painter.drawEllipse(QPointF(ex, 21.5), 2.8, 2.8)
-        head = QRadialGradient(QPointF(46.0, 40.0), 30.0)
-        head.setColorAt(0.0, BODY_LIGHT)
-        head.setColorAt(1.0, BODY_DARK)
-        painter.setBrush(head)
-        painter.drawEllipse(QPointF(50.0, 37.0), 27.0, 22.0)
-        cap = QPainterPath()
-        cap.moveTo(23.2, 41.0)
-        cap.cubicTo(20.0, 14.0, 80.0, 14.0, 76.8, 41.0)
-        cap.cubicTo(70.0, 30.0, 63.0, 28.5, 50.0, 28.5)
-        cap.cubicTo(37.0, 28.5, 30.0, 30.0, 23.2, 41.0)
-        cap_fill = QLinearGradient(QPointF(50.0, 16.0), QPointF(50.0, 34.0))
-        cap_fill.setColorAt(0.0, CAP_LIGHT)
-        cap_fill.setColorAt(1.0, CAP_DARK)
-        painter.setBrush(cap_fill)
-        painter.drawPath(cap)
-
-        self._paint_eyes(painter)
-
-        # Мордочка, нос и улыбка.
-        painter.setBrush(MUZZLE)
-        painter.drawEllipse(QPointF(50.0, 48.0), 11.5, 8.0)
-        nose = QPainterPath()
-        nose.moveTo(45.5, 43.5)
-        nose.quadTo(50.0, 41.5, 54.5, 43.5)
-        nose.quadTo(52.5, 48.0, 50.0, 48.0)
-        nose.quadTo(47.5, 48.0, 45.5, 43.5)
-        painter.setBrush(INK)
-        painter.drawPath(nose)
-        pen = QPen(INK, 1.6)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        mouth = QPainterPath()
-        if self._mood == MOOD_SAD:
-            mouth.moveTo(45.0, 53.5)
-            mouth.quadTo(50.0, 50.0, 55.0, 53.5)
-        else:
-            mouth.moveTo(44.5, 50.5)
-            mouth.quadTo(47.5, 54.0, 50.0, 50.5)
-            mouth.quadTo(52.5, 54.0, 55.5, 50.5)
-        painter.drawPath(mouth)
-        painter.setPen(Qt.PenStyle.NoPen)
-
-        # Передние лапы поверх тела.
-        self._paint_paw(painter, QPointF(50.0 - SHOULDER_X, SHOULDER_Y), -left_paw)
-        self._paint_paw(painter, QPointF(50.0 + SHOULDER_X, SHOULDER_Y), right_paw)
-
-    def _paint_eyes(self, painter: QPainter) -> None:
-        openness = self.eye_openness()
-        look = self.look_offset()
-        for ex in (40.0, 60.0):
-            center = QPointF(ex, 37.5)
-            if openness < 0.15:
-                # Закрытый глаз — дужка. Радостный медоед жмурится дужкой вверх.
-                pen = QPen(INK, 2.0)
-                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-                painter.setPen(pen)
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                arc = QPainterPath()
-                lift = -3.0 if self._gesture == MOOD_HAPPY else 2.0
-                arc.moveTo(ex - 4.5, 38.0)
-                arc.quadTo(ex, 38.0 + lift, ex + 4.5, 38.0)
-                painter.drawPath(arc)
-                painter.setPen(Qt.PenStyle.NoPen)
-                continue
-            painter.setBrush(QColor("#ffffff"))
-            painter.drawEllipse(center, 5.0, 5.6 * openness)
-            painter.save()
-            clip = QPainterPath()
-            clip.addEllipse(center, 5.0, 5.6 * openness)
-            painter.setClipPath(clip)
-            pupil = QPointF(ex + 1.8 * look, 38.1)
-            painter.setBrush(INK)
-            painter.drawEllipse(pupil, 3.4, 3.8)
-            painter.setBrush(QColor("#ffffff"))
-            painter.drawEllipse(QPointF(pupil.x() - 1.1, pupil.y() - 1.4), 1.2, 1.2)
-            painter.restore()
-
-    @staticmethod
-    def _paint_paw(painter: QPainter, shoulder: QPointF, angle: float) -> None:
-        painter.save()
-        painter.translate(shoulder)
-        painter.rotate(angle)
-        arm = QLinearGradient(QPointF(0.0, 0.0), QPointF(0.0, ARM_LENGTH + 6.0))
-        arm.setColorAt(0.0, BODY_LIGHT)
-        arm.setColorAt(1.0, BODY_DARK)
-        painter.setBrush(arm)
-        painter.drawRoundedRect(QRectF(-5.0, -3.0, 10.0, ARM_LENGTH + 6.0), 5.0, 5.0)
-        painter.setBrush(PAW_DARK)
-        painter.drawEllipse(QPointF(0.0, ARM_LENGTH + 1.5), 6.0, 5.2)
-        # Коготки медоеда — его главная гордость.
-        pen = QPen(CAP_LIGHT, 1.3)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(pen)
-        for claw in (-3.0, 0.0, 3.0):
-            painter.drawLine(QPointF(claw, ARM_LENGTH + 5.0), QPointF(claw * 1.15, ARM_LENGTH + 8.0))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.restore()
+        """Рисует медоеда с логотипа в квадрате 100×100 в текущей позе."""
+        paint_logo_badger(painter, self.logo_pose())
 
 
 __all__ = ["DrawnBadger"]
