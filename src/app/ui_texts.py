@@ -249,9 +249,9 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Zapret остановлен",
         "en": "Zapret stopped",
     },
-    "page.control.status.uptime.under_minute": {
-        "ru": "меньше минуты",
-        "en": "under a minute",
+    "page.control.status.uptime.seconds": {
+        "ru": "{seconds} с",
+        "en": "{seconds} s",
     },
     "page.control.status.uptime.minutes": {
         "ru": "{minutes} мин",

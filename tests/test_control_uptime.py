@@ -20,14 +20,15 @@ from winws_runtime.state.launch_runtime_service import LaunchRuntimeService
 class UptimeTextTests(unittest.TestCase):
     def test_formats_minutes_hours_and_days(self) -> None:
         cases = {
-            0: "меньше минуты",
-            59: "меньше минуты",
+            0: "0 с",
+            12.7: "12 с",
+            59: "59 с",
             60: "1 мин",
             14 * 60 + 30: "14 мин",
             2 * 3600 + 14 * 60: "2 ч 14 мин",
             24 * 3600 - 1: "23 ч 59 мин",
             3 * 86400 + 4 * 3600 + 120: "3 д 4 ч",
-            -5: "меньше минуты",
+            -5: "0 с",
         }
         for seconds, expected in cases.items():
             with self.subTest(seconds=seconds):
@@ -131,7 +132,7 @@ class UptimeLabelTests(unittest.TestCase):
         self.label.set_running_since(self.now - (2 * 3600 + 14 * 60 + 45))
 
         self.assertFalse(self.label.isHidden())
-        self.assertEqual(self.label.text(), "·  2 ч 14 мин")
+        self.assertEqual(self.label.text(), "2 ч 14 мин")
         self.assertEqual(self.label.property("screenReaderStateText"), "Обход работает: 2 ч 14 мин")
         self.assertTrue(self.label._timer.isActive())
         self.assertTrue(self.label._timer.isSingleShot())
@@ -140,7 +141,32 @@ class UptimeLabelTests(unittest.TestCase):
 
         self.now += 15.3
         self.label._refresh()
-        self.assertEqual(self.label.text(), "·  2 ч 15 мин")
+        self.assertEqual(self.label.text(), "2 ч 15 мин")
+
+    def test_first_minute_counts_seconds_then_switches_to_minutes(self) -> None:
+        self.host.show()
+        self.label.set_running_since(self.now - 12.4)
+
+        self.assertEqual(self.label.text(), "12 с")
+        self.assertEqual(self.label.property("screenReaderStateText"), "Обход работает: 12 с")
+        self.assertAlmostEqual(self.label._timer.interval(), 620, delta=5)
+
+        self.now += 50.0
+        self.label._refresh()
+        self.assertEqual(self.label.text(), "1 мин")
+        # После первой минуты будит раз в минуту, а не каждую секунду.
+        self.assertGreater(self.label._timer.interval(), 50_000)
+
+    def test_paints_pill_with_clock(self) -> None:
+        from PyQt6.QtGui import QColor, QPixmap
+
+        self.host.show()
+        self.label.set_running_since(self.now - 120)
+        image = QPixmap(self.label.sizeHint())
+        image.fill(QColor(0, 0, 0, 0))
+        self.label.render(image)
+        self.assertFalse(image.toImage().isNull())
+        self.assertGreater(self.label.sizeHint().width(), self.label.fontMetrics().horizontalAdvance("2 мин") + 20)
 
     def test_timer_sleeps_while_hidden_and_text_is_fresh_on_return(self) -> None:
         self.label.set_running_since(self.now - 120)
@@ -153,7 +179,7 @@ class UptimeLabelTests(unittest.TestCase):
 
         self.now += 600
         self.host.show()
-        self.assertEqual(self.label.text(), "·  12 мин")
+        self.assertEqual(self.label.text(), "12 мин")
 
     def test_stopping_hides_the_label(self) -> None:
         self.host.show()
@@ -168,7 +194,7 @@ class UptimeLabelTests(unittest.TestCase):
         self.host.show()
         self.label.set_running_since(self.now - 3 * 60)
         self.label.set_language("en")
-        self.assertEqual(self.label.text(), "·  3 min")
+        self.assertEqual(self.label.text(), "3 min")
 
     def test_page_passes_time_only_in_running_phase(self) -> None:
         self.host.show()

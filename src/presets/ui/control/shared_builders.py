@@ -96,13 +96,13 @@ def build_mode_status_section_common(
     if desc_text:
         set_state_text(status_desc, f"Описание состояния Zapret: {desc_text}")
 
-    # Рядом с заголовком — сколько обход уже работает («· 2 ч 14 мин»).
+    # Рядом с заголовком — плашка, сколько обход уже работает («2 ч 14 мин»).
     uptime_label = UptimeLabel(status_card)
     title_row = QHBoxLayout()
     title_row.setContentsMargins(0, 0, 0, 0)
     title_row.setSpacing(8)
     title_row.addWidget(status_title)
-    title_row.addWidget(uptime_label, 0, Qt.AlignmentFlag.AlignBottom)
+    title_row.addWidget(uptime_label, 0, Qt.AlignmentFlag.AlignVCenter)
     title_row.addStretch(1)
     status_text.addLayout(title_row)
     status_text.addWidget(status_desc)
