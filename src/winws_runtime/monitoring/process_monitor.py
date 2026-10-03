@@ -1,9 +1,6 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from winws_runtime.runtime.process_probe import (
-    find_foreign_winws_processes,
-    get_canonical_winws_process_pids,
-)
+from winws_runtime.runtime.process_probe import WinwsProcessScan, scan_winws_processes
 
 
 class ProcessMonitorThread(QThread):
@@ -30,32 +27,19 @@ class ProcessMonitorThread(QThread):
         self._cur_details: dict[str, list[int]] | None = None
         self._cur_foreign: dict[int, str] | None = None
 
-    def _check_processes_fast(self) -> dict[str, list[int]]:
+    def _scan_processes_fast(self) -> WinwsProcessScan:
         """
-        Возвращает PID канонических winws.exe/winws2.exe.
+        Канонические winws.exe/winws2.exe (PID) и посторонние (PID -> путь)
+        за один снимок процессов.
 
         Канонический здесь означает:
         - имя процесса совпадает;
         - полный путь процесса совпадает с ожидаемым `exe/winws*.exe` проекта.
         """
         try:
-            return get_canonical_winws_process_pids()
+            return scan_winws_processes()
         except Exception:
-            return {}
-
-    def _check_foreign_processes_fast(self) -> dict[int, str]:
-        """PID -> путь для winws-процессов с посторонним путём."""
-        try:
-            return {record.pid: record.exe_path for record in find_foreign_winws_processes()}
-        except Exception:
-            return {}
-
-    def _check_process_fast(self) -> bool:
-        """
-        Быстрая проверка через канонический WinAPI probe.
-        Не блокирует GUI!
-        """
-        return bool(self._check_processes_fast())
+            return WinwsProcessScan(canonical_pids={}, foreign_paths={})
 
     # ------------------------- ОСНОВНОЙ ЦИКЛ --------------------------
     def run(self):
@@ -67,7 +51,8 @@ class ProcessMonitorThread(QThread):
                 # 🔄 Сигнализируем о начале проверки
                 self.checkingStarted.emit()
                 
-                details = self._check_processes_fast()
+                scan = self._scan_processes_fast()
+                details = scan.canonical_pids
                 is_running = bool(details)
                 
                 # 🔄 Сигнализируем об окончании проверки
@@ -78,7 +63,7 @@ class ProcessMonitorThread(QThread):
                     self._cur_details = details
                     self.processDetailsChanged.emit(details)
 
-                foreign = self._check_foreign_processes_fast()
+                foreign = scan.foreign_paths
                 if foreign != self._cur_foreign:
                     self._cur_foreign = foreign
                     self.foreignProcessesChanged.emit(foreign)

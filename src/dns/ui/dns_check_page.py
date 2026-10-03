@@ -172,7 +172,8 @@ class DNSCheckPage(BasePage):
         row.addWidget(self.save_button)
         self.control_card.add_layout(row)
 
-        self.progress_bar = IndeterminateProgressBar(self)
+        # start=False: иначе анимация крутится и у скрытой полосы, пока жива страница.
+        self.progress_bar = IndeterminateProgressBar(self, start=False)
         self.progress_bar.setVisible(False)
         set_state_text(self.progress_bar, "Ход проверки DNS: не выполняется")
         self.control_card.add_widget(self.progress_bar)

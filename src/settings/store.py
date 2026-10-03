@@ -1701,6 +1701,33 @@ def set_orchestra_locked_map(askey: str, data: dict[str, int]) -> bool:
     return True
 
 
+def set_orchestra_locked_state(
+    locked_by_askey: dict[str, dict[str, int]],
+    user_locked_by_askey: dict[str, list[str]],
+) -> bool:
+    """Все залоченные и пользовательские списки оркестратора одной транзакцией.
+
+    Раньше это были 2 записи на каждый askey (18 полных пересборок настроек
+    на одно событие LOCK/UNLOCK из потока чтения вывода winws2).
+    """
+    locked = {_normalize_askey(askey): _as_dict(data) for askey, data in locked_by_askey.items()}
+    user_locked = {
+        _normalize_askey(askey): [
+            _normalize_lookup_key(item) for item in _unique_str_list(values) if _normalize_lookup_key(item)
+        ]
+        for askey, values in user_locked_by_askey.items()
+    }
+
+    def _mutator(data: dict[str, Any]) -> None:
+        for key, mapping in locked.items():
+            _set_path_value(data, ("orchestra", "locked", key), mapping)
+        for key, values in user_locked.items():
+            _set_path_value(data, ("orchestra", "user_locked", key), values)
+
+    _update_settings(_mutator)
+    return True
+
+
 def set_orchestra_locked_strategy(askey: str, target: str, strategy: int) -> bool:
     key = _normalize_askey(askey)
     lookup_key = _normalize_lookup_key(target)
@@ -1991,6 +2018,7 @@ __all__ = [
     "set_orchestra_keep_debug_file",
     "set_orchestra_lock_successes",
     "set_orchestra_locked_map",
+    "set_orchestra_locked_state",
     "set_orchestra_locked_strategy",
     "set_orchestra_settings",
     "set_orchestra_strict_detection",

@@ -37,7 +37,7 @@ from settings.store import (
     remove_orchestra_user_locked,
     set_orchestra_history,
     set_orchestra_history_for_targets,
-    set_orchestra_locked_map,
+    set_orchestra_locked_state,
     set_orchestra_locked_strategy,
     set_orchestra_user_locked,
 )
@@ -256,13 +256,14 @@ class LockedStrategiesManager:
     def save(self):
         """Сохраняет залоченные стратегии в settings.sqlite3."""
         try:
-            total_saved = 0
-
-            for askey in ASKEY_ALL:
-                target_dict = self.locked_by_askey[askey]
-                set_orchestra_locked_map(askey, {hostname: int(strategy) for hostname, strategy in target_dict.items()})
-                set_orchestra_user_locked(askey, sorted(self.user_locked_by_askey[askey]))
-                total_saved += len(target_dict)
+            set_orchestra_locked_state(
+                {
+                    askey: {hostname: int(strategy) for hostname, strategy in self.locked_by_askey[askey].items()}
+                    for askey in ASKEY_ALL
+                },
+                {askey: sorted(self.user_locked_by_askey[askey]) for askey in ASKEY_ALL},
+            )
+            total_saved = sum(len(self.locked_by_askey[askey]) for askey in ASKEY_ALL)
 
             # Логируем детальную статистику
             stats = ", ".join(f"{askey.upper()}: {len(self.locked_by_askey[askey])}"

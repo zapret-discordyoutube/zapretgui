@@ -156,6 +156,45 @@ def find_canonical_winws_processes() -> dict[str, list[WinwsProcessRecord]]:
     return result
 
 
+@dataclass(frozen=True, slots=True)
+class WinwsProcessScan:
+    """Канонические и посторонние winws-процессы по одному снимку процессов."""
+
+    canonical_pids: dict[str, list[int]]
+    foreign_paths: dict[int, str]
+
+
+def scan_winws_processes() -> WinwsProcessScan:
+    """Один снимок процессов и один запрос пути на каждый winws.
+
+    Даёт тот же результат, что get_canonical_winws_process_pids() вместе с
+    find_foreign_winws_processes(), но без трёх полных снимков подряд:
+    монитор процессов зовёт это каждые 2 секунды всё время работы программы.
+    """
+    expected_paths = get_expected_winws_paths()
+    existing_expected = {
+        name: path for name, path in expected_paths.items() if os.path.exists(path)
+    }
+    canonical: dict[str, list[int]] = {}
+    foreign: dict[int, str] = {}
+    for pid, process_name in _iter_winws_process_entries():
+        process_path = _query_process_image_path(pid)
+        if not process_path:
+            continue
+        expected_path = expected_paths.get(process_name, "")
+        if expected_path and process_path == expected_path:
+            if process_name in existing_expected:
+                canonical.setdefault(process_name, []).append(int(pid))
+            continue
+        foreign[int(pid)] = process_path
+    for pids in canonical.values():
+        pids.sort()
+    return WinwsProcessScan(
+        canonical_pids=canonical,
+        foreign_paths=dict(sorted(foreign.items())),
+    )
+
+
 def get_canonical_winws_process_pids() -> dict[str, list[int]]:
     result: dict[str, list[int]] = {}
     for process_name, records in find_canonical_winws_processes().items():

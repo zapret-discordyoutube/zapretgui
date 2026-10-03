@@ -43,6 +43,36 @@ class PageFloatInContractTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_rise_effect_reuses_source_snapshot_between_frames(self) -> None:
+        # Для виджета Qt не кэширует sourcePixmap(): без своего снимка каждый
+        # кадр выплывания заново рисовал карточку со всеми детьми на CPU.
+        class _Counting(QWidget):
+            paints = 0
+
+            def paintEvent(self, event) -> None:  # noqa: N802
+                type(self).paints += 1
+
+        host = QWidget()
+        host.resize(200, 120)
+        child = _Counting(host)
+        child.setGeometry(10, 10, 120, 60)
+        effect = float_module._RiseEffect(child)
+        child.setGraphicsEffect(effect)
+        effect.set_progress(0.5)
+        self.addCleanup(host.deleteLater)
+
+        clock = [100.0]
+        with mock.patch.object(float_module.time, "monotonic", side_effect=lambda: clock[0]):
+            for step in range(5):
+                effect.set_progress(0.5 + step * 0.05)
+                host.grab()
+            self.assertEqual(_Counting.paints, 1)
+
+            clock[0] += float_module._SOURCE_REFRESH_S
+            effect.set_progress(0.9)
+            host.grab()
+            self.assertEqual(_Counting.paints, 2)
+
     def test_every_registered_page_gets_float_in(self) -> None:
         from ui.page_registry import PAGE_CLASS_SPECS
         from ui.pages.base_page import BasePage

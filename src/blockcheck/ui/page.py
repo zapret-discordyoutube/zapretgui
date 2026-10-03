@@ -313,7 +313,8 @@ class BlockcheckPage(BasePage):
         self._set_status_text(self._status_label.text())
         row.addWidget(self._status_label, 1)
 
-        self._progress_bar = IndeterminateProgressBar()
+        # start=False: иначе анимация крутится и у скрытой полосы, пока жива страница.
+        self._progress_bar = IndeterminateProgressBar(start=False)
         self._progress_bar.setVisible(False)
         self._progress_bar.setFixedWidth(160)
         set_control_accessibility(

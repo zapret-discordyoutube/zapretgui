@@ -57,6 +57,28 @@ class SettingsSqliteStoreTests(unittest.TestCase):
             self.assertEqual(user_version, 1)
             self.assertFalse((root / "user" / "settings.json").exists())
 
+    def test_orchestra_locked_state_for_all_askeys_is_written_in_one_update(self) -> None:
+        from settings import store as settings_store
+
+        with TemporaryDirectory() as temp_dir:
+            with patch("settings.store.MAIN_DIRECTORY", temp_dir):
+                settings_store.prepare_settings_database()
+                settings_store.set_orchestra_locked_map("http", {"old.com": 1})
+                with patch.object(settings_store, "_update_settings", wraps=settings_store._update_settings) as update:
+                    settings_store.set_orchestra_locked_state(
+                        {"tls": {"YouTube.com": 3}, "http": {}},
+                        {"tls": ["YouTube.com", "youtube.com"], "http": []},
+                    )
+                tls = settings_store.get_orchestra_locked_map("tls")
+                http = settings_store.get_orchestra_locked_map("http")
+                user_tls = settings_store.get_orchestra_user_locked("tls")
+                settings_store.close_settings_database()
+
+        self.assertEqual(update.call_count, 1)
+        self.assertEqual(tls, {"youtube.com": 3})
+        self.assertEqual(http, {})
+        self.assertEqual(user_tls, ["youtube.com"])
+
     def test_orchestra_history_for_several_targets_is_written_in_one_update(self) -> None:
         from settings import store as settings_store
 

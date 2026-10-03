@@ -156,7 +156,8 @@ class ImportPresetDialog(PresetDialogTextMixin, MessageBoxBase):
         self.autoUpdateCheck.setChecked(True)
         self.autoUpdateCheck.setEnabled(False)
 
-        self.progressBar = IndeterminateProgressBar(self.widget)
+        # start=False: иначе анимация крутится и у скрытой полосы, пока открыт диалог.
+        self.progressBar = IndeterminateProgressBar(self.widget, start=False)
         self.progressBar.hide()
 
         self.warningLabel = CaptionLabel("", self.widget)
@@ -256,6 +257,7 @@ class ImportPresetDialog(PresetDialogTextMixin, MessageBoxBase):
         self._downloading = True
         self.warningLabel.hide()
         self.progressBar.show()
+        self.progressBar.start()
         self._set_inputs_enabled(False)
 
         worker = PresetImportDownloadWorker(request_id, url)
@@ -303,6 +305,7 @@ class ImportPresetDialog(PresetDialogTextMixin, MessageBoxBase):
     def _finish_download_state(self) -> None:
         self._downloading = False
         self._download_worker = None
+        self.progressBar.stop()
         self.progressBar.hide()
         self._set_inputs_enabled(True)
 

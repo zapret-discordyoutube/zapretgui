@@ -11,6 +11,8 @@ AC7: structured post-mortem resolution (transient flag, scan-guard silence).
 
 from __future__ import annotations
 
+import ntpath
+
 import inspect
 import threading
 import time
@@ -252,6 +254,67 @@ class ForeignWinwsDetectionTests(unittest.TestCase):
 
         self.assertEqual([record.pid for record in foreign], [200])
         self.assertEqual(foreign[0].exe_path, r"c:\other\winws.exe")
+
+    def test_single_snapshot_scan_matches_separate_probes(self) -> None:
+        from winws_runtime.runtime import process_probe
+
+        entries = [(300, "winws2.exe"), (100, "winws2.exe"), (200, "winws.exe"), (400, "winws.exe")]
+        paths = {
+            100: r"c:\zapret\exe\winws2.exe",  # canonical
+            300: r"c:\zapret\exe\winws2.exe",  # canonical
+            200: r"c:\other\winws.exe",       # foreign
+            400: "",                            # unqueryable → skipped
+        }
+        expected = {
+            "winws2.exe": r"c:\zapret\exe\winws2.exe",
+            "winws.exe": r"c:\zapret\exe\winws.exe",
+        }
+        snapshots = []
+
+        def entries_once():
+            snapshots.append(1)
+            return list(entries)
+
+        with (
+            patch.object(process_probe, "_iter_winws_process_entries", side_effect=entries_once),
+            patch.object(process_probe, "_query_process_image_path", side_effect=lambda pid: paths[pid]),
+            patch.object(process_probe, "get_expected_winws_paths", return_value=expected),
+            patch.object(process_probe.os.path, "exists", return_value=True),
+            # Пути в тесте Windows-овские: на Linux basename их бы не разобрал.
+            patch.object(process_probe, "_normalize_path", side_effect=lambda path: path),
+            patch.object(process_probe.os.path, "basename", ntpath.basename),
+        ):
+            scan = process_probe.scan_winws_processes()
+            self.assertEqual(len(snapshots), 1)
+            separate_canonical = process_probe.get_canonical_winws_process_pids()
+            separate_foreign = {
+                record.pid: record.exe_path for record in process_probe.find_foreign_winws_processes()
+            }
+
+        self.assertEqual(scan.canonical_pids, {"winws2.exe": [100, 300]})
+        self.assertEqual(scan.foreign_paths, {200: r"c:\other\winws.exe"})
+        self.assertEqual(scan.canonical_pids, separate_canonical)
+        self.assertEqual(scan.foreign_paths, separate_foreign)
+
+    def test_scan_skips_canonical_when_expected_exe_is_missing(self) -> None:
+        from winws_runtime.runtime import process_probe
+
+        with (
+            patch.object(process_probe, "_iter_winws_process_entries", return_value=[(100, "winws2.exe")]),
+            patch.object(
+                process_probe, "_query_process_image_path", return_value=r"c:\zapret\exe\winws2.exe"
+            ),
+            patch.object(
+                process_probe,
+                "get_expected_winws_paths",
+                return_value={"winws2.exe": r"c:\zapret\exe\winws2.exe"},
+            ),
+            patch.object(process_probe.os.path, "exists", return_value=False),
+        ):
+            scan = process_probe.scan_winws_processes()
+
+        self.assertEqual(scan.canonical_pids, {})
+        self.assertEqual(scan.foreign_paths, {})
 
     def _make_objects(self, *, running: bool = True):
         from app.feature_facades.runtime_parts import RuntimeObjects

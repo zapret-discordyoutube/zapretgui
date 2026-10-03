@@ -1136,7 +1136,7 @@ class OrchestraRunner:
                                 self.output_callback(msg)
 
                             if history_save_counter >= 5:
-                                self.locked_manager.save_history()
+                                self.locked_manager.flush_history()
                                 history_save_counter = 0
                         continue
 
@@ -1195,7 +1195,7 @@ class OrchestraRunner:
                                         if self.output_callback:
                                             self.output_callback(msg)
                                         self.locked_manager.save()
-                                        self.locked_manager.save_history()
+                                        self.locked_manager.flush_history()
                                         history_save_counter = 0
 
                             msg = f"[{timestamp}] {proto_tag} ✓ SUCCESS: {host}{port_str} strategy={strat}"
@@ -1203,7 +1203,7 @@ class OrchestraRunner:
                                 self.output_callback(msg)
 
                             if history_save_counter >= 5:
-                                self.locked_manager.save_history()
+                                self.locked_manager.flush_history()
                                 history_save_counter = 0
                         continue
 
@@ -1245,7 +1245,7 @@ class OrchestraRunner:
                                     self.discord_fail_count = 0  # Сброс после рестарта
 
                             if history_save_counter >= 5:
-                                self.locked_manager.save_history()
+                                self.locked_manager.flush_history()
                                 history_save_counter = 0
                         continue
 
@@ -1300,7 +1300,10 @@ class OrchestraRunner:
                         # msg = f"[{timestamp}] HISTORY: {event.hostname} strat={event.strategy} ({event.successes}✓/{event.failures}✗) = {event.rate}%"
                         # if self.output_callback:
                         #     self.output_callback(msg)
-                        self.locked_manager.save_history()
+                        # В базу пишет сам менеджер: изменившиеся цели раз в
+                        # HISTORY_FLUSH_INTERVAL_SECONDS и всю историю при остановке.
+                        # Полная запись на каждую строку HISTORY (при старте их
+                        # тысячи) пересобирала весь документ настроек.
                         continue
 
                     # === PRELOADED ===

@@ -68,6 +68,8 @@ class PresetImportDialogTests(unittest.TestCase):
 
     def test_valid_url_starts_download_and_disables_inputs(self) -> None:
         dlg = self._make_dialog()
+        # Скрытая полоса не крутит бесконечную анимацию 60 раз в секунду.
+        self.assertFalse(dlg.progressBar.isStarted())
         dlg.urlEdit.setText("https://example.com/p.txt")
         started = {}
 
@@ -99,6 +101,7 @@ class PresetImportDialogTests(unittest.TestCase):
         self.assertFalse(dlg.yesButton.isEnabled())
         self.assertFalse(dlg.urlEdit.isEnabled())
         self.assertTrue(dlg.progressBar.isVisibleTo(dlg))
+        self.assertTrue(dlg.progressBar.isStarted())
 
         # Закрытие во время скачивания просит отмену.
         dlg.done(0)
@@ -140,8 +143,10 @@ class PresetImportDialogTests(unittest.TestCase):
         dlg._downloading = True
         dlg._download_request_id = 5
         dlg._set_inputs_enabled(False)
+        dlg.progressBar.start()
         dlg._on_download_failed(5, "timeout", "stalled")
         self.assertFalse(dlg._downloading)
+        self.assertFalse(dlg.progressBar.isStarted())
         self.assertTrue(dlg.yesButton.isEnabled())
         self.assertTrue(dlg.warningLabel.isVisibleTo(dlg))
 

@@ -22,6 +22,8 @@
 
 from __future__ import annotations
 
+import time
+
 from PyQt6 import sip
 from PyQt6.QtCore import QEasingCurve, QEvent, QObject, QPointF, QRectF, Qt, QTimer, QVariantAnimation
 from PyQt6.QtWidgets import QGraphicsEffect, QWidget
@@ -34,6 +36,12 @@ FLOAT_IN_STEP_MS = 70
 FLOAT_IN_RISE_PX = 16.0
 # Дальше этого номера карточки идут без дополнительной задержки.
 _MAX_STAGGERED = 8
+# Как часто эффект заново снимает картинку виджета. Для виджета Qt не кэширует
+# sourcePixmap() и на каждый кадр перерисовывает его со всеми детьми на CPU —
+# замер на win10 показал 43% главного потока при переключении страниц. Между
+# снимками кадры рисуют готовую картинку; содержимое, пришедшее во время
+# выплывания, появляется не позже чем через этот интервал.
+_SOURCE_REFRESH_S = 0.12
 _CONTROLLER_ATTR = "_zapret_stagger_float_in"
 NO_FLOAT_IN_ATTR = "_zapret_no_float_in"
 # Метод «своего входа» у виджета: play_float_in(delay_ms) / finish_float_in().
@@ -53,10 +61,15 @@ class _RiseEffect(QGraphicsEffect):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._progress = 0.0
+        self._source = None
+        self._source_at = 0.0
 
     def set_progress(self, value: float) -> None:
         self._progress = max(0.0, min(1.0, float(value)))
         self.update()
+
+    def sourceChanged(self, flags) -> None:  # noqa: N802
+        self._source = None
 
     def boundingRectFor(self, rect: QRectF) -> QRectF:  # noqa: N802
         return rect.adjusted(0.0, 0.0, 0.0, FLOAT_IN_RISE_PX)
@@ -65,11 +78,16 @@ class _RiseEffect(QGraphicsEffect):
         progress = self._progress
         if progress <= 0.0:
             return
-        pixmap, offset = self.sourcePixmap(Qt.CoordinateSystem.LogicalCoordinates)
+        now = time.monotonic()
+        if self._source is None or now - self._source_at >= _SOURCE_REFRESH_S:
+            pixmap, offset = self.sourcePixmap(Qt.CoordinateSystem.LogicalCoordinates)
+            self._source = (pixmap, QPointF(offset))
+            self._source_at = now
+        pixmap, offset = self._source
         painter.save()
         try:
             painter.setOpacity(progress)
-            painter.drawPixmap(QPointF(offset) + QPointF(0.0, FLOAT_IN_RISE_PX * (1.0 - progress)), pixmap)
+            painter.drawPixmap(offset + QPointF(0.0, FLOAT_IN_RISE_PX * (1.0 - progress)), pixmap)
         finally:
             painter.restore()
 

@@ -490,6 +490,22 @@ class OrchestraAccessibilityTests(unittest.TestCase):
             "Индикатор обучения Оркестратора: Не запущен",
         )
 
+    def test_repeated_status_is_not_restyled(self) -> None:
+        # Статус приходит на каждую строку лога; одинаковый не пересчитывает стиль.
+        page = OrchestraPage(
+            orchestra_feature=_OrchestraFeatureStub(),
+            is_runtime_running=lambda: False,
+        )
+        self.addCleanup(page.deleteLater)
+        page._update_status(page.STATE_RUNNING)
+
+        with patch.object(page.status_label, "setStyleSheet") as restyle:
+            for _ in range(20):
+                page._update_status(page.STATE_RUNNING)
+            restyle.assert_not_called()
+            page._update_status(page.STATE_LEARNING)
+            restyle.assert_called_once()
+
     def test_status_update_exposes_status_as_screen_reader_state(self) -> None:
         page = OrchestraPage(
             orchestra_feature=_OrchestraFeatureStub(),

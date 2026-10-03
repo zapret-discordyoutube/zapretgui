@@ -58,6 +58,33 @@ class OrchestraHistoryFlushTests(unittest.TestCase):
         self.write.assert_not_called()
 
 
+    def test_save_writes_every_askey_in_one_store_call(self) -> None:
+        self.manager.locked_by_askey["tls"]["a.com"] = 3
+        self.manager.user_locked_by_askey["quic"].add("b.com")
+        with patch.object(manager_module, "set_orchestra_locked_state") as save_state:
+            self.manager.save()
+
+        save_state.assert_called_once()
+        locked, user_locked = save_state.call_args.args
+        self.assertEqual(set(locked), set(manager_module.ASKEY_ALL))
+        self.assertEqual(locked["tls"], {"a.com": 3})
+        self.assertEqual(user_locked["quic"], ["b.com"])
+
+    def test_runner_does_not_rewrite_whole_history_per_output_line(self) -> None:
+        # Полная запись истории пересобирает весь документ настроек; в цикле
+        # чтения вывода winws2 она шла на каждую строку HISTORY (при старте их
+        # тысячи). В цикле — только flush_history(), полная запись — при выходе.
+        import inspect
+        import textwrap
+
+        from orchestra.orchestra_runner import OrchestraRunner
+
+        source = textwrap.dedent(inspect.getsource(OrchestraRunner._read_output))
+        loop_body, _, after_loop = source.partition("\n        finally:")
+        self.assertNotIn("save_history()", loop_body)
+        self.assertIn("flush_history()", loop_body)
+        self.assertIn("save_history()", after_loop)
+
     def test_history_keeps_recent_and_locked_targets_within_limit(self) -> None:
         self.manager.locked_by_askey["quic"]["1.1.1.1"] = 4
         with patch.object(manager_module, "MAX_HISTORY_TARGETS", 100), patch.object(

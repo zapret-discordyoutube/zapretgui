@@ -99,6 +99,20 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertEqual(page._sites_table.accessibleName(), "Результаты BlockCheck по сайтам: пока нет результатов")
         self.assertEqual(page._summary_panel.level, "idle")
 
+    def test_hidden_progress_bars_do_not_animate(self) -> None:
+        # IndeterminateProgressBar по умолчанию запускает бесконечную анимацию
+        # в конструкторе, и она крутится 60 раз в секунду у скрытой полосы.
+        from qfluentwidgets import IndeterminateProgressBar
+
+        page = _make_page()
+        self.addCleanup(page.deleteLater)
+
+        bars = page.findChildren(IndeterminateProgressBar)
+        self.assertTrue(bars)
+        for bar in bars:
+            if not bar.isVisibleTo(page):
+                self.assertFalse(bar.isStarted(), bar.accessibleName())
+
     def test_scope_combo_menu_items_are_named_for_screen_reader(self) -> None:
         page = _make_page()
         self.addCleanup(page.deleteLater)

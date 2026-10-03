@@ -122,6 +122,8 @@ class OrchestraPage(BasePage):
         self._clear_learned_reset_timer = QTimer(self)
         self._clear_learned_reset_timer.setSingleShot(True)
         self._clear_learned_reset_timer.timeout.connect(self._reset_clear_learned_button)
+        # Что уже показано в строке статуса: чтобы не перекрашивать её заново.
+        self._status_applied_key: tuple | None = None
 
         self._build_ui()
 
@@ -322,6 +324,13 @@ class OrchestraPage(BasePage):
             unlocked_text=self._tr("page.orchestra.status.unlocked", "🔓 UNLOCKED - переобучение (RST блокировка)"),
             idle_color=tokens.fg_faint,
         )
+        # Статус приходит на каждую строку лога с LOCKED/PRELOADED/RST (до
+        # сотен в секунду), а setStyleSheet пересчитывает стиль метки целиком.
+        # Тема и язык меняют текст или цвет — тогда ключ другой.
+        applied_key = (plan.label_text, plan.label_color, plan.icon_color)
+        if applied_key == self._status_applied_key:
+            return
+        self._status_applied_key = applied_key
         self.status_icon.setPixmap(get_cached_qta_pixmap("fa5s.brain", color=plan.icon_color, size=24))
         self.status_label.setText(plan.label_text)
         self.status_label.setStyleSheet(f"color: {plan.label_color}; font-size: 14px;")
