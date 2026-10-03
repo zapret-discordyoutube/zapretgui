@@ -165,5 +165,80 @@ class DrawnBadgerTests(unittest.TestCase):
             self.assertFalse(image.toImage().isNull())
 
 
+class LogoBadgerShapeCacheTests(unittest.TestCase):
+    """Контуры медоеда не зависят от позы и собираются один раз, а не каждый кадр."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    @staticmethod
+    def _render(pose: BadgerPose):
+        from PyQt6.QtGui import QImage, QPainter
+
+        image = QImage(88, 88, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(0)
+        painter = QPainter(image)
+        painter.scale(0.88, 0.88)
+        paint_logo_badger(painter, pose)
+        painter.end()
+        return image
+
+    def test_paths_are_built_once_for_all_frames(self) -> None:
+        import ui.widgets.fun.logo_badger as logo
+
+        paint_logo_badger_warmup = self._render(BadgerPose())
+        self.assertFalse(paint_logo_badger_warmup.isNull())
+        with mock.patch.object(logo, "_path", wraps=logo._path) as build, mock.patch.object(
+            logo, "_smooth", wraps=logo._smooth
+        ) as smooth:
+            for step in range(30):
+                self._render(BadgerPose(blink=step % 2, jaw=step / 30.0, paw=step, ear=-step, bolt_glow=step / 30.0))
+        build.assert_not_called()
+        smooth.assert_not_called()
+
+    def test_cached_shapes_draw_exactly_like_fresh_ones(self) -> None:
+        import ui.widgets.fun.logo_badger as logo
+
+        poses = [
+            BadgerPose(),
+            BadgerPose(blink=1.0, jaw=0.6, paw=20.0),
+            BadgerPose(eye_open=1.18, look=-0.8, ear=-14.0, bolt_glow=0.5),
+            BadgerPose(jaw=-0.8, paw=-9.0, bolt_glow=1.0),
+        ]
+        warm = [self._render(pose) for pose in poses]
+        for cached in (
+            logo._holes,
+            logo._body_shape,
+            logo._fold_shape,
+            logo._stripe_path,
+            logo._ear_inner_path,
+            logo._closed_eye_path,
+            logo._outer_body,
+            logo._fold,
+            logo._gap,
+            logo._neck,
+            logo._head,
+            logo._mouth,
+            logo._throat,
+            logo._jaw,
+            logo._bolt,
+            logo._paw,
+        ):
+            cached.cache_clear()
+        fresh = [self._render(pose) for pose in poses]
+        for index, (a, b) in enumerate(zip(warm, fresh)):
+            self.assertEqual(a, b, f"поза {index}: картинка из запаса отличается от свежей")
+
+    def test_drawing_never_changes_shared_paths(self) -> None:
+        import ui.widgets.fun.logo_badger as logo
+
+        before = {name: getattr(logo, name)().elementCount() for name in ("_body_shape", "_fold_shape", "_bolt", "_jaw")}
+        for step in range(5):
+            self._render(BadgerPose(jaw=step / 5.0, paw=10.0 * step, bolt_glow=step / 5.0))
+        after = {name: getattr(logo, name)().elementCount() for name in before}
+        self.assertEqual(before, after)
+
+
 if __name__ == "__main__":
     unittest.main()

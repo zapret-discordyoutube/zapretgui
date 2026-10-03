@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
@@ -82,6 +83,7 @@ def _smooth(points, *, close: bool = True) -> QPainterPath:
     return path
 
 
+@lru_cache(maxsize=None)
 def _outer_body() -> QPainterPath:
     # Спина и хвост: большая дуга от шеи вниз и вправо до кончика у лапы.
     return _path([
@@ -97,6 +99,7 @@ def _outer_body() -> QPainterPath:
     ])
 
 
+@lru_cache(maxsize=None)
 def _fold() -> QPainterPath:
     # Тёмная складка тела — внутренняя «C» вокруг просвета под челюстью.
     return _smooth([
@@ -106,6 +109,7 @@ def _fold() -> QPainterPath:
     ])
 
 
+@lru_cache(maxsize=None)
 def _gap() -> QPainterPath:
     # Просвет между челюстью и складкой: на логотипе он прозрачный (замерено по картинке).
     return _smooth([
@@ -115,6 +119,7 @@ def _gap() -> QPainterPath:
     ])
 
 
+@lru_cache(maxsize=None)
 def _neck() -> QPainterPath:
     # Светлая шея под ухом, от неё начинается челюсть.
     return _path([
@@ -126,6 +131,7 @@ def _neck() -> QPainterPath:
     ])
 
 
+@lru_cache(maxsize=None)
 def _head() -> QPainterPath:
     # Голова с верхней челюстью: макушка, вытянутая морда и три зуба вниз.
     return _path([
@@ -147,6 +153,7 @@ def _head() -> QPainterPath:
     ])
 
 
+@lru_cache(maxsize=None)
 def _mouth() -> QPainterPath:
     # Тёмная часть раскрытой пасти — полумесяц слева от глотки.
     return _smooth([
@@ -155,6 +162,7 @@ def _mouth() -> QPainterPath:
     ])
 
 
+@lru_cache(maxsize=None)
 def _throat() -> QPainterPath:
     # Глотка внутри пасти: на логотипе она тоже прозрачная.
     return _smooth([
@@ -163,6 +171,7 @@ def _throat() -> QPainterPath:
     ])
 
 
+@lru_cache(maxsize=None)
 def _jaw() -> QPainterPath:
     # Нижняя челюсть: сверху мелкие зубы, снизу край над просветом.
     return _path([
@@ -183,6 +192,7 @@ def _jaw() -> QPainterPath:
     ])
 
 
+@lru_cache(maxsize=None)
 def _bolt() -> QPainterPath:
     # Молния «Z»: верхняя перекладина, косая черта и нижняя перекладина.
     return _path([
@@ -199,6 +209,7 @@ def _bolt() -> QPainterPath:
     ])
 
 
+@lru_cache(maxsize=None)
 def _paw() -> QPainterPath:
     # Лапа, которая держит молнию снизу.
     return _path([
@@ -211,25 +222,59 @@ def _paw() -> QPainterPath:
     ])
 
 
+# Контуры медоеда не зависят от позы. Раньше каждый кадр заново собирал их из
+# списков точек (Катмулл — Ром для складки, просвета, пасти и глотки) и дважды
+# вырезал просвет из тела и складки — это самое дорогое место кадра. Теперь всё
+# собирается один раз; рисуют их те же вызовы, картинка не меняется. Кэшированные
+# контуры общие: их можно только рисовать, не изменять.
+
+@lru_cache(maxsize=None)
+def _holes() -> QPainterPath:
+    return _gap().united(_throat())
+
+
+@lru_cache(maxsize=None)
+def _body_shape() -> QPainterPath:
+    return _outer_body().subtracted(_holes())
+
+
+@lru_cache(maxsize=None)
+def _fold_shape() -> QPainterPath:
+    return _fold().subtracted(_holes())
+
+
+@lru_cache(maxsize=None)
+def _stripe_path() -> QPainterPath:
+    return _path([(39.0, 7.0), (50.0, 3.0, 60.0, 5.0, 65.0, 9.5)], close=False)
+
+
+@lru_cache(maxsize=None)
+def _ear_inner_path() -> QPainterPath:
+    return _path([(28.5, 18.0), (26.0, 10.5, 30.5, 8.5, 32.0, 10.5), (33.5, 12.5, 34.0, 14.0, 35.0, 15.0)], close=False)
+
+
+@lru_cache(maxsize=None)
+def _closed_eye_path() -> QPainterPath:
+    return _path([(51.5, 15.5), (56.0, 18.0, 60.5, 15.5)], close=False)
+
+
 def paint_logo_badger(painter: QPainter, pose: BadgerPose = BadgerPose()) -> None:
     """Рисует медоеда с логотипа в квадрате 100×100."""
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(Qt.PenStyle.NoPen)
 
-    holes = _gap().united(_throat())
-
     body = QLinearGradient(QPointF(30.0, 5.0), QPointF(55.0, 100.0))
     body.setColorAt(0.0, BODY_TOP)
     body.setColorAt(1.0, BODY_BOTTOM)
     painter.setBrush(body)
-    painter.drawPath(_outer_body().subtracted(holes))
+    painter.drawPath(_body_shape())
 
     fold = QLinearGradient(QPointF(28.0, 50.0), QPointF(88.0, 70.0))
     fold.setColorAt(0.0, FOLD_LEFT)
     fold.setColorAt(1.0, FOLD_RIGHT)
     painter.setBrush(fold)
-    painter.drawPath(_fold().subtracted(holes))
+    painter.drawPath(_fold_shape())
 
     painter.setBrush(NECK)
     painter.drawPath(_neck())
@@ -250,7 +295,7 @@ def paint_logo_badger(painter: QPainter, pose: BadgerPose = BadgerPose()) -> Non
     stripe.setCapStyle(Qt.PenCapStyle.RoundCap)
     painter.setPen(stripe)
     painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawPath(_path([(39.0, 7.0), (50.0, 3.0, 60.0, 5.0, 65.0, 9.5)], close=False))
+    painter.drawPath(_stripe_path())
     painter.setPen(Qt.PenStyle.NoPen)
 
     _paint_ear(painter, pose.ear)
@@ -277,7 +322,7 @@ def _paint_ear(painter: QPainter, angle: float) -> None:
     inner.setCapStyle(Qt.PenCapStyle.RoundCap)
     painter.setPen(inner)
     painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawPath(_path([(28.5, 18.0), (26.0, 10.5, 30.5, 8.5, 32.0, 10.5), (33.5, 12.5, 34.0, 14.0, 35.0, 15.0)], close=False))
+    painter.drawPath(_ear_inner_path())
     painter.setPen(Qt.PenStyle.NoPen)
     painter.restore()
 
@@ -292,7 +337,7 @@ def _paint_eye(painter: QPainter, pose: BadgerPose) -> None:
         lid.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(lid)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawPath(_path([(51.5, 15.5), (56.0, 18.0, 60.5, 15.5)], close=False))
+        painter.drawPath(_closed_eye_path())
         painter.setPen(Qt.PenStyle.NoPen)
         return
     ry *= openness
