@@ -10,6 +10,11 @@
 
 По клику медоед делает оборот — просто так, для настроения.
 
+Соседний виджет может оживить медоеда по своим событиям: ``react("toss")`` —
+замах, будто он что-то бросил, ``react("alarm")`` — вздрогнуть;
+``set_breath(-1..1)`` — спокойное дыхание в такт чужим кадрам (своего
+таймера на это у медоеда нет).
+
 Анимация идёт, только пока виджет виден, окно не свёрнуто и в настройках
 включены «живые анимации». В покое таймеров нет, кроме редкого одиночного
 таймера «оглядывания» в ``idle``.
@@ -49,7 +54,11 @@ _GESTURE_MS = {
     MOOD_ALARM: 650,
     "look": 900,
     "spin": 800,
+    "toss": 620,
 }
+GESTURE_TOSS = "toss"
+# Жесты, которые можно запросить снаружи через react().
+_REACTIONS = (GESTURE_TOSS, MOOD_ALARM)
 IDLE_LOOK_INTERVAL_MS = 8000
 
 
@@ -75,6 +84,7 @@ class Mascot(QWidget):
         self._mood = MOOD_IDLE
         self._gesture = ""
         self._t = 0.0
+        self._breath = 0.0
 
         self._anim = QVariantAnimation(self)
         self._anim.setStartValue(0.0)
@@ -112,6 +122,21 @@ class Mascot(QWidget):
 
     def spin(self) -> None:
         self._play("spin")
+
+    def react(self, gesture: str) -> None:
+        """Короткий жест по чужому событию. Радостный прыжок и оборот не перебивает."""
+        if gesture not in _REACTIONS or self._gesture in (MOOD_HAPPY, "spin"):
+            return
+        self._play(gesture)
+
+    def set_breath(self, value: float) -> None:
+        """Фаза дыхания от -1 до 1: её задаёт сосед, у которого уже идут кадры."""
+        value = max(-1.0, min(1.0, float(value)))
+        if abs(value - self._breath) < 0.05:
+            return
+        self._breath = value
+        if not self._gesture and self._mood == MOOD_IDLE:
+            self.update()
 
     def logo_top(self) -> int:
         """Где начинается сам значок в покое: выше — только запас под прыжок.
@@ -225,9 +250,21 @@ class Mascot(QWidget):
                 return -0.32 * math.sin(math.pi * k), 360.0 * _ease_out_back(k), 1.0, 1.0
             k = (t - 0.75) / 0.25
             return 0.0, 0.0, 1.0 + 0.08 * math.sin(math.pi * k), 1.0 - 0.08 * math.sin(math.pi * k)
+        # Насторожённый медоед в покое чуть наклонён: жесты приходят в эту позу плавно.
+        rest_tilt = 6.0 if self._mood == MOOD_ALARM else 0.0
         if g == MOOD_ALARM:
             shake = 12.0 * math.sin(6 * math.pi * t) * (1.0 - t)
-            return 0.0, shake, 1.0, 1.0
+            return 0.0, shake + rest_tilt * t, 1.0, 1.0
+        if g == GESTURE_TOSS:
+            # Замах назад, резкий выпад вперёд с подскоком, возврат в позу покоя.
+            if t < 0.3:
+                return 0.0, rest_tilt - 9.0 * math.sin(0.5 * math.pi * t / 0.3), 1.0, 1.0
+            if t < 0.55:
+                k = (t - 0.3) / 0.25
+                lunge = -9.0 + 23.0 * (1.0 - (1.0 - k) ** 2)
+                return -0.06 * math.sin(math.pi * k), rest_tilt + lunge, 1.0, 1.0
+            k = (t - 0.55) / 0.45
+            return 0.0, rest_tilt + 14.0 * (1.0 - k) ** 2, 1.0, 1.0
         if g == "look":
             return 0.0, 10.0 * math.sin(2 * math.pi * t) * (1.0 - t * 0.5), 1.0, 1.0
         if g == "spin":
@@ -237,8 +274,9 @@ class Mascot(QWidget):
             k = 1.0 if g != MOOD_SAD else t
             return 0.05 * k, -14.0 * k, 1.0, 1.0 - 0.06 * k
         if self._mood == MOOD_ALARM:
-            return 0.0, 6.0, 1.0, 1.0
-        return 0.0, 0.0, 1.0, 1.0
+            return 0.0, rest_tilt, 1.0, 1.0
+        # Спокойный медоед дышит: чуть вытягивается и опадает.
+        return 0.0, 0.0, 1.0 - 0.012 * self._breath, 1.0 + 0.03 * self._breath
 
     def _current_pixmap(self) -> QPixmap:
         if self._pixmap.isNull():
@@ -268,4 +306,4 @@ class Mascot(QWidget):
         painter.end()
 
 
-__all__ = ["MOODS", "MOOD_ALARM", "MOOD_BUSY", "MOOD_HAPPY", "MOOD_IDLE", "MOOD_SAD", "Mascot"]
+__all__ = ["GESTURE_TOSS", "MOODS", "MOOD_ALARM", "MOOD_BUSY", "MOOD_HAPPY", "MOOD_IDLE", "MOOD_SAD", "Mascot"]

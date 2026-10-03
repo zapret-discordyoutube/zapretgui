@@ -18,11 +18,11 @@ import ui.widgets.motion_icon as motion_module
 import ui.widgets.soft_visibility as soft_module
 from ui.widgets.soft_visibility import set_visible_softly, soft_visibility_target
 from donater.premium_display import TIER_ACTIVE, TIER_FREE, PremiumDisplay
-from presets.ui.control.status_hero_card import StatusHeroCard, mascot_mood_for_phase
+from presets.ui.control.status_hero_card import StatusHeroCard
 from presets.ui.control.top_summary_widget import ControlTopSummaryWidget
 from ui.pulsing_dot import PulsingDot
-from ui.widgets.bypass_scene import BypassScene
-from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD, Mascot
+from ui.widgets.bypass_scene import BypassScene, mascot_mood_for_phase
+from ui.widgets.fun.mascot import GESTURE_TOSS, MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 from ui.widgets.motion_icon import GESTURE_BOUNCE, MotionIcon
 
 
@@ -264,6 +264,69 @@ class BypassSceneTests(unittest.TestCase):
         self.assertEqual(colors, ["#6ccb5f"])
         self.assertEqual(phases, ["running", "stopped"])
 
+    def test_mascot_mood_follows_phase(self) -> None:
+        self.assertEqual(mascot_mood_for_phase("running"), MOOD_IDLE)
+        self.assertEqual(mascot_mood_for_phase("running", "starting"), MOOD_HAPPY)
+        self.assertEqual(mascot_mood_for_phase("running", "running"), MOOD_IDLE)
+        self.assertEqual(mascot_mood_for_phase("starting", "stopped"), MOOD_BUSY)
+        self.assertEqual(mascot_mood_for_phase("stopping", "running"), MOOD_BUSY)
+        self.assertEqual(mascot_mood_for_phase("failed", "starting"), MOOD_SAD)
+        self.assertEqual(mascot_mood_for_phase("stopped", "stopping"), MOOD_ALARM)
+
+        scene = self._scene("starting")
+        self.assertEqual(scene.mascot().mood(), MOOD_BUSY)
+        scene.set_phase("running")
+        self.assertEqual(scene.mascot().mood(), MOOD_HAPPY)
+
+    def test_mascot_stands_in_the_scene_left_of_the_lanes(self) -> None:
+        scene = self._scene("stopped")
+        mascot = scene.mascot()
+        left, right, _top, _bottom = scene._lanes()
+
+        self.assertIs(mascot.parent(), scene)
+        self.assertLessEqual(mascot.geometry().right(), left)
+        self.assertGreaterEqual(mascot.geometry().top(), 0)
+        self.assertLessEqual(mascot.geometry().bottom(), scene.height())
+        # Кнопка стоит посередине дорожек, а не посередине виджета.
+        self.assertEqual(scene.gate_center().x(), round((left + right) / 2))
+
+    def test_mascot_tosses_packets_and_flinches_when_they_bounce(self) -> None:
+        scene = self._scene("stopped")
+        mascot = scene.mascot()
+        self.assertEqual(mascot.gesture(), GESTURE_TOSS)
+
+        before = int(scene_module.BLOCKED_BURST_MS * (scene_module.FIRST_IMPACT_PHASE - 0.05))
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=before):
+            scene._on_beat_frame()
+        self.assertEqual(mascot.gesture(), GESTURE_TOSS)
+
+        after = int(scene_module.BLOCKED_BURST_MS * (scene_module.FIRST_IMPACT_PHASE + 0.05))
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=after):
+            scene._on_beat_frame()
+        self.assertEqual(mascot.gesture(), MOOD_ALARM)
+
+    def test_sad_mascot_does_not_toss_after_a_failed_start(self) -> None:
+        scene = self._scene("starting")
+        scene.set_phase("failed")
+        mascot = scene.mascot()
+        self.assertEqual(mascot.mood(), MOOD_SAD)
+        self.assertNotEqual(mascot.gesture(), GESTURE_TOSS)
+
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=int(scene_module.BLOCKED_BURST_MS * 0.9)):
+            scene._on_beat_frame()
+        self.assertNotEqual(mascot.gesture(), MOOD_ALARM)
+
+    def test_calm_mascot_breathes_with_the_flow_frames(self) -> None:
+        scene = self._scene("running")
+        mascot = scene.mascot()
+        quarter = int(scene_module.BREATH_PERIOD_S * 250)
+        with mock.patch.object(scene._beat_clock, "elapsed", return_value=quarter):
+            scene._on_beat_frame()
+        self.assertAlmostEqual(mascot._breath, 1.0, places=2)
+        _dy, _angle, scale_x, scale_y = mascot.pose()
+        self.assertGreater(scale_y, 1.0)
+        self.assertLess(scale_x, 1.0)
+
     def test_paints_every_phase(self) -> None:
         scene = BypassScene()
         scene.set_clickable(True)
@@ -293,28 +356,17 @@ class StatusHeroCardTests(unittest.TestCase):
     def _card(self):
         card = StatusHeroCard()
         scene = BypassScene(card)
-        mascot = Mascot(card, size=44)
-        card.bind_scene(scene, mascot)
+        card.bind_scene(scene)
         card.resize(900, 104)
         self.addCleanup(card.deleteLater)
-        return card, scene, mascot
+        return card, scene, scene.mascot()
 
-    def test_mascot_mood_follows_phase(self) -> None:
-        self.assertEqual(mascot_mood_for_phase("running"), MOOD_IDLE)
-        self.assertEqual(mascot_mood_for_phase("running", "starting"), MOOD_HAPPY)
-        self.assertEqual(mascot_mood_for_phase("running", "running"), MOOD_IDLE)
-        self.assertEqual(mascot_mood_for_phase("starting", "stopped"), MOOD_BUSY)
-        self.assertEqual(mascot_mood_for_phase("stopping", "running"), MOOD_BUSY)
-        self.assertEqual(mascot_mood_for_phase("failed", "starting"), MOOD_SAD)
-        self.assertEqual(mascot_mood_for_phase("stopped", "stopping"), MOOD_ALARM)
-
-    def test_card_takes_color_and_mood_from_scene(self) -> None:
+    def test_card_takes_color_from_scene(self) -> None:
         card, scene, mascot = self._card()
         scene.set_color("#f5a623")
         scene.set_phase("starting")
 
         self.assertEqual(card.tint(), QColor("#f5a623"))
-        self.assertEqual(mascot.mood(), MOOD_BUSY)
 
     def test_wave_plays_only_when_bypass_turns_on_in_view(self) -> None:
         card, scene, mascot = self._card()
@@ -345,16 +397,6 @@ class StatusHeroCardTests(unittest.TestCase):
 
         self.assertFalse(card.is_wave_playing())
         self.assertEqual(card.tint(), QColor("#6ccb5f"))
-
-    def test_mascot_hides_on_a_narrow_card(self) -> None:
-        card, _scene, mascot = self._card()
-        card.show()
-        card.resize(hero_module.MASCOT_MIN_CARD_WIDTH + 60, 104)
-        QApplication.processEvents()
-        self.assertFalse(mascot.isHidden())
-        card.resize(hero_module.MASCOT_MIN_CARD_WIDTH - 60, 104)
-        QApplication.processEvents()
-        self.assertTrue(mascot.isHidden())
 
     def test_paints_tint_and_wave(self) -> None:
         card, scene, _mascot = self._card()

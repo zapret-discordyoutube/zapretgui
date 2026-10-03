@@ -16,7 +16,6 @@ from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath
 from qfluentwidgets import CardWidget, isDarkTheme
 
 from ui.animation_policy import are_live_animations_enabled
-from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 
 
 TINT_FADE_MS = 420
@@ -25,20 +24,6 @@ WAVE_MS = 900
 TINT_ALPHA_DARK = 0.17
 TINT_ALPHA_LIGHT = 0.13
 WAVE_ALPHA = 0.26
-# Уже этого талисман не помещается рядом с текстом и кнопкой «Закрыть программу».
-MASCOT_MIN_CARD_WIDTH = 720
-
-
-def mascot_mood_for_phase(phase: str, previous: str = "") -> str:
-    """Настроение талисмана по состоянию Zapret."""
-    if phase == "running":
-        # Радуется, когда обход включился на глазах; при первом показе просто сидит.
-        return MOOD_HAPPY if previous and previous != "running" else MOOD_IDLE
-    if phase in {"autostart_pending", "starting", "stopping"}:
-        return MOOD_BUSY
-    if phase == "failed":
-        return MOOD_SAD
-    return MOOD_ALARM
 
 
 def _mix(a: QColor, b: QColor, t: float) -> QColor:
@@ -60,7 +45,6 @@ class StatusHeroCard(CardWidget):
         self._wave_origin = QPointF()
         self._wave_color = QColor()
         self._scene = None
-        self._mascot = None
         self._phase = ""
 
         # QVariantAnimation, а не QPropertyAnimation: при выключенных
@@ -87,31 +71,17 @@ class StatusHeroCard(CardWidget):
     def _pressedBackgroundColor(self):  # noqa: N802
         return self._normalBackgroundColor()
 
-    def bind_scene(self, scene, mascot) -> None:
-        """Связывает карточку со сценой: цвет фона, волна и настроение талисмана."""
+    def bind_scene(self, scene) -> None:
+        """Связывает карточку со сценой: цвет фона и волна от кнопки."""
         self._scene = scene
-        self._mascot = mascot
         scene.colorChanged.connect(self.set_tint)
         scene.phaseChanged.connect(self._on_scene_phase_changed)
-        self._sync_mascot()
 
     def _on_scene_phase_changed(self, phase: str) -> None:
         previous, self._phase = self._phase, phase
-        mascot = self._mascot
-        if mascot is not None:
-            mascot.set_mood(mascot_mood_for_phase(phase, previous))
         scene = self._scene
         if scene is not None and phase == "running" and previous and previous != "running":
             self.play_wave(scene.mapTo(self, scene.gate_center()), scene.target_color().name())
-
-    def _sync_mascot(self) -> None:
-        # Талисман прячется, когда карточка узкая.
-        mascot = self._mascot
-        if mascot is None:
-            return
-        wanted = self.width() >= MASCOT_MIN_CARD_WIDTH
-        if mascot.isHidden() == wanted:
-            mascot.setVisible(wanted)
 
     def tint(self) -> QColor:
         return QColor(self._tint)
@@ -172,10 +142,6 @@ class StatusHeroCard(CardWidget):
         self._wave_t = 0.0
         super().hideEvent(event)
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self._sync_mascot()
-
     def changeEvent(self, event) -> None:  # noqa: N802
         super().changeEvent(event)
         if event.type() == QEvent.Type.WindowStateChange:
@@ -220,4 +186,4 @@ class StatusHeroCard(CardWidget):
         painter.end()
 
 
-__all__ = ["MASCOT_MIN_CARD_WIDTH", "StatusHeroCard", "mascot_mood_for_phase"]
+__all__ = ["StatusHeroCard"]

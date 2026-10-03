@@ -1,14 +1,17 @@
 """Сцена обхода для карточки «Статус работы».
 
-Слева компьютер, справа сайты, посередине стена блокировки, а в стене —
-круглая кнопка питания: это и есть выключатель Zapret.
+Слева талисман-медоед (это Zapret на вашем компьютере), справа сайты,
+посередине стена блокировки, а в стене — круглая кнопка питания: это и есть
+выключатель Zapret.
 
-- Zapret остановлен или упал: пакеты летят к стене, разбиваются о неё и
-  отскакивают. Обратной дороги нет — ответы не приходят.
+- Zapret остановлен: медоед замахивается и кидает пакеты, они разбиваются о
+  стену и отскакивают, медоед вздрагивает. Ответы не приходят.
+- Запуск не удался: то же самое, но медоед грустит и уже ничего не кидает.
 - Идёт запуск или остановка: пакеты доходят до стены и ждут, вокруг кнопки
-  бегает дуга.
+  бегает дуга, медоед суетится.
 - Zapret работает: стена бледнеет, пакеты проходят сквозь кнопку и
-  окрашиваются в её цвет, по нижней дорожке летят ответы.
+  окрашиваются в её цвет, по нижней дорожке летят ответы. Медоед радостно
+  подпрыгивает в момент включения, а потом спокойно дышит и оглядывается.
 
 Кадры идут, только пока сцена видна, окно не свёрнуто и включены «живые
 анимации». В остановленном состоянии это короткий залп и пауза (таймер
@@ -25,13 +28,17 @@ from PyQt6.QtWidgets import QSizePolicy
 
 from ui.animation_policy import are_live_animations_enabled
 from ui.pulsing_dot import PulsingDot
+from ui.widgets.fun.mascot import GESTURE_TOSS, MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD, Mascot
 
 
 SCENE_HEIGHT = 76
-SCENE_WIDTH = 300
-SCENE_MIN_WIDTH = 210
-# Место под значки компьютера и сайтов по краям сцены.
+SCENE_WIDTH = 330
+SCENE_MIN_WIDTH = 240
+MASCOT_SIZE = 40
+# Место под значок сайтов справа; слева стоит талисман.
 ENDPOINT_ROOM = 34
+# Полный вдох и выдох спокойного талисмана, секунды.
+BREATH_PERIOD_S = 3.6
 LANE_GAP = 6
 RAW_COLOR = QColor(150, 156, 168)
 
@@ -58,6 +65,20 @@ SCENE_FRAME_MS = 40
 
 BUSY_PHASES = frozenset({"autostart_pending", "starting", "stopping"})
 KNOWN_PHASES = frozenset({"running", "failed", "stopped"}) | BUSY_PHASES
+# Доля залпа, на которой первый пакет долетает до стены.
+FIRST_IMPACT_PHASE = BLOCKED_FLIGHT * (1.0 - BLOCKED_PACKET_DELAYS[-1])
+
+
+def mascot_mood_for_phase(phase: str, previous: str = "") -> str:
+    """Настроение талисмана по состоянию Zapret."""
+    if phase == "running":
+        # Радуется, когда обход включился на глазах; при первом показе просто сидит.
+        return MOOD_HAPPY if previous and previous != "running" else MOOD_IDLE
+    if phase in BUSY_PHASES:
+        return MOOD_BUSY
+    if phase == "failed":
+        return MOOD_SAD
+    return MOOD_ALARM
 
 
 class BypassScene(PulsingDot):
@@ -77,6 +98,11 @@ class BypassScene(PulsingDot):
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         self._beat.setInterval(SCENE_FRAME_MS)
+
+        # Талисман — участник сцены: это он отправляет пакеты к сайтам.
+        self._mascot = Mascot(self, size=MASCOT_SIZE)
+        self._mascot.move(0, SCENE_HEIGHT // 2 - (self._mascot.height() - 2 - MASCOT_SIZE // 2))
+        self._flinched = False
 
         self._phase = ""
         self._flow_time = 0.0
@@ -138,6 +164,7 @@ class BypassScene(PulsingDot):
             return
         previous = self._phase
         self._phase = phase
+        self._mascot.set_mood(mascot_mood_for_phase(phase, previous))
         self._animate_wall()
         # Встряска — только когда запуск сорвался на глазах, а не при первом показе.
         if phase == "failed" and previous and self.isVisible() and are_live_animations_enabled():
@@ -148,9 +175,13 @@ class BypassScene(PulsingDot):
         self.update()
         self.phaseChanged.emit(phase)
 
+    def mascot(self) -> Mascot:
+        return self._mascot
+
     def gate_center(self) -> QPoint:
         """Центр кнопки в координатах сцены: отсюда по карточке расходится волна."""
-        return QPoint(self.width() // 2, self.height() // 2)
+        left, right, _top, _bottom = self._lanes()
+        return QPoint(round((left + right) / 2), self.height() // 2)
 
     def _is_flowing(self) -> bool:
         return self._phase == "running" or self._phase in BUSY_PHASES
@@ -333,9 +364,15 @@ class BypassScene(PulsingDot):
         return are_live_animations_enabled()
 
     def _start_beat(self) -> None:
-        if self._can_animate() and self._is_flowing():
-            # Поток продолжается с того места, где остановился, без рывка.
-            self._flow_origin = self._flow_time
+        if self._can_animate():
+            if self._is_flowing():
+                # Поток продолжается с того места, где остановился, без рывка.
+                self._flow_origin = self._flow_time
+            else:
+                self._flinched = False
+                if self._phase == "stopped":
+                    # Новый залп: медоед замахивается и кидает пакеты в стену.
+                    self._mascot.react(GESTURE_TOSS)
         super()._start_beat()
 
     def _on_beat_frame(self) -> None:
@@ -347,11 +384,18 @@ class BypassScene(PulsingDot):
             return
         if self._is_flowing():
             self._flow_time = self._flow_origin + self._beat_clock.elapsed() / 1000.0
+            if self._phase == "running":
+                self._mascot.set_breath(math.sin(2 * math.pi * self._flow_time / BREATH_PERIOD_S))
             self.update(self._motion_region())
             return
         phase = self._beat_clock.elapsed() / BLOCKED_BURST_MS
         if phase < 1.0:
             self._pulse_phase = phase
+            if phase >= FIRST_IMPACT_PHASE and not self._flinched:
+                # Первый пакет разбился о стену: медоед вздрагивает.
+                self._flinched = True
+                if self._phase == "stopped":
+                    self._mascot.react(MOOD_ALARM)
             self.update(self._motion_region())
             return
         self._beat.stop()
@@ -364,7 +408,7 @@ class BypassScene(PulsingDot):
         """(левый край дорожек, правый край, y верхней дорожки, y нижней)."""
         center_y = self.height() / 2
         return (
-            float(ENDPOINT_ROOM),
+            float(self._mascot.width() + 2),
             float(self.width() - ENDPOINT_ROOM),
             center_y - LANE_GAP,
             center_y + LANE_GAP,
@@ -390,14 +434,13 @@ class BypassScene(PulsingDot):
             t = self._shake_t
             painter.translate(4.0 * math.sin(6 * math.pi * t) * (1.0 - t), 0.0)
 
-        width = float(self.width())
-        center = QPointF(width / 2, self.height() / 2)
+        center = QPointF(self.gate_center())
         left, right, top, bottom = self._lanes()
         gate = BUTTON_RADIUS + 3.0
         open_t = self._open_t
         color = self._shown_color
 
-        self._paint_endpoints(painter, center, color, open_t)
+        self._paint_globe(painter, center, color, open_t)
 
         track = QColor(RAW_COLOR)
         track.setAlphaF(0.16)
@@ -423,19 +466,11 @@ class BypassScene(PulsingDot):
             self._paint_spinner(painter, center, color)
         painter.end()
 
-    def _paint_endpoints(self, painter: QPainter, center: QPointF, color: QColor, open_t: float) -> None:
+    def _paint_globe(self, painter: QPainter, center: QPointF, color: QColor, open_t: float) -> None:
         pen = QPen(RAW_COLOR)
         pen.setWidthF(1.6)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-
-        # Компьютер: экран и подставка.
-        painter.setPen(pen)
-        x = 5.0
-        painter.drawRoundedRect(QRectF(x, center.y() - 9.0, 20.0, 14.0), 2.5, 2.5)
-        painter.drawLine(QPointF(x + 10.0, center.y() + 5.0), QPointF(x + 10.0, center.y() + 9.0))
-        painter.drawLine(QPointF(x + 5.0, center.y() + 9.0), QPointF(x + 15.0, center.y() + 9.0))
 
         # Сайты: глобус. Когда обход работает, он загорается цветом кнопки.
         globe = QColor(
@@ -585,4 +620,4 @@ class BypassScene(PulsingDot):
         painter.setPen(Qt.PenStyle.NoPen)
 
 
-__all__ = ["BypassScene"]
+__all__ = ["BypassScene", "mascot_mood_for_phase"]

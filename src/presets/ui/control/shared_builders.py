@@ -18,7 +18,6 @@ from ui.pulsing_dot import PulsingDot
 from ui.accessibility import enable_keyboard_click, set_control_accessibility, set_state_text
 from ui.theme import get_themed_qta_icon
 from ui.widgets.bypass_scene import BypassScene
-from ui.widgets.fun.mascot import Mascot
 
 
 ACTION_CARD_BUTTON_WIDTH = 156
@@ -41,11 +40,8 @@ class ModeStatusWidgets:
     close_btn: object
     progress_bar: object
     loading_label: object
-    mascot: object
     uptime_label: object
 
-
-STATUS_MASCOT_SIZE = 44
 
 
 def build_mode_status_section_common(
@@ -86,6 +82,8 @@ def build_mode_status_section_common(
 
     status_title = strong_body_label_cls(tr_fn(checking_key, checking_default))
     status_desc = caption_label_cls(tr_fn(detecting_key, detecting_default))
+    # В узком окне пояснение переносится на вторую строку, а не обрезается.
+    status_desc.setWordWrap(True)
     title_text = str(status_title.text() or "").strip()
     desc_text = str(status_desc.text() or "").strip()
     state_text = f"{title_text}: {desc_text}".strip(": ")
@@ -124,10 +122,7 @@ def build_mode_status_section_common(
     status_text.addWidget(loading_label)
     status_layout.addLayout(status_text, 1)
 
-    # Талисман показывает состояние настроением: спокоен, суетится, грустит.
-    mascot = Mascot(status_card, size=STATUS_MASCOT_SIZE)
-    status_layout.addWidget(mascot, 0, Qt.AlignmentFlag.AlignVCenter)
-    status_card.bind_scene(status_dot, mascot)
+    status_card.bind_scene(status_dot)
 
     close_text = tr_fn("launch.action.close_app", "Закрыть программу")
     close_btn = close_button_cls(FluentIcon.POWER_BUTTON, close_text)
@@ -148,7 +143,6 @@ def build_mode_status_section_common(
         close_btn=close_btn,
         progress_bar=progress_bar,
         loading_label=loading_label,
-        mascot=mascot,
         uptime_label=uptime_label,
     )
 
