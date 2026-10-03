@@ -143,6 +143,21 @@ class QuickActionsTests(unittest.TestCase):
         tile.render(image)
         self.assertFalse(image.isNull())
 
+    def test_icon_is_darker_in_light_theme_and_follows_theme_switch(self) -> None:
+        from qfluentwidgets import Theme, setTheme
+
+        tile = self.widgets.tour_card
+        tile._start_icon()
+        self.addCleanup(setTheme, Theme.DARK)
+
+        setTheme(Theme.DARK)
+        self.assertEqual(tile.shown_icon_color(), QColor("#b39ddb"))
+        setTheme(Theme.LIGHT)
+        light = tile.shown_icon_color()
+        self.assertLess(light.lightness(), QColor("#b39ddb").lightness())
+        tile._apply_icon(force=True)
+        self.assertFalse(tile._icon.pixmap().isNull())
+
     def test_specs_use_mode_texts_for_both_pages(self) -> None:
         for prefix in ("page.winws1_control", "page.winws2_control"):
             specs = {spec.key: spec for spec in quick_action_specs(prefix)}

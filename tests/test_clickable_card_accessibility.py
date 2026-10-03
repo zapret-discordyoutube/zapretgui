@@ -22,7 +22,7 @@ class ClickableCardAccessibilityTests(unittest.TestCase):
     def test_control_summary_clickable_item_works_from_keyboard(self) -> None:
         from presets.ui.control.top_summary_widget import ControlTopSummaryItem
 
-        item = ControlTopSummaryItem(icon_name="fa5s.folder-open", clickable=True)
+        item = ControlTopSummaryItem(icon_name="preset", clickable=True)
         clicks: list[bool] = []
         item.clicked.connect(lambda: clicks.append(True))
         item.set_texts(caption="Текущий preset", value="Default", details="")

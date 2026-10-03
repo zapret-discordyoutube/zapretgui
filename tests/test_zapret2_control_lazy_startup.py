@@ -165,7 +165,7 @@ class ControlPageImmediateStartupTests(unittest.TestCase):
         import ui.widgets.action_tile as action_tile
 
         source = inspect.getsource(action_tile.ActionTile.__init__)
-        self.assertIn("QTimer.singleShot(ACTION_ICON_DELAY_MS, self._apply_icon)", source)
+        self.assertIn("QTimer.singleShot(ACTION_ICON_DELAY_MS, self._start_icon)", source)
         self.assertNotIn("get_cached_qta_pixmap", source)
 
 

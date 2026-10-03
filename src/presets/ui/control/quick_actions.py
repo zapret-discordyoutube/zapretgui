@@ -51,7 +51,7 @@ def quick_action_specs(text_prefix: str) -> tuple[QuickActionSpec, ...]:
     return (
         QuickActionSpec(
             key="tour",
-            icon_name="fa5s.graduation-cap",
+            icon_name="tour",
             icon_color="#b39ddb",
             title=("page.control.onboarding_tour.title", "Как пользоваться программой"),
             content=("page.control.onboarding_tour.desc", "Пошаговая экскурсия: пресеты, профили и стратегии"),
@@ -59,7 +59,7 @@ def quick_action_specs(text_prefix: str) -> tuple[QuickActionSpec, ...]:
         ),
         QuickActionSpec(
             key="test",
-            icon_name="fa5s.wifi",
+            icon_name="connection_test",
             icon_color="#60cdff",
             title=(f"{text_prefix}.button.connection_test", "Тест соединения"),
             content=(f"{text_prefix}.button.connection_test.desc", "Проверить доступность сети и состояние обхода"),
@@ -67,7 +67,7 @@ def quick_action_specs(text_prefix: str) -> tuple[QuickActionSpec, ...]:
         ),
         QuickActionSpec(
             key="internet_cleanup",
-            icon_name="fa5s.network-wired",
+            icon_name="network_reset",
             icon_color="#4cc38a",
             title=("page.control.internet_cleanup.title", "Сбросить сеть Windows"),
             content=(
@@ -78,7 +78,7 @@ def quick_action_specs(text_prefix: str) -> tuple[QuickActionSpec, ...]:
         ),
         QuickActionSpec(
             key="folder",
-            icon_name="fa5s.folder-open",
+            icon_name="folder",
             icon_color="#f5c04d",
             title=(f"{text_prefix}.button.open_folder", "Открыть папку"),
             content=(f"{text_prefix}.button.open_folder.desc", "Перейти в папку программы и служебных файлов"),
@@ -86,7 +86,7 @@ def quick_action_specs(text_prefix: str) -> tuple[QuickActionSpec, ...]:
         ),
         QuickActionSpec(
             key="docs",
-            icon_name="fa5s.book",
+            icon_name="docs",
             icon_color="#8ab4f8",
             title=(f"{text_prefix}.button.documentation", "Документация"),
             content=(f"{text_prefix}.button.documentation.desc", "Открыть справку и описание возможностей"),

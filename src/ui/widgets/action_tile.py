@@ -11,19 +11,22 @@ from PyQt6.QtCore import QEvent, QRectF, Qt, QTimer
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QVBoxLayout
 
-from qfluentwidgets import CaptionLabel, StrongBodyLabel
+from qfluentwidgets import CaptionLabel, StrongBodyLabel, isDarkTheme
 
 from ui.accessibility import set_control_accessibility, set_state_text
+from ui.widgets.line_icons import line_icon_pixmap
 from ui.widgets.motion_icon import MotionIcon
 from ui.widgets.tile_grid import SoftTile
 
 
-ACTION_ICON_SIZE = 20
+ACTION_ICON_SIZE = 22
 ACTION_ICON_BOX = 36
 ACTION_TILE_MARGIN = 14
 # Значок рисуется чуть позже плитки: первая отрисовка страницы не ждёт qtawesome.
 ACTION_ICON_DELAY_MS = 250
 DISABLED_OPACITY = 0.45
+# Насколько темнее значок плитки в светлой теме (процент для QColor.darker).
+LIGHT_THEME_DARKER = 140
 
 
 class ActionTile(SoftTile):
@@ -38,7 +41,7 @@ class ActionTile(SoftTile):
         accessible_name: str = "",
     ):
         super().__init__(parent, clickable=True)
-        self._icon_name = str(icon_name or "fa5s.circle")
+        self._icon_name = str(icon_name or "docs")
         self._icon_color = QColor(str(icon_color or "#60cdff"))
         self._accessible_name = ""
 
@@ -69,7 +72,8 @@ class ActionTile(SoftTile):
         layout.addStretch(1)
 
         self.set_texts(title, content, accessible_name=accessible_name)
-        QTimer.singleShot(ACTION_ICON_DELAY_MS, self._apply_icon)
+        self._theme_refresh = None
+        QTimer.singleShot(ACTION_ICON_DELAY_MS, self._start_icon)
 
     # ---- тексты --------------------------------------------------------
 
@@ -117,12 +121,32 @@ class ActionTile(SoftTile):
         half = ACTION_ICON_BOX / 2
         return QRectF(center.x() - half + 0.5, center.y() - half + 0.5, ACTION_ICON_BOX, ACTION_ICON_BOX)
 
-    def _apply_icon(self) -> None:
-        from ui.theme import get_cached_qta_pixmap
+    def shown_icon_color(self) -> QColor:
+        """Цвет значка на экране: в светлой теме пастельный цвет плитки темнее, иначе он теряется."""
+        if isDarkTheme():
+            return QColor(self._icon_color)
+        return self._icon_color.darker(LIGHT_THEME_DARKER)
 
+    def _apply_icon(self, tokens=None, force: bool = False) -> None:
+        _ = tokens, force
+        # Свой значок из линий (ui.widgets.line_icons) в цвет плитки.
         self._icon.setPixmap(
-            get_cached_qta_pixmap(self._icon_name, color=self._icon_color.name(), size=ACTION_ICON_SIZE)
+            line_icon_pixmap(
+                self._icon_name,
+                color=self.shown_icon_color().name(),
+                size=ACTION_ICON_SIZE,
+                ratio=float(self.devicePixelRatioF() or 1.0),
+            )
         )
+        self.update()
+
+    def _start_icon(self) -> None:
+        # Тема сменилась — значок перерисовывается в подходящий ей оттенок.
+        if self._theme_refresh is None:
+            from ui.theme_refresh import ThemeRefreshBinding
+
+            self._theme_refresh = ThemeRefreshBinding(self, self._apply_icon)
+        self._apply_icon()
 
     def enterEvent(self, event) -> None:  # noqa: N802
         super().enterEvent(event)
@@ -146,7 +170,7 @@ class ActionTile(SoftTile):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.paint_tile_background(painter)
         # Подложка значка: мягкий квадрат его цвета, под мышью становится ярче.
-        box = QColor(self._icon_color)
+        box = self.shown_icon_color()
         box.setAlphaF(0.14 + 0.10 * self.hover_progress())
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(box)
