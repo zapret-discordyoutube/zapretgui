@@ -32,6 +32,7 @@ import random
 from PyQt6.QtCore import QTimer, QVariantAnimation
 from PyQt6.QtGui import QPainter
 
+from ui.frame_clock import frame_clock
 from ui.widgets.fun.logo_badger import BadgerPose, paint_logo_badger
 from ui.widgets.fun.mascot import GESTURE_TOSS, MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_SAD, Mascot
 
@@ -103,6 +104,11 @@ class DrawnBadger(Mascot):
         if not self._can_animate():
             return
         if self._blink_anim.state() == QVariantAnimation.State.Running:
+            return
+        if frame_clock().is_paused():
+            # Экран никто не видит (сеанс заблокирован, дисплей выключен):
+            # не моргаем, но следующее моргание назначаем.
+            self._schedule_blink()
             return
         self._blink_left = 1 if random.random() < DOUBLE_BLINK_CHANCE else 0
         self._blink_anim.start()

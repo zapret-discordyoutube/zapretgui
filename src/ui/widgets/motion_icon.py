@@ -18,6 +18,7 @@ from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPixmap, QRadialGradient
 from PyQt6.QtWidgets import QWidget
 
 from ui.animation_policy import are_live_animations_enabled
+from ui.frame_clock import frame_clock
 
 
 BOUNCE_DURATION_MS = 560
@@ -143,7 +144,10 @@ class MotionIcon(QWidget):
             self._twinkle_timer.start(self._twinkle_interval_ms)
 
     def _on_twinkle_timer(self) -> None:
-        if not self._anim.state() == QVariantAnimation.State.Running:
+        # Пока экран никто не видит (сеанс заблокирован, дисплей выключен),
+        # поблёскивание пропускаем, но следующее назначаем: после возвращения
+        # оно продолжится само.
+        if not self._anim.state() == QVariantAnimation.State.Running and not frame_clock().is_paused():
             self.twinkle()
         self._schedule_twinkle()
 

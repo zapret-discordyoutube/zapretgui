@@ -18,6 +18,7 @@ from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QObject, QTimer
 
 from ui.animation_policy import are_live_animations_enabled
+from ui.frame_clock import frame_clock
 
 
 LOOP_STEP_MS = 2600
@@ -88,6 +89,11 @@ class IconLoopConductor(QObject):
         if not self._host_can_animate():
             # Окно свёрнуто или анимации выключены: о развороте окна родитель
             # не узнаёт, поэтому просто пропускаем ход, таймер редкий.
+            return
+        if frame_clock().is_paused():
+            # Сеанс заблокирован или дисплей выключен: жест никто не увидит.
+            # Ход пропускаем, а таймер идёт дальше — после возвращения жесты
+            # продолжатся сами.
             return
         count = len(self._icons)
         for offset in range(count):

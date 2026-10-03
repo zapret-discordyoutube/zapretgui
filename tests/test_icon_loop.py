@@ -97,6 +97,38 @@ class IconLoopConductorTests(unittest.TestCase):
         # Таймер редкий и ждёт, когда анимации снова включат.
         self.assertTrue(self.conductor.is_running())
 
+    def test_no_gesture_while_the_screen_is_not_seen(self) -> None:
+        # Сеанс заблокирован или дисплей выключен: жест никто не увидит.
+        from ui.frame_clock import frame_clock
+
+        self.host.show()
+        self.addCleanup(frame_clock().resume_all)
+        frame_clock().set_paused("display_off", True)
+        self.conductor._step()
+        self.assertTrue(all(icon.gesture() == "" for icon in self.icons))
+        # Таймер идёт дальше: после возвращения жесты продолжаются сами.
+        self.assertTrue(self.conductor.is_running())
+
+        frame_clock().set_paused("display_off", False)
+        self.conductor._step()
+        self.assertEqual([icon.gesture() for icon in self.icons].count(GESTURE_LOOP), 1)
+
+    def test_twinkle_is_skipped_but_rescheduled_while_the_screen_is_not_seen(self) -> None:
+        from ui.frame_clock import frame_clock
+
+        self.host.show()
+        icon = self.icons[0]
+        icon.set_idle_twinkle(9000)
+        self.addCleanup(frame_clock().resume_all)
+        frame_clock().set_paused("session_locked", True)
+        icon._on_twinkle_timer()
+        self.assertEqual(icon.gesture(), "")
+        self.assertTrue(icon._twinkle_timer.isActive())
+
+        frame_clock().set_paused("session_locked", False)
+        icon._on_twinkle_timer()
+        self.assertNotEqual(icon.gesture(), "")
+
     def test_icon_without_own_gesture_is_skipped(self) -> None:
         star = MotionIcon(self.host, size=24)
         star.set_line_icon("star", color="#f5c542", size=24)

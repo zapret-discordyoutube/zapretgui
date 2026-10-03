@@ -62,6 +62,21 @@ class DrawnBadgerTests(unittest.TestCase):
         self.assertEqual(badger.blink_progress(), 0.0)
         self.assertEqual(badger.eye_openness(), 1.0)
 
+    def test_no_blink_while_the_screen_is_not_seen_but_next_one_is_scheduled(self) -> None:
+        from ui.frame_clock import frame_clock
+
+        badger, _host = self._badger()
+        self.addCleanup(frame_clock().resume_all)
+        frame_clock().set_paused("display_off", True)
+        badger._blink_timer.stop()
+        badger.blink()
+        self.assertNotEqual(badger._blink_anim.state(), badger._blink_anim.State.Running)
+        self.assertTrue(badger.is_blink_scheduled())
+
+        frame_clock().set_paused("display_off", False)
+        badger.blink()
+        self.assertEqual(badger._blink_anim.state(), badger._blink_anim.State.Running)
+
     def test_no_blinking_without_live_animations(self) -> None:
         self._enabled = False
         badger, _host = self._badger()
