@@ -21,6 +21,7 @@ from ui.widgets.spinning_logo import SpinningLogo
 from ui.window_preset_file_drop import WindowPresetFileDropFilter
 from ui.windows_drag_hover_detector import WindowsDragHoverDetector
 from ui.windows_file_drop import enable_windows_file_drop, use_qt_file_drop
+from ui.windows_screen_presence import register_screen_presence_notifications
 
 
 # Логотип рисуется на 18 px, как стандартный значок qfluentwidgets; коробка
@@ -136,6 +137,9 @@ class ZapretFluentWindow(FluentWindow):
     def _register_windows_file_drop(self) -> None:
         """Привязывает WM_DROPFILES к текущему системному HWND окна."""
         self._windows_file_drop_enabled = enable_windows_file_drop(self)
+        # К тому же HWND привязаны уведомления «сеанс заблокирован» и «дисплей
+        # выключен»: по ним анимации перестают рисовать кадры в пустоту.
+        register_screen_presence_notifications(self)
 
     def event(self, event):
         result = super().event(event)

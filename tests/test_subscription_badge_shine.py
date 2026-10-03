@@ -35,8 +35,13 @@ class SubscriptionBadgeShineTests(unittest.TestCase):
 
         self.badge.play_shine()
         self.assertTrue(self.badge.is_shining())
-        self.badge._shine.setCurrentTime(self.badge._shine.duration())
+        # Кадр на общем такте после конца вспышки завершает её.
+        with mock.patch.object(
+            self.badge._shine, "elapsed_ms", return_value=badge_module.PREMIUM_SHINE_DURATION_MS
+        ):
+            self.badge._on_shine_frame()
         self.assertFalse(self.badge.is_shining())
+        self.assertEqual(self.badge._shine_t, 0.0)
         # После вспышки ждёт следующую только одиночный таймер.
         self.assertTrue(self.badge._shine_timer.isActive())
         self.assertEqual(self.badge._shine_timer.interval(), badge_module.PREMIUM_SHINE_INTERVAL_MS)

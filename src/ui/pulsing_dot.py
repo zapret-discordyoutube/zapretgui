@@ -15,6 +15,7 @@ from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QWidget
 
 from ui.animation_policy import are_live_animations_enabled
+from ui.frame_clock import frame_clock
 
 
 # Один «удар сердца»: двойной толчок точки (тук-тук) и расходящееся кольцо.
@@ -64,9 +65,9 @@ class PulsingDot(QWidget):
         self.setFixedSize(max(12, int(size)), max(12, int(size)))
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        self._beat = QTimer(self)
-        self._beat.setInterval(BEAT_FRAME_MS)
-        self._beat.timeout.connect(self._on_beat_frame)
+        # Кадры удара идут от общего такта приложения: перерисовка точки
+        # сливается с остальными анимациями окна в одну отправку на экран.
+        self._beat = frame_clock().subscribe(self._on_beat_frame, interval_ms=BEAT_FRAME_MS, owner=self)
         self._beat_clock = QElapsedTimer()
 
         self._rest_timer = QTimer(self)

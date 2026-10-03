@@ -11,7 +11,7 @@ from collections.abc import Callable
 
 import math
 
-from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, QVariantAnimation
+from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QRadialGradient
 from PyQt6.QtWidgets import QSizePolicy
 from qfluentwidgets import TransparentPushButton, setCustomStyleSheet
@@ -21,6 +21,7 @@ from donater.premium_display import TIER_UNKNOWN, PremiumDisplay, format_days_le
 from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import set_tooltip
+from ui.frame_clock import BASE_FRAME_MS, frame_clock
 from ui.theme_semantic import get_semantic_palette
 from ui.title_badge_paint import badge_qss, badge_shape, current_theme_name, paint_badge_body
 from ui.widgets.star_glyph import paint_star
@@ -112,14 +113,10 @@ class SubscriptionTitleBadge(TransparentPushButton):
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         self._shine_t = 0.0
-        # QVariantAnimation, а не QPropertyAnimation: при выключенных
-        # анимациях WinUI общий fallback подменяет QPropertyAnimation.start.
-        self._shine = QVariantAnimation(self)
-        self._shine.setStartValue(0.0)
-        self._shine.setEndValue(1.0)
-        self._shine.setDuration(PREMIUM_SHINE_DURATION_MS)
-        self._shine.valueChanged.connect(self._on_shine_value)
-        self._shine.finished.connect(self._on_shine_finished)
+        # Блик быстрый (полоса пробегает значок за 1,6 с), поэтому частота
+        # прежняя, 60 кадров. Но кадры берёт у общего такта: они совпадают с
+        # кадрами соседнего значка «Работает» и не дают отдельных перерисовок окна.
+        self._shine = frame_clock().subscribe(self._on_shine_frame, interval_ms=BASE_FRAME_MS, owner=self)
         self._shine_timer = QTimer(self)
         self._shine_timer.setSingleShot(True)
         self._shine_timer.timeout.connect(self.play_shine)
@@ -182,16 +179,19 @@ class SubscriptionTitleBadge(TransparentPushButton):
         if not self._can_shine():
             return
         self._shine.stop()
+        self._shine_t = 0.0
         self._shine.start()
 
     def is_shining(self) -> bool:
-        return self._shine.state() == QVariantAnimation.State.Running
+        return self._shine.isActive()
 
-    def _on_shine_value(self, value) -> None:
-        try:
-            self._shine_t = float(value)
-        except (TypeError, ValueError):
+    def _on_shine_frame(self) -> None:
+        progress = self._shine.elapsed_ms() / PREMIUM_SHINE_DURATION_MS
+        if progress >= 1.0:
+            self._shine.stop()
+            self._on_shine_finished()
             return
+        self._shine_t = progress
         self.update()
 
     def _on_shine_finished(self) -> None:

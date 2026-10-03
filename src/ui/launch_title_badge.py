@@ -12,7 +12,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QEvent, QPointF, Qt, QVariantAnimation
+from PyQt6.QtCore import QEvent, QPointF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import QSizePolicy
 from qfluentwidgets import TransparentPushButton, setCustomStyleSheet
@@ -21,9 +21,11 @@ from app.ui_texts import tr as tr_catalog
 from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import set_tooltip
+from ui.frame_clock import frame_clock
 from ui.launch_control import BUSY_LAUNCH_PHASES, mode_label_for_launch_method, normalize_launch_phase, phase_color
+from ui.theme import get_theme_tokens, to_qcolor
 from ui.theme_semantic import get_semantic_palette
-from ui.title_badge_paint import badge_qss, badge_shape, current_theme_name, paint_badge_body
+from ui.title_badge_paint import badge_qss, badge_shape, current_theme_name
 
 
 LAUNCH_TITLE_BADGE_OBJECT_NAME = "launchTitleBadge"
@@ -36,6 +38,14 @@ BUSY_BREATH_MS = 1200
 RUNNING_PULSE_MS = 1800
 # Кольцо дорастает до 10 px: целиком помещается в значок высотой 22 px.
 RUNNING_RING_GROWTH = 5.5
+# Кадры значка идут от общего такта (ui.frame_clock) с той же частотой, что у
+# точки статуса на главной: 30 в секунду. За кадр кольцо сдвигается не больше
+# чем на 0,2 px, его прозрачность меняется примерно на 6/255, свечение
+# подложки — на 3/255. Раньше значок рисовался своим таймером 62 раза в
+# секунду, отдельно от остальных анимаций, и при работающем Zapret был главной
+# нагрузкой программы в покое: каждый кадр — перерисовка заголовка и отправка
+# окна на экран.
+BADGE_FRAME_MS = 33
 STOPPED_DOT_COLOR = "#9aa0a6"
 
 
@@ -103,22 +113,16 @@ class LaunchTitleBadge(TransparentPushButton):
         self.setFixedHeight(22)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
+        # Обе анимации бесконечные и считают фазу по времени, а кадры берут
+        # у общего такта: их перерисовка сливается с остальными анимациями окна.
+        clock = frame_clock()
         self._breath_t = 0.0
-        # QVariantAnimation, а не QPropertyAnimation: при выключенных
-        # анимациях общий fallback подменяет QPropertyAnimation.start.
-        self._breath = QVariantAnimation(self)
-        self._breath.setStartValue(0.0)
-        self._breath.setEndValue(1.0)
-        self._breath.setDuration(BUSY_BREATH_MS)
-        self._breath.setLoopCount(-1)
-        self._breath.valueChanged.connect(self._on_breath_value)
+        self._breath = clock.subscribe(self._on_breath_frame, interval_ms=BADGE_FRAME_MS, owner=self)
         self._pulse_t = 0.0
-        self._pulse = QVariantAnimation(self)
-        self._pulse.setStartValue(0.0)
-        self._pulse.setEndValue(1.0)
-        self._pulse.setDuration(RUNNING_PULSE_MS)
-        self._pulse.setLoopCount(-1)
-        self._pulse.valueChanged.connect(self._on_pulse_value)
+        self._pulse = clock.subscribe(self._on_pulse_frame, interval_ms=BADGE_FRAME_MS, owner=self)
+        # Цвета значка для текущей фазы и темы: считаются один раз, а не на каждый кадр.
+        self._paint_colors_key: tuple | None = None
+        self._paint_colors: tuple[QColor, QColor, QColor] | None = None
         self.hide()
 
     def phase(self) -> str:
@@ -180,36 +184,30 @@ class LaunchTitleBadge(TransparentPushButton):
 
     def _sync_breath(self) -> None:
         if self._can_breathe():
-            if self._breath.state() != QVariantAnimation.State.Running:
+            if not self._breath.isActive():
                 self._breath.start()
         else:
             self._breath.stop()
             self._breath_t = 0.0
         if self._can_pulse():
-            if self._pulse.state() != QVariantAnimation.State.Running:
+            if not self._pulse.isActive():
                 self._pulse.start()
         else:
             self._pulse.stop()
             self._pulse_t = 0.0
 
     def is_pulsing(self) -> bool:
-        return self._pulse.state() == QVariantAnimation.State.Running
+        return self._pulse.isActive()
 
-    def _on_pulse_value(self, value) -> None:
-        try:
-            self._pulse_t = float(value)
-        except (TypeError, ValueError):
-            return
+    def _on_pulse_frame(self) -> None:
+        self._pulse_t = (self._pulse.elapsed_ms() % RUNNING_PULSE_MS) / RUNNING_PULSE_MS
         self.update()
 
     def is_breathing(self) -> bool:
-        return self._breath.state() == QVariantAnimation.State.Running
+        return self._breath.isActive()
 
-    def _on_breath_value(self, value) -> None:
-        try:
-            self._breath_t = float(value)
-        except (TypeError, ValueError):
-            return
+    def _on_breath_frame(self) -> None:
+        self._breath_t = (self._breath.elapsed_ms() % BUSY_BREATH_MS) / BUSY_BREATH_MS
         self.update()
 
     def showEvent(self, event) -> None:  # noqa: N802
@@ -226,17 +224,36 @@ class LaunchTitleBadge(TransparentPushButton):
         if event.type() == QEvent.Type.WindowStateChange:
             self._sync_breath()
 
+    def _colors_for_paint(self) -> tuple[QColor, QColor, QColor]:
+        """Фон, фон при наведении и цвет точки для текущей фазы и темы."""
+        theme_name = current_theme_name()
+        # Палитра темы — один и тот же объект, пока тема и акцент не менялись.
+        key = (self._phase, theme_name, id(get_theme_tokens(theme_name)))
+        if key != self._paint_colors_key or self._paint_colors is None:
+            _fg, background, hover = _badge_colors(phase=self._phase, theme_name=theme_name)
+            self._paint_colors = (
+                to_qcolor(background),
+                to_qcolor(hover),
+                QColor(phase_color(self._phase) or STOPPED_DOT_COLOR),
+            )
+            self._paint_colors_key = key
+        return self._paint_colors
+
     def paintEvent(self, event) -> None:  # noqa: N802
-        _fg, background, hover = _badge_colors(phase=self._phase, theme_name=current_theme_name())
+        background, hover, color = self._colors_for_paint()
+        shape = badge_shape(self)
         # Фон со сглаженными углами — до текста кнопки.
-        paint_badge_body(self, background=background, hover_background=hover)
+        hovered = bool(getattr(self, "isHover", False)) and not bool(getattr(self, "isPressed", False))
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillPath(shape, hover if hovered else background)
+        painter.end()
         super().paintEvent(event)
         if not self._phase:
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        color = QColor(phase_color(self._phase) or STOPPED_DOT_COLOR)
         center = QPointF(BADGE_DOT_LEFT, self.height() / 2)
 
         if self.is_pulsing():
@@ -244,7 +261,6 @@ class LaunchTitleBadge(TransparentPushButton):
             # Подложка в такт мягко светлеет и гаснет.
             glow = QColor(color)
             glow.setAlphaF(0.2 * math.sin(math.pi * p))
-            shape = badge_shape(self)
             painter.fillPath(shape, glow)
             painter.save()
             painter.setClipPath(shape)

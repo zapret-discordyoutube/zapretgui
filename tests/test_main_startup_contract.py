@@ -3231,18 +3231,52 @@ class WindowLifecycleEarlyEventTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.calls: list[str] = []
 
-        window = Window()
-        message = object()
+        from ui.windows_file_drop import WM_DROPFILES
 
-        with patch(
-            "main.window_lifecycle.handle_native_preset_file_drop",
-            return_value=True,
-        ) as handle_drop:
+        window = Window()
+        msg = wintypes.MSG()
+        msg.message = WM_DROPFILES
+        message = int(addressof(msg))
+
+        with (
+            patch(
+                "main.window_lifecycle.handle_native_preset_file_drop",
+                return_value=True,
+            ) as handle_drop,
+            patch("main.window_native_commands.sys.platform", "win32"),
+        ):
             result = window.nativeEvent(b"windows_generic_MSG", message)
 
         self.assertEqual(result, (True, 0))
         handle_drop.assert_called_once_with(window, message)
         self.assertEqual(window.calls, [])
+
+    def test_ordinary_native_message_skips_file_drop_parsing(self) -> None:
+        # nativeEvent получает каждое сообщение Windows для окна (движение
+        # мыши, перерисовка, таймеры): разбор брошенных файлов — только для WM_DROPFILES.
+        from main.window_lifecycle import WindowLifecycleMixin
+
+        WM_MOUSEMOVE = 0x0200
+
+        class Window(WindowLifecycleMixin, _BaseWindowEvents):
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+        window = Window()
+        msg = wintypes.MSG()
+        msg.message = WM_MOUSEMOVE
+
+        with (
+            patch("main.window_lifecycle.handle_native_preset_file_drop") as handle_drop,
+            patch("main.window_lifecycle.handle_native_minimize_command") as handle_minimize,
+            patch("main.window_native_commands.sys.platform", "win32"),
+        ):
+            result = window.nativeEvent(b"windows_generic_MSG", int(addressof(msg)))
+
+        handle_drop.assert_not_called()
+        handle_minimize.assert_not_called()
+        self.assertEqual(window.calls, ["base_native"])
+        self.assertEqual(result, (False, 123))
 
     def test_native_minimize_command_uses_normal_window_flow_when_mode_is_normal(self) -> None:
         from main.window_native_commands import SC_MINIMIZE, WM_SYSCOMMAND

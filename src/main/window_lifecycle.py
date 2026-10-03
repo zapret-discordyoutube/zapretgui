@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QWidget
 from log.log import log
 
 from main.window_native_commands import (
+    WM_SYSCOMMAND,
     handle_minimize_request,
     handle_native_minimize_command,
 )
@@ -13,7 +14,14 @@ from main.runtime_state import (
     log_startup_metric as emit_startup_metric,
     startup_elapsed_ms,
 )
+from ui.frame_clock import frame_clock
 from ui.window_preset_file_drop import handle_native_preset_file_drop
+from ui.windows_file_drop import WM_DROPFILES
+from ui.windows_screen_presence import (
+    SCREEN_PRESENCE_MESSAGES,
+    handle_native_screen_presence,
+    native_message_id,
+)
 
 
 class _FirstPaintProbe(QObject):
@@ -123,14 +131,21 @@ class WindowLifecycleMixin:
         return bool(provider())
 
     def nativeEvent(self, event_type, message):  # noqa: N802 (Qt override)
-        if handle_native_preset_file_drop(self, message):
-            return (True, 0)
-        if handle_native_minimize_command(
-            self,
-            message,
-            minimize_to_tray_enabled=self._minimize_to_tray_enabled,
-        ):
-            return (True, 0)
+        # Сюда приходит каждое сообщение Windows для окна, поэтому структуру
+        # сообщения разбираем один раз и дальше идём только по своим номерам.
+        message_id = native_message_id(message)
+        if message_id == WM_DROPFILES:
+            if handle_native_preset_file_drop(self, message):
+                return (True, 0)
+        elif message_id == WM_SYSCOMMAND:
+            if handle_native_minimize_command(
+                self,
+                message,
+                minimize_to_tray_enabled=self._minimize_to_tray_enabled,
+            ):
+                return (True, 0)
+        elif message_id in SCREEN_PRESENCE_MESSAGES:
+            handle_native_screen_presence(message)
         return super().nativeEvent(event_type, message)
 
     def showMinimized(self) -> None:  # noqa: N802 (Qt override)
@@ -148,6 +163,10 @@ class WindowLifecycleMixin:
             try:
                 if not self.isActiveWindow():
                     self.release_input_interaction_states()
+                else:
+                    # Окно активировали — экран точно видят: снимаем паузу
+                    # анимаций, даже если уведомление Windows потерялось.
+                    frame_clock().resume_all()
                 self._sync_holiday_animation_activity()
             except Exception as e:
                 log(f"Не удалось сбросить состояние ввода при смене активности окна: {e}", "DEBUG")
