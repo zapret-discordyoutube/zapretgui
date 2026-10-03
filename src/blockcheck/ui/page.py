@@ -126,6 +126,7 @@ class BlockcheckPage(BasePage):
         blockcheck_feature,
         dns_feature,
         create_strategy_scan_worker,
+        create_geo_sites_worker=None,
         open_dns_settings=None,
     ):
         super().__init__(
@@ -143,6 +144,7 @@ class BlockcheckPage(BasePage):
         self._blockcheck = blockcheck_feature
         self._dns = dns_feature
         self._create_strategy_scan_worker = create_strategy_scan_worker
+        self._create_geo_sites_worker = create_geo_sites_worker
         self._open_dns_settings = open_dns_settings
         self._last_report: dict | None = None
         self._report_lines: list[str] = []
@@ -457,6 +459,9 @@ class BlockcheckPage(BasePage):
                 embedded=True,
                 blockcheck_feature=self._blockcheck,
                 create_strategy_scan_worker=self._create_strategy_scan_worker,
+                create_geo_sites_worker=self._create_geo_sites_worker,
+                open_hosts_editor=lambda: self._on_problem_action("hosts", ""),
+                open_dns_settings=lambda: self._on_problem_action("dns", ""),
             )
             self._strategy_tab_page.setVisible(False)
             self.add_widget(self._strategy_tab_page)
@@ -716,7 +721,7 @@ class BlockcheckPage(BasePage):
 
     def _on_problem_action(self, action: str, target: str) -> None:
         """Кнопки у проблем в итоге: подбор стратегии с нужной целью, запуск
-        Zapret или настройка DNS."""
+        Zapret, настройка DNS или редактор hosts."""
         if action == "start_zapret":
             from ui.workflows.mode import show_active_mode_control_page
 
@@ -727,6 +732,12 @@ class BlockcheckPage(BasePage):
             from ui.window_adapter import show_page
 
             show_page(self.window(), PageName.NETWORK)
+            return
+        if action == "hosts":
+            from app.page_names import PageName
+            from ui.window_adapter import show_page
+
+            show_page(self.window(), PageName.HOSTS)
             return
         if action not in ("strategy", "strategy_voice"):
             return

@@ -45,6 +45,8 @@ from diagnostics.tls_probe import (
 )
 from diagnostics.verdict import (
     ADVICE_DNS as _ADVICE_DNS,
+    ADVICE_VIA_ZAPRET as _ADVICE_VIA_ZAPRET,
+    advice_geo_site as _advice_geo_site,
     DnsJudgement,
     DnsState,
     Level,
@@ -803,6 +805,10 @@ _LEVEL_ORDER = {Level.FAIL: 0, Level.WARN: 1, Level.UNKNOWN: 2, Level.OK: 3}
 _BYPASSABLE = (ReachState.DPI, ReachState.FREEZE)
 
 
+def _no_geo_service(_host: str) -> str:
+    return ""
+
+
 def _problem(level: Level, text: str, advice=(), *, action: str = "", target: str = "") -> dict:
     return {"level": level.value, "text": text, "advice": list(advice), "action": action, "target": target}
 
@@ -815,6 +821,7 @@ def _collect_problems(
     voice,
     freeze,
     zapret_running: bool | None,
+    geo_service_for: Callable[[str], str] | None = None,
 ) -> tuple[list[dict], list[str], list[str]]:
     """Итог для экрана: проблемы по важности, открывающиеся сервисы, подменённые DNS."""
     problems: list[dict] = []
@@ -856,6 +863,18 @@ def _collect_problems(
             if bypassable is not None:
                 action = "strategy" if zapret_running else "start_zapret"
             target = (bypassable or broken[0]).host
+            # Гео-сайт сам ограничивает доступ из России: стратегия его не
+            # чинит, и совет «подберите стратегию» увёл бы пользователя не туда.
+            geo = next(
+                ((probe.host, name) for probe in broken if (name := (geo_service_for or _no_geo_service)(probe.host))),
+                None,
+            )
+            if geo is not None:
+                target, geo_service = geo
+                advice = (_advice_geo_site(geo_service),) + tuple(
+                    item for item in advice if item not in _ADVICE_VIA_ZAPRET
+                )
+                action = "hosts"
             problems.append(_problem(verdict.level, verdict.headline, advice, action=action, target=target))
         elif verdict.level == Level.UNKNOWN:
             if not offline:
@@ -906,8 +925,13 @@ def run_blockcheck(
     user_domains=(),
     emit: Emit,
     should_stop: ShouldStop | None = None,
+    geo_service_for: Callable[[str], str] | None = None,
 ) -> dict:
-    """Проверка BlockCheck. Печатает отчёт через ``emit`` и возвращает итог для экрана."""
+    """Проверка BlockCheck. Печатает отчёт через ``emit`` и возвращает итог для экрана.
+
+    ``geo_service_for`` — поиск «адрес → сервис» по гео-сайтам каталога hosts:
+    таким сайтам советуется hosts или DNS, а не подбор стратегии.
+    """
     from diagnostics.freeze_check import check_freeze, summarize_freeze
     from diagnostics.voice_check import check_voice, summarize_voice
 
@@ -983,6 +1007,7 @@ def run_blockcheck(
             voice=voice,
             freeze=freeze,
             zapret_running=zapret_running,
+            geo_service_for=geo_service_for,
         )
 
         emit("")

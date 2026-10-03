@@ -197,6 +197,7 @@ def build_app_features(*, deps: AppFeatureAssemblyDeps, paths: Any, state: Any) 
     runtime_feature.configure_installation_repair(updater_feature=updater_feature)
 
     t_secondary = _time.perf_counter()
+    hosts_feature = build_hosts_feature()
     features = AppFeatures(
         appearance=build_appearance_feature(),
         runtime=runtime_feature,
@@ -206,10 +207,11 @@ def build_app_features(*, deps: AppFeatureAssemblyDeps, paths: Any, state: Any) 
         blockcheck=BlockcheckFeature(
             presets_feature=preset_profile.presets,
             profile_feature=preset_profile.profile,
+            load_geo_sites=hosts_feature.load_geo_sites,
         ),
         dns=build_dns_feature(),
         fakes=build_fakes_feature(paths),
-        hosts=build_hosts_feature(),
+        hosts=hosts_feature,
         lists=build_lists_feature(),
         logs=build_logs_feature(),
         dpi_settings=build_dpi_settings_feature(),

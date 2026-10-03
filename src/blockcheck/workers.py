@@ -92,6 +92,27 @@ class BlockcheckUserDomainActionWorker(QThread):
         self.completed.emit(self._request_id, self._action, result, context)
 
 
+class GeoSitesWorker(QThread):
+    """Читает гео-сайты из каталога hosts вне UI-потока."""
+
+    completed = pyqtSignal(int, object)
+    failed = pyqtSignal(int, str)
+
+    def __init__(self, request_id: int, *, load_geo_sites: Callable[[], Any], parent=None):
+        super().__init__(parent)
+        self._request_id = int(request_id)
+        self._load_geo_sites = load_geo_sites
+
+    def run(self) -> None:
+        try:
+            geo_sites = self._load_geo_sites()
+        except Exception as exc:
+            log(f"GeoSitesWorker: не удалось прочитать гео-сайты из каталога hosts: {exc}", "WARNING")
+            self.failed.emit(self._request_id, str(exc))
+            return
+        self.completed.emit(self._request_id, geo_sites)
+
+
 class StrategyScanQuickTargetsWorker(QThread):
     completed = pyqtSignal(int, object)
     failed = pyqtSignal(int, str)

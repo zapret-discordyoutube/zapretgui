@@ -17,7 +17,13 @@ from PyQt6.QtWidgets import QHBoxLayout
 from qfluentwidgets import CaptionLabel, FluentIcon
 
 from blockcheck.strategy_scan_page_plans import MODE_ITEMS, PROTOCOL_ITEMS, PROTOCOL_TILE_DETAILS
-from blockcheck.ui.strategy_scan_widgets import ChoiceRadios, ChoiceTiles, ScanProgressPanel, StrategyResultsView
+from blockcheck.ui.strategy_scan_widgets import (
+    ChoiceRadios,
+    ChoiceTiles,
+    GeoSiteNotice,
+    ScanProgressPanel,
+    StrategyResultsView,
+)
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import SettingsCard, set_tooltip
 
@@ -35,6 +41,7 @@ class StrategyScanControlWidgets:
     target_label: object
     target_input: object
     quick_domain_btn: object
+    geo_notice: object
     udp_scope_hint_label: object
     start_btn: object
     stop_btn: object
@@ -139,6 +146,15 @@ def build_strategy_scan_control_section(
     target_row.addStretch(0)
     control_card.add_layout(target_row)
 
+    # Выбран гео-сайт: стратегия его не чинит, нужен hosts или DNS.
+    geo_notice = GeoSiteNotice()
+    geo_notice.set_button_texts(
+        tr_fn("page.strategy_scan.geo_site.open_hosts", "Открыть «Редактор hosts»"),
+        tr_fn("page.strategy_scan.geo_site.open_dns", "Настройка DNS"),
+    )
+    control_card.add_widget(geo_notice)
+    geo_notice.setVisible(False)
+
     udp_scope_hint_label = CaptionLabel("")
     udp_scope_hint_label.setWordWrap(True)
     control_card.add_widget(udp_scope_hint_label)
@@ -193,6 +209,7 @@ def build_strategy_scan_control_section(
         target_label=target_label,
         target_input=target_input,
         quick_domain_btn=quick_domain_btn,
+        geo_notice=geo_notice,
         udp_scope_hint_label=udp_scope_hint_label,
         start_btn=start_btn,
         stop_btn=stop_btn,

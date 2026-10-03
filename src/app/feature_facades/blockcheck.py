@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass(frozen=True, slots=True)
 class BlockcheckFeature:
     presets_feature: Any
     profile_feature: Any
+    # Гео-сайты из каталога hosts (сервисы, которые сами закрыты для России):
+    # им помогает hosts или DNS, а не стратегия. Читает файл — звать в фоне.
+    load_geo_sites: Callable[[], Any] | None = None
 
     @staticmethod
     def _commands():
@@ -28,6 +31,7 @@ class BlockcheckFeature:
             start_run_log=self.start_blockcheck_run_log,
             append_run_log=self.append_blockcheck_run_log,
             close_run_log=self.close_blockcheck_run_log,
+            load_geo_sites=self.load_geo_sites,
             **kwargs,
         )
 
@@ -92,6 +96,11 @@ class BlockcheckFeature:
             build_quick_target_menu_plan=self.build_quick_target_menu_plan,
             **kwargs,
         )
+
+    def create_geo_sites_worker(self, request_id: int, *, parent=None):
+        from blockcheck.workers import GeoSitesWorker
+
+        return GeoSitesWorker(request_id, load_geo_sites=self.load_geo_sites, parent=parent)
 
     def create_strategy_scan_finalize_worker(self, request_id: int, **kwargs):
         from blockcheck.workers import StrategyScanFinalizeWorker

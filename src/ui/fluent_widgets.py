@@ -493,6 +493,8 @@ class SemanticNotice(QWidget):
         super().__init__(parent)
         self._tone = str(tone or "warning").strip().lower() or "warning"
         self._text = str(text or "")
+        # Без этого обычный QWidget не рисует заливку и рамку из своего стиля.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._icon_label = QLabel(self)
         self._text_label = CaptionLabel(self)
         self._text_label.setWordWrap(True)
@@ -536,7 +538,8 @@ class SemanticNotice(QWidget):
 
             palette = get_semantic_palette(getattr(tokens, "theme_name", None))
             if self._tone == "warning":
-                fg = palette.warning_soft
+                # warning_text читается и на светлой теме, яркий оранжевый там бледный.
+                fg = palette.warning_text
                 bg = palette.warning_soft_bg
                 icon_color = palette.warning
                 border = "rgba(255, 152, 0, 0.30)"

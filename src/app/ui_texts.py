@@ -4927,6 +4927,30 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "ru": "Отмена",
         "en": "Cancel",
     },
+    "page.strategy_scan.geo_site.notice": {
+        "ru": "{service} сам ограничивает доступ из России — стратегия Zapret его не чинит, подбор ничего не найдёт. Включите для него DNS-профиль в «Редакторе hosts» или смените DNS в «Настройке DNS».",
+        "en": "{service} restricts access from Russia on its own side — a Zapret strategy cannot fix it and the search will find nothing. Turn on a DNS profile for it in the Hosts editor or change DNS in DNS settings.",
+    },
+    "page.strategy_scan.geo_site.open_hosts": {
+        "ru": "Открыть «Редактор hosts»",
+        "en": "Open the Hosts editor",
+    },
+    "page.strategy_scan.geo_site.open_dns": {
+        "ru": "Настройка DNS",
+        "en": "DNS settings",
+    },
+    "page.strategy_scan.geo_site.question_title": {
+        "ru": "Стратегия здесь не поможет",
+        "en": "A strategy will not help here",
+    },
+    "page.strategy_scan.geo_site.question_text": {
+        "ru": "{target} — это {service}. Сервис сам ограничивает доступ из России: провайдер тут ни при чём, поэтому ни одна стратегия Zapret его не откроет, а подбор зря займёт время.\n\nЧто помогает: DNS-профиль для этого сервиса в «Редакторе hosts» или другой DNS в «Настройке DNS».",
+        "en": "{target} belongs to {service}. The service restricts access from Russia on its own side: your provider is not the cause, so no Zapret strategy will open it and the search would only waste time.\n\nWhat helps: a DNS profile for this service in the Hosts editor or another DNS in DNS settings.",
+    },
+    "page.strategy_scan.geo_site.question_scan_anyway": {
+        "ru": "Всё равно подобрать",
+        "en": "Search anyway",
+    },
     "page.strategy_scan.applied": {
         "ru": "Стратегия добавлена",
         "en": "Strategy added",

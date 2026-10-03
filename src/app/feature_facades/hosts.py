@@ -19,6 +19,7 @@ class HostsFeature:
     create_permission_restore_worker: Callable
     create_file_text_worker: Callable
     create_file_save_worker: Callable
+    load_geo_sites: Callable
 
 
 def build_hosts_feature() -> HostsFeature:
@@ -107,4 +108,6 @@ def build_hosts_feature() -> HostsFeature:
         create_permission_restore_worker=_create_permission_restore_worker,
         create_file_text_worker=_create_file_text_worker,
         create_file_save_worker=_create_file_save_worker,
+        # Читает каталог hosts с диска: звать только из фонового потока.
+        load_geo_sites=lambda: _public().load_geo_sites(),
     )

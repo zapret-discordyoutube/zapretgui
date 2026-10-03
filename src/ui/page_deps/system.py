@@ -299,10 +299,15 @@ def build_blockcheck_page_kwargs(
         worker.set_runtime_restore(was_running=runtime_feature.is_running(), restore=runtime_feature.start)
         return worker
 
+    def _create_geo_sites_worker(request_id: int, *, parent=None):
+        # Гео-сайты каталога hosts: подбор предупреждает, что им нужна не стратегия.
+        return blockcheck_feature.create_geo_sites_worker(request_id, parent=parent)
+
     return {
         "blockcheck_feature": blockcheck_feature,
         "dns_feature": dns_feature,
         "create_strategy_scan_worker": _create_strategy_scan_worker,
+        "create_geo_sites_worker": _create_geo_sites_worker,
         # «Поймали провайдера на подмене DNS» → кнопка ведёт на «Настройка DNS».
         "open_dns_settings": (lambda: show_page(PageName.NETWORK)) if show_page is not None else None,
     }

@@ -32,6 +32,7 @@ class BlockcheckWorker(QObject):
         start_run_log: Callable[[str, list[str]], object],
         append_run_log: Callable[[str | None, str], None],
         close_run_log: Callable[[str | None], None],
+        load_geo_sites: Callable[[], object] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -40,9 +41,20 @@ class BlockcheckWorker(QObject):
         self._start_run_log = start_run_log
         self._append_run_log_action = append_run_log
         self._close_run_log_action = close_run_log
+        self._load_geo_sites = load_geo_sites
         self._cancelled = False
         self._running = False
         self._run_log_file = None
+
+    def _geo_service_lookup(self):
+        """Поиск «адрес → гео-сервис» из каталога hosts; без каталога — None."""
+        if self._load_geo_sites is None:
+            return None
+        try:
+            return self._load_geo_sites().service_for
+        except Exception:
+            logger.exception("Failed to load geo sites for blockcheck")
+            return None
 
     def run(self):
         # Флаг «Стоп» здесь не сбрасывается: проверку могли остановить, пока
@@ -64,6 +76,7 @@ class BlockcheckWorker(QObject):
                 user_domains=self._user_domains,
                 emit=self._emit,
                 should_stop=self.is_cancelled,
+                geo_service_for=self._geo_service_lookup(),
             )
             if isinstance(report, dict) and report.get("stopped"):
                 report = None

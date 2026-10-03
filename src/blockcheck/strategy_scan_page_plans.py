@@ -153,6 +153,42 @@ def mode_hint_text(index: int, *, language: str | None = None) -> str:
     return tr_catalog(key, language=language, default=default)
 
 
+def geo_service_for_target(geo_sites, *, scan_protocol: str, target_input: str) -> str:
+    """Название гео-сервиса каталога hosts для введённой цели, иначе пустая строка.
+
+    Гео-сайт сам ограничивает доступ из России: стратегия Zapret его не чинит.
+    Проверяются только сайты — у голоса и игр цель не сайт.
+    """
+    if geo_sites is None or scan_protocol != "tcp_https":
+        return ""
+    return str(geo_sites.service_for(normalize_target_input(target_input, scan_protocol)) or "")
+
+
+def geo_site_notice_text(service: str, *, language: str | None = None) -> str:
+    return tr_catalog(
+        "page.strategy_scan.geo_site.notice",
+        language=language,
+        default=(
+            "{service} сам ограничивает доступ из России — стратегия Zapret его не чинит, подбор ничего не найдёт. "
+            "Включите для него DNS-профиль в «Редакторе hosts» или смените DNS в «Настройке DNS»."
+        ),
+    ).format(service=service)
+
+
+def geo_site_question_text(service: str, target_input: str, *, language: str | None = None) -> str:
+    # Тот же адрес, с которым запустился бы подбор.
+    target = normalize_target_input(target_input, "tcp_https")
+    return tr_catalog(
+        "page.strategy_scan.geo_site.question_text",
+        language=language,
+        default=(
+            "{target} — это {service}. Сервис сам ограничивает доступ из России: провайдер тут ни при чём, "
+            "поэтому ни одна стратегия Zapret его не откроет, а подбор зря займёт время.\n\n"
+            "Что помогает: DNS-профиль для этого сервиса в «Редакторе hosts» или другой DNS в «Настройке DNS»."
+        ),
+    ).format(service=service, target=target)
+
+
 def build_language_plan(*, language: str) -> StrategyScanLanguagePlan:
     def _tr(key: str, default: str) -> str:
         return tr_catalog(key, language=language, default=default)

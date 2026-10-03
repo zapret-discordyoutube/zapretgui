@@ -74,6 +74,9 @@ class StrategyScanPage(BasePage):
         embedded: bool = False,
         blockcheck_feature,
         create_strategy_scan_worker,
+        create_geo_sites_worker=None,
+        open_hosts_editor=None,
+        open_dns_settings=None,
     ):
         self._embedded = bool(embedded)
         super().__init__(
@@ -88,6 +91,13 @@ class StrategyScanPage(BasePage):
 
         self._blockcheck = blockcheck_feature
         self._create_strategy_scan_worker = create_strategy_scan_worker
+        self._create_geo_sites_worker = create_geo_sites_worker
+        self._open_hosts_editor = open_hosts_editor
+        self._open_dns_settings = open_dns_settings
+        # Гео-сайты из каталога hosts; None, пока фоновая загрузка не закончилась.
+        self._geo_sites = None
+        self._geo_notice = None
+        self._geo_sites_runtime = OneShotWorkerRuntime()
         self._result_rows: list[dict] = []
         self._scan_target: str = ""
         self._scan_protocol: str = "tcp_https"
@@ -193,6 +203,12 @@ class StrategyScanPage(BasePage):
         self._target_label = control_widgets.target_label
         self._target_input = control_widgets.target_input
         self._quick_domain_btn = control_widgets.quick_domain_btn
+        self._geo_notice = control_widgets.geo_notice
+        self._geo_notice.hosts_button.setVisible(self._open_hosts_editor is not None)
+        self._geo_notice.dns_button.setVisible(self._open_dns_settings is not None)
+        self._geo_notice.open_hosts_clicked.connect(self._open_hosts_editor_for_geo_site)
+        self._geo_notice.open_dns_clicked.connect(self._open_dns_settings_for_geo_site)
+        self._target_input.textChanged.connect(self._refresh_geo_notice)
         self._udp_scope_hint_label = control_widgets.udp_scope_hint_label
         self._start_btn = control_widgets.start_btn
         self._stop_btn = control_widgets.stop_btn
@@ -230,6 +246,108 @@ class StrategyScanPage(BasePage):
         self._refresh_mode_hint()
         self._on_protocol_changed(self._protocol_combo.currentIndex())
         self._set_status_text(self._status_label.text())
+        self._request_geo_sites()
+
+    # ------------------------------------------------------------------
+    # Гео-сайты: им помогает hosts или DNS, а не стратегия
+    # ------------------------------------------------------------------
+
+    def _request_geo_sites(self) -> None:
+        """Читает гео-сайты из каталога hosts в фоне; дальше поиск идёт по памяти."""
+        if self._create_geo_sites_worker is None:
+            return
+        self._geo_sites_runtime.start_qthread_worker(
+            worker_factory=lambda request_id: self._create_geo_sites_worker(request_id, parent=self),
+            on_loaded=self._on_geo_sites_loaded,
+            loaded_signal_name="completed",
+        )
+
+    def _on_geo_sites_loaded(self, request_id: int, geo_sites) -> None:
+        if not self._geo_sites_runtime.is_current(request_id, cleanup_in_progress=self._cleanup_in_progress):
+            return
+        self._geo_sites = geo_sites
+        self._refresh_geo_notice()
+
+    def _geo_service_for_target(self) -> str:
+        """Название гео-сервиса для цели в поле ввода, иначе пустая строка."""
+        from blockcheck.strategy_scan_page_plans import geo_service_for_target
+
+        selection = self._blockcheck.build_selection_state(
+            protocol_value=self._protocol_combo.currentData(),
+            udp_scope_value=self._games_scope_combo.currentData() if self._games_scope_combo is not None else "all",
+            mode_index=self._mode_combo.currentIndex() if self._mode_combo is not None else 0,
+        )
+        return geo_service_for_target(
+            self._geo_sites,
+            scan_protocol=selection.scan_protocol,
+            target_input=self._target_input.text(),
+        )
+
+    def _refresh_geo_notice(self, *_args) -> None:
+        if self._geo_notice is None:
+            return
+        from blockcheck.strategy_scan_page_plans import geo_site_notice_text
+
+        service = self._geo_service_for_target()
+        if service:
+            self._geo_notice.set_text(geo_site_notice_text(service, language=self._ui_language))
+        self._geo_notice.setVisible(bool(service))
+
+    def _open_hosts_editor_for_geo_site(self) -> None:
+        if self._open_hosts_editor is not None:
+            self._open_hosts_editor()
+
+    def _open_dns_settings_for_geo_site(self) -> None:
+        if self._open_dns_settings is not None:
+            self._open_dns_settings()
+
+    def _confirm_geo_site_scan(self) -> bool:
+        """Цель — гео-сайт: спрашивает, подбирать ли всё равно. True — подбирать."""
+        service = self._geo_service_for_target()
+        if not service:
+            return True
+        from blockcheck.strategy_scan_page_plans import geo_site_question_text
+        from ui.fluent_dialog import MessageBox
+        from ui.message_box_accessibility import set_message_box_button_accessibility
+
+        box = MessageBox(
+            tr_catalog("page.strategy_scan.geo_site.question_title", default="Стратегия здесь не поможет"),
+            geo_site_question_text(service, self._target_input.text(), language=self._ui_language),
+            self.window(),
+        )
+        hosts_text = tr_catalog("page.strategy_scan.geo_site.open_hosts", default="Открыть «Редактор hosts»")
+        scan_text = tr_catalog("page.strategy_scan.geo_site.question_scan_anyway", default="Всё равно подобрать")
+        box.yesButton.setText(hosts_text)
+        box.yesButton.setVisible(self._open_hosts_editor is not None)
+        box.cancelButton.setText(tr_catalog("page.strategy_scan.resume_question_cancel", default="Отмена"))
+        scan_button = PushButton(scan_text)
+        choice = {"scan": False}
+
+        def _scan_anyway() -> None:
+            choice["scan"] = True
+            box.accept()
+
+        scan_button.clicked.connect(_scan_anyway)
+        box.buttonLayout.insertWidget(1, scan_button)
+        set_state_text(scan_button, scan_text)
+        set_control_accessibility(
+            scan_button,
+            name=scan_text,
+            description="Запустить подбор стратегии, хотя этому сервису стратегия не помогает.",
+        )
+        set_message_box_button_accessibility(
+            box,
+            yes_name=hosts_text,
+            yes_description="Открывает «Редактор hosts», где сервису включается DNS-профиль. Подбор не запустится.",
+            cancel_name="Отменить запуск подбора",
+            cancel_description="Подбор не запустится.",
+        )
+        if not box.exec():
+            return False
+        if choice["scan"]:
+            return True
+        self._open_hosts_editor_for_geo_site()
+        return False
 
     def _refresh_mode_hint(self, *_args) -> None:
         from blockcheck.strategy_scan_page_plans import mode_hint_text
@@ -290,6 +408,7 @@ class StrategyScanPage(BasePage):
         self._target_input.setText(plan.normalized_target)
         self._target_input.setPlaceholderText(plan.placeholder_text)
         self._refresh_udp_scope_hint()
+        self._refresh_geo_notice()
         self._update_control_accessibility()
 
     def _on_udp_games_scope_changed(self, _index: int) -> None:
@@ -495,6 +614,8 @@ class StrategyScanPage(BasePage):
         if self._strategy_scan_run_runtime.is_running():
             return
         self._cleanup_in_progress = False
+        if not self._confirm_geo_site_scan():
+            return
         from_start = self._ask_scan_start_choice()
         if from_start is None:
             return
@@ -1377,6 +1498,7 @@ class StrategyScanPage(BasePage):
         try:
             self._apply_language_plan(language)
             self._refresh_udp_scope_hint()
+            self._refresh_geo_notice()
             self._update_control_accessibility()
             self._refresh_mode_hint()
             self._set_status_text(self._status_label.text())
@@ -1385,6 +1507,11 @@ class StrategyScanPage(BasePage):
 
     def cleanup(self) -> None:
         self._cleanup_in_progress = True
+        self._geo_sites_runtime.stop(
+            blocking=False,
+            warning_prefix="strategy scan geo sites worker",
+        )
+        self._geo_sites_runtime.cancel()
         self._strategy_apply_runtime.stop(
             blocking=False,
             warning_prefix="strategy scan apply worker",

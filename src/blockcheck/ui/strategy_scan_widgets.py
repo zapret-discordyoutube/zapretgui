@@ -32,7 +32,7 @@ from qfluentwidgets import (
 from blockcheck.ui.check_results import _HeightKeeper, tone_color
 from ui.accessibility import enable_keyboard_click, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
-from ui.fluent_widgets import set_tooltip
+from ui.fluent_widgets import SemanticNotice, set_tooltip
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.fun import CounterBadge, FunTicker, Mascot, StepList, burst_confetti
@@ -322,6 +322,57 @@ SCAN_STEPS = (
     ("control", "Контрольный запуск winws2"),
     ("strategies", "Перебираем стратегии"),
 )
+
+
+class GeoSiteNotice(QWidget):
+    """Предупреждение под полем цели: выбран гео-сайт, стратегия его не чинит.
+
+    Гео-сайт сам ограничивает доступ из России. Ему помогают DNS-профиль в
+    «Редакторе hosts» или другой DNS — на них и ведут кнопки.
+    """
+
+    open_hosts_clicked = pyqtSignal()
+    open_dns_clicked = pyqtSignal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        self.notice = SemanticNotice(tone="warning", parent=self)
+        layout.addWidget(self.notice)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        self.hosts_button = PushButton("Открыть «Редактор hosts»", self)
+        self.dns_button = PushButton("Настройка DNS", self)
+        self.hosts_button.clicked.connect(self.open_hosts_clicked)
+        self.dns_button.clicked.connect(self.open_dns_clicked)
+        buttons.addWidget(self.hosts_button)
+        buttons.addWidget(self.dns_button)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+        self.set_button_texts(self.hosts_button.text(), self.dns_button.text())
+
+    def set_button_texts(self, hosts_text: str, dns_text: str) -> None:
+        self.hosts_button.setText(hosts_text)
+        self.dns_button.setText(dns_text)
+        set_control_accessibility(
+            self.hosts_button,
+            name=hosts_text,
+            description="Открывает «Редактор hosts», где сервису включается DNS-профиль.",
+        )
+        set_control_accessibility(
+            self.dns_button,
+            name=dns_text,
+            description="Открывает раздел «Настройка DNS», где меняется DNS-сервер.",
+        )
+
+    def set_text(self, text: str) -> None:
+        self.notice.setText(text)
+
+    def text(self) -> str:
+        return self.notice.text()
 
 
 class ScanProgressPanel(_HeightKeeper, SimpleCardWidget):

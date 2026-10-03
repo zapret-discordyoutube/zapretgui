@@ -14,14 +14,17 @@ from hosts.commands import (
     save_user_selection,
     write_hosts_file,
 )
+from hosts.geo_sites import GeoSites, load_geo_sites
 from hosts.state import HostsApplyResult, HostsCommandResult, HostsFileText
 
 __all__ = [
+    "GeoSites",
     "HostsApplyResult",
     "HostsCommandResult",
     "HostsFileText",
     "apply_hosts_draft",
     "get_hosts_path_str",
+    "load_geo_sites",
     "load_hosts_text",
     "load_page_snapshot",
     "load_user_selection",
