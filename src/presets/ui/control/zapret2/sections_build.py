@@ -13,6 +13,7 @@ from ui.fluent_widgets import build_additional_settings_section, enable_setting_
 class Zapret2SettingsBuildWidgets:
     program_settings_section_label: object | None
     program_settings_card: object
+    windows_settings_card: object
     gui_autostart_toggle: object
     auto_dpi_toggle: object
     tray_close_mode_combo: object
@@ -47,7 +48,8 @@ def build_winws2_pages_settings_sections(
     on_debug_log_toggled,
     on_open_fakes,
 ) -> Zapret2SettingsBuildWidgets:
-    program_settings_title = tr_fn("page.winws2_control.section.program_settings", "Настройки программы")
+    # Первая группа — про саму программу: когда стартует и как ведёт себя окно.
+    program_settings_title = tr_fn("page.control.section.launch_behavior", "Запуск и поведение")
     program_settings_section_label = None
     program_settings_card = setting_card_group_cls(program_settings_title, content_parent)
 
@@ -92,15 +94,6 @@ def build_winws2_pages_settings_sections(
         win11_toggle_row_cls=win11_toggle_row_cls,
         on_state_media_block_toggled=on_state_media_block_toggled,
     )
-
-    program_settings_card.addSettingCard(gui_autostart_toggle)
-    program_settings_card.addSettingCard(auto_dpi_toggle)
-    program_settings_card.addSettingCard(tray_close_mode_combo)
-    program_settings_card.addSettingCard(windows_feature_toggles.defender_toggle)
-    program_settings_card.addSettingCard(windows_feature_toggles.max_block_toggle)
-    program_settings_card.addSettingCard(state_media_block_toggle)
-
-    enable_setting_card_group_auto_height(program_settings_card)
 
     discord_restart_toggle = (
         win11_toggle_row_cls(
@@ -157,17 +150,36 @@ def build_winws2_pages_settings_sections(
         parent=content_parent,
     )
 
+    program_settings_card.addSettingCard(gui_autostart_toggle)
+    program_settings_card.addSettingCard(auto_dpi_toggle)
+    program_settings_card.addSettingCard(tray_close_mode_combo)
+    if discord_restart_toggle is not None:
+        program_settings_card.addSettingCard(discord_restart_toggle)
+    enable_setting_card_group_auto_height(program_settings_card)
+
+    # Вторая группа — что программа меняет в самой Windows.
+    windows_settings_card = setting_card_group_cls(
+        tr_fn("page.control.section.windows_blocks", "Windows и блокировки"),
+        content_parent,
+    )
+    windows_settings_card.addSettingCard(windows_feature_toggles.defender_toggle)
+    windows_settings_card.addSettingCard(windows_feature_toggles.max_block_toggle)
+    windows_settings_card.addSettingCard(state_media_block_toggle)
+    enable_setting_card_group_auto_height(windows_settings_card)
+
+    # Третья группа — параметры движка для опытных, с предупреждением.
     additional_settings_card, additional_settings_notice = build_additional_settings_section(
-        title=tr_fn("page.winws2_control.card.advanced", "Дополнительные настройки"),
+        title=tr_fn("page.control.section.advanced_bypass", "Тонкая настройка обхода"),
         warning_text=tr_fn("page.winws2_control.advanced.warning", "Эти параметры лучше менять, только если уверены в результате"),
         parent=content_parent,
-        toggle_rows=[discord_restart_toggle, wssize_toggle, debug_log_toggle],
+        toggle_rows=[wssize_toggle, debug_log_toggle],
         action_rows=[fakes_card],
     )
 
     return Zapret2SettingsBuildWidgets(
         program_settings_section_label=program_settings_section_label,
         program_settings_card=program_settings_card,
+        windows_settings_card=windows_settings_card,
         gui_autostart_toggle=gui_autostart_toggle,
         auto_dpi_toggle=auto_dpi_toggle,
         tray_close_mode_combo=tray_close_mode_combo,

@@ -145,6 +145,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self._start_onboarding_tour_callback = start_onboarding_tour
         self.onboarding_tour_card = None
         self.quick_actions_title = None
+        self.windows_settings_card = None
         self.quick_actions_grid = None
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
@@ -509,6 +510,10 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.add_spacing(8)
         self.add_spacing(16)
         self.add_widget(self.program_settings_card)
+
+        self.add_spacing(16)
+        self.windows_settings_card = section_widgets.windows_settings_card
+        self.add_widget(self.windows_settings_card)
 
         self.additional_settings_section_label = None
         self.discord_restart_toggle = section_widgets.discord_restart_toggle
@@ -963,6 +968,7 @@ class Zapret2ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             docs_card=self.docs_card,
             tour_card=self.onboarding_tour_card,
             quick_actions_title=self.quick_actions_title,
+            windows_settings_card=self.windows_settings_card,
             additional_settings_notice=self.additional_settings_notice,
             fakes_card=self.fakes_card,
             program_settings_card=self.program_settings_card,

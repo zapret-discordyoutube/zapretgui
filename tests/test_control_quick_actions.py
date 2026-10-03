@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import os
 import unittest
 from unittest import mock
@@ -152,13 +151,110 @@ class QuickActionsTests(unittest.TestCase):
             self.assertTrue(specs["folder"].accessible_name[0].startswith(prefix))
 
 
-class ProgramSettingsGroupTests(unittest.TestCase):
-    def test_state_media_toggle_lives_with_other_windows_blocks(self) -> None:
-        for module in (zapret1_sections, zapret2_sections):
-            with self.subTest(module=module.__name__):
-                source = inspect.getsource(module)
-                self.assertIn("program_settings_card.addSettingCard(state_media_block_toggle)", source)
-                self.assertNotIn("extra_card", source)
+class SettingsGroupsTests(unittest.TestCase):
+    """Настройки на главной разложены по смыслу в три группы."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def _build(self, module, builder_name: str, **extra):
+        from qfluentwidgets import PushSettingCard, SettingCardGroup
+
+        from ui.widgets.win11_controls import Win11ComboRow, Win11ToggleRow
+
+        parent = QWidget()
+        self.addCleanup(parent.deleteLater)
+        noop = lambda *_args, **_kwargs: None  # noqa: E731
+        widgets = getattr(module, builder_name)(
+            add_section_title=noop,
+            tr_fn=_tr("ru"),
+            content_parent=parent,
+            setting_card_group_cls=SettingCardGroup,
+            win11_toggle_row_cls=Win11ToggleRow,
+            win11_combo_row_cls=Win11ComboRow,
+            on_gui_autostart_toggled=noop,
+            on_auto_dpi_toggled=noop,
+            on_tray_close_mode_changed=noop,
+            on_defender_toggled=noop,
+            on_max_blocker_toggled=noop,
+            on_state_media_block_toggled=noop,
+            on_discord_restart_changed=noop,
+            on_wssize_toggled=noop,
+            on_debug_log_toggled=noop,
+            **({"push_setting_card_cls": PushSettingCard, "on_open_fakes": noop} if extra.get("fakes") else {}),
+        )
+        return widgets
+
+    def _assert_groups(self, widgets, *, fakes: bool) -> None:
+        launch, windows, advanced = (
+            widgets.program_settings_card,
+            widgets.windows_settings_card,
+            widgets.additional_settings_card,
+        )
+        self.assertEqual(launch.titleLabel.text(), "Запуск и поведение")
+        self.assertEqual(windows.titleLabel.text(), "Windows и блокировки")
+        self.assertEqual(advanced.titleLabel.text(), "Тонкая настройка обхода")
+
+        def group_of(row):
+            return row.parent()
+
+        for row in (
+            widgets.gui_autostart_toggle,
+            widgets.auto_dpi_toggle,
+            widgets.tray_close_mode_combo,
+            widgets.discord_restart_toggle,
+        ):
+            self.assertIs(group_of(row), launch)
+        for row in (widgets.defender_toggle, widgets.max_block_toggle, widgets.state_media_block_toggle):
+            self.assertIs(group_of(row), windows)
+        for row in (widgets.wssize_toggle, widgets.debug_log_toggle):
+            self.assertIs(group_of(row), advanced)
+        if fakes:
+            self.assertIs(group_of(widgets.fakes_card), advanced)
+        # Предупреждение стоит у параметров движка, а не у настроек программы.
+        self.assertIs(widgets.additional_settings_notice.parent(), advanced)
+
+    def test_zapret2_groups(self) -> None:
+        widgets = self._build(zapret2_sections, "build_winws2_pages_settings_sections", fakes=True)
+        self._assert_groups(widgets, fakes=True)
+
+    def test_zapret1_groups(self) -> None:
+        widgets = self._build(zapret1_sections, "build_winws1_pages_settings_sections")
+        self._assert_groups(widgets, fakes=False)
+
+    def test_language_switch_retitles_all_three_groups(self) -> None:
+        from presets.ui.control.zapret2.runtime_helpers import apply_profile_language
+
+        widgets = self._build(zapret2_sections, "build_winws2_pages_settings_sections", fakes=True)
+        close_btn = __import__("qfluentwidgets").TransparentPushButton("x")
+        self.addCleanup(close_btn.deleteLater)
+        apply_profile_language(
+            language="en",
+            close_btn=close_btn,
+            test_card=None,
+            internet_cleanup_card=None,
+            folder_card=None,
+            docs_card=None,
+            additional_settings_notice=widgets.additional_settings_notice,
+            fakes_card=None,
+            program_settings_card=widgets.program_settings_card,
+            windows_settings_card=widgets.windows_settings_card,
+            auto_dpi_toggle=widgets.auto_dpi_toggle,
+            gui_autostart_toggle=widgets.gui_autostart_toggle,
+            tray_close_mode_combo=widgets.tray_close_mode_combo,
+            defender_toggle=widgets.defender_toggle,
+            max_block_toggle=widgets.max_block_toggle,
+            state_media_block_toggle=widgets.state_media_block_toggle,
+            additional_settings_card=widgets.additional_settings_card,
+            discord_restart_toggle=widgets.discord_restart_toggle,
+            wssize_toggle=widgets.wssize_toggle,
+            debug_log_toggle=widgets.debug_log_toggle,
+        )
+
+        self.assertEqual(widgets.program_settings_card.titleLabel.text(), "Startup and behavior")
+        self.assertEqual(widgets.windows_settings_card.titleLabel.text(), "Windows and blocking")
+        self.assertEqual(widgets.additional_settings_card.titleLabel.text(), "Fine-tuning the bypass")
 
 
 if __name__ == "__main__":

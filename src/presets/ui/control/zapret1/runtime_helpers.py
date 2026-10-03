@@ -69,6 +69,7 @@ def apply_winws1_pages_language(
     docs_card,
     tour_card=None,
     quick_actions_title=None,
+    windows_settings_card=None,
     additional_settings_card,
     additional_settings_notice,
     discord_restart_toggle,
@@ -89,8 +90,12 @@ def apply_winws1_pages_language(
     )
 
     program_settings_card.titleLabel.setText(
-        tr_catalog("page.winws1_control.section.program_settings", language=language, default="Настройки программы")
+        tr_catalog("page.control.section.launch_behavior", language=language, default="Запуск и поведение")
     )
+    if windows_settings_card is not None:
+        windows_settings_card.titleLabel.setText(
+            tr_catalog("page.control.section.windows_blocks", language=language, default="Windows и блокировки")
+        )
     if auto_dpi_toggle is not None:
         auto_dpi_toggle.set_texts(
             tr_catalog("page.winws1_control.setting.autostart.title", language=language, default="Автозапуск DPI после старта программы"),
@@ -142,7 +147,7 @@ def apply_winws1_pages_language(
     )
 
     additional_settings_card.titleLabel.setText(
-        tr_catalog("page.winws1_control.card.advanced", language=language, default="Дополнительные настройки")
+        tr_catalog("page.control.section.advanced_bypass", language=language, default="Тонкая настройка обхода")
     )
     additional_settings_notice.setText(
         tr_catalog("page.winws1_control.advanced.warning", language=language, default="Эти параметры лучше менять, только если уверены в результате")

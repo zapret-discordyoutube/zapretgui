@@ -189,6 +189,18 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Определение состояния процесса",
         "en": "Detecting process state",
     },
+    "page.control.section.launch_behavior": {
+        "ru": "Запуск и поведение",
+        "en": "Startup and behavior",
+    },
+    "page.control.section.windows_blocks": {
+        "ru": "Windows и блокировки",
+        "en": "Windows and blocking",
+    },
+    "page.control.section.advanced_bypass": {
+        "ru": "Тонкая настройка обхода",
+        "en": "Fine-tuning the bypass",
+    },
     "page.control.section.quick_actions": {
         "ru": "Быстрые действия",
         "en": "Quick actions",
@@ -416,10 +428,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.winws1_control.setting.autostart.desc": {
         "ru": "После запуска ZapretGUI автоматически запускать текущий DPI-режим",
         "en": "Automatically start the current DPI mode after ZapretGUI launches",
-    },
-    "page.winws1_control.card.advanced": {
-        "ru": "Дополнительные настройки",
-        "en": "ADVANCED SETTINGS",
     },
     "page.winws1_control.advanced.warning": {
         "ru": "Эти параметры лучше менять, только если уверены в результате",
@@ -3429,10 +3437,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Пресеты и настройка пресета",
         "en": "Presets and preset setup",
     },
-    "page.winws1_control.section.program_settings": {
-        "ru": "Настройки программы",
-        "en": "Program Settings",
-    },
     "page.winws1_pages.title": {
         "ru": "Настройка пресета",
         "en": "Preset setup",
@@ -3966,10 +3970,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Настройка пресета",
         "en": "Preset setup",
     },
-    "page.winws2_control.section.program_settings": {
-        "ru": "Настройки программы",
-        "en": "Program Settings",
-    },
     "page.winws2_control.section.additional_settings": {
         "ru": "Дополнительные настройки",
         "en": "Additional Settings",
@@ -4013,10 +4013,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.winws2_control.preset.current": {
         "ru": "Текущий выбранный пресет",
         "en": "Current selected preset",
-    },
-    "page.winws2_control.card.advanced": {
-        "ru": "Дополнительные настройки",
-        "en": "ADVANCED SETTINGS",
     },
     "page.winws2_control.advanced.warning": {
         "ru": "Эти параметры лучше менять, только если уверены в результате",
@@ -6212,8 +6208,8 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
         ),
     },
     "onboarding.step.program_settings.title": {
-        "ru": "Настройки программы",
-        "en": "App settings",
+        "ru": "Запуск и поведение",
+        "en": "Startup and behavior",
     },
     "onboarding.step.program_settings.body": {
         "ru": (
