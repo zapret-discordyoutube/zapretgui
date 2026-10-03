@@ -73,7 +73,8 @@ def build_winws1_pages_settings_sections(
             ("Не скрывать в трей", "normal"),
         ],
     )
-    tray_close_mode_combo.combo.setFixedWidth(270)
+    # Полная ширина под самый длинный вариант, а в узком окне список уже.
+    tray_close_mode_combo.set_combo_width_range(170, 320)
     tray_close_mode_combo.combo.currentIndexChanged.connect(
         lambda _index: on_tray_close_mode_changed(tray_close_mode_combo.currentData())
     )

@@ -28,13 +28,16 @@ from PyQt6.QtWidgets import QSizePolicy
 
 from ui.animation_policy import are_live_animations_enabled
 from ui.pulsing_dot import PulsingDot
-from ui.widgets.fun.mascot import GESTURE_TOSS, MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD, Mascot
+from ui.widgets.fun.badger import DrawnBadger
+from ui.widgets.fun.mascot import GESTURE_TOSS, MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 
 
 SCENE_HEIGHT = 76
+# Наибольшая ширина виджета в Qt: «без ограничения».
+QWIDGETSIZE_MAX = (1 << 24) - 1
 SCENE_WIDTH = 330
 SCENE_MIN_WIDTH = 240
-MASCOT_SIZE = 40
+MASCOT_SIZE = 46
 # Место под значок сайтов справа; слева стоит талисман.
 ENDPOINT_ROOM = 34
 # Полный вдох и выдох спокойного талисмана, секунды.
@@ -105,8 +108,10 @@ class BypassScene(PulsingDot):
         self._beat.setInterval(SCENE_FRAME_MS)
 
         # Талисман — участник сцены: это он отправляет пакеты к сайтам.
-        self._mascot = Mascot(self, size=MASCOT_SIZE)
-        self._mascot.move(0, SCENE_HEIGHT // 2 - (self._mascot.height() - 2 - MASCOT_SIZE // 2))
+        # Нарисованный медоед: моргает и двигает лапами, а не только поворачивается целиком.
+        self._mascot = DrawnBadger(self, size=MASCOT_SIZE)
+        # Стоит на «полу» сцены: лапы у нижнего края, голова выше дорожек.
+        self._mascot.move(0, SCENE_HEIGHT - self._mascot.height() - 1)
         self._flinched = False
 
         # Политика фокуса обычного виджета: к ней сцена вернётся, если перестанет быть кнопкой.
@@ -141,6 +146,17 @@ class BypassScene(PulsingDot):
         self._shake.setDuration(SHAKE_MS)
         self._shake.valueChanged.connect(self._on_shake_value)
         self._shake.finished.connect(self._on_shake_finished)
+
+    def set_stretched(self, stretched: bool) -> None:
+        """Растянуть сцену на всю доступную ширину (узкое окно) или вернуть обычную."""
+        self.setMaximumWidth(QWIDGETSIZE_MAX if stretched else self._preferred_width)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding if stretched else QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
+
+    def is_stretched(self) -> bool:
+        return self.maximumWidth() > self._preferred_width
 
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(self._preferred_width, SCENE_HEIGHT)
@@ -182,7 +198,7 @@ class BypassScene(PulsingDot):
         self.update()
         self.phaseChanged.emit(phase)
 
-    def mascot(self) -> Mascot:
+    def mascot(self) -> DrawnBadger:
         return self._mascot
 
     def gate_center(self) -> QPoint:

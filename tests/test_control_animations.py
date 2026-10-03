@@ -483,6 +483,32 @@ class StatusHeroCardTests(unittest.TestCase):
         # Два пятна — два оттенка, сколько бы кадров ни прошло.
         self.assertEqual(len(hero_module._SPOT_CACHE), 3)
 
+    def test_narrow_card_puts_the_scene_on_its_own_stretched_row(self) -> None:
+        from PyQt6.QtWidgets import QBoxLayout, QHBoxLayout
+
+        card, scene, _mascot = self._card()
+        layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, card)
+        layout.addWidget(scene)
+        layout.addLayout(QHBoxLayout(), 1)
+        card.set_stacking_layout(layout)
+        card.show()
+
+        card.resize(hero_module.STACK_BELOW_WIDTH + 100, 104)
+        QApplication.processEvents()
+        self.assertFalse(card.is_stacked())
+        self.assertFalse(scene.is_stretched())
+
+        card.resize(hero_module.STACK_BELOW_WIDTH - 100, 200)
+        QApplication.processEvents()
+        self.assertTrue(card.is_stacked())
+        self.assertTrue(scene.is_stretched())
+        self.assertGreater(scene.width(), scene_module.SCENE_WIDTH)
+
+        card.resize(hero_module.STACK_BELOW_WIDTH + 100, 104)
+        QApplication.processEvents()
+        self.assertFalse(card.is_stacked())
+        self.assertLessEqual(scene.width(), scene_module.SCENE_WIDTH)
+
     def test_paints_tint_and_wave(self) -> None:
         card, scene, _mascot = self._card()
         card.show()

@@ -20,7 +20,7 @@ from ui.widgets.action_tile import ActionTile
 from ui.widgets.tile_grid import TileGrid
 
 
-QUICK_ACTION_MIN_WIDTH = 190
+QUICK_ACTION_MIN_WIDTH = 165
 QUICK_ACTIONS_TITLE_KEY = "page.control.section.quick_actions"
 QUICK_ACTIONS_TITLE_DEFAULT = "Быстрые действия"
 

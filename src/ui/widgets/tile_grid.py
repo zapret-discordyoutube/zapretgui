@@ -228,30 +228,41 @@ class TileGrid(QWidget):
 
     def _rows(self, tiles: list[tuple[QWidget, float]], width: int) -> list[list[tuple[QWidget, int]]]:
         """Самое большое число столбцов, при котором ни одна плитка не у́же допустимого."""
-        for columns in range(len(tiles), 0, -1):
-            # Одинокая плитка в последнем ряду выглядит оборванной: такие раскладки пропускаем.
-            if columns > 1 and len(tiles) % columns == 1:
-                continue
-            room = width - self._spacing * (columns - 1)
-            rows: list[list[tuple[QWidget, int]]] = []
-            for start in range(0, len(tiles), columns):
-                chunk = tiles[start : start + columns]
-                if columns == len(tiles):
-                    # Всё в один ряд: плитки делят ширину по своим долям.
-                    total = sum(weight for _tile, weight in chunk)
-                    rows.append([(tile, int(room * weight / total)) for tile, weight in chunk])
-                else:
-                    # В несколько рядов плитки равной ширины, иначе края рядов не совпадут.
-                    rows.append([(tile, room // columns) for tile, _weight in chunk])
-            if columns == 1 or all(
-                tile_width >= max(self._min_tile_width, tile.minimumWidth())
-                for row in rows
-                for tile, tile_width in row
-            ):
-                self._columns = columns
-                return rows
-        self._columns = 0
-        return []
+        # Сначала раскладки без одинокой плитки в последнем ряду. Если ни одна
+        # не влезла, разрешаем одинокую — она растянется на весь ряд, — лишь
+        # бы не ставить все плитки в один столбец.
+        for allow_lonely in (False, True):
+            for columns in range(len(tiles), 1, -1):
+                lonely = len(tiles) % columns == 1
+                if lonely and not allow_lonely:
+                    continue
+                rows = self._layout_rows(tiles, columns, width)
+                if all(
+                    tile_width >= max(self._min_tile_width, tile.minimumWidth())
+                    for row in rows
+                    if len(row) > 1
+                    for tile, tile_width in row
+                ):
+                    self._columns = columns
+                    return rows
+        self._columns = 1 if tiles else 0
+        return [[(tile, width)] for tile, _weight in tiles]
+
+    def _layout_rows(self, tiles, columns: int, width: int) -> list[list[tuple[QWidget, int]]]:
+        room = width - self._spacing * (columns - 1)
+        rows: list[list[tuple[QWidget, int]]] = []
+        for start in range(0, len(tiles), columns):
+            chunk = tiles[start : start + columns]
+            if columns == len(tiles):
+                # Всё в один ряд: плитки делят ширину по своим долям.
+                total = sum(weight for _tile, weight in chunk)
+                rows.append([(tile, int(room * weight / total)) for tile, weight in chunk])
+            elif len(chunk) == 1:
+                rows.append([(chunk[0][0], width)])
+            else:
+                # В несколько рядов плитки равной ширины, иначе края рядов не совпадут.
+                rows.append([(tile, room // columns) for tile, _weight in chunk])
+        return rows
 
     def relayout(self) -> None:
         if self._in_relayout:

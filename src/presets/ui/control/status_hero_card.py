@@ -21,6 +21,7 @@ import math
 
 from PyQt6.QtCore import QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, Qt, QVariantAnimation
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPixmap, QRadialGradient
+from PyQt6.QtWidgets import QBoxLayout
 
 from qfluentwidgets import CardWidget, isDarkTheme
 
@@ -28,6 +29,8 @@ from ui.animation_policy import are_live_animations_enabled
 
 
 TINT_FADE_MS = 420
+# Уже этого сцена встаёт отдельной строкой над текстом, иначе текст наезжает на неё.
+STACK_BELOW_WIDTH = 760
 WAVE_MS = 900
 # Насколько заметна подкраска у левого края (у сцены) в тёмной и светлой теме.
 TINT_ALPHA_DARK = 0.17
@@ -100,6 +103,7 @@ class StatusHeroCard(CardWidget):
         self._wave_origin = QPointF()
         self._wave_color = QColor()
         self._scene = None
+        self._stacking_layout = None
         self._phase = ""
         # None — свечение неподвижно; иначе время потока сцены в секундах.
         self._shimmer_t: float | None = None
@@ -128,12 +132,41 @@ class StatusHeroCard(CardWidget):
     def _pressedBackgroundColor(self):  # noqa: N802
         return self._normalBackgroundColor()
 
+    def set_stacking_layout(self, layout) -> None:
+        """Раскладка карточки, которую в узком окне надо развернуть сверху вниз."""
+        self._stacking_layout = layout
+        self._sync_stacking()
+
+    def is_stacked(self) -> bool:
+        layout = self._stacking_layout
+        return layout is not None and layout.direction() == QBoxLayout.Direction.TopToBottom
+
+    def _sync_stacking(self) -> None:
+        layout = self._stacking_layout
+        if layout is None:
+            return
+        stacked = self.width() < STACK_BELOW_WIDTH
+        if stacked == self.is_stacked():
+            return
+        layout.setDirection(QBoxLayout.Direction.TopToBottom if stacked else QBoxLayout.Direction.LeftToRight)
+        layout.setSpacing(10 if stacked else 18)
+        scene = self._scene
+        if scene is not None:
+            # Отдельной строкой сцена растягивается на всю ширину: дорожки длиннее.
+            scene.set_stretched(stacked)
+            layout.setAlignment(scene, Qt.AlignmentFlag(0) if stacked else Qt.AlignmentFlag.AlignVCenter)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_stacking()
+
     def bind_scene(self, scene) -> None:
         """Связывает карточку со сценой: цвет фона и волна от кнопки."""
         self._scene = scene
         scene.colorChanged.connect(self.set_tint)
         scene.phaseChanged.connect(self._on_scene_phase_changed)
         scene.flowFrame.connect(self._on_scene_flow_frame)
+        self._sync_stacking()
 
     def shimmer_rect(self) -> QRect:
         """Область за сценой, где живёт свечение: только её и перерисовываем."""

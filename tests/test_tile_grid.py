@@ -59,6 +59,16 @@ class TileGridTests(unittest.TestCase):
         self.assertEqual([tile.y() for tile in tiles], [0, 0, 52, 52])
         self.assertEqual(grid.maximumHeight(), 40 + 12 + 40)
 
+    def test_lonely_last_tile_beats_a_single_column(self) -> None:
+        # Три столбца не влезают, два без одинокой плитки невозможны (5 = 2+2+1):
+        # лучше одинокая плитка на всю ширину, чем столбик из пяти.
+        grid, tiles = self._grid(5, width=500)
+
+        self.assertEqual(grid.columns(), 2)
+        self.assertEqual([tile.y() for tile in tiles], [0, 0, 52, 52, 104])
+        self.assertEqual(tiles[4].width(), 500)
+        self.assertEqual(tiles[0].width(), (500 - 12) // 2)
+
     def test_very_narrow_grid_falls_back_to_one_column(self) -> None:
         grid, tiles = self._grid(3, width=300)
 

@@ -77,8 +77,84 @@ def _apply_setting_card_text_styles(title_label, desc_label, tokens=None) -> Non
     )
 
 
-class Win11ToggleRow(FluentSettingCard):
+# Отступ между текстом строки и её переключателем или списком справа.
+ROW_TEXT_GAP = 16
+
+
+def _let_row_texts_shrink(title_label, desc_label) -> None:
+    """В узком окне уступает текст слева, а переключатель справа не уезжает за край."""
+    for label in (title_label, desc_label):
+        if label is not None:
+            # 1, а не 0: ноль вернул бы минимум по длине текста.
+            label.setMinimumWidth(1)
+
+
+def _fit_row_texts(row, control) -> None:
+    """Не влезающий текст строки обрезается многоточием, полный — в подсказке.
+
+    Полные тексты строка хранит в ``_full_title`` и ``_full_description``:
+    на экране может стоять сокращённый вариант, а сравнивать и переводить
+    нужно полный.
+    """
+    title_label = getattr(row, "_title_label", None)
+    if control is None or title_label is None or not row.isVisible():
+        return
+    # Справа от элемента управления в строке всегда отступ ROW_TEXT_GAP. Ширину
+    # берём заданную, а не текущую: раскладка может ещё не успеть его подвинуть.
+    fixed = control.minimumWidth() == control.maximumWidth()
+    control_width = control.maximumWidth() if fixed else control.width()
+    room = row.width() - ROW_TEXT_GAP - control_width - ROW_TEXT_GAP - title_label.x()
+    if room < 24:
+        return
+    for label, full in (
+        (title_label, getattr(row, "_full_title", "")),
+        (getattr(row, "_desc_label", None), getattr(row, "_full_description", "")),
+    ):
+        if label is None or not full:
+            continue
+        fitted = label.fontMetrics().elidedText(full, Qt.TextElideMode.ElideRight, room)
+        if label.text() != fitted:
+            label.setText(fitted)
+        tooltip = full if fitted != full else ""
+        if label.toolTip() != tooltip:
+            label.setToolTip(tooltip)
+
+
+class _FittingRowTextsMixin:
+    """Общая часть строк настроек: полные тексты и подгонка под ширину строки."""
+
+    def _row_control(self):
+        return None
+
+    def setTitle(self, title: str) -> None:  # noqa: N802
+        self._full_title = str(title or "")
+        super().setTitle(self._full_title)
+        _fit_row_texts(self, self._row_control())
+
+    def setContent(self, content: str) -> None:  # noqa: N802
+        self._full_description = str(content or "")
+        super().setContent(self._full_description)
+        _fit_row_texts(self, self._row_control())
+
+    def _sync_control_width(self) -> None:
+        pass
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_control_width()
+        _fit_row_texts(self, self._row_control())
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._sync_control_width()
+        _fit_row_texts(self, self._row_control())
+
+
+class Win11ToggleRow(_FittingRowTextsMixin, FluentSettingCard):
     """Строка с toggle switch в стиле Windows 11."""
+
+    def _row_control(self):
+        return getattr(self, "_switch_button", None)
 
     toggled = pyqtSignal(bool)
 
@@ -109,6 +185,10 @@ class Win11ToggleRow(FluentSettingCard):
         self._icon_label = getattr(self, "iconLabel", None)
         self._title_label = getattr(self, "titleLabel", None)
         self._desc_label = getattr(self, "contentLabel", None)
+
+        self._full_title = str(title or "")
+        self._full_description = str(description or "")
+        _let_row_texts_shrink(self._title_label, self._desc_label)
 
         # Подписи «Вкл.»/«Выкл.» и постоянную ширину задаёт сам AlignedSwitchButton.
         self._switch_button = AlignedSwitchButton(self)
@@ -726,8 +806,27 @@ class Win11NumberRow(FluentSettingCard):
             set_state_text(spinbox, name)
 
 
-class Win11ComboRow(FluentSettingCard):
+class Win11ComboRow(_FittingRowTextsMixin, FluentSettingCard):
     """Строка с выпадающим списком в стиле Windows 11."""
+
+    def _row_control(self):
+        return getattr(self, "combo", None)
+
+    def set_combo_width_range(self, minimum: int, maximum: int) -> None:
+        """Список шириной до ``maximum``, но в узкой строке сужается до ``minimum``."""
+        self._combo_width_range = (int(minimum), max(int(minimum), int(maximum)))
+        self._sync_control_width()
+
+    def _sync_control_width(self) -> None:
+        width_range = self.__dict__.get("_combo_width_range")
+        combo = getattr(self, "combo", None)
+        if width_range is None or combo is None:
+            return
+        minimum, maximum = width_range
+        # Список занимает не больше 45% строки, остальное — название и пояснение.
+        width = max(minimum, min(maximum, int(self.width() * 0.45)))
+        if combo.maximumWidth() != width or combo.minimumWidth() != width:
+            combo.setFixedWidth(width)
 
     currentIndexChanged = pyqtSignal(int)
     currentTextChanged = pyqtSignal(str)
@@ -763,6 +862,9 @@ class Win11ComboRow(FluentSettingCard):
         self._title_label = getattr(self, "titleLabel", None)
         self._desc_label = getattr(self, "contentLabel", None)
         layout = getattr(self, "hBoxLayout", None)
+        self._full_title = str(title or "")
+        self._full_description = str(description or "")
+        _let_row_texts_shrink(self._title_label, self._desc_label)
 
         self.combo = ComboBox()
         self.combo.setFixedWidth(160)

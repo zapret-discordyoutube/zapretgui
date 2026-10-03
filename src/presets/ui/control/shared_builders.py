@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QIcon, QPixmap
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout
+from PyQt6.QtWidgets import QBoxLayout, QHBoxLayout, QVBoxLayout
 
 from qfluentwidgets import CardWidget, FluentIcon
 
@@ -61,7 +61,9 @@ def build_mode_status_section_common(
 ) -> ModeStatusWidgets:
     """Карточка «Статус работы». Кнопка в стене сцены — выключатель Zapret."""
     status_card = StatusHeroCard()
-    status_layout = QHBoxLayout(status_card)
+    # Сцена слева, справа текст и «Закрыть программу». В узком окне карточка
+    # сама ставит сцену отдельной строкой над текстом (StatusHeroCard.resizeEvent).
+    status_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, status_card)
     status_layout.setContentsMargins(16, 14, 16, 14)
     status_layout.setSpacing(18)
 
@@ -120,7 +122,11 @@ def build_mode_status_section_common(
     loading_label.setVisible(False)
     set_state_text(loading_label, "Статус запуска Zapret: нет активного запуска")
     status_text.addWidget(loading_label)
-    status_layout.addLayout(status_text, 1)
+    info_row = QHBoxLayout()
+    info_row.setContentsMargins(0, 0, 0, 0)
+    info_row.setSpacing(18)
+    info_row.addLayout(status_text, 1)
+    status_layout.addLayout(info_row, 1)
 
     status_card.bind_scene(status_dot)
 
@@ -133,7 +139,8 @@ def build_mode_status_section_common(
     set_state_text(close_btn, close_text)
     close_btn.clicked.connect(on_close)
     close_btn.setVisible(False)
-    status_layout.addWidget(close_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+    info_row.addWidget(close_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+    status_card.set_stacking_layout(status_layout)
 
     return ModeStatusWidgets(
         card=status_card,
