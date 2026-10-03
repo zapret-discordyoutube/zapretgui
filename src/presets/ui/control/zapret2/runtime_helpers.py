@@ -84,7 +84,7 @@ def apply_profile_language(
     )
     if additional_settings_notice is not None:
         additional_settings_notice.setText(
-            tr_catalog("page.winws2_control.advanced.warning", language=language, default="Изменяйте только если знаете что делаете")
+            tr_catalog("page.winws2_control.advanced.warning", language=language, default="Эти параметры лучше менять, только если уверены в результате")
         )
 
     program_settings_card.titleLabel.setText(

@@ -5,11 +5,11 @@
 Страницы импортируют отсюда только готовые UI-кирпичики:
 SettingsCard, SettingsRow, PulsingDot и похожие элементы.
 """
-from PyQt6.QtCore import Qt, QSize, QTimer, QObject, QEvent
+from PyQt6.QtCore import Qt, QSize, QTimer, QObject, QEvent, QPointF
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy,
 )
-from PyQt6.QtGui import QIcon, QFont, QColor, QPainter, QPixmap, QTransform
+from PyQt6.QtGui import QIcon, QFont, QColor, QPainter, QPen, QPixmap, QTransform
 import qtawesome as qta
 
 from ui.theme import get_cached_qta_pixmap, get_themed_qta_icon, get_theme_tokens
@@ -486,6 +486,41 @@ class QuickActionsBar(SimpleCardWidget):
             pass
 
 
+class _NoticeMarker(QWidget):
+    """Свой значок предупреждения: цветной кружок с восклицательным знаком.
+
+    Рисуется кистью, без шрифтов и эмодзи, поэтому выглядит одинаково везде.
+    """
+
+    _SIZE = 16
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._color = QColor("#ff9800")
+        self.setFixedSize(self._SIZE, self._SIZE)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def set_color(self, color: str) -> None:
+        self._color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event):  # noqa: N802
+        _ = event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._color)
+        size = float(self._SIZE)
+        painter.drawEllipse(0, 0, self._SIZE, self._SIZE)
+
+        glyph = QColor(32, 32, 32, 230)
+        center = size / 2.0
+        painter.setPen(QPen(glyph, 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(QPointF(center, size * 0.27), QPointF(center, size * 0.55))
+        painter.drawPoint(QPointF(center, size * 0.74))
+        painter.end()
+
+
 class SemanticNotice(QWidget):
     """Небольшое theme-aware предупреждение/подсказка внутри fluent-групп."""
 
@@ -493,17 +528,17 @@ class SemanticNotice(QWidget):
         super().__init__(parent)
         self._tone = str(tone or "warning").strip().lower() or "warning"
         self._text = str(text or "")
-        # Без этого обычный QWidget не рисует заливку и рамку из своего стиля.
+        # Без этого обычный QWidget не рисует заливку из своего стиля.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self._icon_label = QLabel(self)
+        self._icon_label = _NoticeMarker(self)
         self._text_label = CaptionLabel(self)
         self._text_label.setWordWrap(True)
         self._text_label.setText(self._text)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(8)
-        layout.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignTop)
+        layout.setContentsMargins(12, 9, 12, 9)
+        layout.setSpacing(10)
+        layout.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self._text_label, 1)
 
         self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
@@ -540,37 +575,29 @@ class SemanticNotice(QWidget):
             if self._tone == "warning":
                 # warning_text читается и на светлой теме, яркий оранжевый там бледный.
                 fg = palette.warning_text
-                bg = palette.warning_soft_bg
+                bg = "rgba(255, 152, 0, 0.08)"
                 icon_color = palette.warning
-                border = "rgba(255, 152, 0, 0.30)"
             elif self._tone == "error":
                 fg = palette.error
                 bg = palette.error_soft_bg
                 icon_color = palette.error
-                border = palette.error_soft_border
             else:
                 fg = palette.info
-                bg = "rgba(95, 205, 254, 0.12)"
+                bg = "rgba(95, 205, 254, 0.08)"
                 icon_color = palette.info
-                border = "rgba(95, 205, 254, 0.26)"
         except Exception:
             fg = "#ff9800"
-            bg = "rgba(255, 152, 0, 0.12)"
+            bg = "rgba(255, 152, 0, 0.08)"
             icon_color = "#ff9800"
-            border = "rgba(255, 152, 0, 0.30)"
 
-        try:
-            self._icon_label.setPixmap(
-                get_cached_qta_pixmap("fa5s.exclamation-triangle", color=icon_color, size=14)
-            )
-        except Exception:
-            pass
+        self._icon_label.set_color(icon_color)
 
         self._text_label.setStyleSheet(
             f"color: {fg}; background: transparent;"
         )
+        # Безрамочный интерфейс: только мягкая заливка, без обводки.
         self.setStyleSheet(
-            f"SemanticNotice {{ background: {bg}; border: 1px solid {border}; border-radius: 8px; }}"
+            f"SemanticNotice {{ background: {bg}; border: none; border-radius: 8px; }}"
         )
 
 

@@ -398,8 +398,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "ADVANCED SETTINGS",
     },
     "page.winws1_control.advanced.warning": {
-        "ru": "Изменяйте только если знаете что делаете",
-        "en": "Change only if you know what you are doing",
+        "ru": "Эти параметры лучше менять, только если уверены в результате",
+        "en": "Better change these only if you are sure of the result",
     },
     "page.winws1_control.advanced.discord_restart.title": {
         "ru": "Перезапуск Discord",
@@ -1474,8 +1474,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "ADVANCED SETTINGS",
     },
     "page.dpi_settings.advanced.warning": {
-        "ru": "Изменяйте только если знаете что делаете",
-        "en": "Change only if you know what you are doing",
+        "ru": "Эти параметры лучше менять, только если уверены в результате",
+        "en": "Better change these only if you are sure of the result",
     },
     "page.dpi_settings.advanced.wssize.title": {
         "ru": "Включить --wssize",
@@ -4011,8 +4011,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "ADVANCED SETTINGS",
     },
     "page.winws2_control.advanced.warning": {
-        "ru": "Изменяйте только если знаете что делаете",
-        "en": "Change only if you know what you are doing",
+        "ru": "Эти параметры лучше менять, только если уверены в результате",
+        "en": "Better change these only if you are sure of the result",
     },
     "page.winws2_control.button.connection_test": {
         "ru": "Тест соединения",

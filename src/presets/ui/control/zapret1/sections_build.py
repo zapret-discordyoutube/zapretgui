@@ -146,7 +146,7 @@ def build_winws1_pages_settings_sections(
 
     additional_settings_card, additional_settings_notice = build_additional_settings_section(
         title=tr_fn("page.winws1_control.card.advanced", "Дополнительные настройки"),
-        warning_text=tr_fn("page.winws1_control.advanced.warning", "Изменяйте только если знаете что делаете"),
+        warning_text=tr_fn("page.winws1_control.advanced.warning", "Эти параметры лучше менять, только если уверены в результате"),
         parent=content_parent,
         toggle_rows=[discord_restart_toggle, wssize_toggle, debug_log_toggle],
         action_rows=[],

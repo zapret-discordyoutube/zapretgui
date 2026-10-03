@@ -179,7 +179,7 @@ def apply_winws1_pages_language(
         tr_catalog("page.winws1_control.card.advanced", language=language, default="Дополнительные настройки")
     )
     additional_settings_notice.setText(
-        tr_catalog("page.winws1_control.advanced.warning", language=language, default="Изменяйте только если знаете что делаете")
+        tr_catalog("page.winws1_control.advanced.warning", language=language, default="Эти параметры лучше менять, только если уверены в результате")
     )
     discord_restart_toggle.set_texts(
         tr_catalog("page.winws1_control.advanced.discord_restart.title", language=language, default="Перезапуск Discord"),
