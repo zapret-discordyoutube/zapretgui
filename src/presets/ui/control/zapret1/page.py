@@ -78,6 +78,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         open_presets,
         open_preset_setup,
         open_premium,
+        open_dpi_settings,
         create_external_open_url_worker,
         ui_state_store,
         start_onboarding_tour,
@@ -107,6 +108,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self._open_presets_callback = open_presets
         self._open_preset_setup_callback = open_preset_setup
         self._open_premium_callback = open_premium
+        self._open_dpi_settings_callback = open_dpi_settings
         self._create_external_open_url_worker = create_external_open_url_worker
         self._start_onboarding_tour_callback = start_onboarding_tour
         self.onboarding_tour_card = None
@@ -200,6 +202,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         )
         self.top_summary.presetClicked.connect(self._open_presets_callback)
         self.top_summary.profilesClicked.connect(self._open_preset_setup_page)
+        self.top_summary.modeClicked.connect(self._open_dpi_settings_callback)
         self.top_summary.premiumClicked.connect(self._open_premium_callback)
         self.add_widget(self.top_summary)
 

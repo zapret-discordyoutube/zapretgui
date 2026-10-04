@@ -83,6 +83,30 @@ def test_only_zapret2_control_page_gets_open_fakes():
     assert "open_fakes" not in _kwargs(PageName.ZAPRET1_MODE_CONTROL, Mock())
 
 
+def test_both_control_pages_get_a_way_to_the_dpi_mode_page():
+    from ui.page_deps.presets import build_control_page_kwargs
+
+    for page_name in (PageName.ZAPRET1_MODE_CONTROL, PageName.ZAPRET2_MODE_CONTROL):
+        show_page = Mock()
+        kwargs = build_control_page_kwargs(
+            page_name=page_name,
+            presets_feature=Mock(),
+            profile_feature=Mock(),
+            launch_control=Mock(),
+            program_settings_feature=Mock(),
+            external_actions_feature=Mock(),
+            set_status=Mock(),
+            request_exit=Mock(),
+            open_connection_test=Mock(),
+            open_folder=Mock(),
+            show_page=show_page,
+            start_onboarding_tour=Mock(),
+            ui_state_store=Mock(),
+        )
+        kwargs["open_dpi_settings"]()
+        show_page.assert_called_once_with(PageName.DPI_SETTINGS)
+
+
 def _snapshot():
     from fakes.user_fakes import FakeNameRules, FakeRow, FakesPageSnapshot
 

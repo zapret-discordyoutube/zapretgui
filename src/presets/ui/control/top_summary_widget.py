@@ -405,6 +405,7 @@ class ControlTopSummaryItem(SoftTile):
 class ControlTopSummaryWidget(TileGrid):
     presetClicked = pyqtSignal()
     profilesClicked = pyqtSignal()
+    modeClicked = pyqtSignal()
     premiumClicked = pyqtSignal()
 
     def __init__(self, *, language: str, mode_value: str, initial_icon_delay_ms: int = 0, parent=None):
@@ -432,6 +433,7 @@ class ControlTopSummaryWidget(TileGrid):
         )
         self.mode_item = ControlTopSummaryItem(
             icon_name="mode",
+            clickable=True,
             initial_icon_delay_ms=initial_icon_delay_ms,
             parent=self,
         )
@@ -444,6 +446,7 @@ class ControlTopSummaryWidget(TileGrid):
 
         self.preset_item.clicked.connect(self.presetClicked.emit)
         self.profiles_item.clicked.connect(self.profilesClicked.emit)
+        self.mode_item.clicked.connect(self.modeClicked.emit)
         self.premium_item.clicked.connect(self.premiumClicked.emit)
 
         # Значки плиток по очереди играют свои короткие жесты; звезда Premium

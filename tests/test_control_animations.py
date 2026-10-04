@@ -773,15 +773,21 @@ class ControlTopSummaryTilesTests(unittest.TestCase):
         ("simple:telegram:TG", "#229ED9"),
     )
 
-    def test_summary_items_are_tiles_and_only_links_are_clickable(self) -> None:
+    def test_summary_items_are_tiles_and_all_of_them_lead_somewhere(self) -> None:
         self.host.show()
         QApplication.processEvents()
         items = (self.summary.preset_item, self.summary.profiles_item, self.summary.mode_item, self.summary.premium_item)
 
-        self.assertEqual([item.is_clickable() for item in items], [True, True, False, True])
+        self.assertEqual([item.is_clickable() for item in items], [True, True, True, True])
         self.assertEqual(self.summary.columns(), 4)
         self.assertEqual({item.height() for item in items}, {summary_module.TILE_ROW_HEIGHT})
         self.assertGreater(self.summary.preset_item.width(), self.summary.mode_item.width())
+
+    def test_current_mode_tile_opens_the_mode_page(self) -> None:
+        opened = []
+        self.summary.modeClicked.connect(lambda: opened.append("mode"))
+        self.summary.mode_item.clicked.emit()
+        self.assertEqual(opened, ["mode"])
 
     def test_tiles_wrap_into_two_rows_in_a_narrow_window(self) -> None:
         self.host.resize(560, 300)
