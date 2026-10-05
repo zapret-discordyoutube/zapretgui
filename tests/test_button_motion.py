@@ -134,7 +134,10 @@ class ButtonMotionTests(unittest.TestCase):
                     _seen.append((math.degrees(math.atan2(transform.m12(), transform.m11())), _motion.icon_angle()))
                     return original_draw(icon, painter, rect, *args, **kwargs)
 
-                with mock.patch.object(fluent_button, "drawIcon", side_effect=record):
+                # Подмена — сама функция, а не Mock: Mock запоминает аргументы вызова,
+                # то есть держит QPainter дольше отрисовки, и его разбор сборщиком
+                # мусора после grab() роняет интерпретатор.
+                with mock.patch.object(fluent_button, "drawIcon", record):
                     button.grab()
                 self.assertEqual(len(seen), 1)
                 painter_angle, motion_angle = seen[0]
