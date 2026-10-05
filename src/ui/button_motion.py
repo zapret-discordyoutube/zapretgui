@@ -23,12 +23,20 @@
 Анимации — QVariantAnimation: при выключенных анимациях WinUI общий
 fallback подменяет QPropertyAnimation.start (см. ui/animation_policy.py).
 Подписок на смену темы нет, цвет волны берётся в момент отрисовки.
+
+Состояние жестов живёт в общем списке ``_MOTIONS`` по адресу кнопки в Qt, а не
+в поле Python-обёртки кнопки, и само на обёртку кнопки не ссылается. Иначе
+получается кольцо ссылок «обёртка кнопки ↔ состояние»: если обёртку кнопки
+больше никто не держит (кнопкой владеет Qt), сборщик мусора разбирает кольцо
+и стирает поля состояния, а в сборке Nuitka сигналы анимаций продолжают звать
+уже пустой объект.
 """
 
 from __future__ import annotations
 
 import math
 
+from PyQt6 import sip
 from PyQt6.QtCore import QEasingCurve, QEvent, QObject, QPointF, QRectF, Qt, QVariantAnimation
 from PyQt6.QtGui import QColor, QPainter, QPainterPath
 from PyQt6.QtWidgets import QPushButton
@@ -47,7 +55,6 @@ RIPPLE_DURATION_MS = 450
 RIPPLE_MAX_ALPHA = 0.22
 BUTTON_CORNER_RADIUS = 5.0
 
-_MOTION_ATTR = "_zapret_button_motion"
 _DRAWING_ATTR = "_zapret_button_motion_drawing"
 _FILTERED_ATTR = "_zapret_button_motion_filtered"
 _PATCHED_ATTR = "_zapret_button_motion_patched"
@@ -56,6 +63,8 @@ _PLAIN_BUTTON_ATTRS = ("yesButton", "cancelButton", "button", "completeButton")
 _INSTALLED = False
 _FLUENT_BUTTON_TYPES: tuple[type, ...] = ()
 _FILTER: "_ButtonMotionFilter | None" = None
+# Адрес кнопки в Qt → состояние её жестов. Запись убирается, когда кнопка удалена.
+_MOTIONS: "dict[int, _ButtonMotion]" = {}
 
 
 def _can_animate(button) -> bool:
@@ -89,7 +98,6 @@ class _ButtonMotion(QObject):
 
     def __init__(self, button) -> None:
         super().__init__(button)
-        self._button = button
         self._wobble_t = 0.0
         self._press = 0.0
         self._ripple_t = 1.0
@@ -114,18 +122,20 @@ class _ButtonMotion(QObject):
     def hover(self) -> None:
         if self._wobble.state() == QVariantAnimation.State.Running:
             return
-        if not _button_has_icon(self._button) or not _can_animate(self._button):
+        button = self.parent()
+        if not _button_has_icon(button) or not _can_animate(button):
             return
         self._wobble.start()
 
     def press(self, pos: QPointF) -> None:
-        if not _can_animate(self._button):
+        button = self.parent()
+        if not _can_animate(button):
             return
         self._animate_press(1.0, PRESS_DURATION_MS, QEasingCurve.Type.OutCubic)
         self._ripple.stop()
         self._ripple_origin = QPointF(pos)
         self._ripple_t = 0.0
-        _ensure_paint_filter(self._button)
+        _ensure_paint_filter(button)
         self._ripple.start()
 
     def release(self) -> None:
@@ -191,7 +201,7 @@ class _ButtonMotion(QObject):
 
     def _repaint(self) -> None:
         try:
-            self._button.update()
+            self.parent().update()
         except RuntimeError:
             pass
 
@@ -267,12 +277,30 @@ def _corner_radius(button, rect: QRectF) -> float:
     return min(BUTTON_CORNER_RADIUS, rect.height() / 2.0)
 
 
+def _existing_motion(button) -> _ButtonMotion | None:
+    """Состояние жестов кнопки, если оно уже создано."""
+    if not _MOTIONS:
+        return None
+    try:
+        key = sip.unwrapinstance(button)
+    except (RuntimeError, TypeError):
+        return None
+    motion = _MOTIONS.get(key)
+    if motion is not None and sip.isdeleted(motion):
+        # Кнопку удалили, а её адрес мог достаться новой.
+        del _MOTIONS[key]
+        return None
+    return motion
+
+
 def button_motion(button) -> _ButtonMotion:
     """Возвращает состояние жестов кнопки, создавая его при первом обращении."""
-    motion = getattr(button, _MOTION_ATTR, None)
+    motion = _existing_motion(button)
     if motion is None:
+        key = sip.unwrapinstance(button)
         motion = _ButtonMotion(button)
-        setattr(button, _MOTION_ATTR, motion)
+        _MOTIONS[key] = motion
+        motion.destroyed.connect(lambda *_: _MOTIONS.pop(key, None))
     return motion
 
 
@@ -283,7 +311,7 @@ class _ButtonMotionFilter(QObject):
         try:
             kind = event.type()
             if kind == QEvent.Type.Paint:
-                motion = getattr(obj, _MOTION_ATTR, None)
+                motion = _existing_motion(obj)
                 if motion is None or not motion.ripple_active():
                     return False
                 obj.paintEvent(event)
@@ -294,7 +322,7 @@ class _ButtonMotionFilter(QObject):
             if kind == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 button_motion(obj).press(event.position())
             elif kind == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
-                motion = getattr(obj, _MOTION_ATTR, None)
+                motion = _existing_motion(obj)
                 if motion is not None:
                     motion.release()
         except Exception:
@@ -331,7 +359,7 @@ def _wrap_draw_icon(cls: type) -> None:
     original = cls.__dict__["_drawIcon"]
 
     def _drawIcon(self, icon, painter, rect, *args, **kwargs):  # noqa: N802
-        motion = getattr(self, _MOTION_ATTR, None)
+        motion = _existing_motion(self)
         if motion is None or getattr(self, _DRAWING_ATTR, False) or not motion.icon_transformed():
             return original(self, icon, painter, rect, *args, **kwargs)
 
@@ -376,7 +404,7 @@ def _patch_fluent_events(base: type) -> None:
     def mouseReleaseEvent(self, e):  # noqa: N802
         # Жест до оригинала: обработчик clicked может удалить кнопку.
         try:
-            motion = getattr(self, _MOTION_ATTR, None)
+            motion = _existing_motion(self)
             if motion is not None and e.button() == Qt.MouseButton.LeftButton:
                 motion.release()
         except Exception:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import gc
 import inspect
 import math
 import os
+import sys
 import time
 import unittest
 from pathlib import Path
@@ -10,9 +12,10 @@ from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QPointF, Qt, qInstallMessageHandler
 from PyQt6.QtGui import QMouseEvent
-from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
 
 import ui.button_motion as motion_module
 from ui.button_motion import button_motion, install_button_motion
@@ -187,6 +190,53 @@ class ButtonMotionTests(unittest.TestCase):
         self._press(card.button)
         self.assertTrue(button_motion(card.button).ripple_active())
         self._release(card.button)
+
+    def test_gestures_survive_garbage_collection_of_button_wrapper(self) -> None:
+        # Кнопкой владеет Qt, а её Python-обёртку никто не держит: так бывает с
+        # кнопками, которые создал сам Qt или чей Python-владелец уже отпущен.
+        button = QPushButton("Отмена", self.host)
+        motion_module.attach_button_motion(button)
+        self._add(button)
+        sip.transferto(button, None)
+        del button
+
+        # В сборке Nuitka метод — не обычный метод Python, и PyQt держит слот
+        # сильной ссылкой. ``__call__`` связанного метода даёт здесь то же самое.
+        make_animation = motion_module._make_animation
+        errors: list[BaseException] = []
+        with (
+            mock.patch.object(
+                motion_module,
+                "_make_animation",
+                lambda parent, on_value, **kwargs: make_animation(parent, on_value.__call__, **kwargs),
+            ),
+            mock.patch.object(sys, "excepthook", lambda _kind, error, _tb: errors.append(error)),
+        ):
+            self._press(self.host.findChild(QPushButton))
+            _wait(0.05)
+            gc.collect()
+            _wait(0.1)
+
+            self.assertEqual(errors, [])
+            found = self.host.findChild(QPushButton)
+            self.assertTrue(button_motion(found).ripple_active())
+            self._release(found)
+            _wait(motion_module.RIPPLE_DURATION_MS / 1000 + 0.1)
+            self.assertFalse(button_motion(found).ripple_active())
+            self.assertEqual(errors, [])
+        self.assertEqual(len(found.findChildren(motion_module._ButtonMotion)), 1)
+
+    def test_motion_is_forgotten_when_button_is_deleted(self) -> None:
+        button = QPushButton("Отмена", self.host)
+        motion_module.attach_button_motion(button)
+        self._add(button)
+        self._press(button)
+        key = sip.unwrapinstance(button)
+        self.assertIn(key, motion_module._MOTIONS)
+
+        sip.delete(button)
+
+        self.assertNotIn(key, motion_module._MOTIONS)
 
     def test_module_contract(self) -> None:
         source = inspect.getsource(motion_module)
