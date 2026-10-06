@@ -7,6 +7,7 @@ from typing import Any
 
 COMMON_FOLDER_KEY = "common"
 PINNED_FOLDER_KEY = "pinned"
+VOICE_FOLDER_KEY = "voice"
 
 
 _WINWS2_PRESET_FOLDERS: tuple[tuple[str, str, bool], ...] = (
@@ -38,6 +39,9 @@ _WINWS1_PRESET_FOLDERS: tuple[tuple[str, str, bool], ...] = (
 _PROFILE_FOLDERS: tuple[tuple[str, str, bool], ...] = (
     ("youtube", "YouTube", False),
     ("discord", "Discord", False),
+    # Звонки по STUN — один профиль на весь пресет: он чинит голос и в
+    # Discord, и в Telegram, и в других программах, поэтому стоит отдельно.
+    (VOICE_FOLDER_KEY, "Голосовые звонки (Discord, Telegram)", False),
     ("github", "GitHub", False),
     ("messengers", "Мессенджеры", False),
     ("social", "Соцсети", False),
@@ -50,6 +54,16 @@ _PROFILE_FOLDERS: tuple[tuple[str, str, bool], ...] = (
     (COMMON_FOLDER_KEY, "Общие", True),
     ("all-sites", "Все сайты", False),
 )
+
+
+# Папки, которые появились позже остальных: {новая папка: папка, куда такой
+# профиль попадал раньше}. Профиль, который пользователь сам не раскладывал,
+# один раз переезжает в новую (profile.folders.move_untouched_profiles_to_split_folders).
+PROFILE_FOLDER_SPLITS: dict[str, str] = {VOICE_FOLDER_KEY: "discord"}
+
+# В оригинальном zapret2 stun — общий протокол звонков (--filter-l7=stun), а
+# не признак Discord, хотя в одном фильтре с ним обычно стоит и discord.
+_SHARED_VOICE_FILTER = re.compile(r"--filter-l7=\S*(?<![a-z0-9_])stun(?![a-z0-9_])")
 
 
 def build_default_preset_folders(scope_key: object = "winws2") -> dict[str, Any]:
@@ -92,6 +106,8 @@ def _classify_profile_folder_text(value: str) -> str:
         return COMMON_FOLDER_KEY
     if _has_any_token(value, ("youtube", "googlevideo", "ytimg")):
         return "youtube"
+    if _SHARED_VOICE_FILTER.search(value):
+        return VOICE_FOLDER_KEY
     if _has_any_token(value, ("discord", "vencord")):
         return "discord"
     if _has_any_token(value, ("github", "ghcr.io")):
@@ -264,6 +280,8 @@ def clone_default_profile_folders() -> dict[str, Any]:
 __all__ = [
     "COMMON_FOLDER_KEY",
     "PINNED_FOLDER_KEY",
+    "PROFILE_FOLDER_SPLITS",
+    "VOICE_FOLDER_KEY",
     "build_default_preset_folders",
     "build_default_profile_folders",
     "classify_preset_folder",

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from core.paths import AppPaths
 from folders.defaults import classify_profile_folder
-from profile.folders import load_profile_folder_state
+from profile.folders import load_profile_folder_state, save_profile_folder_state
 from profile.identity import (
     generate_profile_uid,
     is_profile_uid,
@@ -233,6 +233,74 @@ class ProfileIdentityServiceTests(unittest.TestCase):
                 self.assertEqual(result, (uid, uid))
                 state = load_profile_folder_state()
                 self.assertEqual(state["items"][uid]["folder_key"], "common")
+
+    _VOICE_PRESET = "\n".join(
+        (
+            "--name=discord.com",
+            "--filter-tcp=443",
+            "--hostlist=lists/discord.txt",
+            "--lua-desync=pass",
+            "",
+            "--new",
+            "",
+            "--name=Голосовые звонки/чаты",
+            "--filter-l7=stun,discord",
+            "--payload=stun,discord_ip_discovery",
+            "--lua-desync=fake:blob=tls_max",
+            "",
+        )
+    )
+
+    def _place_both_in_discord(self, service: ProfilePresetService, *, voice_order: int | None) -> tuple[str, str]:
+        """Состояние до появления папки звонков: оба профиля лежат в Discord."""
+        preset, _manifest = service.load_selected_preset()
+        discord_uid, voice_uid = (profile.persistent_key for profile in preset.profiles)
+        state = load_profile_folder_state()
+        state["items"][discord_uid] = {"folder_key": "discord", "order": None, "rating": 0}
+        state["items"][voice_uid] = {"folder_key": "discord", "order": voice_order, "rating": 0}
+        save_profile_folder_state(state)
+        return discord_uid, voice_uid
+
+    def test_new_voice_profile_is_placed_in_voice_folder(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                service, _store = self._service(self._VOICE_PRESET, root)
+                preset, _manifest = service.load_selected_preset()
+                discord_uid, voice_uid = (profile.persistent_key for profile in preset.profiles)
+                state = load_profile_folder_state()
+
+        self.assertEqual(state["items"][discord_uid]["folder_key"], "discord")
+        self.assertEqual(state["items"][voice_uid]["folder_key"], "voice")
+
+    def test_voice_profile_placed_in_discord_before_moves_on_next_preset_load(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                service, _store = self._service(self._VOICE_PRESET, root)
+                discord_uid, voice_uid = self._place_both_in_discord(service, voice_order=None)
+
+                # Программа открывается заново и читает тот же пресет.
+                next_service, _store = self._service(self._VOICE_PRESET, root)
+                next_preset, _manifest = next_service.load_selected_preset()
+                state = load_profile_folder_state()
+
+        self.assertEqual([profile.persistent_key for profile in next_preset.profiles], [discord_uid, voice_uid])
+        self.assertEqual(state["items"][voice_uid]["folder_key"], "voice")
+        self.assertEqual(state["items"][discord_uid]["folder_key"], "discord")
+
+    def test_voice_profile_ordered_by_user_inside_discord_stays_there(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            with patch("settings.store.MAIN_DIRECTORY", str(root)):
+                service, _store = self._service(self._VOICE_PRESET, root)
+                _discord_uid, voice_uid = self._place_both_in_discord(service, voice_order=1)
+
+                next_service, _store = self._service(self._VOICE_PRESET, root)
+                next_service.load_selected_preset()
+                state = load_profile_folder_state()
+
+        self.assertEqual(state["items"][voice_uid], {"folder_key": "discord", "order": 1, "rating": 0})
 
 
 if __name__ == "__main__":

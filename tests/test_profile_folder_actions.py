@@ -12,6 +12,7 @@ from profile.folders import (
     delete_profile_folder,
     load_profile_folder_state,
     move_profile_folder_by_step,
+    move_untouched_profiles_to_split_folders,
     rename_profile_folder,
     reset_profile_folders,
     set_profile_folder_collapsed,
@@ -101,6 +102,50 @@ class ProfileFolderActionTests(unittest.TestCase):
                     state = reset_profile_folders()
         self.assertIsInstance(state, dict)
         self.assertIn("youtube", state["folders"])
+
+    def test_untouched_voice_profile_moves_from_discord_to_its_new_folder(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            with patch("settings.store.MAIN_DIRECTORY", str(Path(temp_dir))):
+                state = load_profile_folder_state()
+                state["items"]["uid:voice"] = {"folder_key": "discord", "order": None, "rating": 4}
+                state["items"]["uid:discord"] = {"folder_key": "discord", "order": None, "rating": 0}
+                save_profile_folder_state(state)
+
+                self.assertTrue(
+                    move_untouched_profiles_to_split_folders({"uid:voice": "voice", "uid:discord": "discord"})
+                )
+                state = load_profile_folder_state()
+                # Повторный вызов ничего не меняет и в настройки не пишет.
+                with patch(
+                    "profile.folders.settings_store.set_folders_settings",
+                    side_effect=AssertionError("повторный перенос не должен писать настройки"),
+                ):
+                    self.assertFalse(move_untouched_profiles_to_split_folders({"uid:voice": "voice"}))
+
+        self.assertEqual(state["items"]["uid:voice"], {"folder_key": "voice", "order": None, "rating": 4})
+        self.assertEqual(state["items"]["uid:discord"]["folder_key"], "discord")
+
+    def test_voice_profile_arranged_by_user_is_left_where_it_is(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            with patch("settings.store.MAIN_DIRECTORY", str(Path(temp_dir))):
+                folder_key = create_profile_folder("Моя папка")
+                state = load_profile_folder_state()
+                # Пользователь раскладывал Discord сам: у профиля есть порядок.
+                state["items"]["uid:ordered"] = {"folder_key": "discord", "order": 2, "rating": 0}
+                # Пользователь унёс профиль в свою папку.
+                state["items"]["uid:moved"] = {"folder_key": folder_key, "order": None, "rating": 0}
+                save_profile_folder_state(state)
+
+                self.assertFalse(
+                    move_untouched_profiles_to_split_folders(
+                        {"uid:ordered": "voice", "uid:moved": "voice", "uid:not-placed-yet": "voice"}
+                    )
+                )
+                state = load_profile_folder_state()
+
+        self.assertEqual(state["items"]["uid:ordered"]["folder_key"], "discord")
+        self.assertEqual(state["items"]["uid:moved"]["folder_key"], folder_key)
+        self.assertNotIn("uid:not-placed-yet", state["items"])
 
     def test_profile_folder_reset_materializes_assignments(self) -> None:
         with TemporaryDirectory() as temp_dir:

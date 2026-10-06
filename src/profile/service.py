@@ -29,6 +29,7 @@ from .derived_cache import (
 from .folders import (
     load_profile_folder_state,
     materialize_profile_folder_items,
+    move_untouched_profiles_to_split_folders,
     profile_classification_text,
     profile_folder_state_lock,
     save_profile_folder_state,
@@ -217,14 +218,17 @@ class ProfilePresetService:
 
                 migrate_profile_item_keys(legacy_key_mapping)
                 self._state_store.migrate_profile_keys(legacy_key_mapping)
+            folder_by_uid = {
+                uid: classify_profile_folder(profile_classification_text(profile))
+                for profile, uid in zip(preset.profiles, resolution.uids)
+            }
             if resolution.new_uids:
                 materialize_profile_folder_items(
-                    {
-                        uid: classify_profile_folder(profile_classification_text(profile))
-                        for profile, uid in zip(preset.profiles, resolution.uids)
-                        if uid in resolution.new_uids
-                    }
+                    {uid: folder for uid, folder in folder_by_uid.items() if uid in resolution.new_uids}
                 )
+            # Уже размещённые профили: переезд в папку, появившуюся позже
+            # (звонки вынесены из Discord), если пользователь их не трогал.
+            move_untouched_profiles_to_split_folders(folder_by_uid)
         except Exception as exc:
             log(f"ProfilePresetService: не удалось применить реестр идентичности профилей: {exc}", "ERROR")
 

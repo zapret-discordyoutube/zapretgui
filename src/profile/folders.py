@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any
 
-from folders.defaults import COMMON_FOLDER_KEY, build_default_profile_folders
+from folders.defaults import COMMON_FOLDER_KEY, PROFILE_FOLDER_SPLITS, build_default_profile_folders
 from folders.state_lock import FOLDERS_SETTINGS_LOCK
 from folders.store import FolderLibraryStore, normalize_folder_state
 from settings import store as settings_store
@@ -139,6 +139,44 @@ def materialize_profile_folder_items(folder_by_profile_key: dict[str, str]) -> b
         return True
 
 
+def move_untouched_profiles_to_split_folders(folder_by_profile_key: dict[str, str]) -> bool:
+    """Переносит профиль в папку, которой не было, когда его размещали.
+
+    Пример: «Голосовые звонки» раньше попадали в Discord, теперь у них своя
+    папка. Переезжает только профиль, который пользователь сам не трогал:
+    любое ручное перемещение проставляет порядок (`order`) всем профилям
+    папки, поэтому `order is None` означает «лежит там, куда положила
+    программа». Профиль, возвращённый в старую папку вручную, получает
+    порядок и больше не переносится.
+    """
+    wanted = {
+        str(profile_key or "").strip(): str(folder_key or "").strip()
+        for profile_key, folder_key in dict(folder_by_profile_key or {}).items()
+        if str(folder_key or "").strip() in PROFILE_FOLDER_SPLITS and str(profile_key or "").strip()
+    }
+    if not wanted:
+        return False
+    with profile_folder_state_lock():
+        state = load_profile_folder_state()
+        folders = state.get("folders", {})
+        items = state.get("items", {})
+        changed = False
+        for profile_key, folder_key in wanted.items():
+            meta = items.get(profile_key) if isinstance(items, dict) else None
+            if not isinstance(meta, dict) or meta.get("order") is not None:
+                continue
+            if meta.get("folder_key") != PROFILE_FOLDER_SPLITS[folder_key]:
+                continue
+            if not isinstance(folders, dict) or folder_key not in folders:
+                continue
+            meta["folder_key"] = folder_key
+            changed = True
+        if not changed:
+            return False
+        save_profile_folder_state(state)
+        return True
+
+
 def migrate_profile_item_keys(key_mapping: dict[str, str]) -> bool:
     """Переносит мету папок с legacy-ключей (name:/sig:) на uid-ключи.
 
@@ -217,6 +255,7 @@ __all__ = [
     "delete_profile_folder",
     "load_profile_folder_state",
     "materialize_profile_folder_items",
+    "move_untouched_profiles_to_split_folders",
     "profile_classification_text",
     "move_profile_folder_by_step",
     "profile_folder_state_lock",

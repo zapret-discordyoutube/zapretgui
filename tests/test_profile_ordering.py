@@ -112,8 +112,10 @@ class ProfileOrderRoundTripTests(unittest.TestCase):
 
         self.assertEqual(
             view.items_by_folder["discord"],
-            ("discord-tcp", "discord-udp", "discord-voice", "vencord"),
+            ("discord-tcp", "discord-udp", "vencord"),
         )
+        # Общий профиль звонков (STUN) стоит в своей папке, а не в Discord.
+        self.assertEqual(view.items_by_folder["voice"], ("discord-voice",))
 
     def test_ac1_move_round_trip_matches_optimistic_order(self) -> None:
         items = _youtube_items()

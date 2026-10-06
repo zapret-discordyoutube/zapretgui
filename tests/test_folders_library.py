@@ -55,6 +55,7 @@ class FolderDefaultsTests(unittest.TestCase):
             [
                 "YouTube",
                 "Discord",
+                "Голосовые звонки (Discord, Telegram)",
                 "GitHub",
                 "Мессенджеры",
                 "Соцсети",
@@ -108,6 +109,28 @@ class FolderDefaultsTests(unittest.TestCase):
             classify_preset_folder("general ALT12 1.9.9a (game filter).txt", "winws1"),
             "1-9-9a",
         )
+
+    def test_shared_voice_profile_gets_its_own_folder_not_discord(self) -> None:
+        # STUN — общий протокол звонков: профиль чинит голос и в Discord, и в
+        # Telegram, поэтому слово discord в том же фильтре его в Discord не тянет.
+        self.assertEqual(
+            classify_profile_folder("Голосовые звонки/чаты --filter-l7=stun,discord"),
+            "voice",
+        )
+        self.assertEqual(classify_profile_folder("Voice --filter-l7=wireguard,stun,discord"), "voice")
+        self.assertEqual(classify_profile_folder("Звонки --filter-l7=stun"), "voice")
+        # Профили самого Discord остаются в Discord.
+        self.assertEqual(
+            classify_profile_folder("Discord UDP (обычно не нужно) --filter-udp=443-65535 --filter-l7=discord"),
+            "discord",
+        )
+        self.assertEqual(classify_profile_folder("discord.media (voice RTC) --filter-tcp=443"), "discord")
+        # Слово stun в имени списка — не фильтр звонков.
+        self.assertEqual(classify_profile_folder("Discord --hostlist=lists/discord-stun.txt"), "discord")
+
+        folders = build_default_profile_folders()["folders"]
+        self.assertEqual(folders["voice"]["name"], "Голосовые звонки (Discord, Telegram)")
+        self.assertEqual(folders["voice"]["order"], folders["discord"]["order"] + 1)
 
     def test_profile_default_folder_is_classified_from_profile_text(self) -> None:
         self.assertEqual(classify_profile_folder("YouTube Russia CDN --hostlist=youtube.txt"), "youtube")
@@ -178,6 +201,7 @@ class FolderDefaultsTests(unittest.TestCase):
             [
                 "YouTube",
                 "Discord",
+                "Голосовые звонки (Discord, Telegram)",
                 "GitHub",
                 "Мессенджеры",
                 "Соцсети",
