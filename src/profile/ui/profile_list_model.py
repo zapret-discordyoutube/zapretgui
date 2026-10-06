@@ -41,6 +41,9 @@ class ProfileListModel(QAbstractListModel):
     IconColorRole = Qt.ItemDataRole.UserRole + 19
     TooltipRole = Qt.ItemDataRole.UserRole + 20
     StrategyPayloadBadgeRole = Qt.ItemDataRole.UserRole + 21
+    ActiveCountRole = Qt.ItemDataRole.UserRole + 22
+    ActiveFlagsRole = Qt.ItemDataRole.UserRole + 23
+    IconInHeaderRole = Qt.ItemDataRole.UserRole + 24
 
     MIME_TYPE = "application/x-zapret-profile-key"
 
@@ -491,6 +494,12 @@ class ProfileListModel(QAbstractListModel):
             return bool(row.get("collapsed", False))
         if role == self.CountRole:
             return int(row.get("count", 0) or 0)
+        if role == self.ActiveCountRole:
+            return int(row.get("active_count", 0) or 0)
+        if role == self.ActiveFlagsRole:
+            return tuple(row.get("active_flags", ()) or ())
+        if role == self.IconInHeaderRole:
+            return bool(row.get("icon_in_header", False))
         if role == self.IconNameRole:
             return row.get("icon_name", "")
         if role == self.IconColorRole:
@@ -695,6 +704,9 @@ def _profile_data_roles() -> list[int]:
         ProfileListModel.GroupNameRole,
         ProfileListModel.CollapsedRole,
         ProfileListModel.CountRole,
+        ProfileListModel.ActiveCountRole,
+        ProfileListModel.ActiveFlagsRole,
+        ProfileListModel.IconInHeaderRole,
         ProfileListModel.IconNameRole,
         ProfileListModel.IconColorRole,
         ProfileListModel.TooltipRole,
@@ -728,9 +740,11 @@ def _profile_accessible_text(row: dict[str, Any]) -> str:
     group_name = str(row.get("group_name") or row.get("display_name") or "").strip()
     if group_name:
         count = _safe_int(row.get("count"))
+        # То же, что плитка показывает как «3 из 5».
+        active_text = f", включено {_safe_int(row.get('active_count'))}" if "active_count" in row else ""
         expanded_text = "свернута" if bool(row.get("collapsed", False)) else "развернута"
         return (
-            f"Группа {group_name}, {_profile_count_text(count)}, {expanded_text}. "
+            f"Группа {group_name}, {_profile_count_text(count)}{active_text}, {expanded_text}. "
             "Нажмите Enter или Пробел, чтобы свернуть или развернуть группу."
         )
     return str(row.get("display_name") or "").strip()

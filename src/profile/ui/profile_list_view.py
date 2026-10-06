@@ -8,6 +8,8 @@ from qfluentwidgets import ListView
 
 from .profile_list_model import ProfileListModel
 from ui.accessibility import set_state_text
+from ui.widgets.tile_layout import TILE_ROW_HEADER, TILE_ROW_ITEM, TILE_ROW_WIDE
+from ui.widgets.tile_list_view import TileListViewMixin
 
 
 PROFILE_DROP_MARKER_PROPERTY = "profileDropMarker"
@@ -88,7 +90,7 @@ def profile_canonical_drop_target_for_next_row(
     return {"marker": {"row": row_index, "mode": "before"}, "destination_kind": "profile", "destination_row": row_index}
 
 
-class ProfileListView(ListView):
+class ProfileListView(TileListViewMixin, ListView):
     profile_activated = pyqtSignal(str)
     profile_context_requested = pyqtSignal(str, QPoint)
     folder_context_requested = pyqtSignal(str, QPoint)
@@ -103,6 +105,15 @@ class ProfileListView(ListView):
         self._drag_start_pos: QPoint | None = None
         self._drag_source: tuple[str, str] | None = None
         self.set_drop_marker(-1, "")
+
+    def tile_row_kind(self, index) -> str:
+        # В режиме плиток (set_tile_layout_enabled) папка становится плиткой.
+        kind = str(index.data(ProfileListModel.KindRole) or "")
+        if kind == "folder":
+            return TILE_ROW_HEADER
+        if kind == "empty":
+            return TILE_ROW_WIDE
+        return TILE_ROW_ITEM
 
     def set_screen_reader_list_name(self, name: str) -> None:
         value = " ".join(str(name or "").strip().split())
@@ -165,7 +176,7 @@ class ProfileListView(ListView):
                 self.viewport().update(rect)
 
     def _drop_target_at(self, point: QPoint) -> tuple[dict[str, object], str, str]:
-        drop_index = self.indexAt(point)
+        drop_index = self.tile_index_near(point)
         if not drop_index.isValid():
             return {"marker": {"row": -1, "mode": ""}, "destination_kind": "end", "destination_row": -1}, "", ""
         destination_kind = str(drop_index.data(ProfileListModel.KindRole) or "")
@@ -331,6 +342,8 @@ class ProfileListView(ListView):
         super().keyPressEvent(event)
 
     def _move_current_index_from_keyboard(self, key: int) -> bool:
+        if key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            return self._move_current_index_to_neighbor_column(1 if key == Qt.Key.Key_Right else -1)
         if key not in (
             Qt.Key.Key_Down,
             Qt.Key.Key_Up,
@@ -363,6 +376,15 @@ class ProfileListView(ListView):
             row = max(0, row - 10)
 
         next_index = model.index(row, 0)
+        if not next_index.isValid():
+            return False
+        set_current_index_if_changed(self, next_index)
+        self.scrollTo(next_index)
+        return True
+
+    def _move_current_index_to_neighbor_column(self, direction: int) -> bool:
+        # Стрелки влево и вправо в плитках переходят в соседний столбец.
+        next_index = self.tile_neighbor_index(self.currentIndex(), direction)
         if not next_index.isValid():
             return False
         set_current_index_if_changed(self, next_index)

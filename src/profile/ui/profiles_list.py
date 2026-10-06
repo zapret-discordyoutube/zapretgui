@@ -177,6 +177,10 @@ class ProfilesList(QWidget):
         set_control_accessibility(self._view, name="Список профилей", description=profile_list_description)
         self._view.set_screen_reader_list_name("Список профилей")
         self._view.setModel(self._model)
+        # Группы профилей стоят плитками в несколько столбцов: весь пресет
+        # виден на одном экране. Страница «Порядок в пресете» использует тот же
+        # вид без этого режима — обычным столбцом.
+        self._view.set_tile_layout_enabled(True)
         # Точечные правки списка модель применяет insert/remove/move-сигналами,
         # и QListView сам сохраняет позицию прокрутки. Полный reset «того же
         # списка» восстанавливает позицию по scroll-anchor (identity верхней
@@ -432,7 +436,9 @@ class ProfilesList(QWidget):
         смещение относительно верха viewport (обычно ≤ 0)."""
         if self._view.verticalScrollBar().value() <= 0:
             return None
-        index = self._view.indexAt(QPoint(0, 0))
+        # В плитках в точке (0, 0) может оказаться поле плитки или промежуток
+        # между плитками, поэтому верхнюю строку находит сам вид.
+        index = self._view.top_visible_index()
         if not index.isValid():
             return None
         identity = self._model.stable_row_identity_at(index.row())
