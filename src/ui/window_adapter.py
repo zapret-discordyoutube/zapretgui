@@ -88,7 +88,10 @@ def route_window_search_result(window, page_name: PageName, tab_key: str = "") -
 
 
 def persist_window_geometry(window) -> None:
-    window.window_geometry_runtime.persist_now(force=True)
+    # Сворачивание в трей — обычное действие пользователя: снимок геометрии
+    # берётся сразу, а запись в settings.sqlite3 делает фоновый поток.
+    # Синхронная запись (force=True) нужна только при выходе из программы.
+    window.window_geometry_runtime.persist_now()
 
 
 def release_input_interaction_states(window) -> None:

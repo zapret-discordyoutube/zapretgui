@@ -251,5 +251,63 @@ class ObservedModelGuardTests(unittest.TestCase):
         self.assertEqual(scheduled, [True])
 
 
+class TrayHidePersistTests(unittest.TestCase):
+    """Сворачивание в трей не пишет в базу настроек в потоке интерфейса."""
+
+    def _window_with_runtime(self, host, store):
+        from types import SimpleNamespace
+
+        runtime = _make_runtime(host, store)
+        runtime.close_state = None
+        requested: list[tuple[tuple[int, int, int, int] | None, bool]] = []
+        runtime._request_geometry_save = lambda *, geometry, maximized: requested.append(
+            (geometry, maximized)
+        )
+        runtime._stop_geometry_save_worker_for_sync = lambda: None
+        return SimpleNamespace(window_geometry_runtime=runtime), requested
+
+    def test_tray_hide_hands_snapshot_to_background_save(self) -> None:
+        from main.tray_window_port import TrayWindowPort
+
+        host = _FakeHost(visible=True, live_geometry=(50, 60, 1280, 720))
+        store = _RecordingStore()
+        window, requested = self._window_with_runtime(host, store)
+
+        TrayWindowPort(window).persist_geometry()
+
+        # Снимок взят до скрытия окна, а запись ушла фоновому работнику.
+        self.assertEqual(requested, [((50, 60, 1280, 720), False)])
+        self.assertEqual(store.saved_geometry, [])
+        self.assertEqual(store.saved_maximized, [])
+
+    def test_tray_hide_skips_save_when_nothing_changed(self) -> None:
+        from main.tray_window_port import TrayWindowPort
+
+        host = _FakeHost(visible=True, live_geometry=(50, 60, 1280, 720))
+        store = _RecordingStore()
+        window, requested = self._window_with_runtime(host, store)
+        window.window_geometry_runtime._last_persisted_geometry = (50, 60, 1280, 720)
+        window.window_geometry_runtime._last_persisted_maximized = False
+
+        TrayWindowPort(window).persist_geometry()
+
+        self.assertEqual(requested, [])
+        self.assertEqual(store.saved_geometry, [])
+        self.assertEqual(store.saved_maximized, [])
+
+    def test_exit_still_persists_synchronously(self) -> None:
+        from main.window_lifecycle_cleanup import persist_window_geometry
+
+        host = _FakeHost(visible=True, live_geometry=(50, 60, 1280, 720))
+        store = _RecordingStore()
+        window, requested = self._window_with_runtime(host, store)
+
+        persist_window_geometry(window, context="закрытии")
+
+        self.assertEqual(requested, [])
+        self.assertEqual(store.saved_geometry, [(50, 60, 1280, 720)])
+        self.assertEqual(store.saved_maximized, [False])
+
+
 if __name__ == "__main__":
     unittest.main()
