@@ -1,5 +1,5 @@
 # Preset: Ростелеком
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -91,7 +91,7 @@
 
 --new
 
---name=googlevideo.com (CDN сервера)
+--name=YouTube · видео (googlevideo.com)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
 --out-range=-d8
@@ -99,7 +99,7 @@
 
 --new
 
---name=youtube.com (интерфейс)
+--name=YouTube · сайт и приложение
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
 --out-range=-d8
@@ -107,7 +107,7 @@
 
 --new
 
---name=youtube.com (QUIC)
+--name=YouTube · быстрый протокол QUIC
 --filter-udp=443
 --ipset=lists/ipset-youtube.txt
 --out-range=-n8
@@ -173,7 +173,7 @@
 
 --new
 
---name=discord.com
+--name=Discord · сайт и приложение
 --ipset=lists/ipset-discord.txt
 --out-range=-d10
 --lua-desync=syndata
@@ -233,7 +233,7 @@
 
 --new
 
---name=Roblox TCP
+--name=Roblox · игра
 --ipset=lists/ipset-roblox.txt
 --out-range=-d10
 --lua-desync=syndata
@@ -281,7 +281,7 @@
 
 --new
 
---name=WhatsApp
+--name=WhatsApp · сообщения
 --ipset=lists/ipset-whatsapp.txt
 --out-range=-d10
 --lua-desync=syndata
@@ -329,7 +329,7 @@
 
 --new
 
---name=Discord UDP (обычно не нужно)
+--name=Discord · UDP (обычно не нужно)
 --filter-udp=443-65535
 --ipset=lists/ipset-discord.txt
 --out-range=-n8
@@ -383,7 +383,7 @@
 
 --new
 
---name=Roblox UDP
+--name=Roblox · игра (UDP)
 --filter-udp=443-65535
 --ipset=lists/ipset-roblox.txt
 --out-range=-n8
@@ -419,7 +419,7 @@
 
 --new
 
---name=WhatsApp UDP wide
+--name=WhatsApp · звонки (UDP)
 --filter-udp=443-65535
 --ipset=lists/ipset-whatsapp.txt
 --out-range=-n8

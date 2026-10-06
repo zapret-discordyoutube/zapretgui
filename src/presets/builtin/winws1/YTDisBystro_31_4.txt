@@ -6,7 +6,7 @@
 --wf-udp=443,50000-50090
 
 # === HTTPS YouTube ===
---comment=youtube.com (RTMPS Россия)
+--comment=YouTube · трансляции (RTMPS)
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-russia-youtube-rtmps.txt
 --dpi-desync=syndata
@@ -31,7 +31,7 @@
 
 --new
 
---comment=googlevideo.com (CDN сервера)
+--comment=YouTube · видео (googlevideo.com)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
 --dpi-desync=fake,multidisorder
@@ -46,7 +46,7 @@
 
 --new
 
---comment=youtube.com (интерфейс)
+--comment=YouTube · сайт и приложение
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
 --dpi-desync=fake,multidisorder

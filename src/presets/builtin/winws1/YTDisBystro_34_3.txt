@@ -1,5 +1,5 @@
 # Preset: YTDisBystro_34_3
-# BuiltinVersion: 1.2
+# BuiltinVersion: 1.3
 # IconColor: #60cdff
 # Description: Imported from bat/YTDisBystro_34_3.txt
 
@@ -7,7 +7,7 @@
 --wf-udp=443,50000-50090
 
 # === HTTPS YouTube ===
---comment=youtube.com (RTMPS Россия)
+--comment=YouTube · трансляции (RTMPS)
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-russia-youtube-rtmps.txt
 --dpi-desync=syndata
@@ -32,7 +32,7 @@
 
 --new
 
---comment=googlevideo.com (CDN сервера)
+--comment=YouTube · видео (googlevideo.com)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
 --ipcache-hostname
@@ -53,7 +53,7 @@
 
 --new
 
---comment=youtube.com (интерфейс)
+--comment=YouTube · сайт и приложение
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
 --ipcache-hostname
@@ -90,7 +90,7 @@
 
 --new
 
---comment=discord.com
+--comment=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
 --dpi-desync=fake,multisplit
@@ -162,7 +162,7 @@
 
 --new
 
---comment=Roblox TCP
+--comment=Roblox · игра
 --filter-tcp=80,443-65535
 --hostlist=lists/roblox.txt
 --dpi-desync=fake,multisplit
@@ -252,7 +252,7 @@
 
 --new
 
---comment=WhatsApp
+--comment=WhatsApp · сообщения
 --filter-tcp=80,443
 --hostlist=lists/whatsapp.txt
 --dpi-desync=fake,multisplit

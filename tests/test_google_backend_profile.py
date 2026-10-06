@@ -3,7 +3,7 @@
 Сайты YouTube тянут шрифты, скрипты и статику с общих доменов Google. Эти
 домены вынесены в отдельный список lists/google-backend.txt и отдельный
 profile «Бэкенд Google», который в каждом встроенном winws2 preset-е с
-«youtube.com (интерфейс)» повторяет его стратегию и стоит до RU-исключений.
+«YouTube · сайт и приложение» повторяет его стратегию и стоит до RU-исключений.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ GOOGLE_BACKEND_LIST_PATH = PRIVATE_ROOT / "dist" / "lists" / "google-backend.txt
 WINWS2_BUILTIN_DIR = PUBLIC_ROOT / "src" / "presets" / "builtin" / "winws2"
 
 BACKEND_NAME = "Бэкенд Google"
-YOUTUBE_INTERFACE_NAME = "youtube.com (интерфейс)"
+YOUTUBE_INTERFACE_NAME = "YouTube · сайт и приложение"
 RU_EXCLUSION_NAMES = frozenset({"Исключения домены (RU сайты)", "Исключения айпи (RU сайты)"})
 BACKEND_MATCH_LINES = ["--filter-tcp=80,443", "--hostlist=lists/google-backend.txt"]
 TLS_GOOGLE_BLOB_LINE = "--blob=tls_google:@bin/tls_clienthello_www_google_com.bin"

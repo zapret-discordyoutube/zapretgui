@@ -6,7 +6,7 @@
 --wf-udp=443,50000-50090
 
 # === HTTPS YouTube ===
---comment=youtube.com (RTMPS Россия)
+--comment=YouTube · трансляции (RTMPS)
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-russia-youtube-rtmps.txt
 --dpi-desync=syndata
@@ -29,7 +29,7 @@
 
 --new
 
---comment=discord.com
+--comment=Discord · сайт и приложение
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-discord.txt
 --dpi-desync=syndata
@@ -120,7 +120,7 @@
 
 --new
 
---comment=Roblox TCP
+--comment=Roblox · игра
 --filter-tcp=80,443-65535
 --hostlist=lists/roblox.txt
 --dpi-desync=fake,multisplit
@@ -180,7 +180,7 @@
 
 --new
 
---comment=WhatsApp
+--comment=WhatsApp · сообщения
 --filter-tcp=80,443
 --hostlist=lists/whatsapp.txt
 --dpi-desync=fake,multisplit

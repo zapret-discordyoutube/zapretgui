@@ -1,5 +1,5 @@
 # Preset: special for loop-uh
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -91,7 +91,7 @@
 
 --new
 
---name=youtube.com (интерфейс)
+--name=YouTube · сайт и приложение
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
 --out-range=-d8
@@ -99,7 +99,7 @@
 
 --new
 
---name=youtube.com (QUIC)
+--name=YouTube · быстрый протокол QUIC
 --filter-udp=443
 --ipset=lists/ipset-youtube.txt
 --out-range=-n8

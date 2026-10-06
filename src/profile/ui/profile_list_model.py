@@ -44,6 +44,8 @@ class ProfileListModel(QAbstractListModel):
     ActiveCountRole = Qt.ItemDataRole.UserRole + 22
     ActiveFlagsRole = Qt.ItemDataRole.UserRole + 23
     IconInHeaderRole = Qt.ItemDataRole.UserRole + 24
+    # Имя для строки плитки: без повтора названия группы («Видео» под «YouTube»).
+    TileNameRole = Qt.ItemDataRole.UserRole + 25
 
     MIME_TYPE = "application/x-zapret-profile-key"
 
@@ -500,6 +502,8 @@ class ProfileListModel(QAbstractListModel):
             return tuple(row.get("active_flags", ()) or ())
         if role == self.IconInHeaderRole:
             return bool(row.get("icon_in_header", False))
+        if role == self.TileNameRole:
+            return row.get("tile_name") or row.get("display_name", "")
         if role == self.IconNameRole:
             return row.get("icon_name", "")
         if role == self.IconColorRole:
@@ -707,6 +711,7 @@ def _profile_data_roles() -> list[int]:
         ProfileListModel.ActiveCountRole,
         ProfileListModel.ActiveFlagsRole,
         ProfileListModel.IconInHeaderRole,
+        ProfileListModel.TileNameRole,
         ProfileListModel.IconNameRole,
         ProfileListModel.IconColorRole,
         ProfileListModel.TooltipRole,

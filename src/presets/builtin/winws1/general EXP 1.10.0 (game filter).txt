@@ -1,5 +1,5 @@
 # Preset: general EXP 1.10.0 (game filter)
-# BuiltinVersion: 1.0
+# BuiltinVersion: 1.1
 # IconColor: #60cdff
 # Description: Adapted from zapret-discord-youtube 1.10.0 general (EXP)
 
@@ -8,7 +8,7 @@
 
 --filter-udp=443
 --filter-l7=quic
---comment=youtube.com (QUIC)
+--comment=YouTube · быстрый протокол QUIC
 --hostlist=lists/youtube.txt
 --hostlist-exclude=lists/list-exclude.txt
 --ipset-exclude=lists/ipset-exclude.txt
@@ -20,7 +20,7 @@
 
 --filter-udp=443
 --filter-l7=quic
---comment=discord.com
+--comment=Discord · сайт и приложение
 --hostlist=lists/discord.txt
 --hostlist-exclude=lists/list-exclude.txt
 --ipset-exclude=lists/ipset-exclude.txt
@@ -32,7 +32,7 @@
 
 --filter-udp=443
 --filter-l7=quic
---comment=discord.media (voice RTC)
+--comment=Discord · голос и видео (discord.media)
 --hostlist=lists/discord-media.txt
 --hostlist-exclude=lists/list-exclude.txt
 --ipset-exclude=lists/ipset-exclude.txt
@@ -80,7 +80,7 @@
 
 --filter-udp=443
 --filter-l7=quic
---comment=Roblox TCP
+--comment=Roblox · игра
 --hostlist=lists/roblox.txt
 --hostlist-exclude=lists/list-exclude.txt
 --ipset-exclude=lists/ipset-exclude.txt
@@ -140,7 +140,7 @@
 
 --filter-udp=443
 --filter-l7=quic
---comment=WhatsApp
+--comment=WhatsApp · сообщения
 --hostlist=lists/whatsapp.txt
 --hostlist-exclude=lists/list-exclude.txt
 --ipset-exclude=lists/ipset-exclude.txt
@@ -196,7 +196,7 @@
 --new
 
 --filter-tcp=80,443
---comment=youtube.com (интерфейс)
+--comment=YouTube · сайт и приложение
 --hostlist=lists/youtube.txt
 --hostlist-exclude=lists/list-exclude.txt
 --ipset-exclude=lists/ipset-exclude.txt
@@ -212,7 +212,7 @@
 --new
 
 --filter-tcp=80,443
---comment=discord.com
+--comment=Discord · сайт и приложение
 --hostlist=lists/discord.txt
 --hostlist-exclude=lists/list-exclude.txt
 --ipset-exclude=lists/ipset-exclude.txt
@@ -228,7 +228,7 @@
 --new
 
 --filter-tcp=80,443
---comment=discord.media (voice RTC)
+--comment=Discord · голос и видео (discord.media)
 --hostlist=lists/discord-media.txt
 --hostlist-exclude=lists/list-exclude.txt
 --ipset-exclude=lists/ipset-exclude.txt
@@ -292,7 +292,7 @@
 --new
 
 --filter-tcp=80,443
---comment=Roblox TCP
+--comment=Roblox · игра
 --hostlist=lists/roblox.txt
 --hostlist-exclude=lists/list-exclude.txt
 --ipset-exclude=lists/ipset-exclude.txt
@@ -372,7 +372,7 @@
 --new
 
 --filter-tcp=80,443
---comment=WhatsApp
+--comment=WhatsApp · сообщения
 --hostlist=lists/whatsapp.txt
 --hostlist-exclude=lists/list-exclude.txt
 --ipset-exclude=lists/ipset-exclude.txt

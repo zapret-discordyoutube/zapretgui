@@ -327,6 +327,27 @@ def profile_row_tooltip(item: ProfileDisplayItem) -> str:
     return "\n".join(lines)
 
 
+# Имя профиля записано как «Сервис · роль»: «YouTube · видео (googlevideo.com)».
+PROFILE_NAME_ROLE_SEPARATOR = " · "
+
+
+def profile_name_inside_group(name: str, group_title: str) -> str:
+    """Имя профиля для строки плитки: без повтора названия группы.
+
+    Под шапкой «YouTube» профиль «YouTube · видео (googlevideo.com)» читается
+    как «Видео (googlevideo.com)». Полное имя остаётся в пресете, в подсказке,
+    в поиске и везде, где шапки группы рядом нет.
+    """
+    name = str(name or "").strip()
+    prefix = f"{str(group_title or '').strip()}{PROFILE_NAME_ROLE_SEPARATOR}"
+    if len(prefix) <= len(PROFILE_NAME_ROLE_SEPARATOR) or not name.casefold().startswith(prefix.casefold()):
+        return name
+    role = name[len(prefix) :].strip()
+    if not role:
+        return name
+    return role[0].upper() + role[1:]
+
+
 def row_for_profile(item: ProfileDisplayItem, *, header_icon_name: str = "") -> dict[str, Any]:
     match_lines = tuple(item.match_lines or ())
     ports = ports_label_from_match_lines(match_lines)
@@ -347,11 +368,16 @@ def row_for_profile(item: ProfileDisplayItem, *, header_icon_name: str = "") -> 
     elif not item.enabled:
         tooltip = f"{tooltip}\nПрофиль есть в пресете, но сейчас выключен. В файле это записано через --skip."
     icon = resolve_profile_icon(item.display_name, match_lines)
+    tile_name = profile_name_inside_group(item.display_name, item.group_name)
+    if tile_name != item.display_name:
+        # В строке плитки имя сокращено — полное показывает подсказка.
+        tooltip = f"{item.display_name}\n{tooltip}"
     return {
         "kind": "profile",
         "key": item.key,
         "persistent_key": item.persistent_key,
         "display_name": item.display_name,
+        "tile_name": tile_name,
         "description": " | ".join(description_parts),
         "strategy_id": item.strategy_id,
         "strategy_name": item.strategy_name,
@@ -610,6 +636,7 @@ __all__ = [
     "normalized_search_query",
     "ordered_group_keys",
     "profile_matches_filter",
+    "profile_name_inside_group",
     "profile_matches_search_query",
     "profile_matches_type_filter",
     "profile_search_text",

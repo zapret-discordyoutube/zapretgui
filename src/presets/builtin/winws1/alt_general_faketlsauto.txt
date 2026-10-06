@@ -110,7 +110,7 @@
 
 --new
 
---comment=discord.media (voice RTC)
+--comment=Discord · голос и видео (discord.media)
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord-media.txt
 --dpi-desync=fake,multidisorder
@@ -143,7 +143,7 @@
 
 --new
 
---comment=discord.com
+--comment=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
 --dpi-desync=fake,multidisorder
@@ -187,7 +187,7 @@
 
 --new
 
---comment=Roblox TCP
+--comment=Roblox · игра
 --filter-tcp=80,443-65535
 --hostlist=lists/roblox.txt
 --dpi-desync=fake,multidisorder
@@ -242,7 +242,7 @@
 
 --new
 
---comment=WhatsApp
+--comment=WhatsApp · сообщения
 --filter-tcp=80,443
 --hostlist=lists/whatsapp.txt
 --dpi-desync=fake,multidisorder

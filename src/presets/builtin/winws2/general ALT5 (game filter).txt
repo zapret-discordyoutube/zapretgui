@@ -1,5 +1,5 @@
 # Preset: general ALT5 (game filter)
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # IconColor: #b475f0ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -148,7 +148,7 @@
 
 --new
 
---name=discord.com
+--name=Discord · сайт и приложение
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-discord.txt
 --out-range=-d10
@@ -193,7 +193,7 @@
 
 --new
 
---name=Roblox TCP
+--name=Roblox · игра
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-roblox.txt
 --out-range=-d10
@@ -229,7 +229,7 @@
 
 --new
 
---name=WhatsApp
+--name=WhatsApp · сообщения
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-whatsapp.txt
 --out-range=-d10
@@ -265,7 +265,7 @@
 
 --new
 
---name=Discord UDP (обычно не нужно)
+--name=Discord · UDP (обычно не нужно)
 --filter-udp=443-65535
 --ipset=lists/ipset-discord.txt
 --out-range=-n3
@@ -319,7 +319,7 @@
 
 --new
 
---name=Roblox UDP
+--name=Roblox · игра (UDP)
 --filter-udp=443-65535
 --ipset=lists/ipset-roblox.txt
 --out-range=-n3
@@ -355,7 +355,7 @@
 
 --new
 
---name=WhatsApp UDP wide
+--name=WhatsApp · звонки (UDP)
 --filter-udp=443-65535
 --ipset=lists/ipset-whatsapp.txt
 --out-range=-n3

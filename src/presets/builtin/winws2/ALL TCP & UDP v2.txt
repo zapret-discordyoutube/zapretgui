@@ -1,5 +1,5 @@
 # Preset: ALL TCP & UDP v2
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # Description: 
 
 --lua-init=@lua/zapret-lib.lua
@@ -55,7 +55,7 @@
 
 --new
 
---name=updates.discord.com
+--name=Discord · обновления
 --filter-tcp=443
 --hostlist=lists/discord-updates.txt
 --out-range=-d2
@@ -63,7 +63,7 @@
 
 --new
 
---name=discord.media (voice RTC)
+--name=Discord · голос и видео (discord.media)
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord-media.txt
 --out-range=-d2
@@ -71,7 +71,7 @@
 
 --new
 
---name=discord.com
+--name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
 --out-range=-n2

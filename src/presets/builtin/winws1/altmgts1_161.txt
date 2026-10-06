@@ -1,5 +1,5 @@
 # Preset: altmgts1_161
-# BuiltinVersion: 1.3
+# BuiltinVersion: 1.4
 # IconColor: #60cdff
 # Description: Imported from bat/altmgts1_161.txt
 
@@ -14,7 +14,7 @@
 
 --new
 
---comment=Discord UDP (обычно не нужно)
+--comment=Discord · UDP (обычно не нужно)
 --filter-udp=443-65535
 --ipset=lists/ipset-discord.txt
 --dpi-desync=fake
@@ -43,7 +43,7 @@
 
 --new
 
---comment=discord.com
+--comment=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
 --dpi-desync=fake
@@ -98,7 +98,7 @@
 
 --new
 
---comment=Roblox TCP
+--comment=Roblox · игра
 --filter-tcp=80,443-65535
 --hostlist=lists/roblox.txt
 --dpi-desync=fake
@@ -153,7 +153,7 @@
 
 --new
 
---comment=WhatsApp
+--comment=WhatsApp · сообщения
 --filter-tcp=80,443
 --hostlist=lists/whatsapp.txt
 --dpi-desync=fake

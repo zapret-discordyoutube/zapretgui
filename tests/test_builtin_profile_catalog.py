@@ -548,7 +548,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             )
             uses_github_hostlist = any(
                 profile.enabled
-                and str(profile.name or "").strip() == "GitHub"
+                and str(profile.name or "").strip() == "GitHub · сайт"
                 and profile.match.hostlist_lines == ["--hostlist=lists/github.txt"]
                 for profile in preset.profiles
             )
@@ -557,7 +557,7 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
             seen_github_presets += 1
             has_githubusercontent = any(
                 profile.enabled
-                and str(profile.name or "").strip() == "githubusercontent.com"
+                and str(profile.name or "").strip() == "GitHub · файлы и картинки"
                 and profile.match.filter_lines == ["--filter-tcp=443"]
                 and profile.match.hostlist_lines == ["--hostlist=lists/githubusercontent.txt"]
                 for profile in preset.profiles
@@ -756,10 +756,10 @@ class BuiltinProfileCatalogTests(unittest.TestCase):
     def test_winws2_builtin_discord_profiles_use_catalog_names(self) -> None:
         expected_names = _all_profile_names_by_key(
             {
-                "updates.discord.com",
+                "Discord · обновления",
                 "discord.media",
-                "discord.com",
-                "Discord UDP (обычно не нужно)",
+                "Discord · сайт и приложение",
+                "Discord · UDP (обычно не нужно)",
                 "Голосовые звонки/чаты",
             }
         )

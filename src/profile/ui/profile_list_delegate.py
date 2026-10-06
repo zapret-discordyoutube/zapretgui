@@ -378,7 +378,8 @@ class ProfileListDelegate(QStyledItemDelegate):
             row_layout.name_rect,
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             metrics.elidedText(
-                str(index.data(ProfileListModel.DisplayNameRole) or ""),
+                # Под шапкой группы имя пишется без повтора её названия.
+                str(index.data(ProfileListModel.TileNameRole) or ""),
                 Qt.TextElideMode.ElideRight,
                 row_layout.name_rect.width(),
             ),

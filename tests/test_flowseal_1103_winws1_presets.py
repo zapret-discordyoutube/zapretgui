@@ -97,7 +97,12 @@ class Flowseal1103Winws1PresetTests(unittest.TestCase):
                 lines = _read(name).splitlines()
                 header = [line for line in lines if line.startswith("# ")]
                 self.assertEqual(lines[0], f"# Preset: {name[:-4]}")
-                self.assertIn("# BuiltinVersion: 1.0", header)
+                # Номер не ниже того, с которым набор добавлен: каждая правка
+                # пресета поднимает его на шаг.
+                version_line = next(line for line in header if line.startswith("# BuiltinVersion: "))
+                version = re.fullmatch(r"# BuiltinVersion: (\d+)\.(\d+)", version_line)
+                self.assertIsNotNone(version, version_line)
+                self.assertGreaterEqual((int(version.group(1)), int(version.group(2))), (1, 0))
                 self.assertTrue(any(line.startswith("# IconColor: #") for line in header))
                 description = next(line for line in header if line.startswith("# Description: "))
                 self.assertIn(f"zapret-discord-youtube {_V}", description)

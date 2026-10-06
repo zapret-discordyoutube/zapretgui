@@ -1,5 +1,5 @@
 # Preset: YTDisBystro_34_Amazon3
-# BuiltinVersion: 1.2
+# BuiltinVersion: 1.3
 # IconColor: #60cdff
 # Description: Imported from bat/YTDisBystro_34_Amazon3.txt
 
@@ -19,7 +19,7 @@
 
 --new
 
---comment=googlevideo.com (CDN сервера)
+--comment=YouTube · видео (googlevideo.com)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
 --ipcache-hostname
@@ -40,7 +40,7 @@
 
 --new
 
---comment=youtube.com (интерфейс)
+--comment=YouTube · сайт и приложение
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
 --ipcache-hostname

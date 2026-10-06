@@ -5,7 +5,7 @@
 --wf-tcp=443,6695-6705
 --wf-udp=443,50000-50090
 
---comment=youtube.com (RTMPS Россия)
+--comment=YouTube · трансляции (RTMPS)
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-russia-youtube-rtmps.txt
 --dpi-desync=syndata
@@ -40,7 +40,7 @@
 
 --new
 
---comment=discord.com
+--comment=Discord · сайт и приложение
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-discord.txt
 --dpi-desync=syndata
@@ -67,7 +67,7 @@
 
 --new
 
---comment=googlevideo.com (CDN сервера)
+--comment=YouTube · видео (googlevideo.com)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
 --dpi-desync=multidisorder

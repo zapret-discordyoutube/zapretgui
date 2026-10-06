@@ -1,5 +1,5 @@
 # Preset: alt_190b_allsites
-# BuiltinVersion: 1.1
+# BuiltinVersion: 1.2
 # IconColor: #60cdff
 # Description: Imported from bat/alt_190b_allsites.txt
 
@@ -109,7 +109,7 @@
 
 --new
 
---comment=discord.media (voice RTC)
+--comment=Discord · голос и видео (discord.media)
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord-media.txt
 --dpi-desync=fake,fakedsplit

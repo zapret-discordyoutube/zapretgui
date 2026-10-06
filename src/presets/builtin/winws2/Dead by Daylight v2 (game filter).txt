@@ -1,5 +1,5 @@
 # Preset: Dead by Daylight v2 (game filter)
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -91,7 +91,7 @@
 
 --new
 
---name=googlevideo.com (CDN сервера)
+--name=YouTube · видео (googlevideo.com)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
 --out-range=-d8
@@ -99,7 +99,7 @@
 
 --new
 
---name=youtube.com (интерфейс)
+--name=YouTube · сайт и приложение
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
 --out-range=-d8
@@ -107,7 +107,7 @@
 
 --new
 
---name=youtube.com (QUIC)
+--name=YouTube · быстрый протокол QUIC
 --filter-udp=443
 --ipset=lists/ipset-youtube.txt
 --out-range=-n8
@@ -144,7 +144,7 @@
 
 --new
 
---name=discord.media (voice RTC)
+--name=Discord · голос и видео (discord.media)
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord-media.txt
 --out-range=-n8
@@ -152,7 +152,7 @@
 
 --new
 
---name=discord.com
+--name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
 --out-range=-d10
@@ -178,7 +178,7 @@
 
 --new
 
---name=updates.discord.com
+--name=Discord · обновления
 --filter-tcp=443
 --hostlist=lists/discord-updates.txt
 --out-range=-d10
@@ -245,7 +245,7 @@
 
 --new
 
---name=Roblox TCP
+--name=Roblox · игра
 --filter-tcp=80,443-65535
 --hostlist=lists/roblox.txt
 --out-range=-n8
@@ -289,7 +289,7 @@
 
 --new
 
---name=WhatsApp
+--name=WhatsApp · сообщения
 --filter-tcp=80,443
 --hostlist=lists/whatsapp.txt
 --out-range=-n8
@@ -300,7 +300,7 @@
 
 --new
 
---name=Roblox UDP
+--name=Roblox · игра (UDP)
 --filter-udp=443-65535
 --ipset=lists/ipset-roblox.txt
 --out-range=-n8
@@ -337,7 +337,7 @@
 
 --new
 
---name=discord.com
+--name=Discord · сайт и приложение
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-discord.txt
 --out-range=-n8
@@ -417,7 +417,7 @@
 
 --new
 
---name=WhatsApp
+--name=WhatsApp · сообщения
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-whatsapp.txt
 --out-range=-n8
@@ -457,7 +457,7 @@
 
 --new
 
---name=Discord UDP (обычно не нужно)
+--name=Discord · UDP (обычно не нужно)
 --filter-udp=443-65535
 --ipset=lists/ipset-discord.txt
 --out-range=-n8
@@ -538,7 +538,7 @@
 
 --new
 
---name=WhatsApp UDP wide
+--name=WhatsApp · звонки (UDP)
 --filter-udp=443-65535
 --ipset=lists/ipset-whatsapp.txt
 --out-range=-n8

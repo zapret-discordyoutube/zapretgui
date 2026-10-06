@@ -16,7 +16,7 @@
 
 --new
 
---comment=youtube.com (интерфейс)
+--comment=YouTube · сайт и приложение
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
 --dpi-desync=fake,split2

@@ -84,27 +84,30 @@ IPSET_UDP_HYBRID = "Cloudflare UDP"
 # (presets.preset_contract, WINWS2_LUA_INIT_LINES) and the `# BuiltinVersion:` line. The hash is
 # therefore taken over the text with exactly those lines masked out (_masked_sha256), so any other
 # change to an old port still fails this pin.
+# 2026-10-06: the pins were refreshed once for another format-wide edit — every builtin preset
+# got the «Сервис · роль» profile names (`--name=YouTube · видео (googlevideo.com)` instead of
+# `--name=googlevideo.com (CDN сервера)`); strategy lines were not touched.
 OLD_PORT_SHA256 = {
-    "general 1.9.9 (game filter).txt": "2a719810906ad3f2c721d2126aee745ba9ce5e5467da86a982e1eb1b731904f0",
-    "general ALT10 1.9.9 (game filter).txt": "68d66d9c9eaf093f4abfea11dd8c85ea1b819367f7f073f6043445cb6dacd6b4",
-    "general ALT11 1.9.9 (game filter).txt": "5c66343f31745943a131b40831353d3107e9a4855908807dc8dcc15428a79ee6",
-    "general ALT1 1.9.9 (game filter).txt": "f8d8aae3496911f917c2dcb488e310fa69d20521de92b600985cf47a8b47d58e",
-    "general ALT12 1.9.9 (game filter).txt": "661dafd145e65d471d00e94b283d435a0e3de3709dee40d7faf951b9596e646a",
-    "general ALT2 1.9.9 (game filter).txt": "e93feb90d20bd8d4177f8421a53518c76e455f7d27e623560a3299957c364bc3",
-    "general ALT3 1.9.9 (game filter).txt": "5f9b5166da3e4b7ce15d8339a994a707cd954b68563fb48265d639813b17ab2c",
-    "general ALT4 1.9.9 (game filter).txt": "70741fd8a003901f836be6e393c47e9687cf9c14e0b752005a350fd7d76c2350",
-    "general ALT6 1.9.9 (game filter).txt": "f1b45c5e1cb44471a5610ed4d7b02ef7ec0d0d9b1ef3abee3afd659e6be6ef9c",
-    "general ALT7 1.9.9 (game filter).txt": "3748933ba3661fdc091c7fdfe163ce893e176337112d580d7a9650dadbfa5ebd",
-    "general ALT8 1.9.9 (game filter).txt": "d939523e47f0dff0c8d2e286c10e4146cf2a7ca2a9e8eac3206b82349f1e2e54",
-    "general ALT9 1.9.9 (game filter).txt": "441d4f8e820e677034a77b019e4f0d28c451c9087c1a0f4ced40242ce8640563",
-    "general EXP 1.10.0 (game filter).txt": "7b4f4ba3e7296e599dcafde3a7e8f86500f108be8a980e05afe81fee4682b663",
-    "general FAKE TLS AUTO 1.9.9 (game filter).txt": "7b6b3b08f425941f154871276984aa938c3e16d8ed7356791d1729b23e14a875",
-    "general FAKE TLS AUTO ALT 1.9.9 (game filter).txt": "a2f3a01cd8dd275056813c7caafc7c6e56dbd4232cb1750daf7de11fb6df3edc",
-    "general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt": "5e56662a0738f89cf42f4aeb58f57dd0d70cca3574fdf0d54bd15973dd004200",
-    "general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt": "c76d54236c9299bea6337438aa155b8796d9704462198645443b6224d4dcb741",
-    "general SIMPLE FAKE 1.9.9 (game filter).txt": "865e6f5fbef275e49ca9d0c3c7cabb01fc0d9581bbd77019adb2df43e6161031",
-    "general SIMPLE FAKE ALT 1.9.9 (game filter).txt": "c7317151907218c59dca9b2f6b10120d00deb0eee5db5d24c2678c3c978ba89f",
-    "general SIMPLE FAKE ALT2 1.9.9 (game filter).txt": "fc37f5fbe161dd40bb87eda905188006c6ecb45c51309bb8833a2fd2eac86188",
+    "general 1.9.9 (game filter).txt": "a7a766a48f4d5602e9eebf90c01fcf918a4294b466f70e63abdddb3eddb9e7e9",
+    "general ALT10 1.9.9 (game filter).txt": "c38358a8a84ee08178f9fd8683da416e5affe08c13776edf15a8deb900230d79",
+    "general ALT11 1.9.9 (game filter).txt": "806d7ca2822aebff9db3caebf9f68ec7b6b02a6e899c4226c4c969afd87da2ea",
+    "general ALT1 1.9.9 (game filter).txt": "da0dadcfb8db7ff574dc5cc694b13f75d04c5aa31e67c8e1ac160864c93ebaf6",
+    "general ALT12 1.9.9 (game filter).txt": "84cea74e9d45c0bc1bd1c1732ccacb53c334be0dae71bb0636c0ddd02c12e11c",
+    "general ALT2 1.9.9 (game filter).txt": "34b950600bb434548da46ae6f740f9a83889d3a47303ae72374027695c1a5b8c",
+    "general ALT3 1.9.9 (game filter).txt": "9ad033034376152c96c7221e5aa287d91aa5b2df7e56fd1aeb7dc71f0825adc5",
+    "general ALT4 1.9.9 (game filter).txt": "20afb6079a3211dc1926100cf9b9376b5b0824df63507dfb253483e9bd7dc86d",
+    "general ALT6 1.9.9 (game filter).txt": "4735394c5b8f71e1f8344118c6d0f55a1ab4788ee82e6b213894d15409def703",
+    "general ALT7 1.9.9 (game filter).txt": "1cdfcc4ca0ec63fcddcdbbda76c33b8beece907c548b2abfd54182a79faad6a9",
+    "general ALT8 1.9.9 (game filter).txt": "8ad7ad89fe947413ac310e667168454a556c7e6cf1383237cc58b6e7f5d4d085",
+    "general ALT9 1.9.9 (game filter).txt": "925a033a680a05287e22066733e88e9e6a0c6e67dcf8b8e8d7ffc5f71ca35a9a",
+    "general EXP 1.10.0 (game filter).txt": "e7244560693e438e6cd9fd6893c19e1a73001936d45ee15f256933897604beb0",
+    "general FAKE TLS AUTO 1.9.9 (game filter).txt": "bfe6553f3c3542b30e973ff2d864c6d9f02208c45cf82d933f45abcb7237c1b9",
+    "general FAKE TLS AUTO ALT 1.9.9 (game filter).txt": "4b7f68c70b1d160b1278ca97e723f1f45301aa2df85750e93591b969327282ba",
+    "general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt": "72e744cda439f618efefedc3caa4923b17e7c7409b5f975d3998c0ddddd10764",
+    "general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt": "ddafb3a2827f3c8dc17d86ef993cbce40dc8f93e43cf51881a592bad8fc91f27",
+    "general SIMPLE FAKE 1.9.9 (game filter).txt": "764ea7fb6fbe90291ff5b196f1d3a4791292e009ef87760909953a5c4f3e002f",
+    "general SIMPLE FAKE ALT 1.9.9 (game filter).txt": "b2cca01a45ee92421e648b6842be16def35abd2192306c93ef312de2954039c3",
+    "general SIMPLE FAKE ALT2 1.9.9 (game filter).txt": "d4c9f22ba726154035affbfbe349b85c731adcb3f677f40ddcc6cd7300b052aa",
 }
 _BATCH_SYNTAX = re.compile(r"%[A-Za-z_]+%|\^|\"|(?:^|\s)start(?:\s|$)|call service\.bat|winws\.exe", re.MULTILINE)
 
@@ -174,7 +177,11 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
             with self.subTest(name=name):
                 lines = _read(name).splitlines()
                 self.assertEqual(lines[0], f"# Preset: {name[:-4]}")
-                self.assertEqual(lines[1], "# BuiltinVersion: 2.42")
+                # Номер не ниже того, с которым набор добавлен: каждая правка
+                # пресета поднимает его на шаг.
+                version = re.fullmatch(r"# BuiltinVersion: (\d+)\.(\d+)", lines[1])
+                self.assertIsNotNone(version, lines[1])
+                self.assertGreaterEqual((int(version.group(1)), int(version.group(2))), (2, 42))
                 self.assertRegex(lines[2], r"^# IconColor: #[0-9a-f]{6}([0-9a-f]{2})?$")
                 self.assertTrue(lines[3].startswith(f"# Description: Flowseal {_V} "))
                 self.assertTrue(lines[3].endswith(", adapted to ZapretGUI profiles"))
@@ -227,7 +234,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
                     ("--out-range=-d8", "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4"),
                 )
                 backend = _profile(preset, "Бэкенд Google")
-                youtube = _profile(preset, "youtube.com (интерфейс)")
+                youtube = _profile(preset, "YouTube · сайт и приложение")
                 self.assertEqual(_strategy(backend), _strategy(youtube))
                 self.assertIn("\n\n--new\n\n", _read(name))
 
@@ -276,7 +283,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
     def test_strategies_are_payload_scoped_not_generalised(self) -> None:
         for name, preset in self.presets.items():
             with self.subTest(name=name):
-                discord = _strategy(_profile(preset, "discord.com"))
+                discord = _strategy(_profile(preset, "Discord · сайт и приложение"))
                 if "--payload=all" in discord:  # ALT5: syndata must see the empty SYN
                     self.assertEqual(discord[: 2], ("--payload=all", "--lua-desync=syndata"))
                     discord = discord[2:]
@@ -346,10 +353,10 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
     def test_alt9_md5sig_only_on_list_general_profiles(self) -> None:
         preset = self.presets[_name("ALT9")]
         self.assertEqual(
-            _lua(_profile(preset, "discord.com")),
+            _lua(_profile(preset, "Discord · сайт и приложение")),
             ["--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_ts_up:tcp_md5:repeats=4"],
         )
-        for profile_name in ("OVH TCP", "Steam", "youtube.com (интерфейс)", "discord.media (voice RTC)"):
+        for profile_name in ("OVH TCP", "Steam", "YouTube · сайт и приложение", "Discord · голос и видео (discord.media)"):
             with self.subTest(profile=profile_name):
                 self.assertFalse(any("tcp_md5" in line for line in _lua(_profile(preset, profile_name))))
         self.assertEqual(
@@ -365,7 +372,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
         self.assertEqual(
             _strategy(_profile(preset, "Steam")), ("--out-range=<n4", "--payload=all", "--lua-desync=syndata")
         )
-        self.assertNotIn("--lua-desync=syndata", _strategy(_profile(preset, "discord.com")))
+        self.assertNotIn("--lua-desync=syndata", _strategy(_profile(preset, "Discord · сайт и приложение")))
         for variant in VARIANTS:
             with self.subTest(variant=variant):
                 has_ipcache = "--ipcache-hostname=1" in _read(_name(variant)).splitlines()
@@ -412,7 +419,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
                 # ipset UDP = ipset-all UDP 443 block (== list-general QUIC block) for QUIC,
                 # then the game UDP block with its cutoff for every other payload
                 udp = _strategy(_profile(preset, IPSET_UDP_HYBRID))
-                quic = _strategy(_profile(preset, "youtube.com (QUIC)"))
+                quic = _strategy(_profile(preset, "YouTube · быстрый протокол QUIC"))
                 self.assertEqual(udp[: len(quic)], quic)
                 self.assertEqual(udp[len(quic)], f"--out-range=<{udp_cutoff}")
                 # ipset TCP = only the ipset-all TCP 80,443,8443 block: no cutoff, no any-protocol
@@ -429,7 +436,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
         text = _read(_name("ALT11"))
         self.assertNotIn("stun_pat", text)
         self.assertEqual(
-            _strategy(_profile(preset, "discord.com")),
+            _strategy(_profile(preset, "Discord · сайт и приложение")),
             (
                 "--payload=tls_client_hello",
                 "--lua-desync=fake:blob=stun2:tcp_ts=-600000:tcp_ts_up:repeats=8",
@@ -441,7 +448,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            _lua(_profile(preset, "youtube.com (интерфейс)")),
+            _lua(_profile(preset, "YouTube · сайт и приложение")),
             [
                 "--lua-desync=fake:blob=tls_google:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=8",
                 "--lua-desync=fake:blob=fake_default_http:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=8",
@@ -451,7 +458,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
 
     def test_simple_fake_google_uses_hostfakesplit(self) -> None:
         preset = self.presets[_name("SIMPLE FAKE")]
-        for profile_name in ("googlevideo.com (CDN сервера)", "youtube.com (интерфейс)", "Бэкенд Google"):
+        for profile_name in ("YouTube · видео (googlevideo.com)", "YouTube · сайт и приложение", "Бэкенд Google"):
             self.assertEqual(
                 _strategy(_profile(preset, profile_name)),
                 (
@@ -462,7 +469,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
         # 1.10.3 dropped the duplicate stun.bin TLS fake from the general blocks
         self.assertNotIn("stun_pat", _read(_name("SIMPLE FAKE")))
         self.assertEqual(
-            _lua(_profile(preset, "discord.com")),
+            _lua(_profile(preset, "Discord · сайт и приложение")),
             [
                 "--lua-desync=fake:blob=tls_google:tcp_ts=-600000:tcp_ts_up:repeats=6",
                 "--lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=6",
@@ -476,7 +483,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
         self.assertIn("--blob=tls_sochi:@bin/tls_clienthello_sochi_park.bin", text.splitlines())
         self.assertIn("altorder=1", text.splitlines()[4])  # documented mismatch
         self.assertEqual(
-            _strategy(_profile(preset, "discord.com")),
+            _strategy(_profile(preset, "Discord · сайт и приложение")),
             (
                 "--payload=tls_client_hello",
                 "--lua-desync=fake:blob=tls_sochi:tcp_ts=-600000:tcp_ts_up:repeats=5",
@@ -489,7 +496,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
         )
         # the ALT13 list-google block has no --ip-id=zero upstream
         self.assertEqual(
-            _lua(_profile(preset, "youtube.com (интерфейс)")),
+            _lua(_profile(preset, "YouTube · сайт и приложение")),
             ["--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:tcp_ts_up"],
         )
 
@@ -511,7 +518,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
             "--lua-desync=fake:blob=quic_google:repeats=4:payload=all",
             "--lua-desync=fake:blob=discord_active:repeats=4:payload=all",
         )
-        for profile_name in ("Discord UDP (обычно не нужно)", "Голосовые звонки/чаты"):
+        for profile_name in ("Discord · UDP (обычно не нужно)", "Голосовые звонки/чаты"):
             self.assertEqual(_strategy(_profile(preset, profile_name)), expected)
         # non-EXP voice blocks have neither cutoff nor unknown payload
         self.assertEqual(
@@ -523,7 +530,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
         preset = self.presets[_name("FAKE TLS AUTO")]
         self.assertNotIn("zero4", _read(_name("FAKE TLS AUTO")))
         self.assertEqual(
-            _lua(_profile(preset, "discord.com")),
+            _lua(_profile(preset, "Discord · сайт и приложение")),
             [
                 "--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:tcp_ts_up:repeats=11",
                 "--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:"
@@ -538,7 +545,7 @@ class Flowseal1103Winws2PresetTests(unittest.TestCase):
         preset = self.presets[name]
         self.assertIn("--ipcache-hostname=1", _read(name).splitlines())
         self.assertEqual(
-            _strategy(_profile(preset, "discord.com")),
+            _strategy(_profile(preset, "Discord · сайт и приложение")),
             (
                 "--payload=all",
                 "--lua-desync=syndata",

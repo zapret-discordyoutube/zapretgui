@@ -1,5 +1,5 @@
 # Preset: general ALT8
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # IconColor: #e6c300ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -90,7 +90,7 @@
 
 --new
 
---name=youtube.com (интерфейс)
+--name=YouTube · сайт и приложение
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
 --out-range=-d8
@@ -158,7 +158,7 @@
 
 --new
 
---name=discord.media (voice RTC)
+--name=Discord · голос и видео (discord.media)
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --out-range=-d10
 --hostlist=lists/discord-media.txt
@@ -166,7 +166,7 @@
 
 --new
 
---name=discord.com
+--name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
 --out-range=-d10
@@ -209,7 +209,7 @@
 
 --new
 
---name=Roblox TCP
+--name=Roblox · игра
 --filter-tcp=80,443-65535
 --hostlist=lists/roblox.txt
 --out-range=-d10
@@ -249,7 +249,7 @@
 
 --new
 
---name=WhatsApp
+--name=WhatsApp · сообщения
 --filter-tcp=80,443
 --hostlist=lists/whatsapp.txt
 --out-range=-d10

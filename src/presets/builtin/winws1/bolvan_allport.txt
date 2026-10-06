@@ -15,7 +15,7 @@
 
 --new
 
---comment=youtube.com (интерфейс)
+--comment=YouTube · сайт и приложение
 --filter-tcp=80,443
 --hostlist=lists/youtube.txt
 --dpi-desync=fake,multidisorder
@@ -62,7 +62,7 @@
 
 --new
 
---comment=youtube.com (QUIC)
+--comment=YouTube · быстрый протокол QUIC
 --filter-udp=443
 --hostlist=lists/youtube.txt
 --dpi-desync=fake

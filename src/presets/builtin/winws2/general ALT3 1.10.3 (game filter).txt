@@ -1,5 +1,5 @@
 # Preset: general ALT3 1.10.3 (game filter)
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # IconColor: #e6c300ff
 # Description: Flowseal 1.10.3 ALT3, adapted to ZapretGUI profiles
 # Note: hostfakesplit-mod altorder=1 -> nofake2 (one fake host as in zapret1); zapret2 hostfakesplit cannot send the after-host part before the real host, so that segment order is not reproduced
@@ -30,7 +30,7 @@
 
 --new
 
---name=googlevideo.com (CDN сервера)
+--name=YouTube · видео (googlevideo.com)
 --filter-tcp=80,443
 --hostlist=lists/googlevideo.txt
 --payload=tls_client_hello
@@ -42,7 +42,7 @@
 
 --new
 
---name=i.ytimg.com (превью роликов)
+--name=YouTube · превью роликов
 --filter-tcp=443
 --hostlist=lists/i-ytimg.txt
 --payload=tls_client_hello
@@ -54,7 +54,7 @@
 
 --new
 
---name=youtube.com (интерфейс)
+--name=YouTube · сайт и приложение
 --filter-tcp=80,443
 --ipset=lists/ipset-youtube.txt
 --payload=tls_client_hello
@@ -66,7 +66,7 @@
 
 --new
 
---name=youtube.com (QUIC)
+--name=YouTube · быстрый протокол QUIC
 --filter-udp=443
 --ipset=lists/ipset-youtube.txt
 --payload=quic_initial
@@ -106,7 +106,7 @@
 
 --new
 
---name=updates.discord.com
+--name=Discord · обновления
 --filter-tcp=443
 --hostlist=lists/discord-updates.txt
 --payload=tls_client_hello
@@ -118,7 +118,7 @@
 
 --new
 
---name=discord (images)
+--name=Discord · картинки
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord-images.txt
 --payload=tls_client_hello
@@ -130,7 +130,7 @@
 
 --new
 
---name=discord.media (voice RTC)
+--name=Discord · голос и видео (discord.media)
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord-media.txt
 --payload=tls_client_hello
@@ -142,7 +142,7 @@
 
 --new
 
---name=discord.com
+--name=Discord · сайт и приложение
 --filter-tcp=80,443,1080,2053,2083,2087,2096,8443
 --hostlist=lists/discord.txt
 --payload=tls_client_hello
@@ -154,7 +154,7 @@
 
 --new
 
---name=Discord UDP (обычно не нужно)
+--name=Discord · UDP (обычно не нужно)
 --filter-udp=443-65535
 --ipset=lists/ipset-discord.txt
 --payload=discord_ip_discovery,stun
@@ -193,7 +193,7 @@
 
 --new
 
---name=static.whatsapp.net
+--name=WhatsApp · картинки и файлы
 --filter-tcp=80-65535
 --hostlist=lists/static-whatsapp-net.txt
 --payload=tls_client_hello
@@ -205,7 +205,7 @@
 
 --new
 
---name=WhatsApp
+--name=WhatsApp · сообщения
 --filter-tcp=80,443
 --hostlist=lists/whatsapp.txt
 --payload=tls_client_hello
@@ -277,7 +277,7 @@
 
 --new
 
---name=Twitter Images (twimg.com)
+--name=Twitter/X · картинки (twimg.com)
 --filter-tcp=80,443
 --hostlist=lists/twimg.txt
 --payload=tls_client_hello
@@ -337,7 +337,7 @@
 
 --new
 
---name=GitHub
+--name=GitHub · сайт
 --filter-tcp=443
 --hostlist=lists/github.txt
 --payload=tls_client_hello
@@ -349,7 +349,7 @@
 
 --new
 
---name=githubusercontent.com
+--name=GitHub · файлы и картинки
 --filter-tcp=443
 --hostlist=lists/githubusercontent.txt
 --payload=tls_client_hello
@@ -832,7 +832,7 @@
 
 --new
 
---name=Roblox TCP
+--name=Roblox · игра
 --filter-tcp=80,443-65535
 --hostlist=lists/roblox.txt
 --out-range=<n4
@@ -956,7 +956,7 @@
 
 --new
 
---name=Roblox UDP
+--name=Roblox · игра (UDP)
 --filter-udp=443-65535
 --ipset=lists/ipset-roblox.txt
 --payload=quic_initial
@@ -1203,7 +1203,7 @@
 
 --new
 
---name=WhatsApp UDP wide
+--name=WhatsApp · звонки (UDP)
 --filter-udp=443-65535
 --ipset=lists/ipset-whatsapp.txt
 --payload=quic_initial
