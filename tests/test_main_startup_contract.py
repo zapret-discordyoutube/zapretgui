@@ -433,6 +433,10 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(shutdown_module, "connect_windows_session_shutdown", side_effect=lambda *_: calls.append("shutdown.hook")),
             patch.object(entry, "_configure_window_appearance", side_effect=lambda *_: calls.append("appearance")),
             patch("startup.show_window_bridge.ShowWindowBridge", Bridge),
+            patch(
+                "ui.precise_timer.install_window_precise_timer",
+                side_effect=lambda _window: calls.append("precise_timer") or object(),
+            ),
             patch.object(
                 entry.QTimer,
                 "singleShot",
@@ -454,6 +458,8 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         self.assertLess(calls.index("startup_interactive.emit"), calls.index("install_post_startup"))
         self.assertLess(calls.index("appearance"), calls.index("install_post_startup"))
         self.assertLess(calls.index("bridge.start"), calls.index("install_post_startup"))
+        # Точным таймером после запуска управляет видимость окна.
+        self.assertIn("precise_timer", calls)
 
     def test_post_startup_install_is_bound_to_interactive_ready(self) -> None:
         from main import entry

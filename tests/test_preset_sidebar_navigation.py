@@ -1125,6 +1125,110 @@ class PresetSidebarNavigationTests(unittest.TestCase):
         )
         self.assertEqual(item.property("screenReaderStateText"), "Открыть раздел: Настройка DNS")
 
+    def test_group_build_reads_launch_method_once_not_per_item(self) -> None:
+        from app.page_names import PageName
+        import ui.navigation.sidebar_builder as sidebar_builder
+        from settings.mode import ZAPRET2_MODE
+
+        launch_method_reads: list[str] = []
+        added: list[tuple[PageName, str | None]] = []
+
+        def _get_launch_method() -> str:
+            # Настоящее чтение берёт общий замок настроек. В первую секунду
+            # после запуска его держат фоновые задачи, и чтение на каждый
+            # пункт меню задерживало кадр на 65–100 мс.
+            launch_method_reads.append("read")
+            return ZAPRET2_MODE
+
+        session = SimpleNamespace(
+            nav_scroll_position=None,
+            nav_header_by_group={},
+            nav_headers=[],
+            ui_language="ru",
+        )
+        window = SimpleNamespace(
+            ui_session=session,
+            navigationInterface=SimpleNamespace(addItemHeader=lambda *_args: object()),
+            get_launch_method=_get_launch_method,
+        )
+        group_plan = SimpleNamespace(
+            header_key="",
+            group_name="settings",
+            page_names=(PageName.NETWORK, PageName.HOSTS, PageName.APPEARANCE),
+        )
+
+        with patch.object(
+            sidebar_builder,
+            "add_nav_item",
+            side_effect=lambda _window, page_name, _position, **kwargs: added.append(
+                (page_name, kwargs.get("launch_method"))
+            ),
+        ):
+            sidebar_builder._add_sidebar_group(window, group_plan, {}, ZAPRET2_MODE)
+
+        self.assertEqual(launch_method_reads, [])
+        self.assertEqual(
+            added,
+            [
+                (PageName.NETWORK, ZAPRET2_MODE),
+                (PageName.HOSTS, ZAPRET2_MODE),
+                (PageName.APPEARANCE, ZAPRET2_MODE),
+            ],
+        )
+
+    def test_add_nav_item_uses_given_launch_method_without_settings_read(self) -> None:
+        from app.page_names import PageName
+        import ui.navigation.sidebar_builder as sidebar_builder
+        from settings.mode import ZAPRET2_MODE
+
+        class FakeNavItem:
+            def setVisible(self, _visible) -> None:
+                pass
+
+            def setAccessibleName(self, _text) -> None:
+                pass
+
+            def setAccessibleDescription(self, _text) -> None:
+                pass
+
+            def setProperty(self, _name, _value) -> None:
+                pass
+
+        class FakeNavigationInterface:
+            def addItem(self, *, routeKey, icon, text, onClick, selectable, position):
+                _ = routeKey, icon, text, onClick, selectable, position
+                return FakeNavItem()
+
+        session = SimpleNamespace(
+            nav_items={},
+            nav_icons={},
+            nav_labels={PageName.NETWORK: "DNS и сеть"},
+            nav_scroll_position=None,
+            default_nav_icon=None,
+            ui_language="ru",
+            page_host=SimpleNamespace(ensure_page=lambda page_name: None),
+        )
+
+        def _fail_read() -> str:
+            raise AssertionError("режим запуска уже передан, читать настройки незачем")
+
+        window = SimpleNamespace(
+            ui_session=session,
+            navigationInterface=FakeNavigationInterface(),
+            get_launch_method=_fail_read,
+        )
+        seen_methods: list[str] = []
+
+        with patch.object(
+            sidebar_builder,
+            "get_eager_page_names_for_method",
+            side_effect=lambda method: seen_methods.append(method) or (),
+        ):
+            sidebar_builder.add_nav_item(window, PageName.NETWORK, None, launch_method=ZAPRET2_MODE)
+
+        self.assertEqual(seen_methods, [ZAPRET2_MODE])
+        self.assertIn(PageName.NETWORK, session.nav_items)
+
     def test_nav_visibility_filter_keeps_mode_items_hidden_when_state_is_missing(self) -> None:
         from app.page_names import PageName
         import ui.navigation.sidebar_builder as sidebar_builder

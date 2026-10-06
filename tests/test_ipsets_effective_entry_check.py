@@ -71,5 +71,36 @@ class HasEffectiveIpEntryTests(unittest.TestCase):
             self.assertTrue(ipsets_manager.rebuild_ipset_all_files())
 
 
+class FullParseYieldsGilTests(unittest.TestCase):
+    """Полный разбор списка в фоне регулярно отдаёт GIL интерфейсу."""
+
+    def test_long_file_yields_every_block_of_lines(self) -> None:
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = Path(folder.name) / "ipset.txt"
+        lines = 5 * ipsets_manager._GIL_YIELD_EVERY_LINES + 10
+        path.write_text("\n".join(f"10.{i // 256}.{i % 256}.0/24" for i in range(lines)) + "\n", encoding="utf-8")
+
+        with patch.object(ipsets_manager.time, "sleep") as sleep:
+            entries = ipsets_manager._read_effective_ip_entries(str(path))
+
+        # Windows отбирает GIL у занятого потока только раз в ~15 мс: без
+        # добровольной паузы разбор 33 тысяч строк давал рывки интерфейса.
+        self.assertEqual(len(entries), lines)
+        self.assertEqual(sleep.call_count, 5)
+        sleep.assert_called_with(0)
+
+    def test_short_file_does_not_pause(self) -> None:
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = Path(folder.name) / "ipset.txt"
+        path.write_text("10.0.0.0/8\n8.8.8.8\n", encoding="utf-8")
+
+        with patch.object(ipsets_manager.time, "sleep") as sleep:
+            self.assertEqual(ipsets_manager._read_effective_ip_entries(str(path)), ["10.0.0.0/8", "8.8.8.8"])
+
+        sleep.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

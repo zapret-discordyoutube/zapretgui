@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import ipaddress
+import time
 import os
 from pathlib import Path
 from urllib.parse import urlparse
@@ -71,6 +72,10 @@ def _cache_base(path: str, entries: list[str]) -> None:
     _BASE_CACHE_SET = set(entries)
 
 
+# Через сколько строк разбор списка отдаёт GIL интерфейсу.
+_GIL_YIELD_EVERY_LINES = 200
+
+
 def _normalize_ip_entry(text: str) -> str | None:
     line = str(text or "").strip()
     if not line or line.startswith("#"):
@@ -107,7 +112,13 @@ def _read_effective_ip_entries(path: str) -> list[str]:
     seen: set[str] = set()
     try:
         with open(path, "r", encoding="utf-8") as f:
-            for raw in f:
+            for index, raw in enumerate(f, start=1):
+                if index % _GIL_YIELD_EVERY_LINES == 0:
+                    # Разбор идёт в фоновом потоке, но всё это время держит
+                    # GIL. Windows отбирает его у занятого потока только раз в
+                    # ~15 мс, и на 33 тысячах строк интерфейс получал серию
+                    # рывков по ~50 мс. sleep(0) отдаёт GIL сразу.
+                    time.sleep(0)
                 norm = _normalize_ip_entry(raw)
                 if not norm or norm in seen:
                     continue

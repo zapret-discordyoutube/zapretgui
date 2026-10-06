@@ -462,6 +462,7 @@ def add_nav_item(
     initial_visible: bool | None = None,
     insert_index: int | None = None,
     pump_ui: bool = False,
+    launch_method: str | None = None,
 ) -> None:
     session = get_window_ui_session(window)
     if session is None:
@@ -480,7 +481,12 @@ def add_nav_item(
 
     icon = session.nav_icons.get(page_name, session.default_nav_icon)
     text = get_nav_label(window, page_name)
-    eager_pages = set(get_eager_page_names_for_method(window.get_launch_method()))
+    # Режим запуска читается из настроек под общим замком. Тот, кто строит
+    # сразу несколько пунктов, передаёт его готовым: в первую секунду после
+    # запуска замок заняты фоновые задачи, и чтение на каждый пункт меню
+    # задерживало кадр на 65–100 мс.
+    method = launch_method if launch_method else window.get_launch_method()
+    eager_pages = set(get_eager_page_names_for_method(method))
 
     if insert_index is not None:
         if page_name in eager_pages:
@@ -659,6 +665,7 @@ def _install_hidden_mode_nav_items(window) -> None:
             initial_visible=False,
             insert_index=_resolve_scroll_insert_index(window, page_name, method),
             pump_ui=False,
+            launch_method=method,
         )
         if page_name in session.nav_items:
             added_count += 1
@@ -675,7 +682,7 @@ def _install_hidden_mode_nav_items(window) -> None:
         pass
 
 
-def _add_sidebar_group(window, group_plan, initial_visibility) -> None:
+def _add_sidebar_group(window, group_plan, initial_visibility, launch_method: str | None = None) -> None:
     session = get_window_ui_session(window)
     if session is None:
         return
@@ -698,6 +705,7 @@ def _add_sidebar_group(window, group_plan, initial_visibility) -> None:
             page_name,
             pos_scroll,
             initial_visible=bool(initial_visibility.get(page_name, True)),
+            launch_method=launch_method,
         )
 
 
@@ -786,7 +794,7 @@ def _install_secondary_sidebar_groups(window) -> None:
             return
 
         group_started_at = _time.perf_counter()
-        _add_sidebar_group(window, group_plans[index], initial_visibility)
+        _add_sidebar_group(window, group_plans[index], initial_visibility, method)
         work_seconds += _time.perf_counter() - group_started_at
         QTimer.singleShot(
             SIDEBAR_SECONDARY_GROUP_STEP_MS,
@@ -898,7 +906,7 @@ def init_navigation(window) -> None:
     for group_plan in build_sidebar_group_plans(current_method):
         if group_plan.group_name != "root":
             continue
-        _add_sidebar_group(window, group_plan, initial_visibility)
+        _add_sidebar_group(window, group_plan, initial_visibility, current_method)
 
     for hidden in get_hidden_pages_for_method(current_method):
         page = _get_loaded_pages(window).get(hidden)

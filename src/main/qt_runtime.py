@@ -176,6 +176,13 @@ def ensure_qt_runtime() -> QApplication:
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     os.environ["QT_API"] = "pyqt6"
     apply_gui_gil_switch_interval()
+    # Интервал выше работает только вместе с точным таймером Windows: без
+    # него GUI-поток ждёт GIL у фоновых задач по 16 мс вместо 2 (ui.precise_timer).
+    # Включаем сразу — на запуск приходится больше всего фоновой работы; дальше
+    # таймером управляет видимость окна.
+    from ui.precise_timer import set_precise_timer
+
+    set_precise_timer(True)
     _set_attr_if_exists("AA_EnableHighDpiScaling")
     _set_attr_if_exists("AA_UseHighDpiPixmaps")
 

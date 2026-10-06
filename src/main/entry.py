@@ -230,6 +230,12 @@ def _finish_event_loop_bootstrap(*, app, window, application_controller, start_i
         f"{(_time.perf_counter() - t_bridge) * 1000:.0f}ms",
     )
 
+    # Точный системный таймер нужен, только пока окно на экране: в трее он
+    # зря расходовал бы энергию. Ссылка держится на окне, как и мост выше.
+    from ui.precise_timer import install_window_precise_timer
+
+    window._precise_timer = install_window_precise_timer(window)
+
     if start_in_tray:
         log("Запуск приложения скрыто в трее", "TRAY")
 
