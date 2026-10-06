@@ -1,5 +1,5 @@
 # Preset: general FAKE TLS AUTO ALT3 1.10.3 (game filter)
-# BuiltinVersion: 1.1
+# BuiltinVersion: 1.0
 # IconColor: #60cdff
 # Description: Imported from zapret-discord-youtube 1.10.3
 

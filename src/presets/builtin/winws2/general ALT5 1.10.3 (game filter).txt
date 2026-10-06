@@ -1,5 +1,5 @@
 # Preset: general ALT5 1.10.3 (game filter)
-# BuiltinVersion: 2.43
+# BuiltinVersion: 2.42
 # IconColor: #60cdff
 # Description: Flowseal 1.10.3 ALT5, adapted to ZapretGUI profiles
 # Note: deviation: the bat main TCP block is --filter-l3=ipv4 for all TCP 80,443,2053,2083,2087,2096,8443 without lists; here syndata+multidisorder is applied to the listed canonical TCP profiles for IPv4 AND IPv6 (--filter-l3 would change the canonical profile identity); --ipcache-hostname=1 caches the host name seen in SNI/Host per IP, so syndata on hostlist profiles works from the second connection to the same IP (no DNS capture); no other functional change

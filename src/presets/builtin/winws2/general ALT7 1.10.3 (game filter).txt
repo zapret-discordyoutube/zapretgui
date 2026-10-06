@@ -1,5 +1,5 @@
 # Preset: general ALT7 1.10.3 (game filter)
-# BuiltinVersion: 2.43
+# BuiltinVersion: 2.42
 # IconColor: #67d1e4ff
 # Description: Flowseal 1.10.3 ALT7, adapted to ZapretGUI profiles
 # Note: --ipcache-hostname=1 caches the host name seen in SNI/Host per IP, so syndata on hostlist profiles works from the second connection to the same IP (no DNS capture); no other functional change

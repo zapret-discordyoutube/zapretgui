@@ -1,5 +1,5 @@
 # Preset: general EXP 1.10.0 (game filter)
-# BuiltinVersion: 1.1
+# BuiltinVersion: 1.0
 # IconColor: #60cdff
 # Description: Adapted from zapret-discord-youtube 1.10.0 general (EXP)
 
