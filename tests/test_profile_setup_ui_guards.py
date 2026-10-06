@@ -399,8 +399,8 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         tabs = SegmentedWidget()
         self.addCleanup(tabs.deleteLater)
         tabs.addItem("strategies", "Готовые стратегии", lambda: None)
-        tabs.addItem("editor", "Редактор", lambda: None)
-        tabs.addItem("match", "Когда применяется", lambda: None)
+        tabs.addItem("editor", "Список сайтов", lambda: None)
+        tabs.addItem("raw", "Текст профиля", lambda: None)
         tabs.setCurrentItem("strategies")
 
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
@@ -412,23 +412,23 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
 
         self.assertEqual(
             tabs.items["strategies"].accessibleName(),
-            "Разделы profile: Готовые стратегии, выбрано",
+            "Разделы профиля: Готовые стратегии, выбрано",
         )
         self.assertEqual(
             tabs.items["editor"].accessibleName(),
-            "Разделы profile: Редактор, не выбрано",
+            "Разделы профиля: Список сайтов, не выбрано",
         )
 
-        tabs.setCurrentItem("match")
-        ProfileSetupPageBase._update_strategy_tabs_accessibility(page, "match")
+        tabs.setCurrentItem("raw")
+        ProfileSetupPageBase._update_strategy_tabs_accessibility(page, "raw")
 
         self.assertEqual(
             tabs.items["strategies"].accessibleName(),
-            "Разделы profile: Готовые стратегии, не выбрано",
+            "Разделы профиля: Готовые стратегии, не выбрано",
         )
         self.assertEqual(
-            tabs.items["match"].accessibleName(),
-            "Разделы profile: Когда применяется, выбрано",
+            tabs.items["raw"].accessibleName(),
+            "Разделы профиля: Текст профиля, выбрано",
         )
 
     def test_text_update_skips_duplicate_value(self) -> None:
@@ -528,13 +528,6 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         )
         page._favorite_button._accessible_name = "Убрать стратегию из избранного. Избранное: включено."
         page._favorite_button._text = "Убрать из избранного"
-        page._clear_feedback_button = _PropertyWidget(
-            enabled=True,
-            properties={
-                "screenReaderStateText": "Убрать оценку стратегии. Текущая оценка: работает.",
-            },
-        )
-        page._clear_feedback_button._accessible_name = "Убрать оценку стратегии. Текущая оценка: работает."
 
         payload = SimpleNamespace(
             item=SimpleNamespace(in_preset=True, enabled=True, strategy_id="tls_fake"),
@@ -546,10 +539,8 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         self.assertEqual(page._work_button.enabled_calls, [])
         self.assertEqual(page._notwork_button.enabled_calls, [])
         self.assertEqual(page._favorite_button.enabled_calls, [])
-        self.assertEqual(page._clear_feedback_button.enabled_calls, [])
         self.assertEqual(page._work_button.property_calls, [])
         self.assertEqual(page._notwork_button.property_calls, [])
-        self.assertEqual(page._clear_feedback_button.property_calls, [])
         self.assertEqual(page._favorite_button.text_calls, [])
         self.assertEqual(page._favorite_button._text, "Убрать из избранного")
 
@@ -562,7 +553,6 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         page._work_button = _PropertyWidget(enabled=True, properties={"selected": False})
         page._notwork_button = _PropertyWidget(enabled=True, properties={"selected": False})
         page._favorite_button = _PropertyWidget(enabled=True)
-        page._clear_feedback_button = _PropertyWidget(enabled=True)
 
         payload = SimpleNamespace(
             item=SimpleNamespace(in_preset=True, enabled=True, strategy_id="tls_fake"),
@@ -597,7 +587,6 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         page._work_button = _PropertyWidget(enabled=True)
         page._notwork_button = _PropertyWidget(enabled=True)
         page._favorite_button = _PropertyWidget(enabled=True)
-        page._clear_feedback_button = _PropertyWidget(enabled=True)
 
         payload = SimpleNamespace(
             item=SimpleNamespace(in_preset=True, enabled=True, strategy_id="tls_fake"),
@@ -613,33 +602,6 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         self.assertEqual(
             page._favorite_button.property("screenReaderStateText"),
             "Добавить стратегию в избранное. Избранное: не включено.",
-        )
-
-    def test_clear_feedback_button_exposes_current_rating_to_screen_reader(self) -> None:
-        from types import SimpleNamespace
-
-        from profile.ui.profile_setup_page import ProfileSetupPageBase
-
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._work_button = _PropertyWidget(enabled=True)
-        page._notwork_button = _PropertyWidget(enabled=True)
-        page._favorite_button = _PropertyWidget(enabled=True)
-        page._clear_feedback_button = _PropertyWidget(enabled=True)
-
-        payload = SimpleNamespace(
-            item=SimpleNamespace(in_preset=True, enabled=True, strategy_id="tls_fake"),
-            current_strategy_state=SimpleNamespace(favorite=False, rating="work"),
-        )
-
-        ProfileSetupPageBase._apply_feedback_buttons(page, payload)
-
-        self.assertEqual(
-            page._clear_feedback_button.accessibleName(),
-            "Убрать оценку стратегии. Текущая оценка: работает.",
-        )
-        self.assertEqual(
-            page._clear_feedback_button.property("screenReaderStateText"),
-            "Убрать оценку стратегии. Текущая оценка: работает.",
         )
 
     def test_enabled_checkbox_exposes_state_text_to_screen_reader(self) -> None:
@@ -994,7 +956,6 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         from profile.ui.profile_setup_page import ProfileSetupPageBase
 
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._list_file_title = None
         page._list_file_base_title = None
         page._list_file_base_text = _PlainTextWidget("base.example")
         page._list_file_user_title = None
@@ -1038,7 +999,6 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         from profile.ui.profile_setup_page import ProfileSetupPageBase
 
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._list_file_title = None
         page._list_file_base_title = None
         page._list_file_base_text = _PlainTextWidget("")
         page._list_file_user_title = None
@@ -1354,11 +1314,11 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
 
         self.assertEqual(
             page._list_file_status_label.accessibleName(),
-            "Статус списка profile: Записей всего: 3 • ваших: 2 • есть несохранённые изменения",
+            "Статус списка профиля: Записей всего: 3 • ваших: 2 • есть несохранённые изменения",
         )
         self.assertEqual(
             page._list_file_status_label.property("screenReaderStateText"),
-            "Статус списка profile: Записей всего: 3 • ваших: 2 • есть несохранённые изменения",
+            "Статус списка профиля: Записей всего: 3 • ваших: 2 • есть несохранённые изменения",
         )
 
     def test_list_file_text_change_defers_large_editor_read_until_timer(self) -> None:
@@ -1798,13 +1758,12 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         self.assertEqual(page._list_file_error_label.style_calls, [])
         self.assertEqual(page._list_file_status_label.style_calls, [])
 
-    def test_match_tab_payload_skips_duplicate_plain_text(self) -> None:
+    def test_raw_tab_payload_skips_duplicate_plain_text(self) -> None:
         from types import SimpleNamespace
         from unittest.mock import Mock
 
         from profile.ui.profile_setup_page import ProfileSetupPageBase
 
-        match_text = "prepared match text"
         payload = SimpleNamespace(
             item=SimpleNamespace(
                 in_preset=True,
@@ -1816,29 +1775,25 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
             },
             match_summary="hostlist: youtube.txt",
             raw_profile_text="--new\n--lua-desync=fake",
-            match_tab_text=match_text,
         )
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page._payload = payload
-        page._match_tab_built = True
-        page._match_text = _PlainTextWidget(match_text)
-        page._match_text_snapshot = match_text
+        page._raw_tab_built = True
         page._raw_profile_text = _PlainTextWidget(payload.raw_profile_text, read_only=False)
         page._raw_profile_text_cache = payload.raw_profile_text
         page._raw_profile_save_button = _BoolWidget(enabled=True)
         page._apply_feedback_buttons = Mock()
 
-        ProfileSetupPageBase._apply_match_tab_payload(page)
+        ProfileSetupPageBase._apply_raw_tab_payload(page)
 
-        self.assertEqual(page._match_text.plain_text_calls, [])
-        self.assertEqual(page._match_text.plain_text_read_calls, [])
         self.assertEqual(page._raw_profile_text.plain_text_read_calls, [])
         self.assertEqual(page._raw_profile_text.plain_text_calls, [])
         self.assertEqual(page._raw_profile_text.read_only_calls, [])
         self.assertEqual(page._raw_profile_save_button.enabled_calls, [])
-        page._apply_feedback_buttons.assert_called_once_with(payload)
+        # Оценка стратегии живёт под списком стратегий, вкладка текста её не трогает.
+        page._apply_feedback_buttons.assert_not_called()
 
-    def test_match_tab_payload_uses_cached_raw_profile_text(self) -> None:
+    def test_raw_tab_payload_uses_cached_raw_profile_text(self) -> None:
         from types import SimpleNamespace
         from unittest.mock import Mock
 
@@ -1854,53 +1809,22 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
             strategy_entries={},
             match_summary="hostlist: youtube.txt",
             raw_profile_text=raw_text,
-            match_tab_text="prepared match text",
         )
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page._payload = payload
-        page._match_tab_built = True
-        page._match_text = None
+        page._raw_tab_built = True
         page._raw_profile_text = _PlainTextWidget(raw_text, read_only=False)
         page._raw_profile_text_cache = raw_text
         page._raw_profile_save_button = _BoolWidget(enabled=True)
         page._apply_feedback_buttons = Mock()
 
-        ProfileSetupPageBase._apply_match_tab_payload(page)
+        ProfileSetupPageBase._apply_raw_tab_payload(page)
 
         self.assertEqual(page._raw_profile_text.plain_text_read_calls, [])
         self.assertEqual(page._raw_profile_text.plain_text_calls, [])
-        page._apply_feedback_buttons.assert_called_once_with(payload)
+        page._apply_feedback_buttons.assert_not_called()
 
-    def test_match_tab_payload_sets_match_text_without_reading_editor(self) -> None:
-        from types import SimpleNamespace
-        from unittest.mock import Mock
-
-        from profile.ui.profile_setup_page import ProfileSetupPageBase
-
-        match_text = "prepared match text"
-        payload = SimpleNamespace(
-            item=SimpleNamespace(in_preset=True, strategy_id="tls_fake", strategy_name="Fake TLS"),
-            strategy_entries={"tls_fake": SimpleNamespace(args="--lua-desync=fake")},
-            match_summary="hostlist: youtube.txt",
-            raw_profile_text="--new\n--lua-desync=fake",
-            match_tab_text=match_text,
-        )
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._payload = payload
-        page._match_tab_built = True
-        page._match_text = _PlainTextWidget("old match text")
-        page._match_text_snapshot = "old match text"
-        page._raw_profile_text = None
-        page._raw_profile_save_button = None
-        page._apply_feedback_buttons = Mock()
-
-        ProfileSetupPageBase._apply_match_tab_payload(page)
-
-        self.assertEqual(page._match_text.plain_text_read_calls, [])
-        self.assertEqual(page._match_text.plain_text_calls, [match_text])
-        self.assertEqual(page._match_text_snapshot, match_text)
-
-    def test_match_tab_payload_sets_raw_profile_text_without_reading_editor(self) -> None:
+    def test_raw_tab_payload_sets_raw_profile_text_without_reading_editor(self) -> None:
         from types import SimpleNamespace
         from unittest.mock import Mock
 
@@ -1914,14 +1838,13 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
             match_summary="hostlist: youtube.txt",
             raw_profile_text=raw_text,
         )
-        page._match_tab_built = True
-        page._match_text = None
+        page._raw_tab_built = True
         page._raw_profile_text = _PlainTextWidget("--old\n", read_only=False)
         page._raw_profile_text_cache = "--old\n"
         page._raw_profile_save_button = _BoolWidget(enabled=True)
         page._apply_feedback_buttons = Mock()
 
-        ProfileSetupPageBase._apply_match_tab_payload(page)
+        ProfileSetupPageBase._apply_raw_tab_payload(page)
 
         self.assertEqual(page._raw_profile_text.plain_text_read_calls, [])
         self.assertEqual(page._raw_profile_text.plain_text_calls, [raw_text])

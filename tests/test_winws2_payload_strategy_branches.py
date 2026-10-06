@@ -116,7 +116,6 @@ class CompositeStrategyServiceTests(_ServiceCase):
         self.assertEqual((setup.item.strategy_id, setup.item.strategy_name), ("ozon_both", "Ozon TLS + HTTP"))
         self.assertEqual(setup.item.strategy_payload_scopes, ("tls_client_hello", "http_req"))
         self.assertEqual(payload_badge_text(setup.item.strategy_payload_scopes), "TLS · HTTP")
-        self.assertIn("Ozon TLS + HTTP", setup.match_tab_text)
         self.assertEqual(setup.out_range, "-d8")
 
     def test_unknown_payload_branches_are_one_custom_strategy(self) -> None:

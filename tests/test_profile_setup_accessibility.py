@@ -129,7 +129,7 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
         page = self._make_page()
         self.addCleanup(page.deleteLater)
         page._ensure_editor_tab_built()
-        page._ensure_match_tab_built()
+        page._ensure_raw_tab_built()
 
         self.assertEqual(page._enabled_checkbox.accessibleName(), "Profile, выключено")
         self.assertEqual(page._enabled_checkbox.property("screenReaderStateText"), "Profile, выключено")
@@ -150,32 +150,27 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
             page._out_range_mode.property("screenReaderStateText"),
             "Режим out-range, выбрано: a — всегда",
         )
-        self.assertEqual(page._list_file_base_text.accessibleName(), "Базовая часть списка profile")
+        self.assertEqual(page._list_file_base_text.accessibleName(), "Встроенные записи списка профиля")
         self.assertEqual(
             page._list_file_base_text.property("screenReaderStateText"),
-            "Базовая часть списка profile",
+            "Встроенные записи списка профиля",
         )
-        self.assertEqual(page._list_file_text.accessibleName(), "Ваши записи списка profile")
+        self.assertEqual(page._list_file_text.accessibleName(), "Ваши записи списка профиля")
         self.assertEqual(
             page._list_file_text.property("screenReaderStateText"),
-            "Ваши записи списка profile",
+            "Ваши записи списка профиля",
         )
         # Кнопки «Сохранить список» больше нет: список сохраняется автоматически.
         self.assertIsNone(page._list_file_save_button)
-        self.assertEqual(page._match_text.accessibleName(), "Условия применения profile")
-        self.assertEqual(
-            page._match_text.property("screenReaderStateText"),
-            "Условия применения profile",
-        )
-        self.assertEqual(page._raw_profile_text.accessibleName(), "Текст profile в текущем preset")
+        self.assertEqual(page._raw_profile_text.accessibleName(), "Текст профиля в текущем пресете")
         self.assertEqual(
             page._raw_profile_text.property("screenReaderStateText"),
-            "Текст profile в текущем preset",
+            "Текст профиля в текущем пресете",
         )
-        self.assertEqual(page._raw_profile_save_button.accessibleName(), "Сохранить текст profile")
+        self.assertEqual(page._raw_profile_save_button.accessibleName(), "Сохранить текст профиля")
         self.assertEqual(
             page._raw_profile_save_button.property("screenReaderStateText"),
-            "Сохранить текст profile",
+            "Сохранить текст профиля",
         )
         self.assertEqual(page._update_user_profile_button.accessibleName(), "Изменить пользовательский profile")
         self.assertEqual(
@@ -190,7 +185,8 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
         self.assertEqual(page._work_button.accessibleName(), "Отметить стратегию как рабочую")
         self.assertEqual(page._notwork_button.accessibleName(), "Отметить стратегию как нерабочую")
         self.assertEqual(page._favorite_button.accessibleName(), "Добавить стратегию в избранное")
-        self.assertEqual(page._clear_feedback_button.accessibleName(), "Убрать оценку стратегии")
+        # Отдельной кнопки «Убрать оценку» нет: оценку снимает повторное нажатие.
+        self.assertFalse(hasattr(page, "_clear_feedback_button"))
 
     def test_settings_line_edit_buttons_do_not_take_tab_focus(self) -> None:
         page = self._make_page()
@@ -212,15 +208,15 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
         page = self._make_page()
         self.addCleanup(page.deleteLater)
 
-        self.assertEqual(page._strategy_tabs.accessibleName(), "Разделы profile, выбрано: Готовые стратегии")
-        self.assertIn("Готовые стратегии, Редактор или Когда применяется", page._strategy_tabs.accessibleDescription())
+        self.assertEqual(page._strategy_tabs.accessibleName(), "Разделы профиля, выбрано: Готовые стратегии")
+        self.assertIn("Готовые стратегии, Список сайтов или Текст профиля", page._strategy_tabs.accessibleDescription())
 
-        page._strategy_tabs.setCurrentItem("match")
+        page._strategy_tabs.setCurrentItem("raw")
 
-        self.assertEqual(page._strategy_tabs.accessibleName(), "Разделы profile, выбрано: Когда применяется")
+        self.assertEqual(page._strategy_tabs.accessibleName(), "Разделы профиля, выбрано: Текст профиля")
         self.assertEqual(
             page._strategy_tabs.property("screenReaderStateText"),
-            "Разделы profile, выбрано: Когда применяется",
+            "Разделы профиля, выбрано: Текст профиля",
         )
 
     def test_tab_from_profile_sections_moves_to_list_and_ctrl_f_opens_search(self) -> None:

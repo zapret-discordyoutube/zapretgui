@@ -64,7 +64,6 @@ class ProfileSetupPayload:
     raw_profile_text: str
     raw_strategy_text: str
     match_summary: str
-    match_tab_text: str = ""
     editable_filter_kind: str = ""
     editable_filter_value: str = ""
     editable_filter_enabled: bool = True

@@ -14,7 +14,6 @@ from profile.ui.profile_setup_page import (
     _profile_editor_tab_title,
     set_segmented_current_item_if_changed,
 )
-from profile.setup_match_text import build_profile_setup_match_tab_text
 from profile.profile_setup_loader import (
     ProfileEnabledSaveWorker,
     ProfileItemRefreshWorker,
@@ -4991,33 +4990,31 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         self.assertEqual(tuple(clicked.parameters), ("self", "item"))
         self.assertEqual(tuple(activated.parameters), ("self", "item"))
 
-    def test_match_tab_text_contains_match_strategy_and_raw_profile(self) -> None:
-        text = build_profile_setup_match_tab_text(
-            match_summary="TCP • TCP 80,443 • hostlist",
-            strategy_id="tls_fake",
-            strategy_name="TLS Fake",
-            raw_strategy_text="--lua-desync=fake",
-        )
+    def test_feedback_bar_names_the_selected_strategy(self) -> None:
+        from profile.ui.strategy_feedback_bar import visible_strategy_name
 
-        self.assertIn("Когда profile применяется", text)
-        self.assertIn("TCP • TCP 80,443 • hostlist", text)
-        self.assertIn("Текущая готовая стратегия", text)
-        self.assertIn("TLS Fake", text)
-        self.assertIn("--lua-desync=fake", text)
-        self.assertNotIn("--hostlist=lists/youtube.txt", text)
+        self.assertEqual(visible_strategy_name("tls_fake", "TLS Fake"), "TLS Fake")
+        self.assertEqual(visible_strategy_name("custom", "что угодно"), "Своя стратегия")
+        self.assertEqual(visible_strategy_name("none", "TLS Fake"), "Стратегия не выбрана")
+        self.assertEqual(visible_strategy_name("tls_fake", ""), "Стратегия не выбрана")
 
-    def test_match_tab_payload_uses_worker_prepared_text(self) -> None:
-        apply_match = inspect.getsource(ProfileSetupPageBase._apply_match_tab_payload)
+    def test_raw_tab_shows_only_the_profile_text(self) -> None:
+        """Сводки «условия, стратегия, аргументы» больше нет: она повторяла шапку,
+        список стратегий и сам текст профиля."""
+        from profile.state import ProfileSetupPayload
 
-        self.assertIn("match_tab_text", apply_match)
-        self.assertNotIn("strategy_entries", apply_match)
-        self.assertNotIn("raw_strategy_text", apply_match)
-        self.assertNotIn("_match_tab_text(", apply_match)
+        apply_raw = inspect.getsource(ProfileSetupPageBase._apply_raw_tab_payload)
+
+        self.assertIn("raw_profile_text", apply_raw)
+        self.assertNotIn("strategy_entries", apply_raw)
+        self.assertNotIn("_apply_feedback_buttons", apply_raw)
+        self.assertNotIn("match_tab_text", ProfileSetupPayload.__dataclass_fields__)
+        self.assertFalse(hasattr(ProfileSetupPageBase, "_ensure_match_tab_built"))
 
     def test_profile_setup_page_has_raw_profile_editor_for_current_preset(self) -> None:
         build = inspect.getsource(ProfileSetupPageBase._build_content)
-        ensure_match = inspect.getsource(ProfileSetupPageBase._ensure_match_tab_built)
-        apply_match = inspect.getsource(ProfileSetupPageBase._apply_match_tab_payload)
+        ensure_match = inspect.getsource(ProfileSetupPageBase._ensure_raw_tab_built)
+        apply_match = inspect.getsource(ProfileSetupPageBase._apply_raw_tab_payload)
         handler = inspect.getsource(ProfileSetupPageBase._on_raw_profile_save_clicked)
         from profile.ui.profile_setup_save_controllers import ProfileSetupSaveController
 
@@ -5025,8 +5022,11 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         saved_handler = inspect.getsource(ProfileSetupSaveController._on_raw_profile_save_finished)
 
         self.assertNotIn("self._raw_profile_text = PlainTextEdit()", build)
+        from profile.ui.profile_raw_text_tab import ProfileRawTextTab
+
         self.assertIn("_raw_profile_text", ensure_match)
-        self.assertIn("Сохранить текст profile", ensure_match)
+        self.assertIn("ProfileRawTextTab", ensure_match)
+        self.assertIn("Сохранить текст профиля", inspect.getsource(ProfileRawTextTab))
         self.assertIn("in_preset", apply_match)
         self.assertIn("_request_raw_profile_save", handler)
         self.assertIn("create_profile_raw_text_save_worker", start_handler)
@@ -5488,7 +5488,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         save_start_handler = inspect.getsource(ProfileListFileEditorController._start_list_file_save_worker)
         validation = inspect.getsource(ProfileSetupPageBase._render_list_file_validation)
 
-        self.assertIn('addItem("editor", "Редактор"', build)
+        self.assertIn('addItem("editor", LIST_TAB_TITLE_HOSTLIST', build)
         self.assertIn("_sync_editor_tab_label(payload)", apply_payload)
         self.assertIn('set_tab_item_text_if_changed(self._strategy_tabs, "editor", editor_title)', sync_label)
         self.assertNotIn("self._list_file_text = PlainTextEdit()", build)
@@ -5496,7 +5496,10 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         self.assertIn("_request_list_file_editor_state", switch_tab)
         self.assertIn("_list_file_text", ensure_editor)
         self.assertIn("_list_file_base_text", ensure_editor)
-        self.assertIn("Ваши записи", ensure_editor)
+        self.assertIn("ProfileListFileTab", ensure_editor)
+        from profile.ui import profile_list_file_tab
+
+        self.assertEqual(profile_list_file_tab.USER_TITLE, "Ваши записи")
         self.assertNotIn("_apply_list_file_editor_state", apply_payload)
         self.assertIn("_request_list_file_save", save_handler)
         self.assertIn("create_profile_list_file_save_worker", save_start_handler)
@@ -5686,7 +5689,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         # Состояние приходит для того же файла, что уже показан.
         page._list_file_applied_identity = ("hostlist", "lists/site.txt")
         page._list_file_base_text_snapshot = ""
-        page._list_file_title = None
         page._list_file_base_title = None
         page._list_file_base_text = None
         page._list_file_user_title = None
@@ -6120,7 +6122,16 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(_profile_editor_tab_title(regular_payload), "Редактор")
+        ipset_payload = SimpleNamespace(
+            item=SimpleNamespace(
+                display_name="Cloudflare",
+                match_lines=("--filter-tcp=443", "--ipset=lists/ipset-cloudflare.txt"),
+            )
+        )
+
+        # Вкладка называется по содержимому файла: домены или адреса.
+        self.assertEqual(_profile_editor_tab_title(regular_payload), "Список сайтов")
+        self.assertEqual(_profile_editor_tab_title(ipset_payload), "Список адресов")
         self.assertEqual(_profile_editor_tab_title(exclude_payload), "Исключения")
 
     def test_profile_setup_page_hides_editor_tab_when_profile_has_no_list_file(self) -> None:
@@ -6139,7 +6150,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             ),
         )
 
-        self.assertIn('addItem("editor", "Редактор"', build)
+        self.assertIn('addItem("editor", LIST_TAB_TITLE_HOSTLIST', build)
         self.assertIn("_set_list_file_editor_available(_profile_has_list_file_editor(payload))", apply_payload)
         self.assertIn('removeWidget("editor")', page_source)
         self.assertFalse(_profile_has_list_file_editor(l7_payload))
@@ -7029,8 +7040,8 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         )
         page._strategy_list = SimpleNamespace(set_current_strategy_id=Mock())
         page._apply_feedback_buttons = Mock()
-        page._match_tab_built = False
-        page._apply_match_tab_payload = Mock()
+        page._raw_tab_built = False
+        page._apply_raw_tab_payload = Mock()
         page._rebuild_breadcrumb = Mock(side_effect=AssertionError("strategy change must not rebuild breadcrumbs"))
 
         self.assertTrue(ProfileSetupPageBase._mark_strategy_selection_pending(page, "tls_fake"))
@@ -7041,7 +7052,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         self.assertEqual(page._payload.item.strategy_id, "old")
         self.assertEqual(page._payload.item.strategy_name, "Old")
         page._apply_feedback_buttons.assert_not_called()
-        page._apply_match_tab_payload.assert_not_called()
+        page._apply_raw_tab_payload.assert_not_called()
         page._rebuild_breadcrumb.assert_not_called()
 
     def test_strategy_apply_worker_emits_new_profile_key(self) -> None:
@@ -7214,16 +7225,43 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page._apply_feedback_buttons.assert_called_once_with(page._payload)
         page._on_profile_changed_callback.assert_called_once_with("profile-1", "feedback", page._payload.item)
 
-    def test_repeating_same_strategy_rating_does_not_start_feedback_worker(self) -> None:
+    def test_repeating_same_strategy_rating_clears_it(self) -> None:
+        """Отдельной кнопки «Убрать оценку» нет: её снимает повторное нажатие."""
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page._loading = False
         page._profile_key = "profile-1"
         page._payload = SimpleNamespace(
             current_strategy_state=ProfileStrategyState(rating="work", favorite=False),
         )
-        page._request_strategy_feedback_save = Mock(side_effect=AssertionError("same rating must not start worker"))
+        page._request_strategy_feedback_save = Mock()
 
         ProfileSetupPageBase._set_current_strategy_feedback(page, rating="work")
+
+        page._request_strategy_feedback_save.assert_called_once_with({"rating": "", "favorite": None})
+
+    def test_other_strategy_rating_replaces_the_current_one(self) -> None:
+        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
+        page._loading = False
+        page._profile_key = "profile-1"
+        page._payload = SimpleNamespace(
+            current_strategy_state=ProfileStrategyState(rating="work", favorite=False),
+        )
+        page._request_strategy_feedback_save = Mock()
+
+        ProfileSetupPageBase._set_current_strategy_feedback(page, rating="notwork")
+
+        page._request_strategy_feedback_save.assert_called_once_with({"rating": "notwork", "favorite": None})
+
+    def test_clearing_an_empty_strategy_rating_does_not_start_feedback_worker(self) -> None:
+        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
+        page._loading = False
+        page._profile_key = "profile-1"
+        page._payload = SimpleNamespace(
+            current_strategy_state=ProfileStrategyState(rating="", favorite=False),
+        )
+        page._request_strategy_feedback_save = Mock(side_effect=AssertionError("nothing to clear"))
+
+        ProfileSetupPageBase._set_current_strategy_feedback(page, rating="")
 
         page._request_strategy_feedback_save.assert_not_called()
 

@@ -137,15 +137,17 @@ class ChunkedReadOnlyFillTests(unittest.TestCase):
         self.assertFalse(editor.document().isUndoAvailable())
 
     def test_profile_page_fills_base_list_through_chunks(self) -> None:
-        source = (Path(__file__).resolve().parents[1] / "src/profile/ui/profile_setup_page.py").read_text(
-            encoding="utf-8"
-        )
+        ui_root = Path(__file__).resolve().parents[1] / "src/profile/ui"
+        source = (ui_root / "profile_setup_page.py").read_text(encoding="utf-8")
+        tab_source = (ui_root / "profile_list_file_tab.py").read_text(encoding="utf-8")
 
-        self.assertIn("self._list_file_base_fill = ChunkedReadOnlyFill(self._list_file_base_text)", source)
+        # Поля расставляет вкладка списка, заполняет их страница профиля.
+        self.assertIn("self.base_fill = ChunkedReadOnlyFill(self.base_text)", tab_source)
+        self.assertIn("self._list_file_base_fill = tab.base_fill", source)
         self.assertIn("base_fill.set_text(base_text)", source)
         # Поле с записями пользователя порциями не заполняется: автосохранение
         # читает его текст и записало бы на диск только начало списка.
-        self.assertNotIn("ChunkedReadOnlyFill(self._list_file_text)", source)
+        self.assertNotIn("ChunkedReadOnlyFill(self.user_text)", tab_source)
 
 
 if __name__ == "__main__":

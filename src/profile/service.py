@@ -69,7 +69,6 @@ from .serializer import (
     with_profile_ready_strategy,
     with_profile_user_match,
 )
-from .setup_match_text import build_profile_setup_match_tab_text
 from .strategy_state import ProfileStrategyState, ProfileStrategyStateStore
 from .strategy_catalog import StrategyEntry, load_strategy_catalogs_with_signature
 from .strategy_shape import composite_identity, strategy_shape
@@ -673,12 +672,6 @@ class ProfilePresetService:
             raw_profile_text=core.raw_profile_text,
             raw_strategy_text=raw_strategy_text,
             match_summary=core.match_summary,
-            match_tab_text=build_profile_setup_match_tab_text(
-                match_summary=core.match_summary,
-                strategy_id=item.strategy_id,
-                strategy_name=item.strategy_name,
-                raw_strategy_text=raw_strategy_text,
-            ),
             editable_filter_kind=editable.filter_kind,
             editable_filter_value=editable.filter_value,
             editable_filter_enabled=editable.filter_editable,

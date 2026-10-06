@@ -5987,13 +5987,14 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     },
     "onboarding.step.profile_tabs.body": {
         "ru": (
-            "Готовые стратегии — выбрать способ обхода для этого профиля. Редактор — записи списка "
-            "сайтов или адресов. Когда применяется — условия профиля и его текст внутри пресета."
+            "Готовые стратегии — выбрать способ обхода для этого профиля и отметить, работает ли он. "
+            "Список сайтов — ваши записи списка сайтов или адресов. Текст профиля — строки профиля "
+            "так, как они записаны в пресете."
         ),
         "en": (
-            "Ready strategies — choose the bypass method for this profile. Editor — the entries of "
-            "the site or address list. When it applies — the profile conditions and its text inside "
-            "the preset."
+            "Ready strategies — choose the bypass method for this profile and mark whether it works. "
+            "Site list — your entries of the site or address list. Profile text — the profile lines "
+            "as they are written in the preset."
         ),
     },
     "onboarding.scene.you": {"ru": "Вы", "en": "You"},

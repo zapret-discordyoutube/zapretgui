@@ -53,7 +53,7 @@ class ProfileSetupCodeEditorTests(unittest.TestCase):
         from ui.code_editor.syntax import PresetSyntaxHighlighter
 
         page = self._page()
-        page._ensure_match_tab_built()
+        page._ensure_raw_tab_built()
 
         self.assertIsInstance(page._raw_profile_text, CodeEditor)
         self.assertIsInstance(page._raw_profile_find_bar, FindReplaceBar)
@@ -63,7 +63,7 @@ class ProfileSetupCodeEditorTests(unittest.TestCase):
 
     def test_raw_profile_search_highlights_matches(self) -> None:
         page = self._page()
-        page._ensure_match_tab_built()
+        page._ensure_raw_tab_built()
         page._raw_profile_text.setPlainText("--filter-tcp=443\n--filter-udp=443\n")
 
         QTest.keyClick(page._raw_profile_text, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
@@ -123,7 +123,7 @@ class ProfileSetupCodeEditorTests(unittest.TestCase):
         from ui.code_editor.syntax import SyntaxTheme
 
         page = self._page()
-        page._ensure_match_tab_built()
+        page._ensure_raw_tab_built()
         page._raw_profile_text.setPlainText("--filter-tcp=443\n")
         page._raw_profile_text_cache = "--filter-tcp=443\n"
 
@@ -136,7 +136,7 @@ class ProfileSetupCodeEditorTests(unittest.TestCase):
 
     def test_user_edit_still_invalidates_raw_profile_cache(self) -> None:
         page = self._page()
-        page._ensure_match_tab_built()
+        page._ensure_raw_tab_built()
         page._raw_profile_text.setPlainText("--filter-tcp=443\n")
         page._raw_profile_text_cache = "--filter-tcp=443\n"
 

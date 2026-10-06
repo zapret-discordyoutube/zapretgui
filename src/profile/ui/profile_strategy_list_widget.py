@@ -2368,17 +2368,6 @@ def _set_strategy_favorite_button_state(button, *, action_name: str, favorite: b
     set_state_text(button, f"{action_name}. Избранное: {state_text}.")
 
 
-def _set_strategy_clear_feedback_button_state(button, *, rating: str) -> None:
-    rating_value = str(rating or "").strip()
-    if rating_value == "work":
-        rating_text = "работает"
-    elif rating_value == "notwork":
-        rating_text = "не работает"
-    else:
-        rating_text = "не задана"
-    set_state_text(button, f"Убрать оценку стратегии. Текущая оценка: {rating_text}.")
-
-
 def _strategy_screen_reader_text(
     *,
     name: str,

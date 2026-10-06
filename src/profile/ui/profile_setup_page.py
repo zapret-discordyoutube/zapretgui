@@ -36,21 +36,21 @@ from profile.ui.profile_strategy_list_widget import (
     ProfileStrategySearchLineEdit,
     _current_strategy_id,
     _join_accessible_options,
-    _set_strategy_clear_feedback_button_state,
     _set_strategy_favorite_button_state,
     _set_strategy_feedback_button_state,
     _sync_combo_items_accessibility,
 )
+from profile.ui.profile_list_file_tab import BASE_TITLE, USER_TITLE, ProfileListFileTab, titled
+from profile.ui.profile_raw_text_tab import ProfileRawTextTab
+from profile.ui.strategy_feedback_bar import StrategyFeedbackBar, visible_strategy_name
 from profile.ui.user_profile_dialog import CreateUserProfileDialog
 from qfluentwidgets import (
     BodyLabel,
     BreadcrumbBar,
-    CaptionLabel,
     CheckBox,
     ComboBox,
     InfoBar,
     LineEdit,
-    PlainTextEdit,
     FluentIcon,
     SegmentedWidget,
     PushButton,
@@ -64,11 +64,6 @@ from ui.accessibility import (
     set_control_accessibility,
     set_state_text,
 )
-from ui.code_editor.editor import CodeEditor
-from ui.code_editor.find_bar import FindReplaceBar
-from ui.code_editor.find_controller import FindController
-from ui.code_editor.chunked_fill import ChunkedReadOnlyFill
-from ui.code_editor.syntax import ListFileSyntaxHighlighter, PresetSyntaxHighlighter
 from ui.fluent_widgets import set_tooltip
 from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.message_box_accessibility import set_message_box_button_accessibility
@@ -153,7 +148,7 @@ def set_widget_property_if_changed(widget, name: str, value) -> bool:
 
 def set_profile_list_status_text(label, text: str) -> bool:
     changed = set_widget_text_if_changed(label, text)
-    set_state_text(label, f"Статус списка profile: {text}")
+    set_state_text(label, f"Статус списка профиля: {text}")
     return changed
 
 
@@ -232,6 +227,14 @@ def set_tab_item_text_if_changed(widget, item_key: str, text: str) -> bool:
     return True
 
 
+STRATEGIES_TAB_TITLE = "Готовые стратегии"
+LIST_TAB_TITLE_HOSTLIST = "Список сайтов"
+LIST_TAB_TITLE_IPSET = "Список адресов"
+RAW_TAB_TITLE = "Текст профиля"
+# Ключи вкладок в порядке показа; вкладки списка у профиля может не быть.
+_STRATEGY_TAB_KEYS = ("strategies", "editor", "raw")
+
+
 def _profile_editor_tab_title(payload) -> str:
     item = getattr(payload, "item", None)
     match_lines = tuple(str(line or "").strip().lower() for line in getattr(item, "match_lines", ()) or ())
@@ -242,7 +245,12 @@ def _profile_editor_tab_title(payload) -> str:
     if "исключения" in display_name:
         return "Исключения"
 
-    return "Редактор"
+    # Вкладка называется по тому, что лежит в файле: домены или адреса.
+    has_hostlist = any(line.startswith("--hostlist=") for line in match_lines)
+    has_ipset = any(line.startswith("--ipset=") for line in match_lines)
+    if has_ipset and not has_hostlist:
+        return LIST_TAB_TITLE_IPSET
+    return LIST_TAB_TITLE_HOSTLIST
 
 
 def _profile_has_list_file_editor(payload) -> bool:
@@ -492,24 +500,22 @@ class ProfileSetupPageBase(BasePage):
         self._strategy_list = None
         self._strategy_tab = None
         self._list_file_editor_placeholder = None
-        self._match_tab_placeholder = None
+        self._raw_tab_placeholder = None
         self._editor_tab_available = True
         self._editor_tab_built = False
-        self._match_tab_built = False
+        self._raw_tab_built = False
         self._list_file_dirty = True
-        self._match_text = None
-        self._match_text_snapshot = ""
         self._settings_container = None
         self._work_button = None
         self._notwork_button = None
         self._favorite_button = None
-        self._clear_feedback_button = None
+        self._strategy_feedback_bar = None
         self._update_user_profile_button = None
         self._delete_user_profile_button = None
         self._raw_profile_text = None
         self._raw_profile_text_cache: str | None = None
         self._raw_profile_save_button = None
-        self._list_file_title = None
+        self._list_file_base_pane = None
         self._list_file_base_title = None
         self._list_file_base_text = None
         self._list_file_base_fill = None
@@ -791,9 +797,9 @@ class ProfileSetupPageBase(BasePage):
 
         self._strategy_stack = QStackedWidget(self)
         self._strategy_tabs = SegmentedWidget()
-        self._strategy_tabs.addItem("strategies", "Готовые стратегии", lambda: self._switch_strategy_tab(0))
-        self._strategy_tabs.addItem("editor", "Редактор", lambda: self._switch_strategy_tab(1))
-        self._strategy_tabs.addItem("match", "Когда применяется", lambda: self._switch_strategy_tab(2))
+        self._strategy_tabs.addItem("strategies", STRATEGIES_TAB_TITLE, lambda: self._switch_strategy_tab(0))
+        self._strategy_tabs.addItem("editor", LIST_TAB_TITLE_HOSTLIST, lambda: self._switch_strategy_tab(1))
+        self._strategy_tabs.addItem("raw", RAW_TAB_TITLE, lambda: self._switch_strategy_tab(2))
         set_segmented_current_item_if_changed(self._strategy_tabs, "strategies")
         self._sync_editor_tab_label(None)
         self._strategy_tabs.currentItemChanged.connect(self._update_strategy_tabs_accessibility)
@@ -803,18 +809,37 @@ class ProfileSetupPageBase(BasePage):
         self._strategy_list.strategy_activated.connect(self._on_strategy_list_activated)
         self._strategy_list.open_group_changed.connect(self._on_strategy_open_group_changed)
         self._strategy_list.grouping_changed.connect(self._on_strategy_grouping_changed)
-        self._strategy_stack.addWidget(self._strategy_list)
 
+        # Оценка стоит под списком: её ставят той стратегии, которую здесь выбрали.
+        self._strategy_feedback_bar = StrategyFeedbackBar(self)
+        self._work_button = self._strategy_feedback_bar.work_button
+        self._notwork_button = self._strategy_feedback_bar.notwork_button
+        self._favorite_button = self._strategy_feedback_bar.favorite_button
+        self._strategy_feedback_bar.rating_clicked.connect(self._on_strategy_rating_clicked)
+        self._strategy_feedback_bar.favorite_clicked.connect(self._on_strategy_favorite_clicked)
+
+        strategies_tab = QWidget(self)
+        strategies_layout = QVBoxLayout(strategies_tab)
+        strategies_layout.setContentsMargins(0, 0, 0, 0)
+        strategies_layout.setSpacing(10)
+        strategies_layout.addWidget(self._strategy_list, 1)
+        strategies_layout.addWidget(self._strategy_feedback_bar)
+        self._strategy_stack.addWidget(strategies_tab)
+
+        # Вкладки списка и текста профиля собираются при первом открытии.
         self._list_file_editor_placeholder = QWidget(self)
         self._strategy_stack.addWidget(self._list_file_editor_placeholder)
 
-        self._match_tab_placeholder = QWidget(self)
-        self._strategy_stack.addWidget(self._match_tab_placeholder)
+        self._raw_tab_placeholder = QWidget(self)
+        self._strategy_stack.addWidget(self._raw_tab_placeholder)
 
         self.layout.addWidget(self._strategy_stack, 1)
         QWidget.setTabOrder(self._strategy_tabs, self._strategy_list._grouping_combo)
         QWidget.setTabOrder(self._strategy_list._grouping_combo, self._strategy_list._search)
         QWidget.setTabOrder(self._strategy_list._search, self._strategy_list._list)
+        QWidget.setTabOrder(self._strategy_list._list, self._work_button)
+        QWidget.setTabOrder(self._work_button, self._notwork_button)
+        QWidget.setTabOrder(self._notwork_button, self._favorite_button)
         self._update_profile_setup_accessibility()
 
     def _update_combo_accessibility(self, combo, *, name: str, description: str) -> None:
@@ -866,8 +891,8 @@ class ProfileSetupPageBase(BasePage):
 
     def _strategy_tab_accessible_labels(self) -> dict[str, str]:
         labels = {
-            "strategies": "Готовые стратегии",
-            "match": "Когда применяется",
+            "strategies": STRATEGIES_TAB_TITLE,
+            "raw": RAW_TAB_TITLE,
         }
         if bool(getattr(self, "_editor_tab_available", False)):
             labels["editor"] = _profile_editor_tab_title(getattr(self, "_payload", None))
@@ -884,11 +909,10 @@ class ProfileSetupPageBase(BasePage):
             except Exception:
                 key = ""
         labels = self._strategy_tab_accessible_labels()
-        label = labels.get(key) or labels.get("strategies") or "Готовые стратегии"
-        state = f"Разделы profile, выбрано: {label}"
-        ordered_keys = ["strategies", "editor", "match"]
-        options = _join_accessible_options([labels[key] for key in ordered_keys if key in labels])
-        description = f"Выберите раздел настройки profile: {options}." if options else "Выберите раздел настройки profile."
+        label = labels.get(key) or labels.get("strategies") or STRATEGIES_TAB_TITLE
+        state = f"Разделы профиля, выбрано: {label}"
+        options = _join_accessible_options([labels[key] for key in _STRATEGY_TAB_KEYS if key in labels])
+        description = f"Выберите раздел настройки профиля: {options}." if options else "Выберите раздел настройки профиля."
         set_state_text(tabs, state)
         set_control_accessibility(
             tabs,
@@ -897,7 +921,7 @@ class ProfileSetupPageBase(BasePage):
         )
         set_segmented_items_accessibility(
             tabs,
-            name="Разделы profile",
+            name="Разделы профиля",
             labels=labels,
             item_tab_focus=False,
         )
@@ -911,162 +935,56 @@ class ProfileSetupPageBase(BasePage):
             self._ensure_editor_tab_built()
             self._request_list_file_editor_state()
         elif index == 2:
-            self._ensure_match_tab_built()
-            self._apply_match_tab_payload()
+            self._ensure_raw_tab_built()
+            self._apply_raw_tab_payload()
         set_current_index_if_changed(self._strategy_stack, index)
         if self._strategy_tabs is not None:
-            key = "editor" if index == 1 else "match" if index == 2 else "strategies"
-            self._update_strategy_tabs_accessibility(key)
+            self._update_strategy_tabs_accessibility(_STRATEGY_TAB_KEYS[index] if 0 <= index < 3 else "strategies")
 
     def _ensure_editor_tab_built(self) -> None:
         if self._editor_tab_built:
             return
         self._editor_tab_built = True
-        editor_tab = self._list_file_editor_placeholder
-        self._list_file_editor_tab = editor_tab
-        editor_layout = QVBoxLayout(editor_tab)
-        editor_layout.setContentsMargins(0, 0, 0, 0)
-        editor_layout.setSpacing(10)
-
-        self._list_file_title = BodyLabel("Файл списка")
-        editor_layout.addWidget(self._list_file_title)
-
-        self._list_file_base_title = CaptionLabel("База")
-        self._list_file_base_title.setWordWrap(True)
-        editor_layout.addWidget(self._list_file_base_title)
-
-        self._list_file_base_text = CodeEditor(
-            highlighter_factory=lambda document: ListFileSyntaxHighlighter(document),
-        )
-        self._list_file_base_text.setReadOnly(True)
-        # Системная база бывает на сто тысяч строк: целиком за один вызов она
-        # подвешивала окно на секунды, поэтому дописывается порциями.
-        self._list_file_base_fill = ChunkedReadOnlyFill(self._list_file_base_text)
-        self._list_file_base_text.setMinimumHeight(180)
-        self._list_file_base_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
-        set_tooltip(
-            self._list_file_base_text,
-            "Системная часть списка. Она обновляется программой и показана только для просмотра.",
-        )
-        set_control_accessibility(
-            self._list_file_base_text,
-            name="Базовая часть списка profile",
-            description="Системная часть списка. Она обновляется программой и доступна только для чтения.",
-        )
-        set_state_text(self._list_file_base_text, "Базовая часть списка profile")
-        editor_layout.addWidget(self._list_file_base_text, 1)
-
-        self._list_file_user_title = CaptionLabel("Ваши записи")
-        self._list_file_user_title.setWordWrap(True)
-        editor_layout.addWidget(self._list_file_user_title)
-
-        self._list_file_find_bar = FindReplaceBar(editor_tab)
-        self._list_file_find_bar.setVisible(False)
-        editor_layout.addWidget(self._list_file_find_bar)
-
-        self._list_file_text = CodeEditor(
-            highlighter_factory=lambda document: ListFileSyntaxHighlighter(document),
-        )
-        self._list_file_find_controller = FindController(
-            self._list_file_text,
-            self._list_file_find_bar,
-            parent=self,
-        )
-        self._list_file_text.setMinimumHeight(320)
-        self._list_file_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        tab = ProfileListFileTab(self._list_file_editor_placeholder)
+        placeholder_layout = QVBoxLayout(self._list_file_editor_placeholder)
+        placeholder_layout.setContentsMargins(0, 0, 0, 0)
+        placeholder_layout.addWidget(tab)
+        self._list_file_editor_tab = tab
+        # Поля вкладки, с которыми работают загрузка, проверка и автосохранение списка.
+        self._list_file_base_pane = tab.base_pane
+        self._list_file_base_title = tab.base_title
+        self._list_file_base_text = tab.base_text
+        self._list_file_base_fill = tab.base_fill
+        self._list_file_user_title = tab.user_title
+        self._list_file_find_bar = tab.find_bar
+        self._list_file_find_controller = tab.find_controller
+        self._list_file_text = tab.user_text
+        self._list_file_error_label = tab.error_label
+        self._list_file_status_label = tab.status_label
+        # Кнопки «Сохранить» нет: валидный текст сохраняется сам
+        # (_maybe_autosave_list_file), статус показывает результат.
+        self._list_file_save_button = None
         # contentEdited, а не textChanged: перекраска синтаксиса при смене темы
         # иначе запускала бы валидацию и автосохранение списка.
         self._list_file_text.contentEdited.connect(self._on_list_file_text_changed)
-        set_tooltip(
-            self._list_file_text,
-            "Пользовательская часть списка. Сохраняется в lists/user и добавляется к базе.",
-        )
-        set_control_accessibility(
-            self._list_file_text,
-            name="Ваши записи списка profile",
-            description=(
-                "Пользовательская часть списка. Эти строки можно редактировать и сохранить. "
-                "Ctrl+F — поиск, Ctrl+H — замена, Ctrl+G — переход к строке."
-            ),
-        )
-        set_state_text(self._list_file_text, "Ваши записи списка profile")
-        editor_layout.addWidget(self._list_file_text, 1)
-
-        self._list_file_error_label = CaptionLabel("")
-        self._list_file_error_label.setWordWrap(True)
-        self._list_file_error_label.hide()
-        editor_layout.addWidget(self._list_file_error_label)
-
-        editor_actions = QWidget(editor_tab)
-        editor_actions_layout = QHBoxLayout(editor_actions)
-        editor_actions_layout.setContentsMargins(0, 0, 0, 0)
-        editor_actions_layout.setSpacing(12)
-        # Кнопки «Сохранить» больше нет: валидный текст сохраняется сам
-        # (_maybe_autosave_list_file), статус показывает результат.
-        self._list_file_save_button = None
-        self._list_file_status_label = CaptionLabel("Загрузка файла списка...")
-        set_state_text(self._list_file_status_label, "Статус списка profile: Загрузка файла списка...")
-        self._list_file_status_label.setWordWrap(True)
-        editor_actions_layout.addWidget(self._list_file_status_label, 1)
-        editor_layout.addWidget(editor_actions)
         self._refresh_list_file_editor_style(has_error=False)
 
-    def _ensure_match_tab_built(self) -> None:
-        if self._match_tab_built:
+    def _ensure_raw_tab_built(self) -> None:
+        if self._raw_tab_built:
             return
-        self._match_tab_built = True
-        match_tab = self._match_tab_placeholder
-        match_layout = QVBoxLayout(match_tab)
-        match_layout.setContentsMargins(0, 0, 0, 0)
-        match_layout.setSpacing(10)
-        match_layout.addWidget(BodyLabel("Условия и готовая стратегия"))
-        self._match_text = PlainTextEdit()
-        self._match_text.setReadOnly(True)
-        self._match_text.setMinimumHeight(280)
-        set_tooltip(
-            self._match_text,
-            "Подробности текущего profile: условия применения и выбранная готовая стратегия.",
-        )
-        set_control_accessibility(
-            self._match_text,
-            name="Условия применения profile",
-            description="Здесь показаны условия применения profile и выбранная готовая стратегия.",
-        )
-        set_state_text(self._match_text, "Условия применения profile")
-        match_layout.addWidget(self._match_text, 1)
-
-        match_layout.addWidget(BodyLabel("Текст profile в текущем preset"))
-        self._raw_profile_find_bar = FindReplaceBar(match_tab)
-        self._raw_profile_find_bar.setVisible(False)
-        match_layout.addWidget(self._raw_profile_find_bar)
-
-        self._raw_profile_text = CodeEditor(
-            highlighter_factory=lambda document: PresetSyntaxHighlighter(document),
-        )
-        self._raw_profile_find_controller = FindController(
-            self._raw_profile_text,
-            self._raw_profile_find_bar,
-            parent=self,
-        )
-        self._raw_profile_text.setMinimumHeight(150)
-        self._raw_profile_text.setMaximumHeight(220)
-        set_tooltip(
-            self._raw_profile_text,
-            "Сырой текст profile. Сохраняется только в текущий preset и не меняет пользовательский шаблон.",
-        )
-        set_control_accessibility(
-            self._raw_profile_text,
-            name="Текст profile в текущем preset",
-            description=(
-                "Сырой текст profile. Сохраняется только в текущий preset. "
-                "Ctrl+F — поиск, Ctrl+H — замена, Ctrl+G — переход к строке, "
-                "Ctrl с колесом мыши — масштаб."
-            ),
-        )
-        set_state_text(self._raw_profile_text, "Текст profile в текущем preset")
+        self._raw_tab_built = True
+        tab = ProfileRawTextTab(self._raw_tab_placeholder)
+        placeholder_layout = QVBoxLayout(self._raw_tab_placeholder)
+        placeholder_layout.setContentsMargins(0, 0, 0, 0)
+        placeholder_layout.addWidget(tab)
+        self._raw_profile_find_bar = tab.find_bar
+        self._raw_profile_find_controller = tab.find_controller
+        self._raw_profile_text = tab.text
+        self._raw_profile_save_button = tab.save_button
         # contentEdited, а не textChanged: перекраска синтаксиса при смене темы
         # тоже эмитит textChanged и сбрасывала бы кэш текста без правки.
         self._raw_profile_text.contentEdited.connect(self._on_raw_profile_text_changed)
+        self._raw_profile_save_button.clicked.connect(self._on_raw_profile_save_clicked)
         self._raw_profile_language = None
         if is_zapret2_launch_method(self.launch_method):
             from profile.ui.winws2_editor_language import Winws2EditorLanguageController
@@ -1080,93 +998,19 @@ class ProfileSetupPageBase(BasePage):
                 preset_text=lambda: str(getattr(self._payload, "preset_preamble_text", "") or ""),
                 parent=self,
             )
-        match_layout.addWidget(self._raw_profile_text)
+        self._apply_raw_tab_payload()
 
-        raw_actions = QWidget(match_tab)
-        raw_actions_layout = QHBoxLayout(raw_actions)
-        raw_actions_layout.setContentsMargins(0, 0, 0, 0)
-        raw_actions_layout.setSpacing(12)
-        self._raw_profile_save_button = PushButton("Сохранить текст profile", icon=FluentIcon.SAVE)
-        self._raw_profile_save_button.clicked.connect(self._on_raw_profile_save_clicked)
-        set_tooltip(
-            self._raw_profile_save_button,
-            "Проверяет текст как один profile и записывает его в текущий preset.",
-        )
-        set_control_accessibility(
-            self._raw_profile_save_button,
-            name="Сохранить текст profile",
-            description="Проверяет текст как один profile и записывает его в текущий preset.",
-        )
-        set_state_text(self._raw_profile_save_button, "Сохранить текст profile")
-        raw_actions_layout.addWidget(self._raw_profile_save_button)
-        raw_actions_layout.addStretch(1)
-        match_layout.addWidget(raw_actions)
-
-        feedback_actions = QWidget(match_tab)
-        feedback_actions_layout = QHBoxLayout(feedback_actions)
-        feedback_actions_layout.setContentsMargins(0, 0, 0, 0)
-        feedback_actions_layout.setSpacing(12)
-
-        self._work_button = PushButton("Работает", icon=FluentIcon.ACCEPT)
-        set_tooltip(self._work_button, "Пометить текущую готовую стратегию как рабочую для этого profile.")
-        set_control_accessibility(
-            self._work_button,
-            name="Отметить стратегию как рабочую",
-            description="Помечает текущую готовую стратегию как рабочую для этого profile.",
-        )
-        self._work_button.clicked.connect(lambda: self._set_current_strategy_feedback(rating="work"))
-        feedback_actions_layout.addWidget(self._work_button)
-
-        self._notwork_button = PushButton("Не работает", icon=FluentIcon.CLOSE)
-        set_tooltip(self._notwork_button, "Пометить текущую готовую стратегию как нерабочую для этого profile.")
-        set_control_accessibility(
-            self._notwork_button,
-            name="Отметить стратегию как нерабочую",
-            description="Помечает текущую готовую стратегию как нерабочую для этого profile.",
-        )
-        self._notwork_button.clicked.connect(lambda: self._set_current_strategy_feedback(rating="notwork"))
-        feedback_actions_layout.addWidget(self._notwork_button)
-
-        self._favorite_button = PushButton("В избранное", icon=FluentIcon.HEART)
-        set_tooltip(self._favorite_button, "Добавить текущую готовую стратегию в избранное или убрать её оттуда.")
-        set_control_accessibility(
-            self._favorite_button,
-            name="Добавить стратегию в избранное",
-            description="Добавляет текущую готовую стратегию в избранное или убирает её оттуда.",
-        )
-        self._favorite_button.clicked.connect(self._toggle_current_strategy_favorite)
-        feedback_actions_layout.addWidget(self._favorite_button)
-
-        self._clear_feedback_button = PushButton("Убрать оценку", icon=FluentIcon.RETURN)
-        set_tooltip(self._clear_feedback_button, "Очистить вашу оценку для текущей готовой стратегии.")
-        set_control_accessibility(
-            self._clear_feedback_button,
-            name="Убрать оценку стратегии",
-            description="Очищает вашу оценку для текущей готовой стратегии.",
-        )
-        self._clear_feedback_button.clicked.connect(lambda: self._set_current_strategy_feedback(rating=""))
-        feedback_actions_layout.addWidget(self._clear_feedback_button)
-        feedback_actions_layout.addStretch(1)
-        match_layout.addWidget(feedback_actions)
-        self._apply_match_tab_payload()
-
-    def _apply_match_tab_payload(self) -> None:
+    def _apply_raw_tab_payload(self) -> None:
         payload = self._payload
-        if payload is None or not self._match_tab_built:
+        if payload is None or not self._raw_tab_built:
             return
         item = payload.item
-        if self._match_text is not None:
-            match_text = str(getattr(payload, "match_tab_text", "") or "")
-            if self.__dict__.get("_match_text_snapshot") != match_text:
-                self._match_text.setPlainText(match_text)
-                self._match_text_snapshot = match_text
         if self._raw_profile_text is not None:
             self._set_raw_profile_text_from_payload(str(getattr(payload, "raw_profile_text", "") or ""))
             raw_editable = bool(getattr(item, "in_preset", False))
             set_read_only_if_changed(self._raw_profile_text, not raw_editable)
         if self._raw_profile_save_button is not None:
             set_widget_enabled_if_changed(self._raw_profile_save_button, bool(getattr(item, "in_preset", False)))
-        self._apply_feedback_buttons(payload)
 
     def _set_raw_profile_text_from_payload(self, text: str) -> None:
         value = str(text or "")
@@ -1664,7 +1508,7 @@ class ProfileSetupPageBase(BasePage):
         return None
 
     def onboarding_set_state(self, state: str | None) -> None:
-        """Тур открывает вкладку «Редактор», а потом возвращает «Готовые стратегии»."""
+        """Тур открывает вкладку списка сайтов, а потом возвращает «Готовые стратегии»."""
         if self._strategy_tabs is None:
             return
         if state == "editor":
@@ -1955,8 +1799,9 @@ class ProfileSetupPageBase(BasePage):
             self._list_file_dirty = True
             if self._editor_tab_built and self._strategy_stack.currentIndex() == 1:
                 self._request_list_file_editor_state()
-            if self._match_tab_built:
-                self._apply_match_tab_payload()
+            self._apply_feedback_buttons(payload)
+            if self._raw_tab_built:
+                self._apply_raw_tab_payload()
             self._rebuild_breadcrumb()
         finally:
             self._loading = False
@@ -1987,7 +1832,7 @@ class ProfileSetupPageBase(BasePage):
             set_tab_item_text_if_changed(self._strategy_tabs, "editor", editor_title)
             set_tooltip(
                 self._strategy_tabs,
-                f"Готовые стратегии меняют строки --lua-desync. «{editor_title}» меняет файл hostlist/ipset. «Когда применяется» показывает условия profile и итоговый текст. Ctrl+F — поиск по готовым стратегиям.",
+                f"«{STRATEGIES_TAB_TITLE}» меняют строки --lua-desync. «{editor_title}» меняет файл hostlist/ipset. «{RAW_TAB_TITLE}» показывает строки профиля как в пресете и даёт править их вручную. Ctrl+F — поиск по готовым стратегиям.",
             )
             self._update_strategy_tabs_accessibility()
 
@@ -2038,19 +1883,15 @@ class ProfileSetupPageBase(BasePage):
             getattr(state, "user_entries_count", 0)
         )
 
-        title = "Файл списка"
-        if display_path:
-            title = f"{display_path} ({'IPset' if kind == 'ipset' else 'Hostlist'})"
-        if self._list_file_title is not None:
-            set_widget_text_if_changed(self._list_file_title, title)
+        # Список, который нельзя менять, показан одним полем: базы у него нет.
+        base_pane = self.__dict__.get("_list_file_base_pane")
+        if base_pane is not None and base_pane.isHidden() == editable:
+            # isHidden, а не isVisible: пока сама страница не показана, поле
+            # «не видно» в любом случае, и спрятать его было бы «незачем».
+            base_pane.setVisible(editable)
         if self._list_file_base_title is not None:
-            set_widget_visible_if_changed(self._list_file_base_title, editable)
-            set_widget_text_if_changed(
-                self._list_file_base_title,
-                f"База: {base_display_path}" if base_display_path else "База"
-            )
+            set_widget_text_if_changed(self._list_file_base_title, titled(BASE_TITLE, base_display_path))
         if self._list_file_base_text is not None:
-            set_widget_visible_if_changed(self._list_file_base_text, editable)
             self._list_file_base_text.blockSignals(True)
             try:
                 if base_text_changed:
@@ -2060,18 +1901,15 @@ class ProfileSetupPageBase(BasePage):
                     else:
                         self._list_file_base_text.setPlainText(base_text)
                 if kind == "ipset":
-                    set_placeholder_text_if_changed(self._list_file_base_text, "В базе пока нет IP или подсетей.")
+                    set_placeholder_text_if_changed(self._list_file_base_text, "Встроенных IP и подсетей пока нет.")
                 else:
-                    set_placeholder_text_if_changed(self._list_file_base_text, "В базе пока нет доменов.")
+                    set_placeholder_text_if_changed(self._list_file_base_text, "Встроенных доменов пока нет.")
             finally:
                 self._list_file_base_text.blockSignals(False)
         self._list_file_base_text_snapshot = base_text
         if self._list_file_user_title is not None:
             set_widget_visible_if_changed(self._list_file_user_title, editable)
-            set_widget_text_if_changed(
-                self._list_file_user_title,
-                f"Ваши записи: {user_display_path}" if user_display_path else "Ваши записи"
-            )
+            set_widget_text_if_changed(self._list_file_user_title, titled(USER_TITLE, user_display_path))
         if self._list_file_text is not None:
             self._list_file_text.blockSignals(True)
             try:
@@ -2357,7 +2195,10 @@ class ProfileSetupPageBase(BasePage):
             and item.enabled
             and item.strategy_id not in {"", "none", "custom"}
         )
-        for button in (self._work_button, self._notwork_button, self._favorite_button, self._clear_feedback_button):
+        bar = self.__dict__.get("_strategy_feedback_bar")
+        if bar is not None:
+            bar.set_strategy_name(visible_strategy_name(item.strategy_id, getattr(item, "strategy_name", "")))
+        for button in (self._work_button, self._notwork_button, self._favorite_button):
             if button is not None:
                 set_widget_enabled_if_changed(button, editable)
         if self._favorite_button is not None:
@@ -2373,6 +2214,7 @@ class ProfileSetupPageBase(BasePage):
                 name=favorite_action_name,
                 description="Добавляет текущую готовую стратегию в избранное или убирает её оттуда.",
             )
+            set_widget_checked_if_changed(self._favorite_button, bool(state.favorite))
             _set_strategy_favorite_button_state(
                 self._favorite_button,
                 action_name=favorite_action_name,
@@ -2381,6 +2223,7 @@ class ProfileSetupPageBase(BasePage):
         if self._work_button is not None:
             work_selected = state.rating == "work"
             set_widget_property_if_changed(self._work_button, "selected", work_selected)
+            set_widget_checked_if_changed(self._work_button, work_selected)
             _set_strategy_feedback_button_state(
                 self._work_button,
                 action_name="Отметить стратегию как рабочую",
@@ -2389,15 +2232,11 @@ class ProfileSetupPageBase(BasePage):
         if self._notwork_button is not None:
             notwork_selected = state.rating == "notwork"
             set_widget_property_if_changed(self._notwork_button, "selected", notwork_selected)
+            set_widget_checked_if_changed(self._notwork_button, notwork_selected)
             _set_strategy_feedback_button_state(
                 self._notwork_button,
                 action_name="Отметить стратегию как нерабочую",
                 selected=notwork_selected,
-            )
-        if self._clear_feedback_button is not None:
-            _set_strategy_clear_feedback_button_state(
-                self._clear_feedback_button,
-                rating=state.rating,
             )
 
     def _apply_editable_settings(self, payload) -> None:
@@ -2725,8 +2564,29 @@ class ProfileSetupPageBase(BasePage):
         state = getattr(getattr(self, "_payload", None), "current_strategy_state", None)
         current_rating = str(getattr(state, "rating", "") or "").strip()
         if next_rating == current_rating:
-            return
+            if not next_rating:
+                return
+            # Повторное нажатие на ту же оценку снимает её.
+            next_rating = ""
         self._request_strategy_feedback_save({"rating": next_rating, "favorite": None})
+
+    def _resync_feedback_buttons(self) -> None:
+        """Возвращает кнопкам сохранённое состояние.
+
+        Нажатие само переключает кнопку, а новая оценка появится только после
+        записи в настройки: до тех пор кнопки показывают то, что сохранено.
+        """
+        payload = self.__dict__.get("_payload")
+        if payload is not None:
+            self._apply_feedback_buttons(payload)
+
+    def _on_strategy_rating_clicked(self, rating: str) -> None:
+        self._set_current_strategy_feedback(rating=rating)
+        self._resync_feedback_buttons()
+
+    def _on_strategy_favorite_clicked(self) -> None:
+        self._toggle_current_strategy_favorite()
+        self._resync_feedback_buttons()
 
     def _toggle_current_strategy_favorite(self) -> None:
         if self._loading or not self._profile_key or self._payload is None:
