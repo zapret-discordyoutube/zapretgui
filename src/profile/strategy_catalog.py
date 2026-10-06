@@ -21,6 +21,9 @@ class StrategyEntry:
     is_composite: bool = False
     # --payload каждой ветки составной стратегии, для значка типов пакетов.
     payload_scopes: tuple[str, ...] = ()
+    # Прежнее название (поле old_name каталога): по нему стратегию находит
+    # поиск, а подсказка напоминает, как она называлась раньше.
+    old_name: str = ""
 
 
 _STRATEGY_CATALOGS_CACHE: dict[
@@ -54,10 +57,11 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
     seen_ids: set[str] = set()
     current_id: Optional[str] = None
     current_name = ""
+    current_old_name = ""
     current_args: list[str] = []
 
     def _flush() -> None:
-        nonlocal current_id, current_name, current_args
+        nonlocal current_id, current_name, current_old_name, current_args
         if not current_id:
             return
         args = "\n".join(line for line in current_args if line).strip()
@@ -82,6 +86,7 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
             visual=describe_strategy_visual(args),
             is_composite=shape.composite,
             payload_scopes=shape.payload_scopes if shape.composite else (),
+            old_name=current_old_name,
         )
 
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -100,6 +105,7 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
                 )
             seen_ids.add(current_id)
             current_name = current_id
+            current_old_name = ""
             current_args = []
             continue
         if current_id is None:
@@ -112,8 +118,11 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
             continue
         if "=" in stripped:
             key, _, value = stripped.partition("=")
-            if key.strip().lower() == "name":
+            key = key.strip().lower()
+            if key == "name":
                 current_name = value.strip()
+            elif key == "old_name":
+                current_old_name = value.strip()
 
     _flush()
     return strategies

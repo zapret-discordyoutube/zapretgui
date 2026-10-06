@@ -1,5 +1,6 @@
 [fake_2_n2_google]
-name = Базовая для игр (Google QUIC)
+name = Базовая для игр · Google QUIC
+old_name = Базовая для игр (Google QUIC)
 author = community
 label = game
 description = Базовая стратегия для многих игр
@@ -10,7 +11,8 @@ description = Базовая стратегия для многих игр
 --dpi-desync-fake-unknown-udp=quic_initial_www_google_com.bin
 
 [fake_2_n2_test]
-name = Fake 2 повтора (n2 cutoff)
+name = Fake 2 повтора · n2 cutoff
+old_name = Fake 2 повтора (n2 cutoff)
 author = community
 label = recommended
 description = 2 повтора с quic_test_00.bin, cutoff n2
@@ -20,7 +22,8 @@ description = 2 повтора с quic_test_00.bin, cutoff n2
 --dpi-desync-fake-unknown-udp=quic_initial_www_google_com.bin
 
 [fake_4_google]
-name = Fake 4 повтора (Google QUIC)
+name = Fake 4 повтора · Google QUIC
+old_name = Fake 4 повтора (Google QUIC)
 author = community
 description = 4 повтора с Google QUIC
 --dpi-desync=fake
@@ -28,7 +31,8 @@ description = 4 повтора с Google QUIC
 --dpi-desync-fake-unknown-udp=quic_initial_www_google_com.bin
 
 [fake_4_quic1]
-name = Fake 4 повтора (QUIC 1)
+name = Fake 4 повтора · QUIC 1
+old_name = Fake 4 повтора (QUIC 1)
 author = community
 description = 4 повтора с quic_1.bin
 --dpi-desync=fake
@@ -36,7 +40,8 @@ description = 4 повтора с quic_1.bin
 --dpi-desync-fake-quic=quic_1.bin
 
 [fake_11_simple]
-name = Fake 11 повторов (простая)
+name = Fake 11 повторов · простая
+old_name = Fake 11 повторов (простая)
 author = community
 label = stable
 description = Простая стратегия с 11 повторами fake
@@ -44,7 +49,8 @@ description = Простая стратегия с 11 повторами fake
 --dpi-desync-repeats=11
 
 [fake_tamper_11]
-name = Fake + Tamper (11 повторов)
+name = Fake + Tamper · 11 повторов
+old_name = Fake + Tamper (11 повторов)
 author = community
 label = recommended
 description = Fake с tamper, 11 повторов
@@ -83,7 +89,8 @@ description = UDP длина +4 с QUIC 4
 --dpi-desync-repeats=2
 
 [ipset_fake_12_n2]
-name = Игры: Apex & Rockstar v2
+name = Игры: Apex и Rockstar v2
+old_name = Игры: Apex & Rockstar v2
 author = community
 label = game
 description = Apex legends & Rockstar v2
@@ -95,7 +102,8 @@ description = Apex legends & Rockstar v2
 --dpi-desync-cutoff=n2
 
 [ipset_fake_12_n3]
-name = Игры: Apex & Battlefield 6
+name = Игры: Apex и Battlefield 6
+old_name = Игры: Apex & Battlefield 6
 author = community
 label = game
 description = Apex legends & Battlefield 6
@@ -107,7 +115,8 @@ description = Apex legends & Battlefield 6
 --dpi-desync-cutoff=n3
 
 [ipset_fake_10_n2]
-name = Игры: Apex & Battlefield 6 v2
+name = Игры: Apex и Battlefield 6 v2
+old_name = Игры: Apex & Battlefield 6 v2
 author = community
 label = game
 description = Apex legends & Battlefield 6 v2
@@ -131,7 +140,8 @@ description = Apex legends v3
 --dpi-desync-cutoff=n3
 
 [general_bf_32]
-name = Игры: General-BF 3.2
+name = General BF 3.2 · игры
+old_name = Игры: General-BF 3.2
 author = community
 label = recommended
 description = General-BF 3.2 для Battlefield
@@ -298,7 +308,8 @@ author = System
 description = Отключить обработку Discord
 
 [discord_fake_6_1]
-name = fake 6 quic 1
+name = Fake 6 quic 1
+old_name = fake 6 quic 1
 author = hz
 label = recommended
 description = Стандартная стратегия для Discord Voice с другим Fake QUIC
@@ -307,7 +318,8 @@ description = Стандартная стратегия для Discord Voice с 
 --dpi-desync-fake-quic=quic_1.bin
 
 [discord_fake_6_vk_com]
-name = fake 6 quic vk.com
+name = Fake 6 quic vk.com
+old_name = fake 6 quic vk.com
 author = hz
 label = recommended
 description = Стандартная стратегия для Discord Voice с другим QUIC от VK
@@ -316,7 +328,8 @@ description = Стандартная стратегия для Discord Voice с 
 --dpi-desync-fake-quic=quic_initial_vk_com.bin
 
 [discord_fake_8_google]
-name = fake 8 google
+name = Fake 8 google
+old_name = fake 8 google
 author = hz
 label = recommended
 description = Стандартная стратегия для Discord Voice
@@ -336,7 +349,8 @@ description = Стандартная стратегия для Discord Voice с 
 --dpi-desync-fake-quic=quic_initial_www_google_com.bin
 
 [discord_fake_udplen]
-name = YTDis Bystro 2.9.2 v1 / v2
+name = YTDisBystro 2.9.2 v1, v2
+old_name = YTDis Bystro 2.9.2 v1 / v2
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -348,7 +362,8 @@ description = Потом опишу подробнее
 --dpi-desync-cutoff=n2
 
 [discord_fake_updlen_7_quic_cutoff]
-name = fake udplen 7 quic cutoff
+name = Fake UDPLen 7 quic cutoff
+old_name = fake udplen 7 quic cutoff
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -360,7 +375,8 @@ description = Потом опишу подробнее
 --dpi-desync-cutoff=n2
 
 [discord_fake_updlen_7_quic_google]
-name = fake udplen 7 quic google
+name = Fake UDPLen 7 quic google
+old_name = fake udplen 7 quic google
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -371,7 +387,8 @@ description = Потом опишу подробнее
 --dpi-desync-fake-quic=quic_initial_www_google_com.bin
 
 [discord_fake_updlen_10_pattern]
-name = fake udplen 10 pattern
+name = Fake UDPLen 10 pattern
+old_name = fake udplen 10 pattern
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -383,7 +400,8 @@ description = Потом опишу подробнее
 --dpi-desync-cutoff=n2
 
 [discord_fake_split2_repeats_6]
-name = fake split2 repeats 6
+name = Fake Split2 repeats 6
+old_name = fake split2 repeats 6
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -394,7 +412,8 @@ description = Потом опишу подробнее
 --dpi-desync-fake-quic=quic_initial_www_google_com.bin
 
 [discord_fake_split2_repeats_11]
-name = fake split2 repeats 11
+name = Fake Split2 repeats 11
+old_name = fake split2 repeats 11
 author = hz
 label = recommended
 description = Потом опишу подробнее

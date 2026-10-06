@@ -1,12 +1,14 @@
 [dronator_43]
-name = Dronator 4.3
+name = Dronatar 4.3
+old_name = Dronator 4.3
 author = Dronator
 label = stable
 description = fake stun 0x0
 --lua-desync=fake:blob=0x00
 
 [fake_blob_quic_google_repeats_10_autottl]
-name = Fake Blob QUIC Google Repeats 10 Autottl (alt v11)
+name = Fake Blob QUIC Google Repeats 10 Autottl · General ALT11
+old_name = Fake Blob QUIC Google Repeats 10 Autottl (alt v11)
 author = Flowseal
 label = stable
 description = fake quic_google с 10 повторами и авто TTL
@@ -40,7 +42,8 @@ blobs = quic1
 --lua-desync=fake:blob=quic1:repeats=4
 
 [general_bf_32]
-name = General-BF 3.2
+name = General BF 3.2
+old_name = General-BF 3.2
 author = community
 label = recommended
 description = Для Battlefield 6
@@ -48,7 +51,8 @@ blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=9:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all
 
 [ipset_fake_12_n3]
-name = IPSET Fake x12 N3 (Apex legends & Battlefield 6)
+name = IPSET Fake x12 N3 · Apex legends и Battlefield 6
+old_name = IPSET Fake x12 N3 (Apex legends & Battlefield 6)
 author = community
 label = game
 description = UDP 443+ с ipset-all, 12 повторов, cutoff n3
@@ -56,7 +60,8 @@ blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=12:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all
 
 [ipset_fake_10_n2]
-name = IPSET Fake x10 N2 (Apex legends & Battlefield 6)
+name = IPSET Fake x10 N2 · Apex legends и Battlefield 6
+old_name = IPSET Fake x10 N2 (Apex legends & Battlefield 6)
 author = community
 label = game
 description = UDP 443+ с ipset-all, 10 повторов, cutoff n2
@@ -64,7 +69,8 @@ blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=10:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all
 
 [ipset_fake_14_n3]
-name = IPSET Fake x14 N3 (Apex legends)
+name = IPSET Fake x14 N3 · Apex legends
+old_name = IPSET Fake x14 N3 (Apex legends)
 author = community
 label = game
 description = UDP 443+ с ipset-all, 14 повторов, cutoff n3
@@ -72,7 +78,8 @@ blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=14:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all
 
 [ipset_fake_tamper_11]
-name = IPSET Fake+Tamper x11 (DHT)
+name = IPSET Fake+Tamper x11 · DHT
+old_name = IPSET Fake+Tamper x11 (DHT)
 author = community
 label = game
 description = UDP с fake+tamper для DHT, 11 повторов
@@ -216,7 +223,8 @@ blobs = quic_google
 --lua-desync=udplen:increment=25
 
 [fake_tamper_11]
-name = Fake+Tamper x11 (DHT)
+name = Fake+Tamper x11 · DHT
+old_name = Fake+Tamper x11 (DHT)
 author = community
 label = recommended
 description = Fake с tamper для DHT, 11 повторов
@@ -225,7 +233,8 @@ blobs = quic_google
 --lua-desync=dht_dn:dn=2
 
 [fake_tamper_11_autottl]
-name = Fake+Tamper x11 AutoTTL (DHT)
+name = Fake+Tamper x11 AutoTTL · DHT
+old_name = Fake+Tamper x11 AutoTTL (DHT)
 author = community
 label = recommended
 description = Fake с tamper и AutoTTL=2 для DHT
@@ -233,14 +242,16 @@ description = Fake с tamper и AutoTTL=2 для DHT
 --lua-desync=dht_dn:dn=2
 
 [fake_repeat_2_quic]
-name = fake 2 повторов (fake_quic.bin)
+name = Fake 2 повторов · fake_quic.bin
+old_name = fake 2 повторов (fake_quic.bin)
 author = hz
 description = 2 повтора с fake_quic.bin
 blobs = fake_quic
 --lua-desync=fake:blob=fake_quic:repeats=2
 
 [fake_6_1]
-name = fake 6 quic 1
+name = Fake 6 quic 1
+old_name = fake 6 quic 1
 author = hz
 label = recommended
 description = Стандартная стратегия с другим Fake QUIC
@@ -248,7 +259,8 @@ blobs = quic1
 --lua-desync=fake:blob=quic1:repeats=6
 
 [fake_6_vk_com]
-name = fake 6 quic vk.com
+name = Fake 6 quic vk.com
+old_name = fake 6 quic vk.com
 author = hz
 label = recommended
 description = Стандартная стратегия для Discord Voice с другим QUIC от VK
@@ -256,7 +268,8 @@ blobs = quic_vk
 --lua-desync=fake:blob=quic_vk:repeats=6
 
 [fake_8_google]
-name = fake 8 google
+name = Fake 8 google
+old_name = fake 8 google
 author = hz
 label = recommended
 description = Стандартная стратегия для Discord Voice
@@ -273,7 +286,8 @@ blobs = quic_google
 --lua-desync=udplen:increment=10:pattern=0xDEADBEEF
 
 [fake_udplen]
-name = YTDis Bystro 2.9.2 v1 / v2
+name = YTDisBystro 2.9.2 v1, v2
+old_name = YTDis Bystro 2.9.2 v1 / v2
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -282,7 +296,8 @@ blobs = quic2
 --lua-desync=udplen:increment=5:pattern=0xDEADBEEF
 
 [fake_updlen_7_quic_cutoff]
-name = fake udplen 7 quic cutoff
+name = Fake UDPLen 7 quic cutoff
+old_name = fake udplen 7 quic cutoff
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -291,7 +306,8 @@ blobs = quic_test
 --lua-desync=udplen:increment=10:pattern=0xDEADBEEF
 
 [fake_updlen_7_quic_google]
-name = fake udplen 7 quic google
+name = Fake UDPLen 7 quic google
+old_name = fake udplen 7 quic google
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -300,7 +316,8 @@ blobs = quic_google
 --lua-desync=udplen:increment=10:pattern=0xDEADBEEF
 
 [fake_updlen_10_pattern]
-name = fake udplen 10 pattern
+name = Fake UDPLen 10 pattern
+old_name = fake udplen 10 pattern
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -309,7 +326,8 @@ blobs = quic2
 --lua-desync=udplen:increment=10:pattern=0xDEADBEEF
 
 [fake_udplen_11]
-name = fake udplen 11
+name = Fake UDPLen 11
+old_name = fake udplen 11
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -359,11 +377,13 @@ author = community
 --lua-desync=fake:repeats=6:blob=fake_default_udp
 
 [pass]
-name = pass
+name = Pass
+old_name = pass
 --lua-desync=pass
 
 [fake_quic_google_2_all]
-name = Fake QUIC Google x2 payload=all (in args)
+name = Fake QUIC Google x2 payload=all
+old_name = Fake QUIC Google x2 payload=all (in args)
 author = community
 blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=2:payload=all
@@ -377,7 +397,8 @@ blobs = quic6
 
 # --- missing builtin strategy coverage (generated from presets) ---
 [stock_missing_199_udp_01]
-name = general 1.9.9 (game filter) / WhatsApp UDP wide
+name = General 1.9.9 · из WhatsApp UDP wide
+old_name = general 1.9.9 (game filter) / WhatsApp UDP wide
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general 1.9.9 (game filter).txt (WhatsApp UDP wide) в basic-режиме.
@@ -386,7 +407,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=fake_dbankcloud:payload=all:repeats=12
 
 [stock_missing_199_udp_02]
-name = general ALT11 1.9.9 (game filter) / WhatsApp UDP wide
+name = General ALT11 1.9.9 · из WhatsApp UDP wide
+old_name = general ALT11 1.9.9 (game filter) / WhatsApp UDP wide
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT11 1.9.9 (game filter).txt (WhatsApp UDP wide) в basic-режиме.
@@ -396,7 +418,8 @@ description = Автодобавлено для распознавания но�
 
 
 [stock_builtin_coverage_udp_001]
-name = Dead by Daylight v2 (game filter) / ZapretKVN UDP
+name = Dead by Daylight v2 · из ZapretKVN UDP
+old_name = Dead by Daylight v2 (game filter) / ZapretKVN UDP
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из Dead by Daylight v2 (game filter).txt (ZapretKVN UDP) определялся как готовая стратегия, а не custom.
@@ -405,7 +428,8 @@ description = Добавлено, чтобы встроенный профиль
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 [stock_builtin_coverage_udp_004]
-name = Default (game filter) / Все сайты UDP (айпи)
+name = Default · из «Все сайты UDP (айпи)»
+old_name = Default (game filter) / Все сайты UDP (айпи)
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из Default (game filter).txt (Все сайты UDP (айпи)) определялся как готовая стратегия, а не custom.
@@ -413,21 +437,24 @@ description = Добавлено, чтобы встроенный профиль
 --lua-desync=udplen:increment=8:pattern=0x0F0F0E0F
 
 [stock_builtin_coverage_udp_005]
-name = Default v1 (game filter) / Все сайты UDP (айпи)
+name = Default v1 · из «Все сайты UDP (айпи)»
+old_name = Default v1 (game filter) / Все сайты UDP (айпи)
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из Default v1 (game filter).txt (Все сайты UDP (айпи)) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=stun_pat:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:repeats=10:payload=all
 
 [stock_builtin_coverage_udp_006]
-name = Preset.X1 / Amazon UDP
+name = Preset.X1 · из Amazon UDP
+old_name = Preset.X1 / Amazon UDP
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из Preset.X1.txt (Amazon UDP) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=quic_google:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:payload=all:repeats=10
 
 [stock_builtin_coverage_udp_007]
-name = general 1.9.9 (game filter) / WhatsApp UDP wide
+name = General 1.9.9 · из WhatsApp UDP wide №2
+old_name = general 1.9.9 (game filter) / WhatsApp UDP wide
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general 1.9.9 (game filter).txt (WhatsApp UDP wide) определялся как готовая стратегия, а не custom.
@@ -436,7 +463,8 @@ description = Добавлено, чтобы встроенный профиль
 --lua-desync=fake:blob=fake_dbankcloud:repeats=12
 
 [stock_builtin_coverage_udp_008]
-name = general ALT11 1.9.9 (game filter) / WhatsApp UDP wide
+name = General ALT11 1.9.9 · из WhatsApp UDP wide №2
+old_name = general ALT11 1.9.9 (game filter) / WhatsApp UDP wide
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general ALT11 1.9.9 (game filter).txt (WhatsApp UDP wide) определялся как готовая стратегия, а не custom.
@@ -453,7 +481,8 @@ description = Добавлено, чтобы встроенный профиль
 # такой, как в profile-ах пресетов, поэтому они узнаются как эта стратегия.
 
 [flowseal_1103_general_game_udp]
-name = Flowseal 1.10.3 / general, ALT1, ALT2 и ещё 7 / Игры UDP
+name = Flowseal 1.10.3 (General, ALT1, ALT2 и ещё 7) · из «Игры UDP»
+old_name = Flowseal 1.10.3 / general, ALT1, ALT2 и ещё 7 / Игры UDP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 general, Flowseal 1.10.3 ALT1, Flowseal 1.10.3 ALT2, Flowseal 1.10.3 ALT6, Flowseal 1.10.3 ALT7, Flowseal 1.10.3 ALT8, Flowseal 1.10.3 ALT9, Flowseal 1.10.3 ALT10, Flowseal 1.10.3 SIMPLE FAKE, Flowseal 1.10.3 SIMPLE FAKE ALT2.
@@ -466,7 +495,8 @@ blobs = fake_zero64,game_active
 --lua-desync=fake:blob=game_active:repeats=12:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_1103_general_ipset_udp]
-name = Flowseal 1.10.3 / general, ALT2, ALT6 и ещё 4 / IP-set UDP (QUIC + игры)
+name = Flowseal 1.10.3 (General, ALT2, ALT6 и ещё 4) · из IP-set UDP (QUIC + игры)
+old_name = Flowseal 1.10.3 / general, ALT2, ALT6 и ещё 4 / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 general, Flowseal 1.10.3 ALT2, Flowseal 1.10.3 ALT6, Flowseal 1.10.3 ALT7, Flowseal 1.10.3 ALT8, Flowseal 1.10.3 ALT9, Flowseal 1.10.3 ALT10.
@@ -480,7 +510,8 @@ blobs = quic_google,fake_zero64,game_active
 --lua-desync=fake:blob=game_active:repeats=12:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_1103_alt1_ipset_udp]
-name = Flowseal 1.10.3 / ALT1, SIMPLE FAKE, SIMPLE FAKE ALT2 / IP-set UDP (QUIC + игры)
+name = Flowseal 1.10.3 (ALT1, Simple Fake, Simple Fake ALT2) · из IP-set UDP (QUIC + игры)
+old_name = Flowseal 1.10.3 / ALT1, SIMPLE FAKE, SIMPLE FAKE ALT2 / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT1, Flowseal 1.10.3 SIMPLE FAKE, Flowseal 1.10.3 SIMPLE FAKE ALT2.
@@ -494,7 +525,8 @@ blobs = quic_google,fake_zero64,game_active
 --lua-desync=fake:blob=game_active:repeats=12:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_1103_alt3_game_udp]
-name = Flowseal 1.10.3 / ALT3, ALT4, ALT11 и ещё 7 / Игры UDP
+name = Flowseal 1.10.3 (ALT3, ALT4, ALT11 и ещё 7) · из «Игры UDP»
+old_name = Flowseal 1.10.3 / ALT3, ALT4, ALT11 и ещё 7 / Игры UDP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT3, Flowseal 1.10.3 ALT4, Flowseal 1.10.3 ALT11, Flowseal 1.10.3 ALT12, Flowseal 1.10.3 ALT13, Flowseal 1.10.3 FAKE TLS AUTO, Flowseal 1.10.3 FAKE TLS AUTO ALT, Flowseal 1.10.3 FAKE TLS AUTO ALT2, Flowseal 1.10.3 FAKE TLS AUTO ALT3, Flowseal 1.10.3 SIMPLE FAKE ALT.
@@ -507,7 +539,8 @@ blobs = fake_zero64,game_active
 --lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_1103_alt11_ipset_udp]
-name = Flowseal 1.10.3 / ALT11, ALT12, ALT13 / IP-set UDP (QUIC + игры)
+name = Flowseal 1.10.3 (ALT11, ALT12, ALT13) · из IP-set UDP (QUIC + игры)
+old_name = Flowseal 1.10.3 / ALT11, ALT12, ALT13 / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT11, Flowseal 1.10.3 ALT12, Flowseal 1.10.3 ALT13.
@@ -521,7 +554,8 @@ blobs = quic_google,fake_zero64,game_active
 --lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_1103_alt3_ipset_udp]
-name = Flowseal 1.10.3 / ALT3 / IP-set UDP (QUIC + игры)
+name = Flowseal ALT3 1.10.3 · из IP-set UDP (QUIC + игры)
+old_name = Flowseal 1.10.3 / ALT3 / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT3.
@@ -535,7 +569,8 @@ blobs = quic_google,fake_zero64,game_active
 --lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_1103_alt4_ipset_udp]
-name = Flowseal 1.10.3 / ALT4, SIMPLE FAKE ALT / IP-set UDP (QUIC + игры)
+name = Flowseal 1.10.3 (ALT4, Simple Fake ALT) · из IP-set UDP (QUIC + игры)
+old_name = Flowseal 1.10.3 / ALT4, SIMPLE FAKE ALT / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT4, Flowseal 1.10.3 SIMPLE FAKE ALT.
@@ -549,7 +584,8 @@ blobs = quic_google,fake_zero64,game_active
 --lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_1103_alt5_game_udp]
-name = Flowseal 1.10.3 / ALT5 / Игры UDP
+name = Flowseal ALT5 1.10.3 · из «Игры UDP»
+old_name = Flowseal 1.10.3 / ALT5 / Игры UDP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT5.
@@ -562,7 +598,8 @@ blobs = fake_zero64,game_active
 --lua-desync=fake:blob=game_active:repeats=14:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_1103_alt5_ipset_udp]
-name = Flowseal 1.10.3 / ALT5 / IP-set UDP (QUIC + игры)
+name = Flowseal ALT5 1.10.3 · из IP-set UDP (QUIC + игры)
+old_name = Flowseal 1.10.3 / ALT5 / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 ALT5.
@@ -576,7 +613,8 @@ blobs = quic_google,fake_zero64,game_active
 --lua-desync=fake:blob=game_active:repeats=14:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_exp_1100_ipset_udp]
-name = Flowseal EXP 1.10.0 + Flowseal 1.10.3 / EXP / IP-set UDP (QUIC + игры)
+name = Flowseal EXP 1.10.0, 1.10.3 · из IP-set UDP (QUIC + игры)
+old_name = Flowseal EXP 1.10.0 + Flowseal 1.10.3 / EXP / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal EXP 1.10.0, Flowseal 1.10.3 EXP.
@@ -590,7 +628,8 @@ blobs = fake_zero64,quic_4pda,game_active
 --lua-desync=fake:blob=game_active:repeats=5:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_1103_exp_ipset_udp]
-name = Flowseal 1.10.3 / EXP / IP-set UDP (QUIC + игры)
+name = Flowseal EXP 1.10.3 · из IP-set UDP (QUIC + игры)
+old_name = Flowseal 1.10.3 / EXP / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 EXP.
@@ -605,7 +644,8 @@ blobs = quic_google,fake_zero64,quic_4pda,game_active
 --lua-desync=fake:blob=game_active:repeats=5:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_1103_fake_tls_auto_ipset_udp]
-name = Flowseal 1.10.3 / FAKE TLS AUTO, FAKE TLS AUTO ALT, FAKE TLS AUTO ALT2 / IP-set UDP (QUIC + игры)
+name = Flowseal 1.10.3 (Fake TLS Auto, Fake TLS Auto ALT, Fake TLS Auto ALT2) · из IP-set UDP (QUIC + игры)
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO, FAKE TLS AUTO ALT, FAKE TLS AUTO ALT2 / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO, Flowseal 1.10.3 FAKE TLS AUTO ALT, Flowseal 1.10.3 FAKE TLS AUTO ALT2.
@@ -619,7 +659,8 @@ blobs = quic_google,fake_zero64,game_active
 --lua-desync=fake:blob=game_active:repeats=10:payload=~empty,quic_initial,wireguard_initiation,dht,discord_ip_discovery,stun
 
 [flowseal_1103_fake_tls_auto_alt3_ipset_udp]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / IP-set UDP (QUIC + игры)
+name = Flowseal Fake TLS Auto ALT3 1.10.3 · из IP-set UDP (QUIC + игры)
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / IP-set UDP (QUIC + игры)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (QUIC · игры · прочее). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT3.

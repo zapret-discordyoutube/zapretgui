@@ -32,6 +32,9 @@ from profile.strategy_list_filter import (
     ProfileStrategyListGroup,
     ProfileStrategyListPlan,
     strategy_list_groups,
+    strategy_matches_search,
+    strategy_old_name,
+    strategy_tooltip_text,
 )
 from profile.strategy_state import ProfileStrategyState
 from profile.strategy_shape import payload_badge_accessible_text, payload_badge_text
@@ -830,14 +833,14 @@ class ProfileStrategyListWidget(QWidget):
         set_control_accessibility(self._search, name="Поиск готовых стратегий")
         set_tooltip(
             self._search,
-            "Поиск по названию, параметрам --lua-desync и описанию готовой стратегии. "
+            "Поиск по названию, прежнему названию, параметрам --lua-desync и описанию готовой стратегии. "
             "Ctrl+F — открыть или закрыть поиск, Esc — закрыть.",
         )
         set_control_accessibility(
             self._search,
             name="Поиск готовых стратегий",
             description=(
-                "Поиск по названию, параметрам --lua-desync и описанию готовой стратегии. "
+                "Поиск по названию, прежнему названию, параметрам --lua-desync и описанию готовой стратегии. "
                 "После ввода перейдите в список клавишей Tab или нажмите Стрелка вниз, "
                 "выберите стратегию стрелками вверх и вниз, "
                 "затем нажмите Enter или Пробел. "
@@ -1397,7 +1400,13 @@ class ProfileStrategyListWidget(QWidget):
             visual_label = str(visual.label or "")
             visual_description = str(visual.description or "")
             visual_search = f"{visual_label} {visual_description}".lower()
-            if search_text and search_text not in name.lower() and search_text not in args.lower() and search_text not in visual_search:
+            if search_text and not strategy_matches_search(
+                search_text,
+                name=name,
+                old_name=strategy_old_name(entry),
+                args=args,
+                visual_search=visual_search,
+            ):
                 continue
             family_key = family_keys[strategy_id]
             group_counts[family_key] = group_counts.get(family_key, 0) + 1
@@ -1449,8 +1458,14 @@ class ProfileStrategyListWidget(QWidget):
                 Qt.ItemDataRole.AccessibleTextRole,
                 accessible_text,
             )
-            tooltip_parts = [visual_description.strip(), args]
-            item.setData(self._ROLE_TOOLTIP_TEXT, "\n\n".join(part for part in tooltip_parts if part))
+            item.setData(
+                self._ROLE_TOOLTIP_TEXT,
+                strategy_tooltip_text(
+                    visual_description=visual_description,
+                    args=args,
+                    old_name=strategy_old_name(entry),
+                ),
+            )
             item.setSizeHint(QSize(0, _STRATEGY_ROW_HEIGHT))
             self._item_by_strategy_id[strategy_id] = item
             self._list.addItem(item)

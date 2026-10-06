@@ -98,7 +98,10 @@ def build_profile_strategy_list_plan(
         visual_label = str(getattr(visual, "label", "") or "")
         visual_description = str(getattr(visual, "description", "") or "")
         visual_search = f"{visual_label} {visual_description}".lower()
-        if query and query not in name.lower() and query not in args.lower() and query not in visual_search:
+        old_name = strategy_old_name(entry)
+        if query and not strategy_matches_search(
+            query, name=name, old_name=old_name, args=args, visual_search=visual_search
+        ):
             continue
 
         payload_badge = payload_badge_text(getattr(entry, "payload_scopes", ()) or ())
@@ -108,7 +111,6 @@ def build_profile_strategy_list_plan(
         group_counts[family_key] = group_counts.get(family_key, 0) + 1
         status_parts = _strategy_status_parts(state, is_current=is_current, include_unselected=False)
         accessible_status_parts = _strategy_status_parts(state, is_current=is_current, include_unselected=True)
-        tooltip_parts = [visual_description.strip(), args]
         rows.append(
             ProfileStrategyListRow(
                 strategy_id=strategy_id,
@@ -126,7 +128,11 @@ def build_profile_strategy_list_plan(
                 visual_color=str(getattr(visual, "color", "") or ""),
                 visual_label=visual_label,
                 visual_description=visual_description,
-                tooltip_text="\n\n".join(part for part in tooltip_parts if part),
+                tooltip_text=strategy_tooltip_text(
+                    visual_description=visual_description,
+                    args=args,
+                    old_name=old_name,
+                ),
                 payload_badge=payload_badge,
                 family_key=family_key,
                 rating=str(getattr(state, "rating", "") or ""),
@@ -141,6 +147,34 @@ def build_profile_strategy_list_plan(
         current_strategy_id=current_id,
         groups=strategy_list_groups(group_counts),
     )
+
+
+def strategy_old_name(entry) -> str:
+    """Прежнее название стратегии; пусто, если её не переименовывали."""
+    return str(getattr(entry, "old_name", "") or "").strip()
+
+
+def strategy_matches_search(query: str, *, name: str, old_name: str, args: str, visual_search: str) -> bool:
+    """Поиск смотрит название, прежнее название, параметры и описание способа.
+
+    query и visual_search уже в нижнем регистре.
+    """
+    return (
+        query in name.lower()
+        or query in old_name.lower()
+        or query in args.lower()
+        or query in visual_search
+    )
+
+
+def strategy_tooltip_text(*, visual_description: str, args: str, old_name: str) -> str:
+    """Подсказка строки: что делает способ, как стратегия называлась раньше, её параметры."""
+    parts = [
+        str(visual_description or "").strip(),
+        f"Раньше называлась: {old_name}" if old_name else "",
+        str(args or ""),
+    ]
+    return "\n\n".join(part for part in parts if part)
 
 
 def strategy_list_groups(group_counts: dict[str, int]) -> tuple[ProfileStrategyListGroup, ...]:
@@ -249,4 +283,7 @@ __all__ = [
     "ProfileStrategyListRow",
     "build_profile_strategy_list_plan",
     "strategy_list_groups",
+    "strategy_matches_search",
+    "strategy_old_name",
+    "strategy_tooltip_text",
 ]

@@ -1,5 +1,6 @@
 [multisplit_seqovl700]
-name = multisplit seqovl700
+name = MultiSplit seqovl700
+old_name = multisplit seqovl700
 author = loop-uh
 label = experimental
 description = Потом опишу подробнее
@@ -12,7 +13,8 @@ description = Сложная стратегия MultiDisorder с множест�
 --lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
 
 [multisplit_midsld]
-name = multisplit midsld
+name = MultiSplit midsld
+old_name = multisplit midsld
 author = loop-uh
 label = experimental
 description = Потом опишу подробнее
@@ -33,57 +35,66 @@ description = Данные в SYN + out-of-order
 --lua-desync=multidisorder:pos=host+1
 
 [fake_ttl1]
-name = 🎭 Fake TTL=1
+name = Fake TTL=1
+old_name = 🎭 Fake TTL=1
 author = Community
 description = Fake с минимальным TTL (умрёт на первом хопе)
 --lua-desync=fake:blob=fake_default_http:ip_ttl=1:ip6_ttl=1
 
 [fake_ttl1_disorder]
-name = 🎭 Fake TTL=1 + Disorder
+name = Fake TTL=1 + Disorder
+old_name = 🎭 Fake TTL=1 + Disorder
 author = Community
 description = Fake TTL=1 + out-of-order
 --lua-desync=fake:blob=fake_default_http:ip_ttl=1:ip6_ttl=1
 --lua-desync=multidisorder:pos=host+1
 
 [fake_repeats]
-name = 🎭 Fake Repeats x5
+name = Fake Repeats x5
+old_name = 🎭 Fake Repeats x5
 author = Community
 description = Множественные fake пакеты для забивания буфера DPI
 --lua-desync=fake:blob=fake_default_http:repeats=5:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [disorder_method]
-name = 🔀 Disorder Method
+name = Disorder Method
+old_name = 🔀 Disorder Method
 author = Community
 description = Out-of-order доставка по позиции Method
 --lua-desync=multidisorder:pos=method+2,host+1
 
 [fakedsplit_host]
-name = 🎭 FakeDSplit Host
+name = FakedSplit Host
+old_name = 🎭 FakeDSplit Host
 author = Community
 label = recommended
 description = Fake + Disorder Split по Host
 --lua-desync=fakedsplit:pos=host+1:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [fakedsplit_method]
-name = 🎭 FakeDSplit Method
+name = FakedSplit Method
+old_name = 🎭 FakeDSplit Method
 author = Community
 description = Fake + Disorder Split по Method
 --lua-desync=fakedsplit:pos=method+2:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [fake_badseq]
-name = 🎭 Fake BadSeq
+name = Fake BadSeq
+old_name = 🎭 Fake BadSeq
 author = Community
 description = Fake с неправильным sequence number
 --lua-desync=fake:blob=fake_default_http:tcp_seq=-10000:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [fake_badack]
-name = 🎭 Fake BadAck
+name = Fake BadAck
+old_name = 🎭 Fake BadAck
 author = Community
 description = Fake с неправильным ACK number
 --lua-desync=fake:blob=fake_default_http:tcp_ack=-66000:tcp_ts_up:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [fake_badseq_disorder]
-name = 🎭 Fake BadSeq + Disorder
+name = Fake BadSeq + Disorder
+old_name = 🎭 Fake BadSeq + Disorder
 author = Community
 label = recommended
 description = Fake с badseq + disorder split
@@ -91,20 +102,23 @@ description = Fake с badseq + disorder split
 --lua-desync=multidisorder:pos=host+1
 
 [split_multi]
-name = ✂️ Split Multi
+name = Split Multi
+old_name = ✂️ Split Multi
 author = Community
 description = Множественная нарезка без seqovl
 --lua-desync=multisplit:pos=1,method+2,host+1,sld+1
 
 [fake_ttl_split]
-name = 🎭 Fake TTL + Split
+name = Fake TTL + Split
+old_name = 🎭 Fake TTL + Split
 author = Community
 description = Fake с низким TTL + простая нарезка
 --lua-desync=fake:blob=fake_default_http:ip_ttl=3:ip6_ttl=3
 --lua-desync=multisplit:pos=host+1
 
 [fake_md5_disorder]
-name = 🎭 Fake MD5 + Disorder
+name = Fake MD5 + Disorder
+old_name = 🎭 Fake MD5 + Disorder
 author = Community
 description = Fake с md5sig + disorder
 --lua-desync=fake:blob=fake_default_http:tcp_md5:ip_autottl=0,3-20:ip6_autottl=0,3-20
@@ -136,21 +150,24 @@ description = fake multisplit seqovl pos fake http
 --lua-desync=multisplit:pos=host+1:seqovl=2
 
 [fake_multisplit_md5sig_autottl]
-name = fake multisplit md5sig
+name = Fake MultiSplit md5sig
+old_name = fake multisplit md5sig
 author = hz
 label = game
 --lua-desync=fake:blob=fake_default_http:tcp_md5:ip_autottl=0,3-20:ip6_autottl=0,3-20
 --lua-desync=multisplit:pos=sld+1
 
 [dronator_4_3]
-name = Dronator 4.3
+name = Dronatar 4.3
+old_name = Dronator 4.3
 author = hz
 description = fake multisplit md5sig
 --lua-desync=fake:blob=fake_default_http:tcp_md5
 --lua-desync=multisplit
 
 [multisplit_17]
-name = YTDisBystro 3.4 v1 (2)
+name = YTDisBystro 3.4 v1 №2
+old_name = YTDisBystro 3.4 v1 (2)
 author = hz
 description = Мульти нарезка с md5sig и фейком HTTP
 --lua-desync=send:repeats=2:tcp_md5:ip_autottl=0,3-20:ip6_autottl=0,3-20
@@ -158,60 +175,69 @@ description = Мульти нарезка с md5sig и фейком HTTP
 --lua-desync=multisplit:pos=2,midsld
 
 [general_altv2_161_original]
-name = general (alt v2) 1.6.1
+name = General ALT2 1.6.1
+old_name = general (alt v2) 1.6.1
 author = hz
 description = Оригинальный alt2
 --lua-desync=fake:blob=fake_default_http:tcp_md5:ip_autottl=2,3-20:ip6_autottl=2,3-20
 --lua-desync=multisplit
 
 [general_alt8_185]
-name = general (alt8) 1.8.5
+name = General ALT8 1.8.5
+old_name = general (alt8) 1.8.5
 author = V3nilla
 description = Потом опишу подробнее
 --lua-desync=fake:blob=fake_default_http:tcp_ack=-2:tcp_ts_up:ip_autottl=2,3-20:ip6_autottl=2,3-20
 --lua-desync=multisplit
 
 [multisplit_pos_1_3_5_7]
-name = multisplit pos 1,3,5,7
+name = MultiSplit pos 1,3,5,7
+old_name = multisplit pos 1,3,5,7
 author = hz
 description = multisplit pos 1,3,5,7
 --lua-desync=multisplit:pos=1,3,5,7
 
 [multisplit_pos_1_3_5_7_2]
-name = multisplit pos 1,3,5,7 v2
+name = MultiSplit pos 1,3,5,7 v2
+old_name = multisplit pos 1,3,5,7 v2
 author = hz
 description = multisplit pos 1,3,5,7 v2
 --lua-desync=multisplit:pos=1,3,5,7:seqovl=2
 
 [http_aggressive]
-name = 🔥 HTTP Aggressive (porno365)
+name = HTTP Aggressive · porno365
+old_name = 🔥 HTTP Aggressive (porno365)
 author = Custom
 label = recommended
 description = Агрессивный обход: flood фейками + split Host + disorder. Для упорных DPI.
 --lua-desync=http_aggressive:fakes=5:ttl_start=1:ttl_step=1:split_host:disorder
 
 [http_aggressive_lite]
-name = 🔥 HTTP Aggressive Lite
+name = HTTP Aggressive Lite
+old_name = 🔥 HTTP Aggressive Lite
 author = Custom
 description = Агрессивный обход без disorder (меньше нагрузка)
 --lua-desync=http_aggressive:fakes=3:ttl_start=1
 
 [http_aggressive_max]
-name = 🔥 HTTP Aggressive MAX
+name = HTTP Aggressive MAX
+old_name = 🔥 HTTP Aggressive MAX
 author = Custom
 label = caution
 description = Максимальная агрессия: 10 фейков + все техники
 --lua-desync=http_aggressive:fakes=10:ttl_start=1:ttl_step=2:split_host:disorder
 
 [http_multidisorder]
-name = 🔀 HTTP MultiDisorder
+name = HTTP MultiDisorder
+old_name = 🔀 HTTP MultiDisorder
 author = Custom
 label = recommended
 description = Нарезка HTTP запроса в критических точках + disorder
 --lua-desync=http_multidisorder
 
 [http_fake_multidisorder]
-name = 🎭 Fake + HTTP MultiDisorder
+name = Fake + HTTP MultiDisorder
+old_name = 🎭 Fake + HTTP MultiDisorder
 author = Custom
 label = recommended
 description = Фейки с низким TTL + HTTP MultiDisorder
@@ -219,14 +245,16 @@ description = Фейки с низким TTL + HTTP MultiDisorder
 --lua-desync=http_multidisorder
 
 [http_syndata_aggressive]
-name = 🚀 HTTP SynData + Aggressive
+name = HTTP Syndata + Aggressive
+old_name = 🚀 HTTP SynData + Aggressive
 author = Custom
 label = caution
 description = Комбинация SynData и агрессивного обхода
 --lua-desync=http_aggressive:fakes=3:disorder
 
 [mgts_http_v1]
-name = 🏠 МГТС HTTP v1 (AutoTTL+2)
+name = МГТС HTTP v1 · AutoTTL+2
+old_name = 🏠 МГТС HTTP v1 (AutoTTL+2)
 author = Custom
 label = recommended
 description = Для МГТС: fake с autottl=2 + multidisorder по Host
@@ -234,7 +262,8 @@ description = Для МГТС: fake с autottl=2 + multidisorder по Host
 --lua-desync=multidisorder:pos=host+1
 
 [mgts_http_v2]
-name = 🏠 МГТС HTTP v2 (BadSeq)
+name = МГТС HTTP v2 · BadSeq
+old_name = 🏠 МГТС HTTP v2 (BadSeq)
 author = Custom
 label = recommended
 description = Для МГТС: fake с badseq + multidisorder
@@ -242,7 +271,8 @@ description = Для МГТС: fake с badseq + multidisorder
 --lua-desync=multidisorder:pos=host+1,method+2
 
 [http_fake_flood_6]
-name = 🌊 HTTP Fake Flood x6
+name = HTTP Fake Flood x6
+old_name = 🌊 HTTP Fake Flood x6
 author = Custom
 label = recommended
 description = Флуд 6 фейками с низким TTL + disorder
@@ -250,7 +280,8 @@ description = Флуд 6 фейками с низким TTL + disorder
 --lua-desync=multidisorder:pos=host+1,method+2
 
 [http_fake_flood_11]
-name = 🌊 HTTP Fake Flood x11
+name = HTTP Fake Flood x11
+old_name = 🌊 HTTP Fake Flood x11
 author = Custom
 label = caution
 description = Максимальный флуд 11 фейками
@@ -258,70 +289,80 @@ description = Максимальный флуд 11 фейками
 --lua-desync=multidisorder:pos=1,host+1,method+2
 
 [http_fakedsplit_autottl]
-name = 🎭 HTTP FakedSplit AutoTTL
+name = HTTP FakedSplit AutoTTL
+old_name = 🎭 HTTP FakedSplit AutoTTL
 author = Custom
 label = recommended
 description = FakedSplit с AutoTTL для близких DPI
 --lua-desync=fakedsplit:pos=host+1:ip_autottl=2,3-20:ip6_autottl=2,3-20:tcp_md5
 
 [http_fakeddisorder_host]
-name = 🔀 HTTP FakedDisorder Host
+name = HTTP FakedDisorder Host
+old_name = 🔀 HTTP FakedDisorder Host
 author = Custom
 label = recommended
 description = FakedDisorder по позиции Host
 --lua-desync=fakeddisorder:pos=host+1:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [http_fakeddisorder_md5]
-name = 🔀 HTTP FakedDisorder MD5
+name = HTTP FakedDisorder MD5
+old_name = 🔀 HTTP FakedDisorder MD5
 author = Custom
 label = recommended
 description = FakedDisorder с tcp_md5 по Host
 --lua-desync=fakeddisorder:pos=host+1:ip_autottl=0,3-20:ip6_autottl=0,3-20:tcp_md5
 
 [http_fakeddisorder_ttl1]
-name = 🔀 HTTP FakedDisorder TTL=1
+name = HTTP FakedDisorder TTL=1
+old_name = 🔀 HTTP FakedDisorder TTL=1
 author = Custom
 label = recommended
 description = FakedDisorder с TTL=1 (фейки умирают быстро)
 --lua-desync=fakeddisorder:pos=host+1:ip_ttl=1:ip6_ttl=1
 
 [http_fakeddisorder_ttl2]
-name = 🔀 HTTP FakedDisorder TTL=2
+name = HTTP FakedDisorder TTL=2
+old_name = 🔀 HTTP FakedDisorder TTL=2
 author = Custom
 label = recommended
 description = FakedDisorder с TTL=2 для близких DPI
 --lua-desync=fakeddisorder:pos=host+1:ip_ttl=2:ip6_ttl=2:tcp_md5
 
 [http_fakeddisorder_badseq]
-name = 🔀 HTTP FakedDisorder BadSeq
+name = HTTP FakedDisorder BadSeq
+old_name = 🔀 HTTP FakedDisorder BadSeq
 author = Custom
 label = recommended
 description = FakedDisorder с неправильным sequence number
 --lua-desync=fakeddisorder:pos=host+1:tcp_seq=-10000:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [http_fakeddisorder_seqovl]
-name = 🔀 HTTP FakedDisorder seqovl=2
+name = HTTP FakedDisorder seqovl=2
+old_name = 🔀 HTTP FakedDisorder seqovl=2
 author = Custom
 label = recommended
 description = FakedDisorder с sequence overlap
 --lua-desync=fakeddisorder:pos=host+1:seqovl=2:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [http_fakeddisorder_method_host]
-name = 🔀 HTTP FakedDisorder Method+Host
+name = HTTP FakedDisorder Method+Host
+old_name = 🔀 HTTP FakedDisorder Method+Host
 author = Custom
 label = recommended
 description = FakedDisorder по двум позициям
 --lua-desync=fakeddisorder:pos=method+2,host+1:ip_autottl=0,3-20:ip6_autottl=0,3-20:tcp_md5
 
 [http_fakeddisorder_multi]
-name = 🔀 HTTP FakedDisorder Multi
+name = HTTP FakedDisorder Multi
+old_name = 🔀 HTTP FakedDisorder Multi
 author = Custom
 label = recommended
 description = FakedDisorder по нескольким позициям с seqovl
 --lua-desync=fakeddisorder:pos=1,method+2,host+1:seqovl=2:ip_ttl=2:ip6_ttl=2:tcp_md5
 
 [http_fake_fakeddisorder]
-name = 🎭 Fake + FakedDisorder
+name = Fake + FakedDisorder
+old_name = 🎭 Fake + FakedDisorder
 author = Custom
 label = recommended
 description = Сначала фейки, потом FakedDisorder
@@ -329,7 +370,8 @@ description = Сначала фейки, потом FakedDisorder
 --lua-desync=fakeddisorder:pos=host+1:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [http_combo_mgts]
-name = 💥 HTTP Combo МГТС
+name = HTTP Combo МГТС
+old_name = 💥 HTTP Combo МГТС
 author = Custom
 label = recommended
 description = Комбо для МГТС: SynData + Fake + Disorder
@@ -337,7 +379,8 @@ description = Комбо для МГТС: SynData + Fake + Disorder
 --lua-desync=multidisorder:pos=host+1
 
 [http_dup_fake_disorder]
-name = 📦 HTTP Dup + Fake + Disorder
+name = HTTP Dup + Fake + Disorder
+old_name = 📦 HTTP Dup + Fake + Disorder
 author = Custom
 label = recommended
 description = Дублирование + фейки + disorder
@@ -346,26 +389,30 @@ description = Дублирование + фейки + disorder
 --lua-desync=multidisorder:pos=host+1
 
 [http_split_seqovl_2]
-name = ✂️ HTTP Split seqovl=2
+name = HTTP Split seqovl=2
+old_name = ✂️ HTTP Split seqovl=2
 author = Custom
 description = Простая нарезка с seqovl=2 по Host
 --lua-desync=multisplit:pos=host+1:seqovl=2
 
 [http_split_seqovl_5]
-name = ✂️ HTTP Split seqovl=5
+name = HTTP Split seqovl=5
+old_name = ✂️ HTTP Split seqovl=5
 author = Custom
 description = Нарезка с seqovl=5 по Host и Method
 --lua-desync=multisplit:pos=host+1,method+2:seqovl=5
 
 [http_datanoack]
-name = ⚡ HTTP DataNoAck
+name = HTTP DataNoAck
+old_name = ⚡ HTTP DataNoAck
 author = Custom
 description = Убираем ACK флаг из данных
 --lua-desync=fake:blob=fake_default_http:tcp_flags_unset=ack
 --lua-desync=multidisorder:pos=host+1:tcp_flags_unset=ack
 
 [http_badsum_flood]
-name = 💀 HTTP BadSum Flood
+name = HTTP BadSum Flood
+old_name = 💀 HTTP BadSum Flood
 author = Custom
 label = caution
 description = Фейки с неправильной контрольной суммой
@@ -373,7 +420,8 @@ description = Фейки с неправильной контрольной су
 --lua-desync=multidisorder:pos=host+1
 
 [http_ultimate]
-name = 🔥 HTTP Ultimate (porno365)
+name = HTTP Ultimate · porno365
+old_name = 🔥 HTTP Ultimate (porno365)
 author = Custom
 label = caution
 description = Максимальная комбинация всех техник для упорных DPI
@@ -382,14 +430,16 @@ description = Максимальная комбинация всех техни�
 --lua-desync=multidisorder:pos=1,method+2,host+1
 
 [http_syndata_disorder_multi]
-name = 🚀 SynData + Disorder Multi
+name = Syndata + Disorder Multi
+old_name = 🚀 SynData + Disorder Multi
 author = Custom
 label = recommended
 description = SynData + disorder на 4 позиции
 --lua-desync=multidisorder:pos=1,method+2,host+1,sld+1
 
 [http_fake_flood_syndata]
-name = 🌊 Fake Flood + SynData
+name = Fake Flood + Syndata
+old_name = 🌊 Fake Flood + SynData
 author = Custom
 label = recommended
 description = Сначала 10 фейков, потом SynData
@@ -397,21 +447,24 @@ description = Сначала 10 фейков, потом SynData
 --lua-desync=syndata
 
 [http_disorder_4pos]
-name = 🔀 Disorder 4 позиции
+name = Disorder 4 позиции
+old_name = 🔀 Disorder 4 позиции
 author = Custom
 label = recommended
 description = Disorder по 4 точкам: 1, method, host, sld
 --lua-desync=multidisorder:pos=1,method+2,host+1,sld+1:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [http_disorder_seqovl_4]
-name = 🔀 Disorder seqovl=4
+name = Disorder seqovl=4
+old_name = 🔀 Disorder seqovl=4
 author = Custom
 label = recommended
 description = Disorder с большим перекрытием (4 байта)
 --lua-desync=multidisorder:pos=host+1:seqovl=4:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [http_fake_disorder_seqovl]
-name = 🎭 Fake + Disorder seqovl=4
+name = Fake + Disorder seqovl=4
+old_name = 🎭 Fake + Disorder seqovl=4
 author = Custom
 label = recommended
 description = Фейки + disorder с перекрытием 4 байта
@@ -419,7 +472,8 @@ description = Фейки + disorder с перекрытием 4 байта
 --lua-desync=multidisorder:pos=host+1:seqovl=4
 
 [http_split_disorder_combo]
-name = ✂️ Split + Disorder Combo
+name = Split + Disorder Combo
+old_name = ✂️ Split + Disorder Combo
 author = Custom
 label = recommended
 description = Сначала split, потом disorder - путает DPI
@@ -427,7 +481,8 @@ description = Сначала split, потом disorder - путает DPI
 --lua-desync=multidisorder:pos=host+1,sld+1
 
 [http_porno365_v1]
-name = 💋 Porno365 v1 (SynData)
+name = Porno365 v1 · Syndata
+old_name = 💋 Porno365 v1 (SynData)
 author = Custom
 label = recommended
 description = Специально для porno365 - SynData обходит МГТС
@@ -435,7 +490,8 @@ description = Специально для porno365 - SynData обходит МГ
 --lua-desync=multidisorder:pos=host+1
 
 [http_porno365_v2]
-name = 💋 Porno365 v2 (TTL Flood)
+name = Porno365 v2 · TTL Flood
+old_name = 💋 Porno365 v2 (TTL Flood)
 author = Custom
 label = recommended
 description = Флуд фейками с разными TTL + disorder
@@ -445,7 +501,8 @@ description = Флуд фейками с разными TTL + disorder
 --lua-desync=multidisorder:pos=host+1
 
 [http_porno365_v3]
-name = 💋 Porno365 v3 (Max Split)
+name = Porno365 v3 · Max Split
+old_name = 💋 Porno365 v3 (Max Split)
 author = Custom
 label = caution
 description = Максимальная нарезка на 5 частей + фейки
@@ -453,7 +510,8 @@ description = Максимальная нарезка на 5 частей + фе
 --lua-desync=multidisorder:pos=1,3,method+2,host+1,sld+1:seqovl=2
 
 [http_porno365_v4]
-name = 💋 Porno365 v4 (Dup+Fake+Split)
+name = Porno365 v4 · Dup+Fake+Split
+old_name = 💋 Porno365 v4 (Dup+Fake+Split)
 author = Custom
 label = caution
 description = Дублирование + фейки + многопозиционный split
@@ -462,7 +520,8 @@ description = Дублирование + фейки + многопозицион
 --lua-desync=multidisorder:pos=1,method+2,host+1,sld+1:seqovl=3
 
 [http_badsum_only]
-name = 💀 BadSum Only
+name = BadSum Only
+old_name = 💀 BadSum Only
 author = Custom
 label = recommended
 description = Фейки с неправильной контрольной суммой - DPI примет, сервер отбросит
@@ -470,7 +529,8 @@ description = Фейки с неправильной контрольной су
 --lua-desync=multidisorder:pos=host+1
 
 [http_badsum_badseq]
-name = 💀 BadSum + BadSeq
+name = BadSum + BadSeq
+old_name = 💀 BadSum + BadSeq
 author = Custom
 label = recommended
 description = Неправильная сумма + неправильный seq
@@ -478,7 +538,8 @@ description = Неправильная сумма + неправильный seq
 --lua-desync=multidisorder:pos=host+1
 
 [http_badseq_extreme]
-name = 🔢 BadSeq Extreme (-100000)
+name = BadSeq Extreme · -100000
+old_name = 🔢 BadSeq Extreme (-100000)
 author = Custom
 label = recommended
 description = Очень большое смещение seq - сервер отбросит фейки
@@ -486,7 +547,8 @@ description = Очень большое смещение seq - сервер от
 --lua-desync=multidisorder:pos=host+1
 
 [http_badack_extreme]
-name = 🔢 BadAck Extreme
+name = BadAck Extreme
+old_name = 🔢 BadAck Extreme
 author = Custom
 label = recommended
 description = Неправильный ACK - DPI запутается
@@ -494,7 +556,8 @@ description = Неправильный ACK - DPI запутается
 --lua-desync=multidisorder:pos=host+1
 
 [http_triple_fake]
-name = 🎭 Triple Fake Layers
+name = Triple Fake Layers
+old_name = 🎭 Triple Fake Layers
 author = Custom
 label = recommended
 description = 3 слоя фейков с разными параметрами
@@ -504,7 +567,8 @@ description = 3 слоя фейков с разными параметрами
 --lua-desync=multidisorder:pos=host+1
 
 [http_mega_flood_20]
-name = 🌊 Mega Flood x20
+name = Mega Flood x20
+old_name = 🌊 Mega Flood x20
 author = Custom
 label = caution
 description = 20 фейков чтобы переполнить буфер DPI
@@ -512,7 +576,8 @@ description = 20 фейков чтобы переполнить буфер DPI
 --lua-desync=multidisorder:pos=host+1
 
 [http_mgts_killer_v1]
-name = ⚔️ МГТС Killer v1
+name = МГТС Killer v1
+old_name = ⚔️ МГТС Killer v1
 author = Custom
 label = recommended
 description = BadSum + много фейков + disorder
@@ -520,7 +585,8 @@ description = BadSum + много фейков + disorder
 --lua-desync=multidisorder:pos=1,host+1:seqovl=3
 
 [http_mgts_killer_v2]
-name = ⚔️ МГТС Killer v2
+name = МГТС Killer v2
+old_name = ⚔️ МГТС Killer v2
 author = Custom
 label = recommended
 description = BadSeq extreme + TTL gradient + split
@@ -529,7 +595,8 @@ description = BadSeq extreme + TTL gradient + split
 --lua-desync=multidisorder:pos=host+1,method+2:seqovl=2
 
 [http_mgts_killer_v3]
-name = ⚔️ МГТС Killer v3
+name = МГТС Killer v3
+old_name = ⚔️ МГТС Killer v3
 author = Custom
 label = caution
 description = Всё вместе: badsum + badseq + badack + flood
@@ -539,7 +606,8 @@ description = Всё вместе: badsum + badseq + badack + flood
 --lua-desync=multidisorder:pos=1,host+1,sld+1:seqovl=3
 
 [http_rst_race]
-name = 🏎️ RST Race
+name = RST Race
+old_name = 🏎️ RST Race
 author = Custom
 label = recommended
 description = Отправить данные быстрее чем DPI пошлёт RST
@@ -547,78 +615,90 @@ description = Отправить данные быстрее чем DPI пошл
 --lua-desync=multidisorder:pos=host+1
 
 [http_no_fake_disorder]
-name = 🔀 No Fake Disorder
+name = No Fake Disorder
+old_name = 🔀 No Fake Disorder
 author = Custom
 description = Только disorder без фейков - иногда работает лучше
 --lua-desync=multidisorder:pos=1,method+2,host+1,sld+1:seqovl=4
 
 [http_seqovl_host_google]
-name = 🎯 SeqOvl Host (google)
+name = SeqOvl Host · google
+old_name = 🎯 SeqOvl Host (google)
 author = Custom
 label = recommended
 description = DPI видит google.com, сервер - реальный хост (seqovl атака)
 --lua-desync=http_seqovl_host:fake_host=www.google.com
 
 [http_seqovl_host_yandex]
-name = 🎯 SeqOvl Host (yandex)
+name = SeqOvl Host · yandex
+old_name = 🎯 SeqOvl Host (yandex)
 author = Custom
 label = recommended
 description = DPI видит yandex.ru, сервер - реальный хост
 --lua-desync=http_seqovl_host:fake_host=www.yandex.ru
 
 [http_triple_seqovl_attack]
-name = 🎯 Triple SeqOvl Attack
+name = Triple SeqOvl Attack
+old_name = 🎯 Triple SeqOvl Attack
 author = Custom
 label = recommended
 description = 3 пакета с одинаковым seq: fake->garbage->real
 --lua-desync=http_triple_seqovl:fake_host=www.google.com
 
 [http_mgts_combo_v1]
-name = ⚔️ МГТС Combo (disorder+seqovl)
+name = МГТС Combo · Disorder+seqovl
+old_name = ⚔️ МГТС Combo (disorder+seqovl)
 author = Custom
 label = recommended
 description = Disorder + seqovl комбо специально для МГТС
 --lua-desync=http_mgts_combo:fake_host=www.google.com
 
 [http_ipfrag_24]
-name = 📦 IP Frag (24 bytes)
+name = IP Frag · 24 bytes
+old_name = 📦 IP Frag (24 bytes)
 author = Custom
 label = recommended
 description = IP фрагментация - DPI может не собирать фрагменты
 --lua-desync=http_ipfrag:frag_size=24
 
 [http_ipfrag_8]
-name = 📦 IP Frag (8 bytes)
+name = IP Frag · 8 bytes
+old_name = 📦 IP Frag (8 bytes)
 author = Custom
 description = Минимальная IP фрагментация
 --lua-desync=http_ipfrag:frag_size=8
 
 [http_hostmod_lower]
-name = 📝 Host: lowercase
+name = Host: lowercase
+old_name = 📝 Host: lowercase
 author = Custom
 description = Меняет 'Host:' на 'host:' - некоторые DPI чувствительны
 --lua-desync=http_hostmod:case=lower
 
 [http_hostmod_upper]
-name = 📝 HOST: uppercase
+name = HOST: uppercase
+old_name = 📝 HOST: uppercase
 author = Custom
 description = Меняет 'Host:' на 'HOST:'
 --lua-desync=http_hostmod:case=upper
 
 [http_hostmod_mixed]
-name = 📝 HoSt: mixed case
+name = HoSt: mixed case
+old_name = 📝 HoSt: mixed case
 author = Custom
 description = Меняет 'Host:' на 'HoSt:'
 --lua-desync=http_hostmod:case=mixed
 
 [http_absolute_url_google]
-name = 🔗 Absolute URL (google)
+name = Absolute URL · google
+old_name = 🔗 Absolute URL (google)
 author = Custom
 description = GET http://real/ с Host: google.com
 --lua-desync=http_absolute_url:fake_host=www.google.com
 
 [http_seqovl_disorder_combo]
-name = 💥 SeqOvl + Disorder Full
+name = SeqOvl + Disorder Full
+old_name = 💥 SeqOvl + Disorder Full
 author = Custom
 label = recommended
 description = SeqOvl хост + полный disorder
@@ -626,7 +706,8 @@ description = SeqOvl хост + полный disorder
 --lua-desync=multidisorder:pos=method+2,host+1
 
 [http_ipfrag_seqovl_combo]
-name = 💥 IP Frag + SeqOvl
+name = IP Frag + SeqOvl
+old_name = 💥 IP Frag + SeqOvl
 author = Custom
 label = caution
 description = IP фрагментация + seqovl атака на Host
@@ -634,26 +715,30 @@ description = IP фрагментация + seqovl атака на Host
 --lua-desync=http_seqovl_host:fake_host=google.com
 
 [http_hostcase_mixed]
-name = 📝 HostCase HoSt
+name = HostCase HoSt
+old_name = 📝 HostCase HoSt
 author = Custom
 description = Меняет 'Host:' на 'HoSt:' (4-символьный spell) для простых DPI
 --lua-desync=http_hostcase:spell=HoSt
 
 [http_methodeol_shift]
-name = 📑 Method EOL shift
+name = Method EOL shift
+old_name = 📑 Method EOL shift
 author = Custom
 description = Сдвигает User-Agent вверх (http_methodeol) — ломает парсер DPI
 --lua-desync=http_methodeol
 
 [http_methodeol_shift_multisplit]
-name = 📑 Method EOL shift + Multisplit
+name = Method EOL shift + MultiSplit
+old_name = 📑 Method EOL shift + Multisplit
 author = Custom
 description = Сдвигает User-Agent вверх (http_methodeol) — ломает парсер DPI + Multisplit
 --lua-desync=http_methodeol
 --lua-desync=multisplit:pos=host+1
 
 [http_fake_methodeol_shift_multisplit]
-name = 📑 Fake + Method EOL shift + Multisplit
+name = Fake + Method EOL shift + MultiSplit
+old_name = 📑 Fake + Method EOL shift + Multisplit
 author = Custom
 description = Фейки + сдвигает User-Agent вверх (http_methodeol) — ломает парсер DPI + Multisplit
 --lua-desync=fake:blob=fake_default_http:repeats=10:ip_ttl=1:ip6_ttl=1:badsum:tcp_md5
@@ -661,7 +746,8 @@ description = Фейки + сдвигает User-Agent вверх (http_methodeo
 --lua-desync=multisplit:pos=1,host+1,midsld:oob
 
 [http_fake_methodeol_shift_multisplit_badsum]
-name = 📑 Fake + Method EOL shift + Multisplit + BadSum
+name = Fake + Method EOL shift + MultiSplit + BadSum
+old_name = 📑 Fake + Method EOL shift + Multisplit + BadSum
 author = Custom
 description = Фейки + сдвигает User-Agent вверх (http_methodeol) — ломает парсер DPI + Multisplit + BadSum
 --lua-desync=fake:blob=fake_default_http:repeats=10:ip_ttl=1:ip6_ttl=1:badsum
@@ -669,129 +755,148 @@ description = Фейки + сдвигает User-Agent вверх (http_methodeo
 --lua-desync=multisplit:pos=1,host+1,midsld
 
 [http_hostfakesplit_google]
-name = 🌀 HostFakeSplit (google)
+name = HostFakeSplit · google
+old_name = 🌀 HostFakeSplit (google)
 author = Custom
 label = caution
 description = Подменяет Host на google.com фейками и разбивает внутри Host (midsld)
 --lua-desync=hostfakesplit:host=google.com:midhost=midsld
 
 [http_hostfakesplit_yandex]
-name = 🌀 HostFakeSplit (yandex)
+name = HostFakeSplit · yandex
+old_name = 🌀 HostFakeSplit (yandex)
 author = Custom
 label = caution
 description = Подменяет Host на yandex.ru фейками и разбивает внутри Host (midsld)
 --lua-desync=hostfakesplit:host=yandex.ru:midhost=midsld
 
 [http_garbage_prefix_crlf]
-name = 🗑️ Garbage Prefix CRLF
+name = Garbage Prefix CRLF
+old_name = 🗑️ Garbage Prefix CRLF
 author = Custom
 label = recommended
 description = Много \r\n перед запросом - сбивает парсер DPI
 --lua-desync=http_garbage_prefix:mode=crlf:amount=50
 
 [http_garbage_prefix_mixed]
-name = 🗑️ Garbage Prefix Mixed
+name = Garbage Prefix Mixed
+old_name = 🗑️ Garbage Prefix Mixed
 author = Custom
 label = recommended
 description = Смешанный мусор перед запросом (пробелы, табы, CRLF)
 --lua-desync=http_garbage_prefix:mode=mixed:amount=100
 
 [http_garbage_prefix_spaces]
-name = 🗑️ Garbage Prefix Spaces
+name = Garbage Prefix Spaces
+old_name = 🗑️ Garbage Prefix Spaces
 author = Custom
 description = Много пробелов перед запросом
 --lua-desync=http_garbage_prefix:mode=spaces:amount=50
 
 [http_pipeline_fake_google]
-name = 📤 Pipeline Fake (google)
+name = Pipeline Fake · google
+old_name = 📤 Pipeline Fake (google)
 author = Custom
 label = recommended
 description = HTTP pipelining - фейковый запрос к google перед реальным
 --lua-desync=http_pipeline_fake:fake_host=www.google.com
 
 [http_pipeline_fake_yandex]
-name = 📤 Pipeline Fake (yandex)
+name = Pipeline Fake · yandex
+old_name = 📤 Pipeline Fake (yandex)
 author = Custom
 description = HTTP pipelining - фейковый запрос к yandex перед реальным
 --lua-desync=http_pipeline_fake:fake_host=www.yandex.ru
 
 [http_pipeline_fake_v2_google]
-name = 📤 Pipeline Fake v2 (badsum)
+name = Pipeline Fake v2 · badsum
+old_name = 📤 Pipeline Fake v2 (badsum)
 author = Custom
 label = recommended
 description = HTTP pipelining v2 - фейк с badsum (не дойдёт до сервера)
 --lua-desync=http_pipeline_fake_v2:fake_host=www.google.com:badsum
 
 [http_header_shuffle_google]
-name = 🔀 Header Shuffle (google)
+name = Header Shuffle · google
+old_name = 🔀 Header Shuffle (google)
 author = Custom
 label = recommended
 description = Вставляет фейковый X-Host перед реальным Host
 --lua-desync=http_header_shuffle:fake_host=www.google.com
 
 [http_host_bytesplit_5]
-name = ✂️ Host Bytesplit x5
+name = Host Bytesplit x5
+old_name = ✂️ Host Bytesplit x5
 author = Custom
 label = recommended
 description = Разбивает Host на 5 частей побайтово
 --lua-desync=http_host_bytesplit:max_parts=5
 
 [http_host_bytesplit_10]
-name = ✂️ Host Bytesplit x10
+name = Host Bytesplit x10
+old_name = ✂️ Host Bytesplit x10
 author = Custom
 label = caution
 description = Разбивает Host на 10 частей побайтово (агрессивно)
 --lua-desync=http_host_bytesplit:max_parts=10
 
 [http_methodeol_safe_only]
-name = 📑 Methodeol Safe
+name = Methodeol Safe
+old_name = 📑 Methodeol Safe
 author = Custom
 label = recommended
 description = Только \r\n в начало без обрезания User-Agent
 --lua-desync=http_methodeol_safe
 
 [http_multi_crlf_5]
-name = 📑 Multi CRLF x5
+name = Multi CRLF x5
+old_name = 📑 Multi CRLF x5
 author = Custom
 label = recommended
 description = 5 штук \r\n в начало запроса
 --lua-desync=http_multi_crlf:count=5
 
 [http_multi_crlf_10]
-name = 📑 Multi CRLF x10
+name = Multi CRLF x10
+old_name = 📑 Multi CRLF x10
 author = Custom
 description = 10 штук \r\n в начало запроса
 --lua-desync=http_multi_crlf:count=10
 
 [http_mixed_prefix_only]
-name = 📑 Mixed Prefix
+name = Mixed Prefix
+old_name = 📑 Mixed Prefix
 author = Custom
 label = recommended
 description = Смешанный whitespace перед запросом (\r\n + пробел + таб)
 --lua-desync=http_mixed_prefix
 
 [http_xpadding_header]
-name = 📝 X-Padding Header
+name = X-Padding Header
+old_name = 📝 X-Padding Header
 author = Custom
 label = recommended
 description = Добавляет длинный X-Pad заголовок (100% безопасно для сервера)
 --lua-desync=http_xpadding
 
 [http_simple_bypass_crlf]
-name = 🔓 Simple Bypass (CRLF+HoSt)
+name = Simple Bypass · CRLF+HoSt
+old_name = 🔓 Simple Bypass (CRLF+HoSt)
 author = Custom
 label = recommended
 description = Простой обход: \r\n + замена Host на HoSt
 --lua-desync=http_simple_bypass:prefix=\r\n:hostcase=HoSt
 
 [http_simple_bypass_hostonly]
-name = 🔓 Simple Bypass (HoSt only)
+name = Simple Bypass · HoSt only
+old_name = 🔓 Simple Bypass (HoSt only)
 author = Custom
 description = Только замена Host на HoSt без prefix
 --lua-desync=http_simple_bypass:hostcase=HoSt
 
 [http_combo_garbage_hostcase_split]
-name = 💥 Combo: Garbage + HoSt + Split
+name = Combo: Garbage + HoSt + Split
+old_name = 💥 Combo: Garbage + HoSt + Split
 author = Custom
 label = recommended
 description = Мусор + смена регистра Host + split
@@ -800,7 +905,8 @@ description = Мусор + смена регистра Host + split
 --lua-desync=multisplit:pos=1,host+1,midsld
 
 [http_combo_fake_simple_bypass]
-name = 💥 Combo: Fake + Simple Bypass
+name = Combo: Fake + Simple Bypass
+old_name = 💥 Combo: Fake + Simple Bypass
 author = Custom
 label = recommended
 description = Фейки + простой обход (\r\n + HoSt)
@@ -808,7 +914,8 @@ description = Фейки + простой обход (\r\n + HoSt)
 --lua-desync=http_simple_bypass:prefix=\r\n:hostcase=HoSt
 
 [http_combo_fake_methodeol_safe]
-name = 💥 Combo: Fake + Methodeol Safe
+name = Combo: Fake + Methodeol Safe
+old_name = 💥 Combo: Fake + Methodeol Safe
 author = Custom
 label = recommended
 description = Фейки + безопасный methodeol
@@ -816,7 +923,8 @@ description = Фейки + безопасный methodeol
 --lua-desync=http_methodeol_safe
 
 [http_combo_fake_xpadding_split]
-name = 💥 Combo: Fake + X-Padding + Split
+name = Combo: Fake + X-Padding + Split
+old_name = 💥 Combo: Fake + X-Padding + Split
 author = Custom
 label = recommended
 description = Фейки + X-Padding заголовок + split
@@ -825,7 +933,8 @@ description = Фейки + X-Padding заголовок + split
 --lua-desync=multisplit:pos=1,host+1,midsld
 
 [http_porno365_redirector_v1]
-name = 💋 Porno365 Redirector v1
+name = Porno365 Redirector v1
+old_name = 💋 Porno365 Redirector v1
 author = Custom
 label = recommended
 description = Для редиректоров: много фейков + methodeol safe + split
@@ -834,7 +943,8 @@ description = Для редиректоров: много фейков + methode
 --lua-desync=multidisorder:pos=1,host+1,midsld
 
 [http_porno365_redirector_v2]
-name = 💋 Porno365 Redirector v2
+name = Porno365 Redirector v2
+old_name = 💋 Porno365 Redirector v2
 author = Custom
 label = recommended
 description = Для редиректоров: pipeline fake v2 + disorder
@@ -842,7 +952,8 @@ description = Для редиректоров: pipeline fake v2 + disorder
 --lua-desync=multidisorder:pos=host+1
 
 [http_porno365_redirector_v3]
-name = 💋 Porno365 Redirector v3
+name = Porno365 Redirector v3
+old_name = 💋 Porno365 Redirector v3
 author = Custom
 label = recommended
 description = Для редиректоров: garbage + header shuffle + split
@@ -852,7 +963,8 @@ description = Для редиректоров: garbage + header shuffle + split
 --lua-desync=multidisorder:pos=1,host+1
 
 [http_porno365_ultimate]
-name = 💋 Porno365 Ultimate
+name = Porno365 Ultimate
+old_name = 💋 Porno365 Ultimate
 author = Custom
 label = caution
 description = Все техники вместе для самых упорных DPI
@@ -862,26 +974,30 @@ description = Все техники вместе для самых упорны�
 --lua-desync=multidisorder:pos=1,host+1,midsld:seqovl=2
 
 [http_method_obfuscate]
-name = 🔡 Method Obfuscate
+name = Method Obfuscate
+old_name = 🔡 Method Obfuscate
 author = Custom
 description = Меняет GET на GeT или gEt
 --lua-desync=http_method_obfuscate
 
 [http_version_downgrade]
-name = 📉 Version Downgrade
+name = Version Downgrade
+old_name = 📉 Version Downgrade
 author = Custom
 description = HTTP/1.1 -> HTTP/1.0 (некоторые DPI не парсят 1.0)
 --lua-desync=http_version_downgrade
 
 [http_fake_continuation]
-name = 📤 Fake Continuation
+name = Fake Continuation
+old_name = 📤 Fake Continuation
 author = Custom
 description = Отправляет фейковый chunked continuation
 --lua-desync=http_fake_continuation
 
 # --- builtin stock basic coverage (generated) ---
 [stock_dead_by_daylight_game_filter_01]
-name = fake tls14 ack-66000 + multisplit sld+1 ack-66000
+name = Fake tls14 ack-66000 + MultiSplit sld+1 ack-66000
+old_name = fake tls14 ack-66000 + multisplit sld+1 ack-66000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Dead by Daylight (game filter).txt (all_tcp) в basic-режиме.
@@ -889,7 +1005,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=sld+1:tcp_ack=-66000:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [stock_dead_by_daylight_v2_game_filter_02]
-name = fake fake_default_tls x3 ts-600000 + fake tls_4pda x3 ts-600000
+name = Fake fake_default_tls x3 ts-600000 + Fake tls_4pda x3 ts-600000
+old_name = fake fake_default_tls x3 ts-600000 + fake tls_4pda x3 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Dead by Daylight v2 (game filter).txt (all_tcp) в basic-режиме.
@@ -897,7 +1014,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=tls_4pda:repeats=3:tcp_ts=-600000
 
 [stock_dead_by_daylight_v2_game_filter_03]
-name = send x2 + syndata tls_google + multisplit tls_google s700
+name = Send x2 + Syndata tls_google + MultiSplit tls_google s700 · autottl
+old_name = send x2 + syndata tls_google + multisplit tls_google s700
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Dead by Daylight v2 (game filter).txt (all_tcp) в basic-режиме.
@@ -906,7 +1024,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:seqovl=700:seqovl_pattern=tls_google:tcp_flags_unset=ack
 
 [stock_default_game_filter_04]
-name = fake tls_google x6 ts-600000 + fakedsplit x6 ts-600000
+name = Fake tls_google x6 ts-600000 + FakedSplit x6 ts-600000
+old_name = fake tls_google x6 ts-600000 + fakedsplit x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default (game filter).txt (all_tcp) в basic-режиме.
@@ -914,7 +1033,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000
 
 [stock_default_multisplit_sni_game_filter_05]
-name = send x2 + syndata tls_google + tls_multisplit_sni tls_google s652
+name = Send x2 + Syndata tls_google + tls_multisplit_sni tls_google s652
+old_name = send x2 + syndata tls_google + tls_multisplit_sni tls_google s652
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default multisplit_sni (game filter).txt (all_tcp) в basic-режиме.
@@ -923,7 +1043,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google
 
 [stock_default_multisplit_stun_game_filter_06]
-name = send x2 + syndata tls_google + multisplit 1 stun_pat s740
+name = Send x2 + Syndata tls_google + MultiSplit 1 stun_pat s740
+old_name = send x2 + syndata tls_google + multisplit 1 stun_pat s740
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default multisplit_stun (game filter).txt (all_tcp) в basic-режиме.
@@ -932,7 +1053,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=1:seqovl=740:seqovl_pattern=stun_pat
 
 [stock_default_07]
-name = send x2 + syndata stun_pat + tls_multisplit_sni stun_pat s652
+name = Send x2 + Syndata stun_pat + tls_multisplit_sni stun_pat s652
+old_name = send x2 + syndata stun_pat + tls_multisplit_sni stun_pat s652
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default.txt (all_tcp) в basic-режиме.
@@ -941,7 +1063,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=stun_pat
 
 [stock_preset_x_game_filter_08]
-name = send x2 + syndata tls_google + multidisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1
+name = Send x2 + Syndata tls_google + MultiDisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1
+old_name = send x2 + syndata tls_google + multidisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Preset X (game filter).txt (all_tcp) в basic-режиме.
@@ -950,7 +1073,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
 
 [stock_preset_x_v2_game_filter_09]
-name = send x2 + syndata tls_google + multisplit midsld
+name = Send x2 + Syndata tls_google + MultiSplit midsld
+old_name = send x2 + syndata tls_google + multisplit midsld
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Preset X v2 (game filter).txt (porn_tcp) в basic-режиме.
@@ -959,7 +1083,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=midsld
 
 [stock_general_alt_10]
-name = fake tls_google x6 ts-600000 + fake fake_default_http x6 ts-600000 + fakedsplit x6 ts-600000
+name = Fake tls_google x6 ts-600000 + Fake fake_default_http x6 ts-600000 + FakedSplit x6 ts-600000
+old_name = fake tls_google x6 ts-600000 + fake fake_default_http x6 ts-600000 + fakedsplit x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT.txt (all_tcp) в basic-режиме.
@@ -968,7 +1093,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000
 
 [stock_general_alt11_game_filter_12]
-name = fake tls_max x8 ts-600000 + multisplit 2 tls_max s664 x8 ts-600000
+name = Fake tls_max x8 ts-600000 + MultiSplit 2 tls_max s664 x8 ts-600000
+old_name = fake tls_max x8 ts-600000 + multisplit 2 tls_max s664 x8 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT11 (game filter).txt (all_tcp) в basic-режиме.
@@ -976,14 +1102,16 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2:seqovl=664:seqovl_pattern=tls_max:repeats=8:tcp_ts=-600000
 
 [stock_general_alt2_game_filter_14]
-name = multisplit 2 tls_google s652
+name = MultiSplit 2 tls_google s652
+old_name = multisplit 2 tls_google s652
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT2 (game filter).txt (all_tcp) в basic-режиме.
 --lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google
 
 [stock_general_alt2_syndata_15]
-name = syndata tls_google x11 + multisplit 2 tls_google s652
+name = Syndata tls_google x11 + MultiSplit 2 tls_google s652
+old_name = syndata tls_google x11 + multisplit 2 tls_google s652
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT2 + syndata.txt (all_tcp) в basic-режиме.
@@ -991,7 +1119,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google
 
 [stock_general_alt3_game_filter_16]
-name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000
+name = Fake tls_google ts-600000 + HostFakeSplit ya.ru ts-600000
+old_name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT3 (game filter).txt (all_tcp) в basic-режиме.
@@ -999,7 +1128,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-600000
 
 [stock_general_alt4_game_filter_17]
-name = fake tls_google x6 seq1000 + multisplit 2
+name = Fake tls_google x6 seq1000 + MultiSplit 2
+old_name = fake tls_google x6 seq1000 + multisplit 2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT4 (game filter).txt (all_tcp) в basic-режиме.
@@ -1007,7 +1137,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2
 
 [stock_general_alt3_16_v2]
-name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000 + fake fake_default_http ts-600000 + hostfakesplit ya.ru ts-600000
+name = Fake tls_google ts-600000 + HostFakeSplit ya.ru ts-600000 + Fake fake_default_http ts-600000 + HostFakeSplit ya.ru ts-600000
+old_name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000 + fake fake_default_http ts-600000 + hostfakesplit ya.ru ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT3.txt (all_tcp) в basic-режиме.
@@ -1017,7 +1148,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-600000
 
 [stock_general_alt5_game_filter_18]
-name = syndata + multidisorder 2
+name = Syndata + MultiDisorder 2
+old_name = syndata + multidisorder 2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT5 (game filter).txt (all_tcp) в basic-режиме.
@@ -1025,28 +1157,32 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=2
 
 [stock_general_alt6_game_filter_19]
-name = multisplit 1 tls_google s681
+name = MultiSplit 1 tls_google s681
+old_name = multisplit 1 tls_google s681
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT6 (game filter).txt (all_tcp) в basic-режиме.
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [stock_general_alt7_game_filter_20]
-name = syndata
+name = Syndata
+old_name = syndata
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT7 (game filter).txt (all_tcp) в basic-режиме.
 --lua-desync=syndata
 
 [stock_general_alt8_game_filter_21]
-name = fake tls_google x6 seq2
+name = Fake tls_google x6 seq2
+old_name = fake tls_google x6 seq2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT8 (game filter).txt (all_tcp) в basic-режиме.
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_seq=2
 
 [stock_general_alt8_22]
-name = fake tls_google x6 seq2 + fake fake_default_http x6 seq2
+name = Fake tls_google x6 seq2 + Fake fake_default_http x6 seq2
+old_name = fake tls_google x6 seq2 + fake fake_default_http x6 seq2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT8.txt (all_tcp) в basic-режиме.
@@ -1054,14 +1190,16 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=fake_default_http:repeats=6:tcp_seq=2
 
 [stock_general_alt9_1_9_4_game_filter_23]
-name = hostfakesplit ozon.ru x4 ts-600000
+name = HostFakeSplit ozon.ru x4 ts-600000
+old_name = hostfakesplit ozon.ru x4 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT9 1.9.4 (game filter).txt (all_tcp) в basic-режиме.
 --lua-desync=hostfakesplit:host=ozon.ru:repeats=4:tcp_ts=-600000
 
 [stock_general_fake_tls_auto_game_filter_24]
-name = fake 0x00000000 x11 tsup ack-66000 + fake fake_default_tls x11 tsup ack-66000 + multidisorder_legacy 1,midsld x11
+name = Fake 0x00000000 x11 tsup ack-66000 + Fake fake_default_tls x11 tsup ack-66000 + multidisorder_legacy 1,midsld x11
+old_name = fake 0x00000000 x11 tsup ack-66000 + fake fake_default_tls x11 tsup ack-66000 + multidisorder_legacy 1,midsld x11
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general FAKE TLS AUTO (game filter).txt (all_tcp) в basic-режиме.
@@ -1070,21 +1208,24 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld:repeats=11
 
 [stock_general_simple_fake_game_filter_25]
-name = fake tls_google x6 ts-600000
+name = Fake tls_google x6 ts-600000
+old_name = fake tls_google x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general SIMPLE FAKE (game filter).txt (all_tcp) в basic-режиме.
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=-600000
 
 [stock_general_simple_fake_alt2_game_filter_26]
-name = fake tls_max x6 ts-600000
+name = Fake tls_max x6 ts-600000
+old_name = fake tls_max x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general SIMPLE FAKE ALT2 (game filter).txt (all_tcp) в basic-режиме.
 --lua-desync=fake:blob=tls_max:repeats=6:tcp_ts=-600000
 
 [stock_general_simple_fake_alt2_27]
-name = fake tls_max x6 ts-600000 + fake fake_default_http x6 ts-600000
+name = Fake tls_max x6 ts-600000 + Fake fake_default_http x6 ts-600000
+old_name = fake tls_max x6 ts-600000 + fake fake_default_http x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general SIMPLE FAKE ALT2.txt (all_tcp) в basic-режиме.
@@ -1092,7 +1233,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=fake_default_http:repeats=6:tcp_ts=-600000
 
 [stock_dead_by_daylight_game_filter_01_v2]
-name = send x2 + syndata tls7
+name = Send x2 + Syndata tls7
+old_name = send x2 + syndata tls7
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Dead by Daylight (game filter).txt (resources_tcp) в basic-режиме.
@@ -1100,7 +1242,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=syndata:blob=tls7
 
 [stock_default_v3_game_filter_03]
-name = send x2 + syndata tls_google + hostfakesplit_multi hosts x2 md5 ts-1000
+name = Send x2 + Syndata tls_google + hostfakesplit_multi hosts x2 md5 ts-1000
+old_name = send x2 + syndata tls_google + hostfakesplit_multi hosts x2 md5 ts-1000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default v3 (game filter).txt (all_tcp) в basic-режиме.
@@ -1109,7 +1252,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 [stock_default_v5_04]
-name = send x2 + syndata tls_google + multisplit tls5 s211
+name = Send x2 + Syndata tls_google + MultiSplit tls5 s211
+old_name = send x2 + syndata tls_google + multisplit tls5 s211
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default v5.txt (all_tcp) в basic-режиме.
@@ -1118,7 +1262,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:seqovl=211:seqovl_pattern=tls5
 
 [stock_preset_x_v2_game_filter_05]
-name = send x2 + syndata tls_google + multisplit tls_google s700
+name = Send x2 + Syndata tls_google + MultiSplit tls_google s700
+old_name = send x2 + syndata tls_google + multisplit tls_google s700
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Preset X v2 (game filter).txt (all_tcp) в basic-режиме.
@@ -1127,7 +1272,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:seqovl=700:seqovl_pattern=tls_google:tcp_flags_unset=ack
 
 [stock_syndata_multidisorder_legacy_game_filter_06]
-name = syndata + multidisorder_legacy 1,midsld
+name = Syndata + multidisorder_legacy 1,midsld
+old_name = syndata + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Syndata + MultiDisorder legacy (game filter).txt (resources_tcp) в basic-режиме.
@@ -1135,7 +1281,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_07]
-name = send x2 + syndata fake_tls_7 + fake tls_google x11 md5 + hostfakesplit_multi hosts x2 md5 ts-1000
+name = Send x2 + Syndata fake_tls_7 + Fake tls_google x11 md5 + hostfakesplit_multi hosts x2 md5 ts-1000
+old_name = send x2 + syndata fake_tls_7 + fake tls_google x11 md5 + hostfakesplit_multi hosts x2 md5 ts-1000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Syndata + MultiDisorder legacy WoW (game filter).txt (all_tcp) в basic-режиме.
@@ -1145,7 +1292,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_08]
-name = send x2 + syndata fake_tls_8 + fake tls1 md5 + multidisorder_legacy 1,midsld
+name = Send x2 + Syndata fake_tls_8 + Fake tls1 md5 + multidisorder_legacy 1,midsld
+old_name = send x2 + syndata fake_tls_8 + fake tls1 md5 + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Syndata + MultiDisorder legacy WoW (game filter).txt (all_tcp) в basic-режиме.
@@ -1155,7 +1303,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [stock_ultimate_main_riot_valorant_game_filter_09]
-name = send + multidisorder 1
+name = Send + MultiDisorder 1
+old_name = send + multidisorder 1
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Ultimate Main Riot + Valorant (game filter).txt (all_tcp) в basic-режиме.
@@ -1163,7 +1312,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1
 
 [stock_general_fake_tls_auto_alt_game_filter_13]
-name = fake fake_default_tls x8 seq2 + fakedsplit 2 x8 seq2
+name = Fake fake_default_tls x8 seq2 + FakedSplit 2 x8 seq2
+old_name = fake fake_default_tls x8 seq2 + fakedsplit 2 x8 seq2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general FAKE TLS AUTO ALT (game filter).txt (all_tcp) в basic-режиме.
@@ -1171,7 +1321,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pos=2:repeats=8:tcp_seq=2
 
 [stock_general_fake_tls_auto_alt2_game_filter_14]
-name = fake fake_default_tls x8 seq1000 + multisplit 2 tls_google s681 x8
+name = Fake fake_default_tls x8 seq1000 + MultiSplit 2 tls_google s681 x8
+old_name = fake fake_default_tls x8 seq1000 + multisplit 2 tls_google s681 x8
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general FAKE TLS AUTO ALT2 (game filter).txt (all_tcp) в basic-режиме.
@@ -1179,7 +1330,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=tls_google:repeats=8
 
 [stock_general_fake_tls_auto_alt3_game_filter_15]
-name = fake fake_default_tls x8 ts-600000 + multisplit 2 tls_google s681 x8 ts-600000
+name = Fake fake_default_tls x8 ts-600000 + MultiSplit 2 tls_google s681 x8 ts-600000
+old_name = fake fake_default_tls x8 ts-600000 + multisplit 2 tls_google s681 x8 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general FAKE TLS AUTO ALT3 (game filter).txt (all_tcp) в basic-режиме.
@@ -1187,7 +1339,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=tls_google:repeats=8:tcp_ts=-600000
 
 [stock_general_fake_tls_auto_v2_game_filter_16]
-name = fake fake_default_tls x11 ack-66000 + multidisorder 1,midsld x11 ack-66000
+name = Fake fake_default_tls x11 ack-66000 + MultiDisorder 1,midsld x11 ack-66000
+old_name = fake fake_default_tls x11 ack-66000 + multidisorder 1,midsld x11 ack-66000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general FAKE TLS AUTO v2 (game filter).txt (all_tcp) в basic-режиме.
@@ -1195,7 +1348,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1,midsld:tcp_ack=-66000:repeats=11
 
 [stock_http80_18]
-name = syndata + multidisorder_legacy 1,midsld + syndata + multidisorder_legacy 1,midsld
+name = Syndata + multidisorder_legacy 1,midsld + Syndata + multidisorder_legacy 1,midsld
+old_name = syndata + multidisorder_legacy 1,midsld + syndata + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Ростелеком.txt (all_tcp) в basic-режиме.

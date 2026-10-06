@@ -1,5 +1,6 @@
 [other_seqovl]
-name = YTDisBystro 3.4 v1 (all ports)
+name = YTDisBystro 3.4 v1 · all ports
+old_name = YTDisBystro 3.4 v1 (all ports)
 author = hz
 label = recommended
 description = Раньше эта стратегия била по всем портам и отлично подходила для игр
@@ -8,7 +9,8 @@ description = Раньше эта стратегия била по всем по
 --dpi-desync-split-seqovl-pattern=tls_clienthello_5.bin
 
 [multisplit_sniext_midsld_18]
-name = multisplit sniext+1 midsld-1
+name = MultiSplit sniext+1 midsld-1
+old_name = multisplit sniext+1 midsld-1
 author = hz
 description = Потом опишу позже
 --dpi-desync=multisplit
@@ -16,7 +18,8 @@ description = Потом опишу позже
 --dpi-desync-split-seqovl=652
 
 [dis4]
-name = general (alt v2) 1.6.1 / 1.8.2
+name = General ALT2 1.6.1, 1.8.2
+old_name = general (alt v2) 1.6.1 / 1.8.2
 author = hz
 label = recommended
 description = Устаревший split2 с seqovl 652 и паттерном 4
@@ -42,7 +45,8 @@ description = Хорошая базовая комлектация для ста
 --dup-cutoff=n3
 
 [multisplit_fake_tls_md5sig]
-name = multisplit и md5sig 1
+name = MultiSplit и md5sig 1
+old_name = multisplit и md5sig 1
 author = hz
 description = Стандартный multisplit и md5sig и фейк TLS 1
 --dpi-desync=fake,multisplit
@@ -69,7 +73,8 @@ description = fake fake-tls=0x00, repeats=6 badseq increment=0
 --dpi-desync-badseq-increment=0
 
 [multidisorder_badseq_pos]
-name = original bol-van v2 (badsum)
+name = Bol-van original v2 · badsum
+old_name = original bol-van v2 (badsum)
 author = hz
 description = Дисордер стратегия с фуллингом badseq нарезкой и повтором 6
 --dpi-desync=fake,multidisorder
@@ -78,7 +83,8 @@ description = Дисордер стратегия с фуллингом badseq �
 --dpi-desync-fooling=badseq
 
 [multidisorder_md5sig_pos]
-name = original bol-van v2
+name = Bol-van original v2
+old_name = original bol-van v2
 author = hz
 description = Дисордер стратегия с фуллингом md5sig нарезкой и повтором 6
 --dpi-desync=fake,multidisorder
@@ -87,7 +93,8 @@ description = Дисордер стратегия с фуллингом md5sig �
 --dpi-desync-fooling=badseq,md5sig
 
 [multidisorder_ipset_syndata]
-name = Ulta v2 / 06.01.2025
+name = Ulta v2 · 06.01.2025
+old_name = Ulta v2 / 06.01.2025
 author = hz
 label = recommended
 description = Использует адреса дискорда, вместо доменов
@@ -96,7 +103,8 @@ description = Использует адреса дискорда, вместо �
 --dpi-desync-autottl
 
 [original_bolvan_v2_badsum]
-name = Если стратегия не работает смени её!
+name = Fake + MultiDisorder x6 · sni google.com
+old_name = Если стратегия не работает смени её!
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -118,7 +126,8 @@ description = Потом опишу подробнее
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=web.max.ru
 
 [multisplit_286_pattern]
-name = YTDisBystro 3.4 v2 (1)
+name = YTDisBystro 3.4 v2 №1
+old_name = YTDisBystro 3.4 v2 (1)
 author = hz
 description = Дисордер стратегия с фуллингом badseq нарезкой и повтором 11
 --dpi-desync=multisplit
@@ -128,7 +137,8 @@ description = Дисордер стратегия с фуллингом badseq �
 --dup-cutoff=n3
 
 [multidisorder_super_split_md5sig]
-name = Discord Voice & YT (badseq)
+name = Discord Voice и YT · badseq
+old_name = Discord Voice & YT (badseq)
 author = hz
 description = Обратная стратегия с нестандартной нарезкой и md5sig
 --dpi-desync=fake,multidisorder
@@ -139,7 +149,8 @@ description = Обратная стратегия с нестандартной 
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [multidisorder_super_split_badseq]
-name = Discord Voice & YT (md5sig и badseq)
+name = Discord Voice и YT · md5sig и badseq
+old_name = Discord Voice & YT (md5sig и badseq)
 author = hz
 description = Обратная стратегия с нестандартной нарезкой и badseq
 --dpi-desync=fake,multidisorder
@@ -150,7 +161,8 @@ description = Обратная стратегия с нестандартной 
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [multidisorder_w3]
-name = Discord Voice & YT (DTLS)
+name = Discord Voice и YT · DTLS
+old_name = Discord Voice & YT (DTLS)
 author = hz
 description = Обратная стратегия с фейком tls w3 и md5sig
 --dpi-desync=fake,multidisorder
@@ -169,7 +181,8 @@ description = Обратная стратегия с нестандартной 
 --dpi-desync-ttl=4
 
 [dis14]
-name = multisplit и seqovl
+name = MultiSplit и seqovl
+old_name = multisplit и seqovl
 author = hz
 description = Мульти нарезка с seqovl и нестандартной позицией
 --dpi-desync=multisplit
@@ -177,7 +190,8 @@ description = Мульти нарезка с seqovl и нестандартно�
 --dpi-desync-split-pos=midsld+1
 
 [multisplit_3]
-name = YTDisBystro 2.9.2 v1 / v2
+name = YTDisBystro 2.9.2 v1, v2
+old_name = YTDisBystro 2.9.2 v1 / v2
 author = hz
 description = Отлично подходит для YouTube
 --dpi-desync=multisplit
@@ -186,7 +200,8 @@ description = Отлично подходит для YouTube
 --dpi-desync-split-seqovl-pattern=tls_clienthello_7.bin
 
 [fake_badseq_rnd]
-name = YTDisBystro 2.9.2 v1 (1)
+name = YTDisBystro 2.9.2 v1 №1
+old_name = YTDisBystro 2.9.2 v1 (1)
 author = hz
 description = Базовая стратегия десинхронизации с фейком tls rnd
 --dpi-desync=fake
@@ -195,7 +210,8 @@ description = Базовая стратегия десинхронизации �
 --dpi-desync-fake-tls-mod=rnd
 
 [fakedsplit_badseq_4]
-name = Фейк с фуулингом badseq и фейком tls 4
+name = Фейк с фулингом badseq и фейком tls 4
+old_name = Фейк с фуулингом badseq и фейком tls 4
 author = hz
 description = Десинхронизация badseq с фейком tls 4
 --dpi-desync=fakedsplit
@@ -231,7 +247,8 @@ description = Улучшенная стратегия с datanoack и padencap
 --dpi-desync-fake-tls-mod=rnd,rndsni,padencap
 
 [dis2]
-name = multisplit split pos padencap
+name = MultiSplit split pos padencap
+old_name = multisplit split pos padencap
 author = hz
 description = Стандартный мультисплит с нарезкой и фейком padencap
 --dpi-desync=fake,multisplit
@@ -240,7 +257,8 @@ description = Стандартный мультисплит с нарезкой 
 --dpi-desync-fake-tls-mod=rnd,rndsni,padencap
 
 [dis3]
-name = split badseq 10
+name = Split badseq 10 · ttl 4
+old_name = split badseq 10
 author = hz
 description = Стандартный сплит с фуллингом badseq и 10 повторами
 --dpi-desync=split
@@ -250,7 +268,8 @@ description = Стандартный сплит с фуллингом badseq и 
 --dpi-desync-ttl=4
 
 [dis5]
-name = fake split2 6 sberbank
+name = Fake Split2 6 sberbank
+old_name = fake split2 6 sberbank
 author = hz
 description = Фейковый сплит2 с повторением 6 и фейком от сбербанка много деняк
 --dpi-desync=fake,split2
@@ -260,7 +279,8 @@ description = Фейковый сплит2 с повторением 6 и фей
 --dpi-desync-fake-tls=tls_clienthello_sberbank_ru.bin
 
 [dis6]
-name = syndata (на все домены!)
+name = Syndata · на все домены
+old_name = syndata (на все домены!)
 author = hz
 label = caution
 description = Стратегия работает на все домены и может ломать сайты (на свой страх и риск)
@@ -269,7 +289,8 @@ description = Стратегия работает на все домены и м
 --dpi-desync-ttl=5
 
 [dis7]
-name = Ростелеком & Мегафон
+name = Ростелеком и Мегафон
+old_name = Ростелеком & Мегафон
 author = hz
 description = Сплит с повторением 6 и фуллингом badseq и фейком tls от Google
 --dpi-desync=fake,split
@@ -279,7 +300,8 @@ description = Сплит с повторением 6 и фуллингом badse
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [dis8]
-name = Ростелеком & Мегафон v2
+name = Ростелеком и Мегафон v2
+old_name = Ростелеком & Мегафон v2
 author = hz
 description = Cплит2 с фейком tls 4 и ttl 4 (короче одни четвёрки)
 --dpi-desync=fake,split2
@@ -289,7 +311,8 @@ description = Cплит2 с фейком tls 4 и ttl 4 (короче одни �
 --dpi-desync-ttl=4
 
 [dis9]
-name = split2 sniext google
+name = Split2 sniext google
+old_name = split2 sniext google
 author = hz
 description = Cплит2 с фейком tls от Google
 --dpi-desync=fake,split2
@@ -299,7 +322,8 @@ description = Cплит2 с фейком tls от Google
 --dpi-desync-ttl=2
 
 [dis10]
-name = disorder2 badseq tls google
+name = Disorder2 badseq tls google
+old_name = disorder2 badseq tls google
 author = hz
 description = Cплит2 badseq с фейком tls от Google
 --dpi-desync=syndata,disorder2
@@ -309,7 +333,8 @@ description = Cплит2 badseq с фейком tls от Google
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [dis11]
-name = split badseq 10
+name = Split badseq 10 · autottl
+old_name = split badseq 10
 author = hz
 description = Cплит2 с фуллингом badseq и 10 повторами
 --dpi-desync=split
@@ -319,7 +344,8 @@ description = Cплит2 с фуллингом badseq и 10 повторами
 --dpi-desync-autottl
 
 [split_pos_badseq]
-name = Ростелеком & Мегафон
+name = Ростелеком и Мегафон · без фейка
+old_name = Ростелеком & Мегафон
 author = hz
 description = Базовый split и badseq
 --dpi-desync=split
@@ -329,7 +355,8 @@ description = Базовый split и badseq
 --dpi-desync-autottl=2
 
 [dis12]
-name = split badseq 10 ttl
+name = Split badseq 10 ttl
+old_name = split badseq 10 ttl
 author = hz
 description = Cплит2 с фуллингом badseq и 10 повторами и ttl 3
 --dpi-desync=split
@@ -339,7 +366,8 @@ description = Cплит2 с фуллингом badseq и 10 повторами �
 --dpi-desync-ttl=3
 
 [dis13]
-name = fakedsplit badsrq 10
+name = FakedSplit badseq 10
+old_name = fakedsplit badsrq 10
 author = hz
 description = Фейки и сплиты с фуллингом badseq и 10 повторами
 --dpi-desync=fakedsplit
@@ -349,7 +377,8 @@ description = Фейки и сплиты с фуллингом badseq и 10 по
 --dpi-desync-autottl
 
 [alt1_161]
-name = general (alt v1) 1.8.2
+name = General ALT1 1.8.2
+old_name = general (alt v1) 1.8.2
 author = Flowseal
 description = fake,split autottl 5 repeats 6 badseq и fake tls google
 --dpi-desync=fake,split
@@ -359,7 +388,8 @@ description = fake,split autottl 5 repeats 6 badseq и fake tls google
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_alt183]
-name = general (alt) 1.8.3 / 1.8.4
+name = General ALT 1.8.3, 1.8.4
+old_name = general (alt) 1.8.3 / 1.8.4
 author = Flowseal
 description = Потом опишу подробнее
 --dpi-desync=fake,fakedsplit
@@ -369,7 +399,8 @@ description = Потом опишу подробнее
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_alt185]
-name = general (alt) 1.8.5
+name = General ALT 1.8.5
+old_name = general (alt) 1.8.5
 author = Flowseal
 description = Потом опишу подробнее
 --dpi-desync=fake,fakedsplit
@@ -379,7 +410,8 @@ description = Потом опишу подробнее
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_alt2183]
-name = general (alt2) 1.8.3 / 1.8.4
+name = General ALT2 1.8.3, 1.8.4
+old_name = general (alt2) 1.8.3 / 1.8.4
 author = Flowseal
 description = Потом опишу подробнее
 --dpi-desync=multisplit
@@ -388,7 +420,8 @@ description = Потом опишу подробнее
 --dpi-desync-split-seqovl-pattern=tls_clienthello_www_google_com.bin
 
 [general_alt3183_2]
-name = general (alt v3) 1.8.2 / 1.8.4
+name = General ALT3 1.8.2, 1.8.4
+old_name = general (alt v3) 1.8.2 / 1.8.4
 author = Flowseal
 description = fakedsplit pos 1 autottl badseq repeats 8
 --dpi-desync=fakedsplit
@@ -398,7 +431,8 @@ description = fakedsplit pos 1 autottl badseq repeats 8
 --dpi-desync-repeats=8
 
 [general_alt4_182]
-name = general (alt v4) 1.8.2 / 1.8.4
+name = General ALT4 1.8.2, 1.8.4
+old_name = general (alt v4) 1.8.2 / 1.8.4
 author = https://github.com/Flowseal/zapret-discord-youtube/issues/2361
 description = Для Rockstar Launcher & Epic Games
 --dpi-desync=fake,multisplit
@@ -407,7 +441,8 @@ description = Для Rockstar Launcher & Epic Games
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_bf_2]
-name = general (BF) 2.0
+name = General BF 2.0
+old_name = general (BF) 2.0
 author = Flowseal
 label = game
 description = Для Battlefield 6
@@ -417,7 +452,8 @@ description = Для Battlefield 6
 --dpi-desync-fooling=badseq
 
 [general_alt5_182]
-name = general (alt v5) 1.8.2 / 1.8.4
+name = General ALT5 1.8.2, 1.8.4
+old_name = general (alt v5) 1.8.2 / 1.8.4
 author = Flowseal
 label = caution
 description = syndata
@@ -425,7 +461,8 @@ description = syndata
 --dpi-desync=syndata
 
 [general_alt6_182]
-name = general (alt v6) 1.8.2
+name = General ALT6 1.8.2
+old_name = general (alt v6) 1.8.2
 author = Flowseal
 description = multisplit repeats 2 seqovl 681 pos 1 badseq hopbyhop2
 --dpi-desync=multisplit
@@ -436,7 +473,8 @@ description = multisplit repeats 2 seqovl 681 pos 1 badseq hopbyhop2
 --dpi-desync-split-seqovl-pattern=tls_clienthello_www_google_com.bin
 
 [general_alt6_184]
-name = general (alt v6) 1.8.4
+name = General ALT6 1.8.4
+old_name = general (alt v6) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync=multisplit
@@ -445,7 +483,8 @@ description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync-split-seqovl-pattern=tls_clienthello_www_google_com.bin
 
 [general_alt7_184]
-name = general (alt v7) 1.8.4
+name = General ALT7 1.8.4
+old_name = general (alt v7) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync=multisplit
@@ -454,7 +493,8 @@ description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync-split-seqovl-pattern=tls_clienthello_www_google_com.bin
 
 [general_alt8_185]
-name = general (alt v8) 1.8.5
+name = General ALT8 1.8.5
+old_name = general (alt v8) 1.8.5
 author = V3nilla
 description = fake autottl repeats 6 badseq increment 2
 --dpi-desync=fake
@@ -464,7 +504,8 @@ description = fake autottl repeats 6 badseq increment 2
 --dpi-desync-badseq-increment=2
 
 [general_alt8_185_2]
-name = general (alt v8) 1.8.5 (2)
+name = General ALT8 1.8.5 №2
+old_name = general (alt v8) 1.8.5 (2)
 author = V3nilla
 description = fake autottl repeats 6 badseq increment 0
 --dpi-desync=fake
@@ -474,7 +515,8 @@ description = fake autottl repeats 6 badseq increment 0
 --dpi-desync-badseq-increment=0
 
 [general_alt8_185_3]
-name = general (alt v8) 1.8.5 (3)
+name = General ALT8 1.8.5 №3
+old_name = general (alt v8) 1.8.5 (3)
 author = V3nilla
 description = fake autottl repeats 6 badseq increment 100000
 --dpi-desync=fake
@@ -484,7 +526,8 @@ description = fake autottl repeats 6 badseq increment 100000
 --dpi-desync-badseq-increment=100000
 
 [fake_autottl_repeats_6_badseq]
-name = alt mgts (v1) 1.6.1 / 1.8.4
+name = ALT MGTS v1 1.6.1, 1.8.4
+old_name = alt mgts (v1) 1.6.1 / 1.8.4
 author = hz
 description = fake autottl repeats 6 badseq
 --dpi-desync=fake
@@ -494,7 +537,8 @@ description = fake autottl repeats 6 badseq
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_simplefake_185]
-name = general simple fake alt 1.8.5
+name = General Simple Fake ALT 1.8.5
+old_name = general simple fake alt 1.8.5
 author = hz
 description = fake autottl repeats 6 badseq
 --dpi-desync=fake
@@ -504,7 +548,8 @@ description = fake autottl repeats 6 badseq
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [altmgts2_161_2]
-name = alt mgts (v2) 1.6.1 / 1.8.4
+name = ALT MGTS v2 1.6.1, 1.8.4
+old_name = alt mgts (v2) 1.6.1 / 1.8.4
 author = hz
 description = fake autottl repeats 6 md5sig
 --dpi-desync=fake
@@ -513,7 +558,8 @@ description = fake autottl repeats 6 md5sig
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_simple_fake_165_2]
-name = general simple fake 1.8.5 v2
+name = General Simple Fake 1.8.5 v2
+old_name = general simple fake 1.8.5 v2
 author = hz
 description = fake autottl repeats 6 ts
 --dpi-desync=fake
@@ -522,7 +568,8 @@ description = fake autottl repeats 6 ts
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [altmgts2_161_3]
-name = alt mgts (v3) 1.6.1
+name = ALT MGTS v3 1.6.1
+old_name = alt mgts (v3) 1.6.1
 author = hz
 description = fake autottl repeats 6 md5sig
 --dpi-desync=fake
@@ -532,7 +579,8 @@ description = fake autottl repeats 6 md5sig
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_fake_tls_auto_alt_184]
-name = general (fake TLS auto alt) 1.8.4
+name = General Fake TLS Auto ALT 1.8.4
+old_name = general (fake TLS auto alt) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync=fake,fakedsplit
@@ -544,7 +592,8 @@ description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 
 [general_fake_tls_auto_alt_185]
-name = general (fake TLS auto alt) 1.8.5
+name = General Fake TLS Auto ALT 1.8.5
+old_name = general (fake TLS auto alt) 1.8.5
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync=fake,fakedsplit
@@ -555,7 +604,8 @@ description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 
 [general_fake_tls_auto_alt3_184]
-name = general (fake TLS auto alt3) 1.8.4
+name = General Fake TLS Auto ALT3 1.8.4
+old_name = general (fake TLS auto alt3) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync=fake,multisplit
@@ -567,7 +617,8 @@ description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 
 [general_fake_tls_auto_alt2_184]
-name = general (fake TLS auto alt2) 1.8.4
+name = General Fake TLS Auto ALT2 1.8.4
+old_name = general (fake TLS auto alt2) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync=fake,multisplit
@@ -580,7 +631,8 @@ description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 
 [general_fake_tls_auto_184]
-name = general (fake TLS auto) 1.8.4
+name = General Fake TLS Auto 1.8.4
+old_name = general (fake TLS auto) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 --dpi-desync=fake,multidisorder
@@ -642,7 +694,8 @@ description = multisplit pos 1 seqovl 681 pattern 4.bin dpi-desync-repeats=2
 --dpi-desync-split-seqovl-pattern=4.bin
 
 [multidisorder_seqovl_midsld]
-name = multidisorder seqovl midsld
+name = MultiDisorder seqovl midsld
+old_name = multidisorder seqovl midsld
 label = recommended
 description = Самая простая стратегия multisplit для YouTube
 --dpi-desync=multidisorder
@@ -650,7 +703,8 @@ description = Самая простая стратегия multisplit для You
 --dpi-desync-split-pos=midsld-1
 
 [other_seqovl_2]
-name = multidisorder seqovl 211 & pattern 5
+name = MultiDisorder seqovl 211 и pattern 5
+old_name = multidisorder seqovl 211 & pattern 5
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -659,7 +713,8 @@ description = Потом опишу подробнее
 --dpi-desync-split-seqovl-pattern=tls_clienthello_5.bin
 
 [multisplit_226_pattern_18]
-name = multisplit seqovl 226
+name = MultiSplit seqovl 226
+old_name = multisplit seqovl 226
 author = hz
 description = Мультисплит стратегия с фуллингом pattern и повтором 9
 --dpi-desync=multisplit
@@ -669,7 +724,8 @@ description = Мультисплит стратегия с фуллингом pa
 --dup-cutoff=n3
 
 [multisplit_226_pattern_google_Com]
-name = multisplit seqovl 226 v2
+name = MultiSplit seqovl 226 v2
+old_name = multisplit seqovl 226 v2
 author = hz
 description = Мультисплит стратегия с фуллингом pattern и повтором 9
 --dpi-desync=multisplit
@@ -679,7 +735,8 @@ description = Мультисплит стратегия с фуллингом pa
 --dup-cutoff=d1
 
 [multisplit_308_pattern]
-name = multisplit seqovl 308 с парттерном 9
+name = MultiSplit seqovl 308 с паттерном 9
+old_name = multisplit seqovl 308 с парттерном 9
 author = hz
 description = Мультисплит стратегия с фуллингом badseq нарезкой и повтором 9
 --dpi-desync=multisplit
@@ -689,7 +746,8 @@ description = Мультисплит стратегия с фуллингом ba
 --dup-cutoff=n3
 
 [multisplit_split_pos_1]
-name = multisplit split pos 1
+name = MultiSplit split pos 1
+old_name = multisplit split pos 1
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -697,14 +755,16 @@ description = Потом опишу подробнее
 --dpi-desync-split-pos=1
 
 [datanoack]
-name = datanoack
+name = Datanoack
+old_name = datanoack
 author = hz
 label = recommended
 description = Потом опишу подробнее
 --dpi-desync-fooling=datanoack
 
 [multisplit_datanoack]
-name = multisplit datanoack
+name = MultiSplit datanoack
+old_name = multisplit datanoack
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -712,7 +772,8 @@ description = Потом опишу подробнее
 --dpi-desync-fooling=datanoack
 
 [multisplit_datanoack_split_pos_1]
-name = multisplit datanoack split pos 1
+name = MultiSplit datanoack split pos 1
+old_name = multisplit datanoack split pos 1
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -721,7 +782,8 @@ description = Потом опишу подробнее
 --dpi-desync-split-pos=1
 
 [other_seqovl_fakedsplit_ttl2]
-name = fakedsplit ttl2
+name = FakedSplit ttl2
+old_name = fakedsplit ttl2
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -742,7 +804,8 @@ description = Базовая стратегия FakedDisorder с datanoack
 --dpi-desync-fake-tls=0x00000000
 
 [other_multidisorder]
-name = multidisorder 6 md5sig
+name = MultiDisorder 6 md5sig
+old_name = multidisorder 6 md5sig
 author = hz
 label = stable
 description = Потом опишу подробнее
@@ -752,14 +815,16 @@ description = Потом опишу подробнее
 --dpi-desync-fooling=md5sig
 
 [fake_fakedsplit_autottl_2]
-name = fake fakedsplit badseq (рекомендуется для 80 порта)
+name = Fake FakedSplit badseq · для 80 порта
+old_name = fake fakedsplit badseq (рекомендуется для 80 порта)
 author = hz
 --dpi-desync=fake,fakedsplit
 --dpi-desync-autottl=2
 --dpi-desync-fooling=badseq
 
 [multisplit_seqovl_2_midsld]
-name = fake multisplit seqovl 2 midsld
+name = Fake MultiSplit seqovl 2 midsld
+old_name = fake multisplit seqovl 2 midsld
 author = hz
 description = Потом опишу подробнее
 --dpi-desync=fake,multisplit
@@ -784,7 +849,8 @@ description = Мульти нарезка с md5sig и фейком TLS
 --dup-cutoff=n3
 
 [other5]
-name = multidisorder datanoack deepseek
+name = MultiDisorder datanoack deepseek
+old_name = multidisorder datanoack deepseek
 author = hz
 description = Потом опишу подробнее
 --dpi-desync=fake,multidisorder
@@ -793,14 +859,16 @@ description = Потом опишу подробнее
 --dpi-desync-fake-tls=tls_clienthello_chat_deepseek_com.bin
 
 [multisplit_1_midsld]
-name = multisplit seqovl 1 и midsld
+name = MultiSplit seqovl 1 и midsld
+old_name = multisplit seqovl 1 и midsld
 author = hz
 description = Базовая мультисплит с midsld
 --dpi-desync=multisplit
 --dpi-desync-split-pos=1,midsld
 
 [fake_multidisorder_1_split_pos_1]
-name = fake multidisorder badsum split pos 1
+name = Fake MultiDisorder badsum split pos 1
+old_name = fake multidisorder badsum split pos 1
 author = hz
 description = Базовая мультисплит с midsld
 --dpi-desync=fake,multidisorder
@@ -808,7 +876,8 @@ description = Базовая мультисплит с midsld
 --dpi-desync-split-pos=1
 
 [multisplit_seqovl_midsld]
-name = multisplit seqovl midsld
+name = MultiSplit seqovl midsld
+old_name = multisplit seqovl midsld
 label = recommended
 description = Самая простая стратегия multisplit для Google
 --dpi-desync=multisplit
@@ -816,7 +885,8 @@ description = Самая простая стратегия multisplit для Goo
 --dpi-desync-split-pos=midsld-1
 
 [bolvan_md5sig]
-name = BolVan md5sig 11
+name = Bol-van md5sig 11
+old_name = BolVan md5sig 11
 author = OrigBolvan
 description = Другой метод фуллинга + большее число повторений
 --dpi-desync=fake,multidisorder
@@ -825,7 +895,8 @@ description = Другой метод фуллинга + большее числ
 --dpi-desync-fooling=md5sig
 
 [bolvan_md5sig_2]
-name = BolVan v3
+name = Bol-van v3
+old_name = BolVan v3
 author = Уфанет
 description = Другой метод фуллинга + большее число повторений + tls от гугла
 --dpi-desync=fake,multidisorder
@@ -835,7 +906,8 @@ description = Другой метод фуллинга + большее числ
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 
 [bolvan_fake_tls]
-name = BolVan fake TLS 4
+name = Bol-van Fake TLS 4
+old_name = BolVan fake TLS 4
 author = OrigBolvan
 description = Используется фейковый Clienthello
 --dpi-desync=fake,multidisorder
@@ -845,7 +917,8 @@ description = Используется фейковый Clienthello
 --dpi-desync-fooling=badseq
 
 [fake_multisplit_seqovl_md5sig]
-name = fake multisplit и seqovl 1 md5sig
+name = Fake MultiSplit и seqovl 1 md5sig
+old_name = fake multisplit и seqovl 1 md5sig
 author = hz
 description = Используется multisplit и seqovl 1
 --dpi-desync=fake,multisplit
@@ -872,7 +945,8 @@ description = Базовая стратегия десинхронизации m
 --dpi-desync-split-pos=sld-1
 
 [multidisorder_fake_tls_1]
-name = YtDisBystro 3.4 (v4)
+name = YTDisBystro 3.4 v4
+old_name = YtDisBystro 3.4 (v4)
 author = hz
 description = multidisorder 7 Fake TLS fonts и badseq
 --dpi-desync=fake,multidisorder
@@ -884,7 +958,8 @@ description = multidisorder 7 Fake TLS fonts и badseq
 --dpi-desync-autottl
 
 [multidisorder_fake_tls_2]
-name = multidisorder 7 Fake TLS calendar и badseq
+name = MultiDisorder 7 Fake TLS calendar и badseq
+old_name = multidisorder 7 Fake TLS calendar и badseq
 author = hz
 description = Кастомная и сложная стратегия с фейком calendar
 --dpi-desync=fake,multidisorder
@@ -896,14 +971,16 @@ description = Кастомная и сложная стратегия с фей�
 --dpi-desync-autottl
 
 [syndata]
-name = syndata
+name = Syndata
+old_name = syndata
 author = Flowseal
 label = caution
 description = Экспериментальная стратегия с ЧИСТОЙ syndata
 --dpi-desync=syndata
 
 [multisplit_md5sig]
-name = multisplit и md5sig
+name = MultiSplit и md5sig
+old_name = multisplit и md5sig
 author = hz
 description = Экспериментальная стратегия multisplit и md5sig
 --dpi-desync=fake,multisplit
@@ -919,7 +996,8 @@ description = Экспериментальная стратегия multisplit �
 --dup-cutoff=n3
 
 [fake_multidisorder_seqovl_fake_tls]
-name = fake multidisorder seqovl fake tls
+name = Fake MultiDisorder seqovl Fake tls
+old_name = fake multidisorder seqovl fake tls
 author = hz
 description = ОЧЕНЬ сложная стратегия с фейком TLS и seqovl
 --dpi-desync=fake,multidisorder
@@ -936,7 +1014,8 @@ description = ОЧЕНЬ сложная стратегия с фейком TLS �
 --dup-cutoff=n3
 
 [syndata_md5sig_2]
-name = multisplit и md5sig 9
+name = MultiSplit и md5sig 9
+old_name = multisplit и md5sig 9
 author = hz
 label = caution
 description = Стандартный multisplit и md5sig и фейк TLS 9
@@ -955,7 +1034,8 @@ description = Стандартный multisplit и md5sig и фейк TLS 9
 --dup-cutoff=n3
 
 [multisplit_seqovl_pos]
-name = multisplit seqovl с split pos
+name = MultiSplit seqovl с split pos
+old_name = multisplit seqovl с split pos
 author = hz
 description = Базовый multisplit и seqovl с фейками и нарезкой
 --dpi-desync=fake,multisplit
@@ -965,7 +1045,8 @@ description = Базовый multisplit и seqovl с фейками и наре�
 --dpi-desync-ttl=3
 
 [multisplit_seqovl_pos_2]
-name = multisplit seqovl с split pos и badseq
+name = MultiSplit seqovl с split pos и badseq
+old_name = multisplit seqovl с split pos и badseq
 author = hz
 description = Базовый multisplit и seqovl с фейками, нарезкой и  badseq
 --dpi-desync=fake,multisplit
@@ -977,7 +1058,8 @@ description = Базовый multisplit и seqovl с фейками, нарез�
 --dpi-desync-autottl
 
 [multidisorder_repeats_md5sig_2]
-name = multidisorder с повторами и md5ig
+name = MultiDisorder с повторами и md5sig
+old_name = multidisorder с повторами и md5ig
 author = hz
 description = multidisorder с fake tls clienthello
 --dpi-desync=fake,multidisorder
@@ -987,7 +1069,8 @@ description = multidisorder с fake tls clienthello
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_alt3183]
-name = general (alt v3) 1.6.1
+name = General ALT3 1.6.1
+old_name = general (alt v3) 1.6.1
 author = Flowseal
 description = split pos 1 autottl badseq repeats 8
 --dpi-desync=split
@@ -997,7 +1080,8 @@ description = split pos 1 autottl badseq repeats 8
 --dpi-desync-repeats=8
 
 [general_alt4_161]
-name = general (alt v4) 1.6.1
+name = General ALT4 1.6.1
+old_name = general (alt v4) 1.6.1
 author = Flowseal
 description = fake split2 repeats 6 md5sig tls google
 --dpi-desync=fake,split2
@@ -1006,7 +1090,8 @@ description = fake split2 repeats 6 md5sig tls google
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_alt6_181]
-name = general (alt v6) 1.8.1
+name = General ALT6 1.8.1
+old_name = general (alt v6) 1.8.1
 author = Flowseal
 description = split2 repeats 2 seqovl 681 pos 1 badseq hopbyhop2
 --dpi-desync=split2
@@ -1017,7 +1102,8 @@ description = split2 repeats 2 seqovl 681 pos 1 badseq hopbyhop2
 --dpi-desync-split-seqovl-pattern=tls_clienthello_www_google_com.bin
 
 [ankddev10]
-name = aankddev (v10)
+name = Aankddev v10
+old_name = aankddev (v10)
 author = hz
 label = caution
 description = syndata multidisorder split pos 4 repeats 10 md5sig fake tls vk kyber
@@ -1029,7 +1115,8 @@ description = syndata multidisorder split pos 4 repeats 10 md5sig fake tls vk ky
 --dpi-desync-fake-tls=tls_clienthello_vk_com_kyber.bin
 
 [split2_seqovl_vk]
-name = Устаревший split2 с clienthello от VK
+name = Split2 с clienthello от VK · устаревшая
+old_name = Устаревший split2 с clienthello от VK
 author = hz
 description = split2 и 625 seqovl с sniext и vk ttl 2 от конторы пидорасов
 --dpi-desync=fake,split2
@@ -1039,7 +1126,8 @@ description = split2 и 625 seqovl с sniext и vk ttl 2 от конторы п�
 --dpi-desync-ttl=2
 
 [split2_seqovl_google]
-name = Устаревший split2 с clienthello от google
+name = Split2 с clienthello от google · устаревшая
+old_name = Устаревший split2 с clienthello от google
 author = hz
 description = split2 и 1 seqovl с sniext и google ttl 4
 --dpi-desync=fake,split2
@@ -1049,7 +1137,8 @@ description = split2 и 1 seqovl с sniext и google ttl 4
 --dpi-desync-ttl=4
 
 [split2_split]
-name = Устаревший split2 split
+name = Split2 split · устаревшая
+old_name = Устаревший split2 split
 author = hz
 description = Базовый split2 и нарезка
 --dpi-desync=fake,split2
@@ -1057,7 +1146,8 @@ description = Базовый split2 и нарезка
 --dpi-desync-split-pos=3
 
 [split2_seqovl_652]
-name = split2 seqovl 652
+name = Split2 seqovl 652
+old_name = split2 seqovl 652
 author = hz
 description = Устаревший split2 с seqovl 652 и паттерном 4
 --dpi-desync=fake,split2
@@ -1066,7 +1156,8 @@ description = Устаревший split2 с seqovl 652 и паттерном 4
 --dpi-desync-split-seqovl-pattern=tls_clienthello_4.bin
 
 [split2_split_google]
-name = Устаревший split2 split seqovl google
+name = Split2 split seqovl google · устаревшая
+old_name = Устаревший split2 split seqovl google
 author = hz
 description = Базовый split2 и нарезка с fake tls google
 --dpi-desync=fake,split2
@@ -1076,7 +1167,8 @@ description = Базовый split2 и нарезка с fake tls google
 --dpi-desync-ttl=3
 
 [split2_split_2]
-name = Устаревший split2 split seqovl 2
+name = Split2 split seqovl 2 · устаревшая
+old_name = Устаревший split2 split seqovl 2
 author = hz
 description = Базовый split2 и нарезка с fake tls 2
 --dpi-desync=fake,split2
@@ -1086,7 +1178,8 @@ description = Базовый split2 и нарезка с fake tls 2
 --dpi-desync-autottl=2
 
 [fake_split2]
-name = Устаревший fake split2 seqovl 1
+name = Fake Split2 seqovl 1 · устаревшая
+old_name = Устаревший fake split2 seqovl 1
 author = hz
 description = fake и split2, нарезка с fake tls 2
 --dpi-desync=fake,split2
@@ -1096,7 +1189,8 @@ description = fake и split2, нарезка с fake tls 2
 --dpi-desync-ttl=2
 
 [split_seqovl]
-name = Устаревший split и seqovl
+name = Split и seqovl · устаревшая
+old_name = Устаревший split и seqovl
 author = hz
 description = Базовый split и seqovl
 --dpi-desync=split
@@ -1106,7 +1200,8 @@ description = Базовый split и seqovl
 --dpi-desync-ttl=1
 
 [split_pos_badseq_10]
-name = split badseq 10 и cutoff
+name = Split badseq 10 и cutoff
+old_name = split badseq 10 и cutoff
 author = hz
 description = split и badseq разрез и 10 повторов
 --dpi-desync=split
@@ -1117,7 +1212,8 @@ description = split и badseq разрез и 10 повторов
 --dpi-desync-ttl=3
 
 [split_pos_3]
-name = split pos 3 и повторы
+name = Split pos 3 и повторы
+old_name = split pos 3 и повторы
 author = hz
 description = split разрез в 3 и 4 повтора
 --dpi-desync=split
@@ -1126,14 +1222,16 @@ description = split разрез в 3 и 4 повтора
 --dpi-desync-autottl=1
 
 [multidisorder_midsld]
-name = multidisorder midsld
+name = MultiDisorder midsld
+old_name = multidisorder midsld
 label = recommended
 description = Базовая стратегия multidisorder и midsld
 --dpi-desync=multidisorder
 --dpi-desync-split-pos=1,midsld
 
 [multidisorder_midsld_syndata]
-name = syndata multidisorder midsld
+name = Syndata MultiDisorder midsld
+old_name = syndata multidisorder midsld
 label = caution
 description = syndata и multidisorder и midsld (работает на все сайты!)
 --dpi-desync=syndata,multidisorder
@@ -1245,7 +1343,8 @@ description = Экспериментальная стратегия Fake+MultiSp
 --dpi-desync-fake-tls-mod=rnd,dupsid,rndsni,padencap
 
 [syndata_1]
-name = syndata 4
+name = Syndata 4
+old_name = syndata 4
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -1254,7 +1353,8 @@ description = Потом опишу подробнее
 --dpi-desync-autottl
 
 [syndata_4_badseq]
-name = syndata 4 badseq
+name = Syndata 4 badseq
+old_name = syndata 4 badseq
 author = hz
 description = Потом опишу подробнее
 --dpi-desync=syndata
@@ -1262,7 +1362,8 @@ description = Потом опишу подробнее
 --dpi-desync-fooling=badseq
 
 [syndata_7_n3]
-name = syndata 7 n3
+name = Syndata 7 n3
+old_name = syndata 7 n3
 author = hz
 description = Потом опишу подробнее
 --dpi-desync=syndata
@@ -1271,7 +1372,8 @@ description = Потом опишу подробнее
 --dup-cutoff=n3
 
 [syndata_syn_packet_n3]
-name = syndata syn_packet.bin n3
+name = Syndata syn_packet.bin n3
+old_name = syndata syn_packet.bin n3
 author = hz
 description = Потом опишу подробнее
 --dpi-desync=syndata

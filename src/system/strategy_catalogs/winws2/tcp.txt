@@ -1,5 +1,6 @@
 [pass]
-name = pass (ничего не делает)
+name = Pass · ничего не делает
+old_name = pass (ничего не делает)
 author = loop-uh
 --lua-desync=pass
 
@@ -8,7 +9,8 @@ name = hostfakesplit_multi
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 [hostfakesplit_multi_syndata]
-name = hostfakesplit_multi + syndata
+name = hostfakesplit_multi + Syndata
+old_name = hostfakesplit_multi + syndata
 --lua-desync=send:repeats=2
 --lua-desync=syndata:blob=stun_pat
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
@@ -68,12 +70,14 @@ description = Фейкует все части, добавляет badseq и Aut
 --lua-desync=fakemultidisorder:fake_blob=tls_google:pos=1,host+2,midsld,sniext+1,endhost-1:fake_all:repeats=6:tcp_ack=-66000:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:seqovl=host:seqovl_pattern=tls_google:tls_mod=rnd,rndsni,dupsid
 
 [fake_stun_multisplit_2_32]
-name = fake + stun + multisplit pos 2,32
+name = Fake + stun + MultiSplit pos 2,32
+old_name = fake + stun + multisplit pos 2,32
 --lua-desync=fake:blob=stun_pat:badsum:payload=all
 --lua-desync=multisplit:pos=2,32:payload=all
 
 [censorliber_tls_google_syndata_tcpack_fake]
-name = Censorliber tls google + Syndata + fake + TCP ACK
+name = Censorliber tls google + Syndata + Fake + TCP ACK
+old_name = Censorliber tls google + Syndata + fake + TCP ACK
 author = loop-uh
 label = recommended
 description = Моя стратегия с паттерном Google TLS ClientHello + Syndata и смещением TCP ACK
@@ -81,7 +85,8 @@ blobs = tls_google
 --lua-desync=fake:blob=tls_google:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:repeats=6:tcp_ack=-66000
 
 [censorliber_tls_google_syndata_tcpack_fake_seqovl_1]
-name = Censorliber tls google + fake + TCP ACK + seqovl 1
+name = Censorliber tls google + Fake + TCP ACK + seqovl 1
+old_name = Censorliber tls google + fake + TCP ACK + seqovl 1
 author = loop-uh
 label = recommended
 description = Моя стратегия с паттерном Google TLS ClientHello + Syndata и смещением TCP ACK
@@ -89,7 +94,8 @@ blobs = tls_google
 --lua-desync=fake:blob=tls_google:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:repeats=6:tcp_ack=-66000:seqovl=680:seqovl_pattern=tls_google
 
 [censorliber_max_ru_syndata_tcpack_fake_seqovl_1]
-name = Censorliber max.ru + fake + TCP ACK + seqovl 1
+name = Censorliber max.ru + Fake + TCP ACK + seqovl 1
+old_name = Censorliber max.ru + fake + TCP ACK + seqovl 1
 author = loop-uh
 label = recommended
 description = Моя стратегия с паттерном Max TLS ClientHello + Syndata и смещением TCP ACK
@@ -97,7 +103,8 @@ blobs = tls_max
 --lua-desync=fake:blob=tls_max:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:repeats=6:tcp_ack=-66000:seqovl=680:seqovl_pattern=tls_max
 
 [multisplit_complex]
-name = Multisplit Complex
+name = MultiSplit Complex
+old_name = Multisplit Complex
 --lua-desync=multisplit:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
 
 [googlevideo_multidisorder]
@@ -105,7 +112,8 @@ name = MultiDisorder Complex
 --lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
 
 [googlevideo_multidisorder_syndata]
-name = MultiDisorder Complex + syndata
+name = MultiDisorder Complex + Syndata
+old_name = MultiDisorder Complex + syndata
 --lua-desync=send:repeats=2
 --lua-desync=syndata:blob=tls_google
 --lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
@@ -121,34 +129,39 @@ blobs = tls7
 --lua-desync=fakeddisorder:pos=2,midsld-2:pattern=tls7:seqovl=1:tcp_ack=-66000:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [tls_multisplit_sni]
-name = 🔀 TLS MultiSplit SNI
+name = TLS MultiSplit SNI
+old_name = 🔀 TLS MultiSplit SNI
 author = Custom
 label = recommended
 description = Экстремальная нарезка вокруг SNI (17 позиций) + seqovl 211
 --lua-desync=tls_multisplit_sni:seqovl=211
 
 [tls_multisplit_sni_652]
-name = 🔀 TLS MultiSplit SNI seqovl 652
+name = TLS MultiSplit SNI seqovl 652
+old_name = 🔀 TLS MultiSplit SNI seqovl 652
 author = Custom
 description = Экстремальная нарезка вокруг SNI + seqovl 652
 blobs = tls_google
 --lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google
 
 [tls_multisplit_sni_syndata]
-name = 🔀 TLS MultiSplit SNI seqovl 652 + syndata
+name = TLS MultiSplit SNI seqovl 652 + Syndata
+old_name = 🔀 TLS MultiSplit SNI seqovl 652 + syndata
 --lua-desync=send:repeats=2
 --lua-desync=syndata:blob=tls_google
 --lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google
 
 [general_simplefake_alt2_191]
-name = general (simple fake alt2) 1.9.1
+name = General Simple Fake ALT2 1.9.1
+old_name = general (simple fake alt2) 1.9.1
 author = hz
 label = recommended
 blobs = tls_max
 --lua-desync=fake:blob=tls_max:tcp_ts=1:repeats=6
 
 [fake_badseq_rnd]
-name = YTDisBystro 2.9.2 v1 (1)
+name = YTDisBystro 2.9.2 v1 №1
+old_name = YTDisBystro 2.9.2 v1 (1)
 author = hz
 description = Базовая стратегия десинхронизации с фейком tls rnd
 blobs = tls7
@@ -167,14 +180,16 @@ description = Фейк с datanoack и фейком tls
 --lua-desync=fake:blob=fake_default_tls:tcp_flags_unset=ack:tls_mod=rnd,rndsni,padencap
 
 [general_bf_2]
-name = general (BF) 2.0
+name = General BF 2.0
+old_name = general (BF) 2.0
 author = Flowseal
 label = game
 description = Для Battlefield 6
 --lua-desync=fake:blob=fake_default_tls:repeats=6:tcp_ack=-66000:tcp_ts_up
 
 [general_alt8_185]
-name = general (alt v8) 1.8.5
+name = General ALT8 1.8.5
+old_name = general (alt v8) 1.8.5
 author = V3nilla
 description = fake autottl repeats 6 badseq increment 2
 --lua-desync=fake:blob=fake_default_tls:repeats=6:tcp_ack=-2:tcp_ts_up
@@ -186,47 +201,54 @@ description = fake repeats 6 badseq increment 2 (без tls_mod)
 --lua-desync=fake:blob=fake_default_tls:repeats=6:tcp_ack=-2
 
 [general_alt8_185_2]
-name = general (alt v8) 1.8.5 (2)
+name = General ALT8 1.8.5 №2
+old_name = general (alt v8) 1.8.5 (2)
 author = V3nilla
 description = fake autottl repeats 6 badseq increment 0
 --lua-desync=fake:blob=fake_default_tls:repeats=6
 
 [general_alt8_185_3]
-name = general (alt v8) 1.8.5 (3)
+name = General ALT8 1.8.5 №3
+old_name = general (alt v8) 1.8.5 (3)
 author = V3nilla
 description = fake autottl repeats 6 badseq increment 100000
 --lua-desync=fake:blob=fake_default_tls:repeats=6:tcp_ack=-100000:tcp_ts_up
 
 [fake_autottl_repeats_6_badseq]
-name = alt mgts (v1) 1.6.1 / 1.8.4
+name = ALT MGTS v1 1.6.1, 1.8.4
+old_name = alt mgts (v1) 1.6.1 / 1.8.4
 author = hz
 description = fake autottl repeats 6 badseq
 blobs = tls_google
 --lua-desync=fake:blob=tls_google:ip_autottl=2,3-20:ip6_autottl=2,3-20:repeats=6:tcp_ack=-66000
 
 [general_simplefake_185]
-name = general simple fake alt 1.8.5
+name = General Simple Fake ALT 1.8.5
+old_name = general simple fake alt 1.8.5
 author = hz
 description = fake autottl repeats 6 badseq
 blobs = tls_google
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_ack=-10000000:tcp_ts_up
 
 [altmgts2_161_2]
-name = alt mgts (v2) 1.6.1 / 1.8.4
+name = ALT MGTS v2 1.6.1, 1.8.4
+old_name = alt mgts (v2) 1.6.1 / 1.8.4
 author = hz
 description = fake autottl repeats 6 md5sig
 blobs = tls_google
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_md5
 
 [general_simple_fake_165_2]
-name = general simple fake 1.8.5 v2
+name = General Simple Fake 1.8.5 v2
+old_name = general simple fake 1.8.5 v2
 author = hz
 description = fake autottl repeats 6 ts
 blobs = tls_google
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_ts=1000
 
 [altmgts2_161_3]
-name = alt mgts (v3) 1.6.1
+name = ALT MGTS v3 1.6.1
+old_name = alt mgts (v3) 1.6.1
 author = hz
 description = fake autottl repeats 6 md5sig
 blobs = tls_google
@@ -246,43 +268,50 @@ description = Базовая десинхронизация md5sig с фейко
 --lua-desync=fake:blob=fake_default_tls:tcp_md5:tls_mod=rnd,rndsni,padencap
 
 [tls_fake_only]
-name = 🎭 TLS Fake Only (без нарезки!)
+name = TLS Fake Only · без нарезки
+old_name = 🎭 TLS Fake Only (без нарезки!)
 author = Custom
 label = recommended
 description = ТОЛЬКО фейки, реальные данные идут как есть
 --lua-desync=fake:blob=fake_default_tls:repeats=6:ip_ttl=3:ip6_ttl=3:tls_mod=rnd,dupsid,sni=www.google.com
 
 [tls_fake_only_ttl2]
-name = 🎭 TLS Fake Only TTL=2
+name = TLS Fake Only TTL=2
+old_name = 🎭 TLS Fake Only TTL=2
 author = Custom
 label = recommended
 description = Фейки с TTL=2, без нарезки
 --lua-desync=fake:blob=fake_default_tls:repeats=8:ip_ttl=2:ip6_ttl=2:tls_mod=rnd,dupsid,sni=www.google.com
 
 [tls_fake_only_badseq]
-name = 🎭 TLS Fake Only + BadSeq
+name = TLS Fake Only + BadSeq
+old_name = 🎭 TLS Fake Only + BadSeq
 author = Custom
 label = recommended
 description = Фейки с badseq, без нарезки
 --lua-desync=fake:blob=fake_default_tls:repeats=6:tcp_ack=-66000:tls_mod=rnd,dupsid,sni=www.google.com
 
 [tls_fake_only_md5]
-name = 🎭 TLS Fake Only + MD5sig
+name = TLS Fake Only + MD5sig
+old_name = 🎭 TLS Fake Only + MD5sig
 author = Custom
 label = recommended
 description = Фейки с md5sig, без нарезки
 --lua-desync=fake:blob=fake_default_tls:repeats=6:tcp_md5:tls_mod=rnd,dupsid,sni=www.google.com
 
 [multisplit_pos_1_seqovl_740]
-name = multisplit pos 1 seqovl 740
+name = MultiSplit pos 1 seqovl 740
+old_name = multisplit pos 1 seqovl 740
 --lua-desync=multisplit:pos=1:seqovl=740:seqovl_pattern=stun_pat
 
 [multisplit_pos_4__midsld_2seqovl_740_seqovl_pattern]
-name = multisplit pos 4 midsld+2 seqovl 1
+name = MultiSplit pos 4 midsld+2 seqovl 1
+old_name = multisplit pos 4 midsld+2 seqovl 1
 --lua-desync=multisplit:pos=4,midsld+2:seqovl=1:seqovl_pattern=tls7
 
 [multisplit]
-name = multisplit
+name = MultiSplit
+old_name = multisplit
 --lua-desync=multisplit
 
 [googlevideo_fakedsplit]
@@ -295,14 +324,16 @@ name = Split cutoff
 --lua-desync=multisplit:pos=1:tcp_ack=-66000:repeats=10:ip_ttl=4:ip6_ttl=4
 
 [multisplit_tls_google_700]
-name = multisplit tls google seqovl 700
+name = MultiSplit tls google seqovl 700
+old_name = multisplit tls google seqovl 700
 author = loop-uh
 label = experimental
 blobs = tls_google
 --lua-desync=multisplit:seqovl=700:seqovl_pattern=tls_google:tcp_flags_unset=ack
 
 [multidisorder_tls_google_700]
-name = multidisorder tls google seqovl 700
+name = MultiDisorder tls google seqovl 700
+old_name = multidisorder tls google seqovl 700
 author = loop-uh
 label = experimental
 description = Потом опишу подробнее
@@ -310,7 +341,8 @@ blobs = tls_google
 --lua-desync=multidisorder:seqovl=700:seqovl_pattern=tls_google:tcp_flags_unset=ack
 
 [multisplit_tls_google_1000]
-name = multisplit tls google seqovl 1000
+name = MultiSplit tls google seqovl 1000
+old_name = multisplit tls google seqovl 1000
 author = loop-uh
 label = experimental
 description = Потом опишу подробнее
@@ -318,7 +350,8 @@ blobs = tls_google
 --lua-desync=multisplit:seqovl=1000:seqovl_pattern=tls_google
 
 [multidisorder_tls_google_1000]
-name = multidisorder tls google seqovl 1000
+name = MultiDisorder tls google seqovl 1000
+old_name = multidisorder tls google seqovl 1000
 author = loop-uh
 label = experimental
 description = Потом опишу подробнее
@@ -326,7 +359,8 @@ blobs = tls_google
 --lua-desync=multidisorder:seqovl=1000:seqovl_pattern=tls_google:tcp_flags_unset=ack
 
 [multisplit_midsld]
-name = multisplit midsld
+name = MultiSplit midsld
+old_name = multisplit midsld
 author = loop-uh
 label = experimental
 description = Потом опишу подробнее
@@ -334,21 +368,24 @@ blobs = tls_google
 --lua-desync=multisplit:pos=midsld
 
 [alt9]
-name = alt v9
+name = General ALT9
+old_name = alt v9
 author = loop-uh
 label = recommended
 blobs = tls_google
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
 
 [fake_multidisorder]
-name = fake + multidisorder 
+name = Fake + MultiDisorder
+old_name = fake + multidisorder
 author = loop-uh
 blobs = tls_google
 --lua-desync=fake:blob=tls_google:ip_ttl=-1,3-20:ip6_autottl=-1,3-20
 --lua-desync=multidisorder:pos=1,midsld:seqovl=680:seqovl_pattern=tls_google:ip_ttl=-1,3-20:ip6_ttl=-1,3-20
 
 [multidisorder_680_seqovl]
-name = multidisorder 680
+name = MultiDisorder 680
+old_name = multidisorder 680
 author = loop-uh
 blobs = tls_google
 --lua-desync=multidisorder:pos=1,midsld:seqovl=680:seqovl_pattern=tls_google:tls_mod=rnd,rndsni,dupsid:ip_ttl=-1,3-20:ip6_ttl=-1,3-20
@@ -364,14 +401,16 @@ blobs = tls_google
 --lua-desync=multidisorder:pos=1,midsld:seqovl=680:seqovl_pattern=tls_google:tls_mod=rnd,rndsni,dupsid:tcp_ack=-66000:ip_ttl=-1,3-20:ip6_ttl=-1,3-20
 
 [alt11]
-name = alt v11
+name = General ALT11
+old_name = alt v11
 blobs = tls_google
 --lua-desync=fake:blob=tls_google:repeats=6:tcp_ack=-66000
 --lua-desync=fake:blob=tls_google:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:repeats=6:tcp_ack=-66000
 --lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google
 
 [general_alt11_191_syndata]
-name = general (alt v11) 1.9.1 + syndata
+name = General ALT11 1.9.1 · с Syndata
+old_name = general (alt v11) 1.9.1 + syndata
 author = hz
 label = recommended
 blobs = tls_max
@@ -396,7 +435,8 @@ blobs = tls5
 --lua-desync=multidisorder_legacy:seqovl=652:seqovl_pattern=tls5
 
 [multidisorder_legacy_badseq]
-name = multidisorder_legacy + fake badseq
+name = multidisorder_legacy + Fake badseq
+old_name = multidisorder_legacy + fake badseq
 author = bol-van
 label = experimental
 description = Legacy multidisorder с fake пакетами и badseq
@@ -405,7 +445,8 @@ blobs = fake_default_tls
 --lua-desync=multidisorder_legacy:pos=1,midsld:tcp_ack=-66000
 
 [multidisorder_legacy_md5sig]
-name = multidisorder_legacy + fake md5sig
+name = multidisorder_legacy + Fake md5sig
+old_name = multidisorder_legacy + fake md5sig
 author = bol-van
 label = experimental
 description = Legacy multidisorder с fake пакетами и md5 signature
@@ -435,7 +476,8 @@ description = Legacy multidisorder с позициями sniext+1 и midsld
 --lua-desync=multidisorder_legacy:pos=sniext+1,midsld:seqovl=652
 
 [other_seqovl]
-name = YTDisBystro 3.4 v1 (all ports)
+name = YTDisBystro 3.4 v1 · all ports
+old_name = YTDisBystro 3.4 v1 (all ports)
 author = hz
 label = recommended
 description = Раньше эта стратегия била по всем портам и отлично подходила для игр
@@ -443,7 +485,8 @@ blobs = tls5
 --lua-desync=multisplit:seqovl=211:seqovl_pattern=tls5
 
 [general_alt11_191]
-name = general (alt v11) 1.9.1
+name = General ALT11 1.9.1
+old_name = general (alt v11) 1.9.1
 author = hz
 label = recommended
 blobs = tls_google
@@ -451,7 +494,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:payload=tls_client_hello
 
 [general_simplefake_alt2_191_v2]
-name = general (simple fake alt2 v2) 1.9.1
+name = General Simple Fake ALT2 v2 1.9.1
+old_name = general (simple fake alt2 v2) 1.9.1
 author = hz
 label = recommended
 blobs = tls_max
@@ -459,97 +503,111 @@ blobs = tls_max
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_max:payload=tls_client_hello
 
 [seqovl_211_google]
-name = seqovl 211 + tls_google
+name = Seqovl 211 + tls_google
+old_name = seqovl 211 + tls_google
 author = hz
 description = Multisplit с seqovl=211 и паттерном Google TLS ClientHello
 blobs = tls_google
 --lua-desync=multisplit:seqovl=211:seqovl_pattern=tls_google
 
 [seqovl_211_tls4]
-name = seqovl 211 + tls4
+name = Seqovl 211 + tls4
+old_name = seqovl 211 + tls4
 author = hz
 description = Multisplit с seqovl=211 и паттерном TLS ClientHello 4
 blobs = tls4
 --lua-desync=multisplit:seqovl=211:seqovl_pattern=tls4
 
 [seqovl_286_tls5]
-name = seqovl 286 + tls5
+name = Seqovl 286 + tls5
+old_name = seqovl 286 + tls5
 author = hz
 description = Multisplit с seqovl=286 и паттерном TLS ClientHello 5
 blobs = tls5
 --lua-desync=multisplit:seqovl=286:seqovl_pattern=tls5
 
 [seqovl_286_google]
-name = seqovl 286 + tls_google
+name = Seqovl 286 + tls_google
+old_name = seqovl 286 + tls_google
 author = hz
 description = Multisplit с seqovl=286 и паттерном Google TLS ClientHello
 blobs = tls_google
 --lua-desync=multisplit:seqovl=286:seqovl_pattern=tls_google
 
 [seqovl_308_tls5]
-name = seqovl 308 + tls5
+name = Seqovl 308 + tls5
+old_name = seqovl 308 + tls5
 author = hz
 description = Multisplit с seqovl=308 и паттерном TLS ClientHello 5
 blobs = tls5
 --lua-desync=multisplit:seqovl=308:seqovl_pattern=tls5
 
 [seqovl_652_tls5]
-name = seqovl 652 + tls5
+name = Seqovl 652 + tls5
+old_name = seqovl 652 + tls5
 author = hz
 description = Multisplit с seqovl=652 и паттерном TLS ClientHello 5
 blobs = tls5
 --lua-desync=multisplit:seqovl=652:seqovl_pattern=tls5
 
 [seqovl_681_tls5]
-name = seqovl 681 + tls5
+name = Seqovl 681 + tls5
+old_name = seqovl 681 + tls5
 author = hz
 description = Multisplit с seqovl=681 и паттерном TLS ClientHello 5
 blobs = tls5
 --lua-desync=multisplit:seqovl=681:seqovl_pattern=tls5
 
 [seqovl_50_tls12]
-name = seqovl 50 + tls12
+name = Seqovl 50 + tls12
+old_name = seqovl 50 + tls12
 author = Я :)
 description = Multisplit с seqovl=50 и паттерном TLS ClientHello 12
 blobs = tls12
 --lua-desync=multisplit:seqovl=50:seqovl_pattern=tls12
 
 [seqovl_150_tls5]
-name = seqovl 150 + tls5
+name = Seqovl 150 + tls5
+old_name = seqovl 150 + tls5
 author = hz
 description = Multisplit с seqovl=150 и паттерном TLS ClientHello 5
 blobs = tls5
 --lua-desync=multisplit:seqovl=150:seqovl_pattern=tls5
 
 [seqovl_350_google]
-name = seqovl 350 + tls_google
+name = Seqovl 350 + tls_google
+old_name = seqovl 350 + tls_google
 author = hz
 description = Multisplit с seqovl=350 и паттерном Google TLS ClientHello
 blobs = tls_google
 --lua-desync=multisplit:seqovl=350:seqovl_pattern=tls_google
 
 [seqovl_500_tls7]
-name = seqovl 500 + tls7
+name = Seqovl 500 + tls7
+old_name = seqovl 500 + tls7
 author = hz
 description = Multisplit с seqovl=500 и паттерном TLS ClientHello 7
 blobs = tls7
 --lua-desync=multisplit:seqovl=500:seqovl_pattern=tls7
 
 [seqovl_211_tls9]
-name = seqovl 211 + tls9
+name = Seqovl 211 + tls9
+old_name = seqovl 211 + tls9
 author = hz
 description = Multisplit с seqovl=211 и паттерном TLS ClientHello 9
 blobs = tls9
 --lua-desync=multisplit:seqovl=211:seqovl_pattern=tls9
 
 [multisplit_sniext_midsld_18]
-name = multisplit sniext+1 midsld-1
+name = MultiSplit sniext+1 midsld-1
+old_name = multisplit sniext+1 midsld-1
 author = hz
 description = Потом опишу позже
 --lua-desync=multisplit:pos=sniext+1,midsld:seqovl=652
 
 [dis4_dup]
-name = general (alt v2) + Dup
+name = General ALT2 · с dup
+old_name = general (alt v2) + Dup
 author = hz
 description = Split2 + дублирование первого пакета
 blobs = tls_google
@@ -557,7 +615,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google
 
 [dis4_midsld]
-name = general (alt v2) MidSLD
+name = General ALT2 · midsld
+old_name = general (alt v2) MidSLD
 author = hz
 description = Split2 с резкой по середине SLD
 blobs = tls_google
@@ -573,7 +632,8 @@ blobs = tls14
 --lua-desync=multisplit:pos=sld+1:tcp_ack=-66000:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [multisplit_fake_tls_badseq_lite]
-name = YTDisBystro 3.4 v1 (Lite)
+name = YTDisBystro 3.4 v1 · Lite
+old_name = YTDisBystro 3.4 v1 (Lite)
 author = hz
 description = Без dup для экономии
 blobs = tls14
@@ -581,7 +641,8 @@ blobs = tls14
 --lua-desync=multisplit:pos=sld+1:tcp_ack=-66000:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [multisplit_fake_tls_badseq_autottl2]
-name = YTDisBystro 3.4 v1 (AutoTTL+2)
+name = YTDisBystro 3.4 v1 · AutoTTL+2
+old_name = YTDisBystro 3.4 v1 (AutoTTL+2)
 author = hz
 description = С AutoTTL delta=+2 (как для МГТС)
 blobs = tls14
@@ -590,7 +651,8 @@ blobs = tls14
 --lua-desync=multisplit:pos=sld+1:tcp_ack=-66000:ip_autottl=2,3-20:ip6_autottl=2,3-20
 
 [multisplit_fake_tls_md5sig]
-name = multisplit и md5sig 1
+name = MultiSplit и md5sig 1
+old_name = multisplit и md5sig 1
 author = hz
 description = Стандартный multisplit и md5sig и фейк TLS 1
 blobs = tls1
@@ -607,14 +669,16 @@ blobs = tls14
 --lua-desync=multisplit:pos=sld+1:tcp_md5:ip_autottl=0,3-20:ip6_autottl=0,3-20
 
 [dronatar_4_2]
-name = Dronatar 4.2 (без tls_mod)
+name = Dronatar 4.2 · без tls_mod
+old_name = Dronatar 4.2 (без tls_mod)
 author = Dronatar
 label = recommended
 description = fake blob=0x00, repeats=6 - без модификации TLS
 --lua-desync=fake:blob=0x00000000000000000000000000000000:repeats=6:tcp_ts_up
 
 [dronatar_4_2_tlsmod]
-name = Dronatar 4.2 (с tls_mod)
+name = Dronatar 4.2 · с tls_mod
+old_name = Dronatar 4.2 (с tls_mod)
 author = Dronatar
 label = recommended
 description = fake tls14, repeats=6 с tls_mod=rnd,dupsid
@@ -622,21 +686,24 @@ blobs = tls14
 --lua-desync=fake:blob=tls14:repeats=6:tls_mod=rnd,dupsid:tcp_ts_up
 
 [multidisorder_badseq_pos]
-name = original bol-van v2 (badsum)
+name = Bol-van original v2 · badsum
+old_name = original bol-van v2 (badsum)
 author = hz
 description = Дисордер стратегия с фуллингом badseq нарезкой и повтором 6
 --lua-desync=fake:blob=fake_default_tls:repeats=6:tcp_ack=-66000
 --lua-desync=multidisorder:pos=1,midsld:tcp_ack=-66000
 
 [multidisorder_md5sig_pos]
-name = original bol-van v2
+name = Bol-van original v2
+old_name = original bol-van v2
 author = hz
 description = Дисордер стратегия с фуллингом md5sig нарезкой и повтором 6
 --lua-desync=fake:blob=fake_default_tls:repeats=6:tcp_ack=-66000:tcp_md5
 --lua-desync=multidisorder:pos=1,midsld:tcp_ack=-66000:tcp_md5
 
 [original_bolvan_v2_badsum]
-name = Если стратегия не работает смени её!
+name = Fake + MultiDisorder x6 · sni google.com
+old_name = Если стратегия не работает смени её!
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -644,7 +711,8 @@ description = Потом опишу подробнее
 --lua-desync=multidisorder:pos=1,midsld:tcp_ack=-66000
 
 [multidisorder_midsld]
-name = multidisorder midsld
+name = MultiDisorder midsld
+old_name = multidisorder midsld
 label = recommended
 description = Базовая стратегия multidisorder и midsld
 --lua-desync=multidisorder:pos=1,midsld
@@ -658,14 +726,16 @@ description = Потом опишу подробнее
 --lua-desync=multidisorder:pos=1,midsld
 
 [multisplit_286_pattern]
-name = YTDisBystro 3.4 v2 (1)
+name = YTDisBystro 3.4 v2 №1
+old_name = YTDisBystro 3.4 v2 (1)
 author = hz
 description = Дисордер стратегия с фуллингом badseq нарезкой и повтором 11
 blobs = tls11
 --lua-desync=multisplit:seqovl=286:seqovl_pattern=tls11
 
 [multidisorder_super_split_md5sig]
-name = Discord Voice & YT (badseq)
+name = Discord Voice и YT · badseq
+old_name = Discord Voice & YT (badseq)
 author = hz
 description = Обратная стратегия с нестандартной нарезкой и md5sig
 blobs = tls_google
@@ -673,7 +743,8 @@ blobs = tls_google
 --lua-desync=multidisorder:pos=method+2,midsld,5
 
 [multidisorder_super_split_badseq]
-name = Discord Voice & YT (md5sig и badseq)
+name = Discord Voice и YT · md5sig и badseq
+old_name = Discord Voice & YT (md5sig и badseq)
 author = hz
 description = Обратная стратегия с нестандартной нарезкой и badseq
 blobs = tls_google
@@ -681,7 +752,8 @@ blobs = tls_google
 --lua-desync=multidisorder:pos=method+2,midsld,5
 
 [multidisorder_w3]
-name = Discord Voice & YT (DTLS)
+name = Discord Voice и YT · DTLS
+old_name = Discord Voice & YT (DTLS)
 author = hz
 description = Обратная стратегия с фейком tls w3 и md5sig
 blobs = dtls_w3
@@ -695,27 +767,31 @@ description = Обратная стратегия с нестандартной 
 --lua-desync=multidisorder:pos=100,midsld,sniext+1,endhost-2,-10
 
 [multidisorder_pos_100_fake]
-name = Split Position + fake
+name = Split Position + Fake
+old_name = Split Position + fake
 author = hz
 description = Обратная стратегия с нестандартной нарезкой и фейком TLS
 --lua-desync=fake:blob=fake_default_tls:repeats=3:ip_ttl=4:ip6_ttl=4:tls_mod=rnd,dupsid
 --lua-desync=multidisorder:pos=100,midsld,sniext+1,endhost-2,-10
 
 [dis14]
-name = multisplit и seqovl
+name = MultiSplit и seqovl
+old_name = multisplit и seqovl
 author = hz
 description = Мульти нарезка с seqovl и нестандартной позицией
 --lua-desync=multisplit:pos=midsld+1:seqovl=1
 
 [multisplit_3]
-name = YTDisBystro 2.9.2 v1 / v2
+name = YTDisBystro 2.9.2 v1, v2
+old_name = YTDisBystro 2.9.2 v1 / v2
 author = hz
 description = Отлично подходит для YouTube
 blobs = tls7
 --lua-desync=multisplit:pos=midsld+1:seqovl=1:seqovl_pattern=tls7
 
 [fakedsplit_badseq_4]
-name = Фейк с фуулингом badseq и фейком tls 4
+name = Фейк с фулингом badseq и фейком tls 4
+old_name = Фейк с фуулингом badseq и фейком tls 4
 author = hz
 description = Десинхронизация badseq с фейком tls 4
 blobs = tls4
@@ -729,20 +805,23 @@ description = Улучшенная стратегия с datanoack и padencap
 --lua-desync=fakeddisorder:pos=midsld:tcp_flags_unset=ack
 
 [dis2]
-name = multisplit split pos padencap
+name = MultiSplit split pos padencap
+old_name = multisplit split pos padencap
 author = hz
 description = Стандартный мультисплит с нарезкой и фейком padencap
 --lua-desync=fake:blob=fake_default_tls:ip_ttl=1:ip6_ttl=1:tls_mod=rnd,rndsni,padencap
 --lua-desync=multisplit:pos=1,midsld
 
 [dis3]
-name = split badseq 10
+name = Split badseq 10 · ttl 4
+old_name = split badseq 10
 author = hz
 description = Стандартный сплит с фуллингом badseq и 10 повторами
 --lua-desync=multisplit:pos=1:repeats=10:tcp_ack=-66000:tcp_ts_up:ip_ttl=4:ip6_ttl=4
 
 [dis5]
-name = fake split 6 google
+name = Fake Split 6 google
+old_name = fake split 6 google
 author = hz
 description = Фейковый сплит с повторением 6 и фейком google
 blobs = tls_google
@@ -750,7 +829,8 @@ blobs = tls_google
 --lua-desync=multisplit
 
 [dis5_sberbank]
-name = fake split2 6 sberbank
+name = Fake Split2 6 sberbank
+old_name = fake split2 6 sberbank
 author = hz
 description = Фейковый сплит2 с повторением 6 и фейком от сбербанка много деняк
 blobs = tls_sber
@@ -758,7 +838,8 @@ blobs = tls_sber
 --lua-desync=multisplit
 
 [dis7]
-name = Ростелеком & Мегафон
+name = Ростелеком и Мегафон
+old_name = Ростелеком & Мегафон
 author = hz
 description = Сплит с повторением 6 и фуллингом badseq и фейком tls от Google
 blobs = tls_google
@@ -766,7 +847,8 @@ blobs = tls_google
 --lua-desync=multisplit
 
 [dis8]
-name = Ростелеком & Мегафон v2
+name = Ростелеком и Мегафон v2
+old_name = Ростелеком & Мегафон v2
 author = hz
 description = Cплит2 с фейком tls 4 и ttl 4 (короче одни четвёрки)
 blobs = tls4
@@ -774,7 +856,8 @@ blobs = tls4
 --lua-desync=multisplit:pos=sniext:seqovl=1
 
 [dis9]
-name = split2 sniext google
+name = Split2 sniext google
+old_name = split2 sniext google
 author = hz
 description = Cплит2 с фейком tls от Google
 blobs = tls_google
@@ -782,7 +865,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=sniext:seqovl=1
 
 [dis10]
-name = disorder2 badseq tls google
+name = Disorder2 badseq tls google
+old_name = disorder2 badseq tls google
 author = hz
 description = Cплит2 badseq с фейком tls от Google
 blobs = tls_google
@@ -790,31 +874,36 @@ blobs = tls_google
 --lua-desync=multidisorder:pos=3
 
 [dis11]
-name = split badseq 10
+name = Split badseq 10 · autottl
+old_name = split badseq 10
 author = hz
 description = Cплит2 с фуллингом badseq и 10 повторами
 --lua-desync=multisplit:pos=1:repeats=10:tcp_ack=-66000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [split_pos_badseq]
-name = Ростелеком & Мегафон
+name = Ростелеком и Мегафон · без фейка
+old_name = Ростелеком & Мегафон
 author = hz
 description = Базовый split и badseq
 --lua-desync=multisplit:pos=1:repeats=10:tcp_ack=-66000:tcp_ts_up:ip_autottl=2,3-20:ip6_autottl=2,3-20
 
 [dis12]
-name = split badseq 10 ttl
+name = Split badseq 10 ttl
+old_name = split badseq 10 ttl
 author = hz
 description = Cплит2 с фуллингом badseq и 10 повторами и ttl 3
 --lua-desync=multisplit:pos=1:repeats=10:tcp_ack=-66000:tcp_ts_up:ip_ttl=3:ip6_ttl=3
 
 [dis13]
-name = fakedsplit badsrq 10
+name = FakedSplit badseq 10
+old_name = fakedsplit badsrq 10
 author = hz
 description = Фейки и сплиты с фуллингом badseq и 10 повторами
 --lua-desync=fakedsplit:pos=1:repeats=10:tcp_ack=-66000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [alt1_161]
-name = general (alt v1) 1.8.2
+name = General ALT1 1.8.2
+old_name = general (alt v1) 1.8.2
 author = Flowseal
 description = fake,split autottl 5 repeats 6 badseq и fake tls google
 blobs = tls_google
@@ -822,7 +911,8 @@ blobs = tls_google
 --lua-desync=multisplit:repeats=6:tcp_ack=-66000:tcp_ts_up:ip_autottl=5,3-20:ip6_autottl=5,3-20
 
 [general_alt183]
-name = general (alt) 1.8.3 / 1.8.4
+name = General ALT 1.8.3, 1.8.4
+old_name = general (alt) 1.8.3 / 1.8.4
 author = Flowseal
 description = Потом опишу подробнее
 blobs = tls_google
@@ -830,7 +920,8 @@ blobs = tls_google
 --lua-desync=fakedsplit:tcp_ack=-66000:tcp_ts_up:ip_autottl=5,3-20:ip6_autottl=5,3-20
 
 [general_alt185]
-name = general (alt) 1.8.5
+name = General ALT 1.8.5
+old_name = general (alt) 1.8.5
 author = Flowseal
 description = Потом опишу подробнее
 blobs = tls_google
@@ -838,20 +929,23 @@ blobs = tls_google
 --lua-desync=fakedsplit:pattern=0x00:tcp_ts=1000
 
 [general_alt2183]
-name = general (alt2) 1.8.3 / 1.8.4
+name = General ALT2 1.8.3, 1.8.4
+old_name = general (alt2) 1.8.3 / 1.8.4
 author = Flowseal
 description = Потом опишу подробнее
 blobs = tls_google
 --lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google
 
 [general_alt3183_2]
-name = general (alt v3) 1.8.2 / 1.8.4
+name = General ALT3 1.8.2, 1.8.4
+old_name = general (alt v3) 1.8.2 / 1.8.4
 author = Flowseal
 description = fakedsplit pos 1 autottl badseq repeats 8
 --lua-desync=fakedsplit:pos=1:repeats=8:tcp_ack=-66000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [general_alt4_182]
-name = general (alt v4) 1.8.2 / 1.8.4
+name = General ALT4 1.8.2, 1.8.4
+old_name = general (alt v4) 1.8.2 / 1.8.4
 author = https://github.com/Flowseal/zapret-discord-youtube/issues/2361
 description = Для Rockstar Launcher & Epic Games
 blobs = tls_google
@@ -859,42 +953,48 @@ blobs = tls_google
 --lua-desync=multisplit:repeats=6:tcp_md5
 
 [general_alt6_182]
-name = general (alt v6) 1.8.2
+name = General ALT6 1.8.2
+old_name = general (alt v6) 1.8.2
 author = Flowseal
 description = multisplit repeats 2 seqovl 681 pos 1 badseq hopbyhop2
 blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:repeats=2:tcp_ack=-66000:tcp_ts_up:ip6_hopbyhop2
 
 [general_alt6_184]
-name = general (alt v6) 1.8.4
+name = General ALT6 1.8.4
+old_name = general (alt v6) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [general_alt7_184]
-name = general (alt v7) 1.8.4
+name = General ALT7 1.8.4
+old_name = general (alt v7) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 blobs = tls_google
 --lua-desync=multisplit:pos=2,sniext+1:seqovl=679:seqovl_pattern=tls_google
 
 [general_fake_tls_auto_alt_184]
-name = general (fake TLS auto alt) 1.8.4
+name = General Fake TLS Auto ALT 1.8.4
+old_name = general (fake TLS auto alt) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 --lua-desync=fake:blob=fake_default_tls:repeats=8:tcp_ack=-10000000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:tls_mod=rnd,dupsid,sni=www.google.com
 --lua-desync=fakedsplit:pos=1:tcp_ack=-10000000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [general_fake_tls_auto_alt_185]
-name = general (fake TLS auto alt) 1.8.5
+name = General Fake TLS Auto ALT 1.8.5
+old_name = general (fake TLS auto alt) 1.8.5
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 --lua-desync=fake:blob=fake_default_tls:repeats=8:tcp_ack=-10000000:tcp_ts_up:tls_mod=rnd,dupsid,sni=www.google.com
 --lua-desync=fakedsplit:pos=1:tcp_ack=-10000000:tcp_ts_up
 
 [general_fake_tls_auto_alt3_184]
-name = general (fake TLS auto alt3) 1.8.4
+name = General Fake TLS Auto ALT3 1.8.4
+old_name = general (fake TLS auto alt3) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 blobs = tls_google
@@ -902,7 +1002,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:tcp_ts=1000
 
 [general_fake_tls_auto_alt2_184]
-name = general (fake TLS auto alt2) 1.8.4
+name = General Fake TLS Auto ALT2 1.8.4
+old_name = general (fake TLS auto alt2) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 blobs = tls_google
@@ -910,14 +1011,16 @@ blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:tcp_ack=-10000000:tcp_ts_up
 
 [general_fake_tls_auto_184]
-name = general (fake TLS auto) 1.8.4
+name = General Fake TLS Auto 1.8.4
+old_name = general (fake TLS auto) 1.8.4
 author = Flowseal
 description = multisplit seqovl 681 pos 1 seqovl pattern
 --lua-desync=fake:blob=fake_default_tls:repeats=11:tcp_ack=-66000:tcp_ts_up:tls_mod=rnd,dupsid,sni=sun6-21.userapi.com
 --lua-desync=multidisorder:pos=1,midsld:tcp_ack=-66000:tcp_ts_up
 
 [launcher_zapret_2_9_1_v1]
-name = Launcher zapret 2.9.1 v1 (без tls_mod)
+name = Launcher zapret 2.9.1 v1 · без tls_mod
+old_name = Launcher zapret 2.9.1 v1 (без tls_mod)
 author = Dronatar
 label = recommended
 description = fake multidisorder pos 7 blob=0x0F0F0F0F badseq,autottl - без tls_mod
@@ -925,7 +1028,8 @@ description = fake multidisorder pos 7 blob=0x0F0F0F0F badseq,autottl - без t
 --lua-desync=multidisorder:pos=7,sld+1:tcp_ack=-66000:tcp_ts_up:ip_autottl=2,2-12:ip6_autottl=2,2-12
 
 [launcher_zapret_2_9_1_v1_tlsmod]
-name = Launcher zapret 2.9.1 v1 (с tls_mod)
+name = Launcher zapret 2.9.1 v1 · с tls_mod
+old_name = Launcher zapret 2.9.1 v1 (с tls_mod)
 author = Dronatar
 label = recommended
 description = fake multidisorder pos 7 tls14 с tls_mod=rnd,dupsid,sni=fonts.google.com
@@ -950,13 +1054,15 @@ blobs = tls4
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls4:repeats=2
 
 [multidisorder_seqovl_midsld]
-name = multidisorder seqovl midsld
+name = MultiDisorder seqovl midsld
+old_name = multidisorder seqovl midsld
 label = recommended
 description = Самая простая стратегия multisplit для YouTube
 --lua-desync=multidisorder:pos=midsld-1:seqovl=1
 
 [other_seqovl_2]
-name = multidisorder seqovl 211 & pattern 5
+name = MultiDisorder seqovl 211 и pattern 5
+old_name = multidisorder seqovl 211 & pattern 5
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -964,42 +1070,48 @@ blobs = tls5
 --lua-desync=multidisorder:seqovl=211:seqovl_pattern=tls5
 
 [multisplit_226_pattern_18]
-name = multisplit seqovl 226
+name = MultiSplit seqovl 226
+old_name = multisplit seqovl 226
 author = hz
 description = Мультисплит стратегия с фуллингом pattern и повтором 9
 blobs = tls18
 --lua-desync=multisplit:seqovl=226:seqovl_pattern=tls18
 
 [multisplit_226_pattern_google_Com]
-name = multisplit seqovl 226 v2
+name = MultiSplit seqovl 226 v2
+old_name = multisplit seqovl 226 v2
 author = hz
 description = Мультисплит стратегия с фуллингом pattern и повтором 9
 blobs = tls_google
 --lua-desync=multisplit:seqovl=226:seqovl_pattern=tls_google
 
 [multisplit_308_pattern]
-name = multisplit seqovl 308 с парттерном 9
+name = MultiSplit seqovl 308 с паттерном 9
+old_name = multisplit seqovl 308 с парттерном 9
 author = hz
 description = Мультисплит стратегия с фуллингом badseq нарезкой и повтором 9
 blobs = tls9
 --lua-desync=multisplit:seqovl=308:seqovl_pattern=tls9
 
 [multisplit_split_pos_1]
-name = multisplit split pos 1
+name = MultiSplit split pos 1
+old_name = multisplit split pos 1
 author = hz
 label = recommended
 description = Потом опишу подробнее
 --lua-desync=multisplit:pos=1
 
 [datanoack]
-name = datanoack
+name = Datanoack
+old_name = datanoack
 author = loop-uh
 label = recommended
 description = Потом опишу подробнее
 --lua-desync=pktmod:tcp_flags_unset=ack
 
 [pktmod_syndata_stun]
-name = pktmod + syndata (stun)
+name = PktMod + Syndata · stun
+old_name = pktmod + syndata (stun)
 author = loop-uh
 label = recommended
 description = Потом опишу подробнее
@@ -1008,7 +1120,8 @@ description = Потом опишу подробнее
 --lua-desync=pktmod:tcp_flags_unset=ack
 
 [send_syndata]
-name = send repeats 2 + syndata (stun)
+name = Send repeats 2 + Syndata · stun
+old_name = send repeats 2 + syndata (stun)
 author = loop-uh
 label = recommended
 description = Потом опишу подробнее
@@ -1016,25 +1129,29 @@ description = Потом опишу подробнее
 --lua-desync=syndata:blob=stun_pat
 
 [send_x3_syndata_tls_google]
-name = send x3 + syndata tls_google
+name = Send x3 + Syndata tls_google
+old_name = send x3 + syndata tls_google
 blobs = tls_google
 --lua-desync=send:repeats=3
 --lua-desync=syndata:blob=tls_google
 
 [send_x2_syndata_tls_google]
-name = send x2 + syndata tls_google
+name = Send x2 + Syndata tls_google
+old_name = send x2 + syndata tls_google
 blobs = tls_google
 --lua-desync=send:repeats=2
 --lua-desync=syndata:blob=tls_google
 
 [fake_tls_google_autottl_multidisorder_complex]
-name = fake tls_google x6 AutoTTL badack + MultiDisorder Complex
+name = Fake tls_google x6 AutoTTL badack + MultiDisorder Complex
+old_name = fake tls_google x6 AutoTTL badack + MultiDisorder Complex
 blobs = tls_google
 --lua-desync=fake:blob=tls_google:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:repeats=6:tcp_ack=-66000
 --lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
 
 [pktmod_syndata]
-name = pktmod + syndata
+name = PktMod + Syndata
+old_name = pktmod + syndata
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -1043,21 +1160,24 @@ description = Потом опишу подробнее
 --lua-desync=pktmod:tcp_flags_unset=ack
 
 [multisplit_datanoack]
-name = multisplit datanoack
+name = MultiSplit datanoack
+old_name = multisplit datanoack
 author = hz
 label = recommended
 description = Потом опишу подробнее
 --lua-desync=multisplit:tcp_flags_unset=ack
 
 [multisplit_datanoack_split_pos_1]
-name = multisplit datanoack split pos 1
+name = MultiSplit datanoack split pos 1
+old_name = multisplit datanoack split pos 1
 author = hz
 label = recommended
 description = Потом опишу подробнее
 --lua-desync=multisplit:pos=1:tcp_flags_unset=ack
 
 [other_seqovl_fakedsplit_ttl2]
-name = fakedsplit ttl2 (без tls_mod)
+name = FakedSplit ttl2 · без tls_mod
+old_name = fakedsplit ttl2 (без tls_mod)
 author = hz
 label = recommended
 description = Fakedsplit с TTL=2, без модификации TLS
@@ -1065,7 +1185,8 @@ description = Fakedsplit с TTL=2, без модификации TLS
 --lua-desync=fakedsplit:pos=1:ip_ttl=2:ip6_ttl=2
 
 [other_seqovl_fakedsplit_ttl2_tlsmod]
-name = fakedsplit ttl2 (с tls_mod)
+name = FakedSplit ttl2 · с tls_mod
+old_name = fakedsplit ttl2 (с tls_mod)
 author = hz
 label = recommended
 description = Fakedsplit с TTL=2 и tls_mod=rnd,rndsni,dupsid
@@ -1081,7 +1202,8 @@ description = Базовая стратегия FakedDisorder с datanoack
 --lua-desync=fakeddisorder:pos=midsld:tcp_flags_unset=ack
 
 [other_multidisorder]
-name = multidisorder 6 md5sig
+name = MultiDisorder 6 md5sig
+old_name = multidisorder 6 md5sig
 author = hz
 label = stable
 description = Потом опишу подробнее
@@ -1089,13 +1211,15 @@ description = Потом опишу подробнее
 --lua-desync=multidisorder:pos=1,midsld:tcp_md5
 
 [fake_fakedsplit_autottl_2]
-name = fake fakedsplit badseq (рекомендуется для 80 порта)
+name = Fake FakedSplit badseq · для 80 порта
+old_name = fake fakedsplit badseq (рекомендуется для 80 порта)
 author = hz
 --lua-desync=fake:blob=fake_default_http:ip_autottl=2,3-20:ip6_autottl=2,3-20:tcp_ack=-66000:tcp_ts_up
 --lua-desync=fakedsplit:ip_autottl=2,3-20:ip6_autottl=2,3-20:tcp_ack=-66000:tcp_ts_up
 
 [multisplit_seqovl_2_midsld]
-name = fake multisplit seqovl 2 midsld
+name = Fake MultiSplit seqovl 2 midsld
+old_name = fake multisplit seqovl 2 midsld
 author = hz
 description = Потом опишу подробнее
 --lua-desync=fake:blob=0x0F0F0F0F:tcp_md5
@@ -1111,7 +1235,8 @@ blobs = tls17
 --lua-desync=multisplit:pos=2,midsld:tcp_md5:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [other5]
-name = multidisorder datanoack deepseek
+name = MultiDisorder datanoack deepseek
+old_name = multidisorder datanoack deepseek
 author = hz
 description = Потом опишу подробнее
 blobs = tls_deepseek
@@ -1119,40 +1244,46 @@ blobs = tls_deepseek
 --lua-desync=multidisorder:pos=midsld:tcp_flags_unset=ack
 
 [multisplit_1_midsld]
-name = multisplit seqovl 1 и midsld
+name = MultiSplit seqovl 1 и midsld
+old_name = multisplit seqovl 1 и midsld
 author = hz
 description = Базовая мультисплит с midsld
 --lua-desync=multisplit:pos=1,midsld
 
 [fake_multidisorder_1_split_pos_1]
-name = fake multidisorder badsum split pos 1
+name = Fake MultiDisorder badsum split pos 1
+old_name = fake multidisorder badsum split pos 1
 author = hz
 description = Базовая мультисплит с midsld
 --lua-desync=fake:blob=fake_default_tls:badsum
 --lua-desync=multidisorder:pos=1:badsum
 
 [multisplit_seqovl_midsld]
-name = multisplit seqovl midsld
+name = MultiSplit seqovl midsld
+old_name = multisplit seqovl midsld
 label = recommended
 description = Самая простая стратегия multisplit для Google
 --lua-desync=multisplit:pos=midsld-1:seqovl=1
 
 [bolvan_md5sig]
-name = BolVan md5sig 11
+name = Bol-van md5sig 11
+old_name = BolVan md5sig 11
 author = OrigBolvan
 description = Другой метод фуллинга + большее число повторений
 --lua-desync=fake:blob=fake_default_tls:repeats=11:tcp_md5
 --lua-desync=multidisorder:pos=1,midsld:tcp_md5
 
 [bolvan_md5sig_2]
-name = BolVan v3
+name = Bol-van v3
+old_name = BolVan v3
 author = Уфанет
 description = Другой метод фуллинга + большее число повторений + tls от гугла
 --lua-desync=fake:blob=fake_default_tls:repeats=11:tcp_md5:tls_mod=rnd,dupsid,sni=www.google.com
 --lua-desync=multidisorder:pos=1,midsld:tcp_md5
 
 [bolvan_fake_tls]
-name = BolVan fake TLS 4
+name = Bol-van Fake TLS 4
+old_name = BolVan fake TLS 4
 author = OrigBolvan
 description = Используется фейковый Clienthello
 blobs = tls18
@@ -1160,7 +1291,8 @@ blobs = tls18
 --lua-desync=multidisorder:pos=1,midsld:tcp_ack=-66000:tcp_ts_up
 
 [fake_multisplit_seqovl_md5sig]
-name = fake multisplit и seqovl 1 md5sig
+name = Fake MultiSplit и seqovl 1 md5sig
+old_name = fake multisplit и seqovl 1 md5sig
 author = hz
 description = Используется multisplit и seqovl 1
 blobs = tls4
@@ -1174,7 +1306,8 @@ description = Базовая стратегия десинхронизации m
 --lua-desync=multisplit:pos=sld+1:seqovl=1
 
 [multisplit_2_plus]
-name = Мультисплит и смещение +1 (вариант 2)
+name = Мультисплит и смещение +1 · вариант 2
+old_name = Мультисплит и смещение +1 (вариант 2)
 author = hz
 description = Базовая стратегия десинхронизации multisplit
 --lua-desync=multisplit:pos=2,host,sld+1:seqovl=1
@@ -1192,14 +1325,16 @@ description = Базовая стратегия десинхронизации m
 --lua-desync=multisplit:pos=sld-1:seqovl=1
 
 [multidisorder_fake_tls_1]
-name = YtDisBystro 3.4 v4 (без tls_mod)
+name = YTDisBystro 3.4 v4 · без tls_mod
+old_name = YtDisBystro 3.4 v4 (без tls_mod)
 author = hz
 description = multidisorder 7 blob=0x0F0F0F0F и badseq - без tls_mod
 --lua-desync=fake:blob=0x0F0F0F0F:tcp_ack=-66000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 --lua-desync=multidisorder:pos=7,sld+1:tcp_ack=-66000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [multidisorder_fake_tls_1_tlsmod]
-name = YtDisBystro 3.4 v4 (с tls_mod fonts)
+name = YTDisBystro 3.4 v4 · с tls_mod fonts
+old_name = YtDisBystro 3.4 v4 (с tls_mod fonts)
 author = hz
 description = multidisorder 7 tls14 с tls_mod=rnd,dupsid,sni=fonts.google.com
 blobs = tls14
@@ -1207,7 +1342,8 @@ blobs = tls14
 --lua-desync=multidisorder:pos=7,sld+1:tcp_ack=-66000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [multidisorder_fake_tls_2_tlsmod]
-name = multidisorder 7 calendar (с tls_mod)
+name = MultiDisorder 7 calendar · с tls_mod
+old_name = multidisorder 7 calendar (с tls_mod)
 author = hz
 description = multidisorder 7 tls14 с tls_mod=rnd,dupsid,sni=calendar.google.com
 blobs = tls14
@@ -1215,7 +1351,8 @@ blobs = tls14
 --lua-desync=multidisorder:pos=7,sld+1:tcp_ack=-66000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [multisplit_md5sig]
-name = multisplit и md5sig
+name = MultiSplit и md5sig
+old_name = multisplit и md5sig
 author = hz
 description = Экспериментальная стратегия multisplit и md5sig
 blobs = tls9
@@ -1224,7 +1361,8 @@ blobs = tls9
 --lua-desync=multisplit:pos=sld+1:tcp_md5:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [fake_multidisorder_seqovl_fake_tls]
-name = fake multidisorder seqovl fake tls
+name = Fake MultiDisorder seqovl Fake tls
+old_name = fake multidisorder seqovl fake tls
 author = hz
 description = ОЧЕНЬ сложная стратегия с фейком TLS и seqovl
 blobs = tls9
@@ -1233,7 +1371,8 @@ blobs = tls9
 --lua-desync=multidisorder:pos=sld+1:seqovl=1:tcp_md5:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [syndata_md5sig_2]
-name = multisplit и md5sig 9
+name = MultiSplit и md5sig 9
+old_name = multisplit и md5sig 9
 author = hz
 label = caution
 description = Стандартный multisplit и md5sig и фейк TLS 9
@@ -1242,7 +1381,8 @@ blobs = tls7, tls9
 --lua-desync=multisplit:pos=sld+1:tcp_md5:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [multisplit_seqovl_pos]
-name = multisplit seqovl с split pos
+name = MultiSplit seqovl с split pos
+old_name = multisplit seqovl с split pos
 author = hz
 description = Базовый multisplit и seqovl с фейками и нарезкой
 blobs = tls2
@@ -1250,7 +1390,8 @@ blobs = tls2
 --lua-desync=multisplit:pos=3:seqovl=2
 
 [multisplit_seqovl_pos_2]
-name = multisplit seqovl с split pos и badseq
+name = MultiSplit seqovl с split pos и badseq
+old_name = multisplit seqovl с split pos и badseq
 author = hz
 description = Базовый multisplit и seqovl с фейками, нарезкой и  badseq
 blobs = tls2n
@@ -1258,7 +1399,8 @@ blobs = tls2n
 --lua-desync=multisplit:pos=2:seqovl=2:tcp_ack=-66000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [multidisorder_repeats_md5sig_2]
-name = multidisorder с повторами и md5ig
+name = MultiDisorder с повторами и md5sig
+old_name = multidisorder с повторами и md5ig
 author = hz
 description = multidisorder с fake tls clienthello
 blobs = tls_google
@@ -1266,13 +1408,15 @@ blobs = tls_google
 --lua-desync=multidisorder:pos=1,midsld:tcp_md5
 
 [general_alt3183]
-name = general (alt v3) 1.6.1
+name = General ALT3 1.6.1
+old_name = general (alt v3) 1.6.1
 author = Flowseal
 description = split pos 1 autottl badseq repeats 8
 --lua-desync=multisplit:pos=1:repeats=8:tcp_ack=-66000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [ankddev10]
-name = aankddev (v10)
+name = Aankddev v10
+old_name = aankddev (v10)
 author = hz
 label = caution
 description = syndata multidisorder split pos 4 repeats 10 md5sig fake tls vk kyber
@@ -1280,7 +1424,8 @@ blobs = tls_vk_kyber
 --lua-desync=multidisorder:pos=4:repeats=10:tcp_md5
 
 [split2_seqovl_vk]
-name = Устаревший split2 с clienthello от VK
+name = Split2 с clienthello от VK · устаревшая
+old_name = Устаревший split2 с clienthello от VK
 author = hz
 description = split2 и 625 seqovl с sniext и vk ttl 2 от конторы пидорасов
 blobs = tls_vk
@@ -1288,7 +1433,8 @@ blobs = tls_vk
 --lua-desync=multisplit:pos=sniext:seqovl=625
 
 [split2_seqovl_google]
-name = Устаревший split2 с clienthello от google
+name = Split2 с clienthello от google · устаревшая
+old_name = Устаревший split2 с clienthello от google
 author = hz
 description = split2 и 1 seqovl с sniext и google ttl 4
 blobs = tls_google
@@ -1296,14 +1442,16 @@ blobs = tls_google
 --lua-desync=multisplit:pos=sniext:seqovl=1
 
 [split2_split]
-name = Устаревший split2 split
+name = Split2 split · устаревшая
+old_name = Устаревший split2 split
 author = hz
 description = Базовый split2 и нарезка
 --lua-desync=fake:blob=fake_default_tls
 --lua-desync=multisplit:pos=3:seqovl=2
 
 [split2_seqovl_652]
-name = split2 seqovl 652
+name = Split2 seqovl 652
+old_name = split2 seqovl 652
 author = hz
 description = Устаревший split2 с seqovl 652 и паттерном 4
 blobs = tls4
@@ -1311,7 +1459,8 @@ blobs = tls4
 --lua-desync=multisplit:pos=3,midsld-1:seqovl=652:seqovl_pattern=tls4
 
 [split2_split_google]
-name = Устаревший split2 split seqovl google
+name = Split2 split seqovl google · устаревшая
+old_name = Устаревший split2 split seqovl google
 author = hz
 description = Базовый split2 и нарезка с fake tls google
 blobs = tls_google
@@ -1319,7 +1468,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=3:seqovl=2
 
 [split2_split_2]
-name = Устаревший split2 split seqovl 2
+name = Split2 split seqovl 2 · устаревшая
+old_name = Устаревший split2 split seqovl 2
 author = hz
 description = Базовый split2 и нарезка с fake tls 2
 blobs = tls2
@@ -1327,7 +1477,8 @@ blobs = tls2
 --lua-desync=multisplit:pos=3:seqovl=2
 
 [fake_split2]
-name = Устаревший fake split2 seqovl 1
+name = Fake Split2 seqovl 1 · устаревшая
+old_name = Устаревший fake split2 seqovl 1
 author = hz
 description = fake и split2, нарезка с fake tls 2
 blobs = tls3
@@ -1335,14 +1486,16 @@ blobs = tls3
 --lua-desync=multisplit:pos=sniext:seqovl=1
 
 [split_seqovl]
-name = Устаревший split и seqovl
+name = Split и seqovl · устаревшая
+old_name = Устаревший split и seqovl
 author = hz
 description = Базовый split и seqovl
 blobs = tls_google
 --lua-desync=multisplit:pos=sniext:seqovl=1:ip_ttl=1:ip6_ttl=1
 
 [split_pos_3]
-name = split pos 3 и повторы
+name = Split pos 3 и повторы
+old_name = split pos 3 и повторы
 author = hz
 description = split разрез в 3 и 4 повтора
 --lua-desync=multisplit:pos=3:repeats=4:ip_autottl=1,3-20:ip6_autottl=1,3-20
@@ -1386,56 +1539,64 @@ description = Экспериментальная стратегия Fake+MultiSp
 --lua-desync=multisplit:pos=midsld:tcp_flags_unset=ack
 
 [multidisorder_1_midsld_seqovl_800_seqovl_pattern_tls_google]
-name = multidisorder 1 midsld seqovl 800 seqovl_pattern tls_google
+name = MultiDisorder 1 midsld seqovl 800 seqovl_pattern tls_google
+old_name = multidisorder 1 midsld seqovl 800 seqovl_pattern tls_google
 author = hz
 description = Потом опишу подробнее
 blobs = tls_google
 --lua-desync=multidisorder:pos=1,midsld:seqovl=800:seqovl_pattern=tls_google
 
 [tls_aggressive]
-name = 🔥 TLS Aggressive (browserleaks)
+name = TLS Aggressive · browserleaks
+old_name = 🔥 TLS Aggressive (browserleaks)
 author = Custom
 label = recommended
 description = Агрессивный обход для упорных DPI: 6 фейков + SNI split + disorder
 --lua-desync=tls_aggressive:fakes=6:ttl_start=1:ttl_step=1:badseq:split_sni
 
 [tls_aggressive_max]
-name = 🔥 TLS Aggressive MAX
+name = TLS Aggressive MAX
+old_name = 🔥 TLS Aggressive MAX
 author = Custom
 label = caution
 description = Максимальная агрессия: 11 фейков + все техники + seqovl
 --lua-desync=tls_aggressive:fakes=11:ttl_start=1:ttl_step=2:seqovl=211:badseq:split_sni
 
 [tls_aggressive_md5]
-name = 🔥 TLS Aggressive MD5sig
+name = TLS Aggressive MD5sig
+old_name = 🔥 TLS Aggressive MD5sig
 author = Custom
 label = recommended
 description = Агрессивный обход с md5sig fooling
 --lua-desync=tls_aggressive:fakes=6:ttl_start=1:md5sig:split_sni
 
 [tls_fake_flood]
-name = 🌊 TLS Fake Flood x11
+name = TLS Fake Flood x11
+old_name = 🌊 TLS Fake Flood x11
 author = Custom
 label = recommended
 description = Флуд 11 фейками + multidisorder
 --lua-desync=tls_fake_flood:fakes=11:badseq
 
 [tls_fake_flood_md5]
-name = 🌊 TLS Fake Flood x11 MD5sig
+name = TLS Fake Flood x11 MD5sig
+old_name = 🌊 TLS Fake Flood x11 MD5sig
 author = Custom
 label = recommended
 description = Флуд 11 фейками с md5sig + multidisorder
 --lua-desync=tls_fake_flood:fakes=11:md5sig
 
 [tls_fake_flood_max]
-name = 🌊 TLS Fake Flood x20 MAX
+name = TLS Fake Flood x20 MAX
+old_name = 🌊 TLS Fake Flood x20 MAX
 author = Custom
 label = caution
 description = Максимальный флуд: 20 фейков + custom split
 --lua-desync=tls_fake_flood:fakes=20:pos=1,host,midsld,sld+1,endhost,sniext+1:badseq
 
 [tls_combo_aggressive]
-name = 💥 TLS Combo (Fake + MultiSplit + Disorder)
+name = TLS Combo · Fake + MultiSplit + Disorder
+old_name = 💥 TLS Combo (Fake + MultiSplit + Disorder)
 author = Custom
 label = caution
 description = Комбинация: 6 фейков TTL=1 + multisplit SNI + disorder
@@ -1443,81 +1604,93 @@ description = Комбинация: 6 фейков TTL=1 + multisplit SNI + diso
 --lua-desync=tls_multisplit_sni:seqovl=211
 
 [tls_fake_simple]
-name = 🎭 TLS Fake Simple (browserleaks)
+name = TLS Fake Simple · browserleaks
+old_name = 🎭 TLS Fake Simple (browserleaks)
 author = Custom
 label = recommended
 description = Только фейки без нарезки - не ломает сайты
 --lua-desync=tls_fake_simple:fakes=6:ttl=3
 
 [tls_fake_simple_ttl2]
-name = 🎭 TLS Fake Simple TTL=2
+name = TLS Fake Simple TTL=2
+old_name = 🎭 TLS Fake Simple TTL=2
 author = Custom
 label = recommended
 description = Фейки с TTL=2 (ближе к DPI)
 --lua-desync=tls_fake_simple:fakes=6:ttl=2
 
 [tls_fake_simple_10]
-name = 🎭 TLS Fake Simple x10
+name = TLS Fake Simple x10
+old_name = 🎭 TLS Fake Simple x10
 author = Custom
 description = 10 фейков без нарезки
 --lua-desync=tls_fake_simple:fakes=10:ttl=2
 
 [tls_split_gentle]
-name = ✂️ TLS Split Gentle (midsld)
+name = TLS Split Gentle · midsld
+old_name = ✂️ TLS Split Gentle (midsld)
 author = Custom
 label = recommended
 description = Мягкая нарезка: только 2 части по midsld
 --lua-desync=tls_split_gentle:pos=midsld
 
 [tls_split_gentle_host]
-name = ✂️ TLS Split Gentle (host)
+name = TLS Split Gentle · host
+old_name = ✂️ TLS Split Gentle (host)
 author = Custom
 label = recommended
 description = Мягкая нарезка: только 2 части по host
 --lua-desync=tls_split_gentle:pos=host
 
 [tls_split_gentle_sld]
-name = ✂️ TLS Split Gentle (sld+1)
+name = TLS Split Gentle · sld+1
+old_name = ✂️ TLS Split Gentle (sld+1)
 author = Custom
 description = Мягкая нарезка: только 2 части по sld+1
 --lua-desync=tls_split_gentle:pos=sld+1
 
 [tls_fake_split]
-name = 🎭✂️ TLS Fake + Split
+name = TLS Fake + Split
+old_name = 🎭✂️ TLS Fake + Split
 author = Custom
 label = recommended
 description = 4 фейка + мягкая нарезка по midsld
 --lua-desync=tls_fake_split:fakes=4:ttl=2:pos=midsld
 
 [tls_fake_split_host]
-name = 🎭✂️ TLS Fake + Split (host)
+name = TLS Fake + Split · host
+old_name = 🎭✂️ TLS Fake + Split (host)
 author = Custom
 label = recommended
 description = 4 фейка + нарезка по host
 --lua-desync=tls_fake_split:fakes=4:ttl=2:pos=host
 
 [tls_disorder_gentle]
-name = 🔀 TLS Disorder Gentle (3 parts)
+name = TLS Disorder Gentle · 3 parts
+old_name = 🔀 TLS Disorder Gentle (3 parts)
 author = Custom
 label = recommended
 description = Мягкий disorder: только 3 части (host, endhost)
 --lua-desync=tls_disorder_gentle
 
 [tls_disorder_gentle_sld]
-name = 🔀 TLS Disorder Gentle (sld)
+name = TLS Disorder Gentle · sld
+old_name = 🔀 TLS Disorder Gentle (sld)
 author = Custom
 description = Мягкий disorder: 3 части (sld, endhost)
 --lua-desync=tls_disorder_gentle:pos1=sld:pos2=endhost
 
 [tls_fake_disorder_gentle]
-name = 🎭🔀 TLS Fake + Disorder Gentle
+name = TLS Fake + Disorder Gentle
+old_name = 🎭🔀 TLS Fake + Disorder Gentle
 author = Custom
 label = recommended
 description = 3 фейка + мягкий disorder (лучший баланс!)
 --lua-desync=tls_fake_disorder_gentle:fakes=3:ttl=2
 
 [tls_fake_disorder_gentle_6]
-name = 🎭🔀 TLS Fake x6 + Disorder Gentle
+name = TLS Fake x6 + Disorder Gentle
+old_name = 🎭🔀 TLS Fake x6 + Disorder Gentle
 author = Custom
 label = recommended
 description = 6 фейков + мягкий disorder
@@ -1634,14 +1807,16 @@ blobs = tls_google
 --lua-desync=fake:blob=tls_google:repeats=11:tcp_ts=-600000
 
 [syndata_multisplit_2_652_ts_up]
-name = Syndata + Multisplit pos=2 seqovl=652 tls_google
+name = Syndata + MultiSplit pos=2 seqovl=652 tls_google
+old_name = Syndata + Multisplit pos=2 seqovl=652 tls_google
 author = community
 blobs = tls_google
 --lua-desync=syndata:blob=tls_google:repeats=11:tcp_ack=-66000:tcp_ts_up
 --lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google
 
 [fake_8_tls_max_ts_multisplit_664]
-name = Fake TLS Max x8 TCP_TS + Multisplit seqovl=664
+name = Fake TLS Max x8 TCP_TS + MultiSplit seqovl=664
+old_name = Fake TLS Max x8 TCP_TS + Multisplit seqovl=664
 author = community
 blobs = tls_max
 --lua-desync=fake:blob=tls_max:repeats=8:tcp_ts=-600000
@@ -1658,7 +1833,8 @@ author = community
 --lua-desync=hostfakesplit:host=ozon.ru:repeats=4:tcp_ts=-600000:tcp_md5
 
 [fake_tls_auto_11]
-name = Fake TLS AUTO x11 (0x0+default_tls+multidisorder_legacy)
+name = Fake TLS AUTO x11 · 0x0+default_tls+multidisorder_legacy
+old_name = Fake TLS AUTO x11 (0x0+default_tls+multidisorder_legacy)
 author = community
 --lua-desync=fake:blob=0x00000000:repeats=11:tcp_ack=-66000:tcp_ts_up
 --lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:repeats=11:tcp_ack=-66000:tcp_ts_up
@@ -1666,7 +1842,8 @@ author = community
 
 # --- builtin stock basic coverage (generated) ---
 [stock_all_tcp_udp_v1_01]
-name = syndata + multidisorder_legacy 6,midsld+2
+name = Syndata + multidisorder_legacy 6,midsld+2
+old_name = syndata + multidisorder_legacy 6,midsld+2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета ALL TCP & UDP v1.txt (russia_blacklist_tcp)
@@ -1674,7 +1851,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=6,midsld+2
 
 [stock_dead_by_daylight_game_filter_02]
-name = send x2 + syndata tls7
+name = Send x2 + Syndata tls7
+old_name = send x2 + syndata tls7
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Dead by Daylight (game filter).txt (youtube_tcp)
@@ -1682,7 +1860,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=syndata:blob=tls7
 
 [stock_dead_by_daylight_v2_game_filter_03]
-name = send x2 + syndata tls_google + pass
+name = Send x2 + Syndata tls_google + pass
+old_name = send x2 + syndata tls_google + pass
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Dead by Daylight v2 (game filter).txt (telegram_tcp)
@@ -1691,7 +1870,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=pass
 
 [stock_dead_by_daylight_v2_game_filter_04]
-name = send x2 + syndata tls_google + fake tls_google x8 tls_client_hello ts1 + multisplit 1 tls_google s681 tls_client_hello
+name = Send x2 + Syndata tls_google + Fake tls_google x8 tls_client_hello ts1 + MultiSplit 1 tls_google s681 tls_client_hello
+old_name = send x2 + syndata tls_google + fake tls_google x8 tls_client_hello ts1 + multisplit 1 tls_google s681 tls_client_hello
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Dead by Daylight v2 (game filter).txt (other_tcp)
@@ -1701,7 +1881,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:payload=tls_client_hello
 
 [stock_default_multisplit_sni_game_filter_05]
-name = send x1 + syndata tls_max + tls_multisplit_sni tls_google s652
+name = Send x1 + Syndata tls_max + tls_multisplit_sni tls_google s652
+old_name = send x1 + syndata tls_max + tls_multisplit_sni tls_google s652
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default multisplit_sni (game filter).txt (googlevideo_tcp)
@@ -1710,7 +1891,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google
 
 [stock_default_multisplit_stun_game_filter_06]
-name = send x1 + syndata tls_max + multisplit 1 stun_pat 740
+name = Send x1 + Syndata tls_max + MultiSplit 1 stun_pat 740
+old_name = send x1 + syndata tls_max + multisplit 1 stun_pat 740
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default multisplit_stun (game filter).txt (googlevideo_tcp)
@@ -1719,13 +1901,15 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=1:seqovl=740:seqovl_pattern=stun_pat
 
 [send_x2_syndata_tls_google_multisplit_stun_pat_740]
-name = send x2 + syndata tls_google + multisplit 1 stun_pat 740
+name = Send x2 + Syndata tls_google + MultiSplit 1 stun_pat 740
+old_name = send x2 + syndata tls_google + multisplit 1 stun_pat 740
 --lua-desync=send:repeats=2
 --lua-desync=syndata:blob=tls_google
 --lua-desync=multisplit:pos=1:seqovl=740:seqovl_pattern=stun_pat
 
 [stock_default_v2_game_filter_07]
-name = fake fake_default_http x4 md5 + multidisorder host+1
+name = Fake fake_default_http x4 md5 + MultiDisorder host+1
+old_name = fake fake_default_http x4 md5 + multidisorder host+1
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default v2 (game filter).txt (cloudflare_tcp)
@@ -1733,7 +1917,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=host+1
 
 [stock_default_v3_game_filter_08]
-name = send x2 + multidisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1
+name = Send x2 + MultiDisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1
+old_name = send x2 + multidisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default v3 (game filter).txt (googlevideo_tcp)
@@ -1741,7 +1926,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
 
 [stock_default_v3_game_filter_09]
-name = send x2 + syndata tls_google + hostfakesplit_multi hosts x2 md5 ts-1000
+name = Send x2 + Syndata tls_google + hostfakesplit_multi hosts x2 md5 ts-1000
+old_name = send x2 + syndata tls_google + hostfakesplit_multi hosts x2 md5 ts-1000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default v3 (game filter).txt (telegram_tcp)
@@ -1750,7 +1936,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 [stock_default_v4_game_filter_10]
-name = send x1 + syndata tls_max + hostfakesplit_multi hosts x2 md5 ts-1000
+name = Send x1 + Syndata tls_max + hostfakesplit_multi hosts x2 md5 ts-1000
+old_name = send x1 + syndata tls_max + hostfakesplit_multi hosts x2 md5 ts-1000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default v4 (game filter).txt (googlevideo_tcp)
@@ -1759,7 +1946,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 [stock_default_v5_11]
-name = fake tls_max x8 badsum + multidisorder 1 tls_max s681
+name = Fake tls_max x8 badsum + MultiDisorder 1 tls_max s681
+old_name = fake tls_max x8 badsum + multidisorder 1 tls_max s681
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default v5.txt (youtube_tcp)
@@ -1767,7 +1955,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1:seqovl=681:seqovl_pattern=tls_max
 
 [stock_default_v5_12]
-name = send x3 + syndata tls_google + syndata
+name = Send x3 + Syndata tls_google + Syndata
+old_name = send x3 + syndata tls_google + syndata
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default v5.txt (discord_update_tcp)
@@ -1776,7 +1965,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=syndata
 
 [stock_default_v5_13]
-name = send x2 + multisplit tls5 s211
+name = Send x2 + MultiSplit tls5 s211
+old_name = send x2 + multisplit tls5 s211
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default v5.txt (telegram_tcp)
@@ -1784,7 +1974,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:seqovl=211:seqovl_pattern=tls5
 
 [stock_default_v5_14]
-name = send x2 + syndata tls_google + multisplit tls5 s211
+name = Send x2 + Syndata tls_google + MultiSplit tls5 s211
+old_name = send x2 + syndata tls_google + multisplit tls5 s211
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default v5.txt (rutracker_tcp)
@@ -1793,7 +1984,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:seqovl=211:seqovl_pattern=tls5
 
 [stock_preset_x_game_filter_15]
-name = send x2 + syndata tls_google + multisplit
+name = Send x2 + Syndata tls_google + MultiSplit
+old_name = send x2 + syndata tls_google + multisplit
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Preset X (game filter).txt (roblox_tcp)
@@ -1802,7 +1994,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit
 
 [stock_preset_x_v2_game_filter_16]
-name = send x2 + syndata tls_google + fakedsplit 1 x10 ack-66000
+name = Send x2 + Syndata tls_google + FakedSplit 1 x10 ack-66000
+old_name = send x2 + syndata tls_google + fakedsplit 1 x10 ack-66000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Preset X v2 (game filter).txt (warp_tcp)
@@ -1811,7 +2004,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pos=1:tcp_ack=-66000:repeats=10:ip_ttl=4:ip6_ttl=4
 
 [stock_preset_x_v2_game_filter_17]
-name = send x2 + syndata tls_google + multisplit tls_google s700
+name = Send x2 + Syndata tls_google + MultiSplit tls_google s700
+old_name = send x2 + syndata tls_google + multisplit tls_google s700
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Preset X v2 (game filter).txt (russia_youtube_rtmps_tcp)
@@ -1820,7 +2014,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:seqovl=700:seqovl_pattern=tls_google:tcp_flags_unset=ack
 
 [stock_preset_xy_game_filter_18]
-name = send x2 + syndata tls_google + multidisorder_legacy sniext+1,midsld s652
+name = Send x2 + Syndata tls_google + multidisorder_legacy sniext+1,midsld s652
+old_name = send x2 + syndata tls_google + multidisorder_legacy sniext+1,midsld s652
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Preset XY (game filter).txt (warp_tcp)
@@ -1829,7 +2024,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=sniext+1,midsld:seqovl=652
 
 [stock_syndata_multidisorder_legacy_game_filter_19]
-name = syndata + multidisorder_legacy 1,midsld
+name = Syndata + multidisorder_legacy 1,midsld
+old_name = syndata + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Syndata + MultiDisorder legacy (game filter).txt (youtube_tcp)
@@ -1837,7 +2033,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_20]
-name = send x2 + syndata fake_tls_8 + fake tls14 x6 tsup + multidisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1 + multidisorder_legacy
+name = Send x2 + Syndata fake_tls_8 + Fake tls14 x6 tsup + MultiDisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1 + multidisorder_legacy
+old_name = send x2 + syndata fake_tls_8 + fake tls14 x6 tsup + multidisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1 + multidisorder_legacy
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Syndata + MultiDisorder legacy WoW (game filter).txt (google_tcp)
@@ -1848,7 +2045,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_21]
-name = send x2 + syndata fake_tls_8 + fake tls18 x4 tsup ack-66000 + multidisorder_legacy 1,midsld
+name = Send x2 + Syndata fake_tls_8 + Fake tls18 x4 tsup ack-66000 + multidisorder_legacy 1,midsld
+old_name = send x2 + syndata fake_tls_8 + fake tls18 x4 tsup ack-66000 + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Syndata + MultiDisorder legacy WoW (game filter).txt (amazon_tcp)
@@ -1858,7 +2056,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_22]
-name = send x2 + syndata fake_tls_8 + fake fake_default_tls x6 tsup ack-66000 + multidisorder_legacy 1,midsld + tls_fake_flood
+name = Send x2 + Syndata fake_tls_8 + Fake fake_default_tls x6 tsup ack-66000 + multidisorder_legacy 1,midsld + tls_fake_flood
+old_name = send x2 + syndata fake_tls_8 + fake fake_default_tls x6 tsup ack-66000 + multidisorder_legacy 1,midsld + tls_fake_flood
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Syndata + MultiDisorder legacy WoW (game filter).txt (warp_tcp)
@@ -1869,7 +2068,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=tls_fake_flood:fakes=11:md5sig
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_22_simple]
-name = fake fake_default_tls x6 tsup ack-66000 + multidisorder_legacy 1,midsld
+name = Fake fake_default_tls x6 tsup ack-66000 + multidisorder_legacy 1,midsld
+old_name = fake fake_default_tls x6 tsup ack-66000 + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Syndata + MultiDisorder legacy WoW (game filter).txt (ipset_all)
@@ -1877,7 +2077,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_23]
-name = send x2 + syndata fake_tls_7 + fake tls_google x11 md5 + hostfakesplit_multi hosts x2 md5 ts-1000
+name = Send x2 + Syndata fake_tls_7 + Fake tls_google x11 md5 + hostfakesplit_multi hosts x2 md5 ts-1000
+old_name = send x2 + syndata fake_tls_7 + fake tls_google x11 md5 + hostfakesplit_multi hosts x2 md5 ts-1000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Syndata + MultiDisorder legacy WoW (game filter).txt (cloudflare_ipset_tcp)
@@ -1887,7 +2088,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_24]
-name = send x2 + syndata fake_tls_8 + fake tls1 md5 + multidisorder_legacy 1,midsld
+name = Send x2 + Syndata fake_tls_8 + Fake tls1 md5 + multidisorder_legacy 1,midsld
+old_name = send x2 + syndata fake_tls_8 + fake tls1 md5 + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Syndata + MultiDisorder legacy WoW (game filter).txt (russia_youtube_rtmps_tcp)
@@ -1897,14 +2099,16 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [stock_ultimate_main_riot_valorant_game_filter_25]
-name = send
+name = Send
+old_name = send
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Ultimate Main Riot + Valorant (game filter).txt (riotgames_tcp)
 --lua-desync=send
 
 [stock_ultimate_main_riot_valorant_game_filter_26]
-name = send + multidisorder 1
+name = Send + MultiDisorder 1
+old_name = send + multidisorder 1
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Ultimate Main Riot + Valorant (game filter).txt (russia_blacklist_tcp)
@@ -1912,7 +2116,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1
 
 [stock_general_alt_game_filter_27]
-name = fake tls_google x6 ts-600000 ip_id=zero + fakedsplit x6 ts-600000 ip_id=zero
+name = Fake tls_google x6 ts-600000 ip_id=zero + FakedSplit x6 ts-600000 ip_id=zero
+old_name = fake tls_google x6 ts-600000 ip_id=zero + fakedsplit x6 ts-600000 ip_id=zero
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT (game filter).txt (googlevideo_tcp)
@@ -1920,7 +2125,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000:ip_id=zero
 
 [stock_general_alt3_game_filter_30]
-name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000 + fake fake_default_http ts-600000 + hostfakesplit ya.ru ts-600000
+name = Fake tls_google ts-600000 + HostFakeSplit ya.ru ts-600000 + Fake fake_default_http ts-600000 + HostFakeSplit ya.ru ts-600000
+old_name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000 + fake fake_default_http ts-600000 + hostfakesplit ya.ru ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT3 (game filter).txt (list_general_tcp)
@@ -1930,7 +2136,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-600000
 
 [stock_general_alt3_31]
-name = fake tls_google ts-600000 + hostfakesplit www.google.com ts-600000 + fake fake_default_http ts-600000 + hostfakesplit www.google.com ts-600000
+name = Fake tls_google ts-600000 + HostFakeSplit www.google.com ts-600000 + Fake fake_default_http ts-600000 + HostFakeSplit www.google.com ts-600000
+old_name = fake tls_google ts-600000 + hostfakesplit www.google.com ts-600000 + fake fake_default_http ts-600000 + hostfakesplit www.google.com ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT3.txt (discord_tcp)
@@ -1940,7 +2147,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000
 
 [stock_general_alt8_game_filter_35]
-name = fake tls_google x6 seq2 + fake fake_default_http x6 seq2
+name = Fake tls_google x6 seq2 + Fake fake_default_http x6 seq2
+old_name = fake tls_google x6 seq2 + fake fake_default_http x6 seq2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT8 (game filter).txt (discord_tcp)
@@ -1948,7 +2156,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=fake_default_http:repeats=6:tcp_seq=2
 
 [stock_general_fake_tls_auto_alt_game_filter_36]
-name = fake fake_default_tls x8 seq2 + fakedsplit 2 x8 seq2
+name = Fake fake_default_tls x8 seq2 + FakedSplit 2 x8 seq2
+old_name = fake fake_default_tls x8 seq2 + fakedsplit 2 x8 seq2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general FAKE TLS AUTO ALT (game filter).txt (discord_tcp)
@@ -1956,7 +2165,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pos=2:repeats=8:tcp_seq=2
 
 [stock_general_fake_tls_auto_alt2_game_filter_37]
-name = fake fake_default_tls x8 seq1000 + multisplit 2 tls_google s681 x8
+name = Fake fake_default_tls x8 seq1000 + MultiSplit 2 tls_google s681 x8
+old_name = fake fake_default_tls x8 seq1000 + multisplit 2 tls_google s681 x8
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general FAKE TLS AUTO ALT2 (game filter).txt (discord_tcp)
@@ -1964,7 +2174,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=tls_google:repeats=8
 
 [stock_general_fake_tls_auto_alt3_game_filter_38]
-name = fake fake_default_tls x8 ts-600000 + multisplit 2 tls_google s681 x8 ts-600000
+name = Fake fake_default_tls x8 ts-600000 + MultiSplit 2 tls_google s681 x8 ts-600000
+old_name = fake fake_default_tls x8 ts-600000 + multisplit 2 tls_google s681 x8 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general FAKE TLS AUTO ALT3 (game filter).txt (discord_tcp)
@@ -1972,7 +2183,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=tls_google:repeats=8:tcp_ts=-600000
 
 [stock_general_fake_tls_auto_v2_game_filter_39]
-name = fake fake_default_tls x11 ack-66000 + multidisorder 1,midsld x11 ack-66000
+name = Fake fake_default_tls x11 ack-66000 + MultiDisorder 1,midsld x11 ack-66000
+old_name = fake fake_default_tls x11 ack-66000 + multidisorder 1,midsld x11 ack-66000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general FAKE TLS AUTO v2 (game filter).txt (discord_tcp)
@@ -1980,7 +2192,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1,midsld:tcp_ack=-66000:repeats=11
 
 [stock_general_simple_fake_game_filter_40]
-name = fake tls_google x6 ts-600000 + fake fake_default_http x6 ts-600000
+name = Fake tls_google x6 ts-600000 + Fake fake_default_http x6 ts-600000
+old_name = fake tls_google x6 ts-600000 + fake fake_default_http x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general SIMPLE FAKE (game filter).txt (discord_tcp)
@@ -1988,7 +2201,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=fake_default_http:repeats=6:tcp_ts=-600000
 
 [stock_tcp_41]
-name = syndata + multidisorder_legacy 1,midsld + syndata + multidisorder_legacy 1,midsld
+name = Syndata + multidisorder_legacy 1,midsld + Syndata + multidisorder_legacy 1,midsld
+old_name = syndata + multidisorder_legacy 1,midsld + syndata + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Ростелеком.txt (other_tcp)
@@ -1998,7 +2212,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld
 
 [stock_dead_by_daylight_v2_game_filter_01]
-name = send x2 + syndata tls_google + multisplit tls_google s700
+name = Send x2 + Syndata tls_google + MultiSplit tls_google s700 · autottl
+old_name = send x2 + syndata tls_google + multisplit tls_google s700
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Dead by Daylight v2 (game filter).txt (cloudflare_tcp)
@@ -2007,7 +2222,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:seqovl=700:seqovl_pattern=tls_google:tcp_flags_unset=ack
 
 [stock_default_multisplit_sni_game_filter_02]
-name = send x2 + syndata tls_google + tls_multisplit_sni tls_google s652
+name = Send x2 + Syndata tls_google + tls_multisplit_sni tls_google s652
+old_name = send x2 + syndata tls_google + tls_multisplit_sni tls_google s652
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default multisplit_sni (game filter).txt (cloudflare_tcp)
@@ -2016,7 +2232,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google
 
 [stock_default_multisplit_stun_game_filter_03]
-name = send x2 + syndata tls_google + multisplit 1 stun_pat s740
+name = Send x2 + Syndata tls_google + MultiSplit 1 stun_pat s740
+old_name = send x2 + syndata tls_google + multisplit 1 stun_pat s740
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета Default multisplit_stun (game filter).txt (cloudflare_tcp)
@@ -2025,7 +2242,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=1:seqovl=740:seqovl_pattern=stun_pat
 
 [stock_general_alt_game_filter_04]
-name = fake tls_google x6 ts-600000 + fakedsplit x6 ts-600000
+name = Fake tls_google x6 ts-600000 + FakedSplit x6 ts-600000
+old_name = fake tls_google x6 ts-600000 + fakedsplit x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT (game filter).txt (list_general_tcp)
@@ -2033,7 +2251,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000
 
 [stock_general_alt10_game_filter_05]
-name = fake fake_default_tls x3 ts-600000 + fake tls_4pda x3 ts-600000
+name = Fake fake_default_tls x3 ts-600000 + Fake tls_4pda x3 ts-600000
+old_name = fake fake_default_tls x3 ts-600000 + fake tls_4pda x3 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT10 (game filter).txt (cloudflare_tcp)
@@ -2041,7 +2260,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=tls_4pda:repeats=3:tcp_ts=-600000
 
 [stock_general_alt11_06]
-name = fake tls_google x8 ts-600000 + multisplit 2 tls_google s681 x8 ts-600000
+name = Fake tls_google x8 ts-600000 + MultiSplit 2 tls_google s681 x8 ts-600000
+old_name = fake tls_google x8 ts-600000 + multisplit 2 tls_google s681 x8 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT11.txt (googlevideo_tcp)
@@ -2049,7 +2269,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=tls_google:repeats=8:tcp_ts=-600000
 
 [stock_general_alt3_game_filter_08]
-name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000
+name = Fake tls_google ts-600000 + HostFakeSplit ya.ru ts-600000
+old_name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT3 (game filter).txt (cloudflare_tcp)
@@ -2057,7 +2278,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-600000
 
 [stock_general_alt4_game_filter_11]
-name = fake tls_google x6 seq1000 + multisplit 2
+name = Fake tls_google x6 seq1000 + MultiSplit 2
+old_name = fake tls_google x6 seq1000 + multisplit 2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT4 (game filter).txt (discord_tcp)
@@ -2065,7 +2287,8 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2
 
 [stock_general_alt5_game_filter_13]
-name = syndata + multidisorder 2
+name = Syndata + MultiDisorder 2
+old_name = syndata + multidisorder 2
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT5 (game filter).txt (discord_tcp)
@@ -2073,14 +2296,16 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=2
 
 [stock_general_alt7_game_filter_14]
-name = syndata
+name = Syndata
+old_name = syndata
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general ALT7 (game filter).txt (cloudflare_tcp)
 --lua-desync=syndata
 
 [stock_general_simple_fake_alt2_game_filter_17]
-name = fake tls_max x6 ts-600000
+name = Fake tls_max x6 ts-600000
+old_name = fake tls_max x6 ts-600000
 author = builtin
 label = stock
 description = Автодобавлено для распознавания встроенного пресета general SIMPLE FAKE ALT2 (game filter).txt (cloudflare_tcp)
@@ -2163,37 +2388,43 @@ blobs = fake_default_tls
 --lua-desync=tls_fake_flood:fakes=11:md5sig
 
 [fake_quic_google_10_autottl_all_tcp]
-name = Fake QUIC Google x10 AutoTTL payload=all (ipset_zapretkvn TCP catalog)
+name = Fake QUIC Google x10 AutoTTL payload=all · из ZapretKVN
+old_name = Fake QUIC Google x10 AutoTTL payload=all (ipset_zapretkvn TCP catalog)
 author = community
 blobs = quic_google
 --lua-desync=fake:blob=quic_google:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:repeats=10:payload=all
 
 [fake_quic_google_12_all_tcp]
-name = Fake QUIC Google x12 (ipset_zapretkvn TCP catalog)
+name = Fake QUIC Google x12 · из ZapretKVN
+old_name = Fake QUIC Google x12 (ipset_zapretkvn TCP catalog)
 author = community
 blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=12
 
 [fake_quic_google_10_all_tcp]
-name = Fake QUIC Google x10 (ipset_zapretkvn TCP catalog)
+name = Fake QUIC Google x10 · из ZapretKVN
+old_name = Fake QUIC Google x10 (ipset_zapretkvn TCP catalog)
 author = community
 blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=10
 
 [fake_quic_google_12_autottl2_all_tcp]
-name = Fake QUIC Google x12 AutoTTL2 payload=all in args (ipset_zapretkvn)
+name = Fake QUIC Google x12 AutoTTL2 payload=all · из ZapretKVN
+old_name = Fake QUIC Google x12 AutoTTL2 payload=all in args (ipset_zapretkvn)
 author = community
 blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=12:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all
 
 [fake_quic_google_2_all_tcp]
-name = Fake QUIC Google x2 (ipset_zapretkvn TCP catalog)
+name = Fake QUIC Google x2 · из ZapretKVN
+old_name = Fake QUIC Google x2 (ipset_zapretkvn TCP catalog)
 author = community
 blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=2
 
 [fake_quic2_udplen_deadbeef_tcp]
-name = Fake quic2 x7 + UDPLen deadbeef (ipset_zapretkvn TCP catalog)
+name = Fake quic2 x7 + UDPLen deadbeef · из ZapretKVN
+old_name = Fake quic2 x7 + UDPLen deadbeef (ipset_zapretkvn TCP catalog)
 author = community
 blobs = quic2
 --lua-desync=fake:blob=quic2:repeats=7
@@ -2201,28 +2432,32 @@ blobs = quic2
 
 # --- missing builtin strategy coverage (generated from presets) ---
 [stock_missing_199_tcp_01]
-name = general 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:ip_id=zero
 
 [stock_missing_199_tcp_02]
-name = general 1.9.9 (game filter) / Telegram
+name = General 1.9.9 · из Telegram
+old_name = general 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general 1.9.9 (game filter).txt (Telegram) в basic-режиме.
 --lua-desync=multisplit:pos=1:seqovl=568:seqovl_pattern=tls_4pda
 
 [stock_missing_199_tcp_03]
-name = general 1.9.9 (game filter) / Steam
+name = General 1.9.9 · из Steam
+old_name = general 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general 1.9.9 (game filter).txt (Steam) в basic-режиме.
 --lua-desync=multisplit:payload=all:pos=1:seqovl=568:seqovl_pattern=tls_4pda
 
 [stock_missing_199_tcp_04]
-name = general ALT1 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General ALT1 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general ALT1 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT1 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
@@ -2230,7 +2465,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fakedsplit:pattern=0x00:tcp_ts=-600000:ip_id=zero:repeats=6
 
 [stock_missing_199_tcp_05]
-name = general ALT1 1.9.9 (game filter) / discord.media
+name = General ALT1 1.9.9 · из discord.media
+old_name = general ALT1 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT1 1.9.9 (game filter).txt (discord.media) в basic-режиме.
@@ -2238,7 +2474,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fakedsplit:pattern=0x00:tcp_ts=-600000:repeats=6
 
 [stock_missing_199_tcp_06]
-name = general ALT1 1.9.9 (game filter) / Telegram
+name = General ALT1 1.9.9 · из Telegram
+old_name = general ALT1 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT1 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2248,7 +2485,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=http_max:tcp_ts=-600000:repeats=6
 
 [stock_missing_199_tcp_07]
-name = general ALT1 1.9.9 (game filter) / Steam
+name = General ALT1 1.9.9 · из Steam
+old_name = general ALT1 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT1 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2259,21 +2497,24 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=zero256:tcp_ts=-600000:repeats=6
 
 [stock_missing_199_tcp_08]
-name = general ALT10 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General ALT10 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general ALT10 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT10 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
 --lua-desync=fake:blob=tls_google:tcp_ts=-600000:ip_id=zero:repeats=6
 
 [stock_missing_199_tcp_09]
-name = general ALT10 1.9.9 (game filter) / discord.media
+name = General ALT10 1.9.9 · из discord.media
+old_name = general ALT10 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT10 1.9.9 (game filter).txt (discord.media) в basic-режиме.
 --lua-desync=fake:blob=tls_google:tcp_ts=-600000:repeats=6
 
 [stock_missing_199_tcp_10]
-name = general ALT10 1.9.9 (game filter) / Telegram
+name = General ALT10 1.9.9 · из Telegram
+old_name = general ALT10 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT10 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2282,7 +2523,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=http_max:tcp_ts=-600000:repeats=6
 
 [stock_missing_199_tcp_11]
-name = general ALT10 1.9.9 (game filter) / Steam
+name = General ALT10 1.9.9 · из Steam
+old_name = general ALT10 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT10 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2292,7 +2534,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=zero256:tcp_ts=-600000:repeats=6
 
 [stock_missing_199_tcp_12]
-name = general ALT11 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General ALT11 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general ALT11 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT11 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
@@ -2300,7 +2543,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:ip_id=zero
 
 [stock_missing_199_tcp_13]
-name = general ALT11 1.9.9 (game filter) / discord.media
+name = General ALT11 1.9.9 · из discord.media
+old_name = general ALT11 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT11 1.9.9 (game filter).txt (discord.media) в basic-режиме.
@@ -2308,7 +2552,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [stock_missing_199_tcp_14]
-name = general ALT11 1.9.9 (game filter) / Telegram
+name = General ALT11 1.9.9 · из Telegram
+old_name = general ALT11 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT11 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2317,7 +2562,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max
 
 [stock_missing_199_tcp_15]
-name = general ALT11 1.9.9 (game filter) / Steam
+name = General ALT11 1.9.9 · из Steam
+old_name = general ALT11 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT11 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2328,14 +2574,16 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:payload=all:pos=1:seqovl=664:seqovl_pattern=tls_max
 
 [stock_missing_199_tcp_16]
-name = general ALT12 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General ALT12 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general ALT12 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT12 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:ip_id=zero
 
 [stock_missing_199_tcp_17]
-name = general ALT12 1.9.9 (game filter) / Telegram
+name = General ALT12 1.9.9 · из Telegram
+old_name = general ALT12 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT12 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2344,7 +2592,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max
 
 [stock_missing_199_tcp_18]
-name = general ALT12 1.9.9 (game filter) / Steam
+name = General ALT12 1.9.9 · из Steam
+old_name = general ALT12 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT12 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2355,21 +2604,24 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:payload=all:pos=1:seqovl=664:seqovl_pattern=tls_max
 
 [stock_missing_199_tcp_19]
-name = general ALT2 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General ALT2 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general ALT2 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT2 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
 --lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google:ip_id=zero
 
 [stock_missing_199_tcp_20]
-name = general ALT2 1.9.9 (game filter) / Steam
+name = General ALT2 1.9.9 · из Steam
+old_name = general ALT2 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT2 1.9.9 (game filter).txt (Steam) в basic-режиме.
 --lua-desync=multisplit:payload=all:pos=2:seqovl=652:seqovl_pattern=tls_google
 
 [stock_missing_199_tcp_21]
-name = general ALT3 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General ALT3 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general ALT3 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT3 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
@@ -2378,7 +2630,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:ip_id=zero:nofake2
 
 [stock_missing_199_tcp_22]
-name = general ALT3 1.9.9 (game filter) / discord.media
+name = General ALT3 1.9.9 · из discord.media
+old_name = general ALT3 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT3 1.9.9 (game filter).txt (discord.media) в basic-режиме.
@@ -2387,7 +2640,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:nofake2
 
 [stock_missing_199_tcp_23]
-name = general ALT3 1.9.9 (game filter) / Telegram
+name = General ALT3 1.9.9 · из Telegram
+old_name = general ALT3 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT3 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2396,7 +2650,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-600000:nofake2
 
 [stock_missing_199_tcp_24]
-name = general ALT4 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General ALT4 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general ALT4 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT4 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
@@ -2405,7 +2660,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=2:ip_id=zero
 
 [stock_missing_199_tcp_25]
-name = general ALT4 1.9.9 (game filter) / discord.media
+name = General ALT4 1.9.9 · из discord.media
+old_name = general ALT4 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT4 1.9.9 (game filter).txt (discord.media) в basic-режиме.
@@ -2414,7 +2670,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=2
 
 [stock_missing_199_tcp_26]
-name = general ALT4 1.9.9 (game filter) / Telegram
+name = General ALT4 1.9.9 · из Telegram
+old_name = general ALT4 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT4 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2424,7 +2681,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=2
 
 [stock_missing_199_tcp_27]
-name = general ALT4 1.9.9 (game filter) / Steam
+name = General ALT4 1.9.9 · из Steam
+old_name = general ALT4 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT4 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2435,21 +2693,24 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:payload=all:pos=2
 
 [stock_missing_199_tcp_28]
-name = general ALT6 1.9.9 (game filter) / Steam
+name = General ALT6 1.9.9 · из Steam
+old_name = general ALT6 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT6 1.9.9 (game filter).txt (Steam) в basic-режиме.
 --lua-desync=multisplit:payload=all:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [stock_missing_199_tcp_29]
-name = general ALT7 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General ALT7 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general ALT7 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT7 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
 --lua-desync=multisplit:pos=2,sniext+1:seqovl=679:seqovl_pattern=tls_google:ip_id=zero
 
 [stock_missing_199_tcp_30]
-name = general ALT8 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General ALT8 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general ALT8 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT8 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
@@ -2457,7 +2718,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=fake_default_http:tcp_seq=2:repeats=6:ip_id=zero
 
 [stock_missing_199_tcp_31]
-name = general ALT8 1.9.9 (game filter) / discord.media
+name = General ALT8 1.9.9 · из discord.media
+old_name = general ALT8 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT8 1.9.9 (game filter).txt (discord.media) в basic-режиме.
@@ -2465,7 +2727,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=fake_default_http:tcp_seq=2:repeats=6
 
 [stock_missing_199_tcp_32]
-name = general ALT8 1.9.9 (game filter) / Telegram
+name = General ALT8 1.9.9 · из Telegram
+old_name = general ALT8 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT8 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2473,7 +2736,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=fake_http_max:tcp_seq=2:repeats=6
 
 [stock_missing_199_tcp_33]
-name = general ALT8 1.9.9 (game filter) / Steam
+name = General ALT8 1.9.9 · из Steam
+old_name = general ALT8 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT8 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2482,42 +2746,48 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=zero256:tcp_seq=2:repeats=6
 
 [stock_missing_199_tcp_34]
-name = general ALT9 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General ALT9 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general ALT9 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT9 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:repeats=4:ip_id=zero
 
 [stock_missing_199_tcp_35]
-name = general ALT9 1.9.9 (game filter) / discord.media
+name = General ALT9 1.9.9 · из discord.media
+old_name = general ALT9 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT9 1.9.9 (game filter).txt (discord.media) в basic-режиме.
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:repeats=4
 
 [stock_missing_199_tcp_36]
-name = general ALT9 1.9.9 (game filter) / Telegram
+name = General ALT9 1.9.9 · из Telegram
+old_name = general ALT9 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT9 1.9.9 (game filter).txt (Telegram) в basic-режиме.
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_md5:repeats=4
 
 [stock_missing_199_tcp_37]
-name = general ALT9 1.9.9 (game filter) / Steam
+name = General ALT9 1.9.9 · из Steam
+old_name = general ALT9 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT9 1.9.9 (game filter).txt (Steam) в basic-режиме.
 --lua-desync=hostfakesplit:payload=all:host=ozon.ru:tcp_ts=-600000:repeats=4
 
 [stock_missing_199_tcp_38]
-name = general ALT9 1.9.9 (game filter) / Cloudflare TCP
+name = General ALT9 1.9.9 · из Cloudflare TCP
+old_name = general ALT9 1.9.9 (game filter) / Cloudflare TCP
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT9 1.9.9 (game filter).txt (Cloudflare TCP) в basic-режиме.
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:repeats=4
 
 [stock_missing_199_tcp_39]
-name = general FAKE TLS AUTO 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General Fake TLS Auto 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general FAKE TLS AUTO 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
@@ -2527,7 +2797,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_id=zero
 
 [stock_missing_199_tcp_40]
-name = general FAKE TLS AUTO 1.9.9 (game filter) / discord.media
+name = General Fake TLS Auto 1.9.9 · из discord.media
+old_name = general FAKE TLS AUTO 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO 1.9.9 (game filter).txt (discord.media) в basic-режиме.
@@ -2537,7 +2808,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multidisorder_legacy:pos=1,midsld
 
 [stock_missing_199_tcp_41]
-name = general FAKE TLS AUTO 1.9.9 (game filter) / Telegram
+name = General Fake TLS Auto 1.9.9 · из Telegram
+old_name = general FAKE TLS AUTO 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2547,7 +2819,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multidisorder_legacy:pos=1,midsld
 
 [stock_missing_199_tcp_42]
-name = general FAKE TLS AUTO 1.9.9 (game filter) / Steam
+name = General Fake TLS Auto 1.9.9 · из Steam
+old_name = general FAKE TLS AUTO 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2558,7 +2831,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multidisorder_legacy:payload=all:pos=1,midsld
 
 [stock_missing_199_tcp_43]
-name = general FAKE TLS AUTO ALT 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General Fake TLS Auto ALT 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general FAKE TLS AUTO ALT 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
@@ -2567,7 +2841,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fakedsplit:pos=1:tcp_seq=2:repeats=8:ip_id=zero
 
 [stock_missing_199_tcp_44]
-name = general FAKE TLS AUTO ALT 1.9.9 (game filter) / discord.media
+name = General Fake TLS Auto ALT 1.9.9 · из discord.media
+old_name = general FAKE TLS AUTO ALT 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT 1.9.9 (game filter).txt (discord.media) в basic-режиме.
@@ -2576,7 +2851,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fakedsplit:pos=1:tcp_seq=2:repeats=8
 
 [stock_missing_199_tcp_45]
-name = general FAKE TLS AUTO ALT 1.9.9 (game filter) / Telegram
+name = General Fake TLS Auto ALT 1.9.9 · из Telegram
+old_name = general FAKE TLS AUTO ALT 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2585,7 +2861,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fakedsplit:pos=1:tcp_seq=2:repeats=8
 
 [stock_missing_199_tcp_46]
-name = general FAKE TLS AUTO ALT 1.9.9 (game filter) / Steam
+name = General Fake TLS Auto ALT 1.9.9 · из Steam
+old_name = general FAKE TLS AUTO ALT 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2595,7 +2872,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fakedsplit:payload=all:pos=1:tcp_seq=2:repeats=8
 
 [stock_missing_199_tcp_47]
-name = general FAKE TLS AUTO ALT2 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General Fake TLS Auto ALT2 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general FAKE TLS AUTO ALT2 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
@@ -2604,7 +2882,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:ip_id=zero
 
 [stock_missing_199_tcp_48]
-name = general FAKE TLS AUTO ALT2 1.9.9 (game filter) / discord.media
+name = General Fake TLS Auto ALT2 1.9.9 · из discord.media
+old_name = general FAKE TLS AUTO ALT2 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt (discord.media) в basic-режиме.
@@ -2613,7 +2892,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [stock_missing_199_tcp_49]
-name = general FAKE TLS AUTO ALT2 1.9.9 (game filter) / Telegram
+name = General Fake TLS Auto ALT2 1.9.9 · из Telegram
+old_name = general FAKE TLS AUTO ALT2 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2622,7 +2902,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [stock_missing_199_tcp_50]
-name = general FAKE TLS AUTO ALT2 1.9.9 (game filter) / Steam
+name = General Fake TLS Auto ALT2 1.9.9 · из Steam
+old_name = general FAKE TLS AUTO ALT2 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2632,7 +2913,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:payload=all:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [stock_missing_199_tcp_51]
-name = general FAKE TLS AUTO ALT3 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General Fake TLS Auto ALT3 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general FAKE TLS AUTO ALT3 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
@@ -2641,7 +2923,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:ip_id=zero
 
 [stock_missing_199_tcp_52]
-name = general FAKE TLS AUTO ALT3 1.9.9 (game filter) / discord.media
+name = General Fake TLS Auto ALT3 1.9.9 · из discord.media
+old_name = general FAKE TLS AUTO ALT3 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt (discord.media) в basic-режиме.
@@ -2650,7 +2933,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [stock_missing_199_tcp_53]
-name = general FAKE TLS AUTO ALT3 1.9.9 (game filter) / Telegram
+name = General Fake TLS Auto ALT3 1.9.9 · из Telegram
+old_name = general FAKE TLS AUTO ALT3 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2659,7 +2943,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [stock_missing_199_tcp_54]
-name = general FAKE TLS AUTO ALT3 1.9.9 (game filter) / Steam
+name = General Fake TLS Auto ALT3 1.9.9 · из Steam
+old_name = general FAKE TLS AUTO ALT3 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2669,7 +2954,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=multisplit:payload=all:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [stock_missing_199_tcp_55]
-name = general SIMPLE FAKE 1.9.9 (game filter) / Telegram
+name = General Simple Fake 1.9.9 · из Telegram
+old_name = general SIMPLE FAKE 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general SIMPLE FAKE 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2678,7 +2964,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=http_max:tcp_ts=-600000:repeats=6
 
 [stock_missing_199_tcp_56]
-name = general SIMPLE FAKE 1.9.9 (game filter) / Steam
+name = General Simple Fake 1.9.9 · из Steam
+old_name = general SIMPLE FAKE 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general SIMPLE FAKE 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2688,21 +2975,24 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=zero256:tcp_ts=-600000:repeats=6
 
 [stock_missing_199_tcp_57]
-name = general SIMPLE FAKE ALT 1.9.9 (game filter) / googlevideo.com (CDN сервера)
+name = General Simple Fake ALT 1.9.9 · из googlevideo.com (CDN сервера)
+old_name = general SIMPLE FAKE ALT 1.9.9 (game filter) / googlevideo.com (CDN сервера)
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general SIMPLE FAKE ALT 1.9.9 (game filter).txt (googlevideo.com (CDN сервера)) в basic-режиме.
 --lua-desync=fake:blob=tls_google:tcp_seq=2:ip_id=zero:repeats=6
 
 [stock_missing_199_tcp_58]
-name = general SIMPLE FAKE ALT 1.9.9 (game filter) / discord.media
+name = General Simple Fake ALT 1.9.9 · из discord.media
+old_name = general SIMPLE FAKE ALT 1.9.9 (game filter) / discord.media
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general SIMPLE FAKE ALT 1.9.9 (game filter).txt (discord.media) в basic-режиме.
 --lua-desync=fake:blob=tls_google:tcp_seq=2:repeats=6
 
 [stock_missing_199_tcp_59]
-name = general SIMPLE FAKE ALT 1.9.9 (game filter) / Telegram
+name = General Simple Fake ALT 1.9.9 · из Telegram
+old_name = general SIMPLE FAKE ALT 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general SIMPLE FAKE ALT 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2711,7 +3001,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=http_max:tcp_seq=2:repeats=6
 
 [stock_missing_199_tcp_60]
-name = general SIMPLE FAKE ALT 1.9.9 (game filter) / Steam
+name = General Simple Fake ALT 1.9.9 · из Steam
+old_name = general SIMPLE FAKE ALT 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general SIMPLE FAKE ALT 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2721,7 +3012,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=zero256:tcp_seq=2:repeats=6
 
 [stock_missing_199_tcp_61]
-name = general SIMPLE FAKE ALT2 1.9.9 (game filter) / Telegram
+name = General Simple Fake ALT2 1.9.9 · из Telegram
+old_name = general SIMPLE FAKE ALT2 1.9.9 (game filter) / Telegram
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general SIMPLE FAKE ALT2 1.9.9 (game filter).txt (Telegram) в basic-режиме.
@@ -2730,7 +3022,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=http_max:tcp_ts=-600000:repeats=6
 
 [stock_missing_199_tcp_62]
-name = general SIMPLE FAKE ALT2 1.9.9 (game filter) / Steam
+name = General Simple Fake ALT2 1.9.9 · из Steam
+old_name = general SIMPLE FAKE ALT2 1.9.9 (game filter) / Steam
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general SIMPLE FAKE ALT2 1.9.9 (game filter).txt (Steam) в basic-режиме.
@@ -2741,14 +3034,16 @@ description = Автодобавлено для распознавания но�
 
 
 [stock_builtin_coverage_tcp_003]
-name = Default v1 (game filter) / js.rbxcdn.com
+name = Default v1 · из js.rbxcdn.com
+old_name = Default v1 (game filter) / js.rbxcdn.com
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из Default v1 (game filter).txt (js.rbxcdn.com) определялся как готовая стратегия, а не custom.
 --lua-desync=multisplit:seqovl=681:seqovl_pattern=stun_pat
 
 [stock_builtin_coverage_tcp_004]
-name = Default v1 (game filter) / tr.rbxcdn.com
+name = Default v1 · из tr.rbxcdn.com
+old_name = Default v1 (game filter) / tr.rbxcdn.com
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из Default v1 (game filter).txt (tr.rbxcdn.com) определялся как готовая стратегия, а не custom.
@@ -2757,7 +3052,8 @@ description = Добавлено, чтобы встроенный профиль
 --lua-desync=multisplit:seqovl=1000:seqovl_pattern=stun_pat
 
 [stock_builtin_coverage_tcp_005]
-name = Preset X v2 (game filter) / 18+ сайты
+name = Preset X v2 · из «18+ сайты»
+old_name = Preset X v2 (game filter) / 18+ сайты
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из Preset X v2 (game filter).txt (18+ сайты) определялся как готовая стратегия, а не custom.
@@ -2766,7 +3062,8 @@ description = Добавлено, чтобы встроенный профиль
 --lua-desync=multisplit:pos=midsld
 
 [stock_builtin_coverage_tcp_006]
-name = Syndata + MultiDisorder legacy WoW (game filter) / Все сайты (айпи)
+name = Syndata + MultiDisorder legacy WoW · из «Все сайты (айпи)»
+old_name = Syndata + MultiDisorder legacy WoW (game filter) / Все сайты (айпи)
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из Syndata + MultiDisorder legacy WoW (game filter).txt (Все сайты (айпи)) определялся как готовая стратегия, а не custom.
@@ -2776,91 +3073,104 @@ description = Добавлено, чтобы встроенный профиль
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [stock_builtin_coverage_tcp_009]
-name = general ALT1 1.9.9 (game filter) / DeepSeek
+name = General ALT1 1.9.9 · из DeepSeek
+old_name = general ALT1 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general ALT1 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=fake_stun_as_tls:tcp_ts=-600000:repeats=6
 
 [stock_builtin_coverage_tcp_010]
-name = general ALT11 1.9.9 (game filter) / DeepSeek
+name = General ALT11 1.9.9 · из DeepSeek
+old_name = general ALT11 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general ALT11 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=fake_stun_as_tls:tcp_ts=-600000:repeats=8
 
 [stock_builtin_coverage_tcp_011]
-name = general ALT12 1.9.9 (game filter) / DeepSeek
+name = General ALT12 1.9.9 · из DeepSeek
+old_name = general ALT12 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general ALT12 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=fake_stun:tcp_ts=-600000:repeats=8
 
 [stock_builtin_coverage_tcp_012]
-name = general ALT3 1.9.9 (game filter) / DeepSeek
+name = General ALT3 1.9.9 · из DeepSeek
+old_name = general ALT3 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general ALT3 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=fake_default_tls:tcp_ts=-600000:tls_mod=rnd,dupsid,sni=ya.ru
 
 [stock_builtin_coverage_tcp_013]
-name = general ALT4 1.9.9 (game filter) / DeepSeek
+name = General ALT4 1.9.9 · из DeepSeek
+old_name = general ALT4 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general ALT4 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=fake_stun_as_tls:tcp_seq=1000:repeats=6
 
 [stock_builtin_coverage_tcp_014]
-name = general ALT5 / Мои сайты
+name = General ALT5 · из «Мои сайты»
+old_name = general ALT5 / Мои сайты
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general ALT5.txt (Мои сайты) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=quic_google:repeats=6
 
 [stock_builtin_coverage_tcp_015]
-name = general ALT8 1.9.9 (game filter) / DeepSeek
+name = General ALT8 1.9.9 · из DeepSeek
+old_name = general ALT8 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general ALT8 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=fake_default_tls:tcp_seq=2:repeats=6
 
 [stock_builtin_coverage_tcp_016]
-name = general FAKE TLS AUTO 1.9.9 (game filter) / DeepSeek
+name = General Fake TLS Auto 1.9.9 · из DeepSeek
+old_name = general FAKE TLS AUTO 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general FAKE TLS AUTO 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=tls_zero4:tcp_seq=-10000:repeats=11
 
 [stock_builtin_coverage_tcp_017]
-name = general FAKE TLS AUTO ALT 1.9.9 (game filter) / DeepSeek
+name = General Fake TLS Auto ALT 1.9.9 · из DeepSeek
+old_name = general FAKE TLS AUTO ALT 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general FAKE TLS AUTO ALT 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=fake_default_tls:tcp_seq=2:repeats=8:tls_mod=rnd,dupsid,sni=www.google.com
 
 [stock_builtin_coverage_tcp_018]
-name = general FAKE TLS AUTO ALT2 1.9.9 (game filter) / DeepSeek
+name = General Fake TLS Auto ALT2 1.9.9 · из DeepSeek
+old_name = general FAKE TLS AUTO ALT2 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general FAKE TLS AUTO ALT2 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=fake_default_tls:tcp_seq=10000000:repeats=8:tls_mod=rnd,dupsid,sni=www.google.com
 
 [stock_builtin_coverage_tcp_019]
-name = general FAKE TLS AUTO ALT3 1.9.9 (game filter) / DeepSeek
+name = General Fake TLS Auto ALT3 1.9.9 · из DeepSeek
+old_name = general FAKE TLS AUTO ALT3 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general FAKE TLS AUTO ALT3 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=fake_default_tls:tcp_ts=-600000:repeats=8:tls_mod=rnd,dupsid,sni=www.google.com
 
 [stock_builtin_coverage_tcp_020]
-name = general SIMPLE FAKE 1.9.9 (game filter) / DeepSeek
+name = General Simple Fake 1.9.9 · из DeepSeek
+old_name = general SIMPLE FAKE 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general SIMPLE FAKE 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=tls_stun:tcp_ts=-600000:repeats=6
 
 [stock_builtin_coverage_tcp_021]
-name = general SIMPLE FAKE ALT 1.9.9 (game filter) / DeepSeek
+name = General Simple Fake ALT 1.9.9 · из DeepSeek
+old_name = general SIMPLE FAKE ALT 1.9.9 (game filter) / DeepSeek
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general SIMPLE FAKE ALT 1.9.9 (game filter).txt (DeepSeek) определялся как готовая стратегия, а не custom.
@@ -2869,14 +3179,16 @@ description = Добавлено, чтобы встроенный профиль
 # --- Flowseal general EXP 1.10.0 ---
 
 [flowseal_exp_1100_google]
-name = Flowseal EXP 1.10.0 / Google
+name = Flowseal EXP 1.10.0 · из Google
+old_name = Flowseal EXP 1.10.0 / Google
 author = Flowseal
 label = experimental
 description = Подмена Host с отметкой времени TCP для Google и YouTube.
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:tcp_ts_up:ip_id=zero
 
 [flowseal_exp_1100_tcp]
-name = Flowseal EXP 1.10.0 / TCP
+name = Flowseal EXP 1.10.0 · из TCP
+old_name = Flowseal EXP 1.10.0 / TCP
 author = Flowseal
 label = experimental
 description = Поддельный TLS и перекрытие начала настоящего пакета.
@@ -2885,7 +3197,8 @@ blobs = tls_max,stun2
 --lua-desync=multisplit:pos=1:seqovl=480:seqovl_pattern=stun2
 
 [multisplit_fake_tls_hostfakesplit_rzd]
-name = multisplit fake_default_tls + hostfakesplit rzd.ru
+name = MultiSplit fake_default_tls + HostFakeSplit rzd.ru
+old_name = multisplit fake_default_tls + hostfakesplit rzd.ru
 label = experimental
 --lua-desync=multisplit:blob=fake_default_tls:tcp_ts=-1000:pos=2:nodrop:repeats=4
 --lua-desync=hostfakesplit:host=rzd.ru:midhost=host-2:badsum:tcp_ack=-66000:tcp_ts_up
@@ -2893,59 +3206,68 @@ label = experimental
 # --- Flowseal 1.10.3 winws2 ports (generated) ---
 
 [flowseal_1103_general_game_other]
-name = Flowseal 1.10.3 / general / Game other
+name = Flowseal General 1.10.3 · из Game other
+old_name = Flowseal 1.10.3 / general / Game other
 author = Flowseal
 label = experimental
 blobs = tls_4pda
 --lua-desync=multisplit:pos=1:seqovl=568:seqovl_pattern=tls_4pda:payload=~empty
 
 [flowseal_1103_alt2_game_other]
-name = Flowseal 1.10.3 / ALT2 / Game other
+name = Flowseal ALT2 1.10.3 · из Game other
+old_name = Flowseal 1.10.3 / ALT2 / Game other
 author = Flowseal
 label = experimental
 blobs = tls_google
 --lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google:payload=~empty
 
 [flowseal_1103_alt5_game_other]
-name = Flowseal 1.10.3 / ALT5 / Game other
+name = Flowseal ALT5 1.10.3 · из Game other
+old_name = Flowseal 1.10.3 / ALT5 / Game other
 author = Flowseal
 label = experimental
 --lua-desync=syndata
 --lua-desync=multidisorder_legacy:pos=2:payload=~empty
 
 [flowseal_1103_alt6_game_other]
-name = Flowseal 1.10.3 / ALT6 / Game other
+name = Flowseal ALT6 1.10.3 · из Game other
+old_name = Flowseal 1.10.3 / ALT6 / Game other
 author = Flowseal
 label = experimental
 blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:payload=~empty
 
 [flowseal_1103_alt9_google_main]
-name = Flowseal 1.10.3 / ALT9 / Google TLS+HTTP
+name = Flowseal ALT9 1.10.3 · из Google TLS+HTTP
+old_name = Flowseal 1.10.3 / ALT9 / Google TLS+HTTP
 author = Flowseal
 label = experimental
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=4
 
 [flowseal_1103_alt9_tcp_main]
-name = Flowseal 1.10.3 / ALT9 / TCP TLS+HTTP
+name = Flowseal ALT9 1.10.3 · из TCP TLS+HTTP
+old_name = Flowseal 1.10.3 / ALT9 / TCP TLS+HTTP
 author = Flowseal
 label = experimental
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_ts_up:tcp_md5:repeats=4
 
 [flowseal_1103_alt9_discord_main]
-name = Flowseal 1.10.3 / ALT9 / Discord media TLS+HTTP
+name = Flowseal ALT9 1.10.3 · из Discord media TLS+HTTP
+old_name = Flowseal 1.10.3 / ALT9 / Discord media TLS+HTTP
 author = Flowseal
 label = experimental
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:tcp_ts_up:repeats=4
 
 [flowseal_1103_alt9_ipset_main]
-name = Flowseal 1.10.3 / ALT9 / IP-set TLS+HTTP
+name = Flowseal ALT9 1.10.3 · из IP-set TLS+HTTP
+old_name = Flowseal 1.10.3 / ALT9 / IP-set TLS+HTTP
 author = Flowseal
 label = experimental
 --lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_ts_up:repeats=4
 
 [flowseal_1103_alt13_google_main]
-name = Flowseal 1.10.3 / ALT13 / Google TLS+HTTP
+name = Flowseal ALT13 1.10.3 · из Google TLS+HTTP
+old_name = Flowseal 1.10.3 / ALT13 / Google TLS+HTTP
 author = Flowseal
 label = experimental
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:tcp_ts_up
@@ -2957,7 +3279,8 @@ label = experimental
 # такой, как в profile-ах пресетов, поэтому они узнаются как эта стратегия.
 
 [general_alt_all_sites]
-name = general ALT / Все сайты
+name = General ALT · из «Все сайты»
+old_name = general ALT / Все сайты
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: general ALT.
@@ -2970,7 +3293,8 @@ blobs = tls_google
 --lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000
 
 [flowseal_1103_alt1_google]
-name = Flowseal 1.10.3 / ALT1 / YouTube и Google
+name = Flowseal ALT1 1.10.3 · из YouTube и Google
+old_name = Flowseal 1.10.3 / ALT1 / YouTube и Google
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT1.
@@ -2983,7 +3307,8 @@ blobs = tls_google
 --lua-desync=fakedsplit:pos=2:pattern=0x00:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=6
 
 [flowseal_1103_alt1_tcp]
-name = Flowseal 1.10.3 / ALT1 / TCP
+name = Flowseal ALT1 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / ALT1 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT1.
@@ -2997,7 +3322,8 @@ blobs = stun_pat,tls_google,tls_max
 --lua-desync=fakedsplit:pos=2:pattern=0x00:tcp_ts=-600000:tcp_ts_up:repeats=6
 
 [flowseal_1103_alt1_discord_media]
-name = Flowseal 1.10.3 / ALT1 / Discord media
+name = Flowseal ALT1 1.10.3 · из Discord media
+old_name = Flowseal 1.10.3 / ALT1 / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT1.
@@ -3010,7 +3336,8 @@ blobs = tls_google
 --lua-desync=fakedsplit:pos=2:pattern=0x00:tcp_ts=-600000:tcp_ts_up:repeats=6
 
 [flowseal_1103_alt1_game_tcp]
-name = Flowseal 1.10.3 / ALT1 / Игры TCP
+name = Flowseal ALT1 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / ALT1 / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 ALT1.
@@ -3026,7 +3353,8 @@ blobs = stun_pat,tls_google,tls_max
 --lua-desync=fakedsplit:pos=2:pattern=0x00:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty
 
 [flowseal_1103_alt10_google]
-name = Flowseal 1.10.3 / ALT10, SIMPLE FAKE ALT2 / YouTube и Google
+name = Flowseal 1.10.3 (ALT10, Simple Fake ALT2) · из YouTube и Google
+old_name = Flowseal 1.10.3 / ALT10, SIMPLE FAKE ALT2 / YouTube и Google
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: Flowseal 1.10.3 ALT10, Flowseal 1.10.3 SIMPLE FAKE ALT2.
@@ -3037,7 +3365,8 @@ blobs = tls_google
 --lua-desync=fake:blob=fake_default_http:tcp_ts=-600000:tcp_ts_up:ip_id=zero:repeats=6
 
 [flowseal_1103_alt10_tcp]
-name = Flowseal 1.10.3 / ALT10 / TCP
+name = Flowseal ALT10 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / ALT10 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: Flowseal 1.10.3 ALT10.
@@ -3049,7 +3378,8 @@ blobs = stun_pat,tls_4pda,tls_max
 --lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=6
 
 [flowseal_1103_alt10_discord_media]
-name = Flowseal 1.10.3 / ALT10, SIMPLE FAKE, SIMPLE FAKE ALT2 / Discord media
+name = Flowseal 1.10.3 (ALT10, Simple Fake, Simple Fake ALT2) · из Discord media
+old_name = Flowseal 1.10.3 / ALT10, SIMPLE FAKE, SIMPLE FAKE ALT2 / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: Flowseal 1.10.3 ALT10, Flowseal 1.10.3 SIMPLE FAKE, Flowseal 1.10.3 SIMPLE FAKE ALT2.
@@ -3060,7 +3390,8 @@ blobs = tls_google
 --lua-desync=fake:blob=fake_default_http:tcp_ts=-600000:tcp_ts_up:repeats=6
 
 [flowseal_1103_alt10_game_tcp]
-name = Flowseal 1.10.3 / ALT10 / Игры TCP
+name = Flowseal ALT10 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / ALT10 / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 ALT10.
@@ -3075,7 +3406,8 @@ blobs = stun_pat,tls_4pda,tls_max
 --lua-desync=fake:blob=tls_4pda:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
 
 [flowseal_1103_alt11_google]
-name = Flowseal 1.10.3 / ALT11 / YouTube и Google
+name = Flowseal ALT11 1.10.3 · из YouTube и Google
+old_name = Flowseal 1.10.3 / ALT11 / YouTube и Google
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT11.
@@ -3088,7 +3420,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:ip_id=zero
 
 [flowseal_1103_alt11_tcp]
-name = Flowseal 1.10.3 / ALT11 / TCP
+name = Flowseal ALT11 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / ALT11 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT11.
@@ -3102,7 +3435,8 @@ blobs = stun2,tls_max
 --lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max
 
 [flowseal_exp_1100_discord_media]
-name = Flowseal EXP 1.10.0 + Flowseal 1.10.3 / ALT11, ALT12 и ещё 1 / Discord media
+name = Flowseal 1.10.0, 1.10.3 (EXP, ALT11, ALT12 и ещё 1) · из Discord media
+old_name = Flowseal EXP 1.10.0 + Flowseal 1.10.3 / ALT11, ALT12 и ещё 1 / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal EXP 1.10.0, Flowseal 1.10.3 ALT11, Flowseal 1.10.3 ALT12, Flowseal 1.10.3 EXP.
@@ -3115,7 +3449,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [flowseal_1103_alt11_game_tcp]
-name = Flowseal 1.10.3 / ALT11 / Игры TCP
+name = Flowseal ALT11 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / ALT11 / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 ALT11.
@@ -3131,7 +3466,8 @@ blobs = stun2,tls_max
 --lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max:payload=~empty
 
 [general_alt11_google]
-name = general ALT11 / YouTube и Google
+name = General ALT11 · из YouTube и Google
+old_name = general ALT11 / YouTube и Google
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (прочее · TLS+HTTP). Из пресетов: general ALT11.
@@ -3141,7 +3477,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=tls_google:repeats=8:tcp_ts=-600000
 
 [general_alt11_all_sites]
-name = general ALT11 / Все сайты
+name = General ALT11 · из «Все сайты»
+old_name = general ALT11 / Все сайты
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · TLS+HTTP). Из пресетов: general ALT11.
@@ -3152,7 +3489,8 @@ blobs = tls_max
 --lua-desync=multisplit:pos=2:seqovl=664:seqovl_pattern=tls_max:repeats=8:tcp_ts=-600000
 
 [flowseal_1103_alt12_tcp]
-name = Flowseal 1.10.3 / ALT12 / TCP
+name = Flowseal ALT12 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / ALT12 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT12.
@@ -3166,7 +3504,8 @@ blobs = stun_pat,tls_max
 --lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max
 
 [flowseal_1103_alt12_game_tcp]
-name = Flowseal 1.10.3 / ALT12 / Игры TCP
+name = Flowseal ALT12 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / ALT12 / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 ALT12.
@@ -3182,7 +3521,8 @@ blobs = stun_pat,tls_max
 --lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max:payload=~empty
 
 [flowseal_1103_alt13_tcp]
-name = Flowseal 1.10.3 / ALT13 / TCP
+name = Flowseal ALT13 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / ALT13 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT13.
@@ -3196,7 +3536,8 @@ blobs = tls_sochi,stun2
 --lua-desync=hostfakesplit:host=mail.ru:nofake2:tcp_ts=-600000:tcp_ts_up:repeats=5
 
 [flowseal_1103_alt13_discord_media]
-name = Flowseal 1.10.3 / ALT13 / Discord media
+name = Flowseal ALT13 1.10.3 · из Discord media
+old_name = Flowseal 1.10.3 / ALT13 / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT13.
@@ -3209,7 +3550,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [flowseal_1103_alt13_game_tcp]
-name = Flowseal 1.10.3 / ALT13 / Игры TCP
+name = Flowseal ALT13 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / ALT13 / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT13.
@@ -3226,7 +3568,8 @@ blobs = tls_sochi,stun2
 --lua-desync=hostfakesplit:host=mail.ru:nofake2:tcp_ts=-600000:tcp_ts_up:repeats=5
 
 [general_alt3_all_sites]
-name = general ALT3 / Все сайты
+name = General ALT3 · из «Все сайты»
+old_name = general ALT3 / Все сайты
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: general ALT3.
@@ -3239,7 +3582,8 @@ blobs = tls_google
 --lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-600000
 
 [flowseal_1103_alt3_google]
-name = Flowseal 1.10.3 / ALT3 / YouTube и Google
+name = Flowseal ALT3 1.10.3 · из YouTube и Google
+old_name = Flowseal 1.10.3 / ALT3 / YouTube и Google
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT3.
@@ -3251,7 +3595,8 @@ description = Составная стратегия: свои действия �
 --lua-desync=hostfakesplit:host=www.google.com:nofake2:tcp_ts=-600000:tcp_ts_up:ip_id=zero
 
 [flowseal_1103_alt3_tcp]
-name = Flowseal 1.10.3 / ALT3 / TCP
+name = Flowseal ALT3 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / ALT3 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT3.
@@ -3264,7 +3609,8 @@ blobs = tls_max
 --lua-desync=hostfakesplit:host=ya.ru:nofake2:tcp_ts=-600000:tcp_ts_up
 
 [flowseal_1103_alt3_discord_media]
-name = Flowseal 1.10.3 / ALT3 / Discord media
+name = Flowseal ALT3 1.10.3 · из Discord media
+old_name = Flowseal 1.10.3 / ALT3 / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT3.
@@ -3276,7 +3622,8 @@ description = Составная стратегия: свои действия �
 --lua-desync=hostfakesplit:host=www.google.com:nofake2:tcp_ts=-600000:tcp_ts_up
 
 [flowseal_1103_alt3_game_tcp]
-name = Flowseal 1.10.3 / ALT3 / Игры TCP
+name = Flowseal ALT3 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / ALT3 / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT3.
@@ -3291,7 +3638,8 @@ blobs = tls_max
 --lua-desync=hostfakesplit:host=ya.ru:nofake2:tcp_ts=-600000:tcp_ts_up
 
 [general_alt3_google]
-name = general ALT3 / YouTube и Google
+name = General ALT3 · из YouTube и Google
+old_name = general ALT3 / YouTube и Google
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: general ALT3.
@@ -3304,7 +3652,8 @@ blobs = tls_google
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000
 
 [general_alt3_discord_media]
-name = general ALT3 / Discord media
+name = General ALT3 · из Discord media
+old_name = general ALT3 / Discord media
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (прочее · HTTP). Из пресетов: general ALT3.
@@ -3316,7 +3665,8 @@ blobs = tls_google
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000
 
 [general_alt4_discord_media]
-name = general ALT4 / Discord media
+name = General ALT4 · из Discord media
+old_name = general ALT4 / Discord media
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (прочее · TLS+HTTP). Из пресетов: general ALT4.
@@ -3326,7 +3676,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=2
 
 [general_alt4_all_sites]
-name = general ALT4 / Все сайты
+name = General ALT4 · из «Все сайты»
+old_name = general ALT4 / Все сайты
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · TLS+HTTP). Из пресетов: general ALT4.
@@ -3337,7 +3688,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=2
 
 [flowseal_1103_alt4_google]
-name = Flowseal 1.10.3 / ALT4 / YouTube и Google
+name = Flowseal ALT4 1.10.3 · из YouTube и Google
+old_name = Flowseal 1.10.3 / ALT4 / YouTube и Google
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT4.
@@ -3350,7 +3702,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=2:ip_id=zero
 
 [flowseal_1103_alt4_tcp]
-name = Flowseal 1.10.3 / ALT4 / TCP
+name = Flowseal ALT4 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / ALT4 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT4.
@@ -3364,7 +3717,8 @@ blobs = stun_pat,tls_google,tls_max
 --lua-desync=multisplit:pos=2
 
 [flowseal_1103_alt4_discord_media]
-name = Flowseal 1.10.3 / ALT4 / Discord media
+name = Flowseal ALT4 1.10.3 · из Discord media
+old_name = Flowseal 1.10.3 / ALT4 / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT4.
@@ -3377,7 +3731,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=2
 
 [flowseal_1103_alt4_game_tcp]
-name = Flowseal 1.10.3 / ALT4 / Игры TCP
+name = Flowseal ALT4 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / ALT4 / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 ALT4.
@@ -3393,7 +3748,8 @@ blobs = stun_pat,tls_google,tls_max
 --lua-desync=multisplit:pos=2:payload=~empty
 
 [flowseal_1103_alt5_tcp]
-name = Flowseal 1.10.3 / ALT5 / TCP
+name = Flowseal ALT5 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / ALT5 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (прочее · TLS+HTTP). Из пресетов: Flowseal 1.10.3 ALT5.
@@ -3403,7 +3759,8 @@ description = Составная стратегия: свои действия �
 --lua-desync=multidisorder_legacy:pos=2
 
 [general_alt8_discord_media]
-name = general ALT8 / Discord media
+name = General ALT8 · из Discord media
+old_name = general ALT8 / Discord media
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (прочее · HTTP). Из пресетов: general ALT8.
@@ -3413,7 +3770,8 @@ blobs = tls_google
 --lua-desync=fake:blob=fake_default_http:repeats=6:tcp_seq=2
 
 [flowseal_1103_alt8_google]
-name = Flowseal 1.10.3 / ALT8 / YouTube и Google
+name = Flowseal ALT8 1.10.3 · из YouTube и Google
+old_name = Flowseal 1.10.3 / ALT8 / YouTube и Google
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: Flowseal 1.10.3 ALT8.
@@ -3423,7 +3781,8 @@ description = Составная стратегия: свои действия �
 --lua-desync=fake:blob=fake_default_http:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=6
 
 [flowseal_1103_alt8_tcp]
-name = Flowseal 1.10.3 / ALT8 / TCP
+name = Flowseal ALT8 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / ALT8 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: Flowseal 1.10.3 ALT8.
@@ -3434,7 +3793,8 @@ blobs = tls_max
 --lua-desync=fake:blob=tls_max:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6
 
 [flowseal_1103_alt8_discord_media]
-name = Flowseal 1.10.3 / ALT8 / Discord media
+name = Flowseal ALT8 1.10.3 · из Discord media
+old_name = Flowseal 1.10.3 / ALT8 / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: Flowseal 1.10.3 ALT8.
@@ -3444,7 +3804,8 @@ description = Составная стратегия: свои действия �
 --lua-desync=fake:blob=fake_default_http:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6
 
 [flowseal_1103_alt8_game_tcp]
-name = Flowseal 1.10.3 / ALT8 / Игры TCP
+name = Flowseal ALT8 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / ALT8 / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 ALT8.
@@ -3457,7 +3818,8 @@ blobs = tls_max
 --lua-desync=fake:blob=tls_max:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
 
 [general_alt8_all_sites]
-name = general ALT8 / Все сайты
+name = General ALT8 · из «Все сайты»
+old_name = general ALT8 / Все сайты
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: general ALT8.
@@ -3468,7 +3830,8 @@ blobs = tls_google
 --lua-desync=fake:blob=fake_default_http:repeats=6:tcp_seq=2
 
 [flowseal_exp_1100_game_tcp]
-name = Flowseal EXP 1.10.0 + Flowseal 1.10.3 / EXP / Игры TCP
+name = Flowseal EXP 1.10.0, 1.10.3 · из «Игры TCP»
+old_name = Flowseal EXP 1.10.0 + Flowseal 1.10.3 / EXP / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal EXP 1.10.0, Flowseal 1.10.3 EXP.
@@ -3483,7 +3846,8 @@ blobs = stun2,tls_max,fake_unknown_256
 --lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max:payload=~empty
 
 [flowseal_1103_fake_tls_auto_google]
-name = Flowseal 1.10.3 / FAKE TLS AUTO / YouTube и Google
+name = Flowseal Fake TLS Auto 1.10.3 · из YouTube и Google
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO / YouTube и Google
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO.
@@ -3496,7 +3860,8 @@ description = Составная стратегия: свои действия �
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_id=zero
 
 [flowseal_1103_fake_tls_auto_tcp]
-name = Flowseal 1.10.3 / FAKE TLS AUTO / TCP
+name = Flowseal Fake TLS Auto 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO.
@@ -3510,7 +3875,8 @@ blobs = tls_max
 --lua-desync=multidisorder_legacy:pos=1,midsld
 
 [flowseal_1103_fake_tls_auto_discord_media]
-name = Flowseal 1.10.3 / FAKE TLS AUTO / Discord media
+name = Flowseal Fake TLS Auto 1.10.3 · из Discord media
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO.
@@ -3523,7 +3889,8 @@ description = Составная стратегия: свои действия �
 --lua-desync=multidisorder_legacy:pos=1,midsld
 
 [flowseal_1103_fake_tls_auto_game_tcp]
-name = Flowseal 1.10.3 / FAKE TLS AUTO / Игры TCP
+name = Flowseal Fake TLS Auto 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO.
@@ -3539,7 +3906,8 @@ blobs = tls_max
 --lua-desync=multidisorder_legacy:pos=1,midsld:payload=~empty
 
 [flowseal_1103_fake_tls_auto_alt_google]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / YouTube и Google
+name = Flowseal Fake TLS Auto ALT 1.10.3 · из YouTube и Google
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / YouTube и Google
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT.
@@ -3551,7 +3919,8 @@ description = Составная стратегия: свои действия �
 --lua-desync=fakedsplit:pos=1:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=8
 
 [flowseal_1103_fake_tls_auto_alt_tcp]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / TCP
+name = Flowseal Fake TLS Auto ALT 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT.
@@ -3564,7 +3933,8 @@ blobs = tls_max
 --lua-desync=fakedsplit:pos=1:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=8
 
 [flowseal_1103_fake_tls_auto_alt_discord_media]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / Discord media
+name = Flowseal Fake TLS Auto ALT 1.10.3 · из Discord media
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT.
@@ -3576,7 +3946,8 @@ description = Составная стратегия: свои действия �
 --lua-desync=fakedsplit:pos=1:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=8
 
 [flowseal_1103_fake_tls_auto_alt_game_tcp]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / Игры TCP
+name = Flowseal Fake TLS Auto ALT 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT.
@@ -3590,7 +3961,8 @@ blobs = tls_max
 --lua-desync=fakedsplit:pos=1:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=8:payload=~empty
 
 [flowseal_1103_fake_tls_auto_alt2_google]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / YouTube и Google
+name = Flowseal Fake TLS Auto ALT2 1.10.3 · из YouTube и Google
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / YouTube и Google
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT2.
@@ -3603,7 +3975,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:ip_id=zero
 
 [flowseal_1103_fake_tls_auto_alt2_tcp]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / TCP
+name = Flowseal Fake TLS Auto ALT2 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT2.
@@ -3616,7 +3989,8 @@ blobs = tls_max,tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [flowseal_1103_fake_tls_auto_alt2_discord_media]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / Discord media
+name = Flowseal Fake TLS Auto ALT2 1.10.3 · из Discord media
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT2.
@@ -3629,7 +4003,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [flowseal_1103_fake_tls_auto_alt2_game_tcp]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / Игры TCP
+name = Flowseal Fake TLS Auto ALT2 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT2 / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT2.
@@ -3643,7 +4018,8 @@ blobs = tls_max,tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:payload=~empty
 
 [flowseal_1103_fake_tls_auto_alt3_google]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / YouTube и Google
+name = Flowseal Fake TLS Auto ALT3 1.10.3 · из YouTube и Google
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / YouTube и Google
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT3.
@@ -3656,7 +4032,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:ip_id=zero
 
 [flowseal_1103_fake_tls_auto_alt3_tcp]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / TCP
+name = Flowseal Fake TLS Auto ALT3 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT3.
@@ -3669,7 +4046,8 @@ blobs = tls_max,tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [flowseal_1103_fake_tls_auto_alt3_discord_media]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / Discord media
+name = Flowseal Fake TLS Auto ALT3 1.10.3 · из Discord media
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · TLS+HTTP). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT3.
@@ -3682,7 +4060,8 @@ blobs = tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google
 
 [flowseal_1103_fake_tls_auto_alt3_game_tcp]
-name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / Игры TCP
+name = Flowseal Fake TLS Auto ALT3 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / FAKE TLS AUTO ALT3 / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 FAKE TLS AUTO ALT3.
@@ -3696,7 +4075,8 @@ blobs = tls_max,tls_google
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:payload=~empty
 
 [general_simple_fake_all_sites]
-name = general SIMPLE FAKE / Все сайты
+name = General Simple Fake · из «Все сайты»
+old_name = general SIMPLE FAKE / Все сайты
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: general SIMPLE FAKE.
@@ -3707,7 +4087,8 @@ blobs = tls_google
 --lua-desync=fake:blob=fake_default_http:repeats=6:tcp_ts=-600000
 
 [general_simple_fake_tcp]
-name = general SIMPLE FAKE, SIMPLE FAKE ALT2 / TCP
+name = General Simple Fake, Simple Fake ALT2 · из TCP
+old_name = general SIMPLE FAKE, SIMPLE FAKE ALT2 / TCP
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (прочее · HTTP). Из пресетов: general SIMPLE FAKE, general SIMPLE FAKE ALT2.
@@ -3717,7 +4098,8 @@ blobs = tls_google
 --lua-desync=fake:blob=fake_default_http:repeats=6:tcp_ts=-600000
 
 [flowseal_1103_simple_fake_tcp]
-name = Flowseal 1.10.3 / SIMPLE FAKE / TCP
+name = Flowseal Simple Fake 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / SIMPLE FAKE / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: Flowseal 1.10.3 SIMPLE FAKE.
@@ -3728,7 +4110,8 @@ blobs = tls_google,tls_max
 --lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=6
 
 [flowseal_1103_simple_fake_game_tcp]
-name = Flowseal 1.10.3 / SIMPLE FAKE / Игры TCP
+name = Flowseal Simple Fake 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / SIMPLE FAKE / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 SIMPLE FAKE.
@@ -3742,7 +4125,8 @@ blobs = tls_google,tls_max,stun2
 --lua-desync=fake:blob=tls_google:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
 
 [flowseal_1103_simple_fake_alt_google]
-name = Flowseal 1.10.3 / SIMPLE FAKE ALT / YouTube и Google
+name = Flowseal Simple Fake ALT 1.10.3 · из YouTube и Google
+old_name = Flowseal 1.10.3 / SIMPLE FAKE ALT / YouTube и Google
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: Flowseal 1.10.3 SIMPLE FAKE ALT.
@@ -3753,7 +4137,8 @@ blobs = tls_google
 --lua-desync=fake:blob=fake_default_http:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:ip_id=zero:repeats=6
 
 [flowseal_1103_simple_fake_alt_tcp]
-name = Flowseal 1.10.3 / SIMPLE FAKE ALT / TCP
+name = Flowseal Simple Fake ALT 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / SIMPLE FAKE ALT / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: Flowseal 1.10.3 SIMPLE FAKE ALT.
@@ -3765,7 +4150,8 @@ blobs = stun2,tls_google,tls_max
 --lua-desync=fake:blob=tls_max:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6
 
 [flowseal_1103_simple_fake_alt_discord_media]
-name = Flowseal 1.10.3 / SIMPLE FAKE ALT / Discord media
+name = Flowseal Simple Fake ALT 1.10.3 · из Discord media
+old_name = Flowseal 1.10.3 / SIMPLE FAKE ALT / Discord media
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: Flowseal 1.10.3 SIMPLE FAKE ALT.
@@ -3776,7 +4162,8 @@ blobs = tls_google
 --lua-desync=fake:blob=fake_default_http:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6
 
 [flowseal_1103_simple_fake_alt_game_tcp]
-name = Flowseal 1.10.3 / SIMPLE FAKE ALT / Игры TCP
+name = Flowseal Simple Fake ALT 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / SIMPLE FAKE ALT / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 SIMPLE FAKE ALT.
@@ -3791,7 +4178,8 @@ blobs = stun2,tls_google,tls_max
 --lua-desync=fake:blob=tls_google:tcp_seq=2:tcp_ack=-66000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
 
 [general_simple_fake_alt2_all_sites]
-name = general SIMPLE FAKE ALT2 / Все сайты
+name = General Simple Fake ALT2 · из «Все сайты»
+old_name = general SIMPLE FAKE ALT2 / Все сайты
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: general SIMPLE FAKE ALT2.
@@ -3802,7 +4190,8 @@ blobs = tls_max
 --lua-desync=fake:blob=fake_default_http:repeats=6:tcp_ts=-600000
 
 [flowseal_1103_simple_fake_alt2_tcp]
-name = Flowseal 1.10.3 / SIMPLE FAKE ALT2 / TCP
+name = Flowseal Simple Fake ALT2 1.10.3 · из TCP
+old_name = Flowseal 1.10.3 / SIMPLE FAKE ALT2 / TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP). Из пресетов: Flowseal 1.10.3 SIMPLE FAKE ALT2.
@@ -3814,7 +4203,8 @@ blobs = stun2,tls_max
 --lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=6
 
 [flowseal_1103_simple_fake_alt2_game_tcp]
-name = Flowseal 1.10.3 / SIMPLE FAKE ALT2 / Игры TCP
+name = Flowseal Simple Fake ALT2 1.10.3 · из «Игры TCP»
+old_name = Flowseal 1.10.3 / SIMPLE FAKE ALT2 / Игры TCP
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (TLS · HTTP · прочее). Из пресетов: Flowseal 1.10.3 SIMPLE FAKE ALT2.
@@ -3829,7 +4219,8 @@ blobs = stun2,tls_max
 --lua-desync=fake:blob=tls_max:tcp_ts=-600000:tcp_ts_up:repeats=6:payload=~empty,tls_client_hello,http_req
 
 [rostelecom_tcp]
-name = Ростелеком / TCP
+name = Ростелеком · из TCP
+old_name = Ростелеком / TCP
 author = builtin
 label = stock
 description = Составная стратегия: свои действия для разных типов пакетов (всё). Из пресетов: Ростелеком.

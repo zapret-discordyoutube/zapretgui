@@ -4,7 +4,8 @@ author = System
 description = Отключить обработку голосовых чатов Discord.
 
 [ipv4_dup2_autottl_cutoff_n3]
-name = IPv4 & IPv6 DUP, AutoTTL, Cutoff n3
+name = IPv4 и IPv6 DUP, AutoTTL, Cutoff n3
+old_name = IPv4 & IPv6 DUP, AutoTTL, Cutoff n3
 author = Community
 label = recommended
 description = Стратегия для IPv4 и IPv6 с дублированием пакетов, автоматическим TTL и обрезкой n3.
@@ -24,7 +25,8 @@ description = Базовая стратегия с DPI Desync 'fake' и филь
 --dpi-desync=fake
 
 [dronatar_4_2]
-name = Dronatar 4.2 / 4.3
+name = Dronatar 4.2, 4.3
+old_name = Dronatar 4.2 / 4.3
 author = Dronatar
 label = recommended
 description = fake discord=0x00, fake stun=0x00, repeats=6
@@ -76,7 +78,8 @@ description = Простая стратегия с 6 повторениями ф
 --dpi-desync-repeats=6
 
 [ipset_fake_any_proto_cutoff_d3_repeats_6]
-name = general (alt v2) 1.6.1
+name = General ALT2 1.6.1
+old_name = general (alt v2) 1.6.1
 author = Community
 label = recommended
 description = Стратегия, использующая IPSet, с 6 повторениями и обрезкой d3.

@@ -1,12 +1,14 @@
 [fake_simple]
-name = Fake (простой)
+name = Fake · простой
+old_name = Fake (простой)
 author = Community
 label = stable
 description = Базовый fake для Discord Voice
 --lua-desync=fake:blob=fake_default_udp
 
 [fake_blob_quic_google_repeats_10_autottl]
-name = Fake Blob QUIC Google Repeats 10 Autottl (alt v11)
+name = Fake Blob QUIC Google Repeats 10 Autottl · General ALT11
+old_name = Fake Blob QUIC Google Repeats 10 Autottl (alt v11)
 author = Flowseal
 label = stable
 description = fake quic_google с 10 повторами и авто TTL
@@ -170,7 +172,8 @@ blobs = quic1,quic_initial
 --lua-desync=fake:blob=quic1:repeats=4
 
 [general_bf_32]
-name = General-BF 3.2
+name = General BF 3.2
+old_name = General-BF 3.2
 author = community
 label = recommended
 description = Для Battlefield 6
@@ -178,7 +181,8 @@ blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=9:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all
 
 [ipset_fake_12_n2_apex]
-name = Apex legends & Rockstar v2
+name = Apex legends и Rockstar v2
+old_name = Apex legends & Rockstar v2
 author = community
 label = game
 description = UDP 443+ с ipset-all, 12 повторов, cutoff n2
@@ -186,7 +190,8 @@ blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=12:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all
 
 [ipset_fake_10_n2]
-name = IPSET Fake x10 N2 (Apex legends & Battlefield 6)
+name = IPSET Fake x10 N2 · Apex legends и Battlefield 6
+old_name = IPSET Fake x10 N2 (Apex legends & Battlefield 6)
 author = community
 label = game
 description = UDP 443+ с ipset-all, 10 повторов, cutoff n2
@@ -194,7 +199,8 @@ blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=10:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all
 
 [ipset_fake_14_n3]
-name = IPSET Fake x14 N3 (Apex legends)
+name = IPSET Fake x14 N3 · Apex legends
+old_name = IPSET Fake x14 N3 (Apex legends)
 author = community
 label = game
 description = UDP 443+ с ipset-all, 14 повторов, cutoff n3
@@ -202,7 +208,8 @@ blobs = quic_google
 --lua-desync=fake:blob=quic_google:repeats=14:ip_autottl=2,3-20:ip6_autottl=2,3-20:payload=all
 
 [ipset_fake_tamper_11]
-name = IPSET Fake+Tamper x11 (DHT)
+name = IPSET Fake+Tamper x11 · DHT
+old_name = IPSET Fake+Tamper x11 (DHT)
 author = community
 label = game
 description = UDP с fake+tamper для DHT, 11 повторов
@@ -339,7 +346,8 @@ blobs = quic_google,quic_initial
 --lua-desync=udplen:increment=25
 
 [fake_tamper_11]
-name = Fake+Tamper x11 (DHT)
+name = Fake+Tamper x11 · DHT
+old_name = Fake+Tamper x11 (DHT)
 author = community
 label = recommended
 description = Fake с tamper для DHT, 11 повторов
@@ -348,35 +356,40 @@ blobs = quic_google
 --lua-desync=dht_dn:dn=2
 
 [fake_11_quic_bin]
-name = fake 11 повторов (Google QUIC)
+name = Fake 11 повторов · Google QUIC
+old_name = fake 11 повторов (Google QUIC)
 author = hz
 description = 11 повтора с Google QUIC и cutoff после 11 пакетов
 blobs = quic_google,quic_initial
 --lua-desync=fake:blob=quic_google:repeats=11
 
 [fake_2_n2_quic]
-name = fake 2 повторов (Google QUIC) cutoff=n2
+name = Fake 2 повторов (Google QUIC) cutoff=n2
+old_name = fake 2 повторов (Google QUIC) cutoff=n2
 author = hz
 description = 2 повтора с Google QUIC и cutoff после 2 пакетов
 blobs = quic_google,quic_initial
 --lua-desync=fake:blob=quic_google:repeats=2
 
 [fake_repeat_2_quic]
-name = fake 2 повторов (fake_quic.bin)
+name = Fake 2 повторов · fake_quic.bin
+old_name = fake 2 повторов (fake_quic.bin)
 author = hz
 description = 2 повтора с fake_quic.bin
 blobs = fake_quic,quic_initial
 --lua-desync=fake:blob=fake_quic:repeats=2
 
 [fake_4_google_quic]
-name = fake 4 повтора (Google QUIC)
+name = Fake 4 повтора · Google QUIC
+old_name = fake 4 повтора (Google QUIC)
 author = hz
 description = 4 повтора с fake QUIC пакетом Google
 blobs = quic_google,quic_initial
 --lua-desync=fake:blob=quic_google:repeats=4
 
 [fake_6_1]
-name = fake 6 quic 1
+name = Fake 6 quic 1
+old_name = fake 6 quic 1
 author = hz
 label = recommended
 description = Стандартная стратегия с другим Fake QUIC
@@ -384,7 +397,8 @@ blobs = quic1,quic_initial
 --lua-desync=fake:blob=quic1:repeats=6
 
 [fake_6_vk_com]
-name = fake 6 quic vk.com
+name = Fake 6 quic vk.com
+old_name = fake 6 quic vk.com
 author = hz
 label = recommended
 description = Стандартная стратегия для Discord Voice с другим QUIC от VK
@@ -392,7 +406,8 @@ blobs = quic_vk,quic_initial
 --lua-desync=fake:blob=quic_vk:repeats=6
 
 [fake_8_google]
-name = fake 8 google
+name = Fake 8 google
+old_name = fake 8 google
 author = hz
 label = recommended
 description = Стандартная стратегия для Discord Voice
@@ -409,7 +424,8 @@ blobs = quic_google,quic_initial
 --lua-desync=udplen:increment=10:pattern=0xDEADBEEF
 
 [fake_udplen]
-name = YTDis Bystro 2.9.2 v1 / v2
+name = YTDisBystro 2.9.2 v1, v2
+old_name = YTDis Bystro 2.9.2 v1 / v2
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -418,7 +434,8 @@ blobs = quic2,quic_initial
 --lua-desync=udplen:increment=5:pattern=0xDEADBEEF
 
 [fake_updlen_7_quic_cutoff]
-name = fake udplen 7 quic cutoff
+name = Fake UDPLen 7 quic cutoff
+old_name = fake udplen 7 quic cutoff
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -427,7 +444,8 @@ blobs = quic_test,quic_initial
 --lua-desync=udplen:increment=10:pattern=0xDEADBEEF
 
 [fake_updlen_7_quic_google]
-name = fake udplen 7 quic google
+name = Fake UDPLen 7 quic google
+old_name = fake udplen 7 quic google
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -436,7 +454,8 @@ blobs = quic_google,quic_initial
 --lua-desync=udplen:increment=10:pattern=0xDEADBEEF
 
 [fake_updlen_10_pattern]
-name = fake udplen 10 pattern
+name = Fake UDPLen 10 pattern
+old_name = fake udplen 10 pattern
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -445,7 +464,8 @@ blobs = quic2,quic_initial
 --lua-desync=udplen:increment=10:pattern=0xDEADBEEF
 
 [fake_udplen_11]
-name = fake udplen 11
+name = Fake UDPLen 11
+old_name = fake udplen 11
 author = hz
 label = recommended
 description = Потом опишу подробнее
@@ -457,7 +477,8 @@ blobs = quic_google,quic_initial
 
 # --- missing builtin strategy coverage (generated from presets) ---
 [stock_missing_199_voice_01]
-name = general 1.9.9 (game filter) / Discord UDP
+name = General 1.9.9 · из Discord UDP
+old_name = general 1.9.9 (game filter) / Discord UDP
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general 1.9.9 (game filter).txt (Discord UDP) в basic-режиме.
@@ -466,14 +487,16 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=fake_dbankcloud:payload=all:repeats=12
 
 [stock_missing_199_voice_02]
-name = general 1.9.9 (game filter) / Голосовые звонки/чаты
+name = General 1.9.9 · из «Голосовые звонки/чаты»
+old_name = general 1.9.9 (game filter) / Голосовые звонки/чаты
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general 1.9.9 (game filter).txt (Голосовые звонки/чаты) в basic-режиме.
 --lua-desync=fake:blob=fake_dbankcloud:repeats=6
 
 [stock_missing_199_voice_03]
-name = general ALT11 1.9.9 (game filter) / Discord UDP
+name = General ALT11 1.9.9 · из Discord UDP
+old_name = general ALT11 1.9.9 (game filter) / Discord UDP
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT11 1.9.9 (game filter).txt (Discord UDP) в basic-режиме.
@@ -482,7 +505,8 @@ description = Автодобавлено для распознавания но�
 --lua-desync=fake:blob=fake_dbankcloud:payload=all:repeats=10
 
 [stock_missing_199_voice_04]
-name = general ALT12 1.9.9 (game filter) / Голосовые звонки/чаты
+name = General ALT12 1.9.9 · из «Голосовые звонки/чаты»
+old_name = general ALT12 1.9.9 (game filter) / Голосовые звонки/чаты
 author = builtin
 label = stock
 description = Автодобавлено для распознавания нового builtin preset-а general ALT12 1.9.9 (game filter).txt (Голосовые звонки/чаты) в basic-режиме.
@@ -491,14 +515,16 @@ description = Автодобавлено для распознавания но�
 
 
 [stock_builtin_coverage_voice_001]
-name = Preset.X1 / Голосовые звонки/чаты
+name = Preset.X1 · из «Голосовые звонки/чаты»
+old_name = Preset.X1 / Голосовые звонки/чаты
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из Preset.X1.txt (Голосовые звонки/чаты) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=quic_google:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:payload=all:repeats=10
 
 [stock_builtin_coverage_voice_002]
-name = general 1.9.9 (game filter) / Discord UDP
+name = General 1.9.9 · из Discord UDP №2
+old_name = general 1.9.9 (game filter) / Discord UDP
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general 1.9.9 (game filter).txt (Discord UDP) определялся как готовая стратегия, а не custom.
@@ -507,14 +533,16 @@ description = Добавлено, чтобы встроенный профиль
 --lua-desync=fake:blob=fake_dbankcloud:repeats=12
 
 [stock_builtin_coverage_voice_003]
-name = general ALT (game filter) / Discord UDP
+name = General ALT · из Discord UDP
+old_name = general ALT (game filter) / Discord UDP
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general ALT (game filter).txt (Discord UDP) определялся как готовая стратегия, а не custom.
 --lua-desync=fake:blob=quic_google:repeats=12
 
 [stock_builtin_coverage_voice_004]
-name = general ALT11 1.9.9 (game filter) / Discord UDP
+name = General ALT11 1.9.9 · из Discord UDP №2
+old_name = general ALT11 1.9.9 (game filter) / Discord UDP
 author = builtin
 label = stock
 description = Добавлено, чтобы встроенный профиль из general ALT11 1.9.9 (game filter).txt (Discord UDP) определялся как готовая стратегия, а не custom.
@@ -527,14 +555,16 @@ description = Добавлено, чтобы встроенный профиль
 # --- Flowseal 1.10.3 winws2 ports (generated) ---
 
 [flowseal_1103_general_voice_discord_stun]
-name = Flowseal 1.10.3 / general / Discord voice Discord+STUN
+name = Flowseal General 1.10.3 · из Discord voice Discord+STUN
+old_name = Flowseal 1.10.3 / general / Discord voice Discord+STUN
 author = Flowseal
 label = experimental
 blobs = discord_active
 --lua-desync=fake:blob=discord_active:repeats=6
 
 [flowseal_1103_alt13_voice_discord_stun]
-name = Flowseal 1.10.3 / ALT13 / Discord voice Discord+STUN
+name = Flowseal ALT13 1.10.3 · из Discord voice Discord+STUN
+old_name = Flowseal 1.10.3 / ALT13 / Discord voice Discord+STUN
 author = Flowseal
 label = experimental
 blobs = discord_active
@@ -547,7 +577,8 @@ blobs = discord_active
 # такой, как в profile-ах пресетов, поэтому они узнаются как эта стратегия.
 
 [flowseal_1103_alt12_voice]
-name = Flowseal 1.10.3 / ALT12 / Голос (Discord, STUN)
+name = Flowseal ALT12 1.10.3 · из «Голос (Discord, STUN)»
+old_name = Flowseal 1.10.3 / ALT12 / Голос (Discord, STUN)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (Discord · STUN). Из пресетов: Flowseal 1.10.3 ALT12.
@@ -559,7 +590,8 @@ blobs = stun_pat,discord_active
 --lua-desync=fake:blob=discord_active:repeats=3
 
 [flowseal_exp_1100_voice]
-name = Flowseal EXP 1.10.0 + Flowseal 1.10.3 / EXP / Голос (Discord, STUN)
+name = Flowseal EXP 1.10.0, 1.10.3 · из «Голос (Discord, STUN)»
+old_name = Flowseal EXP 1.10.0 + Flowseal 1.10.3 / EXP / Голос (Discord, STUN)
 author = Flowseal
 label = experimental
 description = Составная стратегия: свои действия для разных типов пакетов (Discord · STUN · прочее). Из пресетов: Flowseal EXP 1.10.0, Flowseal 1.10.3 EXP.

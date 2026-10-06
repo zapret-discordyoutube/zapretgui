@@ -35,7 +35,8 @@ description = Третья версия стратегии для TankiX
 --dpi-desync-fooling=md5sig
 
 [fake_fakedsplit_autottl_2]
-name = fake fakedsplit badseq
+name = Fake FakedSplit badseq
+old_name = fake fakedsplit badseq
 author = hz
 description = Использует fake и fakedsplit с автоматическим TTL
 --dpi-desync=fake,fakedsplit
@@ -43,7 +44,8 @@ description = Использует fake и fakedsplit с автоматичес�
 --dpi-desync-fooling=badseq
 
 [fake_multisplit_md5sig_autottl]
-name = fake multisplit md5sig
+name = Fake MultiSplit md5sig
+old_name = fake multisplit md5sig
 author = hz
 label = game
 description = Fake multisplit с md5sig и автоматическим TTL
@@ -53,14 +55,16 @@ description = Fake multisplit с md5sig и автоматическим TTL
 --dpi-desync-autottl
 
 [dronator_4_3]
-name = Dronator 4.3
+name = Dronatar 4.3
+old_name = Dronator 4.3
 author = hz
 description = Стратегия Dronator версии 4.3
 --dpi-desync=fake,split2
 --dpi-desync-fooling=md5sig
 
 [multisplit_seqovl_2_midsld]
-name = fake multisplit seqovl 2 midsld
+name = Fake MultiSplit seqovl 2 midsld
+old_name = fake multisplit seqovl 2 midsld
 author = hz
 description = Multisplit с перекрытием последовательности и позицией midsld
 --dpi-desync=fake,multisplit
@@ -70,7 +74,8 @@ description = Multisplit с перекрытием последовательн�
 --dpi-desync-fooling=md5sig
 
 [multisplit_fake_tls_badseq]
-name = YTDisBystro 3.4 v1 (1)
+name = YTDisBystro 3.4 v1 №1
+old_name = YTDisBystro 3.4 v1 (1)
 author = hz
 description = Первый вариант стратегии для YouTube с badseq
 --dpi-desync=fake,multisplit
@@ -86,7 +91,8 @@ description = Первый вариант стратегии для YouTube с b
 --dup-cutoff=n3
 
 [multisplit_fake_tls_md5sig]
-name = YTDisBystro 3.4 v1 (3)
+name = YTDisBystro 3.4 v1 №3
+old_name = YTDisBystro 3.4 v1 (3)
 author = hz
 description = Третий вариант стратегии для YouTube с md5sig
 --dpi-desync=fake,multisplit
@@ -102,7 +108,8 @@ description = Третий вариант стратегии для YouTube с m
 --dup-cutoff=n3
 
 [multisplit_17]
-name = YTDisBystro 3.4 v1 (2)
+name = YTDisBystro 3.4 v1 №2
+old_name = YTDisBystro 3.4 v1 (2)
 author = hz
 description = Второй вариант стратегии для YouTube с TLS 1.7
 --dpi-desync=fake,multisplit
@@ -117,7 +124,8 @@ description = Второй вариант стратегии для YouTube с T
 --dup-cutoff=n3
 
 [other4]
-name = fakedsplit badseq 10
+name = FakedSplit badseq 10
+old_name = fakedsplit badseq 10
 author = hz
 description = Fakedsplit с badseq и 10 повторами
 --dpi-desync=fakedsplit
@@ -127,7 +135,8 @@ description = Fakedsplit с badseq и 10 повторами
 --dpi-desync-autottl
 
 [other5]
-name = multidisorder datanoack deepseek
+name = MultiDisorder datanoack deepseek
+old_name = multidisorder datanoack deepseek
 author = hz
 description = Multidisorder с datanoack для DeepSeek
 --dpi-desync=fake,multidisorder
@@ -136,7 +145,8 @@ description = Multidisorder с datanoack для DeepSeek
 --dpi-desync-fake-tls=tls_clienthello_chat_deepseek_com.bin
 
 [general_altv2_161_original]
-name = general (alt v2) 1.6.1 original
+name = General ALT2 1.6.1 · original
+old_name = general (alt v2) 1.6.1 original
 author = hz
 label = recommended
 description = Оригинальная общая стратегия версии 1.6.1
@@ -145,7 +155,8 @@ description = Оригинальная общая стратегия верси�
 --dpi-desync-fooling=md5sig
 
 [general_altv2_161]
-name = general (alt v2) 1.6.1
+name = General ALT2 1.6.1
+old_name = general (alt v2) 1.6.1
 author = hz
 label = recommended
 description = Общая стратегия версии 1.6.1 с split2
@@ -155,7 +166,8 @@ description = Общая стратегия версии 1.6.1 с split2
 --dpi-desync-split-seqovl-pattern=tls_clienthello_www_google_com.bin
 
 [other6]
-name = general (alt1) 1.8.1
+name = General ALT1 1.8.1
+old_name = general (alt1) 1.8.1
 author = hz
 description = Первая альтернативная стратегия версии 1.8.1
 --dpi-desync=fake,split
@@ -165,7 +177,8 @@ description = Первая альтернативная стратегия ве�
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_alt183]
-name = general (alt) 1.8.3
+name = General ALT 1.8.3
+old_name = general (alt) 1.8.3
 author = Flowseal
 description = Альтернативная общая стратегия версии 1.8.3
 --dpi-desync=fake,fakedsplit
@@ -175,7 +188,8 @@ description = Альтернативная общая стратегия вер�
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_alt185]
-name = general (alt) 1.8.5
+name = General ALT 1.8.5
+old_name = general (alt) 1.8.5
 author = Flowseal
 description = Альтернативная общая стратегия версии 1.8.5
 --dpi-desync=fake,fakedsplit
@@ -185,7 +199,8 @@ description = Альтернативная общая стратегия вер�
 --dpi-desync-fake-tls=tls_clienthello_www_google_com.bin
 
 [general_alt2183]
-name = general (alt2) 1.8.3
+name = General ALT2 1.8.3
+old_name = general (alt2) 1.8.3
 author = Flowseal
 description = Вторая альтернативная стратегия версии 1.8.3
 --dpi-desync=multisplit
@@ -194,7 +209,8 @@ description = Вторая альтернативная стратегия ве�
 --dpi-desync-split-seqovl-pattern=tls_clienthello_www_google_com.bin
 
 [general_alt8_185]
-name = general (alt8) 1.8.5
+name = General ALT8 1.8.5
+old_name = general (alt8) 1.8.5
 author = V3nilla
 description = Восьмая альтернативная стратегия версии 1.8.5
 --dpi-desync=fake,split2
@@ -203,7 +219,8 @@ description = Восьмая альтернативная стратегия в�
 --dpi-desync-badseq-increment=2
 
 [general_alt8_185_2]
-name = general (alt v8) 1.8.5 (2)
+name = General ALT8 1.8.5 №2
+old_name = general (alt v8) 1.8.5 (2)
 author = V3nilla
 description = Восьмая альтернативная стратегия версии 1.8.5 вариант 2
 --dpi-desync=fake
@@ -213,7 +230,8 @@ description = Восьмая альтернативная стратегия в�
 --dpi-desync-badseq-increment=0
 
 [general_alt8_185_3]
-name = general (alt v8) 1.8.5 (3)
+name = General ALT8 1.8.5 №3
+old_name = general (alt v8) 1.8.5 (3)
 author = V3nilla
 description = Восьмая альтернативная стратегия версии 1.8.5 вариант 3
 --dpi-desync=fake
