@@ -3232,10 +3232,38 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         page_source = inspect.getsource(StrategyScanPage)
         feature_source = inspect.getsource(BlockcheckFeature)
 
-        # Порядок стратегий теперь задаёт история подбора, а не курсор продолжения.
+        strategy_scan_run_workflow = importlib.import_module("blockcheck.strategy_scan_run_workflow")
+        strategy_scan_page_plans = importlib.import_module("blockcheck.strategy_scan_page_plans")
+        workflow_source = inspect.getsource(strategy_scan_run_workflow)
+        count_source = inspect.getsource(strategy_scan_page_plans.count_resumable_strategies)
+
+        # Порядок стратегий задаёт история подбора, а не курсор продолжения:
+        # сохранённого номера стратегии, с которого продолжать, больше нет.
         self.assertFalse(hasattr(blockcheck_workers, "StrategyScanResumeSaveWorker"))
-        self.assertNotIn("resume", page_source)
-        self.assertNotIn("resume", feature_source)
+        for source_name, source in (
+            ("page", page_source),
+            ("feature", feature_source),
+            ("workflow", workflow_source),
+        ):
+            for cursor_name in (
+                "resume_state",
+                "resume_index",
+                "resume_next_index",
+                "resume_available",
+                "resume_save",
+                "ResumeSave",
+            ):
+                with self.subTest(source=source_name, cursor_name=cursor_name):
+                    self.assertNotIn(cursor_name, source)
+
+        # Окно «Продолжить / Начать заново» — не курсор: оно считает недавние
+        # неудачи в истории подбора и передаёт движку только флажок from_start.
+        self.assertIn("plan_strategy_scan_resume", page_source)
+        self.assertIn("from_start=", page_source)
+        self.assertIn("count_resumable_strategies", feature_source)
+        self.assertIn("count_resumable_strategies", workflow_source)
+        self.assertIn("from_start=bool(from_start)", workflow_source)
+        self.assertIn("count_recent_failures", count_source)
 
     def test_strategy_scan_finish_plan_finalizes_through_worker(self) -> None:
         import blockcheck.workers as blockcheck_workers
@@ -4391,7 +4419,6 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
     def test_lazy_pages_start_runtime_after_activation_not_constructor(self) -> None:
         page_classes = (
             dns_page.NetworkPage,
-            ServersPage,
             PremiumPage,
             DpiSettingsPage,
             OrchestraWhitelistPage,
@@ -4407,6 +4434,22 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
 
                 self.assertNotIn("self._run_runtime_init_once()", init_source)
                 self.assertIn("self._run_runtime_init_once()", activated_source)
+
+        # «Серверы» только показывают: проверкой и установкой владеют сервисы,
+        # отдельного _run_runtime_init_once у страницы нет. Конструктор ничего
+        # не запускает, а подсказка простоя ставится один раз после показа.
+        servers_init_source = inspect.getsource(ServersPage.__init__)
+        servers_activated_source = inspect.getsource(ServersPage.on_page_activated)
+
+        self.assertNotIn(".start(", servers_init_source)
+        self.assertNotIn("_request_check_updates", servers_init_source)
+        self.assertNotIn("on_page_activated(", servers_init_source)
+        self.assertNotIn("_show_idle_hint(", servers_init_source)
+        self.assertIn("self._idle_view_applied = False", servers_init_source)
+        self.assertIn("if self._idle_view_applied:", servers_activated_source)
+        self.assertIn("self._idle_view_applied = True", servers_activated_source)
+        self.assertIn("self._show_idle_hint(snapshot)", servers_activated_source)
+        self.assertNotIn(".start(", servers_activated_source)
 
     def test_dpi_settings_page_keeps_radio_icons_visible_immediately(self) -> None:
         page_build_source = inspect.getsource(DpiSettingsPage._build_ui)
