@@ -157,8 +157,24 @@ def _read_effective_ip_entries_from_text(text: str) -> list[str]:
     return result
 
 
-def _count_effective_entries(path: str) -> int:
-    return len(_read_effective_ip_entries(path))
+def _count_list_lines(path: str) -> int:
+    """Число строк с записями — только для строки в журнале при запуске.
+
+    Раньше ради этой строки ipset-all.txt (33 тысячи строк) целиком
+    разбирался через ipaddress: 120 мс чистого Python на быстром компьютере,
+    и всё это время фоновый поток отнимал процессор у интерфейса. Для
+    собранного программой файла простой подсчёт даёт то же число.
+    """
+    count = 0
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if line and not line.startswith("#"):
+                    count += 1
+    except Exception:
+        return 0
+    return count
 
 
 def get_ipset_all_base_entries() -> list[str]:
@@ -290,10 +306,10 @@ def startup_ipsets_check() -> bool:
         ipset_ru_ok = rebuild_ipset_ru_files()
 
         if ipset_all_ok and ipset_ru_ok:
-            total_all = _count_effective_entries(IPSET_ALL_PATH)
-            user_all = _count_effective_entries(IPSET_ALL_USER_PATH)
-            total_ru = _count_effective_entries(IPSET_RU_PATH)
-            user_ru = _count_effective_entries(IPSET_RU_USER_PATH)
+            total_all = _count_list_lines(IPSET_ALL_PATH)
+            user_all = _count_list_lines(IPSET_ALL_USER_PATH)
+            total_ru = _count_list_lines(IPSET_RU_PATH)
+            user_ru = _count_list_lines(IPSET_RU_USER_PATH)
             log(f"ipset-all.txt: {total_all} строк, user: {user_all}", "INFO")
             log(f"ipset-ru.txt: {total_ru} строк, user: {user_ru}", "INFO")
             return True

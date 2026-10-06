@@ -53,6 +53,11 @@ _SETTINGS_CACHE: dict[str, Any] | None = None
 _SETTINGS_CACHE_REVISION: int | None = None
 _SETTINGS_CONNECTION: sqlite3.Connection | None = None
 _SETTINGS_CONNECTION_PATH: Path | None = None
+# Корень настроек, для которого открыто соединение. Path.resolve() на Windows
+# стоит ~85 мкс — в двадцать раз дороже самого запроса к базе, а путь к базе
+# нужен при каждом чтении настройки. Пока корень тот же, заново его не
+# разворачиваем.
+_SETTINGS_CONNECTION_ROOT: str | None = None
 _SETTINGS_SCHEMA_VERSION = 1
 _SETTINGS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings_sections (
@@ -136,12 +141,13 @@ def _serialize_section(value: Any) -> str:
 
 
 def _close_connection_locked() -> None:
-    global _SETTINGS_CONNECTION, _SETTINGS_CONNECTION_PATH
+    global _SETTINGS_CONNECTION, _SETTINGS_CONNECTION_PATH, _SETTINGS_CONNECTION_ROOT
     global _SETTINGS_CACHE, _SETTINGS_CACHE_REVISION
 
     connection = _SETTINGS_CONNECTION
     _SETTINGS_CONNECTION = None
     _SETTINGS_CONNECTION_PATH = None
+    _SETTINGS_CONNECTION_ROOT = None
     _SETTINGS_CACHE = None
     _SETTINGS_CACHE_REVISION = None
     if connection is not None:
@@ -310,16 +316,21 @@ def _create_connection_with_recovery_locked(path: Path) -> tuple[sqlite3.Connect
 
 
 def _get_connection_locked() -> sqlite3.Connection:
-    global _SETTINGS_CONNECTION, _SETTINGS_CONNECTION_PATH
+    global _SETTINGS_CONNECTION, _SETTINGS_CONNECTION_PATH, _SETTINGS_CONNECTION_ROOT
     global _SETTINGS_CACHE, _SETTINGS_CACHE_REVISION
 
+    root = MAIN_DIRECTORY
+    if _SETTINGS_CONNECTION is not None and _SETTINGS_CONNECTION_ROOT == root:
+        return _SETTINGS_CONNECTION
     path = get_settings_database_path().resolve()
     if _SETTINGS_CONNECTION is not None and _SETTINGS_CONNECTION_PATH == path:
+        _SETTINGS_CONNECTION_ROOT = root
         return _SETTINGS_CONNECTION
     _close_connection_locked()
     connection, data = _create_connection_with_recovery_locked(path)
     _SETTINGS_CONNECTION = connection
     _SETTINGS_CONNECTION_PATH = path
+    _SETTINGS_CONNECTION_ROOT = root
     _SETTINGS_CACHE = copy.deepcopy(data)
     _SETTINGS_CACHE_REVISION = _read_revision_locked(connection)
     return connection

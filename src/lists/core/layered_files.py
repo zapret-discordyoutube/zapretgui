@@ -30,6 +30,10 @@ from lists.core.files import normalize_newlines, read_text_file_safe, write_text
 SAFE_HOSTLIST_PLACEHOLDER = "www.example.com"
 SAFE_IPSET_PLACEHOLDER = "123.123.123.123"
 _LAYERED_LIST_FILE_LOCK = threading.RLock()
+# Итоговый файл -> отпечаток трёх его файлов после последней сверки.
+# Живёт только в памяти: первая сверка после запуска всегда настоящая.
+# Читается и меняется под _LAYERED_LIST_FILE_LOCK.
+_RECONCILED_STAMPS: dict[str, tuple[tuple[int, int] | None, ...]] = {}
 
 
 class ListOwnership(Enum):
@@ -230,9 +234,30 @@ def _reconcile_list_file(lists_root: Path, file_name: str, *, authoritative: boo
     """Снимок → план → применение. authoritative=True — операция пользователя:
     слои становятся единственным источником истины для итогового файла."""
     paths = layered_list_file(lists_root, file_name)
+    stamp_key = str(paths.final_path)
+    if not authoritative and _RECONCILED_STAMPS.get(stamp_key) == _layers_stamp(paths):
+        # Ни один из трёх файлов не менялся с прошлой сверки в этом запуске:
+        # читать и сравнивать их заново незачем. Сверка идёт при запуске
+        # программы дважды и перед каждым пуском обхода — по всем спискам.
+        return
+    _RECONCILED_STAMPS.pop(stamp_key, None)
     snapshot = _load_snapshot(paths)
     plan = _plan_rebuild(paths.file_name, snapshot, authoritative=authoritative)
     _apply_plan(paths, plan)
+    _RECONCILED_STAMPS[stamp_key] = _layers_stamp(paths)
+
+
+def _file_stamp(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def _layers_stamp(paths: LayeredListFile) -> tuple[tuple[int, int] | None, ...]:
+    """Время изменения и размер base-, user- и итогового файла списка."""
+    return (_file_stamp(paths.base_path), _file_stamp(paths.user_path), _file_stamp(paths.final_path))
 
 
 def _load_snapshot(paths: LayeredListFile) -> _LayerSnapshot:
@@ -341,9 +366,5 @@ def _has_effective_entries(entries: Iterable[str]) -> bool:
 
 
 def _text_entries(text: str) -> list[str]:
-    result: list[str] = []
-    for raw_line in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        line = raw_line.strip()
-        if line:
-            result.append(line)
-    return result
+    lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return [line for raw_line in lines if (line := raw_line.strip())]

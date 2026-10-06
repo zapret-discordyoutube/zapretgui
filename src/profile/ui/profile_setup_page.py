@@ -67,6 +67,7 @@ from ui.accessibility import (
 from ui.code_editor.editor import CodeEditor
 from ui.code_editor.find_bar import FindReplaceBar
 from ui.code_editor.find_controller import FindController
+from ui.code_editor.chunked_fill import ChunkedReadOnlyFill
 from ui.code_editor.syntax import ListFileSyntaxHighlighter, PresetSyntaxHighlighter
 from ui.fluent_widgets import set_tooltip
 from ui.latest_value_worker_state import LatestValueWorkerState
@@ -504,6 +505,7 @@ class ProfileSetupPageBase(BasePage):
         self._list_file_title = None
         self._list_file_base_title = None
         self._list_file_base_text = None
+        self._list_file_base_fill = None
         self._list_file_user_title = None
         self._list_file_text = None
         self._list_file_editor_tab = None
@@ -928,6 +930,9 @@ class ProfileSetupPageBase(BasePage):
             highlighter_factory=lambda document: ListFileSyntaxHighlighter(document),
         )
         self._list_file_base_text.setReadOnly(True)
+        # Системная база бывает на сто тысяч строк: целиком за один вызов она
+        # подвешивала окно на секунды, поэтому дописывается порциями.
+        self._list_file_base_fill = ChunkedReadOnlyFill(self._list_file_base_text)
         self._list_file_base_text.setMinimumHeight(180)
         self._list_file_base_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         set_tooltip(
@@ -2011,7 +2016,11 @@ class ProfileSetupPageBase(BasePage):
             self._list_file_base_text.blockSignals(True)
             try:
                 if base_text_changed:
-                    self._list_file_base_text.setPlainText(base_text)
+                    base_fill = self.__dict__.get("_list_file_base_fill")
+                    if base_fill is not None:
+                        base_fill.set_text(base_text)
+                    else:
+                        self._list_file_base_text.setPlainText(base_text)
                 if kind == "ipset":
                     set_placeholder_text_if_changed(self._list_file_base_text, "В базе пока нет IP или подсетей.")
                 else:
@@ -2739,6 +2748,9 @@ class ProfileSetupPageBase(BasePage):
         except Exception:
             writes_to_save = []
         self._cleanup_in_progress = True
+        base_fill = self.__dict__.get("_list_file_base_fill")
+        if base_fill is not None:
+            base_fill.stop()
         language = self.__dict__.get("_raw_profile_language")
         if language is not None:
             language.cleanup()

@@ -56,6 +56,42 @@ class SettingsReadCostTests(unittest.TestCase):
 
         self.assertEqual(settings_store.get_custom_dns_servers(), stored)
 
+    def test_getter_does_not_resolve_database_path_again(self) -> None:
+        # Path.resolve() на Windows — ~85 мкс, в двадцать раз дороже запроса
+        # ревизии. Страница читает десятки настроек за один показ.
+        settings_store.get_dpi_autostart()
+
+        with patch.object(
+            settings_store,
+            "get_settings_database_path",
+            wraps=settings_store.get_settings_database_path,
+        ) as database_path:
+            for _ in range(20):
+                settings_store.get_dpi_autostart()
+
+        database_path.assert_not_called()
+
+    def test_changed_settings_root_opens_its_own_database(self) -> None:
+        settings_store.set_dpi_autostart(False)
+        other_dir = TemporaryDirectory()
+        self.addCleanup(other_dir.cleanup)
+
+        with patch.object(settings_store, "MAIN_DIRECTORY", other_dir.name):
+            settings_store.reset_settings()
+            settings_store.set_dpi_autostart(True)
+            self.assertTrue(settings_store.get_dpi_autostart())
+            self.assertTrue(settings_store.get_settings_database_path().is_file())
+
+        # Вернулись к прежнему корню — читается прежняя база, а не кэш чужой.
+        self.assertFalse(settings_store.get_dpi_autostart())
+
+    def test_closed_database_is_opened_again_for_same_root(self) -> None:
+        settings_store.set_dpi_autostart(False)
+
+        settings_store.close_settings_database()
+
+        self.assertFalse(settings_store.get_dpi_autostart())
+
     def test_read_settings_still_returns_detached_document(self) -> None:
         data = settings_store.read_settings()
         data["program"]["dpi_autostart"] = "corrupted"
