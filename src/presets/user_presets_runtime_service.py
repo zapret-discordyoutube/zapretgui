@@ -1459,6 +1459,9 @@ class UserPresetsRuntimeService:
             metadata = {}
         metadata["file_name"] = new_file_name
         metadata["display_name"] = new_display_name or new_file_name
+        # Встроенный пресет ищется по имени файла, поэтому флаг прежнего имени
+        # к новому не относится; точное значение принесёт фоновое обновление.
+        metadata["can_reset_to_builtin"] = False
         self._cached_presets_metadata[new_file_name] = metadata
         self._ui_dirty = False
         return True

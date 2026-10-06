@@ -382,22 +382,21 @@ class UserPresetsPageBase(BasePage):
         return False
 
     def _can_reset_preset_to_builtin(self, name: str) -> bool:
-        # Ленивая проверка одного файла при открытии меню: кэш списка не хранит
-        # этот флаг (его вычисление требует чтения содержимого файлов).
+        # Меню открывается в потоке интерфейса, поэтому файлы здесь не читаются:
+        # флаг уже посчитан фоновой загрузкой списка и лежит в кэше метаданных.
         candidate = str(name or "").strip()
         if not candidate:
             return False
         if self._is_builtin_preset_file(candidate):
             return False
 
-        checker = getattr(self._preset_runtime_actions, "preset_differs_from_builtin_by_file_name", None)
-        if not callable(checker):
-            return False
-        file_name = candidate if candidate.lower().endswith(".txt") else f"{candidate}.txt"
-        try:
-            return bool(checker(self._config.launch_method, file_name))
-        except Exception:
-            return False
+        cached_metadata = self._runtime_service.cached_presets_metadata()
+        metadata = cached_metadata.get(candidate)
+        if metadata is None and not candidate.lower().endswith(".txt"):
+            metadata = cached_metadata.get(f"{candidate}.txt")
+        if isinstance(metadata, dict):
+            return bool(metadata.get("can_reset_to_builtin", False))
+        return False
 
     def _folder_scope_key(self) -> str:
         return self._config.folder_scope

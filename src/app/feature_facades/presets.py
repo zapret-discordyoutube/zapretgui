@@ -13,6 +13,7 @@ class PresetsFeature:
     _profile_feature: Any = None
     _preset_list_metadata_cache: Any = None
     _preset_list_metadata_lock: Any = None
+    _preset_reset_flag_memo: Any = None
 
     @staticmethod
     def _commands():
@@ -128,23 +129,48 @@ class PresetsFeature:
                 display_name=display_name,
                 kind=kind,
                 is_builtin=is_builtin,
-                can_reset_to_builtin=can_reset_to_builtin,
+                can_reset_to_builtin=self._preset_reset_flag_for_list_entry(path, builtin_path, stat_key),
                 read_headers=False,
                 stat_result=stat_result,
             )
-            for file_name, display_name, kind, is_builtin, can_reset_to_builtin, path, _stat_key, stat_result in entries
+            for file_name, display_name, kind, is_builtin, builtin_path, path, stat_key, stat_result in entries
         }
         signature = tuple(
             (file_name, str(path), stat_key)
-            for file_name, _display, _kind, _builtin, _can_reset, path, stat_key, _stat_result in entries
+            for file_name, _display, _kind, _builtin, _builtin_path, path, stat_key, _stat_result in entries
         )
         return signature, metadata
 
     def _build_preset_list_metadata_signature(self, launch_method: str):
         return tuple(
             (file_name, str(path), stat_key)
-            for file_name, _display, _kind, _builtin, _can_reset, path, stat_key, _stat_result in self._preset_list_metadata_entries(launch_method)
+            for file_name, _display, _kind, _builtin, _builtin_path, path, stat_key, _stat_result in self._preset_list_metadata_entries(launch_method)
         )
+
+    def _preset_reset_flag_for_list_entry(self, path, builtin_path, stat_key) -> bool:
+        # Вызывается только из фоновой сборки списка: меню пресета читает готовый
+        # флаг из кэша метаданных и само файлы не трогает. Размеры уже известны
+        # из scandir, поэтому содержимое читается лишь у пары одинакового размера
+        # и один раз на версию обоих файлов.
+        if builtin_path is None:
+            return False
+        user_key, builtin_key = stat_key
+        if builtin_key == (0, 0):
+            return False
+        if user_key != (0, 0) and user_key[1] != builtin_key[1]:
+            return True
+        memo_key = str(path)
+        with self._metadata_lock():
+            if self._preset_reset_flag_memo is None:
+                self._preset_reset_flag_memo = {}
+            memo = self._preset_reset_flag_memo
+            cached = memo.get(memo_key)
+        if cached is not None and cached[0] == stat_key:
+            return bool(cached[1])
+        differs = self._preset_differs_from_builtin_paths(path, builtin_path)
+        with self._metadata_lock():
+            memo[memo_key] = (stat_key, differs)
+        return differs
 
     def _preset_list_metadata_entries(self, launch_method: str):
         from settings.mode import engine_for_launch_method_or_none
@@ -183,10 +209,6 @@ class PresetsFeature:
                 builtin_path = engine_paths.builtin_presets_dir / file_name
                 display_name = Path(file_name).stem.strip() or file_name
                 kind = "builtin" if is_builtin else "user"
-                # Путь списка не читает содержимое файлов: can_reset вычисляется
-                # лениво через preset_differs_from_builtin_by_file_name при
-                # открытии меню конкретного пресета.
-                can_reset_to_builtin = False
                 try:
                     stat_result = dir_entry.stat()
                     path_stat_key = self._preset_file_stat_key_from_result(stat_result)
@@ -206,7 +228,7 @@ class PresetsFeature:
                     display_name,
                     kind,
                     is_builtin,
-                    can_reset_to_builtin,
+                    None if is_builtin else builtin_path,
                     path,
                     stat_key,
                     stat_result,
