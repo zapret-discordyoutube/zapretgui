@@ -48,6 +48,50 @@ def apply_gui_gil_switch_interval() -> None:
         pass
 
 
+def preload_darkdetect_without_wmi() -> None:
+    """Загружает darkdetect, не давая ему спросить версию Windows через WMI.
+
+    Библиотека (её тянет qfluentwidgets) при импорте вызывает
+    platform.release() и platform.version(). На Windows это запрос к WMI:
+    ~50 мс на быстром компьютере до появления окна. Ей нужно только «Windows
+    не ниже 10 и сборка не ниже 14393», а это мгновенно отвечает
+    sys.getwindowsversion().
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        version = sys.getwindowsversion()
+    except AttributeError:
+        return
+    import platform
+
+    original_release, original_version = platform.release, platform.version
+    platform.release = lambda: str(version.major)
+    platform.version = lambda: f"{version.major}.{version.minor}.{version.build}"
+    try:
+        import darkdetect  # noqa: F401
+    except Exception:
+        pass
+    finally:
+        platform.release, platform.version = original_release, original_version
+
+
+def skip_frameless_wmi_version_probe() -> None:
+    """Отвечает библиотеке окна «это не Windows 7» без похода в WMI.
+
+    qframelesswindow в конструкторе окна вызывает isWin7(), а та —
+    platform.platform(). На Windows эта функция спрашивает WMI: ~75 мс на
+    быстром компьютере и заметно больше на медленном, и всё это до появления
+    окна. Ниже Windows 10 1809 программа не запускается вовсе
+    (startup.windows_version_guard), поэтому ответ известен заранее.
+    """
+    try:
+        from qframelesswindow.utils import win32_utils
+    except Exception:
+        return
+    win32_utils.isWin7 = lambda: False
+
+
 def _set_attr_if_exists(name: str, on: bool = True) -> None:
     attr = getattr(Qt.ApplicationAttribute, name, None)
     if attr is None:
@@ -153,6 +197,7 @@ def ensure_qt_runtime() -> QApplication:
         return app
 
     t_hooks = _time.perf_counter()
+    preload_darkdetect_without_wmi()
     t_fluent_translator = _time.perf_counter()
     from ui.fluent_translator import install_fluent_translator
 
@@ -161,6 +206,7 @@ def ensure_qt_runtime() -> QApplication:
         "StartupQtFluentTranslator",
         f"{(_time.perf_counter() - t_fluent_translator) * 1000:.0f}ms",
     )
+    skip_frameless_wmi_version_probe()
     t_infobar_duration = _time.perf_counter()
     from ui.infobar_duration import install_infobar_min_duration
 

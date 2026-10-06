@@ -134,6 +134,12 @@ def install_secondary_page_warmup(*args, **kwargs):
     return install(*args, **kwargs)
 
 
+def build_idle_ui_task_queue(startup_host):
+    from main.post_startup_idle_tasks import build_idle_ui_task_queue as build
+
+    return build(startup_host)
+
+
 def install_update_check(*args, **kwargs):
     from main.post_startup_update import install_update_check as install
 
@@ -169,6 +175,9 @@ class PostStartupDeps:
 
 def install_post_startup_tasks(deps: PostStartupDeps) -> None:
     startup_host = deps.startup_host
+    # Сборка скрытых страниц занимает GUI-поток, поэтому идёт через общую
+    # очередь: по одной странице и только в паузах пользователя.
+    idle_tasks = build_idle_ui_task_queue(startup_host)
     on_profile_warmup_ready = None
     if deps.presets_feature is not None and deps.ui_state_store is not None:
         on_profile_warmup_ready = lambda method: deps.presets_feature.refresh_profile_strategy_summary_in_store(
@@ -200,10 +209,12 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
     install_telegram_proxy_page_warmup(
         startup_host,
         log_startup_metric=deps.log_startup_metric,
+        idle_tasks=idle_tasks,
     )
     install_secondary_page_warmup(
         startup_host,
         log_startup_metric=deps.log_startup_metric,
+        idle_tasks=idle_tasks,
     )
     install_lists_check(
         startup_host,
@@ -241,6 +252,7 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
         startup_host,
         profile_feature=deps.profile_feature,
         log_startup_metric=deps.log_startup_metric,
+        idle_tasks=idle_tasks,
         current_launch_method=str(getattr(deps, "launch_method", "") or ""),
         on_profile_warmup_ready=on_profile_warmup_ready,
     )
@@ -268,6 +280,7 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
         updater_feature=deps.updater_feature,
         notify=deps.notify,
         set_status=deps.set_status,
+        idle_tasks=idle_tasks,
     )
     request_installation_repair = getattr(deps, "request_installation_repair", None)
     if callable(request_installation_repair):

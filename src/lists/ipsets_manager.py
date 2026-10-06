@@ -118,6 +118,22 @@ def _read_effective_ip_entries(path: str) -> list[str]:
     return result
 
 
+def _has_effective_ip_entry(path: str) -> bool:
+    """Есть ли в файле хотя бы одна настоящая запись.
+
+    Останавливается на первой же: чтобы ответить «файл не пустой», незачем
+    разбирать через ipaddress все 30 с лишним тысяч строк ipset-all.txt.
+    Разбор идёт в фоновом потоке, но держит GIL и отнимает время у интерфейса.
+    """
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return any(_normalize_ip_entry(raw) for raw in f)
+    except Exception:
+        return False
+
+
 def _read_effective_ip_entries_from_text(text: str) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
@@ -177,7 +193,7 @@ def rebuild_ipset_all_files() -> bool:
     """Пересобирает итоговый ipset-all.txt из системной базы и user-слоя."""
     try:
         rebuild_profile_list_file(LISTS_ROOT, "ipset-all.txt")
-        return bool(_read_effective_ip_entries(IPSET_ALL_PATH))
+        return _has_effective_ip_entry(IPSET_ALL_PATH)
     except Exception as exc:
         log(f"Ошибка rebuild_ipset_all_files: {exc}", "ERROR")
         return False

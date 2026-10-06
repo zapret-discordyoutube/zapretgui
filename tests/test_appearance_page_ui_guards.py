@@ -50,5 +50,78 @@ class AppearancePageUiGuardTests(unittest.TestCase):
             page._apply_premium_access.assert_called_once_with(state)
 
 
+class AccentRestyleGuardTests(unittest.TestCase):
+    """Тот же акцент не должен перекрашивать всю программу заново."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def setUp(self) -> None:
+        from PyQt6.QtGui import QColor
+        from qfluentwidgets.common.config import qconfig
+
+        previous = QColor(qconfig.get(qconfig.themeColor))
+        self.addCleanup(lambda: qconfig.set(qconfig.themeColor, previous, save=False))
+        qconfig.set(qconfig.themeColor, QColor("#112233"), save=False)
+
+    def test_same_accent_does_not_restyle_every_widget(self) -> None:
+        from PyQt6.QtGui import QColor
+        from unittest.mock import patch
+
+        from ui.pages import appearance_page
+
+        # qfluentwidgets.setThemeColor проходит по всем своим виджетам в
+        # программе, даже если цвет не изменился: сотни миллисекунд.
+        with patch.object(appearance_page, "setThemeColor") as set_theme_color:
+            changed = appearance_page.set_theme_color_if_changed(QColor("#112233"))
+
+        self.assertFalse(changed)
+        set_theme_color.assert_not_called()
+
+    def test_new_accent_is_applied(self) -> None:
+        from PyQt6.QtGui import QColor
+        from unittest.mock import patch
+
+        from ui.pages import appearance_page
+
+        with patch.object(appearance_page, "setThemeColor") as set_theme_color:
+            changed = appearance_page.set_theme_color_if_changed(QColor("#445566"))
+
+        self.assertTrue(changed)
+        set_theme_color.assert_called_once()
+        self.assertEqual(set_theme_color.call_args.args[0].name(), "#445566")
+
+    def test_page_build_with_saved_accent_does_not_restyle(self) -> None:
+        from unittest.mock import patch
+
+        from ui.pages import appearance_page
+        from ui.pages.appearance_page import AppearancePage
+
+        button = Mock()
+        page = AppearancePage.__new__(AppearancePage)
+        page._color_picker_btn = button
+        page._follow_windows_accent_cb = None
+        page._tinted_bg_cb = None
+        page._tinted_intensity_slider = None
+        page._tinted_intensity_value_label = None
+        page._tinted_intensity_container = None
+        page._begin_ui_sync = lambda: None
+        page._end_ui_sync = lambda: None
+        page._update_accent_color_button_accessibility = lambda *_a, **_k: None
+        plan = Mock(accent_color="#112233", follow_windows_accent=False, tinted_background=False, tinted_intensity=15)
+
+        with patch.object(appearance_page, "setThemeColor") as set_theme_color:
+            try:
+                AppearancePage._apply_initial_accent_state(page, plan)
+            except Exception:
+                # Остальная часть метода настраивает виджеты, которых в этом
+                # тесте нет; проверяется только обращение к акценту.
+                pass
+
+        button.setColor.assert_called_once()
+        set_theme_color.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,7 @@ def install_profile_warmup(
     *,
     profile_feature,
     log_startup_metric,
+    idle_tasks,
     current_launch_method: str = DEFAULT_PROFILE_WARMUP_METHOD,
     delay_ms: int = PROFILE_WARMUP_DELAY_MS,
     preset_setup_page_delay_ms: int = PRESET_SETUP_PAGE_WARMUP_DELAY_MS,
@@ -122,15 +123,17 @@ def install_profile_warmup(
         )
         profile_page_delay = max(delay, int(profile_setup_page_delay_ms))
         log_startup_metric("StartupProfileSetupUiWarmupQueued", f"{profile_page_delay}ms after interactive")
-        schedule_after(
-            profile_page_delay,
-            lambda: is_startup_host_alive(startup_host) and _run_profile_setup_page_warmup(),
+        idle_tasks.add(
+            "ProfileSetupPageWarmup",
+            _run_profile_setup_page_warmup,
+            delay_ms=profile_page_delay,
         )
         page_delay = max(delay, int(preset_setup_page_delay_ms))
         log_startup_metric("StartupPresetSetupUiWarmupQueued", f"{page_delay}ms after interactive")
-        schedule_after(
-            page_delay,
-            lambda: is_startup_host_alive(startup_host) and _run_preset_setup_page_warmup(),
+        idle_tasks.add(
+            "PresetSetupPageWarmup",
+            _run_preset_setup_page_warmup,
+            delay_ms=page_delay,
         )
 
     bind_startup_gate(

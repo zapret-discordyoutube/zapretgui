@@ -16,7 +16,6 @@ import os
 import traceback
 import threading
 import datetime
-import platform
 import atexit
 from pathlib import Path
 
@@ -44,8 +43,28 @@ def _get_crash_logs_folder() -> Path:
     return folder
 
 
+def _session_platform_line() -> str:
+    """Короткая строка о системе для заголовка сеанса.
+
+    Пишется при каждом запуске ещё до появления окна, поэтому берётся из
+    sys.getwindowsversion() — это доли миллисекунды. platform.platform() на
+    Windows идёт через WMI: на быстром компьютере это ~75 мс, на медленном —
+    заметно больше. Полные сведения собирает _get_system_info() уже в момент
+    краша, когда время не важно.
+    """
+    try:
+        version = sys.getwindowsversion()
+    except AttributeError:
+        return sys.platform
+    return f"Windows {version.major}.{version.minor}.{version.build}"
+
+
 def _get_system_info() -> str:
     """Собирает информацию о системе"""
+    # Импорт здесь, а не в начале файла: модуль нужен только в момент краша,
+    # а его загрузка при каждом запуске стоит ~10 мс до появления окна.
+    import platform
+
     info_lines = [
         f"OS: {platform.system()} {platform.release()} ({platform.version()})",
         f"Python: {sys.version}",
@@ -242,7 +261,7 @@ def install_crash_handler():
         _faulthandler_file.write(f"\n{'=' * 60}\n")
         _faulthandler_file.write(f"Session started: {datetime.datetime.now()}\n")
         _faulthandler_file.write(f"Python: {sys.version}\n")
-        _faulthandler_file.write(f"Platform: {platform.platform()}\n")
+        _faulthandler_file.write(f"Platform: {_session_platform_line()}\n")
         _faulthandler_file.write(f"{'=' * 60}\n\n")
         _faulthandler_file.flush()
         

@@ -129,8 +129,13 @@ class PresetRuntimeCoordinator(QObject):
         self._active_preset_watch_runtime_request_id = 0
 
     def setup_active_preset_file_watcher(self) -> None:
-        watched_path = self._resolve_active_preset_watch_path()
-        self._apply_active_preset_watch_path(watched_path)
+        """Вешает watcher на файл выбранного пресета.
+
+        Путь к файлу ищет фоновый поток: первый поиск читает заголовки всех
+        пресетов в папке, и в GUI-потоке это задерживало кадр на ~240 мс
+        сразу после появления окна.
+        """
+        self._schedule_active_preset_file_watcher_setup()
 
     def _apply_active_preset_watch_path(self, watched_path: str) -> None:
         if not watched_path:
@@ -419,20 +424,6 @@ class PresetRuntimeCoordinator(QObject):
                         raise
         except Exception:
             pass
-
-    def _resolve_active_preset_watch_path(self) -> str:
-        pending = self._pending_active_preset_watch
-        self._pending_active_preset_watch = None
-        if pending is not None:
-            method = normalize_launch_method(pending.launch_method, default="")
-            file_name = str(pending.preset_file_name or "").strip()
-            resolver = self._get_preset_source_path_by_file_name
-            if method and file_name and callable(resolver):
-                try:
-                    return str(resolver(method, file_name) or "")
-                except Exception:
-                    pass
-        return str(self._get_active_preset_path() or "")
 
     def _schedule_active_preset_file_watcher_setup(
         self,

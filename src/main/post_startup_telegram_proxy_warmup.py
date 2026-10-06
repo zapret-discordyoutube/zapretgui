@@ -5,7 +5,6 @@ import time
 from app.page_names import PageName
 from log.log import log
 from main.post_startup_gate import bind_startup_gate, is_startup_host_alive
-from main.post_startup_threading import schedule_after
 from ui.performance_metrics import log_ui_timing_since
 
 
@@ -16,6 +15,7 @@ def install_telegram_proxy_page_warmup(
     startup_host,
     *,
     log_startup_metric,
+    idle_tasks,
     delay_ms: int = TELEGRAM_PROXY_PAGE_WARMUP_DELAY_MS,
 ) -> None:
     def _run_telegram_proxy_page_warmup() -> None:
@@ -37,9 +37,10 @@ def install_telegram_proxy_page_warmup(
             return
         delay = max(0, int(delay_ms))
         log_startup_metric("StartupTelegramProxyPageWarmupQueued", f"{delay}ms after interactive")
-        schedule_after(
-            delay,
-            lambda: is_startup_host_alive(startup_host) and _run_telegram_proxy_page_warmup(),
+        idle_tasks.add(
+            "TelegramProxyPageWarmup",
+            _run_telegram_proxy_page_warmup,
+            delay_ms=delay,
         )
 
     bind_startup_gate(

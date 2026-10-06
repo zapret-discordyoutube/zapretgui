@@ -63,6 +63,24 @@ from qfluentwidgets import (
 TINTED_INTENSITY_MAX = appearance_settings.schema.MAX_TINTED_INTENSITY
 
 
+def set_theme_color_if_changed(color: QColor) -> bool:
+    """Меняет акцент программы, только если он действительно другой.
+
+    setThemeColor заново применяет стиль к каждому виджету qfluentwidgets во
+    всей программе, даже когда цвет прежний: при паре тысяч виджетов это
+    сотни миллисекунд работы GUI-потока. Страница «Оформление» при сборке
+    выставляет сохранённый акцент, который запуск программы уже применил, —
+    то есть перекрашивала всю программу в тот же цвет.
+    """
+    from qfluentwidgets.common.config import qconfig
+
+    current = QColor(qconfig.get(qconfig.themeColor))
+    if current.isValid() and current.rgba() == QColor(color).rgba():
+        return False
+    setThemeColor(color)
+    return True
+
+
 def update_accent_color_button_accessibility(button, *, language: str = "ru", color: QColor | None = None) -> None:
     if button is None:
         return
@@ -1431,7 +1449,7 @@ class AppearancePage(BasePage):
                 self._begin_ui_sync()
                 try:
                     self._color_picker_btn.setColor(color)
-                    setThemeColor(color)
+                    set_theme_color_if_changed(color)
                 finally:
                     self._end_ui_sync()
 
@@ -1589,7 +1607,7 @@ class AppearancePage(BasePage):
                 if color.isValid():
                     self._begin_ui_sync()
                     try:
-                        setThemeColor(color)
+                        set_theme_color_if_changed(color)
                         self._request_appearance_save("accent_color", hex_color)
                         if self._color_picker_btn is not None:
                             self._color_picker_btn.setColor(color)

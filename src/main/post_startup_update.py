@@ -11,12 +11,17 @@ from main.post_startup_threading import enqueue_subsystem_task, schedule_after
 class _UpdateCheckBridge(QObject):
     result_ready = pyqtSignal(object)
     whats_new_ready = pyqtSignal(object)
+    # (ожидавшаяся версия, готовый текст уведомления)
+    interrupted_update_found = pyqtSignal(str, str)
 
 
 # «Что нового» ждёт, пока окно программы откроется и успокоится.
 _WHATS_NEW_DELAY_MS = 1500
+# Окно «Что нового» строится в GUI-потоке, поэтому идёт через очередь пауз
+# пользователя: она сама ждёт, пока окно программы откроют из трея и человек
+# перестанет водить мышью. Повтор нужен только на редкий случай, когда окно
+# успели убрать между проверкой очереди и показом.
 _WHATS_NEW_RETRY_MS = 3000
-# Программа могла запуститься в трей: ждём до 20 минут, пока окно откроют.
 _WHATS_NEW_MAX_RETRIES = 400
 
 
@@ -26,6 +31,7 @@ def install_update_check(
     updater_feature,
     notify,
     set_status,
+    idle_tasks,
 ) -> None:
     update_bridge = _UpdateCheckBridge(QCoreApplication.instance())
     startup_check_token: int | None = None
@@ -45,8 +51,23 @@ def install_update_check(
 
             # Окно обновления открывает сама страница «Серверы» по общему итогу
             # проверки — одно окно на любой путь. Здесь страницу только
-            # создаём, не переходя на неё.
-            startup_host.ensure_page(StartupPageName.SERVERS)
+            # создаём, не переходя на неё. Сборка страницы занимает GUI-поток
+            # (~100 мс на быстром компьютере), поэтому ждёт паузы пользователя:
+            # окно обновления не выскакивает посреди клика. При окне в трее
+            # ждать нечего — страница строится сразу, как и раньше.
+            idle_tasks.add(
+                "UpdateWindowPage",
+                lambda: _ensure_update_page(StartupPageName.SERVERS),
+                needs_shown_window=False,
+            )
+        except Exception as exc:
+            log(f"Ошибка при показе окна обновления: {exc}", "❌ ERROR")
+
+    def _ensure_update_page(page_name) -> None:
+        if not is_startup_host_alive(startup_host):
+            return
+        try:
+            startup_host.ensure_page(page_name)
         except Exception as exc:
             log(f"Ошибка при показе окна обновления: {exc}", "❌ ERROR")
 
@@ -165,14 +186,15 @@ def install_update_check(
 
         enqueue_subsystem_task("update", "StartupUpdateCheckWorker", _startup_update_worker)
 
-    def _report_interrupted_update() -> None:
-        """Рассказывает про обновление, которое не довёл до конца прошлый запуск.
+    def _interrupted_update_worker() -> None:
+        """Ищет обновление, которое не довёл до конца прошлый запуск.
 
         Проверка не зависит от настройки автообновления: сорвавшаяся установка
         — это факт о состоянии программы, а не предложение обновиться.
+
+        Идёт в фоне: первый импорт updater.install и чтение его файлов в
+        GUI-потоке задерживали кадр на ~45 мс сразу после появления окна.
         """
-        if not is_startup_host_alive(startup_host):
-            return
         try:
             from updater.install.interrupted import (
                 describe_interrupted_update,
@@ -182,23 +204,33 @@ def install_update_check(
             interrupted = detect_interrupted_update()
             if interrupted is None:
                 return
+            update_bridge.interrupted_update_found.emit(
+                str(interrupted.expected_version or ""),
+                str(describe_interrupted_update(interrupted) or ""),
+            )
+        except Exception as exc:
+            log(f"Не удалось разобрать состояние прошлого обновления: {exc}", "❌ ERROR")
 
+    def _on_interrupted_update_found(expected_version: str, description: str) -> None:
+        if not is_startup_host_alive(startup_host):
+            return
+        try:
             notify(
                 advisory_notification(
                     level="warning",
                     title="Обновление не завершилось",
-                    content=describe_interrupted_update(interrupted),
+                    content=description,
                     source="startup.update_recovery",
                     presentation="infobar",
                     queue="immediate",
                     duration=15000,
-                    dedupe_key=(
-                        f"startup.update_recovery:{interrupted.expected_version}"
-                    ),
+                    dedupe_key=f"startup.update_recovery:{expected_version}",
                 )
             )
         except Exception as exc:
-            log(f"Не удалось разобрать состояние прошлого обновления: {exc}", "❌ ERROR")
+            log(f"Не удалось показать уведомление о прошлом обновлении: {exc}", "❌ ERROR")
+
+    update_bridge.interrupted_update_found.connect(_on_interrupted_update_found)
 
     def _retire_legacy_update_watchdog() -> None:
         try:
@@ -232,7 +264,11 @@ def install_update_check(
         if not shown:
             # Окно программы свёрнуто в трей: покажем, когда его откроют.
             if attempt < _WHATS_NEW_MAX_RETRIES:
-                schedule_after(_WHATS_NEW_RETRY_MS, lambda: _on_whats_new_ready(history, attempt + 1))
+                idle_tasks.add(
+                    "WhatsNewDialog",
+                    lambda: _on_whats_new_ready(history, attempt + 1),
+                    delay_ms=_WHATS_NEW_RETRY_MS,
+                )
             return
         log(f"Показано «Что нового» для v{APP_VERSION}", "🔁 UPDATE")
         enqueue_subsystem_task(
@@ -241,12 +277,14 @@ def install_update_check(
             lambda: updater_feature.mark_whats_new_seen(APP_VERSION),
         )
 
-    update_bridge.whats_new_ready.connect(lambda history: _on_whats_new_ready(history))
+    update_bridge.whats_new_ready.connect(
+        lambda history: idle_tasks.add("WhatsNewDialog", lambda: _on_whats_new_ready(history))
+    )
 
     def _schedule_startup_update_check_deferred() -> None:
         if not is_startup_host_alive(startup_host):
             return
-        _report_interrupted_update()
+        enqueue_subsystem_task("update", "InterruptedUpdateCheck", _interrupted_update_worker)
         schedule_after(
             _WHATS_NEW_DELAY_MS,
             lambda: is_startup_host_alive(startup_host)

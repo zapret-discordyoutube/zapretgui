@@ -570,6 +570,54 @@ class PresetRuntimeCoordinatorTests(unittest.TestCase):
 
         self.assertEqual(path_calls, [(ZAPRET2_MODE, "Default v5.txt")])
 
+    def test_startup_watcher_setup_resolves_path_off_the_gui_thread(self) -> None:
+        import threading
+
+        from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
+
+        gui_thread = threading.get_ident()
+        resolver_threads: list[int] = []
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            preset_path = Path(temp_dir) / "Default.txt"
+            preset_path.write_text("--new\n", encoding="utf-8")
+
+            def _active_path() -> str:
+                # Первый поиск пути читает заголовки всех пресетов в папке:
+                # в GUI-потоке это задерживало кадр сразу после появления окна.
+                resolver_threads.append(threading.get_ident())
+                return str(preset_path)
+
+            coordinator = PresetRuntimeCoordinator(
+                presets_feature=SimpleNamespace(),
+                ui_state_store=None,
+                get_launch_method=lambda: "zapret2_mode",
+                get_active_preset_path=_active_path,
+                get_preset_source_path_by_file_name=lambda *_args: str(preset_path),
+                refresh_after_switch=lambda: None,
+                request_selected_source_preset_apply=lambda *_args: True,
+                request_preset_content_apply=lambda *_args: True,
+            )
+
+            coordinator.setup_active_preset_file_watcher()
+
+            # Сам вызов путь не ищет — этим занят фоновый поток.
+            self.assertEqual(resolver_threads, [])
+            self.assertTrue(
+                self._process_events_until(
+                    lambda: coordinator._active_preset_file_watcher is not None,
+                    timeout_s=3.0,
+                )
+            )
+
+        self.assertEqual(len(resolver_threads), 1)
+        self.assertNotEqual(resolver_threads[0], gui_thread)
+        self.assertEqual(
+            [Path(path).name for path in coordinator._active_preset_file_watcher.files()]
+            or [Path(coordinator._active_preset_file_path).name],
+            ["Default.txt"],
+        )
+
     def test_preset_switch_resolves_watcher_path_in_worker(self) -> None:
         from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
 

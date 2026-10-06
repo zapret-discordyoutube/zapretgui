@@ -34,6 +34,13 @@ class PostStartupHost:
         close_state = self.close_state
         return not bool(close_state.is_exiting or close_state.closing_completely)
 
+    def is_window_shown(self) -> bool:
+        """Окно сейчас на экране: не свёрнуто и не убрано в трей."""
+        window = self._window
+        if window is None:
+            return False
+        return bool(window.isVisible()) and not bool(window.isMinimized())
+
     def show_whats_new(self, version: str, history) -> bool:
         """Окно «Что нового» после обновления. False — окно программы не готово."""
         window = self._window

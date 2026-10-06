@@ -67,14 +67,59 @@ class ImportWarmupTests(unittest.TestCase):
             startup_state=SimpleNamespace(interactive_logged=False),
             is_alive=lambda: True,
         )
-        with patch.object(warmup, "start_daemon_thread") as start_thread:
+        scheduled: list[tuple[int, object]] = []
+        with (
+            patch.object(warmup, "start_daemon_thread") as start_thread,
+            patch.object(
+                warmup,
+                "schedule_after",
+                side_effect=lambda delay_ms, callback: scheduled.append((delay_ms, callback)),
+            ),
+        ):
             warmup.install_after_interactive_import_warmup(startup_host, log_startup_metric=lambda *_a: None)
             start_thread.assert_not_called()
 
             signal.callbacks[0]()
 
+            # Первую секунду интерфейс занят собой: фоновый импорт в это время
+            # делил бы с GUI-потоком GIL, поэтому сразу не стартует.
+            start_thread.assert_not_called()
+            self.assertEqual(
+                [delay for delay, _callback in scheduled],
+                [warmup.AFTER_INTERACTIVE_IMPORT_WARMUP_DELAY_MS],
+            )
+            self.assertGreaterEqual(warmup.AFTER_INTERACTIVE_IMPORT_WARMUP_DELAY_MS, 1_000)
+
+            scheduled[0][1]()
+
         start_thread.assert_called_once()
         self.assertEqual(start_thread.call_args.args[0], "import-warmup-after-interactive")
+
+    def test_tray_and_telegram_proxy_modules_are_warmed_in_background(self) -> None:
+        # Значок в трее создаётся в GUI-потоке: первый импорт его модулей и
+        # пакета Telegram Proxy прямо там задерживал кадр на ~65 мс.
+        from main.post_startup_import_warmup import AFTER_INTERACTIVE_IMPORT_WARMUP_MODULES
+
+        for name in ("tray", "telegram_proxy.runtime.commands", "telegram_proxy.manager"):
+            with self.subTest(module=name):
+                self.assertIn(name, AFTER_INTERACTIVE_IMPORT_WARMUP_MODULES)
+
+    def test_warmed_modules_create_no_qt_objects_at_import(self) -> None:
+        # Импорт идёт в фоновом потоке: QObject, созданный там на уровне
+        # файла, получил бы чужой поток-владелец.
+        from main.post_startup_import_warmup import AFTER_INTERACTIVE_IMPORT_WARMUP_MODULES
+
+        source_root = Path(__file__).resolve().parents[1] / "src"
+        instance_at_module_level = re.compile(
+            r"^[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:Q[A-Z][A-Za-z]+|[A-Za-z_.]*Manager|[A-Za-z_.]*Bridge)\(",
+            flags=re.MULTILINE,
+        )
+        for name in AFTER_INTERACTIVE_IMPORT_WARMUP_MODULES:
+            path = source_root.joinpath(*name.split(".")).with_suffix(".py")
+            if not path.exists():
+                continue
+            with self.subTest(module=name):
+                self.assertIsNone(instance_at_module_level.search(path.read_text(encoding="utf-8")))
 
     def test_failing_import_does_not_stop_the_rest(self) -> None:
         warmed = entry.warm_up_modules(("zapret_no_such_module_xyz", "asyncio"))

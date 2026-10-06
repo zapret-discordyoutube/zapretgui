@@ -16,6 +16,10 @@ PROJECT_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
 
+# Очередь пауз пользователя для сборки скрытых страниц: в тестах установки
+# поздних задач важна только её передача дальше, а не работа.
+_IDLE_TASKS = object()
+
 
 class StartupRuntimeSetupTests(unittest.TestCase):
     def test_post_interactive_startup_steps_have_no_fixed_gap(self) -> None:
@@ -738,7 +742,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_dns_page_data_warmup"),
             patch.object(post_startup, "install_hosts_page_warmup"),
             patch.object(post_startup, "install_profile_warmup"),
-            patch.object(post_startup, "install_update_check"),
+            # Одной строкой: у with есть предел на число вложенных блоков.
+            patch.multiple(
+                post_startup,
+                install_update_check=Mock(),
+                build_idle_ui_task_queue=Mock(return_value=_IDLE_TASKS),
+            ),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
             patch.object(post_startup, "install_idle_memory_trim"),
@@ -2314,7 +2323,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_dns_page_data_warmup"),
             patch.object(post_startup, "install_hosts_page_warmup") as install_hosts_page_warmup,
             patch.object(post_startup, "install_profile_warmup"),
-            patch.object(post_startup, "install_update_check"),
+            # Одной строкой: у with есть предел на число вложенных блоков.
+            patch.multiple(
+                post_startup,
+                install_update_check=Mock(),
+                build_idle_ui_task_queue=Mock(return_value=_IDLE_TASKS),
+            ),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
             patch.object(post_startup, "install_idle_memory_trim"),
@@ -2363,7 +2377,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_dns_page_data_warmup"),
             patch.object(post_startup, "install_hosts_page_warmup"),
             patch.object(post_startup, "install_profile_warmup"),
-            patch.object(post_startup, "install_update_check"),
+            # Одной строкой: у with есть предел на число вложенных блоков.
+            patch.multiple(
+                post_startup,
+                install_update_check=Mock(),
+                build_idle_ui_task_queue=Mock(return_value=_IDLE_TASKS),
+            ),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
             patch.object(post_startup, "install_idle_memory_trim"),
@@ -2376,6 +2395,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         install_telegram_proxy_page_warmup.assert_called_once_with(
             startup_host,
             log_startup_metric=log_startup_metric,
+            idle_tasks=_IDLE_TASKS,
         )
 
     def test_post_startup_tasks_install_profile_warmup(self) -> None:
@@ -2412,7 +2432,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_dns_page_data_warmup"),
             patch.object(post_startup, "install_hosts_page_warmup"),
             patch.object(post_startup, "install_profile_warmup") as install_profile_warmup,
-            patch.object(post_startup, "install_update_check"),
+            # Одной строкой: у with есть предел на число вложенных блоков.
+            patch.multiple(
+                post_startup,
+                install_update_check=Mock(),
+                build_idle_ui_task_queue=Mock(return_value=_IDLE_TASKS),
+            ),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
             patch.object(post_startup, "install_idle_memory_trim"),
@@ -2425,6 +2450,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             startup_host,
             profile_feature=profile_feature,
             log_startup_metric=log_startup_metric,
+            idle_tasks=_IDLE_TASKS,
             current_launch_method="",
             on_profile_warmup_ready=None,
         )
@@ -2469,7 +2495,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_user_preset_contract_migration"),
             patch.object(post_startup, "install_user_presets_warmup"),
             patch.object(post_startup, "install_remote_presets_sync"),
-            patch.object(post_startup, "install_update_check"),
+            # Одной строкой: у with есть предел на число вложенных блоков.
+            patch.multiple(
+                post_startup,
+                install_update_check=Mock(),
+                build_idle_ui_task_queue=Mock(return_value=_IDLE_TASKS),
+            ),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
             patch.object(post_startup, "install_idle_memory_trim"),
@@ -2529,7 +2560,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             ) as install_user_preset_contract_migration,
             patch.object(post_startup, "install_user_presets_warmup") as install_user_presets_warmup,
             patch.object(post_startup, "install_remote_presets_sync") as install_remote_presets_sync,
-            patch.object(post_startup, "install_update_check"),
+            # Одной строкой: у with есть предел на число вложенных блоков.
+            patch.multiple(
+                post_startup,
+                install_update_check=Mock(),
+                build_idle_ui_task_queue=Mock(return_value=_IDLE_TASKS),
+            ),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
             patch.object(post_startup, "install_idle_memory_trim"),
@@ -2622,7 +2658,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_dns_page_data_warmup") as install_dns_page_data_warmup,
             patch.object(post_startup, "install_hosts_page_warmup"),
             patch.object(post_startup, "install_profile_warmup"),
-            patch.object(post_startup, "install_update_check"),
+            # Одной строкой: у with есть предел на число вложенных блоков.
+            patch.multiple(
+                post_startup,
+                install_update_check=Mock(),
+                build_idle_ui_task_queue=Mock(return_value=_IDLE_TASKS),
+            ),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
             patch.object(post_startup, "install_idle_memory_trim"),
@@ -2675,7 +2716,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_hosts_page_warmup"),
             patch.object(post_startup, "install_backend_page_data_warmup") as install_backend_page_data_warmup,
             patch.object(post_startup, "install_profile_warmup"),
-            patch.object(post_startup, "install_update_check"),
+            # Одной строкой: у with есть предел на число вложенных блоков.
+            patch.multiple(
+                post_startup,
+                install_update_check=Mock(),
+                build_idle_ui_task_queue=Mock(return_value=_IDLE_TASKS),
+            ),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
             patch.object(post_startup, "install_idle_memory_trim"),
@@ -2778,6 +2824,12 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         delays: list[int] = []
         queued_tasks: list[tuple[str, str]] = []
         ready_methods: list[str] = []
+        idle_queue: list[tuple[str, int]] = []
+        idle_tasks = SimpleNamespace(
+            add=lambda name, callback, *, delay_ms=0, needs_shown_window=True: (
+                idle_queue.append((name, delay_ms)) or callback()
+            )
+        )
 
         with (
             patch.object(
@@ -2795,12 +2847,19 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 startup_host,
                 profile_feature=profile_feature,
                 log_startup_metric=metric,
+                idle_tasks=idle_tasks,
                 current_launch_method="zapret1_mode",
                 on_profile_warmup_ready=ready_methods.append,
             )
             signal.emit("interactive")
 
-        self.assertEqual(delays, [0, 1000, 2200])
+        # Данные профилей греет фоновый поток по таймеру, а страницы строятся
+        # в GUI-потоке — поэтому они идут через очередь пауз пользователя.
+        self.assertEqual(delays, [0])
+        self.assertEqual(
+            idle_queue,
+            [("ProfileSetupPageWarmup", 1000), ("PresetSetupPageWarmup", 2200)],
+        )
         self.assertEqual(
             queued_tasks,
             [("profile", "ProfileWarmup-zapret1_mode")],

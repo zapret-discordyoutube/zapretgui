@@ -6,8 +6,9 @@ GUI-потоке. В логе это давало рывки на 64–70 мс �
 переносит ту же работу в паузу после старта, когда пользователь ничего не
 делает и рывок незаметен.
 
-Страницы греются по одной с разносом по времени: одновременная сборка
-нескольких страниц снова заняла бы GUI-поток одним куском.
+Паузу проверяет очередь main.post_startup_idle_tasks: страницы строятся по
+одной, только пока мышь и клавиатура молчат и окно на экране. Задержки ниже —
+это «не раньше чем», а не точное время сборки.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ import time
 from app.page_names import PageName
 from log.log import log
 from main.post_startup_gate import bind_startup_gate, is_startup_host_alive
-from main.post_startup_threading import schedule_after
 from ui.performance_metrics import log_ui_timing_since
 
 
@@ -34,6 +34,7 @@ def install_secondary_page_warmup(
     startup_host,
     *,
     log_startup_metric,
+    idle_tasks,
     plan: tuple[tuple[PageName, int], ...] = SECONDARY_PAGE_WARMUP_PLAN,
 ) -> None:
     def _warm_page(page_name: PageName) -> None:
@@ -65,9 +66,10 @@ def install_secondary_page_warmup(
                 "StartupSecondaryPageWarmupQueued",
                 f"{page_name.name} {delay}ms after interactive",
             )
-            schedule_after(
-                delay,
-                lambda name=page_name: is_startup_host_alive(startup_host) and _warm_page(name),
+            idle_tasks.add(
+                f"SecondaryPageWarmup-{page_name.name}",
+                lambda name=page_name: _warm_page(name),
+                delay_ms=delay,
             )
 
     bind_startup_gate(

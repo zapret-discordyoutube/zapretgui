@@ -65,6 +65,7 @@ class PostStartupUpdateContractTests(unittest.TestCase):
                 updater_feature=updater_feature,
                 notify=Mock(),
                 set_status=statuses.append,
+                idle_tasks=_ImmediateIdleTasks(),
             )
 
         self.assertEqual(statuses[0], "Проверка обновлений...")
@@ -74,6 +75,23 @@ class PostStartupUpdateContractTests(unittest.TestCase):
         self.assertEqual(updater_feature.finish_source, "startup")
         self.assertEqual(updater_feature.finish_token, 7)
         self.assertTrue(updater_feature.finished_result["skipped"])
+
+
+class _ImmediateIdleTasks:
+    """Очередь пауз пользователя, которая в тесте выполняет задачу сразу."""
+
+    def add(self, _name, callback, *, delay_ms=0, needs_shown_window=True) -> None:
+        callback()
+
+
+class _RecordingIdleTasks:
+    """Очередь пауз пользователя, которая только записывает задачи."""
+
+    def __init__(self) -> None:
+        self.tasks: list[tuple[str, object, bool]] = []
+
+    def add(self, name, callback, *, delay_ms=0, needs_shown_window=True) -> None:
+        self.tasks.append((name, callback, bool(needs_shown_window)))
 
 
 class _Feature:
@@ -113,8 +131,13 @@ class PostStartupUpdateWindowTests(unittest.TestCase):
 
     _FOUND = {"has_update": True, "version": "9.9.9", "release_notes": "новое", "error": None}
 
-    def _run(self, feature: _Feature):
+    def _run(self, feature: _Feature, *, idle_tasks=None, queued_tasks=None):
         from main import post_startup_update
+
+        def _enqueue(queue, name, target):
+            if queued_tasks is not None:
+                queued_tasks.append((queue, name))
+            target()
 
         host = SimpleNamespace(
             startup_post_init_ready=object(),
@@ -127,7 +150,7 @@ class PostStartupUpdateWindowTests(unittest.TestCase):
         with (
             patch.object(post_startup_update, "bind_startup_gate", side_effect=lambda _signal, callback, **_kwargs: callback()),
             patch.object(post_startup_update, "schedule_after", side_effect=lambda _delay_ms, callback: callback()),
-            patch.object(post_startup_update, "enqueue_subsystem_task", side_effect=lambda _queue, _name, target: target()),
+            patch.object(post_startup_update, "enqueue_subsystem_task", side_effect=_enqueue),
             patch.object(post_startup_update, "log"),
         ):
             post_startup_update.install_update_check(
@@ -135,6 +158,7 @@ class PostStartupUpdateWindowTests(unittest.TestCase):
                 updater_feature=feature,
                 notify=Mock(),
                 set_status=Mock(),
+                idle_tasks=idle_tasks or _ImmediateIdleTasks(),
             )
         return host
 
@@ -144,6 +168,62 @@ class PostStartupUpdateWindowTests(unittest.TestCase):
         host = self._run(_Feature(self._FOUND))
 
         host.ensure_page.assert_called_once_with(PageName.SERVERS)
+
+    def test_update_page_is_built_in_user_pause_not_in_the_result_handler(self) -> None:
+        from app.page_names import PageName
+
+        idle_tasks = _RecordingIdleTasks()
+
+        host = self._run(_Feature(self._FOUND), idle_tasks=idle_tasks)
+
+        # Сборка страницы занимает GUI-поток: посреди клика пользователя она
+        # давала рывок, поэтому ждёт паузы. При окне в трее ждать нечего.
+        host.ensure_page.assert_not_called()
+        self.assertEqual(
+            [(name, needs_window) for name, _cb, needs_window in idle_tasks.tasks],
+            [("UpdateWindowPage", False)],
+        )
+
+        idle_tasks.tasks[0][1]()
+        host.ensure_page.assert_called_once_with(PageName.SERVERS)
+
+    def test_update_page_is_not_built_after_app_started_closing(self) -> None:
+        idle_tasks = _RecordingIdleTasks()
+        host = self._run(_Feature(self._FOUND), idle_tasks=idle_tasks)
+
+        host.is_alive.return_value = False
+        idle_tasks.tasks[0][1]()
+
+        host.ensure_page.assert_not_called()
+
+    def test_interrupted_update_is_checked_in_background_queue(self) -> None:
+        queued: list[tuple[str, str]] = []
+
+        self._run(_Feature({"has_update": False, "version": "1.0", "error": None}), queued_tasks=queued)
+
+        # Первый импорт updater.install и чтение его файлов в GUI-потоке
+        # задерживали кадр сразу после появления окна.
+        self.assertIn(("update", "InterruptedUpdateCheck"), queued)
+
+    def test_whats_new_dialog_waits_for_user_pause_and_shown_window(self) -> None:
+        from config.build_info import APP_VERSION
+
+        history = ({"version": APP_VERSION, "notes": "новое"},)
+        feature = _Feature({"has_update": False, "version": APP_VERSION, "error": None}, whats_new=history)
+        idle_tasks = _RecordingIdleTasks()
+
+        host = self._run(feature, idle_tasks=idle_tasks)
+
+        # Окно строится в GUI-потоке и раньше появлялось по таймеру — посреди
+        # действий пользователя и вместе со значком в трее.
+        host.show_whats_new.assert_not_called()
+        self.assertEqual(
+            [(name, needs_window) for name, _cb, needs_window in idle_tasks.tasks],
+            [("WhatsNewDialog", True)],
+        )
+
+        idle_tasks.tasks[0][1]()
+        host.show_whats_new.assert_called_once_with(APP_VERSION, history)
 
     def test_skipped_version_does_not_create_the_page(self) -> None:
         host = self._run(_Feature(dict(self._FOUND, user_skipped=True)))

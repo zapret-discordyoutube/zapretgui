@@ -281,6 +281,7 @@ class StartupAddressRefreshInstallTests(unittest.TestCase):
             if name.startswith("install_") and name != "install_post_startup_tasks"
         ]
         patches = [patch.object(post_startup, name, getattr(order, name)) for name in installers]
+        patches.append(patch.object(post_startup, "build_idle_ui_task_queue", return_value=object()))
         for item in patches:
             item.start()
         try:

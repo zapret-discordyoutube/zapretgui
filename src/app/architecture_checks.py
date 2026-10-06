@@ -536,6 +536,40 @@ def check_post_startup_uses_explicit_host(files: list[Path]) -> list[Problem]:
     )
 
 
+def check_post_startup_builds_ui_only_in_user_pause(files: list[Path]) -> list[Problem]:
+    """Сборка страницы или окна занимает GUI-поток на десятки миллисекунд.
+
+    По таймеру она попадала на действия пользователя и давала рывки в первые
+    секунды после запуска, поэтому поздние задачи строят интерфейс только
+    через очередь пауз пользователя (main/post_startup_idle_tasks.py).
+    """
+    builds_ui = re.compile(r"\bstartup_host\.(?:ensure_page|show_whats_new)\s*\(")
+    owners = {
+        "src/main/post_startup_host.py",
+        "src/main/post_startup_idle_tasks.py",
+    }
+    problems: list[Problem] = []
+    for path in files:
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if not rel.startswith("src/main/post_startup") or rel in owners:
+            continue
+        lines = _lines(path)
+        if any("idle_tasks.add(" in line for line in lines):
+            continue
+        for index, line in enumerate(lines, start=1):
+            if builds_ui.search(line):
+                problems.append(
+                    Problem(
+                        path,
+                        index,
+                        "поздняя задача строит страницу или окно: это должно идти через idle_tasks.add(...), "
+                        "а не по таймеру",
+                        line,
+                    )
+                )
+    return problems
+
+
 def check_discord_tray_command_does_not_receive_window() -> list[Problem]:
     scopes = [
         SRC_ROOT / "tray.py",
@@ -1609,6 +1643,7 @@ def run_checks() -> list[Problem]:
     problems.extend(check_application_lifecycle_uses_window_port())
     problems.extend(check_window_page_deps_setup_uses_actions())
     problems.extend(check_post_startup_uses_explicit_host(files))
+    problems.extend(check_post_startup_builds_ui_only_in_user_pause(files))
     problems.extend(check_discord_tray_command_does_not_receive_window())
     problems.extend(check_post_startup_does_not_use_window_as_feature_container())
     problems.extend(check_page_deps_context_not_stored_on_window(files))

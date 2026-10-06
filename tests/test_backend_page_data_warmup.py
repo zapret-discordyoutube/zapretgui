@@ -171,20 +171,25 @@ class BackendPageDataWarmupTests(unittest.TestCase):
             show_page=Mock(),
         )
         metric = Mock()
-        delays: list[int] = []
-
-        with patch.object(
-            post_startup_telegram_proxy_warmup,
-            "schedule_after",
-            side_effect=lambda delay_ms, callback: delays.append(delay_ms) or callback(),
-        ):
-            install_telegram_proxy_page_warmup(
-                startup_host,
-                log_startup_metric=metric,
+        queued: list[tuple[str, object, int]] = []
+        idle_tasks = SimpleNamespace(
+            add=lambda name, callback, *, delay_ms=0, needs_shown_window=True: queued.append(
+                (name, callback, delay_ms)
             )
-            signal.emit("interactive")
+        )
 
-        self.assertEqual(delays, [3000])
+        install_telegram_proxy_page_warmup(
+            startup_host,
+            log_startup_metric=metric,
+            idle_tasks=idle_tasks,
+        )
+        signal.emit("interactive")
+
+        # Страница строится в GUI-потоке, поэтому её время выбирает очередь
+        # пауз пользователя, а не таймер: 3000 мс — это «не раньше чем».
+        self.assertEqual([(name, delay) for name, _cb, delay in queued], [("TelegramProxyPageWarmup", 3000)])
+        startup_host.ensure_page.assert_not_called()
+        queued[0][1]()
         startup_host.ensure_page.assert_called_once_with(PageName.TELEGRAM_PROXY)
         startup_host.show_page.assert_not_called()
         metric.assert_any_call("StartupTelegramProxyPageWarmupQueued", "3000ms after interactive")
