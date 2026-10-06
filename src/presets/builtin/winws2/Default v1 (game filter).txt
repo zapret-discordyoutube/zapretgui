@@ -150,6 +150,22 @@
 
 --new
 
+--name=Twitter/X
+--filter-tcp=80,443
+--hostlist=lists/twitter.txt
+--out-range=-d8
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+
+--new
+
+--name=Twitter Images (twimg.com)
+--filter-tcp=80,443
+--hostlist=lists/twimg.txt
+--out-range=-d8
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
+
+--new
+
 --name=Исключения домены (RU сайты)
 --filter-tcp=80,443-65535
 --hostlist=lists/netrogat.txt
@@ -215,11 +231,12 @@
 --new
 
 --name=Telegram
+--skip
 --filter-tcp=80,443-65535
 --ipset=lists/ipset-telegram.txt
 --out-range=-d10
 --payload=all
---lua-desync=tls_aggressive:fakes=6:ttl_start=1:ttl_step=1:badseq:split_sni
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4
 
 --new
 
