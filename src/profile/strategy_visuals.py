@@ -236,6 +236,11 @@ def _visual_from_techniques(technique_keys: tuple[str, ...]) -> StrategyVisual:
     )
 
 
+def strategy_technique_keys(args_text: str) -> tuple[str, ...]:
+    """Способы обхода стратегии по её строкам --lua-desync, в порядке следования."""
+    return tuple(_extract_techniques(args_text))
+
+
 def _extract_techniques(args_text: str) -> list[str]:
     result: list[str] = []
     for value in re.findall(r"(?:^|\s)--lua-desync=([a-zA-Z0-9_-]+)", str(args_text or "")):

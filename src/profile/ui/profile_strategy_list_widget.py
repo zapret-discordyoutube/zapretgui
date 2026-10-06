@@ -25,7 +25,14 @@ from PyQt6.QtWidgets import (
 )
 
 from log.log import log
-from profile.strategy_list_filter import ProfileStrategyListFilterWorker, ProfileStrategyListPlan
+from profile.strategy_families import strategy_family_keys, strategy_sort_key
+from profile.strategy_list_filter import (
+    STRATEGY_SELECTED_TEXT,
+    ProfileStrategyListFilterWorker,
+    ProfileStrategyListGroup,
+    ProfileStrategyListPlan,
+    strategy_list_groups,
+)
 from profile.strategy_state import ProfileStrategyState
 from profile.strategy_shape import payload_badge_accessible_text, payload_badge_text
 from profile.strategy_visuals import describe_strategy_visual
@@ -54,8 +61,85 @@ from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
 from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.fluent_scrollbar import install_fluent_scrollbars
+from ui.widgets.folder_header import folder_header_font, folder_header_icon_color, folder_header_icon_name
 from ui.widgets.hover_row import paint_profile_hover_row, profile_hover_row_rect
 from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_icon_motion, row_hover_motion
+
+
+_ROW_KIND_GROUP = "group"
+_STRATEGY_ROW_HEIGHT = 31
+# В коротком списке сворачивать нечего: все группы раскрыты сразу.
+_AUTO_COLLAPSE_MIN_ROWS = 30
+_KEYBOARD_PAGE_ROWS = 10
+_NAVIGATION_KEYS = (
+    Qt.Key.Key_Down,
+    Qt.Key.Key_Up,
+    Qt.Key.Key_Home,
+    Qt.Key.Key_End,
+    Qt.Key.Key_PageDown,
+    Qt.Key.Key_PageUp,
+)
+_MARK_SIZE = 11
+_MARK_GAP = 5
+_MARK_FAVORITE = ("fa5s.star", "#d9a441")
+_MARK_WORKS = ("fa5s.check", "#49a35f")
+_MARK_NOT_WORKS = ("fa5s.times", "#d85c5c")
+
+
+def _is_group_item(item) -> bool:
+    """Строка списка — заголовок группы стратегий, а не сама стратегия."""
+    if item is None:
+        return False
+    try:
+        return str(item.data(ProfileStrategyListWidget._ROLE_ROW_KIND) or "") == _ROW_KIND_GROUP
+    except Exception:
+        return False
+
+
+def _row_hidden(list_widget, row: int) -> bool:
+    checker = getattr(list_widget, "isRowHidden", None)
+    if not callable(checker):
+        return False
+    try:
+        return bool(checker(row))
+    except Exception:
+        return False
+
+
+def _visible_row_from(list_widget, row: int, step: int, count: int) -> int:
+    """Ближайшая видимая строка начиная с row в сторону step; -1, если таких нет."""
+    while 0 <= row < count:
+        if not _row_hidden(list_widget, row):
+            return row
+        row += step
+    return -1
+
+
+def _keyboard_target_row(list_widget, key: int, *, count: int, current_row: int) -> int:
+    """Куда клавиша навигации переводит текущую строку.
+
+    Строки свёрнутых групп скрыты, поэтому счёт идёт только по видимым.
+    """
+    first = _visible_row_from(list_widget, 0, 1, count)
+    last = _visible_row_from(list_widget, count - 1, -1, count)
+    if first < 0:
+        return -1
+    key = int(key)
+    if key == int(Qt.Key.Key_Home) or current_row < 0:
+        return first
+    if key == int(Qt.Key.Key_End):
+        return last
+    step = 1 if key in (int(Qt.Key.Key_Down), int(Qt.Key.Key_PageDown)) else -1
+    moves = _KEYBOARD_PAGE_ROWS if key in (int(Qt.Key.Key_PageDown), int(Qt.Key.Key_PageUp)) else 1
+    row = current_row
+    for _ in range(moves):
+        next_row = _visible_row_from(list_widget, row + step, step, count)
+        if next_row < 0:
+            break
+        row = next_row
+    if _row_hidden(list_widget, row):
+        return first
+    return row
 
 
 def _set_widget_text_if_changed(widget, text: str) -> bool:
@@ -78,12 +162,19 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
         attach_row_hover_motion(view)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        if str(index.data(ProfileStrategyListWidget._ROLE_ROW_KIND) or "") == _ROW_KIND_GROUP:
+            self._paint_group_header(painter, option, index)
+            return
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         tokens = get_theme_tokens()
         rect = profile_hover_row_rect(option.rect)
         is_active = bool(index.data(ProfileStrategyListWidget._ROLE_IS_ACTIVE))
+        rating = str(index.data(ProfileStrategyListWidget._ROLE_RATING) or "")
+        favorite = bool(index.data(ProfileStrategyListWidget._ROLE_FAVORITE))
+        # Стратегия с отметкой «не работает» отступает на второй план.
+        dimmed = rating == "notwork" and not is_active
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
         selected = bool(option.state & QStyle.StateFlag.State_Selected) or bool(
             option.state & QStyle.StateFlag.State_HasFocus
@@ -109,7 +200,8 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
 
         left = rect.left() + (24 if is_active else 18)
         right = rect.right() - 16
-        status = str(index.data(ProfileStrategyListWidget._ROLE_STATUS_TEXT) or "")
+        # Справа словами пишется только «Выбрана»; оценка и избранное — значками.
+        status = STRATEGY_SELECTED_TEXT if is_active else ""
         icon_name = str(index.data(ProfileStrategyListWidget._ROLE_VISUAL_ICON_NAME) or "")
         visual_color = str(index.data(ProfileStrategyListWidget._ROLE_VISUAL_COLOR) or "")
         visual_label = str(index.data(ProfileStrategyListWidget._ROLE_VISUAL_LABEL_TEXT) or "")
@@ -136,7 +228,10 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
                 size=icon_size * (2 if moving else 1),
             )
             if not pixmap.isNull():
+                if dimmed:
+                    painter.setOpacity(0.45)
                 paint_icon_motion(painter, icon_rect, hover_motion, index, lambda: painter.drawPixmap(icon_rect, pixmap))
+                painter.setOpacity(1.0)
             else:
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(to_qcolor(visual_color or tokens.fg_faint, "#aeb5c1"))
@@ -148,6 +243,27 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
             visual_width = min(metrics.horizontalAdvance(visual_label) + 4, max(0, rect.width() // 3))
             visual_rect = QRect(max(left, right - visual_width), rect.top(), visual_width, rect.height())
             right = visual_rect.left() - 12
+
+        # Отметки пользователя стоят перед названием способа: звезда избранного,
+        # затем галочка «работает» или крестик «не работает».
+        marks = []
+        if favorite:
+            marks.append(_MARK_FAVORITE)
+        if rating == "work":
+            marks.append(_MARK_WORKS)
+        elif rating == "notwork":
+            marks.append(_MARK_NOT_WORKS)
+        mark_rects = []
+        if marks:
+            mark_right = right + (12 - _MARK_GAP if visual_label else 0)
+            for mark in reversed(marks):
+                mark_rect = QRect(mark_right - _MARK_SIZE, rect.center().y() - _MARK_SIZE // 2, _MARK_SIZE, _MARK_SIZE)
+                if mark_rect.left() - left < 120:
+                    break
+                mark_rects.append((mark, mark_rect))
+                mark_right = mark_rect.left() - _MARK_GAP
+            if mark_rects:
+                right = mark_right - 6
 
         payload_badge = str(index.data(ProfileStrategyListWidget._ROLE_PAYLOAD_BADGE_TEXT) or "")
         payload_badge_rect = QRect()
@@ -163,7 +279,7 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
 
         name = str(index.data(ProfileStrategyListWidget._ROLE_NAME_TEXT) or "")
         name_rect = QRect(left, rect.top(), max(0, right - left), rect.height())
-        painter.setPen(to_qcolor(tokens.fg, "#f5f5f5"))
+        painter.setPen(to_qcolor(tokens.fg_muted if dimmed else tokens.fg, "#f5f5f5"))
         painter.drawText(
             name_rect,
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
@@ -172,8 +288,15 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
 
         paint_payload_badge(painter, payload_badge_rect, payload_badge, metrics, tokens)
 
+        for (mark_icon, mark_color), mark_rect in mark_rects:
+            mark_pixmap = get_cached_qta_pixmap(mark_icon, color=mark_color, size=_MARK_SIZE)
+            if not mark_pixmap.isNull():
+                painter.drawPixmap(mark_rect, mark_pixmap)
+
         if visual_rect.width() > 0:
-            painter.setPen(to_qcolor(visual_color or tokens.fg_faint, "#aeb5c1"))
+            # Цвет способа остаётся только у значка слева: название справа
+            # спокойное, чтобы взгляд читал имена стратегий.
+            painter.setPen(to_qcolor(tokens.fg_faint if dimmed else tokens.fg_muted, "#aeb5c1"))
             painter.drawText(
                 visual_rect,
                 int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
@@ -198,9 +321,77 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
 
         painter.restore()
 
+    def _paint_group_header(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        """Заголовок группы: стрелка, значок способа, название, число стратегий и объяснение."""
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        tokens = get_theme_tokens()
+        rect = profile_hover_row_rect(option.rect)
+        if bool(option.state & QStyle.StateFlag.State_MouseOver) or bool(
+            option.state & QStyle.StateFlag.State_HasFocus
+        ):
+            paint_profile_hover_row(painter, rect, hovered=True, fill_idle=False, show_active_marker=False)
+
+        center_y = rect.center().y()
+        left = rect.left() + 18
+        right = rect.right() - 16
+        expanded = bool(index.data(ProfileStrategyListWidget._ROLE_GROUP_EXPANDED))
+        chevron = get_cached_qta_pixmap(
+            folder_header_icon_name(expanded),
+            color=folder_header_icon_color(),
+            size=10,
+        )
+        if not chevron.isNull():
+            painter.drawPixmap(QRect(left, center_y - 5, 10, 10), chevron)
+        left += 10 + 8
+
+        icon_name = str(index.data(ProfileStrategyListWidget._ROLE_VISUAL_ICON_NAME) or "")
+        if icon_name:
+            icon = get_cached_qta_pixmap(
+                icon_name,
+                color=str(index.data(ProfileStrategyListWidget._ROLE_VISUAL_COLOR) or "") or tokens.fg_faint,
+                size=14,
+            )
+            if not icon.isNull():
+                painter.drawPixmap(QRect(left, center_y - 7, 14, 14), icon)
+            left += 14 + 8
+
+        body_font = painter.font()
+        body_font.setBold(False)
+        title_font = folder_header_font(body_font)
+        title_metrics = QFontMetrics(title_font)
+        title = title_metrics.elidedText(
+            str(index.data(ProfileStrategyListWidget._ROLE_NAME_TEXT) or ""),
+            Qt.TextElideMode.ElideRight,
+            max(0, right - left),
+        )
+        flags = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        painter.setFont(title_font)
+        painter.setPen(to_qcolor(tokens.fg, "#f5f5f5"))
+        painter.drawText(QRect(left, rect.top(), max(0, right - left), rect.height()), flags, title)
+        left += title_metrics.horizontalAdvance(title) + 8
+
+        painter.setFont(body_font)
+        metrics = QFontMetrics(body_font)
+        count_text = str(int(index.data(ProfileStrategyListWidget._ROLE_GROUP_COUNT) or 0))
+        if right - left > metrics.horizontalAdvance(count_text):
+            painter.setPen(to_qcolor(tokens.fg_muted, "#b7bec8"))
+            painter.drawText(QRect(left, rect.top(), right - left, rect.height()), flags, count_text)
+            left += metrics.horizontalAdvance(count_text) + 12
+
+        description = str(index.data(ProfileStrategyListWidget._ROLE_VISUAL_DESCRIPTION) or "")
+        if description and right - left > 80:
+            painter.setPen(to_qcolor(tokens.fg_faint, "#aeb5c1"))
+            painter.drawText(
+                QRect(left, rect.top(), right - left, rect.height()),
+                flags,
+                metrics.elidedText(description, Qt.TextElideMode.ElideRight, right - left),
+            )
+        painter.restore()
+
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
         _ = (option, index)
-        return QSize(0, 31)
+        return QSize(0, _STRATEGY_ROW_HEIGHT)
 
     def helpEvent(self, event, view, option, index: QModelIndex) -> bool:  # noqa: N802
         _ = (view, option)
@@ -290,24 +481,24 @@ class CompactDisplayComboBox(ComboBox):
 class ProfileStrategyListView(QListWidget):
     """Список стратегий, который выбирается клавиатурой так же, как DNS."""
 
+    # Заголовок группы нажали мышью или клавишей: её нужно свернуть или развернуть.
+    group_toggle_requested = pyqtSignal(object)
+
     def keyPressEvent(self, event):  # noqa: N802
         if self._move_current_row_from_keyboard(event.key()):
             event.accept()
             return
-        navigation_keys = (
-            Qt.Key.Key_Down,
-            Qt.Key.Key_Up,
-            Qt.Key.Key_Home,
-            Qt.Key.Key_End,
-            Qt.Key.Key_PageDown,
-            Qt.Key.Key_PageUp,
-        )
+        navigation_keys = _NAVIGATION_KEYS
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
             item = self.currentItem()
             if item is None:
                 item = self._first_selectable_item()
                 if item is not None:
                     self.setCurrentItem(item)
+            if _is_group_item(item):
+                self.group_toggle_requested.emit(item)
+                event.accept()
+                return
             if item is not None:
                 self.itemActivated.emit(item)
                 event.accept()
@@ -315,6 +506,14 @@ class ProfileStrategyListView(QListWidget):
         super().keyPressEvent(event)
         if event.key() in navigation_keys:
             self.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def mouseReleaseEvent(self, event):  # noqa: N802
+        super().mouseReleaseEvent(event)
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        item = self.itemAt(event.position().toPoint())
+        if _is_group_item(item):
+            self.group_toggle_requested.emit(item)
 
     def focusInEvent(self, event):  # noqa: N802
         super().focusInEvent(event)
@@ -324,39 +523,28 @@ class ProfileStrategyListView(QListWidget):
                 self.setCurrentItem(item)
 
     def _first_selectable_item(self):
+        # Сначала ищем саму стратегию; если все группы свёрнуты — первый заголовок.
+        first_visible = None
         for row in range(self.count()):
             item = self.item(row)
-            if item is not None and item.flags() & Qt.ItemFlag.ItemIsSelectable:
+            if item is None or _row_hidden(self, row):
+                continue
+            if item.flags() & Qt.ItemFlag.ItemIsSelectable:
                 return item
-        return None
+            if first_visible is None:
+                first_visible = item
+        return first_visible
 
     def _move_current_row_from_keyboard(self, key: int) -> bool:
-        if key not in (
-            Qt.Key.Key_Down,
-            Qt.Key.Key_Up,
-            Qt.Key.Key_Home,
-            Qt.Key.Key_End,
-            Qt.Key.Key_PageDown,
-            Qt.Key.Key_PageUp,
-        ):
+        if key not in _NAVIGATION_KEYS:
             return False
         count = self.count()
         if count <= 0:
             return False
 
-        row = self.currentRow()
-        if key == Qt.Key.Key_Home or row < 0:
-            row = 0
-        elif key == Qt.Key.Key_End:
-            row = count - 1
-        elif key == Qt.Key.Key_Down:
-            row = min(count - 1, row + 1)
-        elif key == Qt.Key.Key_Up:
-            row = max(0, row - 1)
-        elif key == Qt.Key.Key_PageDown:
-            row = min(count - 1, row + 10)
-        else:
-            row = max(0, row - 10)
+        row = _keyboard_target_row(self, int(key), count=count, current_row=self.currentRow())
+        if row < 0:
+            return False
 
         self.setCurrentRow(row)
         item = self.currentItem()
@@ -410,6 +598,14 @@ class ProfileStrategyListWidget(QWidget):
     _ROLE_VISUAL_DESCRIPTION = int(Qt.ItemDataRole.UserRole) + 8
     _ROLE_TOOLTIP_TEXT = int(Qt.ItemDataRole.UserRole) + 9
     _ROLE_PAYLOAD_BADGE_TEXT = int(Qt.ItemDataRole.UserRole) + 10
+    # Группы по способу обхода: заголовок помечен _ROLE_ROW_KIND, а ключ группы
+    # есть и у заголовка, и у его стратегий.
+    _ROLE_ROW_KIND = int(Qt.ItemDataRole.UserRole) + 11
+    _ROLE_GROUP_KEY = int(Qt.ItemDataRole.UserRole) + 12
+    _ROLE_GROUP_COUNT = int(Qt.ItemDataRole.UserRole) + 13
+    _ROLE_GROUP_EXPANDED = int(Qt.ItemDataRole.UserRole) + 14
+    _ROLE_RATING = int(Qt.ItemDataRole.UserRole) + 15
+    _ROLE_FAVORITE = int(Qt.ItemDataRole.UserRole) + 16
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -417,6 +613,10 @@ class ProfileStrategyListWidget(QWidget):
         self._entries = {}
         self._states = {}
         self._item_by_strategy_id = {}
+        self._group_header_items = {}
+        # Что пользователь сам свернул или развернул; остальное решает
+        # _auto_expanded_group_keys.
+        self._group_expanded_choice = {}
         self._rows_signature = None
         self._strategy_filter_runtime = OneShotWorkerRuntime()
         self._strategy_filter_state = LatestValueWorkerState(
@@ -519,6 +719,7 @@ class ProfileStrategyListWidget(QWidget):
         self._list.currentItemChanged.connect(self._update_current_strategy_accessibility)
         self._list.itemActivated.connect(self._on_item_activated)
         self._list.itemClicked.connect(self._on_item_clicked)
+        self._list.group_toggle_requested.connect(self._toggle_group_item)
         self._search.activate_current_result.connect(self._activate_current_search_result)
         self._search.navigate_results.connect(self._navigate_strategy_results_from_search)
         self._list.installEventFilter(self)
@@ -595,7 +796,10 @@ class ProfileStrategyListWidget(QWidget):
                 item = self._list.currentItem()
             if item is not None:
                 self._list.setFocus(Qt.FocusReason.OtherFocusReason)
-                self._on_item_activated(item)
+                if _is_group_item(item):
+                    self._toggle_group_item(item)
+                else:
+                    self._on_item_activated(item)
                 event.accept()
                 return True
             return False
@@ -630,21 +834,9 @@ class ProfileStrategyListWidget(QWidget):
         if count <= 0:
             return False
 
-        row = self._list.currentRow()
+        row = _keyboard_target_row(self._list, int(key), count=count, current_row=self._list.currentRow())
         if row < 0:
-            row = 0
-        elif int(key) == int(Qt.Key.Key_Down):
-            row = min(count - 1, row + 1)
-        elif int(key) == int(Qt.Key.Key_Up):
-            row = max(0, row - 1)
-        elif int(key) == int(Qt.Key.Key_Home):
-            row = 0
-        elif int(key) == int(Qt.Key.Key_End):
-            row = count - 1
-        elif int(key) == int(Qt.Key.Key_PageDown):
-            row = min(count - 1, row + 10)
-        elif int(key) == int(Qt.Key.Key_PageUp):
-            row = max(0, row - 10)
+            return False
 
         self._list.setFocus(Qt.FocusReason.OtherFocusReason)
         self._list.setCurrentRow(row)
@@ -658,16 +850,120 @@ class ProfileStrategyListWidget(QWidget):
             return
         for row in range(self._list.count()):
             item = self._list.item(row)
-            if item is None:
+            if item is None or _row_hidden(self._list, row):
                 continue
             self._list.setCurrentItem(item)
             return
+
+    # ------------------------------------------------------------------
+    # Группы по способу обхода
+    # ------------------------------------------------------------------
+
+    def _group_headers(self) -> dict:
+        return self.__dict__.setdefault("_group_header_items", {})
+
+    def _group_choice(self) -> dict:
+        return self.__dict__.setdefault("_group_expanded_choice", {})
+
+    def _strategy_search_active(self) -> bool:
+        try:
+            return bool(str(self._search.text() or "").strip())
+        except Exception:
+            return False
+
+    def _auto_expanded_group_keys(self) -> set[str] | None:
+        """Какие группы раскрыты, пока пользователь сам их не трогал.
+
+        Раскрыто то, с чем человек уже работал: группа выбранной стратегии и
+        группы с избранным или с отметкой «работает». Остальные свёрнуты —
+        длинный список открывается картой способов обхода. None — раскрыто
+        всё (короткий список).
+        """
+        entries = self.__dict__.get("_entries") or {}
+        states = self.__dict__.get("_states") or {}
+        if len(entries) <= _AUTO_COLLAPSE_MIN_ROWS:
+            return None
+        current_id = str(self.__dict__.get("_current_strategy_id") or "")
+        family_keys = strategy_family_keys(entries)
+        keys: set[str] = set()
+        for strategy_id in entries:
+            state = states.get(strategy_id)
+            if (
+                strategy_id == current_id
+                or bool(getattr(state, "favorite", False))
+                or str(getattr(state, "rating", "") or "") == "work"
+            ):
+                keys.add(family_keys[strategy_id])
+        return keys
+
+    def _group_is_expanded(self, group_key: str, auto_keys: set[str] | None) -> bool:
+        if self._strategy_search_active():
+            # Поиск показывает все совпадения, свёрнутые группы их не прячут.
+            return True
+        choice = self._group_choice()
+        if group_key in choice:
+            return bool(choice[group_key])
+        return auto_keys is None or group_key in auto_keys
+
+    def _make_group_header_item(self, group: ProfileStrategyListGroup, *, expanded: bool) -> QListWidgetItem:
+        item = QListWidgetItem()
+        accessible_text = group.accessible_text(expanded=expanded)
+        item.setText(accessible_text)
+        # Заголовок не стратегия: первой строкой для выбора он не считается.
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+        item.setData(self._ROLE_ROW_KIND, _ROW_KIND_GROUP)
+        item.setData(self._ROLE_GROUP_KEY, group.key)
+        item.setData(self._ROLE_GROUP_COUNT, int(group.count))
+        item.setData(self._ROLE_GROUP_EXPANDED, bool(expanded))
+        item.setData(self._ROLE_NAME_TEXT, group.title)
+        item.setData(self._ROLE_VISUAL_ICON_NAME, group.icon_name)
+        item.setData(self._ROLE_VISUAL_COLOR, group.color)
+        item.setData(self._ROLE_VISUAL_DESCRIPTION, group.description)
+        item.setData(Qt.ItemDataRole.AccessibleTextRole, accessible_text)
+        item.setData(self._ROLE_TOOLTIP_TEXT, f"Способ обхода: {group.description}.")
+        item.setSizeHint(QSize(0, _STRATEGY_ROW_HEIGHT))
+        return item
+
+    def _toggle_group_item(self, item) -> None:
+        group_key = str(item.data(self._ROLE_GROUP_KEY) or "") if item is not None else ""
+        if not group_key:
+            return
+        expanded = not bool(item.data(self._ROLE_GROUP_EXPANDED))
+        self._group_choice()[group_key] = expanded
+        self._set_group_expanded(group_key, expanded)
+
+    def _set_group_expanded(self, group_key: str, expanded: bool) -> None:
+        """Сворачивает группу, пряча её строки: список при этом не пересобирается."""
+        header = self._group_headers().get(group_key)
+        if header is not None:
+            header.setData(self._ROLE_GROUP_EXPANDED, bool(expanded))
+            accessible_text = ProfileStrategyListGroup(
+                key=group_key,
+                title=str(header.data(self._ROLE_NAME_TEXT) or ""),
+                description=str(header.data(self._ROLE_VISUAL_DESCRIPTION) or ""),
+                icon_name="",
+                color="",
+                count=int(header.data(self._ROLE_GROUP_COUNT) or 0),
+            ).accessible_text(expanded=bool(expanded))
+            header.setText(accessible_text)
+            header.setData(Qt.ItemDataRole.AccessibleTextRole, accessible_text)
+        for item in self._item_by_strategy_id.values():
+            if str(item.data(self._ROLE_GROUP_KEY) or "") == group_key:
+                item.setHidden(not expanded)
+        current = self._list.currentItem()
+        if header is not None and current is not None and current.isHidden():
+            self._list.setCurrentItem(header)
+        self._update_current_strategy_accessibility(self._list.currentItem())
 
     def set_rows(self, *, entries, states, current_strategy_id: str) -> None:
         next_entries = dict(entries or {})
         next_states = dict(states or {})
         next_current_id = str(current_strategy_id or "none").strip() or "none"
         next_signature = _strategy_rows_signature(next_entries, next_states)
+        if set(next_entries.keys()) != set((self.__dict__.get("_entries") or {}).keys()):
+            # Другой набор стратегий (другой профиль или протокол): свёрнутое
+            # вручную относилось к прежнему списку.
+            self._group_choice().clear()
         if self.__dict__.get("_rows_signature") == next_signature:
             self._entries = next_entries
             self._states = next_states
@@ -756,11 +1052,32 @@ class ProfileStrategyListWidget(QWidget):
         item = self._item_by_strategy_id.get(strategy_id)
         if item is None:
             return None
-        list_row = self._list.row(item)
-        if list_row != source_index:
+        # Избранное меняет место только внутри своей группы, поэтому заголовки
+        # и их счётчики остаются как были. Новое место ищем по соседу из той же
+        # группы: номера строк списка сдвинуты заголовками.
+        family_keys = strategy_family_keys(next_entries)
+        family_key = family_keys[strategy_id]
+        anchor_item = None
+        insert_after = False
+        for neighbor_index, after in ((insert_index - 1, True), (insert_index + 1, False)):
+            if not 0 <= neighbor_index < len(next_order):
+                continue
+            neighbor_id = next_order[neighbor_index]
+            if family_keys[neighbor_id] != family_key:
+                continue
+            anchor_item = self._item_by_strategy_id.get(neighbor_id)
+            insert_after = after
+            if anchor_item is not None:
+                break
+        if anchor_item is None:
             return None
-        moved_item = self._list.takeItem(list_row)
-        self._list.insertItem(insert_index, moved_item)
+        moved_item = self._list.takeItem(self._list.row(item))
+        self._list.insertItem(self._list.row(anchor_item) + (1 if insert_after else 0), moved_item)
+        header = self._group_headers().get(family_key)
+        if header is not None:
+            # Вынутая и вставленная строка снова видима — возвращаем ей
+            # состояние её группы.
+            moved_item.setHidden(not bool(header.data(self._ROLE_GROUP_EXPANDED)))
         return strategy_id
 
     def set_current_strategy_id(self, strategy_id: str) -> None:
@@ -778,17 +1095,20 @@ class ProfileStrategyListWidget(QWidget):
     def _rebuild_tree(self) -> None:
         search_text = self._search.text().strip().lower()
         self._item_by_strategy_id.clear()
+        headers = self._group_headers()
+        headers.clear()
         self._list.clear()
         visible = 0
         current_item = None
         first_item = None
+        first_header = None
 
+        family_keys = strategy_family_keys(self._entries)
         rows = list(self._entries.items())
-        rows.sort(key=lambda pair: (
-            not bool(getattr(self._states.get(pair[0]), "favorite", False)),
-            str(getattr(pair[1], "name", "") or "").lower(),
-        ))
+        rows.sort(key=lambda pair: strategy_sort_key(family_keys[pair[0]], pair[1], self._states.get(pair[0])))
 
+        matched = []
+        group_counts: dict[str, int] = {}
         for strategy_id, entry in rows:
             name = str(getattr(entry, "name", "") or strategy_id)
             args = str(getattr(entry, "args", "") or "")
@@ -798,6 +1118,23 @@ class ProfileStrategyListWidget(QWidget):
             visual_search = f"{visual_label} {visual_description}".lower()
             if search_text and search_text not in name.lower() and search_text not in args.lower() and search_text not in visual_search:
                 continue
+            family_key = family_keys[strategy_id]
+            group_counts[family_key] = group_counts.get(family_key, 0) + 1
+            matched.append((strategy_id, entry, name, args, visual, visual_label, visual_description, family_key))
+
+        groups = {group.key: group for group in strategy_list_groups(group_counts)}
+        auto_keys = self._auto_expanded_group_keys() if groups else None
+
+        for strategy_id, entry, name, args, visual, visual_label, visual_description, family_key in matched:
+            expanded = True
+            if family_key in groups:
+                expanded = self._group_is_expanded(family_key, auto_keys)
+                if family_key not in headers:
+                    header = self._make_group_header_item(groups[family_key], expanded=expanded)
+                    headers[family_key] = header
+                    self._list.addItem(header)
+                    if first_header is None:
+                        first_header = header
             payload_badge = payload_badge_text(getattr(entry, "payload_scopes", ()) or ())
 
             item = QListWidgetItem()
@@ -820,6 +1157,9 @@ class ProfileStrategyListWidget(QWidget):
             item.setData(self._ROLE_PAYLOAD_BADGE_TEXT, payload_badge)
             item.setData(self._ROLE_STATUS_TEXT, status_text)
             item.setData(self._ROLE_IS_ACTIVE, is_current)
+            item.setData(self._ROLE_GROUP_KEY, family_key)
+            item.setData(self._ROLE_RATING, str(getattr(state, "rating", "") or ""))
+            item.setData(self._ROLE_FAVORITE, bool(getattr(state, "favorite", False)))
             item.setData(self._ROLE_VISUAL_ICON_NAME, str(visual.icon_name or ""))
             item.setData(self._ROLE_VISUAL_COLOR, str(visual.color or ""))
             item.setData(self._ROLE_VISUAL_LABEL_TEXT, visual_label)
@@ -830,19 +1170,23 @@ class ProfileStrategyListWidget(QWidget):
             )
             tooltip_parts = [visual_description.strip(), args]
             item.setData(self._ROLE_TOOLTIP_TEXT, "\n\n".join(part for part in tooltip_parts if part))
-            item.setSizeHint(QSize(0, 31))
-            if is_current:
-                current_item = item
-            if first_item is None:
-                first_item = item
+            item.setSizeHint(QSize(0, _STRATEGY_ROW_HEIGHT))
             self._item_by_strategy_id[strategy_id] = item
             self._list.addItem(item)
+            if not expanded:
+                item.setHidden(True)
+            elif first_item is None:
+                first_item = item
+            if is_current and expanded:
+                current_item = item
             visible += 1
 
         summary_text = f"{visible} из {len(self._entries)}"
         _set_widget_text_if_changed(self._summary, summary_text)
         set_state_text(self._summary, f"Показано готовых стратегий: {summary_text}")
-        focus_item = current_item or first_item
+        # Текущей становится выбранная стратегия; если её группа свёрнута —
+        # первая видимая стратегия, а когда свёрнуто всё — первый заголовок.
+        focus_item = current_item or first_item or first_header
         if focus_item is not None:
             self._list.setCurrentItem(focus_item)
         self._update_current_strategy_accessibility(self._list.currentItem())
@@ -860,6 +1204,14 @@ class ProfileStrategyListWidget(QWidget):
             changed = True
         if bool(item.data(self._ROLE_IS_ACTIVE)) != bool(is_current):
             item.setData(self._ROLE_IS_ACTIVE, is_current)
+            changed = True
+        rating = str(getattr(state, "rating", "") or "")
+        if str(item.data(self._ROLE_RATING) or "") != rating:
+            item.setData(self._ROLE_RATING, rating)
+            changed = True
+        favorite = bool(getattr(state, "favorite", False))
+        if bool(item.data(self._ROLE_FAVORITE)) != favorite:
+            item.setData(self._ROLE_FAVORITE, favorite)
             changed = True
         if is_current:
             try:
@@ -1063,11 +1415,26 @@ class ProfileStrategyListWidget(QWidget):
 
     def _apply_strategy_list_plan(self, plan: ProfileStrategyListPlan) -> None:
         self._item_by_strategy_id.clear()
+        headers = self._group_headers()
+        headers.clear()
         self._list.clear()
         current_item = None
         first_item = None
+        first_header = None
+        groups = {group.key: group for group in tuple(getattr(plan, "groups", ()) or ())}
+        auto_keys = self._auto_expanded_group_keys() if groups else None
 
         for row in tuple(getattr(plan, "rows", ()) or ()):
+            family_key = str(getattr(row, "family_key", "") or "")
+            expanded = True
+            if family_key in groups:
+                expanded = self._group_is_expanded(family_key, auto_keys)
+                if family_key not in headers:
+                    header = self._make_group_header_item(groups[family_key], expanded=expanded)
+                    headers[family_key] = header
+                    self._list.addItem(header)
+                    if first_header is None:
+                        first_header = header
             item = QListWidgetItem()
             item.setText(row.accessible_text or row.name)
             item.setData(self._ROLE_STRATEGY_ID, row.strategy_id)
@@ -1075,24 +1442,31 @@ class ProfileStrategyListWidget(QWidget):
             item.setData(self._ROLE_PAYLOAD_BADGE_TEXT, row.payload_badge)
             item.setData(self._ROLE_STATUS_TEXT, row.status_text)
             item.setData(self._ROLE_IS_ACTIVE, row.is_current)
+            item.setData(self._ROLE_GROUP_KEY, family_key)
+            item.setData(self._ROLE_RATING, str(getattr(row, "rating", "") or ""))
+            item.setData(self._ROLE_FAVORITE, bool(getattr(row, "favorite", False)))
             item.setData(self._ROLE_VISUAL_ICON_NAME, row.visual_icon_name)
             item.setData(self._ROLE_VISUAL_COLOR, row.visual_color)
             item.setData(self._ROLE_VISUAL_LABEL_TEXT, row.visual_label)
             item.setData(self._ROLE_VISUAL_DESCRIPTION, row.visual_description)
             item.setData(Qt.ItemDataRole.AccessibleTextRole, row.accessible_text)
             item.setData(self._ROLE_TOOLTIP_TEXT, row.tooltip_text)
-            item.setSizeHint(QSize(0, 31))
-            if row.is_current:
-                current_item = item
-            if first_item is None:
-                first_item = item
+            item.setSizeHint(QSize(0, _STRATEGY_ROW_HEIGHT))
             self._item_by_strategy_id[row.strategy_id] = item
             self._list.addItem(item)
+            if not expanded:
+                item.setHidden(True)
+            elif first_item is None:
+                first_item = item
+            if row.is_current and expanded:
+                current_item = item
 
         summary_text = f"{int(getattr(plan, 'visible_count', 0) or 0)} из {int(getattr(plan, 'total_count', 0) or 0)}"
         _set_widget_text_if_changed(self._summary, summary_text)
         set_state_text(self._summary, f"Показано готовых стратегий: {summary_text}")
-        focus_item = current_item or first_item
+        # Текущей становится выбранная стратегия; если её группа свёрнута —
+        # первая видимая стратегия, а когда свёрнуто всё — первый заголовок.
+        focus_item = current_item or first_item or first_header
         if focus_item is not None:
             self._list.setCurrentItem(focus_item)
         self._update_current_strategy_accessibility(self._list.currentItem())
@@ -1224,14 +1598,14 @@ def _strategy_entry_signature(entries) -> tuple:
 
 
 def _strategy_visible_order(entries, states) -> tuple[str, ...]:
+    entries = dict(entries or {})
+    states = dict(states or {})
+    family_keys = strategy_family_keys(entries)
     return tuple(
         strategy_id
         for strategy_id, _entry in sorted(
-            dict(entries or {}).items(),
-            key=lambda pair: (
-                not bool(getattr(dict(states or {}).get(pair[0]), "favorite", False)),
-                str(getattr(pair[1], "name", "") or "").lower(),
-            ),
+            entries.items(),
+            key=lambda pair: strategy_sort_key(family_keys[pair[0]], pair[1], states.get(pair[0])),
         )
     )
 

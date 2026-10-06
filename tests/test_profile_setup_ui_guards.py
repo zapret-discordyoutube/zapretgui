@@ -945,6 +945,9 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
             data={
                 ProfileStrategyListWidget._ROLE_STATUS_TEXT: "В избранном • Работает",
                 ProfileStrategyListWidget._ROLE_IS_ACTIVE: False,
+                # Те же отметки строка хранит и по отдельности — для значков.
+                ProfileStrategyListWidget._ROLE_RATING: "work",
+                ProfileStrategyListWidget._ROLE_FAVORITE: True,
             },
             selected=False,
         )

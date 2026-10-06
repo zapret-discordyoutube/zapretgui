@@ -5,8 +5,17 @@ from dataclasses import dataclass
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from log.log import log
+from profile.strategy_families import (
+    strategy_count_text,
+    strategy_family,
+    strategy_family_keys,
+    strategy_sort_key,
+)
 from profile.strategy_shape import payload_badge_accessible_text, payload_badge_text
 from profile.strategy_visuals import describe_strategy_visual
+
+
+STRATEGY_SELECTED_TEXT = "Выбрана"
 
 
 @dataclass(frozen=True)
@@ -23,14 +32,42 @@ class ProfileStrategyListRow:
     tooltip_text: str
     # Типы пакетов веток составной стратегии («TLS · HTTP»), пусто — обычная.
     payload_badge: str = ""
+    # Группа по способу обхода (profile.strategy_families); пусто — без группы.
+    family_key: str = ""
+    rating: str = ""
+    favorite: bool = False
+
+
+@dataclass(frozen=True)
+class ProfileStrategyListGroup:
+    """Заголовок группы стратегий одного способа обхода."""
+
+    key: str
+    title: str
+    description: str
+    icon_name: str
+    color: str
+    count: int
+
+    def accessible_text(self, *, expanded: bool) -> str:
+        state = "развернута" if expanded else "свернута"
+        return (
+            f"Группа {self.title}, {strategy_count_text(self.count)}, {state}. "
+            f"Способ обхода: {self.description}. "
+            "Нажмите Enter или Пробел, чтобы свернуть или развернуть группу."
+        )
 
 
 @dataclass(frozen=True)
 class ProfileStrategyListPlan:
+    # Строки уже стоят по группам: все стратегии одной группы идут подряд.
     rows: tuple[ProfileStrategyListRow, ...]
     visible_count: int
     total_count: int
     current_strategy_id: str
+    # Заголовки показываются, только когда групп хотя бы две: один заголовок
+    # на весь список ничего не объясняет (так выходит у каталога Zapret 1).
+    groups: tuple[ProfileStrategyListGroup, ...] = ()
 
 
 def build_profile_strategy_list_plan(
@@ -46,11 +83,12 @@ def build_profile_strategy_list_plan(
     query = str(search_text or "").strip().lower()
     rows: list[ProfileStrategyListRow] = []
 
+    family_keys = strategy_family_keys(entries)
     sorted_entries = list(entries.items())
-    sorted_entries.sort(key=lambda pair: (
-        not bool(getattr(states.get(pair[0]), "favorite", False)),
-        str(getattr(pair[1], "name", "") or "").lower(),
-    ))
+    sorted_entries.sort(
+        key=lambda pair: strategy_sort_key(family_keys[pair[0]], pair[1], states.get(pair[0]))
+    )
+    group_counts: dict[str, int] = {}
 
     for strategy_id, entry in sorted_entries:
         strategy_id = str(strategy_id or "").strip()
@@ -66,6 +104,8 @@ def build_profile_strategy_list_plan(
         payload_badge = payload_badge_text(getattr(entry, "payload_scopes", ()) or ())
         state = states.get(strategy_id)
         is_current = strategy_id == current_id
+        family_key = family_keys.get(strategy_id, "other")
+        group_counts[family_key] = group_counts.get(family_key, 0) + 1
         status_parts = _strategy_status_parts(state, is_current=is_current, include_unselected=False)
         accessible_status_parts = _strategy_status_parts(state, is_current=is_current, include_unselected=True)
         tooltip_parts = [visual_description.strip(), args]
@@ -88,6 +128,9 @@ def build_profile_strategy_list_plan(
                 visual_description=visual_description,
                 tooltip_text="\n\n".join(part for part in tooltip_parts if part),
                 payload_badge=payload_badge,
+                family_key=family_key,
+                rating=str(getattr(state, "rating", "") or ""),
+                favorite=bool(getattr(state, "favorite", False)),
             )
         )
 
@@ -96,7 +139,28 @@ def build_profile_strategy_list_plan(
         visible_count=len(rows),
         total_count=len(entries),
         current_strategy_id=current_id,
+        groups=strategy_list_groups(group_counts),
     )
+
+
+def strategy_list_groups(group_counts: dict[str, int]) -> tuple[ProfileStrategyListGroup, ...]:
+    """Заголовки групп в порядке появления строк; пусто, если группа одна."""
+    if len(group_counts) < 2:
+        return ()
+    groups = []
+    for family_key, count in group_counts.items():
+        family = strategy_family(family_key)
+        groups.append(
+            ProfileStrategyListGroup(
+                key=family.key,
+                title=family.title,
+                description=family.description,
+                icon_name=family.icon_name,
+                color=family.color,
+                count=int(count),
+            )
+        )
+    return tuple(groups)
 
 
 class ProfileStrategyListFilterWorker(QThread):
@@ -138,7 +202,7 @@ class ProfileStrategyListFilterWorker(QThread):
 def _strategy_status_parts(state, *, is_current: bool, include_unselected: bool) -> list[str]:
     status_parts = []
     if is_current:
-        status_parts.append("Выбрана")
+        status_parts.append(STRATEGY_SELECTED_TEXT)
     elif include_unselected:
         status_parts.append("Не выбрана")
     if bool(getattr(state, "favorite", False)):
@@ -178,8 +242,11 @@ def _lower_first(text: str) -> str:
 
 
 __all__ = [
+    "STRATEGY_SELECTED_TEXT",
     "ProfileStrategyListFilterWorker",
+    "ProfileStrategyListGroup",
     "ProfileStrategyListPlan",
     "ProfileStrategyListRow",
     "build_profile_strategy_list_plan",
+    "strategy_list_groups",
 ]
