@@ -230,6 +230,11 @@ def ensure_qt_runtime() -> QApplication:
         "StartupQtInfoBarLayout",
         f"{(_time.perf_counter() - t_infobar_layout) * 1000:.0f}ms",
     )
+    # Последним из перехватчиков InfoBar.new: проверка потока должна сработать
+    # раньше кода, который читает размеры окна-родителя.
+    from ui.infobar_thread_guard import install_infobar_window_thread_guard
+
+    install_infobar_window_thread_guard()
     t_combo_guard = _time.perf_counter()
     from ui.combo_popup_guard import install_global_combo_popup_closer
 

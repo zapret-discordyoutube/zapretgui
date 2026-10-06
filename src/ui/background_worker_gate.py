@@ -247,7 +247,12 @@ def background_worker_gate() -> BackgroundWorkerGate:
     """Возвращает общий гейт приложения (создаётся лениво)."""
     global _GATE
     if _GATE is None:
-        _GATE = BackgroundWorkerGate()
+        gate = BackgroundWorkerGate()
+        # Гейт с таймером создаётся по первому требованию; жить он обязан в потоке окна.
+        from app.ui_thread_marshaller import ensure_window_thread_affinity
+
+        ensure_window_thread_affinity(gate, "Гейт фоновых воркеров")
+        _GATE = gate
     return _GATE
 
 

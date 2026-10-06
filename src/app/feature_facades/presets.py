@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import threading
 from typing import Any
+
+# Сервисы пресетов собираются один раз: два потока, пришедшие одновременно,
+# иначе получили бы две разные шины сигналов.
+_PRESET_SERVICES_BUILD_LOCK = threading.Lock()
 
 
 @dataclass(slots=True)
@@ -35,7 +40,9 @@ class PresetsFeature:
         if self._services is None:
             from presets.services_bundle import create_preset_services
 
-            self._services = create_preset_services(self._app_paths)
+            with _PRESET_SERVICES_BUILD_LOCK:
+                if self._services is None:
+                    self._services = create_preset_services(self._app_paths)
         return self._services
 
     def _metadata_cache(self) -> dict:

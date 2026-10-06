@@ -142,7 +142,9 @@ class WindowNotificationCenter(QObject):
         try:
             return QThread.currentThread() is self.thread()
         except Exception:
-            return True
+            # Не удалось узнать поток — считаем его чужим: потерять уведомление
+            # лучше, чем создать плашку не в том потоке.
+            return False
 
     def notify_threadsafe(self, payload: dict | None) -> None:
         normalized = normalize_notification_payload(payload)

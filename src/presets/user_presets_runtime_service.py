@@ -6,7 +6,7 @@ from typing import Any, Callable
 import time
 import weakref
 
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 
 from log.log import log
 from presets.icon_color import normalize_preset_icon_color
@@ -739,9 +739,13 @@ class UserPresetsRuntimeService:
             return False
         try:
             watcher = NativePresetsDirWatcher(presets_dir, page)
-            watcher.events.connect(lambda events, p=page: self._on_native_watch_events(events, p))
-            watcher.overflowed.connect(lambda p=page: self._on_native_watch_overflowed(p))
-            watcher.failed.connect(lambda error, p=page: self._on_native_watch_failed(error, p))
+            # Сигналы приходят из потока слежения, а обработчики запускают
+            # таймер Qt: доставка в поток окна задана явно, а не выводится
+            # библиотекой из вида слота.
+            queued = Qt.ConnectionType.QueuedConnection
+            watcher.events.connect(lambda events, p=page: self._on_native_watch_events(events, p), queued)
+            watcher.overflowed.connect(lambda p=page: self._on_native_watch_overflowed(p), queued)
+            watcher.failed.connect(lambda error, p=page: self._on_native_watch_failed(error, p), queued)
             if not watcher.start_watching():
                 watcher.deleteLater()
                 return False

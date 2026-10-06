@@ -27,6 +27,13 @@ def create_preset_services(app_paths) -> PresetServicesBundle:
         ENGINE_WINWS1: PresetUiStore(ENGINE_WINWS1, preset_file_store, preset_selection_service),
     }
 
+    # Сервисы собираются по первому требованию, и первым может прийти фоновый
+    # поток. Шина сигналов при этом обязана жить в потоке окна.
+    from app.ui_thread_marshaller import ensure_window_thread_affinity
+
+    for engine_key, store in stores.items():
+        ensure_window_thread_affinity(store, f"Шина событий пресетов {engine_key}")
+
     def _on_selection_changed(engine: str, file_name: str, reason: str, detail: str) -> None:
         store = stores.get(str(engine or "").strip().lower())
         if store is not None:

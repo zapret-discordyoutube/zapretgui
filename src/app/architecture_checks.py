@@ -570,6 +570,64 @@ def check_post_startup_builds_ui_only_in_user_pause(files: list[Path]) -> list[P
     return problems
 
 
+# Создание элементов окна, которое запрещено фоновому коду.
+_WIDGET_CREATION_RE = re.compile(
+    r"(?:\b(?:InfoBar|InfoBarHelper|TeachingTip|Flyout)\s*\.\s*\w+\s*\(|"
+    r"\b(?:MessageBox|MessageBoxBase|Dialog)\s*\(|"
+    r"^\s*(?:from\s+qfluentwidgets\b|import\s+qfluentwidgets\b))"
+)
+_QTHREAD_SUBCLASS_RE = re.compile(r"^\s*class\s+\w+\s*\([^)]*\bQThread\b[^)]*\)\s*:")
+
+
+def is_background_code_module(rel_path: str, source: str) -> bool:
+    """Модуль, чей код по назначению выполняется вне потока окна.
+
+    Это фоновые задачи запуска (main/post_startup*), модули работников и
+    загрузчиков (в имени файла worker или loader) и любой модуль, где объявлен
+    наследник QThread.
+    """
+    name = rel_path.rsplit("/", 1)[-1]
+    if rel_path.startswith("src/main/post_startup"):
+        return True
+    if "worker" in name or "loader" in name:
+        return True
+    return any(_QTHREAD_SUBCLASS_RE.match(line) for line in source.splitlines())
+
+
+def check_background_code_does_not_create_widgets(sources: list[tuple[Path, str]]) -> list[Problem]:
+    """Фоновый код не создаёт элементы окна.
+
+    Создание элемента окна из фонового потока на Windows останавливает
+    программу целиком: вызывающий поток ждёт ответа потока окна, а тот не
+    может ответить, пока вызывающий держит GIL (Dev 21.1.7.19 — уведомление
+    из фоновой задачи запуска). По коду не видно, в каком потоке окажется
+    вызов, поэтому модулям, которые по назначению работают в фоне, плашки,
+    диалоги и виджеты qfluentwidgets запрещены вовсе. Уведомление показывается
+    через notify центра уведомлений (ui/window_notification_center.py),
+    остальное — сигналом Qt, слот которого живёт в потоке окна.
+    """
+    problems: list[Problem] = []
+    for path, source in sources:
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if not is_background_code_module(rel, source):
+            continue
+        for index, line in enumerate(source.splitlines(), start=1):
+            if line.lstrip().startswith("#"):
+                continue
+            if _WIDGET_CREATION_RE.search(line):
+                problems.append(
+                    Problem(
+                        path,
+                        index,
+                        "фоновый код создаёт элемент окна: из фонового потока это останавливает программу. "
+                        "Уведомление показывать через notify центра уведомлений, остальное — сигналом Qt "
+                        "в поток окна",
+                        line,
+                    )
+                )
+    return problems
+
+
 def check_discord_tray_command_does_not_receive_window() -> list[Problem]:
     scopes = [
         SRC_ROOT / "tray.py",
@@ -1644,6 +1702,11 @@ def run_checks() -> list[Problem]:
     problems.extend(check_window_page_deps_setup_uses_actions())
     problems.extend(check_post_startup_uses_explicit_host(files))
     problems.extend(check_post_startup_builds_ui_only_in_user_pause(files))
+    problems.extend(
+        check_background_code_does_not_create_widgets(
+            [(path, path.read_text(encoding="utf-8", errors="replace")) for path in files]
+        )
+    )
     problems.extend(check_discord_tray_command_does_not_receive_window())
     problems.extend(check_post_startup_does_not_use_window_as_feature_container())
     problems.extend(check_page_deps_context_not_stored_on_window(files))

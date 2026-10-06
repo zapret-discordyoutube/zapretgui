@@ -21,7 +21,9 @@ class ProgramSettingsFeature:
     def _create_runtime_service():
         from core.runtime.program_settings_runtime_service import ProgramSettingsRuntimeService
 
-        return ProgramSettingsRuntimeService()
+        from app.ui_thread_marshaller import shared_ui_thread_marshaller
+
+        return ProgramSettingsRuntimeService(ui_thread_marshaller_provider=shared_ui_thread_marshaller)
 
     @property
     def runtime_service(self):

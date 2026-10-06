@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
+import threading
+
+from PyQt6.QtCore import QCoreApplication, QObject, QThread, Qt, pyqtSignal
 
 
 class QtUiThreadMarshaller(QObject):
@@ -41,4 +43,70 @@ class QtUiThreadMarshaller(QObject):
         action()
 
 
-__all__ = ["QtUiThreadMarshaller"]
+_shared_marshaller: QtUiThreadMarshaller | None = None
+
+
+def install_shared_ui_thread_marshaller() -> QtUiThreadMarshaller:
+    """Общий маршалер программы. Первый вызов — из потока окна, при запуске.
+
+    Один на всю программу: им пользуются слой состояния окна, службы с
+    подписчиками (настройки программы, проверка обновлений) и страж плашек.
+    """
+    global _shared_marshaller
+    if _shared_marshaller is None:
+        _shared_marshaller = QtUiThreadMarshaller()
+    return _shared_marshaller
+
+
+def shared_ui_thread_marshaller() -> QtUiThreadMarshaller | None:
+    """Общий маршалер или None, если окно ещё не собрано (или его нет вовсе)."""
+    return _shared_marshaller
+
+
+def reset_shared_ui_thread_marshaller() -> None:
+    """Сбрасывает общий маршалер. Нужно тестам, живому коду — нет."""
+    global _shared_marshaller
+    _shared_marshaller = None
+
+
+def ensure_window_thread_affinity(obj: QObject, what: str) -> bool:
+    """Общий QObject должен жить в потоке окна, кто бы его ни создал.
+
+    Общие объекты с сигналами (шина событий пресетов, менеджер Telegram Proxy)
+    создаются по первому требованию, и первым может оказаться фоновый поток.
+    QObject принадлежит потоку, который его создал: сигналы такого объекта
+    доставлялись бы в поток без цикла событий (то есть никуда) либо
+    выполнялись бы прямо в фоновом потоке и оттуда трогали окно. Поэтому сразу
+    после создания объект переносится в поток окна.
+
+    Вызывать из потока, создавшего объект, до первого подключения сигналов.
+    Возвращает True, если объект пришлось перенести.
+    """
+    app = QCoreApplication.instance()
+    if app is None:
+        # Без приложения Qt (юнит-тесты) потока окна нет.
+        return False
+    window_thread = app.thread()
+    if obj.thread() is window_thread:
+        return False
+    obj.moveToThread(window_thread)
+    try:
+        from log.log import log
+
+        log(
+            f"{what} создан в фоновом потоке «{threading.current_thread().name}» "
+            "и перенесён в поток окна",
+            "DEBUG",
+        )
+    except Exception:
+        pass
+    return True
+
+
+__all__ = [
+    "QtUiThreadMarshaller",
+    "ensure_window_thread_affinity",
+    "install_shared_ui_thread_marshaller",
+    "reset_shared_ui_thread_marshaller",
+    "shared_ui_thread_marshaller",
+]

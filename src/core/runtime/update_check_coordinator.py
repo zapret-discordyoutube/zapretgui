@@ -5,6 +5,8 @@ from threading import RLock
 import time
 import weakref
 
+from core.runtime.ui_thread_delivery import UiThreadMarshallerProvider, deliver_in_ui_thread
+
 
 @dataclass(frozen=True, slots=True)
 class UpdateCheckSnapshot:
@@ -38,7 +40,10 @@ class UpdateCheckCoordinator:
     его всем экранам. Это не даёт запуску программы и странице расходиться по состоянию.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, ui_thread_marshaller_provider: UiThreadMarshallerProvider | None = None) -> None:
+        # Подписчик — страница обновлений: зовём его только в потоке окна,
+        # а начать и закончить проверку может фоновая задача.
+        self._ui_thread_marshaller_provider = ui_thread_marshaller_provider
         self._lock = RLock()
         self._revision = 0
         self._snapshot = UpdateCheckSnapshot(
@@ -177,6 +182,11 @@ class UpdateCheckCoordinator:
         return _unsubscribe
 
     def _notify(self, snapshot: UpdateCheckSnapshot) -> None:
+        deliver_in_ui_thread(self._ui_thread_marshaller_provider, lambda: self._deliver(snapshot))
+
+    def _deliver(self, snapshot: UpdateCheckSnapshot) -> None:
+        # Подписчики читаются в момент доставки: между публикацией из фонового
+        # потока и вызовом в потоке окна страница могла отписаться.
         callbacks: list = []
         with self._lock:
             alive_refs: list[object] = []

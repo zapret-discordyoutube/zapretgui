@@ -21,7 +21,9 @@ class UpdaterFeature:
     def _create_check_coordinator():
         from core.runtime.update_check_coordinator import UpdateCheckCoordinator
 
-        return UpdateCheckCoordinator()
+        from app.ui_thread_marshaller import shared_ui_thread_marshaller
+
+        return UpdateCheckCoordinator(ui_thread_marshaller_provider=shared_ui_thread_marshaller)
 
     @property
     def check_coordinator(self):

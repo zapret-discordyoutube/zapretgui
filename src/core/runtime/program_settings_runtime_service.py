@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from threading import RLock
 import weakref
 
+from core.runtime.ui_thread_delivery import UiThreadMarshallerProvider, deliver_in_ui_thread
+
 from settings.schema import (
     TRAY_CLOSE_MODE_MINIMIZE_AND_CLOSE,
     TRAY_CLOSE_MODE_MINIMIZE_ONLY,
@@ -52,7 +54,10 @@ class ProgramSettingsRuntimeService:
     состояния через on_page_activated().
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, ui_thread_marshaller_provider: UiThreadMarshallerProvider | None = None) -> None:
+        # Подписчики — страницы: зовём их только в потоке окна, а публикует
+        # новое состояние в том числе фоновый работник загрузки настроек.
+        self._ui_thread_marshaller_provider = ui_thread_marshaller_provider
         self._lock = RLock()
         self._tray_close_mode_cache: str | None = peek_warmed_tray_close_mode()
         self._snapshot: ProgramSettingsSnapshot | None = None
@@ -180,6 +185,11 @@ class ProgramSettingsRuntimeService:
             return None
 
     def _notify(self, snapshot: ProgramSettingsSnapshot) -> None:
+        deliver_in_ui_thread(self._ui_thread_marshaller_provider, lambda: self._deliver(snapshot))
+
+    def _deliver(self, snapshot: ProgramSettingsSnapshot) -> None:
+        # Подписчики читаются в момент доставки: между публикацией из фонового
+        # потока и вызовом в потоке окна страница могла отписаться.
         callbacks: list = []
         with self._lock:
             alive_refs: list[object] = []

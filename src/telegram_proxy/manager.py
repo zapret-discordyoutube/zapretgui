@@ -4,6 +4,8 @@
 Integrates with PyQt6 event system — emits signals on status changes.
 """
 
+import threading
+
 from PyQt6.QtCore import QThread, pyqtSignal
 from typing import Optional, Callable
 
@@ -13,6 +15,7 @@ from telegram_proxy.proxy.upstream_controller import UpstreamRuntimeSnapshot
 from telegram_proxy.proxy_logger import get_proxy_logger
 
 _shared_proxy_manager: Optional["TelegramProxyManager"] = None
+_SHARED_PROXY_MANAGER_LOCK = threading.Lock()
 
 
 class TelegramProxyManager(QThread):
@@ -177,7 +180,15 @@ class TelegramProxyManager(QThread):
 def get_proxy_manager() -> TelegramProxyManager:
     global _shared_proxy_manager
     if _shared_proxy_manager is None:
-        _shared_proxy_manager = TelegramProxyManager()
+        with _SHARED_PROXY_MANAGER_LOCK:
+            if _shared_proxy_manager is None:
+                manager = TelegramProxyManager()
+                # Первым менеджер может запросить фоновый поток (автозапуск
+                # прокси), а его сигналы слушают трей и страница.
+                from app.ui_thread_marshaller import ensure_window_thread_affinity
+
+                ensure_window_thread_affinity(manager, "Менеджер Telegram Proxy")
+                _shared_proxy_manager = manager
     return _shared_proxy_manager
 
 
