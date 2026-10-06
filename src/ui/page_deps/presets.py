@@ -114,6 +114,7 @@ def build_preset_setup_page_kwargs(
         "create_profile_item_refresh_worker": profile_feature.create_profile_item_refresh_worker,
         "create_profile_context_action_worker": profile_feature.create_profile_context_action_worker,
         "create_profile_move_worker": profile_feature.create_profile_move_worker,
+        "create_profile_display_order_notice_worker": profile_feature.create_profile_display_order_notice_worker,
         "create_user_profile_create_worker": profile_feature.create_user_profile_create_worker,
         "create_user_profile_update_worker": profile_feature.create_user_profile_update_worker,
         "create_user_profile_delete_worker": profile_feature.create_user_profile_delete_worker,

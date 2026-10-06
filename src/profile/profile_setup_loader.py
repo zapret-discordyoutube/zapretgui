@@ -766,6 +766,27 @@ class ProfileStrategyOpenGroupSaveWorker(QThread):
         self.saved.emit(self._request_id)
 
 
+class ProfileDisplayOrderNoticeWorker(QThread):
+    """Узнаёт в настройках, показывать ли пояснение про порядок в пресете."""
+
+    loaded = pyqtSignal(int, object)
+    failed = pyqtSignal(int, str)
+
+    def __init__(self, request_id: int, claim_notice, parent=None):
+        super().__init__(parent)
+        self._request_id = int(request_id)
+        self._claim_notice = claim_notice
+
+    def run(self) -> None:
+        try:
+            first_time = bool(self._claim_notice())
+        except Exception as exc:
+            log(f"ProfileDisplayOrderNoticeWorker: не удалось прочитать настройки: {exc}", "ERROR")
+            self.failed.emit(self._request_id, str(exc))
+            return
+        self.loaded.emit(self._request_id, first_time)
+
+
 class ProfileStrategyGroupingSaveWorker(QThread):
     """Запоминает в настройках, по чему человек сгруппировал список стратегий."""
 

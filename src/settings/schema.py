@@ -112,6 +112,9 @@ def default_warnings() -> dict[str, Any]:
         "isp_dns_info_shown": False,
         "tg_proxy_deeplink_done": False,
         "onboarding_tour_done": False,
+        # Пояснение «перетаскивание в списке профилей не меняет порядок в
+        # пресете» уже показано.
+        "profile_display_order_hint_shown": False,
     }
 
 

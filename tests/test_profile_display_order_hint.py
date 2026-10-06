@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import os
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -138,23 +139,47 @@ class DragHintTests(unittest.TestCase):
         self.assertEqual(order_list._view._drag_hint_text, "")
 
 
+class _Runtime:
+    """Запоминает запущенного работника и отдаёт его ответ по команде теста."""
+
+    def __init__(self) -> None:
+        self.started = []
+
+    def start_qthread_worker(self, *, worker_factory, on_loaded=None, **_kwargs):
+        worker = worker_factory(len(self.started) + 1)
+        self.started.append((worker, on_loaded))
+        return len(self.started), worker
+
+    def answer(self, first_time: bool) -> None:
+        _worker, on_loaded = self.started[-1]
+        on_loaded(len(self.started), first_time)
+
+
 class FirstMoveNoticeTests(unittest.TestCase):
     def setUp(self) -> None:
         flag = patch.object(page_module, "_display_order_explained", False)
         flag.start()
         self.addCleanup(flag.stop)
 
-    def _page(self):
+    def _page(self, *, with_settings: bool = True):
         page = PresetSetupPageBase.__new__(PresetSetupPageBase)
         page.window = Mock(return_value="main window")
+        page._profile_display_order_notice_runtime = _Runtime()
+        page._create_profile_display_order_notice_worker_fn = (
+            Mock(return_value="notice worker") if with_settings else None
+        )
         return page
 
-    def test_first_move_explains_that_the_preset_order_is_the_same(self) -> None:
+    def test_very_first_move_explains_that_the_preset_order_is_the_same(self) -> None:
         page = self._page()
 
         with patch.object(page_module.InfoBar, "info") as info:
             PresetSetupPageBase._explain_display_order_once(page, "profile:a", "profile:b", "games")
+            # Пока настройки не ответили, уведомления нет.
+            info.assert_not_called()
+            page._profile_display_order_notice_runtime.answer(True)
 
+        page._create_profile_display_order_notice_worker_fn.assert_called_once_with(1, parent=page)
         info.assert_called_once()
         kwargs = info.call_args.kwargs
         self.assertEqual(kwargs["title"], "Порядок в пресете не изменился")
@@ -162,13 +187,33 @@ class FirstMoveNoticeTests(unittest.TestCase):
         self.assertIn("«Порядок в пресете»", kwargs["content"])
         self.assertEqual(kwargs["parent"], "main window")
 
-    def test_notice_is_shown_once_per_program_run(self) -> None:
+    def test_notice_already_shown_in_an_earlier_run_is_not_repeated(self) -> None:
         page = self._page()
 
         with patch.object(page_module.InfoBar, "info") as info:
             PresetSetupPageBase._explain_display_order_once(page, "profile:a")
+            page._profile_display_order_notice_runtime.answer(False)
+
+        info.assert_not_called()
+
+    def test_settings_are_asked_once_per_program_run(self) -> None:
+        page = self._page()
+
+        with patch.object(page_module.InfoBar, "info"):
+            PresetSetupPageBase._explain_display_order_once(page, "profile:a")
             PresetSetupPageBase._explain_display_order_once(page, "profile:b", "games")
-            PresetSetupPageBase._explain_display_order_once(self._page(), "profile:c")
+            other_page = self._page()
+            PresetSetupPageBase._explain_display_order_once(other_page, "profile:c")
+
+        self.assertEqual(len(page._profile_display_order_notice_runtime.started), 1)
+        self.assertEqual(other_page._profile_display_order_notice_runtime.started, [])
+
+    def test_page_without_settings_access_explains_on_the_first_move_of_the_run(self) -> None:
+        page = self._page(with_settings=False)
+
+        with patch.object(page_module.InfoBar, "info") as info:
+            PresetSetupPageBase._explain_display_order_once(page, "profile:a")
+            PresetSetupPageBase._explain_display_order_once(page, "profile:b")
 
         info.assert_called_once()
 
@@ -185,6 +230,62 @@ class FirstMoveNoticeTests(unittest.TestCase):
         ):
             self.assertIn(f"profiles_list.{signal},", wiring)
         self.assertIn("moved.connect(self._explain_display_order_once)", wiring)
+
+    def test_real_page_gets_the_settings_worker(self) -> None:
+        from app.feature_facades.profile import ProfileFeature
+        from ui.page_deps import presets as deps
+
+        self.assertIn(
+            '"create_profile_display_order_notice_worker": profile_feature.create_profile_display_order_notice_worker',
+            Path(deps.__file__).read_text(encoding="utf-8"),
+        )
+        self.assertTrue(callable(ProfileFeature.create_profile_display_order_notice_worker))
+
+
+class NoticeIsRememberedTests(unittest.TestCase):
+    """«Пояснение показано» лежит в настройках программы и переживает перезапуск."""
+
+    def test_notice_is_claimed_exactly_once(self) -> None:
+        from profile import commands
+
+        stored = {"shown": False}
+
+        def remember(value: bool = True) -> bool:
+            stored["shown"] = bool(value)
+            return True
+
+        with (
+            patch("settings.store.get_profile_display_order_hint_shown", side_effect=lambda: stored["shown"]),
+            patch("settings.store.set_profile_display_order_hint_shown", side_effect=remember) as save,
+        ):
+            self.assertTrue(commands.claim_display_order_notice())
+            self.assertFalse(commands.claim_display_order_notice())
+            self.assertFalse(commands.claim_display_order_notice())
+
+        save.assert_called_once_with(True)
+
+    def test_worker_reports_the_claim(self) -> None:
+        from profile.profile_setup_loader import ProfileDisplayOrderNoticeWorker
+
+        for first_time in (True, False):
+            with self.subTest(first_time=first_time):
+                answers = []
+                worker = ProfileDisplayOrderNoticeWorker(7, lambda value=first_time: value)
+                worker.loaded.connect(lambda request_id, value: answers.append((request_id, value)))
+
+                worker.run()
+
+                self.assertEqual(answers, [(7, first_time)])
+
+    def test_settings_keep_the_flag_and_default_to_not_shown(self) -> None:
+        from settings.normalize import normalize_warnings
+        from settings.schema import default_warnings
+
+        self.assertFalse(default_warnings()["profile_display_order_hint_shown"])
+        self.assertFalse(normalize_warnings({})["profile_display_order_hint_shown"])
+        self.assertTrue(
+            normalize_warnings({"profile_display_order_hint_shown": True})["profile_display_order_hint_shown"]
+        )
 
 
 if __name__ == "__main__":

@@ -901,6 +901,15 @@ class ProfileFeature:
             parent=parent,
         )
 
+    def create_profile_display_order_notice_worker(self, request_id: int, *, parent=None):
+        from profile.profile_setup_loader import ProfileDisplayOrderNoticeWorker
+
+        return ProfileDisplayOrderNoticeWorker(
+            request_id,
+            self._commands().claim_display_order_notice,
+            parent=parent,
+        )
+
     def create_profile_move_worker(
         self,
         request_id: int,

@@ -202,6 +202,20 @@ def set_strategy_open_group(
     return _profile_preset_service(profile_services, launch_method).set_strategy_open_group(profile_key, group_key)
 
 
+def claim_display_order_notice() -> bool:
+    """Пора ли объяснить, что перетаскивание в списке не меняет порядок в пресете.
+
+    True возвращается один раз за всю жизнь настроек: вызов сразу запоминает,
+    что пояснение показано.
+    """
+    from settings.store import get_profile_display_order_hint_shown, set_profile_display_order_hint_shown
+
+    if get_profile_display_order_hint_shown():
+        return False
+    set_profile_display_order_hint_shown(True)
+    return True
+
+
 def set_strategy_grouping(profile_services, launch_method: str, grouping: str) -> bool:
     return _profile_preset_service(profile_services, launch_method).set_strategy_grouping(grouping)
 

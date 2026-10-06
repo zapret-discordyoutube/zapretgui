@@ -136,7 +136,8 @@ def _pending_kind_property(kind: str, from_operation, to_operation):
     return property(_get, _set)
 
 
-# Пояснение про порядок в пресете уже показано в этом запуске программы.
+# В этом запуске программы уже выясняли, показывать ли пояснение про порядок
+# в пресете: само «показано» хранится в настройках (warnings).
 _display_order_explained = False
 
 
@@ -167,6 +168,7 @@ class PresetSetupPageBase(BasePage):
         open_profile_setup,
         open_profile_order,
         ui_state_store=None,
+        create_profile_display_order_notice_worker=None,
     ):
         super().__init__(
             title=self.page_title,
@@ -182,6 +184,9 @@ class PresetSetupPageBase(BasePage):
         self._create_user_profile_delete_worker_fn = create_user_profile_delete_worker
         self._create_profile_folder_action_worker_fn = create_profile_folder_action_worker
         self._create_profile_request_form_open_worker_fn = create_profile_request_form_open_worker
+        # Без этой фабрики пояснение про порядок в пресете показывается при
+        # первом перетаскивании каждого запуска, а не один раз.
+        self._create_profile_display_order_notice_worker_fn = create_profile_display_order_notice_worker
         self._open_profile_setup = open_profile_setup
         self._open_profile_order_page = open_profile_order
 
@@ -1167,16 +1172,31 @@ class PresetSetupPageBase(BasePage):
         )
 
     def _explain_display_order_once(self, *_move) -> None:
-        """После первого перетаскивания объясняет, что порядок в пресете прежний.
+        """После самого первого перетаскивания объясняет, что порядок в пресете прежний.
 
         Список похож на сам пресет, и без пояснения кажется, что профили
-        переставлены в нём. Хватает одного раза за запуск программы: дальше
-        об этом напоминает подсказка у курсора.
+        переставлены в нём. Показано ли пояснение, помнят настройки, поэтому
+        оно появляется один раз; дальше об этом напоминает подсказка у курсора.
         """
         global _display_order_explained
         if _display_order_explained:
             return
+        # В этом запуске настройки больше не спрашиваем.
         _display_order_explained = True
+        create_worker = self.__dict__.get("_create_profile_display_order_notice_worker_fn")
+        if create_worker is None:
+            self._show_display_order_notice()
+            return
+        self._worker_runtime("_profile_display_order_notice_runtime").start_qthread_worker(
+            worker_factory=lambda request_id: create_worker(request_id, parent=self),
+            on_loaded=self._on_display_order_notice_claimed,
+        )
+
+    def _on_display_order_notice_claimed(self, _request_id: int, first_time) -> None:
+        if first_time and not bool(self.__dict__.get("_cleanup_in_progress", False)):
+            self._show_display_order_notice()
+
+    def _show_display_order_notice(self) -> None:
         InfoBar.info(
             title=DISPLAY_ORDER_NOTICE_TITLE,
             content=DISPLAY_ORDER_NOTICE_TEXT,
@@ -1425,6 +1445,7 @@ class PresetSetupPageBase(BasePage):
             ("_profile_item_refresh_runtime", "profile item refresh worker"),
             ("_profile_context_action_runtime", "profile context action worker"),
             ("_profile_move_runtime", "profile move worker"),
+            ("_profile_display_order_notice_runtime", "profile display order notice worker"),
             ("_profile_folder_action_runtime", "profile folder action worker"),
             ("_profile_request_form_open_runtime", "profile request form open worker"),
             ("_user_profile_create_runtime", "user profile create worker"),

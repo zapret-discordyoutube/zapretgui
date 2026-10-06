@@ -354,6 +354,10 @@ def normalize_warnings(data: object) -> dict[str, Any]:
         "isp_dns_info_shown": as_bool(raw.get("isp_dns_info_shown"), defaults["isp_dns_info_shown"]),
         "tg_proxy_deeplink_done": as_bool(raw.get("tg_proxy_deeplink_done"), defaults["tg_proxy_deeplink_done"]),
         "onboarding_tour_done": as_bool(raw.get("onboarding_tour_done"), defaults["onboarding_tour_done"]),
+        "profile_display_order_hint_shown": as_bool(
+            raw.get("profile_display_order_hint_shown"),
+            defaults["profile_display_order_hint_shown"],
+        ),
     }
 
 

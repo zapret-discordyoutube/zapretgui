@@ -1384,6 +1384,14 @@ def set_onboarding_tour_done(value: bool) -> bool:
     return _set_bool(("warnings", "onboarding_tour_done"), value)
 
 
+def get_profile_display_order_hint_shown() -> bool:
+    return _get_bool(("warnings", "profile_display_order_hint_shown"), False)
+
+
+def set_profile_display_order_hint_shown(value: bool = True) -> bool:
+    return _set_bool(("warnings", "profile_display_order_hint_shown"), value)
+
+
 def get_active_hosts_domains() -> set[str]:
     items = _read_path_value(("hosts", "active_domains"), [])
     if not isinstance(items, list):
@@ -1924,6 +1932,7 @@ __all__ = [
     "get_hosts_selection",
     "get_isp_dns_info_shown",
     "get_onboarding_tour_done",
+    "get_profile_display_order_hint_shown",
     "get_kaspersky_warning_disabled",
     "get_last_seen_version",
     "get_max_blocked",
@@ -2019,6 +2028,7 @@ __all__ = [
     "set_hosts_selection",
     "set_isp_dns_info_shown",
     "set_onboarding_tour_done",
+    "set_profile_display_order_hint_shown",
     "set_kaspersky_warning_disabled",
     "set_last_seen_version",
     "set_max_blocked",
