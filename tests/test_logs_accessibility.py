@@ -539,17 +539,17 @@ class LogsAccessibilityTests(unittest.TestCase):
         errors_text = type("ErrorsText", (), {"append": lambda self, text: None})()
         label = _FakeLabel()
 
-        count = runtime_helpers.append_error(
+        count = runtime_helpers.append_errors(
             errors_text=errors_text,
             errors_count_label=label,
             tr_fn=lambda _key, default: default,
             current_count=0,
-            text="RuntimeError: failed",
+            lines=["RuntimeError: failed", "ValueError: failed"],
         )
 
-        self.assertEqual(count, 1)
-        self.assertEqual(label.accessible_name, "Ошибок: 1")
-        self.assertEqual(label.properties["screenReaderStateText"], "Ошибок: 1")
+        self.assertEqual(count, 2)
+        self.assertEqual(label.accessible_name, "Ошибок: 2")
+        self.assertEqual(label.properties["screenReaderStateText"], "Ошибок: 2")
 
 
 if __name__ == "__main__":

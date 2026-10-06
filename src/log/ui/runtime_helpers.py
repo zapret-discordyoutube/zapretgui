@@ -74,12 +74,18 @@ def compute_errors_text_height(*, text_edit, min_height: int, max_height: int) -
     return max(min_height, min(max_height, target_height))
 
 
-def append_error(*, errors_text, errors_count_label, tr_fn, current_count: int, text: str) -> int:
-    next_count = int(current_count) + 1
+def append_errors(*, errors_text, errors_count_label, tr_fn, current_count: int, lines) -> int:
+    lines = list(lines)
+    if not lines:
+        return int(current_count)
+    # Каждая строка добавляется отдельно, как и раньше (Qt сам решает по строке,
+    # обычный это текст или разметка), а счётчик обновляется один раз на пачку.
+    for line in lines:
+        errors_text.append(line)
+    next_count = int(current_count) + len(lines)
     count_text = tr_fn("page.logs.errors.count", "Ошибок: {count}").format(count=next_count)
     errors_count_label.setText(count_text)
     set_state_text(errors_count_label, count_text)
-    errors_text.append(text)
     return next_count
 
 

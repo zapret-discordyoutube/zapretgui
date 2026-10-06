@@ -12,6 +12,32 @@ import log.runtime_workflow as log_runtime_workflow
 import log.support_worker as support_worker
 
 
+class _FakeLogText:
+    """Поле журнала без Qt: запоминает, какими кусками в него вставляли текст."""
+
+    def __init__(self):
+        self.inserted = []
+        self.MoveOperation = SimpleNamespace(End="end")
+
+    def verticalScrollBar(self):  # noqa: N802
+        return SimpleNamespace(value=lambda: 10, maximum=lambda: 10, setValue=lambda _value: None)
+
+    def setUpdatesEnabled(self, _enabled):  # noqa: N802
+        return None
+
+    def textCursor(self):  # noqa: N802
+        return self
+
+    def movePosition(self, _operation):  # noqa: N802
+        return True
+
+    def insertText(self, text):  # noqa: N802
+        self.inserted.append(text)
+
+    def setTextCursor(self, _cursor):  # noqa: N802
+        return None
+
+
 class LogsWorkerArchitectureTests(unittest.TestCase):
     def test_logs_workers_receive_feature_actions_not_feature_object(self) -> None:
         feature_source = inspect.getsource(LogsFeature)
@@ -417,7 +443,7 @@ class LogsWorkerArchitectureTests(unittest.TestCase):
         page._log_text_cache = ""
         page._error_pattern = Mock(search=Mock(return_value=False))
         page._exclude_pattern = Mock(search=Mock(return_value=False))
-        page._add_error = Mock()
+        page._add_errors = Mock()
         page.log_text = LogText()
         scheduled_callbacks = []
         single_shot = Mock(side_effect=lambda _delay, callback: scheduled_callbacks.append(callback))
@@ -436,6 +462,100 @@ class LogsWorkerArchitectureTests(unittest.TestCase):
         self.assertEqual(page.log_text.cursor.inserted, ["first\nsecond\n"])
         self.assertFalse(page._log_text_append_scheduled)
         self.assertEqual(page._pending_log_text_append, "")
+
+    def _page_with_fake_log_text(self):
+        page = logs_page.LogsPage.__new__(logs_page.LogsPage)
+        page._cleanup_in_progress = False
+        page._pending_log_text_append = ""
+        page._log_text_append_scheduled = False
+        page._log_text_cache = ""
+        page._first_log_content_timing_done = True
+        page._error_pattern = Mock(search=Mock(side_effect=lambda line: "ERROR" in line))
+        page._exclude_pattern = Mock(search=Mock(return_value=False))
+        page._add_errors = Mock()
+        page.log_text = _FakeLogText()
+        return page
+
+    def test_big_log_snapshot_is_inserted_in_chunks_between_gui_turns(self) -> None:
+        chunk_lines = logs_page.LOG_APPEND_CHUNK_LINES
+        snapshot = "".join(f"line {index}\n" for index in range(chunk_lines * 2 + 7))
+        page = self._page_with_fake_log_text()
+        scheduled_callbacks = []
+        single_shot = Mock(side_effect=lambda _delay, callback: scheduled_callbacks.append(callback))
+
+        with patch.object(logs_page, "QTimer", SimpleNamespace(singleShot=single_shot)):
+            logs_page.LogsPage._append_text(page, snapshot)
+            self.assertEqual(len(scheduled_callbacks), 1)
+
+            scheduled_callbacks.pop(0)()
+
+            # Первая порция уже на экране, остаток ждёт следующего прохода Qt.
+            self.assertEqual(len(page.log_text.inserted), 1)
+            self.assertEqual(len(page.log_text.inserted[0].splitlines()), chunk_lines)
+            self.assertTrue(page._log_text_append_scheduled)
+            self.assertEqual(len(scheduled_callbacks), 1)
+
+            # Строка, пришедшая во время вставки, встаёт в конец очереди.
+            logs_page.LogsPage._append_text(page, "live tail\n")
+            self.assertEqual(len(scheduled_callbacks), 1)
+
+            while scheduled_callbacks:
+                scheduled_callbacks.pop(0)()
+
+        self.assertEqual([len(part.splitlines()) for part in page.log_text.inserted], [chunk_lines, chunk_lines, 8])
+        self.assertEqual("".join(page.log_text.inserted), snapshot + "live tail\n")
+        self.assertFalse(page._log_text_append_scheduled)
+        self.assertEqual(page._pending_log_text_append, "")
+        self.assertTrue(all(call.args[0] == 0 for call in single_shot.call_args_list))
+
+    def test_error_lines_of_one_chunk_reach_errors_panel_as_one_batch(self) -> None:
+        page = self._page_with_fake_log_text()
+
+        logs_page.LogsPage._append_text_now(page, "ok\n[ERROR] first\n\nok again\n[ERROR] second  \n[ERROR] third\n")
+
+        page._add_errors.assert_called_once_with(["[ERROR] first", "[ERROR] second", "[ERROR] third"])
+
+    def test_chunk_without_errors_does_not_touch_errors_panel(self) -> None:
+        page = self._page_with_fake_log_text()
+
+        logs_page.LogsPage._append_text_now(page, "ok\nfine\n")
+
+        page._add_errors.assert_not_called()
+
+    def test_errors_batch_recalculates_panel_once(self) -> None:
+        page = logs_page.LogsPage.__new__(logs_page.LogsPage)
+        page._ui_language = "ru"
+        page._errors_count = 2
+        page._ensure_logs_secondary_panels = Mock(return_value=True)
+        page._update_errors_text_height = Mock()
+        scrollbar = Mock(maximum=Mock(return_value=40))
+        page.errors_text = Mock(verticalScrollBar=Mock(return_value=scrollbar))
+        page.errors_count_label = Mock()
+
+        logs_page.LogsPage._add_errors(page, ["[ERROR] first", "[ERROR] second", "[ERROR] third"])
+
+        self.assertEqual(page._errors_count, 5)
+        self.assertEqual(
+            [call.args[0] for call in page.errors_text.append.call_args_list],
+            ["[ERROR] first", "[ERROR] second", "[ERROR] third"],
+        )
+        page.errors_count_label.setText.assert_called_once()
+        self.assertIn("5", page.errors_count_label.setText.call_args.args[0])
+        page._update_errors_text_height.assert_called_once_with()
+        scrollbar.setValue.assert_called_once_with(40)
+
+    def test_clearing_log_view_drops_chunks_not_inserted_yet(self) -> None:
+        page = self._page_with_fake_log_text()
+        page.log_text.clear = Mock()
+        page._pending_log_text_append = "old file tail\n"
+        page._log_text_append_scheduled = True
+
+        logs_page.LogsPage._clear_log_view_silent(page)
+        logs_page.LogsPage._flush_pending_log_text_append(page)
+
+        page.log_text.clear.assert_called_once_with()
+        self.assertEqual(page.log_text.inserted, [])
+        self.assertFalse(page._log_text_append_scheduled)
 
 
 if __name__ == "__main__":
