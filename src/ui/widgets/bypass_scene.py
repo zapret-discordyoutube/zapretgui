@@ -172,6 +172,8 @@ class BypassScene(PulsingDot):
         self._click_locked = False
         self._hovered = False
         self._pressed = False
+        # Подсветка от фокуса — только с клавиатуры, не после щелчка мышью.
+        self._key_focus = False
         self._hover_t = 0.0
         self._open_t = 0.0
         self._shake_t = 0.0
@@ -430,7 +432,7 @@ class BypassScene(PulsingDot):
             self.unsetCursor()
 
     def _hover_target(self) -> float:
-        return 1.0 if (self._hovered or self.hasFocus()) and self.is_click_enabled() else 0.0
+        return 1.0 if (self._hovered or self._key_focus) and self.is_click_enabled() else 0.0
 
     def _animate_hover(self) -> None:
         target = self._hover_target()
@@ -472,10 +474,12 @@ class BypassScene(PulsingDot):
 
     def focusInEvent(self, event) -> None:  # noqa: N802
         super().focusInEvent(event)
+        self._key_focus = event.reason() != Qt.FocusReason.MouseFocusReason
         self._animate_hover()
 
     def focusOutEvent(self, event) -> None:  # noqa: N802
         super().focusOutEvent(event)
+        self._key_focus = False
         self._animate_hover()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802

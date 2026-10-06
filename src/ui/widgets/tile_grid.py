@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QEasingCurve, QEvent, QPointF, QRect, QRectF, QSize, Qt, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtGui import QColor, QCursor, QPainter, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
 from qfluentwidgets import isDarkTheme
@@ -38,6 +38,10 @@ class SoftTile(QWidget):
         self._chevron = bool(chevron) and self._clickable
         self._hovered = False
         self._pressed = False
+        # Фокус с клавиатуры (Tab, пробел): подсвечивается как наведение. Фокус
+        # от щелчка мышью не подсвечивается — иначе после клика плитка
+        # оставалась бы светиться, когда курсор уже ушёл.
+        self._key_focus = False
         self._hover_t = 0.0
         # QVariantAnimation, а не QPropertyAnimation: при выключенных
         # анимациях WinUI общий fallback подменяет QPropertyAnimation.start.
@@ -74,7 +78,7 @@ class SoftTile(QWidget):
     # ---- наведение и нажатие -------------------------------------------
 
     def _hover_target(self) -> float:
-        return 1.0 if self._clickable and self.isEnabled() and (self._hovered or self.hasFocus()) else 0.0
+        return 1.0 if self._clickable and self.isEnabled() and (self._hovered or self._key_focus) else 0.0
 
     def _animate_hover(self) -> None:
         target = self._hover_target()
@@ -96,6 +100,20 @@ class SoftTile(QWidget):
             return
         self.update()
 
+    def sync_hover_with_cursor(self) -> None:
+        """Сверяет «под мышью» с настоящим положением курсора.
+
+        Qt не всегда присылает «курсор ушёл»: например, если после щелчка
+        открылось окно подтверждения. Тогда плитка думала бы, что курсор на ней.
+        """
+        if not self._hovered:
+            return
+        if not (self.isVisible() and self.rect().contains(self.mapFromGlobal(QCursor.pos()))):
+            self._hovered = False
+            self._pressed = False
+            self._animate_hover()
+            self.update()
+
     def enterEvent(self, event) -> None:  # noqa: N802
         super().enterEvent(event)
         self._hovered = True
@@ -109,14 +127,19 @@ class SoftTile(QWidget):
 
     def focusInEvent(self, event) -> None:  # noqa: N802
         super().focusInEvent(event)
+        self._key_focus = event.reason() != Qt.FocusReason.MouseFocusReason
         self._animate_hover()
 
     def focusOutEvent(self, event) -> None:  # noqa: N802
         super().focusOutEvent(event)
+        self._key_focus = False
         self._animate_hover()
 
     def changeEvent(self, event) -> None:  # noqa: N802
         super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange:
+            # Окно потеряло или вернуло активность (закрылось окно подтверждения).
+            self.sync_hover_with_cursor()
         if event.type() == QEvent.Type.EnabledChange:
             self._pressed = False
             self._animate_hover()
@@ -126,6 +149,7 @@ class SoftTile(QWidget):
         self._hover_fade.stop()
         self._hovered = False
         self._pressed = False
+        self._key_focus = False
         self._hover_t = 0.0
         super().hideEvent(event)
 
@@ -144,6 +168,8 @@ class SoftTile(QWidget):
             event.accept()
             if self.rect().contains(event.position().toPoint()):
                 self.click()
+                # Пока шёл щелчок, могло открыться окно и курсор мог уйти.
+                self.sync_hover_with_cursor()
             return
         super().mouseReleaseEvent(event)
 

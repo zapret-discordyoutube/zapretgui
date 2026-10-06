@@ -188,6 +188,42 @@ class SoftTileTests(unittest.TestCase):
         tile.click()
         self.assertEqual(clicks, [])
 
+    def test_focus_from_a_mouse_click_does_not_keep_the_tile_lit(self) -> None:
+        from PyQt6.QtGui import QFocusEvent
+
+        tile, _clicks = self._tile()
+        tile.show()
+        tile.focusInEvent(QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.MouseFocusReason))
+        self.assertEqual(tile._hover_target(), 0.0)
+        tile.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.MouseFocusReason))
+
+        # Табуляция с клавиатуры подсвечивает, а уход фокуса гасит.
+        tile.focusInEvent(QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason))
+        self.assertEqual(tile._hover_target(), 1.0)
+        tile.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.TabFocusReason))
+        self.assertEqual(tile._hover_target(), 0.0)
+
+    def test_hover_is_dropped_when_the_cursor_is_really_elsewhere(self) -> None:
+        from PyQt6.QtCore import QPoint
+
+        tile, _clicks = self._tile()
+        tile.show()
+        tile.enterEvent(None)
+        self.assertTrue(tile._hovered)
+
+        # Qt не прислал «курсор ушёл» (например, открылось окно подтверждения).
+        with mock.patch.object(tile_module, "QCursor") as cursor:
+            cursor.pos.return_value = tile.mapToGlobal(QPoint(-500, -500))
+            tile.sync_hover_with_cursor()
+        self.assertFalse(tile._hovered)
+        self.assertEqual(tile._hover_target(), 0.0)
+
+        tile.enterEvent(None)
+        with mock.patch.object(tile_module, "QCursor") as cursor:
+            cursor.pos.return_value = tile.mapToGlobal(QPoint(5, 5))
+            tile.sync_hover_with_cursor()
+        self.assertTrue(tile._hovered)
+
     def test_hover_fades_in_and_resets_when_hidden(self) -> None:
         tile, _clicks = self._tile()
         tile.show()
