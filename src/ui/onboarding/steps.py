@@ -251,6 +251,7 @@ _TOUR_STEPS: tuple[TourStep, ...] = (
     _preset_section("profile_new"),
     TourStep("presets_toolbar", _page_target("presets_toolbar"), page="user_presets"),
     TourStep("profiles_list", _page_target("profiles_list"), page="preset_setup", target_optional=True),
+    TourStep("profile_group", _page_target("first_group"), page="preset_setup"),
     TourStep("profile_row", _page_target("first_profile"), page="preset_setup"),
     TourStep("profile_menu", _page_target("profile_menu"), page="preset_setup", page_state="profile_menu"),
     TourStep("profiles_toolbar", _page_target("profiles_toolbar"), page="preset_setup"),

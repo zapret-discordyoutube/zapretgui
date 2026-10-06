@@ -518,6 +518,23 @@ class ProfilesList(QWidget):
             first = first or found
         return first
 
+    def first_visible_group_header(self):
+        """Шапка первой видимой плитки: (viewport, прямоугольник) или None.
+
+        Её показывает обучающий тур, когда рассказывает про счётчик «3 из 5».
+        """
+        view = self._view
+        viewport = view.viewport()
+        visible = viewport.rect()
+        for row in range(self._model.rowCount()):
+            index = self._model.index(row, 0)
+            if str(index.data(ProfileListModel.KindRole) or "") != "folder":
+                continue
+            rect = view.visualRect(index).intersected(visible)
+            if rect.isValid() and rect.height() >= 8:
+                return viewport, rect
+        return None
+
     def first_profile_key_with_list(self) -> str:
         """Первый профиль пресета со списком сайтов или адресов.
 

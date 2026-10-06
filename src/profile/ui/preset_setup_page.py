@@ -345,6 +345,9 @@ class PresetSetupPageBase(BasePage):
             if profiles_list is not None:
                 return profiles_list
             return self.__dict__.get("_empty_state_label")
+        if name == "first_group":
+            profiles_list = self._profiles_list_widget()
+            return profiles_list.first_visible_group_header() if profiles_list is not None else None
         if name == "first_profile":
             profiles_list = self._profiles_list_widget()
             return profiles_list.first_visible_profile_row() if profiles_list is not None else None

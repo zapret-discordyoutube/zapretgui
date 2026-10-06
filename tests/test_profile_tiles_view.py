@@ -372,6 +372,194 @@ class ProfileTilesViewTests(unittest.TestCase):
         self.assertEqual(view.top_visible_index().row(), 5)
 
 
+class ProfileTileTooltipTextTests(unittest.TestCase):
+    def test_counter_hint_says_that_not_all_profiles_are_needed(self) -> None:
+        from profile.list_view_state import PROFILES_NOT_ALL_NEEDED_HINT, profile_group_counter_tooltip
+
+        text = profile_group_counter_tooltip(3, 5)
+
+        self.assertIn("Включено 3 из 5 профилей группы.", text)
+        self.assertIn("Каждое деление полоски — один профиль", text)
+        self.assertIn(PROFILES_NOT_ALL_NEEDED_HINT, text)
+        self.assertIn("Включать все профили не нужно", PROFILES_NOT_ALL_NEEDED_HINT)
+        self.assertIn("смените стратегию у включённого профиля", PROFILES_NOT_ALL_NEEDED_HINT)
+
+    def test_long_group_explains_the_solid_bar_instead_of_segments(self) -> None:
+        from profile.list_view_state import profile_group_counter_tooltip
+
+        text = profile_group_counter_tooltip(8, 12)
+
+        self.assertNotIn("Каждое деление", text)
+        self.assertIn("какая часть профилей группы включена", text)
+
+    def test_group_and_chevron_hints(self) -> None:
+        from profile.list_view_state import profile_group_chevron_tooltip, profile_group_tooltip
+
+        self.assertEqual(
+            profile_group_tooltip("YouTube", 3, 5),
+            "Группа «YouTube»: профили одного сайта или сервиса.\n"
+            "Включено 3 из 5. Нажмите на шапку, чтобы свернуть или развернуть группу.",
+        )
+        self.assertEqual(profile_group_chevron_tooltip(True), "Свернуть группу")
+        self.assertEqual(profile_group_chevron_tooltip(False), "Развернуть группу")
+
+    def test_state_hint_names_the_marker_the_user_actually_sees(self) -> None:
+        from profile.list_view_state import profile_state_tooltip
+
+        self.assertTrue(
+            profile_state_tooltip(in_preset=True, enabled=True, icon_in_header=True).startswith("Закрашенная точка: ")
+        )
+        ring = profile_state_tooltip(in_preset=False, enabled=False, icon_in_header=True)
+        self.assertTrue(ring.startswith("Кольцо: профиля нет в пресете"))
+        self.assertIn("Это нормально", ring)
+        self.assertIn("Включать все профили не нужно", ring)
+        self.assertTrue(
+            profile_state_tooltip(in_preset=True, enabled=True, icon_in_header=False).startswith("Цветной значок: ")
+        )
+        self.assertTrue(
+            profile_state_tooltip(in_preset=False, enabled=False, icon_in_header=False).startswith("Серый значок: ")
+        )
+        skipped = profile_state_tooltip(in_preset=True, enabled=False, icon_in_header=True)
+        self.assertIn("выключен", skipped)
+        self.assertIn("--skip", skipped)
+
+    def test_strategy_hint_explains_marks_and_does_not_push_to_enable(self) -> None:
+        from profile.list_view_state import profile_strategy_tooltip
+
+        working = profile_strategy_tooltip(
+            in_preset=True, enabled=True, strategy_name="hostfakesplit_multi", rating="work", favorite=True
+        )
+        self.assertIn("Стратегия обхода: hostfakesplit_multi.", working)
+        self.assertIn("попробуйте другую стратегию", working)
+        self.assertIn("Звезда: стратегия у вас в избранном.", working)
+        self.assertIn("Галочка: вы отметили, что эта стратегия работает.", working)
+        self.assertIn(
+            "Крестик",
+            profile_strategy_tooltip(in_preset=True, enabled=True, strategy_name="x", rating="notwork"),
+        )
+        missing = profile_strategy_tooltip(in_preset=False, enabled=False, strategy_name="Не добавлен")
+        self.assertIn("только если этот сайт у вас не открывается", missing)
+        self.assertNotIn("Стратегия обхода", missing)
+
+    def test_rows_carry_group_hint_and_calm_not_added_hint(self) -> None:
+        state = _view_state(_two_groups())
+        folder = _rows_by_kind(state, "folder", "youtube")[0]
+        missing = _rows_by_kind(state, "profile", "youtube")[2]
+
+        self.assertIn("Группа «YouTube»", folder["tooltip"])
+        self.assertIn("Включено 3 из 5", folder["tooltip"])
+        self.assertIn("Профиля ещё нет в пресете. Включать его не обязательно", missing["tooltip"])
+        self.assertNotIn("Включите его или выберите", missing["tooltip"])
+
+
+class ProfileTileElementTooltipTests(unittest.TestCase):
+    """Над каждым элементом плитки своя подсказка."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def setUp(self) -> None:
+        from profile.ui.profile_list_model import ProfileListModel
+        from profile.ui.profiles_list import ProfilesList
+
+        self.widget = ProfilesList()
+        self.addCleanup(self.widget.deleteLater)
+        self.widget.resize(1100, 500)
+        self.widget.apply_view_state(_view_state(_two_groups()))
+        self.widget.show()
+        self._app.processEvents()
+        self.model = self.widget._model
+        self.roles = ProfileListModel
+
+    def _index(self, kind: str, group: str, position: int = 0):
+        rows = [
+            row
+            for row in range(self.model.rowCount())
+            if self.model.index(row, 0).data(self.roles.KindRole) == kind
+            and self.model.index(row, 0).data(self.roles.GroupRole) == group
+        ]
+        return self.model.index(rows[position], 0)
+
+    def _hint(self, index, x: int) -> str:
+        option = QStyleOptionViewItem()
+        option.rect = self.widget._view.visualRect(index)
+        option.font = self.widget._view.font()
+        return self.widget._delegate._tile_element_tooltip(QPoint(x, option.rect.center().y()), option, index)
+
+    def test_header_has_three_hints(self) -> None:
+        index = self._index("folder", "youtube")
+        rect = self.widget._view.visualRect(index)
+
+        self.assertIn("Группа «YouTube»", self._hint(index, rect.left() + 60))
+        counter = self._hint(index, rect.right() - 80)
+        self.assertIn("Включено 3 из 5 профилей группы.", counter)
+        self.assertIn("Включать все профили не нужно", counter)
+        self.assertEqual(self._hint(index, rect.right() - 22), "Свернуть группу")
+
+    def test_row_has_state_strategy_and_default_hints(self) -> None:
+        working = self._index("profile", "youtube", 0)
+        missing = self._index("profile", "youtube", 2)
+        rect = self.widget._view.visualRect(working)
+
+        self.assertTrue(self._hint(working, rect.left() + 24).startswith("Закрашенная точка: "))
+        self.assertTrue(self._hint(missing, rect.left() + 24).startswith("Кольцо: "))
+        self.assertIn("Стратегия обхода: pass.", self._hint(working, rect.right() - 30))
+        self.assertIn("Профиль не добавлен в пресет.", self._hint(missing, rect.right() - 30))
+        # Над именем остаётся подробная подсказка строки из модели.
+        self.assertEqual(self._hint(working, rect.left() + 120), "")
+
+    def test_row_with_its_own_icon_names_the_icon_not_the_dot(self) -> None:
+        # В группе Discord значок Discord ушёл в шапку, а у профиля звонков
+        # остался свой микрофон.
+        index = self._index("profile", "discord", 1)
+        rect = self.widget._view.visualRect(index)
+
+        self.assertFalse(index.data(self.roles.IconInHeaderRole))
+        self.assertTrue(self._hint(index, rect.left() + 24).startswith("Цветной значок: "))
+
+    def test_help_event_shows_the_element_hint_and_falls_back_to_row_hint(self) -> None:
+        from PyQt6.QtCore import QEvent
+        from PyQt6.QtGui import QHelpEvent
+
+        view = self.widget._view
+        delegate = self.widget._delegate
+        shown: list[str] = []
+        delegate._tooltip.show_text = lambda text, _pos: shown.append(text)
+        index = self._index("folder", "youtube")
+        rect = view.visualRect(index)
+        option = QStyleOptionViewItem()
+        option.rect = rect
+        option.font = view.font()
+
+        def help_at(x: int, target_index, target_rect) -> None:
+            option.rect = target_rect
+            pos = QPoint(x, target_rect.center().y())
+            event = QHelpEvent(QEvent.Type.ToolTip, pos, view.viewport().mapToGlobal(pos))
+            self.assertTrue(delegate.helpEvent(event, view, option, target_index))
+
+        help_at(rect.right() - 80, index, rect)
+        self.assertIn("Включено 3 из 5 профилей группы.", shown[-1])
+
+        row_index = self._index("profile", "youtube", 0)
+        row_rect = view.visualRect(row_index)
+        help_at(row_rect.left() + 120, row_index, row_rect)
+        self.assertEqual(shown[-1], str(row_index.data(self.roles.TooltipRole)).replace("\n", "<br>"))
+
+    def test_tour_can_point_at_the_first_tile_header(self) -> None:
+        found = self.widget.first_visible_group_header()
+
+        self.assertIsNotNone(found)
+        viewport, rect = found
+        self.assertIs(viewport, self.widget._view.viewport())
+        first_header = min(
+            (self.widget._view.visualRect(self._index("folder", group)) for group in ("youtube", "discord")),
+            key=lambda header: (header.top(), header.left()),
+        )
+        self.assertEqual(rect.top(), first_header.top())
+        self.assertEqual(rect.height(), 36)
+
+
 class ProfileTileRowLayoutTests(unittest.TestCase):
     def test_strategy_takes_at_most_half_and_never_touches_the_name(self) -> None:
         from profile.ui.profile_list_delegate import _tile_row_layout
@@ -390,6 +578,15 @@ class ProfileTileRowLayoutTests(unittest.TestCase):
         layout = _tile_row_layout(QRect(8, 1, 500, 30), strategy_width=64)
 
         self.assertEqual(layout.strategy_rect.width(), 64)
+
+    def test_very_short_strategy_name_is_not_dropped(self) -> None:
+        # «pass» уже сорока точек: прятать её как «обрывок» нельзя.
+        from profile.ui.profile_list_delegate import _tile_row_layout
+
+        layout = _tile_row_layout(QRect(8, 1, 500, 30), strategy_width=30)
+
+        self.assertTrue(layout.strategy_rect.isValid())
+        self.assertEqual(layout.strategy_rect.width(), 30)
 
     def test_very_narrow_row_drops_strategy_and_keeps_name(self) -> None:
         from profile.ui.profile_list_delegate import _tile_row_layout

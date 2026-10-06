@@ -225,6 +225,93 @@ _LIST_TYPE_TOOLTIP_NOTES = {
 }
 
 
+# Главное, что стоит знать новичку про счётчик «3 из 5»: это не недоделка.
+PROFILES_NOT_ALL_NEEDED_HINT = (
+    "Включать все профили не нужно: в пресете уже включено то, что обычно требуется. "
+    "Если сайт не открывается, сначала смените стратегию у включённого профиля."
+)
+# До стольких профилей у каждого своё деление полоски (см. делегат списка).
+PROFILE_METER_MAX_SEGMENTS = 8
+
+
+def profile_group_tooltip(group_name: str, active_count: int, count: int) -> str:
+    """Подсказка для названия группы в шапке плитки."""
+    return (
+        f"Группа «{str(group_name or '').strip()}»: профили одного сайта или сервиса.\n"
+        f"Включено {int(active_count)} из {int(count)}. "
+        "Нажмите на шапку, чтобы свернуть или развернуть группу."
+    )
+
+
+def profile_group_counter_tooltip(active_count: int, count: int) -> str:
+    """Подсказка для счётчика «3 из 5» и полоски рядом с ним."""
+    if int(count) <= PROFILE_METER_MAX_SEGMENTS:
+        meter = (
+            "Каждое деление полоски — один профиль, в том же порядке, что строки ниже. "
+            "Закрашенное деление — профиль включён."
+        )
+    else:
+        meter = "Полоска показывает, какая часть профилей группы включена."
+    return (
+        f"Включено {int(active_count)} из {int(count)} профилей группы.\n"
+        f"{meter}\n"
+        f"{PROFILES_NOT_ALL_NEEDED_HINT}"
+    )
+
+
+def profile_group_chevron_tooltip(expanded: bool) -> str:
+    return "Свернуть группу" if expanded else "Развернуть группу"
+
+
+def profile_state_tooltip(*, in_preset: bool, enabled: bool, icon_in_header: bool) -> str:
+    """Подсказка для точки или значка слева от имени профиля."""
+    working = bool(in_preset and enabled)
+    if icon_in_header:
+        marker = "Закрашенная точка" if working else "Кольцо"
+    else:
+        marker = "Цветной значок" if in_preset else "Серый значок"
+    if working:
+        return f"{marker}: профиль включён, его трафик обрабатывается выбранной стратегией."
+    if in_preset:
+        return f"{marker}: профиль есть в пресете, но выключен. В файле это записано через --skip."
+    return (
+        f"{marker}: профиля нет в пресете, он ничего не делает. Это нормально.\n"
+        f"{PROFILES_NOT_ALL_NEEDED_HINT}"
+    )
+
+
+def profile_strategy_tooltip(
+    *,
+    in_preset: bool,
+    enabled: bool,
+    strategy_name: str,
+    rating: str = "",
+    favorite: bool = False,
+) -> str:
+    """Подсказка для правого края строки: стратегия и отметки пользователя."""
+    if not in_preset:
+        return (
+            "Профиль не добавлен в пресет.\n"
+            "Нажмите на него, чтобы включить и выбрать стратегию, — только если этот сайт у вас не открывается."
+        )
+    if not enabled:
+        return (
+            "Профиль выключен: движок его пропускает.\n"
+            "Включить его можно в меню по правой кнопке мыши."
+        )
+    lines = [
+        f"Стратегия обхода: {str(strategy_name or '').strip()}.",
+        "Если сайт не открывается, нажмите на профиль и попробуйте другую стратегию.",
+    ]
+    if favorite:
+        lines.append("Звезда: стратегия у вас в избранном.")
+    if rating == "work":
+        lines.append("Галочка: вы отметили, что эта стратегия работает.")
+    elif rating == "notwork":
+        lines.append("Крестик: вы отметили, что эта стратегия не работает.")
+    return "\n".join(lines)
+
+
 def profile_row_tooltip(item: ProfileDisplayItem) -> str:
     match_lines = tuple(item.match_lines or ())
     lines = [match_summary(item)]
@@ -253,7 +340,10 @@ def row_for_profile(item: ProfileDisplayItem, *, header_icon_name: str = "") -> 
     ]
     tooltip = profile_row_tooltip(item)
     if not item.in_preset:
-        tooltip = f"{tooltip}\nПрофиля ещё нет в пресете. Включите его или выберите готовую стратегию."
+        tooltip = (
+            f"{tooltip}\nПрофиля ещё нет в пресете. Включать его не обязательно: нажмите на него и выберите "
+            "готовую стратегию, только если этот сайт у вас не открывается."
+        )
     elif not item.enabled:
         tooltip = f"{tooltip}\nПрофиль есть в пресете, но сейчас выключен. В файле это записано через --skip."
     icon = resolve_profile_icon(item.display_name, match_lines)
@@ -323,6 +413,7 @@ def build_profile_rows_from(
             "count": len(group_items),
             "active_count": sum(active_flags),
             "active_flags": active_flags,
+            "tooltip": profile_group_tooltip(group_name, sum(active_flags), len(group_items)),
             "icon_name": shared_icon.icon_name if shared_icon is not None else "",
             "icon_color": shared_icon.color if shared_icon is not None else "",
         })

@@ -569,6 +569,26 @@ class TourStepCatalogTests(unittest.TestCase):
             if step.wiki_url:
                 self.assertTrue(step.wiki_url.startswith("https://wiki.zapret.moe/"), step.key)
 
+    def test_tile_counter_step_stands_between_profiles_overview_and_profile_row(self) -> None:
+        from app.ui_texts import TEXTS as UI_TEXTS
+        from ui.onboarding.steps import TOUR_STEPS
+
+        keys = [step.key for step in TOUR_STEPS]
+        position = keys.index("profile_group")
+        self.assertEqual(keys[position - 1 : position + 2], ["profiles_list", "profile_group", "profile_row"])
+        self.assertEqual(TOUR_STEPS[position].page, "preset_setup")
+
+        # Главная мысль для новичка: включать все профили не нужно.
+        overview = UI_TEXTS["onboarding.step.profiles_list.body"]["ru"]
+        counter = UI_TEXTS["onboarding.step.profile_group.body"]["ru"]
+        row = UI_TEXTS["onboarding.step.profile_row.body"]["ru"]
+        self.assertIn("Включать все профили подряд не надо", overview)
+        self.assertIn("«3 из 5»", counter)
+        self.assertIn("включать их все обычно бесполезно", counter)
+        self.assertIn("Наведите мышь", counter)
+        self.assertIn("закрашенная — профиль включён", row)
+        self.assertNotIn("Hostlist или IPset", row)
+
     def test_every_step_has_title_and_body_in_both_languages(self) -> None:
         from app.ui_texts import TEXTS
         from ui.onboarding.steps import TOUR_STEPS

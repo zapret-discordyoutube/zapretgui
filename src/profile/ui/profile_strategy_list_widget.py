@@ -86,6 +86,19 @@ _MARK_WORKS = ("fa5s.check", "#49a35f")
 _MARK_NOT_WORKS = ("fa5s.times", "#d85c5c")
 
 
+def _strategy_marks_tooltip(*, is_active: bool, favorite: bool, rating: str) -> str:
+    lines = []
+    if is_active:
+        lines.append("Эта стратегия выбрана для профиля.")
+    if favorite:
+        lines.append("Звезда: стратегия у вас в избранном.")
+    if rating == "work":
+        lines.append("Галочка: вы отметили, что эта стратегия работает.")
+    elif rating == "notwork":
+        lines.append("Крестик: вы отметили, что эта стратегия не работает.")
+    return "\n".join(lines)
+
+
 def _is_group_item(item) -> bool:
     """Строка списка — заголовок группы стратегий, а не сама стратегия."""
     if item is None:
@@ -396,6 +409,14 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
     def helpEvent(self, event, view, option, index: QModelIndex) -> bool:  # noqa: N802
         _ = (view, option)
         text = str(index.data(ProfileStrategyListWidget._ROLE_TOOLTIP_TEXT) or "").strip()
+        if str(index.data(ProfileStrategyListWidget._ROLE_ROW_KIND) or "") != _ROW_KIND_GROUP:
+            # Значки отметок в строке без слов — подсказка их расшифровывает.
+            marks = _strategy_marks_tooltip(
+                is_active=bool(index.data(ProfileStrategyListWidget._ROLE_IS_ACTIVE)),
+                favorite=bool(index.data(ProfileStrategyListWidget._ROLE_FAVORITE)),
+                rating=str(index.data(ProfileStrategyListWidget._ROLE_RATING) or ""),
+            )
+            text = "\n\n".join(part for part in (marks, text) if part)
         if not text:
             self._tooltip.hide()
             return True

@@ -5823,13 +5823,39 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     "onboarding.step.profiles_list.body": {
         "ru": (
             "Это «Профили пресета» — из чего состоит выбранный пресет. Профиль — правило: какой трафик "
-            "обрабатывать и какой стратегией. Какой трафик, задаёт список сайтов или адресов — о нём "
-            "чуть дальше."
+            "обрабатывать и какой стратегией. Профили собраны в плитки по сайтам и сервисам: YouTube, "
+            "Discord и так далее.\n\n"
+            "В готовом пресете уже включено то, что обычно нужно. Включать все профили подряд не надо: "
+            "чаще всего достаточно менять стратегию у тех, что уже включены."
         ),
         "en": (
             "This is Preset profiles — what the selected preset is made of. A profile is a rule: which "
-            "traffic to handle and with which strategy. The traffic is set by a list of sites or "
-            "addresses — more on that a bit later."
+            "traffic to handle and with which strategy. Profiles are grouped into tiles by site or "
+            "service: YouTube, Discord and so on.\n\n"
+            "A ready preset already has what is usually needed turned on. Do not turn every profile "
+            "on: most of the time it is enough to change the strategy of the ones that are on."
+        ),
+    },
+    "onboarding.step.profile_group.title": {
+        "ru": "Плитка сайта и счётчик «3 из 5»",
+        "en": "A site tile and the “3 of 5” counter",
+    },
+    "onboarding.step.profile_group.body": {
+        "ru": (
+            "В шапке плитки — название сайта или сервиса. Справа счётчик: «3 из 5» значит, что из пяти "
+            "профилей этой группы включены три. Полоска рядом показывает, какие именно: её деления идут "
+            "в том же порядке, что строки.\n\n"
+            "«3 из 5» — это нормально, а не недоделка. Остальные профили нужны редко, и включать их все "
+            "обычно бесполезно.\n\n"
+            "Наведите мышь на любой элемент плитки — появится подсказка, за что он отвечает."
+        ),
+        "en": (
+            "The tile header shows the site or service name. The counter on the right: “3 of 5” means "
+            "three of the five profiles in this group are on. The bar next to it shows which ones: its "
+            "segments follow the order of the rows.\n\n"
+            "“3 of 5” is normal, not something unfinished. The other profiles are rarely needed, and "
+            "turning all of them on is usually pointless.\n\n"
+            "Hover any part of a tile to see a hint about what it does."
         ),
     },
     "onboarding.step.profile_row.title": {
@@ -5838,15 +5864,17 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     },
     "onboarding.step.profile_row.body": {
         "ru": (
-            "Слева — название профиля и тип списка (Hostlist или IPset), справа — выбранная стратегия. "
-            "Горящая точка значит, что стратегия выбрана и профиль работает.\n\n"
+            "Слева точка: закрашенная — профиль включён и работает, кольцо — не включён. Там, где в "
+            "группе собраны разные сервисы, вместо точки стоит значок: цветной — включён, серый — нет. "
+            "Дальше название профиля, а справа — выбранная стратегия.\n\n"
             "Нажмите на профиль, чтобы выбрать для него другую готовую стратегию. Если сервис не "
             "открывается, попробуйте несколько стратегий по очереди — какая-то подойдёт вашему "
             "провайдеру."
         ),
         "en": (
-            "On the left are the profile name and list type (Hostlist or IPset), on the right is the "
-            "selected strategy. A lit dot means a strategy is selected and the profile works.\n\n"
+            "On the left is a dot: filled means the profile is on and working, a ring means it is off. "
+            "Where a group mixes different services, an icon stands there instead: coloured is on, "
+            "grey is off. Then comes the profile name, and on the right is the selected strategy.\n\n"
             "Click a profile to choose another ready strategy for it. If a service does not open, try "
             "several strategies one by one — one of them will suit your provider."
         ),
@@ -5995,6 +6023,8 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "Сверху — как обычно работает блокировка: проверка у провайдера читает имя сайта в "
             "первом пакете и обрывает соединение. Стратегия — это набор техник, которые мешают ей "
             "прочитать имя. Где-то помогает нарезка, где-то подсунутый фейк, где-то их сочетание.\n\n"
+            "В списке стратегии собраны в группы по этим техникам. Не помогла стратегия из одной "
+            "группы — попробуйте другую группу, а не соседнюю строку.\n\n"
             "Дальше — коротко о главных техниках. Разберитесь, что делает каждая, и оставляйте то, "
             "что работает у вашего провайдера: поменяли стратегию — проверили сайт."
         ),
@@ -6004,6 +6034,8 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "Above is how blocking usually works: the provider's inspection reads the site name in "
             "the first packet and cuts the connection. A strategy is a set of techniques that stop "
             "it from reading the name. Sometimes splitting helps, sometimes a fake, sometimes both.\n\n"
+            "In the list, strategies are grouped by these techniques. If a strategy from one group "
+            "did not help, try another group rather than the next row.\n\n"
             "Next is a short look at the main techniques. Learn what each one does and keep what "
             "works for your provider: change the strategy, then check the site."
         ),

@@ -26,6 +26,7 @@ ONBOARDING_WIKI_URLS = {
     "preset_profile_strategy": "https://wiki.zapret.moe/Zapret2/desync",
     "preset_profile_new": "https://wiki.zapret.moe/Zapret2/profile-independence",
     "profiles_list": "https://wiki.zapret.moe/Zapret2/profile",
+    "profile_group": "https://wiki.zapret.moe/Zapret2/profile",
     "profile_row": "https://wiki.zapret.moe/Zapret2/verify-strategy",
     "profiles_toolbar": "https://wiki.zapret.moe/Zapret2/add-profile",
     "profile_order": "https://wiki.zapret.moe/Zapret2/profile-independence",

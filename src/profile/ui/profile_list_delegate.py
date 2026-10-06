@@ -6,6 +6,14 @@ from PyQt6.QtCore import QEvent, QModelIndex, QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QFontMetrics, QMouseEvent, QPainter, QPen
 from PyQt6.QtWidgets import QListView, QStyledItemDelegate, QStyle, QStyleOptionViewItem
 
+from profile.list_view_state import (
+    PROFILE_METER_MAX_SEGMENTS,
+    profile_group_chevron_tooltip,
+    profile_group_counter_tooltip,
+    profile_group_tooltip,
+    profile_state_tooltip,
+    profile_strategy_tooltip,
+)
 from profile.ui.profile_icon import profile_icon_pixmap
 from profile.ui.widgets.payload_badge import PAYLOAD_BADGE_HEIGHT, paint_payload_badge, payload_badge_width
 from ui.presets_menu.common import cached_icon
@@ -127,7 +135,13 @@ class ProfileListDelegate(QStyledItemDelegate):
     def helpEvent(self, event, view, option, index):  # noqa: N802
         if not index.isValid() or not isinstance(event, QEvent):
             return super().helpEvent(event, view, option, index)
-        text = str(index.data(ProfileListModel.TooltipRole) or "").strip()
+        text = ""
+        if self._tile_mode() and hasattr(event, "pos"):
+            # В плитке у каждого элемента своя подсказка: шапка, счётчик,
+            # точка состояния, способ обхода.
+            text = self._tile_element_tooltip(event.pos(), option, index)
+        if not text:
+            text = str(index.data(ProfileListModel.TooltipRole) or "").strip()
         if not text:
             self._tooltip.hide()
             return False
@@ -138,6 +152,80 @@ class ProfileListDelegate(QStyledItemDelegate):
             self._tooltip.show_text(text.replace("\n", "<br>"), pos)
             return True
         return super().helpEvent(event, view, option, index)
+
+    def _tile_element_tooltip(self, pos, option: QStyleOptionViewItem, index: QModelIndex) -> str:
+        """Текст подсказки для того элемента плитки, на который наведена мышь."""
+        kind = str(index.data(ProfileListModel.KindRole) or "")
+        rect = profile_hover_row_rect(option.rect)
+        metrics = QFontMetrics(option.font)
+        if kind == "folder":
+            count = int(index.data(ProfileListModel.CountRole) or 0)
+            active_count = int(index.data(ProfileListModel.ActiveCountRole) or 0)
+            layout = self._tile_header_layout_for(rect, index, metrics)
+            if layout.chevron_rect.adjusted(-6, -8, 10, 8).contains(pos):
+                return profile_group_chevron_tooltip(not bool(index.data(ProfileListModel.CollapsedRole)))
+            counter_left = min(
+                (part.left() for part in (layout.counter_rect, layout.meter_rect) if part.isValid()),
+                default=None,
+            )
+            if counter_left is not None and pos.x() >= counter_left - 6:
+                return profile_group_counter_tooltip(active_count, count)
+            return profile_group_tooltip(str(index.data(ProfileListModel.GroupNameRole) or ""), active_count, count)
+        if kind != "profile":
+            return ""
+        in_preset = bool(index.data(ProfileListModel.InPresetRole))
+        enabled = bool(index.data(ProfileListModel.EnabledRole))
+        row_layout = self._tile_row_parts(rect, index, metrics).layout
+        if pos.x() <= row_layout.icon_rect.right() + 5:
+            return profile_state_tooltip(
+                in_preset=in_preset,
+                enabled=enabled,
+                icon_in_header=bool(index.data(ProfileListModel.IconInHeaderRole)),
+            )
+        if row_layout.strategy_rect.isValid() and pos.x() >= row_layout.strategy_rect.left() - 6:
+            return profile_strategy_tooltip(
+                in_preset=in_preset,
+                enabled=enabled,
+                strategy_name=str(index.data(ProfileListModel.StrategyNameRole) or ""),
+                rating=str(index.data(ProfileListModel.RatingRole) or "").strip().lower(),
+                favorite=bool(index.data(ProfileListModel.FavoriteRole)),
+            )
+        # Над именем — прежняя подробная подсказка: порты, список, стратегия.
+        return ""
+
+    def _tile_header_layout_for(self, rect: QRect, index: QModelIndex, metrics: QFontMetrics) -> "TileHeaderLayout":
+        count = int(index.data(ProfileListModel.CountRole) or 0)
+        active_count = int(index.data(ProfileListModel.ActiveCountRole) or 0)
+        return _tile_header_layout(
+            rect,
+            has_icon=bool(str(index.data(ProfileListModel.IconNameRole) or "")),
+            counter_width=metrics.horizontalAdvance(_tile_counter_text(active_count, count)) + 2,
+            meter_width=_tile_meter_width(count),
+        )
+
+    def _tile_row_parts(self, rect: QRect, index: QModelIndex, metrics: QFontMetrics) -> "TileRowParts":
+        """Раскладка строки плитки: одна и та же для отрисовки и для подсказок."""
+        strategy_name = str(index.data(ProfileListModel.StrategyNameRole) or "")
+        payload_badge = str(index.data(ProfileListModel.StrategyPayloadBadgeRole) or "")
+        marks = _tile_feedback_marks(
+            str(index.data(ProfileListModel.RatingRole) or "").strip().lower(),
+            bool(index.data(ProfileListModel.FavoriteRole)),
+        )
+        badge_width = payload_badge_width(metrics, payload_badge) if strategy_name else 0
+        marks_width = len(marks) * (_TILE_MARK_SIZE + _TILE_MARK_GAP) if strategy_name else 0
+        strategy_width = 0
+        if strategy_name:
+            strategy_width = metrics.horizontalAdvance(strategy_name) + 8 + marks_width
+            if badge_width:
+                strategy_width += badge_width + _PAYLOAD_BADGE_GAP
+        return TileRowParts(
+            layout=_tile_row_layout(rect, strategy_width=strategy_width),
+            strategy_name=strategy_name,
+            payload_badge=payload_badge,
+            badge_width=badge_width,
+            marks=marks,
+            marks_width=marks_width,
+        )
 
     def _paint_folder_row(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         paint_folder_header_row(
@@ -164,12 +252,7 @@ class ProfileListDelegate(QStyledItemDelegate):
         active_count = int(index.data(ProfileListModel.ActiveCountRole) or 0)
         icon_name = str(index.data(ProfileListModel.IconNameRole) or "")
         counter_text = _tile_counter_text(active_count, count)
-        layout = _tile_header_layout(
-            rect,
-            has_icon=bool(icon_name),
-            counter_width=QFontMetrics(painter.font()).horizontalAdvance(counter_text) + 2,
-            meter_width=_tile_meter_width(count),
-        )
+        layout = self._tile_header_layout_for(rect, index, QFontMetrics(painter.font()))
 
         cached_icon(folder_header_icon_name(expanded), folder_header_icon_color()).paint(painter, layout.chevron_rect)
 
@@ -254,24 +337,17 @@ class ProfileListDelegate(QStyledItemDelegate):
 
         in_preset = bool(index.data(ProfileListModel.InPresetRole))
         working = in_preset and bool(index.data(ProfileListModel.EnabledRole))
-        strategy_name = str(index.data(ProfileListModel.StrategyNameRole) or "")
-        payload_badge = str(index.data(ProfileListModel.StrategyPayloadBadgeRole) or "")
-        marks = _tile_feedback_marks(
-            str(index.data(ProfileListModel.RatingRole) or "").strip().lower(),
-            bool(index.data(ProfileListModel.FavoriteRole)),
-        )
 
         text_font = painter.font()
         text_font.setBold(False)
         metrics = QFontMetrics(text_font)
-        badge_width = payload_badge_width(metrics, payload_badge) if strategy_name else 0
-        marks_width = len(marks) * (_TILE_MARK_SIZE + _TILE_MARK_GAP) if strategy_name else 0
-        strategy_width = 0
-        if strategy_name:
-            strategy_width = metrics.horizontalAdvance(strategy_name) + 8 + marks_width
-            if badge_width:
-                strategy_width += badge_width + _PAYLOAD_BADGE_GAP
-        row_layout = _tile_row_layout(rect, strategy_width=strategy_width)
+        parts = self._tile_row_parts(rect, index, metrics)
+        row_layout = parts.layout
+        strategy_name = parts.strategy_name
+        payload_badge = parts.payload_badge
+        badge_width = parts.badge_width
+        marks = parts.marks
+        marks_width = parts.marks_width
 
         if bool(index.data(ProfileListModel.IconInHeaderRole)):
             # Значок группы уже стоит в шапке плитки: здесь только состояние.
@@ -652,8 +728,8 @@ _TILE_MARK_GAP = 5
 _TILE_METER_SEGMENT_WIDTH = 10
 _TILE_METER_SEGMENT_GAP = 2
 _TILE_METER_HEIGHT = 4
-# Больше восьми профилей — вместо отдельных делений одна сплошная полоска.
-_TILE_METER_MAX_SEGMENTS = 8
+# Больше стольких профилей — вместо отдельных делений одна сплошная полоска.
+_TILE_METER_MAX_SEGMENTS = PROFILE_METER_MAX_SEGMENTS
 _TILE_METER_BAR_WIDTH = 64
 
 
@@ -676,10 +752,13 @@ def _tile_row_layout(rect: QRect, *, strategy_width: int) -> TileRowLayout:
     available = max(0, right_edge - text_left + 1)
 
     # Способ обхода занимает не больше половины строки: имя сайта главнее.
-    width = min(max(0, int(strategy_width or 0)), available // 2)
+    requested = max(0, int(strategy_width or 0))
+    width = min(requested, available // 2)
     if width and available - width - gap < min_name_width:
         width = max(0, available - gap - min_name_width)
-    if width < 40:
+    # Прячем способ, только когда от него остался бы обрывок. Короткое
+    # название («pass») показывается целиком.
+    if width < min(requested, 40):
         width = 0
 
     strategy_rect = QRect()
@@ -692,6 +771,16 @@ def _tile_row_layout(rect: QRect, *, strategy_width: int) -> TileRowLayout:
         name_rect=QRect(text_left, row_center_y - 10, name_width, 20),
         strategy_rect=strategy_rect,
     )
+
+
+@dataclass(frozen=True)
+class TileRowParts:
+    layout: TileRowLayout
+    strategy_name: str
+    payload_badge: str
+    badge_width: int
+    marks: tuple[tuple[str, str], ...]
+    marks_width: int
 
 
 @dataclass(frozen=True)

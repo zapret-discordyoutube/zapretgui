@@ -284,6 +284,23 @@ class StrategyListGroupsTests(unittest.TestCase):
         self.assertFalse(item.data(W._ROLE_FAVORITE))
 
 
+class StrategyMarksTooltipTests(unittest.TestCase):
+    def test_marks_are_explained_in_words(self) -> None:
+        marks = widget_module._strategy_marks_tooltip
+
+        self.assertEqual(marks(is_active=False, favorite=False, rating=""), "")
+        self.assertEqual(
+            marks(is_active=True, favorite=True, rating="work"),
+            "Эта стратегия выбрана для профиля.\n"
+            "Звезда: стратегия у вас в избранном.\n"
+            "Галочка: вы отметили, что эта стратегия работает.",
+        )
+        self.assertEqual(
+            marks(is_active=False, favorite=False, rating="notwork"),
+            "Крестик: вы отметили, что эта стратегия не работает.",
+        )
+
+
 class _SpyMetrics(QFontMetrics):
     elided: list[str] = []
 
