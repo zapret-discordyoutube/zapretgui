@@ -111,6 +111,13 @@ class DomainLookupPageTests(unittest.TestCase):
         page._on_finished(_report(kind=engine.KIND_IP, target="93.184.216.34", answers=()))
         self.assertTrue(page.dns_card.isHidden())
 
+        # Повторная проверка того же домена: поле соседей очищается и заполняется заново,
+        # хотя текст совпадает с прошлым.
+        page.start_lookup()
+        self.assertEqual(page.neighbors_text.toPlainText(), "")
+        page._on_finished(_report())
+        self.assertIn("a.example", page.neighbors_text.toPlainText())
+
         # Смена языка переводит подписи и не теряет результат.
         host.set_ui_language("en")
         self.assertEqual(page.start_button.text(), "Check")

@@ -160,6 +160,8 @@ class DomainLookupPage(BasePage):
         self._dns = dns_feature
         self._closed = False
         self._report = None
+        # Что сейчас показано в поле соседей: сравниваем с этой строкой, а не читаем текст обратно из поля.
+        self._neighbors_shown_text = ""
         self._running = False
         self._lane = LatestWorkerLane(
             name="domain_lookup",
@@ -350,6 +352,7 @@ class DomainLookupPage(BasePage):
             card.setVisible(False)
         self.dns_table.setRowCount(0)
         self.neighbors_text.clear()
+        self._neighbors_shown_text = ""
         self.status_lines.set_lines((plans.InfoLine(f"Проверяем {target}…", plans.TONE_ACCENT),))
         self._set_running(True)
         self._lane.request({"target": target, "use_external": self.external_check.isChecked()})
@@ -404,7 +407,8 @@ class DomainLookupPage(BasePage):
 
         text = plans.build_neighbors_text(report)
         self.neighbors_card.setVisible(bool(text))
-        if text != self.neighbors_text.toPlainText():
+        if text != self._neighbors_shown_text:
+            self._neighbors_shown_text = text
             self.neighbors_text.setPlainText(text)
             lines = min(18, max(4, text.count("\n") + 1))
             self.neighbors_text.setFixedHeight(lines * self.neighbors_text.fontMetrics().lineSpacing() + 24)
