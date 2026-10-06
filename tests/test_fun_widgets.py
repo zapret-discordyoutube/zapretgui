@@ -38,6 +38,21 @@ class MascotTests(unittest.TestCase):
             mascot.set_mood(MOOD_SAD)
             self.assertEqual(mascot.mood(), MOOD_SAD)
 
+    def test_busy_sway_resumes_after_click_spin(self) -> None:
+        mascot = _shown(Mascot(size=32))
+        self.addCleanup(mascot.deleteLater)
+        with patch("ui.widgets.fun.mascot.are_live_animations_enabled", return_value=True):
+            mascot.set_mood(MOOD_BUSY)
+            mascot.spin()
+            self.assertEqual(mascot.gesture(), "spin")
+            # Оборот доиграл до конца.
+            mascot._anim.setCurrentTime(mascot._anim.duration())
+            QApplication.processEvents()
+            self.assertEqual(mascot.gesture(), MOOD_BUSY)
+            self.assertEqual(mascot._anim.loopCount(), -1)
+            mascot.set_mood(MOOD_IDLE)
+            self.assertEqual(mascot.gesture(), "")
+
     def test_no_motion_when_live_animations_are_off(self) -> None:
         mascot = _shown(Mascot(size=32))
         self.addCleanup(mascot.deleteLater)

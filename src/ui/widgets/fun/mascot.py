@@ -198,6 +198,10 @@ class Mascot(QWidget):
         self.update()
         if self._mood == MOOD_IDLE:
             self._schedule_look()
+        elif self._mood == MOOD_BUSY:
+            # Разовый жест (оборот по клику, замах) перебил покачивание — работа
+            # ещё идёт, значит, покачивание продолжается.
+            self._play(MOOD_BUSY)
 
     # --- события ---------------------------------------------------------------
 
