@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .models import Profile, build_profile_logical_key
+from .stock_names import current_stock_profile_name
 
 
 @dataclass(frozen=True)
@@ -130,7 +131,9 @@ def _logical_profile_keys(profile: Profile) -> tuple[str, ...]:
     keys: list[str] = []
     name = str(getattr(profile, "name", "") or "").strip()
     if name:
-        keys.append(f"name:{name.casefold()}")
+        # Профиль под прежним стоковым именем — тот же профиль, что шаблон с
+        # нынешним именем: иначе в списке стояли бы оба.
+        keys.append(f"name:{current_stock_profile_name(name).casefold()}")
     match_key = build_profile_logical_key(profile.match_signature)
     if match_key:
         keys.append(match_key)
@@ -183,7 +186,9 @@ def _source_with_resolved_display_name(
 def _resolved_display_name(selected: ProfileListSource, candidates: list[ProfileListSource]) -> str:
     profile_name = _profile_name(selected.profile)
     if selected.in_preset and profile_name:
-        return profile_name
+        # В пресете пользователя профиль может стоять под прежним стоковым
+        # именем: показываем нынешнее, текст пресета не трогаем.
+        return current_stock_profile_name(profile_name)
     if selected.in_preset:
         template_name = _first_template_profile_name(candidates)
         if template_name:

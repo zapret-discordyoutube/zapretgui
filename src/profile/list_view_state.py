@@ -372,6 +372,10 @@ def row_for_profile(item: ProfileDisplayItem, *, header_icon_name: str = "") -> 
     if tile_name != item.display_name:
         # В строке плитки имя сокращено — полное показывает подсказка.
         tooltip = f"{item.display_name}\n{tooltip}"
+    written_name = str(getattr(item, "profile_name", "") or "").strip()
+    if item.in_preset and written_name and written_name != item.display_name:
+        # Профиль записан в пресете под прежним стоковым именем.
+        tooltip = f"{tooltip}\nВ тексте пресета профиль записан как «{written_name}»."
     return {
         "kind": "profile",
         "key": item.key,

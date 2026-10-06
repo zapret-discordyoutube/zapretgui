@@ -87,6 +87,25 @@ tests/test_preset_contract_architecture_checks.py — структура) и а�
    Если аргументы запуска те же (убраны только служебные строки шапки),
    файл пишется без оповещения и без перезапуска.
 
+7. Обновление встроенного пресета (``BUILTIN_PRESET_UPDATES``). Когда
+   пользователь меняет встроенный пресет, его правка сохраняется копией в
+   папке пользователя, и дальше работает копия. У встроенного пресета есть
+   номер ``# BuiltinVersion:``, который растёт при каждой его правке. Если
+   после обновления программы номер у встроенного пресета стал больше, чем в
+   копии пользователя (или в копии номера нет), копия заменяется новым
+   встроенным пресетом — всегда: иначе исправления встроенных пресетов до
+   пользователя не доходят (решение владельца проекта от 2026-10-06).
+   Замена делается после запуска программы в фоне
+   (``PresetFileService.refresh_outdated_builtin_overrides``) тем же действием,
+   что и ручной «Сброс к встроенному». Прежняя копия перед заменой
+   сохраняется в ``presets/replaced/<папка пресетов>/<имя файла>`` (хранится
+   одна, последняя), каждая замена пишется строкой в лог. Копия, которую ведёт
+   автосинк по ссылке, не заменяется: её содержимым владеет источник.
+   Пресеты пользователя с другими именами файлов не трогаются. Если заменён
+   активный пресет при работающем winws, программа узнаёт об изменении как при
+   обычном сохранении — один перезапуск, после него работает ровно то, что
+   записано в файле.
+
 Модуль намеренно не импортирует ничего, кроме стандартной библиотеки, на уровне
 модуля: его константы читает ``app.architecture_checks`` в CI без зависимостей.
 """
@@ -177,6 +196,36 @@ ONE_TIME_MIGRATIONS: dict[str, str] = {
     USER_WINWS2_PRESETS_SAVE_FORMAT_MIGRATION: "после запуска пресеты winws2 из папки пользователя один раз "
     "проходят нормализацию сохранения (полный блок --lua-init) и записываются, только если текст изменился",
 }
+
+OUTDATED_BUILTIN_OVERRIDE_REFRESH = "outdated_builtin_override_refresh"
+
+BUILTIN_PRESET_UPDATES: dict[str, str] = {
+    OUTDATED_BUILTIN_OVERRIDE_REFRESH: "после запуска копия встроенного пресета в папке пользователя заменяется "
+    "встроенным пресетом, если его номер # BuiltinVersion: стал больше; прежняя копия сохраняется в presets/replaced",
+}
+
+# Шапка встроенного пресета с номером его версии.
+BUILTIN_VERSION_HEADER_PREFIX = "# BuiltinVersion:"
+
+
+def builtin_preset_version(text: str) -> tuple[int, ...] | None:
+    """Номер версии из шапки пресета («# BuiltinVersion: 2.44» -> (2, 44)); None — номера нет."""
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if not line.startswith("#"):
+            # Шапка кончилась: дальше идут параметры запуска.
+            return None
+        if not line.startswith(BUILTIN_VERSION_HEADER_PREFIX):
+            continue
+        parts = line[len(BUILTIN_VERSION_HEADER_PREFIX) :].strip().split(".")
+        try:
+            return tuple(int(part) for part in parts)
+        except ValueError:
+            return None
+    return None
+
 
 # Причина изменения пресета, с которой программа узнаёт о разовом переводе.
 CONTRACT_MIGRATION_CHANGE_KIND = "contract_migration"
@@ -282,6 +331,8 @@ def normalize_preset_source_for_save(source_text: str, engine: str) -> str:
 __all__ = [
     "ARCHIVE_IMPORT_LIST_RENAME",
     "ARCHIVE_IMPORT_TRANSFORMATIONS",
+    "BUILTIN_PRESET_UPDATES",
+    "BUILTIN_VERSION_HEADER_PREFIX",
     "CONTRACT_MIGRATION_CHANGE_KIND",
     "DEBUG_LOG_DIR",
     "DRY_RUN_FUNCTION_MARKER",
@@ -290,6 +341,7 @@ __all__ = [
     "GENERATED_CONFIG_EXEMPTIONS",
     "LAUNCH_TIME_TRANSFORMATIONS",
     "ONE_TIME_MIGRATIONS",
+    "OUTDATED_BUILTIN_OVERRIDE_REFRESH",
     "PRESET_CONTRACT_SCOPE",
     "PRESET_FILE_STORE_MODULE",
     "PRESET_FILE_WRITE_METHODS",
@@ -301,6 +353,7 @@ __all__ = [
     "USER_WINWS2_PRESETS_SAVE_FORMAT_MIGRATION",
     "WINWS1_DRY_RUN_EXTRA_ARGS",
     "WINWS2_DRY_RUN_EXTRA_ARGS",
+    "builtin_preset_version",
     "normalize_preset_source_for_save",
     "relocate_legacy_debug_log_file",
     "strip_utf8_bom",

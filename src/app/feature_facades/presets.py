@@ -1265,6 +1265,13 @@ class PresetsFeature:
             preset_services=self._preset_services(),
         )
 
+    def refresh_outdated_builtin_overrides(self, launch_method: str):
+        """Замена копий встроенных пресетов, отставших по номеру версии (preset_contract, пункт 7)."""
+        return self._commands().refresh_outdated_builtin_overrides(
+            launch_method,
+            preset_services=self._preset_services(),
+        )
+
     def publish_preset_content_changed(self, launch_method: str, file_name: str, *, content_change_kind: str = ""):
         return self._commands().publish_preset_content_changed(
             launch_method,

@@ -238,6 +238,13 @@ def migrate_user_presets_to_save_contract(launch_method: str, *, preset_services
     ).migrate_user_presets_to_save_contract()
 
 
+def refresh_outdated_builtin_overrides(launch_method: str, *, preset_services):
+    return _create_preset_file_service(
+        launch_method,
+        preset_services=preset_services,
+    ).refresh_outdated_builtin_overrides()
+
+
 def publish_preset_content_changed(
     launch_method: str,
     file_name: str,

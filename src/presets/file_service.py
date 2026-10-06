@@ -15,7 +15,12 @@ from presets.preset_file_ops import (
     reset_all_to_builtin as _reset_all_to_builtin,
     reset_to_builtin_by_file_name as _reset_to_builtin_by_file_name,
 )
-from presets.preset_contract import CONTRACT_MIGRATION_CHANGE_KIND, normalize_preset_source_for_save
+from presets.builtin_catalog import list_builtin_presets
+from presets.preset_contract import (
+    CONTRACT_MIGRATION_CHANGE_KIND,
+    builtin_preset_version,
+    normalize_preset_source_for_save,
+)
 from settings.mode import (
     ENGINE_WINWS1,
     ENGINE_WINWS2,
@@ -60,6 +65,21 @@ class PresetContractMigrationResult:
 
     migrated: tuple[str, ...] = ()
     failed: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class BuiltinOverrideRefreshResult:
+    """Итог замены устаревших копий встроенных пресетов (preset_contract, пункт 7).
+
+    refreshed — (имя файла, номер версии копии или "", номер версии встроенного).
+    """
+
+    refreshed: tuple[tuple[str, str, str], ...] = ()
+    failed: tuple[tuple[str, str], ...] = ()
+
+
+def _version_text(version: tuple[int, ...] | None) -> str:
+    return ".".join(str(part) for part in version) if version else ""
 
 
 @dataclass(frozen=True)
@@ -354,6 +374,53 @@ class PresetFileService:
             except Exception as exc:
                 failed.append((file_name, f"файл записан, но программа не узнала об изменении: {exc}"))
         return PresetContractMigrationResult(migrated=tuple(migrated), failed=tuple(failed))
+
+    def refresh_outdated_builtin_overrides(self) -> BuiltinOverrideRefreshResult:
+        """Заменяет копии встроенных пресетов, отставшие от них по номеру версии.
+
+        Пункт 7 договора ``presets.preset_contract``: копия в папке пользователя
+        с тем же именем файла, что у встроенного пресета, заменяется им, если у
+        встроенного номер ``# BuiltinVersion:`` больше (или в копии номера нет).
+        Прежняя копия сохраняется в ``EnginePaths.replaced_presets_dir``. Сама
+        замена — то же действие, что ручной «Сброс к встроенному»: программа
+        узнаёт об изменении и при необходимости один раз перезапускает winws.
+        Копия, которую ведёт автосинк по ссылке, не трогается.
+        """
+        from utils.atomic_text import read_preset_file_text
+
+        engine_paths = self.app_paths.engine_paths(self.engine).ensure_directories()
+        refreshed: list[tuple[str, str, str]] = []
+        failed: list[tuple[str, str]] = []
+        for builtin_path in list_builtin_presets(engine_paths.builtin_presets_dir):
+            file_name = builtin_path.name
+            user_path = engine_paths.user_presets_dir / file_name
+            if not user_path.is_file():
+                continue
+            try:
+                builtin_version = builtin_preset_version(read_preset_file_text(builtin_path))
+                if builtin_version is None:
+                    continue
+                user_version = builtin_preset_version(read_preset_file_text(user_path))
+                if user_version is not None and user_version >= builtin_version:
+                    continue
+                if self._has_active_remote_binding(file_name):
+                    continue
+                backup_dir = engine_paths.replaced_presets_dir
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                (backup_dir / file_name).write_bytes(user_path.read_bytes())
+                self.reset_to_builtin_by_file_name(file_name)
+            except Exception as exc:
+                failed.append((file_name, str(exc) or type(exc).__name__))
+                continue
+            refreshed.append((file_name, _version_text(user_version), _version_text(builtin_version)))
+        return BuiltinOverrideRefreshResult(refreshed=tuple(refreshed), failed=tuple(failed))
+
+    def _has_active_remote_binding(self, file_name: str) -> bool:
+        """Ведёт ли эту копию автосинк по ссылке (её содержимым владеет источник)."""
+        from presets.remote_bindings import get_remote_preset_binding
+
+        binding = get_remote_preset_binding(self.engine, str(file_name or "").strip())
+        return binding is not None and bool(binding.get("auto", True))
 
     def save_selected_source_text(self, source_text: str, *, content_change_kind: str = "") -> PresetManifest:
         selected_file_name = self.get_selected_file_name()

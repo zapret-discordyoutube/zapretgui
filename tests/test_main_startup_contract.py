@@ -2498,7 +2498,11 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(post_startup, "install_dns_page_data_warmup"),
             patch.object(post_startup, "install_hosts_page_warmup"),
             patch.object(post_startup, "install_profile_warmup") as install_profile_warmup,
-            patch.object(post_startup, "install_user_preset_contract_migration"),
+            patch.multiple(
+                post_startup,
+                install_user_preset_contract_migration=Mock(),
+                install_builtin_preset_override_refresh=Mock(),
+            ),
             patch.object(post_startup, "install_user_presets_warmup"),
             patch.object(post_startup, "install_remote_presets_sync"),
             # Одной строкой: у with есть предел на число вложенных блоков.
@@ -2533,6 +2537,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         startup_host = object()
         presets_feature = object()
         log_startup_metric = Mock()
+        install_builtin_preset_override_refresh = Mock()
         deps = PostStartupDeps(
             startup_host=startup_host,
             profile_feature=object(),
@@ -2571,6 +2576,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 post_startup,
                 install_update_check=Mock(),
                 build_idle_ui_task_queue=Mock(return_value=_IDLE_TASKS),
+                install_builtin_preset_override_refresh=install_builtin_preset_override_refresh,
             ),
             patch.object(post_startup, "install_onboarding_tour"),
             patch.object(post_startup, "install_cpu_diagnostic"),
@@ -2580,6 +2586,13 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         ):
             install_post_startup_tasks(deps)
 
+        # Устаревшие копии встроенных пресетов заменяются в той же очереди.
+        install_builtin_preset_override_refresh.assert_called_once_with(
+            startup_host,
+            presets_feature=presets_feature,
+            log_startup_metric=log_startup_metric,
+            notify=deps.notify,
+        )
         install_user_preset_contract_migration.assert_called_once_with(
             startup_host,
             presets_feature=presets_feature,

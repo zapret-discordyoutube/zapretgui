@@ -92,6 +92,12 @@ def install_user_presets_warmup(*args, **kwargs):
     return install(*args, **kwargs)
 
 
+def install_builtin_preset_override_refresh(*args, **kwargs):
+    from main.post_startup_builtin_preset_refresh import install_builtin_preset_override_refresh as install
+
+    return install(*args, **kwargs)
+
+
 def install_user_preset_contract_migration(*args, **kwargs):
     from main.post_startup_preset_contract_migration import install_user_preset_contract_migration as install
 
@@ -257,6 +263,13 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
         on_profile_warmup_ready=on_profile_warmup_ready,
     )
     if deps.presets_feature is not None:
+        # Раньше перевода в обязательный формат: заменённую копию переводить не нужно.
+        install_builtin_preset_override_refresh(
+            startup_host,
+            presets_feature=deps.presets_feature,
+            log_startup_metric=deps.log_startup_metric,
+            notify=deps.notify,
+        )
         install_user_preset_contract_migration(
             startup_host,
             presets_feature=deps.presets_feature,

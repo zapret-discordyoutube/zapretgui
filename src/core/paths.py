@@ -21,6 +21,12 @@ class EnginePaths:
     user_presets_dir: Path
     builtin_presets_dir: Path
 
+    @property
+    def replaced_presets_dir(self) -> Path:
+        """Прежние копии встроенных пресетов, заменённые при их обновлении
+        (presets.preset_contract, пункт 7). В список пресетов не попадают."""
+        return self.presets_root_dir / "replaced" / self.user_presets_dir.name
+
     def ensure_directories(self) -> "EnginePaths":
         self.presets_root_dir.mkdir(parents=True, exist_ok=True)
         self.user_presets_dir.mkdir(parents=True, exist_ok=True)
