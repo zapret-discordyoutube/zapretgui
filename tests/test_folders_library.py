@@ -57,6 +57,8 @@ class FolderDefaultsTests(unittest.TestCase):
                 "Discord",
                 "Голосовые звонки (Discord, Telegram)",
                 "GitHub",
+                "Telegram",
+                "WhatsApp",
                 "Мессенджеры",
                 "Соцсети",
                 "Игры",
@@ -145,7 +147,13 @@ class FolderDefaultsTests(unittest.TestCase):
             classify_profile_folder("githubusercontent.com --hostlist=lists/githubusercontent.txt"),
             "github",
         )
-        self.assertEqual(classify_profile_folder("Telegram --hostlist=telegram.txt"), "messengers")
+        self.assertEqual(classify_profile_folder("Telegram --hostlist=telegram.txt"), "telegram")
+        self.assertEqual(classify_profile_folder("MTProto --filter-l7=mtproto"), "telegram")
+        self.assertEqual(classify_profile_folder("WhatsApp --hostlist=lists/whatsapp.txt"), "whatsapp")
+        self.assertEqual(classify_profile_folder("static.whatsapp.net --hostlist=lists/static-whatsapp.txt"), "whatsapp")
+        self.assertEqual(classify_profile_folder("WhatsApp UDP wide --ipset=lists/ipset-whatsapp.txt"), "whatsapp")
+        self.assertEqual(classify_profile_folder("Viber --hostlist=lists/viber.txt"), "messengers")
+        self.assertEqual(classify_profile_folder("Signal --hostlist=lists/signal.txt"), "messengers")
         self.assertEqual(classify_profile_folder("Facebook --hostlist=facebook.txt"), "social")
         self.assertEqual(classify_profile_folder("Valorant game filter"), "games")
         self.assertEqual(classify_profile_folder("itch.io --hostlist=lists/itch.txt"), "games")
@@ -203,6 +211,8 @@ class FolderDefaultsTests(unittest.TestCase):
                 "Discord",
                 "Голосовые звонки (Discord, Telegram)",
                 "GitHub",
+                "Telegram",
+                "WhatsApp",
                 "Мессенджеры",
                 "Соцсети",
                 "Игры",

@@ -125,6 +125,35 @@ class ProfileFolderActionTests(unittest.TestCase):
         self.assertEqual(state["items"]["uid:voice"], {"folder_key": "voice", "order": None, "rating": 4})
         self.assertEqual(state["items"]["uid:discord"]["folder_key"], "discord")
 
+    def test_untouched_telegram_and_whatsapp_leave_the_shared_messengers_folder(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            with patch("settings.store.MAIN_DIRECTORY", str(Path(temp_dir))):
+                state = load_profile_folder_state()
+                for key in ("uid:telegram", "uid:whatsapp", "uid:viber"):
+                    state["items"][key] = {"folder_key": "messengers", "order": None, "rating": 0}
+                # Этот WhatsApp пользователь уже двигал внутри «Мессенджеров».
+                state["items"]["uid:whatsapp-ordered"] = {"folder_key": "messengers", "order": 0, "rating": 0}
+                save_profile_folder_state(state)
+
+                self.assertTrue(
+                    move_untouched_profiles_to_split_folders(
+                        {
+                            "uid:telegram": "telegram",
+                            "uid:whatsapp": "whatsapp",
+                            "uid:viber": "messengers",
+                            "uid:whatsapp-ordered": "whatsapp",
+                        }
+                    )
+                )
+                state = load_profile_folder_state()
+
+        self.assertEqual(state["items"]["uid:telegram"]["folder_key"], "telegram")
+        self.assertEqual(state["items"]["uid:whatsapp"]["folder_key"], "whatsapp")
+        self.assertEqual(state["items"]["uid:viber"]["folder_key"], "messengers")
+        self.assertEqual(state["items"]["uid:whatsapp-ordered"]["folder_key"], "messengers")
+        self.assertEqual(state["folders"]["telegram"]["name"], "Telegram")
+        self.assertEqual(state["folders"]["whatsapp"]["name"], "WhatsApp")
+
     def test_voice_profile_arranged_by_user_is_left_where_it_is(self) -> None:
         with TemporaryDirectory() as temp_dir:
             with patch("settings.store.MAIN_DIRECTORY", str(Path(temp_dir))):

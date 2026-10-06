@@ -43,6 +43,10 @@ _PROFILE_FOLDERS: tuple[tuple[str, str, bool], ...] = (
     # Discord, и в Telegram, и в других программах, поэтому стоит отдельно.
     (VOICE_FOLDER_KEY, "Голосовые звонки (Discord, Telegram)", False),
     ("github", "GitHub", False),
+    # У больших мессенджеров свои группы, как у YouTube и Discord: в общей
+    # «Мессенджеры» их профили смешивались под одним значком.
+    ("telegram", "Telegram", False),
+    ("whatsapp", "WhatsApp", False),
     ("messengers", "Мессенджеры", False),
     ("social", "Соцсети", False),
     ("games", "Игры", False),
@@ -59,7 +63,11 @@ _PROFILE_FOLDERS: tuple[tuple[str, str, bool], ...] = (
 # Папки, которые появились позже остальных: {новая папка: папка, куда такой
 # профиль попадал раньше}. Профиль, который пользователь сам не раскладывал,
 # один раз переезжает в новую (profile.folders.move_untouched_profiles_to_split_folders).
-PROFILE_FOLDER_SPLITS: dict[str, str] = {VOICE_FOLDER_KEY: "discord"}
+PROFILE_FOLDER_SPLITS: dict[str, str] = {
+    VOICE_FOLDER_KEY: "discord",
+    "telegram": "messengers",
+    "whatsapp": "messengers",
+}
 
 # В оригинальном zapret2 stun — общий протокол звонков (--filter-l7=stun), а
 # не признак Discord, хотя в одном фильтре с ним обычно стоит и discord.
@@ -112,7 +120,11 @@ def _classify_profile_folder_text(value: str) -> str:
         return "discord"
     if _has_any_token(value, ("github", "ghcr.io")):
         return "github"
-    if _has_any_token(value, ("telegram", "whatsapp", "viber", "signal", "mtproto")):
+    if _has_any_token(value, ("telegram", "mtproto")):
+        return "telegram"
+    if _has_any_token(value, ("whatsapp",)):
+        return "whatsapp"
+    if _has_any_token(value, ("viber", "signal")):
         return "messengers"
     if _has_any_token(value, ("facebook", "instagram", "tiktok", "twitter", "x.com", "vk")):
         return "social"
