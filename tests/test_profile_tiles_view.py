@@ -135,14 +135,48 @@ class ProfileTileRowsTests(unittest.TestCase):
         self.assertEqual([row["icon_in_header"] for row in profiles], [True, True, True, False])
         self.assertTrue(profiles[3]["icon_name"].startswith("simple:vencord"))
 
-    def test_group_without_majority_icon_keeps_icons_on_its_rows(self) -> None:
-        state = _view_state(_two_groups())
+    def test_service_icon_never_outvotes_the_site_icon(self) -> None:
+        # Один профиль сайта и два «голосовых» с микрофоном: в шапке всё равно
+        # значок сайта, у строки сайта — точка, микрофон остаётся у своих строк.
+        state = _view_state(_two_groups() + (
+            _item(
+                "Звонки",
+                key="dc-2",
+                group="discord",
+                group_name="Discord",
+                order=2,
+                match_lines=("--filter-l7=stun",),
+            ),
+        ))
         folder = _rows_by_kind(state, "folder", "discord")[0]
         profiles = _rows_by_kind(state, "profile", "discord")
+
+        self.assertTrue(folder["icon_name"].startswith("simple:discord"))
+        self.assertEqual([row["icon_in_header"] for row in profiles], [True, False, False])
+        self.assertEqual(profiles[1]["icon_name"], "fa5s.microphone")
+
+    def test_group_of_different_sites_keeps_icons_on_its_rows(self) -> None:
+        items = (
+            _item("telegram.org", key="m-0", group="messengers", group_name="Мессенджеры", order=0),
+            _item("whatsapp.com", key="m-1", group="messengers", group_name="Мессенджеры", order=1),
+        )
+        state = _view_state(items)
+        folder = _rows_by_kind(state, "folder", "messengers")[0]
+        profiles = _rows_by_kind(state, "profile", "messengers")
 
         self.assertEqual(len({row["icon_name"] for row in profiles}), 2)
         self.assertEqual(folder["icon_name"], "")
         self.assertFalse(any(row["icon_in_header"] for row in profiles))
+
+    def test_one_known_site_among_plain_sites_does_not_name_the_group(self) -> None:
+        items = (
+            _item("github.com", key="s-0", group="sites", group_name="Сайты", order=0),
+            _item("Первый сайт", key="s-1", group="sites", group_name="Сайты", order=1),
+            _item("Второй сайт", key="s-2", group="sites", group_name="Сайты", order=2),
+        )
+        folder = _rows_by_kind(_view_state(items), "folder", "sites")[0]
+
+        self.assertEqual(folder["icon_name"], "")
 
     def test_initials_icon_is_never_a_group_icon(self) -> None:
         # У обоих профилей значок из одних и тех же первых букв, но сайт он

@@ -333,25 +333,35 @@ def build_profile_rows_from(
     return rows
 
 
-def _shared_group_icon(group_items: tuple[ProfileDisplayItem, ...]):
-    """Значок группы — тот, что носит больше половины её профилей.
+_SITE_ICON_PREFIXES = ("simple:", "fa5b.")
+_INITIALS_ICON_PREFIX = "profile-initials:"
 
-    Группа одного сайта (YouTube, Discord) получает его значок в шапку плитки.
-    Профили с другим значком (vencord в группе Discord) оставляют свой у
-    строки, а в группе без явного большинства значки остаются у всех строк.
+
+def _shared_group_icon(group_items: tuple[ProfileDisplayItem, ...]):
+    """Значок группы для шапки плитки — значок её главного сайта.
+
+    В шапку идёт только значок сайта (YouTube, Discord). Служебные значки —
+    микрофон звонков, облако хостера — и значки из первых букв имени сайт не
+    обозначают и в шапку не выносятся. Сайт считается главным, когда его
+    значок носит больше половины профилей группы; профили со служебным
+    значком в этот счёт не входят. Профили с другим значком (vencord в группе
+    Discord) оставляют его у своей строки.
     """
     counts: dict[str, int] = {}
     specs: dict[str, Any] = {}
+    counted_rows = 0
     for item in group_items:
         icon = resolve_profile_icon(item.display_name, tuple(item.match_lines or ()))
-        counts[icon.icon_name] = counts.get(icon.icon_name, 0) + 1
-        specs.setdefault(icon.icon_name, icon)
+        if icon.icon_name.startswith(_SITE_ICON_PREFIXES):
+            counts[icon.icon_name] = counts.get(icon.icon_name, 0) + 1
+            specs.setdefault(icon.icon_name, icon)
+            counted_rows += 1
+        elif icon.icon_name.startswith(_INITIALS_ICON_PREFIX):
+            counted_rows += 1
     if not counts:
         return None
     icon_name, count = max(counts.items(), key=lambda entry: entry[1])
-    # Значок из первых букв имени сайт не обозначает: совпасть он может
-    # случайно, поэтому в шапку плитки не выносится.
-    if icon_name.startswith("profile-initials:") or count * 2 <= len(group_items):
+    if count * 2 <= counted_rows:
         return None
     return specs[icon_name]
 
