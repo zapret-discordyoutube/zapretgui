@@ -29,6 +29,7 @@ class UiRootStartupLaunchMethodTests(unittest.TestCase):
             ui_state_store=SimpleNamespace(
                 snapshot=Mock(return_value=SimpleNamespace(launch_method="zapret1_mode")),
             ),
+            launch_control=Mock(),
         )
         window = SimpleNamespace(
             get_launch_method=Mock(side_effect=AssertionError("window settings read must stay out of UI build")),
