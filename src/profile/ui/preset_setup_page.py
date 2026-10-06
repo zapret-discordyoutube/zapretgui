@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from PyQt6.QtCore import QTimer, QUrl
+from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 
 from log.log import log
@@ -23,7 +23,11 @@ from profile.ui.profile_payload_controller import (
 )
 from profile.ui.preset_write_queue import PresetWriteQueue
 from profile.ui.profile_folder_controller import ProfileFolderController
-from profile.ui.profiles_list import ProfilesList
+from profile.ui.profiles_list import (
+    DISPLAY_ORDER_NOTICE_TEXT,
+    DISPLAY_ORDER_NOTICE_TITLE,
+    ProfilesList,
+)
 from profile.ui.shell import build_profile_shell, wire_profile_search_keyboard_activation
 from profile.ui.user_profile_dialog import CreateUserProfileDialog
 from qfluentwidgets import BodyLabel, InfoBar, PushButton
@@ -130,6 +134,10 @@ def _pending_kind_property(kind: str, from_operation, to_operation):
         state.pending.extend(to_operation(operation) for operation in list(value or []))
 
     return property(_get, _set)
+
+
+# Пояснение про порядок в пресете уже показано в этом запуске программы.
+_display_order_explained = False
 
 
 class PresetSetupPageBase(BasePage):
@@ -663,6 +671,13 @@ class PresetSetupPageBase(BasePage):
         profiles_list.profile_move_after_requested.connect(self._on_profile_move_after_requested)
         profiles_list.profile_move_to_folder_requested.connect(self._on_profile_move_to_folder_requested)
         profiles_list.profile_move_to_end_requested.connect(self._on_profile_move_to_end_requested)
+        for moved in (
+            profiles_list.profile_move_requested,
+            profiles_list.profile_move_after_requested,
+            profiles_list.profile_move_to_folder_requested,
+            profiles_list.profile_move_to_end_requested,
+        ):
+            moved.connect(self._explain_display_order_once)
         profiles_list.folder_context_requested.connect(self._on_folder_context_requested)
         profiles_list.folder_toggled.connect(self._on_folder_toggled)
         profiles_list.folders_toggled.connect(self._on_folders_toggled)
@@ -1149,6 +1164,25 @@ class PresetSetupPageBase(BasePage):
             source_profile_key,
             destination_profile_key=destination_profile_key,
             destination_group_key=destination_group_key,
+        )
+
+    def _explain_display_order_once(self, *_move) -> None:
+        """После первого перетаскивания объясняет, что порядок в пресете прежний.
+
+        Список похож на сам пресет, и без пояснения кажется, что профили
+        переставлены в нём. Хватает одного раза за запуск программы: дальше
+        об этом напоминает подсказка у курсора.
+        """
+        global _display_order_explained
+        if _display_order_explained:
+            return
+        _display_order_explained = True
+        InfoBar.info(
+            title=DISPLAY_ORDER_NOTICE_TITLE,
+            content=DISPLAY_ORDER_NOTICE_TEXT,
+            orient=Qt.Orientation.Vertical,
+            duration=12000,
+            parent=self.window(),
         )
 
     def _on_profile_move_finished(

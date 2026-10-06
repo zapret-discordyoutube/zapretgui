@@ -8,6 +8,7 @@ from qfluentwidgets import ListView
 
 from .profile_list_model import ProfileListModel
 from ui.accessibility import set_state_text
+from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.tile_layout import TILE_ROW_HEADER, TILE_ROW_ITEM, TILE_ROW_WIDE
 from ui.widgets.tile_list_view import TileListViewMixin
 
@@ -104,7 +105,27 @@ class ProfileListView(TileListViewMixin, ListView):
         super().__init__(parent)
         self._drag_start_pos: QPoint | None = None
         self._drag_source: tuple[str, str] | None = None
+        # Подсказка, которая едет за курсором, пока профиль тащат: что именно
+        # меняет перетаскивание в этом списке. Пусто — подсказки нет.
+        self._drag_hint_text = ""
+        self._drag_hint: FluentItemToolTipController | None = None
         self.set_drop_marker(-1, "")
+
+    def set_drag_hint_text(self, text: str) -> None:
+        self._drag_hint_text = str(text or "").strip()
+        if not self._drag_hint_text:
+            self._hide_drag_hint()
+
+    def _show_drag_hint(self, point: QPoint) -> None:
+        if not self._drag_hint_text:
+            return
+        if self._drag_hint is None:
+            self._drag_hint = FluentItemToolTipController(self.viewport())
+        self._drag_hint.show_text(self._drag_hint_text, self.viewport().mapToGlobal(point))
+
+    def _hide_drag_hint(self) -> None:
+        if self._drag_hint is not None:
+            self._drag_hint.hide()
 
     def tile_row_kind(self, index) -> str:
         # В режиме плиток (set_tile_layout_enabled) папка становится плиткой.
@@ -296,14 +317,17 @@ class ProfileListView(TileListViewMixin, ListView):
     def _update_internal_drag(self, point: QPoint) -> None:
         if not self.viewport().rect().contains(point):
             self.set_drop_marker(-1, "")
+            self._hide_drag_hint()
             return
         target, _destination_id, _destination_group_key = self._drop_target_at(point)
         self.set_drop_marker_payload(dict(target.get("marker") or {}))
+        self._show_drag_hint(point)
 
     def _finish_internal_drag(self, point: QPoint) -> bool:
         source = self._drag_source
         self._drag_source = None
         self.set_drop_marker(-1, "")
+        self._hide_drag_hint()
         if source is None or not self.viewport().rect().contains(point):
             return False
 
@@ -445,15 +469,18 @@ class ProfileListView(TileListViewMixin, ListView):
         if event.mimeData().hasFormat(ProfileListModel.MIME_TYPE):
             target, _destination_id, _destination_group_key = self._drop_target_at(event.position().toPoint())
             self.set_drop_marker_payload(dict(target.get("marker") or {}))
+            self._show_drag_hint(event.position().toPoint())
             event.acceptProposedAction()
             return
         super().dragMoveEvent(event)
 
     def dragLeaveEvent(self, event):  # noqa: N802
         self.set_drop_marker(-1, "")
+        self._hide_drag_hint()
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event):  # noqa: N802
+        self._hide_drag_hint()
         if not event.mimeData().hasFormat(ProfileListModel.MIME_TYPE):
             self.set_drop_marker(-1, "")
             super().dropEvent(event)

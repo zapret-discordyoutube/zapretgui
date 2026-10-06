@@ -20,6 +20,17 @@ from ui.accessibility import set_control_accessibility, set_state_text
 from ui.widgets.fluent_scrollbar import install_fluent_scrollbars
 
 
+# Что видит человек у курсора, пока тащит профиль по списку.
+DISPLAY_ORDER_DRAG_HINT = "Меняется только вид списка. Порядок в пресете остаётся прежним."
+# Что страница сообщает после первого перетаскивания.
+DISPLAY_ORDER_NOTICE_TITLE = "Порядок в пресете не изменился"
+DISPLAY_ORDER_NOTICE_TEXT = (
+    "Перетаскивание меняет только вид этого списка: как вам удобнее его читать. "
+    "Порядок, в котором профили записаны в пресете и применяются, меняется кнопкой "
+    "«Порядок в пресете» над списком."
+)
+
+
 class ProfileListViewStateWorker(QThread):
     loaded = pyqtSignal(int, object)
     failed = pyqtSignal(int, str)
@@ -218,6 +229,9 @@ class ProfilesList(QWidget):
         self._view.profile_move_after_requested.connect(self.profile_move_after_requested)
         self._view.profile_move_to_folder_requested.connect(self.profile_move_to_folder_requested)
         self._view.profile_move_to_end_requested.connect(self.profile_move_to_end_requested)
+        # Перетаскивание здесь меняет только раскладку списка; порядок профилей
+        # в файле пресета меняет отдельная страница (profile_order_page).
+        self._view.set_drag_hint_text(DISPLAY_ORDER_DRAG_HINT)
         # Страница обычно показывает все profile-ы, поэтому вертикальная прокрутка
         # почти всегда есть. Запас справа включается только при реальном scroll range,
         # чтобы карточки не заходили под fluent-scrollbar.
