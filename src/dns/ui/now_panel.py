@@ -33,10 +33,11 @@ from qfluentwidgets import (
 )
 
 from dns.ui.provider_grid import CHARGE_MS, FRAME_MS, badge_color, comet_geometry, ease_out_cubic, paint_comet, paint_glow
+from profile.ui.profile_icon import profile_icon_pixmap
 from ui.animation_policy import are_live_animations_enabled
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import set_tooltip, style_semantic_caption_label
-from ui.theme import get_cached_qta_pixmap, get_theme_tokens
+from ui.theme import get_theme_tokens
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +171,7 @@ class _Badge(QWidget):
         painter.setBrush(back)
         painter.drawEllipse(QPointF(0, 0), half, half)
         icon_size = 24
-        pixmap = get_cached_qta_pixmap(icon_name, color=color.name(), size=icon_size)
+        pixmap = profile_icon_pixmap(icon_name, color=color.name(), size=icon_size)
         painter.drawPixmap(-icon_size // 2, -icon_size // 2, pixmap)
         painter.restore()
 

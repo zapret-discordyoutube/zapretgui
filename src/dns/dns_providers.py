@@ -1,6 +1,12 @@
 # dns/dns_providers.py
 """
 Список DNS провайдеров для UI
+
+Значок ("icon") рисует profile.ui.profile_icon: кроме имён Font Awesome
+("fa5s.*", "fa5b.*") подходят фирменные логотипы "simple:<имя>:<буквы>" и свои
+SVG "own:<имя>:<буквы>". У серверов из раздела «Для ИИ» значок и цвет те же,
+что у одноимённого DNS-профиля в «Редакторе hosts» (hosts/ui/profile_icons.py):
+один сервер — один значок во всей программе.
 """
 
 DNS_PROVIDERS = {
@@ -9,7 +15,7 @@ DNS_PROVIDERS = {
             "ipv4": ["1.1.1.1", "1.0.0.1"],
             "ipv6": ["2606:4700:4700::1111", "2606:4700:4700::1001"],
             "desc": "Быстрый и приватный",
-            "icon": "fa5s.bolt",
+            "icon": "simple:cloudflare:CF",
             "color": "#f48120",
             "doh": "https://cloudflare-dns.com/dns-query"
         },
@@ -25,7 +31,7 @@ DNS_PROVIDERS = {
             "ipv4": ["185.222.222.222", "45.11.45.11"],
             "ipv6": ["2a09::", "2a11::"],
             "desc": "Без цензуры",
-            "icon": "fa5s.shield-alt",
+            "icon": "fa5s.unlock-alt",
             "color": "#00bcd4",
             "doh": "https://doh.sb/dns-query"
         },
@@ -35,7 +41,7 @@ DNS_PROVIDERS = {
             "ipv4": ["9.9.9.9", "149.112.112.112"],
             "ipv6": ["2620:fe::fe", "2620:fe::9"],
             "desc": "Антивирус",
-            "icon": "fa5s.shield-virus",
+            "icon": "simple:quad9:Q9",
             "color": "#e91e63",
             "doh": "https://dns.quad9.net/dns-query"
         },
@@ -43,7 +49,7 @@ DNS_PROVIDERS = {
             "ipv4": ["94.140.14.14", "94.140.15.15"],
             "ipv6": ["2a10:50c0::ad1:ff", "2a10:50c0::ad2:ff"],
             "desc": "Без рекламы",
-            "icon": "fa5s.ad",
+            "icon": "simple:adguard:AG",
             "color": "#68bc71",
             "doh": "https://dns.adguard.com/dns-query"
         },
@@ -51,8 +57,8 @@ DNS_PROVIDERS = {
             "ipv4": ["208.67.222.222", "208.67.220.220"],
             "ipv6": ["2620:119:35::35", "2620:119:53::53"],
             "desc": "Фильтрация",
-            "icon": "fa5s.user-shield",
-            "color": "#ff9800",
+            "icon": "own:opendns:OD",
+            "color": "#fe7702",
             "doh": "https://doh.opendns.com/dns-query"
         },
         "dnsdoh.art": {
@@ -69,40 +75,40 @@ DNS_PROVIDERS = {
             "ipv4": ["111.88.96.54", "111.88.96.55"],
             "ipv6": ["2a00:ab00:1233:26::50", "2a00:ab00:1233:26::51"],
             "desc": "ChatGPT",
-            "icon": "fa5s.robot",
-            "color": "#9c27b0",
+            "icon": "fa5b.xbox",
+            "color": "#107C10",
             "doh": "https://xbox-dns.ru/dns-query"
         },
         "Xbox DNS v2": {
             "ipv4": ["87.228.47.200", "87.228.47.201"],
             "ipv6": [],
             "desc": "ChatGPT",
-            "icon": "fa5s.robot",
-            "color": "#7b1fa2",
+            "icon": "fa5b.xbox",
+            "color": "#2EA043",
             "doh": "https://xbox-dns.ru/dns-query"
         },
         "Xbox DNS (old)": {
             "ipv4": ["176.99.11.77", "80.78.247.254"],
             "ipv6": [],
             "desc": "ChatGPT",
-            "icon": "fa5s.robot",
-            "color": "#6d6d6d",
+            "icon": "fa5s.gamepad",
+            "color": "#7A9A01",
             "doh": "https://xbox-dns.ru/dns-query"
         },
         "Comss DNS": {
             "ipv4": ["83.220.169.155", "212.109.195.93"],
             "ipv6": [],
             "desc": "ChatGPT",
-            "icon": "fa5s.brain",
-            "color": "#673ab7",
+            "icon": "fa5s.shield-alt",
+            "color": "#2F80ED",
             "doh": "https://dns.comss.one/dns-query"
         },
         "dns.malw.link": {
             "ipv4": ["95.216.204.218", "80.253.249.40"],
             "ipv6": ["2a01:4f9:c014:6dac::1", "2a12:bec4:1460:5b7::2"],
             "desc": "ChatGPT",
-            "icon": "fa5s.comments",
-            "color": "#2196f3",
+            "icon": "fa5s.bug",
+            "color": "#E5484D",
             "doh": "https://dns.malw.link/dns-query"
         },
         # Адреса — у официального имени DoH dns.astracat.network: опубликованный
@@ -112,7 +118,7 @@ DNS_PROVIDERS = {
             "ipv6": [],
             "desc": "ChatGPT, без рекламы",
             "icon": "fa5s.cat",
-            "color": "#ff7043",
+            "color": "#F59E0B",
             "doh": "https://dns.astracat.network/dns-query"
         },
         # Российская пара из официального geohide.ru/static/metadata/servers.json.
@@ -122,7 +128,7 @@ DNS_PROVIDERS = {
             "ipv6": [],
             "desc": "ChatGPT, Grok, Notion",
             "icon": "fa5s.globe-europe",
-            "color": "#26a69a",
+            "color": "#8B5CF6",
             "doh": "https://geohide.ru/dns-query"
         },
     }

@@ -32,6 +32,7 @@ from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPe
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 from qfluentwidgets import FluentIcon, getFont, isDarkTheme, themeColor
 
+from profile.ui.profile_icon import profile_icon_pixmap
 from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import set_area_tooltip
@@ -552,7 +553,7 @@ class DnsProviderGrid(QWidget):
         painter.setBrush(back)
         painter.drawEllipse(center, half, half)
 
-        icon = get_cached_qta_pixmap(tile.icon_name or "fa5s.server", color=color.name(), size=self._ICON)
+        icon = profile_icon_pixmap(tile.icon_name or "fa5s.server", color=color.name(), size=self._ICON)
         painter.save()
         painter.translate(center)
         if settle is not None:

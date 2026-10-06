@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.03.1")
+        self.assertEqual(catalog.catalog_version, "2026.10.06.1")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -99,6 +99,18 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         }
         self.assertIn("discord", simple_slugs)
         self.assertEqual(sorted(simple_slugs - set(SIMPLE_ICON_SVGS)), [])
+        # Свои SVG ("own:<имя>:<буквы>") — для логотипов, которых нет в Simple Icons.
+        from profile.ui.own_icons import OWN_ICON_SVGS
+
+        own_slugs = {
+            icon.removeprefix("own:").partition(":")[0]
+            for icon, _color in catalog.service_icons.values()
+            if icon.startswith("own:")
+        }
+        self.assertIn("openai", own_slugs)
+        self.assertEqual(sorted(own_slugs - set(OWN_ICON_SVGS)), [])
+        self.assertEqual(catalog.service_icons["ChatGPT & Sora (OpenAI)"], ("own:openai:AI", "#10a37f"))
+        self.assertEqual(catalog.service_icons["Grok"], ("own:grok:GR", None))
         self.assertEqual(len(catalog.content_sha256), 64)
         self.assertEqual(len(catalog.service_order), 73)
         self.assertEqual(len(catalog.dns_profiles), 8)
