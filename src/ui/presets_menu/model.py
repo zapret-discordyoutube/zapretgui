@@ -26,6 +26,7 @@ class PresetListModel(QAbstractListModel):
     CanResetRole = Qt.ItemDataRole.UserRole + 18
     RemoteRole = Qt.ItemDataRole.UserRole + 19
     RemoteStateRole = Qt.ItemDataRole.UserRole + 20
+    RepeatedPrefixLengthRole = Qt.ItemDataRole.UserRole + 21
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -603,8 +604,41 @@ class PresetListModel(QAbstractListModel):
             return bool(row.get("is_remote", False))
         if role == self.RemoteStateRole:
             return str(row.get("remote_state", "") or "")
+        if role == self.RepeatedPrefixLengthRole:
+            return self._repeated_prefix_length(index.row()) if kind == "preset" else 0
 
         return None
+
+    def _repeated_prefix_length(self, row_index: int) -> int:
+        """Сколько первых символов имени пресета повторяют заголовок над ним.
+
+        В папке «ALL TCP & UDP» все имена начинаются с «ALL TCP & UDP …» —
+        делегат приглушает этот повтор, чтобы читалось только отличие.
+        Закреплённый пресет стоит под «Закрепленные», поэтому там повтора нет.
+        """
+        name = str(self._rows[row_index].get("name") or "")
+        for position in range(row_index - 1, -1, -1):
+            row = self._rows[position]
+            if str(row.get("kind") or "") == "folder":
+                return repeated_folder_prefix_length(name, str(row.get("name") or row.get("text") or ""))
+        return 0
+
+
+def repeated_folder_prefix_length(name: str, folder_title: str) -> int:
+    """Длина начала имени, которое слово в слово повторяет название папки.
+
+    Считается вместе с пробелом после названия. Ноль, если имя не начинается
+    с названия папки целым словом или кроме повтора в имени ничего нет.
+    """
+    name = str(name or "")
+    title = str(folder_title or "").strip()
+    if not title or not name.lower().startswith(title.lower()):
+        return 0
+    rest = name[len(title):]
+    tail = rest.lstrip()
+    if not tail or len(tail) == len(rest):
+        return 0
+    return len(name) - len(tail)
 
 
 def _folder_is_expanded(rows: list[dict[str, object]], folder_key: str) -> bool:
