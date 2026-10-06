@@ -1842,7 +1842,7 @@ author = community
 
 # --- builtin stock basic coverage (generated) ---
 [stock_all_tcp_udp_v1_01]
-name = Syndata + multidisorder_legacy 6,midsld+2
+name = ALL TCP и UDP v1 · из Russia blacklist
 old_name = syndata + multidisorder_legacy 6,midsld+2
 author = builtin
 label = stock
@@ -1851,7 +1851,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=6,midsld+2
 
 [stock_dead_by_daylight_game_filter_02]
-name = Send x2 + Syndata tls7
+name = Dead by Daylight · из YouTube
 old_name = send x2 + syndata tls7
 author = builtin
 label = stock
@@ -1860,7 +1860,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=syndata:blob=tls7
 
 [stock_dead_by_daylight_v2_game_filter_03]
-name = Send x2 + Syndata tls_google + pass
+name = Dead by Daylight v2 · из Telegram
 old_name = send x2 + syndata tls_google + pass
 author = builtin
 label = stock
@@ -1870,7 +1870,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=pass
 
 [stock_dead_by_daylight_v2_game_filter_04]
-name = Send x2 + Syndata tls_google + Fake tls_google x8 tls_client_hello ts1 + MultiSplit 1 tls_google s681 tls_client_hello
+name = Dead by Daylight v2 · из «Остальные сайты»
 old_name = send x2 + syndata tls_google + fake tls_google x8 tls_client_hello ts1 + multisplit 1 tls_google s681 tls_client_hello
 author = builtin
 label = stock
@@ -1881,7 +1881,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google:payload=tls_client_hello
 
 [stock_default_multisplit_sni_game_filter_05]
-name = Send x1 + Syndata tls_max + tls_multisplit_sni tls_google s652
+name = Default multisplit_sni · из googlevideo.com
 old_name = send x1 + syndata tls_max + tls_multisplit_sni tls_google s652
 author = builtin
 label = stock
@@ -1891,7 +1891,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google
 
 [stock_default_multisplit_stun_game_filter_06]
-name = Send x1 + Syndata tls_max + MultiSplit 1 stun_pat 740
+name = Default multisplit_stun · из googlevideo.com
 old_name = send x1 + syndata tls_max + multisplit 1 stun_pat 740
 author = builtin
 label = stock
@@ -1908,7 +1908,7 @@ old_name = send x2 + syndata tls_google + multisplit 1 stun_pat 740
 --lua-desync=multisplit:pos=1:seqovl=740:seqovl_pattern=stun_pat
 
 [stock_default_v2_game_filter_07]
-name = Fake fake_default_http x4 md5 + MultiDisorder host+1
+name = Default v2 · из Cloudflare
 old_name = fake fake_default_http x4 md5 + multidisorder host+1
 author = builtin
 label = stock
@@ -1917,7 +1917,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=host+1
 
 [stock_default_v3_game_filter_08]
-name = Send x2 + MultiDisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1
+name = Default v3 · из googlevideo.com
 old_name = send x2 + multidisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1
 author = builtin
 label = stock
@@ -1926,7 +1926,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1
 
 [stock_default_v3_game_filter_09]
-name = Send x2 + Syndata tls_google + hostfakesplit_multi hosts x2 md5 ts-1000
+name = Default v3 · из Telegram
 old_name = send x2 + syndata tls_google + hostfakesplit_multi hosts x2 md5 ts-1000
 author = builtin
 label = stock
@@ -1936,7 +1936,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 [stock_default_v4_game_filter_10]
-name = Send x1 + Syndata tls_max + hostfakesplit_multi hosts x2 md5 ts-1000
+name = Default v4 · из googlevideo.com
 old_name = send x1 + syndata tls_max + hostfakesplit_multi hosts x2 md5 ts-1000
 author = builtin
 label = stock
@@ -1946,7 +1946,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 [stock_default_v5_11]
-name = Fake tls_max x8 badsum + MultiDisorder 1 tls_max s681
+name = Default v5 · из YouTube
 old_name = fake tls_max x8 badsum + multidisorder 1 tls_max s681
 author = builtin
 label = stock
@@ -1955,7 +1955,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1:seqovl=681:seqovl_pattern=tls_max
 
 [stock_default_v5_12]
-name = Send x3 + Syndata tls_google + Syndata
+name = Default v5 · из updates.discord.com
 old_name = send x3 + syndata tls_google + syndata
 author = builtin
 label = stock
@@ -1965,7 +1965,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=syndata
 
 [stock_default_v5_13]
-name = Send x2 + MultiSplit tls5 s211
+name = Default v5 · из Telegram
 old_name = send x2 + multisplit tls5 s211
 author = builtin
 label = stock
@@ -1974,7 +1974,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:seqovl=211:seqovl_pattern=tls5
 
 [stock_default_v5_14]
-name = Send x2 + Syndata tls_google + MultiSplit tls5 s211
+name = Default v5 · из rutracker.org
 old_name = send x2 + syndata tls_google + multisplit tls5 s211
 author = builtin
 label = stock
@@ -1984,7 +1984,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:seqovl=211:seqovl_pattern=tls5
 
 [stock_preset_x_game_filter_15]
-name = Send x2 + Syndata tls_google + MultiSplit
+name = Preset X · из Roblox
 old_name = send x2 + syndata tls_google + multisplit
 author = builtin
 label = stock
@@ -1994,7 +1994,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit
 
 [stock_preset_x_v2_game_filter_16]
-name = Send x2 + Syndata tls_google + FakedSplit 1 x10 ack-66000
+name = Preset X v2 · из WARP
 old_name = send x2 + syndata tls_google + fakedsplit 1 x10 ack-66000
 author = builtin
 label = stock
@@ -2004,7 +2004,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pos=1:tcp_ack=-66000:repeats=10:ip_ttl=4:ip6_ttl=4
 
 [stock_preset_x_v2_game_filter_17]
-name = Send x2 + Syndata tls_google + MultiSplit tls_google s700
+name = Preset X v2 · из YouTube RTMPS
 old_name = send x2 + syndata tls_google + multisplit tls_google s700
 author = builtin
 label = stock
@@ -2014,7 +2014,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:seqovl=700:seqovl_pattern=tls_google:tcp_flags_unset=ack
 
 [stock_preset_xy_game_filter_18]
-name = Send x2 + Syndata tls_google + multidisorder_legacy sniext+1,midsld s652
+name = Preset XY · из WARP
 old_name = send x2 + syndata tls_google + multidisorder_legacy sniext+1,midsld s652
 author = builtin
 label = stock
@@ -2024,7 +2024,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=sniext+1,midsld:seqovl=652
 
 [stock_syndata_multidisorder_legacy_game_filter_19]
-name = Syndata + multidisorder_legacy 1,midsld
+name = Syndata + MultiDisorder legacy · из YouTube
 old_name = syndata + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
@@ -2033,7 +2033,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_20]
-name = Send x2 + Syndata fake_tls_8 + Fake tls14 x6 tsup + MultiDisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1 + multidisorder_legacy
+name = Syndata + MultiDisorder legacy WoW · из Google
 old_name = send x2 + syndata fake_tls_8 + fake tls14 x6 tsup + multidisorder 1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2 s1 + multidisorder_legacy
 author = builtin
 label = stock
@@ -2045,7 +2045,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_21]
-name = Send x2 + Syndata fake_tls_8 + Fake tls18 x4 tsup ack-66000 + multidisorder_legacy 1,midsld
+name = Syndata + MultiDisorder legacy WoW · из Amazon
 old_name = send x2 + syndata fake_tls_8 + fake tls18 x4 tsup ack-66000 + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
@@ -2056,7 +2056,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_22]
-name = Send x2 + Syndata fake_tls_8 + Fake fake_default_tls x6 tsup ack-66000 + multidisorder_legacy 1,midsld + tls_fake_flood
+name = Syndata + MultiDisorder legacy WoW · из WARP
 old_name = send x2 + syndata fake_tls_8 + fake fake_default_tls x6 tsup ack-66000 + multidisorder_legacy 1,midsld + tls_fake_flood
 author = builtin
 label = stock
@@ -2068,7 +2068,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=tls_fake_flood:fakes=11:md5sig
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_22_simple]
-name = Fake fake_default_tls x6 tsup ack-66000 + multidisorder_legacy 1,midsld
+name = Syndata + MultiDisorder legacy WoW · из «Все сайты (айпи)» №2
 old_name = fake fake_default_tls x6 tsup ack-66000 + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
@@ -2077,7 +2077,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_23]
-name = Send x2 + Syndata fake_tls_7 + Fake tls_google x11 md5 + hostfakesplit_multi hosts x2 md5 ts-1000
+name = Syndata + MultiDisorder legacy WoW · из Cloudflare (айпи)
 old_name = send x2 + syndata fake_tls_7 + fake tls_google x11 md5 + hostfakesplit_multi hosts x2 md5 ts-1000
 author = builtin
 label = stock
@@ -2088,7 +2088,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit_multi:hosts=google.com,vimeo.com:tcp_ts=-1000:tcp_md5:repeats=2
 
 [stock_syndata_multidisorder_legacy_wow_game_fi_24]
-name = Send x2 + Syndata fake_tls_8 + Fake tls1 md5 + multidisorder_legacy 1,midsld
+name = Syndata + MultiDisorder legacy WoW · из YouTube RTMPS
 old_name = send x2 + syndata fake_tls_8 + fake tls1 md5 + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
@@ -2099,7 +2099,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld:ip_autottl=-1,3-20:ip6_autottl=-1,3-20
 
 [stock_ultimate_main_riot_valorant_game_filter_25]
-name = Send
+name = Ultimate Main Riot + Valorant · из Riot
 old_name = send
 author = builtin
 label = stock
@@ -2107,7 +2107,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=send
 
 [stock_ultimate_main_riot_valorant_game_filter_26]
-name = Send + MultiDisorder 1
+name = Ultimate Main Riot + Valorant · из Russia blacklist
 old_name = send + multidisorder 1
 author = builtin
 label = stock
@@ -2116,7 +2116,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1
 
 [stock_general_alt_game_filter_27]
-name = Fake tls_google x6 ts-600000 ip_id=zero + FakedSplit x6 ts-600000 ip_id=zero
+name = General ALT · из googlevideo.com
 old_name = fake tls_google x6 ts-600000 ip_id=zero + fakedsplit x6 ts-600000 ip_id=zero
 author = builtin
 label = stock
@@ -2125,7 +2125,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000:ip_id=zero
 
 [stock_general_alt3_game_filter_30]
-name = Fake tls_google ts-600000 + HostFakeSplit ya.ru ts-600000 + Fake fake_default_http ts-600000 + HostFakeSplit ya.ru ts-600000
+name = General ALT3 · из General list
 old_name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000 + fake fake_default_http ts-600000 + hostfakesplit ya.ru ts-600000
 author = builtin
 label = stock
@@ -2136,7 +2136,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-600000
 
 [stock_general_alt3_31]
-name = Fake tls_google ts-600000 + HostFakeSplit www.google.com ts-600000 + Fake fake_default_http ts-600000 + HostFakeSplit www.google.com ts-600000
+name = General ALT3 · из Discord
 old_name = fake tls_google ts-600000 + hostfakesplit www.google.com ts-600000 + fake fake_default_http ts-600000 + hostfakesplit www.google.com ts-600000
 author = builtin
 label = stock
@@ -2147,7 +2147,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000
 
 [stock_general_alt8_game_filter_35]
-name = Fake tls_google x6 seq2 + Fake fake_default_http x6 seq2
+name = General ALT8 · из Discord
 old_name = fake tls_google x6 seq2 + fake fake_default_http x6 seq2
 author = builtin
 label = stock
@@ -2156,7 +2156,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=fake_default_http:repeats=6:tcp_seq=2
 
 [stock_general_fake_tls_auto_alt_game_filter_36]
-name = Fake fake_default_tls x8 seq2 + FakedSplit 2 x8 seq2
+name = General Fake TLS Auto ALT · из Discord
 old_name = fake fake_default_tls x8 seq2 + fakedsplit 2 x8 seq2
 author = builtin
 label = stock
@@ -2165,7 +2165,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pos=2:repeats=8:tcp_seq=2
 
 [stock_general_fake_tls_auto_alt2_game_filter_37]
-name = Fake fake_default_tls x8 seq1000 + MultiSplit 2 tls_google s681 x8
+name = General Fake TLS Auto ALT2 · из Discord
 old_name = fake fake_default_tls x8 seq1000 + multisplit 2 tls_google s681 x8
 author = builtin
 label = stock
@@ -2174,7 +2174,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=tls_google:repeats=8
 
 [stock_general_fake_tls_auto_alt3_game_filter_38]
-name = Fake fake_default_tls x8 ts-600000 + MultiSplit 2 tls_google s681 x8 ts-600000
+name = General Fake TLS Auto ALT3 · из Discord
 old_name = fake fake_default_tls x8 ts-600000 + multisplit 2 tls_google s681 x8 ts-600000
 author = builtin
 label = stock
@@ -2183,7 +2183,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=tls_google:repeats=8:tcp_ts=-600000
 
 [stock_general_fake_tls_auto_v2_game_filter_39]
-name = Fake fake_default_tls x11 ack-66000 + MultiDisorder 1,midsld x11 ack-66000
+name = General Fake TLS Auto v2 · из Discord
 old_name = fake fake_default_tls x11 ack-66000 + multidisorder 1,midsld x11 ack-66000
 author = builtin
 label = stock
@@ -2192,7 +2192,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=1,midsld:tcp_ack=-66000:repeats=11
 
 [stock_general_simple_fake_game_filter_40]
-name = Fake tls_google x6 ts-600000 + Fake fake_default_http x6 ts-600000
+name = General Simple Fake · из Discord
 old_name = fake tls_google x6 ts-600000 + fake fake_default_http x6 ts-600000
 author = builtin
 label = stock
@@ -2201,7 +2201,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=fake_default_http:repeats=6:tcp_ts=-600000
 
 [stock_tcp_41]
-name = Syndata + multidisorder_legacy 1,midsld + Syndata + multidisorder_legacy 1,midsld
+name = Ростелеком · из «Остальные сайты»
 old_name = syndata + multidisorder_legacy 1,midsld + syndata + multidisorder_legacy 1,midsld
 author = builtin
 label = stock
@@ -2212,7 +2212,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder_legacy:pos=1,midsld
 
 [stock_dead_by_daylight_v2_game_filter_01]
-name = Send x2 + Syndata tls_google + MultiSplit tls_google s700 · autottl
+name = Dead by Daylight v2 · из Cloudflare
 old_name = send x2 + syndata tls_google + multisplit tls_google s700
 author = builtin
 label = stock
@@ -2222,7 +2222,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:seqovl=700:seqovl_pattern=tls_google:tcp_flags_unset=ack
 
 [stock_default_multisplit_sni_game_filter_02]
-name = Send x2 + Syndata tls_google + tls_multisplit_sni tls_google s652
+name = Default multisplit_sni · из Cloudflare
 old_name = send x2 + syndata tls_google + tls_multisplit_sni tls_google s652
 author = builtin
 label = stock
@@ -2232,7 +2232,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=tls_multisplit_sni:seqovl=652:seqovl_pattern=tls_google
 
 [stock_default_multisplit_stun_game_filter_03]
-name = Send x2 + Syndata tls_google + MultiSplit 1 stun_pat s740
+name = Default multisplit_stun · из Cloudflare
 old_name = send x2 + syndata tls_google + multisplit 1 stun_pat s740
 author = builtin
 label = stock
@@ -2242,7 +2242,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=1:seqovl=740:seqovl_pattern=stun_pat
 
 [stock_general_alt_game_filter_04]
-name = Fake tls_google x6 ts-600000 + FakedSplit x6 ts-600000
+name = General ALT · из General list
 old_name = fake tls_google x6 ts-600000 + fakedsplit x6 ts-600000
 author = builtin
 label = stock
@@ -2251,7 +2251,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fakedsplit:pattern=0x00:repeats=6:tcp_ts=-600000
 
 [stock_general_alt10_game_filter_05]
-name = Fake fake_default_tls x3 ts-600000 + Fake tls_4pda x3 ts-600000
+name = General ALT10 · из Cloudflare
 old_name = fake fake_default_tls x3 ts-600000 + fake tls_4pda x3 ts-600000
 author = builtin
 label = stock
@@ -2260,7 +2260,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=fake:blob=tls_4pda:repeats=3:tcp_ts=-600000
 
 [stock_general_alt11_06]
-name = Fake tls_google x8 ts-600000 + MultiSplit 2 tls_google s681 x8 ts-600000
+name = General ALT11 · из googlevideo.com
 old_name = fake tls_google x8 ts-600000 + multisplit 2 tls_google s681 x8 ts-600000
 author = builtin
 label = stock
@@ -2269,7 +2269,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=tls_google:repeats=8:tcp_ts=-600000
 
 [stock_general_alt3_game_filter_08]
-name = Fake tls_google ts-600000 + HostFakeSplit ya.ru ts-600000
+name = General ALT3 · из Cloudflare
 old_name = fake tls_google ts-600000 + hostfakesplit ya.ru ts-600000
 author = builtin
 label = stock
@@ -2278,7 +2278,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-600000
 
 [stock_general_alt4_game_filter_11]
-name = Fake tls_google x6 seq1000 + MultiSplit 2
+name = General ALT4 · из Discord
 old_name = fake tls_google x6 seq1000 + multisplit 2
 author = builtin
 label = stock
@@ -2287,7 +2287,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multisplit:pos=2
 
 [stock_general_alt5_game_filter_13]
-name = Syndata + MultiDisorder 2
+name = General ALT5 · из Discord
 old_name = syndata + multidisorder 2
 author = builtin
 label = stock
@@ -2296,7 +2296,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=multidisorder:pos=2
 
 [stock_general_alt7_game_filter_14]
-name = Syndata
+name = General ALT7 · из Cloudflare
 old_name = syndata
 author = builtin
 label = stock
@@ -2304,7 +2304,7 @@ description = Автодобавлено для распознавания вс�
 --lua-desync=syndata
 
 [stock_general_simple_fake_alt2_game_filter_17]
-name = Fake tls_max x6 ts-600000
+name = General Simple Fake ALT2 · из Cloudflare
 old_name = fake tls_max x6 ts-600000
 author = builtin
 label = stock

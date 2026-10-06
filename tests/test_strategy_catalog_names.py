@@ -114,11 +114,37 @@ class StrategyCatalogNameSchemeTests(unittest.TestCase):
             "tls_fake_only_md5": ("TLS Fake Only + MD5sig", "🎭 TLS Fake Only + MD5sig"),
             "general_alt11_all_sites": ("General ALT11 · из «Все сайты»", "general ALT11 / Все сайты"),
             "split2_split_2": ("Split2 split seqovl 2 · устаревшая", "Устаревший split2 split seqovl 2"),
+            # Стратегия, добавленная из встроенного пресета, названа по нему,
+            # а не перечислением своих параметров.
+            "stock_dead_by_daylight_v2_game_filter_03": (
+                "Dead by Daylight v2 · из Telegram",
+                "send x2 + syndata tls_google + pass",
+            ),
         }
         for strategy_id, (name, old_name) in expected.items():
             with self.subTest(strategy=strategy_id):
                 self.assertEqual(tcp[strategy_id].name, name)
                 self.assertEqual(tcp[strategy_id].old_name, old_name)
+
+
+class StrategyFromBuiltinPresetNameTests(unittest.TestCase):
+    """Стратегии, автоматически добавленные из встроенных пресетов."""
+
+    _SOURCE = re.compile(r"встроенного пресета .+?\.txt \([a-z0-9_]+\)")
+
+    def test_they_are_named_after_the_preset_and_its_profile(self) -> None:
+        checked = 0
+        for path in sorted(CATALOGS_ROOT.glob("*/*.txt")):
+            name = ""
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("name = "):
+                    name = line[len("name = ") :]
+                elif line.startswith("description = ") and self._SOURCE.search(line):
+                    with self.subTest(catalog=path.name, name=name):
+                        self.assertIn(" · из ", name)
+                        self.assertNotIn(" + Syndata tls", name)
+                    checked += 1
+        self.assertGreater(checked, 80)
 
 
 class StrategyOldNameSearchTests(unittest.TestCase):
