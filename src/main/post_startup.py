@@ -263,13 +263,11 @@ def install_post_startup_tasks(deps: PostStartupDeps) -> None:
         on_profile_warmup_ready=on_profile_warmup_ready,
     )
     if deps.presets_feature is not None:
-        # Раньше перевода в обязательный формат: заменённую копию переводить не нужно.
-        install_builtin_preset_override_refresh(
-            startup_host,
-            presets_feature=deps.presets_feature,
-            log_startup_metric=deps.log_startup_metric,
-            notify=deps.notify,
-        )
+        # Замена устаревших копий встроенных пресетов (install_builtin_preset_override_refresh)
+        # при запуске ОТКЛЮЧЕНА 2026-10-06: в выпуске 21.1.7.19 окно программы зависло на
+        # «Ждём подтверждение процесса winws» — замена активного пресета пришлась на момент
+        # запуска обхода. Включать только после того, как причина найдена и замена не
+        # пересекается с запуском (tests/test_builtin_preset_override_refresh.py).
         install_user_preset_contract_migration(
             startup_host,
             presets_feature=deps.presets_feature,

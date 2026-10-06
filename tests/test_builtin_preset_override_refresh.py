@@ -388,16 +388,16 @@ class BuiltinOverrideRefreshStartupTests(unittest.TestCase):
         self.assertEqual(feature.refresh_outdated_builtin_overrides.call_count, 2)
         self.assertEqual([call.args[1] for call in log.call_args_list], ["WARNING", "INFO"])
 
-    def test_refresh_is_installed_before_the_format_migration(self) -> None:
+    def test_refresh_is_not_started_at_program_startup_for_now(self) -> None:
+        """В 21.1.7.19 замена шла сразу после запуска программы и подвесила окно:
+        она пришлась на запуск обхода. Пока причина не устранена, задача не ставится."""
         import inspect
 
         from main import post_startup
 
         source = inspect.getsource(post_startup.install_post_startup_tasks)
-        self.assertLess(
-            source.index("install_builtin_preset_override_refresh("),
-            source.index("install_user_preset_contract_migration("),
-        )
+        calls = [line for line in source.splitlines() if "install_builtin_preset_override_refresh(" in line]
+        self.assertEqual([line for line in calls if not line.strip().startswith("#")], [])
 
 
 if __name__ == "__main__":
