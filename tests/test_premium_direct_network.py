@@ -9,19 +9,157 @@ import requests
 
 
 class PremiumDirectNetworkTests(unittest.TestCase):
-    def test_background_network_runs_on_start_then_every_three_hours(self) -> None:
+    @staticmethod
+    def _ok_response() -> Mock:
+        response = Mock()
+        response.content = b'{"success": true}'
+        response.status_code = 200
+        response.json.return_value = {"success": True}
+        return response
+
+    def test_service_has_no_own_schedule(self) -> None:
+        # Когда идти в сеть, решает donater.status_runtime; сервис выполняет
+        # ровно ту проверку, о которой его попросили.
+        import inspect
+
         from donater.service import PremiumService
 
-        service = PremiumService(api_base_url="https://premium.example/api")
-        with patch("donater.service.time.monotonic", side_effect=(100.0, 101.0, 10901.0)):
-            self.assertTrue(service._automatic_network_due(has_pending_pairing=False))
-            self.assertFalse(service._automatic_network_due(has_pending_pairing=False))
-            self.assertTrue(service._automatic_network_due(has_pending_pairing=False))
+        self.assertFalse(hasattr(PremiumService, "_automatic_network_due"))
+        self.assertNotIn("automatic", inspect.signature(PremiumService.check_status).parameters)
+        self.assertNotIn(
+            "automatic",
+            inspect.signature(PremiumService.check_device_activation).parameters,
+        )
 
-        service._last_background_network_attempt_at = 200.0
-        with patch("donater.service.time.monotonic", return_value=201.0):
-            self.assertTrue(service._automatic_network_due(has_pending_pairing=True))
-        self.assertEqual(service._last_background_network_attempt_at, 200.0)
+    def test_request_does_not_pause_winws2_when_plain_route_works(self) -> None:
+        from donater.api import PremiumApiClient
+
+        client = PremiumApiClient(base_url="https://premium.example/api")
+        with patch(
+            "donater.api.request_with_dns_fallback",
+            return_value=self._ok_response(),
+        ), patch(
+            "winws_runtime.runtime.direct_network.run_with_direct_network_access",
+        ) as direct, patch(
+            "winws_runtime.runtime.direct_network.direct_network_pause_needed",
+            return_value=True,
+        ):
+            result = client.get_status()
+
+        self.assertTrue(result["success"])
+        direct.assert_not_called()
+        self.assertFalse(client.uses_direct_window)
+
+    def test_plain_route_failure_falls_back_to_direct_window_and_remembers_it(self) -> None:
+        from donater.api import PremiumApiClient
+
+        client = PremiumApiClient(base_url="https://premium.example/api")
+        sends = Mock(
+            side_effect=(
+                requests.exceptions.SSLError("desync broke tls"),
+                self._ok_response(),
+                self._ok_response(),
+            )
+        )
+        with patch("donater.api.request_with_dns_fallback", sends), patch(
+            "winws_runtime.runtime.direct_network.run_with_direct_network_access",
+            side_effect=lambda operation: operation(),
+        ) as direct, patch(
+            "winws_runtime.runtime.direct_network.direct_network_pause_needed",
+            return_value=True,
+        ):
+            first = client.get_status()
+            self.assertTrue(first["success"])
+            self.assertEqual(direct.call_count, 1)
+            self.assertTrue(client.uses_direct_window)
+
+            # Следующий запрос не тратит время на заведомо неудачную попытку.
+            second = client.get_status()
+
+        self.assertTrue(second["success"])
+        self.assertEqual(direct.call_count, 2)
+        self.assertEqual(sends.call_count, 3)
+
+    def test_plain_route_failure_without_running_winws2_is_not_retried(self) -> None:
+        from donater.api import PremiumApiClient
+
+        client = PremiumApiClient(base_url="https://premium.example/api")
+        sends = Mock(side_effect=requests.exceptions.ConnectTimeout("offline"))
+        with patch("donater.api.request_with_dns_fallback", sends), patch(
+            "winws_runtime.runtime.direct_network.run_with_direct_network_access",
+        ) as direct, patch(
+            "winws_runtime.runtime.direct_network.direct_network_pause_needed",
+            return_value=False,
+        ):
+            result = client.get_status()
+
+        self.assertEqual(result["error"]["code"], "connect_timeout")
+        direct.assert_not_called()
+        sends.assert_called_once()
+
+    def test_useless_direct_window_is_not_repeated_while_server_is_down(self) -> None:
+        from donater.api import PremiumApiClient
+
+        client = PremiumApiClient(base_url="https://premium.example/api")
+        sends = Mock(side_effect=requests.exceptions.ConnectTimeout("server down"))
+        with patch("donater.api.request_with_dns_fallback", sends), patch(
+            "winws_runtime.runtime.direct_network.run_with_direct_network_access",
+            side_effect=lambda operation: operation(),
+        ) as direct, patch(
+            "winws_runtime.runtime.direct_network.direct_network_pause_needed",
+            return_value=True,
+        ):
+            for _attempt in range(4):
+                result = client.get_status()
+                self.assertEqual(result["error"]["code"], "connect_timeout")
+
+        # Пауза winws2 не помогла — повторные паузы только рвали бы обход.
+        self.assertEqual(direct.call_count, 1)
+        self.assertFalse(client.uses_direct_window)
+
+    def test_direct_window_memory_is_dropped_when_direct_route_fails(self) -> None:
+        from donater.api import PremiumApiClient
+
+        client = PremiumApiClient(base_url="https://premium.example/api")
+        sends = Mock(
+            side_effect=(
+                requests.exceptions.SSLError("desync broke tls"),
+                self._ok_response(),
+                requests.exceptions.ConnectTimeout("server down"),
+                requests.exceptions.ConnectTimeout("server down"),
+            )
+        )
+        with patch("donater.api.request_with_dns_fallback", sends), patch(
+            "winws_runtime.runtime.direct_network.run_with_direct_network_access",
+            side_effect=lambda operation: operation(),
+        ) as direct, patch(
+            "winws_runtime.runtime.direct_network.direct_network_pause_needed",
+            return_value=True,
+        ):
+            self.assertTrue(client.get_status()["success"])
+            self.assertTrue(client.uses_direct_window)
+            self.assertEqual(client.get_status()["error"]["code"], "connect_timeout")
+            self.assertFalse(client.uses_direct_window)
+            self.assertEqual(client.get_status()["error"]["code"], "connect_timeout")
+
+        self.assertEqual(direct.call_count, 2)
+
+    def test_direct_pause_is_needed_only_for_running_winws2(self) -> None:
+        from winws_runtime.runtime.direct_network import direct_network_pause_needed
+
+        running = Mock()
+        running.is_running.return_value = True
+        stopped = Mock()
+        stopped.is_running.return_value = False
+        winws1 = Mock(spec=["is_running"])
+        winws1.is_running.return_value = True
+
+        for runner, expected in ((running, True), (stopped, False), (winws1, False), (None, False)):
+            with self.subTest(expected=expected), patch(
+                "winws_runtime.runners.runner_factory.get_current_runner",
+                return_value=runner,
+            ):
+                self.assertEqual(direct_network_pause_needed(), expected)
 
     def test_direct_boundary_uses_active_winws2_owner(self) -> None:
         from winws_runtime.runtime.direct_network import run_with_direct_network_access
@@ -70,6 +208,12 @@ class PremiumDirectNetworkTests(unittest.TestCase):
         client = PremiumApiClient(base_url="https://premium.example/api")
         client._session = Mock()
         with patch(
+            "donater.api.request_with_dns_fallback",
+            side_effect=requests.exceptions.SSLError("desync broke tls"),
+        ), patch(
+            "winws_runtime.runtime.direct_network.direct_network_pause_needed",
+            return_value=True,
+        ), patch(
             "winws_runtime.runtime.direct_network.run_with_direct_network_access",
             side_effect=DirectNetworkAccessError("restore failed"),
         ):

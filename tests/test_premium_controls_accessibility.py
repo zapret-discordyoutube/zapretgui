@@ -270,9 +270,6 @@ class PremiumControlsAccessibilityTests(unittest.TestCase):
             set_status_badge=lambda **_kwargs: None,
             set_activation_status=activation_status,
             set_activation_section_visible=lambda _visible: None,
-            stop_autopoll=lambda: None,
-            sync_autopoll=lambda: None,
-            apply_subscription_state=lambda _premium, _days: None,
         )
 
         self.assertEqual(activation.key_input.text(), "")
@@ -305,7 +302,6 @@ class PremiumControlsAccessibilityTests(unittest.TestCase):
             key_input=activation.key_input,
             tr=lambda _key, default: default,
             set_activation_status=lambda **_kwargs: None,
-            stop_autopoll=lambda: None,
         )
         apply_connection_test_plan(
             build_connection_test_start_plan(checker_ready=True),
@@ -328,8 +324,7 @@ class PremiumControlsAccessibilityTests(unittest.TestCase):
             tr=lambda _key, default: default,
             set_activation_status=lambda **_kwargs: None,
             update_device_info=lambda: None,
-            start_autopoll=lambda: None,
-            stop_autopoll=lambda: None,
+            notify_pairing_started=lambda: None,
         )
 
         self.assertEqual(activation.key_input.accessibleName(), "Код привязки Premium: ABCD12EF")

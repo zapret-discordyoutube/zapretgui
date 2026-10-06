@@ -102,9 +102,6 @@ def apply_status_check_success(
     set_status_badge: Callable[..., None],
     set_activation_status: Callable[..., None],
     set_activation_section_visible: Callable[[bool], None],
-    stop_autopoll: Callable[[], None],
-    sync_autopoll: Callable[[], None],
-    apply_subscription_state: Callable[[bool, int | None], None],
 ) -> tuple[bool, int]:
     refresh_btn.set_loading(False)
     update_device_info()
@@ -114,12 +111,9 @@ def apply_status_check_success(
         linked_hint=linked_hint,
         unlinked_hint=unlinked_hint,
     )
-    # Сначала store: его подписчики (включая эту страницу) перерисуются по
-    # общим правилам, а карточка ниже добавит детали именно этой проверки.
-    # Невалидный ответ сервера не означает Free — store в этом случае не трогаем.
-    if plan.valid:
-        apply_subscription_state(plan.is_premium, plan.days_remaining)
-
+    # Общий UI-store к этому моменту уже обновил владелец статуса
+    # (donater.status_runtime): страница перерисовалась по общим правилам,
+    # а карточка ниже добавляет детали именно этой проверки.
     set_status_badge(
         status=plan.badge_plan.status,
         text_key=plan.badge_plan.text_key,
@@ -131,9 +125,19 @@ def apply_status_check_success(
     )
     set_activation_section_visible(not plan.hide_activation_section)
 
-    if plan.is_linked:
+    if not plan.valid or plan.pairing_pending:
+        # Код ещё ждёт подтверждения в боте: поле и подсказку не трогаем.
+        return plan.days_plan.kind, plan.days_plan.value
+
+    had_pair_code = bool(str(key_input.text() or "").strip())
+    if plan.is_linked or had_pair_code:
+        # Код использован, истёк или отклонён — показывать его больше незачем.
         key_input.clear()
         apply_premium_pair_code_accessibility(tr_fn=tr, key_input=key_input)
+    if had_pair_code and not plan.is_linked:
+        set_activation_status(text="")
+
+    if plan.is_linked:
         if plan.is_premium:
             set_activation_status(
                 text_key="page.premium.activation.success.linked_active",
@@ -145,11 +149,6 @@ def apply_status_check_success(
                 text_default="✅ Устройство привязано. Подписка сейчас не активна.",
             )
 
-    if plan.stop_autopoll:
-        stop_autopoll()
-    elif plan.sync_autopoll:
-        sync_autopoll()
-
     return plan.days_plan.kind, plan.days_plan.value
 
 
@@ -157,11 +156,9 @@ def apply_status_check_exception(
     error,
     *,
     tr: Callable[[str, str], str],
-    sync_autopoll: Callable[[], None],
     refresh_btn,
     set_status_badge: Callable[..., None],
 ) -> None:
-    sync_autopoll()
     refresh_btn.set_loading(False)
     linked_hint, unlinked_hint = build_status_check_hints(tr=tr)
     plan = premium_page_plans.build_status_check_plan(
@@ -209,13 +206,12 @@ def apply_reset_plan_ui(
     set_status_badge: Callable[..., None],
     render_days_label: Callable[[], None],
     set_activation_section_visible: Callable[[bool], None],
-    stop_autopoll: Callable[[], None],
-    apply_subscription_state: Callable[[bool, int | None], None],
+    apply_local_reset: Callable[[], None],
 ) -> tuple[str, int]:
     plan = premium_page_plans.build_reset_plan()
     # Привязка сброшена — устройство теперь Free. Store пишем до карточки,
     # чтобы подписка страницы не перетёрла сообщение «Привязка сброшена».
-    apply_subscription_state(False, None)
+    apply_local_reset()
 
     if plan.clear_pair_input:
         key_input.clear()
@@ -237,6 +233,4 @@ def apply_reset_plan_ui(
     )
     render_days_label()
     set_activation_section_visible(plan.show_activation_section)
-    if plan.stop_autopoll:
-        stop_autopoll()
     return plan.days_plan.kind, plan.days_plan.value

@@ -23,14 +23,6 @@ from donater.ui.pairing_workflow import (
     apply_pair_code_result_ui,
     apply_pair_code_start_ui,
 )
-from donater.pairing_workflow import (
-    build_pairing_autopoll_runtime_plan,
-    can_poll_pairing_status,
-    poll_pairing_status,
-    start_pairing_status_autopoll,
-    stop_pairing_status_autopoll,
-    sync_pairing_status_autopoll,
-)
 from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.message_box_accessibility import set_message_box_button_accessibility
@@ -42,7 +34,6 @@ from donater.ui.page_lifecycle import (
     cleanup_premium_page,
     close_premium_page,
     handle_premium_ui_state_changed,
-    hide_premium_page,
     render_activation_status_label,
     run_premium_runtime_init_once,
 )
@@ -85,9 +76,11 @@ def _set_days_label_color(label, field: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class PremiumPage(BasePage):
-    """Страница управления Premium подпиской"""
+    """Страница управления Premium подпиской.
 
-    _PAIRING_AUTOPOLL_INTERVAL_MS = 2500
+    За статусом в сеть страница не ходит: когда спрашивать сервер, решает
+    donater.status_runtime, а страница просит обновление и рисует итог.
+    """
 
     def __init__(self, parent=None, *, deps):
         super().__init__(
@@ -123,17 +116,11 @@ class PremiumPage(BasePage):
             "text_default": "",
             "text_kwargs": {},
         }
-        self._pairing_status_timer = QTimer(self)
-        self._pairing_status_timer.setInterval(self._PAIRING_AUTOPOLL_INTERVAL_MS)
-        self._pairing_status_timer.timeout.connect(self._poll_pairing_status)
         self._actions_bar = None
         self._runtime_initialized = False
         self._subscription_state_store = None
         self._ui_state_unsubscribe = None
-        self._pairing_autopoll_snapshot = {
-            "has_device_token": False,
-            "has_pending_pair_code": False,
-        }
+        self._status_checks_unsubscribe = None
         self._open_bot_runtime = OneShotWorkerRuntime()
         self._open_bot_state = LatestValueWorkerState(
             self._open_bot_runtime,
@@ -221,12 +208,6 @@ class PremiumPage(BasePage):
             )
 
         self.status_badge.set_status(text, details, state.get("status") or "neutral")
-
-    def _apply_subscription_state(self, is_premium: bool, days_remaining: int | None) -> None:
-        self._premium.apply_subscription_state_to_ui_store(
-            is_premium=bool(is_premium),
-            days_remaining=days_remaining,
-        )
 
     def _render_days_label(self) -> None:
         kind = self._days_state_kind
@@ -349,13 +330,19 @@ class PremiumPage(BasePage):
 
     def on_page_activated(self) -> None:
         self._run_runtime_init_once()
+        self._subscribe_status_checks()
         activate_premium_page(
-            sync_pairing_status_autopoll_fn=self._sync_pairing_status_autopoll,
+            request_status_refresh_fn=self._premium.request_status_refresh,
         )
 
-    def on_page_hidden(self) -> None:
-        hide_premium_page(
-            stop_pairing_status_autopoll_fn=self._stop_pairing_status_autopoll,
+    def _subscribe_status_checks(self) -> None:
+        # До первого показа странице хватает общего UI-store; детали каждой
+        # проверки (код привязки, подсказки) нужны только открытой странице.
+        if self._status_checks_unsubscribe is not None:
+            return
+        self._status_checks_unsubscribe = self._premium.subscribe_status_checks(
+            self._on_status_complete,
+            self._on_status_error,
         )
 
     def closeEvent(self, event):
@@ -363,18 +350,18 @@ class PremiumPage(BasePage):
             set_cleanup_in_progress_fn=lambda value: setattr(self, "_cleanup_in_progress", value),
             build_close_plan_fn=premium_page_plans.build_close_plan,
             premium_action_runtime=self._premium_action_runtime,
-            stop_pairing_status_autopoll_fn=self._stop_pairing_status_autopoll,
             event=event,
         )
 
     def cleanup(self) -> None:
         cleanup_premium_page(
             set_cleanup_in_progress_fn=lambda value: setattr(self, "_cleanup_in_progress", value),
-            stop_pairing_status_autopoll_fn=self._stop_pairing_status_autopoll,
             premium_action_runtime=self._premium_action_runtime,
             unsubscribe_ui_state_fn=self._ui_state_unsubscribe,
+            unsubscribe_status_checks_fn=self._status_checks_unsubscribe,
         )
         self._ui_state_unsubscribe = None
+        self._status_checks_unsubscribe = None
         self._open_bot_state_obj().reset()
         self._open_bot_runtime.stop(
             blocking=False,
@@ -401,12 +388,6 @@ class PremiumPage(BasePage):
     def _read_initial_device_info_snapshot(self):
         return self._premium.read_device_info_snapshot(current_time=int(time.time()))
 
-    def _set_pairing_autopoll_snapshot_from_device_info(self, snapshot) -> None:
-        self._pairing_autopoll_snapshot = {
-            "has_device_token": bool((snapshot or {}).get("device_token")),
-            "has_pending_pair_code": bool((snapshot or {}).get("pair_code")),
-        }
-
     def _is_premium_action_running(self) -> bool:
         return _premium_action_runtime_running(self)
 
@@ -426,7 +407,6 @@ class PremiumPage(BasePage):
     def _on_premium_init_complete(self, snapshot) -> None:
         if self._cleanup_in_progress or not snapshot:
             return
-        self._set_pairing_autopoll_snapshot_from_device_info(snapshot)
         apply_device_info_snapshot_labels(
             snapshot=snapshot,
             tr=self._tr,
@@ -434,7 +414,6 @@ class PremiumPage(BasePage):
             saved_key_label=self.saved_key_label,
             last_check_label=self.last_check_label,
         )
-        self._sync_pairing_status_autopoll()
         if self.__dict__.get("_pending_premium_action"):
             self._schedule_pending_premium_action_start()
 
@@ -475,8 +454,6 @@ class PremiumPage(BasePage):
             return
         if action == "pair_code":
             self._create_pair_code()
-        elif action == "check_status":
-            self._check_status()
         elif action == "test_connection":
             self._test_connection()
 
@@ -578,70 +555,6 @@ class PremiumPage(BasePage):
         if hasattr(self, "key_input_container"):
             self.key_input_container.setVisible(visible)
 
-    def _can_poll_pairing_status(self) -> bool:
-        return can_poll_pairing_status(
-            premium_feature=self._premium,
-            page_visible=self.isVisible(),
-            activation_in_progress=self._activation_in_progress,
-            connection_test_in_progress=self._connection_test_in_progress,
-            worker_running=self._is_premium_action_running(),
-            current_time=int(time.time()),
-            pairing_snapshot=self._pairing_autopoll_snapshot,
-        )
-
-    def _start_pairing_status_autopoll(self) -> None:
-        start_pairing_status_autopoll(
-            self._pairing_status_timer,
-            premium_feature=self._premium,
-            page_visible=self.isVisible(),
-            activation_in_progress=self._activation_in_progress,
-            connection_test_in_progress=self._connection_test_in_progress,
-            worker_running=self._is_premium_action_running(),
-            current_time=int(time.time()),
-            pairing_snapshot=self._pairing_autopoll_snapshot,
-        )
-
-    def _stop_pairing_status_autopoll(self) -> None:
-        stop_pairing_status_autopoll(self._pairing_status_timer)
-
-    def _sync_pairing_status_autopoll(self) -> None:
-        was_active = self._pairing_status_timer.isActive()
-        sync_pairing_status_autopoll(
-            self._pairing_status_timer,
-            premium_feature=self._premium,
-            page_visible=self.isVisible(),
-            activation_in_progress=self._activation_in_progress,
-            connection_test_in_progress=self._connection_test_in_progress,
-            worker_running=self._is_premium_action_running(),
-            current_time=int(time.time()),
-            pairing_snapshot=self._pairing_autopoll_snapshot,
-        )
-        if (
-            not was_active
-            and self._pairing_status_timer.isActive()
-            and self._can_poll_pairing_status()
-        ):
-            # После возврата из Telegram первый запрос не должен ждать полного
-            # интервала. Сеть всё равно вызывается только внутри worker-а.
-            QTimer.singleShot(0, self._poll_pairing_status)
-
-    def _poll_pairing_status(self) -> None:
-        plan = build_pairing_autopoll_runtime_plan(
-            premium_feature=self._premium,
-            page_visible=self.isVisible(),
-            activation_in_progress=self._activation_in_progress,
-            connection_test_in_progress=self._connection_test_in_progress,
-            worker_running=self._is_premium_action_running(),
-            current_time=int(time.time()),
-            pairing_snapshot=self._pairing_autopoll_snapshot,
-        )
-        poll_pairing_status(
-            can_poll=plan.can_poll,
-            keep_timer=plan.start_timer,
-            stop_autopoll=self._stop_pairing_status_autopoll,
-            check_status=lambda: self._check_status(automatic=True),
-        )
-
     def _update_device_info(self):
         self._request_device_info_load()
 
@@ -684,7 +597,6 @@ class PremiumPage(BasePage):
             return
         if not snapshot:
             return
-        self._set_pairing_autopoll_snapshot_from_device_info(snapshot)
         apply_device_info_snapshot_labels(
             snapshot=snapshot,
             tr=self._tr,
@@ -692,7 +604,6 @@ class PremiumPage(BasePage):
             saved_key_label=self.saved_key_label,
             last_check_label=self.last_check_label,
         )
-        self._sync_pairing_status_autopoll()
 
     def _on_device_info_failed(self, request_id: int, error: str) -> None:
         if not self._device_info_runtime.is_current(
@@ -898,7 +809,6 @@ class PremiumPage(BasePage):
             key_input=self.key_input,
             tr=self._tr,
             set_activation_status=self._set_activation_status,
-            stop_autopoll=self._stop_pairing_status_autopoll,
         )
         self._activation_in_progress = plan.activation_in_progress
 
@@ -918,10 +828,15 @@ class PremiumPage(BasePage):
             tr=self._tr,
             set_activation_status=self._set_activation_status,
             update_device_info=self._update_device_info,
-            start_autopoll=self._start_pairing_status_autopoll,
-            stop_autopoll=self._stop_pairing_status_autopoll,
+            # Код создан — владелец статуса сам дождётся подтверждения бота,
+            # даже если пользователь уйдёт с этой страницы.
+            notify_pairing_started=lambda: self._premium.request_status_refresh(force=True),
         )
         self._activation_in_progress = plan.activation_in_progress
+        if plan.pairing_started:
+            # Пока код создавался, итог фоновой проверки мог спрятать раздел
+            # привязки (устройство уже привязано, подписка не активна).
+            self._set_activation_section_visible(True)
 
     def _on_activation_error(self, error):
         if self._cleanup_in_progress:
@@ -933,40 +848,23 @@ class PremiumPage(BasePage):
             tr=self._tr,
             set_activation_status=self._set_activation_status,
             update_device_info=self._update_device_info,
-            stop_autopoll=self._stop_pairing_status_autopoll,
         )
         self._activation_in_progress = plan.activation_in_progress
 
     # ── status check ─────────────────────────────────────────────────────────
 
-    def _check_status(self, *, automatic: bool = False):
+    def _check_status(self):
+        """Кнопка «Обновить статус»: просим владельца статуса спросить сервер.
+
+        Итог придёт в _on_status_complete / _on_status_error — туда же, куда
+        приходят его собственные фоновые проверки.
+        """
         self._cleanup_in_progress = False
-        gate_plan = premium_page_plans.build_worker_gate_plan(
-            thread_running=self._is_premium_action_running(),
+        apply_status_check_start_ui(
+            refresh_btn=self.refresh_btn,
+            set_status_badge=self._set_status_badge,
         )
-        if not gate_plan.can_start:
-            self._remember_pending_premium_action("check_status")
-            return
-        if not self._request_checker_init(pending_action="check_status"):
-            self._set_status_badge(
-                status="neutral",
-                text_key="page.premium.status.checking.title",
-                text_default="Проверка...",
-                details="",
-            )
-            return
-
-        if not automatic:
-            apply_status_check_start_ui(
-                refresh_btn=self.refresh_btn,
-                set_status_badge=self._set_status_badge,
-            )
-
-        self._start_worker_thread(
-            lambda: self._premium.check_device_activation(automatic=automatic),
-            self._on_status_complete,
-            self._on_status_error,
-        )
+        self._premium.request_status_refresh(force=True)
 
     def _on_status_complete(self, result):
         if self._cleanup_in_progress:
@@ -981,16 +879,12 @@ class PremiumPage(BasePage):
                 set_status_badge=self._set_status_badge,
                 set_activation_status=self._set_activation_status,
                 set_activation_section_visible=self._set_activation_section_visible,
-                stop_autopoll=self._stop_pairing_status_autopoll,
-                sync_autopoll=self._sync_pairing_status_autopoll,
-                apply_subscription_state=self._apply_subscription_state,
             )
             self._days_state_kind = days_kind
             self._days_state_value = days_value
             self._render_days_label()
 
         except Exception as e:
-            self._sync_pairing_status_autopoll()
             self._set_status_badge(
                 status="expired",
                 text_key="page.premium.status.error.title",
@@ -1005,7 +899,6 @@ class PremiumPage(BasePage):
         apply_status_check_exception(
             error,
             tr=self._tr,
-            sync_autopoll=self._sync_pairing_status_autopoll,
             refresh_btn=self.refresh_btn,
             set_status_badge=self._set_status_badge,
         )
@@ -1174,8 +1067,7 @@ class PremiumPage(BasePage):
             set_status_badge=self._set_status_badge,
             render_days_label=self._render_days_label,
             set_activation_section_visible=self._set_activation_section_visible,
-            stop_autopoll=self._stop_pairing_status_autopoll,
-            apply_subscription_state=self._apply_subscription_state,
+            apply_local_reset=self._premium.apply_local_reset,
         )
         self._render_days_label()
 
@@ -1184,6 +1076,9 @@ class PremiumPage(BasePage):
             return
         if self._reset_storage_state_obj().has_pending():
             return
+        # Сервер отвязку не подтвердил, но локальный доступ уже закрыт:
+        # статус должен это показать, а не остаться прежним до перезапуска.
+        self._premium.request_status_refresh(force=True)
         if InfoBar:
             InfoBar.warning(
                 title=self._tr("common.error.title", "Ошибка"),

@@ -17,3 +17,7 @@ class ActivationStatus:
     is_linked: Optional[bool] = None
     subscription_level: str = "–"
     source: str = "api"
+    # Свежий код привязки ещё ждёт подтверждения в Telegram-боте.
+    pairing_pending: bool = False
+    # Сервер в этот раз не ответил из-за сети (а не отказал по существу).
+    network_failed: bool = False

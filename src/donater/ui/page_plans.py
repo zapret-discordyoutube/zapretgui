@@ -49,9 +49,9 @@ class PremiumStatusCheckPlan:
     is_premium: bool
     days_remaining: int | None
     is_linked: bool
+    # Свежий код ещё ждёт подтверждения в боте — его нельзя прятать и стирать.
+    pairing_pending: bool
     hide_activation_section: bool
-    stop_autopoll: bool
-    sync_autopoll: bool
     badge_plan: PremiumStatusBadgePlan
     days_plan: PremiumDaysPlan
 
@@ -59,7 +59,6 @@ class PremiumStatusCheckPlan:
 @dataclass(slots=True)
 class PremiumPairCodeStartPlan:
     activation_in_progress: bool
-    stop_autopoll: bool
     clear_key_input: bool
     activate_enabled: bool
     activate_text_key: str
@@ -78,8 +77,8 @@ class PremiumPairCodeResultPlan:
     copy_to_clipboard: bool
     activation_status_plan: PremiumActivationStatusPlan
     update_device_info: bool
-    start_autopoll: bool
-    stop_autopoll: bool
+    # Код создан: владелец статуса должен начать ждать подтверждение бота.
+    pairing_started: bool
 
 
 @dataclass(slots=True)
@@ -98,7 +97,6 @@ class PremiumResetPlan:
     badge_plan: PremiumStatusBadgePlan
     days_plan: PremiumDaysPlan
     show_activation_section: bool
-    stop_autopoll: bool
 
 
 @dataclass(slots=True)
@@ -113,26 +111,12 @@ class PremiumDeviceInfoPlan:
 
 
 @dataclass(slots=True)
-class PremiumAutopollPlan:
-    can_poll: bool
-    start_timer: bool
-    stop_timer: bool
-
-
-@dataclass(slots=True)
 class PremiumWorkerGatePlan:
     can_start: bool
 
 
 @dataclass(slots=True)
-class PremiumPairingPollPlan:
-    should_stop_timer: bool
-    should_check_status: bool
-
-
-@dataclass(slots=True)
 class PremiumClosePlan:
-    stop_autopoll: bool
     should_quit_thread: bool
     wait_timeout_ms: int
 
@@ -235,9 +219,8 @@ def build_status_check_plan(result, *, linked_hint: str, unlinked_hint: str, err
             is_premium=False,
             days_remaining=None,
             is_linked=False,
+            pairing_pending=False,
             hide_activation_section=False,
-            stop_autopoll=False,
-            sync_autopoll=False,
             badge_plan=PremiumStatusBadgePlan(
                 status="expired",
                 text_key="page.premium.status.error.title",
@@ -256,9 +239,8 @@ def build_status_check_plan(result, *, linked_hint: str, unlinked_hint: str, err
             is_premium=False,
             days_remaining=None,
             is_linked=False,
+            pairing_pending=False,
             hide_activation_section=False,
-            stop_autopoll=False,
-            sync_autopoll=False,
             badge_plan=PremiumStatusBadgePlan(
                 status="expired",
                 text_key="page.premium.status.error.title",
@@ -273,6 +255,7 @@ def build_status_check_plan(result, *, linked_hint: str, unlinked_hint: str, err
 
     is_premium = bool(result.get("is_premium", result.get("activated")))
     is_linked = bool(result.get("found"))
+    pairing_pending = bool(result.get("pairing_pending"))
     display = build_premium_display(
         is_premium=is_premium,
         days_remaining=result.get("days_remaining") if is_premium else None,
@@ -288,9 +271,8 @@ def build_status_check_plan(result, *, linked_hint: str, unlinked_hint: str, err
             is_premium=True,
             days_remaining=display.days,
             is_linked=True,
+            pairing_pending=False,
             hide_activation_section=True,
-            stop_autopoll=True,
-            sync_autopoll=False,
             badge_plan=badge_plan,
             days_plan=days_plan,
         )
@@ -301,9 +283,8 @@ def build_status_check_plan(result, *, linked_hint: str, unlinked_hint: str, err
         is_premium=False,
         days_remaining=None,
         is_linked=is_linked,
-        hide_activation_section=bool(is_linked),
-        stop_autopoll=bool(is_linked),
-        sync_autopoll=not bool(is_linked),
+        pairing_pending=pairing_pending,
+        hide_activation_section=bool(is_linked) and not pairing_pending,
         badge_plan=badge_plan,
         days_plan=days_plan,
     )
@@ -311,7 +292,6 @@ def build_status_check_plan(result, *, linked_hint: str, unlinked_hint: str, err
 def build_pair_code_start_plan() -> PremiumPairCodeStartPlan:
     return PremiumPairCodeStartPlan(
         activation_in_progress=True,
-        stop_autopoll=True,
         clear_key_input=True,
         activate_enabled=False,
         activate_text_key="page.premium.button.create_code.loading",
@@ -342,8 +322,7 @@ def build_pair_code_result_plan(result) -> PremiumPairCodeResultPlan:
                 text_default="✅ Код создан примерно на 10 минут и скопирован. Отправьте его боту — приложение само обновит статус.",
             ),
             update_device_info=True,
-            start_autopoll=True,
-            stop_autopoll=False,
+            pairing_started=True,
         )
 
     return PremiumPairCodeResultPlan(
@@ -358,8 +337,7 @@ def build_pair_code_result_plan(result) -> PremiumPairCodeResultPlan:
             text=f"❌ {message}",
         ),
         update_device_info=True,
-        start_autopoll=False,
-        stop_autopoll=True,
+        pairing_started=False,
     )
 
 def build_pair_code_error_plan(error: str) -> PremiumPairCodeResultPlan:
@@ -377,8 +355,7 @@ def build_pair_code_error_plan(error: str) -> PremiumPairCodeResultPlan:
             text_kwargs={"error": error},
         ),
         update_device_info=True,
-        start_autopoll=False,
-        stop_autopoll=True,
+        pairing_started=False,
     )
 
 def build_connection_test_start_plan(*, checker_ready: bool) -> PremiumConnectionTestPlan:
@@ -453,7 +430,6 @@ def build_reset_plan() -> PremiumResetPlan:
         ),
         days_plan=PremiumDaysPlan(kind="none", value=0),
         show_activation_section=True,
-        stop_autopoll=True,
     )
 
 def build_device_info_plan(
@@ -493,50 +469,11 @@ def build_device_info_plan(
         last_check_kwargs={},
     )
 
-def build_pairing_autopoll_plan(
-    *,
-    checker_ready: bool,
-    storage_ready: bool,
-    page_visible: bool,
-    activation_in_progress: bool,
-    connection_test_in_progress: bool,
-    worker_running: bool,
-    has_device_token: bool,
-    has_pending_pair_code: bool,
-    ) -> PremiumAutopollPlan:
-    timer_eligible = (
-        checker_ready
-        and storage_ready
-        and page_visible
-        and not has_device_token
-        and has_pending_pair_code
-    )
-    can_poll = (
-        timer_eligible
-        and not activation_in_progress
-        and not connection_test_in_progress
-        and not worker_running
-    )
-    return PremiumAutopollPlan(
-        can_poll=can_poll,
-        # Занятый worker — временное состояние, а не причина терять таймер.
-        # Иначе первый же запрос останавливал опрос до ручного обновления.
-        start_timer=timer_eligible,
-        stop_timer=not timer_eligible,
-    )
-
 def build_worker_gate_plan(*, thread_running: bool) -> PremiumWorkerGatePlan:
     return PremiumWorkerGatePlan(can_start=not bool(thread_running))
 
-def build_pairing_poll_plan(*, can_poll: bool, keep_timer: bool) -> PremiumPairingPollPlan:
-    return PremiumPairingPollPlan(
-        should_stop_timer=not bool(keep_timer),
-        should_check_status=bool(can_poll),
-    )
-
 def build_close_plan(*, thread_running: bool) -> PremiumClosePlan:
     return PremiumClosePlan(
-        stop_autopoll=True,
         should_quit_thread=bool(thread_running),
         wait_timeout_ms=2000,
     )

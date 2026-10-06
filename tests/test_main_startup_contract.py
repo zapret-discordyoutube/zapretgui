@@ -1465,7 +1465,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         ui_state_store = object()
         ui_actions = object()
         commands = SimpleNamespace(
-            create_subscription_manager=Mock(return_value="manager"),
+            create_status_runtime=Mock(return_value="runtime"),
         )
 
         def ensure_ui_actions(feature):
@@ -1488,7 +1488,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             feature.prepare_subscription()
 
         self.assertEqual(created_actions, [(deps, ui_state_store)])
-        commands.create_subscription_manager.assert_called_once_with(
+        commands.create_status_runtime.assert_called_once_with(
             thread_parent="thread-parent",
             ui_actions=ui_actions,
         )

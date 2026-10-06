@@ -121,12 +121,10 @@ def run_premium_runtime_init_once(
     render_server_status_fn()
 
 
-def activate_premium_page(*, sync_pairing_status_autopoll_fn) -> None:
-    sync_pairing_status_autopoll_fn()
-
-
-def hide_premium_page(*, stop_pairing_status_autopoll_fn) -> None:
-    stop_pairing_status_autopoll_fn()
+def activate_premium_page(*, request_status_refresh_fn) -> None:
+    # Открыли страницу — заодно сверяемся с сервером (не чаще раза в минуту,
+    # частоту ограничивает владелец статуса).
+    request_status_refresh_fn()
 
 
 def close_premium_page(
@@ -134,15 +132,12 @@ def close_premium_page(
     set_cleanup_in_progress_fn,
     build_close_plan_fn,
     premium_action_runtime,
-    stop_pairing_status_autopoll_fn,
     event,
 ) -> None:
     set_cleanup_in_progress_fn(True)
     plan = build_close_plan_fn(
         thread_running=premium_action_runtime.is_running(),
     )
-    if plan.stop_autopoll:
-        stop_pairing_status_autopoll_fn()
     if plan.should_quit_thread:
         premium_action_runtime.stop(
             blocking=False,
@@ -155,17 +150,17 @@ def close_premium_page(
 def cleanup_premium_page(
     *,
     set_cleanup_in_progress_fn,
-    stop_pairing_status_autopoll_fn,
     premium_action_runtime,
     unsubscribe_ui_state_fn,
+    unsubscribe_status_checks_fn,
 ) -> None:
     set_cleanup_in_progress_fn(True)
-    if callable(unsubscribe_ui_state_fn):
-        try:
-            unsubscribe_ui_state_fn()
-        except Exception:
-            pass
-    stop_pairing_status_autopoll_fn()
+    for unsubscribe_fn in (unsubscribe_ui_state_fn, unsubscribe_status_checks_fn):
+        if callable(unsubscribe_fn):
+            try:
+                unsubscribe_fn()
+            except Exception:
+                pass
     premium_action_runtime.stop(
         blocking=False,
         wait_timeout_ms=1000,

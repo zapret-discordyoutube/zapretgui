@@ -104,6 +104,10 @@ def check_removed_legacy_files() -> list[Problem]:
         "src/ui/window_state_sync.py",
         "src/ui/state/main_window_state.py",
         "src/ui/state/app_runtime_state.py",
+        # Проверкой Premium-статуса владеет donater/status_runtime.py.
+        "src/donater/subscription_manager.py",
+        "src/donater/subscription_worker.py",
+        "src/donater/pairing_workflow.py",
     )
     problems: list[Problem] = []
     for rel in removed_files:
@@ -264,7 +268,7 @@ def check_window_state_sync_is_window_only() -> list[Problem]:
     return _scan_lines(
         [path],
         re.compile(
-            r"\b(?:app_runtime\.features|features\.|get_premium_state|subscription_manager|"
+            r"\b(?:app_runtime\.features|features\.|get_premium_state|subscription_manager|status_runtime|"
             r"load_premium_effects|init_holiday_effects_from_settings|load_background_preset|"
             r"HolidayEffectsManager|apply_aero_effect|apply_window_background)\b"
         ),
@@ -303,7 +307,7 @@ def check_main_window_not_business_container(files: list[Path]) -> list[Problem]
             r"\b(?:window|self|app)\."
             r"(?:app_context|app_runtime_state|launch_controller|"
             r"launch_runtime|launch_runtime_api|process_monitor_manager|"
-            r"subscription_manager|tray_manager)\b"
+            r"subscription_manager|status_runtime|tray_manager)\b"
         ),
         "MainWindow/UI не должны хранить бизнес-сервис или старое состояние",
     )
@@ -815,6 +819,11 @@ def check_ui_state_store_writer_ownership(files: list[Path]) -> list[Problem]:
             {"src/donater/subscription_ui.py"},
         ),
         (
+            re.compile(r"\bcheck_device_activation\s*\("),
+            "Premium-статус проверяет только donater/status_runtime.py: остальные просят обновление через request_status_refresh",
+            {"src/donater/commands.py", "src/donater/service.py"},
+        ),
+        (
             re.compile(r"\.set_current_strategy_summary\s*\("),
             "current strategy summary должен писать только presets/display_state.py",
             {"src/presets/display_state.py"},
@@ -884,8 +893,8 @@ def check_premium_public_boundary() -> list[Problem]:
         return [Problem(path, 1, "donater/public.py не найден")]
     return _scan_lines(
         [path],
-        re.compile(r"\b(?:PremiumCheckerBundle|get_premium_checker|resolve_checker_bundle|SubscriptionManager|storage)\b"),
-        "donater.public не должен экспортировать внутренний Premium checker/storage/manager",
+        re.compile(r"\b(?:PremiumCheckerBundle|get_premium_checker|resolve_checker_bundle|PremiumStatusRuntime|storage)\b"),
+        "donater.public не должен экспортировать внутренний Premium checker/storage/runtime",
     )
 
 

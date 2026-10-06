@@ -9,68 +9,82 @@ from unittest.mock import Mock, patch
 from app.feature_facades.premium import PremiumFeature
 import donater.commands as premium_commands
 import donater.open_bot_worker as open_bot_worker
-import donater.subscription_manager as subscription_manager
-import donater.subscription_worker as subscription_worker
-import donater.ui.page_plans as premium_page_plans
+import donater.status_runtime as status_runtime
+import donater.status_worker as status_worker
 from donater.ui.page import PremiumPage
 
 
 class PremiumWorkerArchitectureTests(unittest.TestCase):
-    def test_pairing_timer_survives_temporarily_busy_worker(self) -> None:
-        plan = premium_page_plans.build_pairing_autopoll_plan(
-            checker_ready=True,
-            storage_ready=True,
-            page_visible=True,
-            activation_in_progress=False,
-            connection_test_in_progress=False,
-            worker_running=True,
-            has_device_token=False,
-            has_pending_pair_code=True,
-        )
-
-        self.assertFalse(plan.can_poll)
-        self.assertTrue(plan.start_timer)
-        self.assertFalse(plan.stop_timer)
-
-    def test_automatic_status_check_is_dispatched_to_worker(self) -> None:
+    def test_manual_status_check_is_delegated_to_status_owner(self) -> None:
         page = PremiumPage.__new__(PremiumPage)
         page._cleanup_in_progress = False
-        page._premium_action_runtime = SimpleNamespace(is_running=Mock(return_value=False))
+        # Идущее действие страницы (создание кода) не должно задерживать
+        # проверку: у владельца статуса свой фоновый поток.
+        page._premium_action_runtime = SimpleNamespace(is_running=Mock(return_value=True))
         page._pending_premium_action = ""
-        page._pending_premium_action_start_scheduled = False
-        page._request_checker_init = Mock(return_value=True)
-        page._premium = SimpleNamespace(check_device_activation=Mock(return_value={"activated": False}))
+        page._premium = SimpleNamespace(request_status_refresh=Mock())
         page._start_worker_thread = Mock()
         page.refresh_btn = Mock()
         page._set_status_badge = Mock()
 
         with patch("donater.ui.page.apply_status_check_start_ui") as start_ui:
-            PremiumPage._check_status(page, automatic=True)
+            PremiumPage._check_status(page)
 
-        start_ui.assert_not_called()
-        page._premium.check_device_activation.assert_not_called()
-        task = page._start_worker_thread.call_args.args[0]
-        task()
-        page._premium.check_device_activation.assert_called_once_with(automatic=True)
+        start_ui.assert_called_once()
+        page._premium.request_status_refresh.assert_called_once_with(force=True)
+        page._start_worker_thread.assert_not_called()
+        self.assertEqual(page._pending_premium_action, "")
 
-    def test_fresh_device_snapshot_restarts_pairing_autopoll(self) -> None:
+    def test_page_has_no_own_status_network_path_or_polling(self) -> None:
+        page_source = inspect.getsource(PremiumPage)
+        feature_source = inspect.getsource(PremiumFeature)
+
+        self.assertNotIn("check_device_activation", page_source)
+        self.assertNotIn("autopoll", page_source)
+        self.assertNotIn("_pairing_status_timer", page_source)
+        self.assertNotIn("on_page_hidden", page_source)
+        self.assertNotIn("check_device_activation", feature_source)
+        self.assertIsNone(importlib.util.find_spec("donater.pairing_workflow"))
+        self.assertIsNone(importlib.util.find_spec("donater.subscription_manager"))
+        self.assertIsNone(importlib.util.find_spec("donater.subscription_worker"))
+
+    def test_created_pair_code_wakes_status_owner(self) -> None:
         page = PremiumPage.__new__(PremiumPage)
         page._cleanup_in_progress = False
-        page._device_info_runtime = SimpleNamespace(is_current=Mock(return_value=True))
-        page._device_info_state = SimpleNamespace(has_pending=Mock(return_value=False))
-        page._set_pairing_autopoll_snapshot_from_device_info = Mock()
-        page._sync_pairing_status_autopoll = Mock()
-        page._tr = Mock(side_effect=lambda _key, default, **kwargs: default.format(**kwargs))
-        page.device_id_label = Mock()
-        page.saved_key_label = Mock()
-        page.last_check_label = Mock()
-        snapshot = {"device_id": "device-1", "pair_code": "7YRFE33E"}
+        page._activation_in_progress = True
+        page._premium = SimpleNamespace(request_status_refresh=Mock())
+        page.activate_btn = Mock()
+        page.key_input = Mock()
+        page._tr = Mock(side_effect=lambda _key, default, **kwargs: default)
+        page._set_activation_status = Mock()
+        page._update_device_info = Mock()
+        page._set_activation_section_visible = Mock()
 
-        with patch("donater.ui.page.apply_device_info_snapshot_labels"):
-            PremiumPage._on_device_info_loaded(page, 4, snapshot)
+        with patch("donater.ui.pairing_workflow.QApplication"), patch(
+            "donater.ui.pairing_workflow.apply_premium_button_accessibility"
+        ), patch("donater.ui.pairing_workflow.apply_premium_pair_code_accessibility"):
+            PremiumPage._on_pair_code_created(page, (True, "ok", "ABCD12EF"))
+            page._premium.request_status_refresh.assert_called_once_with(force=True)
+            # Раздел с кодом виден, даже если фоновая проверка успела его скрыть.
+            page._set_activation_section_visible.assert_called_once_with(True)
 
-        page._set_pairing_autopoll_snapshot_from_device_info.assert_called_once_with(snapshot)
-        page._sync_pairing_status_autopoll.assert_called_once_with()
+            page._premium.request_status_refresh.reset_mock()
+            page._set_activation_section_visible.reset_mock()
+            PremiumPage._on_pair_code_created(page, (False, "нет сети", None))
+            page._premium.request_status_refresh.assert_not_called()
+            page._set_activation_section_visible.assert_not_called()
+
+    def test_failed_reset_asks_status_owner_to_show_closed_access(self) -> None:
+        page = PremiumPage.__new__(PremiumPage)
+        page._cleanup_in_progress = False
+        page._reset_storage_runtime = SimpleNamespace(is_current=Mock(return_value=True))
+        page._reset_storage_state = SimpleNamespace(has_pending=Mock(return_value=False))
+        page._premium = SimpleNamespace(request_status_refresh=Mock())
+
+        with patch("donater.ui.page.InfoBar", None):
+            PremiumPage._on_reset_storage_failed(page, 1, "сервер не подтвердил")
+
+        page._premium.request_status_refresh.assert_called_once_with(force=True)
 
     def test_open_bot_worker_receives_feature_action_not_feature_object(self) -> None:
         feature_source = inspect.getsource(PremiumFeature.create_open_extend_bot_worker)
@@ -84,51 +98,33 @@ class PremiumWorkerArchitectureTests(unittest.TestCase):
         self.assertNotIn("import donater.commands", worker_source)
         self.assertIn("open_extend_bot", inspect.getsource(premium_commands.open_extend_bot))
 
-    def test_subscription_worker_receives_command_actions_from_manager(self) -> None:
-        command_source = inspect.getsource(premium_commands.create_subscription_manager)
-        manager_init_source = inspect.getsource(subscription_manager.SubscriptionManager.__init__)
-        manager_start_source = inspect.getsource(subscription_manager.SubscriptionManager.initialize_async)
-        worker_source = inspect.getsource(subscription_worker.SubscriptionInitWorker)
+    def test_status_worker_receives_command_actions_from_runtime(self) -> None:
+        command_source = inspect.getsource(premium_commands.create_status_runtime)
+        runtime_init_source = inspect.getsource(status_runtime.PremiumStatusRuntime.__init__)
+        runtime_start_source = inspect.getsource(status_runtime.PremiumStatusRuntime._start_check)
+        worker_source = inspect.getsource(status_worker.PremiumStatusCheckWorker)
 
         self.assertIn("get_premium_checker=get_premium_checker", command_source)
         self.assertIn("check_device_activation=check_device_activation", command_source)
-        self.assertIn("_get_premium_checker", manager_init_source)
-        self.assertIn("_check_device_activation", manager_init_source)
-        self.assertIn("get_premium_checker=self._get_premium_checker", manager_start_source)
-        self.assertIn("check_device_activation=self._check_device_activation", manager_start_source)
+        self.assertIn("_get_premium_checker", runtime_init_source)
+        self.assertIn("_check_device_activation", runtime_init_source)
+        self.assertIn("get_premium_checker=self._get_premium_checker", runtime_start_source)
+        self.assertIn("check_device_activation=self._check_device_activation", runtime_start_source)
         self.assertIn("_get_premium_checker", worker_source)
         self.assertIn("_check_device_activation", worker_source)
         self.assertNotIn("import donater.commands", worker_source)
 
-    def test_subscription_manager_uses_shared_worker_runtime(self) -> None:
-        manager_init_source = inspect.getsource(subscription_manager.SubscriptionManager.__init__)
-        manager_start_source = inspect.getsource(subscription_manager.SubscriptionManager.initialize_async)
-        manager_cleanup_source = inspect.getsource(subscription_manager.SubscriptionManager.cleanup)
+    def test_status_runtime_uses_shared_worker_runtime(self) -> None:
+        runtime_init_source = inspect.getsource(status_runtime.PremiumStatusRuntime.__init__)
+        runtime_start_source = inspect.getsource(status_runtime.PremiumStatusRuntime._start_check)
+        runtime_cleanup_source = inspect.getsource(status_runtime.PremiumStatusRuntime.cleanup)
 
-        self.assertIn("_subscription_runtime = OneShotWorkerRuntime()", manager_init_source)
-        self.assertIn("_subscription_runtime.start_qobject_worker", manager_start_source)
-        self.assertIn("bind_worker=", manager_start_source)
-        self.assertIn("_subscription_runtime.stop", manager_cleanup_source)
-        self.assertNotIn("QThread(", manager_start_source)
-        self.assertNotIn("moveToThread", manager_start_source)
-        self.assertNotIn("self._subscription_thread.start()", manager_start_source)
-
-    def test_subscription_manager_cleanup_does_not_wait_for_worker(self) -> None:
-        manager = subscription_manager.SubscriptionManager.__new__(subscription_manager.SubscriptionManager)
-        manager._cleanup_in_progress = False
-        manager._subscription_runtime = SimpleNamespace(stop=Mock(), cancel=Mock())
-        manager._subscription_worker = object()
-
-        manager.cleanup()
-
-        self.assertTrue(manager._cleanup_in_progress)
-        manager._subscription_runtime.stop.assert_called_once_with(
-            blocking=False,
-            log_fn=subscription_manager.log,
-            warning_prefix="Поток подписки",
-        )
-        manager._subscription_runtime.cancel.assert_called_once_with()
-        self.assertIsNone(manager._subscription_worker)
+        self.assertIn("_worker_runtime = OneShotWorkerRuntime()", runtime_init_source)
+        self.assertIn("_worker_runtime.start_qobject_worker", runtime_start_source)
+        self.assertIn("bind_worker=", runtime_start_source)
+        self.assertIn("_worker_runtime.stop", runtime_cleanup_source)
+        self.assertNotIn("QThread(", runtime_start_source)
+        self.assertNotIn("moveToThread", runtime_start_source)
 
     def test_premium_page_action_tasks_use_shared_worker_runtime(self) -> None:
         page_init_source = inspect.getsource(PremiumPage.__init__)
@@ -166,9 +162,9 @@ class PremiumWorkerArchitectureTests(unittest.TestCase):
 
         page = PremiumPage.__new__(PremiumPage)
         page._cleanup_in_progress = False
-        page._pending_premium_action = "check_status"
+        page._pending_premium_action = "test_connection"
         page._pending_premium_action_start_scheduled = False
-        page._check_status = Mock()
+        page._test_connection = Mock()
         single_shot = Mock(side_effect=lambda _delay, _callback: None)
 
         with patch.object(premium_page, "QTimer", SimpleNamespace(singleShot=single_shot), create=True):
@@ -176,25 +172,12 @@ class PremiumWorkerArchitectureTests(unittest.TestCase):
 
         single_shot.assert_called_once()
         self.assertEqual(single_shot.call_args.args[0], 0)
-        page._check_status.assert_not_called()
+        page._test_connection.assert_not_called()
 
         single_shot.call_args.args[1]()
 
-        page._check_status.assert_called_once_with()
+        page._test_connection.assert_called_once_with()
         self.assertEqual(page._pending_premium_action, "")
-
-    def test_status_check_is_remembered_while_premium_action_runtime_runs(self) -> None:
-        page = PremiumPage.__new__(PremiumPage)
-        page._premium_action_runtime = SimpleNamespace(is_running=Mock(return_value=True))
-        page._pending_premium_action = ""
-        page._pending_premium_action_start_scheduled = False
-        page._premium = SimpleNamespace(is_checker_ready=Mock(return_value=True))
-        page._set_status_badge = Mock()
-
-        PremiumPage._check_status(page)
-
-        self.assertEqual(page._pending_premium_action, "check_status")
-        page._set_status_badge.assert_not_called()
 
     def test_premium_worker_finished_replays_pending_action_later(self) -> None:
         import donater.ui.page as premium_page
@@ -427,7 +410,6 @@ class PremiumWorkerArchitectureTests(unittest.TestCase):
     def test_cleanup_stops_open_bot_worker_without_blocking_gui(self) -> None:
         page = PremiumPage.__new__(PremiumPage)
         page._cleanup_in_progress = False
-        page._stop_pairing_status_autopoll = Mock()
         page._premium_action_runtime = Mock()
         page._open_bot_runtime = Mock()
         page._device_info_runtime = Mock()
@@ -443,12 +425,16 @@ class PremiumWorkerArchitectureTests(unittest.TestCase):
         page._pending_premium_action_start_scheduled = True
         unsubscribe_ui_state = Mock()
         page._ui_state_unsubscribe = unsubscribe_ui_state
+        unsubscribe_status_checks = Mock()
+        page._status_checks_unsubscribe = unsubscribe_status_checks
 
         PremiumPage.cleanup(page)
 
         self.assertTrue(page._cleanup_in_progress)
         unsubscribe_ui_state.assert_called_once_with()
         self.assertIsNone(page._ui_state_unsubscribe)
+        unsubscribe_status_checks.assert_called_once_with()
+        self.assertIsNone(page._status_checks_unsubscribe)
         self.assertFalse(page._open_bot_pending)
         self.assertFalse(page._open_bot_start_scheduled)
         self.assertFalse(page._device_info_pending)
@@ -479,24 +465,20 @@ class PremiumWorkerArchitectureTests(unittest.TestCase):
         runtime = SimpleNamespace(is_running=Mock(return_value=True), stop=Mock())
         event = SimpleNamespace(accept=Mock())
         cleanup_values = []
-        stop_autopoll = Mock()
 
         close_premium_page(
             set_cleanup_in_progress_fn=cleanup_values.append,
             build_close_plan_fn=Mock(
                 return_value=SimpleNamespace(
-                    stop_autopoll=True,
                     should_quit_thread=True,
                     wait_timeout_ms=750,
                 )
             ),
             premium_action_runtime=runtime,
-            stop_pairing_status_autopoll_fn=stop_autopoll,
             event=event,
         )
 
         self.assertEqual(cleanup_values, [True])
-        stop_autopoll.assert_called_once_with()
         runtime.stop.assert_called_once_with(
             blocking=False,
             wait_timeout_ms=750,

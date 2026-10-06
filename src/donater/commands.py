@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from donater.state import PremiumState, normalize_days_remaining, premium_state_from_activation_info
+from donater.state import PremiumState, premium_state_from_activation_info
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,25 +38,15 @@ def resolve_checker_bundle() -> PremiumCheckerBundle:
         return PremiumCheckerBundle(checker=None, storage=None, init_ok=False)
 
 
-def create_subscription_manager(*, thread_parent, ui_actions):
-    from donater.subscription_manager import SubscriptionManager
+def create_status_runtime(*, thread_parent, ui_actions):
+    from donater.status_runtime import PremiumStatusRuntime
 
-    return SubscriptionManager(
+    return PremiumStatusRuntime(
         thread_parent=thread_parent,
         ui_actions=ui_actions,
         get_premium_checker=get_premium_checker,
         check_device_activation=check_device_activation,
     )
-
-
-def initialize_subscription_manager(subscription_manager) -> None:
-    if subscription_manager is not None:
-        subscription_manager.initialize_async()
-
-
-def cleanup_subscription_manager(subscription_manager) -> None:
-    if subscription_manager is not None:
-        subscription_manager.cleanup()
 
 
 def start_pairing(checker: object | None = None, *, device_name: str | None = None):
@@ -68,26 +58,18 @@ def check_device_activation(
     checker: object | None = None,
     *,
     use_cache: bool = False,
-    automatic: bool = False,
 ) -> dict[str, Any]:
     service = checker if checker is not None else get_premium_checker()
-    return dict(service.check_device_activation(use_cache=use_cache, automatic=automatic) or {})
+    return dict(service.check_device_activation(use_cache=use_cache) or {})
 
 
 def get_premium_state(
     checker: object | None = None,
     *,
     use_cache: bool = True,
-    automatic: bool = False,
 ) -> PremiumState:
-    info = check_device_activation(checker, use_cache=use_cache, automatic=automatic)
+    info = check_device_activation(checker, use_cache=use_cache)
     return premium_state_from_activation_info(info)
-
-
-def apply_premium_state_to_store(*, ui_state_store, state: PremiumState) -> None:
-    from donater.subscription_ui import apply_premium_state_to_store as apply_state
-
-    apply_state(ui_state_store=ui_state_store, state=state)
 
 
 def create_premium_worker_thread(target, args=None):
@@ -145,33 +127,6 @@ def read_device_storage_snapshot(storage, *, current_time: int) -> dict:
         "device_token": device_token,
         "pair_code": pair_code,
         "last_check": last_check,
-    }
-
-
-def read_pairing_snapshot(storage, *, current_time: int) -> dict:
-    if storage is None:
-        return {
-            "has_device_token": False,
-            "has_pending_pair_code": False,
-        }
-
-    has_device_token = False
-    has_pending_pair_code = False
-    try:
-        has_device_token = bool(storage.get_device_token())
-    except Exception:
-        has_device_token = False
-
-    try:
-        pair_code = storage.get_pair_code()
-        pair_expires_at = storage.get_pair_expires_at()
-        has_pending_pair_code = bool(pair_code and pair_expires_at and int(pair_expires_at) >= int(current_time))
-    except Exception:
-        has_pending_pair_code = False
-
-    return {
-        "has_device_token": has_device_token,
-        "has_pending_pair_code": has_pending_pair_code,
     }
 
 

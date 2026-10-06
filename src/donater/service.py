@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
@@ -15,7 +16,6 @@ from .types import ActivationStatus
 
 
 REQUEST_TIMEOUT = 5
-BACKGROUND_NETWORK_REFRESH_SEC = 3 * 60 * 60
 PAIR_CODE_TTL_MINUTES = 10
 
 _TRANSIENT_NETWORK_ERROR_CODES = frozenset(
@@ -76,19 +76,6 @@ class PremiumService:
     def __init__(self, *, api_base_url: str = API_BASE_URL, timeout: int = REQUEST_TIMEOUT):
         self._lock = threading.Lock()
         self._api = PremiumApiClient(base_url=api_base_url, timeout=timeout)
-        self._last_background_network_attempt_at = 0.0
-
-    def _automatic_network_due(self, *, has_pending_pairing: bool) -> bool:
-        """Allow startup probe, three-hour refreshes and active pairing polls."""
-
-        if has_pending_pairing:
-            return True
-        now = time.monotonic()
-        previous = float(self._last_background_network_attempt_at or 0.0)
-        if previous > 0.0 and now - previous < BACKGROUND_NETWORK_REFRESH_SEC:
-            return False
-        self._last_background_network_attempt_at = now
-        return True
 
     @property
     def device_id(self) -> str:
@@ -257,14 +244,13 @@ class PremiumService:
             source="offline" if offline else "cache",
         )
 
-    def check_status(
-        self, *, allow_network: bool = True, automatic: bool = False
-    ) -> ActivationStatus:
+    def check_status(self, *, allow_network: bool = True) -> ActivationStatus:
+        """Один проход проверки. Когда его запускать, решает status_runtime."""
+
         with self._lock:
             device_id = PremiumStorage.get_device_id()
             binding = PremiumStorage.get_binding()
             device_token = str((binding or {}).get("device_token") or "")
-            network_cooldown = False
             network_failed = False
 
             pending = PremiumStorage.get_pending_pairing()
@@ -273,13 +259,14 @@ class PremiumService:
                 and pending.get("pairing_id")
                 and int(pending.get("expires_at") or 0) >= int(time.time())
             )
-            if (
-                allow_network
-                and automatic
-                and not self._automatic_network_due(has_pending_pairing=has_pending)
-            ):
-                allow_network = False
-                network_cooldown = True
+
+            def _done(status: ActivationStatus) -> ActivationStatus:
+                return replace(
+                    status,
+                    pairing_pending=has_pending,
+                    network_failed=network_failed,
+                )
+
             pairing_message: str | None = None
             if pending and not has_pending and pending.get("pairing_id"):
                 PremiumStorage.clear_pair_code()
@@ -313,6 +300,7 @@ class PremiumService:
                         ):
                             binding = PremiumStorage.get_binding()
                             device_token = token
+                            has_pending = False
                 else:
                     code, _retryable = _error_data(raw, signed)
                     pairing_message = _error_message(code, pairing=True)
@@ -327,20 +315,22 @@ class PremiumService:
             if not device_token:
                 cached = self._cached_status(
                     device_id=device_id,
-                    offline=network_failed or network_cooldown,
+                    offline=network_failed,
                 )
                 if cached is not None:
-                    return cached
-                return ActivationStatus(
-                    is_activated=False,
-                    days_remaining=None,
-                    expires_at=None,
-                    status_message=(
-                        pairing_message
-                        or ("Ожидание привязки" if has_pending else "Устройство не привязано")
-                    ),
-                    is_linked=False,
-                    subscription_level="–",
+                    return _done(cached)
+                return _done(
+                    ActivationStatus(
+                        is_activated=False,
+                        days_remaining=None,
+                        expires_at=None,
+                        status_message=(
+                            pairing_message
+                            or ("Ожидание привязки" if has_pending else "Устройство не привязано")
+                        ),
+                        is_linked=False,
+                        subscription_level="–",
+                    )
                 )
 
             api_error: str | None = None
@@ -350,7 +340,7 @@ class PremiumService:
                     device_id=device_id,
                     device_token=device_token,
                 )
-                network_failed = self._apply_network_health(raw)
+                network_failed = self._apply_network_health(raw) or network_failed
                 signed = verify_signed_response(
                     raw, expected_device_id=device_id, expected_nonce=nonce
                 )
@@ -367,44 +357,44 @@ class PremiumService:
                         PremiumStorage.apply_status_inactive(
                             message=str(signed.get("message") or "")
                         )
-                    return ActivationStatus(
-                        is_activated=activated,
-                        days_remaining=signed.get("days_remaining"),
-                        expires_at=signed.get("expires_at"),
-                        status_message=str(
-                            signed.get("message")
-                            or ("Активировано" if activated else "Не активировано")
-                        ),
-                        is_linked=linked,
-                        subscription_level=str(
-                            signed.get("subscription_level")
-                            or ("zapretik" if activated else "–")
-                        ),
+                    return _done(
+                        ActivationStatus(
+                            is_activated=activated,
+                            days_remaining=signed.get("days_remaining"),
+                            expires_at=signed.get("expires_at"),
+                            status_message=str(
+                                signed.get("message")
+                                or ("Активировано" if activated else "Не активировано")
+                            ),
+                            is_linked=linked,
+                            subscription_level=str(
+                                signed.get("subscription_level")
+                                or ("zapretik" if activated else "–")
+                            ),
+                        )
                     )
                 code, _retryable = _error_data(raw, signed)
                 api_error = _error_message(code)
-            elif network_cooldown:
-                api_error = "Недавняя ошибка сети, используется подписанный кэш."
 
             cached = self._cached_status(
                 device_id=device_id,
-                offline=network_failed or network_cooldown,
+                offline=network_failed,
             )
             if cached is not None:
-                return cached
-            return ActivationStatus(
-                is_activated=False,
-                days_remaining=None,
-                expires_at=None,
-                status_message=api_error or "Не активировано",
-                is_linked=None,
-                subscription_level="–",
+                return _done(cached)
+            return _done(
+                ActivationStatus(
+                    is_activated=False,
+                    days_remaining=None,
+                    expires_at=None,
+                    status_message=api_error or "Не активировано",
+                    is_linked=None,
+                    subscription_level="–",
+                )
             )
 
-    def check_device_activation(
-        self, *, use_cache: bool = False, automatic: bool = False
-    ) -> Dict[str, Any]:
-        status = self.check_status(allow_network=not use_cache, automatic=automatic)
+    def check_device_activation(self, *, use_cache: bool = False) -> Dict[str, Any]:
+        status = self.check_status(allow_network=not use_cache)
         found = (
             status.is_linked
             if status.is_linked is not None
@@ -420,6 +410,9 @@ class PremiumService:
             "level": "Premium" if status.subscription_level != "–" else "–",
             "subscription_level": status.subscription_level,
             "source": status.source,
+            "pairing_pending": status.pairing_pending,
+            "network_failed": status.network_failed,
+            "direct_window": self._api.uses_direct_window,
         }
 
 

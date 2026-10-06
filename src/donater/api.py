@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import time
 from typing import Any, Dict, Optional, Tuple
 
 import requests
@@ -9,6 +10,17 @@ from utils.https_dns_fallback import (
     is_name_resolution_error,
     request_with_dns_fallback,
 )
+
+
+# Сбои, после которых есть смысл повторить запрос в обход работающего winws2:
+# соединение не установилось или оборвалось, а не сервер ответил отказом.
+_ROUTE_FAILURES = (
+    requests.exceptions.SSLError,
+    requests.Timeout,
+    requests.ConnectionError,
+)
+# Сколько помнить вывод о пути: «нужна пауза winws2» или «пауза не помогает».
+_ROUTE_MEMORY_SEC = 30 * 60
 
 
 class PremiumApiClient:
@@ -26,6 +38,51 @@ class PremiumApiClient:
         self.health_timeout = max(0.1, min(float(health_timeout), self.timeout))
         self._session = requests.Session()
         self._session.trust_env = False
+        self._direct_only_until = 0.0
+        self._direct_useless_until = 0.0
+
+    @property
+    def uses_direct_window(self) -> bool:
+        """True, пока каждый запрос требует паузы winws2."""
+        return time.monotonic() < self._direct_only_until
+
+    def _send_routed(self, send):
+        """Обычный запрос; пауза winws2 — только когда он мешает соединению.
+
+        Ответы сервера подписаны, поэтому путь доставки на доверие не влияет.
+        Остановка winws2 рвёт обход у пользователя, так что она остаётся
+        запасным путём, а вывод о пути запоминается на полчаса:
+
+        - запасной путь сработал после сбоя обычного — мешал winws2, дальше
+          идём сразу напрямую и не ждём заведомо неудачную попытку;
+        - запасной путь тоже не прошёл — недоступен сам сервер или сеть,
+          повторные паузы winws2 ничего не дадут.
+        """
+        from winws_runtime.runtime.direct_network import (
+            direct_network_pause_needed,
+            run_with_direct_network_access,
+        )
+
+        now = time.monotonic()
+        if now < self._direct_only_until:
+            try:
+                return run_with_direct_network_access(send)
+            except _ROUTE_FAILURES:
+                self._direct_only_until = 0.0
+                self._direct_useless_until = time.monotonic() + _ROUTE_MEMORY_SEC
+                raise
+        try:
+            return send()
+        except _ROUTE_FAILURES:
+            if now < self._direct_useless_until or not direct_network_pause_needed():
+                raise
+        try:
+            response = run_with_direct_network_access(send)
+        except _ROUTE_FAILURES:
+            self._direct_useless_until = time.monotonic() + _ROUTE_MEMORY_SEC
+            raise
+        self._direct_only_until = time.monotonic() + _ROUTE_MEMORY_SEC
+        return response
 
     def _url(self, endpoint: str) -> str:
         return f"{self.base_url}/{str(endpoint or '').lstrip('/')}"
@@ -60,9 +117,7 @@ class PremiumApiClient:
             )
 
         try:
-            from winws_runtime.runtime.direct_network import run_with_direct_network_access
-
-            response = run_with_direct_network_access(_send)
+            response = self._send_routed(_send)
         except requests.exceptions.SSLError:
             return {
                 "success": False,

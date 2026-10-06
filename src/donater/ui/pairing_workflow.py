@@ -75,11 +75,8 @@ def apply_pair_code_start_ui(
     key_input,
     tr: Callable[[str, str], str],
     set_activation_status: Callable[..., None],
-    stop_autopoll: Callable[[], None],
 ):
     plan = premium_page_plans.build_pair_code_start_plan()
-    if plan.stop_autopoll:
-        stop_autopoll()
     if plan.clear_key_input:
         key_input.clear()
     apply_premium_pair_code_accessibility(tr_fn=tr, key_input=key_input)
@@ -109,8 +106,7 @@ def apply_pair_code_result_ui(
     tr: Callable[[str, str], str],
     set_activation_status: Callable[..., None],
     update_device_info: Callable[[], None],
-    start_autopoll: Callable[[], None],
-    stop_autopoll: Callable[[], None],
+    notify_pairing_started: Callable[[], None],
 ):
     plan = premium_page_plans.build_pair_code_result_plan(result)
     activate_btn.setEnabled(plan.activate_enabled)
@@ -138,10 +134,8 @@ def apply_pair_code_result_ui(
     )
     if plan.update_device_info:
         update_device_info()
-    if plan.start_autopoll:
-        start_autopoll()
-    if plan.stop_autopoll:
-        stop_autopoll()
+    if plan.pairing_started:
+        notify_pairing_started()
     return plan
 
 
@@ -153,7 +147,6 @@ def apply_pair_code_error_ui(
     tr: Callable[[str, str], str],
     set_activation_status: Callable[..., None],
     update_device_info: Callable[[], None],
-    stop_autopoll: Callable[[], None],
 ):
     plan = premium_page_plans.build_pair_code_error_plan(str(error or ""))
     if plan.clear_key_input:
@@ -174,6 +167,4 @@ def apply_pair_code_error_ui(
     )
     if plan.update_device_info:
         update_device_info()
-    if plan.stop_autopoll:
-        stop_autopoll()
     return plan

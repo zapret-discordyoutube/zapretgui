@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 import unittest
@@ -26,6 +27,8 @@ from donater.premium_display import (  # noqa: E402
     build_premium_display,
     premium_display_from_ui_state,
 )
+from donater.state import premium_state_from_activation_info  # noqa: E402
+from donater.subscription_ui import apply_premium_state_to_store  # noqa: E402
 from donater.ui.page_lifecycle import handle_premium_ui_state_changed  # noqa: E402
 from donater.ui.page_plans import (  # noqa: E402
     build_premium_display_plans,
@@ -66,22 +69,32 @@ class SubscriptionStoreTests(unittest.TestCase):
 
         self.assertEqual(seen, [frozenset({"subscription_known"})])
 
-    def test_facade_keeps_unknown_days_unknown(self) -> None:
+    def test_store_writer_keeps_unknown_days_unknown(self) -> None:
         store = MainWindowStateStore()
-        feature = PremiumFeature(_ui_state_store=store)
 
-        feature.apply_subscription_state_to_ui_store(is_premium=True, days_remaining=None)
+        apply_premium_state_to_store(
+            ui_state_store=store,
+            state=premium_state_from_activation_info({"activated": True, "days_remaining": None}),
+        )
 
         self.assertTrue(store.snapshot().subscription_is_premium)
         self.assertIsNone(store.snapshot().subscription_days_remaining)
 
-    def test_facade_drops_days_for_free(self) -> None:
+    def test_store_writer_drops_days_for_free(self) -> None:
         store = MainWindowStateStore()
-        feature = PremiumFeature(_ui_state_store=store)
 
-        feature.apply_subscription_state_to_ui_store(is_premium=False, days_remaining=15)
+        apply_premium_state_to_store(
+            ui_state_store=store,
+            state=premium_state_from_activation_info({"activated": False, "days_remaining": 15}),
+        )
 
         self.assertIsNone(store.snapshot().subscription_days_remaining)
+
+    def test_facade_has_no_second_status_writer(self) -> None:
+        # Статус в общий UI-store пишет только donater.status_runtime.
+        self.assertFalse(hasattr(PremiumFeature, "apply_subscription_state_to_ui_store"))
+        self.assertFalse(hasattr(PremiumFeature, "check_device_activation"))
+        self.assertFalse(hasattr(PremiumFeature, "get_premium_state"))
 
 
 class PremiumPagePlanTests(unittest.TestCase):
@@ -181,30 +194,25 @@ class PremiumPageWorkflowTests(unittest.TestCase):
             set_status_badge=calls.set_status_badge,
             set_activation_status=lambda **_kwargs: None,
             set_activation_section_visible=lambda _visible: None,
-            stop_autopoll=lambda: None,
-            sync_autopoll=lambda: None,
-            apply_subscription_state=calls.apply_subscription_state,
         )
 
-    def test_invalid_server_reply_is_not_written_as_free(self) -> None:
-        for result in (None, {"found": True}):
+    def test_page_only_draws_status_check_result(self) -> None:
+        # Страница не пишет статус в общий UI-store: это уже сделал владелец
+        # статуса до того, как передал ей итог проверки.
+        import donater.ui.status_workflow as status_workflow
+
+        self.assertNotIn(
+            "apply_subscription_state",
+            inspect.signature(apply_status_check_success).parameters,
+        )
+        self.assertNotIn("set_subscription", inspect.getsource(status_workflow))
+
+        for result in (None, {"found": True}, {"activated": True, "found": True, "status": "ok"}):
             with self.subTest(result=result):
                 calls = Mock()
                 self._run_status_check(result, calls)
 
-                calls.apply_subscription_state.assert_not_called()
                 calls.set_status_badge.assert_called_once()
-
-    def test_valid_reply_updates_store_before_status_card(self) -> None:
-        calls = Mock()
-
-        self._run_status_check({"activated": True, "found": True, "days_remaining": None, "status": "ok"}, calls)
-
-        self.assertEqual(
-            [name for name, *_ in calls.mock_calls],
-            ["apply_subscription_state", "set_status_badge"],
-        )
-        calls.apply_subscription_state.assert_called_once_with(True, None)
 
     def test_reset_writes_free_before_reset_message(self) -> None:
         calls = Mock()
@@ -216,12 +224,11 @@ class PremiumPageWorkflowTests(unittest.TestCase):
             set_status_badge=calls.set_status_badge,
             render_days_label=lambda: None,
             set_activation_section_visible=lambda _visible: None,
-            stop_autopoll=lambda: None,
-            apply_subscription_state=calls.apply_subscription_state,
+            apply_local_reset=calls.apply_local_reset,
         )
 
-        self.assertEqual([name for name, *_ in calls.mock_calls][:2], ["apply_subscription_state", "set_status_badge"])
-        calls.apply_subscription_state.assert_called_once_with(False, None)
+        self.assertEqual([name for name, *_ in calls.mock_calls][:2], ["apply_local_reset", "set_status_badge"])
+        calls.apply_local_reset.assert_called_once_with()
         self.assertEqual(calls.set_status_badge.call_args.kwargs["text_key"], build_reset_plan().badge_plan.text_key)
         self.assertEqual((kind, value), ("none", 0))
 

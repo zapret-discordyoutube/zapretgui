@@ -16,7 +16,7 @@ class PremiumFeature:
     _deps: Any = None
     _ui_state_store: Any = None
     _ui_actions: Any = None
-    _subscription_manager: Any = None
+    _status_runtime: Any = None
     _checker: Any = None
     _storage: Any = None
     _warmed_page_data: PremiumPageData | None = None
@@ -39,24 +39,52 @@ class PremiumFeature:
             )
         return self._ui_actions
 
-    def _ensure_subscription_manager(self):
-        if self._subscription_manager is None:
-            self._subscription_manager = self._commands().create_subscription_manager(
+    def _ensure_status_runtime(self):
+        # Создаётся и вызывается только из GUI-потока: внутри Qt-таймер.
+        if self._status_runtime is None:
+            self._status_runtime = self._commands().create_status_runtime(
                 thread_parent=self._thread_parent,
                 ui_actions=self._ensure_ui_actions(),
             )
-        return self._subscription_manager
+        return self._status_runtime
 
     def prepare_subscription(self) -> None:
-        self._ensure_subscription_manager()
+        self._ensure_status_runtime()
 
     def initialize_subscription(self) -> None:
-        self._commands().initialize_subscription_manager(self._ensure_subscription_manager())
+        self._ensure_status_runtime().start()
 
     def cleanup_subscription(self) -> None:
-        manager = self._subscription_manager
-        self._subscription_manager = None
-        self._commands().cleanup_subscription_manager(manager)
+        runtime = self._status_runtime
+        self._status_runtime = None
+        if runtime is not None:
+            runtime.cleanup()
+
+    def request_status_refresh(self, *, force: bool = False) -> None:
+        """Попросить владельца статуса спросить сервер (см. status_runtime)."""
+        self._ensure_status_runtime().request_refresh(force=bool(force))
+
+    def subscribe_status_checks(self, on_checked, on_failed):
+        """Подписывает страницу на итог каждой проверки. Возвращает отписку."""
+        runtime = self._ensure_status_runtime()
+        runtime.status_checked.connect(on_checked)
+        runtime.status_failed.connect(on_failed)
+
+        def _unsubscribe() -> None:
+            for signal, handler in (
+                (runtime.status_checked, on_checked),
+                (runtime.status_failed, on_failed),
+            ):
+                try:
+                    signal.disconnect(handler)
+                except (TypeError, RuntimeError):
+                    pass
+
+        return _unsubscribe
+
+    def apply_local_reset(self) -> None:
+        """Привязка сброшена на этом устройстве: статус становится Free."""
+        self._ensure_status_runtime().apply_local_reset()
 
     def ensure_checker_ready(self) -> bool:
         if self._checker is not None and self._storage is not None:
@@ -68,9 +96,6 @@ class PremiumFeature:
 
     def is_checker_ready(self) -> bool:
         return bool(self._checker)
-
-    def is_storage_ready(self) -> bool:
-        return bool(self._storage)
 
     def _require_checker(self):
         if self.ensure_checker_ready() and self._checker is not None:
@@ -110,21 +135,11 @@ class PremiumFeature:
     def start_pairing(self):
         return self._commands().start_pairing(self._require_checker())
 
-    def check_device_activation(self, *, automatic: bool = False):
-        return self._commands().check_device_activation(
-            self._require_checker(),
-            automatic=bool(automatic),
-        )
-
     def reset_premium_storage(self):
         self.ensure_checker_ready()
         self._commands().reset_premium_storage(self._checker, self._storage)
         self._checker = None
         self._storage = None
-
-    def read_pairing_snapshot(self, *, current_time: int):
-        self.ensure_checker_ready()
-        return self._commands().read_pairing_snapshot(self._storage, current_time=int(current_time))
 
     def read_device_info_snapshot(self, *, current_time: int):
         if not self.ensure_checker_ready():
@@ -139,17 +154,11 @@ class PremiumFeature:
     def test_connection(self):
         return self._require_checker().test_connection()
 
-    def get_premium_state(self, *, use_cache: bool = True):
-        return self._commands().get_premium_state(use_cache=use_cache)
-
     def warm_page_data_cache(self) -> PremiumPageData:
+        # Только данные устройства для страницы. Статус подписки в общий
+        # UI-store пишет один владелец — status_runtime.
         current_time = int(time.time())
         device_info = self.read_device_info_snapshot(current_time=current_time)
-        try:
-            self._apply_premium_state_to_ui_store(self.get_premium_state(use_cache=True))
-        except Exception:
-            pass
-
         self._warmed_page_data = PremiumPageData(device_info=device_info)
         return self._warmed_page_data
 
@@ -157,22 +166,6 @@ class PremiumFeature:
         warmed = self._warmed_page_data
         self._warmed_page_data = None
         return warmed
-
-    def apply_subscription_state_to_ui_store(self, *, is_premium: bool, days_remaining: int | None) -> None:
-        premium_commands = self._commands()
-        self._apply_premium_state_to_ui_store(
-            premium_commands.PremiumState(
-                is_premium=bool(is_premium),
-                days_remaining=premium_commands.normalize_days_remaining(days_remaining) if is_premium else None,
-                source="premium_page",
-            )
-        )
-
-    def _apply_premium_state_to_ui_store(self, state) -> None:
-        self._commands().apply_premium_state_to_store(
-            ui_state_store=self._ui_state_store or self._ensure_ui_actions().ui_state_store,
-            state=state,
-        )
 
 
 def build_premium_feature(*, deps, ui_state_store) -> PremiumFeature:

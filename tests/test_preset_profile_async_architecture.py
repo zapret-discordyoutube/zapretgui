@@ -59,7 +59,6 @@ from blockcheck.ui.strategy_scan_page import StrategyScanPage
 import blockcheck.ui.helpers as blockcheck_ui_helpers
 from app.feature_facades.blockcheck import BlockcheckFeature
 from updater.ui.page import ServersPage
-import donater.pairing_workflow as premium_pairing_workflow
 import donater.ui.pairing_workflow as premium_ui_pairing_workflow
 import donater.ui.page_plans as premium_page_plans
 from donater.ui.page import PremiumPage
@@ -2369,63 +2368,18 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertNotIn("update_device_info_fn()", language_source)
         self.assertNotIn("update_device_info_fn", inspect.signature(premium_page_lifecycle.apply_premium_language).parameters)
 
-    def test_premium_pairing_autopoll_does_not_initialize_checker_when_storage_is_not_ready(self) -> None:
-        class _PremiumFeature:
-            def is_checker_ready(self) -> bool:
-                return False
-
-            def is_storage_ready(self) -> bool:
-                return False
-
-            def read_pairing_snapshot(self, *, current_time: int):
-                raise AssertionError("read_pairing_snapshot must not run before storage is ready")
-
-        self.assertFalse(
-            premium_pairing_workflow.can_poll_pairing_status(
-                premium_feature=_PremiumFeature(),
-                page_visible=True,
-                activation_in_progress=False,
-                connection_test_in_progress=False,
-                worker_running=False,
-                current_time=1,
-            )
-        )
-
-    def test_premium_pairing_autopoll_uses_cached_snapshot_when_storage_is_ready(self) -> None:
-        class _PremiumFeature:
-            def is_checker_ready(self) -> bool:
-                return True
-
-            def is_storage_ready(self) -> bool:
-                return True
-
-            def read_pairing_snapshot(self, *, current_time: int):
-                raise AssertionError("activation must not read pairing snapshot when cached snapshot is available")
-
-        self.assertTrue(
-            premium_pairing_workflow.can_poll_pairing_status(
-                premium_feature=_PremiumFeature(),
-                page_visible=True,
-                activation_in_progress=False,
-                connection_test_in_progress=False,
-                worker_running=False,
-                current_time=1,
-                pairing_snapshot={
-                    "has_device_token": False,
-                    "has_pending_pair_code": True,
-                },
-            )
-        )
-
-    def test_premium_page_passes_cached_pairing_snapshot_to_autopoll(self) -> None:
+    def test_premium_page_does_not_own_pairing_polling(self) -> None:
         page_source = inspect.getsource(PremiumPage)
-        sync_source = inspect.getsource(PremiumPage._sync_pairing_status_autopoll)
         device_info_loaded_source = inspect.getsource(PremiumPage._on_device_info_loaded)
 
+        # Ждать подтверждение кода — дело donater.status_runtime: он опрашивает
+        # сервер независимо от того, открыта ли страница Premium.
+        self.assertIsNone(importlib.util.find_spec("donater.pairing_workflow"))
+        self.assertNotIn("autopoll", page_source)
+        self.assertNotIn("read_pairing_snapshot", page_source)
         self.assertNotIn("def _has_pending_pair_code", page_source)
         self.assertNotIn("has_pending_pair_code(", page_source)
-        self.assertIn("pairing_snapshot=self._pairing_autopoll_snapshot", sync_source)
-        self.assertIn("_set_pairing_autopoll_snapshot_from_device_info", device_info_loaded_source)
+        self.assertNotIn("pairing", device_info_loaded_source)
 
     def test_premium_device_info_refresh_runs_through_worker(self) -> None:
         spec = importlib.util.find_spec("donater.device_info_worker")
@@ -2458,10 +2412,16 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         connection_source = inspect.getsource(PremiumPage._test_connection)
         init_request_source = inspect.getsource(PremiumPage._request_checker_init)
 
-        for source in (create_source, status_source, connection_source):
+        for source in (create_source, connection_source):
             self.assertIn("_request_checker_init", source)
             self.assertNotIn("_init_checker()", source)
             self.assertNotIn("ensure_checker_ready", source)
+
+        # Проверку статуса выполняет владелец статуса в своём фоновом потоке:
+        # странице для неё checker не нужен.
+        self.assertIn("request_status_refresh(force=True)", status_source)
+        self.assertNotIn("ensure_checker_ready", status_source)
+        self.assertNotIn("_start_worker_thread", status_source)
 
         self.assertIn("_start_premium_init_worker", init_request_source)
         self.assertNotIn("ensure_checker_ready", init_request_source)
