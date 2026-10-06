@@ -276,6 +276,110 @@ class StrategyListGroupsTests(unittest.TestCase):
         self.assertEqual(reported, [])
         self.assertEqual(self._open_groups(widget), ["host"])
 
+    # -------------------------- где выбранная стратегия --------------------------
+
+    def _current_marks(self, widget) -> dict[str, str]:
+        return {
+            key: str(header.data(W._ROLE_GROUP_CURRENT_NAME) or "")
+            for key, header in widget._group_header_items.items()
+            if header.data(W._ROLE_GROUP_CURRENT_NAME)
+        }
+
+    def test_collapsed_group_of_the_selected_strategy_is_marked(self) -> None:
+        entries = _entries()
+        widget = self._widget(entries=entries)
+        # Человек свернул все группы: выбранной строки не видно.
+        widget.set_rows(
+            entries=entries, states={}, current_strategy_id="host-05", open_group_token="uid:a", open_group=""
+        )
+
+        self.assertEqual(self._open_groups(widget), [])
+        self.assertEqual(self._current_marks(widget), {"host": "Host 05"})
+        header = self._header(widget, "host")
+        self.assertIn("В этой группе выбранная стратегия: Host 05.", header.data(Qt.ItemDataRole.AccessibleTextRole))
+        self.assertIn("В этой группе выбранная стратегия: Host 05", header.data(W._ROLE_TOOLTIP_TEXT))
+        self.assertNotIn("выбранная стратегия", self._header(widget, "fake").data(Qt.ItemDataRole.AccessibleTextRole))
+
+    def test_mark_follows_the_selected_strategy_without_rebuild(self) -> None:
+        widget = self._widget(current="host-05")
+        widget._rebuild_tree = Mock(side_effect=AssertionError("пометка не должна пересобирать список"))
+
+        widget.set_current_strategy_id("fake-02")
+        self.assertEqual(self._current_marks(widget), {"fake": "Fake 02"})
+        self.assertNotIn("выбранная стратегия", self._header(widget, "host").data(Qt.ItemDataRole.AccessibleTextRole))
+
+        widget.set_rows(entries=_entries(), states={}, current_strategy_id="split-01")
+        self.assertEqual(self._current_marks(widget), {"split": "Split 01"})
+
+        widget.set_current_strategy_id("none")
+        self.assertEqual(self._current_marks(widget), {})
+
+    def test_mark_survives_toggling_and_search(self) -> None:
+        widget = self._widget(current="host-05")
+
+        widget._toggle_group_item(self._header(widget, "host"))
+        widget._toggle_group_item(self._header(widget, "fake"))
+        self.assertEqual(self._current_marks(widget), {"host": "Host 05"})
+        self.assertIn("свернута", self._header(widget, "host").data(Qt.ItemDataRole.AccessibleTextRole))
+        self.assertIn("Host 05", self._header(widget, "host").data(Qt.ItemDataRole.AccessibleTextRole))
+
+        # Выбранная стратегия под поиск не попала, но её группа всё равно помечена.
+        widget._search.setText("07")
+        self.assertEqual(self._current_marks(widget), {"host": "Host 05"})
+
+    def test_marked_header_paints_accent_strip_and_strategy_name(self) -> None:
+        from ui.widgets.hover_row import profile_hover_row_rect
+
+        widget = self._shown_widget(per_family=12, current="host-05")
+        widget._toggle_group_item(self._header(widget, "host"))
+        view = widget._list
+        option = QStyleOptionViewItem()
+        view.initViewItemOption(option)
+        option.rect = QRect(0, 0, 900, widget_module._STRATEGY_ROW_HEIGHT)
+        row_left = profile_hover_row_rect(option.rect).left()
+
+        def painted_columns(group_key: str) -> set[int]:
+            canvas = QPixmap(900, widget_module._STRATEGY_ROW_HEIGHT)
+            canvas.fill(QColor(0, 0, 0, 0))
+            painter = QPainter(canvas)
+            try:
+                view.itemDelegate().paint(painter, option, view.indexFromItem(self._header(widget, group_key)))
+            finally:
+                painter.end()
+            image = canvas.toImage()
+            return {
+                x for x in range(image.width()) for y in range(image.height()) if image.pixelColor(x, y).alpha() > 0
+            }
+
+        marked = painted_columns("host")
+        plain = painted_columns("fake")
+        # Полоска стоит левее стрелки сворачивания.
+        self.assertTrue(any(x < row_left + 12 for x in marked))
+        self.assertFalse(any(x < row_left + 12 for x in plain))
+        # Справа — название выбранной стратегии и «Выбрана»; у обычной группы там пусто.
+        self.assertTrue(any(x > 700 for x in marked))
+        self.assertFalse(any(x > 700 for x in plain))
+
+    def test_open_group_shows_only_the_strip_because_the_row_is_visible(self) -> None:
+        widget = self._shown_widget(per_family=12, current="host-05")
+        view = widget._list
+        option = QStyleOptionViewItem()
+        view.initViewItemOption(option)
+        option.rect = QRect(0, 0, 900, widget_module._STRATEGY_ROW_HEIGHT)
+        canvas = QPixmap(900, widget_module._STRATEGY_ROW_HEIGHT)
+        canvas.fill(QColor(0, 0, 0, 0))
+        painter = QPainter(canvas)
+        try:
+            view.itemDelegate().paint(painter, option, view.indexFromItem(self._header(widget, "host")))
+        finally:
+            painter.end()
+        image = canvas.toImage()
+
+        self.assertEqual(self._open_groups(widget), ["host"])
+        self.assertFalse(
+            any(image.pixelColor(x, y).alpha() > 0 for x in range(700, 900) for y in range(image.height()))
+        )
+
     # -------------------------- приклеенный заголовок --------------------------
 
     def test_header_of_open_group_stays_at_the_top_while_its_rows_scroll(self) -> None:

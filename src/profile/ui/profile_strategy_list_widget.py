@@ -368,6 +368,16 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
         left = rect.left() + 18
         right = rect.right() - 16
         expanded = bool(index.data(ProfileStrategyListWidget._ROLE_GROUP_EXPANDED))
+        current_name = str(index.data(ProfileStrategyListWidget._ROLE_GROUP_CURRENT_NAME) or "")
+        if current_name:
+            # В этой группе стоит выбранная стратегия: та же акцентная полоска,
+            # что у выбранной строки, видна и когда группа свёрнута.
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(to_qcolor(tokens.accent_hex, "#5caee8"))
+            painter.drawRoundedRect(QRect(rect.left() + 6, rect.top() + 6, 4, max(12, rect.height() - 12)), 2, 2)
+            if not expanded:
+                # Раскрытая группа показывает выбранную строку сама.
+                right = self._paint_group_current_strategy(painter, rect, right, current_name, tokens)
         chevron = get_cached_qta_pixmap(
             folder_header_icon_name(expanded),
             color=folder_header_icon_color(),
@@ -420,6 +430,37 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
                 metrics.elidedText(description, Qt.TextElideMode.ElideRight, right - left),
             )
         painter.restore()
+
+    def _paint_group_current_strategy(self, painter: QPainter, rect: QRect, right: int, name: str, tokens) -> int:
+        """Справа в заголовке: название выбранной стратегии и плашка «Выбрана».
+
+        Возвращает новую правую границу для текста заголовка.
+        """
+        font = painter.font()
+        font.setBold(False)
+        painter.setFont(font)
+        metrics = QFontMetrics(font)
+        badge_width = metrics.horizontalAdvance(STRATEGY_SELECTED_TEXT) + 18
+        badge_rect = QRect(right - badge_width, rect.center().y() - 10, badge_width, 20)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(to_qcolor(tokens.accent_soft_bg_hover, tokens.accent_hex))
+        painter.drawRoundedRect(badge_rect, 9, 9)
+        painter.setPen(to_qcolor(tokens.accent_hex, "#5caee8"))
+        painter.drawText(badge_rect, int(Qt.AlignmentFlag.AlignCenter), STRATEGY_SELECTED_TEXT)
+        right = badge_rect.left() - 10
+
+        # Название занимает не больше 45% строки: слева остаётся место заголовку.
+        name_width = min(metrics.horizontalAdvance(name), int(rect.width() * 0.45))
+        if name_width >= 60:
+            name_rect = QRect(right - name_width, rect.top(), name_width, rect.height())
+            painter.setPen(to_qcolor(tokens.fg, "#f5f5f5"))
+            painter.drawText(
+                name_rect,
+                int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                metrics.elidedText(name, Qt.TextElideMode.ElideRight, name_width),
+            )
+            right = name_rect.left() - 16
+        return right
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
         _ = (option, index)
@@ -792,6 +833,8 @@ class ProfileStrategyListWidget(QWidget):
     _ROLE_GROUP_EXPANDED = int(Qt.ItemDataRole.UserRole) + 14
     _ROLE_RATING = int(Qt.ItemDataRole.UserRole) + 15
     _ROLE_FAVORITE = int(Qt.ItemDataRole.UserRole) + 16
+    # У заголовка группы: название выбранной стратегии, если она в этой группе.
+    _ROLE_GROUP_CURRENT_NAME = int(Qt.ItemDataRole.UserRole) + 17
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1136,6 +1179,59 @@ class ProfileStrategyListWidget(QWidget):
             self._list.setCurrentItem(current)
             self._list.scrollToItem(current)
 
+    def _current_strategy_group(self) -> tuple[str, str]:
+        """(ключ группы, название) выбранной стратегии; ("", "") — её нет в каталоге."""
+        entries = self.__dict__.get("_entries") or {}
+        current_id = str(self.__dict__.get("_current_strategy_id") or "")
+        entry = entries.get(current_id)
+        if entry is None:
+            return "", ""
+        name = str(getattr(entry, "name", "") or current_id)
+        return strategy_family_keys(entries)[current_id], name
+
+    def _apply_group_header_texts(self, header) -> None:
+        """Текст для экранного диктора и подсказка заголовка по его данным."""
+        current_name = str(header.data(self._ROLE_GROUP_CURRENT_NAME) or "")
+        description = str(header.data(self._ROLE_VISUAL_DESCRIPTION) or "")
+        accessible_text = ProfileStrategyListGroup(
+            key=str(header.data(self._ROLE_GROUP_KEY) or ""),
+            title=str(header.data(self._ROLE_NAME_TEXT) or ""),
+            description=description,
+            icon_name="",
+            color="",
+            count=int(header.data(self._ROLE_GROUP_COUNT) or 0),
+        ).accessible_text(expanded=bool(header.data(self._ROLE_GROUP_EXPANDED)))
+        tooltip = f"Способ обхода: {description}."
+        if current_name:
+            accessible_text = f"{accessible_text} В этой группе выбранная стратегия: {current_name}."
+            tooltip = f"{tooltip}\n\nВ этой группе выбранная стратегия: {current_name}"
+        header.setText(accessible_text)
+        header.setData(Qt.ItemDataRole.AccessibleTextRole, accessible_text)
+        header.setData(self._ROLE_TOOLTIP_TEXT, tooltip)
+
+    def _sync_group_current_marks(self) -> None:
+        """Помечает группу, в которой стоит выбранная стратегия.
+
+        Когда группы свёрнуты, выбранной строки не видно: пометка на заголовке
+        показывает, где её искать.
+        """
+        headers = self._group_headers()
+        if not headers:
+            return
+        group_key, name = self._current_strategy_group()
+        changed = False
+        for key, header in headers.items():
+            value = name if key == group_key else ""
+            if str(header.data(self._ROLE_GROUP_CURRENT_NAME) or "") == value:
+                continue
+            header.setData(self._ROLE_GROUP_CURRENT_NAME, value)
+            self._apply_group_header_texts(header)
+            changed = True
+        if changed:
+            # Заголовок может быть приклеен к верху списка — перерисовать и его.
+            self._list.viewport().update()
+            self._update_current_strategy_accessibility(self._list.currentItem())
+
     def _make_group_header_item(self, group: ProfileStrategyListGroup, *, expanded: bool) -> QListWidgetItem:
         item = QListWidgetItem()
         accessible_text = group.accessible_text(expanded=expanded)
@@ -1198,16 +1294,7 @@ class ProfileStrategyListWidget(QWidget):
         header = self._group_headers().get(group_key)
         if header is not None:
             header.setData(self._ROLE_GROUP_EXPANDED, bool(expanded))
-            accessible_text = ProfileStrategyListGroup(
-                key=group_key,
-                title=str(header.data(self._ROLE_NAME_TEXT) or ""),
-                description=str(header.data(self._ROLE_VISUAL_DESCRIPTION) or ""),
-                icon_name="",
-                color="",
-                count=int(header.data(self._ROLE_GROUP_COUNT) or 0),
-            ).accessible_text(expanded=bool(expanded))
-            header.setText(accessible_text)
-            header.setData(Qt.ItemDataRole.AccessibleTextRole, accessible_text)
+            self._apply_group_header_texts(header)
         for item in self._item_by_strategy_id.values():
             if str(item.data(self._ROLE_GROUP_KEY) or "") == group_key:
                 item.setHidden(not expanded)
@@ -1249,6 +1336,7 @@ class ProfileStrategyListWidget(QWidget):
                 self.set_current_strategy_id(next_current_id)
             if owner_changed:
                 self._apply_open_group_to_built_rows()
+            self._sync_group_current_marks()
             return
         if self._can_update_strategy_rows_in_place(next_entries, next_states):
             changed_strategy_ids = [
@@ -1265,6 +1353,7 @@ class ProfileStrategyListWidget(QWidget):
                 self._refresh_strategy_item(item, strategy_id, is_current=strategy_id == self._current_strategy_id)
             if owner_changed:
                 self._apply_open_group_to_built_rows()
+            self._sync_group_current_marks()
             self._supersede_running_strategy_filter()
             return
         single_move = self._move_strategy_row_in_place(next_entries, next_states)
@@ -1287,6 +1376,7 @@ class ProfileStrategyListWidget(QWidget):
                 self._refresh_strategy_item(item, strategy_id, is_current=strategy_id == self._current_strategy_id)
             if owner_changed:
                 self._apply_open_group_to_built_rows()
+            self._sync_group_current_marks()
             self._supersede_running_strategy_filter()
             return
         self._entries = next_entries
@@ -1375,6 +1465,7 @@ class ProfileStrategyListWidget(QWidget):
         self._refresh_strategy_item(previous_item, previous_id, is_current=False)
         if next_item is not previous_item:
             self._refresh_strategy_item(next_item, next_id, is_current=True)
+        self._sync_group_current_marks()
 
     def _rebuild_tree(self) -> None:
         search_text = self._search.text().strip().lower()
@@ -1485,6 +1576,7 @@ class ProfileStrategyListWidget(QWidget):
         focus_item = current_item or first_item or first_header
         if focus_item is not None:
             self._list.setCurrentItem(focus_item)
+        self._sync_group_current_marks()
         self._update_current_strategy_accessibility(self._list.currentItem())
 
     def _refresh_strategy_item(self, item, strategy_id: str, *, is_current: bool) -> None:
@@ -1765,6 +1857,7 @@ class ProfileStrategyListWidget(QWidget):
         focus_item = current_item or first_item or first_header
         if focus_item is not None:
             self._list.setCurrentItem(focus_item)
+        self._sync_group_current_marks()
         self._update_current_strategy_accessibility(self._list.currentItem())
 
     def _cleanup_strategy_filter_worker(self, *_args) -> None:
