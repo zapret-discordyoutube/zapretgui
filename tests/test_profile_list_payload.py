@@ -1552,6 +1552,9 @@ class ProfileListPayloadTests(unittest.TestCase):
                 }
                 return states, "fake"
 
+            def get_grouping(self) -> str:
+                return "method"
+
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / "system" / "templates").mkdir(parents=True)

@@ -483,6 +483,28 @@ class ProfileFeature:
             parent=parent,
         )
 
+    def create_profile_strategy_grouping_save_worker(
+        self,
+        request_id: int,
+        launch_method: str,
+        *,
+        grouping: str,
+        parent=None,
+    ):
+        from profile.profile_setup_loader import ProfileStrategyGroupingSaveWorker
+
+        clean_launch_method = str(launch_method or "")
+
+        def _save_grouping(*, grouping: str):
+            return self.set_strategy_grouping(clean_launch_method, grouping)
+
+        return ProfileStrategyGroupingSaveWorker(
+            request_id,
+            _save_grouping,
+            grouping=grouping,
+            parent=parent,
+        )
+
     def get_profile_list_file_editor_state(
         self,
         launch_method: str,
@@ -597,6 +619,9 @@ class ProfileFeature:
 
     def set_strategy_open_group(self, launch_method: str, profile_key: str, group_key: str) -> bool:
         return self._commands().set_strategy_open_group(self, launch_method, profile_key, group_key)
+
+    def set_strategy_grouping(self, launch_method: str, grouping: str) -> bool:
+        return self._commands().set_strategy_grouping(self, launch_method, grouping)
 
     def set_current_strategy_state(
         self,

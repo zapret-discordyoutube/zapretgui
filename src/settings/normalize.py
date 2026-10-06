@@ -434,6 +434,9 @@ def normalize_ui_state(data: object) -> dict[str, Any]:
 
 
 _STRATEGY_GROUP_KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+# Группировка списка готовых стратегий (profile.strategy_grouping). Обычная,
+# по способу обхода, не записывается.
+_STRATEGY_LIST_GROUPINGS = frozenset({"series", "source"})
 
 
 def normalize_profile_strategy_state(data: object) -> dict[str, Any]:
@@ -484,10 +487,14 @@ def normalize_profile_strategy_state(data: object) -> dict[str, Any]:
         if normalized_profile_row:
             profiles[profile_key] = normalized_profile_row
 
-    return {
+    normalized: dict[str, Any] = {
         "version": 1,
         "profiles": profiles,
     }
+    grouping = as_clean_str(raw.get("grouping")).lower()
+    if grouping in _STRATEGY_LIST_GROUPINGS:
+        normalized["grouping"] = grouping
+    return normalized
 
 
 def normalize_user_profiles(data: object) -> dict[str, Any]:

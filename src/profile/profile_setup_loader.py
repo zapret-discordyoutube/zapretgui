@@ -766,6 +766,28 @@ class ProfileStrategyOpenGroupSaveWorker(QThread):
         self.saved.emit(self._request_id)
 
 
+class ProfileStrategyGroupingSaveWorker(QThread):
+    """Запоминает в настройках, по чему человек сгруппировал список стратегий."""
+
+    saved = pyqtSignal(int)
+    failed = pyqtSignal(int, str)
+
+    def __init__(self, request_id: int, save_grouping, *, grouping: str, parent=None):
+        super().__init__(parent)
+        self._request_id = int(request_id)
+        self._save_grouping = save_grouping
+        self._grouping = str(grouping or "").strip()
+
+    def run(self) -> None:
+        try:
+            self._save_grouping(grouping=self._grouping)
+        except Exception as exc:
+            log(f"ProfileStrategyGroupingSaveWorker: не удалось запомнить группировку стратегий: {exc}", "ERROR")
+            self.failed.emit(self._request_id, str(exc))
+            return
+        self.saved.emit(self._request_id)
+
+
 class ProfileStrategyFeedbackSaveWorker(QThread):
     saved = pyqtSignal(int, str, str, object)
     failed = pyqtSignal(int, str)

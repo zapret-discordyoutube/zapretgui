@@ -92,6 +92,7 @@ _PROFILE_SETUP_CLEANUP_RUNTIMES = (
     ("_strategy_apply_runtime", "profile strategy apply worker", True),
     ("_strategy_feedback_save_runtime", "profile strategy feedback save worker", True),
     ("_strategy_open_group_save_runtime", "profile strategy open group save worker", True),
+    ("_strategy_grouping_save_runtime", "profile strategy grouping save worker", True),
 )
 
 
@@ -369,6 +370,7 @@ class ProfileSetupPageBase(BasePage):
         on_profile_changed,
         ui_state_store=None,
         create_profile_strategy_open_group_save_worker=None,
+        create_profile_strategy_grouping_save_worker=None,
     ):
         super().__init__(
             title="",
@@ -391,6 +393,11 @@ class ProfileSetupPageBase(BasePage):
         self._create_profile_strategy_open_group_save_worker_fn = create_profile_strategy_open_group_save_worker
         # Что ещё не записано в настройки: {ключ профиля: ключ группы}.
         self._pending_strategy_open_group_saves = {}
+        # Без этой фабрики группировка списка стратегий помнится только до
+        # закрытия программы.
+        self._create_profile_strategy_grouping_save_worker_fn = create_profile_strategy_grouping_save_worker
+        # Группировка, ещё не записанная в настройки; None — записывать нечего.
+        self._pending_strategy_grouping_save = None
         self._open_profiles = open_profiles
         self._open_root = open_root
         self._on_profile_changed_callback = on_profile_changed
@@ -795,6 +802,7 @@ class ProfileSetupPageBase(BasePage):
         self._strategy_list = ProfileStrategyListWidget(self)
         self._strategy_list.strategy_activated.connect(self._on_strategy_list_activated)
         self._strategy_list.open_group_changed.connect(self._on_strategy_open_group_changed)
+        self._strategy_list.grouping_changed.connect(self._on_strategy_grouping_changed)
         self._strategy_stack.addWidget(self._strategy_list)
 
         self._list_file_editor_placeholder = QWidget(self)
@@ -804,7 +812,8 @@ class ProfileSetupPageBase(BasePage):
         self._strategy_stack.addWidget(self._match_tab_placeholder)
 
         self.layout.addWidget(self._strategy_stack, 1)
-        QWidget.setTabOrder(self._strategy_tabs, self._strategy_list._search)
+        QWidget.setTabOrder(self._strategy_tabs, self._strategy_list._grouping_combo)
+        QWidget.setTabOrder(self._strategy_list._grouping_combo, self._strategy_list._search)
         QWidget.setTabOrder(self._strategy_list._search, self._strategy_list._list)
         self._update_profile_setup_accessibility()
 
@@ -1836,6 +1845,34 @@ class ProfileSetupPageBase(BasePage):
             loaded_signal_name="saved",
         )
 
+    def _on_strategy_grouping_changed(self, grouping: str) -> None:
+        """Человек сгруппировал список стратегий по-другому: запоминаем это."""
+        if self.__dict__.get("_create_profile_strategy_grouping_save_worker_fn") is None:
+            return
+        # Важна только последняя выбранная группировка.
+        self._pending_strategy_grouping_save = str(grouping or "")
+        self._start_next_strategy_grouping_save()
+
+    def _start_next_strategy_grouping_save(self) -> None:
+        grouping = self.__dict__.get("_pending_strategy_grouping_save")
+        if grouping is None or bool(self.__dict__.get("_cleanup_in_progress", False)):
+            return
+        runtime = self._worker_runtime("_strategy_grouping_save_runtime")
+        if runtime.is_running():
+            return
+        self._pending_strategy_grouping_save = None
+        create_worker = self._create_profile_strategy_grouping_save_worker_fn
+        runtime.start_qthread_worker(
+            worker_factory=lambda request_id: create_worker(
+                request_id,
+                self.launch_method,
+                grouping=grouping,
+                parent=self,
+            ),
+            on_finished=lambda _worker: self._start_next_strategy_grouping_save(),
+            loaded_signal_name="saved",
+        )
+
     def _request_profile_setup_payload(self) -> None:
         return self._payload_controller_obj()._request_profile_setup_payload()
 
@@ -1912,6 +1949,7 @@ class ProfileSetupPageBase(BasePage):
                 # меняется, когда профиль переезжает внутри пресета.
                 open_group_token=str(getattr(item, "persistent_key", "") or self._profile_key or ""),
                 open_group=getattr(payload, "strategy_open_group", None),
+                grouping=getattr(payload, "strategy_grouping", None),
             )
             set_widget_enabled_if_changed(self._strategy_list, not (item.in_preset and not item.enabled))
             self._list_file_dirty = True

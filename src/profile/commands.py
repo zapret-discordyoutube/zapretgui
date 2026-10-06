@@ -202,6 +202,10 @@ def set_strategy_open_group(
     return _profile_preset_service(profile_services, launch_method).set_strategy_open_group(profile_key, group_key)
 
 
+def set_strategy_grouping(profile_services, launch_method: str, grouping: str) -> bool:
+    return _profile_preset_service(profile_services, launch_method).set_strategy_grouping(grouping)
+
+
 def set_strategy_state(
     profile_services,
     launch_method: str,

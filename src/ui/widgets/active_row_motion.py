@@ -305,6 +305,8 @@ class ActiveRowMotion(QObject):
             p = self._t / _SLIDE_SHARE
             eased = _ease_in_out_cubic(p)
             center_y = _lerp(source.center().y(), target.center().y(), eased)
+            # В списке из нескольких столбцов новая строка может стоять и сбоку.
+            left = _lerp(source.left() + inset, left, eased)
             speed = math.sin(math.pi * p)
             # В полёте капсула чуть вытягивается и оставляет хвост.
             height = base_height * (1.0 + 0.35 * speed)

@@ -696,6 +696,7 @@ class ProfilePresetService:
             out_range=editable.out_range,
             current_strategy_state=strategy_states.get(str(item.strategy_id or "").strip(), ProfileStrategyState()),
             strategy_open_group=strategy_open_group,
+            strategy_grouping=self._state_store.get_grouping(),
             preset_preamble_text="\n".join(preset.preamble_lines),
         )
 
@@ -951,6 +952,10 @@ class ProfilePresetService:
         if not persistent_key:
             return False
         return self._state_store.set_open_group(persistent_key, str(group_key or ""))
+
+    def set_strategy_grouping(self, grouping: str) -> bool:
+        """Запоминает, по чему человек сгруппировал списки готовых стратегий."""
+        return self._state_store.set_grouping(str(grouping or ""))
 
     def set_strategy_state(
         self,

@@ -3149,12 +3149,14 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
     def test_strategy_list_updates_current_rows_by_id_without_full_scan(self) -> None:
         init_source = inspect.getsource(ProfileStrategyListWidget.__init__)
-        rebuild_source = inspect.getsource(ProfileStrategyListWidget._rebuild_tree)
+        # Список собирается в одном месте — из готового плана строк.
+        rebuild_source = inspect.getsource(ProfileStrategyListWidget._apply_strategy_list_plan)
         source = inspect.getsource(ProfileStrategyListWidget.set_current_strategy_id)
 
         self.assertIn("_item_by_strategy_id", init_source)
         self.assertIn("_item_by_strategy_id.clear()", rebuild_source)
-        self.assertIn("_item_by_strategy_id[strategy_id] = item", rebuild_source)
+        self.assertIn("_item_by_strategy_id[row.strategy_id] = item", rebuild_source)
+        self.assertIn("_apply_strategy_list_plan", inspect.getsource(ProfileStrategyListWidget._rebuild_tree))
         self.assertNotIn("for row in range", source)
 
     def test_strategy_list_skips_rebuild_when_rows_are_unchanged(self) -> None:
@@ -6147,14 +6149,17 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         self.assertIn("set_widget_visible_if_changed(self._filter_value, filter_switchable)", apply_settings)
 
     def test_strategy_list_rows_store_visual_description(self) -> None:
-        set_rows = inspect.getsource(ProfileStrategyListWidget._rebuild_tree)
+        from profile.strategy_list_filter import build_profile_strategy_list_plan
+
+        set_rows = inspect.getsource(ProfileStrategyListWidget._apply_strategy_list_plan)
+        plan = inspect.getsource(build_profile_strategy_list_plan)
         paint = inspect.getsource(ProfileStrategyListDelegate._paint_row)
 
         self.assertIn("_ROLE_VISUAL_ICON_NAME", set_rows)
         self.assertIn("_ROLE_VISUAL_LABEL_TEXT", set_rows)
         self.assertIn("_ROLE_VISUAL_DESCRIPTION", set_rows)
         self.assertIn("_ROLE_TOOLTIP_TEXT", set_rows)
-        self.assertIn("visual.label", set_rows)
+        self.assertIn('getattr(visual, "label"', plan)
         self.assertIn("get_cached_qta_pixmap", paint)
         self.assertNotIn("set" + "ToolTip", set_rows)
 

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from profile.strategy_grouping import GROUPING_METHOD, normalize_strategy_grouping
 from settings import store as settings_store
 
 
@@ -158,6 +159,21 @@ class ProfileStrategyStateStore:
             self._write(data)
             return True
 
+    def get_grouping(self) -> str:
+        """По чему человек сгруппировал списки готовых стратегий."""
+        return normalize_strategy_grouping(self._read().get("grouping"))
+
+    def set_grouping(self, grouping: str) -> bool:
+        """Запоминает группировку списков стратегий; True — значение изменилось."""
+        clean_grouping = normalize_strategy_grouping(grouping)
+        with _PROFILE_STRATEGY_STATE_LOCK:
+            data = self._read()
+            if normalize_strategy_grouping(data.get("grouping")) == clean_grouping:
+                return False
+            data["grouping"] = clean_grouping
+            self._write(data)
+            return True
+
     def clear_strategy_state(self, profile_key: str, strategy_id: str) -> None:
         clean_profile_key = _normalize_profile_key(profile_key)
         clean_strategy_id = _normalize_strategy_id(strategy_id)
@@ -272,10 +288,14 @@ def _normalize_data(data: dict[str, Any]) -> dict[str, Any]:
             if profile_row:
                 profiles[profile_key] = profile_row
 
-    return {
+    normalized: dict[str, Any] = {
         "version": 1,
         "profiles": profiles,
     }
+    grouping = normalize_strategy_grouping(data.get("grouping"))
+    if grouping != GROUPING_METHOD:
+        normalized["grouping"] = grouping
+    return normalized
 
 
 def _drop_profile_row_if_empty(profiles: dict[str, Any], profile_key: str) -> None:

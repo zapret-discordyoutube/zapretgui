@@ -30,6 +30,7 @@ class ProfileSetupWorkerArchitectureTests(unittest.TestCase):
             "create_profile_strategy_apply_worker",
             "create_profile_strategy_feedback_save_worker",
             "create_profile_strategy_open_group_save_worker",
+            "create_profile_strategy_grouping_save_worker",
         )
 
         for factory_name in worker_factories:

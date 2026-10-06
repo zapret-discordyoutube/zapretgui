@@ -5,11 +5,17 @@ from dataclasses import dataclass
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from log.log import log
-from profile.strategy_families import (
-    strategy_count_text,
-    strategy_family,
-    strategy_family_keys,
-    strategy_sort_key,
+from profile.strategy_families import strategy_count_text, strategy_family
+from profile.strategy_grouping import (
+    GROUPING_METHOD,
+    GROUPING_SOURCE,
+    SOURCE_NONE_KEY,
+    StrategyGroupingLayout,
+    is_method_group_key,
+    normalize_strategy_grouping,
+    split_strategy_name,
+    strategy_detail_without_source,
+    strategy_grouping_layout,
 )
 from profile.strategy_shape import payload_badge_accessible_text, payload_badge_text
 from profile.strategy_visuals import describe_strategy_visual
@@ -32,15 +38,23 @@ class ProfileStrategyListRow:
     tooltip_text: str
     # Типы пакетов веток составной стратегии («TLS · HTTP»), пусто — обычная.
     payload_badge: str = ""
-    # Группа по способу обхода (profile.strategy_families); пусто — без группы.
+    # Группа списка (profile.strategy_grouping); пусто — без группы. Поле
+    # названо по группировке «по способу обхода», с которой список открывается.
     family_key: str = ""
     rating: str = ""
     favorite: bool = False
+    # Подзаголовок внутри группы; пусто — группа без подзаголовков.
+    subgroup_key: str = ""
+    subgroup_title: str = ""
+    # Название без уточнения и само уточнение после « · »: плитка пишет их
+    # двумя строками.
+    title: str = ""
+    detail: str = ""
 
 
 @dataclass(frozen=True)
 class ProfileStrategyListGroup:
-    """Заголовок группы стратегий одного способа обхода."""
+    """Заголовок группы стратегий: один способ обхода, серия или источник."""
 
     key: str
     title: str
@@ -51,9 +65,11 @@ class ProfileStrategyListGroup:
 
     def accessible_text(self, *, expanded: bool) -> str:
         state = "развернута" if expanded else "свернута"
+        description = group_description_text(self.key, self.description)
+        description = f"{description} " if description else ""
         return (
             f"Группа {self.title}, {strategy_count_text(self.count)}, {state}. "
-            f"Способ обхода: {self.description}. "
+            f"{description}"
             "Нажмите Enter или Пробел, чтобы свернуть или развернуть группу."
         )
 
@@ -68,6 +84,18 @@ class ProfileStrategyListPlan:
     # Заголовки показываются, только когда групп хотя бы две: один заголовок
     # на весь список ничего не объясняет (так выходит у каталога Zapret 1).
     groups: tuple[ProfileStrategyListGroup, ...] = ()
+    # По чему сгруппирован список (profile.strategy_grouping).
+    grouping: str = GROUPING_METHOD
+
+
+def group_description_text(group_key: str, description: str) -> str:
+    """Пояснение группы для подсказки и экранного диктора; пусто — пояснения нет."""
+    description = str(description or "").strip()
+    if not description:
+        return ""
+    if is_method_group_key(group_key):
+        return f"Способ обхода: {description}."
+    return f"{description[:1].upper()}{description[1:]}."
 
 
 def build_profile_strategy_list_plan(
@@ -76,6 +104,7 @@ def build_profile_strategy_list_plan(
     states,
     current_strategy_id: str,
     search_text: str,
+    grouping: str = GROUPING_METHOD,
 ) -> ProfileStrategyListPlan:
     entries = dict(entries or {})
     states = dict(states or {})
@@ -83,11 +112,9 @@ def build_profile_strategy_list_plan(
     query = str(search_text or "").strip().lower()
     rows: list[ProfileStrategyListRow] = []
 
-    family_keys = strategy_family_keys(entries)
+    layout = strategy_grouping_layout(entries, grouping)
     sorted_entries = list(entries.items())
-    sorted_entries.sort(
-        key=lambda pair: strategy_sort_key(family_keys[pair[0]], pair[1], states.get(pair[0]))
-    )
+    sorted_entries.sort(key=lambda pair: layout.sort_key(pair[0], pair[1], states.get(pair[0])))
     group_counts: dict[str, int] = {}
 
     for strategy_id, entry in sorted_entries:
@@ -107,8 +134,13 @@ def build_profile_strategy_list_plan(
         payload_badge = payload_badge_text(getattr(entry, "payload_scopes", ()) or ())
         state = states.get(strategy_id)
         is_current = strategy_id == current_id
-        family_key = family_keys.get(strategy_id, "other")
+        placement = layout.placement(strategy_id)
+        family_key = placement.group_key
         group_counts[family_key] = group_counts.get(family_key, 0) + 1
+        title, detail = split_strategy_name(name)
+        if layout.grouping == GROUPING_SOURCE and family_key != SOURCE_NONE_KEY:
+            # Источник уже написан в заголовке группы.
+            detail = strategy_detail_without_source(name)
         status_parts = _strategy_status_parts(state, is_current=is_current, include_unselected=False)
         accessible_status_parts = _strategy_status_parts(state, is_current=is_current, include_unselected=True)
         rows.append(
@@ -137,6 +169,11 @@ def build_profile_strategy_list_plan(
                 family_key=family_key,
                 rating=str(getattr(state, "rating", "") or ""),
                 favorite=bool(getattr(state, "favorite", False)),
+                # В найденном поиском подзаголовки не нужны: строк и так мало.
+                subgroup_key="" if query else placement.subgroup_key,
+                subgroup_title="" if query else placement.subgroup_title,
+                title=title,
+                detail=detail,
             )
         )
 
@@ -145,7 +182,8 @@ def build_profile_strategy_list_plan(
         visible_count=len(rows),
         total_count=len(entries),
         current_strategy_id=current_id,
-        groups=strategy_list_groups(group_counts),
+        groups=strategy_list_groups(group_counts, layout),
+        grouping=layout.grouping,
     )
 
 
@@ -177,13 +215,19 @@ def strategy_tooltip_text(*, visual_description: str, args: str, old_name: str) 
     return "\n\n".join(part for part in parts if part)
 
 
-def strategy_list_groups(group_counts: dict[str, int]) -> tuple[ProfileStrategyListGroup, ...]:
-    """Заголовки групп в порядке появления строк; пусто, если группа одна."""
+def strategy_list_groups(
+    group_counts: dict[str, int],
+    layout: StrategyGroupingLayout | None = None,
+) -> tuple[ProfileStrategyListGroup, ...]:
+    """Заголовки групп в порядке появления строк; пусто, если группа одна.
+
+    Без layout группы считаются группами по способу обхода.
+    """
     if len(group_counts) < 2:
         return ()
     groups = []
     for family_key, count in group_counts.items():
-        family = strategy_family(family_key)
+        family = layout.group_info(family_key) if layout is not None else strategy_family(family_key)
         groups.append(
             ProfileStrategyListGroup(
                 key=family.key,
@@ -209,9 +253,11 @@ class ProfileStrategyListFilterWorker(QThread):
         states,
         current_strategy_id: str,
         search_text: str,
+        grouping: str = GROUPING_METHOD,
         parent=None,
     ) -> None:
         super().__init__(parent)
+        self._grouping = normalize_strategy_grouping(grouping)
         self._request_id = int(request_id)
         self._entries = dict(entries or {})
         self._states = dict(states or {})
@@ -225,6 +271,7 @@ class ProfileStrategyListFilterWorker(QThread):
                 states=self._states,
                 current_strategy_id=self._current_strategy_id,
                 search_text=self._search_text,
+                grouping=self._grouping,
             )
         except Exception as exc:
             log(f"ProfileStrategyListFilterWorker: не удалось подготовить список стратегий: {exc}", "ERROR")
@@ -282,6 +329,7 @@ __all__ = [
     "ProfileStrategyListPlan",
     "ProfileStrategyListRow",
     "build_profile_strategy_list_plan",
+    "group_description_text",
     "strategy_list_groups",
     "strategy_matches_search",
     "strategy_old_name",
