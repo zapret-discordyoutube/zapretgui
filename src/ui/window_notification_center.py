@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import time
 
-from PyQt6.QtCore import Q_ARG, QMetaObject, QObject, Qt, QTimer, pyqtSlot
+from PyQt6.QtCore import Q_ARG, QMetaObject, QObject, Qt, QThread, QTimer, pyqtSlot
 
 from app_notifications import advisory_notification, normalize_notification_payload, notification_action
 from log.log import global_logger, log
@@ -137,6 +137,13 @@ class WindowNotificationCenter(QObject):
 
         return False
 
+    def _called_from_own_thread(self) -> bool:
+        """Вызван ли метод из потока окна, в котором живёт центр уведомлений."""
+        try:
+            return QThread.currentThread() is self.thread()
+        except Exception:
+            return True
+
     def notify_threadsafe(self, payload: dict | None) -> None:
         normalized = normalize_notification_payload(payload)
         if normalized is None:
@@ -149,12 +156,17 @@ class WindowNotificationCenter(QObject):
                 Qt.ConnectionType.QueuedConnection,
                 Q_ARG(object, dict(normalized)),
             )
-        except Exception:
-            self.notify(normalized)
+        except Exception as exc:
+            if self._called_from_own_thread():
+                self._notify_in_window_thread(normalized)
+                return
+            # Из фонового потока показывать нельзя: лучше потерять уведомление,
+            # чем подвесить программу.
+            log(f"Уведомление из фонового потока не доставлено в поток окна: {exc}", "WARNING")
 
     @pyqtSlot(object)
     def _notify_from_payload(self, payload: object) -> None:
-        self.notify(payload if isinstance(payload, dict) else None)
+        self._notify_in_window_thread(payload if isinstance(payload, dict) else None)
 
     def notify_many(self, payloads: list[dict] | tuple[dict, ...] | None) -> None:
         for payload in payloads or ():
@@ -688,6 +700,21 @@ class WindowNotificationCenter(QObject):
             pass
 
     def notify(self, payload: dict | None) -> None:
+        """Показывает уведомление. Вызывать можно из любого потока.
+
+        Показ создаёт элементы окна и запускает таймеры Qt, а это разрешено
+        только в потоке окна. Создание элемента окна из фонового потока на
+        Windows ждёт ответа потока окна, который ответить не может, пока
+        вызывающий держит GIL: программа встаёт целиком (так в 21.1.7.19
+        зависло окно — уведомление пришло из фоновой задачи запуска). Поэтому
+        вызов из чужого потока только ставит уведомление в очередь окна.
+        """
+        if not self._called_from_own_thread():
+            self.notify_threadsafe(payload)
+            return
+        self._notify_in_window_thread(payload)
+
+    def _notify_in_window_thread(self, payload: dict | None) -> None:
         normalized = normalize_notification_payload(payload)
         if normalized is None:
             return

@@ -2586,9 +2586,13 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         ):
             install_post_startup_tasks(deps)
 
-        # Замена устаревших копий встроенных пресетов при запуске отключена:
-        # в 21.1.7.19 она подвесила окно, когда пришлась на запуск обхода.
-        install_builtin_preset_override_refresh.assert_not_called()
+        # Устаревшие копии встроенных пресетов заменяются в той же очереди.
+        install_builtin_preset_override_refresh.assert_called_once_with(
+            startup_host,
+            presets_feature=presets_feature,
+            log_startup_metric=log_startup_metric,
+            notify=deps.notify,
+        )
         install_user_preset_contract_migration.assert_called_once_with(
             startup_host,
             presets_feature=presets_feature,
