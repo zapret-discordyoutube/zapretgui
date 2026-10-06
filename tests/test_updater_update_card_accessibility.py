@@ -5,11 +5,15 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from unittest.mock import patch
+
 from PyQt6.QtCore import QAbstractAnimation, QEvent, Qt
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication
+from qfluentwidgets import PushButton
 
-from updater.ui.update_card import UpdateStatusCard
+from updater.ui import update_card
+from updater.ui.update_card import FINISH_TURN_DEGREES, UpdateStatusCard
 
 
 class UpdaterUpdateCardAccessibilityTests(unittest.TestCase):
@@ -142,6 +146,136 @@ class UpdaterUpdateCardAccessibilityTests(unittest.TestCase):
                 )
                 self.assertEqual(card.check_btn.text(), expected_text)
                 self.assertTrue(card.check_btn.isEnabled())
+
+    # ── значок и анимация кнопки проверки ────────────────────────────────
+
+    def _shown_card(self) -> UpdateStatusCard:
+        card = UpdateStatusCard(language="ru")
+        self.addCleanup(card.deleteLater)
+        card.resize(760, 80)
+        card.show()
+        self._app.processEvents()
+        return card
+
+    def _icon_draws(self, card: UpdateStatusCard) -> int:
+        """Сколько раз кнопка нарисовала значок за одну отрисовку."""
+        draws: list[bool] = []
+
+        def record(_button, _icon, _painter, _rect, *_args, **_kwargs) -> None:
+            draws.append(True)
+
+        # Подмена — сама функция, а не Mock: Mock запоминает аргументы вызова,
+        # то есть держит QPainter дольше отрисовки, и его разбор сборщиком
+        # мусора после grab() роняет интерпретатор.
+        with patch.object(PushButton, "_drawIcon", record):
+            card.check_btn.grab()
+        return len(draws)
+
+    def test_check_button_has_icon_so_shared_button_motion_applies(self) -> None:
+        from ui.button_motion import _button_has_icon
+
+        card = self._shown_card()
+
+        self.assertFalse(card.check_btn.icon().isNull())
+        self.assertTrue(_button_has_icon(card.check_btn))
+        self.assertEqual(self._icon_draws(card), 1)
+
+        card.start_checking()
+        card.show_checked_ago(5.0)
+        card.check_btn._turn.stop()
+
+        self.assertEqual(card.check_btn.text(), "ПРОВЕРИТЬ СНОВА")
+        self.assertFalse(card.check_btn.icon().isNull())
+
+    def test_check_button_hides_icon_under_ring_while_checking(self) -> None:
+        card = self._shown_card()
+
+        card.start_checking()
+
+        self.assertEqual(self._icon_draws(card), 0)
+
+        card.show_checked_ago(5.0)
+
+        self.assertEqual(self._icon_draws(card), 1)
+
+    def test_check_button_keeps_width_while_checking(self) -> None:
+        card = self._shown_card()
+        card.start_checking()
+        card.show_checked_ago(5.0)
+        card.check_btn._turn.stop()
+        self._app.processEvents()
+        idle_width = card.check_btn.width()
+        idle_minimum = card.check_btn.minimumWidth()
+
+        card.start_checking()
+        self._app.processEvents()
+
+        self.assertEqual(card.check_btn.width(), idle_width)
+
+        card.show_checked_ago(5.0)
+        card.check_btn._turn.stop()
+        self._app.processEvents()
+
+        self.assertEqual(card.check_btn.minimumWidth(), idle_minimum)
+        self.assertEqual(card.check_btn.width(), idle_width)
+
+    def test_finished_check_turns_button_icon_once_and_rests(self) -> None:
+        card = self._shown_card()
+        button = card.check_btn
+
+        card.start_checking()
+        self.assertFalse(button.is_finish_turn_running())
+
+        with patch.object(update_card, "are_live_animations_enabled", return_value=True):
+            card.show_checked_ago(5.0)
+
+        self.assertTrue(button.is_finish_turn_running())
+        self.assertEqual(button._turn.loopCount(), 1)
+
+        button._turn.setCurrentTime(button._turn.duration() // 2)
+        self.assertGreater(button._turn_angle, 0.0)
+        self.assertLess(button._turn_angle, FINISH_TURN_DEGREES)
+
+        button._turn.setCurrentTime(button._turn.duration())
+        self._app.processEvents()
+
+        self.assertFalse(button.is_finish_turn_running())
+        self.assertEqual(button._turn_angle, 0.0)
+
+    def test_finish_turn_is_skipped_without_check_animations_or_visibility(self) -> None:
+        # Состояние сменилось без проверки (например, открыли страницу).
+        card = self._shown_card()
+        with patch.object(update_card, "are_live_animations_enabled", return_value=True):
+            card.show_checked_ago(5.0)
+        self.assertFalse(card.check_btn.is_finish_turn_running())
+
+        # «Живые анимации» выключены.
+        card.start_checking()
+        with patch.object(update_card, "are_live_animations_enabled", return_value=False):
+            card.show_checked_ago(5.0)
+        self.assertFalse(card.check_btn.is_finish_turn_running())
+        self.assertEqual(card.check_btn._turn_angle, 0.0)
+
+        # Карточка не на экране: проверка при запуске идёт на скрытой странице.
+        hidden = UpdateStatusCard(language="ru")
+        self.addCleanup(hidden.deleteLater)
+        hidden.start_checking()
+        with patch.object(update_card, "are_live_animations_enabled", return_value=True):
+            hidden.show_checked_ago(5.0)
+        self.assertFalse(hidden.check_btn.is_finish_turn_running())
+
+    def test_hiding_button_stops_finish_turn(self) -> None:
+        card = self._shown_card()
+        card.start_checking()
+        with patch.object(update_card, "are_live_animations_enabled", return_value=True):
+            card.show_checked_ago(5.0)
+        card.check_btn._turn.setCurrentTime(card.check_btn._turn.duration() // 2)
+        self.assertTrue(card.check_btn.is_finish_turn_running())
+
+        card.hide()
+
+        self.assertFalse(card.check_btn.is_finish_turn_running())
+        self.assertEqual(card.check_btn._turn_angle, 0.0)
 
 
 if __name__ == "__main__":
