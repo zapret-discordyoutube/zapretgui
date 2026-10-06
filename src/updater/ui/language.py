@@ -48,7 +48,7 @@ def apply_servers_page_language(
     rebuild_servers_breadcrumb(breadcrumb, tr_fn=tr_fn)
     page_title_label.setText(tr_fn("page.servers.title", "Серверы"))
     servers_title_label.setText(tr_fn("page.servers.section.update_servers", "Серверы обновлений"))
-    legend_active_label.setText(tr_fn("page.servers.legend.active", "⭐ активный"))
+    legend_active_label.setText(tr_fn("page.servers.legend.active", "активный"))
     set_servers_page_title_accessibility(page_title_label)
     set_servers_section_title_accessibility(servers_title_label)
     set_active_server_legend_accessibility(legend_active_label)

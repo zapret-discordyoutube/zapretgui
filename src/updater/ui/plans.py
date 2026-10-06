@@ -354,7 +354,9 @@ def build_server_row_plan(
         return tr_catalog(key, language=language, default=default)
 
     server_accent = bool(status.get("is_current"))
-    server_text = f"⭐ {row_server_name}" if server_accent else row_server_name
+    # Активный сервер помечает значок в ячейке (updater/ui/active_server_icon),
+    # а не символ в тексте: название остаётся чистым.
+    server_text = row_server_name
 
     state = status.get("status")
     if state == "online":

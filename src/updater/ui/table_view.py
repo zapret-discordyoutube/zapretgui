@@ -7,6 +7,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QTableWidgetItem
 
 from updater.ui import plans
+from updater.ui.active_server_icon import ACTIVE_SERVER_ROLE, active_server_icon
 from ui.accessibility import set_item_accessible_text, set_state_text
 
 
@@ -41,8 +42,9 @@ def render_server_row(
     )
     row_accessible_text = _server_row_accessible_text(plan)
     name_item = QTableWidgetItem(plan.server_text)
+    name_item.setData(ACTIVE_SERVER_ROLE, bool(plan.server_accent))
     if plan.server_accent:
-        name_item.setForeground(QColor(accent_hex))
+        apply_active_server_accent(name_item, accent_hex)
     set_item_accessible_text(name_item, row_accessible_text)
     table.setItem(row, 0, name_item)
 
@@ -60,6 +62,20 @@ def render_server_row(
     table.setItem(row, 3, extra_item)
     if table.currentRow() == row:
         _update_server_table_current_row_accessibility(table, row, table.currentColumn())
+
+
+def apply_active_server_accent(name_item, accent_hex: str) -> None:
+    """Красит название и значок активного сервера в цвет акцента."""
+    name_item.setForeground(QColor(accent_hex))
+    name_item.setIcon(active_server_icon(accent_hex))
+
+
+def recolor_active_server_rows(table, accent_hex: str) -> None:
+    """Перекрашивает пометку активного сервера после смены темы или акцента."""
+    for row in range(table.rowCount()):
+        item = table.item(row, 0)
+        if item is not None and bool(item.data(ACTIVE_SERVER_ROLE)):
+            apply_active_server_accent(item, accent_hex)
 
 
 def ensure_server_table_current_row_accessibility(table) -> None:
@@ -112,8 +128,7 @@ def _server_row_accessible_text(plan) -> str:
 
 def _strip_status_markers(text: object) -> str:
     value = str(text or "").strip()
-    for marker in ("●", "⭐"):
-        value = value.replace(marker, "")
+    value = value.replace("●", "")
     return " ".join(value.split())
 
 

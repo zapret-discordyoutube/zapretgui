@@ -4,7 +4,6 @@
 import time
 
 from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QHBoxLayout,
 )
@@ -22,6 +21,7 @@ from updater.ui.main_build import (
 )
 from updater.ui.language import apply_servers_page_language
 from updater.ui.table_view import (
+    recolor_active_server_rows,
     refresh_server_rows,
     reset_server_rows as reset_servers_table_rows,
     upsert_server_status as upsert_server_table_status,
@@ -432,13 +432,12 @@ class ServersPage(BasePage):
         self._tokens = tokens or get_theme_tokens()
         tokens = self._tokens
 
+        legend_icon = self.__dict__.get("_legend_active_icon")
+        if legend_icon is not None:
+            legend_icon.set_color(tokens.accent_hex)
         if hasattr(self, "servers_table"):
             try:
-                accent_qcolor = QColor(tokens.accent_hex)
-                for r in range(self.servers_table.rowCount()):
-                    item = self.servers_table.item(r, 0)
-                    if item and (item.text() or "").lstrip().startswith("⭐"):
-                        item.setForeground(accent_qcolor)
+                recolor_active_server_rows(self.servers_table, tokens.accent_hex)
             except Exception:
                 pass
 
@@ -504,6 +503,7 @@ class ServersPage(BasePage):
         self._page_title_label = header_widgets.page_title_label
         self._servers_title_label = header_widgets.servers_title_label
         self._legend_active_label = header_widgets.legend_active_label
+        self._legend_active_icon = header_widgets.legend_active_icon
 
         self.add_widget(header_widgets.header_widget)
 

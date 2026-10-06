@@ -2894,8 +2894,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Update Servers",
     },
     "page.servers.legend.active": {
-        "ru": "⭐ активный",
-        "en": "⭐ active",
+        "ru": "активный",
+        "en": "active",
     },
     "page.servers.table.header.server": {
         "ru": "Сервер",
