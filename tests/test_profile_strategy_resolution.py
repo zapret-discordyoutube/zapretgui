@@ -214,7 +214,8 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                     list(expected_profiles),
                 )
                 self.assertNotIn("--name=Исключения (RU сайты)", text)
-                self.assertIn("# BuiltinVersion: 2.42", text.splitlines()[:5])
+                # У пресета свой номер: он растёт при каждой правке именно этого файла.
+                self.assertGreaterEqual(_builtin_version(text), (2, 42))
 
                 for profile in exclusion_profiles:
                     self.assertEqual(
@@ -283,16 +284,8 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
                     f"{path.name}: YouTube {youtube_indexes}, RU pass {ru_pass_indexes}"
                 )
 
-            version_line = next(
-                (
-                    line
-                    for line in path.read_text(encoding="utf-8").splitlines()[:5]
-                    if line.startswith("# BuiltinVersion: ")
-                ),
-                "",
-            )
-            if version_line != "# BuiltinVersion: 2.42":
-                offenders.append(f"{path.name}: версия набора не 2.42")
+            if _builtin_version(path.read_text(encoding="utf-8")) < (2, 42):
+                offenders.append(f"{path.name}: версия пресета ниже 2.42")
 
         self.assertGreater(checked_presets, 0)
         self.assertEqual(offenders, [])
@@ -410,6 +403,16 @@ class ProfileStrategyResolutionTests(unittest.TestCase):
 
     def _profile_by_name(self, display_name: str):
         return next(profile for profile in self.preset.profiles if profile.display_name == display_name)
+
+
+def _builtin_version(text: str) -> tuple[int, ...]:
+    for line in text.splitlines()[:5]:
+        if line.startswith("# BuiltinVersion: "):
+            try:
+                return tuple(int(part) for part in line.removeprefix("# BuiltinVersion: ").split("."))
+            except ValueError:
+                return ()
+    return ()
 
 
 def _ready_strategy_identity(engine: str, lines, composite: bool = False) -> tuple:

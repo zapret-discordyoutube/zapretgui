@@ -156,6 +156,16 @@ WINWS1_FIXTURES: dict[str, str] = {
 }
 
 
+def _builtin_version(text: str) -> tuple[int, ...]:
+    for line in text.splitlines()[:5]:
+        if line.startswith("# BuiltinVersion: "):
+            try:
+                return tuple(int(part) for part in line.removeprefix("# BuiltinVersion: ").split("."))
+            except ValueError:
+                return ()
+    return ()
+
+
 def _builtin_texts(engine: str) -> dict[str, str]:
     return {
         path.name: path.read_bytes().decode("utf-8")
@@ -306,7 +316,8 @@ class SaveNormalizationTests(unittest.TestCase):
             with self.subTest(preset=name):
                 self.assertEqual(normalize_preset_source_for_save(text, ENGINE_WINWS2), text)
                 _assert_block_invariants(self, text, text)
-                self.assertIn("# BuiltinVersion: 2.42", text.split("\n")[:5])
+                # У пресета свой номер: он растёт при каждой правке именно этого файла.
+                self.assertGreaterEqual(_builtin_version(text), (2, 42))
 
     def test_every_builtin_winws2_preset_passes_launch_validation(self) -> None:
         from winws_runtime.preset_launch_text import (
