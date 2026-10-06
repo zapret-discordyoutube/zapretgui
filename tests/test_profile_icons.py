@@ -166,13 +166,13 @@ class ProfileIconTests(unittest.TestCase):
         self.assertEqual(icon.icon_name, "simple:fastly:FS")
         self.assertEqual(icon.color, "#FF282D")
 
-    def test_akamai_profile_uses_hoster_icon(self) -> None:
+    def test_akamai_profile_uses_brand_icon(self) -> None:
         icon = resolve_profile_icon(
             "Akamai TCP",
             ("--filter-tcp=80,443-65535", "--ipset=lists/ipset-akamai.txt"),
         )
 
-        self.assertEqual(icon.icon_name, "fa5s.cloud")
+        self.assertEqual(icon.icon_name, "simple:akamai:AK")
         self.assertEqual(icon.color, "#0096D6")
 
     def test_frantech_solutions_profile_uses_hoster_icon(self) -> None:
@@ -184,13 +184,13 @@ class ProfileIconTests(unittest.TestCase):
         self.assertEqual(icon.icon_name, "fa5s.server")
         self.assertEqual(icon.color, "#F59E0B")
 
-    def test_railway_profile_uses_hoster_icon(self) -> None:
+    def test_railway_profile_uses_brand_icon(self) -> None:
         icon = resolve_profile_icon(
             "Railway TCP",
             ("--filter-tcp=80,443-65535", "--ipset=lists/ipset-railway.txt"),
         )
 
-        self.assertEqual(icon.icon_name, "fa5s.train")
+        self.assertEqual(icon.icon_name, "simple:railway:RW")
         self.assertEqual(icon.color, "#A855F7")
 
     def test_datacamp_profile_uses_hoster_icon(self) -> None:
@@ -220,14 +220,50 @@ class ProfileIconTests(unittest.TestCase):
         self.assertEqual(icon.icon_name, "fa5s.server")
         self.assertEqual(icon.color, "#0EA5E9")
 
-    def test_google_cloud_profile_uses_google_icon(self) -> None:
+    def test_google_cloud_profile_uses_google_cloud_icon(self) -> None:
         icon = resolve_profile_icon(
             "Google Cloud TCP",
             ("--filter-tcp=80,443-65535", "--ipset=lists/ipset-usa-google.txt"),
         )
 
-        self.assertEqual(icon.icon_name, "simple:google:GO")
+        self.assertEqual(icon.icon_name, "simple:googlecloud:GC")
         self.assertEqual(icon.color, "#4285F4")
+
+    def test_known_services_get_their_own_icon_instead_of_initials(self) -> None:
+        expected = {
+            ("Apple", "lists/apple.txt"): "simple:apple:AP",
+            ("Claude", "lists/claude.txt"): "simple:claude:CL",
+            ("Gemini", "lists/gemini.txt"): "simple:googlegemini:GE",
+            ("Notion", "lists/notion.txt"): "simple:notion:NO",
+            ("LinkedIn", "lists/linkedin.txt"): "fa5b.linkedin",
+            ("chatgpt", "lists/chatgpt.txt"): "own:openai:AI",
+            ("git.zapret.moe", "lists/git-zapret-moe.txt"): "simple:forgejo:FJ",
+            ("LordFilm (зеркала)", "lists/lordfilm.txt"): "fa5s.film",
+            ("rutracker.org", "lists/rutracker.txt"): "fa5s.magnet",
+            ("rutor.info (.is)", "lists/rutor.txt"): "fa5s.magnet",
+        }
+        for (name, hostlist), icon_name in expected.items():
+            with self.subTest(profile=name):
+                icon = resolve_profile_icon(name, ("--filter-tcp=80,443", f"--hostlist={hostlist}"))
+                self.assertEqual(icon.icon_name, icon_name)
+                self.assertFalse(icon.icon_name.startswith("profile-initials:"))
+
+    def test_black_brand_marks_get_a_color_visible_on_the_dark_theme(self) -> None:
+        for name, hostlist in (("Apple", "lists/apple.txt"), ("Notion", "lists/notion.txt")):
+            with self.subTest(profile=name):
+                icon = resolve_profile_icon(name, ("--filter-tcp=443", f"--hostlist={hostlist}"))
+                red, green, blue = (int(icon.color[position : position + 2], 16) for position in (1, 3, 5))
+                self.assertGreater(min(red, green, blue), 0x80)
+
+    def test_datacamp_hoster_does_not_borrow_the_online_school_logo(self) -> None:
+        # Профиль — хостер Datacamp Limited (CDN77), а не школа DataCamp, чей
+        # значок есть в Simple Icons под тем же именем.
+        icon = resolve_profile_icon(
+            "Datacamp UDP",
+            ("--filter-udp=443", "--ipset=lists/ipset-datacamp.txt"),
+        )
+
+        self.assertEqual(icon.icon_name, "fa5s.cloud")
 
     def test_google_ipset_profile_uses_google_icon(self) -> None:
         icon = resolve_profile_icon(

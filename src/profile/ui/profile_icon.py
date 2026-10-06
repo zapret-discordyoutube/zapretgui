@@ -11,6 +11,8 @@ from ui.theme import get_cached_qta_pixmap
 
 _INITIALS_PREFIX = "profile-initials:"
 _SIMPLE_PREFIX = "simple:"
+# Свои значки из profile/ui/own_icons.py: тот же вид имени, что у simple.
+_OWN_PREFIX = "own:"
 _PROFILE_PIXMAP_CACHE_MAX = 256
 _PROFILE_PIXMAP_CACHE: OrderedDict[tuple[str, str, str, int], QPixmap] = OrderedDict()
 
@@ -37,11 +39,21 @@ def _bundled_simple_icons() -> dict[str, tuple[str, str]]:
     return bundle
 
 
+def _own_icons() -> dict[str, tuple[str, str]]:
+    try:
+        from profile.ui.own_icons import OWN_ICON_SVGS
+
+        return OWN_ICON_SVGS
+    except Exception:
+        return {}
+
+
 def profile_icon_pixmap(icon_name: str, *, color: str, size: int, theme_name: str = "") -> QPixmap:
     name = str(icon_name or "").strip()
-    if name.startswith(_SIMPLE_PREFIX):
+    if name.startswith((_SIMPLE_PREFIX, _OWN_PREFIX)):
+        kind = "own" if name.startswith(_OWN_PREFIX) else "simple"
         slug, fallback = _parse_simple_icon_name(name)
-        pixmap = _cached_profile_pixmap("simple", slug, str(color or ""), size)
+        pixmap = _cached_profile_pixmap(kind, slug, str(color or ""), size)
         if not pixmap.isNull():
             return pixmap
         return _cached_profile_pixmap(
@@ -61,7 +73,7 @@ def profile_icon_pixmap(icon_name: str, *, color: str, size: int, theme_name: st
 
 
 def _parse_simple_icon_name(icon_name: str) -> tuple[str, str]:
-    payload = str(icon_name or "").removeprefix(_SIMPLE_PREFIX)
+    payload = str(icon_name or "").removeprefix(_SIMPLE_PREFIX).removeprefix(_OWN_PREFIX)
     slug, _sep, fallback = payload.partition(":")
     return slug.strip(), fallback.strip()
 
@@ -74,8 +86,9 @@ def _cached_profile_pixmap(kind: str, value: str, color: str, size: int) -> QPix
         _PROFILE_PIXMAP_CACHE.move_to_end(cache_key)
         return QPixmap(cached)
 
-    if cache_key[0] == "simple":
-        pixmap = _simple_icon_pixmap(cache_key[1], color=cache_key[2], size=safe_size)
+    if cache_key[0] in ("simple", "own"):
+        icons = _own_icons() if cache_key[0] == "own" else _bundled_simple_icons()
+        pixmap = _simple_icon_pixmap(cache_key[1], color=cache_key[2], size=safe_size, icons=icons)
     elif cache_key[0] == "initials":
         pixmap = _initials_pixmap(cache_key[1], color=cache_key[2], size=safe_size)
     else:
@@ -92,8 +105,8 @@ def _cached_profile_pixmap(kind: str, value: str, color: str, size: int) -> QPix
     return pixmap
 
 
-def _simple_icon_pixmap(slug: str, *, color: str, size: int) -> QPixmap:
-    svg = _simple_icon_svg(slug, color=color)
+def _simple_icon_pixmap(slug: str, *, color: str, size: int, icons: dict | None = None) -> QPixmap:
+    svg = _simple_icon_svg(slug, color=color, icons=icons)
     if not svg:
         return QPixmap()
 
@@ -112,11 +125,11 @@ def _simple_icon_pixmap(slug: str, *, color: str, size: int) -> QPixmap:
     return canvas
 
 
-def _simple_icon_svg(slug: str, *, color: str) -> str:
+def _simple_icon_svg(slug: str, *, color: str, icons: dict | None = None) -> str:
     clean_slug = str(slug or "").strip().lower().replace("-", "")
     if not clean_slug:
         return ""
-    entry = _bundled_simple_icons().get(clean_slug)
+    entry = (_bundled_simple_icons() if icons is None else icons).get(clean_slug)
     if entry is None:
         return ""
     primary_color_raw, raw_svg = entry

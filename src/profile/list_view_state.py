@@ -424,7 +424,7 @@ def build_profile_rows_from(
     return rows
 
 
-_SITE_ICON_PREFIXES = ("simple:", "fa5b.")
+_SITE_ICON_PREFIXES = ("simple:", "own:", "fa5b.")
 _INITIALS_ICON_PREFIX = "profile-initials:"
 
 
