@@ -46,6 +46,8 @@ DOUBLE_BLINK_CHANCE = 0.25
 # Ширина виджета в долях размера: узкая, чтобы пакеты пропадали у самой морды,
 # а не за невидимым полем рядом с ней.
 BODY_WIDTH_RATIO = 1.12
+# Запас над головой — ровно на прыжок от радости, чтобы не занимать сцену пустотой.
+BODY_HEIGHT_RATIO = 1.3
 
 # Лапа с молнией в покое чуть покачивается в такт дыханию (градусы).
 PAW_BREATH_SWING = 7.0
@@ -61,7 +63,7 @@ class DrawnBadger(Mascot):
 
     def __init__(self, parent=None, *, size: int = 44) -> None:
         super().__init__(parent, size=size)
-        self.setFixedSize(int(self._side * BODY_WIDTH_RATIO), self.height())
+        self.setFixedSize(int(self._side * BODY_WIDTH_RATIO), int(self._side * BODY_HEIGHT_RATIO))
         # Подсказка от сцены: насколько раскрыта пасть, поворот лапы и блик на молнии.
         self._scene_jaw = 0.0
         self._scene_paw = 0.0

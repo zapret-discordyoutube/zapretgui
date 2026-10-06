@@ -1,21 +1,22 @@
 """Сцена обхода для карточки «Статус работы».
 
-Посередине стоит талисман-медоед (это Zapret на вашем компьютере). Слева
-компьютер, справа сайты, а между медоедом и сайтами — стена блокировки с
-круглой кнопкой питания: это и есть выключатель Zapret. Медоед смотрит на
-стену; у него два «приёмника» пакетов: пасть (верхняя дорожка) и лапа с
-молнией «Z» (нижняя дорожка).
+Слева крупно стоит талисман-медоед (это Zapret на вашем компьютере) и смотрит
+на стену блокировки. В стене — круглая кнопка питания: это и есть выключатель
+Zapret. Справа сайты. Лапа медоеда с молнией «Z» тянется к кнопке: пока обход
+работает или запускается, между молнией и кнопкой пробегает электрическая
+дуга — медоед «питает» обход. У медоеда два «приёмника» пакетов: пасть
+(верхняя дорожка) и лапа с молнией (нижняя дорожка).
 
 - Zapret остановлен: медоед лапой с «Z» кидает пакеты в стену, они
-  отскакивают обратно, и он их встречает: один ловит пастью, другой
-  отбивает лапой. Ответов от сайтов нет.
+  отскакивают обратно, и он их встречает: одни ловит пастью, другие
+  отбивает лапой. Дуги нет, ответов от сайтов нет.
 - Запуск не удался: то же самое, но медоед грустит и уже ничего не кидает.
-- Идёт запуск или остановка: пакеты из-под лапы долетают до стены и ждут,
-  вокруг кнопки бегает дуга, медоед суетится.
-- Zapret работает: стена бледнеет, пакеты проходят сквозь кнопку и
-  окрашиваются в её цвет. Лапа с «Z» выпускает их к сайтам, а ответы от сайтов
-  медоед ловит пастью. Радостно подпрыгивает в момент включения, а потом
-  спокойно дышит и оглядывается.
+- Идёт запуск или остановка: между молнией и кнопкой трещит дуга, пакеты
+  из-под лапы долетают до стены и ждут, вокруг кнопки бегает комета.
+- Zapret работает: стена бледнеет, дуга ровно мерцает, пакеты проходят сквозь
+  кнопку и окрашиваются в её цвет. Лапа с «Z» выпускает их к сайтам, а ответы
+  от сайтов медоед ловит пастью. Радостно подпрыгивает в момент включения,
+  а потом спокойно дышит и оглядывается.
 
 Кадры идут, только пока сцена видна, окно не свёрнуто и включены «живые
 анимации». В остановленном состоянии это короткий залп и пауза (таймер
@@ -31,24 +32,34 @@ from PyQt6.QtCore import QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QPainter, QPen, QRegion
 from PyQt6.QtWidgets import QSizePolicy
 
+from qfluentwidgets import isDarkTheme
+
 from ui.animation_policy import are_live_animations_enabled
 from ui.pulsing_dot import PulsingDot
 from ui.widgets.fun.badger import DrawnBadger
 from ui.widgets.fun.mascot import GESTURE_TOSS, MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 
 
-SCENE_HEIGHT = 76
+SCENE_HEIGHT = 88
 # Наибольшая ширина виджета в Qt: «без ограничения».
 QWIDGETSIZE_MAX = (1 << 24) - 1
 SCENE_WIDTH = 330
 SCENE_MIN_WIDTH = 240
-MASCOT_SIZE = 44
+MASCOT_SIZE = 64
 # Высота пасти и лапы с «Z» на значке медоеда (доля его размера от верха):
 # на этих высотах идут дорожки пакетов.
 MOUTH_LANE = 0.34
 PAW_LANE = 0.62
-# Место под значки по краям: слева компьютер, справа сайты.
+# Место под значок сайтов справа.
 ENDPOINT_ROOM = 34
+# Талисман стоит у левого края, а стена — в этом расстоянии от его морды.
+MASCOT_MARGIN = 2
+GATE_OFFSET = 64.0
+# Дуга между молнией «Z» и кнопкой: сколько изломов и как сильно дрожит.
+LINK_SEGMENTS = 6
+LINK_JITTER_BUSY = 3.4
+LINK_JITTER_RUNNING = 1.6
+LINK_FLICKER_HZ = 16.0
 # Пакет входит в пасть и «рождается» из лапы чуть глубже края медоеда, px.
 EAT_DEPTH = 12.0
 BIRTH_DEPTH = 8.0
@@ -80,11 +91,6 @@ COMET_SPEED_DEG = 300.0
 FLOW_LANES = (
     (-1, 36.0, (0.12, 0.58, 0.66)),
     (1, 46.0, (0.0, 0.31, 0.47, 0.78)),
-)
-# Пакеты от компьютера идут к медоеду сзади (слева), по обеим дорожкам.
-INBOUND_LANES = (
-    (40.0, (0.0, 0.5)),
-    (40.0, (0.25, 0.75)),
 )
 # Залп о стену: медоед кидает три пакета один за другим.
 BLOCKED_BURST_MS = 2300
@@ -222,13 +228,9 @@ class BypassScene(PulsingDot):
         return QSize(self._preferred_width, SCENE_HEIGHT)
 
     def _place_mascot(self) -> None:
-        """Ставит медоеда по центру сцены: и по ширине, и по высоте самого значка."""
+        """Ставит медоеда у левого края на «пол» сцены: лапы у нижнего края."""
         mascot = self._mascot
-        box_top = mascot.height() - 2 - MASCOT_SIZE
-        mascot.move(
-            (self.width() - mascot.width()) // 2,
-            max(0, (self.height() - MASCOT_SIZE) // 2 - box_top),
-        )
+        mascot.move(MASCOT_MARGIN, self.height() - mascot.height() - 1)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -281,8 +283,9 @@ class BypassScene(PulsingDot):
 
     def gate_center(self) -> QPoint:
         """Центр кнопки в координатах сцены: отсюда по карточке расходится волна."""
-        left, right, _top, _bottom = self._lanes()
-        return QPoint(round((left + right) / 2), self.height() // 2)
+        left, _right, top, bottom = self._lanes()
+        # Кнопка стоит напротив морды медоеда, на середине между дорожками.
+        return QPoint(round(left + GATE_OFFSET), round((top + bottom) / 2))
 
     def _is_flowing(self) -> bool:
         return self._phase == "running" or self._phase in BUSY_PHASES
@@ -581,21 +584,15 @@ class BypassScene(PulsingDot):
             box_top + PAW_LANE * MASCOT_SIZE,
         )
 
-    def _inbound_span(self) -> tuple[float, float]:
-        """Отрезок слева: от компьютера до медоеда."""
-        return float(ENDPOINT_ROOM - 4), float(self._mascot.geometry().left())
-
     def _motion_region(self) -> QRegion:
-        """Что меняется от кадра к кадру: дорожки по обе стороны от медоеда, стена и кнопка.
+        """Что меняется от кадра к кадру: дорожки, дуга, стена и кнопка.
 
         Сам медоед в область не входит: он перерисовывается только когда
         меняется его поза (иначе каждый кадр перерисовывался бы весь значок).
         """
         left, right, top, bottom = self._lanes()
-        from_x, to_x = self._inbound_span()
         y, height = int(top) - 12, int(bottom - top) + 24
-        region = QRegion(QRect(int(left), y, int(right - left) + 2, height))
-        region |= QRegion(QRect(int(from_x), y, int(to_x - from_x), height))
+        region = QRegion(QRect(int(left) - 8, y, int(right - left) + 10, height))
         center = self.gate_center()
         wall = QRect(center.x() - 8, 0, 16, self.height())
         return region | QRegion(self.button_rect()) | QRegion(wall)
@@ -618,16 +615,14 @@ class BypassScene(PulsingDot):
         open_t = self._open_t
         color = self._shown_color
 
+        self._paint_floor(painter)
         self._paint_endpoints(painter, center, color, open_t)
 
         track = QColor(RAW_COLOR)
         track.setAlphaF(0.16)
         painter.setBrush(track)
-        # Дорожки слева (от компьютера) и справа (от лапы к стене): без обхода
-        # пути за стеной нет, поэтому за ней дорожки бледнеют.
-        from_x, to_x = self._inbound_span()
-        for y in (top, bottom):
-            painter.drawRect(QRectF(from_x, y - 0.5, to_x - from_x, 1.0))
+        # Дорожки от морды и лапы медоеда к сайтам: без обхода пути за стеной
+        # нет, поэтому за ней дорожки бледнеют.
         painter.drawRect(QRectF(left, top - 0.5, right - left, 1.0))
         painter.drawRect(QRectF(left, bottom - 0.5, right - left, 1.0))
         beyond = QColor(RAW_COLOR)
@@ -638,12 +633,12 @@ class BypassScene(PulsingDot):
 
         impact = 0.0
         if self._is_flowing():
-            self._paint_inbound(painter, from_x, to_x, (top, bottom))
             self._paint_stream(painter, center, left, right, (top, bottom), gate, color, open_t)
         elif self._phase:
             impact = self._paint_blocked(painter, center, left, top, bottom, gate, color)
 
         self._paint_wall(painter, center, color, open_t, impact)
+        self._paint_link(painter, center, color, open_t)
         if self._phase == "running" and self.is_beating():
             # Ореол работающей кнопки мягко дышит.
             impact = 0.5 + 0.5 * math.sin(2 * math.pi * self._flow_time / HALO_PERIOD_S)
@@ -659,8 +654,7 @@ class BypassScene(PulsingDot):
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
-        # Сайты — глобус, ваш компьютер — монитор. Когда обход работает, оба
-        # загораются цветом кнопки.
+        # Сайты — глобус. Когда обход работает, он загорается цветом кнопки.
         globe = QColor(
             round(RAW_COLOR.red() + (color.red() - RAW_COLOR.red()) * open_t),
             round(RAW_COLOR.green() + (color.green() - RAW_COLOR.green()) * open_t),
@@ -675,10 +669,6 @@ class BypassScene(PulsingDot):
             QPointF(globe_center.x() - 10.0, globe_center.y()),
             QPointF(globe_center.x() + 10.0, globe_center.y()),
         )
-        screen = QPointF(15.0, center.y() - 1.5)
-        painter.drawRoundedRect(QRectF(screen.x() - 9.0, screen.y() - 6.5, 18.0, 13.0), 2.2, 2.2)
-        painter.drawLine(QPointF(screen.x(), screen.y() + 6.5), QPointF(screen.x(), screen.y() + 9.5))
-        painter.drawLine(QPointF(screen.x() - 4.5, screen.y() + 9.5), QPointF(screen.x() + 4.5, screen.y() + 9.5))
         painter.setPen(Qt.PenStyle.NoPen)
 
     @staticmethod
@@ -693,6 +683,59 @@ class BypassScene(PulsingDot):
         body.setAlphaF(alpha)
         painter.setBrush(body)
         painter.drawRoundedRect(QRectF(x - 3.5, y - 1.75, 7.0, 3.5), 1.75, 1.75)
+
+    def _paint_floor(self, painter: QPainter) -> None:
+        """Мягкая тень под лапами: медоед стоит на полу, а не висит в воздухе."""
+        mascot = self._mascot
+        base = mascot.y() + mascot.height() - 2
+        cx = mascot.geometry().center().x()
+        shadow = QColor(0, 0, 0, 70 if isDarkTheme() else 38)
+        painter.setBrush(shadow)
+        painter.drawEllipse(QPointF(cx, base + 1.0), MASCOT_SIZE * 0.42, 2.6)
+
+    def _link_ends(self, center: QPointF) -> tuple[QPointF, QPointF]:
+        """Концы дуги: острие молнии «Z» и левый край кнопки."""
+        left, _right, _top, bottom = self._lanes()
+        return QPointF(left - 3.0, bottom - 1.0), QPointF(center.x() - BUTTON_RADIUS - 3.0, center.y())
+
+    def _paint_link(self, painter: QPainter, center: QPointF, color: QColor, open_t: float) -> None:
+        """Электрическая дуга от молнии медоеда к кнопке.
+
+        Пока идёт запуск или остановка — трещит сильнее, при работе обхода —
+        ровно мерцает; у остановленного Zapret дуги нет. Дрожание считается из
+        времени потока без случайных чисел, поэтому кадры воспроизводимы.
+        """
+        busy = self._phase in BUSY_PHASES
+        if not (busy or self._phase == "running"):
+            return
+        start, end = self._link_ends(center)
+        jitter = LINK_JITTER_BUSY if busy else LINK_JITTER_RUNNING
+        strength = 0.9 if busy else (0.35 + 0.35 * open_t)
+        tick = int(self._flow_time * LINK_FLICKER_HZ)
+        dx, dy = end.x() - start.x(), end.y() - start.y()
+        length = math.hypot(dx, dy) or 1.0
+        nx, ny = -dy / length, dx / length
+        points = [start]
+        for i in range(1, LINK_SEGMENTS):
+            t = i / LINK_SEGMENTS
+            noise = math.sin(tick * 12.9898 + i * 78.233) * 43758.5453
+            offset = ((noise - math.floor(noise)) - 0.5) * 2.0 * jitter * math.sin(math.pi * t)
+            points.append(QPointF(start.x() + dx * t + nx * offset, start.y() + dy * t + ny * offset))
+        points.append(end)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # Жилка дуги: белая на тёмном фоне и насыщенный цвет кнопки на светлом.
+        core = QColor(255, 255, 255) if isDarkTheme() else QColor(color).darker(125)
+        for width, alpha, tint in ((4.2, 0.18, color), (1.5, 1.0, core)):
+            line = QColor(tint)
+            line.setAlphaF(alpha * strength)
+            pen = QPen(line)
+            pen.setWidthF(width)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            for first, second in zip(points, points[1:]):
+                painter.drawLine(first, second)
+        painter.setPen(Qt.PenStyle.NoPen)
 
     def _flow_x(self, direction: int, speed: float, offset: float, left: float, right: float) -> float:
         """Где сейчас пакет на дорожке справа от медоеда.
@@ -709,18 +752,6 @@ class BypassScene(PulsingDot):
         span = right - start
         u = (self._flow_time * speed / span + offset) % 1.0
         return start + u * span
-
-    def _paint_inbound(self, painter, from_x: float, to_x: float, lanes_y) -> None:
-        """Пакеты от компьютера идут к медоеду и тают у его спины."""
-        length = to_x - from_x
-        if length <= 0.0:
-            return
-        for (speed, offsets), y in zip(INBOUND_LANES, lanes_y):
-            for offset in offsets:
-                u = (self._flow_time * speed / length + offset) % 1.0
-                x = from_x + u * length
-                alpha = min(1.0, min(x - from_x, to_x - x) / 12.0)
-                self._paint_packet(painter, x, y, RAW_COLOR, alpha, 1)
 
     def _paint_stream(self, painter, center, left, right, lanes_y, gate, color, through: float) -> None:
         """Поток пакетов справа от медоеда. ``through`` — насколько открыты ворота (0..1).

@@ -298,29 +298,60 @@ class BypassSceneTests(unittest.TestCase):
         scene.set_phase("running")
         self.assertEqual(scene.mascot().mood(), MOOD_HAPPY)
 
-    def test_mascot_stands_in_the_middle_of_the_scene(self) -> None:
+    def test_mascot_stands_big_on_the_left_facing_the_wall(self) -> None:
         scene = self._scene("stopped")
         mascot = scene.mascot()
         left, right, top, bottom = scene._lanes()
 
         self.assertIs(mascot.parent(), scene)
-        # По ширине медоед посередине, по высоте — тоже (по самому значку, а не по запасу над ним).
-        self.assertAlmostEqual(mascot.geometry().center().x(), scene.width() / 2, delta=1.5)
-        box_top = mascot.y() + mascot.height() - 2 - scene_module.MASCOT_SIZE
-        self.assertAlmostEqual(box_top + scene_module.MASCOT_SIZE / 2, scene.height() / 2, delta=1.5)
-        self.assertGreaterEqual(mascot.geometry().top(), 0)
+        # Медоед у левого края и стоит на «полу»: лапы у нижнего края сцены.
+        self.assertEqual(mascot.x(), scene_module.MASCOT_MARGIN)
         self.assertLessEqual(mascot.geometry().bottom(), scene.height())
+        self.assertGreaterEqual(mascot.geometry().top(), 0)
+        self.assertGreaterEqual(scene.height() - mascot.geometry().bottom(), 1)
+        # Он занимает бо́льшую часть высоты сцены, а не теряется в ней.
+        self.assertGreater(scene_module.MASCOT_SIZE / scene.height(), 0.65)
         # Дорожки начинаются у морды: сверху пасть, снизу лапа с «Z».
         self.assertEqual(left, mascot.geometry().right() + 1)
         self.assertLess(top, bottom)
-        # Кнопка стоит между медоедом и сайтами.
-        self.assertEqual(scene.gate_center().x(), round((left + right) / 2))
-        self.assertGreater(scene.gate_center().x() - scene_module.BUTTON_RADIUS - 3.0, left)
+        # Кнопка в стене напротив морды, на середине между дорожками, а не в центре сцены.
+        gate = scene.gate_center()
+        self.assertEqual(gate.x(), round(left + scene_module.GATE_OFFSET))
+        self.assertEqual(gate.y(), round((top + bottom) / 2))
+        self.assertLess(gate.x(), scene.width() / 2)
+        # Справа от стены остаётся длинный путь к сайтам.
+        self.assertGreater(right - gate.x(), 2 * (gate.x() - left))
 
-    def test_mascot_stays_centered_when_the_scene_is_stretched(self) -> None:
+    def test_mascot_keeps_its_place_when_the_scene_is_stretched(self) -> None:
         scene = self._scene("stopped")
+        before = scene.mascot().pos()
+        gate_before = scene.gate_center()
         scene.resize(scene_module.SCENE_MIN_WIDTH + 100, scene.height())
-        self.assertAlmostEqual(scene.mascot().geometry().center().x(), scene.width() / 2, delta=1.5)
+        self.assertEqual(scene.mascot().pos(), before)
+        self.assertEqual(scene.gate_center(), gate_before)
+
+    def test_power_arc_links_the_bolt_and_the_button_only_while_working(self) -> None:
+        scene = self._scene("stopped")
+        center = scene_module.QPointF(scene.gate_center())
+        start, end = scene._link_ends(center)
+        # Дуга короткая: от острия молнии до края кнопки.
+        self.assertLess(start.x(), end.x())
+        self.assertLess(end.x(), center.x())
+
+        def drawn(phase: str) -> int:
+            scene.set_phase(phase)
+            scene._flow_time = 0.7
+            calls = []
+            painter = mock.Mock()
+            painter.drawLine.side_effect = lambda a, b: calls.append((a, b))
+            scene._paint_link(painter, center, QColor("#6ccb5f"), scene._open_target())
+            return len(calls)
+
+        self.assertEqual(drawn("stopped"), 0)
+        self.assertEqual(drawn("failed"), 0)
+        for phase in ("starting", "stopping", "running"):
+            with self.subTest(phase=phase):
+                self.assertGreater(drawn(phase), 0)
 
     def test_mascot_tosses_packets_when_a_burst_starts(self) -> None:
         scene = self._scene("stopped")
