@@ -1543,12 +1543,14 @@ class ProfileListPayloadTests(unittest.TestCase):
                 self.single_calls += 1
                 return ProfileStrategyState()
 
-            def get_strategy_states(self, _profile_key: str, strategy_ids) -> dict[str, ProfileStrategyState]:
+            def get_strategy_list_marks(self, _profile_key: str, strategy_ids):
+                # Оценки и открытая группа читаются из настроек одним заходом.
                 self.batch_calls += 1
-                return {
+                states = {
                     str(strategy_id): ProfileStrategyState()
                     for strategy_id in tuple(strategy_ids or ())
                 }
+                return states, "fake"
 
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1589,6 +1591,7 @@ class ProfileListPayloadTests(unittest.TestCase):
 
         self.assertIsNotNone(payload)
         self.assertEqual(len(payload.strategy_entries), 80)
+        self.assertEqual(payload.strategy_open_group, "fake")
         self.assertEqual(state_store.batch_calls, 1)
         self.assertLessEqual(state_store.single_calls, 1)
 

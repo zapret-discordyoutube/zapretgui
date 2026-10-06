@@ -459,6 +459,30 @@ class ProfileFeature:
             parent=parent,
         )
 
+    def create_profile_strategy_open_group_save_worker(
+        self,
+        request_id: int,
+        launch_method: str,
+        *,
+        profile_key: str,
+        group_key: str,
+        parent=None,
+    ):
+        from profile.profile_setup_loader import ProfileStrategyOpenGroupSaveWorker
+
+        clean_launch_method = str(launch_method or "")
+
+        def _save_open_group(*, profile_key: str, group_key: str):
+            return self.set_strategy_open_group(clean_launch_method, profile_key, group_key)
+
+        return ProfileStrategyOpenGroupSaveWorker(
+            request_id,
+            _save_open_group,
+            profile_key=profile_key,
+            group_key=group_key,
+            parent=parent,
+        )
+
     def get_profile_list_file_editor_state(
         self,
         launch_method: str,
@@ -570,6 +594,9 @@ class ProfileFeature:
 
     def set_profile_filter_kind(self, launch_method: str, profile_key: str, filter_kind: str) -> tuple[str, str] | None:
         return self._commands().set_profile_filter_kind(self, launch_method, profile_key, filter_kind)
+
+    def set_strategy_open_group(self, launch_method: str, profile_key: str, group_key: str) -> bool:
+        return self._commands().set_strategy_open_group(self, launch_method, profile_key, group_key)
 
     def set_current_strategy_state(
         self,

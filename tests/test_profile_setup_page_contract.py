@@ -6148,7 +6148,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
     def test_strategy_list_rows_store_visual_description(self) -> None:
         set_rows = inspect.getsource(ProfileStrategyListWidget._rebuild_tree)
-        paint = inspect.getsource(ProfileStrategyListDelegate.paint)
+        paint = inspect.getsource(ProfileStrategyListDelegate._paint_row)
 
         self.assertIn("_ROLE_VISUAL_ICON_NAME", set_rows)
         self.assertIn("_ROLE_VISUAL_LABEL_TEXT", set_rows)
@@ -6451,7 +6451,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
     def test_strategy_and_preset_lists_share_hover_row_painter(self) -> None:
         from profile.ui.profile_list_delegate import ProfileListDelegate
 
-        strategy_paint = inspect.getsource(ProfileStrategyListDelegate.paint)
+        strategy_paint = inspect.getsource(ProfileStrategyListDelegate._paint_row)
         preset_paint = inspect.getsource(PresetListDelegate._paint_preset_row)
         profile_paint = inspect.getsource(ProfileListDelegate._paint_profile_row)
 

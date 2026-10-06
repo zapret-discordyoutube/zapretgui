@@ -90,6 +90,7 @@ _PROFILE_SETUP_CLEANUP_RUNTIMES = (
     ("_user_profile_delete_runtime", "profile user delete worker", True),
     ("_strategy_apply_runtime", "profile strategy apply worker", True),
     ("_strategy_feedback_save_runtime", "profile strategy feedback save worker", True),
+    ("_strategy_open_group_save_runtime", "profile strategy open group save worker", True),
 )
 
 
@@ -366,6 +367,7 @@ class ProfileSetupPageBase(BasePage):
         open_root,
         on_profile_changed,
         ui_state_store=None,
+        create_profile_strategy_open_group_save_worker=None,
     ):
         super().__init__(
             title="",
@@ -383,6 +385,11 @@ class ProfileSetupPageBase(BasePage):
         self._create_profile_user_delete_worker_fn = create_profile_user_delete_worker
         self._create_profile_strategy_apply_worker_fn = create_profile_strategy_apply_worker
         self._create_profile_strategy_feedback_save_worker_fn = create_profile_strategy_feedback_save_worker
+        # Без этой фабрики открытая группа стратегий помнится только до
+        # закрытия программы.
+        self._create_profile_strategy_open_group_save_worker_fn = create_profile_strategy_open_group_save_worker
+        # Что ещё не записано в настройки: {ключ профиля: ключ группы}.
+        self._pending_strategy_open_group_saves = {}
         self._open_profiles = open_profiles
         self._open_root = open_root
         self._on_profile_changed_callback = on_profile_changed
@@ -785,6 +792,7 @@ class ProfileSetupPageBase(BasePage):
 
         self._strategy_list = ProfileStrategyListWidget(self)
         self._strategy_list.strategy_activated.connect(self._on_strategy_list_activated)
+        self._strategy_list.open_group_changed.connect(self._on_strategy_open_group_changed)
         self._strategy_stack.addWidget(self._strategy_list)
 
         self._list_file_editor_placeholder = QWidget(self)
@@ -1788,6 +1796,41 @@ class ProfileSetupPageBase(BasePage):
     ):
         return self._create_profile_strategy_feedback_save_worker_fn(request_id, self.launch_method, profile_key=profile_key, strategy_id=strategy_id, rating=rating, favorite=favorite, parent=parent)
 
+    # ------------------------------------------------------------------
+    # Открытая группа готовых стратегий
+    # ------------------------------------------------------------------
+
+    def _on_strategy_open_group_changed(self, _token: str, group_key: str) -> None:
+        """Человек открыл другую группу стратегий: запоминаем её для профиля."""
+        profile_key = str(self.__dict__.get("_profile_key") or "").strip()
+        if not profile_key or self.__dict__.get("_create_profile_strategy_open_group_save_worker_fn") is None:
+            return
+        # Важна только последняя открытая группа каждого профиля.
+        self.__dict__.setdefault("_pending_strategy_open_group_saves", {})[profile_key] = str(group_key or "")
+        self._start_next_strategy_open_group_save()
+
+    def _start_next_strategy_open_group_save(self) -> None:
+        pending = self.__dict__.setdefault("_pending_strategy_open_group_saves", {})
+        if not pending or bool(self.__dict__.get("_cleanup_in_progress", False)):
+            return
+        runtime = self._worker_runtime("_strategy_open_group_save_runtime")
+        if runtime.is_running():
+            return
+        profile_key = next(iter(pending))
+        group_key = pending.pop(profile_key)
+        create_worker = self._create_profile_strategy_open_group_save_worker_fn
+        runtime.start_qthread_worker(
+            worker_factory=lambda request_id: create_worker(
+                request_id,
+                self.launch_method,
+                profile_key=profile_key,
+                group_key=group_key,
+                parent=self,
+            ),
+            on_finished=lambda _worker: self._start_next_strategy_open_group_save(),
+            loaded_signal_name="saved",
+        )
+
     def _request_profile_setup_payload(self) -> None:
         return self._payload_controller_obj()._request_profile_setup_payload()
 
@@ -1860,6 +1903,10 @@ class ProfileSetupPageBase(BasePage):
                 entries=payload.strategy_entries,
                 states=payload.strategy_states,
                 current_strategy_id=_current_strategy_id(payload) or "none",
+                # Открытая группа помнится по постоянному ключу профиля: он не
+                # меняется, когда профиль переезжает внутри пресета.
+                open_group_token=str(getattr(item, "persistent_key", "") or self._profile_key or ""),
+                open_group=getattr(payload, "strategy_open_group", None),
             )
             set_widget_enabled_if_changed(self._strategy_list, not (item.in_preset and not item.enabled))
             self._list_file_dirty = True

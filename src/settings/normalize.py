@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from ipaddress import IPv4Address, ip_address
 from typing import Any
 
@@ -432,6 +433,9 @@ def normalize_ui_state(data: object) -> dict[str, Any]:
     }
 
 
+_STRATEGY_GROUP_KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+
+
 def normalize_profile_strategy_state(data: object) -> dict[str, Any]:
     raw = as_dict(data)
 
@@ -467,8 +471,18 @@ def normalize_profile_strategy_state(data: object) -> dict[str, Any]:
             if updated_at:
                 normalized_row["updated_at"] = updated_at
             strategies[strategy_id] = normalized_row
+        normalized_profile_row: dict[str, Any] = {}
         if strategies:
-            profiles[profile_key] = {"strategies": strategies}
+            normalized_profile_row["strategies"] = strategies
+        # Группа стратегий, оставленная открытой у профиля: ключ группы или ""
+        # (все группы свёрнуты).
+        raw_open_group = profile_row.get("open_group")
+        if isinstance(raw_open_group, str):
+            open_group = raw_open_group.strip()
+            if not open_group or _STRATEGY_GROUP_KEY.match(open_group):
+                normalized_profile_row["open_group"] = open_group
+        if normalized_profile_row:
+            profiles[profile_key] = normalized_profile_row
 
     return {
         "version": 1,

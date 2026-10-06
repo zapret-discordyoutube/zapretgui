@@ -193,6 +193,15 @@ def set_current_strategy_state(
     )
 
 
+def set_strategy_open_group(
+    profile_services,
+    launch_method: str,
+    profile_key: str,
+    group_key: str,
+) -> bool:
+    return _profile_preset_service(profile_services, launch_method).set_strategy_open_group(profile_key, group_key)
+
+
 def set_strategy_state(
     profile_services,
     launch_method: str,

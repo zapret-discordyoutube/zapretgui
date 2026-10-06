@@ -743,6 +743,29 @@ class ProfileStrategyApplyWorker(QThread):
             log_ui_timing_since("worker", "profile", "strategy_apply.run", _metric_started_at, important=True)
 
 
+class ProfileStrategyOpenGroupSaveWorker(QThread):
+    """Запоминает в настройках, какую группу стратегий человек оставил открытой."""
+
+    saved = pyqtSignal(int)
+    failed = pyqtSignal(int, str)
+
+    def __init__(self, request_id: int, save_open_group, *, profile_key: str, group_key: str, parent=None):
+        super().__init__(parent)
+        self._request_id = int(request_id)
+        self._save_open_group = save_open_group
+        self._profile_key = str(profile_key or "").strip()
+        self._group_key = str(group_key or "").strip()
+
+    def run(self) -> None:
+        try:
+            self._save_open_group(profile_key=self._profile_key, group_key=self._group_key)
+        except Exception as exc:
+            log(f"ProfileStrategyOpenGroupSaveWorker: не удалось запомнить открытую группу: {exc}", "ERROR")
+            self.failed.emit(self._request_id, str(exc))
+            return
+        self.saved.emit(self._request_id)
+
+
 class ProfileStrategyFeedbackSaveWorker(QThread):
     saved = pyqtSignal(int, str, str, object)
     failed = pyqtSignal(int, str)

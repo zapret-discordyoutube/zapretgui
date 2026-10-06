@@ -662,7 +662,7 @@ class ProfilePresetService:
         )
         raw_strategy_text = "\n".join(getattr(profile.strategy, "strategy_lines", ()) or ())
         editable = core.editable
-        strategy_states = self._state_store.get_strategy_states(
+        strategy_states, strategy_open_group = self._state_store.get_strategy_list_marks(
             profile.persistent_key,
             tuple(core.strategy_entries),
         )
@@ -695,6 +695,7 @@ class ProfilePresetService:
             in_range=editable.in_range,
             out_range=editable.out_range,
             current_strategy_state=strategy_states.get(str(item.strategy_id or "").strip(), ProfileStrategyState()),
+            strategy_open_group=strategy_open_group,
             preset_preamble_text="\n".join(preset.preamble_lines),
         )
 
@@ -943,6 +944,13 @@ class ProfilePresetService:
             favorite=favorite,
             clear=clear,
         )
+
+    def set_strategy_open_group(self, profile_key: str, group_key: str) -> bool:
+        """Запоминает, какую группу готовых стратегий человек оставил открытой."""
+        persistent_key = self._persistent_key_for_profile(profile_key)
+        if not persistent_key:
+            return False
+        return self._state_store.set_open_group(persistent_key, str(group_key or ""))
 
     def set_strategy_state(
         self,

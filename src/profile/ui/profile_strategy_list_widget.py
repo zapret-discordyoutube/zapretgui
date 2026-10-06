@@ -68,7 +68,8 @@ from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_icon_moti
 
 _ROW_KIND_GROUP = "group"
 _STRATEGY_ROW_HEIGHT = 31
-# В коротком списке сворачивать нечего: все группы раскрыты сразу.
+# В коротком списке сворачивать нечего: все группы раскрыты сразу. В длинном
+# раскрыта одна группа: открыл другую — прежняя закрылась сама.
 _AUTO_COLLAPSE_MIN_ROWS = 30
 _KEYBOARD_PAGE_ROWS = 10
 _NAVIGATION_KEYS = (
@@ -175,6 +176,21 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
         attach_row_hover_motion(view)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        # Под приклеенным заголовком группы строки не рисуются: фон списка
+        # полупрозрачный, закрасить их сверху нечем.
+        clip_top = int(getattr(self.parent(), "rows_clip_top", 0) or 0)
+        if clip_top > option.rect.top():
+            painter.save()
+            painter.setClipRect(
+                QRect(option.rect.left(), clip_top, option.rect.width(), max(0, option.rect.bottom() + 1 - clip_top)),
+                Qt.ClipOperation.IntersectClip,
+            )
+            self._paint_row(painter, option, index)
+            painter.restore()
+            return
+        self._paint_row(painter, option, index)
+
+    def _paint_row(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         if str(index.data(ProfileStrategyListWidget._ROLE_ROW_KIND) or "") == _ROW_KIND_GROUP:
             self._paint_group_header(painter, option, index)
             return
@@ -505,7 +521,143 @@ class ProfileStrategyListView(QListWidget):
     # Заголовок группы нажали мышью или клавишей: её нужно свернуть или развернуть.
     group_toggle_requested = pyqtSignal(object)
 
+    # Ниже какой высоты делегат рисует строки; не 0 только пока рисуется список
+    # с приклеенным заголовком группы.
+    rows_clip_top = 0
+    _pinned_hovered = False
+    _pinned_pressed = False
+
+    # ------------------------------------------------------------------
+    # Приклеенный заголовок раскрытой группы
+    # ------------------------------------------------------------------
+
+    def group_header_for_row(self, row: int):
+        """Заголовок группы, в которой стоит строка; None — список без групп."""
+        for candidate in range(int(row), -1, -1):
+            item = self.item(candidate)
+            if _is_group_item(item):
+                return item
+        return None
+
+    def pinned_group_header(self):
+        """Заголовок раскрытой группы, уехавший за верх списка.
+
+        Пока видны строки группы, её заголовок остаётся у верхнего края:
+        свернуть группу можно, не прокручивая список обратно. Возвращает
+        (строка заголовка, её место на экране) или None.
+        """
+        viewport = self.viewport()
+        top_item = self.itemAt(QPoint(max(0, viewport.width() // 2), 0))
+        if top_item is None:
+            return None
+        top_row = self.row(top_item)
+        header = self.group_header_for_row(top_row)
+        if header is None or not bool(header.data(ProfileStrategyListWidget._ROLE_GROUP_EXPANDED)):
+            return None
+        if self.visualItemRect(header).top() >= 0:
+            return None
+        top = 0
+        # Следующий заголовок выталкивает приклеенный вверх.
+        for row in range(top_row + 1, self.count()):
+            item = self.item(row)
+            if not _is_group_item(item):
+                continue
+            if not _row_hidden(self, row):
+                top = min(0, self.visualItemRect(item).top() - _STRATEGY_ROW_HEIGHT)
+            break
+        return header, QRect(0, top, viewport.width(), _STRATEGY_ROW_HEIGHT)
+
+    def _pinned_header_at(self, point: QPoint):
+        pinned = self.pinned_group_header()
+        if pinned is not None and pinned[1].contains(point):
+            return pinned[0]
+        return None
+
+    def _set_pinned_hovered(self, hovered: bool) -> None:
+        if bool(hovered) == bool(self._pinned_hovered):
+            return
+        self._pinned_hovered = bool(hovered)
+        self.viewport().update()
+
+    def paintEvent(self, event):  # noqa: N802
+        pinned = self.pinned_group_header()
+        self.rows_clip_top = pinned[1].bottom() + 1 if pinned is not None else 0
+        try:
+            super().paintEvent(event)
+        finally:
+            self.rows_clip_top = 0
+        if pinned is None:
+            return
+        header, rect = pinned
+        option = QStyleOptionViewItem()
+        self.initViewItemOption(option)
+        option.rect = rect
+        option.state &= ~(QStyle.StateFlag.State_MouseOver | QStyle.StateFlag.State_HasFocus)
+        if self._pinned_hovered:
+            option.state |= QStyle.StateFlag.State_MouseOver
+        painter = QPainter(self.viewport())
+        try:
+            self.itemDelegate().paint(painter, option, self.indexFromItem(header))
+        finally:
+            painter.end()
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:  # noqa: N802
+        super().scrollContentsBy(dx, dy)
+        # Прокрутка сдвигает уже нарисованное, а приклеенный заголовок стоит
+        # на месте: список перерисовывается целиком.
+        self.viewport().update()
+
+    def viewportEvent(self, event):  # noqa: N802
+        if event.type() == QEvent.Type.ToolTip:
+            pinned = self.pinned_group_header()
+            if pinned is not None and pinned[1].contains(event.pos()):
+                option = QStyleOptionViewItem()
+                option.rect = pinned[1]
+                self.itemDelegate().helpEvent(event, self, option, self.indexFromItem(pinned[0]))
+                return True
+        elif event.type() == QEvent.Type.Leave:
+            self._set_pinned_hovered(False)
+        return super().viewportEvent(event)
+
+    def mouseMoveEvent(self, event):  # noqa: N802
+        self._set_pinned_hovered(self._pinned_header_at(event.position().toPoint()) is not None)
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event):  # noqa: N802
+        # Щелчок по приклеенному заголовку не должен достаться строке под ним.
+        if self._pinned_header_at(event.position().toPoint()) is not None:
+            self._pinned_pressed = event.button() == Qt.MouseButton.LeftButton
+            event.accept()
+            return
+        self._pinned_pressed = False
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        if self._pinned_header_at(event.position().toPoint()) is not None:
+            self._pinned_pressed = event.button() == Qt.MouseButton.LeftButton
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _toggle_group_from_keyboard(self, key: int) -> bool:
+        """Стрелка влево сворачивает группу текущей строки, вправо — раскрывает."""
+        if key not in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            return False
+        item = self.currentItem()
+        if item is None:
+            return False
+        header = item if _is_group_item(item) else self.group_header_for_row(self.row(item))
+        if header is None:
+            return False
+        expanded = bool(header.data(ProfileStrategyListWidget._ROLE_GROUP_EXPANDED))
+        if expanded == (key == Qt.Key.Key_Left):
+            self.group_toggle_requested.emit(header)
+        return True
+
     def keyPressEvent(self, event):  # noqa: N802
+        if self._toggle_group_from_keyboard(event.key()):
+            event.accept()
+            return
         if self._move_current_row_from_keyboard(event.key()):
             event.accept()
             return
@@ -529,6 +681,13 @@ class ProfileStrategyListView(QListWidget):
             self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def mouseReleaseEvent(self, event):  # noqa: N802
+        if self._pinned_pressed:
+            self._pinned_pressed = False
+            header = self._pinned_header_at(event.position().toPoint())
+            if header is not None and event.button() == Qt.MouseButton.LeftButton:
+                self.group_toggle_requested.emit(header)
+            event.accept()
+            return
         super().mouseReleaseEvent(event)
         if event.button() != Qt.MouseButton.LeftButton:
             return
@@ -608,6 +767,9 @@ class ProfileStrategyListWidget(QWidget):
     """Большой список готовых стратегий для profile."""
 
     strategy_activated = pyqtSignal(str)
+    # Пользователь открыл другую группу длинного списка: (чей список, ключ
+    # группы; пустой ключ — всё свёрнуто). Страница сохраняет это в настройки.
+    open_group_changed = pyqtSignal(str, str)
 
     _ROLE_STRATEGY_ID = int(Qt.ItemDataRole.UserRole) + 1
     _ROLE_NAME_TEXT = int(Qt.ItemDataRole.UserRole) + 2
@@ -635,9 +797,14 @@ class ProfileStrategyListWidget(QWidget):
         self._states = {}
         self._item_by_strategy_id = {}
         self._group_header_items = {}
-        # Что пользователь сам свернул или развернул; остальное решает
-        # _auto_expanded_group_keys.
+        # Что пользователь сам свернул в коротком списке (там группы
+        # сворачиваются независимо друг от друга).
         self._group_expanded_choice = {}
+        # Длинный список: какая группа открыта у каждого профиля. Ключ — метка
+        # списка от страницы (постоянный ключ профиля), значение — ключ группы
+        # или "" (всё свёрнуто).
+        self._open_group_token = ""
+        self._open_group_memory = {}
         self._rows_signature = None
         self._strategy_filter_runtime = OneShotWorkerRuntime()
         self._strategy_filter_state = LatestValueWorkerState(
@@ -892,39 +1059,79 @@ class ProfileStrategyListWidget(QWidget):
         except Exception:
             return False
 
-    def _auto_expanded_group_keys(self) -> set[str] | None:
-        """Какие группы раскрыты, пока пользователь сам их не трогал.
+    def _open_group_memory_dict(self) -> dict:
+        return self.__dict__.setdefault("_open_group_memory", {})
 
-        Раскрыто то, с чем человек уже работал: группа выбранной стратегии и
-        группы с избранным или с отметкой «работает». Остальные свёрнуты —
+    def _open_group_token_text(self) -> str:
+        return str(self.__dict__.get("_open_group_token") or "")
+
+    def _single_open_group(self) -> bool:
+        """В длинном списке раскрыта одна группа, короткий раскрыт целиком."""
+        return len(self.__dict__.get("_entries") or {}) > _AUTO_COLLAPSE_MIN_ROWS
+
+    def _auto_expanded_group_keys(self) -> set[str] | None:
+        """Какая группа раскрыта в длинном списке.
+
+        Та, которую человек оставил открытой у этого профиля; если он ещё
+        ничего не открывал — группа выбранной стратегии. Остальные свёрнуты:
         длинный список открывается картой способов обхода. None — раскрыто
         всё (короткий список).
         """
         entries = self.__dict__.get("_entries") or {}
-        states = self.__dict__.get("_states") or {}
-        if len(entries) <= _AUTO_COLLAPSE_MIN_ROWS:
+        if not self._single_open_group():
             return None
-        current_id = str(self.__dict__.get("_current_strategy_id") or "")
         family_keys = strategy_family_keys(entries)
-        keys: set[str] = set()
-        for strategy_id in entries:
-            state = states.get(strategy_id)
-            if (
-                strategy_id == current_id
-                or bool(getattr(state, "favorite", False))
-                or str(getattr(state, "rating", "") or "") == "work"
-            ):
-                keys.add(family_keys[strategy_id])
-        return keys
+        remembered = self._open_group_memory_dict().get(self._open_group_token_text())
+        if remembered is not None:
+            if not remembered:
+                return set()
+            if remembered in family_keys.values():
+                return {remembered}
+        current_id = str(self.__dict__.get("_current_strategy_id") or "")
+        if current_id in family_keys:
+            return {family_keys[current_id]}
+        return set()
 
     def _group_is_expanded(self, group_key: str, auto_keys: set[str] | None) -> bool:
         if self._strategy_search_active():
             # Поиск показывает все совпадения, свёрнутые группы их не прячут.
             return True
-        choice = self._group_choice()
-        if group_key in choice:
-            return bool(choice[group_key])
-        return auto_keys is None or group_key in auto_keys
+        if auto_keys is None:
+            return bool(self._group_choice().get(group_key, True))
+        return group_key in auto_keys
+
+    def set_open_group_memory(self, token: str, open_group: str | None) -> bool:
+        """Чей это список и какую группу человек оставил открытой в прошлый раз.
+
+        Страница вызывает это перед set_rows. Сохранённое значение нужно только
+        при первом показе профиля: дальше список помнит свой выбор сам, и
+        запоздавший ответ из настроек его не перебивает. Возвращает True, если
+        список теперь принадлежит другому профилю.
+        """
+        token = str(token or "")
+        memory = self._open_group_memory_dict()
+        if token not in memory and open_group is not None:
+            memory[token] = str(open_group)
+        if token == self._open_group_token_text():
+            return False
+        self._open_group_token = token
+        self._group_choice().clear()
+        return True
+
+    def _apply_open_group_to_built_rows(self) -> None:
+        """Раскрывает нужную группу в уже собранном списке, без пересборки."""
+        headers = self._group_headers()
+        if not headers or self._strategy_search_active():
+            return
+        auto_keys = self._auto_expanded_group_keys()
+        for group_key, header in headers.items():
+            expanded = self._group_is_expanded(group_key, auto_keys)
+            if bool(header.data(self._ROLE_GROUP_EXPANDED)) != expanded:
+                self._set_group_expanded(group_key, expanded)
+        current = self._item_by_strategy_id.get(str(self.__dict__.get("_current_strategy_id") or ""))
+        if current is not None and not current.isHidden():
+            self._list.setCurrentItem(current)
+            self._list.scrollToItem(current)
 
     def _make_group_header_item(self, group: ProfileStrategyListGroup, *, expanded: bool) -> QListWidgetItem:
         item = QListWidgetItem()
@@ -950,8 +1157,38 @@ class ProfileStrategyListWidget(QWidget):
         if not group_key:
             return
         expanded = not bool(item.data(self._ROLE_GROUP_EXPANDED))
-        self._group_choice()[group_key] = expanded
+        if self._strategy_search_active():
+            # В результатах поиска группу можно свернуть на время: к обычному
+            # списку это не относится.
+            self._set_group_expanded(group_key, expanded)
+            return
+        if not self._single_open_group():
+            self._group_choice()[group_key] = expanded
+            self._set_group_expanded(group_key, expanded)
+            return
+        # Заголовок мог быть приклеен к верху списка: тогда его место — верхний край.
+        header_top = max(0, self._list.visualItemRect(item).top())
+        for other_key, other in self._group_headers().items():
+            if other_key != group_key and bool(other.data(self._ROLE_GROUP_EXPANDED)):
+                self._set_group_expanded(other_key, False)
         self._set_group_expanded(group_key, expanded)
+        self._keep_group_header_in_place(item, header_top)
+        open_group = group_key if expanded else ""
+        token = self._open_group_token_text()
+        self._open_group_memory_dict()[token] = open_group
+        self.open_group_changed.emit(token, open_group)
+
+    def _keep_group_header_in_place(self, header, header_top: int) -> None:
+        """После щелчка заголовок остаётся на виду, по возможности под курсором.
+
+        Прежняя раскрытая группа могла стоять выше: её строки исчезли, и без
+        поправки прокрутки нажатый заголовок улетел бы за верхний край списка.
+        """
+        current_top = self._list.visualItemRect(header).top()
+        if current_top == int(header_top):
+            return
+        scroll_bar = self._list.verticalScrollBar()
+        scroll_bar.setValue(scroll_bar.value() + current_top - int(header_top))
 
     def _set_group_expanded(self, group_key: str, expanded: bool) -> None:
         """Сворачивает группу, пряча её строки: список при этом не пересобирается."""
@@ -976,20 +1213,39 @@ class ProfileStrategyListWidget(QWidget):
             self._list.setCurrentItem(header)
         self._update_current_strategy_accessibility(self._list.currentItem())
 
-    def set_rows(self, *, entries, states, current_strategy_id: str) -> None:
+    def set_rows(
+        self,
+        *,
+        entries,
+        states,
+        current_strategy_id: str,
+        open_group_token: str | None = None,
+        open_group: str | None = None,
+    ) -> None:
+        """Показывает стратегии профиля.
+
+        open_group_token — постоянный ключ профиля, open_group — группа, которую
+        человек оставил открытой у него в прошлый раз (None — ещё не открывал).
+        Без метки список считается тем же, что и раньше.
+        """
         next_entries = dict(entries or {})
         next_states = dict(states or {})
         next_current_id = str(current_strategy_id or "none").strip() or "none"
         next_signature = _strategy_rows_signature(next_entries, next_states)
+        owner_changed = open_group_token is not None and self.set_open_group_memory(open_group_token, open_group)
         if set(next_entries.keys()) != set((self.__dict__.get("_entries") or {}).keys()):
             # Другой набор стратегий (другой профиль или протокол): свёрнутое
             # вручную относилось к прежнему списку.
             self._group_choice().clear()
+            if open_group_token is None:
+                self._open_group_memory_dict().pop(self._open_group_token_text(), None)
         if self.__dict__.get("_rows_signature") == next_signature:
             self._entries = next_entries
             self._states = next_states
             if next_current_id != self._current_strategy_id:
                 self.set_current_strategy_id(next_current_id)
+            if owner_changed:
+                self._apply_open_group_to_built_rows()
             return
         if self._can_update_strategy_rows_in_place(next_entries, next_states):
             changed_strategy_ids = [
@@ -1004,6 +1260,8 @@ class ProfileStrategyListWidget(QWidget):
             for strategy_id in changed_strategy_ids:
                 item = self._item_by_strategy_id.get(strategy_id)
                 self._refresh_strategy_item(item, strategy_id, is_current=strategy_id == self._current_strategy_id)
+            if owner_changed:
+                self._apply_open_group_to_built_rows()
             self._supersede_running_strategy_filter()
             return
         single_move = self._move_strategy_row_in_place(next_entries, next_states)
@@ -1024,6 +1282,8 @@ class ProfileStrategyListWidget(QWidget):
                     continue
                 item = self._item_by_strategy_id.get(strategy_id)
                 self._refresh_strategy_item(item, strategy_id, is_current=strategy_id == self._current_strategy_id)
+            if owner_changed:
+                self._apply_open_group_to_built_rows()
             self._supersede_running_strategy_filter()
             return
         self._entries = next_entries

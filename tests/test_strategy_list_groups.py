@@ -7,9 +7,10 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QEvent, Qt
-from PyQt6.QtGui import QFontMetrics, QKeyEvent
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QEvent, QPoint, QRect, Qt
+from PyQt6.QtGui import QColor, QFontMetrics, QKeyEvent, QPainter, QPixmap
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QStyleOptionViewItem
 
 from profile.strategy_state import ProfileStrategyState
 from profile.ui import profile_strategy_list_widget as widget_module
@@ -72,6 +73,20 @@ class StrategyListGroupsTests(unittest.TestCase):
     def _header(self, widget, key: str):
         return widget._group_header_items[key]
 
+    def _open_groups(self, widget) -> list[str]:
+        return [key for key, header in widget._group_header_items.items() if header.data(W._ROLE_GROUP_EXPANDED)]
+
+    def _shown_widget(self, *, per_family: int = 40, current: str = "none") -> ProfileStrategyListWidget:
+        """Список на экране: групп по per_family строк хватает на прокрутку."""
+        widget = self._widget(entries=_entries(per_family=per_family), current=current)
+        widget.show()
+        self._app.processEvents()
+        return widget
+
+    def _scroll_to(self, widget, value: int) -> None:
+        widget._list.verticalScrollBar().setValue(int(value))
+        self._app.processEvents()
+
     # -------------------------- что раскрыто --------------------------
 
     def test_long_list_opens_as_a_map_of_groups(self) -> None:
@@ -96,18 +111,18 @@ class StrategyListGroupsTests(unittest.TestCase):
         self.assertTrue(self._header(widget, "host").data(W._ROLE_GROUP_EXPANDED))
         self.assertEqual(widget._list.currentItem().data(W._ROLE_STRATEGY_ID), "host-05")
 
-    def test_groups_with_favorite_or_working_strategy_are_open(self) -> None:
+    def test_only_the_group_of_the_selected_strategy_is_open(self) -> None:
+        # Избранное и отметка «работает» групп не раскрывают: открыта одна.
         widget = self._widget(
             states={
                 "fake-03": ProfileStrategyState(rating="", favorite=True),
                 "split-07": ProfileStrategyState(rating="work", favorite=False),
-                "host-01": ProfileStrategyState(rating="notwork", favorite=False),
-            }
+            },
+            current="host-05",
         )
 
-        self.assertTrue(self._header(widget, "fake").data(W._ROLE_GROUP_EXPANDED))
-        self.assertTrue(self._header(widget, "split").data(W._ROLE_GROUP_EXPANDED))
-        self.assertFalse(self._header(widget, "host").data(W._ROLE_GROUP_EXPANDED))
+        self.assertEqual(self._open_groups(widget), ["host"])
+        widget._toggle_group_item(self._header(widget, "fake"))
         # Избранная стратегия стоит первой в своей группе.
         self.assertEqual(self._visible(widget)[1], "fake-03")
 
@@ -180,7 +195,213 @@ class StrategyListGroupsTests(unittest.TestCase):
         self.assertEqual(self._header(widget, "fake").data(W._ROLE_GROUP_COUNT), 1)
         self.assertEqual(widget._summary.text(), "3 из 36")
 
+    # -------------------------- одна открытая группа --------------------------
+
+    def test_opening_another_group_closes_the_previous_one(self) -> None:
+        widget = self._widget(current="host-05")
+        widget._rebuild_tree = Mock(side_effect=AssertionError("сворачивание не должно пересобирать список"))
+
+        widget._list.group_toggle_requested.emit(self._header(widget, "split"))
+
+        self.assertEqual(self._open_groups(widget), ["split"])
+        self.assertEqual(self._visible(widget), ["fake", "split", *[f"split-{n:02d}" for n in range(12)], "host"])
+
+    def test_short_list_groups_fold_independently(self) -> None:
+        widget = self._widget(entries=_entries(per_family=4))
+
+        widget._toggle_group_item(self._header(widget, "fake"))
+
+        self.assertEqual(self._open_groups(widget), ["split", "host"])
+
+    def test_opened_group_is_reported_and_remembered_for_its_profile(self) -> None:
+        entries = _entries()
+        widget = self._widget(entries=entries)
+        reported: list[tuple[str, str]] = []
+        widget.open_group_changed.connect(lambda token, group: reported.append((token, group)))
+        widget.set_rows(entries=entries, states={}, current_strategy_id="host-05", open_group_token="uid:a")
+        self.assertEqual(self._open_groups(widget), ["host"])
+
+        widget._toggle_group_item(self._header(widget, "split"))
+        self.assertEqual(reported, [("uid:a", "split")])
+
+        # Другой профиль с тем же каталогом: у него своя открытая группа.
+        widget.set_rows(entries=entries, states={}, current_strategy_id="fake-02", open_group_token="uid:b")
+        self.assertEqual(self._open_groups(widget), ["fake"])
+        self.assertEqual(widget._list.currentItem().data(W._ROLE_STRATEGY_ID), "fake-02")
+
+        # Вернулись: открыта та же группа, даже если из настроек пришло старое значение.
+        widget.set_rows(
+            entries=entries,
+            states={},
+            current_strategy_id="host-05",
+            open_group_token="uid:a",
+            open_group="fake",
+        )
+        self.assertEqual(self._open_groups(widget), ["split"])
+
+        widget._toggle_group_item(self._header(widget, "split"))
+        self.assertEqual(self._open_groups(widget), [])
+        self.assertEqual(reported[-1], ("uid:a", ""))
+
+    def test_saved_group_opens_on_first_show_of_the_profile(self) -> None:
+        entries = _entries()
+        widget = self._widget(entries=entries)
+
+        widget.set_rows(
+            entries=entries, states={}, current_strategy_id="host-05", open_group_token="uid:a", open_group="split"
+        )
+        self.assertEqual(self._open_groups(widget), ["split"])
+
+        # "" — человек свернул все группы.
+        widget.set_rows(
+            entries=entries, states={}, current_strategy_id="host-05", open_group_token="uid:b", open_group=""
+        )
+        self.assertEqual(self._open_groups(widget), [])
+
+        # Группы с таким ключом в каталоге нет — открыта группа выбранной стратегии.
+        widget.set_rows(
+            entries=entries, states={}, current_strategy_id="host-05", open_group_token="uid:c", open_group="send"
+        )
+        self.assertEqual(self._open_groups(widget), ["host"])
+
+    def test_search_does_not_change_the_remembered_group(self) -> None:
+        widget = self._widget(current="host-05")
+        reported: list[tuple[str, str]] = []
+        widget.open_group_changed.connect(lambda token, group: reported.append((token, group)))
+
+        widget._search.setText("07")
+        widget._toggle_group_item(self._header(widget, "fake"))
+        widget._search.setText("")
+
+        self.assertEqual(reported, [])
+        self.assertEqual(self._open_groups(widget), ["host"])
+
+    # -------------------------- приклеенный заголовок --------------------------
+
+    def test_header_of_open_group_stays_at_the_top_while_its_rows_scroll(self) -> None:
+        widget = self._shown_widget()
+        view = widget._list
+        header = self._header(widget, "fake")
+        widget._toggle_group_item(header)
+        self._app.processEvents()
+        self.assertIsNone(view.pinned_group_header())
+
+        self._scroll_to(widget, widget_module._STRATEGY_ROW_HEIGHT * 10)
+
+        pinned = view.pinned_group_header()
+        self.assertIsNotNone(pinned)
+        self.assertIs(pinned[0], header)
+        self.assertEqual(pinned[1].top(), 0)
+        self.assertEqual(pinned[1].height(), widget_module._STRATEGY_ROW_HEIGHT)
+        self.assertFalse(view.grab().isNull())
+        self.assertEqual(view.rows_clip_top, 0)
+
+    def test_next_header_pushes_the_pinned_one_out(self) -> None:
+        widget = self._shown_widget()
+        view = widget._list
+        # Поиск раскрывает все группы: в каждой по 13 найденных строк.
+        widget._search.setText("0")
+        self._app.processEvents()
+        next_top = view.visualItemRect(self._header(widget, "split")).top()
+
+        # Следующий заголовок в 10 точках от верха: приклеенному места нет.
+        self._scroll_to(widget, view.verticalScrollBar().value() + next_top - 10)
+
+        pinned = view.pinned_group_header()
+        self.assertIsNotNone(pinned)
+        self.assertIs(pinned[0], self._header(widget, "fake"))
+        self.assertEqual(view.visualItemRect(self._header(widget, "split")).top(), 10)
+        self.assertEqual(pinned[1].bottom() + 1, 10)
+
+        # Следующая группа доехала до верха — теперь приклеен её заголовок.
+        self._scroll_to(widget, view.verticalScrollBar().value() + 10 + widget_module._STRATEGY_ROW_HEIGHT * 3)
+        pinned = view.pinned_group_header()
+        self.assertIs(pinned[0], self._header(widget, "split"))
+        self.assertEqual(pinned[1].top(), 0)
+
+    def test_click_on_pinned_header_closes_the_group_and_picks_nothing(self) -> None:
+        widget = self._shown_widget()
+        view = widget._list
+        widget._toggle_group_item(self._header(widget, "fake"))
+        self._scroll_to(widget, widget_module._STRATEGY_ROW_HEIGHT * 10)
+        activated: list[str] = []
+        widget.strategy_activated.connect(activated.append)
+
+        QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(120, 12))
+        self._app.processEvents()
+
+        self.assertEqual(self._open_groups(widget), [])
+        self.assertEqual(activated, [])
+        self.assertEqual(view.verticalScrollBar().value(), 0)
+        self.assertIsNone(view.pinned_group_header())
+
+    def test_clicked_header_stays_on_screen_when_group_above_closes(self) -> None:
+        widget = self._shown_widget()
+        view = widget._list
+        widget._toggle_group_item(self._header(widget, "fake"))
+        self._app.processEvents()
+        split_header = self._header(widget, "split")
+        # Долистали до конца раскрытой группы: следующий заголовок на виду.
+        self._scroll_to(widget, view.verticalScrollBar().maximum())
+        self.assertGreater(view.verticalScrollBar().value(), widget_module._STRATEGY_ROW_HEIGHT * 10)
+        self.assertLess(view.visualItemRect(split_header).top(), view.viewport().height())
+
+        view.group_toggle_requested.emit(split_header)
+        self._app.processEvents()
+
+        self.assertEqual(self._open_groups(widget), ["split"])
+        top = view.visualItemRect(split_header).top()
+        self.assertGreaterEqual(top, 0)
+        self.assertLess(top, view.viewport().height())
+        self.assertIsNone(view.pinned_group_header())
+
+    def test_rows_are_not_painted_under_the_pinned_header(self) -> None:
+        widget = self._shown_widget(current="fake-00")
+        view = widget._list
+        index = view.indexFromItem(widget._item_by_strategy_id["fake-00"])
+        option = QStyleOptionViewItem()
+        view.initViewItemOption(option)
+        option.rect = QRect(0, 0, 400, widget_module._STRATEGY_ROW_HEIGHT)
+
+        def painted_rows(clip_top: int) -> set[int]:
+            canvas = QPixmap(400, widget_module._STRATEGY_ROW_HEIGHT)
+            canvas.fill(QColor(0, 0, 0, 0))
+            painter = QPainter(canvas)
+            view.rows_clip_top = clip_top
+            try:
+                view.itemDelegate().paint(painter, option, index)
+            finally:
+                view.rows_clip_top = 0
+                painter.end()
+            image = canvas.toImage()
+            return {
+                y for y in range(image.height()) for x in range(image.width()) if image.pixelColor(x, y).alpha() > 0
+            }
+
+        self.assertLess(min(painted_rows(0)), 12)
+        clipped = painted_rows(20)
+        self.assertTrue(clipped)
+        self.assertGreaterEqual(min(clipped), 20)
+
     # -------------------------- клавиатура и мышь --------------------------
+
+    def test_left_arrow_closes_the_group_and_right_arrow_opens_it(self) -> None:
+        widget = self._widget(current="host-05")
+        view = widget._list
+        header = self._header(widget, "host")
+        self.assertEqual(view.currentItem().data(W._ROLE_STRATEGY_ID), "host-05")
+
+        view.keyPressEvent(_key(Qt.Key.Key_Left))
+        self.assertEqual(self._open_groups(widget), [])
+        self.assertIs(view.currentItem(), header)
+
+        view.keyPressEvent(_key(Qt.Key.Key_Left))
+        self.assertEqual(self._open_groups(widget), [])
+
+        view.keyPressEvent(_key(Qt.Key.Key_Right))
+        self.assertEqual(self._open_groups(widget), ["host"])
+        view.keyPressEvent(_key(Qt.Key.Key_Right))
+        self.assertEqual(self._open_groups(widget), ["host"])
 
     def test_arrows_walk_only_visible_rows(self) -> None:
         widget = self._widget()

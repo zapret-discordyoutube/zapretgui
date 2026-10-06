@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,6 +11,8 @@ from settings import store as settings_store
 
 
 VALID_RATINGS = frozenset({"", "work", "notwork"})
+# Ключ группы стратегий (profile.strategy_families): "fake", "fake_split", ...
+_OPEN_GROUP_KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 # Составная мутация этой feature-модели остаётся под локальным lock, а
 # settings.store дополнительно сериализует её с другими процессами через
@@ -24,7 +27,8 @@ class ProfileStrategyState:
 
 
 class ProfileStrategyStateStore:
-    """Хранит оценки готовых стратегий в общей SQLite-базе настроек."""
+    """Хранит в общей SQLite-базе настроек то, что человек отметил у профиля в
+    списке готовых стратегий: оценки, избранное и открытую группу."""
 
     @property
     def path(self) -> Path:
@@ -35,20 +39,34 @@ class ProfileStrategyStateStore:
         return states.get(_normalize_strategy_id(strategy_id), ProfileStrategyState())
 
     def get_strategy_states(self, profile_key: str, strategy_ids) -> dict[str, ProfileStrategyState]:
+        return self.get_strategy_list_marks(profile_key, strategy_ids)[0]
+
+    def get_strategy_list_marks(
+        self,
+        profile_key: str,
+        strategy_ids,
+    ) -> tuple[dict[str, ProfileStrategyState], str | None]:
+        """Всё для списка стратегий профиля за одно чтение настроек.
+
+        Возвращает оценки стратегий и группу, оставленную открытой (см.
+        get_open_group).
+        """
         clean_profile_key = _normalize_profile_key(profile_key)
+        if not clean_profile_key:
+            return {}, None
         clean_strategy_ids = tuple(
             strategy_id
             for strategy_id in (_normalize_strategy_id(value) for value in tuple(strategy_ids or ()))
             if strategy_id
         )
-        if not clean_profile_key or not clean_strategy_ids:
-            return {}
-
         data = self._read()
-        return {
+        profiles = data.get("profiles")
+        profile_row = profiles.get(clean_profile_key) if isinstance(profiles, dict) else None
+        states = {
             strategy_id: _state_from_row(_strategy_row(data, clean_profile_key, strategy_id))
             for strategy_id in clean_strategy_ids
         }
+        return states, _open_group_from_row(profile_row)
 
     def set_strategy_state(
         self,
@@ -103,12 +121,42 @@ class ProfileStrategyStateStore:
 
             if not row.get("rating") and not bool(row.get("favorite")):
                 strategies.pop(clean_strategy_id, None)
-            if not strategies:
-                profiles.pop(clean_profile_key, None)
+            _drop_profile_row_if_empty(profiles, clean_profile_key)
 
             self._write(data)
             return self.get_strategy_state(clean_profile_key, clean_strategy_id)
 
+    def get_open_group(self, profile_key: str) -> str | None:
+        """Группа стратегий, которую человек оставил открытой у профиля.
+
+        "" — он свернул все группы, None — ещё ничего не открывал.
+        """
+        return self.get_strategy_list_marks(profile_key, ())[1]
+
+    def set_open_group(self, profile_key: str, group_key: str) -> bool:
+        """Запоминает открытую группу профиля; "" — все группы свёрнуты."""
+        clean_profile_key = _normalize_profile_key(profile_key)
+        if not clean_profile_key:
+            raise ValueError("profile key is required")
+        clean_group_key = _normalize_open_group(group_key)
+        if clean_group_key is None:
+            raise ValueError("unknown strategy group key")
+
+        with _PROFILE_STRATEGY_STATE_LOCK:
+            data = self._read()
+            profiles = data.setdefault("profiles", {})
+            if not isinstance(profiles, dict):
+                profiles = {}
+                data["profiles"] = profiles
+            profile_row = profiles.get(clean_profile_key)
+            if _open_group_from_row(profile_row) == clean_group_key:
+                return False
+            if not isinstance(profile_row, dict):
+                profile_row = {}
+                profiles[clean_profile_key] = profile_row
+            profile_row["open_group"] = clean_group_key
+            self._write(data)
+            return True
 
     def clear_strategy_state(self, profile_key: str, strategy_id: str) -> None:
         clean_profile_key = _normalize_profile_key(profile_key)
@@ -131,8 +179,7 @@ class ProfileStrategyStateStore:
                 return
 
             strategies.pop(clean_strategy_id, None)
-            if not strategies:
-                profiles.pop(clean_profile_key, None)
+            _drop_profile_row_if_empty(profiles, clean_profile_key)
             self._write(data)
 
     def migrate_profile_keys(self, key_mapping: dict[str, str]) -> bool:
@@ -198,7 +245,7 @@ def _normalize_data(data: dict[str, Any]) -> dict[str, Any]:
                 continue
             raw_strategies = raw_profile_row.get("strategies")
             if not isinstance(raw_strategies, dict):
-                continue
+                raw_strategies = {}
             strategies: dict[str, Any] = {}
             for raw_strategy_id, raw_strategy_row in raw_strategies.items():
                 strategy_id = _normalize_strategy_id(raw_strategy_id)
@@ -216,13 +263,46 @@ def _normalize_data(data: dict[str, Any]) -> dict[str, Any]:
                 if updated_at:
                     row["updated_at"] = updated_at
                 strategies[strategy_id] = row
+            profile_row: dict[str, Any] = {}
             if strategies:
-                profiles[profile_key] = {"strategies": strategies}
+                profile_row["strategies"] = strategies
+            open_group = _open_group_from_row(raw_profile_row)
+            if open_group is not None:
+                profile_row["open_group"] = open_group
+            if profile_row:
+                profiles[profile_key] = profile_row
 
     return {
         "version": 1,
         "profiles": profiles,
     }
+
+
+def _drop_profile_row_if_empty(profiles: dict[str, Any], profile_key: str) -> None:
+    profile_row = profiles.get(profile_key)
+    if not isinstance(profile_row, dict):
+        profiles.pop(profile_key, None)
+        return
+    if not profile_row.get("strategies"):
+        profile_row.pop("strategies", None)
+    if not profile_row:
+        profiles.pop(profile_key, None)
+
+
+def _normalize_open_group(value: object) -> str | None:
+    """Ключ группы, "" (всё свёрнуто) или None, если значение не годится."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or _OPEN_GROUP_KEY.match(text):
+        return text
+    return None
+
+
+def _open_group_from_row(profile_row: object) -> str | None:
+    if not isinstance(profile_row, dict) or "open_group" not in profile_row:
+        return None
+    return _normalize_open_group(profile_row.get("open_group"))
 
 
 def _strategy_row(data: dict[str, Any], profile_key: str, strategy_id: str) -> dict[str, Any]:
