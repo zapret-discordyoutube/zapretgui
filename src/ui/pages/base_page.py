@@ -2,7 +2,7 @@
 """Базовый класс для страниц — использует qfluentwidgets ScrollArea."""
 
 import time as _time
-from PyQt6.QtCore import Qt, QEvent, QTimer
+from PyQt6.QtCore import Qt, QEvent, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QFrame, QSizePolicy,
 )
@@ -17,6 +17,7 @@ from qfluentwidgets import (
 
 from app.ui_texts import tr as tr_catalog, normalize_language
 from ui.accessibility import remove_scrollbar_arrow_buttons_from_tab_order, set_state_text
+from ui.navigation.history import ScreenState
 from ui.performance_metrics import log_page_timing
 from ui.smooth_scroll import (
     apply_editor_smooth_scroll_preference,
@@ -70,6 +71,10 @@ class BasePage(_FluentScrollArea):
     The public API (self.layout, add_widget, add_spacing, add_section_title,
     self.title_label, self.subtitle_label) is shared by all pages.
     """
+
+    # Внутри страницы открылся другой экран (вкладка, отчёт, подробности):
+    # журнал экранов окна запишет его как шаг для кнопки «назад».
+    navigation_screen_changed = pyqtSignal()
 
     def __init__(
         self,
@@ -184,6 +189,14 @@ class BasePage(_FluentScrollArea):
             return int(getattr(get_page_performance_profile(page_name), budget_attr))
         except Exception:
             return None
+
+    def navigation_screen(self) -> ScreenState:
+        """Что сейчас открыто внутри страницы. Страницы без вложенных экранов не переопределяют."""
+        return ScreenState()
+
+    def restore_navigation_screen(self, screen: ScreenState) -> bool:
+        """Открывает записанный экран заново; False — такого экрана больше нет."""
+        return not screen.key
 
     def on_page_activated(self) -> None:
         pass

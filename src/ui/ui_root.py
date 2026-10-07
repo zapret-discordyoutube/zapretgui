@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 
+from ui.navigation.history_buttons import install_history_buttons
 from ui.navigation.sidebar_builder import init_navigation
 from ui.window_ui_session import get_window_ui_session
 from ui.window_bootstrap_runtime import (
@@ -75,6 +76,7 @@ class WindowUiRoot:
 
         started_at = time.perf_counter()
         init_navigation(self._window)
+        install_history_buttons(self._window)
         _metric("StartupWindowUiRootNavigation", started_at)
         bind_window_ui_state(
             self._window,

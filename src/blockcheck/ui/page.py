@@ -36,6 +36,7 @@ from blockcheck.page_run_workflow import (
     reset_blockcheck_running_ui,
     start_blockcheck_page_run,
 )
+from ui.navigation.history import ScreenState
 from ui.pages.base_page import BasePage
 from ui.widgets.log_report_view import LogReport
 from ui.accessibility import set_control_accessibility, set_state_text
@@ -166,6 +167,8 @@ class BlockcheckPage(BasePage):
         self._server_detail_view = None
         self._log_report_view = None
         self._over_tabs_return_scroll = 0
+        # Что открыто поверх вкладок, для журнала экранов окна; None — видна сама вкладка.
+        self._over_tabs_screen: ScreenState | None = None
         self._strategy_tab_page = None
         self._domain_lookup_tab_page = None
         self._dns_servers_tab_page = None
@@ -620,6 +623,8 @@ class BlockcheckPage(BasePage):
         normalized = self._normalize_tab_key(key)
         if not self.is_page_ready():
             self._pending_tab_key = normalized
+            self._over_tabs_screen = None
+            self.navigation_screen_changed.emit()
             self.run_when_page_ready(self._apply_pending_tab_if_ready)
             return
         self._pending_tab_key = None
@@ -668,6 +673,8 @@ class BlockcheckPage(BasePage):
         index = max(0, min(int(index), len(self.TAB_ORDER) - 1))
         tab_key = self.TAB_ORDER[index]
         self._active_tab_index = index
+        self._over_tabs_screen = None
+        self.navigation_screen_changed.emit()
         # Вкладку могут сменить и снаружи, пока поверх открыты подробности или отчёт.
         for view in (self._detail_view, self._server_detail_view, self._log_report_view):
             if view is not None and not view.isHidden():
@@ -836,6 +843,7 @@ class BlockcheckPage(BasePage):
         self._show_over_tabs(self._detail_view)
         self._detail_view.show_card(card)
         self._detail_view.setFocus()
+        self._note_over_tabs_screen("card", card.key, card.title, card)
 
     def _open_card_by_key(self, key: str) -> None:
         """Нажатие на строку итога: открывает полный отчёт той же карточки, что стоит ниже."""
@@ -892,6 +900,48 @@ class BlockcheckPage(BasePage):
         # Возвращаем туда же, откуда уходили; вкладка к этому мигу ещё раскладывается.
         QTimer.singleShot(0, self._restore_over_tabs_scroll)
 
+    # ------------------------------------------------------------------
+    # Журнал экранов окна: кнопки «назад» и «вперёд»
+    # ------------------------------------------------------------------
+    def _note_over_tabs_screen(self, kind: str, name: str, title: str, data: object) -> None:
+        """Запоминает экран поверх вкладок вместе с вкладкой, с которой его открыли."""
+        tab_key = self.TAB_ORDER[self._active_tab_index]
+        self._over_tabs_screen = ScreenState(key=f"{kind}:{name}", title=str(title or ""), payload=(tab_key, data))
+        self.navigation_screen_changed.emit()
+
+    def navigation_screen(self) -> ScreenState:
+        if self._over_tabs_screen is not None:
+            return self._over_tabs_screen
+        # Вкладку могли заказать до того, как страница достроилась: она и есть текущий экран.
+        tab_key = self._pending_tab_key or self.TAB_ORDER[self._active_tab_index]
+        title = ""
+        if tab_key != self.TAB_BLOCKCHECK and self._tabs_pivot is not None:
+            item = self._tabs_pivot.items.get(tab_key)
+            title = item.text() if item is not None else ""
+        return ScreenState(key=f"tab:{tab_key}", title=title)
+
+    def restore_navigation_screen(self, screen: ScreenState) -> bool:
+        kind, _, name = screen.key.partition(":")
+        if kind == "tab":
+            if name not in self.TAB_ORDER:
+                return False
+            self.switch_to_tab(name)
+            return True
+        openers = {
+            "card": self._open_card_detail,
+            "server": self._open_server_detail,
+            "report": self._open_log_report,
+        }
+        payload = screen.payload
+        if kind not in openers or not isinstance(payload, tuple) or len(payload) != 2:
+            return False
+        tab_key, data = payload
+        if tab_key not in self.TAB_ORDER or not self.is_page_ready():
+            return False
+        self._switch_tab(self.TAB_ORDER.index(tab_key))
+        openers[kind](data)
+        return True
+
     def _restore_over_tabs_scroll(self) -> None:
         self.verticalScrollBar().setValue(self._over_tabs_return_scroll)
 
@@ -907,6 +957,8 @@ class BlockcheckPage(BasePage):
         self._show_over_tabs(self._server_detail_view)
         self._server_detail_view.show_details(details)
         self._server_detail_view.setFocus()
+        server = details.card.server
+        self._note_over_tabs_screen("server", server, server, details)
 
     def _open_log_report(self, report) -> None:
         """«Отчёт» и «Лог» любой вкладки: текст открывается страницей-редактором с подсветкой."""
@@ -924,6 +976,7 @@ class BlockcheckPage(BasePage):
         self._show_over_tabs(self._log_report_view)
         self._log_report_view.show_report(report)
         self._log_report_view.editor.setFocus()
+        self._note_over_tabs_screen("report", report.title, report.title, report)
 
     def _scroll_to_top(self) -> None:
         try:

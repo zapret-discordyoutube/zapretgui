@@ -437,6 +437,56 @@ class PageCardsTests(unittest.TestCase):
         self.assertFalse(page._results_card.isHidden())
         self.assertTrue(page._progress_card.isHidden())
 
+    def test_window_history_gets_tabs_details_and_reports_as_separate_screens(self) -> None:
+        page = self._page()
+        page._report_lines = ["x"]
+        page._on_finished({**_REPORT, "problems": [], "working": []})
+        page.show()
+        QApplication.processEvents()
+        seen = []
+        page.navigation_screen_changed.connect(lambda: seen.append(page.navigation_screen().key))
+
+        self.assertEqual(page.navigation_screen().key, "tab:blockcheck")
+        self.assertEqual(page.navigation_screen().title, "")
+
+        page._open_card_by_key("hostings")
+        card_screen = page.navigation_screen()
+        self.assertEqual(card_screen.key, "card:hostings")
+        self.assertEqual(card_screen.title, page._result_cards.card("hostings").card.title)
+
+        page._open_report()
+        report_screen = page.navigation_screen()
+        self.assertEqual(report_screen.key, "report:Подробный отчёт BlockCheck")
+
+        page._escape_shortcut.activated.emit()
+        self.assertEqual(page.navigation_screen().key, "tab:blockcheck")
+        page.switch_to_tab(page.TAB_DNS_SPOOFING)
+        tab_screen = page.navigation_screen()
+        self.assertEqual(tab_screen.key, "tab:dns_spoofing")
+        self.assertEqual(tab_screen.title, "DNS подмена")
+        self.assertEqual(seen[-1], "tab:dns_spoofing")
+        self.assertIn("card:hostings", seen)
+        self.assertIn(report_screen.key, seen)
+
+        # «Назад» окна: журнал просит открыть записанный экран заново.
+        self.assertTrue(page.restore_navigation_screen(card_screen))
+        self.assertFalse(page._detail_view.isHidden())
+        self.assertEqual(page.TAB_ORDER[page._active_tab_index], page.TAB_BLOCKCHECK)
+        self.assertEqual(page.navigation_screen().key, "card:hostings")
+
+        self.assertTrue(page.restore_navigation_screen(report_screen))
+        self.assertFalse(page._log_report_view.isHidden())
+        self.assertTrue(page._detail_view.isHidden())
+        self.assertEqual(page._log_report_view.report().title, "Подробный отчёт BlockCheck")
+
+        self.assertTrue(page.restore_navigation_screen(tab_screen))
+        self.assertTrue(page._log_report_view.isHidden())
+        self.assertFalse(page._tabs_pivot.isHidden())
+        self.assertEqual(page.navigation_screen().key, "tab:dns_spoofing")
+
+        self.assertFalse(page.restore_navigation_screen(type(tab_screen)(key="tab:нет такой")))
+        self.assertFalse(page.restore_navigation_screen(type(tab_screen)(key="card:hostings")))
+
     def test_progress_reaches_the_steps_widget(self) -> None:
         page = self._page()
 

@@ -5365,6 +5365,14 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
         "ru": "Обход блокировок выключен",
         "en": "Bypass is off",
     },
+    "nav.history.back.tooltip": {
+        "ru": "Назад. Удерживайте, чтобы увидеть историю",
+        "en": "Back. Hold to see history",
+    },
+    "nav.history.forward.tooltip": {
+        "ru": "Вперёд. Удерживайте, чтобы увидеть историю",
+        "en": "Forward. Hold to see history",
+    },
     "titlebar.subscription.free": {
         "ru": "FREE",
         "en": "FREE",

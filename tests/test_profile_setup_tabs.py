@@ -218,5 +218,93 @@ class RawTextTabTests(_TabsCase):
         self.assertEqual(page._strategy_stack.currentIndex(), 2)
 
 
+class WindowHistoryScreenTests(_TabsCase):
+    """Кнопка «назад» окна возвращает к тому же профилю, разделу и подробностям стратегии."""
+
+    def _loaded_page(self) -> ProfileSetupPageBase:
+        page = self._page()
+        page._profile_key = "uid:youtube"
+        page._payload = SimpleNamespace(item=SimpleNamespace(display_name="YouTube"))
+        entries = {
+            "fake-1": SimpleNamespace(name="Alpha v1", args="--lua-desync=fake:blob=x", visual=None, payload_scopes=(), old_name=""),
+        }
+        page._strategy_list.set_rows(entries=entries, states={}, current_strategy_id="fake-1", open_group_token="uid:youtube")
+        page._rebuild_breadcrumb()
+        return page
+
+    def test_screen_names_profile_section_and_strategy_details(self) -> None:
+        page = self._loaded_page()
+        changes = []
+        page.navigation_screen_changed.connect(lambda: changes.append(page.navigation_screen().key))
+
+        self.assertEqual(page.navigation_screen().key, "uid:youtube|strategies|")
+        self.assertEqual(page.navigation_screen().title, "YouTube")
+
+        page._strategy_list.show_details("fake-1")
+        self.assertEqual(page.navigation_screen().key, "uid:youtube|strategies|fake-1")
+        self.assertEqual(page.navigation_screen().title, "YouTube → Alpha v1")
+
+        page._open_section("raw")
+        self.assertEqual(page.navigation_screen().key, "uid:youtube|raw|")
+        self.assertEqual(page.navigation_screen().title, "YouTube → Текст профиля")
+        self.assertEqual(changes[-1], "uid:youtube|raw|")
+        self.assertIn("uid:youtube|strategies|fake-1", changes)
+
+    def test_restore_reopens_strategy_details_and_section(self) -> None:
+        page = self._loaded_page()
+        page.show_profile = Mock()
+        page._strategy_list.show_details("fake-1")
+        details = page.navigation_screen()
+        page._open_section("raw")
+        raw = page.navigation_screen()
+        page._open_section("strategies")
+
+        self.assertTrue(page.restore_navigation_screen(details))
+        page.show_profile.assert_called_with("uid:youtube")
+        self.assertTrue(page._strategy_list.details_open())
+        self.assertEqual(page.navigation_screen().key, details.key)
+
+        self.assertTrue(page.restore_navigation_screen(raw))
+        self.assertEqual(page._strategy_stack.currentIndex(), 2)
+        self.assertFalse(page._strategy_list.details_open())
+        self.assertEqual(page.navigation_screen().key, raw.key)
+
+    def test_restore_of_another_profile_waits_for_its_data(self) -> None:
+        page = self._loaded_page()
+        page._strategy_list.show_details("fake-1")
+        details = page.navigation_screen()
+        page._strategy_list.close_details()
+
+        # Человек ушёл в другой профиль, а «назад» ведёт к подробностям стратегии прежнего.
+        page._profile_key = "uid:discord"
+
+        def load_other_profile(profile_key: str) -> None:
+            page._profile_key = profile_key
+            page._payload = None
+
+        page.show_profile = load_other_profile
+
+        self.assertTrue(page.restore_navigation_screen(details))
+        # Данные ещё не пришли, но экран уже считается тем самым: журнал не выбросит запись.
+        self.assertEqual(page.navigation_screen().key, details.key)
+        self.assertFalse(page._strategy_list.details_open())
+
+        page._payload = SimpleNamespace(item=SimpleNamespace(display_name="YouTube"))
+        page._apply_navigation_screen(*page._pending_navigation_screen)
+
+        self.assertTrue(page._strategy_list.details_open())
+        self.assertIsNone(page._pending_navigation_screen)
+        self.assertEqual(page.navigation_screen().key, details.key)
+
+    def test_user_choice_while_loading_cancels_the_pending_screen(self) -> None:
+        page = self._loaded_page()
+        page._pending_navigation_screen = ("strategies", "fake-1")
+
+        page._open_section("raw")
+
+        self.assertIsNone(page._pending_navigation_screen)
+        self.assertEqual(page.navigation_screen().key, "uid:youtube|raw|")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QWidget
 
 from log.log import log
 
+from ui.navigation.history_controller import WindowNavigationHistory
 from ui.navigation.text_sync import apply_ui_language_to_page
 from ui.navigation.schema import (
     get_page_route_key,
@@ -36,6 +37,8 @@ class WindowPageHost:
         self._page_factory = page_factory
         self.pages: dict[PageName, QWidget] = {}
         self._shown_pages: set[PageName] = set()
+        # Журнал экранов для кнопок «назад» и «вперёд»; сюда попадает каждый показ страницы.
+        self.navigation_history = WindowNavigationHistory(window, self)
 
     @staticmethod
     def _log_step_timing(
@@ -97,6 +100,12 @@ class WindowPageHost:
             return self._window.stackedWidget.currentWidget()
         except Exception:
             return None
+
+    def page_name_of(self, page: QWidget | None) -> PageName | None:
+        for page_name, loaded_page in self.pages.items():
+            if loaded_page is page:
+                return page_name
+        return None
 
     def has_nav_item(self, page_name: PageName) -> bool:
         session = get_window_ui_session(self._window)
@@ -199,6 +208,7 @@ class WindowPageHost:
 
         page = created_page.page
         self.pages[page_name] = page
+        self.navigation_history.attach_page(page)
 
         step_started_at = time.perf_counter()
         apply_ui_language_to_page(self._window, page)
@@ -265,6 +275,7 @@ class WindowPageHost:
         self._log_step_timing(page_name, "open.navigation_sync", step_started_at)
         self._request_page_keyboard_focus(page)
         self._shown_pages.add(page_name)
+        self.navigation_history.note_screen_changed()
         log_page_timing(
             page_name,
             "open.navigation.first" if first_show else "open.navigation.repeat",

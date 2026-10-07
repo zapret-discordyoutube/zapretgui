@@ -221,6 +221,10 @@ class ProfileStrategyListWidget(QWidget):
     def details_open(self) -> bool:
         return bool(self._details_id)
 
+    def details_strategy_id(self) -> str:
+        """Стратегия, чьи подробности открыты; пусто — виден список."""
+        return self._details_id
+
     def show_details(self, strategy_id: str) -> None:
         """Открывает страницу подробностей вместо списка."""
         strategy_id = str(strategy_id or "")

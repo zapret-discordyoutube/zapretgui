@@ -52,6 +52,7 @@ from qfluentwidgets import (
 )
 from ui.fluent_dialog import MessageBox
 from settings.mode import ZAPRET1_MODE, ZAPRET2_MODE, is_preset_launch_method, is_zapret2_launch_method
+from ui.navigation.history import ScreenState
 from ui.pages.base_page import BasePage
 from ui.accessibility import (
     remove_line_edit_buttons_from_tab_order,
@@ -389,6 +390,9 @@ class ProfileSetupPageBase(BasePage):
         self._open_root = open_root
         self._on_profile_changed_callback = on_profile_changed
         self._profile_key = ""
+        # Раздел и стратегия, которые журнал экранов окна просил открыть у профиля,
+        # пока тот ещё загружается: (раздел, id стратегии).
+        self._pending_navigation_screen: tuple[str, str] | None = None
         self._profile_payload_stale = False
         self._ui_state_unsubscribe = None
         if ui_state_store is not None:
@@ -905,6 +909,7 @@ class ProfileSetupPageBase(BasePage):
     def _switch_strategy_tab(self, index: int) -> None:
         if index == 1 and not self._editor_tab_available:
             index = 0
+        self._pending_navigation_screen = None
         if index == 1:
             self._ensure_editor_tab_built()
             self._request_list_file_editor_state()
@@ -1202,6 +1207,50 @@ class ProfileSetupPageBase(BasePage):
             set_breadcrumb_accessibility(self._breadcrumb, breadcrumb_key)
         finally:
             self._breadcrumb.blockSignals(False)
+        # Строка пути меняется вместе с экраном: профиль, раздел, подробности стратегии.
+        screen_changed = getattr(self, "navigation_screen_changed", None)
+        if screen_changed is not None:
+            screen_changed.emit()
+
+    # ------------------------------------------------------------------
+    # Журнал экранов окна: кнопки «назад» и «вперёд»
+    # ------------------------------------------------------------------
+    def navigation_screen(self) -> ScreenState:
+        profile_key = str(self._profile_key or "")
+        pending = self._pending_navigation_screen
+        if pending is not None:
+            section, details_id = pending
+            part = ""
+        else:
+            section = self._current_section()
+            strategy_list = self.__dict__.get("_strategy_list")
+            details_id = strategy_list.details_strategy_id() if strategy_list is not None else ""
+            part = self._section_title() or str(self.__dict__.get("_strategy_details_name") or "")
+        profile_title = str(getattr(getattr(self._payload, "item", None), "display_name", "") or "")
+        return ScreenState(
+            key=f"{profile_key}|{section}|{details_id}",
+            title=" → ".join(text for text in (profile_title, part) if text),
+            payload=(profile_key, section, details_id),
+        )
+
+    def restore_navigation_screen(self, screen: ScreenState) -> bool:
+        payload = screen.payload
+        if not isinstance(payload, tuple) or len(payload) != 3 or not payload[0]:
+            return False
+        profile_key, section, details_id = payload
+        self.show_profile(profile_key)
+        if self._payload is None or self._strategy_stack is None:
+            # Профиль другой и ещё загружается: раздел откроется, когда придут его данные.
+            self._pending_navigation_screen = (section, details_id)
+            return True
+        self._apply_navigation_screen(section, details_id)
+        return True
+
+    def _apply_navigation_screen(self, section: str, details_id: str) -> None:
+        self._pending_navigation_screen = None
+        self._open_section(section)
+        if details_id and self._current_section() == "strategies":
+            self._strategy_list.show_details(details_id)
 
     def _on_breadcrumb_item_changed(self, key: str) -> None:
         # Клик по крошке уже удалил из BreadcrumbBar элементы правее выбранного —
@@ -1460,6 +1509,7 @@ class ProfileSetupPageBase(BasePage):
             return
         self._profile_payload_stale = False
         if next_key != current_key:
+            self._pending_navigation_screen = None
             # Ждущее автосохранение полей (350 мс) — правка СТАРОГО профиля:
             # отправляем её сейчас, пока поля и ключ ещё его. Иначе таймер
             # срабатывал уже с ключом нового профиля и значениями старого.
@@ -1778,6 +1828,8 @@ class ProfileSetupPageBase(BasePage):
 
     def _apply_payload(self, payload) -> None:
         self._loading = True
+        # Берём сразу: применение данных само переключает разделы и сбросило бы заказ.
+        pending_screen = self._pending_navigation_screen
         try:
             item = payload.item
             set_widget_text_if_changed(self._summary, self._conditions_summary_text(payload))
@@ -1811,6 +1863,8 @@ class ProfileSetupPageBase(BasePage):
                 self._request_list_file_editor_state()
             if self._raw_tab_built:
                 self._apply_raw_tab_payload()
+            if pending_screen is not None:
+                self._apply_navigation_screen(*pending_screen)
             self._rebuild_breadcrumb()
             geo_notice = self.__dict__.get("_geo_notice")
             if geo_notice is not None:
