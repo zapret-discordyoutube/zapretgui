@@ -196,6 +196,60 @@ class QuickActionsBarLayoutTests(unittest.TestCase):
         self.assertIs(first_row_layout.itemAt(0).widget(), first)
         self.assertIs(first_row_layout.itemAt(1).widget(), second)
 
+    def test_presets_toolbar_puts_page_title_before_the_buttons(self) -> None:
+        parent = QWidget()
+        self.addCleanup(parent.deleteLater)
+        toolbar = PresetsToolbarLayout(parent, row_count=3, button_spacing=8)
+        title = QLabel("Мои пресеты")
+        button = PushButton("Импорт")
+        search = LineEdit()
+        toolbar.set_buttons([button])
+        toolbar.set_trailing_widget(search, minimum_width=120)
+        toolbar.set_leading_widget(title)
+
+        toolbar.refresh_layout(900)
+
+        first_row = toolbar._rows[0][1]
+        self.assertIs(first_row.itemAt(0).widget(), title)
+        self.assertIs(first_row.itemAt(1).widget(), button)
+        self.assertIs(first_row.itemAt(first_row.count() - 1).widget(), search)
+
+    def test_presets_toolbar_keeps_search_in_the_last_button_row_when_it_fits(self) -> None:
+        parent = QWidget()
+        self.addCleanup(parent.deleteLater)
+        toolbar = PresetsToolbarLayout(parent, row_count=4, button_spacing=8)
+        buttons = [PushButton("Вернуть встроенные пресеты") for _ in range(3)]
+        search = LineEdit()
+        toolbar.set_buttons(buttons)
+        toolbar.set_trailing_widget(search, minimum_width=120)
+        one_button = buttons[0].sizeHint().width()
+
+        # Влезают две кнопки в ряд: третья уходит на второй, поиск встаёт рядом с ней.
+        toolbar.refresh_layout(2 * one_button + 8 + 60)
+
+        second_row = toolbar._rows[1][1]
+        self.assertIs(second_row.itemAt(0).widget(), buttons[2])
+        self.assertIs(second_row.itemAt(second_row.count() - 1).widget(), search)
+        self.assertEqual(toolbar._rows[2][1].count(), 0)
+
+    def test_presets_toolbar_height_grows_with_every_new_row(self) -> None:
+        parent = QWidget()
+        self.addCleanup(parent.deleteLater)
+        parent.resize(1200, 300)
+        toolbar = PresetsToolbarLayout(parent, row_count=4, button_spacing=8)
+        buttons = [PushButton("Вернуть встроенные пресеты") for _ in range(3)]
+        toolbar.set_buttons(buttons)
+        parent.show()
+        QApplication.processEvents()
+        one_button = buttons[0].sizeHint().width()
+
+        toolbar.refresh_layout(3 * one_button + 16)
+        one_row_height = toolbar.container.maximumHeight()
+        toolbar.refresh_layout(one_button)
+
+        # Раньше высота считалась до показа новых рядов, и нижний ряд обрезался.
+        self.assertGreaterEqual(toolbar.container.maximumHeight(), 3 * one_row_height)
+
     def test_setting_card_group_height_updates_after_late_card_addition(self) -> None:
         group = SettingCardGroup("Управление")
         actions = QuickActionsBar()

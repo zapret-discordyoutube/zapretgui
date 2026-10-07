@@ -159,7 +159,6 @@ class UserPresetsPageBase(BasePage):
         self._runtime_service = self._build_runtime_service()
         self._runtime_service.attach_page(self, self._build_runtime_adapter())
 
-        self._configs_title_label = None
         self._get_configs_btn = None
 
         self._presets_model: Optional[PresetListModel] = None
@@ -600,8 +599,6 @@ class UserPresetsPageBase(BasePage):
             on_preset_list_action=self._on_preset_list_action,
             ui_language=self._ui_language,
         )
-        self._configs_icon = shell.configs_icon
-        self._configs_title_label = shell.configs_title_label
         self._get_configs_btn = shell.get_configs_btn
         self._toolbar_layout = shell.toolbar_layout
         self.create_btn = shell.create_btn
@@ -617,8 +614,6 @@ class UserPresetsPageBase(BasePage):
         self._install_preset_search_shortcut()
         self._install_title_status_icon()
 
-        self.add_widget(shell.configs_card)
-        self.add_spacing(12)
         self.add_widget(self._toolbar_layout.container)
         try:
             from ui.smooth_scroll import get_page_smooth_scroll_enabled
@@ -641,7 +636,7 @@ class UserPresetsPageBase(BasePage):
 
         self.layout.removeWidget(self.title_label)
         self._title_status_header = QWidget(self.content)
-        self._title_status_header.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self._title_status_header.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         title_layout = QHBoxLayout(self._title_status_header)
         title_layout.setContentsMargins(0, 0, 0, 0)
         title_layout.setSpacing(8)
@@ -649,8 +644,11 @@ class UserPresetsPageBase(BasePage):
         self._preset_status_icon = PresetStatusIcon(self._title_status_header, size=24)
         title_layout.addWidget(self._preset_status_icon, 0, Qt.AlignmentFlag.AlignVCenter)
         title_layout.addWidget(self.title_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        title_layout.addStretch(1)
-        self.layout.insertWidget(title_index, self._title_status_header)
+        # Заголовок стоит в одном ряду с кнопками и поиском: отдельная строка
+        # под него отнимала высоту у списка пресетов.
+        title_layout.addSpacing(8)
+        self._toolbar_layout.set_leading_widget(self._title_status_header)
+        self._toolbar_layout.refresh_for_viewport(self.viewport().width(), self.layout.contentsMargins())
 
     def _on_info_clicked(self) -> None:
         if MessageBox:
@@ -820,7 +818,6 @@ class UserPresetsPageBase(BasePage):
             get_semantic_palette_fn=get_semantic_palette,
             get_cached_qta_pixmap_fn=get_cached_qta_pixmap,
             schedule_layout_resync_fn=self._schedule_layout_resync,
-            configs_icon=getattr(self, "_configs_icon", None),
             reset_all_btn=getattr(self, "reset_all_btn", None),
             presets_list=getattr(self, "presets_list", None),
             previous_theme_key=self._last_page_theme_key,
@@ -3244,7 +3241,6 @@ class UserPresetsPageBase(BasePage):
         super().set_ui_language(language)
         apply_user_presets_language(
             tr_fn=self._tr,
-            configs_title_label=self._configs_title_label,
             get_configs_btn=self._get_configs_btn,
             create_btn=self.create_btn,
             import_btn=self.import_btn,

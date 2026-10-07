@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
-from qfluentwidgets import PrimaryPushButton, PushButton
+from qfluentwidgets import PrimaryPushButton, PushButton, ToolButton
 
 from ui.accessibility import set_control_accessibility, set_state_text
 
@@ -23,6 +23,7 @@ class PresetsToolbarLayout:
         self._row_spacing = max(0, int(row_spacing))
         self._button_spacing = max(0, int(button_spacing))
         self._buttons: list[QWidget] = []
+        self._leading_widget: QWidget | None = None
         self._rows: list[tuple[QWidget, QHBoxLayout]] = []
         self._trailing_widget: QWidget | None = None
         self._trailing_minimum_width = 260
@@ -59,6 +60,14 @@ class PresetsToolbarLayout:
         set_state_text(button, name)
         return button
 
+    def create_icon_button(self, icon, *, accessible_name: str, size: int = 32) -> QWidget:
+        """Кнопка из одного значка для второстепенного действия; смысл — в подсказке."""
+        button = ToolButton(icon, self.container)
+        button.setFixedSize(int(size), int(size))
+        set_control_accessibility(button, name=accessible_name)
+        set_state_text(button, accessible_name)
+        return button
+
     def create_primary_tool_button(
         self,
         button_cls,
@@ -85,6 +94,13 @@ class PresetsToolbarLayout:
         self._last_layout_state = None
         for button in self._buttons:
             button.setParent(self.container)
+
+    def set_leading_widget(self, widget: QWidget | None) -> None:
+        """Ставит виджет (заголовок страницы) в начало первого ряда, перед кнопками."""
+        self._leading_widget = widget
+        self._last_layout_state = None
+        if widget is not None:
+            widget.setParent(self.container)
 
     def set_trailing_widget(self, widget: QWidget | None, *, minimum_width: int = 260) -> None:
         self._trailing_widget = widget
@@ -164,10 +180,14 @@ class PresetsToolbarLayout:
         if not button_rows:
             return [([], True)]
 
-        if len(button_rows) == 1 and self._row_fits_trailing(button_rows[0], available_width):
-            return [(button_rows[0], True)]
-
-        return [(row, False) for row in button_rows] + [([], True)]
+        # Поиск встаёт в последний ряд кнопок, если помещается рядом с ними,
+        # и только иначе занимает отдельный ряд.
+        rows = [(row, False) for row in button_rows]
+        if self._row_fits_trailing(button_rows[-1], available_width):
+            rows[-1] = (button_rows[-1], True)
+        else:
+            rows.append(([], True))
+        return rows
 
     def _row_fits_trailing(self, row_buttons: list[QWidget], available_width: int) -> bool:
         if available_width <= 0:
@@ -184,7 +204,8 @@ class PresetsToolbarLayout:
         return sum(widths) + self._button_spacing * max(0, len(widths) - 1)
 
     def _visible_buttons(self) -> list[QWidget]:
-        return [button for button in self._buttons if not button.isHidden()]
+        widgets = [self._leading_widget] if self._leading_widget is not None else []
+        return [widget for widget in widgets + self._buttons if not widget.isHidden()]
 
     def _compute_rows(self, available_width: int) -> list[list[QWidget]]:
         buttons = self._visible_buttons()
@@ -227,6 +248,9 @@ class PresetsToolbarLayout:
 
     def _sync_container_height(self) -> None:
         try:
+            # Без сброса раскладка отдаёт высоту, посчитанную до того, как
+            # ряды показали или скрыли, и нижний ряд обрезается.
+            self._layout.invalidate()
             self._layout.activate()
         except Exception:
             pass

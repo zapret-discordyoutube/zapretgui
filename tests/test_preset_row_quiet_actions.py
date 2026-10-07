@@ -117,53 +117,75 @@ class PresetRowQuietActionsTests(unittest.TestCase):
         return icons, list(_SpyMetrics.elided)
 
     def test_row_is_one_line_high(self) -> None:
-        self.assertEqual(self.delegate.sizeHint(QStyleOptionViewItem(), self.model.index(3, 0)).height(), 36)
+        self.assertEqual(self.delegate.sizeHint(QStyleOptionViewItem(), self.model.index(3, 0)).height(), 32)
 
-    def test_idle_row_shows_only_icon_and_name(self) -> None:
+    def test_idle_tile_shows_only_icon_and_name(self) -> None:
         icons, texts = self._paint(3)
 
         self.assertEqual(icons, ["fa5s.file-alt"])
         self.assertNotIn(DATE, texts)
 
-    def test_hovered_row_reveals_date_pin_and_buttons(self) -> None:
+    def test_tile_hides_the_folder_name_repeated_above_it(self) -> None:
+        _icons, texts = self._paint(3)
+
+        self.assertEqual(texts, ["multisplit_sni"])
+
+    def test_pinned_tile_under_another_header_keeps_its_full_name(self) -> None:
+        _icons, texts = self._paint(1)
+
+        self.assertEqual(texts, ["ALL TCP & UDP v1"])
+
+    def test_hovered_tile_reveals_pin_and_menu_buttons(self) -> None:
         icons, texts = self._paint(3, QStyle.StateFlag.State_MouseOver)
 
-        self.assertIn(DATE, texts)
         self.assertIn("fa5s.thumbtack", icons)
-        self.assertIn("fa5s.star-half-alt", icons)
         self.assertIn("fa5s.ellipsis-v", icons)
+        # Дата на плитку не выводится: она в подсказке.
+        self.assertNotIn(DATE, texts)
 
-    def test_keyboard_focus_reveals_the_same_controls(self) -> None:
-        icons, texts = self._paint(3, QStyle.StateFlag.State_HasFocus)
+    def test_keyboard_focus_reveals_the_same_buttons(self) -> None:
+        icons, _texts = self._paint(3, QStyle.StateFlag.State_HasFocus)
 
-        self.assertIn(DATE, texts)
+        self.assertIn("fa5s.thumbtack", icons)
         self.assertIn("fa5s.ellipsis-v", icons)
 
     def test_pin_of_pinned_preset_and_user_rating_stay_visible(self) -> None:
-        pinned_icons, pinned_texts = self._paint(1)
-        rated_icons, rated_texts = self._paint(4)
+        pinned_icons, _texts = self._paint(1)
+        rated_icons, _texts = self._paint(4)
 
         self.assertIn("fa5s.thumbtack", pinned_icons)
         self.assertNotIn("fa5s.ellipsis-v", pinned_icons)
-        self.assertNotIn(DATE, pinned_texts)
         self.assertIn("fa5s.star", rated_icons)
         self.assertNotIn("fa5s.thumbtack", rated_icons)
-        self.assertNotIn(DATE, rated_texts)
+
+    def test_active_tile_shows_a_check_mark_instead_of_the_file_icon(self) -> None:
+        self.model.set_active_preset("a.txt")
+
+        icons, _texts = self._paint(3)
+
+        self.assertEqual(icons, ["fa5s.check-circle"])
 
     def test_hidden_button_place_still_answers_clicks(self) -> None:
-        # Кнопки скрыты только на вид: их место занято всегда, и наведённая
-        # туда мышь попадает в ту же кнопку.
-        row_rect = QRect(0, 0, 900, 36)
-        actions = dict(self.delegate._action_rects(row_rect, "preset", False, False))
+        # Кнопки скрыты только на вид: наведённая туда мышь попадает в ту же кнопку.
+        row_rect = QRect(0, 0, 300, 32)
+        actions = dict(self.delegate._action_rects(row_rect))
 
-        self.assertEqual(
-            self.delegate._action_at(row_rect, "preset", False, False, 0, actions["edit"].center()),
-            "edit",
-        )
-        self.assertEqual(
-            self.delegate._action_at(row_rect, "preset", False, False, 0, actions["rating"].center()),
-            "rating",
-        )
+        self.assertEqual(self.delegate._action_at(row_rect, actions["edit"].center()), "edit")
+        self.assertEqual(self.delegate._action_at(row_rect, actions["pin"].center()), "pin")
+
+    def test_column_width_follows_the_names_not_the_window(self) -> None:
+        self.view.resize(1400, 400)
+        self.view.show()
+        QApplication.processEvents()
+
+        count, width = self.delegate.column_layout()
+
+        # Имена короткие — плитки узкие, столбцов много; место не простаивает.
+        self.assertGreaterEqual(count, 4)
+        self.assertLessEqual(width, 350)
+        self.model.update_preset_row("a.txt", name="ALL TCP & UDP " + "очень длинное имя пресета " * 3)
+        self.model.update_preset_row("b.txt", name="Ещё одно " + "очень длинное имя пресета " * 3)
+        self.assertLess(self.delegate.column_layout()[0], count)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import QApplication, QListView
 from .common import (
     PRESET_DROP_MARKER_PROPERTY,
     preset_canonical_drop_target_for_next_row,
-    preset_columns_for_width,
     preset_drop_marker_for_target,
     preset_drop_target_for_position,
     set_current_index_if_changed,
@@ -36,7 +35,7 @@ class LinkedWheelListView(ListView):
         self._drag_source: tuple[str, str] | None = None
         self._draggable_kinds = {str(kind) for kind in (draggable_kinds or {"preset"})}
         # Пресеты укладываются слева направо с переносом: в широком окне они
-        # встают в несколько столбцов. Ширину строк задаёт PresetListDelegate,
+        # встают в несколько столбцов. Ширину плиток задаёт PresetListDelegate,
         # заголовок папки всегда занимает линию целиком.
         self.setFlow(QListView.Flow.LeftToRight)
         self.setWrapping(True)
@@ -44,9 +43,12 @@ class LinkedWheelListView(ListView):
         self.set_drop_marker(-1, "")
 
     def preset_column_count(self) -> int:
-        if not self.isWrapping():
+        # Число столбцов знает PresetListDelegate: оно зависит от ширины
+        # списка и от самого длинного имени пресета.
+        column_layout = getattr(self.itemDelegate(), "column_layout", None)
+        if not self.isWrapping() or not callable(column_layout):
             return 1
-        return preset_columns_for_width(self.viewport().width())[0]
+        return int(column_layout()[0])
 
     def resizeEvent(self, event):  # noqa: N802
         if event.size().width() != event.oldSize().width():

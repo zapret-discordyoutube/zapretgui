@@ -19,9 +19,10 @@ _CSS_RGBA_COLOR_RE = re.compile(
     re.IGNORECASE,
 )
 PRESET_DROP_MARKER_PROPERTY = "presetDropMarker"
-# Уже этого имя пресета перестаёт помещаться рядом со значком и кнопками строки.
-PRESET_COLUMN_MIN_WIDTH = 420
-PRESET_COLUMN_MAX_COUNT = 4
+# Плитка пресета не бывает уже и шире этого, каким бы ни было самое длинное имя.
+PRESET_TILE_MIN_WIDTH = 140
+PRESET_TILE_MAX_WIDTH = 320
+PRESET_COLUMN_MAX_COUNT = 8
 
 
 def preset_full_row_width(view_width: int) -> int:
@@ -37,10 +38,20 @@ def preset_full_row_width(view_width: int) -> int:
         return 0
 
 
-def preset_columns_for_width(view_width: int) -> tuple[int, int]:
-    """Сколько столбцов пресетов помещается в список и какой они ширины."""
+def preset_columns_for_width(view_width: int, wanted_width: int = PRESET_TILE_MAX_WIDTH) -> tuple[int, int]:
+    """Сколько столбцов пресетов помещается в список и какой они ширины.
+
+    `wanted_width` — ширина плитки, в которую целиком входит самое длинное
+    имя. Столбцов берётся столько, сколько таких плиток помещается, а
+    оставшееся место делится между ними поровну.
+    """
     total = preset_full_row_width(view_width)
-    count = max(1, min(PRESET_COLUMN_MAX_COUNT, total // PRESET_COLUMN_MIN_WIDTH))
+    try:
+        wanted = int(wanted_width)
+    except Exception:
+        wanted = PRESET_TILE_MAX_WIDTH
+    wanted = max(PRESET_TILE_MIN_WIDTH, min(PRESET_TILE_MAX_WIDTH, wanted))
+    count = max(1, min(PRESET_COLUMN_MAX_COUNT, total // wanted))
     return count, total // count
 
 
@@ -283,7 +294,8 @@ def to_qcolor(value, fallback_hex: str = "#000000") -> QColor:
 
 __all__ = [
     "PRESET_COLUMN_MAX_COUNT",
-    "PRESET_COLUMN_MIN_WIDTH",
+    "PRESET_TILE_MAX_WIDTH",
+    "PRESET_TILE_MIN_WIDTH",
     "PRESET_DROP_MARKER_PROPERTY",
     "cached_icon",
     "fluent_icon",

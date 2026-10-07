@@ -166,7 +166,6 @@ class UserPresetsAccessibilityTests(unittest.TestCase):
 
         apply_user_presets_language(
             tr_fn=lambda _key, default: default,
-            configs_title_label=widgets.configs_title_label,
             get_configs_btn=widgets.get_configs_btn,
             create_btn=widgets.create_btn,
             import_btn=widgets.import_btn,

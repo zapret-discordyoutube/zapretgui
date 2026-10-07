@@ -32,8 +32,8 @@ class ProfileToolbarContractTests(unittest.TestCase):
 
         self.assertIn("request_btn = PrimaryPushButton(", profile_source)
         self.assertIn("icon=FluentIcon.GITHUB", profile_source)
-        self.assertIn("get_configs_btn = PrimaryPushButton(", presets_source)
-        self.assertIn("icon=FluentIcon.GITHUB", presets_source)
+        self.assertIn("get_configs_btn = toolbar_layout.create_action_button(", presets_source)
+        self.assertIn("FluentIcon.GITHUB", presets_source)
 
     def test_profile_request_button_opens_github_form_not_info_popup(self) -> None:
         source = inspect.getsource(preset_setup_page.PresetSetupPageBase._build_content)

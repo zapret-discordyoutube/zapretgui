@@ -11,13 +11,19 @@ from PyQt6.QtWidgets import QApplication, QStyleOptionViewItem
 
 from ui.presets_menu.common import (
     PRESET_COLUMN_MAX_COUNT,
-    PRESET_COLUMN_MIN_WIDTH,
+    PRESET_TILE_MAX_WIDTH,
+    PRESET_TILE_MIN_WIDTH,
     preset_columns_for_width,
     preset_full_row_width,
 )
 from ui.presets_menu.delegate import PresetListDelegate
 from ui.presets_menu.model import PresetListModel
 from ui.presets_menu.view import LinkedWheelListView
+
+
+# Имена короткие, плитка минимальной ширины: три столбца в широком списке и один в узком.
+WIDE = 3 * PRESET_TILE_MIN_WIDTH + 40
+NARROW = 2 * PRESET_TILE_MIN_WIDTH - 20
 
 
 def _preset(file_name: str, folder_key: str) -> dict[str, object]:
@@ -34,21 +40,23 @@ def _rows() -> list[dict[str, object]]:
 
 
 class PresetColumnMathTests(unittest.TestCase):
-    def test_narrow_list_keeps_one_column(self) -> None:
-        self.assertEqual(preset_columns_for_width(0), (1, 0))
-        self.assertEqual(preset_columns_for_width(700), (1, 699))
-        self.assertEqual(preset_columns_for_width(2 * PRESET_COLUMN_MIN_WIDTH), (1, 2 * PRESET_COLUMN_MIN_WIDTH - 1))
+    def test_list_narrower_than_two_tiles_keeps_one_column(self) -> None:
+        self.assertEqual(preset_columns_for_width(0, 200), (1, 0))
+        self.assertEqual(preset_columns_for_width(400, 200), (1, 399))
 
-    def test_wide_list_splits_into_columns_that_fit(self) -> None:
-        self.assertEqual(preset_columns_for_width(2 * PRESET_COLUMN_MIN_WIDTH + 1), (2, PRESET_COLUMN_MIN_WIDTH))
-        count, width = preset_columns_for_width(1391)
-        self.assertEqual(count, 3)
-        self.assertGreaterEqual(width, PRESET_COLUMN_MIN_WIDTH)
+    def test_columns_are_as_many_as_tiles_fit_and_share_the_leftover(self) -> None:
+        self.assertEqual(preset_columns_for_width(401, 200), (2, 200))
+        count, width = preset_columns_for_width(1391, 250)
+        self.assertEqual((count, width), (5, 278))
         # Столбцы вместе не дотягиваются до края: иначе QListView перенёс бы последний.
         self.assertLess(count * width, 1391)
 
+    def test_wanted_tile_width_is_kept_within_sane_bounds(self) -> None:
+        self.assertEqual(preset_columns_for_width(1001, 10), preset_columns_for_width(1001, PRESET_TILE_MIN_WIDTH))
+        self.assertEqual(preset_columns_for_width(1001, 9000), preset_columns_for_width(1001, PRESET_TILE_MAX_WIDTH))
+
     def test_column_count_is_capped(self) -> None:
-        self.assertEqual(preset_columns_for_width(10000)[0], PRESET_COLUMN_MAX_COUNT)
+        self.assertEqual(preset_columns_for_width(10000, PRESET_TILE_MIN_WIDTH)[0], PRESET_COLUMN_MAX_COUNT)
 
     def test_full_row_is_one_point_narrower_than_the_list(self) -> None:
         self.assertEqual(preset_full_row_width(900), 899)
@@ -84,7 +92,7 @@ class PresetListColumnsTests(unittest.TestCase):
         return str(index.data(PresetListModel.FileNameRole) or "")
 
     def test_wide_list_puts_presets_side_by_side_under_a_full_width_header(self) -> None:
-        self._show(1400)
+        self._show(WIDE)
         self.assertEqual(self.view.preset_column_count(), 3)
 
         header = self._rect(0)
@@ -105,20 +113,20 @@ class PresetListColumnsTests(unittest.TestCase):
         self.assertGreater(next_header.top(), self._rect(5).top())
 
     def test_narrow_list_stays_a_plain_list(self) -> None:
-        self._show(600)
+        self._show(NARROW)
         self.assertEqual(self.view.preset_column_count(), 1)
         tops = [self._rect(row).top() for row in range(self.model.rowCount())]
         self.assertEqual(tops, sorted(set(tops)))
         self.assertEqual({self._rect(row).left() for row in range(self.model.rowCount())}, {0})
 
     def test_columns_follow_the_list_width(self) -> None:
-        self._show(1400)
+        self._show(WIDE)
         self.assertEqual(self._rect(1).top(), self._rect(2).top())
-        self._show(600)
+        self._show(NARROW)
         self.assertGreater(self._rect(2).top(), self._rect(1).top())
 
     def test_drop_side_is_chosen_by_left_or_right_half_in_columns(self) -> None:
-        self._show(1400)
+        self._show(WIDE)
         rect = self._rect(2)
         left_target, left_id, _folder = self.view._drop_target_at(QPoint(rect.left() + 10, rect.center().y()))
         self.assertEqual(left_target["destination_kind"], "preset")
@@ -134,7 +142,7 @@ class PresetListColumnsTests(unittest.TestCase):
         self.assertEqual(last_id, "a5.txt")
 
     def test_drop_side_is_chosen_by_upper_or_lower_half_in_one_column(self) -> None:
-        self._show(600)
+        self._show(NARROW)
         rect = self._rect(2)
         upper, upper_id, _folder = self.view._drop_target_at(QPoint(rect.right() - 10, rect.top() + 3))
         self.assertEqual((upper["destination_kind"], upper_id), ("preset", "a2.txt"))
@@ -145,7 +153,7 @@ class PresetListColumnsTests(unittest.TestCase):
         self.view.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier))
 
     def test_arrows_walk_the_grid_in_columns(self) -> None:
-        self._show(1400)
+        self._show(WIDE)
         self.view.setCurrentIndex(self.model.index(2, 0))  # a2: первая линия, второй столбец
 
         self._press(Qt.Key.Key_Right)
@@ -163,7 +171,7 @@ class PresetListColumnsTests(unittest.TestCase):
         self.assertEqual(self._file(self.view.currentIndex()), "a2.txt")
 
     def test_arrows_keep_list_order_in_one_column(self) -> None:
-        self._show(600)
+        self._show(NARROW)
         self.view.setCurrentIndex(self.model.index(5, 0))
         self._press(Qt.Key.Key_Down)
         self.assertEqual(self._file(self.view.currentIndex()), "c1.txt")
@@ -187,7 +195,7 @@ class PresetListColumnsTests(unittest.TestCase):
         self.assertTrue(self.delegate.editorEvent(event, self.model, option, index))
 
     def test_single_click_activates_after_the_double_click_wait(self) -> None:
-        self._show(1400)
+        self._show(WIDE)
         self._click(2)
         self.assertEqual(self.actions, [])
         self.assertTrue(self.delegate._activation_timer.isActive())
@@ -196,20 +204,20 @@ class PresetListColumnsTests(unittest.TestCase):
         self.assertEqual(self.actions, [("activate", "a2.txt")])
 
     def test_double_click_opens_the_preset_without_activating_it(self) -> None:
-        self._show(1400)
+        self._show(WIDE)
         self._click(2)
         self._click(2)
         self.assertEqual(self.actions, [("open", "a2.txt")])
         self.assertFalse(self.delegate._activation_timer.isActive())
 
     def test_shift_click_opens_the_preset_without_activating_it(self) -> None:
-        self._show(1400)
+        self._show(WIDE)
         self._click(2, Qt.KeyboardModifier.ShiftModifier)
         self.assertEqual(self.actions, [("open", "a2.txt")])
         self.assertFalse(self.delegate._activation_timer.isActive())
 
     def test_quick_clicks_on_two_presets_activate_only_the_last_one(self) -> None:
-        self._show(1400)
+        self._show(WIDE)
         self._click(2)
         self._click(3)
         self.delegate._activation_timer.stop()

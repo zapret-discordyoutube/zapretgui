@@ -167,7 +167,6 @@ def apply_user_presets_page_theme(
     get_semantic_palette_fn,
     get_cached_qta_pixmap_fn,
     schedule_layout_resync_fn,
-    configs_icon,
     reset_all_btn,
     presets_list,
     previous_theme_key,
@@ -181,9 +180,6 @@ def apply_user_presets_page_theme(
             return previous_theme_key
 
         _ = get_semantic_palette_fn(tokens.theme_name)
-
-        if configs_icon is not None:
-            configs_icon.setPixmap(get_cached_qta_pixmap_fn("fa5b.github", color=tokens.accent_hex, size=18))
 
         if reset_all_btn is not None:
             try:
@@ -242,7 +238,6 @@ def cleanup_user_presets_page(
 def apply_user_presets_language(
     *,
     tr_fn,
-    configs_title_label,
     get_configs_btn,
     create_btn,
     import_btn,
@@ -263,16 +258,15 @@ def apply_user_presets_language(
 ) -> None:
     apply_mode_labels_fn()
 
-    if configs_title_label is not None:
-        set_widget_text_if_changed(
-            configs_title_label,
+    if get_configs_btn is not None:
+        set_widget_text_if_changed(get_configs_btn, tr_fn(f"{tr_prefix}.configs.button", "Получить конфиги"))
+        set_tooltip(
+            get_configs_btn,
             tr_fn(
                 f"{tr_prefix}.configs.title",
                 "Обменивайтесь пресетами и профилями в разделе Forgejo Issues",
             ),
         )
-    if get_configs_btn is not None:
-        set_widget_text_if_changed(get_configs_btn, tr_fn(f"{tr_prefix}.configs.button", "Получить конфиги"))
 
     if create_btn is not None:
         set_tooltip(create_btn, tr_fn(f"{tr_prefix}.tooltip.create", "Создать новый пресет"))
@@ -303,7 +297,7 @@ def apply_user_presets_language(
     if presets_info_btn is not None:
         set_widget_text_if_changed(presets_info_btn, tr_fn(f"{tr_prefix}.button.wiki", "Вики по пресетам"))
     if info_btn is not None:
-        set_widget_text_if_changed(info_btn, tr_fn(f"{tr_prefix}.button.what_is_this", "Что это такое?"))
+        set_tooltip(info_btn, tr_fn(f"{tr_prefix}.button.what_is_this", "Что это такое?"))
 
     if preset_search_input is not None:
         set_placeholder_if_changed(

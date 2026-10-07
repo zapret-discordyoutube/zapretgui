@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from types import MethodType
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListView, QSizePolicy
-from qfluentwidgets import FluentIcon, PrimaryPushButton
+from PyQt6.QtWidgets import QFrame, QListView, QSizePolicy
+from qfluentwidgets import FluentIcon
 
-from ui.fluent_widgets import SettingsCard, set_tooltip
+from ui.fluent_widgets import set_tooltip
 from ui.widgets.active_row_motion import attach_active_row_motion
 from ui.widgets.hover_row import profile_hover_row_rect
 from presets.ui.common.user_presets_accessibility import apply_user_presets_accessibility
@@ -22,9 +22,6 @@ from ui.widgets.fluent_scrollbar import install_fluent_scrollbars
 
 @dataclass(slots=True)
 class UserPresetsPageBuildWidgets:
-    configs_card: object
-    configs_icon: object
-    configs_title_label: object
     get_configs_btn: object
     toolbar_layout: object
     create_btn: object
@@ -99,36 +96,7 @@ def build_user_presets_page_shell(
     on_preset_list_action,
     ui_language: str,
 ):
-    configs_card = SettingsCard()
-    configs_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-    configs_layout = QHBoxLayout()
-    configs_layout.setSpacing(12)
-
-    configs_icon = QLabel()
-    configs_icon.setPixmap(get_cached_qta_pixmap_fn("fa5b.github", color=tokens.accent_hex, size=18))
-    configs_layout.addWidget(configs_icon)
-
-    configs_title_label = strong_body_label_cls(
-        tr_fn(
-            f"{tr_prefix}.configs.title",
-            "Обменивайтесь пресетами и профилями в разделе Forgejo Issues",
-        )
-    )
-    configs_title_label.setWordWrap(True)
-    configs_title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-    configs_title_label.setMinimumWidth(0)
-    configs_layout.addWidget(configs_title_label, 1)
-
-    get_configs_btn = PrimaryPushButton(
-        tr_fn(f"{tr_prefix}.configs.button", "Получить конфиги"),
-        icon=FluentIcon.GITHUB,
-    )
-    get_configs_btn.setFixedHeight(36)
-    get_configs_btn.clicked.connect(on_open_new_configs_post)
-    configs_layout.addWidget(get_configs_btn)
-    configs_card.add_layout(configs_layout)
-
-    toolbar_layout = PresetsToolbarLayout(parent)
+    toolbar_layout = PresetsToolbarLayout(parent, row_count=6)
 
     create_btn = toolbar_layout.create_primary_tool_button(
         primary_tool_button_cls,
@@ -180,11 +148,27 @@ def build_user_presets_page_shell(
     presets_info_btn.clicked.connect(on_open_presets_info)
     presets_info_btn.hide()
 
-    info_btn = toolbar_layout.create_action_button(
-        tr_fn(f"{tr_prefix}.button.what_is_this", "Что это такое?"),
+    info_btn = toolbar_layout.create_icon_button(
         FluentIcon.QUESTION,
+        accessible_name=tr_fn(f"{tr_prefix}.button.what_is_this", "Что это такое?"),
     )
+    set_tooltip(info_btn, tr_fn(f"{tr_prefix}.button.what_is_this", "Что это такое?"))
     info_btn.clicked.connect(on_info_clicked)
+
+    # Отдельной полосы про обмен пресетами больше нет: её текст стал
+    # подсказкой этой кнопки, а сама кнопка встала в общий ряд.
+    get_configs_btn = toolbar_layout.create_action_button(
+        tr_fn(f"{tr_prefix}.configs.button", "Получить конфиги"),
+        FluentIcon.GITHUB,
+    )
+    set_tooltip(
+        get_configs_btn,
+        tr_fn(
+            f"{tr_prefix}.configs.title",
+            "Обменивайтесь пресетами и профилями в разделе Forgejo Issues",
+        ),
+    )
+    get_configs_btn.clicked.connect(on_open_new_configs_post)
 
     preset_search_input = line_edit_cls()
     preset_search_input.setPlaceholderText(
@@ -213,8 +197,9 @@ def build_user_presets_page_shell(
         open_folder_btn,
         reset_all_btn,
         info_btn,
+        get_configs_btn,
     ])
-    toolbar_layout.set_trailing_widget(preset_search_input, minimum_width=280)
+    toolbar_layout.set_trailing_widget(preset_search_input, minimum_width=220)
     toolbar_layout.refresh_for_viewport(parent.viewport().width(), parent.layout.contentsMargins())
 
     presets_list = LinkedWheelListView(parent)
@@ -277,9 +262,6 @@ def build_user_presets_page_shell(
     )
 
     return UserPresetsPageBuildWidgets(
-        configs_card=configs_card,
-        configs_icon=configs_icon,
-        configs_title_label=configs_title_label,
         get_configs_btn=get_configs_btn,
         toolbar_layout=toolbar_layout,
         create_btn=create_btn,

@@ -10,11 +10,12 @@ from ui.theme import get_theme_tokens
 from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.folder_header import FOLDER_HEADER_HEIGHT, is_folder_toggle_click, paint_folder_header_row
 from ui.widgets.active_row_motion import active_row_motion
-from ui.widgets.hover_row import paint_profile_hover_row, profile_hover_row_rect
+from ui.widgets.hover_row import paint_profile_hover_row
 from ui.widgets.row_hover_motion import attach_row_hover_motion, paint_icon_motion, row_hover_motion
 
 from .common import (
     PRESET_DROP_MARKER_PROPERTY,
+    PRESET_TILE_MAX_WIDTH,
     cached_icon,
     normalize_preset_icon_color,
     pick_contrast_color,
@@ -30,25 +31,26 @@ from .model import PresetListModel
 class PresetListDelegate(QStyledItemDelegate):
     action_triggered = pyqtSignal(str, str)
 
-    # Строка в одну линию: дата и кнопки показываются только под мышью.
-    _ROW_HEIGHT = 36
+    # Пресет — плитка в одну линию: значок, имя и пометки справа. Кнопки
+    # появляются только под мышью, дата и полное имя — в подсказке.
+    _ROW_HEIGHT = 32
     _SECTION_HEIGHT = 24
     _EMPTY_HEIGHT = 64
-    _ACTION_SIZE = 28
-    _ACTION_SPACING = 6
-    _BADGE_HEIGHT = 18
-    _BADGE_H_PADDING = 8
-    _BADGE_GAP = 8
-    _PIN_SIZE = 14
-    _PIN_COLUMN_WIDTH = 18
-    _PIN_TO_ICON_SPACING = 8
-    _RATING_STAR_SIZE = 11
+    _TILE_GAP = 3
+    _TILE_PADDING = 8
+    _ICON_SIZE = 18
+    _ICON_GAP = 8
+    _ACTION_SIZE = 24
+    _ACTION_SPACING = 4
+    _MARK_SIZE = 11
+    _MARK_GAP = 6
+    # Место справа от имени под пометки (оценка, булавка, облако).
+    _MARKS_SPACE = 40
     _RATING_STAR_GAP = 4
     _RATING_STAR_COLOR = "#d9a441"
 
     _ACTION_ICONS = {
-        "folder": "fa5s.folder-open",
-        "rating": "fa5s.star-half-alt",
+        "pin": "fa5s.thumbtack",
         "edit": "fa5s.ellipsis-v",
     }
 
@@ -56,8 +58,6 @@ class PresetListDelegate(QStyledItemDelegate):
     _PENDING_SHAKE_INTERVAL_MS = 50
     # Сколько щелчок ждёт второго, прежде чем включить пресет.
     _DOUBLE_CLICK_WAIT_MS = 300
-    _DATE_GAP = 12
-    _REMOTE_ICON_SPACE = 20
 
     def __init__(self, view: QListView, *, language_scope: str = "winws2", help_name_role: str = "name"):
         super().__init__(view)
@@ -81,6 +81,8 @@ class PresetListDelegate(QStyledItemDelegate):
         self._activation_timer = QTimer(self)
         self._activation_timer.setSingleShot(True)
         self._activation_timer.timeout.connect(self._emit_pending_activation)
+        self._bound_model = None
+        self._wanted_tile_width: int | None = None
         self._tooltip = FluentItemToolTipController(view.viewport())
         attach_row_hover_motion(view, row_filter=_is_preset_row)
         self.set_ui_language("ru")
@@ -92,7 +94,6 @@ class PresetListDelegate(QStyledItemDelegate):
         self._ui_language = language
         prefix = f"page.{self._language_scope}_user_presets.delegate.tooltip"
         self._action_tooltips = {
-            "rating": self._tr(f"{prefix}.rating", "Поставить рейтинг"),
             "edit": self._tr(f"{prefix}.edit", "Меню пресета"),
             "pin": self._tr(f"{prefix}.pin", "Закрепить сверху"),
         }
@@ -126,13 +127,8 @@ class PresetListDelegate(QStyledItemDelegate):
         if self._pressed_row in self._selected_rows:
             self._pressed_row = -1
 
-    def _icon_rect_for_row(self, row_rect: QRect, depth: int) -> QRect:
-        pin_rect = self._pin_rect(row_rect, "preset", depth)
-        if pin_rect is not None:
-            icon_left = pin_rect.left() + self._PIN_COLUMN_WIDTH + self._PIN_TO_ICON_SPACING
-        else:
-            icon_left = row_rect.left() + 12 + depth * 18
-        return QRect(icon_left, row_rect.center().y() - 10, 20, 20)
+    def _tile_rect(self, row_rect: QRect) -> QRect:
+        return row_rect.adjusted(self._TILE_GAP, 2, -self._TILE_GAP, -2)
 
     def _view_width(self) -> int:
         try:
@@ -140,15 +136,70 @@ class PresetListDelegate(QStyledItemDelegate):
         except Exception:
             return 0
 
+    def _bind_model(self, model) -> None:
+        if model is self._bound_model:
+            return
+        self._bound_model = model
+        self._wanted_tile_width = None
+        if model is None:
+            return
+        for signal in (model.modelReset, model.rowsInserted, model.rowsRemoved, model.rowsMoved, model.layoutChanged):
+            signal.connect(self._forget_tile_width)
+        model.dataChanged.connect(self._on_model_data_changed)
+
+    def _forget_tile_width(self, *args) -> None:
+        self._wanted_tile_width = None
+
+    def _on_model_data_changed(self, top_left, bottom_right, roles=()) -> None:
+        if not roles or PresetListModel.NameRole in roles:
+            self._wanted_tile_width = None
+
+    def _shown_name(self, index: QModelIndex) -> str:
+        """Имя без начала, которое повторяет заголовок папки над плиткой."""
+        name = str(index.data(PresetListModel.NameRole) or "")
+        return name[int(index.data(PresetListModel.RepeatedPrefixLengthRole) or 0):]
+
+    def _tile_width_for_longest_name(self) -> int:
+        """Ширина плитки, в которую целиком входят почти все имена списка."""
+        model = self._view.model()
+        self._bind_model(model)
+        if self._wanted_tile_width is None:
+            font = self._view.font()
+            # Активный пресет написан жирным — меряем с запасом на него.
+            font.setBold(True)
+            metrics = QFontMetrics(font)
+            widths: list[int] = []
+            for row in range(model.rowCount() if model is not None else 0):
+                index = model.index(row, 0)
+                if index.data(PresetListModel.KindRole) == "preset":
+                    widths.append(metrics.horizontalAdvance(self._shown_name(index)))
+            widths.sort()
+            # Одно-два очень длинных имени не должны раздувать все столбцы:
+            # ширину задают девять имён из десяти, остальные сокращаются
+            # (полное имя есть в подсказке).
+            longest = widths[max(0, -(-len(widths) * 9 // 10) - 1)] if widths else 0
+            chrome = (
+                2 * self._TILE_GAP
+                + 2 * self._TILE_PADDING
+                + self._ICON_SIZE
+                + self._ICON_GAP
+                + self._MARKS_SPACE
+            )
+            self._wanted_tile_width = min(PRESET_TILE_MAX_WIDTH, longest + chrome)
+        return self._wanted_tile_width
+
+    def column_layout(self) -> tuple[int, int]:
+        """Число столбцов пресетов и ширина одного столбца."""
+        return preset_columns_for_width(self._view_width(), self._tile_width_for_longest_name())
+
     def _side_by_side(self) -> bool:
-        return preset_columns_for_width(self._view_width())[0] > 1
+        return self.column_layout()[0] > 1
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
         # Ширина строки и есть раскладка: список переносит строки слева
-        # направо, поэтому пресеты шириной в столбец встают в ряд, а заголовок
+        # направо, поэтому плитки шириной в столбец встают в ряд, а заголовок
         # папки шириной во весь список всегда занимает отдельную линию.
-        view_width = self._view_width()
-        full_width = preset_full_row_width(view_width)
+        full_width = preset_full_row_width(self._view_width())
         kind = index.data(PresetListModel.KindRole)
         if kind == "folder":
             return QSize(full_width, FOLDER_HEADER_HEIGHT)
@@ -156,7 +207,7 @@ class PresetListDelegate(QStyledItemDelegate):
             return QSize(full_width, self._SECTION_HEIGHT)
         if kind == "empty":
             return QSize(full_width, self._EMPTY_HEIGHT)
-        return QSize(preset_columns_for_width(view_width)[1], self._ROW_HEIGHT)
+        return QSize(self.column_layout()[1], self._ROW_HEIGHT)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
         kind = index.data(PresetListModel.KindRole)
@@ -204,10 +255,7 @@ class PresetListDelegate(QStyledItemDelegate):
             return False
 
         set_current_index_if_changed(self._view, index)
-        is_active = bool(index.data(PresetListModel.ActiveRole))
-        is_builtin = bool(index.data(PresetListModel.BuiltinRole))
-        depth = int(index.data(PresetListModel.DepthRole) or 0)
-        action = self._action_at(option.rect, kind, is_active, is_builtin, depth, event.position().toPoint())
+        action = self._action_at(option.rect, event.position().toPoint())
 
         if action:
             self._cancel_pending_activation()
@@ -244,18 +292,23 @@ class PresetListDelegate(QStyledItemDelegate):
         if kind != "preset":
             return super().helpEvent(event, view, option, index)
 
-        if self._help_name_role == "file_name":
-            name = str(index.data(PresetListModel.FileNameRole) or "")
+        action = self._action_at(option.rect, event.pos())
+        if action:
+            tooltip = self._action_tooltips.get(action, "")
         else:
-            name = str(index.data(PresetListModel.NameRole) or "")
-        is_active = bool(index.data(PresetListModel.ActiveRole))
-        is_builtin = bool(index.data(PresetListModel.BuiltinRole))
-        depth = int(index.data(PresetListModel.DepthRole) or 0)
-        action = self._action_at(option.rect, kind, is_active, is_builtin, depth, event.pos())
-        if not action:
-            return super().helpEvent(event, view, option, index)
-
-        tooltip = self._action_tooltips.get(action, "")
+            # Дата и полное имя на плитку не помещаются — они в подсказке.
+            name_role = PresetListModel.FileNameRole if self._help_name_role == "file_name" else PresetListModel.NameRole
+            lines = [str(index.data(name_role) or "")]
+            date_text = str(index.data(PresetListModel.DateRole) or "")
+            if date_text:
+                lines.append(self._tr("page.user_presets.delegate.tooltip.changed", "Изменён: {date}", date=date_text))
+            lines.append(
+                self._tr(
+                    "page.user_presets.delegate.tooltip.open_hint",
+                    "Щелчок — включить, двойной щелчок — открыть текст",
+                )
+            )
+            tooltip = "\n".join(line for line in lines if line)
         if tooltip:
             self._tooltip.show_text(tooltip, event.globalPos())
             return True
@@ -317,18 +370,13 @@ class PresetListDelegate(QStyledItemDelegate):
         if rect.isValid():
             self._view.viewport().update(rect)
 
-    def _visible_actions(self, kind: str, is_active: bool, is_builtin: bool) -> list[str]:
-        _ = (kind, is_active, is_builtin)
-        return ["rating", "edit"]
-
-    def _action_rects(self, row_rect: QRect, kind: str, is_active: bool, is_builtin: bool) -> list[tuple[str, QRect]]:
-        actions = self._visible_actions(kind, is_active, is_builtin)
-        if not actions:
-            return []
-
+    def _action_rects(self, row_rect: QRect) -> list[tuple[str, QRect]]:
+        """Кнопки плитки: «закрепить» и «меню». Видны под мышью, щелчок ловят всегда."""
+        tile = self._tile_rect(row_rect)
+        actions = list(self._ACTION_ICONS)
         total_width = len(actions) * self._ACTION_SIZE + (len(actions) - 1) * self._ACTION_SPACING
-        x = row_rect.right() - 12 - total_width + 1
-        y = row_rect.center().y() - (self._ACTION_SIZE // 2)
+        x = tile.right() - 4 - total_width + 1
+        y = tile.center().y() - (self._ACTION_SIZE // 2)
 
         rects: list[tuple[str, QRect]] = []
         for action in actions:
@@ -336,12 +384,8 @@ class PresetListDelegate(QStyledItemDelegate):
             x += self._ACTION_SIZE + self._ACTION_SPACING
         return rects
 
-    def _action_at(self, option_rect: QRect, kind: str, is_active: bool, is_builtin: bool, depth: int, pos) -> Optional[str]:
-        pin_rect = self._pin_hit_rect(option_rect, kind, depth)
-        if pin_rect is not None and pin_rect.contains(pos):
-            return "pin"
-
-        for action, rect in self._action_rects(option_rect, kind, is_active, is_builtin):
+    def _action_at(self, row_rect: QRect, pos) -> Optional[str]:
+        for action, rect in self._action_rects(row_rect):
             if rect.contains(pos):
                 return action
         return None
@@ -361,24 +405,6 @@ class PresetListDelegate(QStyledItemDelegate):
         painter.setTransform(transform, combine=True)
         icon.paint(painter, icon_rect)
         painter.restore()
-
-    def _pin_rect(self, row_rect: QRect, kind: str, depth: int) -> QRect | None:
-        if kind != "preset":
-            return None
-        x = row_rect.left() + 12 + depth * 18
-        return QRect(x, row_rect.center().y() - (self._PIN_SIZE // 2), self._PIN_SIZE, self._PIN_SIZE)
-
-    def _pin_hit_rect(self, row_rect: QRect, kind: str, depth: int) -> QRect | None:
-        visual_rect = self._pin_rect(row_rect, kind, depth)
-        if visual_rect is None:
-            return None
-        size = max(self._ACTION_SIZE, self._PIN_SIZE)
-        return QRect(
-            visual_rect.center().x() - (size // 2),
-            visual_rect.center().y() - (size // 2),
-            size,
-            size,
-        )
 
     def _paint_section_row(self, painter: QPainter, option: QStyleOptionViewItem, text: str) -> None:
         painter.save()
@@ -429,20 +455,20 @@ class PresetListDelegate(QStyledItemDelegate):
         if marker.get("mode") == "folder":
             fill = to_qcolor(tokens.accent_soft_bg_hover, tokens.accent_hex)
             fill.setAlpha(70)
-            rect = option.rect.adjusted(4, 2, -8, -2)
+            rect = option.rect.adjusted(self._TILE_GAP, 2, -self._TILE_GAP, -2)
             painter.setBrush(fill)
             painter.setPen(QPen(accent, 2))
             painter.drawRoundedRect(rect, 6, 6)
         elif marker.get("mode") in ("before", "after"):
             before = marker.get("mode") == "before"
-            row_rect = profile_hover_row_rect(option.rect)
+            row_rect = self._tile_rect(option.rect)
             pen = QPen(accent, 3)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
             if self._side_by_side():
                 # В столбцах пресеты стоят рядом, место вставки — сбоку от строки.
                 line_rect = row_rect.adjusted(0, 4, 0, -4)
-                x = line_rect.left() + 2 if before else line_rect.right() - 2
+                x = line_rect.left() - 1 if before else line_rect.right() + 2
                 painter.drawLine(x, line_rect.top(), x, line_rect.bottom())
             else:
                 line_rect = row_rect.adjusted(12, 0, -12, 0)
@@ -463,13 +489,10 @@ class PresetListDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         tokens = get_theme_tokens()
-        rect = profile_hover_row_rect(option.rect)
+        rect = self._tile_rect(option.rect)
 
-        name = str(index.data(PresetListModel.NameRole) or "")
-        date_text = str(index.data(PresetListModel.DateRole) or "")
+        name = self._shown_name(index)
         is_active = bool(index.data(PresetListModel.ActiveRole))
-        is_builtin = bool(index.data(PresetListModel.BuiltinRole))
-        depth = int(index.data(PresetListModel.DepthRole) or 0)
         is_pinned = bool(index.data(PresetListModel.PinnedRole))
         rating = int(index.data(PresetListModel.RatingRole) or 0)
         marker = self._view.property(PRESET_DROP_MARKER_PROPERTY)
@@ -483,8 +506,8 @@ class PresetListDelegate(QStyledItemDelegate):
         focused = bool(option.state & QStyle.StateFlag.State_HasFocus)
         pressed = self._pressed_row == index.row()
         file_name = str(index.data(PresetListModel.FileNameRole) or "")
-        # Дата, булавка и кнопки строки не шумят на всём списке: они видны
-        # только на строке под мышью или с клавиатурным фокусом.
+        # Кнопки не шумят на всём списке: они видны только на плитке под
+        # мышью или с клавиатурным фокусом.
         revealed = (
             bool(hovered)
             or focused
@@ -509,100 +532,65 @@ class PresetListDelegate(QStyledItemDelegate):
         )
         bg = row_paint.background
 
-        icon_rect = self._icon_rect_for_row(rect, depth)
+        icon_rect = QRect(
+            rect.left() + self._TILE_PADDING,
+            rect.center().y() - self._ICON_SIZE // 2 + 1,
+            self._ICON_SIZE,
+            self._ICON_SIZE,
+        )
         if motion is not None:
             # После переезда бегунка значок нового активного пресета подпрыгивает.
             icon_rect = icon_rect.translated(0, round(motion.icon_offset(index)))
-        icon_color = pick_contrast_color(
-            normalize_preset_icon_color(str(index.data(PresetListModel.IconColorRole) or "")),
-            bg,
-            [tokens.accent_hex, tokens.fg],
-            minimum_ratio=2.6,
-        )
+        if is_active:
+            # Включённый пресет виден сразу: галочка вместо значка файла.
+            icon_name, wanted_color = "fa5s.check-circle", str(tokens.accent_hex)
+        else:
+            icon_name = "fa5s.file-alt"
+            wanted_color = normalize_preset_icon_color(str(index.data(PresetListModel.IconColorRole) or ""))
+        icon_color = pick_contrast_color(wanted_color, bg, [tokens.accent_hex, tokens.fg], minimum_ratio=2.6)
         paint_icon_motion(
             painter,
             icon_rect,
             hover_motion,
             index,
-            lambda: cached_icon("fa5s.file-alt", icon_color).paint(painter, icon_rect),
+            lambda: cached_icon(icon_name, icon_color).paint(painter, icon_rect),
         )
 
-        text_left = icon_rect.right() + 10
-        actions = self._action_rects(rect, "preset", is_active, is_builtin)
-        # Место под кнопки занято всегда, даже пока они скрыты: имя не должно
-        # перестраиваться, когда на строку наводят мышь.
-        right_bound = rect.right() - 12
-        if actions:
-            right_bound = actions[0][1].left() - 10
-
-        pin_rect = self._pin_rect(rect, "preset", depth)
-
+        text_left = icon_rect.right() + self._ICON_GAP
+        center_y = rect.center().y()
+        actions = self._action_rects(option.rect)
         meta_font = painter.font()
         meta_font.setBold(False)
-        painter.setFont(meta_font)
         meta_metrics = QFontMetrics(meta_font)
 
-        badge_text = self._tr("page.user_presets.delegate.active_badge", "Активный") if is_active else ""
-        badge_rect = QRect()
-        right_cursor = right_bound
-        if badge_text:
-            badge_text_width = meta_metrics.horizontalAdvance(badge_text)
-            badge_width = badge_text_width + self._BADGE_H_PADDING * 2
-            badge_width = min(max(badge_width, 68), max(0, right_bound - text_left))
-            if badge_width > 0:
-                badge_rect = QRect(
-                    max(text_left, right_cursor - badge_width),
-                    rect.center().y() - (self._BADGE_HEIGHT // 2),
-                    badge_width,
-                    self._BADGE_HEIGHT,
-                )
-                right_cursor = max(text_left, badge_rect.left() - self._BADGE_GAP)
-
-        # Оценка пользователя — единственная пометка, которая видна всегда.
-        rating_text = str(rating) if rating else ""
+        # Справа от имени: под мышью — кнопки, иначе — постоянные пометки.
+        right_cursor = rect.right() - self._TILE_PADDING
         rating_rect = QRect()
-        if rating_text:
-            rating_width = (
-                self._RATING_STAR_SIZE + self._RATING_STAR_GAP + meta_metrics.horizontalAdvance(rating_text)
-            )
-            if right_cursor - rating_width - text_left > 48:
-                rating_rect = QRect(right_cursor - rating_width, rect.center().y() - 9, rating_width, 18)
-                right_cursor = rating_rect.left() - self._BADGE_GAP
+        pin_mark_rect = QRect()
+        if revealed:
+            right_cursor = actions[0][1].left() - self._MARK_GAP
+        else:
+            if is_pinned:
+                pin_mark_rect = QRect(
+                    right_cursor - self._MARK_SIZE + 1,
+                    center_y - self._MARK_SIZE // 2,
+                    self._MARK_SIZE,
+                    self._MARK_SIZE,
+                )
+                right_cursor = pin_mark_rect.left() - self._MARK_GAP
+            if rating:
+                rating_width = self._MARK_SIZE + self._RATING_STAR_GAP + meta_metrics.horizontalAdvance(str(rating))
+                rating_rect = QRect(right_cursor - rating_width + 1, center_y - 9, rating_width, 18)
+                right_cursor = rating_rect.left() - self._MARK_GAP
 
-        name_rect = QRect(text_left, rect.center().y() - 10, max(0, right_cursor - text_left), 20)
-
+        name_rect = QRect(text_left, center_y - 10, max(0, right_cursor - text_left), 20)
         name_font = painter.font()
         name_font.setBold(is_active)
         painter.setFont(name_font)
         name_metrics = QFontMetrics(name_font)
-
-        # Имя важнее даты: в узком столбце дата появляется под мышью, только
-        # если помещается рядом с полным именем и ничего у него не отнимает.
-        date_rect = QRect()
-        if date_text:
-            date_width = meta_metrics.horizontalAdvance(date_text)
-            name_end = text_left + name_metrics.horizontalAdvance(name)
-            if bool(index.data(PresetListModel.RemoteRole)):
-                name_end += self._REMOTE_ICON_SPACE
-            if right_cursor - date_width - self._DATE_GAP >= name_end:
-                date_rect = QRect(right_cursor - date_width, rect.center().y() - 9, date_width, 18)
         elided_name = name_metrics.elidedText(name, Qt.TextElideMode.ElideRight, name_rect.width())
-        name_flags = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        repeated_prefix = name[: int(index.data(PresetListModel.RepeatedPrefixLengthRole) or 0)]
-        if repeated_prefix and len(elided_name) > len(repeated_prefix) and elided_name.startswith(repeated_prefix):
-            # Начало имени повторяет название папки над строкой — приглушаем
-            # его, чтобы взгляд сразу попадал на отличие.
-            painter.setPen(to_qcolor(tokens.fg_faint, "#aeb5c1"))
-            painter.drawText(name_rect, name_flags, repeated_prefix)
-            painter.setPen(to_qcolor(tokens.fg, "#f5f5f5"))
-            painter.drawText(
-                name_rect.adjusted(name_metrics.horizontalAdvance(repeated_prefix), 0, 0, 0),
-                name_flags,
-                elided_name[len(repeated_prefix):],
-            )
-        else:
-            painter.setPen(to_qcolor(tokens.fg, "#f5f5f5"))
-            painter.drawText(name_rect, name_flags, elided_name)
+        painter.setPen(to_qcolor(tokens.fg, "#f5f5f5"))
+        painter.drawText(name_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), elided_name)
 
         if bool(index.data(PresetListModel.RemoteRole)):
             remote_state = str(index.data(PresetListModel.RemoteStateRole) or "")
@@ -619,67 +607,42 @@ class PresetListDelegate(QStyledItemDelegate):
                 cloud_rect = QRect(cloud_left, name_rect.center().y() - 6, 13, 13)
                 cached_icon("fa5s.cloud", cloud_color).paint(painter, cloud_rect)
 
+        meta_font.setBold(False)
         painter.setFont(meta_font)
-        if revealed and date_rect.width() > 0:
-            painter.setPen(to_qcolor(tokens.fg_faint, "#aeb5c1"))
-            elided_date = meta_metrics.elidedText(date_text, Qt.TextElideMode.ElideLeft, date_rect.width())
-            painter.drawText(date_rect, int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter), elided_date)
         if rating_rect.isValid():
             star_rect = QRect(
                 rating_rect.left(),
-                rating_rect.center().y() - self._RATING_STAR_SIZE // 2,
-                self._RATING_STAR_SIZE,
-                self._RATING_STAR_SIZE,
+                rating_rect.center().y() - self._MARK_SIZE // 2,
+                self._MARK_SIZE,
+                self._MARK_SIZE,
             )
             cached_icon("fa5s.star", self._RATING_STAR_COLOR).paint(painter, star_rect)
             painter.setPen(to_qcolor(tokens.fg_muted, "#b7bec8"))
             painter.drawText(
                 rating_rect,
                 int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
-                rating_text,
+                str(rating),
             )
-        if badge_rect.width() > 0 and badge_text:
-            badge_bg = to_qcolor(tokens.accent_soft_bg_hover, tokens.accent_hex)
-            badge_text_color = to_qcolor(tokens.accent_hex, "#5caee8")
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(badge_bg)
-            painter.drawRoundedRect(badge_rect, 9, 9)
-            painter.setPen(badge_text_color)
-            painter.drawText(
-                badge_rect,
-                int(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter),
-                meta_metrics.elidedText(badge_text, Qt.TextElideMode.ElideRight, max(0, badge_rect.width() - self._BADGE_H_PADDING * 2)),
-            )
-
-        if pin_rect is not None and (is_pinned or revealed):
-            pin_color = tokens.accent_hex if is_pinned else tokens.fg_faint
-            self._paint_action_icon(
-                painter,
-                "fa5s.thumbtack",
-                pin_color,
-                pin_rect.adjusted(2, 2, -2, -2),
-            )
+        if pin_mark_rect.isValid():
+            self._paint_action_icon(painter, "fa5s.thumbtack", str(tokens.accent_hex), pin_mark_rect)
 
         for action, action_rect in actions if revealed else ():
             btn_bg = to_qcolor(tokens.surface_bg_hover, tokens.surface_bg)
-            icon_color = pick_contrast_color(
-                str(tokens.fg_muted),
-                btn_bg,
-                [tokens.fg],
-                minimum_ratio=2.6,
-            )
+            if action == "pin" and is_pinned:
+                icon_color = str(tokens.accent_hex)
+            else:
+                icon_color = pick_contrast_color(str(tokens.fg_muted), btn_bg, [tokens.fg], minimum_ratio=2.6)
 
             painter.setBrush(btn_bg)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(action_rect, 6, 6)
 
-            icon_name = self._ACTION_ICONS.get(action, "fa5s.circle")
             rotation = self._pending_shake_rotation if self._pending_destructive == (file_name, action) else 0
             self._paint_action_icon(
                 painter,
-                icon_name,
+                self._ACTION_ICONS[action],
                 icon_color,
-                action_rect.adjusted(7, 7, -7, -7),
+                action_rect.adjusted(6, 6, -6, -6),
                 rotation=rotation,
             )
 
