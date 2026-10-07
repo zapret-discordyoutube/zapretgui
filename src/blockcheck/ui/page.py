@@ -74,6 +74,7 @@ def update_blockcheck_tabs_accessibility(pivot, *, current: object | None = None
         "blockcheck": tr_catalog("page.blockcheck.tab.blockcheck", language=language, default="BlockCheck"),
         "strategy_scan": tr_catalog("page.blockcheck.tab.strategy_scan", language=language, default="Подбор стратегии"),
         "domain_lookup": tr_catalog("page.blockcheck.tab.domain_lookup", language=language, default="Проверка домена"),
+        "dns_servers": tr_catalog("page.blockcheck.tab.dns_servers", language=language, default="DNS-серверы"),
         "dns_spoofing": tr_catalog("page.blockcheck.tab.dns_spoofing", language=language, default="DNS подмена"),
     }
     key = str(current or "").strip() if isinstance(current, str) else ""
@@ -88,7 +89,7 @@ def update_blockcheck_tabs_accessibility(pivot, *, current: object | None = None
     set_control_accessibility(
         pivot,
         name=state,
-        description="Выберите раздел BlockCheck: BlockCheck, Подбор стратегии, Проверка домена или DNS подмена.",
+        description="Выберите раздел BlockCheck: BlockCheck, Подбор стратегии, Проверка домена, DNS-серверы или DNS подмена.",
     )
     set_segmented_items_accessibility(pivot, name="Раздел BlockCheck")
 
@@ -103,11 +104,13 @@ class BlockcheckPage(BasePage):
     TAB_BLOCKCHECK = "blockcheck"
     TAB_STRATEGY_SCAN = "strategy_scan"
     TAB_DOMAIN_LOOKUP = "domain_lookup"
+    TAB_DNS_SERVERS = "dns_servers"
     TAB_DNS_SPOOFING = "dns_spoofing"
     TAB_ORDER = (
         TAB_BLOCKCHECK,
         TAB_STRATEGY_SCAN,
         TAB_DOMAIN_LOOKUP,
+        TAB_DNS_SERVERS,
         TAB_DNS_SPOOFING,
     )
     # «Диагностика» влилась в BlockCheck: старые ссылки на неё ведут сюда.
@@ -117,6 +120,7 @@ class BlockcheckPage(BasePage):
         "dns": TAB_DNS_SPOOFING,
         "domain": TAB_DOMAIN_LOOKUP,
         "ping": TAB_DOMAIN_LOOKUP,
+        "servers": TAB_DNS_SERVERS,
     }
 
     def __init__(
@@ -155,6 +159,7 @@ class BlockcheckPage(BasePage):
         self._tab_widgets: list[QWidget] = []
         self._strategy_tab_page = None
         self._domain_lookup_tab_page = None
+        self._dns_servers_tab_page = None
         self._dns_spoofing_tab_page = None
         self._active_tab_index: int = 0
         self._pending_tab_key: str | None = None
@@ -270,6 +275,11 @@ class BlockcheckPage(BasePage):
             self.TAB_DOMAIN_LOOKUP,
             tr_catalog("page.blockcheck.tab.domain_lookup", default="Проверка домена"),
             lambda: self.switch_to_tab(self.TAB_DOMAIN_LOOKUP),
+        )
+        self._tabs_pivot.addItem(
+            self.TAB_DNS_SERVERS,
+            tr_catalog("page.blockcheck.tab.dns_servers", default="DNS-серверы"),
+            lambda: self.switch_to_tab(self.TAB_DNS_SERVERS),
         )
         self._tabs_pivot.addItem(
             self.TAB_DNS_SPOOFING,
@@ -499,6 +509,30 @@ class BlockcheckPage(BasePage):
         finally:
             self._log_ui_timing("blockcheck_ui.domain_lookup_tab.build", started_at)
 
+    def _ensure_dns_servers_tab(self):
+        """Create embedded DNS servers tab on first open."""
+        if self._dns_servers_tab_page is not None:
+            return
+        started_at = time.perf_counter()
+        try:
+            from dns.ui.server_check_page import ServerCheckPage
+
+            self._dns_servers_tab_page = ServerCheckPage(
+                parent=self,
+                dns_feature=self._dns,
+                embedded=True,
+            )
+            self._dns_servers_tab_page.setVisible(False)
+            self.add_widget(self._dns_servers_tab_page)
+            try:
+                self._dns_servers_tab_page.set_ui_language(self._ui_language)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning("Failed to create DNS servers tab: %s", e)
+        finally:
+            self._log_ui_timing("blockcheck_ui.dns_servers_tab.build", started_at)
+
     def _ensure_dns_spoofing_tab(self):
         """Create embedded DNS spoofing tab on first open."""
         if self._dns_spoofing_tab_page is not None:
@@ -578,7 +612,7 @@ class BlockcheckPage(BasePage):
         return stopped
 
     def _switch_tab(self, index: int) -> None:
-        """Переключает вкладки BlockCheck / Подбор стратегии / Проверка домена / DNS подмена."""
+        """Переключает вкладки BlockCheck / Подбор стратегии / Проверка домена / DNS-серверы / DNS подмена."""
         started_at = time.perf_counter()
         if not self.TAB_ORDER:
             return
@@ -597,6 +631,8 @@ class BlockcheckPage(BasePage):
             self._ensure_strategy_tab()
         elif tab_key == self.TAB_DOMAIN_LOOKUP:
             self._ensure_domain_lookup_tab()
+        elif tab_key == self.TAB_DNS_SERVERS:
+            self._ensure_dns_servers_tab()
         elif tab_key == self.TAB_DNS_SPOOFING:
             self._ensure_dns_spoofing_tab()
 
@@ -612,6 +648,8 @@ class BlockcheckPage(BasePage):
             self._strategy_tab_page.setVisible(tab_key == self.TAB_STRATEGY_SCAN)
         if self._domain_lookup_tab_page is not None:
             self._domain_lookup_tab_page.setVisible(tab_key == self.TAB_DOMAIN_LOOKUP)
+        if self._dns_servers_tab_page is not None:
+            self._dns_servers_tab_page.setVisible(tab_key == self.TAB_DNS_SERVERS)
         if self._dns_spoofing_tab_page is not None:
             self._dns_spoofing_tab_page.setVisible(tab_key == self.TAB_DNS_SPOOFING)
 
@@ -1281,7 +1319,12 @@ class BlockcheckPage(BasePage):
         )
         self._run_runtime.cancel()
 
-        for page in (self._strategy_tab_page, self._domain_lookup_tab_page, self._dns_spoofing_tab_page):
+        for page in (
+            self._strategy_tab_page,
+            self._domain_lookup_tab_page,
+            self._dns_servers_tab_page,
+            self._dns_spoofing_tab_page,
+        ):
             if page is None:
                 continue
             cleanup_handler = getattr(page, "cleanup", None)
@@ -1310,6 +1353,7 @@ class BlockcheckPage(BasePage):
                 self._tabs_pivot.setItemText(
                     self.TAB_DOMAIN_LOOKUP, _tr("page.blockcheck.tab.domain_lookup", "Проверка домена")
                 )
+                self._tabs_pivot.setItemText(self.TAB_DNS_SERVERS, _tr("page.blockcheck.tab.dns_servers", "DNS-серверы"))
                 self._tabs_pivot.setItemText(self.TAB_DNS_SPOOFING, _tr("page.blockcheck.tab.dns_spoofing", "DNS подмена"))
             self._update_tabs_accessibility()
             # Карточки без шапок: set_title не вызывается, он добавил бы шапку обратно.
@@ -1338,6 +1382,8 @@ class BlockcheckPage(BasePage):
                 self._strategy_tab_page.set_ui_language(language)
             if self._domain_lookup_tab_page is not None:
                 self._domain_lookup_tab_page.set_ui_language(language)
+            if self._dns_servers_tab_page is not None:
+                self._dns_servers_tab_page.set_ui_language(language)
             if self._dns_spoofing_tab_page is not None:
                 self._dns_spoofing_tab_page.set_ui_language(language)
         except Exception:

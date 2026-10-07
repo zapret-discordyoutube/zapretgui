@@ -25,13 +25,16 @@ Windows умеет спрашивать только «свои» DNS-серве
 from __future__ import annotations
 
 import errno
+import http.client
 import os
 import socket
 import struct
+import threading
 import time
 from dataclasses import dataclass
 from ipaddress import ip_address
 
+from utils import http2_post
 from utils.socket_cancel import SocketCancel, close_quietly
 
 TYPE_A = 1
@@ -73,6 +76,7 @@ FAILURE_OTHER = "other"
 DEFAULT_TIMEOUT_S = 2.0
 # Шифрованный запрос — это ещё соединение и рукопожатие TLS.
 ENCRYPTED_TIMEOUT_S = 4.0
+_DOH_CONTENT_TYPE = "application/dns-message"
 # WSAENETUNREACH, WSAEHOSTUNREACH: Python не всегда переводит их в errno.
 _UNREACHABLE_WINERRORS = frozenset({10051, 10065})
 _UNREACHABLE_ERRNOS = frozenset({errno.ENETUNREACH, errno.EHOSTUNREACH})
@@ -302,6 +306,9 @@ def _failure_for(exc: BaseException) -> str:
         return FAILURE_TIMEOUT
     if isinstance(exc, ssl.SSLCertVerificationError):
         return FAILURE_CERT
+    if isinstance(exc, (ssl.SSLEOFError, ssl.SSLZeroReturnError)):
+        # Соединение закрыли посреди рукопожатия: это не «шифры не сошлись».
+        return FAILURE_CLOSED
     if isinstance(exc, ssl.SSLError):
         return FAILURE_TLS
     if isinstance(exc, ConnectionRefusedError):
@@ -490,24 +497,35 @@ def query_tcp(
         _close(sock, cancel)
 
 
-_tls_context = None
+_tls_contexts: dict[tuple[str, ...], object] = {}
+_tls_context_lock = threading.Lock()
+# Часть серверов DoH отвечает только по HTTP/2, поэтому клиент предлагает оба.
+_DOH_ALPN = ("h2", "http/1.1")
 
 
-def _client_tls_context():
-    """Контекст с проверкой сертификата: один на процесс, корневые — из certifi."""
-    global _tls_context
-    if _tls_context is None:
-        import ssl
+def _client_tls_context(alpn: tuple[str, ...] = ()):
+    """Контекст с проверкой сертификата: один на процесс, корневые — из certifi.
 
-        context = ssl.create_default_context()
-        try:
-            import certifi
+    Создаётся под замком: загрузка хранилища сертификатов Windows занимает
+    заметное время, и десятки потоков, начавших проверку разом, иначе делали
+    бы её каждый сам.
+    """
+    with _tls_context_lock:
+        context = _tls_contexts.get(alpn)
+        if context is None:
+            import ssl
 
-            context.load_verify_locations(certifi.where())
-        except Exception:
-            pass
-        _tls_context = context
-    return _tls_context
+            context = ssl.create_default_context()
+            try:
+                import certifi
+
+                context.load_verify_locations(certifi.where())
+            except Exception:
+                pass
+            if alpn:
+                context.set_alpn_protocols(list(alpn))
+            _tls_contexts[alpn] = context
+        return context
 
 
 def _connect_tls(
@@ -516,14 +534,19 @@ def _connect_tls(
     tls_host: str,
     deadline: _Deadline,
     cancel: SocketCancel | None,
+    context,
 ) -> tuple[socket.socket, socket.socket]:
-    """(исходный сокет, сокет TLS). Сертификат проверяется для ``tls_host``."""
+    """(исходный сокет, сокет TLS). Сертификат проверяется для ``tls_host``.
+
+    Контекст готовится заранее, до соединения: пока он создаётся, сервер не
+    должен ждать с открытым соединением, а время не должно идти в замер.
+    """
     raw = _open(socket.SOCK_STREAM, server, cancel)
     try:
         raw.settimeout(deadline.remaining())
         raw.connect((server, port))
         raw.settimeout(deadline.remaining())
-        wrapped = _client_tls_context().wrap_socket(raw, server_hostname=tls_host)
+        wrapped = context.wrap_socket(raw, server_hostname=tls_host)
     except BaseException:
         _close(raw, cancel)
         raise
@@ -555,11 +578,12 @@ def query_dot(
     if isinstance(prepared, DnsQueryResult):
         return prepared
     query_id, query = prepared
+    context = _client_tls_context()
     started = time.perf_counter()
     deadline = _Deadline(timeout_s)
     raw = wrapped = None
     try:
-        raw, wrapped = _connect_tls(server, port, tls_host or server, deadline, cancel)
+        raw, wrapped = _connect_tls(server, port, tls_host or server, deadline, cancel, context)
         return _answered(TRANSPORT_DOT, _exchange_framed(wrapped, query, query_id, deadline), started)
     except (OSError, DnsWireError, _Cancelled) as exc:
         return _failed(TRANSPORT_DOT, exc, cancel)
@@ -585,8 +609,6 @@ def query_doh(
     вовсе. Сертификат проверяется для ``tls_host``, а без него — по самому
     адресу. Такой ответ провайдер не может незаметно подменить.
     """
-    import http.client
-
     prepared = _prepare(server, name, rtype, TRANSPORT_DOH)
     if isinstance(prepared, DnsQueryResult):
         return prepared
@@ -595,38 +617,35 @@ def query_doh(
     host_header = f"[{host}]" if ":" in host else host
     if port != 443:
         host_header = f"{host_header}:{port}"
-    request = (
-        f"POST {path} HTTP/1.1\r\n"
-        f"Host: {host_header}\r\n"
-        "Content-Type: application/dns-message\r\n"
-        "Accept: application/dns-message\r\n"
-        f"Content-Length: {len(query)}\r\n"
-        "Connection: close\r\n\r\n"
-    ).encode("ascii") + query
-
+    context = _client_tls_context(_DOH_ALPN)
     started = time.perf_counter()
     deadline = _Deadline(timeout_s)
     raw = wrapped = None
     try:
-        raw, wrapped = _connect_tls(server, port, host, deadline, cancel)
-        wrapped.settimeout(deadline.remaining())
-        wrapped.sendall(request)
-        wrapped.settimeout(deadline.remaining())
-        response = http.client.HTTPResponse(wrapped, method="POST")
-        response.begin()
-        body = response.read(65535)
-        if response.status != 200:
+        raw, wrapped = _connect_tls(server, port, host, deadline, cancel, context)
+        if wrapped.selected_alpn_protocol() == "h2":
+            status, body = http2_post.post(
+                wrapped,
+                authority=host_header,
+                path=path,
+                body=query,
+                content_type=_DOH_CONTENT_TYPE,
+                remaining=deadline.remaining,
+            )
+        else:
+            status, body = _post_http1(wrapped, host_header, path, query, deadline)
+        if status is not None and status != 200:
             return DnsQueryResult(
                 status=STATUS_ERROR,
                 transport=TRANSPORT_DOH,
                 failure=FAILURE_HTTP,
-                detail=f"HTTP {response.status}",
+                detail=f"HTTP {status}",
             )
         message = parse_response(body)
         if not message.is_response:
             raise DnsWireError("ответ не на наш запрос")
         return _answered(TRANSPORT_DOH, message, started)
-    except http.client.HTTPException as exc:
+    except (http.client.HTTPException, http2_post.Http2Error) as exc:
         if cancel is not None and cancel.cancelled:
             return _failed(TRANSPORT_DOH, exc, cancel)
         return DnsQueryResult(
@@ -640,6 +659,23 @@ def query_doh(
     finally:
         _close(wrapped, cancel)
         _close(raw, cancel)
+
+
+def _post_http1(wrapped, host_header: str, path: str, query: bytes, deadline: _Deadline) -> tuple[int, bytes]:
+    request = (
+        f"POST {path} HTTP/1.1\r\n"
+        f"Host: {host_header}\r\n"
+        f"Content-Type: {_DOH_CONTENT_TYPE}\r\n"
+        f"Accept: {_DOH_CONTENT_TYPE}\r\n"
+        f"Content-Length: {len(query)}\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode("ascii") + query
+    wrapped.settimeout(deadline.remaining())
+    wrapped.sendall(request)
+    wrapped.settimeout(deadline.remaining())
+    response = http.client.HTTPResponse(wrapped, method="POST")
+    response.begin()
+    return response.status, response.read(65535)
 
 
 def query_server(

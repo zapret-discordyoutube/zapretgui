@@ -303,6 +303,30 @@ class DnsPageTests(unittest.TestCase):
         self.assertTrue(page.now_panel.measure_button.isEnabled())
         self.assertTrue(page.now_panel.notice_label.isHidden())
 
+    def test_backup_address_is_measured_and_shown_in_tooltip(self) -> None:
+        """Как «Результат 2» в DNS Jumper: запасной адрес может молчать, когда основной отвечает."""
+        page = self._page()
+
+        page.now_panel.measure_button.click()
+        servers = page._latency_lane.request.call_args.args[0]
+        self.assertIn("8.8.8.8", servers)
+        self.assertIn("8.8.4.4", servers)
+        self.assertEqual(len(servers), len(set(servers)))
+
+        page._on_latency_done(
+            DnsLatencyReport(results={"8.8.8.8": 12.0, "8.8.4.4": None, "1.1.1.1": 30.0, "1.0.0.1": 3.0})
+        )
+
+        tiles = {tile.key: tile for tile in self._provider_tiles(page)}
+        self.assertIn("IPv4: 8.8.8.8 — 12 мс, 8.8.4.4 — нет ответа", tiles["Google DNS"].tooltip)
+        # Плитка показывает основной адрес; запасной адрес другого сервера «быстрее всех» не делает.
+        self.assertEqual((tiles["Google DNS"].latency, tiles["Google DNS"].latency_ms), ("ok", 12.0))
+        self.assertTrue(tiles["Google DNS"].fastest)
+        self.assertFalse(tiles["Cloudflare"].fastest)
+        self.assertEqual(page.latency_summary.text(), "Быстрее всех: Google DNS — 12 мс")
+        # Без замера в подсказке просто адреса.
+        self.assertIn("IPv4: 94.140.14.14, 94.140.15.15", tiles["AdGuard"].tooltip)
+
     def test_intercepted_dns_is_explained(self) -> None:
         page = self._page()
         page._measure_latency()

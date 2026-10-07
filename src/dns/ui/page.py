@@ -410,11 +410,43 @@ class NetworkPage(BasePage):
         ipv6 = dns_page_plans.normalize_dns_list(data.get("ipv6", []))
         return ipv4[0] if ipv4 else (ipv6[0] if ipv6 else "")
 
+    def _all_addresses(self, data: dict) -> list[str]:
+        """Все адреса сервера, которые имеет смысл замерять в этой сети."""
+        addresses = dns_page_plans.normalize_dns_list(data.get("ipv4", []))
+        if self._ipv6_available:
+            addresses = [*addresses, *dns_page_plans.normalize_dns_list(data.get("ipv6", []))]
+        return list(dict.fromkeys(addresses))
+
+    def _addresses_with_latency(self, addresses: list[str]) -> str:
+        """Адреса через запятую; после замера у каждого — его время или «нет ответа»."""
+        parts = []
+        for address in dict.fromkeys(addresses):
+            if address in self._latency:
+                value = self._latency[address]
+                speed = (
+                    self._t("page.network.latency.ms", "{ms} мс", ms=max(1, round(value)))
+                    if value is not None
+                    else self._t("page.network.latency.timeout", "нет ответа")
+                )
+                parts.append(f"{address} — {speed}")
+            else:
+                parts.append(address)
+        return ", ".join(parts)
+
     def _tiles(self, plan: dns_page_plans.CurrentDnsPlan) -> list[DnsTile]:
         current = plan.provider if plan.kind == "provider" else None
         chosen = self._pending_choice if self._pending_choice not in (None, AUTO_CHOICE) else None
+        # «Быстрее всех» выбирается среди основных адресов: именно он встанет первым.
+        primary = {
+            address
+            for group in self._providers.values()
+            for data in group.values()
+            if (address := self._primary_address(data))
+        }
         measured = {
-            address: value for address, value in self._latency.items() if value is not None
+            address: value
+            for address, value in self._latency.items()
+            if value is not None and address in primary
         }
         fastest_address = min(measured, key=measured.get) if measured else ""
 
@@ -442,9 +474,9 @@ class NetworkPage(BasePage):
                 custom = bool(data.get("custom_id"))
                 tooltip_lines = [f"{name} — {data.get('desc', '')}".rstrip(" —")]
                 if ipv4:
-                    tooltip_lines.append("IPv4: " + ", ".join(dict.fromkeys(ipv4)))
+                    tooltip_lines.append("IPv4: " + self._addresses_with_latency(ipv4))
                 if ipv6:
-                    tooltip_lines.append("IPv6: " + ", ".join(dict.fromkeys(ipv6)))
+                    tooltip_lines.append("IPv6: " + self._addresses_with_latency(ipv6))
                 if custom:
                     tooltip_lines.append(self._t("page.network.tile.custom_menu", "Правая кнопка мыши — изменить или удалить"))
                 tiles.append(
@@ -628,12 +660,16 @@ class NetworkPage(BasePage):
     # ── замер скорости ──────────────────────────────────────
 
     def _measure_latency(self) -> None:
-        servers = [
-            address
-            for group in self._providers.values()
-            for data in group.values()
-            if (address := self._primary_address(data)) and (":" not in address or self._ipv6_available)
-        ]
+        # Замеряются все адреса сервера, а не только первый: запасной может
+        # молчать или быть закрыт отдельно, и это видно в подсказке плитки.
+        servers = list(
+            dict.fromkeys(
+                address
+                for group in self._providers.values()
+                for data in group.values()
+                for address in self._all_addresses(data)
+            )
+        )
         if not servers:
             return
         self._measuring = True

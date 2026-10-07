@@ -577,6 +577,110 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Проверка домена",
         "en": "Domain Lookup",
     },
+    "page.blockcheck.tab.dns_servers": {
+        "ru": "DNS-серверы",
+        "en": "DNS Servers",
+    },
+    "page.server_check.title": {
+        "ru": "DNS-серверы",
+        "en": "DNS Servers",
+    },
+    "page.server_check.subtitle": {
+        "ru": "Каждый адрес каждого сервера: пинг, обычный и шифрованный DNS, перехват по дороге",
+        "en": "Every address of every server: ping, plain and encrypted DNS, interception on the way",
+    },
+    "page.server_check.intro": {
+        "ru": "Проверка покажет, какие DNS-серверы и какими способами доступны в вашей сети: обычный DNS (порт 53) и шифрованный — DoT (порт 853) и DoH (порт 443). Провайдер может закрыть любой из них отдельно и для отдельного адреса. Заодно видно, не подменяются ли ответы по дороге.",
+        "en": "The check shows which DNS servers are reachable in your network and how: plain DNS (port 53) and encrypted DoT (port 853) and DoH (port 443). A provider can block any of them separately and for a single address. It also shows whether answers are replaced on the way.",
+    },
+    "page.server_check.button.start": {
+        "ru": "Проверить серверы",
+        "en": "Check servers",
+    },
+    "page.server_check.button.start.name": {
+        "ru": "Проверить DNS-серверы",
+        "en": "Check DNS servers",
+    },
+    "page.server_check.button.start.description": {
+        "ru": "Спросить каждый адрес каждого DNS-сервера всеми способами. Занимает около двадцати секунд.",
+        "en": "Ask every address of every DNS server in every way. Takes about twenty seconds.",
+    },
+    "page.server_check.button.stop": {
+        "ru": "Остановить",
+        "en": "Stop",
+    },
+    "page.server_check.button.stop.name": {
+        "ru": "Остановить проверку DNS-серверов",
+        "en": "Stop the DNS server check",
+    },
+    "page.server_check.button.stop.description": {
+        "ru": "Прервать проверку; останется то, что уже успели узнать.",
+        "en": "Interrupt the check; what was already found stays.",
+    },
+    "page.server_check.button.report": {
+        "ru": "Отчёт",
+        "en": "Report",
+    },
+    "page.server_check.button.report.name": {
+        "ru": "Открыть отчёт проверки DNS-серверов",
+        "en": "Open the DNS server check report",
+    },
+    "page.server_check.button.report.description": {
+        "ru": "Открыть полный текст проверки — его можно скопировать и отправить.",
+        "en": "Open the full text of the check — it can be copied and sent.",
+    },
+    "page.server_check.section.summary": {
+        "ru": "Итог",
+        "en": "Summary",
+    },
+    "page.server_check.section.table": {
+        "ru": "Серверы по адресам",
+        "en": "Servers by address",
+    },
+    "page.server_check.column.server": {
+        "ru": "Сервер",
+        "en": "Server",
+    },
+    "page.server_check.column.address": {
+        "ru": "Адрес",
+        "en": "Address",
+    },
+    "page.server_check.column.note": {
+        "ru": "Замечания",
+        "en": "Notes",
+    },
+    "page.server_check.table.name": {
+        "ru": "DNS-серверы по адресам",
+        "en": "DNS servers by address",
+    },
+    "page.server_check.table.description": {
+        "ru": "Для каждого адреса: время ответа на пинг и каждым способом связи или причина отказа.",
+        "en": "For every address: response time to ping and by every transport, or the reason of failure.",
+    },
+    "page.server_check.status.ready": {
+        "ru": "Нажмите «Проверить серверы», чтобы начать.",
+        "en": "Press Check servers to begin.",
+    },
+    "page.server_check.status.starting": {
+        "ru": "Начинаем проверку серверов…",
+        "en": "Starting the server check…",
+    },
+    "page.server_check.status.failed": {
+        "ru": "Проверка не удалась",
+        "en": "The check failed",
+    },
+    "page.server_check.report.title": {
+        "ru": "Отчёт проверки DNS-серверов",
+        "en": "DNS server check report",
+    },
+    "page.server_check.report.empty": {
+        "ru": "Проверка ещё не запускалась.",
+        "en": "The check has not been run yet.",
+    },
+    "page.server_check.report.description": {
+        "ru": "Полный текст проверки: таблица по адресам, итог и подробности.",
+        "en": "Full text of the check: table by address, summary and details.",
+    },
     "page.domain_lookup.title": {
         "ru": "Проверка домена",
         "en": "Domain Lookup",

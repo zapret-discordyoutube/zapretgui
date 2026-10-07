@@ -186,3 +186,30 @@ def run_domain_lookup(target: str, *, use_external: bool = True, on_stage=None, 
         on_stage=on_stage,
         should_stop=should_stop,
     )
+
+
+def build_server_check_targets():
+    """Адреса для вкладки «DNS-серверы»: все серверы программы и свои, IPv6 — если он есть."""
+    from dns.custom_providers import build_dns_providers_with_custom
+    from dns.dns_providers import DNS_PROVIDERS
+    from dns.server_check import build_targets
+
+    try:
+        from settings.store import get_custom_dns_servers
+
+        custom_servers = get_custom_dns_servers()
+    except Exception:
+        custom_servers = []
+    try:
+        from dns.winapi import internet_route
+
+        ipv6 = bool(internet_route().has_ipv6)
+    except Exception:
+        ipv6 = False
+    return build_targets(build_dns_providers_with_custom(DNS_PROVIDERS, custom_servers), ipv6=ipv6)
+
+
+def run_server_check(*, on_progress=None, should_stop=None):
+    from dns.server_check import run_server_check as _run_server_check
+
+    return _run_server_check(build_server_check_targets(), on_progress=on_progress, should_stop=should_stop)

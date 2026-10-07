@@ -53,7 +53,7 @@ class DomainLookupPageTests(unittest.TestCase):
 
         # Вкладка стоит слева от «DNS подмена» и создаётся только при первом открытии.
         order = host.TAB_ORDER
-        self.assertEqual(order.index("domain_lookup") + 1, order.index("dns_spoofing"))
+        self.assertLess(order.index("domain_lookup"), order.index("dns_spoofing"))
         self.assertIsNone(host._domain_lookup_tab_page)
         host._switch_tab(order.index("domain_lookup"))
         page = host._domain_lookup_tab_page

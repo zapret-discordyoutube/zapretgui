@@ -17,6 +17,7 @@ class DnsFeature:
     create_isp_dns_warning_worker: Callable
     create_dns_apply_worker: Callable
     create_domain_lookup_worker: Callable
+    create_server_check_worker: Callable
 
 
 def build_dns_feature() -> DnsFeature:
@@ -40,6 +41,7 @@ def build_dns_feature() -> DnsFeature:
     run_dns_poisoning_check = lambda *args, **kwargs: _commands().run_dns_poisoning_check(*args, **kwargs)
     save_dns_check_results = lambda *args, **kwargs: _commands().save_dns_check_results(*args, **kwargs)
     run_domain_lookup = lambda *args, **kwargs: _commands().run_domain_lookup(*args, **kwargs)
+    run_server_check = lambda *args, **kwargs: _commands().run_server_check(*args, **kwargs)
 
     def _create_dns_flush_cache_worker(request_id: int, *, language: str = "ru", parent=None):
         from dns.page_workers import DnsFlushCacheWorker
@@ -133,6 +135,11 @@ def build_dns_feature() -> DnsFeature:
             parent=parent,
         )
 
+    def _create_server_check_worker(request_id: int, *, parent=None):
+        from dns.server_check_worker import ServerCheckWorker
+
+        return ServerCheckWorker(request_id, run_server_check=run_server_check, parent=parent)
+
     return DnsFeature(
         migrate_outdated_dns_addresses=lambda *args, **kwargs: _public().migrate_outdated_dns_addresses(*args, **kwargs),
         warm_page_data_cache=lambda *args, **kwargs: _public().warm_state(*args, **kwargs),
@@ -145,4 +152,5 @@ def build_dns_feature() -> DnsFeature:
         create_isp_dns_warning_worker=_create_isp_dns_warning_worker,
         create_dns_apply_worker=_create_dns_apply_worker,
         create_domain_lookup_worker=_create_domain_lookup_worker,
+        create_server_check_worker=_create_server_check_worker,
     )

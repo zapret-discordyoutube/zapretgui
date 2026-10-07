@@ -62,6 +62,7 @@ SEARCH_ENTRIES: tuple[SearchEntry, ...] = (
     SearchEntry("blockcheck.tab.blockcheck", PageName.BLOCKCHECK, "page.blockcheck.tab.blockcheck", section_key="nav.page.blockcheck", tab_key="blockcheck", text_prefixes=("page.blockcheck.",)),
     SearchEntry("blockcheck.tab.strategy_scan", PageName.BLOCKCHECK, "page.blockcheck.tab.strategy_scan", section_key="nav.page.blockcheck", tab_key="strategy_scan", text_prefixes=("page.strategy_scan.", "page.strategy_sort.")),
     SearchEntry("blockcheck.tab.domain_lookup", PageName.BLOCKCHECK, "page.blockcheck.tab.domain_lookup", section_key="nav.page.blockcheck", tab_key="domain_lookup", keywords=("ping", "пинг", "whois", "asn", "айпи", "ip", "reverse ip", "домены на ip"), text_prefixes=("page.domain_lookup.",)),
+    SearchEntry("blockcheck.tab.dns_servers", PageName.BLOCKCHECK, "page.blockcheck.tab.dns_servers", section_key="nav.page.blockcheck", tab_key="dns_servers", keywords=("doh", "dot", "dns over https", "dns over tls", "853", "перехват dns", "8.8.8.8", "1.1.1.1", "шифрованный dns", "быстрый dns"), text_prefixes=("page.server_check.",)),
     SearchEntry("blockcheck.tab.dns_spoofing", PageName.BLOCKCHECK, "page.blockcheck.tab.dns_spoofing", section_key="nav.page.blockcheck", tab_key="dns_spoofing", text_prefixes=("page.dns_check.",)),
     # «Диагностика соединения» влилась в BlockCheck: поиск по старому названию ведёт туда.
     SearchEntry("diag.tab.connection", PageName.BLOCKCHECK, "tab.diagnostics.connection", section_key="nav.page.blockcheck", tab_key="blockcheck"),

@@ -327,10 +327,12 @@ def _make_certificate(folder: Path) -> tuple[Path, Path]:
 class _TlsServer:
     """Сервер на localhost с шифрованием: одно соединение отдаётся в ``handle``."""
 
-    def __init__(self, cert: Path, key: Path, handle) -> None:
+    def __init__(self, cert: Path, key: Path, handle, *, alpn: tuple[str, ...] = ()) -> None:
         self._handle = handle
         self._context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self._context.load_cert_chain(str(cert), str(key))
+        if alpn:
+            self._context.set_alpn_protocols(list(alpn))
         self._listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._listener.bind(("127.0.0.1", 0))
         self._listener.listen(1)
@@ -386,13 +388,19 @@ class EncryptedTransportTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls._folder.cleanup()
 
-    def _server(self, handle) -> _TlsServer:
-        server = _TlsServer(self.cert, self.key, handle)
+    def _server(self, handle, *, alpn: tuple[str, ...] = ()) -> _TlsServer:
+        server = _TlsServer(self.cert, self.key, handle, alpn=alpn)
         self.addCleanup(server.close)
         return server
 
     def _trust(self):
-        return patch.object(dns_wire, "_client_tls_context", return_value=self.trusting)
+        def context(alpn: tuple[str, ...] = ()):
+            trusting = ssl.create_default_context(cafile=str(self.cert))
+            if alpn:
+                trusting.set_alpn_protocols(list(alpn))
+            return trusting
+
+        return patch.object(dns_wire, "_client_tls_context", context)
 
     @staticmethod
     def _answer(query: bytes, address: str = "5.5.5.5") -> bytes:
@@ -519,6 +527,43 @@ class EncryptedTransportTests(unittest.TestCase):
         self.assertFalse(result.answered)
         self.assertEqual(result.failure, dns_wire.FAILURE_HTTP)
         self.assertEqual(result.detail, "HTTP 403")
+
+    def test_doh_speaks_http2_when_server_offers_only_it(self) -> None:
+        """Так отвечает Quad9: по HTTP/1.1 он возвращает ошибку 505."""
+        seen: dict = {}
+
+        def _frame(kind: int, flags: int, stream: int, payload: bytes = b"") -> bytes:
+            return struct.pack("!I", len(payload))[1:] + bytes([kind, flags]) + struct.pack("!I", stream) + payload
+
+        def _exact(tls, size: int) -> bytes:
+            data = b""
+            while len(data) < size:
+                data += tls.recv(size - len(data))
+            return data
+
+        def handle(tls) -> None:
+            seen["protocol"] = tls.selected_alpn_protocol()
+            _exact(tls, 24)  # приветствие клиента
+            while True:
+                header = _exact(tls, 9)
+                payload = _exact(tls, int.from_bytes(header[:3], "big"))
+                if header[3] == 1:
+                    seen["headers"] = payload
+                if header[3] == 0 and header[4] & 0x1:
+                    answer = self._answer(payload, "9.9.9.9")
+                    tls.sendall(_frame(4, 0, 0) + _frame(1, 0x4, 1, b"\x88") + _frame(0, 0x1, 1, answer))
+                    return
+
+        server = self._server(handle, alpn=("h2",))
+
+        with self._trust():
+            result = dns_wire.query_doh(
+                "127.0.0.1", "example.com", dns_wire.TYPE_A, tls_host=TLS_NAME, port=server.port
+            )
+
+        self.assertEqual(seen["protocol"], "h2")
+        self.assertEqual(result.values(dns_wire.TYPE_A), ("9.9.9.9",))
+        self.assertIn(f"{TLS_NAME}:{server.port}".encode(), seen["headers"])
 
     def test_doh_closed_port_is_refused(self) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:

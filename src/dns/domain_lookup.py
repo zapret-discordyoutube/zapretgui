@@ -46,6 +46,7 @@ from utils.dns_wire import (
     query_server,
     reverse_name,
 )
+from utils.ip_owner import lookup_ip_owner
 
 KIND_DOMAIN = "domain"
 KIND_IP = "ip"
@@ -395,29 +396,10 @@ def _lookup_ptr(ip: str, servers: tuple[str, ...]) -> NeighborSource:
 
 def _lookup_network(ip: str, servers: tuple[str, ...]) -> NetworkInfo | None:
     """Владелец сети через DNS-службу Team Cymru: без сайтов и ключей, одним DNS-запросом."""
-    pointer = reverse_name(ip)
-    if pointer.endswith(".in-addr.arpa"):
-        name = pointer[: -len(".in-addr.arpa")] + ".origin.asn.cymru.com"
-    else:
-        name = pointer[: -len(".ip6.arpa")] + ".origin6.asn.cymru.com"
-    result = _ask_helpers(name, TYPE_TXT, servers)
-    texts = result.values(TYPE_TXT) if result is not None else ()
-    if not texts:
+    found = lookup_ip_owner(ip, lambda name, rtype: _ask_helpers(name, rtype, servers))
+    if found is None:
         return None
-    parts = [part.strip() for part in texts[0].split("|")]
-    asn = parts[0].split()[0] if parts and parts[0] else ""
-    info = NetworkInfo(
-        asn=asn,
-        prefix=parts[1] if len(parts) > 1 else "",
-        country=parts[2] if len(parts) > 2 else "",
-    )
-    if not asn:
-        return info
-    owner = _ask_helpers(f"AS{asn}.asn.cymru.com", TYPE_TXT, servers)
-    owner_texts = owner.values(TYPE_TXT) if owner is not None else ()
-    if owner_texts:
-        info = replace(info, owner=owner_texts[0].split("|")[-1].strip())
-    return info
+    return NetworkInfo(asn=found.asn, prefix=found.prefix, country=found.country, owner=found.owner)
 
 
 def _lookup_cert(ip: str, key: str, server_name: str | None) -> NeighborSource:

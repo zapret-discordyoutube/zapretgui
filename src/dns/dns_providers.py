@@ -7,6 +7,12 @@
 SVG "own:<имя>:<буквы>". У серверов из раздела «Для ИИ» значок и цвет те же,
 что у одноимённого DNS-профиля в «Редакторе hosts» (hosts/ui/profile_icons.py):
 один сервер — один значок во всей программе.
+
+"doh" — адрес шифрованного DNS поверх HTTPS, "dot" — имя сервера для
+шифрованного DNS поверх TLS (порт 853): по этому имени проверяется его
+сертификат. "dot" указан только там, где сервер действительно отвечает по
+этому способу (проверено запросом 2026-10-07); у остальных проверка DoT не
+делается, чтобы не выдавать «не поддерживает» за «заблокирован».
 """
 
 DNS_PROVIDERS = {
@@ -17,7 +23,8 @@ DNS_PROVIDERS = {
             "desc": "Быстрый и приватный",
             "icon": "simple:cloudflare:CF",
             "color": "#f48120",
-            "doh": "https://cloudflare-dns.com/dns-query"
+            "doh": "https://cloudflare-dns.com/dns-query",
+            "dot": "cloudflare-dns.com"
         },
         "Google DNS": {
             "ipv4": ["8.8.8.8", "8.8.4.4"],
@@ -25,7 +32,8 @@ DNS_PROVIDERS = {
             "desc": "Надёжный",
             "icon": "fa5b.google",
             "color": "#4285f4",
-            "doh": "https://dns.google/dns-query"
+            "doh": "https://dns.google/dns-query",
+            "dot": "dns.google"
         },
         "Dns.SB": {
             "ipv4": ["185.222.222.222", "45.11.45.11"],
@@ -33,7 +41,8 @@ DNS_PROVIDERS = {
             "desc": "Без цензуры",
             "icon": "fa5s.unlock-alt",
             "color": "#00bcd4",
-            "doh": "https://doh.sb/dns-query"
+            "doh": "https://doh.sb/dns-query",
+            "dot": "dot.sb"
         },
     },
     "Безопасные": {
@@ -43,7 +52,8 @@ DNS_PROVIDERS = {
             "desc": "Антивирус",
             "icon": "simple:quad9:Q9",
             "color": "#e91e63",
-            "doh": "https://dns.quad9.net/dns-query"
+            "doh": "https://dns.quad9.net/dns-query",
+            "dot": "dns.quad9.net"
         },
         "AdGuard": {
             "ipv4": ["94.140.14.14", "94.140.15.15"],
@@ -51,7 +61,8 @@ DNS_PROVIDERS = {
             "desc": "Без рекламы",
             "icon": "simple:adguard:AG",
             "color": "#68bc71",
-            "doh": "https://dns.adguard.com/dns-query"
+            "doh": "https://dns.adguard.com/dns-query",
+            "dot": "dns.adguard-dns.com"
         },
         "OpenDNS": {
             "ipv4": ["208.67.222.222", "208.67.220.220"],
@@ -59,7 +70,8 @@ DNS_PROVIDERS = {
             "desc": "Фильтрация",
             "icon": "own:opendns:OD",
             "color": "#fe7702",
-            "doh": "https://doh.opendns.com/dns-query"
+            "doh": "https://doh.opendns.com/dns-query",
+            "dot": "dns.opendns.com"
         },
         "dnsdoh.art": {
             "ipv4": ["194.180.189.33", "194.180.189.33"],
@@ -67,7 +79,8 @@ DNS_PROVIDERS = {
             "desc": "Максимальная приватность",
             "icon": "fa5s.lock",
             "color": "#9c27b0",
-            "doh": "https://dnsdoh.art:444/dns-query"
+            "doh": "https://dnsdoh.art:444/dns-query",
+            "dot": "dnsdoh.art"
         }
     },
     "Для ИИ": {
@@ -77,7 +90,8 @@ DNS_PROVIDERS = {
             "desc": "ChatGPT",
             "icon": "fa5b.xbox",
             "color": "#107C10",
-            "doh": "https://xbox-dns.ru/dns-query"
+            "doh": "https://xbox-dns.ru/dns-query",
+            "dot": "xbox-dns.ru"
         },
         "Xbox DNS v2": {
             "ipv4": ["87.228.47.200", "87.228.47.201"],
@@ -101,7 +115,8 @@ DNS_PROVIDERS = {
             "desc": "ChatGPT",
             "icon": "fa5s.shield-alt",
             "color": "#2F80ED",
-            "doh": "https://dns.comss.one/dns-query"
+            "doh": "https://dns.comss.one/dns-query",
+            "dot": "dns.comss.one"
         },
         "dns.malw.link": {
             "ipv4": ["95.216.204.218", "80.253.249.40"],
@@ -119,7 +134,8 @@ DNS_PROVIDERS = {
             "desc": "ChatGPT, без рекламы",
             "icon": "fa5s.cat",
             "color": "#F59E0B",
-            "doh": "https://dns.astracat.network/dns-query"
+            "doh": "https://dns.astracat.network/dns-query",
+            "dot": "dns.astracat.network"
         },
         # Российская пара из официального geohide.ru/static/metadata/servers.json.
         # Подменяет ответы только для сайтов из своего списка (ChatGPT, Grok, Notion…).
@@ -129,7 +145,8 @@ DNS_PROVIDERS = {
             "desc": "ChatGPT, Grok, Notion",
             "icon": "fa5s.globe-europe",
             "color": "#8B5CF6",
-            "doh": "https://geohide.ru/dns-query"
+            "doh": "https://geohide.ru/dns-query",
+            "dot": "geohide.ru"
         },
     }
 }
