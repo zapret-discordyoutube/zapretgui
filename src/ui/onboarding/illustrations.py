@@ -194,7 +194,8 @@ SCENES: dict[str, Scene] = {
         bubble_trigger=0,
     ),
     "oob": Scene(
-        packets=(Packet("you#tube.com", text_after_gate="youtube.com"),),
+        # Срочный байт по умолчанию встаёт в начало данных (urp=b в zapret-antidpi.lua).
+        packets=(Packet("#youtube.com", text_after_gate="youtube.com"),),
         bubble_key="unknown",
         bubble_trigger=0,
         bubble_tone="confused",
@@ -496,7 +497,9 @@ class TechniqueIllustration(QWidget):
                 site = ("—", "none")
             elif packet.fate == "die":
                 gate = (self._tr("onboarding.scene.log.fooled", "принял за настоящий"), "ok") if passed_gate else wait
-                site = (self._tr("onboarding.scene.log.dropped", "отброшен"), "drop") if raw >= gone else wait
+                # Подделка либо не доходит до сайта (короткий путь), либо он её
+                # отбрасывает (подпись, номер, метка времени): сайту она не достаётся.
+                site = (self._tr("onboarding.scene.log.not_taken", "не принят"), "drop") if raw >= gone else wait
             elif packet.fate == "discard":
                 gate = (self._tr("onboarding.scene.log.passed", "пропустил"), "pass") if passed_gate else wait
                 site = (self._tr("onboarding.scene.log.dropped", "отброшен"), "drop") if raw >= 1.0 else wait

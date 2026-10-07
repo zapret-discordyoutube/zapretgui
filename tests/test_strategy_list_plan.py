@@ -483,14 +483,14 @@ class KnowledgeTests(unittest.TestCase):
         self.assertEqual(steps[0].cautions, ())
         self.assertEqual(
             notes[1]["cut"],
-            ("Где режется запрос", "после 1-го байта; посередине имени сайта; у поля с именем сайта (sniext+1)"),
+            ("Где режется запрос", "после 1-го байта; посередине основной части имени сайта; у поля с именем сайта (sniext+1)"),
         )
         self.assertEqual(notes[1]["overlap"][1], "Заглушка перед первой частью")
 
     def test_every_step_says_what_happens_and_why_in_plain_words(self) -> None:
         from profile.strategy_list.knowledge import _FUNCTIONS, explain_strategy
 
-        for function in ("fake", "multisplit", "multidisorder", "fakedsplit", "hostfakesplit", "syndata", "wssize"):
+        for function in ("fake", "multisplit", "multidisorder", "fakedsplit", "hostfakesplit", "oob", "wssize"):
             step = explain_strategy(f"--lua-desync={function}")[0]
             self.assertTrue(step.text.endswith("."), function)
             self.assertTrue(step.why, function)
@@ -504,6 +504,10 @@ class KnowledgeTests(unittest.TestCase):
         plain = explain_strategy("--lua-desync=fake:blob=x")[0]
         ttl = explain_strategy("--lua-desync=fake:blob=x:ip_ttl=4")[0]
         both = explain_strategy("--lua-desync=hostfakesplit:host=a.ru:tcp_ts=-1000:ip_ttl=3")[0]
+        self.assertEqual(
+            next(note for note in both.notes if note.kind == "names").text,
+            "Образец поддельного имени: a.ru — Перед ним подставляется случайная часть.",
+        )
 
         self.assertEqual(len(plain.cautions), 1)
         self.assertIn("нет защиты от сайта", plain.cautions[0])
@@ -511,6 +515,50 @@ class KnowledgeTests(unittest.TestCase):
         self.assertIn("У другого подделка может дойти до сайта", ttl.cautions[0])
         self.assertEqual(len(both.cautions), 3)
         self.assertEqual(both.caution, " ".join(both.cautions))
+
+    def test_texts_follow_zapret2_sources(self) -> None:
+        """Поправки по сверке с lua/zapret-antidpi.lua, lua/zapret-lib.lua и docs/manual.md."""
+        from profile.strategy_list.knowledge import explain_strategy
+
+        def step(line: str):
+            return explain_strategy(f"--lua-desync={line}")[0]
+
+        def note(line: str, kind: str):
+            return next(item for item in step(line).notes if item.kind == kind)
+
+        # Данные в первом пакете — «скрытая подделка»: защита ей не нужна.
+        self.assertEqual(step("syndata:blob=x").cautions, ())
+        # В UDP (QUIC, звонки) автор Zapret шлёт подделки без защиты.
+        self.assertEqual(step("fake:blob=fake_default_quic:repeats=6").cautions, ())
+        self.assertEqual(explain_strategy("--lua-desync=fake:blob=x", udp=True)[0].cautions, ())
+        self.assertEqual(len(step("fake:blob=fake_default_tls").cautions), 1)
+        # Особые заголовки IPv6 и своя функция порчи — тоже защита.
+        self.assertEqual(step("fake:blob=x:ip6_hopbyhop").cautions, ())
+        self.assertEqual(step("fake:blob=x:fool=my_fool").cautions, ())
+        # У нарезки подделок нет: те же параметры меняют её собственные пакеты.
+        self.assertEqual(note("multisplit:pos=2:tcp_md5", "protection").label, "Изменение пакетов шага")
+        self.assertEqual(note("fake:blob=x:tcp_md5", "protection").label, "Защита подделки от сайта")
+        # Перекрытие у перестановки устроено иначе, чем у нарезки.
+        self.assertEqual(note("multisplit:pos=2:seqovl=5", "overlap").value, "Заглушка перед первой частью")
+        self.assertEqual(note("multidisorder:pos=2:seqovl=1", "overlap").value, "Ложные байты перед второй частью")
+        self.assertIn("не работает с сайтами на Windows", step("multidisorder:pos=2:seqovl=1").caution)
+        # Метка времени, сдвинутая вперёд, устаревшей не выглядит.
+        self.assertEqual(note("fake:blob=x:tcp_ts=-1000", "protection").value, "Старая метка времени")
+        self.assertEqual(note("fake:blob=x:tcp_ts=1000", "protection").value, "Метка времени сдвинута вперёд")
+        # Места разреза.
+        self.assertEqual(note("multisplit:pos=method+2", "cut").value, "в начале названия запроса (GET, POST) (method+2)")
+        self.assertEqual(note("multisplit:pos=-4", "cut").value, "за 4 байт до конца")
+        self.assertEqual(note("tcpseg:pos=0,-1", "cut").label, "Какой кусок")
+        # Отдельный кусок исходный пакет не заменяет; срочный байт — только для Linux.
+        self.assertIn("Исходный пакет этот шаг не заменяет", step("tcpseg:pos=0,-1").caution)
+        self.assertIn("только с сайтами на Linux", step("oob").caution)
+        self.assertIn("ваш компьютер сам", step("wsize:wsize=1").text)
+        self.assertIn("конец данных обрезается", step("udplen:increment=-2").caution)
+
+    def test_oob_scene_puts_urgent_byte_at_the_start(self) -> None:
+        from ui.onboarding.illustrations import SCENES
+
+        self.assertEqual(SCENES["oob"].packets[0].text, "#youtube.com")
 
     def test_own_and_unknown_functions_are_named_honestly(self) -> None:
         from profile.strategy_list.knowledge import explain_strategy
@@ -605,7 +653,8 @@ class AnalyzerSceneTests(unittest.TestCase):
         self.assertEqual((early[1].gate[1], early[1].site[1]), ("wait", "wait"))
 
         _widget, done = self._rows("fake", STATIC_PHASE)
-        self.assertEqual((done[1].gate, done[1].site), (("принял за настоящий", "ok"), ("отброшен", "drop")))
+        # «Не принят» верно для любой защиты: подделка либо не дошла, либо отброшена сайтом.
+        self.assertEqual((done[1].gate, done[1].site), (("принял за настоящий", "ok"), ("не принят", "drop")))
         self.assertEqual((done[2].label, done[2].gate, done[2].site), ("youtube.com", ("пропустил", "pass"), ("принят", "ok")))
 
     def test_blocked_packet_never_reaches_the_site(self) -> None:

@@ -6283,6 +6283,7 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     "onboarding.scene.log.blocked": {"ru": "узнал имя — блок", "en": "name recognised — blocked"},
     "onboarding.scene.log.accepted": {"ru": "принят", "en": "accepted"},
     "onboarding.scene.log.dropped": {"ru": "отброшен", "en": "dropped"},
+    "onboarding.scene.log.not_taken": {"ru": "не принят", "en": "not taken"},
     "onboarding.scene.pause": {"ru": "Остановить анимацию", "en": "Pause the animation"},
     "onboarding.scene.resume": {"ru": "Продолжить анимацию", "en": "Resume the animation"},
     "onboarding.scene.syn_data": {"ru": "SYN + данные", "en": "SYN + data"},
