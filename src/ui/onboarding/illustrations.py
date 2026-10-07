@@ -88,6 +88,9 @@ class Scene:
     bubble_tone: str = "ok"  # ok | block | confused
     # Что в итоге собрал сайт; пусто — сайт ничего не получил.
     site_result: str = "youtube.com"
+    # Сколько доли круга плашка идёт от «Вы» до сайта. В длинной сцене пакеты
+    # едут быстрее: иначе последний не успевал бы дойти до конца круга.
+    travel: float = TRAVEL
 
 
 SCENES: dict[str, Scene] = {
@@ -118,25 +121,50 @@ SCENES: dict[str, Scene] = {
         bubble_trigger=0,
         bubble_tone="confused",
     ),
+    # Порядок пакетов — как в lua/zapret-antidpi.lua: каждая настоящая часть
+    # идёт между двумя своими поддельными копиями того же размера.
     "fakedsplit": Scene(
         packets=(
             Packet("q7z", kind="fake", fate="die"),
             Packet("you", part="1"),
+            Packet("q7z", kind="fake", fate="die"),
             Packet("xr1k.zzz", kind="fake", fate="die"),
             Packet("tube.com", part="2"),
+            Packet("xr1k.zzz", kind="fake", fate="die"),
         ),
+        travel=0.34,
         bubble_key="which_real",
         bubble_trigger=1,
         bubble_tone="confused",
     ),
+    # То же, но вторая часть со своими копиями уходит первой.
+    "fakeddisorder": Scene(
+        packets=(
+            Packet("xr1k.zzz", kind="fake", fate="die"),
+            Packet("tube.com", part="2"),
+            Packet("xr1k.zzz", kind="fake", fate="die"),
+            Packet("q7z", kind="fake", fate="die"),
+            Packet("you", part="1"),
+            Packet("q7z", kind="fake", fate="die"),
+        ),
+        travel=0.34,
+        bubble_key="which_real",
+        bubble_trigger=1,
+        bubble_tone="confused",
+    ),
+    # Запрос режется вокруг имени сайта: начало, поддельное имя, настоящее
+    # имя, снова поддельное, остаток запроса.
     "hostfakesplit": Scene(
         packets=(
+            Packet("…", part="1"),
             Packet("abc.ru", kind="fake", fate="die"),
-            Packet("youtube.com"),
+            Packet("youtube.com", part="2"),
             Packet("abc.ru", kind="fake", fate="die"),
+            Packet("…", part="3"),
         ),
+        travel=0.34,
         bubble_key="fake_host",
-        bubble_trigger=0,
+        bubble_trigger=1,
     ),
     "tcpseg": Scene(
         packets=(
@@ -415,16 +443,16 @@ class TechniqueIllustration(QWidget):
         else:
             # Реплика — когда середина плашки в середине проверки.
             target = layout.gate_x
-        verdict = starts[scene.bubble_trigger] + TRAVEL * _clamp01((target - layout.start_x) / span)
-        arrivals = [starts[i] + TRAVEL for i, packet in enumerate(scene.packets) if packet.fate == "pass"]
+        verdict = starts[scene.bubble_trigger] + scene.travel * _clamp01((target - layout.start_x) / span)
+        arrivals = [starts[i] + scene.travel for i, packet in enumerate(scene.packets) if packet.fate == "pass"]
         site_done = max(arrivals) if (scene.site_result and arrivals) else None
         ends = [verdict + max(POP, SHAKE)]
         for index, packet in enumerate(scene.packets):
             if packet.fate == "die":
                 # Подделка гаснет на полпути от проверки до сайта.
-                ends.append(starts[index] + TRAVEL)
+                ends.append(starts[index] + scene.travel)
             elif packet.fate == "discard":
-                ends.append(starts[index] + TRAVEL + DISCARD)
+                ends.append(starts[index] + scene.travel + DISCARD)
         if site_done is not None:
             ends.append(site_done + max(POP, PULSE))
         return SceneTimes(starts=starts, verdict=verdict, site_done=site_done, settled=max(ends))
@@ -445,11 +473,11 @@ class TechniqueIllustration(QWidget):
         span = layout.end_x - layout.start_x
         frames: list[ChipFrame] = []
         for index, packet in enumerate(scene.packets):
-            raw = (phase - times.starts[index]) / TRAVEL
+            raw = (phase - times.starts[index]) / scene.travel
             if raw <= 0.0:
                 continue
             x = layout.start_x + span * min(raw, 1.0)
-            appear = _ease_out(raw * TRAVEL / APPEAR)
+            appear = _ease_out(raw * scene.travel / APPEAR)
             alpha, scale, dy, angle = appear, 0.85 + 0.15 * appear, 0.0, 0.0
             # Пакет слит, пока его начало не доехало до сайта.
             glued = packet.glued_to_next and index + 1 < len(scene.packets) and raw < 1.0
@@ -457,7 +485,7 @@ class TechniqueIllustration(QWidget):
             flat = ""
             if glued:
                 flat = "left"
-            elif behind_glued and phase < times.starts[index - 1] + TRAVEL:
+            elif behind_glued and phase < times.starts[index - 1] + scene.travel:
                 flat = "right"
             if glued or behind_glued:
                 scale = 1.0  # половины одного пакета не расходятся при появлении
@@ -478,7 +506,7 @@ class TechniqueIllustration(QWidget):
             elif packet.fate == "discard" and raw >= 1.0:
                 # Мусор приехал первым, и сайт его отбрасывает: он падает с дорожки
                 # у входа, а данные следом входят внутрь.
-                t = _clamp01((phase - times.starts[index] - TRAVEL) / DISCARD)
+                t = _clamp01((phase - times.starts[index] - scene.travel) / DISCARD)
                 drop = _ease_out(t)
                 alpha *= 1.0 - _ease_in(t)
                 dy, scale, angle = 30.0 * drop, scale * (1.0 - 0.15 * t), 18.0 * drop
@@ -580,7 +608,7 @@ class TechniqueIllustration(QWidget):
                 gap = chips[index - 1] / 2 + chips[index] / 2
                 if not previous.glued_to_next:
                     gap += CHIP_GAP
-                moment += gap / max(1.0, track) * TRAVEL
+                moment += gap / max(1.0, track) * scene.travel
             moment += packet.delay
             starts.append(moment)
         return starts

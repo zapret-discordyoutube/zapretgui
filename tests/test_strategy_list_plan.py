@@ -518,5 +518,30 @@ class PlacesTests(unittest.TestCase):
             [("--lua-desync=fake:blob=x", "--lua-desync=fake:blob=x"), ("--lua-desync=fake:blob=x", "--lua-desync=multisplit:pos=1")]
         )
 
-        self.assertEqual(usage.places("tcp", "fake"), (("YouTube", 2), ("Discord", 1)))
+        places = usage.places("tcp", "fake")
+        self.assertEqual([(name, presets) for _service, name, presets in places], [("YouTube", 2), ("Discord", 1)])
         self.assertEqual(usage.places("tcp", "missing"), ())
+        # По строкам условий сервиса подбирается его значок.
+        self.assertIn("--hostlist=lists/youtube.txt", usage.service_match_lines[places[0][0]])
+
+    def test_steps_name_their_animated_scene(self) -> None:
+        from profile.strategy_list.knowledge import explain_strategy
+        from ui.onboarding.illustrations import SCENES
+
+        steps = explain_strategy(
+            "--lua-desync=fake:blob=x\n--lua-desync=fakeddisorder:pos=2\n--lua-desync=hostfakesplit_multi:hosts=a\n--lua-desync=wssize:wsize=1"
+        )
+
+        self.assertEqual([step.scene for step in steps], ["fake", "fakeddisorder", "hostfakesplit", ""])
+        self.assertTrue(all(step.scene in SCENES for step in steps if step.scene))
+
+    def test_fakedsplit_scene_follows_engine_packet_order(self) -> None:
+        """По lua/zapret-antidpi.lua: каждая настоящая часть идёт между двумя своими подделками."""
+        from ui.onboarding.illustrations import SCENES
+
+        kinds = [packet.kind for packet in SCENES["fakedsplit"].packets]
+        parts = [packet.part for packet in SCENES["fakedsplit"].packets if packet.kind == "real"]
+        reverse_parts = [packet.part for packet in SCENES["fakeddisorder"].packets if packet.kind == "real"]
+
+        self.assertEqual(kinds, ["fake", "real", "fake", "fake", "real", "fake"])
+        self.assertEqual((parts, reverse_parts), (["1", "2"], ["2", "1"]))

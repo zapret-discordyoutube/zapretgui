@@ -31,6 +31,18 @@ from profile.parser import parse_preset_text
 
 
 @dataclass(frozen=True)
+class StrategyPlace:
+    """Сервис, на котором стратегия стоит в готовых пресетах."""
+
+    name: str
+    presets: int
+    # Профиль этого сервиса в открытом пресете; пусто — в нём такого нет.
+    profile_key: str = ""
+    icon_name: str = ""
+    icon_color: str = ""
+
+
+@dataclass(frozen=True)
 class StrategyUsage:
     # В скольких готовых пресетах стратегия стоит на этом же сервисе.
     same_service: int = 0
@@ -55,16 +67,18 @@ class BuiltinStrategyUsage:
     services: dict[tuple[str, str], int]
     # {сервис: его название в готовых пресетах} — для страницы подробностей.
     service_names: dict[str, str] = field(default_factory=dict)
+    # {сервис: строки условий его профиля} — по ним подбирается значок сервиса.
+    service_match_lines: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
-    def places(self, catalog_name: str, strategy_id: str) -> tuple[tuple[str, int], ...]:
-        """Где стратегия стоит в готовых пресетах: (название сервиса, число пресетов)."""
+    def places(self, catalog_name: str, strategy_id: str) -> tuple[tuple[str, str, int], ...]:
+        """Где стратегия стоит в готовых пресетах: (сервис, его название, число пресетов)."""
         key = (str(catalog_name or ""), str(strategy_id or ""))
         rows = [
-            (self.service_names.get(service, service), int(counts[key]))
+            (service, self.service_names.get(service, service), int(counts[key]))
             for service, counts in self.by_service.items()
             if key in counts
         ]
-        rows.sort(key=lambda row: (-row[1], row[0].lower()))
+        rows.sort(key=lambda row: (-row[2], row[1].lower()))
         return tuple(rows)
 
     def for_profile(self, profile, catalog_name: str | None = None) -> dict[str, StrategyUsage]:
@@ -132,6 +146,7 @@ def count_builtin_strategy_usage(preset_texts, *, engine: str, catalogs) -> Buil
     """Считает частоту по текстам готовых пресетов: [(имя файла, текст), ...]."""
     by_service: dict[str, dict[tuple[str, str], int]] = {}
     service_names: dict[str, str] = {}
+    service_match_lines: dict[str, tuple[str, ...]] = {}
     indexes: dict[str, _CatalogIndex] = {}
     for source_name, text in preset_texts:
         try:
@@ -158,6 +173,7 @@ def count_builtin_strategy_usage(preset_texts, *, engine: str, catalogs) -> Buil
                 continue
             seen.add(vote)
             service_names.setdefault(service, str(profile.name or profile.display_name or service))
+            service_match_lines.setdefault(service, tuple(profile.match.all_lines()))
             counts = by_service.setdefault(service, {})
             counts[vote[1]] = counts.get(vote[1], 0) + 1
 
@@ -165,7 +181,12 @@ def count_builtin_strategy_usage(preset_texts, *, engine: str, catalogs) -> Buil
     for counts in by_service.values():
         for strategy in counts:
             services[strategy] = services.get(strategy, 0) + 1
-    return BuiltinStrategyUsage(by_service=by_service, services=services, service_names=service_names)
+    return BuiltinStrategyUsage(
+        by_service=by_service,
+        services=services,
+        service_names=service_names,
+        service_match_lines=service_match_lines,
+    )
 
 
 def load_builtin_strategy_usage(app_paths, engine: str, catalogs, catalogs_signature) -> BuiltinStrategyUsage:

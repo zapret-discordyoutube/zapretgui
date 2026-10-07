@@ -72,7 +72,8 @@ from .serializer import (
 )
 from .strategy_state import ProfileStrategyState, ProfileStrategyStateStore
 from .strategy_catalog import StrategyEntry, load_strategy_catalogs_with_signature
-from .strategy_usage import load_builtin_strategy_usage
+from .icons import ProfileIconSpec, resolve_profile_icon
+from .strategy_usage import StrategyPlace, load_builtin_strategy_usage, service_key
 from .strategy_shape import composite_identity, strategy_shape
 from .state import (
     ProfileListFileEditorState,
@@ -629,6 +630,36 @@ class ProfilePresetService:
         with self._profile_list_lock:
             return self._get_profile_setup_locked(profile_key)
 
+    @staticmethod
+    def _strategy_places(builtin_usage, catalog_name: str, sources) -> dict[str, tuple[StrategyPlace, ...]]:
+        """Где стратегии каталога стоят в готовых пресетах, со ссылкой на
+        профиль того же сервиса в открытом пресете и значком сервиса."""
+        # Профиль из пресета важнее шаблона: по щелчку открывается он.
+        profile_by_service: dict[str, str] = {}
+        for source in sorted(tuple(sources or ()), key=lambda item: not item.in_preset):
+            profile_by_service.setdefault(service_key(source.profile), source.key)
+        icons: dict[str, ProfileIconSpec] = {}
+        places: dict[str, tuple[StrategyPlace, ...]] = {}
+        for entry_catalog, strategy_id in builtin_usage.services:
+            if entry_catalog != catalog_name:
+                continue
+            rows = []
+            for service, name, presets in builtin_usage.places(catalog_name, strategy_id):
+                icon = icons.get(service)
+                if icon is None:
+                    icon = icons[service] = resolve_profile_icon(name, builtin_usage.service_match_lines.get(service, ()))
+                rows.append(
+                    StrategyPlace(
+                        name=name,
+                        presets=presets,
+                        profile_key=profile_by_service.get(service, ""),
+                        icon_name=icon.icon_name,
+                        icon_color=icon.color,
+                    )
+                )
+            places[strategy_id] = tuple(rows)
+        return places
+
     def warm_strategy_usage(self) -> None:
         """Заранее считает частоту стратегий в готовых пресетах.
 
@@ -684,11 +715,11 @@ class ProfilePresetService:
             strategy_entries=dict(core.strategy_entries),
             strategy_states=strategy_states,
             strategy_usage=builtin_usage.for_profile(profile, usage_catalog),
-            strategy_places={
-                strategy_id: builtin_usage.places(usage_catalog, strategy_id)
-                for (catalog_name, strategy_id) in builtin_usage.services
-                if catalog_name == usage_catalog
-            },
+            strategy_places=self._strategy_places(
+                builtin_usage,
+                usage_catalog,
+                self._profile_sources_cache.sources_for(preset_revision, preset, templates),
+            ),
             strategy_experience=self._state_store.get_strategy_experience(profile.persistent_key),
             raw_profile_text=core.raw_profile_text,
             raw_strategy_text=raw_strategy_text,

@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
+    CardWidget,
+    FlowLayout,
     FluentIcon,
     PrimaryPushButton,
     PushButton,
@@ -23,11 +25,16 @@ from qfluentwidgets import (
     SimpleCardWidget,
     StrongBodyLabel,
     SubtitleLabel,
+    isDarkTheme,
 )
 
 from profile.strategy_list.knowledge import StrategyStep, explain_strategy
+from app.ui_texts import tr as tr_catalog
+from profile.ui.profile_icon import profile_icon_pixmap
 from profile.ui.strategy_list.icons import strategy_icon
 from ui.accessibility import set_control_accessibility
+from ui.fluent_widgets import set_tooltip
+from ui.onboarding.illustrations import TechniqueIllustration
 
 _LABELS = {
     "recommended": "советуемая",
@@ -37,7 +44,6 @@ _LABELS = {
     "game": "для игр",
     "stable": "стабильная",
 }
-_MAX_PLACES = 12
 _WARNING = (QColor("#b55a2a"), QColor("#e9a071"))
 _MUTED = (QColor(0, 0, 0, 150), QColor(255, 255, 255, 150))
 
@@ -59,8 +65,8 @@ class StrategyDetails:
     rating: str = ""
     favorite: bool = False
     is_current: bool = False
-    # Где стоит в готовых пресетах: ((сервис, число пресетов), ...).
-    places: tuple[tuple[str, int], ...] = ()
+    # Где стоит в готовых пресетах: StrategyPlace (profile.strategy_usage).
+    places: tuple = ()
     same_service: int = 0
     # Отметки человека на других профилях: (работает, не работает).
     personal: tuple[int, int] = (0, 0)
@@ -91,17 +97,8 @@ def experience_lines(details: StrategyDetails) -> list[str]:
     return lines
 
 
-def places_lines(details: StrategyDetails) -> list[str]:
-    if not details.places:
-        return ["В готовых пресетах эта стратегия не встречается."]
-    lines = [
-        f"{service} — в {count} {_plural(count, 'пресете', 'пресетах', 'пресетах')}"
-        for service, count in details.places[:_MAX_PLACES]
-    ]
-    rest = len(details.places) - _MAX_PLACES
-    if rest > 0:
-        lines.append(f"…и ещё на {rest} {_plural(rest, 'сервисе', 'сервисах', 'сервисах')}.")
-    return lines
+def presets_text(count: int) -> str:
+    return f"в {count} {_plural(count, 'готовом пресете', 'готовых пресетах', 'готовых пресетах')}"
 
 
 def _text(label_class, text: str, *, colors=None, selectable: bool = False):
@@ -134,15 +131,92 @@ class _Card(SimpleCardWidget):
                         child.widget().deleteLater()
 
 
+def _visible_color(color: str) -> str:
+    """Фирменный цвет, который видно на фоне: чёрный логотип на тёмной теме пропал бы."""
+    value = QColor(color)
+    if not value.isValid():
+        return color
+    brightness = (value.red() * 299 + value.green() * 587 + value.blue() * 114) / 255000
+    if isDarkTheme() and brightness < 0.22:
+        return "#f2f2f2"
+    if not isDarkTheme() and brightness > 0.85:
+        return "#1f1f1f"
+    return color
+
+
+class _StepRow(CardWidget):
+    """Шаг стратегии. Нажатие показывает анимацию этого шага."""
+
+    def __init__(self, number: int, step: StrategyStep, parent=None) -> None:
+        super().__init__(parent)
+        self.step = step
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(4)
+        title = _text(StrongBodyLabel, f"{number}. {step.title}")
+        layout.addWidget(title)
+        layout.addWidget(_text(BodyLabel, step.text))
+        for note in step.notes:
+            layout.addWidget(_text(BodyLabel, f"• {note}", colors=_MUTED))
+        if step.caution:
+            layout.addWidget(_text(BodyLabel, f"Обратите внимание: {step.caution}", colors=_WARNING))
+        layout.addWidget(_text(CaptionLabel, step.line, colors=_MUTED))
+        if step.scene:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            set_tooltip(self, "Нажмите, чтобы посмотреть схему этого шага.")
+        set_control_accessibility(self, name=f"Шаг {number}: {step.title}", description=step.text)
+
+
+class _PlaceCard(CardWidget):
+    """Сервис, на котором стратегия стоит в готовых пресетах.
+
+    Если профиль этого сервиса есть в открытом пресете, нажатие открывает его.
+    """
+
+    def __init__(self, place, parent=None) -> None:
+        super().__init__(parent)
+        self.place = place
+        self.setFixedSize(260, 60)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(10)
+        icon = QLabel(self)
+        icon.setFixedSize(24, 24)
+        pixmap = profile_icon_pixmap(place.icon_name, color=_visible_color(place.icon_color), size=24)
+        if not pixmap.isNull():
+            icon.setPixmap(pixmap)
+        layout.addWidget(icon)
+        texts = QVBoxLayout()
+        texts.setSpacing(0)
+        name = BodyLabel(place.name)
+        name.setToolTip(place.name)
+        texts.addWidget(name)
+        caption = presets_text(place.presets)
+        if place.profile_key:
+            caption = f"{caption} · открыть"
+        texts.addWidget(_text(CaptionLabel, caption, colors=_MUTED))
+        layout.addLayout(texts, 1)
+        if place.profile_key:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            set_tooltip(self, f"Открыть профиль «{place.name}» в этом пресете.")
+            set_control_accessibility(self, name=f"Открыть профиль {place.name}", description=presets_text(place.presets))
+        else:
+            set_tooltip(self, f"{place.name}: в открытом пресете такого профиля нет.")
+            set_control_accessibility(self, name=place.name, description=presets_text(place.presets))
+
+
 class StrategyDetailsView(QWidget):
     # Нажали «Применить»: стратегию выбрали так же, как щелчком в списке.
     strategy_chosen = pyqtSignal(str)
     rating_requested = pyqtSignal(str, str)
     favorite_requested = pyqtSignal(str, bool)
+    # Нажали карточку сервиса: открыть его профиль в этом пресете.
+    profile_chosen = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._details: StrategyDetails | None = None
+        self._step_rows: list[_StepRow] = []
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
@@ -192,12 +266,40 @@ class StrategyDetailsView(QWidget):
         layout.addWidget(head)
 
         self._steps_card = _Card("Что делает эта стратегия", content)
+        # Схема та же, что в экскурсии «Как пользоваться программой»: пакеты
+        # едут от вас через проверку провайдера к сайту. Она одна на страницу
+        # и показывает выбранный шаг — несколько анимаций сразу только грузили бы процессор.
+        self._scene_caption = _text(CaptionLabel, "", colors=_MUTED)
+        self._illustration = TechniqueIllustration(
+            self._steps_card, tr_fn=lambda key, default: tr_catalog(key, default=default)
+        )
+        self._steps_layout = QVBoxLayout()
+        self._steps_layout.setSpacing(8)
+        self._steps_card.body.addWidget(self._illustration)
+        self._steps_card.body.addWidget(self._scene_caption)
+        self._steps_card.body.addLayout(self._steps_layout)
+        layout.addWidget(self._steps_card)
+
         self._places_card = _Card("Где стоит в готовых пресетах", content)
+        self._places_hint = _text(CaptionLabel, "", colors=_MUTED)
+        self._places_card.body.addWidget(self._places_hint)
+        places_host = QWidget(self._places_card)
+        self._places_flow = FlowLayout(places_host, needAni=False)
+        self._places_flow.setContentsMargins(0, 0, 0, 0)
+        self._places_flow.setHorizontalSpacing(8)
+        self._places_flow.setVerticalSpacing(8)
+        self._places_card.body.addWidget(places_host)
+        layout.addWidget(self._places_card)
+
+        pair = QHBoxLayout()
+        pair.setSpacing(12)
         self._experience_card = _Card("Ваш опыт", content)
         self._facts_card = _Card("Сведения", content)
+        pair.addWidget(self._experience_card, 1)
+        pair.addWidget(self._facts_card, 1)
+        layout.addLayout(pair)
         self._args_card = _Card("Строки запуска", content)
-        for card in (self._steps_card, self._places_card, self._experience_card, self._facts_card, self._args_card):
-            layout.addWidget(card)
+        layout.addWidget(self._args_card)
         layout.addStretch(1)
 
     # ------------------------------------------------------------------
@@ -216,6 +318,18 @@ class StrategyDetailsView(QWidget):
     def _toggle_favorite(self) -> None:
         if self._details is not None:
             self.favorite_requested.emit(self._details.strategy_id, not self._details.favorite)
+
+    def _show_scene(self, row: _StepRow | None) -> None:
+        """Схема показывает выбранный шаг; у шага без схемы она убрана."""
+        scene = row.step.scene if row is not None else ""
+        self._illustration.setVisible(bool(scene))
+        self._scene_caption.setVisible(bool(scene))
+        if scene:
+            number = self._step_rows.index(row) + 1
+            self._scene_caption.setText(
+                f"Схема шага {number}: {row.step.title.lower()}. Слева вы, посередине проверка у провайдера, справа сайт."
+            )
+            self._illustration.set_scene(scene)
 
     def _copy_args(self) -> None:
         if self._details is not None:
@@ -256,25 +370,38 @@ class StrategyDetailsView(QWidget):
             # Изменилась только оценка: остальные разделы те же, не перестраиваем.
             return
 
-        self._steps_card.clear()
+        while self._steps_layout.count():
+            item = self._steps_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        self._step_rows = []
         if not steps:
-            self._steps_card.body.addWidget(_text(BodyLabel, "У стратегии нет строк обхода: трафик идёт как есть."))
+            self._steps_layout.addWidget(_text(BodyLabel, "У стратегии нет строк обхода: трафик идёт как есть."))
         for number, step in enumerate(steps, 1):
-            title = _text(BodyLabel, f"{number}. {step.title}")
-            font = title.font()
-            font.setBold(True)
-            title.setFont(font)
-            self._steps_card.body.addWidget(title)
-            self._steps_card.body.addWidget(_text(BodyLabel, step.text))
-            for note in step.notes:
-                self._steps_card.body.addWidget(_text(BodyLabel, f"• {note}", colors=_MUTED))
-            if step.caution:
-                self._steps_card.body.addWidget(_text(BodyLabel, f"Обратите внимание: {step.caution}", colors=_WARNING))
-            self._steps_card.body.addWidget(_text(CaptionLabel, step.line, colors=_MUTED, selectable=True))
+            row = _StepRow(number, step, self._steps_card)
+            if step.scene:
+                row.clicked.connect(lambda shown=row: self._show_scene(shown))
+            self._step_rows.append(row)
+            self._steps_layout.addWidget(row)
+        # Сразу видна схема первого шага, у которого она есть.
+        self._show_scene(next((row for row in self._step_rows if row.step.scene), None))
 
-        self._places_card.clear()
-        for line in places_lines(details):
-            self._places_card.body.addWidget(_text(BodyLabel, line))
+        self._places_flow.takeAllWidgets()
+        for card in self._places_card.findChildren(_PlaceCard):
+            card.deleteLater()
+        if not details.places:
+            self._places_hint.setText("В готовых пресетах эта стратегия не встречается.")
+        else:
+            opened = sum(1 for place in details.places if place.profile_key)
+            hint = f"Сервисов: {len(details.places)}."
+            if opened:
+                hint += " Нажмите карточку, чтобы открыть профиль этого сервиса в вашем пресете."
+            self._places_hint.setText(hint)
+        for place in details.places:
+            card = _PlaceCard(place, self._places_card)
+            if place.profile_key:
+                card.clicked.connect(lambda key=place.profile_key: self.profile_chosen.emit(key))
+            self._places_flow.addWidget(card)
 
         self._facts_card.clear()
         facts = [

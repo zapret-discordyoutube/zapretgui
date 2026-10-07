@@ -22,6 +22,9 @@ class StrategyStep:
     caution: str = ""
     notes: tuple[str, ...] = ()
     line: str = ""
+    # Анимированная схема приёма (ключ сцены из ui.onboarding.illustrations);
+    # пусто — схемы для этой функции нет.
+    scene: str = ""
 
 
 # функция: (название, что делает, на что обратить внимание)
@@ -88,6 +91,23 @@ _FUNCTIONS: dict[str, tuple[str, str, str]] = {
     "drop": ("Сброс пакета", "Пакет не отправляется.", ""),
     "pass": ("Без обхода", "Ничего не делает: трафик идёт как есть.", ""),
 }
+# Какой анимированной схемой показать функцию.
+_SCENES = {
+    "fake": "fake",
+    "multisplit": "multisplit",
+    "multidisorder": "multidisorder",
+    "multidisorder_legacy": "multidisorder",
+    "fakedsplit": "fakedsplit",
+    "fakemultisplit": "fakedsplit",
+    "fakeddisorder": "fakeddisorder",
+    "fakemultidisorder": "fakeddisorder",
+    "hostfakesplit": "hostfakesplit",
+    "hostfakesplit_multi": "hostfakesplit",
+    "tcpseg": "tcpseg",
+    "oob": "oob",
+    "syndata": "syndata",
+}
+
 # Эти функции шлют отдельные поддельные пакеты. Если подделку ничем не
 # «испортить», сервер примет её как настоящие данные (docs/manual.md Zapret 2).
 _SENDS_FAKES = frozenset({"fake", "fakedsplit", "fakeddisorder", "hostfakesplit", "syndata"})
@@ -216,6 +236,7 @@ def explain_strategy(args: str) -> tuple[StrategyStep, ...]:
                 caution=" ".join(part for part in (caution, *dict.fromkeys(cautions)) if part),
                 notes=tuple(notes),
                 line=line,
+                scene=_SCENES.get(function, ""),
             )
         )
     return tuple(steps)

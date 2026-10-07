@@ -783,6 +783,8 @@ class ProfileSetupPageBase(BasePage):
         self._strategy_list.strategy_rating_requested.connect(self._on_strategy_rating_requested)
         self._strategy_list.strategy_favorite_requested.connect(self._on_strategy_favorite_requested)
         self._strategy_list.details_changed.connect(self._on_strategy_details_changed)
+        # Карточка сервиса на странице подробностей открывает его профиль.
+        self._strategy_list.profile_chosen.connect(self.show_profile)
         self._strategy_stack.addWidget(self._strategy_list)
 
         # Вкладки списка и текста профиля собираются при первом открытии.

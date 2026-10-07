@@ -84,9 +84,9 @@ class ProfileSetupPayload:
     # Отметки человека у других профилей: {стратегия: (работает, не работает)}.
     # По ним список учится: что уже помогло на других сервисах, идёт первым.
     strategy_experience: dict[str, tuple[int, int]] = field(default_factory=dict)
-    # Где каждая стратегия стоит в готовых пресетах: {стратегия: ((сервис,
-    # число пресетов), ...)} — для страницы подробностей о стратегии.
-    strategy_places: dict[str, tuple[tuple[str, int], ...]] = field(default_factory=dict)
+    # Где каждая стратегия стоит в готовых пресетах: {стратегия: (StrategyPlace,
+    # ...)} — для страницы подробностей о стратегии.
+    strategy_places: dict[str, tuple] = field(default_factory=dict)
     # Общие строки пресета (до первого профиля): редактор текста профиля берёт
     # из них объявленные фейки и подключённые lua-файлы для проверки.
     preset_preamble_text: str = ""

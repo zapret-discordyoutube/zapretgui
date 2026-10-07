@@ -68,6 +68,8 @@ class ProfileStrategyListWidget(QWidget):
     # Открыта или закрыта страница подробностей: название стратегии, пусто —
     # снова виден список. Страница профиля дописывает его в строку пути.
     details_changed = pyqtSignal(str)
+    # На странице подробностей нажали карточку сервиса: открыть его профиль.
+    profile_chosen = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -104,6 +106,7 @@ class ProfileStrategyListWidget(QWidget):
         self._details_view.strategy_chosen.connect(self._on_strategy_chosen)
         self._details_view.rating_requested.connect(self.strategy_rating_requested)
         self._details_view.favorite_requested.connect(self.strategy_favorite_requested)
+        self._details_view.profile_chosen.connect(self.profile_chosen)
         self._pages.addWidget(self._details_view)
 
         self._try_panel = TryNextPanel(self)

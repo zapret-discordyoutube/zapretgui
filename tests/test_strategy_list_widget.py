@@ -28,7 +28,7 @@ from profile.strategy_list import (
     visible_rows,
 )
 from profile.strategy_state import ProfileStrategyState
-from profile.strategy_usage import StrategyUsage
+from profile.strategy_usage import StrategyPlace, StrategyUsage
 from profile.ui.strategy_list import ProfileStrategyListWidget
 from profile.ui.strategy_list import widget as widget_module
 from profile.ui.strategy_list.delegate import strategy_tooltip, twin_chip_text
@@ -299,7 +299,12 @@ class SearchAndFilterTests(_WidgetCase):
 
 
 class DetailsTests(_WidgetCase):
-    PLACES = {"fake-05": (("YouTube · видео", 9), ("Discord", 2))}
+    PLACES = {
+        "fake-05": (
+            StrategyPlace(name="YouTube · видео", presets=9, profile_key="profile:3", icon_name="simple:youtube:YT", icon_color="#FF0000"),
+            StrategyPlace(name="Discord", presets=2),
+        )
+    }
 
     def _with_details(self, **kwargs):
         widget = self._widget(**kwargs)
@@ -348,11 +353,40 @@ class DetailsTests(_WidgetCase):
         self.assertIn("Alpha v5", text)
         self.assertIn("1. Подделка", text)
         self.assertIn("Перед настоящим запросом уходит отдельный поддельный пакет", text)
-        self.assertIn("YouTube · видео — в 9 пресетах", text)
+        self.assertIn("YouTube · видео", text)
+        self.assertIn("в 9 готовых пресетах · открыть", text)
+        self.assertIn("Схема шага 1: подделка.", text)
+        self.assertEqual(widget._details_view._illustration.scene_key(), "fake")
         self.assertIn("На других профилях отмечена рабочей: 2.", text)
         self.assertIn("--lua-desync=fake:blob=x", text)
         self.assertEqual(widget._details_view._apply_button.text(), "Выбрана")
         self.assertFalse(widget._details_view._apply_button.isEnabled())
+
+    def test_service_card_opens_its_profile_only_when_preset_has_one(self) -> None:
+        from profile.ui.strategy_list.details import _PlaceCard
+
+        widget = self._with_details()
+        widget.show_details("fake-05")
+        chosen = QSignalSpy(widget.profile_chosen)
+        cards = {card.place.name: card for card in widget._details_view.findChildren(_PlaceCard)}
+
+        cards["Discord"].clicked.emit()
+        self.assertEqual(len(chosen), 0)
+        cards["YouTube · видео"].clicked.emit()
+        self.assertEqual([list(call) for call in chosen], [["profile:3"]])
+
+    def test_click_on_step_switches_the_animated_scheme(self) -> None:
+        entries = _entries()
+        entries["two-steps"] = _entry("Two steps", "--lua-desync=fake:blob=x\n--lua-desync=multidisorder:pos=2\n--lua-desync=wssize:wsize=1")
+        widget = self._widget(entries=entries)
+        widget.show_details("two-steps")
+        view = widget._details_view
+
+        self.assertEqual([row.step.scene for row in view._step_rows], ["fake", "multidisorder", ""])
+        self.assertEqual(view._illustration.scene_key(), "fake")
+        view._step_rows[1].clicked.emit()
+        self.assertEqual(view._illustration.scene_key(), "multidisorder")
+        self.assertIn("Схема шага 2", view._scene_caption.text())
 
     def test_details_buttons_ask_the_page_and_follow_new_state(self) -> None:
         widget = self._with_details()
