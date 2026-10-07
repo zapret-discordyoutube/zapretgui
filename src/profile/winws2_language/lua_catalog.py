@@ -229,8 +229,6 @@ LUA_ARGS: dict[str, LuaArgSpec] = {
         _a("ttl", "TTL фейков.", "int"),
         _a("ttl_start", "Начальный TTL фейков.", "int"),
         _a("ttl_step", "На сколько увеличивать TTL каждого следующего фейка.", "int"),
-        _a("ttl_min", "Минимальный TTL.", "int"),
-        _a("ttl_max", "Максимальный TTL.", "int"),
         _a("ttl_fallback", "TTL, если автоматический не определился (по умолчанию 8).", "int"),
         _a("split_host", "Дополнительно резать внутри имени сервера.", "flag"),
         _a("split_sni", "Дополнительно резать внутри SNI.", "flag"),
@@ -268,10 +266,6 @@ LUA_ARGS: dict[str, LuaArgSpec] = {
         _a("parts", "На сколько частей резать.", "int"),
         _a("decoys", "Сколько приманок.", "int"),
         _a("decoy_size", "Размер приманки.", "int"),
-        _a("white_blob", "«Белый» фейк: имя из --blob= или 0xHEX.", "blob"),
-        _a("before", "Сколько фейков до настоящих данных.", "int"),
-        _a("after", "Сколько фейков после настоящих данных.", "int"),
-        _a("ovl_size", "Размер перекрытия.", "int"),
         _a("no_pollution", "Пропустить первую фазу.", "flag"),
         _a("flood_count", "Сколько пакетов в потоке (по умолчанию 30).", "int"),
         _a("src_range", "Диапазон адресов источника: rfc1918 или cgn.", "enum", ("rfc1918", "cgn")),
@@ -322,9 +316,7 @@ _AUTO = ("zapret-auto.lua",)
 _OBFS = ("zapret-obfs.lua",)
 _CUSTOM_FILE = ("custom_funcs.lua",)
 _MULTISHAKE = ("zapret-multishake.lua",)
-_16KB = ("zapret-16kb.lua",)
 _SPLIT_ARGS = ("pos", "seqovl", "seqovl_pattern", "blob", "optional", "nodrop")
-_16KB_ARGS = ("blob", "white_blob", "tls_mod")
 
 
 def _f(
@@ -534,12 +526,6 @@ LUA_FUNCTIONS: tuple[LuaFunctionSpec, ...] = (
     _f("fakemultidisorder", ("fakemultidisorder.lua",), "multidisorder с фейком перед каждой частью.",
        ("fake_blob", "pos", "pattern", "seqovl", "seqovl_pattern", "blob", "optional", "tls_mod",
         "tcp_ts_up", "nodrop", "fake_count", "fake_all", "unsafe_fake"), _CUSTOM),
-    # ------------------------------------------------------- zapret-16kb.lua
-    _f("flood_white", _16KB, "Поток «белых» фейков перед данными.", ("count", "pos") + _16KB_ARGS, _CUSTOM),
-    _f("ttl_ladder", _16KB, "Фейки с TTL от ttl_min до ttl_max.", ("ttl_min", "ttl_max", "pos") + _16KB_ARGS, _CUSTOM),
-    _f("white_sandwich", _16KB, "Настоящие данные между «белыми» фейками.", ("before", "after", "pos") + _16KB_ARGS,
-       _CUSTOM),
-    _f("seqovl_white", _16KB, "Перекрытие sequence «белыми» данными.", ("ovl_size", "pos") + _16KB_ARGS, _CUSTOM),
     # ---------------------------------------------------- zapret-rst-flood.lua
     _f("rst_flood", ("zapret-rst-flood.lua",), "Поток ложных RST с подменой источника.",
        ("no_pollution", "flood_count", "src_range", "no_rst", "rst_interval", "rst_bytes", "fin_mode",

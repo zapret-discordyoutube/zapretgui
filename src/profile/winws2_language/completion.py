@@ -193,7 +193,7 @@ def _complete_lua_desync(value_prefix: str, value_start: int, analysis, context_
         doc = LUA_ARGS.get(key)
         if doc is None:
             return arg_value_start, arg_prefix, []
-        if key in {"blob", "fake_blob", "fallback", "seqovl_pattern", "pattern", "white_blob"}:
+        if key in {"blob", "fake_blob", "fallback", "seqovl_pattern", "pattern"}:
             return arg_value_start, arg_prefix, _blob_name_items(analysis, context_analysis, context)
         if doc.kind == "payload":
             body_offset = 1 if arg_prefix.startswith("~") else 0
