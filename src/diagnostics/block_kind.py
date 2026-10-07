@@ -34,6 +34,7 @@ __all__ = [
     "KIND_SNI",
     "KIND_STUB",
     "KIND_SYSTEM",
+    "KIND_NO_CONNECT",
     "KIND_UNCLEAR",
     "KIND_VOICE",
     "KINDS",
@@ -50,6 +51,8 @@ KIND_STUB = "stub"
 KIND_CERT = "cert"
 # Сайт блокируют, но чем именно — выяснить не удалось.
 KIND_UNCLEAR = "unclear"
+# Соединение не установилось, но что закрыт именно адрес, не подтверждено.
+KIND_NO_CONNECT = "noconnect"
 # Дальше — не про отдельный сайт, а про сеть и компьютер целиком.
 KIND_DNS = "dns"
 KIND_QUIC = "quic"
@@ -121,6 +124,17 @@ KINDS: dict[str, KindInfo] = {
             "устаревшей записи в hosts, антивируса или прокси.",
         ),
         KindInfo(
+            KIND_NO_CONNECT,
+            "Не удалось соединиться",
+            "нет соединения",
+            "не удалось соединиться с сервером, причина не ясна",
+            "Соединение с сервером не установилось, но подтверждения, что закрыт сам адрес, нет. "
+            "Так бывает из-за устаревшей записи в файле hosts, сбоя сети в момент проверки, антивируса "
+            "или когда сайт на самом деле открывается другим путём.",
+            "Повторите проверку. Если повторяется — посмотрите записи этого сайта в «Редакторе hosts» "
+            "и попробуйте другой DNS.",
+        ),
+        KindInfo(
             KIND_UNCLEAR,
             "Блокировка, способ не определён",
             "способ не определён",
@@ -185,24 +199,29 @@ KIND_ORDER: tuple[str, ...] = (
     KIND_STUB,
     KIND_CERT,
     KIND_UNCLEAR,
+    KIND_NO_CONNECT,
     KIND_DNS,
     KIND_QUIC,
     KIND_VOICE,
     KIND_OTHER,
 )
 
-# Исходы уточняющих проб (``diagnostics.block_cause``), которые говорят «закрыт адрес».
-_ADDRESS_CAUSES = ("by_address", "address_closed", "address_silent")
+# Соединение установилось, но шифрование не проходит ни с каким именем: это
+# прямое сравнение на одном адресе, поэтому вывод «по адресу» здесь законен.
+_CAUSE_BY_ADDRESS = "by_address"
 
 
 def kind_info(kind: str) -> KindInfo:
     return KINDS.get(kind) or KINDS[KIND_OTHER]
 
 
-def site_kind(reach: str, cause: str = "") -> str:
+def site_kind(reach: str, cause: str = "", *, address_confirmed: bool = False) -> str:
     """Вид блокировки сайта по исходу проверки. Пусто — сайт открывается или вывода нет.
 
     ``reach`` — значение ``ReachState``, ``cause`` — код причины из уточняющих проб.
+    ``address_confirmed`` — несоединение перепроверено: не ответил ни один адрес
+    сайта, и другим путём (IPv6, QUIC) он тоже не открылся. Без этого одно
+    неудачное соединение «баном по адресу» не называется: причин у него много.
     """
     if reach in ("ok", "unknown", "no_address", ""):
         return ""
@@ -215,8 +234,10 @@ def site_kind(reach: str, cause: str = "") -> str:
         return KIND_CERT
     if cause == "by_name":
         return KIND_SNI
-    if cause in _ADDRESS_CAUSES or reach == "ip_block":
+    if cause == _CAUSE_BY_ADDRESS:
         return KIND_IP
+    if reach == "ip_block":
+        return KIND_IP if address_confirmed else KIND_NO_CONNECT
     if reach == "dpi":
         return KIND_UNCLEAR
     return ""

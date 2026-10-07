@@ -41,8 +41,29 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from diagnostics import block_cause, block_kind, ipv6_check, quic_probe, system_state, upload_probe, volume_probe
+from diagnostics import (
+    block_cause,
+    block_kind,
+    ipv6_check,
+    protocol_probe,
+    quic_probe,
+    system_state,
+    upload_probe,
+    volume_probe,
+)
+from diagnostics.services import (
+    GOOGLEVIDEO_FALLBACK_HOST,
+    SCOPE_ALL,
+    SCOPE_FULL,
+    SCOPE_MAIN,
+    SCOPE_TITLES as _SCOPE_TITLES,
+    YOUTUBE_HOST,
+    Service,
+    Target,
+    build_services,
+)
 from diagnostics.tls_probe import (
+    KIND_CONNECT,
     KIND_CANCELLED,
     KIND_CERT,
     ProbeResult,
@@ -78,14 +99,7 @@ from utils.windows_dns_query import (
 )
 
 __all__ = [
-    "SCOPE_ALL",
     "PROGRESS_STEPS",
-    "SCOPE_FULL",
-    "SCOPE_MAIN",
-    "SERVICES",
-    "Service",
-    "Target",
-    "build_services",
     "run_blockcheck",
     "run_dns_check",
 ]
@@ -102,11 +116,22 @@ DOH_TIMEOUT = 5.0
 HTTPS_TIMEOUT = 5.0
 READ_TIMEOUT = 3.0
 REACH_ATTEMPTS = 2
+# Сколько разных адресов сайта пробовать, прежде чем сказать «не открывается».
+# Браузер перебирает все адреса из ответа DNS; у крупных сайтов их несколько,
+# и закрытым бывает только один.
+REACH_ADDRESSES = 4
+# Пауза перед повтором на единственном адресе: потерянный пакет не должен
+# выглядеть блокировкой.
+RETRY_PAUSE_S = 1.0
+# Сколько видеосерверов YouTube пробовать: плеер тоже переключается на запасные.
+VIDEO_SERVERS = 3
 DISCOVERY_TIMEOUT = 6.0
 # Верхняя граница на всю проверку: дальше недопроверенное помечается как
 # «нет ответа», а не подвешивает окно. Для «Всех сайтов» — дольше: там ещё
 # голосовые серверы и загрузка файлов для проверки обрыва.
 RUN_DEADLINE = 30.0
+# Сколько сайтов проверять одновременно.
+SITES_AT_ONCE = 14
 RUN_DEADLINE_ALL = 45.0
 # Полная проверка ждёт ещё DNS-серверы и поиск места фильтра.
 RUN_DEADLINE_FULL = 120.0
@@ -129,50 +154,12 @@ DNS_TYPE_AAAA = TYPE_AAAA
 
 _WATCH_PAGE = "/watch?v=jNQXAC9IVRw&hl=en"
 _WATCH_PAGE_MAX_BYTES = 2_000_000
-YOUTUBE_HOST = "www.youtube.com"
-GOOGLEVIDEO_FALLBACK_HOST = "redirector.googlevideo.com"
 
 SOURCE_HOSTS = "hosts"
 SOURCE_SYSTEM = "system"
 SOURCE_REFERENCE = "reference"
 
 
-@dataclass(frozen=True, slots=True)
-class Target:
-    host: str
-    purpose: str
-    path: str = "/"
-    read_body: bool = False
-    # Главный адрес сервиса: если он не открывается, не открывается сервис.
-    main: bool = False
-    # Хост видеосервера каждый раз узнаётся у YouTube: он свой у каждого
-    # провайдера и меняется со временем.
-    discover_googlevideo: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class Service:
-    key: str
-    label: str
-    targets: tuple[Target, ...]
-    # Контрольный сайт: его почти никогда не блокируют. Если не открываются
-    # даже контрольные — дело в подключении, а не в блокировках.
-    control: bool = False
-    # Российский контрольный сайт. Если открываются только такие, а зарубежные
-    # контрольные нет — провайдер пропускает лишь разрешённые адреса.
-    domestic: bool = False
-
-
-def _site(key: str, label: str, host: str, *, control: bool = False, domestic: bool = False) -> Service:
-    return Service(
-        key, label, (Target(host, "сайт", read_body=True, main=True),), control=control, domestic=domestic
-    )
-
-
-SCOPE_MAIN = "main"
-SCOPE_ALL = "all"
-# Всё, что в «Все сайты», плюс DNS-серверы и поиск места фильтра.
-SCOPE_FULL = "full"
 # Шаги хода проверки: что и в каком порядке показывает экран, пока она идёт.
 STEP_SITES = "sites"
 STEP_HOSTINGS = "hostings"
@@ -182,81 +169,13 @@ STEP_SYSTEM = "system"
 STEP_DNS_SERVERS = "dns_servers"
 STEP_FILTER = "filter"
 PROGRESS_STEPS = (STEP_SITES, STEP_HOSTINGS, STEP_VOICE, STEP_IPV6, STEP_SYSTEM, STEP_DNS_SERVERS, STEP_FILTER)
-_SCOPE_TITLES = {SCOPE_MAIN: "Discord и YouTube", SCOPE_ALL: "Все сайты", SCOPE_FULL: "Полная проверка"}
-
-# «Discord и YouTube» — то, ради чего Zapret ставят чаще всего.
-SERVICES: dict[str, Service] = {
-    "discord": Service(
-        "discord",
-        "Discord",
-        (
-            Target("discord.com", "сайт и вход", read_body=True, main=True),
-            Target("gateway.discord.gg", "чат и статусы"),
-            Target("cdn.discordapp.com", "картинки и файлы"),
-        ),
-    ),
-    "youtube": Service(
-        "youtube",
-        "YouTube",
-        (
-            Target(YOUTUBE_HOST, "сайт", read_body=True, main=True),
-            Target("i.ytimg.com", "превью видео", path="/generate_204"),
-            Target(
-                GOOGLEVIDEO_FALLBACK_HOST,
-                "видео",
-                path="/generate_204",
-                discover_googlevideo=True,
-            ),
-        ),
-    ),
-}
-
-# Добавляются в режиме «Все сайты».
-EXTRA_SERVICES: tuple[Service, ...] = (
-    Service(
-        "telegram",
-        "Telegram",
-        (
-            Target("telegram.org", "сайт", read_body=True, main=True),
-            Target("web.telegram.org", "веб-версия"),
-        ),
-    ),
-    _site("instagram", "Instagram", "www.instagram.com"),
-    _site("facebook", "Facebook", "www.facebook.com"),
-    _site("x", "X (Twitter)", "x.com"),
-    _site("linkedin", "LinkedIn", "www.linkedin.com"),
-    _site("spotify", "Spotify", "www.spotify.com"),
-    _site("rutracker", "RuTracker", "rutracker.org"),
-    _site("google", "Google", "www.google.com", control=True),
-    _site("cloudflare", "Cloudflare", "www.cloudflare.com", control=True),
-    _site("yandex", "Яндекс", "ya.ru", control=True, domestic=True),
-    _site("vk", "ВКонтакте", "vk.com", control=True, domestic=True),
-)
-
-
-def build_services(scope: str, user_domains=()) -> dict[str, Service]:
-    """Сервисы для проверки: основные, при «Все сайты» — остальные и свои домены."""
-    services = dict(SERVICES)
-    if str(scope or "").strip().lower() not in (SCOPE_ALL, SCOPE_FULL):
-        # Свои домены — часть режима «Все сайты»: так написано на экране.
-        return services
-    for service in EXTRA_SERVICES:
-        services[service.key] = service
-    known_hosts = {target.host for service in services.values() for target in service.targets}
-    for domain in user_domains or ():
-        host = str(domain or "").strip().lower().rstrip(".")
-        if host and host not in known_hosts:
-            known_hosts.add(host)
-            services[f"user:{host}"] = _site(f"user:{host}", host, host)
-    return services
-
-
 # Сколько потоков нужно одной цели в худшем случае: сама цель, три запроса к
 # DNS системы, два эталона (A и AAAA) по запросу на каждый эталонный сервер и
-# несколько HTTPS-запросов, четыре пробы уточнения причины и три пакета QUIC. Задачи ждут друг
+# несколько HTTPS-запросов, четыре пробы уточнения причины, три пакета QUIC и четыре
+# потока на TLS 1.2 / TLS 1.3 / HTTP. Задачи ждут друг
 # друга внутри одного пула, поэтому
 # нехватка потоков — это не «медленнее», а взаимная блокировка.
-_WORKERS_PER_TARGET = 15 + 2 * len(REFERENCE_RESOLVERS)
+_WORKERS_PER_TARGET = 19 + 2 * len(REFERENCE_RESOLVERS)
 
 
 class _Stopped(Exception):
@@ -296,11 +215,41 @@ class _Probe:
     # Проходит ли по одному соединению больше 16 КБ. None — не проверяли:
     # сайт не открылся или главная страница и так больше.
     volume: volume_probe.VolumeVerdict | None = None
+    # Тот же адрес по TLS 1.2, TLS 1.3 и HTTP отдельно. Пусто — не проверяли.
+    protocols: tuple[protocol_probe.ProtocolLine, ...] = ()
+    # Все попытки основного запроса по порядку: (адрес, исход).
+    tried: tuple[tuple[str, str], ...] = ()
+    # Адрес из файла hosts не ответил, а настоящий адрес сайта открылся.
+    hosts_stale: bool = False
+
+    @property
+    def address_confirmed(self) -> bool:
+        """Несоединение перепроверено: молчат все адреса сайта, и другим путём он не открылся.
+
+        Только тогда оно называется «баном по адресу». Одно неудачное соединение
+        бывает из-за устаревшей записи в hosts, потерянного пакета или антивируса.
+        """
+        if not self.tried or any(kind != KIND_CONNECT for _ip, kind in self.tried):
+            return False
+        # Нужна перепроверка: второй адрес или повтор на том же после паузы.
+        if len(self.tried) < 2:
+            return False
+        # Адреса только из hosts — это проверка записи в hosts, а не сайта.
+        if self.hosts_ips and {ip for ip, _kind in self.tried} <= set(self.hosts_ips):
+            return False
+        # QUIC к тому же адресу отвечает — дорога до адреса открыта, браузер сайт откроет.
+        if self.quic is not None and self.quic.code == quic_probe.QUIC_OK:
+            return False
+        return True
 
     @property
     def kind(self) -> str:
         """Вид блокировки: по адресу, по имени сайта, обрыв после 16 КБ… Пусто — сайт открывается."""
-        return block_kind.site_kind(self.reach_state.value, self.cause.code if self.cause else "")
+        return block_kind.site_kind(
+            self.reach_state.value,
+            self.cause.code if self.cause else "",
+            address_confirmed=self.address_confirmed,
+        )
 
 
 class _Run:
@@ -444,8 +393,8 @@ def _get(run: _Run, host: str, ip: str, path: str, *, read_limit: int = 0) -> Pr
     )
 
 
-def _discover_googlevideo(run: _Run) -> tuple[str, str]:
-    """Хост видеосервера, который YouTube выдаёт этой сети. (хост, пояснение)."""
+def _discover_googlevideo(run: _Run) -> tuple[tuple[str, ...], str]:
+    """Видеосерверы, которые YouTube выдаёт этой сети. (хосты, пояснение)."""
     from blockcheck.googlevideo_discovery import extract_googlevideo_hosts
 
     found: list[str] = []
@@ -455,7 +404,7 @@ def _discover_googlevideo(run: _Run) -> tuple[str, str]:
             return False
         hosts = extract_googlevideo_hosts(body.decode("utf-8", errors="ignore"))
         if hosts:
-            found.append(hosts[0])
+            found.extend(hosts[:VIDEO_SERVERS])
             return True
         return False
 
@@ -479,12 +428,12 @@ def _discover_googlevideo(run: _Run) -> tuple[str, str]:
             cancel=run.probe_cancel,
         )
         if found:
-            return found[0], "адрес видеосервера получен от YouTube"
+            return tuple(found), "адрес видеосервера получен от YouTube"
         if result.ok:
-            return GOOGLEVIDEO_FALLBACK_HOST, "YouTube не назвал видеосервер, поэтому проверяем общий адрес"
+            return (GOOGLEVIDEO_FALLBACK_HOST,), "YouTube не назвал видеосервер, поэтому проверяем общий адрес"
         if result.kind == KIND_CANCELLED:
             break
-    return GOOGLEVIDEO_FALLBACK_HOST, "страница YouTube не открылась, поэтому проверяем общий адрес видеосерверов"
+    return (GOOGLEVIDEO_FALLBACK_HOST,), "страница YouTube не открылась, поэтому проверяем общий адрес видеосерверов"
 
 
 def _reach_order(probe: _Probe, *, local_ok: bool) -> tuple[list[str], str]:
@@ -501,6 +450,26 @@ def _reach_order(probe: _Probe, *, local_ok: bool) -> tuple[list[str], str]:
     return list(probe.reference_ips), SOURCE_REFERENCE
 
 
+def _reach_candidates(probe: _Probe, order: list[str]) -> list[str]:
+    """Все известные адреса сайта: сначала те, что выбрал ``_reach_order``, затем остальные.
+
+    Запись в hosts или ответ DNS могут вести на неотвечающий адрес — тогда
+    сайт перепроверяется по остальным, как это сделал бы браузер.
+    """
+    seen: list[str] = []
+    for ip in (*order, *probe.dns.ips, *probe.reference_ips):
+        if ip and ip not in seen:
+            seen.append(ip)
+    return seen
+
+
+def _pause(run: _Run, seconds: float) -> None:
+    """Пауза, которую снимает «Стоп» и общий лимит времени."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline and not run.dns_cancelled():
+        time.sleep(0.05)
+
+
 def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
     local = probe.local_check
     order, source = _reach_order(probe, local_ok=bool(local and local.ok))
@@ -512,29 +481,43 @@ def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
             probe.reach = ProbeResult(ip="", kind=KIND_CANCELLED)
         return
 
+    def _one(ip: str) -> ProbeResult:
+        return _get(run, probe.host, ip, probe.target.path, read_limit=read_limit)
+
+    def _settled(items: list[ProbeResult]) -> bool:
+        return any(item.ok or item.kind == KIND_CANCELLED for item in items)
+
     attempts: list[ProbeResult] = []
     if local is not None and local.ip == order[0]:
         attempts.append(local)
-    while len(attempts) < REACH_ATTEMPTS:
-        last = attempts[-1] if attempts else None
-        if last is not None and (last.ok or last.kind == KIND_CANCELLED):
-            break
-        if run.dns_cancelled():
-            break
-        tried = {item.ip for item in attempts}
-        untried = [item for item in order if item not in tried]
-        # Чужой сертификат на одном адресе — повод попробовать другой, но не
-        # тот же самый ещё раз.
-        if last is not None and last.kind == KIND_CERT and not untried:
-            break
-        ip = untried[0] if untried else order[0]
-        attempts.append(_get(run, probe.host, ip, probe.target.path, read_limit=read_limit))
-
-    probe.attempts = len(attempts)
-    if not attempts:
+    elif run.dns_cancelled():
+        # Проверку прервали до первого запроса: это «не успели», а не «не открывается».
         probe.reach = ProbeResult(ip="", kind=KIND_CANCELLED)
         return
-    probe.reach = next((item for item in attempts if item.ok), attempts[-1])
+    else:
+        attempts.append(_one(order[0]))
+
+    candidates = _reach_candidates(probe, order)
+    others = [ip for ip in candidates if ip != attempts[0].ip][: REACH_ADDRESSES - 1]
+    # Чужой сертификат на адресе — повод попробовать другой адрес, но не тот же ещё раз.
+    if not _settled(attempts) and not run.dns_cancelled():
+        if others:
+            # Остальные адреса пробуются разом: ждать их по очереди — это десятки секунд.
+            futures = [run.submit(_one, ip) for ip in others]
+            attempts.extend(future.result() for future in futures)
+        elif attempts[0].kind != KIND_CERT:
+            _pause(run, RETRY_PAUSE_S)
+            if not run.dns_cancelled():
+                attempts.append(_one(order[0]))
+
+    probe.attempts = len(attempts)
+    probe.tried = tuple((item.ip, item.kind) for item in attempts if item.kind != KIND_CANCELLED)
+    opened = next((item for item in attempts if item.ok), None)
+    probe.reach = opened or attempts[0]
+    if opened is not None and opened.ip not in order:
+        # Открылся адрес не из того источника, с которого начинали.
+        probe.reach_source = SOURCE_SYSTEM if opened.ip in probe.dns.ips else SOURCE_REFERENCE
+        probe.hosts_stale = source == SOURCE_HOSTS
 
     # Браузер сам уходит на IPv6, если IPv4 не отвечает: без этой попытки
     # проверка показала бы ❌ там, где сайт у пользователя открывается.
@@ -544,12 +527,12 @@ def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
         and not last.ok
         and last.kind not in (KIND_CANCELLED, KIND_CERT)
         and probe.reference_ipv6
-        and source != SOURCE_HOSTS
         and not run.dns_cancelled()
     ):
-        probe.ipv6_result = _get(run, probe.host, probe.reference_ipv6[0], probe.target.path, read_limit=read_limit)
+        probe.ipv6_result = _one(probe.reference_ipv6[0])
         if probe.ipv6_result.ok:
             probe.reach = probe.ipv6_result
+            probe.hosts_stale = source == SOURCE_HOSTS
 
 
 def _merge_dns_answers(answers: list[DnsAnswer]) -> tuple[DnsAnswer, int]:
@@ -571,11 +554,23 @@ def _merge_dns_answers(answers: list[DnsAnswer]) -> tuple[DnsAnswer, int]:
 
 
 def _probe_target(run: _Run, target: Target, service: str, *, full: bool, volume: bool = False) -> _Probe:
-    host = target.host
-    discovery_note = ""
-    if target.discover_googlevideo:
-        host, discovery_note = _discover_googlevideo(run)
+    if not target.discover_googlevideo:
+        return _probe_host(run, target, service, target.host, "", full=full, volume=volume)
+    hosts, note = _discover_googlevideo(run)
+    first = probe = _probe_host(run, target, service, hosts[0], note, full=full, volume=volume)
+    # Один видеосервер не ответил — плеер взял бы следующий. Проверяем так же.
+    for host in hosts[1:]:
+        if probe.reach_state == ReachState.OK or run.dns_cancelled():
+            break
+        probe = _probe_host(
+            run, target, service, host, f"{note}; первый видеосервер не ответил, проверен запасной", full=full, volume=volume
+        )
+    return probe if probe.reach_state == ReachState.OK else first
 
+
+def _probe_host(
+    run: _Run, target: Target, service: str, host: str, discovery_note: str, *, full: bool, volume: bool = False
+) -> _Probe:
     probe = _Probe(target=target, service=service, host=host, discovery_note=discovery_note)
     read_limit = BODY_PROBE_BYTES if (full and target.read_body) else 0
 
@@ -634,12 +629,23 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool, volume
         # Пакеты QUIC уходят сразу, а ждём их после уточнения причины: обе
         # проверки идут одновременно.
         quic_future = _start_quic(run, probe)
+        protocols_future = _start_protocols(run, probe)
         _refine_cause(run, probe)
         if volume:
             _check_volume(run, probe)
         if quic_future is not None:
             probe.quic = quic_probe.judge(quic_future.result())
+        if protocols_future is not None:
+            probe.protocols = protocol_probe.judge(protocols_future.result())
     return probe
+
+
+def _start_protocols(run: _Run, probe: _Probe) -> Future | None:
+    """TLS 1.2, TLS 1.3 и HTTP — по тому же адресу, к которому шёл основной запрос."""
+    result = probe.reach
+    if result is None or not result.ip or run.dns_cancelled():
+        return None
+    return run.submit(protocol_probe.collect, probe.host, result.ip, submit=run.submit, cancel=run.probe_cancel)
 
 
 def _start_quic(run: _Run, probe: _Probe) -> Future | None:
@@ -724,11 +730,16 @@ def _reach_text(probe: _Probe) -> str:
         tls = f", {result.tls_version.replace('TLSv', 'TLS ')}" if result.tls_version else ""
         if ":" in result.ip:
             return f"открывается по IPv6, по IPv4 — нет ({result.elapsed_ms:.0f} мс{tls}, {result.ip})"
-        return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source})"
+        stale = " — адрес из файла hosts не ответил, запись в нём устарела" if probe.hosts_stale else ""
+        return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source}){stale}"
     text = _fail_text(probe)
     if result is None or not result.ip:
         return text
-    tries = f", попыток: {probe.attempts}" if probe.attempts > 1 else ""
+    addresses = len({ip for ip, _kind in probe.tried})
+    if addresses > 1:
+        tries = f", не ответил ни один из {addresses} адресов"
+    else:
+        tries = f", попыток: {probe.attempts}" if probe.attempts > 1 else ""
     ipv6 = ", по IPv6 тоже не открылся" if probe.ipv6_result is not None else ""
     return f"{text} ({result.ip}{source}{tries}{ipv6})"
 
@@ -890,10 +901,14 @@ def _run_probes(
     total = sum(len(service.targets) for service in services.values())
     lock = threading.Lock()
     done = [0]
+    # Десятки сайтов разом — это сотни запросов к эталонным DNS-серверам в одну
+    # секунду: они начинают отказывать, и это выглядело бы как блокировка.
+    gate = threading.BoundedSemaphore(SITES_AT_ONCE)
 
     def _probe(*args, **kwargs) -> _Probe:
         try:
-            return _probe_target(*args, **kwargs)
+            with gate:
+                return _probe_target(*args, **kwargs)
         finally:
             if on_done is not None:
                 with lock:
@@ -975,6 +990,17 @@ def _target_report(probe: _Probe) -> dict:
         "cause_text": _sentence(probe.cause.text) if probe.cause else "",
         "quic": probe.quic.code if probe.quic else "",
         "quic_text": probe.quic.text if probe.quic else "",
+        # Тот же адрес по TLS 1.2, TLS 1.3 и HTTP отдельно.
+        "protocols": [
+            {"key": line.key, "title": line.title, "state": line.state, "word": line.word, "text": line.text,
+             "ms": None if line.ms is None else round(line.ms, 1)}
+            for line in probe.protocols
+        ],
+        "address": probe.reach.ip if probe.reach is not None else "",
+        # Какие адреса сайта пробовали и чем кончилось: видно, на чём держится вывод.
+        "tried": [{"address": ip, "result": kind} for ip, kind in probe.tried],
+        "address_confirmed": probe.address_confirmed,
+        "hosts_stale": probe.hosts_stale,
         "note": probe.discovery_note,
     }
 

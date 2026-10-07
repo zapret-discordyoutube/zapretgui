@@ -16,10 +16,10 @@ class SiteKindTests(unittest.TestCase):
         cases = {
             ("dpi", "by_name"): bk.KIND_SNI,
             ("dpi", "by_address"): bk.KIND_IP,
-            ("ip_block", "address_closed"): bk.KIND_IP,
-            ("ip_block", "address_silent"): bk.KIND_IP,
-            # Уточнить не удалось: отказ соединения сам говорит про адрес, обрыв на шифровании — нет.
-            ("ip_block", ""): bk.KIND_IP,
+            # Соединение не установилось, но перепроверки нет: «баном по адресу» это не называется.
+            ("ip_block", "address_closed"): bk.KIND_NO_CONNECT,
+            ("ip_block", "address_silent"): bk.KIND_NO_CONNECT,
+            ("ip_block", ""): bk.KIND_NO_CONNECT,
             ("dpi", ""): bk.KIND_UNCLEAR,
             ("freeze", ""): bk.KIND_CUT,
             ("cert", ""): bk.KIND_CERT,
@@ -27,6 +27,12 @@ class SiteKindTests(unittest.TestCase):
         for (reach, cause), kind in cases.items():
             with self.subTest(reach=reach, cause=cause):
                 self.assertEqual(bk.site_kind(reach, cause), kind)
+        # Перепроверка подтвердила: молчат все адреса сайта — тогда это адрес.
+        for cause in ("", "address_closed", "address_silent"):
+            self.assertEqual(bk.site_kind("ip_block", cause, address_confirmed=True), bk.KIND_IP)
+        # Подтверждение ничего не меняет там, где вид и так известен.
+        self.assertEqual(bk.site_kind("dpi", "by_name", address_confirmed=True), bk.KIND_SNI)
+        self.assertEqual(bk.site_kind("ok", "", address_confirmed=True), "")
 
     def test_block_page_is_direct_evidence_and_wins(self) -> None:
         for reach in ("dpi", "ip_block", "freeze"):
@@ -93,7 +99,10 @@ class HeadlineNamesTheKindTests(unittest.TestCase):
     def test_without_refined_kind_reach_alone_decides(self) -> None:
         self.assertEqual(self._verdict(ReachState.DPI).kind, bk.KIND_UNCLEAR)
         self.assertIn("соединение блокирует провайдер", self._verdict(ReachState.DPI).headline)
-        self.assertEqual(self._verdict(ReachState.IP_BLOCK).kind, bk.KIND_IP)
+        # Одно несоединение — не «бан по адресу»: причина не ясна, пока нет перепроверки.
+        self.assertEqual(self._verdict(ReachState.IP_BLOCK).kind, bk.KIND_NO_CONNECT)
+        self.assertIn("причина не ясна", self._verdict(ReachState.IP_BLOCK).headline)
+        self.assertNotIn("заблокирован", self._verdict(ReachState.IP_BLOCK).headline)
 
     def test_open_site_has_no_kind(self) -> None:
         self.assertEqual(self._verdict(ReachState.OK).kind, "")

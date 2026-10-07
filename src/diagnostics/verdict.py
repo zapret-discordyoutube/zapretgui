@@ -200,7 +200,7 @@ def describe_reach(result: ProbeResult | None, *, timeout: float = 0.0) -> str:
     if state == ReachState.CERT:
         return f"чужой сертификат ({result.cert_problem or 'не прошёл проверку'}) — трафик перехватывает антивирус, прокси или провайдер"
     if state == ReachState.IP_BLOCK:
-        return "сервер не отвечает на подключение — адрес заблокирован или нет сети"
+        return "не удалось соединиться с сервером"
     if result.kind == KIND_TLS:
         return "соединение рвётся при установке шифрования — так режет DPI"
     if result.kind == KIND_RESET:
@@ -283,6 +283,10 @@ _ADVICE_HOSTS = (
     "адрес в ней устарел."
 )
 _ADVICE_IP = "Серверы недоступны по адресу. Zapret в таком случае помогает не всегда — попробуйте другой DNS или VPN."
+_ADVICE_NO_CONNECT = (
+    "Повторите проверку: соединиться не удалось, но подтверждения, что закрыт сам адрес, нет. "
+    "Если повторяется — посмотрите записи этого сайта в «Редакторе hosts» и попробуйте другой DNS."
+)
 
 
 def _cert_cause(items: list[TargetOutcome]) -> DnsState | None:
@@ -333,7 +337,7 @@ def _advice_for(
             return (_ADVICE_START,)
         return (_ADVICE_STRATEGY_OR_ADDRESS,) if kind == KIND_IP else (_ADVICE_STRATEGY,)
     if ReachState.IP_BLOCK in states:
-        return (_ADVICE_IP,)
+        return (_ADVICE_IP,) if kind == KIND_IP else (_ADVICE_NO_CONNECT,)
     return ("Повторите проверку через минуту.",)
 
 

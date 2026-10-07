@@ -22,6 +22,7 @@ from __future__ import annotations
 import socket
 import ssl
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -48,6 +49,8 @@ __all__ = [
     "HELLO_CONNECT",
     "HELLO_GARBAGE",
     "HELLO_OK",
+    "TLS_1_2",
+    "TLS_1_3",
     "HELLO_RESET",
     "HELLO_TIMEOUT",
     "NEUTRAL_NAME",
@@ -108,6 +111,8 @@ _STUB_MARKERS = (
 class HelloResult:
     kind: str
     detail: str = ""
+    # За сколько установилось шифрование. None — не установилось.
+    ms: float | None = None
 
     @property
     def answered(self) -> bool:
@@ -145,28 +150,36 @@ class Cause:
     confident: bool = False
 
 
+TLS_1_2 = "1.2"
+TLS_1_3 = "1.3"
+_TLS_VERSIONS = {TLS_1_2: ssl.TLSVersion.TLSv1_2, TLS_1_3: ssl.TLSVersion.TLSv1_3}
+
 _context_lock = threading.Lock()
-_context: ssl.SSLContext | None = None
+# Версия шифрования ("" — любая) → готовый клиент.
+_contexts: dict[str, ssl.SSLContext] = {}
 
 
-def _hello_context() -> ssl.SSLContext:
+def _hello_context(version: str = "") -> ssl.SSLContext:
     """Тот же клиент, что у основной проверки, но без проверки сертификата.
 
     Сертификат здесь не важен: с посторонним именем сервер и должен
-    предъявить «не тот». Важно одно — ответил ли он вообще.
+    предъявить «не тот». Важно одно — ответил ли он вообще. ``version`` —
+    разрешить только одну версию шифрования (``TLS_1_2`` или ``TLS_1_3``).
     """
-    global _context
     with _context_lock:
-        if _context is None:
+        context = _contexts.get(version)
+        if context is None:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
+            if version in _TLS_VERSIONS:
+                context.minimum_version = context.maximum_version = _TLS_VERSIONS[version]
             try:
                 context.set_alpn_protocols(["http/1.1"])
             except (NotImplementedError, ssl.SSLError):
                 pass
-            _context = context
-        return _context
+            _contexts[version] = context
+        return context
 
 
 def _hello_failure(error: ssl.SSLError) -> HelloResult:
@@ -188,9 +201,15 @@ def tls_hello(
     port: int = 443,
     timeout: float = HELLO_TIMEOUT_S,
     cancel: SocketCancel | None = None,
+    version: str = "",
 ) -> HelloResult:
-    """Начинает шифрованное соединение с ``ip``, называя имя ``name`` (None — без имени)."""
+    """Начинает шифрованное соединение с ``ip``, называя имя ``name`` (None — без имени).
+
+    ``version`` — только этой версией шифрования (``TLS_1_2`` / ``TLS_1_3``).
+    """
     token = cancel or SocketCancel()
+    # Клиент готовится до отсчёта времени: его создание бывает небыстрым.
+    context = _hello_context(version)
     sock: socket.socket | None = None
     wrapped: ssl.SSLSocket | None = None
     connected = False
@@ -201,11 +220,12 @@ def tls_hello(
         sock.settimeout(timeout)
         sock.connect((ip, int(port)))
         connected = True
-        wrapped = _hello_context().wrap_socket(sock, server_hostname=name, do_handshake_on_connect=False)
+        started = time.perf_counter()
+        wrapped = context.wrap_socket(sock, server_hostname=name, do_handshake_on_connect=False)
         token.track(wrapped)
         wrapped.settimeout(timeout)
         wrapped.do_handshake()
-        return HelloResult(HELLO_OK)
+        return HelloResult(HELLO_OK, ms=(time.perf_counter() - started) * 1000.0)
     except (socket.timeout, TimeoutError):
         if token.cancelled:
             return HelloResult(HELLO_CANCELLED)
@@ -340,17 +360,15 @@ def judge(facts: CauseFacts) -> Cause | None:
     if result.kind == KIND_CONNECT and result.stage == STAGE_CONNECT:
         if facts.http is not None and facts.http.status is not None:
             # Тот же адрес ответил по обычному порту: сервер жив, дорога до него есть.
+            # Наблюдение, а не вывод: так выглядит и закрытый порт, и чужой адрес из hosts.
             return Cause(
                 CAUSE_ADDRESS_CLOSED,
-                "тот же адрес отвечает по обычному порту 80, а шифрованное соединение (порт 443) "
-                "не принимает — на этом адресе закрыт именно защищённый доступ",
-                confident=True,
+                "тот же адрес отвечает по обычному порту 80, а соединение с портом 443 не устанавливается",
             )
         if facts.ping_ok:
             return Cause(
                 CAUSE_ADDRESS_CLOSED,
-                "адрес отвечает на пинг, но соединение не принимает — он закрыт для соединений "
-                "(так выглядит блокировка по адресу и режим «белых списков»)",
+                "адрес отвечает на пинг, но соединение с портом 443 не устанавливается",
             )
         if facts.ping_ok is False:
             return Cause(CAUSE_ADDRESS_SILENT, "адрес не отвечает совсем — ни на соединение, ни на пинг")

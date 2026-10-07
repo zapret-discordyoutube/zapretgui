@@ -259,9 +259,13 @@ class JudgeTests(unittest.TestCase):
 
         self.assertEqual(bc.judge(_facts(refused, ping_ok=True)).code, bc.CAUSE_ADDRESS_CLOSED)
         self.assertEqual(bc.judge(_facts(refused, ping_ok=False)).code, bc.CAUSE_ADDRESS_SILENT)
-        # Тот же адрес ответил по порту 80: сервер жив, закрыт именно защищённый доступ.
+        # Тот же адрес ответил по порту 80. Это наблюдение, а не доказательство: так же
+        # выглядит чужой адрес из hosts — поэтому вывод неуверенный и без слов о блокировке.
         by_port = bc.judge(_facts(refused, ping_ok=False, http=bc.HttpFacts(status=301)))
-        self.assertEqual((by_port.code, by_port.confident), (bc.CAUSE_ADDRESS_CLOSED, True))
+        self.assertEqual((by_port.code, by_port.confident), (bc.CAUSE_ADDRESS_CLOSED, False))
+        for cause in (by_port, bc.judge(_facts(refused, ping_ok=True))):
+            self.assertNotIn("блокиров", cause.text)
+            self.assertNotIn("закрыт", cause.text)
         self.assertIn("порту 80", by_port.text)
         # Пинга в системе нет — сказать нечего.
         self.assertIsNone(bc.judge(_facts(refused, ping_ok=None)))

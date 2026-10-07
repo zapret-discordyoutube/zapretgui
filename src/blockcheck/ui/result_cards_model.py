@@ -111,7 +111,43 @@ _SITE_ICONS = {
     "cloudflare": "fa5b.cloudflare",
     "yandex": "fa5b.yandex",
     "vk": "fa5b.vk",
+    "whatsapp": "fa5b.whatsapp",
+    "signal": "fa5s.comment-dots",
+    "messenger": "fa5b.facebook-messenger",
+    "twitch": "fa5b.twitch",
+    "soundcloud": "fa5b.soundcloud",
+    "dailymotion": "fa5b.dailymotion",
+    "patreon": "fa5b.patreon",
+    "github": "fa5b.github",
+    "docker": "fa5b.docker",
+    "chatgpt": "fa5s.robot",
+    "deepl": "fa5s.language",
+    "canva": "fa5s.palette",
+    "coursera": "fa5s.graduation-cap",
+    "proton": "fa5s.shield-alt",
+    "torproject": "fa5s.user-secret",
+    "amnezia": "fa5s.key",
+    "meduza": "fa5s.newspaper",
+    "dw": "fa5s.newspaper",
+    "bbc": "fa5s.newspaper",
+    "svoboda": "fa5s.newspaper",
+    "moscowtimes": "fa5s.newspaper",
+    "nnmclub": "fa5s.magnet",
+    "rezka": "fa5s.film",
+    "speedtest": "fa5s.tachometer-alt",
+    "gosuslugi": "fa5s.landmark",
 }
+# Исход попытки основного запроса — словом для подробностей.
+_TRIED_WORDS = {
+    "ok": "открылся",
+    "connect": "нет соединения",
+    "timeout": "нет ответа",
+    "reset": "сброс",
+    "tls": "обрыв на шифровании",
+    "cert": "чужой сертификат",
+    "error": "ошибка",
+}
+_PROTOCOL_STATES = {"ok": OK, "fail": FAIL, "info": INFO, "unknown": UNKNOWN}
 _SITE_STATUS = {OK: "Открывается", WARN: "Есть проблемы", FAIL: "Не открывается", UNKNOWN: "Не удалось проверить"}
 _CAUSE_WORDS = {
     "by_name": "блокировка по имени",
@@ -171,6 +207,10 @@ def _site_card(service: dict) -> Card:
         for item in targets
     )
     chips: list[tuple[str, str]] = []
+    # Три дороги к главному адресу сайта: TLS 1.2, TLS 1.3 и HTTP.
+    main = next((item for item in targets if item.get("main")), targets[0] if targets else {})
+    for proto in main.get("protocols") or ():
+        chips.append((f"{proto.get('title', '')}: {proto.get('word', '')}", _PROTOCOL_STATES.get(str(proto.get("state")), UNKNOWN)))
     for word in dict.fromkeys(_CAUSE_WORDS[item["cause"]] for item in targets if item.get("cause") in _CAUSE_WORDS):
         chips.append((word, FAIL))
     quic = {str(item.get("quic") or "") for item in targets}
@@ -182,12 +222,33 @@ def _site_card(service: dict) -> Card:
         chips.append(("обрыв на 16 КБ", WARN))
     if service.get("dns_note"):
         chips.append(("DNS подменён", WARN))
+    if any(item.get("hosts_stale") for item in targets):
+        chips.append(("запись в hosts устарела", WARN))
     if service.get("control"):
         chips.append(("контрольный", INFO))
 
     detail: list[Section] = []
     for item in targets:
         rows = [Line(_target_state(item), "Соединение", str(item.get("text") or ""))]
+        if item.get("address"):
+            rows.append(Line(INFO, "Адрес сервера", str(item["address"])))
+        tried = list(item.get("tried") or ())
+        if len(tried) > 1 or (tried and not item.get("ok")):
+            rows.append(
+                Line(
+                    INFO,
+                    "Какие адреса пробовали",
+                    ", ".join(f"{step.get('address', '')} — {_TRIED_WORDS.get(str(step.get('result')), 'сбой')}" for step in tried),
+                )
+            )
+        if item.get("hosts_stale"):
+            rows.append(
+                Line(WARN, "Файл hosts", "записанный в нём адрес не ответил, сайт открылся по настоящему адресу — запись устарела")
+            )
+        for proto in item.get("protocols") or ():
+            rows.append(
+                Line(_PROTOCOL_STATES.get(str(proto.get("state")), UNKNOWN), str(proto.get("title") or ""), str(proto.get("text") or ""))
+            )
         if item.get("cause_text"):
             rows.append(Line(FAIL, "Как блокируют", str(item["cause_text"])))
         if item.get("quic_text"):
@@ -536,6 +597,9 @@ def build_counters(report: dict) -> list[Counter]:
     services = list(report.get("services") or ())
     targets = sum(len(service.get("targets") or ()) for service in services)
     counters = [Counter(len(services), "сайтов", "fa5s.globe"), Counter(targets, "адресов сайтов", "fa5s.link")]
+    protocols = sum(len(item.get("protocols") or ()) for service in services for item in service.get("targets") or ())
+    if protocols:
+        counters.append(Counter(protocols, "проб TLS 1.2 / 1.3 / HTTP", "fa5s.lock"))
     quic = sum(1 for service in services for item in service.get("targets") or () if item.get("quic"))
     if quic:
         counters.append(Counter(quic, "проверок QUIC", "fa5s.bolt"))

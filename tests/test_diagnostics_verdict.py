@@ -208,6 +208,9 @@ class _Net:
         # Что «показал» набор объёма по одному соединению: по умолчанию обрыва нет.
         self.volume_facts = None
         self.volume_asked: list[str] = []
+        # TLS 1.2 / TLS 1.3 / HTTP по отдельности: по умолчанию проверку будто сняли.
+        self.protocol_facts = None
+        self.protocols_asked: list[tuple[str, str]] = []
         self.ipv6 = engine.ipv6_check.Ipv6Verdict(engine.ipv6_check.IPV6_ABSENT, "в этой сети его нет")
         # Состояние системы читает реестр и службы: в сценариях движка оно задаётся явно.
         self.system_items: tuple = ()
@@ -217,6 +220,12 @@ class _Net:
         if self.quic_facts is not None:
             return self.quic_facts(host, ip)
         return engine.quic_probe.QuicFacts(host=host, cancelled=True)
+
+    def _protocols(self, host, ip, **_kwargs):
+        self.protocols_asked.append((host, ip))
+        if self.protocol_facts is not None:
+            return self.protocol_facts(host, ip)
+        return engine.protocol_probe.ProtocolFacts(host=host, ip=ip, cancelled=True)
 
     def _volume(self, host, ip, _path, **_kwargs):
         self.volume_asked.append(host)
@@ -256,6 +265,7 @@ class _Net:
             patch.object(engine.block_cause, "collect", side_effect=self._collect),
             patch.object(engine.quic_probe, "collect", side_effect=self._quic),
             patch.object(engine.volume_probe, "collect", side_effect=self._volume),
+            patch.object(engine.protocol_probe, "collect", side_effect=self._protocols),
             patch.object(engine, "_check_ipv6", side_effect=lambda _run: self.ipv6),
             patch.object(engine, "_check_system", side_effect=lambda _run, _services: self.system_items),
             patch.object(engine, "hosts_file_ipv4", return_value=()),
