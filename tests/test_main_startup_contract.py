@@ -448,10 +448,14 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             ),
             patch.object(entry, "_build_application_post_startup_deps", side_effect=lambda **_: calls.append("build_post_startup_deps") or object()),
             patch.object(entry, "_install_post_startup_tasks", side_effect=lambda *_: calls.append("install_post_startup")),
+            # Настоящее завершение процесса убило бы прогон тестов.
+            patch("main.process_exit.finish_process", side_effect=SystemExit) as finish_process,
         ):
             with self.assertRaises(SystemExit):
                 entry.main()
 
+        # Код выхода цикла событий уходит в единственную точку завершения.
+        finish_process.assert_called_once_with(0)
         self.assertEqual(timer_delays[0], 0)
         self.assertLess(calls.index("schedule.late_bootstrap"), calls.index("app.exec"))
         self.assertLess(calls.index("app.exec"), calls.index("install_post_startup"))

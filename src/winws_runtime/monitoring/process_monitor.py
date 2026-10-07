@@ -1,3 +1,5 @@
+import threading
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from winws_runtime.runtime.process_probe import WinwsProcessScan, scan_winws_processes
@@ -23,6 +25,9 @@ class ProcessMonitorThread(QThread):
         super().__init__()
         self.interval_ms   = interval_ms
         self._running      = True
+        # Пауза между проверками ждёт это событие, а не просто спит: остановка
+        # будит поток сразу, и его можно дождаться за миллисекунды.
+        self._stop_requested = threading.Event()
         self._cur_state: bool | None = None
         self._cur_details: dict[str, list[int]] | None = None
         self._cur_foreign: dict[int, str] | None = None
@@ -80,9 +85,12 @@ class ProcessMonitorThread(QThread):
                 log(f"Ошибка в потоке мониторинга: {e}", level="❌ ERROR")
                 self.checkingFinished.emit()  # На случай ошибки тоже завершаем
 
-            self.msleep(self.interval_ms)            # 5 сек по умолчанию
+            if self._stop_requested.wait(self.interval_ms / 1000.0):
+                break
 
     # ------------------------ СТАНДАРТНЫЙ STOP ------------------------
     def stop(self):
+        """Просит поток остановиться и не ждёт его (окно не подвисает)."""
         self._running = False
+        self._stop_requested.set()
         self.quit()

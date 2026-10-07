@@ -181,7 +181,7 @@ class RuntimeObjects:
     def cleanup_process_monitor(self) -> None:
         manager = self.process_monitor_manager
         if manager is not None:
-            manager.stop_monitoring()
+            manager.shutdown()
 
 
 _AUTO_RESTART_WINDOW_SECONDS = 600.0

@@ -233,6 +233,27 @@ def _qt_exception_handler(exc_type, exc_value, exc_tb):
     _log_crash(report, filepath)
 
 
+def _mark_session_ended() -> None:
+    """Отмечает в журнале конец сеанса, не закрывая файл.
+
+    atexit срабатывает в самом начале завершения интерпретатора: объекты Qt
+    и модули разрушаются уже после него. faulthandler пишет прямо в номер
+    файла, поэтому закрытый здесь файл делал его слепым ровно на тот отрезок,
+    где программа и падала при выходе: в журнале стояло «Session ended», а
+    пользователь видел системное окно «Ошибка приложения». Файл остаётся
+    открытым до конца процесса, и запись о падении после «Session ended»
+    означает аварию при завершении.
+    """
+    handle = _faulthandler_file
+    if handle is None:
+        return
+    try:
+        handle.write(f"\nSession ended: {datetime.datetime.now()}\n")
+        handle.flush()
+    except Exception:
+        pass
+
+
 def install_crash_handler():
     """
     Устанавливает глобальные обработчики крашей.
@@ -269,17 +290,7 @@ def install_crash_handler():
         # (sys.stderr может быть перенаправлен на Logger без fileno())
         faulthandler.enable(file=_faulthandler_file, all_threads=True)
         
-        # Регистрируем закрытие файла при выходе
-        def _close_faulthandler():
-            global _faulthandler_file
-            if _faulthandler_file:
-                try:
-                    _faulthandler_file.write(f"\nSession ended: {datetime.datetime.now()}\n")
-                    _faulthandler_file.close()
-                except Exception:
-                    pass
-        
-        atexit.register(_close_faulthandler)
+        atexit.register(_mark_session_ended)
         
         print(f"[CRASH] Faulthandler enabled -> {faulthandler_path}", file=sys.stderr)
         

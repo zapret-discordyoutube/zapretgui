@@ -55,12 +55,34 @@ class ProcessMonitorManager(QObject):
         except Exception as e:
             log(f"Ошибка в _on_foreign_processes_changed: {e}", level="DEBUG")
 
-    def stop_monitoring(self):
-        """Останавливает мониторинг процесса"""
-        if self.process_monitor:
-            self._retire_process_monitor(self.process_monitor)
-            self.process_monitor = None
-            log("Process Monitor остановлен", "INFO")
+    def shutdown(self, timeout_ms: int = 3000) -> bool:
+        """Закрытие программы: останавливает слежение и дожидается потоков.
+
+        Ждать обязательно: поток, который ещё выполняет Python-код во время
+        завершения интерпретатора, роняет процесс с нарушением доступа уже
+        после записи «Session ended». Пауза потока прерывается сразу, так что
+        ожидание занимает одну проверку процессов, а не всю паузу.
+
+        Возвращает False, если какой-то поток не успел закончиться. Такой
+        поток остаётся в списке: пока на него есть ссылка, Qt не уничтожит
+        работающий поток (это фатальная ошибка Qt).
+        """
+        monitors = list(self._retired_process_monitors)
+        if self.process_monitor is not None and self.process_monitor not in monitors:
+            monitors.append(self.process_monitor)
+        self.process_monitor = None
+        if not monitors:
+            return True
+
+        for monitor in monitors:
+            monitor.stop()
+        unfinished = [monitor for monitor in monitors if not monitor.wait(int(timeout_ms))]
+        self._retired_process_monitors = unfinished
+        if unfinished:
+            log("Process Monitor не успел остановиться до закрытия", "WARNING")
+            return False
+        log("Process Monitor остановлен", "INFO")
+        return True
 
     def _retire_process_monitor(self, monitor) -> None:
         if monitor is None:

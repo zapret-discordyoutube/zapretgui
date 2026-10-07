@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import threading
 import time as _time
 
@@ -352,4 +351,10 @@ def main() -> None:
     from ui.ui_freeze_watchdog import install_ui_freeze_watchdog
 
     install_ui_freeze_watchdog()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # Обычный sys.exit() здесь ронял процесс с нарушением доступа: уборка
+    # PyQt при завершении интерпретатора ломалась об обработчики программы.
+    # Как выход устроен теперь и почему — в main/process_exit.py.
+    from main.process_exit import finish_process
+
+    finish_process(exit_code)
