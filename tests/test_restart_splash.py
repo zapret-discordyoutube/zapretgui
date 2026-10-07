@@ -283,6 +283,8 @@ class SplashScriptContractTests(unittest.TestCase):
         self.assertIn("-- File entry --", script)
         self.assertIn("Starting the installation process.", script)
         self.assertIn("Installation process succeeded.", script)
+        # Из того же журнала — имя файла, который копируется сейчас.
+        self.assertIn("Dest filename: ", script)
         fill = script[script.index("function Target-Fill"):script.index("function Ease-Out")]
         self.assertIn("0.10 + 0.80 * $share", fill)
         self.assertIn("return 0.95 + 0.04", fill)
