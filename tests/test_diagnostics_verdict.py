@@ -202,6 +202,15 @@ class _Net:
         self.cause_facts = cause_facts
         self.refined: list[str] = []
         self.bypass_tools: tuple[str, ...] = ()
+        # Что «показал» QUIC: по умолчанию проверку будто сняли — вывода нет.
+        self.quic_facts = None
+        self.quic_asked: list[tuple[str, str]] = []
+
+    def _quic(self, host, ip, **_kwargs):
+        self.quic_asked.append((host, ip))
+        if self.quic_facts is not None:
+            return self.quic_facts(host, ip)
+        return engine.quic_probe.QuicFacts(host=host, cancelled=True)
 
     def _collect(self, host, result, **_kwargs):
         self.refined.append(host)
@@ -233,6 +242,7 @@ class _Net:
             patch.object(engine, "https_get", side_effect=_https_get),
             # Уточнение причины ходит в сеть само: в сценариях движка оно подменено.
             patch.object(engine.block_cause, "collect", side_effect=self._collect),
+            patch.object(engine.quic_probe, "collect", side_effect=self._quic),
             patch.object(engine, "hosts_file_ipv4", return_value=()),
             patch.object(engine, "system_dns_servers", return_value=("83.220.169.155",)),
             patch.object(engine, "_zapret_status", return_value=(True, "✅ Zapret запущен")),
@@ -393,6 +403,75 @@ class BlockCauseInReportTests(unittest.TestCase):
         self.assertIn("Работают другие программы обхода или VPN: Xray, Cloudflare WARP", note)
         self.assertLess(lines.index(note), next(i for i, line in enumerate(lines) if line.startswith("━━━━━━━━ Discord")))
         self.assertEqual(result["other_bypass_tools"], ["Xray", "Cloudflare WARP"])
+
+
+class QuicInReportTests(unittest.TestCase):
+    """QUIC проверяется по тому же адресу, что и сайт, и не путается с блокировкой сайта."""
+
+    @staticmethod
+    def _facts(blocked=(), silent=()):
+        def facts(host, _ip):
+            if host in blocked:
+                return engine.quic_probe.QuicFacts(host=host, neutral_ms=40.0, nameless_ms=41.0)
+            if host in silent:
+                return engine.quic_probe.QuicFacts(host=host)
+            return engine.quic_probe.QuicFacts(host=host, real_ms=12.0, neutral_ms=13.0, nameless_ms=13.0)
+
+        return facts
+
+    def test_working_quic_is_shown_and_is_not_a_problem(self) -> None:
+        lines: list[str] = []
+        net = _Net()
+        net.quic_facts = self._facts()
+        result = net.run(engine.run_blockcheck, "main", emit=lines.append)
+
+        self.assertIn("   ✅ QUIC (UDP 443): отвечает за 12 мс", lines)
+        self.assertFalse([item for item in result["problems"] if "QUIC" in item["text"]])
+        discord = next(item for item in result["services"] if item["key"] == "discord")
+        self.assertEqual({target["quic"] for target in discord["targets"]}, {"ok"})
+        # Пакеты идут на тот же адрес, к которому шёл основной запрос.
+        self.assertIn(("discord.com", DISCORD_REAL[0]), net.quic_asked)
+
+    def test_quic_blocked_for_open_site_is_one_warning_naming_services(self) -> None:
+        lines: list[str] = []
+        net = _Net()
+        net.quic_facts = self._facts(blocked={"www.youtube.com", "i.ytimg.com", "discord.com"})
+        result = net.run(engine.run_blockcheck, "main", emit=lines.append)
+        text = "\n".join(lines)
+
+        self.assertIn("❌ QUIC (UDP 443): блокируется по имени сайта: пакет с именем discord.com пропадает", text)
+        problems = [item for item in result["problems"] if "QUIC" in item["text"]]
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0]["level"], "warn")
+        self.assertIn("для: Discord, YouTube.", problems[0]["text"])
+        self.assertIn("UDP 443", problems[0]["advice"][0])
+        # Сами сайты открываются: «не открывается» про них не пишется.
+        self.assertEqual(sorted(result["working"]), ["Discord", "YouTube"])
+
+    def test_server_without_quic_is_a_note_not_a_problem(self) -> None:
+        lines: list[str] = []
+        net = _Net()
+        net.quic_facts = self._facts(silent={"discord.com"})
+        result = net.run(engine.run_blockcheck, "main", emit=lines.append)
+
+        note = next(line for line in lines if "QUIC" in line and "не поддерживает" in line)
+        self.assertTrue(note.startswith("   ℹ️ "))
+        self.assertFalse([item for item in result["problems"] if "QUIC" in item["text"]])
+
+    def test_blocked_site_gets_site_problem_not_extra_quic_one(self) -> None:
+        net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET, stage="tls"))
+        net.quic_facts = self._facts(blocked={"discord.com", "gateway.discord.gg", "cdn.discordapp.com"})
+        result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+
+        self.assertFalse([item for item in result["problems"] if item["text"].startswith("QUIC")])
+        self.assertTrue([item for item in result["problems"] if item["target"] == "discord.com"])
+
+    def test_dns_tab_does_not_send_quic_packets(self) -> None:
+        net = _Net()
+        net.quic_facts = self._facts()
+        net.run(engine.run_dns_check, emit=lambda _line: None)
+
+        self.assertEqual(net.quic_asked, [])
 
 
 class EngineScenarioTests(unittest.TestCase):

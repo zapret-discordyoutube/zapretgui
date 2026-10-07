@@ -352,6 +352,8 @@ def _service_details(service: dict) -> tuple[str, str]:
     causes = list(dict.fromkeys(_CAUSE_WORDS[item["cause"]] for item in targets if item.get("cause") in _CAUSE_WORDS))
     if causes:
         short = f"{short} · {', '.join(causes)}" if short else ", ".join(causes)
+    if any(item.get("quic") == "blocked_by_name" for item in targets):
+        short = f"{short} · QUIC заблокирован" if short else "QUIC заблокирован"
     if service.get("dns_note"):
         short = f"{short} · DNS подменён" if short else "DNS подменён"
     lines = []
@@ -359,6 +361,8 @@ def _service_details(service: dict) -> tuple[str, str]:
         lines.append(f"{item.get('host', '')}: {item.get('text', '')}")
         if item.get("cause_text"):
             lines.append(f"   {item['cause_text']}")
+        if item.get("quic_text"):
+            lines.append(f"   QUIC (UDP 443): {item['quic_text']}")
     tooltip = "\n".join(lines)
     headline = str(service.get("headline") or "")
     if headline:

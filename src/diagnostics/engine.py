@@ -35,7 +35,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from diagnostics import block_cause
+from diagnostics import block_cause, quic_probe
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
@@ -229,10 +229,10 @@ def build_services(scope: str, user_domains=()) -> dict[str, Service]:
 
 # Сколько потоков нужно одной цели в худшем случае: сама цель, три запроса к
 # DNS системы, два эталона (A и AAAA) по запросу на каждый эталонный сервер и
-# несколько HTTPS-запросов и четыре пробы уточнения причины. Задачи ждут друг
+# несколько HTTPS-запросов, четыре пробы уточнения причины и три пакета QUIC. Задачи ждут друг
 # друга внутри одного пула, поэтому
 # нехватка потоков — это не «медленнее», а взаимная блокировка.
-_WORKERS_PER_TARGET = 12 + 2 * len(REFERENCE_RESOLVERS)
+_WORKERS_PER_TARGET = 15 + 2 * len(REFERENCE_RESOLVERS)
 
 
 class _Stopped(Exception):
@@ -267,6 +267,8 @@ class _Probe:
     reach_state: ReachState = ReachState.UNKNOWN
     # Как именно блокируют (по имени сайта, по адресу, страницей провайдера), если удалось выяснить.
     cause: block_cause.Cause | None = None
+    # Проходит ли QUIC (UDP 443) к этому сайту. None — не проверяли или проверку сняли.
+    quic: quic_probe.QuicVerdict | None = None
 
 
 class _Run:
@@ -595,8 +597,21 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Pr
             probe.reference_ipv6 = doh6_future.result()[1]
         _check_reach(run, probe, read_limit=read_limit)
         probe.reach_state = judge_reach(probe.reach)
+        # Пакеты QUIC уходят сразу, а ждём их после уточнения причины: обе
+        # проверки идут одновременно.
+        quic_future = _start_quic(run, probe)
         _refine_cause(run, probe)
+        if quic_future is not None:
+            probe.quic = quic_probe.judge(quic_future.result())
     return probe
+
+
+def _start_quic(run: _Run, probe: _Probe) -> Future | None:
+    """QUIC проверяется по тому же адресу, к которому шёл основной запрос."""
+    result = probe.reach
+    if result is None or not result.ip or run.dns_cancelled():
+        return None
+    return run.submit(quic_probe.collect, probe.host, result.ip, submit=run.submit, cancel=run.probe_cancel)
 
 
 def _ping_ok(ip: str) -> bool | None:
@@ -684,6 +699,14 @@ def _dns_lines(probe: _Probe, indent: str) -> list[str]:
     return lines
 
 
+# Молчание по QUIC — не поломка: сервер может его не поддерживать.
+_QUIC_ICON = {
+    quic_probe.QUIC_OK: "✅",
+    quic_probe.QUIC_BLOCKED_BY_NAME: "❌",
+    quic_probe.QUIC_SILENT: "ℹ️",
+}
+
+
 def _sentence(text: str) -> str:
     return text[:1].upper() + text[1:]
 
@@ -703,6 +726,8 @@ def _probe_lines(probe: _Probe, *, full: bool) -> list[str]:
     lines = [f"{icon} {title}: {_reach_text(probe)}"]
     if probe.cause is not None:
         lines.append(f"   🔎 {_sentence(probe.cause.text)}")
+    if probe.quic is not None:
+        lines.append(f"   {_QUIC_ICON[probe.quic.code]} QUIC (UDP 443): {probe.quic.text}")
     if probe.discovery_note:
         lines.append(f"   ℹ️ {probe.discovery_note}")
     lines.extend(_dns_lines(probe, "   "))
@@ -840,6 +865,8 @@ def _target_report(probe: _Probe) -> dict:
         "dns_reason": probe.judgement.reason if probe.judgement else "",
         "cause": probe.cause.code if probe.cause else "",
         "cause_text": _sentence(probe.cause.text) if probe.cause else "",
+        "quic": probe.quic.code if probe.quic else "",
+        "quic_text": probe.quic.text if probe.quic else "",
         "note": probe.discovery_note,
     }
 
@@ -1000,6 +1027,27 @@ def _collect_problems(
                 action="dns",
             )
         )
+    # QUIC заблокирован, а сам сайт открывается: это не «сайт не работает», но
+    # браузер сначала пробует QUIC и переходит на обычное соединение с задержкой.
+    quic_blocked = [
+        services[key].label
+        for key, probes in collected.items()
+        if any(
+            probe.quic is not None
+            and probe.quic.code == quic_probe.QUIC_BLOCKED_BY_NAME
+            and probe.reach_state == ReachState.OK
+            for probe in probes
+        )
+    ]
+    if quic_blocked and not offline:
+        problems.append(
+            _problem(
+                Level.WARN,
+                f"QUIC (UDP 443) блокируется по имени для: {', '.join(quic_blocked)}. Сайты открываются обычным "
+                "соединением, но браузер сначала пробует QUIC, поэтому открытие и начало видео могут запаздывать",
+                (_ADVICE_QUIC,),
+            )
+        )
     for item in _blocked_references(reference or []):
         problems.append(_problem(Level.WARN, _reference_text(item), (_ADVICE_BLOCKED_REFERENCE,), action="dns"))
     problems.sort(key=lambda item: _LEVEL_ORDER.get(Level(item["level"]), 9))
@@ -1021,6 +1069,10 @@ def _reference_text(item: dict) -> str:
     return f"Шифрованный DNS {item['label']} ({item['address']}) недоступен{reason}"
 
 
+_ADVICE_QUIC = (
+    "В пресете должен быть profile для UDP 443 (QUIC) с этими сайтами. Проще всего выбрать готовый пресет, "
+    "где он есть, или отключить QUIC в браузере (в Chrome: chrome://flags → Experimental QUIC protocol)."
+)
 _ADVICE_BLOCKED_REFERENCE = (
     "Похоже, этот сервер закрыт у вашего провайдера. Не выбирайте его для защищённого DNS: "
     "Windows молча вернётся к обычным запросам, которые видны и подменяются."

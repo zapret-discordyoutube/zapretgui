@@ -247,7 +247,7 @@ class BlockcheckProblemsGeoTests(unittest.TestCase):
         from diagnostics.verdict import ADVICE_VIA_ZAPRET, Level, ReachState, ServiceVerdict
 
         service = engine._site("site", host, host)
-        probe = SimpleNamespace(host=host, reach_state=ReachState.DPI, judgement=None, cause=None)
+        probe = SimpleNamespace(host=host, reach_state=ReachState.DPI, judgement=None, cause=None, quic=None)
         verdict = ServiceVerdict(Level.FAIL, f"{host} не открывается", (ADVICE_VIA_ZAPRET[0],))
         problems, _working, _spoofed = engine._collect_problems(
             {"site": service},

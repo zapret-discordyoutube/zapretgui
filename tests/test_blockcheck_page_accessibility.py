@@ -310,6 +310,26 @@ class SitesTableTests(unittest.TestCase):
         tooltip = _service_details(report["services"][0])[1]
         self.assertIn("   Блокировка по имени сайта: с именем x.com соединение обрывается", tooltip)
 
+    def test_blocked_quic_is_marked_for_open_site(self) -> None:
+        service = {
+            "targets": [
+                {
+                    "host": "www.youtube.com",
+                    "short": "открывается",
+                    "text": "открывается (20 мс)",
+                    "ok": True,
+                    "quic": "blocked_by_name",
+                    "quic_text": "блокируется по имени сайта",
+                }
+            ]
+        }
+        short, tooltip = _service_details(service)
+
+        self.assertEqual(short, "открывается · QUIC заблокирован")
+        self.assertIn("   QUIC (UDP 443): блокируется по имени сайта", tooltip)
+        working = {"targets": [{"host": "x", "short": "открывается", "text": "ок", "quic": "ok", "quic_text": "отвечает за 5 мс"}]}
+        self.assertEqual(_service_details(working)[0], "открывается")
+
     def test_unknown_cause_code_is_not_shown_raw(self) -> None:
         service = {"targets": [{"host": "x.com", "short": "не открывается", "text": "…", "cause": "новый_код"}]}
 
