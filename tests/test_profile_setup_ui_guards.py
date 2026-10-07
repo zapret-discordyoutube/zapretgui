@@ -498,112 +498,6 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         self.assertTrue(set_widget_property_if_changed(widget, "selected", False))
         self.assertEqual(widget.property_calls, [("selected", False)])
 
-    def test_feedback_buttons_skip_duplicate_state(self) -> None:
-        from types import SimpleNamespace
-
-        from profile.ui.profile_setup_page import ProfileSetupPageBase
-
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._work_button = _PropertyWidget(
-            enabled=True,
-            properties={
-                "selected": True,
-                "screenReaderStateText": "Отметить стратегию как рабочую. Оценка стратегии: выбрана.",
-            },
-        )
-        page._work_button._accessible_name = "Отметить стратегию как рабочую. Оценка стратегии: выбрана."
-        page._notwork_button = _PropertyWidget(
-            enabled=True,
-            properties={
-                "selected": False,
-                "screenReaderStateText": "Отметить стратегию как нерабочую. Оценка стратегии: не выбрана.",
-            },
-        )
-        page._notwork_button._accessible_name = "Отметить стратегию как нерабочую. Оценка стратегии: не выбрана."
-        page._favorite_button = _PropertyWidget(
-            enabled=True,
-            properties={
-                "screenReaderStateText": "Убрать стратегию из избранного. Избранное: включено.",
-            },
-        )
-        page._favorite_button._accessible_name = "Убрать стратегию из избранного. Избранное: включено."
-        page._favorite_button._text = "Убрать из избранного"
-
-        payload = SimpleNamespace(
-            item=SimpleNamespace(in_preset=True, enabled=True, strategy_id="tls_fake"),
-            current_strategy_state=SimpleNamespace(favorite=True, rating="work"),
-        )
-
-        ProfileSetupPageBase._apply_feedback_buttons(page, payload)
-
-        self.assertEqual(page._work_button.enabled_calls, [])
-        self.assertEqual(page._notwork_button.enabled_calls, [])
-        self.assertEqual(page._favorite_button.enabled_calls, [])
-        self.assertEqual(page._work_button.property_calls, [])
-        self.assertEqual(page._notwork_button.property_calls, [])
-        self.assertEqual(page._favorite_button.text_calls, [])
-        self.assertEqual(page._favorite_button._text, "Убрать из избранного")
-
-    def test_feedback_buttons_expose_selected_state_to_screen_reader(self) -> None:
-        from types import SimpleNamespace
-
-        from profile.ui.profile_setup_page import ProfileSetupPageBase
-
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._work_button = _PropertyWidget(enabled=True, properties={"selected": False})
-        page._notwork_button = _PropertyWidget(enabled=True, properties={"selected": False})
-        page._favorite_button = _PropertyWidget(enabled=True)
-
-        payload = SimpleNamespace(
-            item=SimpleNamespace(in_preset=True, enabled=True, strategy_id="tls_fake"),
-            current_strategy_state=SimpleNamespace(favorite=False, rating="work"),
-        )
-
-        ProfileSetupPageBase._apply_feedback_buttons(page, payload)
-
-        self.assertEqual(
-            page._work_button.accessibleName(),
-            "Отметить стратегию как рабочую. Оценка стратегии: выбрана.",
-        )
-        self.assertEqual(
-            page._work_button.property("screenReaderStateText"),
-            "Отметить стратегию как рабочую. Оценка стратегии: выбрана.",
-        )
-        self.assertEqual(
-            page._notwork_button.accessibleName(),
-            "Отметить стратегию как нерабочую. Оценка стратегии: не выбрана.",
-        )
-        self.assertEqual(
-            page._notwork_button.property("screenReaderStateText"),
-            "Отметить стратегию как нерабочую. Оценка стратегии: не выбрана.",
-        )
-
-    def test_favorite_button_exposes_state_to_screen_reader(self) -> None:
-        from types import SimpleNamespace
-
-        from profile.ui.profile_setup_page import ProfileSetupPageBase
-
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._work_button = _PropertyWidget(enabled=True)
-        page._notwork_button = _PropertyWidget(enabled=True)
-        page._favorite_button = _PropertyWidget(enabled=True)
-
-        payload = SimpleNamespace(
-            item=SimpleNamespace(in_preset=True, enabled=True, strategy_id="tls_fake"),
-            current_strategy_state=SimpleNamespace(favorite=False, rating=""),
-        )
-
-        ProfileSetupPageBase._apply_feedback_buttons(page, payload)
-
-        self.assertEqual(
-            page._favorite_button.accessibleName(),
-            "Добавить стратегию в избранное. Избранное: не включено.",
-        )
-        self.assertEqual(
-            page._favorite_button.property("screenReaderStateText"),
-            "Добавить стратегию в избранное. Избранное: не включено.",
-        )
-
     def test_enabled_checkbox_exposes_state_text_to_screen_reader(self) -> None:
         from profile.ui.profile_setup_page import ProfileSetupPageBase
 
@@ -1782,7 +1676,6 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         page._raw_profile_text = _PlainTextWidget(payload.raw_profile_text, read_only=False)
         page._raw_profile_text_cache = payload.raw_profile_text
         page._raw_profile_save_button = _BoolWidget(enabled=True)
-        page._apply_feedback_buttons = Mock()
 
         ProfileSetupPageBase._apply_raw_tab_payload(page)
 
@@ -1790,8 +1683,6 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         self.assertEqual(page._raw_profile_text.plain_text_calls, [])
         self.assertEqual(page._raw_profile_text.read_only_calls, [])
         self.assertEqual(page._raw_profile_save_button.enabled_calls, [])
-        # Оценка стратегии живёт под списком стратегий, вкладка текста её не трогает.
-        page._apply_feedback_buttons.assert_not_called()
 
     def test_raw_tab_payload_uses_cached_raw_profile_text(self) -> None:
         from types import SimpleNamespace
@@ -1816,13 +1707,11 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         page._raw_profile_text = _PlainTextWidget(raw_text, read_only=False)
         page._raw_profile_text_cache = raw_text
         page._raw_profile_save_button = _BoolWidget(enabled=True)
-        page._apply_feedback_buttons = Mock()
 
         ProfileSetupPageBase._apply_raw_tab_payload(page)
 
         self.assertEqual(page._raw_profile_text.plain_text_read_calls, [])
         self.assertEqual(page._raw_profile_text.plain_text_calls, [])
-        page._apply_feedback_buttons.assert_not_called()
 
     def test_raw_tab_payload_sets_raw_profile_text_without_reading_editor(self) -> None:
         from types import SimpleNamespace
@@ -1842,7 +1731,6 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         page._raw_profile_text = _PlainTextWidget("--old\n", read_only=False)
         page._raw_profile_text_cache = "--old\n"
         page._raw_profile_save_button = _BoolWidget(enabled=True)
-        page._apply_feedback_buttons = Mock()
 
         ProfileSetupPageBase._apply_raw_tab_payload(page)
 

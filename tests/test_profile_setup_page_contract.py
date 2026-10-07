@@ -4990,14 +4990,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         self.assertEqual(tuple(clicked.parameters), ("self", "item"))
         self.assertEqual(tuple(activated.parameters), ("self", "item"))
 
-    def test_feedback_bar_names_the_selected_strategy(self) -> None:
-        from profile.ui.strategy_feedback_bar import visible_strategy_name
-
-        self.assertEqual(visible_strategy_name("tls_fake", "TLS Fake"), "TLS Fake")
-        self.assertEqual(visible_strategy_name("custom", "что угодно"), "Своя стратегия")
-        self.assertEqual(visible_strategy_name("none", "TLS Fake"), "Стратегия не выбрана")
-        self.assertEqual(visible_strategy_name("tls_fake", ""), "Стратегия не выбрана")
-
     def test_raw_tab_shows_only_the_profile_text(self) -> None:
         """Сводки «условия, стратегия, аргументы» больше нет: она повторяла шапку,
         список стратегий и сам текст профиля."""
@@ -5007,7 +4999,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
         self.assertIn("raw_profile_text", apply_raw)
         self.assertNotIn("strategy_entries", apply_raw)
-        self.assertNotIn("_apply_feedback_buttons", apply_raw)
         self.assertNotIn("match_tab_text", ProfileSetupPayload.__dataclass_fields__)
         self.assertFalse(hasattr(ProfileSetupPageBase, "_ensure_match_tab_built"))
 
@@ -7039,7 +7030,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             match_summary="",
         )
         page._strategy_list = SimpleNamespace(set_current_strategy_id=Mock())
-        page._apply_feedback_buttons = Mock()
         page._raw_tab_built = False
         page._apply_raw_tab_payload = Mock()
         page._rebuild_breadcrumb = Mock(side_effect=AssertionError("strategy change must not rebuild breadcrumbs"))
@@ -7051,7 +7041,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         # что прочитано из пресета, до подтверждения записи сервисом.
         self.assertEqual(page._payload.item.strategy_id, "old")
         self.assertEqual(page._payload.item.strategy_name, "Old")
-        page._apply_feedback_buttons.assert_not_called()
         page._apply_raw_tab_payload.assert_not_called()
         page._rebuild_breadcrumb.assert_not_called()
 
@@ -7194,11 +7183,10 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page.create_profile_strategy_feedback_save_worker = Mock(return_value=worker)
         page._strategy_feedback_save_request_id = 0
         page._strategy_list = Mock()
-        page._apply_feedback_buttons = Mock()
         page.reload_current_profile = Mock()
         page._on_profile_changed_callback = Mock()
 
-        ProfileSetupPageBase._set_current_strategy_feedback(page, rating="work")
+        ProfileSetupPageBase._on_strategy_rating_requested(page, "tls_fake", "work")
 
         page.create_profile_strategy_feedback_save_worker.assert_called_once_with(
             1,
@@ -7222,48 +7210,28 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page.reload_current_profile.assert_not_called()
         self.assertEqual(page._payload.current_strategy_state.rating, "work")
         self.assertEqual(page._payload.item.rating, "work")
-        page._apply_feedback_buttons.assert_called_once_with(page._payload)
+        self.assertEqual(page._strategy_list.set_rows.call_args.kwargs["states"]["tls_fake"].rating, "work")
         page._on_profile_changed_callback.assert_called_once_with("profile-1", "feedback", page._payload.item)
 
-    def test_repeating_same_strategy_rating_clears_it(self) -> None:
-        """Отдельной кнопки «Убрать оценку» нет: её снимает повторное нажатие."""
+    def test_menu_rating_is_requested_for_the_named_strategy(self) -> None:
+        """Кнопок оценки нет: меню называет стратегию и то, что с ней сделать."""
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page._loading = False
         page._profile_key = "profile-1"
-        page._payload = SimpleNamespace(
-            current_strategy_state=ProfileStrategyState(rating="work", favorite=False),
-        )
+        page._payload = SimpleNamespace(item=SimpleNamespace(strategy_id="tls_fake"))
         page._request_strategy_feedback_save = Mock()
 
-        ProfileSetupPageBase._set_current_strategy_feedback(page, rating="work")
+        ProfileSetupPageBase._on_strategy_rating_requested(page, "multisplit_1", "")
+        ProfileSetupPageBase._on_strategy_favorite_requested(page, "multisplit_1", True)
+        ProfileSetupPageBase._on_strategy_rating_requested(page, "custom", "work")
 
-        page._request_strategy_feedback_save.assert_called_once_with({"rating": "", "favorite": None})
-
-    def test_other_strategy_rating_replaces_the_current_one(self) -> None:
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._loading = False
-        page._profile_key = "profile-1"
-        page._payload = SimpleNamespace(
-            current_strategy_state=ProfileStrategyState(rating="work", favorite=False),
+        self.assertEqual(
+            [call.args[0] for call in page._request_strategy_feedback_save.call_args_list],
+            [
+                {"strategy_id": "multisplit_1", "rating": "", "favorite": None},
+                {"strategy_id": "multisplit_1", "rating": None, "favorite": True},
+            ],
         )
-        page._request_strategy_feedback_save = Mock()
-
-        ProfileSetupPageBase._set_current_strategy_feedback(page, rating="notwork")
-
-        page._request_strategy_feedback_save.assert_called_once_with({"rating": "notwork", "favorite": None})
-
-    def test_clearing_an_empty_strategy_rating_does_not_start_feedback_worker(self) -> None:
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._loading = False
-        page._profile_key = "profile-1"
-        page._payload = SimpleNamespace(
-            current_strategy_state=ProfileStrategyState(rating="", favorite=False),
-        )
-        page._request_strategy_feedback_save = Mock(side_effect=AssertionError("nothing to clear"))
-
-        ProfileSetupPageBase._set_current_strategy_feedback(page, rating="")
-
-        page._request_strategy_feedback_save.assert_not_called()
 
     def test_strategy_feedback_pending_save_merges_rating_and_favorite_while_worker_runs(self) -> None:
         class _Runtime:
@@ -7277,16 +7245,27 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
         ProfileSetupPageBase._request_strategy_feedback_save(
             page,
-            {"rating": "work", "favorite": None},
+            {"strategy_id": "tls_fake", "rating": "work", "favorite": None},
         )
         ProfileSetupPageBase._request_strategy_feedback_save(
             page,
-            {"rating": None, "favorite": True},
+            {"strategy_id": "tls_fake", "rating": None, "favorite": True},
         )
 
         self.assertEqual(
             page._pending_strategy_feedback_save,
-            {"rating": "work", "favorite": True},
+            {"strategy_id": "tls_fake", "rating": "work", "favorite": True},
+        )
+
+        # Оценка другой стратегии не смешивается с ожидающей записью первой.
+        ProfileSetupPageBase._request_strategy_feedback_save(
+            page,
+            {"strategy_id": "multisplit_1", "rating": None, "favorite": True},
+        )
+
+        self.assertEqual(
+            page._pending_strategy_feedback_save,
+            {"strategy_id": "multisplit_1", "rating": None, "favorite": True},
         )
         page._start_strategy_feedback_save_worker.assert_not_called()
 
@@ -7300,7 +7279,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page._strategy_feedback_save_request_id = 1
         page._strategy_feedback_save_runtime = _Runtime()
-        page._pending_strategy_feedback_save = {"rating": "work", "favorite": None}
+        page._pending_strategy_feedback_save = {"strategy_id": "tls_fake", "rating": "work", "favorite": None}
         page._start_strategy_feedback_save_worker = Mock()
         single_shot = Mock(side_effect=lambda _delay, _callback: None)
 
@@ -7310,7 +7289,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
             )
             ProfileSetupPageBase._request_strategy_feedback_save(
                 page,
-                {"rating": None, "favorite": True},
+                {"strategy_id": "tls_fake", "rating": None, "favorite": True},
             )
 
         page._start_strategy_feedback_save_worker.assert_not_called()
@@ -7318,7 +7297,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         single_shot.call_args.args[1]()
 
         page._start_strategy_feedback_save_worker.assert_called_once_with(
-            {"rating": "work", "favorite": True}
+            {"strategy_id": "tls_fake", "rating": "work", "favorite": True}
         )
 
     def test_strategy_feedback_scheduled_restart_clears_pending_during_cleanup(self) -> None:
@@ -7341,6 +7320,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page._pending_strategy_feedback_save = None
         page._payload = SimpleNamespace(
             item=SimpleNamespace(strategy_id="tls_fake", rating="work", favorite=False),
+            strategy_states={"tls_fake": ProfileStrategyState(rating="work", favorite=False)},
             current_strategy_state=ProfileStrategyState(rating="work", favorite=False),
         )
         page._apply_strategy_feedback_locally = Mock(
@@ -7361,27 +7341,45 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         page.reload_current_profile.assert_not_called()
         page._on_profile_changed_callback.assert_not_called()
 
-    def test_strategy_feedback_finish_for_previous_strategy_is_ignored(self) -> None:
+    def test_strategy_feedback_for_not_selected_strategy_updates_only_the_list(self) -> None:
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page._profile_key = "profile-1"
         page._strategy_feedback_save_request_id = 1
         page._pending_strategy_feedback_save = None
-        page._payload = SimpleNamespace(item=SimpleNamespace(strategy_id="new_strategy"))
+        page._payload = SimpleNamespace(item=SimpleNamespace(strategy_id="new_strategy"), strategy_states={})
         page._apply_strategy_feedback_locally = Mock(return_value=True)
         page.reload_current_profile = Mock()
         page._on_profile_changed_callback = Mock()
+        state = ProfileStrategyState(rating="work", favorite=False)
 
-        ProfileSetupPageBase._on_strategy_feedback_save_finished(
-            page,
-            1,
-            "profile-1",
-            "old_strategy",
-            ProfileStrategyState(rating="work", favorite=False),
-        )
+        ProfileSetupPageBase._on_strategy_feedback_save_finished(page, 1, "profile-1", "old_strategy", state)
 
-        page._apply_strategy_feedback_locally.assert_not_called()
+        page._apply_strategy_feedback_locally.assert_called_once_with("old_strategy", state)
         page.reload_current_profile.assert_not_called()
+        # Отметки выбранной стратегии не менялись: список профилей не трогаем.
         page._on_profile_changed_callback.assert_not_called()
+
+    def test_feedback_for_not_selected_strategy_keeps_marks_of_the_selected_one(self) -> None:
+        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
+        page._payload = ProfileSetupPayload(
+            item=SimpleNamespace(strategy_id="tls_fake", rating="work", favorite=False),
+            strategy_entries={},
+            strategy_states={"tls_fake": ProfileStrategyState(rating="work", favorite=False)},
+            raw_profile_text="",
+            raw_strategy_text="",
+            match_summary="",
+        )
+        selected_item = page._payload.item
+        page._strategy_list = Mock()
+        state = ProfileStrategyState(rating="notwork", favorite=True)
+
+        self.assertTrue(ProfileSetupPageBase._apply_strategy_feedback_locally(page, "multisplit_1", state))
+
+        self.assertIs(page._payload.item, selected_item)
+        self.assertEqual(page._payload.strategy_states["multisplit_1"], state)
+        self.assertEqual(page._payload.strategy_states["tls_fake"].rating, "work")
+        self.assertEqual(page._strategy_list.set_rows.call_args.kwargs["current_strategy_id"], "tls_fake")
+        self.assertEqual(page._strategy_list.set_rows.call_args.kwargs["states"]["multisplit_1"], state)
 
     def test_show_profile_skips_reload_when_profile_is_already_loaded(self) -> None:
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
@@ -7583,6 +7581,7 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
         save_feedback.assert_called_once_with(
             profile_key="profile-1",
+            strategy_id="tls_fake",
             rating="work",
             favorite=True,
         )

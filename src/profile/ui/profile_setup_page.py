@@ -36,13 +36,11 @@ from profile.ui.profile_strategy_list_widget import (
     ProfileStrategySearchLineEdit,
     _current_strategy_id,
     _join_accessible_options,
-    _set_strategy_favorite_button_state,
-    _set_strategy_feedback_button_state,
     _sync_combo_items_accessibility,
 )
 from profile.ui.profile_list_file_tab import BASE_TITLE, USER_TITLE, ProfileListFileTab, titled
 from profile.ui.profile_raw_text_tab import ProfileRawTextTab
-from profile.ui.strategy_feedback_bar import StrategyFeedbackBar, visible_strategy_name
+from profile.ui.strategy_context_menu import can_rate_strategy
 from profile.ui.user_profile_dialog import CreateUserProfileDialog
 from qfluentwidgets import (
     BodyLabel,
@@ -506,10 +504,6 @@ class ProfileSetupPageBase(BasePage):
         self._raw_tab_built = False
         self._list_file_dirty = True
         self._settings_container = None
-        self._work_button = None
-        self._notwork_button = None
-        self._favorite_button = None
-        self._strategy_feedback_bar = None
         self._update_user_profile_button = None
         self._delete_user_profile_button = None
         self._raw_profile_text = None
@@ -809,22 +803,10 @@ class ProfileSetupPageBase(BasePage):
         self._strategy_list.strategy_activated.connect(self._on_strategy_list_activated)
         self._strategy_list.open_group_changed.connect(self._on_strategy_open_group_changed)
         self._strategy_list.grouping_changed.connect(self._on_strategy_grouping_changed)
-
-        # Оценка стоит под списком: её ставят той стратегии, которую здесь выбрали.
-        self._strategy_feedback_bar = StrategyFeedbackBar(self)
-        self._work_button = self._strategy_feedback_bar.work_button
-        self._notwork_button = self._strategy_feedback_bar.notwork_button
-        self._favorite_button = self._strategy_feedback_bar.favorite_button
-        self._strategy_feedback_bar.rating_clicked.connect(self._on_strategy_rating_clicked)
-        self._strategy_feedback_bar.favorite_clicked.connect(self._on_strategy_favorite_clicked)
-
-        strategies_tab = QWidget(self)
-        strategies_layout = QVBoxLayout(strategies_tab)
-        strategies_layout.setContentsMargins(0, 0, 0, 0)
-        strategies_layout.setSpacing(10)
-        strategies_layout.addWidget(self._strategy_list, 1)
-        strategies_layout.addWidget(self._strategy_feedback_bar)
-        self._strategy_stack.addWidget(strategies_tab)
+        # Оценку и избранное ставят из меню стратегии по правой кнопке мыши.
+        self._strategy_list.strategy_rating_requested.connect(self._on_strategy_rating_requested)
+        self._strategy_list.strategy_favorite_requested.connect(self._on_strategy_favorite_requested)
+        self._strategy_stack.addWidget(self._strategy_list)
 
         # Вкладки списка и текста профиля собираются при первом открытии.
         self._list_file_editor_placeholder = QWidget(self)
@@ -837,9 +819,6 @@ class ProfileSetupPageBase(BasePage):
         QWidget.setTabOrder(self._strategy_tabs, self._strategy_list._grouping_combo)
         QWidget.setTabOrder(self._strategy_list._grouping_combo, self._strategy_list._search)
         QWidget.setTabOrder(self._strategy_list._search, self._strategy_list._list)
-        QWidget.setTabOrder(self._strategy_list._list, self._work_button)
-        QWidget.setTabOrder(self._work_button, self._notwork_button)
-        QWidget.setTabOrder(self._notwork_button, self._favorite_button)
         self._update_profile_setup_accessibility()
 
     def _update_combo_accessibility(self, combo, *, name: str, description: str) -> None:
@@ -1799,7 +1778,6 @@ class ProfileSetupPageBase(BasePage):
             self._list_file_dirty = True
             if self._editor_tab_built and self._strategy_stack.currentIndex() == 1:
                 self._request_list_file_editor_state()
-            self._apply_feedback_buttons(payload)
             if self._raw_tab_built:
                 self._apply_raw_tab_payload()
             self._rebuild_breadcrumb()
@@ -2187,58 +2165,6 @@ class ProfileSetupPageBase(BasePage):
                 f"color: {tokens.fg_faint}; background: transparent;",
             )
 
-    def _apply_feedback_buttons(self, payload) -> None:
-        item = payload.item
-        state = payload.current_strategy_state
-        editable = bool(
-            item.in_preset
-            and item.enabled
-            and item.strategy_id not in {"", "none", "custom"}
-        )
-        bar = self.__dict__.get("_strategy_feedback_bar")
-        if bar is not None:
-            bar.set_strategy_name(visible_strategy_name(item.strategy_id, getattr(item, "strategy_name", "")))
-        for button in (self._work_button, self._notwork_button, self._favorite_button):
-            if button is not None:
-                set_widget_enabled_if_changed(button, editable)
-        if self._favorite_button is not None:
-            favorite_text = "Убрать из избранного" if state.favorite else "В избранное"
-            favorite_action_name = (
-                "Убрать стратегию из избранного"
-                if state.favorite
-                else "Добавить стратегию в избранное"
-            )
-            set_widget_text_if_changed(self._favorite_button, favorite_text)
-            set_control_accessibility(
-                self._favorite_button,
-                name=favorite_action_name,
-                description="Добавляет текущую готовую стратегию в избранное или убирает её оттуда.",
-            )
-            set_widget_checked_if_changed(self._favorite_button, bool(state.favorite))
-            _set_strategy_favorite_button_state(
-                self._favorite_button,
-                action_name=favorite_action_name,
-                favorite=state.favorite,
-            )
-        if self._work_button is not None:
-            work_selected = state.rating == "work"
-            set_widget_property_if_changed(self._work_button, "selected", work_selected)
-            set_widget_checked_if_changed(self._work_button, work_selected)
-            _set_strategy_feedback_button_state(
-                self._work_button,
-                action_name="Отметить стратегию как рабочую",
-                selected=work_selected,
-            )
-        if self._notwork_button is not None:
-            notwork_selected = state.rating == "notwork"
-            set_widget_property_if_changed(self._notwork_button, "selected", notwork_selected)
-            set_widget_checked_if_changed(self._notwork_button, notwork_selected)
-            _set_strategy_feedback_button_state(
-                self._notwork_button,
-                action_name="Отметить стратегию как нерабочую",
-                selected=notwork_selected,
-            )
-
     def _apply_editable_settings(self, payload) -> None:
         is_preset_mode = is_preset_launch_method(self.launch_method)
         is_winws2 = is_zapret2_launch_method(self.launch_method)
@@ -2557,42 +2483,20 @@ class ProfileSetupPageBase(BasePage):
         strategy_list.set_current_strategy_id(str(strategy_id or "").strip())
         return True
 
-    def _set_current_strategy_feedback(self, *, rating: str) -> None:
-        if self._loading or not self._profile_key:
-            return
-        next_rating = str(rating or "").strip()
-        state = getattr(getattr(self, "_payload", None), "current_strategy_state", None)
-        current_rating = str(getattr(state, "rating", "") or "").strip()
-        if next_rating == current_rating:
-            if not next_rating:
-                return
-            # Повторное нажатие на ту же оценку снимает её.
-            next_rating = ""
-        self._request_strategy_feedback_save({"rating": next_rating, "favorite": None})
+    def _on_strategy_rating_requested(self, strategy_id: str, rating: str) -> None:
+        self._request_strategy_feedback(strategy_id, rating=str(rating or "").strip(), favorite=None)
 
-    def _resync_feedback_buttons(self) -> None:
-        """Возвращает кнопкам сохранённое состояние.
+    def _on_strategy_favorite_requested(self, strategy_id: str, favorite: bool) -> None:
+        self._request_strategy_feedback(strategy_id, rating=None, favorite=bool(favorite))
 
-        Нажатие само переключает кнопку, а новая оценка появится только после
-        записи в настройки: до тех пор кнопки показывают то, что сохранено.
-        """
-        payload = self.__dict__.get("_payload")
-        if payload is not None:
-            self._apply_feedback_buttons(payload)
-
-    def _on_strategy_rating_clicked(self, rating: str) -> None:
-        self._set_current_strategy_feedback(rating=rating)
-        self._resync_feedback_buttons()
-
-    def _on_strategy_favorite_clicked(self) -> None:
-        self._toggle_current_strategy_favorite()
-        self._resync_feedback_buttons()
-
-    def _toggle_current_strategy_favorite(self) -> None:
+    def _request_strategy_feedback(self, strategy_id: str, *, rating: str | None, favorite: bool | None) -> None:
+        """Просит записать оценку стратегии; список обновится после записи."""
+        strategy_id = str(strategy_id or "").strip()
         if self._loading or not self._profile_key or self._payload is None:
             return
-        current = bool(self._payload.current_strategy_state.favorite)
-        self._request_strategy_feedback_save({"rating": None, "favorite": not current})
+        if not can_rate_strategy(strategy_id):
+            return
+        self._request_strategy_feedback_save({"strategy_id": strategy_id, "rating": rating, "favorite": favorite})
 
     def _request_strategy_feedback_save(self, request: dict) -> None:
         return self._strategy_controller_obj()._request_strategy_feedback_save(request)
@@ -2733,36 +2637,39 @@ class ProfileSetupPageBase(BasePage):
         except Exception:
             pass
 
-    def _apply_strategy_feedback_locally(self, state) -> bool:
+    def _apply_strategy_feedback_locally(self, strategy_id: str, state) -> bool:
         if self._payload is None or state is None:
             return False
         item = getattr(self._payload, "item", None)
         if item is None:
             return False
-        strategy_id = _current_strategy_id(self._payload)
-        if not strategy_id or strategy_id in {"none", "custom"}:
+        strategy_id = str(strategy_id or "").strip()
+        if not can_rate_strategy(strategy_id):
             return False
         next_state = state if isinstance(state, ProfileStrategyState) else ProfileStrategyState()
         strategy_states = dict(getattr(self._payload, "strategy_states", {}) or {})
         strategy_states[strategy_id] = next_state
-        updated_item = replace(
-            item,
-            rating=str(getattr(next_state, "rating", "") or ""),
-            favorite=bool(getattr(next_state, "favorite", False)),
-        )
-        self._payload = replace(
-            self._payload,
-            item=updated_item,
-            strategy_states=strategy_states,
-            current_strategy_state=next_state,
-        )
+        current_strategy_id = _current_strategy_id(self._payload)
+        if strategy_id == current_strategy_id:
+            # Оценили выбранную стратегию: её отметки показывает и список профилей.
+            self._payload = replace(
+                self._payload,
+                item=replace(
+                    item,
+                    rating=str(getattr(next_state, "rating", "") or ""),
+                    favorite=bool(getattr(next_state, "favorite", False)),
+                ),
+                strategy_states=strategy_states,
+                current_strategy_state=next_state,
+            )
+        else:
+            self._payload = replace(self._payload, strategy_states=strategy_states)
         if self._strategy_list is not None:
             self._strategy_list.set_rows(
                 entries=getattr(self._payload, "strategy_entries", {}) or {},
                 states=strategy_states,
-                current_strategy_id=strategy_id,
+                current_strategy_id=current_strategy_id,
             )
-        self._apply_feedback_buttons(self._payload)
         return True
 
 

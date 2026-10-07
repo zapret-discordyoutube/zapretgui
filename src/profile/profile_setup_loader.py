@@ -836,6 +836,7 @@ class ProfileStrategyFeedbackSaveWorker(QThread):
         try:
             state = self._save_feedback(
                 profile_key=self._profile_key,
+                strategy_id=self._strategy_id,
                 rating=self._rating,
                 favorite=self._favorite,
             )

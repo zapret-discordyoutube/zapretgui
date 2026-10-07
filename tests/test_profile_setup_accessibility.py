@@ -182,11 +182,10 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
             page._delete_user_profile_button.property("screenReaderStateText"),
             "Удалить пользовательский profile",
         )
-        self.assertEqual(page._work_button.accessibleName(), "Отметить стратегию как рабочую")
-        self.assertEqual(page._notwork_button.accessibleName(), "Отметить стратегию как нерабочую")
-        self.assertEqual(page._favorite_button.accessibleName(), "Добавить стратегию в избранное")
-        # Отдельной кнопки «Убрать оценку» нет: оценку снимает повторное нажатие.
-        self.assertFalse(hasattr(page, "_clear_feedback_button"))
+        # Кнопок оценки на странице нет: оценку ставят из меню стратегии,
+        # и список говорит об этом тому, кто работает с клавиатуры.
+        self.assertFalse(hasattr(page, "_work_button"))
+        self.assertIn("Клавиша меню", page._strategy_list._list.accessibleDescription())
 
     def test_settings_line_edit_buttons_do_not_take_tab_focus(self) -> None:
         page = self._make_page()

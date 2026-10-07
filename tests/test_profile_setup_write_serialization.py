@@ -509,9 +509,10 @@ class ProfileSetupWriteSerializationTests(unittest.TestCase):
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page._strategy_feedback_save_runtime = _Runtime(running=False)
         page._strategy_feedback_save_request_id = 0
-        page._pending_strategy_feedback_save = {"rating": "work", "favorite": True}
+        page._pending_strategy_feedback_save = {"strategy_id": "tls_fake", "rating": "work", "favorite": True}
         page._profile_key = "profile-1"
-        page._payload = SimpleNamespace(item=SimpleNamespace(strategy_id="tls_fake"))
+        # Запись идёт для стратегии из запроса, а не для выбранной в профиле.
+        page._payload = SimpleNamespace(item=SimpleNamespace(strategy_id="other_strategy"))
         page.create_profile_strategy_feedback_save_worker = Mock(return_value=_Worker())
         callbacks = []
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from PyQt6.QtCore import QEvent, QModelIndex, QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QFont, QFontMetrics, QKeySequence, QPainter, QShortcut
+from PyQt6.QtGui import QAction, QContextMenuEvent, QFont, QFontMetrics, QKeySequence, QPainter, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QAbstractScrollArea,
@@ -43,6 +43,12 @@ from profile.strategy_list_filter import (
     group_description_text,
 )
 from profile.strategy_shape import payload_badge_accessible_text
+from profile.ui.strategy_context_menu import (
+    COMMAND_FAVORITE,
+    COMMAND_RATING,
+    can_rate_strategy,
+    show_strategy_context_menu,
+)
 from profile.ui.widgets.payload_badge import (
     PAYLOAD_BADGE_HEIGHT,
     paint_payload_badge,
@@ -99,6 +105,10 @@ _MARK_GAP = 5
 _MARK_FAVORITE = ("fa5s.star", "#d9a441")
 _MARK_WORKS = ("fa5s.check", "#49a35f")
 _MARK_NOT_WORKS = ("fa5s.times", "#d85c5c")
+
+
+# Оценка и избранное спрятаны в меню: подсказка стратегии говорит, где их искать.
+_STRATEGY_MENU_HINT = "Правая кнопка мыши: отметить, работает ли стратегия, или добавить её в избранное."
 
 
 def _strategy_marks_tooltip(*, is_active: bool, favorite: bool, rating: str) -> str:
@@ -728,7 +738,7 @@ class ProfileStrategyListDelegate(QStyledItemDelegate):
                 favorite=bool(index.data(ProfileStrategyListWidget._ROLE_FAVORITE)),
                 rating=str(index.data(ProfileStrategyListWidget._ROLE_RATING) or ""),
             )
-            text = "\n\n".join(part for part in (marks, text) if part)
+            text = "\n\n".join(part for part in (marks, text, _STRATEGY_MENU_HINT) if part)
         if not text:
             self._tooltip.hide()
             return True
@@ -826,6 +836,8 @@ class ProfileStrategyListView(QListWidget):
 
     # Заголовок группы нажали мышью или клавишей: её нужно свернуть или развернуть.
     group_toggle_requested = pyqtSignal(object)
+    # Правая кнопка или клавиша меню на стратегии: (строка списка, где открыть меню).
+    strategy_menu_requested = pyqtSignal(object, QPoint)
 
     # Ниже какой высоты делегат рисует строки; не 0 только пока рисуется список
     # с приклеенным заголовком группы.
@@ -1027,6 +1039,20 @@ class ProfileStrategyListView(QListWidget):
         self._pinned_pressed = False
         super().mousePressEvent(event)
 
+    def contextMenuEvent(self, event):  # noqa: N802
+        if event.reason() == QContextMenuEvent.Reason.Mouse:
+            pos = event.pos()
+            # Приклеенный заголовок закрывает строку под собой: меню не для неё.
+            item = None if self._pinned_header_at(pos) is not None else self.itemAt(pos)
+            global_pos = event.globalPos()
+        else:
+            # Клавиша меню открывает его у текущей строки, а не у курсора мыши.
+            item = self.currentItem()
+            global_pos = self.viewport().mapToGlobal(self.visualItemRect(item).center()) if item is not None else QPoint()
+        if item is not None and not _is_group_item(item) and bool(item.flags() & Qt.ItemFlag.ItemIsSelectable):
+            self.strategy_menu_requested.emit(item, global_pos)
+        event.accept()
+
     def mouseDoubleClickEvent(self, event):  # noqa: N802
         if self._pinned_header_at(event.position().toPoint()) is not None:
             self._pinned_pressed = event.button() == Qt.MouseButton.LeftButton
@@ -1173,6 +1199,10 @@ class ProfileStrategyListWidget(QWidget):
     open_group_changed = pyqtSignal(str, str)
     # Пользователь выбрал, по чему группировать список (profile.strategy_grouping).
     grouping_changed = pyqtSignal(str)
+    # В меню стратегии выбрали оценку: (стратегия, "work" / "notwork" / "" — снять).
+    strategy_rating_requested = pyqtSignal(str, str)
+    # В меню стратегии выбрали избранное: (стратегия, добавить или убрать).
+    strategy_favorite_requested = pyqtSignal(str, bool)
 
     _ROLE_STRATEGY_ID = int(Qt.ItemDataRole.UserRole) + 1
     _ROLE_NAME_TEXT = int(Qt.ItemDataRole.UserRole) + 2
@@ -1342,7 +1372,7 @@ class ProfileStrategyListWidget(QWidget):
         set_control_accessibility(
             self._list,
             name="Список готовых стратегий",
-            description="Выберите готовую стратегию стрелками вверх и вниз, затем нажмите Enter или Пробел. Ctrl+F открывает поиск по стратегиям.",
+            description="Выберите готовую стратегию стрелками вверх и вниз, затем нажмите Enter или Пробел. Клавиша меню или правая кнопка мыши открывает оценку стратегии и избранное. Ctrl+F открывает поиск по стратегиям.",
         )
         set_state_text(self._list, "Список готовых стратегий: список пока загружается")
         self._list.setMouseTracking(True)
@@ -1356,6 +1386,7 @@ class ProfileStrategyListWidget(QWidget):
         self._list.itemActivated.connect(self._on_item_activated)
         self._list.itemClicked.connect(self._on_item_clicked)
         self._list.group_toggle_requested.connect(self._toggle_group_item)
+        self._list.strategy_menu_requested.connect(self._show_strategy_menu)
         self._search.activate_current_result.connect(self._activate_current_search_result)
         self._search.navigate_results.connect(self._navigate_strategy_results_from_search)
         self._list.installEventFilter(self)
@@ -2304,6 +2335,22 @@ class ProfileStrategyListWidget(QWidget):
     def _strategy_id_for_item(self, item) -> str:
         return str(item.data(self._ROLE_STRATEGY_ID) or "").strip() if item is not None else ""
 
+    def _show_strategy_menu(self, item, global_pos) -> None:
+        strategy_id = self._strategy_id_for_item(item)
+        if not can_rate_strategy(strategy_id):
+            return
+        command, value = show_strategy_context_menu(
+            parent=self,
+            global_pos=global_pos,
+            strategy_name=str(item.data(self._ROLE_NAME_TEXT) or ""),
+            rating=str(item.data(self._ROLE_RATING) or ""),
+            favorite=bool(item.data(self._ROLE_FAVORITE)),
+        )
+        if command == COMMAND_RATING:
+            self.strategy_rating_requested.emit(strategy_id, str(value or ""))
+        elif command == COMMAND_FAVORITE:
+            self.strategy_favorite_requested.emit(strategy_id, bool(value))
+
     def _on_item_clicked(self, item) -> None:
         strategy_id = self._strategy_id_for_item(item)
         if strategy_id == self._current_strategy_id:
@@ -2356,16 +2403,6 @@ def _strategy_status_parts(state, *, is_current: bool, include_unselected: bool)
     elif rating == "notwork":
         status_parts.append("Не работает")
     return status_parts
-
-
-def _set_strategy_feedback_button_state(button, *, action_name: str, selected: bool) -> None:
-    state_text = "выбрана" if selected else "не выбрана"
-    set_state_text(button, f"{action_name}. Оценка стратегии: {state_text}.")
-
-
-def _set_strategy_favorite_button_state(button, *, action_name: str, favorite: bool) -> None:
-    state_text = "включено" if favorite else "не включено"
-    set_state_text(button, f"{action_name}. Избранное: {state_text}.")
 
 
 def _strategy_screen_reader_text(

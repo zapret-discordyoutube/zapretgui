@@ -1,8 +1,8 @@
 """Три вкладки страницы профиля: стратегии, список сайтов и текст профиля.
 
-Каждая вкладка про одно. Оценка выбранной стратегии стоит под списком
-стратегий, свои записи списка стоят раньше встроенных, а на вкладке текста
-нет ничего, кроме редактора.
+Каждая вкладка про одно. Вкладку стратегий целиком занимает их список,
+свои записи списка стоят раньше встроенных, а на вкладке текста нет ничего,
+кроме редактора.
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from profile.strategy_state import ProfileStrategyState
 from profile.ui.profile_list_file_tab import SIDE_BY_SIDE_MIN_WIDTH, ProfileListFileTab
 from profile.ui.profile_raw_text_tab import ProfileRawTextTab
 from profile.ui.profile_setup_page import ProfileSetupPageBase
-from profile.ui.strategy_feedback_bar import StrategyFeedbackBar
 
 
 def _worker_stub(*_args, **_kwargs):
@@ -64,78 +63,46 @@ class _TabsCase(unittest.TestCase):
         )
 
 
-class StrategyFeedbackBarTests(_TabsCase):
-    def test_rating_buttons_stand_on_the_strategies_tab_without_opening_others(self) -> None:
+class StrategiesTabTests(_TabsCase):
+    def test_list_takes_the_whole_tab_and_other_tabs_stay_unbuilt(self) -> None:
         page = self._page()
 
-        self.assertIsInstance(page._strategy_feedback_bar, StrategyFeedbackBar)
-        self.assertIs(page._work_button, page._strategy_feedback_bar.work_button)
-        strategies_tab = page._strategy_stack.widget(0)
-        self.assertTrue(strategies_tab.isAncestorOf(page._strategy_list))
-        self.assertTrue(strategies_tab.isAncestorOf(page._strategy_feedback_bar))
+        # Под списком нет кнопок: оценка и избранное живут в меню стратегии.
+        self.assertIs(page._strategy_stack.widget(0), page._strategy_list)
+        self.assertFalse(hasattr(page, "_strategy_feedback_bar"))
         self.assertFalse(page._raw_tab_built)
         self.assertFalse(page._editor_tab_built)
 
-    def test_bar_shows_the_selected_strategy_and_its_marks(self) -> None:
+    def test_rating_from_the_menu_is_saved_for_the_clicked_strategy(self) -> None:
         page = self._page()
-
-        page._apply_feedback_buttons(self._payload(rating="work", favorite=True))
-
-        bar = page._strategy_feedback_bar
-        self.assertEqual(bar.name_label.text(), "General ALT2 1.9.9")
-        self.assertTrue(bar.work_button.isChecked())
-        self.assertFalse(bar.notwork_button.isChecked())
-        self.assertTrue(bar.favorite_button.isChecked())
-        self.assertEqual(bar.favorite_button.text(), "Убрать из избранного")
-        self.assertTrue(bar.work_button.isEnabled())
-
-    def test_without_a_ready_strategy_there_is_nothing_to_rate(self) -> None:
-        page = self._page()
-
-        page._apply_feedback_buttons(self._payload(strategy_id="none"))
-
-        bar = page._strategy_feedback_bar
-        self.assertEqual(bar.name_label.text(), "Стратегия не выбрана")
-        self.assertFalse(bar.work_button.isEnabled())
-        self.assertFalse(bar.favorite_button.isEnabled())
-
-    def test_click_asks_to_save_and_buttons_keep_the_saved_state(self) -> None:
-        page = self._page()
-        page._payload = self._payload(rating="")
-        page._profile_key = "profile:0"
-        page._loading = False
-        page._request_strategy_feedback_save = Mock()
-        page._apply_feedback_buttons(page._payload)
-
-        page._strategy_feedback_bar.work_button.click()
-
-        page._request_strategy_feedback_save.assert_called_once_with({"rating": "work", "favorite": None})
-        # Оценка ещё не записана: кнопка не выдаёт намерение за сохранённое.
-        self.assertFalse(page._strategy_feedback_bar.work_button.isChecked())
-
-    def test_second_click_on_the_same_rating_clears_it(self) -> None:
-        page = self._page()
-        page._payload = self._payload(rating="notwork")
-        page._profile_key = "profile:0"
-        page._loading = False
-        page._request_strategy_feedback_save = Mock()
-        page._apply_feedback_buttons(page._payload)
-
-        page._strategy_feedback_bar.notwork_button.click()
-
-        page._request_strategy_feedback_save.assert_called_once_with({"rating": "", "favorite": None})
-        self.assertTrue(page._strategy_feedback_bar.notwork_button.isChecked())
-
-    def test_favorite_click_toggles_favorite(self) -> None:
-        page = self._page()
-        page._payload = self._payload(favorite=False)
+        page._payload = self._payload(strategy_id="tls_fake")
         page._profile_key = "profile:0"
         page._loading = False
         page._request_strategy_feedback_save = Mock()
 
-        page._strategy_feedback_bar.favorite_button.click()
+        # Оценили не ту стратегию, что выбрана для профиля.
+        page._strategy_list.strategy_rating_requested.emit("multisplit_1", "notwork")
+        page._strategy_list.strategy_favorite_requested.emit("multisplit_1", True)
 
-        page._request_strategy_feedback_save.assert_called_once_with({"rating": None, "favorite": True})
+        self.assertEqual(
+            page._request_strategy_feedback_save.call_args_list[0].args,
+            ({"strategy_id": "multisplit_1", "rating": "notwork", "favorite": None},),
+        )
+        self.assertEqual(
+            page._request_strategy_feedback_save.call_args_list[1].args,
+            ({"strategy_id": "multisplit_1", "rating": None, "favorite": True},),
+        )
+
+    def test_nothing_is_saved_while_the_profile_is_loading(self) -> None:
+        page = self._page()
+        page._payload = self._payload()
+        page._profile_key = "profile:0"
+        page._loading = True
+        page._request_strategy_feedback_save = Mock()
+
+        page._strategy_list.strategy_rating_requested.emit("tls_fake", "work")
+
+        page._request_strategy_feedback_save.assert_not_called()
 
 
 class ListFileTabTests(_TabsCase):

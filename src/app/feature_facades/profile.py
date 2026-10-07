@@ -439,12 +439,16 @@ class ProfileFeature:
         def _save_feedback(
             *,
             profile_key: str,
+            strategy_id: str,
             rating: str | None = None,
             favorite: bool | None = None,
         ):
-            return self.set_current_strategy_state(
+            # Оценку ставят той стратегии, по которой щёлкнули в списке:
+            # она не обязана быть выбранной для профиля.
+            return self.set_strategy_state(
                 clean_launch_method,
                 profile_key,
+                strategy_id,
                 rating=rating,
                 favorite=favorite,
             )

@@ -335,6 +335,10 @@ class ProfileStrategyController:
         state = page._strategy_feedback_save_state_obj()
         pending = dict(state.pending or {})
         next_request = dict(request or {})
+        if str(pending.get("strategy_id") or "") != str(next_request.get("strategy_id") or ""):
+            # Ждёт запись для другой стратегии: её оценки сюда не подмешиваются.
+            pending = {}
+        pending["strategy_id"] = str(next_request.get("strategy_id") or "")
         for key in ("rating", "favorite"):
             if key in next_request and next_request.get(key) is not None:
                 pending[key] = next_request.get(key)
@@ -346,8 +350,7 @@ class ProfileStrategyController:
         page = self._page
         if not page._profile_key:
             return
-        item = getattr(getattr(page, "_payload", None), "item", None)
-        strategy_id = _current_strategy_id(page._payload)
+        strategy_id = str(request.get("strategy_id") or "").strip()
         if not strategy_id or strategy_id in {"none", "custom"}:
             return
         runtime = page._worker_runtime("_strategy_feedback_save_runtime")
@@ -382,21 +385,17 @@ class ProfileStrategyController:
             return
         if str(profile_key or "").strip() != str(page._profile_key or "").strip():
             return
-        item = getattr(getattr(page, "_payload", None), "item", None)
-        current_strategy_id = _current_strategy_id(page._payload)
-        if str(strategy_id or "").strip() != current_strategy_id:
-            return
+        strategy_id = str(strategy_id or "").strip()
         next_state = state if isinstance(state, ProfileStrategyState) else ProfileStrategyState()
-        current_state = getattr(getattr(page, "_payload", None), "current_strategy_state", None)
-        if (
-            current_state == next_state
-            and str(getattr(item, "rating", "") or "") == str(getattr(next_state, "rating", "") or "")
-            and bool(getattr(item, "favorite", False)) == bool(getattr(next_state, "favorite", False))
-        ):
+        known_states = getattr(getattr(page, "_payload", None), "strategy_states", None) or {}
+        if known_states.get(strategy_id, ProfileStrategyState()) == next_state:
             return
-        if not page._apply_strategy_feedback_locally(state):
+        if not page._apply_strategy_feedback_locally(strategy_id, state):
             page.reload_current_profile()
             page._on_profile_changed_callback(page._profile_key, "feedback")
+            return
+        if strategy_id != _current_strategy_id(page._payload):
+            # Оценили не выбранную стратегию: в списке профилей ничего не меняется.
             return
         item = getattr(getattr(page, "_payload", None), "item", None)
         page._on_profile_changed_callback(page._profile_key, "feedback", item)
