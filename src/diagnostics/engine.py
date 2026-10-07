@@ -35,7 +35,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from diagnostics import block_cause, quic_probe
+from diagnostics import block_cause, ipv6_check, quic_probe
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
@@ -918,6 +918,7 @@ def _collect_problems(
     zapret_running: bool | None,
     geo_service_for: Callable[[str], str] | None = None,
     reference: list[dict] | None = None,
+    ipv6: ipv6_check.Ipv6Verdict | None = None,
 ) -> tuple[list[dict], list[str], list[str]]:
     """Итог для экрана: проблемы по важности, открывающиеся сервисы, подменённые DNS."""
     problems: list[dict] = []
@@ -1048,10 +1049,43 @@ def _collect_problems(
                 (_ADVICE_QUIC,),
             )
         )
+    if ipv6 is not None and ipv6.code == ipv6_check.IPV6_BROKEN and not offline:
+        problems.append(_problem(Level.WARN, f"IPv6 {ipv6.text}", (_ADVICE_IPV6,)))
     for item in _blocked_references(reference or []):
         problems.append(_problem(Level.WARN, _reference_text(item), (_ADVICE_BLOCKED_REFERENCE,), action="dns"))
     problems.sort(key=lambda item: _LEVEL_ORDER.get(Level(item["level"]), 9))
     return problems, working, spoofed
+
+
+def _system_has_ipv6_route() -> bool | None:
+    """Считает ли Windows, что по IPv6 есть дорога в интернет. None — не Windows или ошибка."""
+    if sys.platform != "win32":
+        return None
+    from dns.winapi import internet_route
+
+    return bool(internet_route().has_ipv6)
+
+
+def _check_ipv6(run: _Run) -> ipv6_check.Ipv6Verdict:
+    facts = ipv6_check.collect(
+        has_route=_system_has_ipv6_route,
+        lookup=lambda host: _doh_lookup(run, host, DNS_TYPE_AAAA)[1],
+        get=lambda host, ip: _get(run, host, ip, "/"),
+        submit=run.submit,
+    )
+    return ipv6_check.judge(facts)
+
+
+_IPV6_ICON = {
+    ipv6_check.IPV6_OK: "✅",
+    ipv6_check.IPV6_ABSENT: "ℹ️",
+    ipv6_check.IPV6_BROKEN: "⚠️",
+    ipv6_check.IPV6_UNKNOWN: "❔",
+}
+_ADVICE_IPV6 = (
+    "Из-за этого сайты открываются с задержкой: браузер сначала ждёт IPv6. Перезагрузите роутер; "
+    "если не поможет — снимите галочку «IP версии 6» в свойствах сетевого адаптера Windows."
+)
 
 
 def _blocked_references(reference: list[dict]) -> list[dict]:
@@ -1109,7 +1143,7 @@ def run_blockcheck(
     targets_count = sum(len(service.targets) for service in services.values())
     run = _Run(
         should_stop,
-        workers=targets_count * _WORKERS_PER_TARGET + 24,
+        workers=targets_count * _WORKERS_PER_TARGET + 40,
         deadline=RUN_DEADLINE_ALL if scope == SCOPE_ALL else RUN_DEADLINE,
     )
     started = time.monotonic()
@@ -1138,7 +1172,20 @@ def run_blockcheck(
             lambda host, path: _download(run, host, path),
         )
 
+        ipv6_future = run.submit(_check_ipv6, run)
+
         collected = _run_probes(run, services, full=True, emit=emit)
+
+        ipv6 = None
+        try:
+            ipv6 = run.wait(ipv6_future)
+        except _Stopped:
+            raise
+        except Exception as exc:
+            emit(f"❔ IPv6: проверка не выполнилась ({exc})")
+        if ipv6 is not None:
+            emit("━━━━━━━━ IPv6 ━━━━━━━━")
+            emit(f"{_IPV6_ICON[ipv6.code]} IPv6 {ipv6.text}")
 
         voice = freeze = None
         if voice_future is not None:
@@ -1184,6 +1231,7 @@ def run_blockcheck(
             zapret_running=zapret_running,
             geo_service_for=geo_service_for,
             reference=run.reference_report(),
+            ipv6=ipv6,
         )
 
         emit("")
@@ -1226,6 +1274,7 @@ def run_blockcheck(
             "working": working,
             "spoofed_hosts": spoofed,
             "reference": run.reference_report(),
+            "ipv6": {"state": ipv6.code, "text": ipv6.text} if ipv6 is not None else None,
             "environment": environment,
             "zapret_running": zapret_running,
             "zapret_line": zapret_line,

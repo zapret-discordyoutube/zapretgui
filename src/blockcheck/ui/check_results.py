@@ -330,6 +330,15 @@ def _target_mark(item: dict) -> str:
     return "?" if str(item.get("state") or "") == "unknown" else "✗"
 
 
+# Состояние IPv6 → (уровень строки, слово результата). «Нет в сети» — норма,
+# поэтому зелёным или красным она не красится.
+_IPV6_ROW = {
+    "ok": ("ok", "Работает"),
+    "absent": ("unknown", "Нет в сети"),
+    "broken": ("warn", "Не работает"),
+    "unknown": ("unknown", "Не проверено"),
+}
+
 # Как блокируют — коротко для ячейки; полный текст причины идёт в подсказку строки.
 _CAUSE_WORDS = {
     "by_name": "блокировка по имени сайта",
@@ -451,6 +460,11 @@ class BlockcheckSitesTable(TableWidget):
             if headline.startswith("Голосовые звонки: "):
                 headline = headline[len("Голосовые звонки: "):]
             self._add_row(title, level, _SECTION_WORDS[key].get(level, ""), headline, tooltip)
+        ipv6 = report.get("ipv6")
+        if ipv6:
+            level, word = _IPV6_ROW.get(str(ipv6.get("state") or ""), ("unknown", "Не проверено"))
+            text = f"IPv6 {ipv6.get('text', '')}".strip()
+            self._add_row("IPv6", level, word, text, text)
         self._apply_theme_refresh()
         self._fit_height()
         broken = sum(1 for level in self._levels if level in ("fail", "warn"))

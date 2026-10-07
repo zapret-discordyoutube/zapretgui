@@ -310,6 +310,24 @@ class SitesTableTests(unittest.TestCase):
         tooltip = _service_details(report["services"][0])[1]
         self.assertIn("   Блокировка по имени сайта: с именем x.com соединение обрывается", tooltip)
 
+    def test_ipv6_gets_its_own_row(self) -> None:
+        cases = {
+            "broken": ("Не работает", "IPv6 настроен, но не работает"),
+            "absent": ("Нет в сети", "IPv6 в этой сети его нет"),
+            "ok": ("Работает", "IPv6 работает (ответ за 12 мс)"),
+        }
+        for state, (word, details) in cases.items():
+            with self.subTest(state=state):
+                table = BlockcheckSitesTable()
+                table.show_report({"services": [], "ipv6": {"state": state, "text": details[len("IPv6 "):]}})
+                shown = [table.item(0, column).text() for column in range(3)]
+                self.assertEqual(shown, ["IPv6", word, details])
+        table = BlockcheckSitesTable()
+        table.show_report({"services": [], "ipv6": {"state": "broken", "text": "настроен, но не работает"}})
+        self.assertIn("с проблемами 1", table.accessibleName())
+        table.show_report({"services": [], "ipv6": None})
+        self.assertEqual(table.rowCount(), 0)
+
     def test_blocked_quic_is_marked_for_open_site(self) -> None:
         service = {
             "targets": [

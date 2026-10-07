@@ -205,6 +205,7 @@ class _Net:
         # Что «показал» QUIC: по умолчанию проверку будто сняли — вывода нет.
         self.quic_facts = None
         self.quic_asked: list[tuple[str, str]] = []
+        self.ipv6 = engine.ipv6_check.Ipv6Verdict(engine.ipv6_check.IPV6_ABSENT, "в этой сети его нет")
 
     def _quic(self, host, ip, **_kwargs):
         self.quic_asked.append((host, ip))
@@ -243,6 +244,7 @@ class _Net:
             # Уточнение причины ходит в сеть само: в сценариях движка оно подменено.
             patch.object(engine.block_cause, "collect", side_effect=self._collect),
             patch.object(engine.quic_probe, "collect", side_effect=self._quic),
+            patch.object(engine, "_check_ipv6", side_effect=lambda _run: self.ipv6),
             patch.object(engine, "hosts_file_ipv4", return_value=()),
             patch.object(engine, "system_dns_servers", return_value=("83.220.169.155",)),
             patch.object(engine, "_zapret_status", return_value=(True, "✅ Zapret запущен")),
@@ -472,6 +474,37 @@ class QuicInReportTests(unittest.TestCase):
         net.run(engine.run_dns_check, emit=lambda _line: None)
 
         self.assertEqual(net.quic_asked, [])
+
+
+class Ipv6InReportTests(unittest.TestCase):
+    def _run(self, code: str, text: str):
+        lines: list[str] = []
+        net = _Net()
+        net.ipv6 = engine.ipv6_check.Ipv6Verdict(code, text)
+        return net.run(engine.run_blockcheck, "main", emit=lines.append), lines
+
+    def test_broken_ipv6_is_a_warning_with_advice(self) -> None:
+        result, lines = self._run(engine.ipv6_check.IPV6_BROKEN, "настроен, но не работает")
+
+        self.assertIn("⚠️ IPv6 настроен, но не работает", lines)
+        problem = next(item for item in result["problems"] if item["text"].startswith("IPv6"))
+        self.assertEqual(problem["level"], "warn")
+        self.assertIn("с задержкой", problem["advice"][0])
+        self.assertEqual(result["ipv6"], {"state": "broken", "text": "настроен, но не работает"})
+
+    def test_absent_and_working_ipv6_are_only_lines_in_report(self) -> None:
+        for code, icon in ((engine.ipv6_check.IPV6_ABSENT, "ℹ️"), (engine.ipv6_check.IPV6_OK, "✅")):
+            with self.subTest(code=code):
+                result, lines = self._run(code, "текст")
+                self.assertIn(f"{icon} IPv6 текст", lines)
+                self.assertFalse([item for item in result["problems"] if item["text"].startswith("IPv6")])
+
+    def test_ipv6_section_comes_after_sites_and_before_summary(self) -> None:
+        _result, lines = self._run(engine.ipv6_check.IPV6_OK, "работает")
+        section = lines.index("━━━━━━━━ IPv6 ━━━━━━━━")
+
+        self.assertGreater(section, next(i for i, line in enumerate(lines) if line.startswith("━━━━━━━━ YouTube")))
+        self.assertLess(section, lines.index("━━━━━━━━ 📊 Итог ━━━━━━━━"))
 
 
 class EngineScenarioTests(unittest.TestCase):
