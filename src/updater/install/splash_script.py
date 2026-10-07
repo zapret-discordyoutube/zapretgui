@@ -177,6 +177,10 @@ $S = @{
     FlashAt      = -1.0
     # Промежуточное звено сглаживания: полоса идёт за ним, а оно — за целью.
     Lead         = 0.0
+    # Вертушка: угол логотипа в градусах и сглаженная скорость полосы (доля в
+    # секунду), от которой зависит, как быстро он крутится.
+    Spin         = 0.0
+    Speed        = 0.0
     Closing      = $false
     ClosingAt    = 0.0
     CloseFast    = $false
@@ -619,7 +623,8 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
         $scoutPen.Dispose()
     }
     if ($null -ne $logo) {
-        # Логотип появляется с увеличением, потом едва заметно «дышит» и парит.
+        # Логотип появляется с увеличением и крутится как вертушка: угол копит
+        # таймер (см. $S.Spin), скорость зависит от хода установки.
         # Этап закончился — короткий «вдох», установщик закончил — «вдох» сильнее.
         $scale = (0.84 + 0.16 * (Ease-Back ($now / 0.6))) * (1 + 0.014 * [Math]::Sin($now * 1.8))
         if ($flash -lt 1) { $scale += 0.06 * [Math]::Sin([Math]::PI * $flash) }
@@ -628,20 +633,21 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
             if ($t -lt 1) { $scale += 0.1 * [Math]::Sin([Math]::PI * $t) }
         }
         $size = [single]($ringSize * 0.52 * $scale)
-        $logoLeft = [single]($ringX - $size / 2)
-        $logoTop = [single]($ringY - $size / 2 + 1.6 * $k * [Math]::Sin($now * 1.5))
-        $g.DrawImage($logo, (New-Object System.Drawing.RectangleF($logoLeft, $logoTop, $size, $size)))
+        $logoRect = New-Object System.Drawing.RectangleF((-$size / 2), (-$size / 2), $size, $size)
+        $state = $g.Save()
+        $g.TranslateTransform($ringX, $ringY)
+        $g.RotateTransform([single]$S.Spin)
+        $g.DrawImage($logo, $logoRect)
+        $g.Restore($state)
         # Раз в несколько секунд по значку наискось проходит световой блик.
+        # Полоса света стоит на месте относительно окна, а силуэт под ней
+        # крутится вместе со значком.
         $pass = ($now % 4.4) / 0.95
         if ($null -ne $logoShine -and $pass -lt 1 -and $now -gt 1.0) {
+            $logoLeft = [single]($ringX - $size / 2)
+            $logoTop = [single]($ringY - $size / 2)
             $middle = $logoLeft - $size * 0.35 + $size * 1.7 * (Ease-InOut $pass)
             $slant = $size * 0.16
-            $corners = [System.Drawing.PointF[]]@(
-                (New-Object System.Drawing.PointF($logoLeft, $logoTop)),
-                (New-Object System.Drawing.PointF(($logoLeft + $size), $logoTop)),
-                (New-Object System.Drawing.PointF($logoLeft, ($logoTop + $size)))
-            )
-            $source = New-Object System.Drawing.RectangleF(0, 0, $logoShine.Width, $logoShine.Height)
             # Три вложенные полосы разной ширины: яркая середина, мягкие края.
             foreach ($layer in @(@(0.2, 0.1), @(0.12, 0.13), @(0.05, 0.16))) {
                 $half = $size * $layer[0]
@@ -658,9 +664,15 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
                 $attributes.SetColorMatrix($fade)
                 $state = $g.Save()
                 $g.SetClip($band, [System.Drawing.Drawing2D.CombineMode]::Intersect)
+                $g.TranslateTransform($ringX, $ringY)
+                $g.RotateTransform([single]$S.Spin)
                 # Силуэт полупрозрачный и размытый по смыслу: дорогое сглаживание ему не нужно.
                 $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::Bilinear
-                $g.DrawImage($logoShine, $corners, $source, [System.Drawing.GraphicsUnit]::Pixel, $attributes)
+                $g.DrawImage($logoShine, [System.Drawing.PointF[]]@(
+                    (New-Object System.Drawing.PointF((-$size / 2), (-$size / 2))),
+                    (New-Object System.Drawing.PointF(($size / 2), (-$size / 2))),
+                    (New-Object System.Drawing.PointF((-$size / 2), ($size / 2)))
+                ), (New-Object System.Drawing.RectangleF(0, 0, $logoShine.Width, $logoShine.Height)), [System.Drawing.GraphicsUnit]::Pixel, $attributes)
                 $g.Restore($state)
                 $attributes.Dispose(); $band.Dispose()
             }
@@ -1045,7 +1057,15 @@ $timer.Add_Tick({
         # а разгоняется и тормозит — у движения появляется вес.
         $target = Target-Fill
         $S.Lead = [Math]::Max($S.Lead, $S.Lead + ($target - $S.Lead) * (1 - [Math]::Exp(-$dt / 0.14)))
+        $before = $S.Fill
         $S.Fill = [Math]::Max($S.Fill, $S.Fill + ($S.Lead - $S.Fill) * (1 - [Math]::Exp(-$dt / 0.16)))
+        # Логотип-вертушка: спокойно крутится всегда, быстрее — пока полоса
+        # растёт, и получает порыв, когда этап закончился. Скорость меняется
+        # плавно, поэтому вертушка разгоняется и замедляется, а не дёргается.
+        if ($dt -gt 0) { $S.Speed += (($S.Fill - $before) / $dt - $S.Speed) * (1 - [Math]::Exp(-$dt / 0.5)) }
+        $rate = 80.0 + [Math]::Min(420.0, 1600.0 * $S.Speed)
+        if ($S.FlashAt -ge 0 -and ($now - $S.FlashAt) -lt 1.2) { $rate += 300.0 * (1 - ($now - $S.FlashAt) / 1.2) }
+        $S.Spin = ($S.Spin + $rate * $dt) % 360.0
         # Установка закончена — логотип в кольце делает один «вдох».
         if ($S.InstallSucceeded -and $S.Fill -ge 0.9 -and $S.DoneJumpAt -lt 0) { $S.DoneJumpAt = $now }
         if ($S.Stage -ge 2 -and $S.Fill -ge 0.99 -and $S.DoneAt[2] -lt 0) { $S.DoneAt[2] = $now; $S.FlashAt = $now }
