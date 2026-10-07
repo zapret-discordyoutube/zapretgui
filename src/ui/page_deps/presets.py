@@ -133,8 +133,23 @@ def build_profile_setup_page_kwargs(
     show_page,
     on_profile_setup_changed,
     ui_state_store=None,
+    hosts_feature=None,
 ) -> dict:
     method = ZAPRET2_MODE if page_name == PageName.ZAPRET2_PROFILE_SETUP else ZAPRET1_MODE
+
+    def _load_profile_geo_services(profile_key: str, m=method) -> tuple[str, ...]:
+        # Гео-сервис сам закрыт для России: по списку сайтов профиля страница
+        # подсказывает, что ему нужен hosts или DNS, а не перебор стратегий.
+        state = profile_feature.get_profile_list_file_editor_state(m, profile_key)
+        if state is None or str(getattr(state, "kind", "") or "") != "hostlist":
+            return ()
+        return tuple(hosts_feature.load_geo_services_for_site_list(str(getattr(state, "text", "") or "")))
+
+    def _create_profile_geo_services_worker(request_id: int, profile_key: str, parent=None):
+        from profile.profile_geo_loader import ProfileGeoServicesWorker
+
+        return ProfileGeoServicesWorker(request_id, _load_profile_geo_services, profile_key, parent)
+
     profiles_page = (
         PageName.ZAPRET2_PRESET_SETUP
         if page_name == PageName.ZAPRET2_PROFILE_SETUP
@@ -154,6 +169,11 @@ def build_profile_setup_page_kwargs(
         "create_profile_strategy_feedback_save_worker": profile_feature.create_profile_strategy_feedback_save_worker,
         "create_profile_strategy_open_group_save_worker": profile_feature.create_profile_strategy_open_group_save_worker,
         "create_profile_strategy_grouping_save_worker": profile_feature.create_profile_strategy_grouping_save_worker,
+        "create_profile_geo_services_worker": (
+            _create_profile_geo_services_worker if hosts_feature is not None else None
+        ),
+        "open_hosts_editor": lambda: show_page(PageName.HOSTS),
+        "open_dns_settings": lambda: show_page(PageName.NETWORK),
         "open_profiles": lambda page=profiles_page: show_page(page, allow_internal=True),
         "open_root": lambda m=method: show_page(resolve_profile_setup_root_page_for_method(m), allow_internal=True),
         "on_profile_changed": lambda profile_key, change_kind, profile_item=None, old_profile_key=None, m=method: on_profile_setup_changed(

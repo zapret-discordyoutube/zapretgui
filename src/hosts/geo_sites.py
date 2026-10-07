@@ -47,6 +47,32 @@ def build_geo_sites(profile_index: Mapping[str, object]) -> GeoSites:
     return GeoSites(service_by_site)
 
 
+# Доля списка, с которой он считается списком гео-сервиса. В общем списке на
+# тысячи сайтов пара гео-адресов встречается случайно — о нём молчим.
+_GEO_LIST_SHARE_DIVISOR = 20
+
+
+def geo_services_for_site_list(geo_sites: GeoSites, text: str) -> tuple[str, ...]:
+    """Гео-сервисы, которым посвящён список сайтов (текст hostlist-файла).
+
+    Пустой ответ — список не про гео-сервис: его сайтам помогает стратегия.
+    Сервисы идут по убыванию числа их адресов в списке.
+    """
+    total = 0
+    counts: dict[str, int] = {}
+    for line in str(text or "").splitlines():
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        total += 1
+        service = geo_sites.service_for(entry)
+        if service:
+            counts[service] = counts.get(service, 0) + 1
+    if not counts or sum(counts.values()) * _GEO_LIST_SHARE_DIVISOR < total:
+        return ()
+    return tuple(sorted(counts, key=lambda name: (-counts[name], name)))
+
+
 def load_geo_sites() -> GeoSites:
     """Читает каталог hosts (файл) — звать вне UI-потока."""
     from hosts.proxy_domains import get_services_profile_index
@@ -54,4 +80,15 @@ def load_geo_sites() -> GeoSites:
     return build_geo_sites(get_services_profile_index())
 
 
-__all__ = ["GeoSites", "build_geo_sites", "load_geo_sites"]
+def load_geo_services_for_site_list(text: str) -> tuple[str, ...]:
+    """Читает каталог hosts (файл) — звать вне UI-потока."""
+    return geo_services_for_site_list(load_geo_sites(), text)
+
+
+__all__ = [
+    "GeoSites",
+    "build_geo_sites",
+    "geo_services_for_site_list",
+    "load_geo_services_for_site_list",
+    "load_geo_sites",
+]

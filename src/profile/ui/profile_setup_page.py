@@ -24,6 +24,7 @@ from profile.ui.profile_setup_controls import (
 )
 from profile.strategy_state import ProfileStrategyState
 from profile.ui.profile_conditions_flyout import ProfileConditionsFlyout, ProfileConditionsView
+from profile.ui.profile_geo_notice import ProfileGeoNotice
 from profile.ui.profile_list_file_editor_controller import ProfileListFileEditorController
 from profile.ui.profile_setup_save_controllers import ProfileSetupSaveController
 from profile.ui.profile_setup_payload_controller import ProfileSetupPayloadController
@@ -349,6 +350,9 @@ class ProfileSetupPageBase(BasePage):
         ui_state_store=None,
         create_profile_strategy_open_group_save_worker=None,
         create_profile_strategy_grouping_save_worker=None,
+        create_profile_geo_services_worker=None,
+        open_hosts_editor=None,
+        open_dns_settings=None,
     ):
         super().__init__(
             title="",
@@ -376,6 +380,11 @@ class ProfileSetupPageBase(BasePage):
         self._create_profile_strategy_grouping_save_worker_fn = create_profile_strategy_grouping_save_worker
         # Группировка, ещё не записанная в настройки; None — записывать нечего.
         self._pending_strategy_grouping_save = None
+        # Гео-сервису (сам закрыт для России) помогают hosts и DNS, а не
+        # стратегия: страница говорит об этом всплывающей карточкой.
+        self._create_profile_geo_services_worker_fn = create_profile_geo_services_worker
+        self._open_hosts_editor = open_hosts_editor
+        self._open_dns_settings = open_dns_settings
         self._open_profiles = open_profiles
         self._open_root = open_root
         self._on_profile_changed_callback = on_profile_changed
@@ -800,6 +809,12 @@ class ProfileSetupPageBase(BasePage):
         QWidget.setTabOrder(self._strategy_list._search, self._strategy_list._grouping_combo)
         QWidget.setTabOrder(self._strategy_list._grouping_combo, self._strategy_list._list)
         self._update_profile_setup_accessibility()
+        self._geo_notice = ProfileGeoNotice(
+            self,
+            create_worker=self._create_profile_geo_services_worker_fn,
+            open_hosts_editor=self._open_hosts_editor,
+            open_dns_settings=self._open_dns_settings,
+        )
 
     def _update_combo_accessibility(self, combo, *, name: str, description: str) -> None:
         if combo is None:
@@ -1797,6 +1812,9 @@ class ProfileSetupPageBase(BasePage):
             if self._raw_tab_built:
                 self._apply_raw_tab_payload()
             self._rebuild_breadcrumb()
+            geo_notice = self.__dict__.get("_geo_notice")
+            if geo_notice is not None:
+                geo_notice.request(self._profile_key)
         finally:
             self._loading = False
 
@@ -2552,6 +2570,9 @@ class ProfileSetupPageBase(BasePage):
         except Exception:
             writes_to_save = []
         self._cleanup_in_progress = True
+        geo_notice = self.__dict__.get("_geo_notice")
+        if geo_notice is not None:
+            geo_notice.cleanup()
         base_fill = self.__dict__.get("_list_file_base_fill")
         if base_fill is not None:
             base_fill.stop()
