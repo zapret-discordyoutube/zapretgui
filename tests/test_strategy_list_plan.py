@@ -592,27 +592,38 @@ class AnalyzerSceneTests(unittest.TestCase):
         widget.set_phase(phase)
         return widget, widget.chip_frames(phase)
 
-    def test_caption_names_number_length_and_fake_mark(self) -> None:
-        from PyQt6.QtGui import QFontMetrics
+    def _rows(self, scene: str, phase: float):
+        widget, _frames = self._frames(scene, phase)
+        return widget, {row.number: row for row in widget.log_rows(phase)}
 
-        widget, frames = self._frames("fake", 0.3)
-        metrics = QFontMetrics(widget._detail_font())
-        captions = {frame.label: widget.chip_detail(frame, metrics) for frame in frames}
+    def test_log_row_appears_when_packet_leaves_and_fills_in_as_it_travels(self) -> None:
+        from ui.onboarding.illustrations import STATIC_PHASE
 
-        self.assertEqual(captions["google.com"], "#1 len=10 FAKE")
-        self.assertEqual(captions["youtube.com"], "#2 len=11")
+        widget, early = self._rows("fake", 0.02)
+        self.assertEqual(list(early), [1])
+        self.assertEqual((early[1].label, early[1].kind, early[1].length), ("google.com", "fake", 10))
+        self.assertEqual((early[1].gate[1], early[1].site[1]), ("wait", "wait"))
 
-    def test_caption_under_narrow_packet_is_shortened_instead_of_overlapping(self) -> None:
-        from PyQt6.QtGui import QFontMetrics
-        from ui.onboarding.illustrations import CHIP_GAP
+        _widget, done = self._rows("fake", STATIC_PHASE)
+        self.assertEqual((done[1].gate, done[1].site), (("принял за настоящий", "ok"), ("отброшен", "drop")))
+        self.assertEqual((done[2].label, done[2].gate, done[2].site), ("youtube.com", ("пропустил", "pass"), ("принят", "ok")))
 
-        widget, frames = self._frames("fakedsplit", 0.42)
-        metrics = QFontMetrics(widget._detail_font())
-        for frame in frames:
-            caption = widget.chip_detail(frame, metrics)
-            self.assertTrue(caption.startswith(f"#{frame.index + 1}"))
-            if caption != f"#{frame.index + 1}":
-                self.assertLessEqual(metrics.horizontalAdvance(caption), frame.width + CHIP_GAP)
+    def test_blocked_packet_never_reaches_the_site(self) -> None:
+        from ui.onboarding.illustrations import STATIC_PHASE
+
+        _widget, rows = self._rows("blocked", STATIC_PHASE)
+
+        self.assertEqual((rows[1].gate, rows[1].site), (("узнал имя — блок", "block"), ("—", "none")))
+
+    def test_scheme_height_follows_number_of_packets(self) -> None:
+        from ui.onboarding.illustrations import LOG_ROW_HEIGHT, TechniqueIllustration
+
+        two = TechniqueIllustration.scene_height("fake")
+        six = TechniqueIllustration.scene_height("fakedsplit")
+        widget, _rows = self._rows("fakedsplit", 0.5)
+
+        self.assertEqual(six - two, 4 * LOG_ROW_HEIGHT)
+        self.assertEqual(widget.height(), six)
 
     def test_scene_runs_slowly_enough_to_read_captions(self) -> None:
         from ui.onboarding.illustrations import PERIOD_MS

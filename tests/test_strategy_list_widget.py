@@ -405,6 +405,25 @@ class DetailsTests(_WidgetCase):
         self.assertEqual([list(call) for call in applied], [["fake-05"]])
         self.assertFalse(widget.details_open())
 
+    def test_blocks_take_only_the_height_their_content_needs(self) -> None:
+        """Блок без сервисов — одна строка текста, а не полэкрана пустоты; строки
+        «Ваш опыт» прижаты к заголовку, даже когда соседняя карточка выше."""
+        widget = self._with_details()
+        view = widget._details_view
+
+        widget.show_details("fake-05")
+        self._app.processEvents()
+        with_places = view._places_card.height()
+        widget.show_details("fake-01")
+        self._app.processEvents()
+
+        self.assertIsNone(view._places_host)
+        self.assertLess(view._places_card.height(), 90)
+        self.assertLess(view._places_card.height(), with_places)
+        rows = [child for child in view._experience_card.children() if type(child).__name__ == "_Row"]
+        self.assertLess(rows[0].y(), 60)
+        self.assertEqual(view._experience_card.height(), view._facts_card.height())
+
     def test_service_card_opens_its_profile_only_when_preset_has_one(self) -> None:
         from profile.ui.strategy_list.details import _PlaceCard
 

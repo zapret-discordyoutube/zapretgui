@@ -16,9 +16,11 @@
 
 Так видно главное: проверка провайдера видит одно, а сайт получает другое.
 
-Схема оформлена как окно анализатора трафика: сетка, моноширинный шрифт,
-под каждым пакетом его номер и длина, у подделки — пометка FAKE. Круг идёт
-неторопливо, чтобы подписи успевали прочитать.
+Схема оформлена как окно анализатора трафика: сетка, моноширинный шрифт, под
+каждым пакетом его номер. Под дорожкой — журнал пакетов, как в настоящем
+анализаторе: строка появляется, когда пакет вышел, и дописывает, что с ним
+сделали проверка провайдера и сайт. Текст журнала стоит на месте, поэтому его
+можно спокойно прочитать — в отличие от подписи на движущемся пакете.
 Сцены повторяются по кругу. Все переходы (появление реплики, вспышка у
 сайта, падение подделок) заканчиваются до STATIC_PHASE: когда анимации в
 системе выключены, рисуется этот неподвижный кадр с итогом.
@@ -45,7 +47,13 @@ from ui.fluent_widgets import set_tooltip
 # Круг неторопливый: под каждым пакетом подпись, её нужно успеть прочитать.
 PERIOD_MS = 9000
 FRAME_MS = 33
-ILLUSTRATION_HEIGHT = 164
+# Высота дорожки с узлами; ниже неё идёт журнал пакетов.
+TRACK_HEIGHT = 150
+LOG_HEADER_HEIGHT = 20
+LOG_ROW_HEIGHT = 18
+LOG_BOTTOM_PAD = 8
+# Высота схемы, пока сцена не выбрана: дорожка и журнал на два пакета.
+ILLUSTRATION_HEIGHT = TRACK_HEIGHT + LOG_HEADER_HEIGHT + LOG_ROW_HEIGHT * 2 + LOG_BOTTOM_PAD
 # Сколько доли круга плашка идёт от «Вы» до сайта.
 TRAVEL = 0.45
 # С этого места круга всё плавно гаснет перед повтором.
@@ -258,6 +266,22 @@ class ChipFrame:
 
 
 @dataclass(frozen=True, slots=True)
+class LogRow:
+    """Строка журнала пакетов под дорожкой."""
+
+    number: int
+    label: str
+    kind: str
+    length: int
+    # Что сделала проверка провайдера и что сделал сайт: (текст, тон).
+    # Тон: wait — ещё не дошёл, ok, pass, drop, block, none.
+    gate: tuple[str, str]
+    site: tuple[str, str]
+    # Строка проявляется, когда пакет выходит от «Вы».
+    alpha: float = 1.0
+
+
+@dataclass(frozen=True, slots=True)
 class SceneTimes:
     starts: tuple[float, ...]
     # Когда проверка подаёт реплику (и, для блока, обрывает соединение).
@@ -309,7 +333,16 @@ class TechniqueIllustration(QWidget):
         if key == self._scene_key:
             return
         self._scene_key = key
+        # Высота схемы зависит от сцены: в журнале по строке на пакет.
+        self.setFixedHeight(self.scene_height(key))
         self._restart()
+
+    @staticmethod
+    def scene_height(key: str) -> int:
+        scene = SCENES.get(key)
+        if scene is None:
+            return ILLUSTRATION_HEIGHT
+        return TRACK_HEIGHT + LOG_HEADER_HEIGHT + LOG_ROW_HEIGHT * len(scene.packets) + LOG_BOTTOM_PAD
 
     def is_animating(self) -> bool:
         return self._timer.isActive()
@@ -439,36 +472,106 @@ class TechniqueIllustration(QWidget):
     def _detail_font(self) -> QFont:
         return self._mono_font(2.5)
 
-    @staticmethod
-    def chip_detail(frame: "ChipFrame", metrics: QFontMetrics) -> str:
-        """Подпись под пакетом, как строка анализатора: номер, длина, пометка.
+    def log_rows(self, phase: float) -> list[LogRow]:
+        """Журнал пакетов в момент phase: что уже вышло и что с этим сделали."""
+        scene = SCENES.get(self._scene_key)
+        if scene is None:
+            return []
+        layout = self._layout()
+        chips = self._chip_widths(scene, QFontMetrics(self._chip_font()))
+        times = self._scene_times(scene, layout, chips)
+        span = max(1.0, layout.end_x - layout.start_x)
+        at_gate = (layout.gate_x - layout.start_x) / span
+        # Подделка гаснет на первой половине пути от проверки к сайту.
+        gone = at_gate + (1.0 - at_gate) * 0.55
+        wait = ("…", "wait")
+        rows: list[LogRow] = []
+        for index, packet in enumerate(scene.packets):
+            raw = (phase - times.starts[index]) / scene.travel
+            if raw <= 0.0:
+                continue
+            passed_gate = raw >= at_gate
+            if packet.fate == "blocked":
+                gate = (self._tr("onboarding.scene.log.blocked", "узнал имя — блок"), "block") if phase >= times.verdict else wait
+                site = ("—", "none")
+            elif packet.fate == "die":
+                gate = (self._tr("onboarding.scene.log.fooled", "принял за настоящий"), "ok") if passed_gate else wait
+                site = (self._tr("onboarding.scene.log.dropped", "отброшен"), "drop") if raw >= gone else wait
+            elif packet.fate == "discard":
+                gate = (self._tr("onboarding.scene.log.passed", "пропустил"), "pass") if passed_gate else wait
+                site = (self._tr("onboarding.scene.log.dropped", "отброшен"), "drop") if raw >= 1.0 else wait
+            else:
+                gate = (self._tr("onboarding.scene.log.passed", "пропустил"), "pass") if passed_gate else wait
+                site = (self._tr("onboarding.scene.log.accepted", "принят"), "ok") if raw >= 1.0 else wait
+            label = self._packet_label(packet, False)
+            rows.append(
+                LogRow(
+                    number=index + 1,
+                    label=label,
+                    kind=packet.kind,
+                    length=len(label.split(". ", 1)[-1]),
+                    gate=gate,
+                    site=site,
+                    alpha=_ease_out(raw * scene.travel / APPEAR),
+                )
+            )
+        return rows
 
-        Под узким пакетом полная подпись налезла бы на соседние, поэтому
-        берётся самая подробная из тех, что помещаются под своей плашкой.
-        """
-        payload = frame.label.split(". ", 1)[-1]
-        mark = {"fake": " FAKE", "junk": " JUNK", "syn": " SYN"}.get(frame.kind, "")
-        number = f"#{frame.index + 1}"
-        room = frame.width + CHIP_GAP - 2
-        for text in (f"{number} len={len(payload)}{mark}", f"{number} len={len(payload)}", number):
-            if metrics.horizontalAdvance(text) <= room:
-                return text
-        return number
+    def _paint_log(self, painter: QPainter, phase: float, fade: float, colors) -> None:
+        """Журнал под дорожкой: номер, пакет, длина, проверка провайдера, сайт."""
+        width = float(self.width())
+        top = float(TRACK_HEIGHT)
+        font = self._detail_font()
+        painter.setFont(font)
+        columns = (10.0, 44.0, width * 0.36, width * 0.47, width * 0.78)
+        flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        headers = (
+            "№",
+            self._tr("onboarding.scene.log.packet", "пакет"),
+            self._tr("onboarding.scene.log.length", "длина"),
+            self._tr("onboarding.scene.log.gate", "проверка провайдера"),
+            self._tr("onboarding.scene.log.site", "сайт"),
+        )
+        painter.setPen(colors["muted"])
+        for x, text in zip(columns, headers):
+            painter.drawText(QRectF(x, top, width - x, LOG_HEADER_HEIGHT), flags, text)
+        painter.setPen(QPen(colors["track"], 1))
+        painter.drawLine(QPointF(8, top + LOG_HEADER_HEIGHT - 1), QPointF(width - 8, top + LOG_HEADER_HEIGHT - 1))
+        tones = {
+            "wait": colors["muted"],
+            "none": colors["muted"],
+            "pass": colors["text"],
+            "ok": PASS_GREEN,
+            "drop": FAKE_AMBER,
+            "block": BLOCK_RED,
+        }
+        marks = {"fake": " FAKE", "junk": " JUNK", "syn": " SYN"}
+        for row in self.log_rows(phase):
+            y = top + LOG_HEADER_HEIGHT + (row.number - 1) * LOG_ROW_HEIGHT
+            painter.setOpacity(row.alpha * fade)
+            cells = (
+                (f"#{row.number}", colors["muted"]),
+                (row.label + marks.get(row.kind, ""), FAKE_AMBER if row.kind == "fake" else colors["text"]),
+                (str(row.length), colors["muted"]),
+                (row.gate[0], tones[row.gate[1]]),
+                (row.site[0], tones[row.site[1]]),
+            )
+            for x, (text, color) in zip(columns, cells):
+                painter.setPen(color)
+                painter.drawText(QRectF(x, y, width - x, LOG_ROW_HEIGHT), flags, text)
+        painter.setOpacity(1.0)
 
     def _paint_grid(self, painter: QPainter, layout: "_Layout", colors) -> None:
         """Сетка фона и пунктирные оси трёх узлов."""
         grid = QColor(colors["track"])
         grid.setAlpha(max(8, grid.alpha() // 3))
         painter.setPen(QPen(grid, 1))
-        width, height = self.width(), self.height()
+        # Сетка лежит только под дорожкой: журнал ниже читается на ровном фоне.
+        width, height = self.width(), TRACK_HEIGHT - 6
         for x in range(GRID_STEP, width, GRID_STEP):
             painter.drawLine(x, 0, x, height)
         for y in range(GRID_STEP, height, GRID_STEP):
             painter.drawLine(0, y, width, y)
-        painter.setPen(QPen(colors["track"], 1, Qt.PenStyle.DotLine))
-        for rect in (layout.you_rect, layout.gate_rect, layout.site_rect):
-            x = rect.center().x()
-            painter.drawLine(QPointF(x, rect.bottom() + 18), QPointF(x, height - 4))
 
     def _chip_widths(self, scene: Scene, metrics: QFontMetrics) -> list[float]:
         return [self._chip_width(metrics, self._packet_label(packet, False)) for packet in scene.packets]
@@ -631,10 +734,8 @@ class TechniqueIllustration(QWidget):
         painter.setFont(chip_font)
         for frame in frames:
             self._paint_chip(painter, metrics, frame, layout.track_y, frame.alpha * fade, colors)
-        # Подписи пакетов: номер, длина и пометка подделки.
-        detail_font = self._detail_font()
-        detail_metrics = QFontMetrics(detail_font)
-        painter.setFont(detail_font)
+        # Под пакетом — только его номер: по нему пакет находят в журнале ниже.
+        painter.setFont(self._detail_font())
         glued = {frame.index for frame in frames if frame.glued}
         for frame in frames:
             # У слитых в один пакет плашек своя общая подпись «один пакет».
@@ -643,14 +744,11 @@ class TechniqueIllustration(QWidget):
             painter.setOpacity(frame.alpha * fade)
             painter.setPen(FAKE_AMBER if frame.kind == "fake" else colors["muted"])
             painter.drawText(
-                QRectF(frame.x - 70, layout.track_y + frame.dy + 14, 140, 14),
+                QRectF(frame.x - 30, layout.track_y + frame.dy + 14, 60, 14),
                 Qt.AlignmentFlag.AlignCenter,
-                self.chip_detail(frame, detail_metrics),
+                f"#{frame.index + 1}",
             )
         painter.setOpacity(1.0)
-        for frame in frames:
-            if frame.glued:
-                self._paint_one_packet_caption(painter, frame, chips, layout, colors, fade)
         painter.restore()
 
         # Реплика проверки.
@@ -665,6 +763,7 @@ class TechniqueIllustration(QWidget):
             self._paint_cross(
                 painter, QPointF(layout.gate_rect.left() - 4, layout.track_y), fade, (phase - times.verdict) / POP
             )
+        self._paint_log(painter, phase, fade, colors)
 
     @staticmethod
     def _start_times(scene: Scene, chips: list[float], track: float) -> list[float]:

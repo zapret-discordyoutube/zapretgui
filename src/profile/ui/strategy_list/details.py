@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QGuiApplication
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -119,8 +119,12 @@ def _text(label_class, text: str, *, colors=None, selectable: bool = False):
 
 
 class _Card(SimpleCardWidget):
-    def __init__(self, title: str, parent=None) -> None:
+    def __init__(self, title: str, parent=None, *, fit_content: bool = True) -> None:
         super().__init__(parent)
+        if fit_content:
+            # Карточка занимает столько высоты, сколько нужно её содержимому.
+            # Карточки, стоящие в ряд, наоборот, выравниваются по самой высокой.
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         self.body = QVBoxLayout(self)
         self.body.setContentsMargins(18, 14, 18, 16)
         self.body.setSpacing(8)
@@ -380,6 +384,9 @@ class StrategyDetailsView(QWidget):
         )
         self._steps_layout = QVBoxLayout()
         self._steps_layout.setSpacing(10)
+        # Чем шире схема, тем быстрее по ней летят пакеты (круг один и тот же),
+        # поэтому на широкой странице она не растягивается на всю ширину.
+        self._illustration.setMaximumWidth(760)
         self._steps_card.body.addWidget(self._illustration)
         self._steps_card.body.addWidget(self._scene_caption)
         self._steps_card.body.addLayout(self._steps_layout)
@@ -388,18 +395,15 @@ class StrategyDetailsView(QWidget):
         self._places_card = _Card("Где стоит в готовых пресетах", content)
         self._places_hint = _text(CaptionLabel, "", colors=_MUTED)
         self._places_card.body.addWidget(self._places_hint)
-        places_host = QWidget(self._places_card)
-        self._places_flow = FlowLayout(places_host, needAni=False)
-        self._places_flow.setContentsMargins(0, 0, 0, 0)
-        self._places_flow.setHorizontalSpacing(8)
-        self._places_flow.setVerticalSpacing(8)
-        self._places_card.body.addWidget(places_host)
+        # Сетка карточек сервисов собирается заново под каждую стратегию
+        # (_rebuild_places): так блок занимает ровно столько, сколько карточек.
+        self._places_host: QWidget | None = None
         layout.addWidget(self._places_card)
 
         pair = QHBoxLayout()
         pair.setSpacing(12)
-        self._experience_card = _Card("Ваш опыт", content)
-        self._facts_card = _Card("Сведения", content)
+        self._experience_card = _Card("Ваш опыт", content, fit_content=False)
+        self._facts_card = _Card("Сведения", content, fit_content=False)
         pair.addWidget(self._experience_card, 1)
         pair.addWidget(self._facts_card, 1)
         layout.addLayout(pair)
@@ -423,6 +427,35 @@ class StrategyDetailsView(QWidget):
     def _toggle_favorite(self) -> None:
         if self._details is not None:
             self.favorite_requested.emit(self._details.strategy_id, not self._details.favorite)
+
+    def _rebuild_places(self, places) -> None:
+        """Сетка карточек сервисов. Без сервисов сетки нет вовсе — остаётся одна строка текста."""
+        if self._places_host is not None:
+            self._places_card.body.removeWidget(self._places_host)
+            self._places_host.deleteLater()
+            self._places_host = None
+        if not places:
+            self._places_hint.setText("В готовых пресетах эта стратегия не встречается.")
+            return
+        opened = sum(1 for place in places if place.profile_key)
+        hint = f"Сервисов: {len(places)}."
+        if opened:
+            hint += " Нажмите карточку, чтобы открыть профиль этого сервиса в вашем пресете."
+        self._places_hint.setText(hint)
+        host = QWidget(self._places_card)
+        # Высота сетки — по числу рядов карточек, а не «сколько дадут».
+        host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        flow = FlowLayout(host, needAni=False)
+        flow.setContentsMargins(0, 0, 0, 0)
+        flow.setHorizontalSpacing(8)
+        flow.setVerticalSpacing(8)
+        for place in places:
+            card = _PlaceCard(place, host)
+            if place.profile_key:
+                card.clicked.connect(lambda key=place.profile_key: self.profile_chosen.emit(key))
+            flow.addWidget(card)
+        self._places_card.body.addWidget(host)
+        self._places_host = host
 
     def _show_scene(self, row: _StepRow | None) -> None:
         """Схема показывает выбранный шаг; у шага без схемы она убрана."""
@@ -476,6 +509,9 @@ class StrategyDetailsView(QWidget):
         self._experience_card.clear()
         for icon_name, caption, value in experience_rows(details):
             self._experience_card.body.addWidget(_Row(icon_name, caption, value, self._experience_card))
+        # Соседняя карточка «Сведения» бывает выше: строки прижаты к верху, а не
+        # растянуты по всей высоте с пустотой между ними.
+        self._experience_card.body.addStretch(1)
         if same_strategy:
             # Изменилась только оценка: остальные разделы те же, не перестраиваем.
             return
@@ -501,22 +537,7 @@ class StrategyDetailsView(QWidget):
         # Сразу видна схема первого шага, у которого она есть.
         self._show_scene(next((row for row in self._step_rows if row.step.scene), None))
 
-        self._places_flow.takeAllWidgets()
-        for card in self._places_card.findChildren(_PlaceCard):
-            card.deleteLater()
-        if not details.places:
-            self._places_hint.setText("В готовых пресетах эта стратегия не встречается.")
-        else:
-            opened = sum(1 for place in details.places if place.profile_key)
-            hint = f"Сервисов: {len(details.places)}."
-            if opened:
-                hint += " Нажмите карточку, чтобы открыть профиль этого сервиса в вашем пресете."
-            self._places_hint.setText(hint)
-        for place in details.places:
-            card = _PlaceCard(place, self._places_card)
-            if place.profile_key:
-                card.clicked.connect(lambda key=place.profile_key: self.profile_chosen.emit(key))
-            self._places_flow.addWidget(card)
+        self._rebuild_places(details.places)
 
         self._facts_card.clear()
         facts = [
@@ -528,6 +549,7 @@ class StrategyDetailsView(QWidget):
         for icon_name, name, value in facts:
             if value:
                 self._facts_card.body.addWidget(_Row(icon_name, name, value, self._facts_card))
+        self._facts_card.body.addStretch(1)
 
         self._args_card.clear()
         self._args_card.body.addWidget(_text(BodyLabel, details.args or "—", selectable=True))
