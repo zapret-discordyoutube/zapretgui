@@ -21,6 +21,9 @@
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
+
 from PyQt6.QtCore import QEasingCurve, QEvent, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QToolTip, QVBoxLayout, QWidget
@@ -538,8 +541,13 @@ class CardsGrid(QWidget):
             self._cards.append(widget)
         self._place()
         if animate:
-            for order, widget in enumerate(self._cards):
-                widget.play(first_delay_ms + min(order, 10) * 55)
+            # Выплывают первые карточки; остальные появляются сразу — анимация каждой
+            # из десятков карточек делала показ итога тяжёлым.
+            for order, widget in enumerate(self._cards[:ANIMATED_CARDS]):
+                widget.play(first_delay_ms + order * 55)
+            for widget in self._cards[ANIMATED_CARDS:]:
+                if widget.dots is not None:
+                    widget.dots.play()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -842,6 +850,10 @@ _ADVICE_TITLE = "Что делать"
 _ABOUT_TITLE = "Что это за проверка"
 # Состояния, которые считаются в сводке отчёта, и подписи к их числам.
 _TALLY = (("ok", "в порядке"), ("fail", "с проблемой"), ("warn", "с замечанием"), ("unknown", "нет ответа"))
+# Сколько первых карточек сетки появляется с анимацией.
+ANIMATED_CARDS = 8
+# Сколько первых блоков отчёта появляется с анимацией.
+ANIMATED_BLOCKS = 4
 NAME_COLUMN_MIN = 120
 NAME_COLUMN_MAX = 320
 
@@ -961,10 +973,191 @@ class _ReportRow(QWidget):
         painter.end()
 
 
+@dataclass(frozen=True, slots=True)
+class Tile:
+    """Одна карточка сетки: что проверяли, чем кончилось и сколько заняло."""
+
+    state: str
+    title: str
+    tag: str
+    result: str
+    seconds: str
+    hint: str
+
+
+_SECONDS = re.compile(r"^(.*) · (\d+(?:[.,]\d+)? с)$")
+_NOT_CHECKED = "не удалось проверить: "
+
+
+def line_tile(line: Line) -> Tile:
+    """Строка измерения → карточка: «US.DO-01 · ecomstal.com» и «получено 32 КБ; … · 5.0 с» по частям.
+
+    На карточке — короткий итог: начало фразы до пояснений. Вся фраза остаётся в подсказке.
+    """
+    tag, separator, title = line.name.partition(" · ")
+    if not separator:
+        tag, title = "", line.name
+    text, seconds = line.text, ""
+    match = _SECONDS.match(text)
+    if match is not None:
+        text, seconds = match.group(1), match.group(2)
+    result = text.removeprefix(_NOT_CHECKED)
+    # «Загрузка проходит, но отправка замирает» — суть стоит после «но».
+    result = result.partition(", но ")[2] or result
+    for separator in (" — ", "; ", ", хотя "):
+        result = result.partition(separator)[0]
+    result = f"{result[:1].upper()}{result[1:]}"
+    return Tile(line.state, title, tag, result, seconds, f"{line.name}\n{line.text}")
+
+
+def wants_tiles(section: Section, card: Card) -> bool:
+    """Раздел — перечень однотипных серверов (хостинги): такие идут сеткой карточек, а не строками."""
+    return card.key == "hostings" and bool(section.lines) and all(" · " in line.name and line.text for line in section.lines)
+
+
+class TilesGrid(QWidget):
+    """Сетка карточек, которую рисует один виджет: значок итога, адрес, короткий итог и время.
+
+    На странице хостингов десятки серверов; по виджету с подписями на каждый —
+    долгое открытие и тяжёлая перерисовка. Здесь всё рисуется за один проход, а
+    подсказка с полной фразой показывается по месту мыши.
+    """
+
+    MIN_WIDTH = 250
+    HEIGHT = 46
+    GAP = 6
+
+    def __init__(self, tiles: list[Tile], parent=None) -> None:
+        super().__init__(parent)
+        self._tiles = list(tiles)
+        self._hover = -1
+        policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+        self.setMouseTracking(True)
+        self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
+        set_state_text(self, "; ".join(f"{tile.title}: {tile.result}" for tile in self._tiles))
+
+    def tiles(self) -> list[Tile]:
+        return list(self._tiles)
+
+    def columns_for(self, width: int) -> int:
+        return max(1, (int(width) + self.GAP) // (self.MIN_WIDTH + self.GAP))
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
+        rows = -(-len(self._tiles) // self.columns_for(width))
+        return max(0, rows * (self.HEIGHT + self.GAP) - self.GAP)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        width = max(self.MIN_WIDTH, self.width())
+        return QSize(width, self.heightForWidth(width))
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(self.MIN_WIDTH, self.HEIGHT)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        height = self.heightForWidth(self.width())
+        if height != self.minimumHeight():
+            self.setFixedHeight(height)
+
+    def tile_rect(self, index: int) -> QRectF:
+        columns = self.columns_for(self.width())
+        width = (self.width() - self.GAP * (columns - 1)) / columns
+        row, column = divmod(index, columns)
+        return QRectF(column * (width + self.GAP), row * (self.HEIGHT + self.GAP), width, self.HEIGHT)
+
+    def tile_at(self, x: float, y: float) -> int:
+        return next((index for index in range(len(self._tiles)) if self.tile_rect(index).contains(x, y)), -1)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        hover = self.tile_at(event.position().x(), event.position().y())
+        if hover != self._hover:
+            self._hover = hover
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hover = -1
+        self.update()
+        super().leaveEvent(event)
+
+    def event(self, event) -> bool:
+        if event.type() == QEvent.Type.ToolTip:
+            index = self.tile_at(event.pos().x(), event.pos().y())
+            if index >= 0:
+                QToolTip.showText(event.globalPos(), self._tiles[index].hint, self)
+            else:
+                QToolTip.hideText()
+            return True
+        return super().event(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        _ = event
+        painter = QPainter(self)
+        painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
+        light = _is_light()
+        base = QColor(0, 0, 0, 10) if light else QColor(255, 255, 255, 10)
+        hover = QColor(0, 0, 0, 20) if light else QColor(255, 255, 255, 20)
+        text = QColor(0, 0, 0, 228) if light else QColor(255, 255, 255, 235)
+        muted = QColor(0, 0, 0, 150) if light else QColor(255, 255, 255, 150)
+        title_font = QFont(self.font())
+        title_font.setPixelSize(13)
+        title_font.setWeight(QFont.Weight.DemiBold)
+        small_font = QFont(self.font())
+        small_font.setPixelSize(12)
+        title_metrics, small_metrics = QFontMetrics(title_font), QFontMetrics(small_font)
+        for index, tile in enumerate(self._tiles):
+            rect = self.tile_rect(index)
+            if not rect.intersects(QRectF(event.rect())):
+                continue
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(hover if index == self._hover else base)
+            painter.drawRoundedRect(rect, 6, 6)
+            color = state_color(tile.state)
+            try:
+                icon = get_cached_qta_pixmap(_STATE_ICONS.get(tile.state, _STATE_ICONS["unknown"]), color=color, size=15)
+                painter.drawPixmap(int(rect.left() + 11), int(rect.top() + (self.HEIGHT - 15) / 2), 15, 15, icon)
+            except Exception:
+                pass
+            left = rect.left() + 36
+            right = rect.right() - 10
+            # Время — справа в первой строке; название занимает остальное.
+            painter.setFont(small_font)
+            painter.setPen(muted)
+            seconds_width = small_metrics.horizontalAdvance(tile.seconds) + 8 if tile.seconds else 0
+            if tile.seconds:
+                painter.drawText(
+                    QRectF(right - seconds_width, rect.top() + 6, seconds_width, 17),
+                    int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                    tile.seconds,
+                )
+            second = f"{tile.tag} · {tile.result}" if tile.tag else tile.result
+            painter.drawText(
+                QRectF(left, rect.top() + 24, right - left, 17),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                small_metrics.elidedText(second, Qt.TextElideMode.ElideRight, int(right - left)),
+            )
+            painter.setFont(title_font)
+            painter.setPen(text)
+            title_width = right - left - seconds_width
+            painter.drawText(
+                QRectF(left, rect.top() + 6, title_width, 17),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                title_metrics.elidedText(tile.title, Qt.TextElideMode.ElideRight, int(title_width)),
+            )
+        painter.end()
+
+
 class _SectionBlock(QWidget):
     """Раздел отчёта: значок, название, сводка «сколько в порядке» с полосой и строки-таблица."""
 
-    def __init__(self, section: Section, parent=None, *, icon: str = "fa5s.list-ul", color: str = "") -> None:
+    def __init__(
+        self, section: Section, parent=None, *, icon: str = "fa5s.list-ul", color: str = "", tiles: bool = False
+    ) -> None:
         super().__init__(parent)
         self.section = section
         layout = QVBoxLayout(self)
@@ -996,11 +1189,20 @@ class _SectionBlock(QWidget):
         metrics = QFontMetrics(self.title_label.font())
         widest = max((metrics.horizontalAdvance(line.name) for line in section.lines if line.text), default=0)
         name_width = max(NAME_COLUMN_MIN, min(NAME_COLUMN_MAX, widest + 12))
-        self.rows = [
-            _ReportRow(line, line_icon(line, section), name_width, self, divided=True) for line in section.lines
-        ]
-        for row in self.rows:
-            layout.addWidget(row)
+        # Перечень серверов — сеткой карточек одним виджетом; остальное — строками таблицы.
+        self.grid: TilesGrid | None = None
+        self.rows: list[_ReportRow] = []
+        if tiles:
+            self.grid = TilesGrid([line_tile(line) for line in section.lines], self)
+            layout.addSpacing(2)
+            layout.addWidget(self.grid)
+            layout.addSpacing(6)
+        else:
+            self.rows = [
+                _ReportRow(line, line_icon(line, section), name_width, self, divided=True) for line in section.lines
+            ]
+            for row in self.rows:
+                layout.addWidget(row)
         self.text_label: QLabel | None = None
         if section.text:
             self.text_label = QLabel(section.text, self)
@@ -1203,10 +1405,15 @@ class ResultDetailView(QWidget):
         self.blocks = []
         for section in card.sections:
             icon, color = section_icon(section, card)
-            self.blocks.append(_SectionBlock(section, self._sections_host, icon=icon, color=color))
+            self.blocks.append(
+                _SectionBlock(section, self._sections_host, icon=icon, color=color, tiles=wants_tiles(section, card))
+            )
         for order, block in enumerate(self.blocks):
             self._sections_layout.addWidget(block)
-            float_in(block, delay_ms=min(order, 8) * 45)
+            # Выплывают только первые блоки — те, что видны сразу. Анимация каждого из
+            # десятков блоков длинного отчёта делала открытие страницы долгим и дёрганым.
+            if order < ANIMATED_BLOCKS:
+                float_in(block, delay_ms=order * 45)
         set_state_text(self, f"Подробности: {card.title}, {card.status}, разделов {len(card.sections)}")
         self._sync_height()
 

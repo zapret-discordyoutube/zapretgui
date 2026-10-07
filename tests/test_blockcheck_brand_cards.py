@@ -2,12 +2,13 @@
 
 import os
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QWidget
 
 from blockcheck.ui.brand_icons import brands_in_text, named_brand, readable_color, site_brand
 from blockcheck.ui.check_results import (
@@ -20,7 +21,18 @@ from blockcheck.ui.check_results import (
     split_problem_text,
     split_server_list,
 )
-from blockcheck.ui.result_cards import ResultCard, ResultDetailView, card_hint, line_icon, section_icon, tally
+from blockcheck.ui.result_cards import (
+    ANIMATED_BLOCKS,
+    ResultCard,
+    ResultDetailView,
+    TilesGrid,
+    card_hint,
+    line_icon,
+    line_tile,
+    section_icon,
+    tally,
+    wants_tiles,
+)
 from blockcheck.ui.result_cards_model import Card, Line, Section
 
 
@@ -208,6 +220,65 @@ class OpenReportTests(unittest.TestCase):
         self.assertIn("QUIC закрыт", hint)
 
 
+class TilesTests(unittest.TestCase):
+    """Перечень серверов хостинга — сетка карточек одним виджетом."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_line_becomes_a_short_tile_and_keeps_the_whole_phrase_in_the_hint(self) -> None:
+        long = "не удалось проверить: подключение есть, но сервер не ответил за 0 с — так выглядит блокировка провайдером · 5.0 с"
+        tile = line_tile(Line("unknown", "US.DO-01 · ecomstal.com", long))
+        self.assertEqual((tile.tag, tile.title, tile.seconds), ("US.DO-01", "ecomstal.com", "5.0 с"))
+        self.assertEqual(tile.result, "Сервер не ответил за 0 с")
+        self.assertIn(long, tile.hint)
+        self.assertEqual(line_tile(Line("ok", "FR.A-1 · a.b", "получено 32 КБ без обрыва; отправка тоже проходит · 5.0 с")).result, "Получено 32 КБ без обрыва")
+        # Суть ошибки не теряется: она стоит после «но».
+        cut = line_tile(Line("fail", "CA.F-2 · c.d", "загрузка проходит, но отправка 64 КБ замирает, хотя короткую тот же сервер принимает · 6.1 с"))
+        self.assertEqual(cut.result, "Отправка 64 КБ замирает")
+
+    def test_only_hosting_servers_go_into_tiles(self) -> None:
+        servers = Section("Akamai — обрыв у 0 из 2", (Line("ok", "SE.A-1 · a.b", "получено"), Line("ok", "SE.A-2 · c.d", "получено")))
+        hostings = Card(key="hostings", icon="", title="Хостинги", level="ok", status="")
+        site = Card(key="site:x", icon="", title="X", level="ok", status="", site=True)
+        self.assertTrue(wants_tiles(servers, hostings))
+        self.assertFalse(wants_tiles(servers, site))
+        self.assertFalse(wants_tiles(Section("Что делать", (Line("info", "Подберите стратегию"),)), hostings))
+
+    def test_grid_is_one_widget_with_columns_by_width_and_a_hint_per_tile(self) -> None:
+        tiles = [line_tile(Line("ok", f"US.X-{index} · host{index}.example", "получено 32 КБ · 1.0 с")) for index in range(7)]
+        grid = TilesGrid(tiles)
+        self.addCleanup(grid.deleteLater)
+        grid.resize(800, 10)
+        grid.show()
+        self.app.processEvents()
+
+        self.assertEqual(grid.findChildren(QWidget), [])
+        self.assertEqual([grid.columns_for(width) for width in (200, 520, 800)], [1, 2, 3])
+        # Семь карточек в три колонки — три ряда; высоту сетка считает сама.
+        self.assertEqual(grid.height(), 3 * TilesGrid.HEIGHT + 2 * TilesGrid.GAP)
+        last = grid.tile_rect(6).center()
+        self.assertEqual(grid.tile_at(last.x(), last.y()), 6)
+        self.assertEqual(grid.tile_at(790, grid.height() - 2), -1)
+        self.assertFalse(grid.grab().isNull())
+
+    def test_hostings_report_uses_grids_and_animates_only_the_first_blocks(self) -> None:
+        sections = tuple(
+            Section(f"Провайдер {index} — обрыв у 0 из 2", (Line("ok", "A-1 · a.b", "получено · 1.0 с"), Line("fail", "A-2 · c.d", "обрыв · 1.0 с")))
+            for index in range(12)
+        )
+        view = ResultDetailView()
+        self.addCleanup(view.deleteLater)
+        view.resize(1000, 700)
+        view.show()
+        with patch("blockcheck.ui.result_cards.float_in") as rise:
+            view.show_card(Card(key="hostings", icon="", title="Хостинги", level="fail", status="", sections=sections))
+
+        self.assertTrue(all(block.grid is not None and block.rows == [] for block in view.blocks))
+        self.assertEqual(rise.call_count, ANIMATED_BLOCKS)
+
+
 class ReportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -226,10 +297,11 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(tally(target.lines), {"fail": 1})
 
     def test_report_page_shows_summary_numbers_and_table_rows(self) -> None:
+        # Не хостинги: у них серверы идут сеткой карточек, а здесь проверяется таблица строк.
         card = Card(
-            key="hostings",
+            key="voice",
             icon="fa5s.server",
-            title="Зарубежные хостинги",
+            title="Голосовые серверы",
             level="fail",
             status="Обрыв у 1 из 3",
             sections=(
