@@ -6494,23 +6494,25 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         change = inspect.getsource(ProfileSetupPageBase._on_range_mode_changed)
 
         self.assertIn("_sync_compact_text", compact_combo)
-        self.assertIn("compactText=\"n\"", fill)
-        self.assertIn("compactText=\"d\"", fill)
-        self.assertIn("n — номер пакета", fill)
-        self.assertIn("d — пакет с данными", fill)
+        # В панели условий места хватает: режим показан целиком, без сокращения до буквы.
+        self.assertNotIn("compactText", fill)
+        self.assertIn("n — первые пакеты", fill)
+        self.assertIn("d — первые пакеты с данными", fill)
         self.assertIn("userData=\"n\"", fill)
         self.assertIn("userData=\"d\"", fill)
         self.assertIn("Служебные пакеты без данных не считаются", descriptions)
         self.assertIn("_update_range_tooltips", change)
 
-    def test_profile_settings_row_does_not_force_horizontal_overflow(self) -> None:
+    def test_profile_conditions_live_in_flyout_not_in_header_row(self) -> None:
         build = inspect.getsource(ProfileSetupPageBase._build_content)
 
-        self.assertIn("self._settings_container.setMinimumWidth(0)", build)
-        self.assertIn("self._filter_value.setMinimumWidth(0)", build)
-        self.assertIn("settings_layout = QHBoxLayout", build)
+        self.assertNotIn("settings_layout", build)
+        self.assertNotIn("_settings_container", build)
+        self.assertIn("header_layout.addWidget(self._conditions_button", build)
+        self.assertIn("self._conditions_view.add_filter_section(", build)
+        self.assertEqual(build.count("self._conditions_view.add_range_section("), 2)
+        self.assertIn("ProfileConditionsFlyout(self._conditions_view, self)", build)
         self.assertIn("CompactDisplayComboBox", build)
-        self.assertIn("setMinimumWidth(82)", build)
 
     def test_clicking_active_strategy_starts_background_apply_without_opening_detail_page(self) -> None:
         class _Signal:

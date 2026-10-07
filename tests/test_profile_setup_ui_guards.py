@@ -1969,7 +1969,7 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
 
         page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
         page.launch_method = ZAPRET2_MODE
-        page._settings_container = _BoolWidget(visible=True)
+        page._conditions_button = _BoolWidget(visible=True)
         page._filter_combo = _BoolWidget(visible=False)
         page._filter_value = _PropertyWidget(visible=False)
         page._filter_value._text = "youtube.txt"
@@ -1996,7 +1996,7 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         ):
             ProfileSetupPageBase._apply_editable_settings(page, payload)
 
-        self.assertEqual(page._settings_container.visible_calls, [])
+        self.assertEqual(page._conditions_button.visible_calls, [])
         self.assertEqual(page._filter_combo.visible_calls, [])
         self.assertEqual(page._filter_value.visible_calls, [])
         self.assertEqual(page._filter_value.text_calls, [])

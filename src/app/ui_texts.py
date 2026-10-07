@@ -6100,7 +6100,8 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     },
     "onboarding.step.list_type.body": {
         "ru": (
-            "Это страница одного профиля. Слева — чем профиль выбирает трафик, справа — файл со списком.\n\n"
+            "Это страница одного профиля. Строка вверху коротко говорит, что он ловит, а кнопка "
+            "«Условия» открывает панель, где выбирают тип списка и файл.\n\n"
             "Hostlist — список имён сайтов, например youtube.com. Движок узнаёт сайт по имени, "
             "которое программа сообщает при подключении. Подходит для сайтов и большинства приложений.\n\n"
             "IPset — список IP-адресов и подсетей. Он нужен, когда имени сайта в трафике не видно: "
@@ -6108,8 +6109,8 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "много сайтов, а адреса сервиса могут меняться."
         ),
         "en": (
-            "This is the page of a single profile. On the left is how the profile picks traffic, on "
-            "the right is the list file.\n\n"
+            "This is the page of a single profile. The line at the top says briefly what it catches, "
+            "and the Conditions button opens a panel where you pick the list type and file.\n\n"
             "A hostlist is a list of site names such as youtube.com. The engine recognises the site "
             "by the name an app sends when it connects. It suits sites and most apps.\n\n"
             "An IPset is a list of IP addresses and subnets. It is needed when the site name is not "
@@ -6123,16 +6124,17 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     },
     "onboarding.step.ranges.body": {
         "ru": (
-            "--out-range — пакеты от вас к сайту, --in-range — от сайта к вам. Эти поля решают, к "
-            "каким пакетам соединения применять стратегию.\n\n"
-            "a — всегда, x — никогда, n — по номеру пакета, d — по номеру пакета с данными. Например, "
+            "В той же панели «Условия» задают, к каким пакетам соединения применять стратегию: "
+            "отдельно для пакетов от вас к сайту (--out-range) и от сайта к вам (--in-range).\n\n"
+            "a — всегда, x — никогда, n — первые пакеты, d — первые пакеты с данными. Например, "
             "d и 8 — стратегия работает только на первых 8 пакетах с данными. Блокировка обычно "
             "смотрит на начало соединения, а дальше обработка только нагружает процессор."
         ),
         "en": (
-            "--out-range covers packets from you to the site, --in-range covers packets from the site "
-            "to you. These fields decide which packets of a connection the strategy handles.\n\n"
-            "a means always, x never, n by packet number, d by number of packets with data. For "
+            "The same Conditions panel sets which packets of a connection the strategy handles: "
+            "separately for packets from you to the site (--out-range) and from the site to you "
+            "(--in-range).\n\n"
+            "a means always, x never, n the first packets, d the first packets with data. For "
             "example, d and 8 means the strategy works only on the first 8 data packets. Blocking "
             "usually looks at the start of a connection, and handling the rest only loads the CPU."
         ),

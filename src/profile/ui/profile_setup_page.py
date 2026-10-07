@@ -5,13 +5,13 @@ from dataclasses import replace
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QHBoxLayout,
-    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from log.log import log
+from profile.conditions_text import conditions_summary
 from profile.match_filters import filter_values
 from profile.editable_settings import normalize_filter_value
 from profile.key_resolution import profile_reference_key
@@ -23,6 +23,7 @@ from profile.ui.profile_setup_controls import (
     sync_range_value_enabled,
 )
 from profile.strategy_state import ProfileStrategyState
+from profile.ui.profile_conditions_flyout import ProfileConditionsFlyout, ProfileConditionsView
 from profile.ui.profile_list_file_editor_controller import ProfileListFileEditorController
 from profile.ui.profile_setup_save_controllers import ProfileSetupSaveController
 from profile.ui.profile_setup_payload_controller import ProfileSetupPayloadController
@@ -503,7 +504,9 @@ class ProfileSetupPageBase(BasePage):
         self._editor_tab_built = False
         self._raw_tab_built = False
         self._list_file_dirty = True
-        self._settings_container = None
+        self._conditions_button = None
+        self._conditions_view = None
+        self._conditions_flyout = None
         self._update_user_profile_button = None
         self._delete_user_profile_button = None
         self._raw_profile_text = None
@@ -684,6 +687,15 @@ class ProfileSetupPageBase(BasePage):
         self._summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         header_layout.addWidget(self._summary, 1)
 
+        self._conditions_button = PushButton("Условия", icon=FluentIcon.FILTER)
+        set_control_accessibility(
+            self._conditions_button,
+            name="Условия profile",
+            description="Открывает панель с файлом списка и диапазонами пакетов этого profile.",
+        )
+        self._conditions_button.clicked.connect(self._on_conditions_button_clicked)
+        header_layout.addWidget(self._conditions_button, 0, Qt.AlignmentFlag.AlignRight)
+
         self._enabled_checkbox = CheckBox("Включён")
         self._enabled_checkbox.stateChanged.connect(self._on_enabled_changed)
         self._enabled_checkbox.stateChanged.connect(self._update_profile_setup_accessibility)
@@ -710,18 +722,11 @@ class ProfileSetupPageBase(BasePage):
         header_layout.addWidget(self._delete_user_profile_button, 0, Qt.AlignmentFlag.AlignRight)
         self.layout.addWidget(header)
 
-        self._settings_container = QWidget(self)
-        self._settings_container.setMinimumWidth(0)
-        self._settings_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        settings_layout = QHBoxLayout(self._settings_container)
-        settings_layout.setContentsMargins(0, 0, 0, 0)
-        settings_layout.setSpacing(10)
-
+        # Редко нужные поля живут во всплывающей панели «Условия», а не в шапке.
         self._filter_combo = CompactDisplayComboBox()
         self._filter_combo.setMinimumWidth(120)
         self._filter_combo.addItem(tr_catalog("page.winws2_profile_setup.filter.hostlist", language=self._ui_language, default="Hostlist"), userData="hostlist")
         self._filter_combo.addItem(tr_catalog("page.winws2_profile_setup.filter.ipset", language=self._ui_language, default="IPset"), userData="ipset")
-        settings_layout.addWidget(self._filter_combo)
 
         self._filter_value = LineEdit()
         self._filter_value.setMinimumWidth(0)
@@ -732,43 +737,30 @@ class ProfileSetupPageBase(BasePage):
             description="Путь к hostlist или ipset файлу для текущего profile.",
         )
         remove_line_edit_buttons_from_tab_order(self._filter_value)
-        settings_layout.addWidget(self._filter_value, 1)
 
         self._in_range_mode = CompactDisplayComboBox()
-        self._in_range_mode.setMinimumWidth(82)
         self._fill_range_combo(self._in_range_mode)
-        self._in_range_label = BodyLabel("--in-range")
-        settings_layout.addWidget(self._in_range_label)
-        settings_layout.addWidget(self._in_range_mode)
+        self._in_range_label = BodyLabel("Пакеты от сайта к вам")
 
         self._in_range_value = LineEdit()
-        self._in_range_value.setMinimumWidth(72)
-        self._in_range_value.setPlaceholderText("8")
         set_control_accessibility(
             self._in_range_value,
             name="Значение in-range",
             description="Число или выражение для --in-range.",
         )
         remove_line_edit_buttons_from_tab_order(self._in_range_value)
-        settings_layout.addWidget(self._in_range_value)
 
         self._out_range_mode = CompactDisplayComboBox()
-        self._out_range_mode.setMinimumWidth(82)
         self._fill_range_combo(self._out_range_mode)
-        self._out_range_label = BodyLabel("--out-range")
-        settings_layout.addWidget(self._out_range_label)
-        settings_layout.addWidget(self._out_range_mode)
+        self._out_range_label = BodyLabel("Пакеты от вас к сайту")
 
         self._out_range_value = LineEdit()
-        self._out_range_value.setMinimumWidth(72)
-        self._out_range_value.setPlaceholderText("8")
         set_control_accessibility(
             self._out_range_value,
             name="Значение out-range",
             description="Число или выражение для --out-range.",
         )
         remove_line_edit_buttons_from_tab_order(self._out_range_value)
-        settings_layout.addWidget(self._out_range_value)
 
         self._in_range_mode.currentIndexChanged.connect(
             lambda _index: self._on_range_mode_changed(self._in_range_mode, self._in_range_value)
@@ -785,7 +777,17 @@ class ProfileSetupPageBase(BasePage):
         self._in_range_value.textEdited.connect(lambda _text: self._schedule_settings_autosave())
         self._out_range_value.textEdited.connect(lambda _text: self._schedule_settings_autosave())
 
-        self.layout.addWidget(self._settings_container)
+
+        self._filter_title_label = BodyLabel("Список адресов")
+        self._conditions_view = ProfileConditionsView()
+        self._conditions_view.add_filter_section(self._filter_title_label, self._filter_combo, self._filter_value)
+        self._conditions_view.add_range_section(
+            self._out_range_label, "--out-range", self._out_range_mode, self._out_range_value
+        )
+        self._conditions_view.add_range_section(
+            self._in_range_label, "--in-range", self._in_range_mode, self._in_range_value
+        )
+        self._conditions_flyout = ProfileConditionsFlyout(self._conditions_view, self)
         self._install_profile_tooltips()
         self._update_profile_setup_accessibility()
 
@@ -1078,18 +1080,19 @@ class ProfileSetupPageBase(BasePage):
     _list_file_load_start_scheduled = _worker_start_scheduled_property("_list_file_load_state_obj")
 
     def _fill_range_combo(self, combo: CompactDisplayComboBox) -> None:
-        combo.addItem("a — всегда", userData="a", compactText="a")
-        combo.addItem("x — никогда", userData="x", compactText="x")
-        combo.addItem("n — номер пакета", userData="n", compactText="n")
-        combo.addItem("d — пакет с данными", userData="d", compactText="d")
-        combo.addItem("своё выражение", userData="custom", compactText="своё")
+        # Буква в начале — та же, что стоит в тексте пресета: `d` и 8 это `--out-range=-d8`.
+        combo.addItem("a — всегда", userData="a")
+        combo.addItem("x — никогда", userData="x")
+        combo.addItem("n — первые пакеты", userData="n")
+        combo.addItem("d — первые пакеты с данными", userData="d")
+        combo.addItem("своё выражение", userData="custom")
 
     def _range_mode_description(self, mode: str) -> str:
         descriptions = {
             "a": "a — всегда. Этот range не ограничивает пакеты.",
             "x": "x — никогда. Следующие --lua-desync не будут применяться для этого направления.",
-            "n": "n — номер пакета в соединении. Например, n8 означает восьмой пакет.",
-            "d": "d — номер пакета с данными. Служебные пакеты без данных не считаются.",
+            "n": "n — первые пакеты соединения по счёту. Например, n и 8 — первые 8 пакетов.",
+            "d": "d — первые пакеты с данными. Служебные пакеты без данных не считаются.",
             "custom": "своё выражение — ручной range winws2, например s1<d1 или -d8.",
         }
         return descriptions.get(str(mode or "").strip(), "Неизвестный режим range.")
@@ -1104,7 +1107,7 @@ class ProfileSetupPageBase(BasePage):
         set_tooltip(
             value_edit,
             f"Значение для {option_name}.\n{mode_description}\n"
-            "Поле активно для n, d и своего выражения.",
+            "Поле появляется для n, d и своего выражения.",
         )
 
     def _update_all_range_tooltips(self) -> None:
@@ -1124,7 +1127,7 @@ class ProfileSetupPageBase(BasePage):
     def _install_profile_tooltips(self) -> None:
         range_hint = (
             "Диапазон задаёт, на каких пакетах будут работать следующие --lua-desync внутри этого profile.\n"
-            "a — всегда, x — никогда, n — номер пакета, d — номер пакета с данными, своё — ручное выражение winws2."
+            "a — всегда, x — никогда, n — первые пакеты, d — первые пакеты с данными, своё — ручное выражение winws2."
         )
         set_tooltip(
             self._breadcrumb,
@@ -1132,7 +1135,11 @@ class ProfileSetupPageBase(BasePage):
         )
         set_tooltip(
             self._summary,
-            "Краткое условие profile: протокол, порты и тип фильтра. По этой строке видно, когда этот profile применяется.",
+            "Краткое условие profile: протокол и порты, файл списка и на каких пакетах работает стратегия.",
+        )
+        set_tooltip(
+            self._conditions_button,
+            "Открывает панель условий: файл списка и диапазоны пакетов, на которых работает стратегия.",
         )
         set_tooltip(
             self._enabled_checkbox,
@@ -1164,7 +1171,7 @@ class ProfileSetupPageBase(BasePage):
         )
         set_tooltip(
             self._in_range_value,
-            "Число или ручная часть --in-range. Поле активно, когда выбран режим n, d или своё выражение.",
+            "Число или ручная часть --in-range. Поле появляется, когда выбран режим n, d или своё выражение.",
         )
         set_tooltip(
             self._out_range_label,
@@ -1176,7 +1183,7 @@ class ProfileSetupPageBase(BasePage):
         )
         set_tooltip(
             self._out_range_value,
-            "Число или ручная часть --out-range. Поле активно, когда выбран режим n, d или своё выражение.",
+            "Число или ручная часть --out-range. Поле появляется, когда выбран режим n, d или своё выражение.",
         )
 
     def _rebuild_breadcrumb(self) -> None:
@@ -1458,20 +1465,9 @@ class ProfileSetupPageBase(BasePage):
         self.reload_current_profile()
 
     def onboarding_target(self, name: str):
-        if name == "list_type":
-            return [self.__dict__.get("_filter_combo"), self.__dict__.get("_filter_value")]
-        if name == "ranges":
-            return [
-                self.__dict__.get(attr)
-                for attr in (
-                    "_in_range_label",
-                    "_in_range_mode",
-                    "_in_range_value",
-                    "_out_range_label",
-                    "_out_range_mode",
-                    "_out_range_value",
-                )
-            ]
+        if name in {"list_type", "ranges"}:
+            # Поля списка и диапазонов спрятаны в панели «Условия»: тур показывает кнопку и сводку.
+            return [self.__dict__.get("_summary"), self.__dict__.get("_conditions_button")]
         if name == "tabs":
             return self._strategy_tabs
         if name == "strategies":
@@ -1743,16 +1739,33 @@ class ProfileSetupPageBase(BasePage):
 
     def _restore_loaded_payload_header(self, payload) -> None:
         item = getattr(payload, "item", None)
-        set_widget_text_if_changed(self._summary, getattr(payload, "match_summary", "") or "")
+        set_widget_text_if_changed(self._summary, self._conditions_summary_text(payload))
         if item is not None:
             set_widget_checked_if_changed(self._enabled_checkbox, bool(getattr(item, "enabled", False)))
             set_widget_enabled_if_changed(self._enabled_checkbox, True)
+
+    def _conditions_summary_text(self, payload) -> str:
+        item = getattr(payload, "item", None)
+        # Диапазоны пакетов есть только у winws2: для winws1 в сводке их быть не должно.
+        with_ranges = is_zapret2_launch_method(self.launch_method)
+        return conditions_summary(
+            match_lines=tuple(getattr(item, "match_lines", ()) or ()),
+            match_summary=str(getattr(payload, "match_summary", "") or ""),
+            filter_value=str(getattr(payload, "editable_filter_value", "") or ""),
+            in_range=str(getattr(payload, "in_range", "") or "") if with_ranges else "",
+            out_range=str(getattr(payload, "out_range", "") or "") if with_ranges else "",
+        )
+
+    def _on_conditions_button_clicked(self) -> None:
+        flyout = self.__dict__.get("_conditions_flyout")
+        if flyout is not None and self._conditions_button is not None:
+            flyout.toggle_under(self._conditions_button)
 
     def _apply_payload(self, payload) -> None:
         self._loading = True
         try:
             item = payload.item
-            set_widget_text_if_changed(self._summary, payload.match_summary)
+            set_widget_text_if_changed(self._summary, self._conditions_summary_text(payload))
             set_widget_checked_if_changed(self._enabled_checkbox, bool(item.enabled))
             set_widget_enabled_if_changed(self._enabled_checkbox, True)
             user_profile_visible = bool(_user_profile_id_from_payload(self._profile_key, payload))
@@ -2169,15 +2182,15 @@ class ProfileSetupPageBase(BasePage):
         is_preset_mode = is_preset_launch_method(self.launch_method)
         is_winws2 = is_zapret2_launch_method(self.launch_method)
         if not is_preset_mode:
-            if self._settings_container is not None:
-                set_widget_visible_if_changed(self._settings_container, False)
+            if self._conditions_button is not None:
+                set_widget_visible_if_changed(self._conditions_button, False)
             return
 
         filter_enabled = bool(getattr(payload, "editable_filter_enabled", True))
         available_kinds = tuple(getattr(payload, "editable_filter_kinds", ()) or ())
         filter_switchable = filter_enabled and len({kind for kind in available_kinds if kind in {"hostlist", "ipset"}}) > 1
-        if self._settings_container is not None:
-            set_widget_visible_if_changed(self._settings_container, is_winws2 or filter_switchable)
+        if self._conditions_button is not None:
+            set_widget_visible_if_changed(self._conditions_button, is_winws2 or filter_switchable)
         self._rebuild_filter_kind_combo(
             available_kinds,
             str(getattr(payload, "editable_filter_kind", "") or "hostlist"),
@@ -2186,18 +2199,12 @@ class ProfileSetupPageBase(BasePage):
         set_widget_text_if_changed(self._filter_value, str(getattr(payload, "editable_filter_value", "") or ""))
         set_widget_visible_if_changed(self._filter_combo, filter_switchable)
         set_widget_visible_if_changed(self._filter_value, filter_switchable)
-        for widget in (
-            self._in_range_label,
-            self._in_range_mode,
-            self._in_range_value,
-            self._out_range_label,
-            self._out_range_mode,
-            self._out_range_value,
-        ):
-            if widget is not None:
-                set_widget_visible_if_changed(widget, is_winws2)
         set_range_controls(self._in_range_mode, self._in_range_value, getattr(payload, "in_range", "") or "x")
         set_range_controls(self._out_range_mode, self._out_range_value, getattr(payload, "out_range", "") or "a")
+        conditions_view = self.__dict__.get("_conditions_view")
+        if conditions_view is not None:
+            conditions_view.set_sections_visible(filter_visible=filter_switchable, ranges_visible=is_winws2)
+            conditions_view.sync_ranges()
         self._update_all_range_tooltips()
         self._update_profile_setup_accessibility()
 
