@@ -16,6 +16,7 @@ _WINDOWS11_SIDEBAR_ICON_FILES: dict[PageName, str] = {
     PageName.ZAPRET1_PRESET_SETUP: "play.svg",
     PageName.DPI_SETTINGS: "settings.svg",
     PageName.NETWORK: "search.svg",
+    PageName.NETWORK_CUSTOM_DNS: "search.svg",
     PageName.TELEGRAM_PROXY: "share.svg",
     PageName.TELEGRAM_PROXY_ADVANCED: "settings.svg",
     PageName.HOSTS: "document.svg",
@@ -60,6 +61,7 @@ def build_standard_nav_icons() -> dict[PageName, Any]:
     return {
         PageName.ZAPRET2_MODE_CONTROL: FluentIcon.GAME,
         PageName.NETWORK: FluentIcon.WIFI,
+        PageName.NETWORK_CUSTOM_DNS: FluentIcon.EDIT,
         PageName.HOSTS: FluentIcon.GLOBE,
         PageName.HOSTS_FILE: FluentIcon.DOCUMENT,
         PageName.BLOCKCHECK: FluentIcon.CODE,

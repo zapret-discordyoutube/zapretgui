@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.page_names import PageName
 from log.log import log
 from ui.navigation_pages import (
     resolve_preset_raw_editor_page_for_method,
@@ -59,6 +60,20 @@ def open_preset_raw_editor_for_method(
     return bool(show_page(window, page_name, allow_internal=allow_internal))
 
 
+def open_custom_dns_server(window, server: dict | None = None) -> bool:
+    """Открывает страницу «Свой DNS»: без записи сервера — новый, с записью — правка."""
+    if not send_page_command(
+        window,
+        PageName.NETWORK_CUSTOM_DNS,
+        "edit_custom_server",
+        {"server": server},
+        ensure=True,
+    ):
+        log("Не удалось открыть страницу своего DNS: страница не приняла команду", "ERROR")
+        return False
+    return bool(show_page(window, PageName.NETWORK_CUSTOM_DNS, allow_internal=True))
+
+
 def apply_profile_setup_change_for_method(
     window,
     method: str,
@@ -99,6 +114,7 @@ def apply_profile_setup_change_for_method(
 
 __all__ = [
     "apply_profile_setup_change_for_method",
+    "open_custom_dns_server",
     "open_preset_raw_editor_for_method",
     "open_profile_setup_for_method",
 ]

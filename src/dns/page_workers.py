@@ -133,6 +133,38 @@ class DnsIspWarningWorker(QThread):
         self.completed.emit(self._request_id, plan)
 
 
+class DnsCustomServerWorker(QThread):
+    """Действие со своими DNS — сохранить, удалить, создать копию.
+
+    completed(request_id, CustomServerResult). Сохранение сервера с одним
+    адресом DoH ищет его IP-адреса в сети, поэтому действие получает объект
+    отмены: stop() обрывает незаконченные сетевые запросы.
+    """
+
+    completed = pyqtSignal(int, object)
+    failed = pyqtSignal(int, str)
+
+    def __init__(self, request_id: int, *, action: Callable[..., Any], parent=None):
+        super().__init__(parent)
+        from utils.socket_cancel import SocketCancel
+
+        self._request_id = int(request_id)
+        self._action = action
+        self._cancel = SocketCancel()
+
+    def stop(self) -> None:
+        self._cancel.cancel()
+
+    def run(self) -> None:
+        try:
+            result = self._action(self._cancel)
+        except Exception as exc:
+            log(f"DnsCustomServerWorker: действие со своим DNS не выполнено: {exc}", "ERROR")
+            self.failed.emit(self._request_id, str(exc))
+            return
+        self.completed.emit(self._request_id, result)
+
+
 class DnsApplyWorker(QThread):
     """Применяет DNS и перечитывает адаптеры: completed(request_id, {"plan", "state"})."""
 

@@ -38,6 +38,7 @@ def build_window_page_deps_sources(*, features, state, page_actions, launch_cont
             "on_smooth_scroll_changed": page_actions.on_smooth_scroll_changed,
             "on_ui_language_changed": page_actions.on_ui_language_changed,
             "open_connection_test": page_actions.open_connection_test,
+            "open_custom_dns_server": page_actions.open_custom_dns_server,
             "open_folder": page_actions.open_folder,
             "open_preset_raw_editor": page_actions.open_preset_raw_editor,
             "open_profile_setup": page_actions.open_profile_setup,

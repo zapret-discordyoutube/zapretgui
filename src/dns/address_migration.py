@@ -67,9 +67,7 @@ def migrate_outdated_dns_addresses(replacements: Mapping[str, str] | None = None
 
         replacements = OUTDATED_DNS_ADDRESS_REPLACEMENTS
 
-    from dns.dns_providers import doh_templates
-
-    templates = doh_templates() if winapi.is_doh_supported() else None
+    templates = runtime.write_doh_templates()
     changes: list[str] = []
     for adapter in runtime.adapters_with_static_dns():
         for ipv6, current in ((False, adapter.static_ipv4), (True, adapter.static_ipv6)):

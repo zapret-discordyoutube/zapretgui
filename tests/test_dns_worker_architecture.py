@@ -56,6 +56,57 @@ class DnsWorkerArchitectureTests(unittest.TestCase):
         for removed in ("create_force_dns_action_worker", "create_connectivity_test_worker", "apply_custom_dns"):
             self.assertNotIn(removed, feature_source)
 
+    def test_custom_server_worker_runs_a_feature_action_and_can_be_stopped(self) -> None:
+        from dns.state import CustomServerResult
+
+        feature = build_dns_feature()
+        server = {"id": "a", "name": "Мой", "ipv4": [], "ipv6": [], "doh": "https://dns.example.com/dns-query"}
+        result = CustomServerResult(success=True)
+        seen = []
+
+        with patch("dns.public.save_custom_server", side_effect=lambda record, cancel: seen.append((record, cancel)) or result), patch(
+            "dns.public.delete_custom_server", return_value=result
+        ) as delete, patch("dns.public.duplicate_custom_server", return_value=result) as duplicate:
+            save = feature.create_custom_server_worker(1, action="save", server=server)
+            emitted = []
+            save.completed.connect(lambda request_id, value: emitted.append((request_id, value)))
+            save.run()
+            feature.create_custom_server_worker(2, action="delete", server_id="a").run()
+            feature.create_custom_server_worker(3, action="duplicate", server_id="a").run()
+
+        self.assertEqual(emitted, [(1, result)])
+        record, cancel = seen[0]
+        self.assertEqual(record, server)
+        # Сохранение ищет адреса в сети: stop() обрывает незаконченные запросы.
+        self.assertFalse(cancel.cancelled)
+        save.stop()
+        self.assertTrue(cancel.cancelled)
+        delete.assert_called_once_with("a")
+        duplicate.assert_called_once_with("a")
+        with self.assertRaises(ValueError):
+            feature.create_custom_server_worker(4, action="rename")
+
+    def test_custom_server_worker_reports_a_crash_as_failure(self) -> None:
+        worker = page_workers.DnsCustomServerWorker(9, action=Mock(side_effect=RuntimeError("база занята")))
+        failed = []
+        worker.failed.connect(lambda request_id, error: failed.append((request_id, error)))
+
+        with patch.object(page_workers, "log"):
+            worker.run()
+
+        self.assertEqual(failed, [(9, "база занята")])
+
+    def test_dns_page_does_not_touch_settings_itself(self) -> None:
+        # Свои DNS читает и пишет DNS-слой в фоне; страницы получают готовый список.
+        from dns.ui import custom_server_page, page
+
+        for module in (page, custom_server_page):
+            source = inspect.getsource(module)
+            self.assertNotIn("settings.store", source)
+            self.assertNotIn("MessageBoxBase", source)
+        self.assertIsNone(importlib.util.find_spec("dns.ui.custom_dns_dialog"))
+        self.assertIsNone(importlib.util.find_spec("dns.custom_providers"))
+
     def test_dns_check_workers_receive_feature_action_callables(self) -> None:
         feature_source = inspect.getsource(build_dns_feature)
         worker_source = "\n".join(

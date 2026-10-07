@@ -14,6 +14,7 @@ from ui.page_deps.system import (
     build_about_page_kwargs,
     build_appearance_page_kwargs,
     build_blockcheck_page_kwargs,
+    build_custom_dns_server_page_kwargs,
     build_dpi_settings_page_kwargs,
     build_fakes_page_kwargs,
     build_hosts_file_page_kwargs,
@@ -131,7 +132,12 @@ PAGE_DEPS_BUILDERS: dict[PageName, PageDepsSpec] = {
         features=("fakes", "external_actions"),
         actions=("show_page",),
     ),
-    PageName.NETWORK: PageDepsSpec(build_network_page_kwargs, features=("dns",)),
+    PageName.NETWORK: PageDepsSpec(build_network_page_kwargs, features=("dns",), actions=("open_custom_dns_server",)),
+    PageName.NETWORK_CUSTOM_DNS: PageDepsSpec(
+        build_custom_dns_server_page_kwargs,
+        features=("dns",),
+        actions=("show_page",),
+    ),
     PageName.HOSTS: PageDepsSpec(build_hosts_page_kwargs, features=("hosts",), actions=("show_page",)),
     PageName.HOSTS_FILE: PageDepsSpec(build_hosts_file_page_kwargs, features=("hosts",), actions=("show_page",)),
     PageName.PREMIUM: PageDepsSpec(

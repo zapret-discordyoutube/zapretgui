@@ -240,6 +240,10 @@ def normalize_custom_dns_servers(value: object) -> list[dict[str, Any]]:
         ipv6 = [ip for ip in unique_ip_list(raw.get("ipv6")) if ":" in ip]
         if not ipv4 and not ipv6:
             continue
+        # Адрес шифрованного DNS (DoH): только https и без пробелов, иначе его нет.
+        doh = as_clean_str(raw.get("doh"))
+        if not doh.lower().startswith("https://") or any(char.isspace() for char in doh):
+            doh = ""
         server_id_key = server_id.lower()
         name_key = name.lower()
         if server_id_key in seen_ids or name_key in seen_names:
@@ -251,6 +255,7 @@ def normalize_custom_dns_servers(value: object) -> list[dict[str, Any]]:
             "name": name,
             "ipv4": ipv4,
             "ipv6": ipv6,
+            "doh": doh,
         })
     return result
 

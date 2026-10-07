@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dns.state import DnsCommandResult, DnsState
+from dns.state import CustomServerResult, DnsCommandResult, DnsState
 
 
 def migrate_outdated_dns_addresses():
@@ -150,9 +150,93 @@ def measure_dns_latency(servers: list[str]):
     return _measure_dns_latency(servers)
 
 
+# ── свои DNS-серверы ──────────────────────────────────────────────────────
+
+
+def load_custom_servers() -> list[dict]:
+    from dns.runtime import load_custom_servers as _load_custom_servers
+
+    return _load_custom_servers()
+
+
+def _reserved_names() -> list[str]:
+    """Названия серверов программы: свой сервер не может называться так же."""
+    from dns.dns_providers import iter_providers
+
+    return [name for _group, name, _data in iter_providers()]
+
+
+def _change_custom_servers(change) -> CustomServerResult:
+    """Меняет список своих DNS одной транзакцией; change(список) → (новый список, ошибка)."""
+    from settings.store import update_custom_dns_servers
+
+    class Rejected(Exception):
+        pass
+
+    def mutate(current: list[dict]) -> list[dict]:
+        servers, error = change(current)
+        if error:
+            raise Rejected(error)
+        return servers
+
+    try:
+        return CustomServerResult(success=True, servers=tuple(update_custom_dns_servers(mutate)))
+    except Rejected as exc:
+        return CustomServerResult(success=False, servers=tuple(load_custom_servers()), error=str(exc))
+
+
+def save_custom_server(server: dict, *, cancel=None) -> CustomServerResult:
+    """Добавляет или заменяет (по id) свой DNS-сервер.
+
+    Если задан только адрес DoH, сначала находятся и проверяются IP-адреса
+    сервера (dns.doh_lookup): без них Windows сервер не примет.
+    """
+    from dns import custom_servers as custom
+
+    record = custom.copy_server(server)
+    notice = ""
+    if record["doh"] and not record["ipv4"] and not record["ipv6"]:
+        from dns import winapi
+        from dns.doh_lookup import find_doh_addresses
+
+        template = custom.parse_doh_template(record["doh"])
+        if template is None:
+            return CustomServerResult(success=False, error="Адрес DoH записан неверно.", field=custom.FIELD_DOH)
+        try:
+            ipv6 = bool(winapi.internet_route().has_ipv6)
+        except Exception:
+            ipv6 = False
+        found = find_doh_addresses(template, ipv6=ipv6, doh_supported=winapi.is_doh_supported(), cancel=cancel)
+        if not found.found:
+            return CustomServerResult(success=False, error=found.error, field=custom.FIELD_DOH)
+        record["ipv4"], record["ipv6"], notice = list(found.ipv4), list(found.ipv6), found.notice
+
+    result = _change_custom_servers(
+        lambda current: custom.upsert_server(current, record, reserved_names=_reserved_names())
+    )
+    if not result.success:
+        return CustomServerResult(success=False, servers=result.servers, error=result.error, field=custom.FIELD_NAME)
+    saved = next((item for item in result.servers if str(item.get("id") or "") == record["id"]), record)
+    return CustomServerResult(success=True, servers=result.servers, server=dict(saved), notice=notice)
+
+
+def delete_custom_server(server_id: str) -> CustomServerResult:
+    from dns import custom_servers as custom
+
+    return _change_custom_servers(lambda current: (custom.remove_server(current, server_id), ""))
+
+
+def duplicate_custom_server(server_id: str) -> CustomServerResult:
+    from dns import custom_servers as custom
+
+    return _change_custom_servers(
+        lambda current: (custom.duplicate_server(current, server_id, reserved_names=_reserved_names()), "")
+    )
+
+
 def build_domain_lookup_servers():
     """Серверы для вкладки «Проверка домена»: системные, шифрованные, из списка программы и свои."""
-    from dns.custom_providers import build_dns_providers_with_custom
+    from dns.custom_servers import build_dns_providers_with_custom
     from dns.dns_providers import network_providers
     from dns.domain_lookup import (
         EXTRA_SERVERS,
@@ -162,7 +246,7 @@ def build_domain_lookup_servers():
         SERVER_SYSTEM,
         DnsServer,
     )
-    from dns.custom_providers import CUSTOM_DNS_CATEGORY
+    from dns.custom_servers import CUSTOM_DNS_CATEGORY
     from utils.dns_reference import REFERENCE_RESOLVERS
 
     servers: list = []
@@ -177,12 +261,7 @@ def build_domain_lookup_servers():
         for resolver in REFERENCE_RESOLVERS
     )
 
-    try:
-        from settings.store import get_custom_dns_servers
-
-        custom_servers = get_custom_dns_servers()
-    except Exception:
-        custom_servers = []
+    custom_servers = load_custom_servers()
     # Режимы встроенного шифрованного DNS — не серверы в сети: у них один адрес 127.0.0.1.
     providers = build_dns_providers_with_custom(network_providers(), custom_servers)
     for category, group in providers.items():
@@ -209,16 +288,11 @@ def run_domain_lookup(target: str, *, use_external: bool = True, on_stage=None, 
 
 def build_server_check_targets():
     """Адреса для вкладки «DNS-серверы»: все серверы программы и свои, IPv6 — если он есть."""
-    from dns.custom_providers import build_dns_providers_with_custom
+    from dns.custom_servers import build_dns_providers_with_custom
     from dns.dns_providers import network_providers
     from dns.server_check import build_targets
 
-    try:
-        from settings.store import get_custom_dns_servers
-
-        custom_servers = get_custom_dns_servers()
-    except Exception:
-        custom_servers = []
+    custom_servers = load_custom_servers()
     try:
         from dns.winapi import internet_route
 

@@ -86,6 +86,24 @@ class DnsProviderGridTests(unittest.TestCase):
         self.assertEqual(grid._key_at(grid._cursor), "Cloudflare")
         self.assertIn("Cloudflare, выбран", grid.accessibleDescription())
 
+    def test_focus_scrolls_to_the_tile_only_when_it_came_from_keyboard(self) -> None:
+        # Фокус, перескочивший сам (с выключенной кнопки, от щелчка мышью),
+        # не должен уводить страницу к выбранной плитке.
+        for reason, scrolls in (
+            (Qt.FocusReason.OtherFocusReason, False),
+            (Qt.FocusReason.MouseFocusReason, False),
+            (Qt.FocusReason.TabFocusReason, True),
+            (Qt.FocusReason.BacktabFocusReason, True),
+        ):
+            with self.subTest(reason=reason):
+                grid = self._grid()
+                grid._cursor = -1
+                with patch.object(grid, "_ensure_visible") as reveal:
+                    grid.focusInEvent(QFocusEvent(QEvent.Type.FocusIn, reason))
+
+                self.assertEqual(grid._key_at(grid._cursor), "Cloudflare")
+                self.assertEqual(reveal.called, scrolls)
+
     def test_context_menu_only_for_custom_servers(self) -> None:
         grid = self._grid()
         wanted: list[str] = []

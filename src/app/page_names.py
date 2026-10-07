@@ -35,6 +35,7 @@ class PageName(Enum):
 
     # === Настройки системы ===
     NETWORK = auto()                 # Сеть
+    NETWORK_CUSTOM_DNS = auto()      # Свой DNS-сервер: добавить или изменить (вложенная в «Настройка DNS»)
     HOSTS = auto()                   # Разблокировка сервисов
     HOSTS_FILE = auto()              # Весь файл hosts с раскраской (вложенная в Hosts)
     BLOCKCHECK = auto()              # BlockCheck

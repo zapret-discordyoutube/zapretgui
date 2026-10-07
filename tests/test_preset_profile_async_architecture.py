@@ -4632,7 +4632,7 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertTrue(hasattr(page_workers, "DnsApplyWorker"))
         worker_source = inspect.getsource(page_workers.DnsApplyWorker)
 
-        for method_name in ("_choose_provider", "_confirm_reset_to_auto"):
+        for method_name in ("_choose_provider", "_reset_to_auto"):
             source = inspect.getsource(getattr(dns_page.NetworkPage, method_name))
             self.assertIn("self._apply_lane.request(", source)
             self.assertNotIn(".apply_auto_dns(", source)

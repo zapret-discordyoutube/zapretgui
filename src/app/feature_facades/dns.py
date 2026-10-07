@@ -17,6 +17,7 @@ class DnsFeature:
     create_dns_flush_cache_worker: Callable
     create_isp_dns_warning_worker: Callable
     create_dns_apply_worker: Callable
+    create_custom_server_worker: Callable
     create_domain_lookup_worker: Callable
     create_server_check_worker: Callable
 
@@ -95,6 +96,21 @@ def build_dns_feature() -> DnsFeature:
             parent=parent,
         )
 
+    def _create_custom_server_worker(request_id: int, *, action: str, server=None, server_id: str = "", parent=None):
+        """Действие со своими DNS: "save" (server), "delete" или "duplicate" (server_id)."""
+        from dns.page_workers import DnsCustomServerWorker
+
+        if action == "save":
+            record = dict(server or {})
+            run = lambda cancel: _public().save_custom_server(record, cancel=cancel)
+        elif action == "delete":
+            run = lambda _cancel: _public().delete_custom_server(str(server_id or ""))
+        elif action == "duplicate":
+            run = lambda _cancel: _public().duplicate_custom_server(str(server_id or ""))
+        else:
+            raise ValueError(f"Неизвестное действие со своим DNS: {action}")
+        return DnsCustomServerWorker(request_id, action=run, parent=parent)
+
     def _create_page_load_worker(request_id: int, *, parent=None):
         from dns.page_workers import DnsPageLoadWorker
 
@@ -157,6 +173,7 @@ def build_dns_feature() -> DnsFeature:
         create_dns_flush_cache_worker=_create_dns_flush_cache_worker,
         create_isp_dns_warning_worker=_create_isp_dns_warning_worker,
         create_dns_apply_worker=_create_dns_apply_worker,
+        create_custom_server_worker=_create_custom_server_worker,
         create_domain_lookup_worker=_create_domain_lookup_worker,
         create_server_check_worker=_create_server_check_worker,
     )

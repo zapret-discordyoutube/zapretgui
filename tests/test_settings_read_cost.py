@@ -47,12 +47,14 @@ class SettingsReadCostTests(unittest.TestCase):
         self.assertNotEqual(settings_store.get_program_settings().get("dpi_autostart"), "corrupted")
 
     def test_custom_dns_servers_are_detached_from_cache(self) -> None:
-        stored = settings_store.set_custom_dns_servers([{"name": "One", "primary": "1.1.1.1"}])
+        stored = settings_store.update_custom_dns_servers(
+            lambda _current: [{"id": "one", "name": "One", "ipv4": ["1.1.1.1"]}]
+        )
+        self.assertEqual([server["name"] for server in stored], ["One"])
 
         servers = settings_store.get_custom_dns_servers()
-        servers.append({"name": "Hacked", "primary": "8.8.8.8"})
-        if servers and isinstance(servers[0], dict):
-            servers[0]["primary"] = "9.9.9.9"
+        servers.append({"id": "two", "name": "Hacked", "ipv4": ["8.8.8.8"]})
+        servers[0]["ipv4"] = ["9.9.9.9"]
 
         self.assertEqual(settings_store.get_custom_dns_servers(), stored)
 

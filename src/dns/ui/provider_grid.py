@@ -11,7 +11,9 @@
 группы справа от счётчика — короткое пояснение ко всей группе (DnsTile.note).
 
 Щелчок или Enter/пробел выбирает сервер, правая кнопка мыши (или клавиша
-меню) на своём DNS открывает меню правки.
+меню) на своём DNS открывает меню правки. К плитке под клавиатурным курсором
+страница прокручивается, только когда курсор двигает сам пользователь
+(стрелки, Tab): фокус, пришедший без клавиатуры, страницу не двигает.
 
 Движение (только при включённых «лёгких анимациях»):
 - «зарядка»: по щелчку от верхней точки значка по кругу бежит комета
@@ -899,7 +901,14 @@ class DnsProviderGrid(QWidget):
         if self._key_at(self._cursor) == "":
             selected = [index for index, tile in enumerate(self._tiles) if tile.selected]
             clickable = self._clickable()
-            self._set_cursor(selected[0] if selected else (clickable[0] if clickable else -1))
+            # Прокручиваем к плитке, только если сюда пришли с клавиатуры. Иначе
+            # фокус, перескочивший сам (например, с выключенной кнопки), увёл бы страницу.
+            by_keyboard = event.reason() in (
+                Qt.FocusReason.TabFocusReason,
+                Qt.FocusReason.BacktabFocusReason,
+                Qt.FocusReason.ShortcutFocusReason,
+            )
+            self._set_cursor(selected[0] if selected else (clickable[0] if clickable else -1), reveal=by_keyboard)
         super().focusInEvent(event)
 
     def focusOutEvent(self, event) -> None:  # noqa: N802
@@ -948,7 +957,7 @@ class DnsProviderGrid(QWidget):
             if 0 <= value < len(self._rects):
                 self.update(self._rects[value])
 
-    def _set_cursor(self, index: int) -> None:
+    def _set_cursor(self, index: int, *, reveal: bool = True) -> None:
         if index == self._cursor:
             return
         old, self._cursor = self._cursor, index
@@ -956,7 +965,7 @@ class DnsProviderGrid(QWidget):
             if 0 <= value < len(self._rects):
                 self.update(self._rects[value])
         self._sync_accessibility()
-        if 0 <= index < len(self._rects):
+        if reveal and 0 <= index < len(self._rects):
             self._ensure_visible(index)
 
     def _sync_accessibility(self) -> None:

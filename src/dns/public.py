@@ -3,6 +3,8 @@ from __future__ import annotations
 from dns.commands import (
     apply_dns,
     consume_warmed_state,
+    delete_custom_server,
+    duplicate_custom_server,
     flush_dns_cache,
     is_isp_dns_warning_shown,
     load_state,
@@ -11,20 +13,24 @@ from dns.commands import (
     migrate_outdated_dns_addresses,
     repair_local_proxy,
     reset_to_auto,
+    save_custom_server,
     start_local_proxy,
     stop_local_proxy_if_unused,
     warm_state,
 )
 from dns.dns_providers import DNS_PROVIDERS
-from dns.state import DnsCommandResult, DnsState
+from dns.state import CustomServerResult, DnsCommandResult, DnsState
 
 
 __all__ = [
     "DNS_PROVIDERS",
+    "CustomServerResult",
     "DnsCommandResult",
     "DnsState",
     "apply_dns",
     "consume_warmed_state",
+    "delete_custom_server",
+    "duplicate_custom_server",
     "flush_dns_cache",
     "is_isp_dns_warning_shown",
     "load_state",
@@ -33,6 +39,7 @@ __all__ = [
     "migrate_outdated_dns_addresses",
     "repair_local_proxy",
     "reset_to_auto",
+    "save_custom_server",
     "start_local_proxy",
     "stop_local_proxy_if_unused",
     "warm_state",

@@ -1375,8 +1375,19 @@ def get_custom_dns_servers() -> list[dict[str, Any]]:
     return value if isinstance(value, list) else []
 
 
-def set_custom_dns_servers(value: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    updated = _update_settings(lambda data: _set_path_value(data, ("dns", "custom_servers"), value))
+def update_custom_dns_servers(mutator) -> list[dict[str, Any]]:
+    """Меняет список своих DNS в одной транзакции: mutator(текущий список) → новый.
+
+    Список читается уже внутри транзакции записи, поэтому два одновременных
+    изменения не затирают друг друга. Исключение из mutator отменяет запись.
+    """
+    path = ("dns", "custom_servers")
+
+    def apply(data: dict[str, Any]) -> None:
+        current = _get_path_value(data, path, [])
+        _set_path_value(data, path, mutator(current if isinstance(current, list) else []))
+
+    updated = _update_settings(apply)
     return copy.deepcopy(updated["dns"]["custom_servers"])
 
 
@@ -2037,7 +2048,6 @@ __all__ = [
     "set_defender_disabled_memory",
     "set_discord_restart_enabled",
     "set_display_mode",
-    "set_custom_dns_servers",
     "set_dpi_autostart",
     "set_editor_smooth_scroll_enabled",
     "set_live_animations_enabled",
@@ -2111,4 +2121,5 @@ __all__ = [
     "set_window_geometry",
     "set_window_opacity",
     "clear_selected_source_preset_file_name",
+    "update_custom_dns_servers",
 ]

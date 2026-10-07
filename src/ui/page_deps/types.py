@@ -7,6 +7,14 @@ from typing import Callable
 @dataclass(frozen=True, slots=True)
 class DnsPageDeps:
     dns_feature: object
+    # Открыть страницу «Свой DNS»: без сервера — добавить новый, с записью сервера — изменить его.
+    open_custom_server: Callable[..., object]
+
+
+@dataclass(frozen=True, slots=True)
+class CustomDnsServerPageDeps:
+    dns_feature: object
+    open_dns_page: Callable[[], object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +62,7 @@ class UpdateRuntimeActions:
 
 
 __all__ = [
+    "CustomDnsServerPageDeps",
     "DpiRuntimeActions",
     "DnsPageDeps",
     "FakesPageDeps",

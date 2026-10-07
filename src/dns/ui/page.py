@@ -2,22 +2,27 @@
 """Страница «Настройка DNS».
 
 Сверху — панель «Сейчас»: какой DNS стоит на отмеченных адаптерах, сами
-адаптеры и действия (вернуть автоматически, замерить скорость, сбросить
-кэш). Ниже — фильтр по группам и сетка плиток серверов: щелчок по плитке
-сразу применяет DNS к отмеченным адаптерам.
+адаптеры и действия (замерить скорость, сбросить кэш). Ниже — фильтр по
+группам и сетка плиток: щелчок по плитке сразу применяет DNS к отмеченным
+адаптерам. Первая плитка — «Автоматически»: она возвращает DNS роутера или
+провайдера.
+
+Свои серверы пользователя приходят вместе с состоянием страницы
+(DnsState.custom_servers). Добавляет и правит их отдельная вложенная
+страница «Свой DNS» (dns.ui.custom_server_page), сюда она возвращает уже
+сохранённый результат: при каждом открытии страница перечитывает состояние.
 
 Страница только показывает состояние и зовёт готовые действия DNS-слоя.
-Всё долгое (загрузка адаптеров, запись DNS, замер, сброс кэша, решение о
-предупреждении про DNS провайдера) идёт в фоновых дорожках
-(ui.latest_worker_lane): одна задача за раз, из новых запросов побеждает
-последний.
+Всё долгое (загрузка адаптеров, запись DNS, замер, сброс кэша, изменение
+списка своих серверов, решение о предупреждении про DNS провайдера) идёт в
+фоновых дорожках (ui.latest_worker_lane): одна задача за раз, из новых
+запросов побеждает последний.
 """
 
 from __future__ import annotations
 
 import re
 from textwrap import fill
-from uuid import uuid4
 
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QWidget
@@ -25,17 +30,14 @@ from qfluentwidgets import CaptionLabel, InfoBar, InfoBarPosition, PushButton, R
 
 from app.ui_texts import tr as tr_catalog
 from dns import page_plans as dns_page_plans
-from dns.custom_providers import CUSTOM_DNS_CATEGORY, build_dns_providers_with_custom
+from dns import custom_servers
+from dns.custom_servers import CUSTOM_DNS_CATEGORY, build_dns_providers_with_custom
 from dns.dns_providers import DNS_PROVIDERS, LOCAL_PROXY_GROUP, STATUS_AT_RISK, STATUS_BLOCKED
-from dns.ui.custom_dns_dialog import CustomDnsDialog, unique_copy_name
 from dns.ui.now_panel import AdapterChip, DnsNowPanel, NowState
 from dns.ui.provider_grid import ADD_TILE_KEY, DnsProviderGrid, DnsTile, GridTexts
 from log.log import log
-from settings.store import get_custom_dns_servers, set_custom_dns_servers
 from ui.accessibility import set_control_accessibility
-from ui.fluent_dialog import MessageBox
 from ui.latest_worker_lane import LatestWorkerLane
-from ui.message_box_accessibility import set_message_box_button_accessibility
 from ui.pages.base_page import BasePage
 from ui.popup_menu import exec_popup_menu
 from ui.presets_menu.common import fluent_icon, make_menu_action
@@ -104,8 +106,10 @@ class NetworkPage(BasePage):
             subtitle_key="page.network.subtitle",
         )
         self._dns = deps.dns_feature
+        self._open_custom_server = deps.open_custom_server
 
-        self._custom_servers: list[dict] = get_custom_dns_servers()
+        # Свои серверы приходят с состоянием страницы; до загрузки видны серверы программы.
+        self._custom_servers: list[dict] = []
         self._providers: dict = build_dns_providers_with_custom(DNS_PROVIDERS, self._custom_servers)
         # Адаптеры из DNS-слоя (dns.adapters.DnsAdapter), опознаются по GUID.
         self._adapters: tuple = ()
@@ -120,6 +124,7 @@ class NetworkPage(BasePage):
         # Что сейчас применяется: имя сервера или AUTO_CHOICE.
         self._pending_choice: str | None = None
         self._measuring = False
+        self._flushing = False
         self._latency: dict[str, float | None] = {}
         self._intercepted = False
 
@@ -153,6 +158,15 @@ class NetworkPage(BasePage):
             ),
             on_result=lambda _payload, report: self._on_latency_done(report),
             on_error=lambda _payload, _error: self._on_latency_done(None),
+            log_fn=log,
+        )
+        self._custom_lane = LatestWorkerLane(
+            name="dns_custom_servers",
+            create_worker=lambda request_id, payload: self._dns.create_custom_server_worker(
+                request_id, action=payload["action"], server_id=payload["server_id"], parent=self
+            ),
+            on_result=lambda _payload, result: self._on_custom_servers_changed(result),
+            on_error=lambda _payload, error: self._info("warning", self._t("page.network.error.title", "Ошибка"), error),
             log_fn=log,
         )
         self._isp_lane = LatestWorkerLane(
@@ -212,7 +226,6 @@ class NetworkPage(BasePage):
 
     def _build_ui(self) -> None:
         self.now_panel = DnsNowPanel(self.content)
-        self.now_panel.reset_clicked.connect(self._confirm_reset_to_auto)
         self.now_panel.measure_clicked.connect(self._measure_latency)
         self.now_panel.flush_clicked.connect(self._flush_cache)
         self.now_panel.adapters_changed.connect(lambda _names: self._render())
@@ -234,7 +247,7 @@ class NetworkPage(BasePage):
 
         self.grid = DnsProviderGrid(self.content)
         self.grid.activated.connect(self._choose_provider)
-        self.grid.add_clicked.connect(self._add_custom_server)
+        self.grid.add_clicked.connect(lambda: self._open_custom_server(None))
         self.grid.context_menu_wanted.connect(self._show_custom_server_menu)
         self.add_widget(self.grid)
 
@@ -264,8 +277,7 @@ class NetworkPage(BasePage):
     def _retranslate(self) -> None:
         panel = self.now_panel
         panel.eyebrow_label.setText(self._t("page.network.now.eyebrow", "Сейчас на отмеченных адаптерах"))
-        panel.reset_button.setText(self._t("page.network.button.reset", "Вернуть автоматически"))
-        panel.flush_button.setText(self._t("page.network.button.flush_dns_cache", "Сбросить кэш"))
+        panel.flush_button.setText(self._t("page.network.button.flush_dns_cache", "Сбросить кэш DNS"))
         panel.set_measuring(
             self._measuring,
             idle_text=self._t("page.network.button.measure", "Замерить скорость"),
@@ -302,6 +314,15 @@ class NetworkPage(BasePage):
     # ── жизненный цикл ──────────────────────────────────────
 
     def on_page_activated(self) -> None:
+        """Первый показ загружает состояние, каждый следующий — тихо обновляет его.
+
+        Обновление показывает то, что изменилось, пока страницы не было видно:
+        новый свой сервер со страницы «Свой DNS», другой адаптер, DNS,
+        поменянный в настройках Windows.
+        """
+        if self._load_started and not self._closed:
+            self._load_lane.request()
+            return
         self._run_runtime_init_once()
 
     def _run_runtime_init_once(self) -> None:
@@ -321,14 +342,26 @@ class NetworkPage(BasePage):
 
     def cleanup(self) -> None:
         self._closed = True
-        for lane in (self._load_lane, self._apply_lane, self._flush_lane, self._latency_lane, self._isp_lane):
+        for lane in self._lanes():
             lane.close()
+
+    def _lanes(self) -> tuple[LatestWorkerLane, ...]:
+        return (
+            self._load_lane,
+            self._apply_lane,
+            self._flush_lane,
+            self._latency_lane,
+            self._custom_lane,
+            self._isp_lane,
+        )
 
     def _on_page_data(self, state) -> None:
         if self._closed or state is None:
             return
+        first = not self._loaded
         self._apply_state(state)
-        self._isp_lane.request()
+        if first:
+            self._isp_lane.request()
 
     def _apply_state(self, state) -> None:
         """Новый снимок адаптеров; отметки уже известных адаптеров сохраняются."""
@@ -338,6 +371,7 @@ class NetworkPage(BasePage):
         self._doh_supported = bool(getattr(state, "doh_supported", False))
         self._local_proxy_mode = str(getattr(state, "local_proxy_mode", "") or "")
         self._loaded = True
+        self._set_custom_servers(getattr(state, "custom_servers", ()) or (), render=False)
         if [adapter.guid for adapter in self._adapters] != known or not known:
             self.now_panel.set_adapters([self._adapter_chip(adapter) for adapter in self._adapters])
         self._render()
@@ -499,7 +533,7 @@ class NetworkPage(BasePage):
         if self._filter != FILTER_ALL:
             groups = [(name, items) for name, items in groups if name == self._filter]
 
-        tiles: list[DnsTile] = []
+        tiles: list[DnsTile] = [self._auto_tile(plan)]
         for group, items in groups:
             if self._filter == FILTER_ALL:
                 tiles.append(
@@ -552,6 +586,8 @@ class NetworkPage(BasePage):
                             "DNSSEC: сервер проверяет подписи ответов и не отдаёт подделанные.",
                         )
                     )
+                if custom and data.get("doh"):
+                    tooltip_lines.append(f"DoH: {data['doh']}")
                 if custom:
                     tooltip_lines.append(self._t("page.network.tile.custom_menu", "Правая кнопка мыши — изменить или удалить"))
                 tiles.append(
@@ -583,10 +619,32 @@ class NetworkPage(BasePage):
                         key=ADD_TILE_KEY,
                         title=self._t("page.network.add_tile.title", "Свой DNS"),
                         note=self._t("page.network.add_tile.note", "Добавить свой адрес"),
-                        tooltip=self._t("page.network.custom.button.description", "Открывает окно добавления нового DNS сервера."),
+                        tooltip=self._t(
+                            "page.network.custom.button.description",
+                            "Открывает страницу добавления своего DNS-сервера: по адресу DoH или по IP-адресам.",
+                        ),
                     )
                 )
         return tiles
+
+    def _auto_tile(self, plan: dns_page_plans.CurrentDnsPlan) -> DnsTile:
+        """Первая плитка: вернуть DNS, который выдаёт роутер или провайдер."""
+        pending = self._pending_choice == AUTO_CHOICE
+        return DnsTile(
+            kind="provider",
+            key=AUTO_CHOICE,
+            title=self._t("page.network.auto_tile.title", "Автоматически"),
+            note=self._t("page.network.auto_tile.note", "DNS от роутера"),
+            address=plan.ipv4[0] if plan.kind == "auto" and plan.ipv4 else "",
+            icon_name="fa5s.sync",
+            selected=pending or (plan.kind == "auto" and self._pending_choice is None),
+            pending=pending,
+            tooltip=self._t(
+                "page.network.auto_tile.tooltip",
+                "DNS снова будет получаться автоматически от роутера или провайдера (DHCP). "
+                "Помогает, если после ручной настройки интернет работает нестабильно.",
+            ),
+        )
 
     def _set_filter(self, key: str) -> None:
         self._filter = key
@@ -625,6 +683,9 @@ class NetworkPage(BasePage):
         return adapters
 
     def _choose_provider(self, name: str) -> None:
+        if name == AUTO_CHOICE:
+            self._reset_to_auto()
+            return
         data = self._provider(name)
         if data is None:
             return
@@ -654,26 +715,13 @@ class NetworkPage(BasePage):
             }
         )
 
-    def _confirm_reset_to_auto(self) -> None:
+    def _reset_to_auto(self) -> None:
+        """Плитка «Автоматически»: как и любой сервер, применяется сразу, без вопроса."""
         adapters = self._ready_adapters()
         if adapters is None:
             return
-        title = self._t("page.network.force_dns.reset.button", "Вернуть DNS автоматически")
-        body = self._t(
-            "page.network.force_dns.reset.confirm",
-            "Программа вернёт автоматическое получение DNS через DHCP для выбранных адаптеров. Продолжить?",
-        )
-        box = MessageBox(title, body, self.window())
-        set_message_box_button_accessibility(
-            box,
-            yes_name=title,
-            yes_description=body,
-            cancel_name=f"Отменить действие: {title}",
-            cancel_description="Закрывает диалог без изменения DNS.",
-        )
-        if not box.exec():
-            return
         self._pending_choice = AUTO_CHOICE
+        self.grid.flash(AUTO_CHOICE)
         self._render()
         self._apply_lane.request({"action": "auto", "adapters": adapters})
 
@@ -730,18 +778,22 @@ class NetworkPage(BasePage):
     # ── сброс кэша ──────────────────────────────────────────
 
     def _flush_cache(self) -> None:
-        self.now_panel.flush_button.setEnabled(False)
+        # Кнопка не выключается: выключенная кнопка теряет фокус, он уходит на
+        # сетку плиток, и страница прокручивается к выбранному серверу.
+        if self._flushing:
+            return
+        self._flushing = True
         self._flush_lane.request()
 
     def _on_flush_done(self, plan) -> None:
-        self.now_panel.flush_button.setEnabled(True)
+        self._flushing = False
         if getattr(plan, "success", False):
             self._info("success", self._t("page.network.info.flush_done", "Кэш DNS очищен"))
             return
         self._info("warning", getattr(plan, "title", "") or self._t("page.network.error.title", "Ошибка"), getattr(plan, "content", ""))
 
     def _on_flush_failed(self, error: str) -> None:
-        self.now_panel.flush_button.setEnabled(True)
+        self._flushing = False
         self._info("warning", self._t("page.network.error.title", "Ошибка"), error)
 
     # ── замер скорости ──────────────────────────────────────
@@ -835,34 +887,31 @@ class NetworkPage(BasePage):
 
     # ── свои DNS ────────────────────────────────────────────
 
-    def _save_custom_servers(self, servers: list[dict]) -> None:
-        self._custom_servers = set_custom_dns_servers(servers)
-        self._providers = build_dns_providers_with_custom(DNS_PROVIDERS, self._custom_servers)
-        self._rebuild_filter_bar()
-        self._render()
-
-    def _custom_index(self, name: str) -> int:
-        data = self._provider(name) or {}
-        custom_id = str(data.get("custom_id") or "")
-        for index, server in enumerate(self._custom_servers):
-            if custom_id and str(server.get("id") or "") == custom_id:
-                return index
-        for index, server in enumerate(self._custom_servers):
-            if str(server.get("name") or "") == name:
-                return index
-        return -1
-
-    def _add_custom_server(self) -> None:
-        dialog = CustomDnsDialog(self, ipv6_available=self._ipv6_available)
-        if not dialog.exec():
+    def _set_custom_servers(self, servers, *, render: bool = True) -> None:
+        servers = [custom_servers.copy_server(item) for item in servers]
+        if servers == self._custom_servers:
             return
-        server = dialog.server()
-        if server.get("id"):
-            self._save_custom_servers([*self._custom_servers, server])
+        self._custom_servers = servers
+        self._providers = build_dns_providers_with_custom(DNS_PROVIDERS, servers)
+        self._rebuild_filter_bar()
+        if render:
+            self._render()
+
+    def _on_custom_servers_changed(self, result) -> None:
+        if self._closed:
+            return
+        if not getattr(result, "success", False):
+            self._info("warning", self._t("page.network.error.title", "Ошибка"), str(getattr(result, "error", "") or ""))
+        self._set_custom_servers(getattr(result, "servers", ()) or ())
+
+    def _custom_server(self, name: str) -> dict | None:
+        """Запись своего сервера по названию его плитки."""
+        custom_id = str((self._provider(name) or {}).get("custom_id") or "")
+        return next((server for server in self._custom_servers if custom_id and server["id"] == custom_id), None)
 
     def _show_custom_server_menu(self, name: str, global_pos: QPoint) -> None:
-        index = self._custom_index(name)
-        if index < 0:
+        server = self._custom_server(name)
+        if server is None:
             return
         menu = RoundMenu(parent=self)
         commands: dict[object, str] = {}
@@ -884,44 +933,18 @@ class NetworkPage(BasePage):
 
         command = commands.get(exec_popup_menu(menu, global_pos, owner=self, capture_action=True), "")
         if command == "edit":
-            self._edit_custom_server(index)
-        elif command == "duplicate":
-            self._duplicate_custom_server(index)
+            self._open_custom_server(custom_servers.copy_server(server))
         elif command == "copy":
-            self._copy_custom_server(index)
-        elif command == "delete":
-            self._save_custom_servers([s for i, s in enumerate(self._custom_servers) if i != index])
+            self._copy_custom_server(server)
+        elif command in ("duplicate", "delete"):
+            self._custom_lane.request({"action": command, "server_id": server["id"]})
 
-    def _edit_custom_server(self, index: int) -> None:
-        dialog = CustomDnsDialog(self, server=self._custom_servers[index], ipv6_available=self._ipv6_available)
-        if not dialog.exec():
-            return
-        updated = dialog.server()
-        if updated.get("id"):
-            servers = list(self._custom_servers)
-            servers[index] = updated
-            self._save_custom_servers(servers)
-
-    def _duplicate_custom_server(self, index: int) -> None:
-        server = dict(self._custom_servers[index])
-        server["id"] = f"custom-{uuid4().hex[:12]}"
-        server["name"] = unique_copy_name(
-            str(server.get("name") or "Свой DNS"),
-            [str(item.get("name") or "") for item in self._custom_servers],
-        )
-        self._save_custom_servers([*self._custom_servers, server])
-
-    def _copy_custom_server(self, index: int) -> None:
-        server = self._custom_servers[index]
-        values = [
-            str(item).strip()
-            for item in [*(server.get("ipv4", []) or []), *(server.get("ipv6", []) or [])]
-            if str(item).strip()
-        ]
+    def _copy_custom_server(self, server: dict) -> None:
+        text = custom_servers.clipboard_text(server)
         clipboard = QApplication.clipboard()
-        if not values or clipboard is None:
+        if not text or clipboard is None:
             return
-        clipboard.setText(", ".join(values))
+        clipboard.setText(text)
         self._info(
             "success",
             self._t("page.network.custom.copied.title", "DNS скопирован"),

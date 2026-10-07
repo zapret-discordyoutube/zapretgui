@@ -48,8 +48,12 @@ KNOWN = DnsState(
 
 
 class DnsRuntimeTests(unittest.TestCase):
-    def _run(self, fake: _FakeWinApi, func, *args):
-        patchers = [*fake.patches(), patch.object(runtime, "load_state", return_value=KNOWN)]
+    def _run(self, fake: _FakeWinApi, func, *args, custom_servers=()):
+        patchers = [
+            *fake.patches(),
+            patch.object(runtime, "load_state", return_value=KNOWN),
+            patch.object(runtime, "load_custom_servers", return_value=list(custom_servers)),
+        ]
         for item in patchers:
             item.start()
             self.addCleanup(item.stop)
@@ -80,6 +84,50 @@ class DnsRuntimeTests(unittest.TestCase):
 
         self.assertEqual([write[1] for write in fake.writes], [(), ()])
         self.assertEqual(fake.writes[0][3], doh_templates())
+
+    def test_custom_server_addresses_get_their_own_doh_template(self) -> None:
+        fake = _FakeWinApi(doh=True)
+        custom = [
+            {"id": "a", "name": "Мой", "ipv4": ["203.0.113.5"], "ipv6": ["2001:db8::5"], "doh": "https://dns.example.com/dns-query"},
+            {"id": "b", "name": "Без шифрования", "ipv4": ["203.0.113.9"], "ipv6": [], "doh": ""},
+            # Свой сервер с адресом сервера программы шаблон программы не перебивает.
+            {"id": "c", "name": "Подмена", "ipv4": ["1.1.1.1"], "ipv6": [], "doh": "https://other.example/dns-query"},
+        ]
+
+        self._run(fake, runtime.apply_dns, [ETH], ["203.0.113.5"], ["2001:db8::5"], custom_servers=custom)
+
+        templates = fake.writes[0][3]
+        self.assertEqual(templates["203.0.113.5"], "https://dns.example.com/dns-query")
+        self.assertEqual(templates["2001:db8::5"], "https://dns.example.com/dns-query")
+        self.assertNotIn("203.0.113.9", templates)
+        self.assertEqual(templates["1.1.1.1"], doh_templates()["1.1.1.1"])
+        self.assertEqual(fake.writes[1][3], templates)
+
+    def test_windows_without_doh_gets_no_templates_even_for_custom_servers(self) -> None:
+        fake = _FakeWinApi(doh=False)
+        custom = [{"id": "a", "name": "Мой", "ipv4": ["203.0.113.5"], "ipv6": [], "doh": "https://dns.example.com/dns-query"}]
+
+        self._run(fake, runtime.apply_dns, [ETH], ["203.0.113.5"], [], custom_servers=custom)
+
+        self.assertIsNone(fake.writes[0][3])
+
+    def test_state_carries_custom_servers_from_settings(self) -> None:
+        custom = [{"id": "a", "name": "Мой", "ipv4": ["203.0.113.5"], "ipv6": [], "doh": ""}]
+        route = type("Route", (), {"has_ipv6": False})()
+        with patch.object(winapi, "list_interfaces", return_value=[]), patch.object(
+            winapi, "internet_route", return_value=route
+        ), patch.object(winapi, "is_doh_supported", return_value=True), patch.object(
+            runtime, "_local_proxy_mode", return_value=""
+        ), patch("settings.store.get_custom_dns_servers", return_value=custom):
+            state = runtime.load_state()
+
+        self.assertEqual(state.custom_servers, tuple(custom))
+
+    def test_unreadable_settings_give_no_custom_servers(self) -> None:
+        with patch("settings.store.get_custom_dns_servers", side_effect=RuntimeError("база занята")), patch.object(
+            runtime, "log"
+        ):
+            self.assertEqual(runtime.load_custom_servers(), [])
 
     def test_failed_adapter_is_reported_by_name(self) -> None:
         fake = _FakeWinApi(fail={WIFI})

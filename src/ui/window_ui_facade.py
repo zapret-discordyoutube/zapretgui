@@ -19,6 +19,7 @@ def _get_nav_labels():
 
     return {
         PageName.NETWORK: "Настройка DNS",
+        PageName.NETWORK_CUSTOM_DNS: "Свой DNS",
         PageName.HOSTS: "Редактор hosts",
         PageName.HOSTS_FILE: "Файл hosts",
         PageName.BLOCKCHECK: "BlockCheck",

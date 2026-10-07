@@ -13,6 +13,7 @@ from threading import RLock
 
 from dns import winapi
 from dns.adapters import DnsAdapter, build_dns_adapters, is_dns_adapter
+from dns.custom_servers import custom_doh_templates
 from dns.dns_providers import doh_templates
 from dns.state import DnsCommandResult, DnsState
 from log.log import log
@@ -41,7 +42,30 @@ def load_state() -> DnsState:
         ipv6_available=route.has_ipv6,
         doh_supported=winapi.is_doh_supported(),
         local_proxy_mode=_local_proxy_mode(),
+        custom_servers=tuple(load_custom_servers()),
     )
+
+
+def load_custom_servers() -> list[dict]:
+    """Свои DNS-серверы пользователя из настроек; при сбое чтения — пустой список."""
+    try:
+        from settings.store import get_custom_dns_servers
+
+        return list(get_custom_dns_servers())
+    except Exception as exc:
+        log(f"DNS: не удалось прочитать свои DNS-серверы: {exc}", "WARNING")
+        return []
+
+
+def write_doh_templates() -> dict[str, str] | None:
+    """{адрес: шаблон DoH} для записи в адаптер или None, если Windows DoH не умеет.
+
+    Шаблоны серверов программы и своих серверов пользователя; при совпадении
+    адреса главнее сервер программы.
+    """
+    if not winapi.is_doh_supported():
+        return None
+    return {**custom_doh_templates(load_custom_servers()), **doh_templates()}
 
 
 def _local_proxy_mode() -> str:
@@ -87,7 +111,7 @@ def apply_dns(guids: list[str], ipv4: list[str], ipv6: list[str]) -> DnsCommandR
     """
     guids = list(dict.fromkeys(str(item or "").strip() for item in guids if str(item or "").strip()))
     names = {adapter.guid: adapter.name for adapter in load_state().adapters}
-    templates = doh_templates() if winapi.is_doh_supported() else None
+    templates = write_doh_templates()
     errors: list[str] = []
     for guid in guids:
         if guid not in names:
@@ -170,10 +194,12 @@ __all__ = [
     "apply_dns",
     "consume_warmed_state",
     "flush_dns_cache",
+    "load_custom_servers",
     "load_state",
     "repair_local_proxy",
     "reset_to_auto",
     "start_local_proxy",
     "stop_local_proxy_if_unused",
     "warm_state",
+    "write_doh_templates",
 ]

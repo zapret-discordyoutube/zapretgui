@@ -7,8 +7,9 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QPoint
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QMainWindow
 
 from dataclasses import replace
 
@@ -16,7 +17,8 @@ from dns import page_plans
 from dns.adapters import DnsAdapter
 from dns.dns_providers import DNS_PROVIDERS
 from dns.latency import DnsLatencyReport
-from dns.state import DnsState
+from dns.state import CustomServerResult, DnsState
+from dns.ui.page import AUTO_CHOICE
 
 ETH = "{00000000-0000-0000-0000-000000000009}"
 WIFI = "{00000000-0000-0000-0000-000000000012}"
@@ -32,6 +34,15 @@ SPARE_ADAPTER = DnsAdapter(SPARE, "Ethernet 2", "Realtek", "ethernet", connected
 
 STATE = DnsState(adapters=(ETHERNET, WIFI_ADAPTER, SPARE_ADAPTER), ipv6_available=False, doh_supported=True)
 
+HOME = {"id": "custom-1", "name": "Дом", "ipv4": ["192.168.1.1"], "ipv6": ["fd00::1"], "doh": ""}
+SECURE = {
+    "id": "custom-2",
+    "name": "dns.example.com",
+    "ipv4": ["203.0.113.5"],
+    "ipv6": [],
+    "doh": "https://dns.example.com/dns-query",
+}
+
 
 def _feature(state=STATE):
     return SimpleNamespace(
@@ -41,6 +52,7 @@ def _feature(state=STATE):
         create_dns_flush_cache_worker=Mock(),
         create_dns_latency_worker=Mock(),
         create_isp_dns_warning_worker=Mock(),
+        create_custom_server_worker=Mock(),
     )
 
 
@@ -50,11 +62,7 @@ class DnsPageTests(unittest.TestCase):
         cls._app = QApplication.instance() or QApplication([])
 
     def setUp(self) -> None:
-        self.saved_servers: list[list[dict]] = []
-        self.custom_servers: list[dict] = []
         patches = [
-            patch("dns.ui.page.get_custom_dns_servers", side_effect=lambda: list(self.custom_servers)),
-            patch("dns.ui.page.set_custom_dns_servers", side_effect=self._save_servers),
             patch("dns.ui.page.InfoBar"),
             patch("dns.ui.now_panel.are_live_animations_enabled", return_value=True),
             patch("dns.ui.provider_grid.are_live_animations_enabled", return_value=True),
@@ -65,27 +73,24 @@ class DnsPageTests(unittest.TestCase):
             if item.attribute == "InfoBar":
                 self.info_bar = started
 
-    def _save_servers(self, servers):
-        self.custom_servers = list(servers)
-        self.saved_servers.append(list(servers))
-        return list(servers)
-
     def _page(self, *, load: bool = True, state=STATE):
         from dns.ui.page import NetworkPage
 
         feature = _feature(state)
-        page = NetworkPage(deps=SimpleNamespace(dns_feature=feature))
+        self.open_custom_server = Mock()
+        page = NetworkPage(deps=SimpleNamespace(dns_feature=feature, open_custom_server=self.open_custom_server))
         self.addCleanup(page.deleteLater)
         page.resize(1200, 900)
-        for lane_name in ("_load_lane", "_apply_lane", "_flush_lane", "_latency_lane", "_isp_lane"):
-            getattr(page, lane_name).request = Mock()
+        for lane in page._lanes():
+            lane.request = Mock()
         if load:
             page.on_page_activated()
         return page
 
     @staticmethod
     def _provider_tiles(page):
-        return [tile for tile in page.grid.tiles() if tile.kind == "provider"]
+        """Плитки серверов без плитки «Автоматически»."""
+        return [tile for tile in page.grid.tiles() if tile.kind == "provider" and tile.key != AUTO_CHOICE]
 
     # ── построение ──────────────────────────────────────────
 
@@ -116,14 +121,17 @@ class DnsPageTests(unittest.TestCase):
         from dns.ui.page import NetworkPage
 
         feature = _feature(None)
-        page = NetworkPage(deps=SimpleNamespace(dns_feature=feature))
+        page = NetworkPage(deps=SimpleNamespace(dns_feature=feature, open_custom_server=Mock()))
         self.addCleanup(page.deleteLater)
         page._load_lane.request = Mock()
 
         page.on_page_activated()
-        page.on_page_activated()
 
         page._load_lane.request.assert_called_once_with()
+        # Повторное открытие обновляет состояние, а заранее загруженные данные больше не ищет.
+        page.on_page_activated()
+        self.assertEqual(page._load_lane.request.call_count, 2)
+        feature.consume_warmed_page_data.assert_called_once_with()
 
     # ── текущий DNS ─────────────────────────────────────────
 
@@ -332,34 +340,42 @@ class DnsPageTests(unittest.TestCase):
         page._apply_lane.request.assert_not_called()
         self.assertEqual(self.info_bar.warning.call_args.kwargs["title"], "Нет отмеченных адаптеров")
 
-    def test_reset_to_auto_asks_first_and_names_dialog_buttons(self) -> None:
+    def test_automatic_dns_is_the_first_tile_in_every_filter(self) -> None:
+        page = self._page(state=replace(STATE, adapters=(WIFI_ADAPTER,)))
+
+        for key in ("all", "Популярные", "Свои DNS"):
+            with self.subTest(filter=key):
+                page._set_filter(key)
+                first = page.grid.tiles()[0]
+                self.assertEqual((first.kind, first.key, first.title), ("provider", AUTO_CHOICE, "Автоматически"))
+                self.assertEqual(first.note, "DNS от роутера")
+                # На адаптере автоматический DNS: плитка выбрана и показывает адрес роутера.
+                self.assertTrue(first.selected)
+                self.assertEqual(first.address, "192.168.1.1")
+                self.assertIn("DHCP", first.tooltip)
+
+    def test_automatic_tile_is_not_selected_while_a_server_is_set(self) -> None:
+        page = self._page(state=replace(STATE, adapters=(ETHERNET,)))
+
+        auto = page.grid.tile(AUTO_CHOICE)
+
+        self.assertFalse(auto.selected)
+        self.assertEqual(auto.address, "")
+        self.assertFalse(hasattr(page.now_panel, "reset_button"))
+
+    def test_automatic_tile_resets_dns_at_once_without_a_question(self) -> None:
         page = self._page()
-        boxes = []
 
-        class Box:
-            answer = False
+        page.grid.activated.emit(AUTO_CHOICE)
 
-            def __init__(self, title, body, parent=None):
-                self.title, self.body = title, body
-                self.yesButton, self.cancelButton = Mock(), Mock()
-                boxes.append(self)
-
-            def exec(self):
-                return Box.answer
-
-        with patch("dns.ui.page.MessageBox", Box):
-            page.now_panel.reset_button.click()
-            page._apply_lane.request.assert_not_called()
-            Box.answer = True
-            page.now_panel.reset_button.click()
-
-        self.assertIn("DHCP", boxes[0].body)
-        boxes[0].yesButton.setAccessibleName.assert_called_with(boxes[0].title)
-        boxes[0].cancelButton.setAccessibleName.assert_called_with(f"Отменить действие: {boxes[0].title}")
         payload = page._apply_lane.request.call_args.args[0]
         self.assertEqual(payload, {"action": "auto", "adapters": [ETH, WIFI]})
         self.assertEqual(page.now_panel.title_label.text(), "Автоматически (DHCP)")
         self.assertEqual(page.now_panel.detail_label.text(), "Применяю…")
+        auto = page.grid.tile(AUTO_CHOICE)
+        self.assertTrue(auto.pending and auto.selected)
+        # Пока DNS возвращается, ни один сервер не выглядит выбранным.
+        self.assertFalse(any(tile.selected for tile in self._provider_tiles(page)))
 
     # ── фильтр ──────────────────────────────────────────────
 
@@ -369,10 +385,11 @@ class DnsPageTests(unittest.TestCase):
         page._set_filter("Для ИИ")
         kinds = {tile.kind for tile in page.grid.tiles()}
         self.assertEqual(kinds, {"provider"})
-        self.assertEqual(len(page.grid.tiles()), len(DNS_PROVIDERS["Для ИИ"]))
+        # Плитка «Автоматически» остаётся первой и при фильтре.
+        self.assertEqual(len(page.grid.tiles()), len(DNS_PROVIDERS["Для ИИ"]) + 1)
 
         page._set_filter("Свои DNS")
-        self.assertEqual([tile.kind for tile in page.grid.tiles()], ["add"])
+        self.assertEqual([(tile.kind, tile.key) for tile in page.grid.tiles()], [("provider", AUTO_CHOICE), ("add", "__add__")])
 
     # ── замер скорости ──────────────────────────────────────
 
@@ -465,43 +482,84 @@ class DnsPageTests(unittest.TestCase):
 
     # ── свои DNS ────────────────────────────────────────────
 
-    def test_custom_server_add_edit_duplicate_copy_delete(self) -> None:
+    def test_custom_servers_come_with_the_page_state(self) -> None:
+        page = self._page(state=replace(STATE, custom_servers=(HOME, SECURE)))
+
+        tiles = {tile.key: tile for tile in self._provider_tiles(page)}
+
+        self.assertTrue(tiles["Дом"].custom)
+        self.assertFalse(tiles["Дом"].has_doh)
+        self.assertTrue(tiles["dns.example.com"].has_doh)
+        self.assertIn("DoH: https://dns.example.com/dns-query", tiles["dns.example.com"].tooltip)
+        self.assertEqual(tiles["dns.example.com"].address, "203.0.113.5")
+
+    def test_page_without_loaded_state_shows_builtin_servers_only(self) -> None:
+        page = self._page(load=False)
+
+        self.assertFalse(any(tile.custom for tile in self._provider_tiles(page)))
+        self.assertIn("Quad9", [tile.key for tile in self._provider_tiles(page)])
+
+    def test_add_tile_and_edit_open_the_custom_server_page(self) -> None:
+        page = self._page(state=replace(STATE, custom_servers=(HOME, SECURE)))
+
+        page.grid.add_clicked.emit()
+        self.open_custom_server.assert_called_once_with(None)
+
+        self._run_menu(page, "dns.example.com", "Редактировать")
+        self.assertEqual(self.open_custom_server.call_args.args[0], SECURE)
+
+    def test_duplicate_and_delete_run_in_background_and_refresh_tiles(self) -> None:
+        page = self._page(state=replace(STATE, custom_servers=(HOME, SECURE)))
+
+        self._run_menu(page, "Дом", "Создать копию")
+        self.assertEqual(page._custom_lane.request.call_args.args[0], {"action": "duplicate", "server_id": "custom-1"})
+        self._run_menu(page, "Дом", "Удалить")
+        self.assertEqual(page._custom_lane.request.call_args.args[0], {"action": "delete", "server_id": "custom-1"})
+
+        page._on_custom_servers_changed(CustomServerResult(success=True, servers=(SECURE,)))
+
+        keys = [tile.key for tile in self._provider_tiles(page)]
+        self.assertNotIn("Дом", keys)
+        self.assertIn("dns.example.com", keys)
+
+    def test_custom_lane_worker_gets_action_and_server_id(self) -> None:
         page = self._page()
-        page._ipv6_available = True
-        dialogs = []
 
-        class Dialog:
-            result = {"id": "custom-1", "name": "Дом", "ipv4": ["192.168.1.1"], "ipv6": ["fd00::1"]}
+        page._custom_lane._create_worker(5, {"action": "delete", "server_id": "custom-1"})
 
-            def __init__(self, parent=None, *, server=None, ipv6_available=False):
-                dialogs.append((server, ipv6_available))
+        page._dns.create_custom_server_worker.assert_called_once_with(
+            5, action="delete", server_id="custom-1", parent=page
+        )
 
-            def exec(self):
-                return True
+    def test_failed_custom_change_is_reported_and_keeps_the_list(self) -> None:
+        page = self._page(state=replace(STATE, custom_servers=(HOME,)))
 
-            def server(self):
-                return dict(Dialog.result)
+        page._on_custom_servers_changed(CustomServerResult(success=False, servers=(HOME,), error="база занята"))
 
-        with patch("dns.ui.page.CustomDnsDialog", Dialog):
-            page.grid.add_clicked.emit()
-            self.assertEqual(dialogs[-1], (None, True))
-            self.assertIn("Дом", [tile.key for tile in self._provider_tiles(page)])
+        self.assertEqual(self.info_bar.warning.call_args.kwargs["content"], "база занята")
+        self.assertIn("Дом", [tile.key for tile in self._provider_tiles(page)])
 
-            Dialog.result = {"id": "custom-1", "name": "Дача", "ipv4": ["10.0.0.1"], "ipv6": []}
-            self._run_menu(page, "Дом", "Редактировать")
-            self.assertEqual(dialogs[-1][0]["name"], "Дом")
+    def test_copy_puts_doh_and_addresses_into_clipboard(self) -> None:
+        page = self._page(state=replace(STATE, custom_servers=(HOME, SECURE)))
 
-        self.assertEqual([server["name"] for server in self.custom_servers], ["Дача"])
-        self._run_menu(page, "Дача", "Создать копию")
-        self.assertEqual(len(self.custom_servers), 2)
-        self.assertNotEqual(self.custom_servers[1]["id"], "custom-1")
+        self._run_menu(page, "Дом", "Копировать DNS в буфер обмена")
+        self.assertEqual(QApplication.clipboard().text(), "192.168.1.1, fd00::1")
 
-        self._run_menu(page, "Дача", "Копировать DNS в буфер обмена")
-        self.assertEqual(QApplication.clipboard().text(), "10.0.0.1")
+        self._run_menu(page, "dns.example.com", "Копировать DNS в буфер обмена")
+        self.assertEqual(QApplication.clipboard().text(), "https://dns.example.com/dns-query, 203.0.113.5")
 
-        self._run_menu(page, "Дача", "Удалить")
-        self.assertEqual(len(self.custom_servers), 1)
-        self.assertNotIn("Дача", [tile.key for tile in self._provider_tiles(page)])
+    def test_reopening_the_page_reloads_state_with_new_custom_servers(self) -> None:
+        page = self._page()
+        page._load_lane.request.assert_not_called()
+        page._isp_lane.request.reset_mock()
+
+        page.on_page_activated()
+        page._load_lane.request.assert_called_once_with()
+        page._on_page_data(replace(STATE, custom_servers=(SECURE,)))
+
+        self.assertIn("dns.example.com", [tile.key for tile in self._provider_tiles(page)])
+        # Совет про DNS провайдера решается один раз, а не при каждом возврате на страницу.
+        page._isp_lane.request.assert_not_called()
 
     def _run_menu(self, page, name: str, text: str) -> None:
         def choose(menu, _pos, **_kwargs):
@@ -516,12 +574,37 @@ class DnsPageTests(unittest.TestCase):
         page = self._page()
 
         page.now_panel.flush_button.click()
+        page.now_panel.flush_button.click()
+        # Второе нажатие, пока кэш чистится, новый сброс не запускает.
         page._flush_lane.request.assert_called_once_with()
-        self.assertFalse(page.now_panel.flush_button.isEnabled())
+        self.assertTrue(page.now_panel.flush_button.isEnabled())
         page._on_flush_done(page_plans.build_flush_dns_cache_result_plan(success=True, message=""))
 
-        self.assertTrue(page.now_panel.flush_button.isEnabled())
         self.assertEqual(self.info_bar.success.call_args.kwargs["title"], "Кэш DNS очищен")
+        page.now_panel.flush_button.click()
+        self.assertEqual(page._flush_lane.request.call_count, 2)
+
+    def test_flush_button_does_not_scroll_the_page(self) -> None:
+        # Раньше кнопка на время сброса выключалась: фокус уходил на сетку
+        # плиток, и страница прокручивалась к выбранному серверу.
+        page = self._page(state=replace(STATE, adapters=(replace(ETHERNET, static_ipv4=("193.233.112.67",)),)))
+        window = QMainWindow()
+        self.addCleanup(window.deleteLater)
+        window.setCentralWidget(page)
+        window.resize(1200, 500)
+        window.show()
+        window.activateWindow()
+        self._app.processEvents()
+        bar = page.verticalScrollBar()
+        self.assertGreater(bar.maximum(), 300)
+
+        QTest.mouseClick(page.now_panel.flush_button, Qt.MouseButton.LeftButton)
+        self._app.processEvents()
+
+        page._flush_lane.request.assert_called_once_with()
+        self.assertEqual(bar.value(), 0)
+        self.assertIs(self._app.focusWidget(), page.now_panel.flush_button)
+        window.takeCentralWidget()
 
     def test_english_interface(self) -> None:
         page = self._page()
@@ -530,11 +613,20 @@ class DnsPageTests(unittest.TestCase):
 
         self.assertEqual(page.now_panel.measure_button.text(), "Measure speed")
         self.assertEqual(page.now_panel.title_label.text(), "Adapters use different DNS")
-        self.assertEqual(page.grid.tiles()[0].title, "Encrypted")
+        self.assertEqual(page.grid.tiles()[0].title, "Automatic")
+        self.assertEqual(page.grid.tiles()[1].title, "Encrypted")
+        self.assertEqual(page.now_panel.flush_button.text(), "Flush DNS cache")
 
     def test_cleanup_closes_every_lane(self) -> None:
         page = self._page()
-        lanes = [page._load_lane, page._apply_lane, page._flush_lane, page._latency_lane, page._isp_lane]
+        lanes = [
+            page._load_lane,
+            page._apply_lane,
+            page._flush_lane,
+            page._latency_lane,
+            page._custom_lane,
+            page._isp_lane,
+        ]
         for lane in lanes:
             lane.close = Mock()
 
