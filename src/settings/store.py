@@ -789,6 +789,20 @@ def update_blockcheck_settings(mutator) -> dict[str, Any]:
     return copy.deepcopy(updated["blockcheck"])
 
 
+def get_check_history() -> list[dict[str, Any]]:
+    """Итоги прошлых проверок сети, от старых к новым."""
+    return copy.deepcopy(_read_path_value(("blockcheck", "check_history"), []))
+
+
+def add_check_history_run(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Дописывает итог проверки и возвращает историю; лишние старые записи отбрасываются."""
+
+    def _append(section: dict[str, Any]) -> None:
+        runs = section.get("check_history")
+        section["check_history"] = [*(runs if isinstance(runs, list) else []), _as_dict(entry)]
+
+    return copy.deepcopy(update_blockcheck_settings(_append)["check_history"])
+
 def get_folders_settings() -> dict[str, Any]:
     return _read_section("folders")
 

@@ -28,6 +28,7 @@ def create_blockcheck_worker(
         start_run_log=start_blockcheck_run_log,
         append_run_log=append_blockcheck_run_log,
         close_run_log=close_blockcheck_run_log,
+        remember_run=remember_blockcheck_run,
         parent=parent,
     )
 
@@ -99,6 +100,38 @@ def append_blockcheck_run_log(path: str | None, message: str) -> None:
 
 def close_blockcheck_run_log(path: str | None) -> None:
     run_log_sessions.close(path)
+
+
+def remember_blockcheck_run(report: dict, log_file: str | None) -> dict:
+    """Записывает прогон в историю и рядом с журналом кладёт отчёт в строгом виде.
+
+    Возвращает, что изменилось с прошлой такой же проверки:
+    ``{"changes": [...], "previous_time": "...", "json_file": "..."}``.
+    """
+    from diagnostics import history
+    from settings.store import add_check_history_run, get_check_history
+
+    entry = history.blockcheck_entry(report, log_file=str(log_file or ""))
+    previous = history.previous_run(get_check_history(), entry)
+    add_check_history_run(entry)
+
+    json_file = ""
+    if log_file:
+        try:
+            from config.build_info import APP_VERSION
+        except Exception:
+            APP_VERSION = ""
+        json_file = os.path.splitext(str(log_file))[0] + ".json"
+        try:
+            with open(json_file, "w", encoding="utf-8") as stream:
+                stream.write(history.report_json(report, entry, app_version=str(APP_VERSION)))
+        except OSError:
+            json_file = ""
+    return {
+        "changes": history.describe_changes(previous, entry),
+        "previous_time": str(previous.get("time") or "") if previous else "",
+        "json_file": json_file,
+    }
 
 
 def build_quick_target_menu_plan(*, scan_protocol: str, current_value: str):

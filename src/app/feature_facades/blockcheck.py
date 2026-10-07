@@ -32,6 +32,7 @@ class BlockcheckFeature:
             append_run_log=self.append_blockcheck_run_log,
             close_run_log=self.close_blockcheck_run_log,
             load_geo_sites=self.load_geo_sites,
+            remember_run=self.remember_blockcheck_run,
             **kwargs,
         )
 
@@ -110,6 +111,9 @@ class BlockcheckFeature:
             finalize_scan_report=self.finalize_scan_report,
             **kwargs,
         )
+
+    def remember_blockcheck_run(self, *args, **kwargs):
+        return self._worker_commands().remember_blockcheck_run(*args, **kwargs)
 
     def load_page_initial_state(self, *args, **kwargs):
         return self._worker_commands().load_page_initial_state(*args, **kwargs)

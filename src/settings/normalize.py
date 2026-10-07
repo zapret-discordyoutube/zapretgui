@@ -732,6 +732,45 @@ def normalize_blockcheck_strategy_history(data: object) -> dict[str, Any]:
     return history
 
 
+def _history_text(value: object) -> str:
+    return as_clean_str(value)[: schema.CHECK_HISTORY_TEXT_LIMIT]
+
+
+def normalize_check_history(data: object) -> list[dict[str, Any]]:
+    """История проверок сети: только известные поля, ограниченной длины, последние записи."""
+    runs: list[dict[str, Any]] = []
+    for raw_run in data if isinstance(data, list) else ():
+        run = as_dict(raw_run)
+        kind = as_clean_str(run.get("kind"))
+        time_text = as_clean_str(run.get("time"))
+        if not kind or not time_text:
+            continue
+        states: dict[str, str] = {}
+        for raw_name, raw_level in as_dict(run.get("states")).items():
+            name = _history_text(raw_name)
+            level = as_clean_str(raw_level)
+            if name and level in schema.CHECK_HISTORY_LEVELS and len(states) < schema.CHECK_HISTORY_STATES_LIMIT:
+                states[name] = level
+        problems = [
+            text
+            for text in (_history_text(item) for item in (run.get("problems") if isinstance(run.get("problems"), list) else ()))
+            if text
+        ][: schema.CHECK_HISTORY_PROBLEMS_LIMIT]
+        runs.append(
+            {
+                "kind": kind[:40],
+                "time": time_text[:40],
+                "title": _history_text(run.get("title")),
+                "level": as_str_in(run.get("level"), schema.CHECK_HISTORY_LEVELS, "unknown"),
+                "headline": _history_text(run.get("headline")),
+                "problems": problems,
+                "states": states,
+                "log_file": as_clean_str(run.get("log_file"))[:520],
+            }
+        )
+    return runs[-schema.CHECK_HISTORY_LIMIT :]
+
+
 def normalize_blockcheck(data: object) -> dict[str, Any]:
     raw = as_dict(data)
     return {
@@ -741,6 +780,7 @@ def normalize_blockcheck(data: object) -> dict[str, Any]:
             if normalize_lookup_key(item)
         ],
         "strategy_history": normalize_blockcheck_strategy_history(raw.get("strategy_history")),
+        "check_history": normalize_check_history(raw.get("check_history")),
     }
 
 

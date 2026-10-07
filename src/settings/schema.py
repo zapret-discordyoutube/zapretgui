@@ -38,6 +38,14 @@ VALID_TRAY_CLOSE_MODES = frozenset(
         TRAY_CLOSE_MODE_NORMAL,
     }
 )
+# Сколько прошлых проверок сети помнит программа.
+CHECK_HISTORY_LIMIT = 30
+# Ограничения на одну запись истории: настройки читаются целиком, раздувать их нельзя.
+CHECK_HISTORY_TEXT_LIMIT = 400
+CHECK_HISTORY_PROBLEMS_LIMIT = 12
+CHECK_HISTORY_STATES_LIMIT = 80
+CHECK_HISTORY_LEVELS = frozenset({"ok", "warn", "fail", "unknown"})
+
 ORCHESTRA_ASKEYS = (
     "tls",
     "http",
@@ -246,6 +254,8 @@ def default_blockcheck() -> dict[str, Any]:
         "user_domains": [],
         # Итоги прошлых подборов стратегии: {"<режим>|<цель>": {"confirmed": [...], "failed": {id: время}}}.
         "strategy_history": {},
+        # Итоги прошлых проверок сети, от старых к новым (см. diagnostics.history).
+        "check_history": [],
     }
 
 

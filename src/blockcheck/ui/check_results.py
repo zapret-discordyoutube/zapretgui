@@ -198,6 +198,11 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self.env_label = CaptionLabel("", self)
         self.env_label.setWordWrap(True)
         titles.addWidget(self.env_label)
+        # Что изменилось с прошлой такой же проверки.
+        self.changes_label = CaptionLabel("", self)
+        self.changes_label.setWordWrap(True)
+        self.changes_label.setVisible(False)
+        titles.addWidget(self.changes_label)
         self.ticker = FunTicker(self)
         self.ticker.setVisible(False)
         titles.addWidget(self.ticker)
@@ -229,7 +234,19 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         super().resizeEvent(event)
         self._sync_min_height()
 
+    def _show_changes(self, report: dict | None) -> None:
+        changes = [str(item) for item in (report or {}).get("changes") or ()]
+        text = ""
+        if changes:
+            from diagnostics.history import format_time
+
+            when = format_time(str((report or {}).get("previous_time") or ""))
+            text = f"С прошлой проверки ({when}) {'; '.join(changes)}."
+        self.changes_label.setText(text)
+        self.changes_label.setVisible(bool(text))
+
     def _clear_problems(self) -> None:
+        self._show_changes(None)
         while self._problems_layout.count():
             item = self._problems_layout.takeAt(0)
             widget = item.widget()
@@ -284,6 +301,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
             level = "fail" if any(item.get("level") == "fail" for item in blocking) else "warn"
             title = f"Найдены проблемы: {len(blocking)} — ниже, что с ними делать"
             mood = MOOD_ALARM if level == "fail" else MOOD_SAD
+        self._show_changes(report)
         rows = [_ProblemRow(problem, self._on_action, self._problems_host) for problem in problems]
         working = list(report.get("working") or ())
         if working and problems:

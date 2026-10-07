@@ -63,17 +63,20 @@ def prepare_blockcheck_support_request(
     extra_domains: list[str],
 ) -> SupportRequestFeedback:
     extra_note = (
-        "В архив добавлен текущий лог запуска BlockCheck, если он уже был создан. "
+        "В архив добавлен текущий лог запуска BlockCheck, если он уже был создан: в нём есть и состояние "
+        "компьютера (служба фильтрации, антивирус, прокси, часы). Рядом лежит тот же отчёт в строгом виде (.json). "
         "Если вы добавляли свои домены, обязательно укажите в обращении, какие именно адреса дали TIMEOUT, FAIL или TCP_RESET."
     )
     if extra_domains:
         extra_note += f" Пользовательских доменов в запуске: {len(extra_domains)}."
 
+    # Отчёт в строгом виде пишется рядом с журналом проверки под тем же именем.
+    report_file = f"{os.path.splitext(run_log_file)[0]}.json" if run_log_file else None
     result = prepare_support_request(
         bundle_prefix="blockcheck_support",
         context_label=f"BlockCheck: {mode_label}",
-        candidate_paths=[run_log_file, *_common_candidate_paths()],
-        recent_patterns=("blockcheck_run_*.log", "zapret_winws2_debug_*.log"),
+        candidate_paths=[run_log_file, report_file, *_common_candidate_paths()],
+        recent_patterns=("blockcheck_run_*.log", "blockcheck_run_*.json", "zapret_winws2_debug_*.log"),
         extra_note=extra_note,
         discussions_url=BLOCKCHECK_ISSUES_URL,
     )

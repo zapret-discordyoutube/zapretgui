@@ -33,6 +33,7 @@ class BlockcheckWorker(QObject):
         append_run_log: Callable[[str | None, str], None],
         close_run_log: Callable[[str | None], None],
         load_geo_sites: Callable[[], object] | None = None,
+        remember_run: Callable[[dict, str | None], dict] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -42,6 +43,7 @@ class BlockcheckWorker(QObject):
         self._append_run_log_action = append_run_log
         self._close_run_log_action = close_run_log
         self._load_geo_sites = load_geo_sites
+        self._remember_run = remember_run
         self._cancelled = False
         self._running = False
         self._run_log_file = None
@@ -80,6 +82,8 @@ class BlockcheckWorker(QObject):
             )
             if isinstance(report, dict) and report.get("stopped"):
                 report = None
+            if report is not None:
+                self._remember(report)
         except Exception as e:
             logger.exception("BlockcheckWorker crashed")
             self._emit(f"❌ Проверка упала: {e}")
@@ -91,6 +95,28 @@ class BlockcheckWorker(QObject):
                 pass
             self._running = False
         self.finished.emit(report)
+
+    def _remember(self, report: dict) -> None:
+        """Записывает прогон в историю и дописывает, что изменилось с прошлого раза.
+
+        Сбой записи не должен стоить человеку результата проверки.
+        """
+        if self._remember_run is None:
+            return
+        try:
+            note = self._remember_run(report, self._run_log_file) or {}
+        except Exception:
+            logger.exception("Failed to remember blockcheck run")
+            return
+        changes = [str(item) for item in note.get("changes") or ()]
+        report["changes"] = changes
+        report["previous_time"] = str(note.get("previous_time") or "")
+        report["json_file"] = str(note.get("json_file") or "")
+        if changes:
+            from diagnostics.history import format_time
+
+            self._emit("")
+            self._emit(f"🕘 С прошлой проверки ({format_time(report['previous_time'])}) {'; '.join(changes)}.")
 
     def stop(self):
         self._cancelled = True

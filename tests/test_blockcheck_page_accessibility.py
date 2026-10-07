@@ -267,6 +267,29 @@ class SummaryPanelTests(unittest.TestCase):
         self.assertIn("Zapret выключен", panel.env_label.text())
 
 
+class SummaryChangesTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_changes_since_last_run_are_shown_and_cleared(self) -> None:
+        panel = BlockcheckSummaryPanel()
+        self.assertTrue(panel.changes_label.isHidden())
+
+        panel.show_report(
+            {"problems": [], "changes": ["перестали открываться: YouTube"], "previous_time": "2026-10-06T10:00:00"}
+        )
+        self.assertFalse(panel.changes_label.isHidden())
+        self.assertEqual(panel.changes_label.text(), "С прошлой проверки (06.10 10:00) перестали открываться: YouTube.")
+
+        # Отчёт без перемен и новая проверка строку убирают.
+        panel.show_report({"problems": [], "changes": []})
+        self.assertTrue(panel.changes_label.isHidden())
+        panel.show_report({"problems": [], "changes": ["снова открываются: Discord"], "previous_time": "x"})
+        panel.set_pending()
+        self.assertTrue(panel.changes_label.isHidden())
+
+
 class SitesTableTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
