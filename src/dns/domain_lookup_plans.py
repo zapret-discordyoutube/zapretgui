@@ -343,6 +343,83 @@ def _source_state(source: NeighborSource) -> str:
     return source.status
 
 
+@dataclass(frozen=True, slots=True)
+class Row:
+    """Строка для экрана: состояние (ok / warn / fail / info / unknown), подпись и значение."""
+
+    state: str
+    name: str
+    text: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class RowGroup:
+    title: str
+    rows: tuple[Row, ...]
+
+
+_LEVEL_STATES = {LEVEL_OK: "ok", LEVEL_WARN: "warn", LEVEL_FAIL: "fail", LEVEL_UNKNOWN: "unknown"}
+
+
+def build_path_rows(report: DomainLookupReport) -> tuple[Row, ...]:
+    """Узлы дороги строками; перед узлом, за которым уже работает фильтр, стоит отметка."""
+    route = report.route
+    if route is None or not route.supported or not route.hops:
+        return ()
+    verdict = _filter_verdict(report)
+    filter_hop = verdict.hop if verdict is not None and verdict.code == FILTER_FOUND else None
+    rows: list[Row] = []
+    for hop in route.hops:
+        if hop.ttl == filter_hop:
+            rows.append(Row("fail", FILTER_MARK))
+        time_text = "" if hop.rtt_ms is None else ("< 1 мс" if hop.rtt_ms < 1 else f"{round(hop.rtt_ms)} мс")
+        last = route.reached and hop is route.hops[-1]
+        parts = [hop.address or "не ответил", time_text, "сам сервер" if last else ""]
+        rows.append(Row("info", f"Узел {hop.ttl}", " · ".join(part for part in parts if part)))
+    if filter_hop is not None and filter_hop > route.hops[-1].ttl:
+        rows.append(Row("fail", FILTER_MARK))
+    return tuple(rows)
+
+
+def build_answer_groups(report: DomainLookupReport) -> tuple[RowGroup, ...]:
+    """Ответы DNS-серверов одной группой: сервер, что ответил и за сколько."""
+    rows = tuple(
+        Row(
+            _LEVEL_STATES.get(row.level, "info"),
+            row.server if row.address in ("", "—") else f"{row.server} · {row.address}",
+            " · ".join(part for part in (row.result, row.time) if part),
+        )
+        for row in build_answer_rows(report)
+    )
+    return (RowGroup("Что отвечают DNS-серверы", rows),) if rows else ()
+
+
+# На экране каждая строка — отдельный виджет: сотни имён делали бы вкладку тяжёлой.
+# Полный список остаётся в отчёте.
+NEIGHBOR_ROWS_LIMIT = 40
+
+
+def build_neighbor_groups(report: DomainLookupReport, limit: int = NEIGHBOR_ROWS_LIMIT) -> tuple[RowGroup, ...]:
+    """«Кто ещё на этом адресе»: по группе на источник."""
+    if not report.primary_ip:
+        return ()
+    groups: list[RowGroup] = []
+    for source in report.sources:
+        state = "info" if source.status == SOURCE_OK else "unknown"
+        rows = [Row(state, _capital_first(_source_state(source)))]
+        if source.extra:
+            rows.append(Row("info", source.extra))
+        rows += [Row("info", name) for name in source.names[:limit]]
+        if len(source.names) > limit:
+            rows.append(Row("unknown", f"… и ещё {len(source.names) - limit} — полный список в отчёте (кнопка «Отчёт»)"))
+        groups.append(RowGroup(source_title(source.key), tuple(rows)))
+    return tuple(groups)
+
+
+def _capital_first(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
 def build_neighbors_text(report: DomainLookupReport) -> str:
     """Текст блока «Кто ещё на этом адресе»: по разделу на источник."""
     if not report.primary_ip:
@@ -433,7 +510,12 @@ __all__ = [
     "InfoLine",
     "build_answer_rows",
     "build_dns_summary",
+    "Row",
+    "RowGroup",
+    "build_answer_groups",
+    "build_neighbor_groups",
     "build_neighbors_text",
+    "build_path_rows",
     "build_network_lines",
     "build_path_lines",
     "build_path_text",

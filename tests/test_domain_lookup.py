@@ -565,3 +565,21 @@ class WiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScreenRowsTests(unittest.TestCase):
+    """На экране «Проверки домена» — строки, а не моноширинный текст и таблица."""
+
+    def test_long_neighbour_list_is_cut_on_screen_and_points_to_the_report(self) -> None:
+        from types import SimpleNamespace
+
+        from dns import domain_lookup_plans as plans
+
+        source = SimpleNamespace(key=plans.SOURCE_THC, status=plans.SOURCE_OK, names=tuple(f"s{n}.example" for n in range(100)), total=None, extra="", detail="")
+        report = SimpleNamespace(primary_ip="1.2.3.4", sources=(source,))
+        [group] = plans.build_neighbor_groups(report)
+
+        self.assertEqual(len(group.rows), 1 + plans.NEIGHBOR_ROWS_LIMIT + 1)
+        self.assertIn("и ещё 60", group.rows[-1].name)
+        self.assertEqual(group.rows[0].name, "Найдено: 100")
+        self.assertEqual(plans.build_neighbor_groups(SimpleNamespace(primary_ip="", sources=(source,))), ())

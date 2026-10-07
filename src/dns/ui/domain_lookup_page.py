@@ -7,8 +7,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
-from PyQt6.QtWidgets import QHBoxLayout, QHeaderView, QSizePolicy, QTableWidgetItem, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel,
     CheckBox,
@@ -18,22 +17,23 @@ from qfluentwidgets import (
     PrimaryPushButton,
     PushButton,
     StrongBodyLabel,
-    TableWidget,
 )
 
 import dns.domain_lookup_plans as plans
 from app.ui_texts import tr as tr_catalog
 from blockcheck.ui.check_results import _HeightKeeper
+from blockcheck.ui.result_cards import _SectionBlock
+from blockcheck.ui.result_cards_model import Line, Section
 from log.log import log
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import SettingsCard, set_tooltip
 from ui.latest_worker_lane import LatestWorkerLane
-from ui.pages.base_page import BasePage, ScrollBlockingPlainTextEdit
+from ui.pages.base_page import BasePage
 from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.theme_semantic import get_semantic_palette
+from ui.widgets.fun import FunTicker
 from ui.widgets.log_report_view import LogReport
-from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips, set_fluent_item_tooltip
 
 
 def _tone_color(tone: str) -> str:
@@ -87,63 +87,40 @@ class _InfoLines(_HeightKeeper, QWidget):
             label.setStyleSheet(f"color: {_tone_color(line.tone)};")
 
 
-class DnsAnswersTable(TableWidget):
-    """Одна строка на DNS-сервер: кто он, что ответил и за сколько."""
+class RowsView(QWidget):
+    """Группы строк карточками-разделами — тем же видом, что подробности проверки BlockCheck.
 
-    def __init__(self, parent=None) -> None:
+    Заменяет таблицу и окна с моноширинным текстом: у каждой строки значок
+    состояния, подпись и значение, длинные значения переносятся.
+    """
+
+    def __init__(self, parent=None, *, icon: str = "fa5s.list-ul") -> None:
         super().__init__(parent)
-        self.setColumnCount(4)
-        self.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        self.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
-        self.verticalHeader().setVisible(False)
-        self.setWordWrap(False)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        header = self.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        install_fluent_item_tooltips(self)
-        self._levels: list[str] = []
-        self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
+        self._icon = icon
+        self._shown: tuple = ()
+        self._blocks: list[QWidget] = []
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(6)
 
-    def set_headers(self, headers: tuple[str, str, str, str]) -> None:
-        self.setHorizontalHeaderLabels(list(headers))
+    def groups(self) -> tuple:
+        return self._shown
 
-    def show_rows(self, rows) -> None:
-        rows = tuple(rows)
-        self.setRowCount(len(rows))
-        self._levels = [row.level for row in rows]
-        for index, row in enumerate(rows):
-            for column, text in enumerate((row.server, row.address, row.result, row.time)):
-                item = self.item(index, column)
-                if item is None:
-                    item = QTableWidgetItem()
-                    self.setItem(index, column, item)
-                item.setText(text)
-                set_fluent_item_tooltip(item, row.tooltip)
-        self._apply_theme_refresh()
-        self._fit_height()
-        problems = sum(1 for level in self._levels if level in ("warn", "fail"))
-        set_state_text(self, f"Ответы DNS-серверов: {len(rows)} строк, с пометками {problems}")
-
-    def _fit_height(self) -> None:
-        height = self.horizontalHeader().height() + 2 * self.frameWidth() + 4
-        for row in range(self.rowCount()):
-            height += self.rowHeight(row)
-        self.setMinimumHeight(height)
-        self.setMaximumHeight(height)
-
-    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
-        _ = tokens, force
-        for row, level in enumerate(self._levels):
-            item = self.item(row, 2)
-            if item is None:
-                continue
-            if level in ("warn", "fail"):
-                item.setForeground(QColor(_tone_color(plans.level_tone(level))))
-            else:
-                item.setData(Qt.ItemDataRole.ForegroundRole, None)
+    def show_groups(self, groups) -> None:
+        groups = tuple(groups)
+        if groups == self._shown:
+            return
+        self._shown = groups
+        for block in self._blocks:
+            self._layout.removeWidget(block)
+            block.deleteLater()
+        self._blocks = []
+        for group in groups:
+            section = Section(group.title, tuple(Line(row.state, row.name, row.text) for row in group.rows))
+            block = _SectionBlock(section, self, icon=self._icon)
+            self._layout.addWidget(block)
+            self._blocks.append(block)
+        set_state_text(self, "; ".join(f"{group.title}: строк {len(group.rows)}" for group in groups) or "нет данных")
 
 
 class DomainLookupPage(BasePage):
@@ -164,8 +141,6 @@ class DomainLookupPage(BasePage):
         self._closed = False
         self._report = None
         # Что сейчас показано в поле соседей: сравниваем с этой строкой, а не читаем текст обратно из поля.
-        self._neighbors_shown_text = ""
-        self._path_shown_text = ""
         self._running = False
         self._lane = LatestWorkerLane(
             name="domain_lookup",
@@ -215,6 +190,9 @@ class DomainLookupPage(BasePage):
         self.progress_bar = IndeterminateProgressBar(self.control_card)
         self.progress_bar.setVisible(False)
         self.control_card.add_widget(self.progress_bar)
+        self.ticker = FunTicker(self.control_card)
+        self.ticker.setVisible(False)
+        self.control_card.add_widget(self.ticker)
         self.layout.addWidget(self.control_card)
 
         self.ping_card = SettingsCard()
@@ -231,19 +209,15 @@ class DomainLookupPage(BasePage):
         self.path_card.add_widget(self.path_title)
         self.path_lines = _InfoLines(self.path_card)
         self.path_card.add_widget(self.path_lines)
-        self.path_text = ScrollBlockingPlainTextEdit(self.path_card)
-        self.path_text.setReadOnly(True)
-        self.path_text.setFont(QFont("Consolas", 9))
-        self.path_card.add_widget(self.path_text)
+        self.path_rows = RowsView(self.path_card, icon="fa5s.route")
+        self.path_card.add_widget(self.path_rows)
         self.layout.addWidget(self.path_card)
 
         self.neighbors_card = SettingsCard()
         self.neighbors_title = StrongBodyLabel("", self.neighbors_card)
         self.neighbors_card.add_widget(self.neighbors_title)
-        self.neighbors_text = ScrollBlockingPlainTextEdit(self.neighbors_card)
-        self.neighbors_text.setReadOnly(True)
-        self.neighbors_text.setFont(QFont("Consolas", 9))
-        self.neighbors_card.add_widget(self.neighbors_text)
+        self.neighbors_rows = RowsView(self.neighbors_card, icon="fa5s.sitemap")
+        self.neighbors_card.add_widget(self.neighbors_rows)
         self.layout.addWidget(self.neighbors_card)
 
         self.dns_card = SettingsCard()
@@ -251,8 +225,8 @@ class DomainLookupPage(BasePage):
         self.dns_card.add_widget(self.dns_title)
         self.dns_summary = _InfoLines(self.dns_card)
         self.dns_card.add_widget(self.dns_summary)
-        self.dns_table = DnsAnswersTable(self.dns_card)
-        self.dns_card.add_widget(self.dns_table)
+        self.dns_rows = RowsView(self.dns_card, icon="fa5s.network-wired")
+        self.dns_card.add_widget(self.dns_rows)
         self.layout.addWidget(self.dns_card)
 
         for card in (self.ping_card, self.path_card, self.dns_card, self.neighbors_card):
@@ -297,7 +271,7 @@ class DomainLookupPage(BasePage):
         self.ping_title.setText(self._t("section.ping", "Пинг и сеть"))
         self.path_title.setText(self._t("section.path", "Путь до сервера"))
         set_control_accessibility(
-            self.path_text,
+            self.path_rows,
             name=self._t("path.name", "Узлы по дороге до сервера"),
             description=self._t(
                 "path.description",
@@ -306,21 +280,13 @@ class DomainLookupPage(BasePage):
         )
         self.dns_title.setText(self._t("section.dns", "Адреса с разных DNS-серверов"))
         self.neighbors_title.setText(self._t("section.neighbors", "Кто ещё на этом адресе"))
-        self.dns_table.set_headers(
-            (
-                self._t("column.server", "DNS-сервер"),
-                self._t("column.address", "Адрес сервера"),
-                self._t("column.answer", "Ответ"),
-                self._t("column.time", "Время"),
-            )
-        )
         set_control_accessibility(
-            self.dns_table,
+            self.dns_rows,
             name=self._t("table.name", "Ответы DNS-серверов"),
             description=self._t("table.description", "Для каждого сервера: какие адреса он назвал и за сколько."),
         )
         set_control_accessibility(
-            self.neighbors_text,
+            self.neighbors_rows,
             name=self._t("neighbors.name", "Домены на том же адресе"),
             description=self._t("neighbors.description", "Списки доменов по источникам."),
         )
@@ -351,10 +317,16 @@ class DomainLookupPage(BasePage):
         self.external_check.setEnabled(not running)
         self.report_button.setEnabled(self._report is not None and not running)
         self.progress_bar.setVisible(running)
+        self.ticker.setVisible(running)
         if running:
+            from blockcheck.ui.fun_texts import phrases
+
             self.progress_bar.start()
+            self.ticker.set_phrases(phrases("dns_lookup", self._ui_language))
+            self.ticker.start()
         else:
             self.progress_bar.stop()
+            self.ticker.stop()
         set_state_text(self.progress_bar, "Проверка домена: выполняется" if running else "Проверка домена: не выполняется")
 
     def set_target(self, target: str) -> None:
@@ -374,11 +346,8 @@ class DomainLookupPage(BasePage):
         self._report = None
         for card in (self.ping_card, self.path_card, self.dns_card, self.neighbors_card):
             card.setVisible(False)
-        self.dns_table.setRowCount(0)
-        self.neighbors_text.clear()
-        self._neighbors_shown_text = ""
-        self.path_text.clear()
-        self._path_shown_text = ""
+        for view in (self.dns_rows, self.neighbors_rows, self.path_rows):
+            view.show_groups(())
         self.status_lines.set_lines((plans.InfoLine(f"Проверяем {target}…", plans.TONE_ACCENT),))
         self._set_running(True)
         self._lane.request({"target": target, "use_external": self.external_check.isChecked()})
@@ -429,29 +398,19 @@ class DomainLookupPage(BasePage):
         self.path_card.setVisible(bool(path_lines))
         if path_lines:
             self.path_lines.set_lines(path_lines)
-        path_text = plans.build_path_text(report)
-        self.path_text.setVisible(bool(path_text))
-        if path_text != self._path_shown_text:
-            self._path_shown_text = path_text
-            self.path_text.setPlainText(path_text)
-            lines = min(32, max(2, path_text.count("\n") + 1))
-            self.path_text.setFixedHeight(lines * self.path_text.fontMetrics().lineSpacing() + 24)
-        set_state_text(self.path_text, " ".join(line.text for line in path_lines) or "Путь до сервера: нет данных")
+        path_rows = plans.build_path_rows(report)
+        self.path_rows.setVisible(bool(path_rows))
+        self.path_rows.show_groups((plans.RowGroup("Узлы по дороге до сервера", path_rows),) if path_rows else ())
 
-        rows = plans.build_answer_rows(report)
-        self.dns_card.setVisible(bool(rows))
-        if rows:
+        groups = plans.build_answer_groups(report)
+        self.dns_card.setVisible(bool(groups))
+        if groups:
             self.dns_summary.set_lines((plans.build_dns_summary(report),))
-            self.dns_table.show_rows(rows)
+        self.dns_rows.show_groups(groups)
 
-        text = plans.build_neighbors_text(report)
-        self.neighbors_card.setVisible(bool(text))
-        if text != self._neighbors_shown_text:
-            self._neighbors_shown_text = text
-            self.neighbors_text.setPlainText(text)
-            lines = min(18, max(4, text.count("\n") + 1))
-            self.neighbors_text.setFixedHeight(lines * self.neighbors_text.fontMetrics().lineSpacing() + 24)
-        set_state_text(self.neighbors_text, f"Домены на том же адресе: найдено {plans.count_neighbors(report)}")
+        neighbors = plans.build_neighbor_groups(report)
+        self.neighbors_card.setVisible(bool(neighbors))
+        self.neighbors_rows.show_groups(neighbors)
 
     def _open_report(self) -> None:
         if self._report is None:
@@ -483,4 +442,4 @@ class DomainLookupPage(BasePage):
         super().cleanup()
 
 
-__all__ = ["DnsAnswersTable", "DomainLookupPage"]
+__all__ = ["RowsView", "DomainLookupPage"]

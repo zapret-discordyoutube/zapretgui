@@ -34,6 +34,11 @@ def _report(**overrides) -> engine.DomainLookupReport:
     return engine.DomainLookupReport(**values)
 
 
+def _names(view) -> list[str]:
+    """Подписи всех строк, показанных в виде групп."""
+    return [row.name for group in view.groups() for row in group.rows]
+
+
 class DomainLookupPageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -102,9 +107,11 @@ class DomainLookupPageTests(unittest.TestCase):
         self.assertFalse(page.ping_card.isHidden())
         self.assertFalse(page.dns_card.isHidden())
         self.assertFalse(page.neighbors_card.isHidden())
-        self.assertEqual(page.dns_table.rowCount(), 2)
-        self.assertIn("заглушка (Ростелеком)", page.dns_table.item(1, 2).text())
-        self.assertIn("a.example", page.neighbors_text.toPlainText())
+        [answers] = page.dns_rows.groups()
+        self.assertEqual(len(answers.rows), 2)
+        self.assertIn("заглушка (Ростелеком)", answers.rows[1].text)
+        self.assertEqual(answers.rows[1].state, "fail")
+        self.assertIn("a.example", _names(page.neighbors_rows))
         self.assertIn("AS64500", page.network_lines._lines[-1].text)
         # Пути в этом отчёте нет — карточка скрыта.
         self.assertTrue(page.path_card.isHidden())
@@ -126,8 +133,10 @@ class DomainLookupPageTests(unittest.TestCase):
         self.assertFalse(page.path_card.isHidden())
         self.assertEqual(page.path_title.text(), "Путь до сервера")
         self.assertIn("Фильтр стоит между узлом 2 (10.0.0.2) и узлом 3 (10.0.0.3).", [line.text for line in page.path_lines._lines])
-        self.assertIn(lookup_plans.FILTER_MARK, page.path_text.toPlainText())
-        self.assertIn("Фильтр стоит", page.path_text.accessibleName())
+        [road] = page.path_rows.groups()
+        self.assertEqual([row.name for row in road.rows], ["Узел 1", "Узел 2", lookup_plans.FILTER_MARK, "Узел 3", "Узел 4"])
+        self.assertEqual((road.rows[2].state, road.rows[-1].state), ("fail", "info"))
+        self.assertIn("сам сервер", road.rows[-1].text)
         page._on_finished(_report())
         self.assertTrue(page.path_card.isHidden())
 
@@ -138,9 +147,9 @@ class DomainLookupPageTests(unittest.TestCase):
         # Повторная проверка того же домена: поле соседей очищается и заполняется заново,
         # хотя текст совпадает с прошлым.
         page.start_lookup()
-        self.assertEqual(page.neighbors_text.toPlainText(), "")
+        self.assertEqual(page.neighbors_rows.groups(), ())
         page._on_finished(_report())
-        self.assertIn("a.example", page.neighbors_text.toPlainText())
+        self.assertIn("a.example", _names(page.neighbors_rows))
 
         # Смена языка переводит подписи и не теряет результат.
         host.set_ui_language("en")
