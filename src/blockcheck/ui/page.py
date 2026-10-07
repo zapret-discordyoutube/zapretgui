@@ -17,6 +17,7 @@ import time
 from dataclasses import replace
 
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QHBoxLayout, QWidget
 
 import blockcheck.page_runtime as blockcheck_page_runtime
@@ -408,7 +409,13 @@ class BlockcheckPage(BasePage):
         self._log_ui_timing("blockcheck_ui.domains_card.build", section_started_at)
 
         # ── Итог и список сайтов ──
-        self._summary_panel = BlockcheckSummaryPanel(on_action=self._on_problem_action, parent=self.content)
+        self._summary_panel = BlockcheckSummaryPanel(
+            on_action=self._on_problem_action, parent=self.content, on_open=self._open_card_by_key
+        )
+        # Esc закрывает любую подстраницу раздела, где бы ни стоял фокус.
+        self._escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        self._escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._escape_shortcut.activated.connect(self._close_subpage)
         self._add_tab_widget(self._summary_panel)
 
         # Ход проверки по шагам: виден, только пока она идёт.
@@ -828,6 +835,19 @@ class BlockcheckPage(BasePage):
         self._show_over_tabs(self._detail_view)
         self._detail_view.show_card(card)
         self._detail_view.setFocus()
+
+    def _open_card_by_key(self, key: str) -> None:
+        """Нажатие на строку итога: открывает полный отчёт той же карточки, что стоит ниже."""
+        widget = self._result_cards.card(key)
+        if widget is not None:
+            self._open_card_detail(widget.card)
+
+    def _close_subpage(self) -> None:
+        """Esc: назад из подробностей карточки, DNS-сервера или отчёта."""
+        if self._detail_view is not None and not self._detail_view.isHidden():
+            self._close_card_detail()
+        else:
+            self._close_over_tabs()
 
     def _set_page_header_visible(self, visible: bool) -> None:
         """На подстранице первой идёт строка пути: название и описание раздела там лишние."""

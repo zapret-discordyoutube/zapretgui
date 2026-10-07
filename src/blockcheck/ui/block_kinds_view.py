@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QEasingCurve, QRectF, Qt, QTimer, QVariantAnimation
+from PyQt6.QtCore import QEasingCurve, QEvent, QRectF, Qt, QTimer, QVariantAnimation
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PyQt6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import FlowLayout
@@ -197,6 +197,10 @@ class KindTile(QWidget):
         self._text = QColor("#f2f2f2")
         self._muted = QColor("#a3a8b3")
         self._surface = QColor(255, 255, 255, 10)
+        self._surface_hover = QColor(255, 255, 255, 18)
+        self._hover = False
+        # Под мышью плитка подсвечивается, а в подсказке — все её сайты и пояснение.
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self._anim = QVariantAnimation(self)
         self._anim.setStartValue(0.0)
         self._anim.setEndValue(float(group.count))
@@ -238,10 +242,17 @@ class KindTile(QWidget):
             self._text = to_qcolor(tokens.fg, "#f2f2f2")
             self._muted = to_qcolor(tokens.fg_muted, "#a3a8b3")
             self._surface = to_qcolor(tokens.surface_bg, "#0affffff")
+            self._surface_hover = to_qcolor(tokens.surface_bg_hover, "#12ffffff")
         except Exception:
             pass
         self._color = QColor(kind_color(self._group.key, tokens))
         self.update()
+
+    def event(self, event) -> bool:
+        if event.type() in (QEvent.Type.HoverEnter, QEvent.Type.HoverLeave):
+            self._hover = event.type() == QEvent.Type.HoverEnter
+            self.update()
+        return super().event(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         _ = event
@@ -249,7 +260,7 @@ class KindTile(QWidget):
         painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._surface)
+        painter.setBrush(self._surface_hover if self._hover else self._surface)
         painter.drawRoundedRect(rect, 6, 6)
 
         number_font = QFont(self.font())

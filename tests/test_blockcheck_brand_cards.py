@@ -5,6 +5,8 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 from blockcheck.ui.brand_icons import brands_in_text, named_brand, readable_color, site_brand
@@ -13,15 +15,16 @@ from blockcheck.ui.check_results import (
     cluster_problems,
     cut_providers,
     problem_brand,
+    problem_card_key,
     split_named_sites,
     split_problem_text,
     split_server_list,
 )
-from blockcheck.ui.result_cards import ResultCard, ResultDetailView, line_icon, section_icon, tally
+from blockcheck.ui.result_cards import ResultCard, ResultDetailView, card_hint, line_icon, section_icon, tally
 from blockcheck.ui.result_cards_model import Card, Line, Section
 
 
-def _problem(text, *, kind="other", title="", level="fail", target="", advice=(), action=""):
+def _problem(text, *, kind="other", title="", level="fail", target="", advice=(), action="", evidence=()):
     return {
         "level": level,
         "text": text,
@@ -29,7 +32,7 @@ def _problem(text, *, kind="other", title="", level="fail", target="", advice=()
         "title": title,
         "target": target,
         "advice": list(advice),
-        "evidence": [],
+        "evidence": list(evidence),
         "action": action,
     }
 
@@ -125,6 +128,76 @@ class ProblemListTests(unittest.TestCase):
             }
         }
         self.assertEqual(cut_providers(report), [("Akamai", ["a"])])
+
+
+class OpenReportTests(unittest.TestCase):
+    """Строка итога открывает полный отчёт той карточки, о которой она говорит."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    REPORT = {
+        "services": [
+            {"key": "telegram", "label": "Telegram", "level": "fail", "kind": "ip", "targets": [{"host": "telegram.org"}]},
+            {"key": "youtube", "label": "YouTube", "level": "warn", "kind": "ip", "targets": [{"host": "www.youtube.com"}]},
+            {"key": "x", "label": "X (Twitter)", "level": "fail", "kind": "ip", "targets": [{"host": "x.com"}]},
+        ],
+        "dns_servers": {"level": "fail", "findings": [], "text": ""},
+    }
+
+    def test_problem_is_matched_to_its_card(self) -> None:
+        report = self.REPORT
+        self.assertEqual(problem_card_key(_problem("Telegram не открывается", kind="ip", title="Telegram"), report), "site:telegram")
+        self.assertEqual(problem_card_key(_problem("YouTube открывается, но не работают видео", kind="ip"), report), "site:youtube")
+        self.assertEqual(problem_card_key(_problem("Не открывается", kind="sni", target="x.com"), report), "site:x")
+        self.assertEqual(problem_card_key(_problem("QUIC блокируется по имени для: YouTube, X. Сайты открываются", kind="quic"), report), "site:youtube")
+        self.assertEqual(problem_card_key(_problem("Обычные ответы подменяются", kind="dns"), report), "dns_servers")
+        self.assertEqual(problem_card_key(_problem("Обычные ответы подменяются", kind="dns"), {}), "dns")
+        self.assertEqual(problem_card_key(_problem("Провайдер обрывает загрузку", kind="cut16"), report), "hostings")
+        self.assertEqual(problem_card_key(_problem("Что-то ещё"), report), "")
+
+    def test_rows_open_reports_and_each_site_of_a_shared_row_opens_its_own(self) -> None:
+        opened = []
+        panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open=opened.append)
+        self.addCleanup(panel.deleteLater)
+        same = "Тот же адрес отвечает по порту 80."
+        panel.show_report(
+            {
+                **self.REPORT,
+                "problems": [
+                    # Объяснение — свидетельство проверки: оно остаётся в строке, а не уходит в заголовок группы.
+                    _problem("Telegram не открывается", kind="ip", title="Telegram", advice=[same], evidence=[same]),
+                    _problem("X не открывается", kind="ip", title="X (Twitter)", advice=[same], evidence=[same]),
+                    # Карточки «Этот компьютер» в этом отчёте нет — строка не нажимается.
+                    _problem("Что-то: непонятное", kind="system"),
+                ],
+            }
+        )
+
+        system, shared = sorted(panel.problem_rows(), key=lambda row: len(row.badges))
+        self.assertEqual([badge.card_key for badge in shared.badges], ["site:telegram", "site:x"])
+        self.assertEqual(shared.focusPolicy(), Qt.FocusPolicy.TabFocus)
+        QTest.mouseClick(shared.badges[1], Qt.MouseButton.LeftButton)
+        QTest.keyClick(shared, Qt.Key.Key_Return)
+        self.assertEqual(opened, ["site:x", "site:telegram"])
+        self.assertEqual(system.card_key, "")
+        QTest.mouseClick(system, Qt.MouseButton.LeftButton)
+        self.assertEqual(len(opened), 2)
+
+    def test_card_hint_lists_every_line(self) -> None:
+        card = Card(
+            key="site:x",
+            icon="",
+            title="X",
+            level="fail",
+            status="По имени (SNI)",
+            lines=tuple(Line("fail", f"адрес {index}", "сброшено") for index in range(6)),
+            chips=(("QUIC закрыт", "warn"),),
+        )
+        hint = card_hint(card)
+        self.assertIn("адрес 5: сброшено", hint)
+        self.assertIn("QUIC закрыт", hint)
 
 
 class ReportTests(unittest.TestCase):

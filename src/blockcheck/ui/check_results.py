@@ -17,12 +17,13 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, FlowLayout, PushButton, SimpleCardWidget, StrongBodyLabel, SubtitleLabel
 
 from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_groups
+from blockcheck.ui.result_cards_model import build_cards
 from blockcheck.ui.brand_icons import BrandIcon, named_brand, site_brand
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
 from ui.accessibility import set_control_accessibility, set_state_text
@@ -35,6 +36,8 @@ from ui.widgets.stagger_float_in import float_in
 from ui.widgets.tone_group import ToneDot, ToneGroup, dot_on_first_line, mute
 
 ActionHandler = Callable[[str, str], None]
+# Открыть полный отчёт по карточке: получает её ключ («site:youtube», «hostings» …).
+OpenHandler = Callable[[str], None]
 
 _LEVEL_ICONS = {
     "ok": ("fa5s.check-circle", "success"),
@@ -212,6 +215,35 @@ def cut_providers(report: dict) -> list[tuple[str, list[str]]]:
     return list(providers.items())
 
 
+# Вид проблемы → карточка с её полным отчётом (когда проблема не про один сайт).
+_KIND_CARDS = {"voice": "voice", "system": "system", "cut16": "hostings"}
+
+
+def problem_card_key(problem: dict, report: dict) -> str:
+    """Ключ карточки с полным отчётом по этой проблеме. Пусто — такой карточки нет.
+
+    Сайт ищется по названию, по адресу из проблемы или по первому слову фразы
+    («YouTube открывается, но…»); у QUIC — по первому названному сайту.
+    """
+    kind = str(problem.get("kind") or KIND_OTHER)
+    text = str(problem.get("text") or "")
+    title = str(problem.get("title") or "")
+    target = str(problem.get("target") or "")
+    names = {title, text.split(" ", 1)[0].rstrip(":,")}
+    if kind == "quic":
+        names.update(split_named_sites(text.partition(". ")[0])[1][:1])
+    names.discard("")
+    for service in report.get("services") or ():
+        hosts = {str(item.get("host") or "") for item in service.get("targets") or ()}
+        if str(service.get("label") or "") in names or (target and target in hosts):
+            return f"site:{service.get('key') or ''}"
+    if kind == "dns":
+        return "dns_servers" if report.get("dns_servers") else "dns"
+    if kind == "network":
+        return "ipv6" if text.startswith("IPv6") else "network"
+    return _KIND_CARDS.get(kind, "")
+
+
 def problem_brand(problem: dict) -> tuple[str, str] | None:
     """(значок, фирменный цвет) строки про сайт. ``None`` — строка не про сайт: у неё точка важности."""
     kind = str(problem.get("kind") or KIND_OTHER)
@@ -252,8 +284,13 @@ def cluster_problems(problems: list[dict], hidden_advice=()) -> list[list[dict]]
 class _SiteBadge(QWidget):
     """Логотип и название сайта одной строкой."""
 
-    def __init__(self, problem: dict, parent=None) -> None:
+    def __init__(self, problem: dict, parent=None, *, card_key: str = "", on_open: OpenHandler | None = None) -> None:
         super().__init__(parent)
+        self.card_key = card_key if on_open is not None else ""
+        self._on_open = on_open
+        if self.card_key:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            set_tooltip(self, f"Открыть полный отчёт: {problem.get('title') or ''}")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(9)
@@ -262,6 +299,14 @@ class _SiteBadge(QWidget):
         layout.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignVCenter)
         self.name_label = StrongBodyLabel(str(problem.get("title") or ""), self)
         layout.addWidget(self.name_label, 1, Qt.AlignmentFlag.AlignVCenter)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        # В строке из нескольких сайтов каждый открывает свой отчёт.
+        if self.card_key and event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+            self._on_open(self.card_key)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class _ServerChip(QWidget):
@@ -315,6 +360,9 @@ class _ProblemRow(QWidget):
     ``grouped`` — строка стоит в группе, вид блокировки назван в её заголовке.
     ``hidden_advice`` — советы, уже показанные в заголовке группы.
     ``bare`` — строка вне группы: «Открываются: …» под проблемами.
+    ``card_keys`` — ключи карточек с полным отчётом, по одному на каждый сайт
+    строки. Если отчёт есть, строка подсвечивается под мышью и открывает его
+    по нажатию или Enter.
     """
 
     def __init__(
@@ -328,11 +376,25 @@ class _ProblemRow(QWidget):
         bare: bool = False,
         also=(),
         divided: bool = False,
+        card_keys=(),
+        on_open: OpenHandler | None = None,
     ) -> None:
         super().__init__(parent)
         self._level = str(problem.get("level") or "unknown")
         self._divided = divided
         self.problems = [problem, *also]
+        self._on_open = on_open
+        keys = [*card_keys, *[""] * len(self.problems)][: len(self.problems)] if on_open is not None else []
+        self.card_key = next((key for key in keys if key), "")
+        self._hover = False
+        if self.card_key:
+            self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        # Текст нажимаемой строки не выделяется мышью: иначе нажатие по нему не дошло бы до строки.
+        text_flags = (
+            Qt.TextInteractionFlag.NoTextInteraction if self.card_key else Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 2 if bare else 9, 0, 2 if bare else 9)
         layout.setSpacing(12)
@@ -352,8 +414,8 @@ class _ProblemRow(QWidget):
             names = QVBoxLayout()
             names.setContentsMargins(0, 0, 0, 0)
             names.setSpacing(6)
-            for item in self.problems:
-                badge = _SiteBadge(item, self)
+            for order, item in enumerate(self.problems):
+                badge = _SiteBadge(item, self, card_key=keys[order] if keys else "", on_open=on_open)
                 badge.setFixedWidth(NAME_COLUMN)
                 names.addWidget(badge)
                 self.badges.append(badge)
@@ -384,7 +446,7 @@ class _ProblemRow(QWidget):
             title, named_sites = split_named_sites(title) if grouped and not bare else (title, [])
             self.text_label = BodyLabel(title, self) if bare or not grouped else StrongBodyLabel(title, self)
             self.text_label.setWordWrap(True)
-            self.text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self.text_label.setTextInteractionFlags(text_flags)
             texts.addWidget(self.text_label)
 
         # Перечень DNS-серверов — метками: по одной на сервис, адреса в подсказке.
@@ -412,7 +474,7 @@ class _ProblemRow(QWidget):
         if rest:
             self.detail_label = mute(BodyLabel(rest, self))
             self.detail_label.setWordWrap(True)
-            self.detail_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self.detail_label.setTextInteractionFlags(text_flags)
             texts.addWidget(self.detail_label)
         evidence = set(problem.get("evidence") or ())
         self.advice_labels: list[CaptionLabel] = []
@@ -444,26 +506,79 @@ class _ProblemRow(QWidget):
             )
             layout.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
             self.action_button = button
-        set_state_text(self, " ".join(str(item.get("text") or "") for item in self.problems))
+        state = " ".join(str(item.get("text") or "") for item in self.problems)
+        if self.card_key:
+            # Стрелка справа — знак, что строка открывается.
+            self.chevron = BrandIcon("fa5s.chevron-right", "", self, size=10)
+            layout.addWidget(self.chevron, 0, Qt.AlignmentFlag.AlignVCenter)
+            set_control_accessibility(self, name=state, description="Нажмите, чтобы открыть полный отчёт.")
+            if not titled_site:
+                set_tooltip(self, "Открыть полный отчёт")
+        set_state_text(self, state)
         self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
+
+    def open_report(self) -> None:
+        if self.card_key and self._on_open is not None:
+            self._on_open(self.card_key)
+
+    def event(self, event) -> bool:
+        if event.type() in (QEvent.Type.HoverEnter, QEvent.Type.HoverLeave):
+            self._hover = event.type() == QEvent.Type.HoverEnter
+            self.update()
+        return super().event(event)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        self.update()
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        super().focusOutEvent(event)
+        self.update()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+            self.open_report()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if self.card_key and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.open_report()
+            return
+        super().keyPressEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         _ = event
-        if not self._divided:
+        if not self._divided and not self.card_key:
             return
-        # Тонкая линия между строками группы — вместо отдельной подложки у каждой.
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(_theme_color("divider_strong", QColor(255, 255, 255, 26)))
-        painter.drawRect(0, 0, self.width(), 1)
+        if self.card_key and (self._hover or self.hasFocus()):
+            # Мягкая подсветка под мышью: окно без рамок, поэтому фон, а не обводка.
+            painter.setBrush(_theme_color("surface_bg_hover", QColor(255, 255, 255, 18)))
+            painter.drawRoundedRect(self.rect().adjusted(-8, 1, 6, 0), 5, 5)
+        elif self._divided:
+            # Тонкая линия между строками группы — вместо отдельной подложки у каждой.
+            painter.setBrush(_theme_color("divider_strong", QColor(255, 255, 255, 26)))
+            painter.drawRect(0, 0, self.width(), 1)
         painter.end()
 
 
 class _ProblemGroup(ToneGroup):
     """Проблемы одного вида блокировки: заголовок с цветной точкой, пояснение, общий совет и строки."""
 
-    def __init__(self, kind: str, problems: list[dict], on_action: ActionHandler | None, parent=None) -> None:
+    def __init__(
+        self,
+        kind: str,
+        problems: list[dict],
+        on_action: ActionHandler | None,
+        parent=None,
+        *,
+        card_key_for: Callable[[dict], str] | None = None,
+        on_open: OpenHandler | None = None,
+    ) -> None:
         info = kind_info(kind)
+        key_for = card_key_for or (lambda _problem: "")
         # «Остальное» — не вид блокировки: строки идут без заголовка.
         plain = kind == KIND_OTHER
         super().__init__(
@@ -487,6 +602,8 @@ class _ProblemGroup(ToneGroup):
                 hidden_advice=hidden,
                 also=cluster[1:],
                 divided=not plain,
+                card_keys=[key_for(item) for item in cluster],
+                on_open=on_open,
             )
             for cluster in clusters
         ]
@@ -501,9 +618,12 @@ class _ProblemGroup(ToneGroup):
 class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
     """Итог проверки: одна фраза, картина блокировок и проблемы по видам с советами."""
 
-    def __init__(self, on_action: ActionHandler | None = None, parent=None) -> None:
+    def __init__(
+        self, on_action: ActionHandler | None = None, parent=None, *, on_open: OpenHandler | None = None
+    ) -> None:
         super().__init__(parent)
         self._on_action = on_action
+        self._on_open = on_open
         self._level = "idle"
 
         root = QVBoxLayout(self)
@@ -658,8 +778,17 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
             title = f"Найдены проблемы: {len(blocking)}"
             mood = MOOD_ALARM if level == "fail" else MOOD_SAD
         self._show_changes(report)
+        # Строка открывает полный отчёт, только если под итогом есть такая карточка.
+        known = {card.key for card in build_cards(report)} if self._on_open is not None else set()
+
+        def card_key_for(problem: dict) -> str:
+            key = problem_card_key(problem, report)
+            return key if key in known else ""
+
         rows: list[QWidget] = [
-            _ProblemGroup(kind, items, self._on_action, self._problems_host)
+            _ProblemGroup(
+                kind, items, self._on_action, self._problems_host, card_key_for=card_key_for, on_open=self._on_open
+            )
             for kind, items in group_problems(problems)
         ]
         working = list(report.get("working") or ())

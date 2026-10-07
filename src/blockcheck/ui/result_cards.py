@@ -40,6 +40,7 @@ from blockcheck.ui.brand_icons import BrandIcon, named_brand, site_brand
 from blockcheck.ui.result_cards_model import PREVIEW_LINES, Card, Counter, DotGroup, Line, Section, build_cards, build_counters
 from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
+from ui.fluent_widgets import set_tooltip
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.share_bar import ShareBar
@@ -93,6 +94,16 @@ def card_color(card: Card, tokens=None) -> str:
 _HOLLOW_STATES = frozenset({"warn", "unknown", "info"})
 # Метка говорит о проблеме — её текст в цвете состояния; остальные метки приглушены.
 _LOUD_CHIPS = frozenset({"warn", "fail"})
+
+
+def card_hint(card: Card) -> str:
+    """Подсказка под мышью: все строки карточки, включая те, что на ней не поместились."""
+    lines = [f"{card.title} — {card.status}"]
+    lines += [f"{line.name}: {line.text}" if line.text else line.name for line in card.lines]
+    if card.chips:
+        lines.append(" · ".join(text for text, _state in card.chips))
+    lines.append("Нажмите, чтобы открыть полный отчёт")
+    return "\n".join(lines)
 
 
 def _chip_style(text_color: str, tokens=None) -> str:
@@ -425,6 +436,7 @@ class ResultCard(QWidget):
             description="Нажмите, чтобы открыть все измерения этой проверки.",
         )
         set_state_text(self, f"{card.title}: {card.status}")
+        set_tooltip(self, card_hint(card))
         self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
         self._apply_theme_refresh()
 

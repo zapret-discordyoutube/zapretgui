@@ -416,6 +416,15 @@ class PageCardsTests(unittest.TestCase):
         # Возврат — к тому месту списка, с которого уходили.
         self.assertGreater(was_at, 0)
         self.assertEqual(bar.value(), was_at)
+
+        # Строка итога открывает ту же страницу по ключу карточки, а Esc закрывает её с любого места.
+        page._open_card_by_key("hostings")
+        self.assertFalse(page._detail_view.isHidden())
+        page._open_card_by_key("нет такой")
+        self.assertEqual(page._escape_shortcut.context(), Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        page._escape_shortcut.activated.emit()
+        self.assertTrue(page._detail_view.isHidden())
+        self.assertFalse(page._tabs_pivot.isHidden())
         self.assertFalse(page._results_card.isHidden())
         self.assertTrue(page._progress_card.isHidden())
 
