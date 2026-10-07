@@ -23,10 +23,12 @@ __all__ = [
     "Card",
     "Counter",
     "DotGroup",
+    "FindingParts",
     "Line",
     "Section",
     "build_cards",
     "build_counters",
+    "read_finding_parts",
     "FILTER_MARK",
     "PREVIEW_LINES",
 ]
@@ -44,10 +46,44 @@ PREVIEW_LINES = 4
 
 
 @dataclass(frozen=True, slots=True)
+class FindingParts:
+    """Находка про DNS готовыми частями: экрану не нужно резать фразу."""
+
+    title: str
+    # Все серверы парами «название сервиса, адрес», без обрезки.
+    servers: tuple[tuple[str, str], ...] = ()
+    note: str = ""
+
+    def services(self) -> list[tuple[str, list[str]]]:
+        """Серверы по сервисам в порядке появления: у каждого все его адреса — так строятся метки."""
+        grouped: dict[str, list[str]] = {}
+        for name, address in self.servers:
+            addresses = grouped.setdefault(name, [])
+            if address and address not in addresses:
+                addresses.append(address)
+        return list(grouped.items())
+
+    def detail(self) -> str:
+        """Подробности для подсказки: по строке на сервис со всеми адресами, затем пояснение."""
+        lines = [f"{name}: {', '.join(addresses)}" if addresses else name for name, addresses in self.services()]
+        return "\n".join(part for part in (*lines, self.note) if part)
+
+
+def read_finding_parts(raw: object) -> FindingParts | None:
+    """Части находки из отчёта. None — их нет: отчёты прошлых проверок сохранены только с фразой."""
+    if not isinstance(raw, dict) or not raw.get("title"):
+        return None
+    servers = tuple((str(pair[0]), str(pair[1])) for pair in raw.get("servers") or () if len(pair) == 2)
+    return FindingParts(str(raw["title"]), servers, str(raw.get("note") or ""))
+
+
+@dataclass(frozen=True, slots=True)
 class Line:
     state: str
     name: str
     text: str = ""
+    # Только у выводов про DNS-серверы, и только если проверка отдала их частями.
+    parts: FindingParts | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -585,7 +621,7 @@ _DNS_SERVERS_STATUS = {OK: "В порядке", WARN: "Есть замечани
 def _dns_servers_card(dns_servers: dict) -> Card:
     level = _state(dns_servers.get("level"))
     findings = [
-        Line(_state(item.get("level"), INFO), str(item.get("text") or ""))
+        Line(_state(item.get("level"), INFO), str(item.get("text") or ""), parts=read_finding_parts(item))
         for item in dns_servers.get("findings") or ()
     ]
     sections = [Section("Выводы", tuple(findings))] if findings else []
@@ -637,7 +673,8 @@ def _filter_card(place: dict) -> Card:
         distance = f" · до сервера {item['distance']} узлов" if item.get("distance") else ""
         site_rows.append(
             Line(
-                WARN if item.get("found") else UNKNOWN,
+                # Найденное по сайту — свидетельство, а не отдельное замечание: замечание одно, в выводе.
+                INFO if item.get("found") else UNKNOWN,
                 f"{item.get('host', '')} ({item.get('address', '')}{distance})",
                 _capital(str(item.get("text") or "")),
             )
