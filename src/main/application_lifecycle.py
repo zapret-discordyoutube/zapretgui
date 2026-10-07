@@ -97,7 +97,7 @@ class ApplicationLifecycle:
 
     def _start_async_stop_and_exit(self) -> bool:
         try:
-            return bool(self._runtime_feature.stop_and_exit())
+            return bool(self._runtime_feature.stop_and_exit(on_stopped=self._quit_application))
         except Exception as e:
             log(f"stop_and_exit_async не удалось: {e}", "WARNING")
             return False

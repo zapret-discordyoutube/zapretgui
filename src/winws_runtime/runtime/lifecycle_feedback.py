@@ -132,16 +132,12 @@ def on_dpi_stop_finished(runtime_owner, success, error_message):
 
 
 def on_stop_and_exit_finished(runtime_owner):
-    """Завершает приложение после остановки DPI."""
+    """DPI остановлен: передаёт управление владельцу выхода из программы."""
     set_runtime_owner_status(runtime_owner, "Завершение...")
-    from PyQt6.QtWidgets import QApplication
-
-    try:
-        QApplication.closeAllWindows()
-    except Exception:
-        pass
-
-    QApplication.quit()
+    after_stop = runtime_owner._after_stop_and_exit
+    runtime_owner._after_stop_and_exit = None
+    if after_stop is not None:
+        after_stop()
 
 
 def cleanup_threads(runtime_owner):

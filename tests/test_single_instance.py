@@ -167,10 +167,16 @@ class ShellSecondInstanceTests(unittest.TestCase):
                 "startup.single_instance.create_show_event",
                 side_effect=lambda: calls.append("event") or 42,
             ),
-            patch.object(shell, "atexit", Mock()),
+            patch.object(shell, "register_exit_step") as register_exit_step,
+            patch("startup.single_instance.release_mutex") as release_mutex,
         ):
             start_in_tray = shell.shell_bootstrap(["zapret.exe", "--tray"])
+            # Мьютекс освобождает шаг выхода: иначе после os._exit в конце
+            # работы программа считалась бы всё ещё запущенной.
+            register_exit_step.assert_called_once()
+            register_exit_step.call_args.args[1]()
 
+        release_mutex.assert_called_once_with(1)
         self.assertTrue(start_in_tray)
         self.assertEqual(calls, ["mutex", "event"])
 

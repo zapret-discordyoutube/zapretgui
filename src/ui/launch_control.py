@@ -92,9 +92,9 @@ class LaunchControl(QObject):
         *,
         runtime_feature,
         ui_state_store,
+        request_exit: Callable[..., Any],
         stop_conflicting_checks: Callable[[], bool] | None = None,
         set_status: Callable[[str], Any] | None = None,
-        request_exit: Callable[..., Any] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -164,14 +164,7 @@ class LaunchControl(QObject):
     def stop_and_exit(self) -> None:
         log("Остановка winws и закрытие программы...", "INFO")
         self._cancel_retry()
-        if callable(self._request_exit):
-            self._request_exit(stop_dpi=True)
-            return
-        if self._runtime.stop_and_exit():
-            return
-        from PyQt6.QtWidgets import QApplication
-
-        QApplication.quit()
+        self._request_exit(stop_dpi=True)
 
     # ---- ожидание готовности движка -----------------------------------
 
@@ -254,9 +247,9 @@ def build_launch_control(
     *,
     runtime_feature,
     ui_state_store,
+    request_exit,
     stop_conflicting_checks=None,
     set_status=None,
-    request_exit=None,
     parent=None,
 ) -> LaunchControl:
     return LaunchControl(

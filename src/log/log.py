@@ -4,7 +4,6 @@ import traceback
 import time
 import logging
 import threading
-import atexit
 from datetime import datetime
 import glob
 from collections import deque
@@ -17,6 +16,7 @@ from dataclasses import dataclass
 
 from config.config import MAX_LOG_FILES, MAX_DEBUG_LOG_FILES
 from config.runtime_layout import APPLICATION_PATHS
+from utils.exit_steps import register_exit_step
 
 
 LOGS_FOLDER = str(APPLICATION_PATHS.logs_dir)
@@ -821,7 +821,7 @@ def is_verbose_logging_enabled() -> bool:
 
 
 _install_standard_logging_bridge()
-atexit.register(global_logger.shutdown)
+register_exit_step("закрытие журнала программы", global_logger.shutdown)
 
 
 def log_exception(e, context=""):

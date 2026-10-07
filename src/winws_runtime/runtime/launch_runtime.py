@@ -35,6 +35,9 @@ class PresetLaunchRuntime:
         self._dpi_start_thread = None
         self._dpi_stop_thread = None
         self._stop_exit_thread = None
+        # Закрытие программы после «остановить и выйти». Его даёт владелец
+        # выхода (ApplicationLifecycle): сам runtime программу не закрывает.
+        self._after_stop_and_exit = None
         self._presets_switch_thread = None
         self._presets_switch_worker = None
         self._presets_switch_requested_generation = 0
@@ -163,8 +166,9 @@ class PresetLaunchRuntime:
             cleanup_services=cleanup_services,
         )
     
-    def stop_and_exit_async(self):
-        """Асинхронно останавливает DPI и закрывает программу"""
+    def stop_and_exit_async(self, on_stopped):
+        """Асинхронно останавливает DPI и затем вызывает ``on_stopped``."""
+        self._after_stop_and_exit = on_stopped
         stop_and_exit_async_impl(self)
     
     def _on_dpi_start_finished(self, success, error_message):

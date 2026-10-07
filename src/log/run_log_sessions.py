@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import atexit
 import os
 import threading
 from pathlib import Path
 from typing import TextIO
+
+from utils.exit_steps import register_exit_step
 
 
 class RunLogSessionRegistry:
@@ -101,7 +102,7 @@ class RunLogSessionRegistry:
 
 
 run_log_sessions = RunLogSessionRegistry()
-atexit.register(run_log_sessions.close_all)
+register_exit_step("закрытие журналов запусков winws", run_log_sessions.close_all)
 
 
 __all__ = ["RunLogSessionRegistry", "run_log_sessions"]

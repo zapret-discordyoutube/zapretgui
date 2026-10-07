@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import atexit
 import time
 
 from app_notifications import advisory_notification
@@ -11,7 +10,7 @@ def collect_startup_checks_payload(*, verbose_logging_enabled: bool) -> dict:
     started_at = time.perf_counter()
     notifications: list[dict] = []
 
-    from startup.bfe_util import preload_service_status, ensure_bfe_running, cleanup as bfe_cleanup
+    from startup.bfe_util import preload_service_status, ensure_bfe_running
     from startup.check_start import collect_startup_notifications, check_goodbyedpi, check_mitmproxy
 
     preload_service_status("BFE")
@@ -78,11 +77,6 @@ def collect_startup_checks_payload(*, verbose_logging_enabled: bool) -> dict:
         from startup.admin_check_debug import debug_admin_status
 
         debug_admin_status()
-
-    try:
-        atexit.register(bfe_cleanup)
-    except Exception:
-        pass
 
     return {
         "notifications": notifications,

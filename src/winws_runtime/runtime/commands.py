@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 
@@ -148,11 +149,11 @@ def request_preset_runtime_content_apply(
     )
 
 
-def stop_and_exit_async(*, runtime_feature: Any) -> bool:
+def stop_and_exit_async(*, runtime_feature: Any, on_stopped: Callable[[], None]) -> bool:
     runtime_owner = runtime_feature.objects.launch_runtime
     if runtime_owner is None:
         return False
-    runtime_owner.stop_and_exit_async()
+    runtime_owner.stop_and_exit_async(on_stopped)
     return True
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import InitVar
 from dataclasses import dataclass
 from dataclasses import field
+from collections.abc import Callable
 from typing import Any
 
 from app.feature_facades.runtime_parts import RuntimeCommandPort
@@ -149,8 +150,8 @@ class RuntimeFeature:
     def switch_preset(self, method: str | None = None) -> bool:
         return self.commands.switch_preset(method)
 
-    def stop_and_exit(self) -> bool:
-        return self.commands.stop_and_exit()
+    def stop_and_exit(self, *, on_stopped: Callable[[], None]) -> bool:
+        return self.commands.stop_and_exit(on_stopped=on_stopped)
 
     def cleanup_threads(self) -> bool:
         return self.commands.cleanup_threads()

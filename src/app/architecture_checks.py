@@ -1282,6 +1282,42 @@ def check_no_running_preset_pid_probe(files: list[Path]) -> list[Problem]:
     )
 
 
+def check_process_exit_has_single_owners(sources: list[tuple[Path, str]]) -> list[Problem]:
+    """У выхода из программы по одному владельцу на каждый шаг.
+
+    Окно закрывает только ApplicationLifecycle, процесс завершает только
+    main/process_exit.py, действия «при выходе» записываются только через
+    utils/exit_steps.py. Процесс кончается через os._exit, который обработчики
+    atexit не запускает: шаг, записанный мимо общего списка, молча не
+    выполнится, а обычное завершение интерпретатора вернёт падение при выходе.
+    """
+    rules = (
+        (
+            re.compile(r"^\s*(?:import atexit\b|from atexit\b)|\batexit\.register\("),
+            "src/utils/exit_steps.py",
+            "действие при выходе записывается через utils.exit_steps.register_exit_step, а не через atexit",
+        ),
+        (
+            re.compile(r"\bQApplication\.(?:quit|closeAllWindows)\(\)"),
+            "src/main/application_lifecycle.py",
+            "программу закрывает только ApplicationLifecycle; остальной код просит выход через request_exit",
+        ),
+        (
+            re.compile(r"\bos\._exit\("),
+            "src/main/process_exit.py",
+            "процесс завершает только main/process_exit.py",
+        ),
+    )
+    problems: list[Problem] = []
+    for path, source in sources:
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        for index, line in enumerate(source.splitlines(), start=1):
+            for pattern, owner, message in rules:
+                if rel != owner and pattern.search(line):
+                    problems.append(Problem(path, index, message, line))
+    return problems
+
+
 def check_ui_workflows_do_not_call_page_methods(files: list[Path]) -> list[Problem]:
     scopes = [
         path for path in files
@@ -1673,6 +1709,11 @@ def run_checks() -> list[Problem]:
     files = _python_files()
     problems: list[Problem] = []
     problems.extend(check_removed_legacy_files())
+    problems.extend(
+        check_process_exit_has_single_owners(
+            [(path, path.read_text(encoding="utf-8", errors="replace")) for path in files]
+        )
+    )
     problems.extend(check_no_app_context(files))
     problems.extend(check_no_app_runtime_context(files))
     problems.extend(check_app_features_is_registry_only())

@@ -49,8 +49,11 @@ class _StuckThread(QThread):
 _CHILD_PRELUDE = """
 import atexit, sys, threading
 from PyQt6.QtCore import QCoreApplication, QThread
+from utils.exit_steps import register_exit_step
 
 marker = sys.argv[1]
+register_exit_step("метка", lambda: open(marker, "a").write("exit step\\n"))
+# Обычный atexit при выходе программы не выполняется: там же стоит уборка PyQt.
 atexit.register(lambda: open(marker, "a").write("atexit\\n"))
 app = QCoreApplication([])
 started = threading.Event()
@@ -126,16 +129,6 @@ finish_process(7)
 """
 
 
-_CHILD_PYQT_CLEANUP = """
-import sys
-from PyQt6.QtCore import QCoreApplication
-
-app = QCoreApplication([])
-from main.process_exit import unregister_pyqt_exit_cleanup
-open(sys.argv[1], "a").write(f"first={unregister_pyqt_exit_cleanup()} second={unregister_pyqt_exit_cleanup()}\\n")
-"""
-
-
 def _run_child(script: str, marker: Path) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(SRC)
@@ -188,6 +181,27 @@ class RunningThreadDiscoveryTests(unittest.TestCase):
             self.assertTrue(thread.wait(5000))
 
 
+class PythonThreadWaitTests(unittest.TestCase):
+    def test_non_daemon_thread_is_waited_but_not_forever(self) -> None:
+        from main.process_exit import wait_for_python_threads
+
+        release = threading.Event()
+        quick = threading.Thread(target=lambda: None, name="quick")
+        stuck = threading.Thread(target=release.wait, name="stuck")
+        background = threading.Thread(target=release.wait, name="background", daemon=True)
+        for thread in (quick, stuck, background):
+            thread.start()
+        try:
+            unfinished = wait_for_python_threads(100)
+        finally:
+            release.set()
+            stuck.join(5)
+            background.join(5)
+
+        # Фоновый поток не ждут вовсе, зависший — только отведённое время.
+        self.assertEqual([thread.name for thread in unfinished], ["stuck"])
+
+
 class _HardExit(Exception):
     """Вместо настоящего os._exit в тестах порядка."""
 
@@ -211,10 +225,8 @@ class FinishProcessTests(unittest.TestCase):
 
         with (
             patch.object(process_exit, "stop_running_qt_threads", side_effect=_record("qt threads", unfinished)),
-            patch.object(process_exit.threading, "_shutdown", side_effect=_record("python threads")),
-            patch("settings.store.close_settings_database", side_effect=_record("settings database")),
-            patch.object(process_exit, "unregister_pyqt_exit_cleanup", side_effect=_record("pyqt cleanup off", True)),
-            patch.object(process_exit.atexit, "_run_exitfuncs", side_effect=_record("atexit")),
+            patch.object(process_exit, "wait_for_python_threads", side_effect=_record("python threads", [])),
+            patch.object(process_exit, "run_exit_steps", side_effect=_record("exit steps")),
             patch.object(process_exit.os, "_exit", side_effect=_hard_exit),
             patch.object(process_exit, "log") as log_mock,
         ):
@@ -222,22 +234,10 @@ class FinishProcessTests(unittest.TestCase):
                 process_exit.finish_process(exit_code)
         return calls, log_mock
 
-    def test_exit_steps_run_in_order_before_hard_exit(self) -> None:
+    def test_threads_then_exit_steps_then_hard_exit(self) -> None:
         calls, log_mock = self._run_finish(unfinished=[])
 
-        # Журналы и мьютекс освобождают обработчики atexit, поэтому они идут
-        # последними перед os._exit, а уборка PyQt к этому моменту уже снята.
-        self.assertEqual(
-            calls,
-            [
-                "qt threads",
-                "python threads",
-                "settings database",
-                "pyqt cleanup off",
-                "atexit",
-                "os._exit(5)",
-            ],
-        )
+        self.assertEqual(calls, ["qt threads", "python threads", "exit steps", "os._exit(5)"])
         log_mock.assert_not_called()
 
     def test_unfinished_threads_are_named_in_log_and_exit_still_completes(self) -> None:
@@ -246,25 +246,12 @@ class FinishProcessTests(unittest.TestCase):
 
         calls, log_mock = self._run_finish(unfinished=[thread])
 
-        self.assertEqual(calls[-2:], ["atexit", "os._exit(5)"])
+        self.assertEqual(calls[-2:], ["exit steps", "os._exit(5)"])
         message = log_mock.call_args.args[0]
         self.assertIn("не остановились фоновые потоки", message)
         self.assertIn("«probe»", message)
 
-    def test_pyqt_exit_cleanup_is_found_and_unregistered(self) -> None:
-        # В отдельном процессе: снятие уборки действует на весь процесс.
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmp:
-            marker = Path(tmp) / "marker.txt"
-            result = _run_child(_CHILD_PYQT_CLEANUP, marker)
-            written = marker.read_text() if marker.exists() else ""
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        # Второй поиск ничего не находит: обработчик действительно снят.
-        self.assertEqual(written, "first=True second=False\n")
-
-    def test_process_with_stuck_thread_exits_cleanly_after_exit_handlers(self) -> None:
+    def test_process_with_stuck_thread_exits_cleanly_after_exit_steps(self) -> None:
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -273,7 +260,7 @@ class FinishProcessTests(unittest.TestCase):
             written = marker.read_text() if marker.exists() else ""
 
         self.assertEqual(result.returncode, 7, result.stderr)
-        self.assertEqual(written, "atexit\n")
+        self.assertEqual(written, "exit step\n")
 
     def test_python_event_filter_does_not_crash_exit(self) -> None:
         import tempfile
@@ -294,11 +281,10 @@ class FinishProcessTests(unittest.TestCase):
             written = marker.read_text() if marker.exists() else ""
 
         self.assertEqual(result.returncode, 7, result.stderr)
-        # Порядок и есть суть исправления: сначала поток закончил свой
-        # Python-код, и только потом началось завершение интерпретатора
-        # (atexit — его первый шаг). При обычном sys.exit() поток продолжал
-        # работать во время завершения.
-        self.assertEqual(written, "thread finished\natexit\n")
+        # Сначала поток закончил свой Python-код, и только потом пошли шаги
+        # выхода. При обычном sys.exit() поток продолжал работать во время
+        # завершения.
+        self.assertEqual(written, "thread finished\nexit step\n")
 
 
 class ExitOrderContractTests(unittest.TestCase):
@@ -317,14 +303,15 @@ class ExitOrderContractTests(unittest.TestCase):
         self.assertEqual(tail[0], "exit_code = app.exec()")
         self.assertEqual(tail[2], "finish_process(exit_code)")
 
-    def test_logs_and_single_instance_mutex_are_released_by_exit_handlers(self) -> None:
-        # exit_without_interpreter_teardown запускает именно atexit-обработчики,
-        # поэтому закрытие журналов и мьютекс должны быть зарегистрированы там.
+    def test_required_exit_work_is_registered_as_exit_steps(self) -> None:
+        # finish_process выполняет именно шаги выхода, поэтому журналы, база
+        # настроек и мьютекс должны быть записаны в этот список.
         expected = {
-            "log/log.py": "atexit.register(global_logger.shutdown)",
-            "log/run_log_sessions.py": "atexit.register(run_log_sessions.close_all)",
-            "log/crash_handler.py": "atexit.register(_mark_session_ended)",
-            "main/shell.py": "atexit.register(lambda: release_mutex(mutex_handle))",
+            "log/log.py": 'register_exit_step("закрытие журнала программы", global_logger.shutdown)',
+            "log/run_log_sessions.py": 'register_exit_step("закрытие журналов запусков winws", run_log_sessions.close_all)',
+            "log/crash_handler.py": 'register_exit_step("отметка конца сеанса в журнале падений", _mark_session_ended)',
+            "settings/store.py": 'register_exit_step("закрытие базы настроек", close_settings_database)',
+            "main/shell.py": "lambda: release_mutex(mutex_handle),",
         }
         for relative, registration in expected.items():
             with self.subTest(relative):
@@ -359,6 +346,55 @@ class ExitOrderContractTests(unittest.TestCase):
             calls,
             ["persist_geometry", "persist_sidebar_state", "stop_dpi", "closeAllWindows", "quit"],
         )
+
+    def test_async_dpi_stop_returns_control_to_exit_owner(self) -> None:
+        import main.application_lifecycle as lifecycle_module
+
+        calls: list[str] = []
+        handed_over: list = []
+        runtime_feature = Mock()
+
+        def _stop_and_exit(*, on_stopped):
+            calls.append("stop started")
+            handed_over.append(on_stopped)
+            return True
+
+        runtime_feature.stop_and_exit.side_effect = _stop_and_exit
+        qapplication = Mock()
+        qapplication.closeAllWindows.side_effect = lambda: calls.append("closeAllWindows")
+        qapplication.quit.side_effect = lambda: calls.append("quit")
+
+        lifecycle = lifecycle_module.ApplicationLifecycle(
+            window_port=Mock(),
+            close_state=Mock(),
+            runtime_feature=runtime_feature,
+            premium_feature=Mock(),
+            telegram_proxy_feature=Mock(),
+            tray_feature=Mock(),
+        )
+        with patch.object(lifecycle_module, "QApplication", qapplication):
+            lifecycle.exit_stop_dpi()
+            # Пока DPI останавливается в фоне, программа ещё не закрывается.
+            self.assertEqual(calls, ["stop started"])
+            runtime_feature.shutdown_sync.assert_not_called()
+
+            handed_over[0]()
+
+        self.assertEqual(calls, ["stop started", "closeAllWindows", "quit"])
+
+    def test_runtime_reports_stop_to_exit_owner_instead_of_quitting(self) -> None:
+        from winws_runtime.runtime import lifecycle_feedback
+
+        after_stop = Mock()
+        runtime_owner = Mock()
+        runtime_owner._after_stop_and_exit = after_stop
+
+        with patch.object(lifecycle_feedback, "set_runtime_owner_status"):
+            lifecycle_feedback.on_stop_and_exit_finished(runtime_owner)
+            lifecycle_feedback.on_stop_and_exit_finished(runtime_owner)
+
+        after_stop.assert_called_once_with()
+        self.assertIsNone(runtime_owner._after_stop_and_exit)
 
     def test_final_close_cleanup_persists_state_and_stops_process_monitor(self) -> None:
         import main.application_lifecycle as lifecycle_module

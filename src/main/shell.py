@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import atexit
 import ctypes
 import os
 import shutil
@@ -13,6 +12,7 @@ from config.build_info import APP_VERSION
 from log.log import log
 
 from startup.admin_check import is_admin
+from utils.exit_steps import register_exit_step
 from utils.subproc import run_hidden
 
 
@@ -96,7 +96,10 @@ def shell_bootstrap(argv: list[str] | None = None) -> bool:
             )
         sys.exit(0)
 
-    atexit.register(lambda: release_mutex(mutex_handle))
+    register_exit_step(
+        "освобождение мьютекса единственного экземпляра",
+        lambda: release_mutex(mutex_handle),
+    )
     # Событие создаётся до инициализации Qt: второй экземпляр, запущенный
     # во время загрузки первого, доставит сигнал без потерь.
     create_show_event()

@@ -6,14 +6,14 @@
 
 Почему программа падала при выходе
 ----------------------------------
-При обычном завершении интерпретатора PyQt запускает свою уборку (обработчик
-``atexit`` с именем ``_qtcore_cleanup``): идёт по таблице всех объектов Qt,
-которыми владеет Python, и удаляет их подряд. Удаление окна рассылает события,
-и они приходят в обработчики программы на Python (фильтры событий виджетов,
-слоты). Обработчик заводит новые объекты, таблица переполняется и переезжает
-в другую память, а уборка продолжает читать старую, уже освобождённую.
-Пользователь видел системное окно «Ошибка приложения … память не может быть
-read», в журнале падений оставалось «access violation» с ``<no Python frame>``.
+При обычном завершении интерпретатора PyQt запускает свою уборку (её
+обработчик ``atexit``): идёт по таблице всех объектов Qt, которыми владеет
+Python, и удаляет их подряд. Удаление окна рассылает события, и они приходят
+в обработчики программы на Python (фильтры событий виджетов, слоты).
+Обработчик заводит новые объекты, таблица переполняется и переезжает в другую
+память, а уборка продолжает читать старую, уже освобождённую. Пользователь
+видел системное окно «Ошибка приложения … память не может быть read», в
+журнале падений оставалось «access violation» с ``<no Python frame>``.
 Воспроизводится на двадцати строках чистого PyQt — см.
 ``tests/test_process_exit.py``.
 
@@ -22,50 +22,48 @@ PyQt доставляет отложенные сигналы уже мёртв�
 себя. У программы сотни обработчиков и больше сотни классов потоков — порядка,
 безопасного для всех, не существует.
 
-Осознанное решение
-------------------
-Объекты Qt при выходе не разрушаются вообще: память и окна процесса заберёт
-Windows. Но всё, что обычное завершение Python делает полезного, выполняется
-здесь явно и в том же порядке:
+Как выход устроен
+-----------------
+Объекты Qt при выходе не разрушаются вообще, и завершение интерпретатора не
+запускается: память и окна процесса заберёт Windows. Всё, что программа
+обязана сделать перед концом процесса, записано явными шагами выхода
+(``utils/exit_steps.py``) и выполняется здесь:
 
 1. потоки Qt получают просьбу остановиться и время на это;
-2. дожидаются обычные потоки Python (``threading._shutdown``);
-3. закрывается база настроек (записи из журнала базы попадают в файл);
-4. уборка PyQt снимается с регистрации, после чего выполняются все
-   обработчики ``atexit``: журнал программы дописывается и закрывается,
-   закрываются журналы запусков winws, освобождаются служба BFE и мьютекс
-   единственного экземпляра, в журнале падений появляется «Session ended»;
-5. ``os._exit`` с кодом выхода цикла событий.
+2. столько же времени получают обычные потоки Python, не помеченные фоновыми;
+3. шаги выхода: закрытие базы настроек и журналов запусков winws,
+   освобождение мьютекса единственного экземпляра, «Session ended» в журнале
+   падений, закрытие журнала программы;
+4. ``os._exit`` с кодом выхода цикла событий.
+
+Ожидание везде ограничено по времени: зависший в сети поток не должен
+держать выход (см. ``utils/net_resolve.py``).
 
 У объектов Qt в программе нет деструкторов с полезной работой (временных
 файлов, файлов-замков, общей памяти Qt программа не использует), так что
-пропуск их разрушения ничего не теряет.
+пропуск их разрушения ничего не теряет. Новое действие «при выходе» —
+это новый шаг выхода, а не деструктор и не ``atexit``.
 """
 
 from __future__ import annotations
 
-import atexit
 import gc
 import os
 import sys
 import threading
 import time
-import types
 from typing import NoReturn
 
 from PyQt6 import sip
 from PyQt6.QtCore import QThread
 
 from log.log import log
+from utils.exit_steps import run_exit_steps
 
 
-# Общее время ожидания всех потоков Qt. Исправный поток заканчивается за
-# миллисекунды; дольше ждать нельзя — пользователь уже нажал «Выход».
+# Время на остановку потоков. Исправный поток заканчивается за миллисекунды;
+# дольше ждать нельзя — пользователь уже нажал «Выход».
 THREAD_DRAIN_TIMEOUT_MS = 2000
-
-# Имя обработчика выхода PyQt (qpy/QtCore/qpycore_init.cpp). Если PyQt его
-# переименует, тест test_pyqt_exit_cleanup_is_found_and_unregistered упадёт.
-PYQT_EXIT_CLEANUP_NAME = "_qtcore_cleanup"
 
 
 def running_qt_threads() -> list[QThread]:
@@ -89,7 +87,7 @@ def running_qt_threads() -> list[QThread]:
 
 
 def stop_running_qt_threads(timeout_ms: int = THREAD_DRAIN_TIMEOUT_MS) -> list[QThread]:
-    """Просит потоки остановиться и ждёт их. Возвращает тех, кто не успел."""
+    """Просит потоки Qt остановиться и ждёт их. Возвращает тех, кто не успел."""
     threads = running_qt_threads()
     if not threads:
         return []
@@ -107,6 +105,24 @@ def stop_running_qt_threads(timeout_ms: int = THREAD_DRAIN_TIMEOUT_MS) -> list[Q
     return unfinished
 
 
+def wait_for_python_threads(timeout_ms: int = THREAD_DRAIN_TIMEOUT_MS) -> list[threading.Thread]:
+    """Ждёт потоки Python, не помеченные фоновыми. Возвращает тех, кто не успел.
+
+    Обычное завершение интерпретатора ждёт такие потоки без срока; здесь срок
+    есть, иначе один зависший поток пула не дал бы программе закрыться.
+    """
+    current = threading.current_thread()
+    threads = [
+        thread
+        for thread in threading.enumerate()
+        if thread is not current and not thread.daemon
+    ]
+    deadline = time.monotonic() + max(0, int(timeout_ms)) / 1000.0
+    for thread in threads:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    return [thread for thread in threads if thread.is_alive()]
+
+
 def describe_thread(thread: QThread) -> str:
     cls = type(thread)
     name = thread.objectName()
@@ -114,79 +130,32 @@ def describe_thread(thread: QThread) -> str:
     return f"{label} «{name}»" if name else label
 
 
-def unregister_pyqt_exit_cleanup() -> bool:
-    """Снимает уборку PyQt с регистрации в ``atexit``. False — не нашлась."""
-    found = False
-    for candidate in gc.get_objects():
-        if (
-            isinstance(candidate, types.BuiltinFunctionType)
-            and candidate.__name__ == PYQT_EXIT_CLEANUP_NAME
-        ):
-            atexit.unregister(candidate)
-            found = True
-    return found
-
-
-def _close_settings_database() -> None:
-    from settings.store import close_settings_database
-
-    close_settings_database()
-
-
-def _wait_for_python_threads() -> None:
-    # То же, с чего начинает обычное завершение интерпретатор: дождаться
-    # потоков Python, не помеченных фоновыми, и рабочих потоков пулов.
-    threading._shutdown()
-
-
-def run_exit_steps() -> None:
-    """Полезная часть обычного завершения Python, выполненная явно."""
-    for title, step in (
-        ("ожидание потоков Python", _wait_for_python_threads),
-        ("закрытие базы настроек", _close_settings_database),
-    ):
-        try:
-            step()
-        except Exception as exc:
-            log(f"Шаг выхода «{title}» не выполнен: {exc}", "WARNING")
-
-    if not unregister_pyqt_exit_cleanup():
-        log("Уборка PyQt при выходе не найдена: возможен сбой при завершении", "WARNING")
-
-    # Последним: здесь закрывается журнал программы, писать в него дальше нельзя.
+def finish_process(exit_code: int, *, timeout_ms: int = THREAD_DRAIN_TIMEOUT_MS) -> NoReturn:
+    """Завершает процесс после ``app.exec()`` (см. описание модуля)."""
     try:
-        atexit._run_exitfuncs()
-    except Exception:
-        pass
+        names = [describe_thread(thread) for thread in stop_running_qt_threads(timeout_ms)]
+        names += [thread.name for thread in wait_for_python_threads(timeout_ms)]
+    except Exception as exc:
+        log(f"Не удалось дождаться фоновых потоков при выходе: {exc}", "WARNING")
+        names = []
+    if names:
+        log(f"При выходе не остановились фоновые потоки: {', '.join(sorted(names))}", "WARNING")
+
+    # Последним из шагов закрывается журнал программы, писать в него дальше нельзя.
+    run_exit_steps()
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.flush()
         except Exception:
             pass
-
-
-def finish_process(exit_code: int, *, timeout_ms: int = THREAD_DRAIN_TIMEOUT_MS) -> NoReturn:
-    """Завершает процесс после ``app.exec()`` (см. описание модуля)."""
-    try:
-        unfinished = stop_running_qt_threads(timeout_ms)
-    except Exception as exc:
-        log(f"Не удалось дождаться фоновых потоков при выходе: {exc}", "WARNING")
-        unfinished = []
-    if unfinished:
-        names = ", ".join(sorted(describe_thread(thread) for thread in unfinished))
-        log(f"При выходе не остановились фоновые потоки: {names}", "WARNING")
-
-    run_exit_steps()
     os._exit(int(exit_code))
 
 
 __all__ = [
-    "PYQT_EXIT_CLEANUP_NAME",
     "THREAD_DRAIN_TIMEOUT_MS",
     "describe_thread",
     "finish_process",
-    "run_exit_steps",
     "running_qt_threads",
     "stop_running_qt_threads",
-    "unregister_pyqt_exit_cleanup",
+    "wait_for_python_threads",
 ]

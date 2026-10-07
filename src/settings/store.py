@@ -15,6 +15,7 @@ except ImportError:  # pragma: no cover - WSL/static checks only
     winreg = None
 
 from config.runtime_layout import APPLICATION_PATHS
+from utils.exit_steps import register_exit_step
 from settings.mode import (
     DEFAULT_LAUNCH_METHOD,
     ENGINE_WINWS1,
@@ -364,6 +365,11 @@ def close_settings_database() -> None:
     """Закрывает SQLite перед удалением каталога или заменой установки."""
     with _SETTINGS_LOCK:
         _close_connection_locked()
+
+
+# При выходе база закрывается явно: записи из её журнала (WAL) попадают в
+# основной файл, рядом не остаётся служебных файлов.
+register_exit_step("закрытие базы настроек", close_settings_database)
 
 
 def get_settings_revision() -> int:

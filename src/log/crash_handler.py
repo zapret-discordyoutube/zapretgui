@@ -16,10 +16,10 @@ import os
 import traceback
 import threading
 import datetime
-import atexit
 from pathlib import Path
 
 from config.runtime_layout import APPLICATION_PATHS
+from utils.exit_steps import register_exit_step
 
 # Папка для логов крашей
 CRASH_LOGS_FOLDER = None
@@ -236,13 +236,12 @@ def _qt_exception_handler(exc_type, exc_value, exc_tb):
 def _mark_session_ended() -> None:
     """Отмечает в журнале конец сеанса, не закрывая файл.
 
-    atexit срабатывает в самом начале завершения интерпретатора: объекты Qt
-    и модули разрушаются уже после него. faulthandler пишет прямо в номер
-    файла, поэтому закрытый здесь файл делал его слепым ровно на тот отрезок,
-    где программа и падала при выходе: в журнале стояло «Session ended», а
-    пользователь видел системное окно «Ошибка приложения». Файл остаётся
-    открытым до конца процесса, и запись о падении после «Session ended»
-    означает аварию при завершении.
+    Это шаг выхода (utils/exit_steps.py), после него процесс ещё живёт.
+    faulthandler пишет прямо в номер файла, поэтому закрытый здесь файл делал
+    его слепым ровно на тот отрезок, где программа и падала при выходе: в
+    журнале стояло «Session ended», а пользователь видел системное окно
+    «Ошибка приложения». Файл остаётся открытым до конца процесса, и запись
+    о падении после «Session ended» означает аварию при завершении.
     """
     handle = _faulthandler_file
     if handle is None:
@@ -290,7 +289,7 @@ def install_crash_handler():
         # (sys.stderr может быть перенаправлен на Logger без fileno())
         faulthandler.enable(file=_faulthandler_file, all_threads=True)
         
-        atexit.register(_mark_session_ended)
+        register_exit_step("отметка конца сеанса в журнале падений", _mark_session_ended)
         
         print(f"[CRASH] Faulthandler enabled -> {faulthandler_path}", file=sys.stderr)
         

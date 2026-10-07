@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import Any
 
 from settings.mode import normalize_launch_method
@@ -536,10 +537,12 @@ class RuntimeCommandPort:
         runtime_commands = self._runtime_commands()
         return bool(runtime_commands.switch_presets_async(runtime_feature=self.owner, method=method))
 
-    def stop_and_exit(self) -> bool:
+    def stop_and_exit(self, *, on_stopped: Callable[[], None]) -> bool:
         runtime_commands = self._runtime_commands()
         self.owner.lifecycle.mark_stop_and_exit_requested()
-        return bool(runtime_commands.stop_and_exit_async(runtime_feature=self.owner))
+        return bool(
+            runtime_commands.stop_and_exit_async(runtime_feature=self.owner, on_stopped=on_stopped)
+        )
 
     def cleanup_threads(self) -> bool:
         runtime_commands = self._runtime_commands()

@@ -19,7 +19,6 @@ def _runtime(*, available: bool = True):
         start=Mock(return_value=True),
         stop=Mock(return_value=True),
         restart=Mock(return_value=True),
-        stop_and_exit=Mock(return_value=True),
         is_available=Mock(return_value=available),
     )
 
@@ -33,6 +32,7 @@ class LaunchControlTests(unittest.TestCase):
         from ui.launch_control import LaunchControl
 
         runtime = runtime or _runtime()
+        kwargs.setdefault("request_exit", Mock())
         return LaunchControl(runtime_feature=runtime, ui_state_store=_store(phase), **kwargs), runtime
 
     def test_toggle_starts_or_stops_by_phase(self) -> None:
@@ -57,7 +57,7 @@ class LaunchControlTests(unittest.TestCase):
 
         runtime = _runtime()
         store = SimpleNamespace(snapshot=lambda: SimpleNamespace(launch_phase="", launch_running=True))
-        control = LaunchControl(runtime_feature=runtime, ui_state_store=store)
+        control = LaunchControl(runtime_feature=runtime, ui_state_store=store, request_exit=Mock())
 
         self.assertEqual(control.phase(), "running")
         self.assertEqual(control.toggle(), "stop")
@@ -109,14 +109,16 @@ class LaunchControlTests(unittest.TestCase):
         runtime.restart.assert_called_once_with()
         runtime.start.assert_not_called()
 
-    def test_stop_and_exit_prefers_window_exit(self) -> None:
+    def test_stop_and_exit_goes_only_through_exit_owner(self) -> None:
         request_exit = Mock()
         control, runtime = self._control("running", request_exit=request_exit)
 
         control.stop_and_exit()
 
+        # Сам LaunchControl ни DPI не останавливает, ни программу не закрывает:
+        # это делает владелец выхода (ApplicationLifecycle).
         request_exit.assert_called_once_with(stop_dpi=True)
-        runtime.stop_and_exit.assert_not_called()
+        runtime.stop.assert_not_called()
 
     def test_phase_color_matches_status_card_colors(self) -> None:
         from presets.ui.control import control_runtime

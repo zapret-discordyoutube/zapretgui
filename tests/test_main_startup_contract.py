@@ -2274,6 +2274,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         control = LaunchControl(
             runtime_feature=runtime,
             ui_state_store=SimpleNamespace(snapshot=lambda: SimpleNamespace(launch_phase="stopped", launch_running=False)),
+            request_exit=Mock(),
             set_status=status_calls.append,
         )
         preparing_calls: list[tuple[bool, str]] = []

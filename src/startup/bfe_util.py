@@ -174,19 +174,3 @@ def ensure_bfe_running() -> tuple[bool, dict | None]:
 def preload_service_status(service_name: str = "BFE"):
     """Предзагрузить состояние службы в фоне."""
     _check_service_once_async(service_name)
-
-
-# Очистка при выходе
-def cleanup():
-    """Очистить ресурсы при завершении программы."""
-    from log.log import log
-
-    try:
-        log("BFE cleanup завершен", "DEBUG")
-    except Exception as e:
-        log(f"Ошибка в BFE cleanup: {e}", "DEBUG")
-
-
-# Регистрируем очистку
-import atexit
-atexit.register(cleanup)
