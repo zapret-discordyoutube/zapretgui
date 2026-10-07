@@ -208,6 +208,8 @@ class _Net:
         # Что «показал» набор объёма по одному соединению: по умолчанию обрыва нет.
         self.volume_facts = None
         self.volume_asked: list[str] = []
+        self.network: dict = {"external_ip": "", "provider": "", "lines": []}
+        self.telegram: tuple = ()
         # TLS 1.2 / TLS 1.3 / HTTP по отдельности: по умолчанию проверку будто сняли.
         self.protocol_facts = None
         self.protocols_asked: list[tuple[str, str]] = []
@@ -267,6 +269,9 @@ class _Net:
             patch.object(engine.volume_probe, "collect", side_effect=self._volume),
             patch.object(engine.protocol_probe, "collect", side_effect=self._protocols),
             patch.object(engine, "_check_ipv6", side_effect=lambda _run: self.ipv6),
+            # «Ваша сеть» и дата-центры Telegram ходят в сеть сами: в сценариях движка их нет.
+            patch.object(engine, "_check_network", side_effect=lambda _run, _tools: self.network),
+            patch.object(engine.telegram_check, "check_telegram", side_effect=lambda *_a, **_k: self.telegram),
             patch.object(engine, "_check_system", side_effect=lambda _run, _services: self.system_items),
             patch.object(engine, "hosts_file_ipv4", return_value=()),
             patch.object(engine, "system_dns_servers", return_value=("83.220.169.155",)),
@@ -1149,6 +1154,44 @@ class BlockcheckScopeTests(unittest.TestCase):
             freeze=(FreezeServer("Akamai", FreezeState.OK, "получено 32 КБ"),),
         )
         return net.run(engine.run_blockcheck, "all", emit=lambda _line: None)
+
+    def _run_with_telegram(self, connected, *, scope="all"):
+        from diagnostics.freeze_check import FreezeServer, FreezeState
+        from diagnostics.telegram_check import DATA_CENTERS, DcResult
+        from diagnostics.voice_check import VoiceServer
+
+        net = _Net(
+            https=lambda host, ip: _ok(ip),
+            voice=(VoiceServer("CF", "stun", True, "отвечает"),),
+            freeze=(FreezeServer("Akamai", FreezeState.OK, "получено 32 КБ"),),
+        )
+        net.telegram = tuple(
+            DcResult(center, ok, 30.0 if ok else None, attempts=1 if ok else 2)
+            for center, ok in zip(DATA_CENTERS, connected)
+        )
+        net.network = {"external_ip": "203.0.113.7", "provider": "ROSTELECOM-AS · AS12389", "lines": []}
+        return net.run(engine.run_blockcheck, scope, emit=lambda _line: None)
+
+    def test_silent_telegram_data_centres_become_a_problem_only_when_all_are_silent(self) -> None:
+        dead = self._run_with_telegram([False] * 5)
+        texts = [item["text"] for item in dead["problems"]]
+        self.assertTrue(any("Дата-центры Telegram не принимают соединения" in text for text in texts))
+        self.assertEqual(dead["telegram"]["level"], "fail")
+        self.assertEqual([item["state"] for item in dead["telegram"]["items"]], ["fail"] * 5)
+        self.assertEqual(dead["telegram"]["items"][0]["text"], "не соединился, попыток: 2")
+
+        partial = self._run_with_telegram([True, True, True, True, False])
+        self.assertEqual(partial["telegram"]["level"], "warn")
+        self.assertFalse(any("Telegram" in item["text"] and "дата-центр" in item["text"].lower() for item in partial["problems"]))
+
+    def test_network_block_reaches_the_report_and_quick_check_skips_telegram(self) -> None:
+        full = self._run_with_telegram([True] * 5)
+        self.assertEqual(full["network"]["provider"], "ROSTELECOM-AS · AS12389")
+        self.assertEqual(full["telegram"]["items"][0]["text"], "соединение за 30 мс")
+
+        quick = self._run_with_telegram([False] * 5, scope="main")
+        self.assertIsNone(quick["telegram"])
+        self.assertEqual(quick["network"]["external_ip"], "203.0.113.7")
 
     def test_controls_down_means_no_internet_first(self) -> None:
         result = self._run_all(lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT))

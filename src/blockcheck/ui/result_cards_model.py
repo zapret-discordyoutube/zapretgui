@@ -409,6 +409,45 @@ def _voice_card(voice: dict) -> Card:
     )
 
 
+def _telegram_card(telegram: dict) -> Card:
+    items = list(telegram.get("items") or ())
+    level = _state(telegram.get("level"))
+    lines = tuple(
+        Line(
+            _SERVER_STATE.get(str(item.get("state")), UNKNOWN),
+            f"{item.get('name', '')} · {item.get('address', '')}",
+            str(item.get("text") or ""),
+        )
+        for item in items
+    )
+    answered = sum(1 for item in items if item.get("state") == "ok")
+    sections = [
+        Section(str(telegram.get("headline") or "Дата-центры Telegram"), lines),
+        Section(
+            "Что это за проверка",
+            (
+                Line(
+                    INFO,
+                    "Приложение Telegram ходит не на сайт, а прямо по адресам своих дата-центров. "
+                    "Здесь с каждым из них устанавливается обычное соединение; неудачное повторяется после паузы.",
+                ),
+            ),
+        ),
+    ]
+    advice = [str(item) for item in telegram.get("advice") or ()]
+    if advice:
+        sections.append(Section("Что делать", tuple(Line(INFO, item) for item in advice)))
+    return Card(
+        key="telegram",
+        icon="fa5b.telegram-plane",
+        title="Telegram: дата-центры",
+        level=level,
+        status=f"Отвечают {answered} из {len(items)}" if items else "Не проверено",
+        lines=lines,
+        sections=tuple(sections),
+    )
+
+
 # Состояние IPv6 → (уровень, слово). «Нет в сети» — норма, поэтому не зелёное и не красное.
 _IPV6 = {
     "ok": (OK, "Работает"),
@@ -529,6 +568,36 @@ def _filter_card(place: dict) -> Card:
     )
 
 
+def _network_card(network: dict) -> Card:
+    lines = tuple(
+        Line(_state(item.get("state"), INFO), str(item.get("name") or ""), str(item.get("text") or ""))
+        for item in network.get("lines") or ()
+    )
+    provider = str(network.get("provider") or "")
+    level = WARN if any(line.state == WARN for line in lines) else (INFO if network.get("external_ip") else UNKNOWN)
+    return Card(
+        key="network",
+        icon="fa5s.wifi",
+        title="Ваша сеть",
+        level=level,
+        status=provider or ("Провайдер не определён" if network.get("external_ip") else "Не удалось узнать"),
+        lines=lines,
+        sections=(
+            Section("Под каким адресом вас видит интернет", lines),
+            Section(
+                "Зачем это",
+                (
+                    Line(
+                        INFO,
+                        "Блокировки у провайдеров разные. Если здесь чужая сеть (VPN, прокси), "
+                        "вся проверка описывает сеть вместе с ней, а не вашего провайдера.",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
 def _system_card(items: list[dict]) -> Card:
     lines = [
         Line(_state(item.get("level")), str(item.get("title") or ""), str(item.get("text") or "")) for item in items
@@ -572,11 +641,15 @@ def build_cards(report: dict) -> list[Card]:
     """Карточки по отчёту: сначала сайты (сломанные впереди), затем остальные проверки."""
     services = list(report.get("services") or ())
     cards = [_site_card(service) for service in sorted(services, key=lambda item: _LEVEL_ORDER.get(site_level(item), 9))]
+    if report.get("network"):
+        cards.append(_network_card(report["network"]))
     freeze = report.get("freeze")
     if freeze and freeze.get("servers"):
         cards.append(_hostings_card(freeze))
     if report.get("voice"):
         cards.append(_voice_card(report["voice"]))
+    if report.get("telegram"):
+        cards.append(_telegram_card(report["telegram"]))
     dns = _dns_card(report)
     if dns is not None:
         cards.append(dns)

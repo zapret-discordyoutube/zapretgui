@@ -45,9 +45,11 @@ from diagnostics import (
     block_cause,
     block_kind,
     ipv6_check,
+    my_network,
     protocol_probe,
     quic_probe,
     system_state,
+    telegram_check,
     upload_probe,
     volume_probe,
 )
@@ -88,6 +90,7 @@ from diagnostics.verdict import (
 from utils.bypass_tools import running_bypass_tools
 from utils.dns_reference import REFERENCE_RESOLVERS, ReferenceResolver
 from utils.dns_wire import FAILURE_CANCELLED, TYPE_A, TYPE_AAAA, DnsQueryResult, failure_text, query_doh
+from utils.ip_owner import lookup_ip_owner
 from utils.socket_cancel import SocketCancel
 from utils.windows_dns_query import (
     DNS_STATUS_NAME_ERROR,
@@ -1127,6 +1130,7 @@ def _collect_problems(
     reference: list[dict] | None = None,
     ipv6: ipv6_check.Ipv6Verdict | None = None,
     system: tuple[system_state.SystemItem, ...] = (),
+    telegram: telegram_check.TelegramReport | None = None,
 ) -> tuple[list[dict], list[str], list[str]]:
     """Итог для экрана: проблемы по важности, открывающиеся сервисы, подменённые DNS."""
     problems: list[dict] = []
@@ -1243,6 +1247,9 @@ def _collect_problems(
         problems.append(
             _problem(voice.level, voice.headline, voice.advice, action="strategy_voice", kind=block_kind.KIND_VOICE)
         )
+    # Один молчащий дата-центр — не проблема для человека: приложение возьмёт другой.
+    if telegram is not None and telegram.level == Level.FAIL and not offline:
+        problems.append(_problem(telegram.level, telegram.headline, telegram.advice, title="Telegram"))
 
     spoofed = [
         probe.host
@@ -1477,6 +1484,57 @@ _ADVICE_BLOCKED_REFERENCE = (
 )
 
 
+def _check_network(run: _Run, other_tools) -> dict:
+    """«Ваша сеть»: внешний адрес, провайдер и адрес компьютера — готовым словарём для отчёта."""
+
+    def _fetch(server: str) -> bytes | None:
+        result = https_get(
+            my_network.TRACE_HOST,
+            server,
+            my_network.TRACE_PATH,
+            timeout=HTTPS_TIMEOUT,
+            read_limit=2048,
+            read_timeout=READ_TIMEOUT,
+            cancel=run.probe_cancel,
+        )
+        return bytes(result.body) if result.ok and result.body else None
+
+    def _ask(name: str, rtype: int) -> DnsQueryResult | None:
+        # Владельца сети спрашиваем шифрованным путём: иначе за него ответил бы перехватчик DNS.
+        for resolver in REFERENCE_RESOLVERS:
+            result = query_doh(resolver.address, name, rtype, cancel=run.probe_cancel)
+            if result.answered:
+                return result
+        return None
+
+    facts = my_network.collect(fetch=_fetch, owner_of=lambda ip: lookup_ip_owner(ip, _ask))
+    lines = my_network.judge(facts, bypass_tools=other_tools)
+    owner = facts.owner
+    provider = " · ".join(part for part in ((owner.owner if owner else ""), (f"AS{owner.asn}" if owner and owner.asn else "")) if part)
+    return {
+        "external_ip": facts.external_ip,
+        "country": facts.country,
+        "provider": provider,
+        "asn": owner.asn if owner else "",
+        "prefix": owner.prefix if owner else "",
+        "local_ip": facts.local_ip,
+        "lines": [{"state": line.state, "name": line.name, "text": line.text} for line in lines],
+    }
+
+
+def _telegram_text(item: telegram_check.DcResult) -> str:
+    if item.connected is None:
+        return "проверку прервали"
+    if item.connected:
+        took = "меньше чем за 1 мс" if (item.ms or 0) < 1 else f"за {round(item.ms or 0)} мс"
+        return f"соединение {took}" + (" (со второй попытки)" if item.attempts > 1 else "")
+    return f"не соединился, попыток: {item.attempts}"
+
+
+def _telegram_state(item: telegram_check.DcResult) -> str:
+    return "unknown" if item.connected is None else ("ok" if item.connected else "fail")
+
+
 def _section_lines(title: str, report, rows) -> list[str]:
     icon = {Level.OK: "✅", Level.WARN: "⚠️", Level.FAIL: "❌", Level.UNKNOWN: "❔"}
     lines = ["", f"━━━━━━━━ {title} ━━━━━━━━"]
@@ -1559,6 +1617,19 @@ def run_blockcheck(
             on_server=lambda _server, done, total: step(STEP_HOSTINGS, done, total),
         )
 
+        network_future = run.submit(_check_network, run, other_tools)
+        # Дата-центры Telegram — часть списка «все сайты»: в коротком режиме их не трогаем.
+        telegram_future = (
+            run.submit(
+                telegram_check.check_telegram,
+                run.submit,
+                _wait_plain,
+                connect=lambda address, port: telegram_check.connect_once(address, port, cancel=run.probe_cancel),
+                pause=lambda seconds: _pause(run, seconds),
+            )
+            if scope != SCOPE_MAIN
+            else None
+        )
         ipv6_future = run.submit(_check_ipv6, run)
         system_future = run.submit(_check_system, run, services)
         dns_future = run.submit(check_dns_servers, should_stop=run.dns_cancelled) if full and check_dns_servers else None
@@ -1609,6 +1680,37 @@ def run_blockcheck(
                     [("✅" if item.answered else "❌", item.name, item.text) for item in voice.servers],
                 ):
                     emit(line)
+        telegram = None
+        if telegram_future is not None:
+            try:
+                telegram = telegram_check.summarize_telegram(run.wait(telegram_future), zapret_running=zapret_running)
+            except _Stopped:
+                raise
+            except Exception as exc:
+                emit(f"❔ Дата-центры Telegram: проверка не выполнилась ({exc})")
+            if telegram is not None:
+                marks = {"ok": "✅", "fail": "❌", "unknown": "❔"}
+                for line in _section_lines(
+                    "Telegram: дата-центры",
+                    telegram,
+                    [
+                        (marks[_telegram_state(item)], f"{item.center.name} ({item.center.address})", _telegram_text(item))
+                        for item in telegram.servers
+                    ],
+                ):
+                    emit(line)
+        network = None
+        try:
+            network = run.wait(network_future)
+        except _Stopped:
+            raise
+        except Exception as exc:
+            emit(f"❔ Ваша сеть: проверка не выполнилась ({exc})")
+        if network is not None:
+            emit("")
+            emit("━━━━━━━━ Ваша сеть ━━━━━━━━")
+            for item in network["lines"]:
+                emit(f"{'⚠️' if item['state'] == 'warn' else 'ℹ️'} {item['name']}: {item['text']}")
         if freeze_future is not None:
             try:
                 freeze = summarize_freeze(run.wait(freeze_future), zapret_running=zapret_running)
@@ -1647,6 +1749,7 @@ def run_blockcheck(
             reference=run.reference_report(),
             ipv6=ipv6,
             system=system,
+            telegram=telegram,
         )
         if dns_servers is not None:
             for finding in dns_servers["findings"]:
@@ -1706,6 +1809,21 @@ def run_blockcheck(
                     for item in freeze.servers
                 ]
             } if freeze else None,
+            "telegram": {
+                "level": telegram.level.value,
+                "headline": telegram.headline,
+                "advice": list(telegram.advice),
+                "items": [
+                    {
+                        "name": item.center.name,
+                        "address": item.center.address,
+                        "state": _telegram_state(item),
+                        "text": _telegram_text(item),
+                    }
+                    for item in telegram.servers
+                ],
+            } if telegram else None,
+            "network": network,
             "problems": problems,
             "working": working,
             "spoofed_hosts": spoofed,

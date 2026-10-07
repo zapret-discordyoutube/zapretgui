@@ -2,7 +2,7 @@
 
 Списки лежат в коде, а не в data-файлах рядом с exe, намеренно: в собранном
 приложении ``blockcheck/data/*`` не оказывалось, диагностика молча
-переключалась на урезанный fallback (3 TCP-цели вместо 62) и писала об этом
+переключалась на урезанный fallback (3 TCP-цели вместо шести десятков) и писала об этом
 только в лог. Питоновский модуль попадает в сборку всегда, и вместе с ним
 исчезает и сам fallback-путь, и дублирование дефолтов.
 
@@ -84,9 +84,7 @@ TCP_16_20_TARGETS: tuple[dict[str, str], ...] = (
     {"id": "US.AKM-03", "asn": "63949", "provider": "Akamai HTTP", "url": "http://speedtest.newark.linode.com/100MB-newark.bin"},
     {"id": "FR.AKM-04", "asn": "16625", "provider": "Akamai", "url": "https://www.rbcroyalbank.com/dvl/v1.0/assets/fonts/Roboto-Light.woff"},
     {"id": "FR.AKM-05", "asn": "16625", "provider": "Akamai", "url": "https://www.thomascook.in/js/updatedHomeLib.js?version=1.5"},
-    {"id": "DE.AWS-01", "asn": "16509", "provider": "AWS", "url": "https://corp.kaltura.com/wp-content/cache/min/1/wp-content/themes/airfleet/dist/styles/theme.css"},
     {"id": "FR.AWS-02", "asn": "16509", "provider": "AWS", "url": "https://www.herokucdn.com/malibu/latest/sprite.svg"},
-    {"id": "DE.AWS-03", "asn": "16509", "provider": "AWS", "url": "https://www.getscope.com/assets/fonts/fa-solid-900.woff2"},
     {"id": "GB.AWS-04", "asn": "16509", "provider": "AWS", "url": "https://www.zillowstatic.com/s3/constellation-website/public/shared/fonts/open-sans/LATEST/open-sans-variable.woff2"},
     {"id": "FR.C77-01", "asn": "60068", "provider": "CDN77", "url": "https://cdn.eso.org/images/banner1920/eso2520a.jpg"},
     {"id": "FR.C77-02", "asn": "60068", "provider": "CDN77", "url": "https://i8secure14-805356.c.cdn77.org/mm/Customers_File/website/bgimages/6c9e8c8c-e7c5-45b2-a9d8-b3fdfed4177d/slide_20250629_MMS_SS25-26-3831_C_1920x1080px_SFW.jpg"},
@@ -113,20 +111,14 @@ TCP_16_20_TARGETS: tuple[dict[str, str], ...] = (
     {"id": "LU.GCORE-01", "asn": "199524", "provider": "Gcore", "url": "https://gcore.com/assets/fonts/Montserrat-Variable.woff2"},
     {"id": "US.GC-01", "asn": "396982", "provider": "Google Cloud", "url": "https://api.usercentrics.eu/gvl/v3/en.json"},
     {"id": "US.GC-02", "asn": "396982", "provider": "Google Cloud", "url": "https://cromwell-intl.com/fonts/hammersmithone.ttf"},
-    {"id": "DE.HE-01", "asn": "24940", "provider": "Hetzner", "url": "https://apiwhatsapp-1000.zapipro.com/libs/bootstrap/dist/css/bootstrap.min.css"},
     {"id": "DE.HE-02", "asn": "24940", "provider": "Hetzner", "url": "https://www.industrialport.net/wp-content/uploads/custom-fonts/2022/10/Lato-Bold.ttf"},
     {"id": "FI.HE-04", "asn": "24940", "provider": "Hetzner", "url": "https://251b5cd9.nip.io/1MB.bin"},
     {"id": "FI.HE-05", "asn": "24940", "provider": "Hetzner", "url": "https://nioges.com/libs/fontawesome/webfonts/fa-solid-900.woff2"},
     {"id": "FI.HE-06", "asn": "24940", "provider": "Hetzner", "url": "https://5fd8bdae.nip.io/1MB.bin"},
-    {"id": "FI.HE-07", "asn": "24940", "provider": "Hetzner", "url": "https://5fd8bca5.nip.io/1MB.bin"},
     {"id": "DE.HE-08", "asn": "24940", "provider": "Hetzner HTTP", "url": "http://media5.cdnbase.com/media/photologue/photos/6143813.jpg"},
     {"id": "NL.LSW-01", "asn": "60781", "provider": "Leaseweb", "url": "https://mirror.leaseweb.com/alpine/v3.9/releases/x86_64/alpine-extended-3.9.0-x86_64.iso"},
-    {"id": "US.MBC-01", "asn": "8849", "provider": "Melbicom", "url": "https://twin.mentat.su/assets/fonts/Inter-SemiBold.woff2"},
     {"id": "MX.OR-01", "asn": "31898", "provider": "Oracle HTTP", "url": "http://40.233.0.95/assets/bundle.538a44e1.js"},
-    {"id": "MX.OR-02", "asn": "31898", "provider": "Oracle", "url": "https://k.860617.xyz/static/app/dist/main.js"},
     {"id": "SG.OR-03", "asn": "31898", "provider": "Oracle", "url": "https://global-seres.com.sg/wp-content/uploads/2024/02/SVG00732-scaled.jpg"},
-    {"id": "SG.OR-04", "asn": "31898", "provider": "Oracle", "url": "https://www.citrusmedia.com.sg/wp-content/plugins/elementor/assets/lib/font-awesome/webfonts/fa-brands-400.woff2"},
-    {"id": "CO.OR-05", "asn": "31898", "provider": "Oracle", "url": "https://plataforma.trackerintl.com/images/background.jpg"},
     {"id": "FR.OVH-01", "asn": "16276", "provider": "OVH", "url": "https://proof.ovh.net/files/1Mb.dat"},
     {"id": "FR.OVH-02", "asn": "16276", "provider": "OVH", "url": "https://proof.ovh.net/files/10Mb.dat"},
     {"id": "FR.OVH-03", "asn": "16276", "provider": "OVH", "url": "https://app.symarobot.com/content/images/logo.png"},
@@ -135,10 +127,18 @@ TCP_16_20_TARGETS: tuple[dict[str, str], ...] = (
     {"id": "NL.SW-01", "asn": "12876", "provider": "Scaleway", "url": "https://www.velivole.fr/img/header.jpg"},
     {"id": "FR.SW-02", "asn": "12876", "provider": "Scaleway", "url": "https://www.moobicom.ci/assets/slider1.jpg"},
     {"id": "FR.SW-03", "asn": "12876", "provider": "Scaleway", "url": "https://www.zenetys.com/en/"},
-    {"id": "FR.SW-04", "asn": "12876", "provider": "Scaleway", "url": "https://www.logvault.io/assets/Poppins-Regular-CTKNfV9P.ttf"},
     {"id": "DE.VLTR-01", "asn": "20473", "provider": "Vultr", "url": "https://static-cdn.play.date/static/js/model-viewer.min.js"},
     {"id": "US.VLTR-02", "asn": "20473", "provider": "Vultr", "url": "https://us.rudder.qntmnet.com/QN-CDN/images/qn_bg_.jpg"},
-    {"id": "DE.HOST-01", "asn": "216127", "provider": "nuxt.cloud", "url": "https://kast-tv.ru/fonts/GraphikLCGRegular.woff"},
     {"id": "MD.HOST-02", "asn": "200019", "provider": "Alexhost", "url": "https://profinance.cc/img/landing/introduction.png"},
-    {"id": "FI.HOST-03", "asn": "215730", "provider": "H2nexus", "url": "https://cascademl.com/images/5.jpg"},
+    # Из списка проекта dpi-checkers (hyperion-cs, лицензия Apache-2.0): главные
+    # страницы, которые отдают больше 24 КБ. Проверено 2026-10-07.
+    {"id": "US.AKM-06", "asn": "20940", "provider": "Akamai", "url": "https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js"},
+    {"id": "US.AWS-05", "asn": "16509", "provider": "AWS", "url": "https://optout.aboutads.info/"},
+    {"id": "US.CF-07", "asn": "13335", "provider": "Cloudflare", "url": "https://www.justice.gov/"},
+    {"id": "US.DO-06", "asn": "14061", "provider": "DigitalOcean", "url": "https://ui-arts.com/"},
+    {"id": "FR.OVH-06", "asn": "16276", "provider": "OVH", "url": "https://www.adwin.fr/"},
+    {"id": "DE.VLTR-03", "asn": "20473", "provider": "Vultr", "url": "https://askit-app.de/"},
+    {"id": "SG.OR-06", "asn": "31898", "provider": "Oracle", "url": "https://ged.com.sg/"},
+    {"id": "US.BVM-01", "asn": "53667", "provider": "BuyVM", "url": "https://dmvideo.download/"},
+    {"id": "US.AZ-01", "asn": "8075", "provider": "Microsoft Azure", "url": "https://store.takeda.com/"},
 )
