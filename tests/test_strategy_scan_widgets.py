@@ -154,6 +154,29 @@ class FunTextsTests(unittest.TestCase):
         self.assertTrue(phrases("dns", "en"))
         self.assertTrue(all(isinstance(item, str) and item for item in phrases("blockcheck")))
 
+    def test_every_block_has_its_own_big_pool(self) -> None:
+        # Фразы идут без повторов, пока не кончится набор: чтобы от проверки
+        # к проверке текст был разный, в каждом блоке их не меньше 50 и ни одна
+        # не встречается в двух блоках. Строка не переносится — фразы короткие.
+        kinds = (
+            "scan_network", "scan_baseline", "scan_control", "fake", "split", "disorder", "syndata", "oob",
+            "seqovl", "hostfake", "udp", "scan_generic", "scan_found", "blockcheck", "dns", "dns_servers",
+        )  # fmt: skip
+        for language in ("ru", "en"):
+            seen: dict[str, str] = {}
+            for kind in kinds:
+                pool = phrases(kind, language)
+                self.assertGreaterEqual(len(pool), 50, (language, kind))
+                for phrase in pool:
+                    self.assertLessEqual(len(phrase), 70, phrase)
+                    self.assertNotIn(phrase, seen, (language, kind, seen.get(phrase)))
+                    seen[phrase] = kind
+        self.assertNotEqual(phrases("blockcheck", "ru"), phrases("blockcheck", "en"))
+
+    def test_strategy_gets_only_its_own_phrases(self) -> None:
+        self.assertEqual(strategy_phrases("--lua-desync=multisplit"), phrases("split"))
+        self.assertEqual(strategy_phrases("--lua-desync=wssize", "en"), phrases("scan_generic", "en"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -417,14 +417,15 @@ class FunTextsTests(unittest.TestCase):
     def test_joke_pools_are_big_unique_and_fit_one_line(self) -> None:
         # Чтобы от обновления к обновлению текст был разный, наборы большие;
         # окно-продолжение не переносит строки, поэтому фразы короткие.
-        minimum = {"preparing": 10, "downloading": 20, "installing": 10, "failed": 6, "restarting": 15, "whats_new": 6}
         for language in ("ru", "en"):
-            for kind, count in minimum.items():
+            seen: dict[str, str] = {}
+            for kind in ("preparing", "downloading", "installing", "failed", "restarting", "whats_new"):
                 pool = phrases(kind, language)
-                self.assertGreaterEqual(len(pool), count, (language, kind))
-                self.assertEqual(len(pool), len(set(pool)), (language, kind))
+                self.assertGreaterEqual(len(pool), 50, (language, kind))
                 for phrase in pool:
                     self.assertLessEqual(len(phrase), 70, phrase)
+                    self.assertNotIn(phrase, seen, (language, kind, seen.get(phrase)))
+                    seen[phrase] = kind
 
 
 if __name__ == "__main__":
