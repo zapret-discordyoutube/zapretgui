@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import replace
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QHBoxLayout, QWidget
@@ -28,7 +29,6 @@ from blockcheck.ui.helpers import (
     collect_extra_domains,
     remove_domain_chip,
 )
-from blockcheck.ui.report_dialog import show_report_dialog
 from ui.performance_metrics import log_ui_timing_since
 from blockcheck.page_run_workflow import (
     request_blockcheck_stop,
@@ -36,6 +36,7 @@ from blockcheck.page_run_workflow import (
     start_blockcheck_page_run,
 )
 from ui.pages.base_page import BasePage
+from ui.widgets.log_report_view import LogReport
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.combo_accessibility import set_combo_items_accessibility
 from ui.segmented_accessibility import set_segmented_items_accessibility
@@ -160,9 +161,10 @@ class BlockcheckPage(BasePage):
         self._run_log_file: str | None = None
         self._tab_widgets: list[QWidget] = []
         self._detail_view: ResultDetailView | None = None
-        # Подробности одного DNS-сервера со вкладки «DNS-серверы».
+        # Страницы поверх вкладок: подробности одного DNS-сервера и подробный отчёт или лог.
         self._server_detail_view = None
-        self._server_detail_return_scroll = 0
+        self._log_report_view = None
+        self._over_tabs_return_scroll = 0
         self._strategy_tab_page = None
         self._domain_lookup_tab_page = None
         self._dns_servers_tab_page = None
@@ -508,6 +510,7 @@ class BlockcheckPage(BasePage):
                 open_hosts_editor=lambda: self._on_problem_action("hosts", ""),
                 open_dns_settings=lambda: self._on_problem_action("dns", ""),
             )
+            self._strategy_tab_page.report_requested.connect(self._open_log_report)
             self._strategy_tab_page.setVisible(False)
             self.add_widget(self._strategy_tab_page)
             try:
@@ -532,6 +535,7 @@ class BlockcheckPage(BasePage):
                 dns_feature=self._dns,
                 embedded=True,
             )
+            self._domain_lookup_tab_page.report_requested.connect(self._open_log_report)
             self._domain_lookup_tab_page.setVisible(False)
             self.add_widget(self._domain_lookup_tab_page)
             try:
@@ -558,6 +562,7 @@ class BlockcheckPage(BasePage):
                 open_dns_settings=self._open_dns_settings,
             )
             self._dns_servers_tab_page.details_requested.connect(self._open_server_detail)
+            self._dns_servers_tab_page.report_requested.connect(self._open_log_report)
             self._dns_servers_tab_page.setVisible(False)
             self.add_widget(self._dns_servers_tab_page)
             try:
@@ -583,6 +588,7 @@ class BlockcheckPage(BasePage):
                 embedded=True,
                 open_dns_settings=self._open_dns_settings,
             )
+            self._dns_spoofing_tab_page.report_requested.connect(self._open_log_report)
             self._dns_spoofing_tab_page.setVisible(False)
             self.add_widget(self._dns_spoofing_tab_page)
 
@@ -655,10 +661,11 @@ class BlockcheckPage(BasePage):
         index = max(0, min(int(index), len(self.TAB_ORDER) - 1))
         tab_key = self.TAB_ORDER[index]
         self._active_tab_index = index
-        # Вкладку могут сменить и снаружи, пока открыты подробности сервера.
-        if self._server_detail_view is not None and not self._server_detail_view.isHidden():
-            self._server_detail_view.setVisible(False)
-            self._tabs_pivot.setVisible(True)
+        # Вкладку могут сменить и снаружи, пока поверх открыты подробности или отчёт.
+        for view in (self._server_detail_view, self._log_report_view):
+            if view is not None and not view.isHidden():
+                view.setVisible(False)
+                self._tabs_pivot.setVisible(True)
 
         if self._tabs_pivot is not None:
             try:
@@ -832,33 +839,66 @@ class BlockcheckPage(BasePage):
         self._tabs_pivot.setVisible(True)
         self._switch_tab(self._active_tab_index)
 
+    def _show_over_tabs(self, view: QWidget) -> None:
+        """Страница подробностей занимает место вкладок; назад ведёт её строка пути."""
+        self._over_tabs_return_scroll = self.verticalScrollBar().value()
+        for widget in self._tab_widgets:
+            widget.setVisible(False)
+        for page in (
+            self._strategy_tab_page,
+            self._domain_lookup_tab_page,
+            self._dns_servers_tab_page,
+            self._dns_spoofing_tab_page,
+            self._detail_view,
+            self._server_detail_view,
+            self._log_report_view,
+        ):
+            if page is not None and page is not view:
+                page.setVisible(False)
+        self._tabs_pivot.setVisible(False)
+        view.setVisible(True)
+        self._scroll_to_top()
+
+    def _close_over_tabs(self) -> None:
+        views = (self._server_detail_view, self._log_report_view)
+        if all(view is None or view.isHidden() for view in views):
+            return
+        self._switch_tab(self._active_tab_index)
+        # Возвращаем туда же, откуда уходили; вкладка к этому мигу ещё раскладывается.
+        QTimer.singleShot(0, self._restore_over_tabs_scroll)
+
+    def _restore_over_tabs_scroll(self) -> None:
+        self.verticalScrollBar().setValue(self._over_tabs_return_scroll)
+
     def _open_server_detail(self, details) -> None:
         """Нажатие на карточку DNS-сервера: его подробности занимают всю страницу."""
         if self._server_detail_view is None:
             from dns.ui.server_check_details import ServerDetailView
 
             self._server_detail_view = ServerDetailView(self.content)
-            self._server_detail_view.closed.connect(self._close_server_detail)
+            self._server_detail_view.closed.connect(self._close_over_tabs)
             self._server_detail_view.setVisible(False)
             self.add_widget(self._server_detail_view)
-        self._server_detail_return_scroll = self.verticalScrollBar().value()
-        if self._dns_servers_tab_page is not None:
-            self._dns_servers_tab_page.setVisible(False)
-        self._tabs_pivot.setVisible(False)
-        self._server_detail_view.setVisible(True)
+        self._show_over_tabs(self._server_detail_view)
         self._server_detail_view.show_details(details)
         self._server_detail_view.setFocus()
-        self._scroll_to_top()
 
-    def _close_server_detail(self) -> None:
-        if self._server_detail_view is None or self._server_detail_view.isHidden():
-            return
-        self._switch_tab(self._active_tab_index)
-        # Возвращаем к той же карточке, с которой уходили; список к этому мигу ещё раскладывается.
-        QTimer.singleShot(0, self._restore_server_detail_scroll)
+    def _open_log_report(self, report) -> None:
+        """«Отчёт» и «Лог» любой вкладки: текст открывается страницей-редактором с подсветкой."""
+        if self._log_report_view is None:
+            from ui.widgets.log_report_view import LogReportView
 
-    def _restore_server_detail_scroll(self) -> None:
-        self.verticalScrollBar().setValue(self._server_detail_return_scroll)
+            self._log_report_view = LogReportView(self.content)
+            self._log_report_view.closed.connect(self._close_over_tabs)
+            self._log_report_view.setVisible(False)
+            self.add_widget(self._log_report_view)
+        # Строка пути ведёт на вкладку, с которой отчёт открыли, — под её названием на языке программы.
+        tab_item = self._tabs_pivot.items.get(self.TAB_ORDER[self._active_tab_index])
+        if tab_item is not None and tab_item.text():
+            report = replace(report, root_title=tab_item.text())
+        self._show_over_tabs(self._log_report_view)
+        self._log_report_view.show_report(report)
+        self._log_report_view.editor.setFocus()
 
     def _scroll_to_top(self) -> None:
         try:
@@ -867,7 +907,15 @@ class BlockcheckPage(BasePage):
             pass
 
     def _open_report(self) -> None:
-        show_report_dialog(self.window(), "\n".join(self._report_lines))
+        self._open_log_report(
+            LogReport(
+                title="Подробный отчёт BlockCheck",
+                text="\n".join(self._report_lines),
+                root_title="BlockCheck",
+                empty_text="Проверка ещё не запускалась.",
+                description="Технические подробности проверки: адреса, ответы DNS и время ответа серверов.",
+            )
+        )
 
     def _on_problem_action(self, action: str, target: str) -> None:
         """Кнопки у проблем в итоге: подбор стратегии с нужной целью, запуск

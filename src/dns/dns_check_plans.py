@@ -14,11 +14,6 @@ class DNSCheckStartPlan:
 
 
 @dataclass(slots=True)
-class DNSResultLinePlan:
-    color_role: str
-
-
-@dataclass(slots=True)
 class DNSCheckFinishPlan:
     status_text: str
     status_tone: str
@@ -47,22 +42,6 @@ def build_start_plan() -> DNSCheckStartPlan:
         save_enabled=False,
         progress_visible=True,
     )
-
-def build_result_line_plan(text: str) -> DNSResultLinePlan:
-    raw = str(text or "")
-    if "✅" in raw:
-        return DNSResultLinePlan(color_role="success")
-    if "❌" in raw:
-        return DNSResultLinePlan(color_role="error")
-    if "⚠️" in raw:
-        return DNSResultLinePlan(color_role="warning")
-    if "🚫" in raw:
-        return DNSResultLinePlan(color_role="blocked")
-    if "🔍" in raw or "📊" in raw:
-        return DNSResultLinePlan(color_role="accent")
-    if "=" in raw and len(raw) > 20:
-        return DNSResultLinePlan(color_role="faint")
-    return DNSResultLinePlan(color_role="normal")
 
 def build_finish_plan(results: dict) -> DNSCheckFinishPlan:
     poisoning_detected = bool(results and results.get("summary", {}).get("dns_poisoning_detected"))

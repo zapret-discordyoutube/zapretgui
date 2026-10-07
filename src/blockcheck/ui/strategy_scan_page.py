@@ -8,7 +8,7 @@ import logging
 from collections import deque
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel
 
 from ui.pages.base_page import BasePage
@@ -37,7 +37,7 @@ from blockcheck.ui.strategy_scan_page_runtime_helpers import (
 )
 from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.log_limits import BLOCKCHECK_LOG_VIEW_MAX_LINES
-from ui.log_report_dialog import show_log_report_dialog
+from ui.widgets.log_report_view import LogReport
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.popup_menu import exec_popup_menu
 from ui.accessibility import set_control_accessibility, set_state_text
@@ -66,6 +66,9 @@ logger = logging.getLogger(__name__)
 
 class StrategyScanPage(BasePage):
     """Strategy Scanner — brute-force DPI bypass strategy testing."""
+
+    # Просят показать отчёт страницей: её открывает страница-хозяин вкладки (LogReport).
+    report_requested = pyqtSignal(object)
 
     def __init__(
         self,
@@ -359,14 +362,16 @@ class StrategyScanPage(BasePage):
     # ------------------------------------------------------------------
 
     def _open_log(self) -> None:
-        """Подробный лог открывается в отдельном окне; во время подбора — снимок на момент открытия."""
-        show_log_report_dialog(
-            self.window(),
-            title="Подробный лог подбора стратегии",
-            text="\n".join(self._log_lines),
-            empty_text="Подбор ещё не запускался.",
-            description="Технический лог подбора стратегии — он нужен для обращения в поддержку.",
-            scroll_to_end=True,
+        """Подробный лог открывается страницей; во время подбора — снимок на момент открытия."""
+        self.report_requested.emit(
+            LogReport(
+                title="Подробный лог подбора стратегии",
+                text="\n".join(self._log_lines),
+                root_title="Подбор стратегии",
+                empty_text="Подбор ещё не запускался.",
+                description="Технический лог подбора стратегии — он нужен для обращения в поддержку.",
+                scroll_to_end=True,
+            )
         )
 
     # ------------------------------------------------------------------

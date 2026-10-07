@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import QHBoxLayout, QHeaderView, QSizePolicy, QTableWidgetItem, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -28,11 +28,11 @@ from log.log import log
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import SettingsCard, set_tooltip
 from ui.latest_worker_lane import LatestWorkerLane
-from ui.log_report_dialog import show_log_report_dialog
 from ui.pages.base_page import BasePage, ScrollBlockingPlainTextEdit
 from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.theme_semantic import get_semantic_palette
+from ui.widgets.log_report_view import LogReport
 from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips, set_fluent_item_tooltip
 
 
@@ -148,6 +148,9 @@ class DnsAnswersTable(TableWidget):
 
 class DomainLookupPage(BasePage):
     """Пинг, адреса с разных DNS и «кто ещё на этом адресе» для одного домена или IP."""
+
+    # Просят показать отчёт страницей: её открывает страница-хозяин вкладки (LogReport).
+    report_requested = pyqtSignal(object)
 
     def __init__(self, parent=None, *, dns_feature, embedded: bool = False):
         super().__init__(
@@ -453,12 +456,16 @@ class DomainLookupPage(BasePage):
     def _open_report(self) -> None:
         if self._report is None:
             return
-        show_log_report_dialog(
-            self.window(),
-            title=self._t("report.title", "Отчёт проверки домена"),
-            text=plans.build_text_report(self._report),
-            empty_text=self._t("report.empty", "Проверка ещё не запускалась."),
-            description=self._t("report.description", "Полный текст проверки: пинг, ответы DNS-серверов и домены на адресе."),
+        self.report_requested.emit(
+            LogReport(
+                title=self._t("report.title", "Отчёт проверки домена"),
+                text=plans.build_text_report(self._report),
+                root_title=self._t("title", "Проверка домена"),
+                empty_text=self._t("report.empty", "Проверка ещё не запускалась."),
+                description=self._t(
+                    "report.description", "Полный текст проверки: пинг, ответы DNS-серверов и домены на адресе."
+                ),
+            )
         )
 
     # ── жизненный цикл ──────────────────────────────────────

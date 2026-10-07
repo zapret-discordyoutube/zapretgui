@@ -1,9 +1,7 @@
 # dns/ui/dns_check_page.py
 """Страница проверки DNS подмены провайдером."""
 
-import html
-
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout
 
 from ui.pages.base_page import BasePage
@@ -14,7 +12,7 @@ from ui.fluent_widgets import SettingsCard, set_tooltip
 from ui.theme import get_theme_tokens
 from ui.theme_semantic import get_semantic_palette
 from ui.accessibility import set_control_accessibility, set_state_text
-from ui.log_report_dialog import show_log_report_dialog
+from ui.widgets.log_report_view import LogReport
 from app.ui_texts import tr as tr_catalog
 
 from qfluentwidgets import (
@@ -31,7 +29,10 @@ from dns.ui.dns_check_widgets import DnsDomainsView, DnsSummaryPanel
 
 class DNSCheckPage(BasePage):
     """Страница проверки DNS подмены провайдером."""
-    
+
+    # Просят показать отчёт страницей: её открывает страница-хозяин вкладки (LogReport).
+    report_requested = pyqtSignal(object)
+
     def __init__(self, parent=None, *, dns_feature, embedded: bool = False, open_dns_settings=None):
         super().__init__(
             "Проверка DNS подмены",
@@ -42,9 +43,6 @@ class DNSCheckPage(BasePage):
         )
         self._dns = dns_feature
         self._open_dns_settings = open_dns_settings
-        # Строки подробного лога: (текст, цветовая роль). HTML собирается при
-        # открытии окна, чтобы цвета соответствовали текущей теме.
-        self._results_log_entries: list[tuple[str, str]] = []
         self._cleanup_in_progress = False
         self._check_runtime = OneShotWorkerRuntime()
         self._check_state = LatestValueWorkerState(
@@ -192,32 +190,15 @@ class DNSCheckPage(BasePage):
         self.layout.addStretch()
 
     def _open_log(self) -> None:
-        show_log_report_dialog(
-            self.window(),
-            title="Подробный лог проверки DNS",
-            text=self._resolve_save_results_text(None),
-            html=self._build_results_log_html(),
-            empty_text="Проверка ещё не запускалась.",
-            description="Текстовый отчёт проверки: какие адреса пришли и почему решено именно так.",
+        self.report_requested.emit(
+            LogReport(
+                title="Подробный лог проверки DNS",
+                text=self._resolve_save_results_text(None),
+                root_title="DNS подмена",
+                empty_text="Проверка ещё не запускалась.",
+                description="Текстовый отчёт проверки: какие адреса пришли и почему решено именно так.",
+            )
         )
-
-    def _build_results_log_html(self) -> str:
-        tokens = get_theme_tokens()
-        semantic = get_semantic_palette()
-        role_map = {
-            "success": semantic.success,
-            "error": semantic.error,
-            "warning": semantic.warning,
-            "blocked": "#e91e63",
-            "accent": tokens.accent_hex,
-            "faint": tokens.fg_faint,
-            "normal": tokens.fg,
-        }
-        lines = []
-        for text, role in self._results_log_entries:
-            color = role_map.get(role, tokens.fg)
-            lines.append(f'<span style="color: {color};">{html.escape(text)}</span>')
-        return f'<div style="white-space: pre-wrap;">{"<br>".join(lines)}</div>'
 
     def _set_log_available(self, available: bool) -> None:
         self.log_button.setEnabled(bool(available))
@@ -271,7 +252,6 @@ class DNSCheckPage(BasePage):
         self._cleanup_in_progress = False
         
         self._clear_results_plain_text_cache()
-        self._results_log_entries = []
         self._set_log_available(False)
         self.summary_panel.set_pending()
         self.domains_view.clear()
@@ -300,8 +280,6 @@ class DNSCheckPage(BasePage):
         if self._cleanup_in_progress:
             return
         self._append_results_plain_text_cache(text)
-        plan = dns_check_page_plans.build_result_line_plan(text)
-        self._results_log_entries.append((str(text or ""), plan.color_role))
         if not self.log_button.isEnabled():
             self._set_log_available(True)
 

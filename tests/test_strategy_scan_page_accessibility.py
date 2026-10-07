@@ -89,7 +89,7 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
         self.assertFalse(page._target_input.isVisibleTo(page))
         self.assertEqual(tiles[2].accessibleName(), "Что должно заработать: Онлайн-игры, выбрано")
 
-    def test_log_opens_in_dialog_with_collected_lines(self) -> None:
+    def test_log_is_handed_to_the_host_page_with_collected_lines(self) -> None:
         page = StrategyScanPage(
             blockcheck_feature=_blockcheck_feature(),
             create_strategy_scan_worker=lambda *_args, **_kwargs: None,
@@ -97,14 +97,16 @@ class StrategyScanPageAccessibilityTests(unittest.TestCase):
         self.addCleanup(page.deleteLater)
         page._on_log("первая строка")
         page._on_log("вторая строка")
+        requested = []
+        page.report_requested.connect(requested.append)
 
-        with patch("blockcheck.ui.strategy_scan_page.show_log_report_dialog") as show_dialog:
-            page._log_btn.click()
+        page._log_btn.click()
 
-        show_dialog.assert_called_once()
-        kwargs = show_dialog.call_args.kwargs
-        self.assertEqual(kwargs["text"], "первая строка\nвторая строка")
-        self.assertTrue(kwargs["scroll_to_end"])
+        (report,) = requested
+        self.assertEqual(report.text, "первая строка\nвторая строка")
+        self.assertEqual(report.title, "Подробный лог подбора стратегии")
+        # Живой лог читают с конца.
+        self.assertTrue(report.scroll_to_end)
 
     def test_quick_target_menu_items_are_named_for_screen_reader(self) -> None:
         page = StrategyScanPage(

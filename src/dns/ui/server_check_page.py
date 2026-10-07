@@ -20,8 +20,8 @@ from log.log import log
 from ui.accessibility import set_control_accessibility
 from ui.fluent_widgets import SettingsCard, set_tooltip
 from ui.latest_worker_lane import LatestWorkerLane
-from ui.log_report_dialog import show_log_report_dialog
 from ui.pages.base_page import BasePage
+from ui.widgets.log_report_view import LogReport
 from ui.widgets.stagger_float_in import float_in
 
 # Промежуточные результаты приходят пачками по несколько в секунду: показываем не чаще.
@@ -33,6 +33,8 @@ class ServerCheckPage(BasePage):
 
     # Нажали на карточку сервера: страница-хозяин открывает его подробности (ServerDetails).
     details_requested = pyqtSignal(object)
+    # Нажали «Отчёт»: страница-хозяин показывает его страницей (LogReport).
+    report_requested = pyqtSignal(object)
 
     def __init__(self, parent=None, *, dns_feature, embedded: bool = False, open_dns_settings=None):
         super().__init__(
@@ -257,14 +259,16 @@ class ServerCheckPage(BasePage):
     def _open_report(self) -> None:
         if self._report is None:
             return
-        show_log_report_dialog(
-            self.window(),
-            title=self._t("report.title", "Отчёт проверки DNS-серверов"),
-            text=plans.build_text_report(self._report),
-            empty_text=self._t("report.empty", "Проверка ещё не запускалась."),
-            description=self._t(
-                "report.description", "Полный текст проверки: таблица по адресам, итог и подробности."
-            ),
+        self.report_requested.emit(
+            LogReport(
+                title=self._t("report.title", "Отчёт проверки DNS-серверов"),
+                text=plans.build_text_report(self._report),
+                root_title=self._t("title", "DNS-серверы"),
+                empty_text=self._t("report.empty", "Проверка ещё не запускалась."),
+                description=self._t(
+                    "report.description", "Полный текст проверки: таблица по адресам, итог и подробности."
+                ),
+            )
         )
 
     # ── жизненный цикл ──────────────────────────────────────

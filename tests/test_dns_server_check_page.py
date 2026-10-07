@@ -433,11 +433,10 @@ class DetailsTests(unittest.TestCase):
         self.assertEqual(view.breadcrumb.count(), 2)
         self.assertEqual(view.title_label.text(), "Свой <b>сервер</b>")
         self.assertEqual(view.title_label.textFormat(), Qt.TextFormat.PlainText)
-        self.assertEqual(view.status_pill.text(), plans.CARD_TITLES[details.card.status])
+        self.assertEqual(view.status_mark.text(), plans.CARD_TITLES[details.card.status])
         self.assertEqual(view.hint_label.text(), plans.CARD_HINTS[details.card.status])
         self.assertEqual(view.facts_label.text(), "адресов: 2 · DoH 25 мс")
-        # Замечания — отдельными метками, а не одной строкой через точку.
-        self.assertEqual([pill.text() for pill in view.note_pills], details.card.note.split(" · "))
+        self.assertEqual(view.notes_label.text(), details.card.note)
 
         # Сводка: пять способов связи, у каждого счёт адресов и пояснение для новичка.
         self.assertEqual([tile.item.title for tile in view.summary_tiles], ["Пинг", "UDP 53", "TCP 53", "DoT 853", "DoH 443"])
@@ -446,6 +445,7 @@ class DetailsTests(unittest.TestCase):
 
         first, second = view.address_cards
         self.assertEqual(first.address_label.text(), "10.0.0.53")
+        self.assertEqual(first.status_mark.text(), plans.CARD_TITLES[first.address.status])
         self.assertEqual([tile.value_label.text() for tile in first.tiles], ["1 мс", "2 мс", "3 мс", "молчит", "50 мс"])
         # Причина отказа — словами под ячейкой; у ответившего способа её нет.
         self.assertEqual(first.tiles[3].reason_label.text(), "сервер молчит")
@@ -802,6 +802,35 @@ class ServerCheckPageTests(unittest.TestCase):
         self.assertFalse(host._tabs_pivot.isHidden())
         page._open_details("Нет такого")
         self.assertTrue(detail.isHidden())
+
+        # «Отчёт» открывается страницей-редактором на месте вкладки; путь ведёт обратно на неё.
+        page.report_button.click()
+        report_view = host._log_report_view
+        self.assertFalse(report_view.isHidden())
+        self.assertTrue(host._tabs_pivot.isHidden())
+        self.assertTrue(page.isHidden())
+        self.assertEqual(report_view.report().root_title, "DNS-серверы")
+        self.assertIn("ПРОВЕРКА DNS-СЕРВЕРОВ", report_view.editor.toPlainText())
+        self.assertEqual(report_view.section_chips[0].text(), "ПРОВЕРКА DNS-СЕРВЕРОВ")
+        # Из отчёта можно сразу перейти к подробностям сервера: открытой остаётся одна страница.
+        page._open_details("Google DNS")
+        self.assertTrue(report_view.isHidden())
+        self.assertFalse(detail.isHidden())
+        detail.closed.emit()
+        self.assertFalse(page.isHidden())
+        page.report_button.click()
+        report_view.closed.emit()
+        self.assertTrue(report_view.isHidden())
+        self.assertFalse(host._tabs_pivot.isHidden())
+        self.assertFalse(page.isHidden())
+
+        # Отчёт главной вкладки BlockCheck открывается той же страницей под своим названием.
+        host._report_lines = ["=== DNS ===", "✅ discord.com 12 мс"]
+        host._open_report()
+        self.assertFalse(report_view.isHidden())
+        self.assertEqual((report_view.report().root_title, report_view.title_label.text()), ("DNS-серверы", "Подробный отчёт BlockCheck"))
+        host._switch_tab(order.index("dns_servers"))
+        self.assertTrue(report_view.isHidden())
 
         # Фильтр прячет лишнее, а новая проверка возвращает «Все».
         page.status_filter.chips[plans.CARD_NETWORK].click()

@@ -13,7 +13,9 @@
   сервер ответил про контрольные сайты обычным и шифрованным путём.
 
 Что показывать, решает ``dns.server_check_plans``; здесь только рисование.
-Рамок нет: состояние показывают подложка, полоска слева и цвет текста.
+Вид строгий: подложки нейтральные, цвет — только маленькая точка у вывода и
+значения, которые отклоняются от нормы (закрыт, отвечает через раз). То, что
+работает как надо, написано обычным текстом и не спорит с тем, что сломано.
 """
 
 from __future__ import annotations
@@ -25,8 +27,7 @@ from qfluentwidgets import (
     BodyLabel,
     BreadcrumbBar,
     CaptionLabel,
-    FlowLayout,
-    PushButton,
+        PushButton,
     StrongBodyLabel,
     SubtitleLabel,
     TitleLabel,
@@ -39,12 +40,12 @@ from dns.ui.server_check_widgets import _FindingRow
 from profile.ui.profile_icon import profile_icon_pixmap
 from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
-from ui.theme import to_qcolor
+from ui.theme import get_theme_tokens, to_qcolor
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.stagger_float_in import float_in
-from ui.widgets.tone_group import TonePill
+from ui.widgets.tone_group import ToneDot, mute
 
-_RADIUS = 10
+_RADIUS = 8
 _GAP = 10
 # С этой ширины карточки адресов встают в два столбца.
 _TWO_COLUMNS_FROM = 980
@@ -78,33 +79,48 @@ def _tint(label, color: QColor) -> None:
     label.setTextColor(solid, solid)
 
 
-def _muted(label) -> None:
-    _tint(label, _text_color(150))
+def _paint_value(label, level: str) -> None:
+    """Цветом выделяется только отклонение; обычный ответ остаётся обычным текстом."""
+    if level in (plans.CELL_WARN, plans.CELL_FAIL):
+        _tint(label, _cell_color(level))
+    elif level == plans.CELL_MUTED:
+        mute(label)
 
 
 class _Surface(QWidget):
-    """Мягкая подложка со скруглением; с ``stripe`` — ещё и цветная полоска слева."""
-
-    def __init__(self, parent=None, *, stripe: QColor | None = None, alpha: int = 11) -> None:
-        super().__init__(parent)
-        self._stripe = stripe
-        self._alpha = alpha
+    """Нейтральная подложка со скруглением — одна на все блоки страницы."""
 
     def paintEvent(self, event) -> None:  # noqa: N802
         _ = event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(_text_color(self._alpha))
+        painter.setBrush(to_qcolor(get_theme_tokens().surface_bg, "#0affffff"))
         painter.drawRoundedRect(self.rect(), _RADIUS, _RADIUS)
-        if self._stripe is not None:
-            painter.setBrush(self._stripe)
-            painter.drawRoundedRect(QRectF(0, 12, 3, max(0, self.height() - 24)), 1.5, 1.5)
         painter.end()
 
 
+class _StatusMark(QWidget):
+    """Вывод словами с цветной точкой: точка — единственное цветное пятно."""
+
+    def __init__(self, status: str, parent=None) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(7)
+        # Кольцо вместо заливки: «не полностью» отличается от «блокируется» не только цветом.
+        hollow = status in (plans.CARD_PARTIAL, plans.CARD_SILENT)
+        dot = ToneDot(lambda _tokens: _solid(_status_color(status)).name(), self, size=9, hollow=hollow)
+        layout.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.label = StrongBodyLabel(plans.CARD_TITLES[status], self)
+        layout.addWidget(self.label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    def text(self) -> str:
+        return self.label.text()
+
+
 class _ServerIcon(QWidget):
-    """Значок сервера в цветном кружке — тот же, что на карточке, только крупнее."""
+    """Значок сервера в фирменном цвете на нейтральном кружке."""
 
     def __init__(self, card: plans.ServerCard, parent=None) -> None:
         super().__init__(parent)
@@ -117,43 +133,13 @@ class _ServerIcon(QWidget):
         tint = to_qcolor(self._card.color, accent.name()) if self._card.color else QColor(accent)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        back = QColor(tint)
-        back.setAlpha(46)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(back)
+        painter.setBrush(_text_color(16))
         painter.drawEllipse(self.rect())
         icon = profile_icon_pixmap(self._card.icon or "fa5s.server", color=tint.name(), size=_ICON)
         if not icon.isNull():
             painter.drawPixmap((self.width() - _ICON) // 2, (self.height() - _ICON) // 2, icon)
         painter.end()
-
-
-class _Flow(QWidget):
-    """Ряд меток с переносом на новую строку, когда в ширину не помещаются."""
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self._flow = FlowLayout(self, needAni=False)
-        self._flow.setContentsMargins(0, 0, 0, 0)
-        self._flow.setHorizontalSpacing(6)
-        self._flow.setVerticalSpacing(6)
-        self._count = 0
-
-    def add(self, widget: QWidget) -> None:
-        self._flow.addWidget(widget)
-        self._count += 1
-        self._sync_height()
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self._sync_height()
-
-    def _sync_height(self) -> None:
-        if self.width() <= 0:
-            return
-        height = self._flow.heightForWidth(self.width()) if self._count else 0
-        if height != self.minimumHeight() or height != self.maximumHeight():
-            self.setFixedHeight(height)
 
 
 class _Dots(QWidget):
@@ -202,14 +188,16 @@ class _SummaryTile(_Surface):
         layout.addLayout(head)
 
         self.value_label = TitleLabel(self._value_text(1.0), self)
-        _tint(self.value_label, _cell_color(item.level))
+        if item.level == plans.CELL_MUTED:
+            mute(self.value_label)
         layout.addWidget(self.value_label)
         self.note_label = BodyLabel(item.note, self)
         self.note_label.setWordWrap(True)
+        _paint_value(self.note_label, item.level)
         layout.addWidget(self.note_label)
         self.about_label = CaptionLabel(item.about, self)
         self.about_label.setWordWrap(True)
-        _muted(self.about_label)
+        mute(self.about_label)
         layout.addWidget(self.about_label)
         layout.addStretch(1)
         set_state_text(self, f"{item.title}: отвечает адресов {item.answered} из {item.total}, {item.note}. {item.about}")
@@ -248,7 +236,9 @@ class _SpeedBar(QWidget):
         if self._share > 0.0:
             # Даже самый быстрый ответ оставляет видимую чёрточку.
             width = max(4.0, self.width() * self._share) * self._progress
-            painter.setBrush(_cell_color(self._level))
+            # Обычный ответ — спокойной полоской; цветной она становится только при сбоях.
+            calm = self._level == plans.CELL_OK
+            painter.setBrush(_text_color(120) if calm else _cell_color(self._level))
             painter.drawRoundedRect(QRectF(0, 0, width, self.height()), 2, 2)
         painter.end()
 
@@ -257,21 +247,21 @@ class _CellTile(_Surface):
     """Один способ связи с одним адресом: время ответа или причина отказа."""
 
     def __init__(self, cell: tuple[str, str, str, str], time_ms: float | None, slowest_ms: float, parent=None) -> None:
-        super().__init__(parent, alpha=10)
+        super().__init__(parent)
         title, text, level, reason = cell
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(3)
         caption = CaptionLabel(title, self)
-        _muted(caption)
+        mute(caption)
         layout.addWidget(caption)
         # «84 мс · 2 из 3»: время — крупно, а сколько запросов дошло — строкой ниже, к причине.
         value, _dot, tail = text.partition(" · ")
         self.value_label = StrongBodyLabel(value, self)
         self.value_label.setWordWrap(True)
         self.value_label.setTextInteractionFlags(_SELECTABLE)
-        _tint(self.value_label, _cell_color(level))
+        _paint_value(self.value_label, level)
         layout.addWidget(self.value_label)
         share = time_ms / slowest_ms if time_ms is not None and slowest_ms > 0 else 0.0
         self.bar = _SpeedBar(share, level, self)
@@ -280,7 +270,7 @@ class _CellTile(_Surface):
         extra = " · ".join(part for part in (tail, reason if reason != text else "") if part)
         self.reason_label = CaptionLabel(extra, self)
         self.reason_label.setWordWrap(True)
-        _muted(self.reason_label)
+        mute(self.reason_label)
         self.reason_label.setVisible(bool(extra))
         layout.addWidget(self.reason_label)
         layout.addStretch(1)
@@ -298,7 +288,7 @@ class _DomainsTable(QWidget):
         grid.setVerticalSpacing(5)
         for column, (title, stretch) in enumerate((("Сайт", 2), ("Обычным путём", 3), ("Шифрованным", 3))):
             head = CaptionLabel(title, self)
-            _muted(head)
+            mute(head)
             grid.addWidget(head, 0, column)
             grid.setColumnStretch(column, stretch)
         self.rows: list[tuple[BodyLabel, BodyLabel, BodyLabel]] = []
@@ -323,7 +313,7 @@ class AddressCard(_Surface):
     """Всё об одном адресе сервера."""
 
     def __init__(self, address: plans.AddressDetails, slowest_ms: float, parent=None) -> None:
-        super().__init__(parent, stripe=_status_color(address.status))
+        super().__init__(parent)
         self.address = address
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 14, 16, 16)
@@ -336,8 +326,8 @@ class AddressCard(_Surface):
         head.addWidget(self.address_label, 0, Qt.AlignmentFlag.AlignVCenter)
         head.addStretch(1)
         status = address.status
-        self.status_pill = TonePill(plans.CARD_TITLES[status], lambda _tokens: _solid(_status_color(status)).name(), self)
-        head.addWidget(self.status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.status_mark = _StatusMark(status, self)
+        head.addWidget(self.status_mark, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(head)
 
         tiles = QHBoxLayout()
@@ -359,7 +349,7 @@ class AddressCard(_Surface):
             label = CaptionLabel(line, self)
             label.setWordWrap(True)
             label.setTextInteractionFlags(_SELECTABLE)
-            _muted(label)
+            mute(label)
             layout.addWidget(label)
             self.who_labels.append(label)
 
@@ -405,7 +395,7 @@ class ServerDetailView(QWidget):
         self.hero: QWidget | None = None
         self.summary_tiles: list[_SummaryTile] = []
         self.address_cards: list[AddressCard] = []
-        self.note_pills: list[TonePill] = []
+        self.notes_label: BodyLabel | None = None
 
         self._reveal = QVariantAnimation(self)
         self._reveal.setStartValue(0.0)
@@ -484,8 +474,7 @@ class ServerDetailView(QWidget):
 
     def _build_hero(self, details: plans.ServerDetails) -> QWidget:
         card = details.card
-        accent = _status_color(card.status)
-        hero = _Surface(self._body, stripe=accent, alpha=14)
+        hero = _Surface(self._body)
         layout = QVBoxLayout(hero)
         layout.setContentsMargins(20, 18, 18, 18)
         layout.setSpacing(12)
@@ -500,15 +489,18 @@ class ServerDetailView(QWidget):
         self.title_label = TitleLabel(card.server, hero)
         self.title_label.setTextFormat(Qt.TextFormat.PlainText)
         name_row.addWidget(self.title_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        status = card.status
-        self.status_pill = TonePill(plans.CARD_TITLES[status], lambda _tokens: _solid(_status_color(status)).name(), hero)
-        name_row.addWidget(self.status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
         name_row.addStretch(1)
         names.addLayout(name_row)
+        facts_row = QHBoxLayout()
+        facts_row.setSpacing(12)
+        self.status_mark = _StatusMark(card.status, hero)
+        facts_row.addWidget(self.status_mark, 0, Qt.AlignmentFlag.AlignVCenter)
         facts = " · ".join(part for part in (f"адресов: {len(details.addresses)}", card.best) if part)
         self.facts_label = CaptionLabel(facts, hero)
-        _muted(self.facts_label)
-        names.addWidget(self.facts_label)
+        mute(self.facts_label)
+        facts_row.addWidget(self.facts_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        facts_row.addStretch(1)
+        names.addLayout(facts_row)
         head.addLayout(names, 1)
 
         self.copy_button = PushButton("Скопировать", hero)
@@ -527,21 +519,18 @@ class ServerDetailView(QWidget):
         self.hint_label.setTextInteractionFlags(_SELECTABLE)
         layout.addWidget(self.hint_label)
 
-        self.note_pills = []
+        # Замечания — отдельным блоком: заголовок и сам текст на разных строках.
+        self.notes_label: BodyLabel | None = None
         notes = [note for note in card.note.split(" · ") if note]
         if notes:
-            row = QHBoxLayout()
-            row.setSpacing(10)
-            caption = CaptionLabel("Что замечено", hero)
-            _muted(caption)
-            row.addWidget(caption, 0, Qt.AlignmentFlag.AlignTop)
-            flow = _Flow(hero)
-            for note in notes:
-                pill = TonePill(note, lambda _tokens: _solid(accent).name(), flow)
-                flow.add(pill)
-                self.note_pills.append(pill)
-            row.addWidget(flow, 1)
-            layout.addLayout(row)
+            block = QVBoxLayout()
+            block.setSpacing(2)
+            block.addWidget(mute(CaptionLabel("Что замечено", hero)))
+            self.notes_label = BodyLabel(" · ".join(notes), hero)
+            self.notes_label.setWordWrap(True)
+            self.notes_label.setTextInteractionFlags(_SELECTABLE)
+            block.addWidget(self.notes_label)
+            layout.addLayout(block)
         return hero
 
     def _build_summary(self, details: plans.ServerDetails) -> QWidget:
@@ -556,7 +545,7 @@ class ServerDetailView(QWidget):
             host,
         )
         intro.setWordWrap(True)
-        _muted(intro)
+        mute(intro)
         layout.addWidget(intro)
         row = QHBoxLayout()
         row.setSpacing(_GAP)

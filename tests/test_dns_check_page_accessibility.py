@@ -38,22 +38,22 @@ class DNSCheckPageAccessibilityTests(unittest.TestCase):
         self.assertEqual(page.log_button.accessibleName(), "Открыть подробный лог проверки DNS, недоступно")
         self.assertIn("текстовый отчёт", page.log_button.accessibleDescription())
 
-    def test_detailed_log_opens_in_dialog_with_colored_lines(self) -> None:
+    def test_detailed_log_is_handed_to_the_host_page_as_plain_text(self) -> None:
         page = DNSCheckPage(dns_feature=_DnsFeatureStub())
         self.addCleanup(page.deleteLater)
 
         page.append_result("www.youtube.com — сайт")
         page.append_result("x < y & z")
+        requested = []
+        page.report_requested.connect(requested.append)
 
         self.assertTrue(page.log_button.isEnabled())
-        with patch("dns.ui.dns_check_page.show_log_report_dialog") as show_dialog:
-            page.log_button.click()
+        page.log_button.click()
 
-        show_dialog.assert_called_once()
-        kwargs = show_dialog.call_args.kwargs
-        self.assertEqual(kwargs["text"], "www.youtube.com — сайт\nx < y & z")
-        self.assertIn("x &lt; y &amp; z", kwargs["html"])
-        self.assertIn("<span style=\"color:", kwargs["html"])
+        # Раскраску делает редактор страницы отчёта, поэтому текст уходит как есть, без разметки.
+        (report,) = requested
+        self.assertEqual(report.text, "www.youtube.com — сайт\nx < y & z")
+        self.assertEqual(report.title, "Подробный лог проверки DNS")
 
     def test_embedded_tab_is_compact(self) -> None:
         """Во вкладке BlockCheck лишние заголовки и карточка «Что проверяем» съедали место."""
@@ -116,7 +116,7 @@ class DNSCheckPageAccessibilityTests(unittest.TestCase):
         page.start_check()
 
         self.assertFalse(page.log_button.isEnabled())
-        self.assertEqual(page._results_log_entries, [])
+        self.assertEqual(page._resolve_save_results_text(None), "")
         self.assertEqual(page._results_plain_text_cache, "")
         self.assertEqual(
             page.log_button.property("screenReaderStateText"),
