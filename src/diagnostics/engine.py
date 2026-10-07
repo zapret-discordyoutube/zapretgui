@@ -33,7 +33,6 @@ BlockCheck отвечает на вопрос «какие сайты откры
 
 from __future__ import annotations
 
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -43,14 +42,12 @@ from datetime import datetime
 from diagnostics import (
     block_cause,
     block_kind,
-    ipv6_check,
-    my_network,
+    net_access,
     protocol_probe,
     quic_probe,
-    speed_check,
+    sections,
     system_state,
     telegram_check,
-    upload_probe,
     volume_probe,
 )
 from diagnostics import problems as problem_rules
@@ -58,13 +55,7 @@ from diagnostics import report_text
 from diagnostics.limits import (
     DISCOVERY_TIMEOUT,
     DNS_ATTEMPTS,
-    DNS_TIMEOUT,
-    DOH_TIMEOUT,
-    FILTER_MAX_TTL,
-    FREEZE_READ_TIMEOUT,
-    HTTPS_TIMEOUT,
     REACH_ADDRESSES,
-    READ_TIMEOUT,
     RECHECK_AT_ONCE,
     RECHECK_NEEDS_S,
     RECHECK_SITES,
@@ -99,7 +90,6 @@ from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
     ProbeResult,
-    https_get,
 )
 from diagnostics.verdict import (
     FREEZE_MAX_BYTES,
@@ -113,16 +103,12 @@ from diagnostics.verdict import (
     summarize_service,
 )
 from utils.bypass_tools import running_bypass_tools
-from utils.dns_reference import REFERENCE_RESOLVERS, ReferenceResolver
-from utils.dns_wire import TYPE_A, TYPE_AAAA, DnsQueryResult, query_doh
-from utils.ip_owner import lookup_ip_owner
+from utils.dns_reference import REFERENCE_RESOLVERS
+from utils.dns_wire import TYPE_A, TYPE_AAAA
 from utils.windows_dns_query import (
     DNS_STATUS_NAME_ERROR,
     ERROR_CANCELLED,
     DnsAnswer,
-    hosts_file_ipv4,
-    query_ipv4,
-    system_dns_servers,
 )
 
 __all__ = [
@@ -136,8 +122,6 @@ Emit = Callable[[str], None]
 ShouldStop = Callable[[], bool]
 
 
-
-
 # Сколько тела ответа читать, чтобы заметить обрыв после ~16 КБ (ТСПУ режет
 # соединение с зарубежными CDN ровно на этом объёме).
 BODY_PROBE_BYTES = 64 * 1024
@@ -147,7 +131,6 @@ DNS_TYPE_AAAA = TYPE_AAAA
 
 _WATCH_PAGE = "/watch?v=jNQXAC9IVRw&hl=en"
 _WATCH_PAGE_MAX_BYTES = 2_000_000
-
 
 
 # Шаги хода проверки: что и в каком порядке показывает экран, пока она идёт.
@@ -168,50 +151,9 @@ PROGRESS_STEPS = (STEP_SITES, STEP_HOSTINGS, STEP_VOICE, STEP_IPV6, STEP_SYSTEM,
 _WORKERS_PER_TARGET = 24 + 2 * len(REFERENCE_RESOLVERS)
 
 
-
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # Отдельные проверки
 # ---------------------------------------------------------------------------
-
-
-def _doh_lookup(run: _Run, host: str, record_type: int = DNS_TYPE_A) -> tuple[bool, tuple[str, ...]]:
-    """Эталонные адреса по DNS-over-HTTPS. (ответил ли хоть один, адреса).
-
-    Спрашиваются все эталонные серверы сразу, ответы складываются. Кто из них
-    не ответил и почему — запоминается в прогоне и попадает в отчёт.
-    """
-
-    def _one(resolver: ReferenceResolver) -> DnsQueryResult:
-        return query_doh(resolver.address, host, record_type, timeout_s=DOH_TIMEOUT, cancel=run.probe_cancel)
-
-    futures = [(resolver, run.submit(_one, resolver)) for resolver in REFERENCE_RESOLVERS]
-    answered = False
-    ips: list[str] = []
-    for resolver, future in futures:
-        result = future.result()
-        run.note_reference(resolver, result)
-        answered = answered or result.answered
-        for ip in result.values(record_type):
-            if ip not in ips:
-                ips.append(ip)
-    return answered, tuple(ips)
-
-
-def _get(run: _Run, host: str, ip: str, path: str, *, read_limit: int = 0) -> ProbeResult:
-    return https_get(
-        host,
-        ip,
-        path,
-        timeout=HTTPS_TIMEOUT,
-        read_limit=read_limit,
-        read_timeout=READ_TIMEOUT,
-        cancel=run.probe_cancel,
-    )
 
 
 def _discover_googlevideo(run: _Run) -> tuple[tuple[str, ...], str]:
@@ -231,22 +173,15 @@ def _discover_googlevideo(run: _Run) -> tuple[tuple[str, ...], str]:
 
     # Адрес YouTube — тот, которым воспользовался бы браузер: hosts, DNS
     # системы, а если DNS его не дал — эталон.
-    candidates = list(hosts_file_ipv4(YOUTUBE_HOST))
+    candidates = list(net_access.hosts_ipv4(YOUTUBE_HOST))
     if not candidates:
-        candidates = list(query_ipv4(YOUTUBE_HOST, timeout=DNS_TIMEOUT, cancelled=run.dns_cancelled).ips)
+        candidates = list(net_access.system_ipv4(run, YOUTUBE_HOST).ips)
     if not candidates:
-        candidates = list(_doh_lookup(run, YOUTUBE_HOST)[1])
+        candidates = list(net_access.doh_lookup(run, YOUTUBE_HOST)[1])
 
     for ip in candidates[:1]:
-        result = https_get(
-            YOUTUBE_HOST,
-            ip,
-            _WATCH_PAGE,
-            timeout=DISCOVERY_TIMEOUT,
-            read_limit=_WATCH_PAGE_MAX_BYTES,
-            read_timeout=READ_TIMEOUT,
-            body_done=_done,
-            cancel=run.probe_cancel,
+        result = net_access.fetch(
+            run, YOUTUBE_HOST, ip, _WATCH_PAGE, timeout=DISCOVERY_TIMEOUT, read_limit=_WATCH_PAGE_MAX_BYTES, body_done=_done
         )
         if found:
             return tuple(found), "адрес видеосервера получен от YouTube"
@@ -323,7 +258,7 @@ def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
         return
 
     def _one(ip: str) -> ProbeResult:
-        return _get(run, probe.host, ip, probe.target.path, read_limit=read_limit)
+        return net_access.get(run, probe.host, ip, probe.target.path, read_limit=read_limit)
 
     def _settled(items: list[ProbeResult]) -> bool:
         return any(item.ok or item.kind == KIND_CANCELLED for item in items)
@@ -431,31 +366,31 @@ def _probe_host(
     read_limit = BODY_PROBE_BYTES if (full and target.read_body) else 0
 
     dns_futures = [
-        run.submit(query_ipv4, host, timeout=DNS_TIMEOUT, cancelled=run.dns_cancelled)
+        run.submit(net_access.system_ipv4, run, host)
         for _attempt in range(DNS_ATTEMPTS)
     ]
-    doh_future = run.submit(_doh_lookup, run, host)
-    doh6_future = run.submit(_doh_lookup, run, host, DNS_TYPE_AAAA) if full else None
-    probe.hosts_ips = hosts_file_ipv4(host)
+    doh_future = run.submit(net_access.doh_lookup, run, host)
+    doh6_future = run.submit(net_access.doh_lookup, run, host, DNS_TYPE_AAAA) if full else None
+    probe.hosts_ips = net_access.hosts_ipv4(host)
     probe.dns, probe.dns_nxdomain = _merge_dns_answers([future.result() for future in dns_futures])
 
     local_ips = probe.hosts_ips or probe.dns.ips
     local_future: Future | None = None
     if full and local_ips:
         # В полной проверке запрос к адресу из DNS нужен всегда — не ждём эталон.
-        local_future = run.submit(_get, run, host, local_ips[0], target.path, read_limit=read_limit)
+        local_future = run.submit(net_access.get, run, host, local_ips[0], target.path, read_limit=read_limit)
 
     probe.reference_ok, probe.reference_ips = doh_future.result()
     reference = set(probe.reference_ips)
     matches = bool(set(probe.dns.ips) & reference)
     if local_future is None and local_ips and (probe.hosts_ips or not matches):
-        local_future = run.submit(_get, run, host, local_ips[0], target.path)
+        local_future = run.submit(net_access.get, run, host, local_ips[0], target.path)
     # DNS дал и адрес из эталона, и другой. У CDN так бывает, но так же
     # выглядит подмена «через раз»: сертификат по другому адресу решает.
     suspects = [ip for ip in probe.dns.ips if ip not in reference] if (matches and not probe.hosts_ips) else []
     suspect_future: Future | None = None
     if suspects and not (local_ips and local_ips[0] == suspects[0]):
-        suspect_future = run.submit(_get, run, host, suspects[0], target.path)
+        suspect_future = run.submit(net_access.get, run, host, suspects[0], target.path)
     if local_future is not None:
         probe.local_check = local_future.result()
     if suspect_future is not None:
@@ -552,98 +487,9 @@ def _check_volume(run: _Run, probe: _Probe) -> None:
         probe.reach_state = ReachState.FREEZE
 
 
-
-
 # ---------------------------------------------------------------------------
 # Текст отчёта
 # ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def _dns_provider(ip: str) -> tuple[str, str, str]:
-    """(название сервера из списка программы, его раздел, пометка состояния) или пустые строки."""
-    try:
-        from dns.dns_providers import find_provider_by_address
-    except Exception:
-        return "", "", ""
-    if ip in ("127.0.0.1", "::1"):
-        # Адрес этого компьютера: отвечает встроенный шифрованный DNS, если он запущен.
-        try:
-            from dns.local_proxy import active_mode
-
-            mode = active_mode()
-        except Exception:
-            mode = ""
-        return (f"шифрованный DNS программы, режим {mode}" if mode else "локальный DNS на этом компьютере"), "", ""
-    found = find_provider_by_address(ip)
-    if found is None:
-        return "", "", ""
-    category, name, info = found
-    return str(name), str(category), str(info.get("status", ""))
-
-
-def _environment_lines() -> list[str]:
-    lines: list[str] = []
-    if sys.platform == "win32":
-        version = sys.getwindowsversion()
-        edition = "Windows 11" if version.build >= 22000 else f"Windows {version.major}"
-        lines.append(f"🖥️ {edition} (сборка {version.build})")
-
-    servers = system_dns_servers()
-    if servers:
-        described: list[str] = []
-        unblock_names: list[str] = []
-        blocked_names: list[str] = []
-        for ip in servers:
-            name, category, status = _dns_provider(ip)
-            described.append(f"{ip} ({name})" if name else ip)
-            if category == "Для ИИ" and name not in unblock_names:
-                unblock_names.append(name)
-            if status == "blocked" and name not in blocked_names:
-                blocked_names.append(name)
-        lines.append(f"🌐 DNS-серверы системы: {', '.join(described)}")
-        for name in unblock_names:
-            lines.append(
-                f"ℹ️ {name} сам меняет адреса части сайтов, чтобы обходить блокировки. "
-                "Такие адреса проверяются по сертификату и подменой не считаются."
-            )
-        for name in blocked_names:
-            lines.append(
-                f"⚠️ {name} в России блокируется: обычные запросы к нему могут не доходить "
-                "или подменяться по дороге. Что отвечает на вашей линии, покажет вкладка «DNS-серверы»."
-            )
-    return lines
-
-
-def _zapret_status() -> tuple[bool | None, str]:
-    try:
-        from settings.mode import ALL_WINWS_EXE_NAME_SET, WINWS_EXE_FAMILY_LABEL
-        from utils.windows_process_probe import iter_process_records_winapi
-
-        running = [
-            f"{name} (PID {pid})"
-            for pid, name in iter_process_records_winapi()
-            if str(name or "").lower() in ALL_WINWS_EXE_NAME_SET
-        ]
-    except Exception as exc:
-        return None, f"⚠️ Zapret: не удалось проверить процессы ({exc})"
-    if running:
-        return True, f"✅ Zapret запущен: {', '.join(running)}"
-    return False, f"❌ Zapret не запущен ({WINWS_EXE_FAMILY_LABEL} нет среди процессов)"
 
 
 # ---------------------------------------------------------------------------
@@ -782,301 +628,25 @@ def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: 
     return summarize_service(service.label, outcomes, zapret_running=zapret_running)
 
 
-
-
-
-
-def _freeze_address(run: _Run, host: str) -> str:
-    """Адрес сервера для проверки обрыва: из hosts/DNS системы, иначе эталон. Пусто — не нашли.
-
-    Адрес запоминается на прогон: отправка проверяется на том же адресе, что и загрузка.
-    """
-    known = run.freeze_addresses.get(host)
-    if known is not None:
-        return known
-    ips = list(hosts_file_ipv4(host)) or list(query_ipv4(host, timeout=DNS_TIMEOUT, cancelled=run.dns_cancelled).ips)
-    if not ips:
-        ips = list(_doh_lookup(run, host)[1])
-    address = ips[0] if ips else ""
-    if address:
-        run.freeze_addresses[host] = address
-    return address
-
-
-def _download(run: _Run, host: str, path: str) -> ProbeResult | None:
-    """Загрузка файла для проверки обрыва."""
-    ip = _freeze_address(run, host)
-    if not ip:
-        return None
-    from diagnostics.freeze_check import READ_LIMIT
-
-    return https_get(
-        host,
-        ip,
-        path,
-        timeout=HTTPS_TIMEOUT,
-        read_limit=READ_LIMIT,
-        read_timeout=FREEZE_READ_TIMEOUT,
-        cancel=run.probe_cancel,
-    )
-
-
-def _upload(run: _Run, host: str, path: str) -> upload_probe.UploadVerdict | None:
-    """Проверка отправки данных на тот же сервер. None — адреса нет или проверку сняли."""
-    ip = _freeze_address(run, host)
-    if not ip or run.dns_cancelled():
-        return None
-    facts = upload_probe.collect(host, ip, path, submit=run.submit, cancel=run.probe_cancel)
-    return upload_probe.judge(facts)
-
-
 def _wait_plain(future: Future):
     return future.result()
 
 
+def _settle(run: _Run, future: Future | None, emit: Emit, title: str):
+    """Итог раздела, который шёл в фоне. None — раздел не запускали или он сломался.
 
-
-
-
-
-
-
-
-def _system_has_ipv6_route() -> bool | None:
-    """Считает ли Windows, что по IPv6 есть дорога в интернет. None — не Windows или ошибка."""
-    if sys.platform != "win32":
+    Сбой одного раздела не должен ронять всю проверку: о нём остаётся строка
+    в отчёте, остальные разделы показываются как обычно.
+    """
+    if future is None:
         return None
-    from dns.winapi import internet_route
-
-    return bool(internet_route().has_ipv6)
-
-
-def _check_ipv6(run: _Run) -> ipv6_check.Ipv6Verdict:
-    facts = ipv6_check.collect(
-        has_route=_system_has_ipv6_route,
-        lookup=lambda host: _doh_lookup(run, host, DNS_TYPE_AAAA)[1],
-        get=lambda host, ip: _get(run, host, ip, "/"),
-        submit=run.submit,
-    )
-    return ipv6_check.judge(facts)
-
-
-_IPV6_ICON = {
-    ipv6_check.IPV6_OK: "✅",
-    ipv6_check.IPV6_ABSENT: "ℹ️",
-    ipv6_check.IPV6_BROKEN: "⚠️",
-    ipv6_check.IPV6_UNKNOWN: "❔",
-}
-
-
-_CLOCK_HOST = "www.google.com"
-
-
-def _clock_skew(run: _Run) -> float | None:
-    """На сколько секунд часы компьютера впереди времени сервера. None — узнать не удалось."""
-    from email.utils import parsedate_to_datetime
-
-    addresses = _doh_lookup(run, _CLOCK_HOST)[1]
-    if not addresses:
-        return None
-    result = _get(run, _CLOCK_HOST, addresses[0], "/generate_204", read_limit=1)
-    local = time.time()
-    for line in result.body.split(b"\r\n\r\n", 1)[0].split(b"\r\n")[1:]:
-        name, _colon, value = line.partition(b":")
-        if name.strip().lower() == b"date":
-            try:
-                return local - parsedate_to_datetime(value.decode("ascii", errors="ignore").strip()).timestamp()
-            except (TypeError, ValueError):
-                return None
-    return None
-
-
-def _check_system(run: _Run, services: dict[str, Service]) -> tuple[system_state.SystemItem, ...]:
-    hosts = tuple(dict.fromkeys(target.host for service in services.values() for target in service.targets))
-    facts = system_state.collect_facts(check_hosts=hosts, clock_skew=lambda: _clock_skew(run))
-    return system_state.judge(facts)
-
-
-_SYSTEM_ICON = {
-    system_state.LEVEL_OK: "✅",
-    system_state.LEVEL_INFO: "ℹ️",
-    system_state.LEVEL_WARN: "⚠️",
-    system_state.LEVEL_FAIL: "❌",
-    system_state.LEVEL_UNKNOWN: "❔",
-}
-
-
-_DNS_FINDING_LEVEL = {"fail": Level.FAIL, "warn": Level.WARN}
-_DNS_FINDING_ICON = {"ok": "✅", "info": "ℹ️", "warn": "⚠️", "fail": "❌"}
-
-
-def _finish_dns_servers(run: _Run, future: Future, emit: Emit) -> dict | None:
-    """Итог проверки DNS-серверов для полной проверки: печатает раздел и возвращает словарь."""
     try:
-        result = run.wait(future)
+        return run.wait(future)
     except _Stopped:
         raise
     except Exception as exc:
-        emit(f"❔ DNS-серверы: проверка не выполнилась ({exc})")
+        emit(f"❔ {title}: проверка не выполнилась ({exc})")
         return None
-    if not isinstance(result, dict):
-        return None
-    findings = [
-        {"level": str(item.get("level") or "info"), "text": str(item.get("text") or "")}
-        for item in result.get("findings") or ()
-        if item.get("text")
-    ]
-    emit("")
-    emit("━━━━━━━━ DNS-серверы ━━━━━━━━")
-    for finding in findings:
-        emit(f"{_DNS_FINDING_ICON.get(finding['level'], 'ℹ️')} {finding['text']}")
-    text = str(result.get("text") or "")
-    for line in text.splitlines():
-        emit(f"   {line}")
-    return {"level": str(result.get("level") or "unknown"), "findings": findings, "text": text}
-
-
-def _find_filter_place(run: _Run, services: dict[str, Service], collected: dict[str, list[_Probe]], emit: Emit) -> dict | None:
-    """Где стоит фильтр — по первому сайту, QUIC к которому блокируют по имени."""
-    from diagnostics import path_trace
-
-    blocked = [
-        probe
-        for probes in collected.values()
-        for probe in probes
-        if probe.quic is not None
-        and probe.quic.code == quic_probe.QUIC_BLOCKED_BY_NAME
-        and probe.reach is not None
-        and probe.reach.ip
-        and ":" not in probe.reach.ip
-    ]
-    # Фильтр один на всю сеть: достаточно найти его по одному сайту.
-    if not blocked or run.dns_cancelled():
-        return None
-    probe = blocked[0]
-    ip = probe.reach.ip
-    trace = path_trace.trace_route(ip, should_stop=run.dns_cancelled)
-    facts = path_trace.locate_filter(ip, probe.host, max_ttl=FILTER_MAX_TTL, cancel=run.probe_cancel)
-    verdict = path_trace.judge_filter(facts, trace if trace.supported else None)
-    if verdict is None:
-        return None
-    emit("")
-    emit("━━━━━━━━ Где стоит фильтр ━━━━━━━━")
-    found = verdict.code == path_trace.FILTER_FOUND
-    emit(f"{'📍' if found else 'ℹ️'} По сайту {probe.host}: {verdict.text}")
-    return {
-        "host": probe.host,
-        "address": ip,
-        "found": found,
-        "hop": verdict.hop,
-        "text": report_text.sentence(verdict.text),
-        "hops": [
-            {"ttl": hop.ttl, "address": hop.address, "rtt_ms": hop.rtt_ms}
-            for hop in (trace.hops if trace.supported else ())
-        ],
-    }
-
-
-
-
-
-
-
-
-def _check_speed(run: _Run, emit: Emit) -> dict | None:
-    """Скорость зарубежных серверов против российских. Идёт последней, когда остальная нагрузка спала."""
-
-    def _download(server: speed_check.SpeedServer) -> tuple[int, float] | None:
-        ip = _freeze_address(run, server.host)
-        if not ip:
-            return None
-        started = time.monotonic()
-        stop_at = started + speed_check.SAMPLE_SECONDS
-        result = https_get(
-            server.host,
-            ip,
-            server.path,
-            timeout=HTTPS_TIMEOUT,
-            read_limit=speed_check.SAMPLE_BYTES,
-            read_timeout=READ_TIMEOUT,
-            # Качаем не дольше отведённого: на медленной линии три мегабайта шли бы минуту.
-            body_done=lambda _body: time.monotonic() >= stop_at,
-            cancel=run.probe_cancel,
-        )
-        if not result.ok:
-            return None
-        return int(result.body_size), time.monotonic() - started
-
-    samples = speed_check.check_speed(_download, should_stop=run.dns_cancelled)
-    if not samples:
-        return None
-    report = speed_check.summarize_speed(samples)
-    emit("")
-    emit("━━━━━━━━ Скорость ━━━━━━━━")
-    for item in samples:
-        place = "Россия" if item.server.domestic else "за границей"
-        emit(f"{'ℹ️' if item.kbps is not None else '❔'} {item.server.name} ({place}): {speed_check.speed_text(item.kbps)}")
-    emit(f"{report_text.LEVEL_ICON[report.level]} {report.headline}")
-    slow = report.level == Level.WARN
-    return {
-        "level": report.level.value,
-        "headline": report.headline,
-        "items": [
-            {
-                "name": item.server.name,
-                "host": item.server.host,
-                "domestic": item.server.domestic,
-                "kbps": None if item.kbps is None else round(item.kbps, 1),
-                "state": "unknown" if item.kbps is None else ("warn" if slow and not item.server.domestic else "ok"),
-                "text": speed_check.speed_text(item.kbps),
-            }
-            for item in samples
-        ],
-    }
-
-
-def _check_network(run: _Run, other_tools) -> dict:
-    """«Ваша сеть»: внешний адрес, провайдер и адрес компьютера — готовым словарём для отчёта."""
-
-    def _fetch(server: str) -> bytes | None:
-        result = https_get(
-            my_network.TRACE_HOST,
-            server,
-            my_network.TRACE_PATH,
-            timeout=HTTPS_TIMEOUT,
-            read_limit=2048,
-            read_timeout=READ_TIMEOUT,
-            cancel=run.probe_cancel,
-        )
-        return bytes(result.body) if result.ok and result.body else None
-
-    def _ask(name: str, rtype: int) -> DnsQueryResult | None:
-        # Владельца сети спрашиваем шифрованным путём: иначе за него ответил бы перехватчик DNS.
-        for resolver in REFERENCE_RESOLVERS:
-            result = query_doh(resolver.address, name, rtype, cancel=run.probe_cancel)
-            if result.answered:
-                return result
-        return None
-
-    facts = my_network.collect(fetch=_fetch, owner_of=lambda ip: lookup_ip_owner(ip, _ask))
-    lines = my_network.judge(facts, bypass_tools=other_tools)
-    owner = facts.owner
-    provider = " · ".join(part for part in ((owner.owner if owner else ""), (f"AS{owner.asn}" if owner and owner.asn else "")) if part)
-    return {
-        "external_ip": facts.external_ip,
-        "country": facts.country,
-        "provider": provider,
-        "asn": owner.asn if owner else "",
-        "prefix": owner.prefix if owner else "",
-        "local_ip": facts.local_ip,
-        "lines": [{"state": line.state, "name": line.name, "text": line.text} for line in lines],
-    }
-
-
-
-
-
-
 
 
 def run_blockcheck(
@@ -1127,10 +697,10 @@ def run_blockcheck(
     try:
         title = _SCOPE_TITLES[scope]
         emit(f"🔍 BlockCheck: {title} — {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
-        environment = _environment_lines()
+        environment = sections.environment_lines()
         for line in environment:
             emit(line)
-        zapret_running, zapret_line = _zapret_status()
+        zapret_running, zapret_line = sections.zapret_status()
         emit(zapret_line)
         other_tools = running_bypass_tools()
         if other_tools:
@@ -1146,13 +716,13 @@ def run_blockcheck(
             check_freeze,
             run.submit,
             _wait_plain,
-            lambda host, path: _download(run, host, path),
-            lambda host, path: _upload(run, host, path),
+            lambda host, path: sections.download(run, host, path),
+            lambda host, path: sections.upload(run, host, path),
             every=full,
             on_server=lambda _server, done, total: step(STEP_HOSTINGS, done, total),
         )
 
-        network_future = run.submit(_check_network, run, other_tools)
+        network_future = run.submit(sections.check_network, run, other_tools)
         # Дата-центры Telegram — часть списка «все сайты»: в коротком режиме их не трогаем.
         telegram_future = (
             run.submit(
@@ -1165,113 +735,85 @@ def run_blockcheck(
             if scope != SCOPE_MAIN
             else None
         )
-        ipv6_future = run.submit(_check_ipv6, run)
-        system_future = run.submit(_check_system, run, services)
+        ipv6_future = run.submit(sections.check_ipv6, run)
+        system_future = run.submit(sections.check_system, run, services)
         dns_future = run.submit(check_dns_servers, should_stop=run.dns_cancelled) if full and check_dns_servers else None
 
         collected = _run_probes(
             run, services, full=True, emit=emit, on_done=lambda done, total: step(STEP_SITES, done, total)
         )
 
-        ipv6 = None
-        try:
-            ipv6 = run.wait(ipv6_future)
-        except _Stopped:
-            raise
-        except Exception as exc:
-            emit(f"❔ IPv6: проверка не выполнилась ({exc})")
+        ipv6 = _settle(run, ipv6_future, emit, "IPv6")
         step(STEP_IPV6)
         if ipv6 is not None:
             emit("━━━━━━━━ IPv6 ━━━━━━━━")
-            emit(f"{_IPV6_ICON[ipv6.code]} IPv6 {ipv6.text}")
+            emit(f"{sections.IPV6_ICON[ipv6.code]} IPv6 {ipv6.text}")
 
-        system: tuple[system_state.SystemItem, ...] = ()
-        try:
-            system = tuple(run.wait(system_future))
-        except _Stopped:
-            raise
-        except Exception as exc:
-            emit(f"❔ Состояние системы: проверка не выполнилась ({exc})")
+        system: tuple[system_state.SystemItem, ...] = tuple(_settle(run, system_future, emit, "Состояние системы") or ())
         step(STEP_SYSTEM)
         if system:
             emit("")
             emit("━━━━━━━━ Состояние системы ━━━━━━━━")
             for item in system:
-                emit(f"{_SYSTEM_ICON[item.level]} {item.title}: {item.text}")
+                emit(f"{sections.SYSTEM_ICON[item.level]} {item.title}: {item.text}")
 
-        voice = freeze = None
-        if voice_future is not None:
-            try:
-                voice = summarize_voice(run.wait(voice_future))
-            except _Stopped:
-                raise
-            except Exception as exc:
-                emit(f"❔ Голосовые серверы: проверка не выполнилась ({exc})")
-            step(STEP_VOICE)
-            if voice is not None:
-                for line in report_text.section_lines(
-                    "Голосовые звонки (UDP)",
-                    voice,
-                    [("✅" if item.answered else "❌", item.name, item.text) for item in voice.servers],
-                ):
-                    emit(line)
-        telegram = None
-        if telegram_future is not None:
-            try:
-                telegram = telegram_check.summarize_telegram(run.wait(telegram_future), zapret_running=zapret_running)
-            except _Stopped:
-                raise
-            except Exception as exc:
-                emit(f"❔ Дата-центры Telegram: проверка не выполнилась ({exc})")
-            if telegram is not None:
-                marks = {"ok": "✅", "fail": "❌", "unknown": "❔"}
-                for line in report_text.section_lines(
-                    "Telegram: дата-центры",
-                    telegram,
-                    [
-                        (marks[report_text.telegram_state(item)], f"{item.center.name} ({item.center.address})", report_text.telegram_text(item))
-                        for item in telegram.servers
-                    ],
-                ):
-                    emit(line)
-        network = None
-        try:
-            network = run.wait(network_future)
-        except _Stopped:
-            raise
-        except Exception as exc:
-            emit(f"❔ Ваша сеть: проверка не выполнилась ({exc})")
+        voice_facts = _settle(run, voice_future, emit, "Голосовые серверы")
+        voice = summarize_voice(voice_facts) if voice_facts is not None else None
+        step(STEP_VOICE)
+        if voice is not None:
+            for line in report_text.section_lines(
+                "Голосовые звонки (UDP)",
+                voice,
+                [("✅" if item.answered else "❌", item.name, item.text) for item in voice.servers],
+            ):
+                emit(line)
+
+        telegram_facts = _settle(run, telegram_future, emit, "Дата-центры Telegram")
+        telegram = (
+            telegram_check.summarize_telegram(telegram_facts, zapret_running=zapret_running)
+            if telegram_facts is not None
+            else None
+        )
+        if telegram is not None:
+            marks = {"ok": "✅", "fail": "❌", "unknown": "❔"}
+            for line in report_text.section_lines(
+                "Telegram: дата-центры",
+                telegram,
+                [
+                    (marks[report_text.telegram_state(item)], f"{item.center.name} ({item.center.address})", report_text.telegram_text(item))
+                    for item in telegram.servers
+                ],
+            ):
+                emit(line)
+
+        network = _settle(run, network_future, emit, "Ваша сеть")
         if network is not None:
             emit("")
             emit("━━━━━━━━ Ваша сеть ━━━━━━━━")
             for item in network["lines"]:
                 emit(f"{'⚠️' if item['state'] == 'warn' else 'ℹ️'} {item['name']}: {item['text']}")
-        if freeze_future is not None:
-            try:
-                freeze = summarize_freeze(run.wait(freeze_future), zapret_running=zapret_running)
-            except _Stopped:
-                raise
-            except Exception as exc:
-                emit(f"❔ Обрыв на 16–20 КБ: проверка не выполнилась ({exc})")
-            if freeze is not None:
-                marks = {"ok": "✅", "freeze": "❌", "unknown": "❔"}
-                for line in report_text.section_lines(
-                    "Обрыв на 16–20 КБ",
-                    freeze,
-                    [(marks[item.state.value], item.name, item.text) for item in freeze.servers],
-                ):
-                    emit(line)
 
-        dns_servers = _finish_dns_servers(run, dns_future, emit) if dns_future is not None else None
+        freeze_facts = _settle(run, freeze_future, emit, "Обрыв на 16–20 КБ")
+        freeze = summarize_freeze(freeze_facts, zapret_running=zapret_running) if freeze_facts is not None else None
+        if freeze is not None:
+            marks = {"ok": "✅", "freeze": "❌", "unknown": "❔"}
+            for line in report_text.section_lines(
+                "Обрыв на 16–20 КБ",
+                freeze,
+                [(marks[item.state.value], item.name, item.text) for item in freeze.servers],
+            ):
+                emit(line)
+
+        dns_servers = sections.finish_dns_servers(run, dns_future, emit) if dns_future is not None else None
         if full:
             step(STEP_DNS_SERVERS)
-        filter_place = _find_filter_place(run, services, collected, emit) if full else None
+        filter_place = sections.find_filter_place(run, services, collected, emit) if full else None
         if full:
             step(STEP_FILTER)
         speed = None
         if full and not run.dns_cancelled():
             try:
-                speed = _check_speed(run, emit)
+                speed = sections.check_speed(run, emit)
             except _Stopped:
                 raise
             except Exception as exc:
@@ -1296,7 +838,7 @@ def run_blockcheck(
         )
         if dns_servers is not None:
             for finding in dns_servers["findings"]:
-                level = _DNS_FINDING_LEVEL.get(finding["level"])
+                level = sections.DNS_FINDING_LEVEL.get(finding["level"])
                 if level is not None:
                     problems.append(problem_rules.problem(level, finding["text"], action="dns", kind=block_kind.KIND_DNS))
             problems.sort(key=lambda item: problem_rules.LEVEL_ORDER.get(Level(item["level"]), 9))
@@ -1337,8 +879,6 @@ def run_blockcheck(
         run.close()
 
 
-
-
 def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
     """Проверка DNS подмены для вкладки «Проверка DNS подмены»."""
     services = build_services(SCOPE_MAIN)
@@ -1347,7 +887,7 @@ def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
     started = time.monotonic()
     try:
         emit("🔍 ПРОВЕРКА DNS ПОДМЕНЫ")
-        for line in _environment_lines():
+        for line in sections.environment_lines():
             emit(line)
         emit(
             "Как проверяем: адрес от DNS системы сравниваем с эталоном по DNS-over-HTTPS. "

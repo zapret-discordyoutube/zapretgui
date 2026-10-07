@@ -1,0 +1,334 @@
+"""Проверки отдельных разделов BlockCheck.
+
+Каждая функция отвечает за один раздел отчёта: собирает факты через
+``diagnostics.net_access``, отдаёт их чистому судье своего модуля
+(``ipv6_check.judge``, ``system_state.judge``, ``speed_check.summarize_speed``…)
+и возвращает готовый итог. Порядок разделов и общий отчёт — дело движка
+(``diagnostics.engine``); здесь нет ничего про сайты и сервисы.
+"""
+
+from __future__ import annotations
+
+import sys
+import time
+from collections.abc import Callable
+from concurrent.futures import Future
+
+from diagnostics import (
+    ipv6_check,
+    my_network,
+    net_access,
+    quic_probe,
+    report_text,
+    speed_check,
+    system_state,
+    upload_probe,
+)
+from diagnostics.limits import FILTER_MAX_TTL, FREEZE_READ_TIMEOUT
+from diagnostics.run_context import Probe, Run, Stopped
+from diagnostics.services import Service
+from diagnostics.tls_probe import ProbeResult
+from diagnostics.verdict import Level
+from utils.dns_wire import TYPE_AAAA
+from utils.ip_owner import lookup_ip_owner
+
+Emit = Callable[[str], None]
+
+
+def _dns_provider(ip: str) -> tuple[str, str, str]:
+    """(название сервера из списка программы, его раздел, пометка состояния) или пустые строки."""
+    try:
+        from dns.dns_providers import find_provider_by_address
+    except Exception:
+        return "", "", ""
+    if ip in ("127.0.0.1", "::1"):
+        # Адрес этого компьютера: отвечает встроенный шифрованный DNS, если он запущен.
+        try:
+            from dns.local_proxy import active_mode
+
+            mode = active_mode()
+        except Exception:
+            mode = ""
+        return (f"шифрованный DNS программы, режим {mode}" if mode else "локальный DNS на этом компьютере"), "", ""
+    found = find_provider_by_address(ip)
+    if found is None:
+        return "", "", ""
+    category, name, info = found
+    return str(name), str(category), str(info.get("status", ""))
+
+
+def environment_lines() -> list[str]:
+    lines: list[str] = []
+    if sys.platform == "win32":
+        version = sys.getwindowsversion()
+        edition = "Windows 11" if version.build >= 22000 else f"Windows {version.major}"
+        lines.append(f"🖥️ {edition} (сборка {version.build})")
+
+    servers = net_access.system_servers()
+    if servers:
+        described: list[str] = []
+        unblock_names: list[str] = []
+        blocked_names: list[str] = []
+        for ip in servers:
+            name, category, status = _dns_provider(ip)
+            described.append(f"{ip} ({name})" if name else ip)
+            if category == "Для ИИ" and name not in unblock_names:
+                unblock_names.append(name)
+            if status == "blocked" and name not in blocked_names:
+                blocked_names.append(name)
+        lines.append(f"🌐 DNS-серверы системы: {', '.join(described)}")
+        for name in unblock_names:
+            lines.append(
+                f"ℹ️ {name} сам меняет адреса части сайтов, чтобы обходить блокировки. "
+                "Такие адреса проверяются по сертификату и подменой не считаются."
+            )
+        for name in blocked_names:
+            lines.append(
+                f"⚠️ {name} в России блокируется: обычные запросы к нему могут не доходить "
+                "или подменяться по дороге. Что отвечает на вашей линии, покажет вкладка «DNS-серверы»."
+            )
+    return lines
+
+
+def zapret_status() -> tuple[bool | None, str]:
+    try:
+        from settings.mode import ALL_WINWS_EXE_NAME_SET, WINWS_EXE_FAMILY_LABEL
+        from utils.windows_process_probe import iter_process_records_winapi
+
+        running = [
+            f"{name} (PID {pid})"
+            for pid, name in iter_process_records_winapi()
+            if str(name or "").lower() in ALL_WINWS_EXE_NAME_SET
+        ]
+    except Exception as exc:
+        return None, f"⚠️ Zapret: не удалось проверить процессы ({exc})"
+    if running:
+        return True, f"✅ Zapret запущен: {', '.join(running)}"
+    return False, f"❌ Zapret не запущен ({WINWS_EXE_FAMILY_LABEL} нет среди процессов)"
+
+
+def download(run: Run, host: str, path: str) -> ProbeResult | None:
+    """Загрузка файла для проверки обрыва."""
+    ip = net_access.known_address(run, host)
+    if not ip:
+        return None
+    from diagnostics.freeze_check import READ_LIMIT
+
+    return net_access.fetch(run, host, ip, path, read_limit=READ_LIMIT, read_timeout=FREEZE_READ_TIMEOUT)
+
+
+def upload(run: Run, host: str, path: str) -> upload_probe.UploadVerdict | None:
+    """Проверка отправки данных на тот же сервер. None — адреса нет или проверку сняли."""
+    ip = net_access.known_address(run, host)
+    if not ip or run.dns_cancelled():
+        return None
+    facts = upload_probe.collect(host, ip, path, submit=run.submit, cancel=run.probe_cancel)
+    return upload_probe.judge(facts)
+
+
+def _system_has_ipv6_route() -> bool | None:
+    """Считает ли Windows, что по IPv6 есть дорога в интернет. None — не Windows или ошибка."""
+    if sys.platform != "win32":
+        return None
+    from dns.winapi import internet_route
+
+    return bool(internet_route().has_ipv6)
+
+
+def check_ipv6(run: Run) -> ipv6_check.Ipv6Verdict:
+    facts = ipv6_check.collect(
+        has_route=_system_has_ipv6_route,
+        lookup=lambda host: net_access.doh_lookup(run, host, TYPE_AAAA)[1],
+        get=lambda host, ip: net_access.get(run, host, ip, "/"),
+        submit=run.submit,
+    )
+    return ipv6_check.judge(facts)
+
+
+IPV6_ICON = {
+    ipv6_check.IPV6_OK: "✅",
+    ipv6_check.IPV6_ABSENT: "ℹ️",
+    ipv6_check.IPV6_BROKEN: "⚠️",
+    ipv6_check.IPV6_UNKNOWN: "❔",
+}
+
+
+_CLOCK_HOST = "www.google.com"
+
+
+def clock_skew(run: Run) -> float | None:
+    """На сколько секунд часы компьютера впереди времени сервера. None — узнать не удалось."""
+    from email.utils import parsedate_to_datetime
+
+    addresses = net_access.doh_lookup(run, _CLOCK_HOST)[1]
+    if not addresses:
+        return None
+    result = net_access.get(run, _CLOCK_HOST, addresses[0], "/generate_204", read_limit=1)
+    local = time.time()
+    for line in result.body.split(b"\r\n\r\n", 1)[0].split(b"\r\n")[1:]:
+        name, _colon, value = line.partition(b":")
+        if name.strip().lower() == b"date":
+            try:
+                return local - parsedate_to_datetime(value.decode("ascii", errors="ignore").strip()).timestamp()
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def check_system(run: Run, services: dict[str, Service]) -> tuple[system_state.SystemItem, ...]:
+    hosts = tuple(dict.fromkeys(target.host for service in services.values() for target in service.targets))
+    facts = system_state.collect_facts(check_hosts=hosts, clock_skew=lambda: clock_skew(run))
+    return system_state.judge(facts)
+
+
+SYSTEM_ICON = {
+    system_state.LEVEL_OK: "✅",
+    system_state.LEVEL_INFO: "ℹ️",
+    system_state.LEVEL_WARN: "⚠️",
+    system_state.LEVEL_FAIL: "❌",
+    system_state.LEVEL_UNKNOWN: "❔",
+}
+
+
+DNS_FINDING_LEVEL = {"fail": Level.FAIL, "warn": Level.WARN}
+_DNS_FINDING_ICON = {"ok": "✅", "info": "ℹ️", "warn": "⚠️", "fail": "❌"}
+
+
+def finish_dns_servers(run: Run, future: Future, emit: Emit) -> dict | None:
+    """Итог проверки DNS-серверов для полной проверки: печатает раздел и возвращает словарь."""
+    try:
+        result = run.wait(future)
+    except Stopped:
+        raise
+    except Exception as exc:
+        emit(f"❔ DNS-серверы: проверка не выполнилась ({exc})")
+        return None
+    if not isinstance(result, dict):
+        return None
+    findings = [
+        {"level": str(item.get("level") or "info"), "text": str(item.get("text") or "")}
+        for item in result.get("findings") or ()
+        if item.get("text")
+    ]
+    emit("")
+    emit("━━━━━━━━ DNS-серверы ━━━━━━━━")
+    for finding in findings:
+        emit(f"{_DNS_FINDING_ICON.get(finding['level'], 'ℹ️')} {finding['text']}")
+    text = str(result.get("text") or "")
+    for line in text.splitlines():
+        emit(f"   {line}")
+    return {"level": str(result.get("level") or "unknown"), "findings": findings, "text": text}
+
+
+def find_filter_place(run: Run, services: dict[str, Service], collected: dict[str, list[Probe]], emit: Emit) -> dict | None:
+    """Где стоит фильтр — по первому сайту, QUIC к которому блокируют по имени."""
+    from diagnostics import path_trace
+
+    blocked = [
+        probe
+        for probes in collected.values()
+        for probe in probes
+        if probe.quic is not None
+        and probe.quic.code == quic_probe.QUIC_BLOCKED_BY_NAME
+        and probe.reach is not None
+        and probe.reach.ip
+        and ":" not in probe.reach.ip
+    ]
+    # Фильтр один на всю сеть: достаточно найти его по одному сайту.
+    if not blocked or run.dns_cancelled():
+        return None
+    probe = blocked[0]
+    ip = probe.reach.ip
+    trace = path_trace.trace_route(ip, should_stop=run.dns_cancelled)
+    facts = path_trace.locate_filter(ip, probe.host, max_ttl=FILTER_MAX_TTL, cancel=run.probe_cancel)
+    verdict = path_trace.judge_filter(facts, trace if trace.supported else None)
+    if verdict is None:
+        return None
+    emit("")
+    emit("━━━━━━━━ Где стоит фильтр ━━━━━━━━")
+    found = verdict.code == path_trace.FILTER_FOUND
+    emit(f"{'📍' if found else 'ℹ️'} По сайту {probe.host}: {verdict.text}")
+    return {
+        "host": probe.host,
+        "address": ip,
+        "found": found,
+        "hop": verdict.hop,
+        "text": report_text.sentence(verdict.text),
+        "hops": [
+            {"ttl": hop.ttl, "address": hop.address, "rtt_ms": hop.rtt_ms}
+            for hop in (trace.hops if trace.supported else ())
+        ],
+    }
+
+
+def check_speed(run: Run, emit: Emit) -> dict | None:
+    """Скорость зарубежных серверов против российских. Идёт последней, когда остальная нагрузка спала."""
+
+    def download(server: speed_check.SpeedServer) -> tuple[int, float] | None:
+        ip = net_access.known_address(run, server.host)
+        if not ip:
+            return None
+        started = time.monotonic()
+        stop_at = started + speed_check.SAMPLE_SECONDS
+        result = net_access.fetch(
+            run,
+            server.host,
+            ip,
+            server.path,
+            read_limit=speed_check.SAMPLE_BYTES,
+            # Качаем не дольше отведённого: на медленной линии три мегабайта шли бы минуту.
+            body_done=lambda _body: time.monotonic() >= stop_at,
+        )
+        if not result.ok:
+            return None
+        return int(result.body_size), time.monotonic() - started
+
+    samples = speed_check.check_speed(download, should_stop=run.dns_cancelled)
+    if not samples:
+        return None
+    report = speed_check.summarize_speed(samples)
+    emit("")
+    emit("━━━━━━━━ Скорость ━━━━━━━━")
+    for item in samples:
+        place = "Россия" if item.server.domestic else "за границей"
+        emit(f"{'ℹ️' if item.kbps is not None else '❔'} {item.server.name} ({place}): {speed_check.speed_text(item.kbps)}")
+    emit(f"{report_text.LEVEL_ICON[report.level]} {report.headline}")
+    slow = report.level == Level.WARN
+    return {
+        "level": report.level.value,
+        "headline": report.headline,
+        "items": [
+            {
+                "name": item.server.name,
+                "host": item.server.host,
+                "domestic": item.server.domestic,
+                "kbps": None if item.kbps is None else round(item.kbps, 1),
+                "state": "unknown" if item.kbps is None else ("warn" if slow and not item.server.domestic else "ok"),
+                "text": speed_check.speed_text(item.kbps),
+            }
+            for item in samples
+        ],
+    }
+
+
+def check_network(run: Run, other_tools) -> dict:
+    """«Ваша сеть»: внешний адрес, провайдер и адрес компьютера — готовым словарём для отчёта."""
+
+    def _fetch(server: str) -> bytes | None:
+        result = net_access.fetch(run, my_network.TRACE_HOST, server, my_network.TRACE_PATH, read_limit=2048)
+        return bytes(result.body) if result.ok and result.body else None
+
+    facts = my_network.collect(fetch=_fetch, # Владельца сети спрашиваем шифрованным путём: иначе за него ответил бы перехватчик DNS.
+        owner_of=lambda ip: lookup_ip_owner(ip, lambda name, rtype: net_access.doh_ask(run, name, rtype)),)
+    lines = my_network.judge(facts, bypass_tools=other_tools)
+    owner = facts.owner
+    provider = " · ".join(part for part in ((owner.owner if owner else ""), (f"AS{owner.asn}" if owner and owner.asn else "")) if part)
+    return {
+        "external_ip": facts.external_ip,
+        "country": facts.country,
+        "provider": provider,
+        "asn": owner.asn if owner else "",
+        "prefix": owner.prefix if owner else "",
+        "local_ip": facts.local_ip,
+        "lines": [{"state": line.state, "name": line.name, "text": line.text} for line in lines],
+    }

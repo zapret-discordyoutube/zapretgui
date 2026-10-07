@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from diagnostics import block_kind as bk
-from diagnostics import engine, report_text
+from diagnostics import engine, net_access, report_text
 from diagnostics.tls_probe import KIND_CONNECT, KIND_OK, KIND_TIMEOUT, ProbeResult
 from diagnostics.verdict import ReachState, judge_reach
 from utils.windows_dns_query import DnsAnswer
@@ -45,7 +45,7 @@ class ReachRecheckTests(unittest.TestCase):
 
         run = engine._Run(None, workers=8, deadline=60)
         self.addCleanup(run.close)
-        with patch.object(engine, "_get", side_effect=_get), patch.object(engine, "RETRY_PAUSE_S", 0.0):
+        with patch.object(net_access, "get", side_effect=_get), patch.object(engine, "RETRY_PAUSE_S", 0.0):
             engine._check_reach(run, probe, read_limit=0)
         probe.reach_state = judge_reach(probe.reach)
         if quic_ok:
@@ -184,7 +184,7 @@ class ReachRecheckTests(unittest.TestCase):
             run.deadline = 0.0
             return _dead(ip)
 
-        with patch.object(engine, "_get", side_effect=_get):
+        with patch.object(net_access, "get", side_effect=_get):
             engine._check_reach(run, probe, read_limit=0)
 
         self.assertEqual(judge_reach(probe.reach), ReachState.UNKNOWN)

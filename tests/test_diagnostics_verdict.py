@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import diagnostics.engine as engine
+from diagnostics import net_access, sections
 from diagnostics.tls_probe import (
     KIND_CERT,
     KIND_CONNECT,
@@ -224,7 +225,7 @@ class _Net:
         # TLS 1.2 / TLS 1.3 / HTTP по отдельности: по умолчанию проверку будто сняли.
         self.protocol_facts = None
         self.protocols_asked: list[tuple[str, str]] = []
-        self.ipv6 = engine.ipv6_check.Ipv6Verdict(engine.ipv6_check.IPV6_ABSENT, "в этой сети его нет")
+        self.ipv6 = sections.ipv6_check.Ipv6Verdict(sections.ipv6_check.IPV6_ABSENT, "в этой сети его нет")
         # Состояние системы читает реестр и службы: в сценариях движка оно задаётся явно.
         self.system_items: tuple = ()
 
@@ -259,21 +260,21 @@ class _Net:
 
         return (
             patch.object(
-                engine,
+                net_access,
                 "query_ipv4",
                 side_effect=lambda host, **_kw: (
                     self.system(host) if callable(self.system) else DnsAnswer(ips=self.system, status=self.status)
                 ),
             ),
             patch.object(
-                engine,
-                "_doh_lookup",
+                net_access,
+                "doh_lookup",
                 side_effect=lambda _run, _host, record_type=engine.DNS_TYPE_A: (
                     True,
                     self.reference_v6 if record_type == engine.DNS_TYPE_AAAA else self.reference,
                 ),
             ),
-            patch.object(engine, "https_get", side_effect=_https_get),
+            patch.object(net_access, "https_get", side_effect=_https_get),
             # Пауза перед повтором нужна настоящей сети; сценариям она только добавляет секунды.
             patch.object(engine, "RETRY_PAUSE_S", 0.0),
             # Уточнение причины ходит в сеть само: в сценариях движка оно подменено.
@@ -281,15 +282,15 @@ class _Net:
             patch.object(engine.quic_probe, "collect", side_effect=self._quic),
             patch.object(engine.volume_probe, "collect", side_effect=self._volume),
             patch.object(engine.protocol_probe, "collect", side_effect=self._protocols),
-            patch.object(engine, "_check_ipv6", side_effect=lambda _run: self.ipv6),
+            patch.object(sections, "check_ipv6", side_effect=lambda _run: self.ipv6),
             # «Ваша сеть» и дата-центры Telegram ходят в сеть сами: в сценариях движка их нет.
-            patch.object(engine, "_check_network", side_effect=lambda _run, _tools: self.network),
-            patch.object(engine, "_check_speed", side_effect=lambda _run, _emit: self.speed),
+            patch.object(sections, "check_network", side_effect=lambda _run, _tools: self.network),
+            patch.object(sections, "check_speed", side_effect=lambda _run, _emit: self.speed),
             patch.object(engine.telegram_check, "check_telegram", side_effect=lambda *_a, **_k: self.telegram),
-            patch.object(engine, "_check_system", side_effect=lambda _run, _services: self.system_items),
-            patch.object(engine, "hosts_file_ipv4", return_value=()),
-            patch.object(engine, "system_dns_servers", return_value=("83.220.169.155",)),
-            patch.object(engine, "_zapret_status", return_value=(True, "✅ Zapret запущен")),
+            patch.object(sections, "check_system", side_effect=lambda _run, _services: self.system_items),
+            patch.object(net_access, "hosts_file_ipv4", return_value=()),
+            patch.object(net_access, "system_dns_servers", return_value=("83.220.169.155",)),
+            patch.object(sections, "zapret_status", return_value=(True, "✅ Zapret запущен")),
             patch.object(engine, "running_bypass_tools", return_value=self.bypass_tools),
             patch.object(engine, "_discover_googlevideo", return_value=(("rr1---sn-test.googlevideo.com",), "")),
             # Звонки и обрыв 16 КБ проверяются в любом режиме — без сети в тестах.
@@ -320,9 +321,9 @@ class ReferenceResolverTests(unittest.TestCase):
         net = _Net()
         with ExitStack() as stack:
             for item in net.patches():
-                if getattr(item, "attribute", "") != "_doh_lookup":
+                if getattr(item, "attribute", "") != "doh_lookup":
                     stack.enter_context(item)
-            stack.enter_context(patch.object(engine, "query_doh", doh))
+            stack.enter_context(patch.object(net_access, "query_doh", doh))
             return fn(*args, **kwargs)
 
     def _doh(self, *, silent=(), cancelled=()):
@@ -381,8 +382,8 @@ class ReferenceResolverTests(unittest.TestCase):
 
         run = engine._Run(None, workers=8)
         try:
-            with patch.object(engine, "query_doh", doh):
-                answered, ips = engine._doh_lookup(run, "example.com")
+            with patch.object(net_access, "query_doh", doh):
+                answered, ips = net_access.doh_lookup(run, "example.com")
         finally:
             run.close()
 
@@ -522,11 +523,11 @@ class Ipv6InReportTests(unittest.TestCase):
     def _run(self, code: str, text: str):
         lines: list[str] = []
         net = _Net()
-        net.ipv6 = engine.ipv6_check.Ipv6Verdict(code, text)
+        net.ipv6 = sections.ipv6_check.Ipv6Verdict(code, text)
         return net.run(engine.run_blockcheck, "main", emit=lines.append), lines
 
     def test_broken_ipv6_is_a_warning_with_advice(self) -> None:
-        result, lines = self._run(engine.ipv6_check.IPV6_BROKEN, "настроен, но не работает")
+        result, lines = self._run(sections.ipv6_check.IPV6_BROKEN, "настроен, но не работает")
 
         self.assertIn("⚠️ IPv6 настроен, но не работает", lines)
         problem = next(item for item in result["problems"] if item["text"].startswith("IPv6"))
@@ -535,14 +536,14 @@ class Ipv6InReportTests(unittest.TestCase):
         self.assertEqual(result["ipv6"], {"state": "broken", "text": "настроен, но не работает"})
 
     def test_absent_and_working_ipv6_are_only_lines_in_report(self) -> None:
-        for code, icon in ((engine.ipv6_check.IPV6_ABSENT, "ℹ️"), (engine.ipv6_check.IPV6_OK, "✅")):
+        for code, icon in ((sections.ipv6_check.IPV6_ABSENT, "ℹ️"), (sections.ipv6_check.IPV6_OK, "✅")):
             with self.subTest(code=code):
                 result, lines = self._run(code, "текст")
                 self.assertIn(f"{icon} IPv6 текст", lines)
                 self.assertFalse([item for item in result["problems"] if item["text"].startswith("IPv6")])
 
     def test_ipv6_section_comes_after_sites_and_before_summary(self) -> None:
-        _result, lines = self._run(engine.ipv6_check.IPV6_OK, "работает")
+        _result, lines = self._run(sections.ipv6_check.IPV6_OK, "работает")
         section = lines.index("━━━━━━━━ IPv6 ━━━━━━━━")
 
         self.assertGreater(section, next(i for i, line in enumerate(lines) if line.startswith("━━━━━━━━ YouTube")))
@@ -563,39 +564,39 @@ class FreezeUploadWiringTests(unittest.TestCase):
 
         def collect(host, ip, path, **_kwargs):
             asked.append((host, ip, path))
-            return engine.upload_probe.UploadFacts(engine.upload_probe.PostResult(engine.upload_probe.POST_STALLED))
+            return sections.upload_probe.UploadFacts(sections.upload_probe.PostResult(sections.upload_probe.POST_STALLED))
 
         with (
-            patch.object(engine, "hosts_file_ipv4", return_value=("203.0.113.9",)) as hosts,
-            patch.object(engine, "https_get", return_value=_ok("203.0.113.9")) as get,
-            patch.object(engine.upload_probe, "collect", collect),
+            patch.object(net_access, "hosts_file_ipv4", return_value=("203.0.113.9",)) as hosts,
+            patch.object(net_access, "https_get", return_value=_ok("203.0.113.9")) as get,
+            patch.object(sections.upload_probe, "collect", collect),
         ):
-            engine._download(run, "cdn.example", "/file.bin")
-            verdict = engine._upload(run, "cdn.example", "/file.bin")
+            sections.download(run, "cdn.example", "/file.bin")
+            verdict = sections.upload(run, "cdn.example", "/file.bin")
 
         self.assertEqual(hosts.call_count, 1)
         self.assertEqual(get.call_args.args[:2], ("cdn.example", "203.0.113.9"))
         self.assertEqual(asked, [("cdn.example", "203.0.113.9", "/file.bin")])
-        self.assertEqual(verdict.code, engine.upload_probe.UPLOAD_UNKNOWN)
+        self.assertEqual(verdict.code, sections.upload_probe.UPLOAD_UNKNOWN)
 
     def test_no_address_or_stopped_run_means_no_upload_probe(self) -> None:
         run = self._run()
         with (
-            patch.object(engine, "hosts_file_ipv4", return_value=()),
-            patch.object(engine, "query_ipv4", return_value=DnsAnswer()),
-            patch.object(engine, "_doh_lookup", return_value=(False, ())),
-            patch.object(engine.upload_probe, "collect") as collect,
+            patch.object(net_access, "hosts_file_ipv4", return_value=()),
+            patch.object(net_access, "query_ipv4", return_value=DnsAnswer()),
+            patch.object(net_access, "doh_lookup", return_value=(False, ())),
+            patch.object(sections.upload_probe, "collect") as collect,
         ):
-            self.assertIsNone(engine._upload(run, "nowhere.example", "/"))
+            self.assertIsNone(sections.upload(run, "nowhere.example", "/"))
         collect.assert_not_called()
 
         stopped = engine._Run(lambda: True, workers=4)
         self.addCleanup(stopped.close)
         with (
-            patch.object(engine, "hosts_file_ipv4", return_value=("203.0.113.9",)),
-            patch.object(engine.upload_probe, "collect") as collect,
+            patch.object(net_access, "hosts_file_ipv4", return_value=("203.0.113.9",)),
+            patch.object(sections.upload_probe, "collect") as collect,
         ):
-            self.assertIsNone(engine._upload(stopped, "cdn.example", "/"))
+            self.assertIsNone(sections.upload(stopped, "cdn.example", "/"))
         collect.assert_not_called()
 
 
@@ -659,11 +660,11 @@ class ClockSkewTests(unittest.TestCase):
         self.addCleanup(run.close)
         result = ProbeResult(ip="142.250.1.1", kind=KIND_OK, status=204, body=body or b"")
         with (
-            patch.object(engine, "_doh_lookup", return_value=(bool(addresses), tuple(addresses))),
-            patch.object(engine, "https_get", return_value=result) as get,
-            patch.object(engine.time, "time", return_value=1_800_000_000.0),
+            patch.object(net_access, "doh_lookup", return_value=(bool(addresses), tuple(addresses))),
+            patch.object(net_access, "https_get", return_value=result) as get,
+            patch.object(sections.time, "time", return_value=1_800_000_000.0),
         ):
-            return engine._clock_skew(run), get
+            return sections.clock_skew(run), get
 
     def test_skew_is_local_time_minus_server_date(self) -> None:
         from email.utils import formatdate
@@ -759,7 +760,7 @@ class FullCheckTests(unittest.TestCase):
         )
         result, lines, calls = self._run(quic_blocked={"discord.com"}, trace=trace)
 
-        self.assertEqual(calls["locate"], [(DISCORD_REAL[0], "discord.com", engine.FILTER_MAX_TTL)])
+        self.assertEqual(calls["locate"], [(DISCORD_REAL[0], "discord.com", sections.FILTER_MAX_TTL)])
         self.assertEqual(calls["trace"], [DISCORD_REAL[0]])
         place = result["filter"]
         self.assertEqual((place["host"], place["found"], place["hop"]), ("discord.com", True, 6))
@@ -836,7 +837,7 @@ class EngineScenarioTests(unittest.TestCase):
         ] * 10)
         lines: list[str] = []
         net = _Net()
-        with patch.object(engine, "query_ipv4", side_effect=lambda *_a, **_k: next(answers)):
+        with patch.object(net_access, "query_ipv4", side_effect=lambda *_a, **_k: next(answers)):
             patches = [item for item in net.patches() if getattr(item, "attribute", "") != "query_ipv4"]
             from contextlib import ExitStack
 
