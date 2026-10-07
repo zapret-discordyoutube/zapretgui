@@ -1,9 +1,15 @@
 """Экран итогов BlockCheck: панель «что с сетью и что делать» и список сайтов.
 
 Панель итога отвечает на главный вопрос одной фразой («Всё открывается» /
-«Найдены проблемы: 2») и перечисляет проблемы по важности — каждая с советом и,
-где можно, кнопкой («Подобрать стратегию»). Список сайтов — одна строка на
-сервис: открывается ли он и что именно не так.
+«Найдены проблемы: 2»). Под ней — картина блокировок (``block_kinds_view``):
+полоса и плитки показывают, сколько сайтов открывается, сколько закрыто по
+адресу (IP), сколько режут по имени сайта (SNI) и у скольких загрузка
+обрывается после 16 КБ.
+
+Проблемы собраны в группы по виду блокировки: у группы цветная метка, одно
+пояснение простыми словами и общий совет, а внутри — строки сайтов с кнопкой
+(«Подобрать стратегию»). Список сайтов — одна строка на сервис: открывается ли
+он и чем именно ему мешают.
 """
 
 from __future__ import annotations
@@ -11,10 +17,12 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QHBoxLayout, QHeaderView, QLabel, QSizePolicy, QTableWidgetItem, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SimpleCardWidget, StrongBodyLabel, TableWidget
 
+from blockcheck.ui.block_kinds_view import KindPill, KindsOverview, kind_color, site_groups
+from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
@@ -114,8 +122,53 @@ class _HeightKeeper:
         QTimer.singleShot(0, self._sync_min_height)
 
 
+def _own_advice(problem: dict) -> list[str]:
+    """Советы строки без фраз-свидетельств («с именем сайта соединение обрывается…»)."""
+    evidence = set(problem.get("evidence") or ())
+    return [str(item) for item in problem.get("advice") or () if item not in evidence]
+
+
+def shared_advice(problems: list[dict]) -> list[str]:
+    """Советы, одинаковые у всех строк группы: их показывают один раз, в заголовке."""
+    if len(problems) < 2:
+        return []
+    others = [set(_own_advice(problem)) for problem in problems[1:]]
+    return [item for item in _own_advice(problems[0]) if all(item in other for other in others)]
+
+
+def group_problems(problems: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Проблемы по видам блокировки. Группы идут по важности худшей строки, внутри — как пришли."""
+    level_order = {"fail": 0, "warn": 1, "unknown": 2, "ok": 3}
+    kind_order = {kind: index for index, kind in enumerate(KIND_ORDER)}
+    groups: dict[str, list[dict]] = {}
+    for problem in problems:
+        kind = str(problem.get("kind") or KIND_OTHER)
+        groups.setdefault(kind if kind in KINDS else KIND_OTHER, []).append(problem)
+
+    def _rank(item: tuple[str, list[dict]]) -> tuple[int, int]:
+        kind, rows = item
+        return min(level_order.get(str(row.get("level")), 9) for row in rows), kind_order.get(kind, 99)
+
+    return sorted(groups.items(), key=_rank)
+
+
 class _ProblemRow(QWidget):
-    def __init__(self, problem: dict, on_action: ActionHandler | None, parent=None) -> None:
+    """Одна проблема: значок, текст, пояснения и кнопка.
+
+    ``grouped`` — строка стоит в группе, вид блокировки назван в заголовке
+    группы: вместо полной фразы хватает короткого названия (``title``).
+    ``hidden_advice`` — советы, уже показанные в заголовке группы.
+    """
+
+    def __init__(
+        self,
+        problem: dict,
+        on_action: ActionHandler | None,
+        parent=None,
+        *,
+        grouped: bool = False,
+        hidden_advice=(),
+    ) -> None:
         super().__init__(parent)
         self._level = str(problem.get("level") or "unknown")
         layout = QHBoxLayout(self)
@@ -128,13 +181,20 @@ class _ProblemRow(QWidget):
 
         texts = QVBoxLayout()
         texts.setSpacing(2)
-        self.text_label = BodyLabel(str(problem.get("text") or ""), self)
+        title = str(problem.get("title") or "") if grouped else ""
+        self.text_label = BodyLabel(title or str(problem.get("text") or ""), self)
         self.text_label.setWordWrap(True)
         texts.addWidget(self.text_label)
+        evidence = set(problem.get("evidence") or ())
+        self.advice_labels: list[CaptionLabel] = []
         for advice in problem.get("advice") or ():
-            advice_label = CaptionLabel(f"→ {advice}", self)
+            if advice in hidden_advice:
+                continue
+            # Свидетельство — это факт, а не действие: стрелка только у советов.
+            advice_label = CaptionLabel(str(advice) if advice in evidence else f"→ {advice}", self)
             advice_label.setWordWrap(True)
             texts.addWidget(advice_label)
+            self.advice_labels.append(advice_label)
         layout.addLayout(texts, 1)
 
         action = str(problem.get("action") or "")
@@ -167,8 +227,81 @@ class _ProblemRow(QWidget):
             pass
 
 
+class _ProblemGroup(QWidget):
+    """Проблемы одного вида блокировки: цветная метка, пояснение, общий совет и строки."""
+
+    def __init__(self, kind: str, problems: list[dict], on_action: ActionHandler | None, parent=None) -> None:
+        super().__init__(parent)
+        self._kind = kind
+        # «Остальное» — не вид блокировки: строки идут как раньше, без заголовка и подложки.
+        self._plain = kind == KIND_OTHER
+        self._color = QColor()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0) if self._plain else layout.setContentsMargins(16, 10, 12, 10)
+        layout.setSpacing(6)
+
+        self.pill: KindPill | None = None
+        self.about_label: CaptionLabel | None = None
+        self.shared_labels: list[CaptionLabel] = []
+        hidden: tuple[str, ...] = ()
+        if not self._plain:
+            info = kind_info(kind)
+            header = QHBoxLayout()
+            header.setSpacing(8)
+            self.pill = KindPill(kind, self)
+            header.addWidget(self.pill, 0, Qt.AlignmentFlag.AlignVCenter)
+            if len(problems) > 1:
+                header.addWidget(CaptionLabel(f"· {len(problems)}", self), 0, Qt.AlignmentFlag.AlignVCenter)
+            header.addStretch(1)
+            layout.addLayout(header)
+            if info.about:
+                self.about_label = CaptionLabel(info.about, self)
+                self.about_label.setWordWrap(True)
+                layout.addWidget(self.about_label)
+            hidden = tuple(shared_advice(problems))
+            for advice in hidden:
+                label = CaptionLabel(f"→ {advice}", self)
+                label.setWordWrap(True)
+                layout.addWidget(label)
+                self.shared_labels.append(label)
+
+        self.rows = [
+            _ProblemRow(problem, on_action, self, grouped=not self._plain, hidden_advice=hidden)
+            for problem in problems
+        ]
+        for row in self.rows:
+            layout.addWidget(row)
+        set_state_text(self, f"{kind_info(kind).title}, проблем: {len(problems)}")
+        self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
+        self._apply_theme_refresh()
+
+    def kind(self) -> str:
+        return self._kind
+
+    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
+        _ = force
+        self._color = QColor(kind_color(self._kind, tokens))
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        _ = event
+        if self._plain:
+            return
+        # Мягкая подложка в цвете вида и полоска-метка слева: рамок в окне без рамки нет.
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        fill = QColor(self._color)
+        fill.setAlphaF(0.07)
+        painter.setBrush(fill)
+        painter.drawRoundedRect(self.rect(), 8, 8)
+        painter.setBrush(self._color)
+        painter.drawRoundedRect(0, 10, 3, max(0, self.height() - 20), 1.5, 1.5)
+        painter.end()
+
+
 class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
-    """Итог проверки: одна фраза, строка про окружение, проблемы с советами."""
+    """Итог проверки: одна фраза, картина блокировок и проблемы по видам с советами."""
 
     def __init__(self, on_action: ActionHandler | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -209,10 +342,15 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         header.addLayout(titles, 1)
         root.addLayout(header)
 
+        # Картина блокировок: полоса и плитки по видам.
+        self.overview = KindsOverview(self)
+        self.overview.setVisible(False)
+        root.addWidget(self.overview)
+
         self._problems_host = QWidget(self)
         self._problems_layout = QVBoxLayout(self._problems_host)
-        self._problems_layout.setContentsMargins(56, 4, 0, 0)
-        self._problems_layout.setSpacing(6)
+        self._problems_layout.setContentsMargins(0, 4, 0, 0)
+        self._problems_layout.setSpacing(8)
         root.addWidget(self._problems_host)
 
         self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
@@ -226,9 +364,18 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         rows = []
         for index in range(self._problems_layout.count()):
             widget = self._problems_layout.itemAt(index).widget()
-            if isinstance(widget, _ProblemRow):
+            if isinstance(widget, _ProblemGroup):
+                rows.extend(widget.rows)
+            elif isinstance(widget, _ProblemRow):
                 rows.append(widget)
         return rows
+
+    def problem_groups(self) -> list[_ProblemGroup]:
+        return [
+            widget
+            for index in range(self._problems_layout.count())
+            if isinstance(widget := self._problems_layout.itemAt(index).widget(), _ProblemGroup)
+        ]
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -247,6 +394,8 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
 
     def _clear_problems(self) -> None:
         self._show_changes(None)
+        self.overview.clear()
+        self.overview.setVisible(False)
         while self._problems_layout.count():
             item = self._problems_layout.takeAt(0)
             widget = item.widget()
@@ -302,17 +451,23 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
             title = f"Найдены проблемы: {len(blocking)} — ниже, что с ними делать"
             mood = MOOD_ALARM if level == "fail" else MOOD_SAD
         self._show_changes(report)
-        rows = [_ProblemRow(problem, self._on_action, self._problems_host) for problem in problems]
+        rows: list[QWidget] = [
+            _ProblemGroup(kind, items, self._on_action, self._problems_host)
+            for kind, items in group_problems(problems)
+        ]
         working = list(report.get("working") or ())
         if working and problems:
             rows.append(_ProblemRow({"level": "ok", "text": f"Открываются: {', '.join(working)}"}, None, self._problems_host))
         for row in rows:
             self._problems_layout.addWidget(row)
         self._problems_host.setVisible(bool(rows))
+        groups = site_groups(report)
+        self.overview.setVisible(bool(groups))
+        self.overview.show_groups(groups)
         self._set_state(level, title, _environment_text(report), mood=mood)
-        # Проблемы выплывают по очереди, а если всё хорошо — салют.
+        # Группы выплывают по очереди, а если всё хорошо — салют.
         for order, row in enumerate(rows):
-            float_in(row, delay_ms=120 + order * 90)
+            float_in(row, delay_ms=160 + order * 90)
         if level == "ok":
             burst_confetti(self)
 
@@ -447,6 +602,20 @@ def _row_level(service: dict) -> str:
     return level
 
 
+def _row_kind(service: dict, level: str) -> str:
+    """Вид блокировки для строки сайта. Пусто — сайт открывается или вид неизвестен."""
+    kind = str(service.get("kind") or "")
+    return kind if level in ("fail", "warn") and kind in KINDS and kind != KIND_OTHER else ""
+
+
+def _result_word(level: str, kind: str) -> str:
+    """«✗ По имени (SNI)» вместо общего «✗ Не открывается», когда вид блокировки известен."""
+    if not kind:
+        return _RESULT_WORDS.get(level, "")
+    short = kind_info(kind).short
+    return f"{'✗' if level == 'fail' else '⚠'} {short[:1].upper()}{short[1:]}"
+
+
 HISTORY_SHOWN = 6
 _HISTORY_MARKS = {"ok": "✓", "warn": "!", "fail": "✗", "unknown": "?"}
 
@@ -536,16 +705,21 @@ class BlockcheckSitesTable(TableWidget):
         set_state_text(self, "Результаты BlockCheck по сайтам: пока нет результатов")
         install_fluent_item_tooltips(self)
         self._levels: list[str] = []
+        # Вид блокировки строки: им красится слово результата (тот же цвет, что у плитки).
+        self._kinds: list[str] = []
         self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
 
     def clear_rows(self) -> None:
         self.setRowCount(0)
         self._levels = []
+        self._kinds = []
         self.setMinimumHeight(0)
         self.setMaximumHeight(16777215)
         set_state_text(self, "Результаты BlockCheck по сайтам: пока нет результатов")
 
-    def _add_row(self, name: str, level: str, result_text: str, details: str, tooltip: str) -> None:
+    def _add_row(
+        self, name: str, level: str, result_text: str, details: str, tooltip: str, kind: str = ""
+    ) -> None:
         row = self.rowCount()
         self.insertRow(row)
         for column, text in enumerate((name, result_text, details)):
@@ -553,6 +727,7 @@ class BlockcheckSitesTable(TableWidget):
             set_fluent_item_tooltip(item, tooltip or details)
             self.setItem(row, column, item)
         self._levels.append(level)
+        self._kinds.append(kind)
 
     def show_report(self, report: dict) -> None:
         self.clear_rows()
@@ -565,7 +740,8 @@ class BlockcheckSitesTable(TableWidget):
             name = str(service.get("label") or "")
             if service.get("control"):
                 name = f"{name} (контрольный)"
-            self._add_row(name, level, _RESULT_WORDS.get(level, ""), short, tooltip)
+            kind = _row_kind(service, level)
+            self._add_row(name, level, _result_word(level, kind), short, tooltip, kind)
         for key, title in (("freeze", "Обрыв на 16–20 КБ"), ("voice", "Голосовые звонки (UDP)")):
             section = report.get(key)
             if not section:
@@ -634,6 +810,7 @@ class BlockcheckSitesTable(TableWidget):
             item = self.item(row, 1)
             if item is None:
                 continue
-            color = tone_color(_level_tone(level), tokens)
+            kind = self._kinds[row] if row < len(self._kinds) else ""
+            color = kind_color(kind, tokens) if kind else tone_color(_level_tone(level), tokens)
             if color:
                 item.setForeground(QColor(color))

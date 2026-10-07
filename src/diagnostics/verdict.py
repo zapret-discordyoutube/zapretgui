@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
+from diagnostics.block_kind import KIND_CUT, KIND_IP, kind_info, site_kind
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
@@ -230,6 +231,9 @@ class TargetOutcome:
     reach: ReachState
     dns: DnsState
     main: bool = False
+    # Вид блокировки (``diagnostics.block_kind``), если его уточнили пробами.
+    # Пусто — берётся тот, что следует из одного исхода ``reach``.
+    kind: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,14 +243,22 @@ class ServiceVerdict:
     # Что сделать, по пунктам. Первый пункт — главный.
     advice: tuple[str, ...] = field(default_factory=tuple)
     dns_note: str = ""
+    # Вид блокировки сервиса: по нему экран собирает проблемы в группы.
+    kind: str = ""
 
 
 _BROKEN = (ReachState.DPI, ReachState.FREEZE, ReachState.IP_BLOCK, ReachState.CERT)
 
 _ADVICE_STRATEGY = "Подберите другую стратегию: вкладка «Подбор стратегии» найдёт рабочую для вашего провайдера."
 _ADVICE_START = "Запустите Zapret на странице «Управление Zapret 2»."
+# Адрес принимает соединение, но шифрование не проходит ни с каким именем:
+# иногда стратегия справляется, но обещать этого нельзя.
+_ADVICE_STRATEGY_OR_ADDRESS = (
+    "Попробуйте подобрать стратегию во вкладке «Подбор стратегии». Если ни одна не подойдёт — закрыт сам адрес: "
+    "поможет DNS-профиль в «Редакторе hosts», другой DNS или VPN."
+)
 # Советы «почини через Zapret»: движок убирает их у гео-сайтов, которым Zapret не помогает.
-ADVICE_VIA_ZAPRET = (_ADVICE_STRATEGY, _ADVICE_START)
+ADVICE_VIA_ZAPRET = (_ADVICE_STRATEGY, _ADVICE_START, _ADVICE_STRATEGY_OR_ADDRESS)
 
 
 def advice_geo_site(service: str) -> str:
@@ -282,20 +294,25 @@ def _cert_cause(items: list[TargetOutcome]) -> DnsState | None:
     return None
 
 
-def _reason_for(states: list[ReachState], cert_cause: DnsState | None = None) -> str:
-    if ReachState.CERT in states:
+def _kind_of(item: TargetOutcome) -> str:
+    return item.kind or site_kind(item.reach.value)
+
+
+def _leading_kind(items: list[TargetOutcome]) -> str:
+    """Вид блокировки сервиса: у первого сломанного адреса (главный идёт первым)."""
+    return next((kind for kind in map(_kind_of, items) if kind), "")
+
+
+def _reason_for(items: list[TargetOutcome], cert_cause: DnsState | None = None) -> str:
+    """Чем мешают: «блокировка по имени сайта», «сервер заблокирован по адресу», «обрыв после 16 КБ»."""
+    if any(item.reach == ReachState.CERT for item in items):
         if cert_cause == DnsState.LOCAL:
             return "запись в файле hosts ведёт на чужой сервер"
         if cert_cause == DnsState.SPOOFED:
             return "DNS подсовывает адрес чужого сервера"
         return "вместо настоящего сервера отвечает чужой"
-    if ReachState.FREEZE in states:
-        return "ТСПУ обрывает загрузку данных"
-    if ReachState.DPI in states:
-        return "соединение блокирует провайдер"
-    if ReachState.IP_BLOCK in states:
-        return "серверы недоступны по адресу"
-    return "проверка не дала ответа"
+    kind = _leading_kind(items)
+    return kind_info(kind).reason if kind else "проверка не дала ответа"
 
 
 def _advice_for(
@@ -303,6 +320,7 @@ def _advice_for(
     *,
     zapret_running: bool | None,
     cert_cause: DnsState | None = None,
+    kind: str = "",
 ) -> tuple[str, ...]:
     if ReachState.CERT in states:
         if cert_cause == DnsState.LOCAL:
@@ -311,7 +329,9 @@ def _advice_for(
             return (_ADVICE_DNS,)
         return (_ADVICE_CERT,)
     if ReachState.DPI in states or ReachState.FREEZE in states:
-        return (_ADVICE_STRATEGY,) if zapret_running else (_ADVICE_START,)
+        if not zapret_running:
+            return (_ADVICE_START,)
+        return (_ADVICE_STRATEGY_OR_ADDRESS,) if kind == KIND_IP else (_ADVICE_STRATEGY,)
     if ReachState.IP_BLOCK in states:
         return (_ADVICE_IP,)
     return ("Повторите проверку через минуту.",)
@@ -348,22 +368,28 @@ def summarize_service(
             parts = ", ".join(item.purpose for item in secondary_broken)
             states = [item.reach for item in secondary_broken]
             cause = _cert_cause(secondary_broken)
-            headline = f"{label} открывается, но не работают {parts}: {_reason_for(states, cause)}"
-            advice = _advice_for(states, zapret_running=zapret_running, cert_cause=cause)
+            headline = f"{label} открывается, но не работают {parts}: {_reason_for(secondary_broken, cause)}"
+            advice = _advice_for(
+                states, zapret_running=zapret_running, cert_cause=cause, kind=_leading_kind(secondary_broken)
+            )
         if spoofed and _ADVICE_DNS not in advice:
             advice = advice + (_ADVICE_DNS,)
-        return ServiceVerdict(level, headline, advice, dns_note)
+        return ServiceVerdict(level, headline, advice, dns_note, _leading_kind(secondary_broken))
 
     if main.reach in _BROKEN:
-        states = [main.reach] + [item.reach for item in secondary_broken]
-        cause = _cert_cause([main, *secondary_broken])
-        headline = f"{label} не открывается: {_reason_for(states, cause)}"
+        broken = [main, *secondary_broken]
+        states = [item.reach for item in broken]
+        cause = _cert_cause(broken)
+        kind = _leading_kind(broken)
+        # При обрыве сайт «открывается» на первые килобайты: честнее сказать, что он не догружается.
+        opens = "грузится не до конца" if kind == KIND_CUT else "не открывается"
+        headline = f"{label} {opens}: {_reason_for(broken, cause)}"
         if main.reach in (ReachState.DPI, ReachState.FREEZE) and zapret_running:
             headline += " — Zapret запущен, но эту блокировку не обходит"
-        advice = _advice_for(states, zapret_running=zapret_running, cert_cause=cause)
+        advice = _advice_for(states, zapret_running=zapret_running, cert_cause=cause, kind=kind)
         if spoofed and _ADVICE_DNS not in advice:
             advice = advice + (_ADVICE_DNS,)
-        return ServiceVerdict(Level.FAIL, headline, advice, dns_note)
+        return ServiceVerdict(Level.FAIL, headline, advice, dns_note, kind)
 
     if main.reach == ReachState.NO_ADDRESS:
         return ServiceVerdict(

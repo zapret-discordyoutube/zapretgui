@@ -205,6 +205,9 @@ class _Net:
         # Что «показал» QUIC: по умолчанию проверку будто сняли — вывода нет.
         self.quic_facts = None
         self.quic_asked: list[tuple[str, str]] = []
+        # Что «показал» набор объёма по одному соединению: по умолчанию обрыва нет.
+        self.volume_facts = None
+        self.volume_asked: list[str] = []
         self.ipv6 = engine.ipv6_check.Ipv6Verdict(engine.ipv6_check.IPV6_ABSENT, "в этой сети его нет")
         # Состояние системы читает реестр и службы: в сценариях движка оно задаётся явно.
         self.system_items: tuple = ()
@@ -214,6 +217,12 @@ class _Net:
         if self.quic_facts is not None:
             return self.quic_facts(host, ip)
         return engine.quic_probe.QuicFacts(host=host, cancelled=True)
+
+    def _volume(self, host, ip, _path, **_kwargs):
+        self.volume_asked.append(host)
+        if self.volume_facts is not None:
+            return self.volume_facts(host, ip)
+        return engine.volume_probe.VolumeFacts(engine.volume_probe.VolumeRun(engine.volume_probe.RUN_PASSED, 33_000, 4))
 
     def _collect(self, host, result, **_kwargs):
         self.refined.append(host)
@@ -246,6 +255,7 @@ class _Net:
             # Уточнение причины ходит в сеть само: в сценариях движка оно подменено.
             patch.object(engine.block_cause, "collect", side_effect=self._collect),
             patch.object(engine.quic_probe, "collect", side_effect=self._quic),
+            patch.object(engine.volume_probe, "collect", side_effect=self._volume),
             patch.object(engine, "_check_ipv6", side_effect=lambda _run: self.ipv6),
             patch.object(engine, "_check_system", side_effect=lambda _run, _services: self.system_items),
             patch.object(engine, "hosts_file_ipv4", return_value=()),
@@ -1292,6 +1302,117 @@ class TlsProbeFailureTests(unittest.TestCase):
 
         self.assertEqual(result.kind, KIND_CONNECT)
         self.assertEqual(judge_reach(result), ReachState.IP_BLOCK)
+
+
+class BlockKindInReportTests(unittest.TestCase):
+    """В отчёте у каждого сайта назван вид блокировки: по адресу, по имени или обрыв после 16 КБ."""
+
+    @staticmethod
+    def _stalls(received: int, requests: int):
+        vp = engine.volume_probe
+        return vp.VolumeRun(vp.RUN_STALLED, received, requests)
+
+    def test_cut_after_16kb_is_found_on_a_site_with_a_small_page(self) -> None:
+        """Главная страница короткая и «открывается», но по соединению не проходит больше 14 КБ."""
+        vp = engine.volume_probe
+        lines: list[str] = []
+        net = _Net()
+        net.volume_facts = lambda host, _ip: (
+            vp.VolumeFacts(self._stalls(14_500, 20), self._stalls(14_100, 40))
+            if host == "discord.com"
+            else vp.VolumeFacts(vp.VolumeRun(vp.RUN_PASSED, 33_000, 4))
+        )
+        result = net.run(engine.run_blockcheck, "main", emit=lines.append)
+
+        discord = next(item for item in result["services"] if item["key"] == "discord")
+        main = next(item for item in discord["targets"] if item["main"])
+        self.assertEqual((main["state"], main["ok"], main["kind"], main["volume"]), ("freeze", False, "cut16", "cut"))
+        self.assertEqual(main["kind_title"], "Обрыв после 16 КБ")
+        self.assertIn("соединение замирает после 14 КБ", main["short"])
+        self.assertEqual((discord["level"], discord["kind"]), ("fail", "cut16"))
+        self.assertTrue(discord["headline"].startswith("Discord грузится не до конца: загрузка обрывается после 16 КБ"))
+        problem = next(item for item in result["problems"] if item["target"] == "discord.com")
+        self.assertEqual((problem["kind"], problem["title"], problem["action"]), ("cut16", "Discord", "strategy"))
+        self.assertNotIn("Discord", result["working"])
+        self.assertIn("   🏷 Вид блокировки: Обрыв после 16 КБ", lines)
+
+    def test_single_stall_does_not_turn_a_working_site_red(self) -> None:
+        vp = engine.volume_probe
+        net = _Net()
+        net.volume_facts = lambda _host, _ip: vp.VolumeFacts(
+            self._stalls(14_500, 20), vp.VolumeRun(vp.RUN_PASSED, 33_000, 70)
+        )
+        lines: list[str] = []
+        result = net.run(engine.run_blockcheck, "main", emit=lines.append)
+
+        self.assertEqual([item["level"] for item in result["services"]], ["ok", "ok"])
+        self.assertFalse([item for item in result["problems"] if item["level"] in ("fail", "warn")])
+        self.assertIn("Discord", result["working"])
+        self.assertIn("случайный сбой", "\n".join(lines))
+
+    def test_big_page_and_broken_site_are_not_probed_for_volume(self) -> None:
+        net = _Net(https=lambda host, ip: _ok(ip, body_size=40_000))
+        net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+        # Страница больше окна обрыва пришла целиком — повторять незачем.
+        self.assertNotIn("discord.com", net.volume_asked)
+
+        net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET, stage="tls"))
+        net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+        self.assertEqual(net.volume_asked, [])
+
+    def test_control_sites_are_not_loaded_with_volume_requests(self) -> None:
+        net = _Net()
+        net.run(engine.run_blockcheck, "all", emit=lambda _line: None)
+
+        self.assertIn("discord.com", net.volume_asked)
+        for host in ("www.google.com", "www.cloudflare.com", "ya.ru", "vk.com"):
+            self.assertNotIn(host, net.volume_asked)
+
+    def test_block_by_name_goes_to_its_own_group(self) -> None:
+        def facts(host, result):
+            return engine.block_cause.CauseFacts(
+                host=host,
+                result=result,
+                neutral=engine.block_cause.HelloResult(engine.block_cause.HELLO_OK),
+                nameless=engine.block_cause.HelloResult(engine.block_cause.HELLO_RESET),
+            )
+
+        net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET, stage="tls"), cause_facts=facts)
+        result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+
+        discord = next(item for item in result["services"] if item["key"] == "discord")
+        self.assertEqual(discord["kind"], "sni")
+        self.assertIn("блокировка по имени сайта (SNI)", discord["headline"])
+        problem = next(item for item in result["problems"] if item["target"] == "discord.com")
+        self.assertEqual((problem["kind"], problem["title"]), ("sni", "Discord"))
+        # Свидетельство стоит первым в советах и отдельно — чтобы экран не ставил перед ним стрелку.
+        self.assertEqual(problem["evidence"], problem["advice"][: len(problem["evidence"])])
+        self.assertTrue(problem["evidence"][0].startswith("Блокировка по имени сайта"))
+
+    def test_block_by_address_is_not_mixed_with_block_by_name(self) -> None:
+        def facts(host, result):
+            return engine.block_cause.CauseFacts(
+                host=host,
+                result=result,
+                neutral=engine.block_cause.HelloResult(engine.block_cause.HELLO_RESET),
+                nameless=engine.block_cause.HelloResult(engine.block_cause.HELLO_TIMEOUT),
+            )
+
+        net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET, stage="tls"), cause_facts=facts)
+        result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+
+        problem = next(item for item in result["problems"] if item["target"] == "discord.com")
+        self.assertEqual(problem["kind"], "ip")
+        self.assertIn("сервер заблокирован по адресу (IP)", problem["text"])
+        self.assertIn("Редакторе hosts", problem["advice"][-1])
+
+    def test_problems_about_the_network_have_their_own_kinds(self) -> None:
+        net = _Net(system=("0.0.0.0",))
+        result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+
+        kinds = {item["kind"] for item in result["problems"]}
+        self.assertIn("dns", kinds)
+        self.assertTrue(all(item["kind"] for item in result["problems"]))
 
 
 class IcmpAddressTests(unittest.TestCase):

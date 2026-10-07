@@ -267,6 +267,160 @@ class SummaryPanelTests(unittest.TestCase):
         self.assertIn("Zapret выключен", panel.env_label.text())
 
 
+def _kind_problem(kind: str, title: str, *, evidence=(), advice=("Подберите другую стратегию",), level="fail") -> dict:
+    return {
+        "level": level,
+        "text": f"{title} не открывается: причина",
+        "advice": [*evidence, *advice],
+        "evidence": list(evidence),
+        "action": "strategy",
+        "target": f"{title.lower()}.com",
+        "kind": kind,
+        "title": title,
+    }
+
+
+def _kind_service(label: str, level: str, kind: str = "", *, ok: bool = False, control: bool = False) -> dict:
+    return {
+        "key": label.lower(),
+        "label": label,
+        "control": control,
+        "level": level,
+        "kind": kind,
+        "headline": label,
+        "targets": [{"host": f"{label.lower()}.com", "purpose": "сайт", "ok": ok, "short": "подробность"}],
+    }
+
+
+_KINDS_REPORT = {
+    "zapret_running": True,
+    "elapsed": 9,
+    "problems": [
+        _kind_problem("sni", "X", evidence=("С именем x.com соединение обрывается.",)),
+        _kind_problem("sni", "LinkedIn", evidence=("С именем linkedin.com соединение обрывается.",)),
+        _kind_problem("ip", "Telegram", advice=("Попробуйте другой DNS",)),
+        _kind_problem("cut16", "Spotify"),
+        {"level": "warn", "text": "DNS подменяет ответы", "advice": ["Включите DoH"], "action": "dns", "kind": "dns"},
+    ],
+    "working": ["Discord"],
+    "services": [
+        _kind_service("Discord", "ok", ok=True),
+        # Подмена DNS при открывающемся сайте — не блокировка сайта.
+        _kind_service("YouTube", "warn", ok=True),
+        _kind_service("X", "fail", "sni"),
+        _kind_service("LinkedIn", "fail", "sni"),
+        _kind_service("Telegram", "fail", "ip"),
+        _kind_service("Spotify", "fail", "cut16"),
+        _kind_service("Google", "ok", ok=True, control=True),
+        _kind_service("Reddit", "unknown"),
+    ],
+}
+
+
+class BlockKindsOnScreenTests(unittest.TestCase):
+    """На экране видно, где бан по адресу, где блокировка по имени, а где обрыв после 16 КБ."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_sites_are_counted_by_block_kind(self) -> None:
+        from blockcheck.ui.block_kinds_view import site_groups
+
+        groups = {group.key: group.names for group in site_groups(_KINDS_REPORT)}
+
+        self.assertEqual(
+            groups,
+            {
+                "open": ("Discord", "YouTube"),
+                "ip": ("Telegram",),
+                "sni": ("X", "LinkedIn"),
+                "cut16": ("Spotify",),
+                "unknown": ("Reddit",),
+            },
+        )
+        # Сначала хорошее, затем виды по тяжести; контрольный сайт не считается.
+        self.assertEqual([group.key for group in site_groups(_KINDS_REPORT)], ["open", "ip", "sni", "cut16", "unknown"])
+
+    def test_overview_shows_a_tile_and_a_bar_share_for_every_kind(self) -> None:
+        panel = BlockcheckSummaryPanel()
+        self.addCleanup(panel.deleteLater)
+        panel.show_report(dict(_KINDS_REPORT))
+
+        tiles = panel.overview.tiles()
+        self.assertFalse(panel.overview.isHidden())
+        self.assertEqual([tile.group().title for tile in tiles][:4], ["Открываются", "По адресу (IP)", "По имени (SNI)", "Обрыв после 16 КБ"])
+        self.assertEqual([tile.group().count for tile in tiles], [2, 1, 2, 1, 1])
+        self.assertEqual([group.key for group in panel.overview.bar.groups()], ["open", "ip", "sni", "cut16", "unknown"])
+        self.assertIn("по имени (sni) — 2", panel.overview.accessibleDescription() + panel.overview.accessibleName())
+        self.assertIn("SNI", tiles[2].toolTip())
+
+        panel.set_pending()
+        self.assertTrue(panel.overview.isHidden())
+        self.assertEqual(panel.overview.tiles(), [])
+
+    def test_tile_number_ends_on_its_value_with_animations_off(self) -> None:
+        from blockcheck.ui import block_kinds_view as view
+
+        tile = view.KindTile(view.SiteGroup("sni", "По имени (SNI)", ("X", "LinkedIn")))
+        self.addCleanup(tile.deleteLater)
+        with patch.object(view, "are_live_animations_enabled", return_value=False):
+            tile.play(0)
+
+        self.assertEqual(tile.shown_count(), 2)
+
+    def test_problems_are_grouped_by_kind_with_one_explanation_per_group(self) -> None:
+        panel = BlockcheckSummaryPanel(on_action=lambda *_args: None)
+        self.addCleanup(panel.deleteLater)
+        panel.show_report(dict(_KINDS_REPORT))
+
+        groups = panel.problem_groups()
+        self.assertEqual([group.kind() for group in groups], ["ip", "sni", "cut16", "dns"])
+        sni = groups[1]
+        self.assertEqual(sni.pill.text(), "Блокировка по имени (SNI)")
+        self.assertIn("SNI", sni.about_label.text())
+        # Одинаковый у обоих сайтов совет показан один раз — в заголовке группы.
+        self.assertEqual([label.text() for label in sni.shared_labels], ["→ Подберите другую стратегию"])
+        self.assertEqual([row.text_label.text() for row in sni.rows], ["X", "LinkedIn"])
+        # В строке остаётся только её свидетельство — и без стрелки: это факт, а не действие.
+        self.assertEqual([label.text() for label in sni.rows[0].advice_labels], ["С именем x.com соединение обрывается."])
+        self.assertEqual(sni.rows[0].action_button.text(), "Подобрать стратегию")
+        # В группе из одной строки совет остаётся у строки.
+        self.assertEqual(groups[0].shared_labels, [])
+        self.assertEqual([label.text() for label in groups[0].rows[0].advice_labels], ["→ Попробуйте другой DNS"])
+        # Все строки по-прежнему доступны списком: группы, затем «Открываются».
+        self.assertEqual(len(panel.problem_rows()), 6)
+
+    def test_problem_without_kind_keeps_the_plain_look(self) -> None:
+        panel = BlockcheckSummaryPanel()
+        self.addCleanup(panel.deleteLater)
+        panel.show_report(dict(_REPORT))
+
+        [group] = panel.problem_groups()
+        self.assertEqual(group.kind(), "other")
+        self.assertIsNone(group.pill)
+        self.assertEqual(group.rows[0].text_label.text(), "X (Twitter) не открывается: соединение блокирует провайдер")
+
+    def test_table_names_the_kind_instead_of_plain_not_opening(self) -> None:
+        table = BlockcheckSitesTable()
+        self.addCleanup(table.deleteLater)
+        table.show_report(dict(_KINDS_REPORT))
+
+        words = {table.item(row, 0).text(): table.item(row, 1).text() for row in range(table.rowCount())}
+        self.assertEqual(words["Telegram"], "✗ По адресу (IP)")
+        self.assertEqual(words["X"], "✗ По имени (SNI)")
+        self.assertEqual(words["Spotify"], "✗ Обрыв после 16 КБ")
+        self.assertEqual(words["Discord"], "✓ Открывается")
+        self.assertEqual(words["Reddit"], "? Не удалось проверить")
+        # У каждого вида свой цвет слова — тот же, что у плитки.
+        colors = {
+            name: table.item(row, 1).foreground().color().name()
+            for row in range(table.rowCount())
+            if (name := table.item(row, 0).text()) in ("Telegram", "X", "Spotify")
+        }
+        self.assertEqual(len(set(colors.values())), 3)
+
+
 class HistoryCardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

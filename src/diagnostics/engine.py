@@ -19,7 +19,13 @@ BlockCheck отвечает на вопрос «какие сайты откры
    по IPv6: браузер сам переключается на IPv6, если IPv4 режут сильнее.
 3. **Честен ли DNS.** Если адрес из DNS не совпал с эталоном, решает
    сертификат по этому адресу (см. ``diagnostics.verdict``).
-4. Результаты печатаются в постоянном порядке, в конце — итог с советами.
+4. **Чем именно мешают.** Если сайт не открылся, дополнительные пробы
+   (``diagnostics.block_cause``) выясняют, режут по имени сайта или закрыт
+   сам адрес. Если открылся — по одному соединению набирается объём
+   (``diagnostics.volume_probe``): так виден обрыв после 16 КБ у сайта с
+   короткой главной страницей. Итог — вид блокировки
+   (``diagnostics.block_kind``): по нему экран собирает проблемы в группы.
+5. Результаты печатаются в постоянном порядке, в конце — итог с советами.
    Тот же итог возвращается словарём для экрана BlockCheck.
 
 Все сетевые вызовы ограничены по времени; кнопка «Стоп» снимает их сразу.
@@ -35,7 +41,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from diagnostics import block_cause, ipv6_check, quic_probe, system_state, upload_probe
+from diagnostics import block_cause, block_kind, ipv6_check, quic_probe, system_state, upload_probe, volume_probe
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
@@ -45,6 +51,7 @@ from diagnostics.tls_probe import (
 from diagnostics.verdict import (
     ADVICE_DNS as _ADVICE_DNS,
     ADVICE_VIA_ZAPRET as _ADVICE_VIA_ZAPRET,
+    FREEZE_MAX_BYTES,
     advice_geo_site as _advice_geo_site,
     DnsJudgement,
     DnsState,
@@ -276,6 +283,14 @@ class _Probe:
     cause: block_cause.Cause | None = None
     # Проходит ли QUIC (UDP 443) к этому сайту. None — не проверяли или проверку сняли.
     quic: quic_probe.QuicVerdict | None = None
+    # Проходит ли по одному соединению больше 16 КБ. None — не проверяли:
+    # сайт не открылся или главная страница и так больше.
+    volume: volume_probe.VolumeVerdict | None = None
+
+    @property
+    def kind(self) -> str:
+        """Вид блокировки: по адресу, по имени сайта, обрыв после 16 КБ… Пусто — сайт открывается."""
+        return block_kind.site_kind(self.reach_state.value, self.cause.code if self.cause else "")
 
 
 class _Run:
@@ -545,7 +560,7 @@ def _merge_dns_answers(answers: list[DnsAnswer]) -> tuple[DnsAnswer, int]:
     return DnsAnswer(ips=tuple(ips), cnames=first.cnames, status=first.status, elapsed_ms=first.elapsed_ms), nxdomain
 
 
-def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Probe:
+def _probe_target(run: _Run, target: Target, service: str, *, full: bool, volume: bool = False) -> _Probe:
     host = target.host
     discovery_note = ""
     if target.discover_googlevideo:
@@ -610,6 +625,8 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Pr
         # проверки идут одновременно.
         quic_future = _start_quic(run, probe)
         _refine_cause(run, probe)
+        if volume:
+            _check_volume(run, probe)
         if quic_future is not None:
             probe.quic = quic_probe.judge(quic_future.result())
     return probe
@@ -647,6 +664,29 @@ def _refine_cause(run: _Run, probe: _Probe) -> None:
         probe.cause = block_cause.judge(facts)
 
 
+def _check_volume(run: _Run, probe: _Probe) -> None:
+    """Сайт открылся: проверяем, проходит ли по одному соединению больше 16 КБ."""
+    result = probe.reach
+    if probe.reach_state != ReachState.OK or result is None or not result.ip or run.dns_cancelled():
+        return
+    if result.body_size >= FREEZE_MAX_BYTES and not result.body_cut:
+        # Главная страница сама больше окна обрыва и пришла целиком.
+        return
+    facts = volume_probe.collect(probe.host, result.ip, probe.target.path, cancel=run.probe_cancel)
+    if run.dns_cancelled():
+        return
+    probe.volume = volume_probe.judge(facts)
+    if probe.volume.code == volume_probe.VOLUME_CUT:
+        probe.reach_state = ReachState.FREEZE
+
+
+def _fail_text(probe: _Probe) -> str:
+    """Почему адрес не открылся — одной фразой."""
+    if probe.volume is not None and probe.volume.code == volume_probe.VOLUME_CUT:
+        return f"{probe.volume.text} — так провайдер обрывает загрузку"
+    return describe_reach(probe.reach, timeout=HTTPS_TIMEOUT)
+
+
 # ---------------------------------------------------------------------------
 # Текст отчёта
 # ---------------------------------------------------------------------------
@@ -675,7 +715,7 @@ def _reach_text(probe: _Probe) -> str:
         if ":" in result.ip:
             return f"открывается по IPv6, по IPv4 — нет ({result.elapsed_ms:.0f} мс{tls}, {result.ip})"
         return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source})"
-    text = describe_reach(result, timeout=HTTPS_TIMEOUT)
+    text = _fail_text(probe)
     if result is None or not result.ip:
         return text
     tries = f", попыток: {probe.attempts}" if probe.attempts > 1 else ""
@@ -733,8 +773,13 @@ def _probe_lines(probe: _Probe, *, full: bool) -> list[str]:
     if probe.reach_state == ReachState.UNKNOWN:
         icon = "❔"
     lines = [f"{icon} {title}: {_reach_text(probe)}"]
+    if probe.kind:
+        lines.append(f"   🏷 Вид блокировки: {block_kind.kind_info(probe.kind).title}")
     if probe.cause is not None:
         lines.append(f"   🔎 {_sentence(probe.cause.text)}")
+    if probe.volume is not None and probe.volume.code != volume_probe.VOLUME_CUT:
+        icon = "✅" if probe.volume.code == volume_probe.VOLUME_OK else "ℹ️"
+        lines.append(f"   {icon} Обрыв после 16 КБ: {probe.volume.text}")
     if probe.quic is not None:
         lines.append(f"   {_QUIC_ICON[probe.quic.code]} QUIC (UDP 443): {probe.quic.text}")
     if probe.discovery_note:
@@ -833,7 +878,10 @@ def _run_probes(
         for target in service.targets:
             if not full and target.discover_googlevideo:
                 target = Target(target.host, target.purpose, target.path, main=target.main)
-            planned.append((key, target, run.submit(_probe_target, run, target, key, full=full)))
+            # Объём по одному соединению — это десятки запросов подряд: контрольные
+            # сайты ими не нагружаем, их всё равно не блокируют.
+            volume = full and not service.control
+            planned.append((key, target, run.submit(_probe_target, run, target, key, full=full, volume=volume)))
 
     collected: dict[str, list[_Probe]] = {key: [] for key in services}
     current_service = ""
@@ -864,6 +912,7 @@ def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: 
             reach=probe.reach_state,
             dns=probe.judgement.state if probe.judgement else DnsState.UNKNOWN,
             main=probe.target.main,
+            kind=probe.kind,
         )
         for probe in probes
     ]
@@ -872,7 +921,7 @@ def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: 
 
 def _short_text(probe: _Probe) -> str:
     if probe.reach_state != ReachState.OK:
-        return describe_reach(probe.reach, timeout=HTTPS_TIMEOUT)
+        return _fail_text(probe)
     if probe.reach is not None and ":" in probe.reach.ip:
         return "открывается только по IPv6"
     return "открывается"
@@ -889,6 +938,11 @@ def _target_report(probe: _Probe) -> dict:
         "short": _short_text(probe),
         "dns_state": probe.judgement.state.value if probe.judgement else "",
         "dns_reason": probe.judgement.reason if probe.judgement else "",
+        # Вид блокировки одним словом (ip / sni / cut16 / …) и его название.
+        "kind": probe.kind,
+        "kind_title": block_kind.kind_info(probe.kind).title if probe.kind else "",
+        "volume": probe.volume.code if probe.volume else "",
+        "volume_text": probe.volume.text if probe.volume else "",
         "cause": probe.cause.code if probe.cause else "",
         "cause_text": _sentence(probe.cause.text) if probe.cause else "",
         "quic": probe.quic.code if probe.quic else "",
@@ -954,8 +1008,33 @@ def _no_geo_service(_host: str) -> str:
     return ""
 
 
-def _problem(level: Level, text: str, advice=(), *, action: str = "", target: str = "") -> dict:
-    return {"level": level.value, "text": text, "advice": list(advice), "action": action, "target": target}
+def _problem(
+    level: Level,
+    text: str,
+    advice=(),
+    *,
+    action: str = "",
+    target: str = "",
+    kind: str = block_kind.KIND_OTHER,
+    title: str = "",
+    evidence=(),
+) -> dict:
+    """Строка итога. ``kind`` — вид блокировки: по нему экран собирает строки в группы.
+
+    ``title`` — короткое название для строки внутри группы (вид блокировки там
+    уже назван в заголовке). ``evidence`` — на чём основан вывод; эти же фразы
+    стоят первыми в ``advice``.
+    """
+    return {
+        "level": level.value,
+        "text": text,
+        "advice": list(advice),
+        "action": action,
+        "target": target,
+        "kind": kind,
+        "title": title,
+        "evidence": list(evidence),
+    }
 
 
 def _collect_problems(
@@ -996,6 +1075,7 @@ def _collect_problems(
                     "В таком режиме Zapret не помогает: закрыты сами адреса, а не отдельные сайты. "
                     "Обычно это временное ограничение, чаще в мобильных сетях — проверьте другую сеть.",
                 ),
+                kind=block_kind.KIND_NETWORK,
             )
         )
     elif offline:
@@ -1005,6 +1085,7 @@ def _collect_problems(
                 f"Не открываются даже контрольные сайты ({', '.join(services[key].label for key in controls)}) — "
                 "похоже, нет интернета или всё соединение режет антивирус, прокси или VPN",
                 ("Проверьте подключение к интернету и повторите проверку.",),
+                kind=block_kind.KIND_NETWORK,
             )
         )
     # В обоих случаях причина общая и уже названа: совет «подберите стратегию»
@@ -1048,7 +1129,20 @@ def _collect_problems(
             causes = tuple(
                 dict.fromkeys(_sentence(probe.cause.text) + "." for probe in broken if probe.cause is not None)
             )
-            problems.append(_problem(verdict.level, verdict.headline, causes + advice, action=action, target=target))
+            problems.append(
+                _problem(
+                    verdict.level,
+                    verdict.headline,
+                    causes + advice,
+                    action=action,
+                    target=target,
+                    kind=verdict.kind or block_kind.KIND_OTHER,
+                    # Сервис не открывается целиком — в группе хватит названия;
+                    # «открывается, но не работают картинки» нужно сказать полностью.
+                    title=service.label if verdict.level == Level.FAIL else "",
+                    evidence=causes,
+                )
+            )
         elif verdict.level == Level.UNKNOWN:
             if not offline:
                 problems.append(_problem(Level.UNKNOWN, verdict.headline, verdict.advice))
@@ -1056,11 +1150,21 @@ def _collect_problems(
             working.append(service.label)
 
     if freeze is not None and freeze.level in (Level.FAIL, Level.WARN):
-        problems.append(_problem(freeze.level, freeze.headline, freeze.advice, action="strategy" if zapret_running else "start_zapret"))
+        problems.append(
+            _problem(
+                freeze.level,
+                freeze.headline,
+                freeze.advice,
+                action="strategy" if zapret_running else "start_zapret",
+                kind=block_kind.KIND_CUT,
+            )
+        )
     elif freeze is not None and freeze.level == Level.UNKNOWN and not offline:
         problems.append(_problem(freeze.level, freeze.headline, freeze.advice))
     if voice is not None and voice.level != Level.OK and not offline:
-        problems.append(_problem(voice.level, voice.headline, voice.advice, action="strategy_voice"))
+        problems.append(
+            _problem(voice.level, voice.headline, voice.advice, action="strategy_voice", kind=block_kind.KIND_VOICE)
+        )
 
     spoofed = [
         probe.host
@@ -1077,6 +1181,7 @@ def _collect_problems(
                 "которые спрашивают адрес у Windows, эти сайты не откроют",
                 (_ADVICE_DNS,),
                 action="dns",
+                kind=block_kind.KIND_DNS,
             )
         )
     # QUIC заблокирован, а сам сайт открывается: это не «сайт не работает», но
@@ -1098,17 +1203,33 @@ def _collect_problems(
                 f"QUIC (UDP 443) блокируется по имени для: {', '.join(quic_blocked)}. Сайты открываются обычным "
                 "соединением, но браузер сначала пробует QUIC, поэтому открытие и начало видео могут запаздывать",
                 (_ADVICE_QUIC,),
+                kind=block_kind.KIND_QUIC,
             )
         )
     # Неполадки самого компьютера показываются всегда: они объясняют и «нет интернета».
     for item in system:
         level = _SYSTEM_PROBLEM_LEVEL.get(item.level)
         if level is not None:
-            problems.append(_problem(level, f"{item.title}: {item.text}", (item.advice,) if item.advice else ()))
+            problems.append(
+                _problem(
+                    level,
+                    f"{item.title}: {item.text}",
+                    (item.advice,) if item.advice else (),
+                    kind=block_kind.KIND_SYSTEM,
+                )
+            )
     if ipv6 is not None and ipv6.code == ipv6_check.IPV6_BROKEN and not offline:
-        problems.append(_problem(Level.WARN, f"IPv6 {ipv6.text}", (_ADVICE_IPV6,)))
+        problems.append(_problem(Level.WARN, f"IPv6 {ipv6.text}", (_ADVICE_IPV6,), kind=block_kind.KIND_NETWORK))
     for item in _blocked_references(reference or []):
-        problems.append(_problem(Level.WARN, _reference_text(item), (_ADVICE_BLOCKED_REFERENCE,), action="dns"))
+        problems.append(
+            _problem(
+                Level.WARN,
+                _reference_text(item),
+                (_ADVICE_BLOCKED_REFERENCE,),
+                action="dns",
+                kind=block_kind.KIND_DNS,
+            )
+        )
     problems.sort(key=lambda item: _LEVEL_ORDER.get(Level(item["level"]), 9))
     return problems, working, spoofed
 
@@ -1428,7 +1549,7 @@ def run_blockcheck(
             for finding in dns_servers["findings"]:
                 level = _DNS_FINDING_LEVEL.get(finding["level"])
                 if level is not None:
-                    problems.append(_problem(level, finding["text"], action="dns"))
+                    problems.append(_problem(level, finding["text"], action="dns", kind=block_kind.KIND_DNS))
             problems.sort(key=lambda item: _LEVEL_ORDER.get(Level(item["level"]), 9))
 
         emit("")
@@ -1454,6 +1575,7 @@ def run_blockcheck(
                     "control": service.control,
                     "domestic": service.domestic,
                     "level": verdicts[key].level.value,
+                    "kind": verdicts[key].kind,
                     "headline": verdicts[key].headline,
                     "advice": list(verdicts[key].advice),
                     "dns_note": verdicts[key].dns_note,

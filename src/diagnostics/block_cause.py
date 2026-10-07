@@ -338,6 +338,14 @@ def judge(facts: CauseFacts) -> Cause | None:
 
     result = facts.result
     if result.kind == KIND_CONNECT and result.stage == STAGE_CONNECT:
+        if facts.http is not None and facts.http.status is not None:
+            # Тот же адрес ответил по обычному порту: сервер жив, дорога до него есть.
+            return Cause(
+                CAUSE_ADDRESS_CLOSED,
+                "тот же адрес отвечает по обычному порту 80, а шифрованное соединение (порт 443) "
+                "не принимает — на этом адресе закрыт именно защищённый доступ",
+                confident=True,
+            )
         if facts.ping_ok:
             return Cause(
                 CAUSE_ADDRESS_CLOSED,
