@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import QEasingCurve, QEvent, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QAbstractScrollArea, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     BreadcrumbBar,
@@ -40,6 +40,8 @@ from qfluentwidgets import (
 
 from blockcheck.ui.block_kinds_view import kind_color
 from blockcheck.ui.brand_icons import BrandIcon, named_brand, site_brand
+from blockcheck.ui.finding_parts import ServerChip, split_finding, split_server_list
+from blockcheck.ui.server_matrix import ServerMatrix, parse_server_table
 from blockcheck.ui.result_cards_model import PREVIEW_LINES, Card, Counter, DotGroup, Line, Section, build_cards, build_counters
 from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
@@ -849,6 +851,10 @@ _LINE_ICONS = {
     "Объём загрузки": "fa5s.download",
     "DNS": "fa5s.network-wired",
     "Заметка": "fa5s.sticky-note",
+    "Провайдер": "fa5s.building",
+    "Адрес": "fa5s.link",
+    "Сервер": "fa5s.server",
+    "Время проверки": "fa5s.clock",
 }
 _ADVICE_TITLE = "Что делать"
 _ABOUT_TITLE = "Что это за проверка"
@@ -879,8 +885,10 @@ def section_icon(section: Section, card: Card) -> tuple[str, str]:
     """(значок, фирменный цвет) раздела отчёта. Цвет пустой — значок нейтральный."""
     if section.title == _ADVICE_TITLE:
         return "fa5s.lightbulb", ""
-    if section.title == _ABOUT_TITLE:
+    if section.title in (_ABOUT_TITLE, "Что это значит"):
         return "fa5s.info-circle", ""
+    if section.title == "Результат":
+        return "fa5s.clipboard-check", ""
     if section.text and not section.lines:
         return "fa5s.file-alt", ""
     head = section.title.split(" — ")[0]
@@ -1013,7 +1021,112 @@ def line_tile(line: Line) -> Tile:
     for separator in (" — ", "; ", ", хотя "):
         result = result.partition(separator)[0]
     result = f"{result[:1].upper()}{result[1:]}"
-    return Tile(line.state, title, tag, result, seconds, f"{line.name}\n{line.text}")
+    return Tile(line.state, title, tag, result, seconds, f"{line.name}\n{line.text}\nНажмите, чтобы открыть страницу сервера")
+
+
+_SERVER_MEANING = {
+    "ok": "Загрузка прошла целиком: на этом сервере обрыва после 16 КБ нет.",
+    "fail": (
+        "Соединение установилось, но загрузка или отправка оборвалась на полпути. Так режет фильтр провайдера: "
+        "сайты на этом хостинге могут грузиться не до конца."
+    ),
+    "unknown": (
+        "С сервером не удалось соединиться или он не ответил, поэтому про обрыв ничего сказать нельзя. "
+        "Это не значит, что сервер заблокирован."
+    ),
+}
+
+
+def server_card(line: Line, section: Section) -> Card:
+    """Отчёт по одному серверу хостинга: что это за сервер, чем кончилась проверка и что это значит."""
+    tile = line_tile(line)
+    provider = section.title.split(" — ")[0]
+    facts = [Line("info", "Провайдер", provider), Line("info", "Адрес", tile.title)]
+    if tile.tag:
+        facts.append(Line("info", "Сервер", tile.tag))
+    if tile.seconds:
+        facts.append(Line("info", "Время проверки", tile.seconds))
+    state = line.state if line.state in _SERVER_MEANING else "unknown"
+    text = _SECONDS.match(line.text)
+    return Card(
+        key=f"hosting:{tile.tag or tile.title}",
+        icon="fa5s.server",
+        title=tile.title,
+        level=state,
+        status=tile.result,
+        sections=(
+            Section("Сервер", tuple(facts)),
+            Section("Результат", (Line(line.state, "Итог", text.group(1) if text is not None else line.text),)),
+            Section("Что это значит", (Line("info", _SERVER_MEANING[state]),)),
+        ),
+    )
+
+
+def wants_findings(section: Section, card: Card) -> bool:
+    """Раздел — выводы проверки DNS-серверов одной фразой каждая: их показывают по частям, с метками серверов."""
+    return card.key == "dns_servers" and bool(section.lines) and not any(line.text for line in section.lines)
+
+
+class _FindingRow(QWidget):
+    """Вывод про DNS по частям: заголовок, серверы метками со счётчиком и пояснение."""
+
+    def __init__(self, line: Line, parent=None, *, divided: bool = False) -> None:
+        super().__init__(parent)
+        self.line = line
+        self._divided = divided
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 8, 0, 8)
+        layout.setSpacing(10)
+        state = line.state
+        holder = QWidget(self)
+        holder.setFixedSize(16, 20)
+        ToneDot(lambda tokens: state_color(state, tokens), holder, size=7, hollow=state in _HOLLOW_STATES).move(4, 6)
+        layout.addWidget(holder, 0, Qt.AlignmentFlag.AlignTop)
+
+        texts = QVBoxLayout()
+        texts.setSpacing(3)
+        title, detail = split_finding(line.name)
+        servers, more, rest = split_server_list(detail)
+        self.name_label = StrongBodyLabel(title, self)
+        self.name_label.setWordWrap(True)
+        self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        texts.addWidget(self.name_label)
+        self.server_chips: list[ServerChip] = []
+        self.more_label: CaptionLabel | None = None
+        if servers:
+            chips = QWidget(self)
+            flow = FlowLayout(chips, needAni=False)
+            flow.setContentsMargins(0, 2, 0, 2)
+            flow.setHorizontalSpacing(6)
+            flow.setVerticalSpacing(4)
+            for name, addresses in servers:
+                chip = ServerChip(name, addresses, chips)
+                flow.addWidget(chip)
+                self.server_chips.append(chip)
+            if more:
+                self.more_label = mute(CaptionLabel(f"и ещё {more}", chips))
+                self.more_label.setFixedHeight(22)
+                flow.addWidget(self.more_label)
+            texts.addWidget(chips)
+        self.text_label: BodyLabel | None = None
+        if rest:
+            self.text_label = mute(BodyLabel(rest, self))
+            self.text_label.setWordWrap(True)
+            self.text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            texts.addWidget(self.text_label)
+        layout.addLayout(texts, 1)
+        set_state_text(self, line.name)
+        self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        _ = event
+        if not self._divided:
+            return
+        painter = QPainter(self)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 20) if _is_light() else QColor(255, 255, 255, 18))
+        painter.drawRect(0, 0, self.width(), 1)
+        painter.end()
 
 
 def wants_tiles(section: Section, card: Card) -> bool:
@@ -1032,11 +1145,14 @@ class TilesGrid(QWidget):
     MIN_WIDTH = 250
     HEIGHT = 46
     GAP = 6
+    # Нажали карточку: её номер.
+    opened = pyqtSignal(int)
 
     def __init__(self, tiles: list[Tile], parent=None) -> None:
         super().__init__(parent)
         self._tiles = list(tiles)
         self._hover = -1
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         policy.setHeightForWidth(True)
         self.setSizePolicy(policy)
@@ -1093,6 +1209,13 @@ class TilesGrid(QWidget):
         self._hint.hide()
         self.update()
         super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        index = self.tile_at(event.position().x(), event.position().y())
+        self._hint.hide()
+        if event.button() == Qt.MouseButton.LeftButton and index >= 0:
+            self.opened.emit(index)
+        super().mouseReleaseEvent(event)
 
     def event(self, event) -> bool:
         # Системную подсказку не показываем: на тёмной теме она мелькает белым окном.
@@ -1162,9 +1285,18 @@ class _SectionBlock(QWidget):
 
     # Просят открыть текст раздела на всю страницу: (название, текст).
     text_opened = pyqtSignal(str, str)
+    # Нажали карточку сервера: строка измерения этого сервера.
+    line_opened = pyqtSignal(object)
 
     def __init__(
-        self, section: Section, parent=None, *, icon: str = "fa5s.list-ul", color: str = "", tiles: bool = False
+        self,
+        section: Section,
+        parent=None,
+        *,
+        icon: str = "fa5s.list-ul",
+        color: str = "",
+        tiles: bool = False,
+        findings: bool = False,
     ) -> None:
         super().__init__(parent)
         self.section = section
@@ -1202,9 +1334,14 @@ class _SectionBlock(QWidget):
         self.rows: list[_ReportRow] = []
         if tiles:
             self.grid = TilesGrid([line_tile(line) for line in section.lines], self)
+            self.grid.opened.connect(lambda index: self.line_opened.emit(section.lines[index]))
             layout.addSpacing(2)
             layout.addWidget(self.grid)
             layout.addSpacing(6)
+        elif findings:
+            self.rows = [_FindingRow(line, self, divided=True) for line in section.lines]
+            for row in self.rows:
+                layout.addWidget(row)
         else:
             self.rows = [
                 _ReportRow(line, line_icon(line, section), name_width, self, divided=True) for line in section.lines
@@ -1215,9 +1352,16 @@ class _SectionBlock(QWidget):
         # прокруткой. Одной надписью на сотни строк он перерисовывался целиком при каждой
         # прокрутке страницы, и страница заметно тормозила.
         self.editor: CodeEditor | None = None
+        self.matrix: ServerMatrix | None = None
         self.open_text_button: PushButton | None = None
+        columns, table = parse_server_table(section.text) if section.text else ([], [])
+        if table:
+            # Таблица серверов — сводкой по сервисам; сам текст открывается кнопкой в заголовке.
+            self.matrix = ServerMatrix(columns, table, self)
+            layout.addWidget(self.matrix)
+            layout.addSpacing(6)
         if section.text:
-            self.open_text_button = PushButton("Открыть на всю страницу", self)
+            self.open_text_button = PushButton("Подробный текст" if table else "Открыть на всю страницу", self)
             set_control_accessibility(
                 self.open_text_button,
                 name=f"Открыть на всю страницу: {section.title}",
@@ -1225,6 +1369,7 @@ class _SectionBlock(QWidget):
             )
             self.open_text_button.clicked.connect(lambda _checked=False: self.text_opened.emit(section.title, section.text))
             header.addWidget(self.open_text_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        if section.text and not table:
             self.editor = CodeEditor(self, highlighter_factory=lambda document: LogSyntaxHighlighter(document))
             self.editor.setReadOnly(True)
             self._fill = ChunkedReadOnlyFill(self.editor)
@@ -1375,12 +1520,16 @@ class ResultDetailView(QWidget):
     text_opened = pyqtSignal(str, str)
     ROOT_KEY = "blockcheck"
     PARENT_KEY = "parent"
+    # Шаг строки пути внутри отчёта: «Зарубежные хостинги» над страницей одного сервера.
+    LEVEL_KEY = "level:"
     CARD_KEY = "card"
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._card: Card | None = None
         self._parent_title = ""
+        # Отчёты выше текущего внутри этой страницы и место прокрутки в каждом.
+        self._ancestors: list[tuple[Card, int]] = []
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(10)
@@ -1415,15 +1564,57 @@ class ResultDetailView(QWidget):
 
     def show_card(self, card: Card, *, parent_title: str = "") -> None:
         """``parent_title`` — промежуточный шаг строки пути: прошлая проверка, из которой открыт отчёт."""
-        self._card = card
         self._parent_title = str(parent_title or "")
-        path = ["BlockCheck", *([self._parent_title] if self._parent_title else []), card.title]
+        self._ancestors = []
+        self._render(card)
+
+    def open_child(self, card: Card) -> None:
+        """Шаг вглубь: отчёт по одному серверу. Строка пути получает ещё один шаг, «назад» ведёт к списку."""
+        if self._card is None:
+            return
+        area = self._scroll_area()
+        scroll = area.verticalScrollBar().value() if area is not None else 0
+        self._ancestors.append((self._card, scroll))
+        self._render(card)
+        if area is not None:
+            area.verticalScrollBar().setValue(0)
+
+    def go_back(self) -> bool:
+        """Шаг назад внутри отчёта. ``False`` — возвращаться некуда: отчёт пора закрывать."""
+        if not self._ancestors:
+            return False
+        self._return_to(len(self._ancestors) - 1)
+        return True
+
+    def _return_to(self, level: int) -> None:
+        card, scroll = self._ancestors[level]
+        del self._ancestors[level:]
+        self._render(card)
+        area = self._scroll_area()
+        if area is not None:
+            # К тому же месту списка, с которого уходили; раскладка к этому мигу ещё досчитывается.
+            QTimer.singleShot(0, lambda: area.verticalScrollBar().setValue(scroll))
+
+    def _scroll_area(self) -> QAbstractScrollArea | None:
+        parent = self.parentWidget()
+        while parent is not None:
+            if isinstance(parent, QAbstractScrollArea):
+                return parent
+            parent = parent.parentWidget()
+        return None
+
+    def _render(self, card: Card) -> None:
+        self._card = card
+        ancestors = [item.title for item, _scroll in self._ancestors]
+        path = ["BlockCheck", *([self._parent_title] if self._parent_title else []), *ancestors, card.title]
         self.breadcrumb.blockSignals(True)
         try:
             self.breadcrumb.clear()
             self.breadcrumb.addItem(self.ROOT_KEY, "BlockCheck")
             if self._parent_title:
                 self.breadcrumb.addItem(self.PARENT_KEY, self._parent_title)
+            for level, title in enumerate(ancestors):
+                self.breadcrumb.addItem(f"{self.LEVEL_KEY}{level}", title)
             self.breadcrumb.addItem(self.CARD_KEY, card.title)
             set_breadcrumb_accessibility(self.breadcrumb, path)
         finally:
@@ -1436,8 +1627,16 @@ class ResultDetailView(QWidget):
         self.blocks = []
         for section in card.sections:
             icon, color = section_icon(section, card)
-            block = _SectionBlock(section, self._sections_host, icon=icon, color=color, tiles=wants_tiles(section, card))
+            block = _SectionBlock(
+                section,
+                self._sections_host,
+                icon=icon,
+                color=color,
+                tiles=wants_tiles(section, card),
+                findings=wants_findings(section, card),
+            )
             block.text_opened.connect(self.text_opened)
+            block.line_opened.connect(lambda line, source=section: self.open_child(server_card(line, source)))
             self.blocks.append(block)
         for order, block in enumerate(self.blocks):
             self._sections_layout.addWidget(block)
@@ -1449,14 +1648,19 @@ class ResultDetailView(QWidget):
         self._sync_height()
 
     def _on_breadcrumb(self, key: str) -> None:
-        if key == self.PARENT_KEY:
+        if key.startswith(self.LEVEL_KEY):
+            self._return_to(int(key.removeprefix(self.LEVEL_KEY)))
+        elif key == self.PARENT_KEY:
+            self._ancestors = []
             self.closed.emit()
         elif key == self.ROOT_KEY:
+            self._ancestors = []
             (self.root_requested if self._parent_title else self.closed).emit()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
-            self.closed.emit()
+            if not self.go_back():
+                self.closed.emit()
             return
         super().keyPressEvent(event)
 

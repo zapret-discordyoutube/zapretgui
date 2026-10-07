@@ -25,9 +25,10 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidg
 from qfluentwidgets import BodyLabel, CaptionLabel, FlowLayout, PushButton, TransparentPushButton, TransparentToolButton, SimpleCardWidget, StrongBodyLabel, SubtitleLabel
 
 from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_groups
+from blockcheck.ui.finding_parts import ServerChip, split_server_list, theme_color
 from blockcheck.ui.result_cards import _ElidedLabel
 from blockcheck.ui.result_cards_model import build_cards
-from blockcheck.ui.brand_icons import BrandIcon, named_brand, site_brand
+from blockcheck.ui.brand_icons import BrandIcon, site_brand
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import set_tooltip
@@ -143,8 +144,6 @@ _SITE_ICON = "fa5s.globe"
 # Виды, которые не относятся к одному сайту: у таких строк точка важности, а не логотип.
 # Всё остальное — про сайт, в том числе виды, которых здесь ещё не знают.
 _NOT_SITE_KINDS = frozenset({"dns", "quic", "system", "network"})
-_SERVER = re.compile(r"\s*([^,()]+?) \(([^()]+)\)")
-_MORE = re.compile(r"\s*и ещё (\d+)")
 _FOR_SITES = re.compile(r"^(.*?) для: (.+)$")
 
 
@@ -170,35 +169,6 @@ def split_problem_text(problem: dict) -> tuple[str, str]:
         return text, ""
     tail = f"{tail[:1].upper()}{tail[1:]}"
     return head.rstrip("."), tail if tail.endswith((".", "!", "?")) else f"{tail}."
-
-
-def split_server_list(detail: str) -> tuple[list[tuple[str, list[str]]], int, str]:
-    """Перечень «Cloudflare (1.1.1.1), Cloudflare (1.0.0.1) и ещё 6. Пояснение» по частям.
-
-    Возвращает серверы по названиям с их адресами, число не названных и
-    остаток текста. Если пояснение начинается не с перечня — серверов нет, а
-    остаток равен всему тексту.
-    """
-    text = str(detail or "")
-    servers: dict[str, list[str]] = {}
-    position = 0
-    while True:
-        match = _SERVER.match(text, position)
-        if match is None:
-            break
-        servers.setdefault(match.group(1).strip(), []).append(match.group(2).strip())
-        position = match.end()
-        if not text.startswith(", ", position):
-            break
-        position += 2
-    if not servers:
-        return [], 0, text
-    more = 0
-    match = _MORE.match(text, position)
-    if match is not None:
-        more = int(match.group(1))
-        position = match.end()
-    return list(servers.items()), more, text[position:].lstrip(". ").strip()
 
 
 def split_named_sites(title: str) -> tuple[str, list[str]]:
@@ -402,7 +372,7 @@ class _SiteCard(QWidget):
         _ = force
         if self.action_button is not None and self._action_icon:
             try:
-                color = _theme_color("icon_fg_muted", QColor("#d2d7df")).name()
+                color = theme_color("icon_fg_muted", QColor("#d2d7df")).name()
                 self.action_button.setIcon(QIcon(get_cached_qta_pixmap(self._action_icon, color=color, size=14)))
             except Exception:
                 pass
@@ -443,7 +413,7 @@ class _SiteCard(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         lit = self._hover or self.hasFocus()
-        painter.setBrush(_theme_color("surface_bg_hover" if lit else "surface_bg", QColor(255, 255, 255, 18 if lit else 10)))
+        painter.setBrush(theme_color("surface_bg_hover" if lit else "surface_bg", QColor(255, 255, 255, 18 if lit else 10)))
         painter.drawRoundedRect(self.rect(), 6, 6)
         painter.end()
 
@@ -497,45 +467,6 @@ class _CardsFlow(QWidget):
             self.setFixedHeight(height)
 
 
-class _ServerChip(QWidget):
-    """Метка сервиса (DNS, хостинг, сайт): значок, название и сколько его адресов названо. Адреса — в подсказке."""
-
-    def __init__(self, name: str, addresses: list[str], parent=None) -> None:
-        super().__init__(parent)
-        self.setFixedHeight(22)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(7, 0, 8, 0)
-        layout.setSpacing(5)
-        brand = named_brand(name)
-        self.icon: BrandIcon | None = None
-        if brand is not None:
-            self.icon = BrandIcon(brand.icon, brand.color, self, size=13)
-            layout.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.text = name if len(addresses) < 2 else f"{name} ×{len(addresses)}"
-        layout.addWidget(CaptionLabel(self.text, self), 0, Qt.AlignmentFlag.AlignVCenter)
-        if addresses:
-            set_tooltip(self, f"{name}: {', '.join(addresses)}")
-        self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        _ = event
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(_theme_color("surface_bg_hover", QColor(255, 255, 255, 18)))
-        painter.drawRoundedRect(self.rect(), 4, 4)
-        painter.end()
-
-
-def _theme_color(token: str, fallback: QColor) -> QColor:
-    try:
-        from ui.theme import get_theme_tokens, to_qcolor
-
-        return to_qcolor(getattr(get_theme_tokens(), token), fallback)
-    except Exception:
-        return QColor(fallback)
-
-
 class _ProblemRow(QWidget):
     """Находка не про один сайт (DNS, компьютер, сеть, звонки): точка важности, заголовок, пояснение, совет, кнопка.
 
@@ -557,6 +488,7 @@ class _ProblemRow(QWidget):
         divided: bool = False,
         card_key: str = "",
         on_open: OpenHandler | None = None,
+        compact: bool = False,
     ) -> None:
         super().__init__(parent)
         self._level = str(problem.get("level") or "unknown")
@@ -574,7 +506,8 @@ class _ProblemRow(QWidget):
             Qt.TextInteractionFlag.NoTextInteraction if self.card_key else Qt.TextInteractionFlag.TextSelectableByMouse
         )
         layout = QHBoxLayout(self)
-        pad = 2 if bare else 9
+        # ``compact`` — действие и отчёт стоят в заголовке группы: строка ниже и не нажимается.
+        pad = 2 if bare else 6 if compact else 9
         layout.setContentsMargins(0, pad, 0, pad)
         layout.setSpacing(12)
 
@@ -610,7 +543,7 @@ class _ProblemRow(QWidget):
         texts.addWidget(self.text_label)
 
         # Перечень DNS-серверов — метками: по одной на сервис, адреса в подсказке.
-        self.server_chips: list[_ServerChip] = []
+        self.server_chips: list[ServerChip] = []
         self.more_label: CaptionLabel | None = None
         servers, more, rest = split_server_list(detail) if problem.get("kind") == "dns" else ([], 0, detail)
         servers = [*[(name, []) for name in named_sites], *servers, *(problem.get("chips") or ())]
@@ -621,7 +554,7 @@ class _ProblemRow(QWidget):
             flow.setHorizontalSpacing(6)
             flow.setVerticalSpacing(4)
             for name, addresses in servers:
-                chip = _ServerChip(name, addresses, chips)
+                chip = ServerChip(name, addresses, chips)
                 flow.addWidget(chip)
                 self.server_chips.append(chip)
             if more:
@@ -713,11 +646,11 @@ class _ProblemRow(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         if self.card_key and (self._hover or self.hasFocus()):
             # Мягкая подсветка под мышью: окно без рамок, поэтому фон, а не обводка.
-            painter.setBrush(_theme_color("surface_bg_hover", QColor(255, 255, 255, 18)))
+            painter.setBrush(theme_color("surface_bg_hover", QColor(255, 255, 255, 18)))
             painter.drawRoundedRect(self.rect().adjusted(-8, 1, 6, 0), 5, 5)
         elif self._divided:
             # Тонкая линия между строками группы — вместо отдельной подложки у каждой.
-            painter.setBrush(_theme_color("divider_strong", QColor(255, 255, 255, 26)))
+            painter.setBrush(theme_color("divider_strong", QColor(255, 255, 255, 26)))
             painter.drawRect(0, 0, self.width(), 1)
         painter.end()
 
@@ -766,16 +699,46 @@ class _ProblemGroup(ToneGroup):
                 self.flow.add(card)
                 self.rows.append(card)
             self.add_widget(self.flow)
+        # У всех строк одно действие и один отчёт (так у находок по DNS): кнопка и значок
+        # отчёта ставятся один раз в заголовок группы, а не повторяются в каждой строке.
+        actions = {str(problem.get("action") or "") for problem in others}
+        keys = {key_for(problem) for problem in others}
+        self.shared_action_button: PushButton | None = None
+        self.report_button: TransparentToolButton | None = None
+        several = len(others) > 1 and not plain
+        action = next(iter(actions), "")
+        shared_action = several and len(actions) == 1 and on_action is not None and action in _ACTION_TEXT
+        if shared_action:
+            self.shared_action_button = PushButton(_ACTION_TEXT[action], self)
+            self.shared_action_button.clicked.connect(lambda _checked=False, a=action: on_action(a, ""))
+            set_control_accessibility(
+                self.shared_action_button, name=_ACTION_TEXT[action], description=f"{_ACTION_DESCRIPTION.get(action, '')}."
+            )
+            self.add_header_widget(self.shared_action_button)
+        key = next(iter(keys), "")
+        shared_report = several and len(keys) == 1 and on_open is not None and bool(key)
+        if shared_report:
+            self.report_button = TransparentToolButton(self)
+            self.report_button.setFixedSize(30, 30)
+            color = theme_color("icon_fg_muted", QColor("#d2d7df")).name()
+            self.report_button.setIcon(QIcon(get_cached_qta_pixmap("fa5s.file-alt", color=color, size=14)))
+            self.report_button.clicked.connect(lambda _checked=False, k=key: on_open(k))
+            set_tooltip(self.report_button, "Открыть полный отчёт")
+            set_control_accessibility(
+                self.report_button, name=f"Полный отчёт: {info.title}", description="Открывает страницу со всеми измерениями."
+            )
+            self.add_header_widget(self.report_button)
         for problem in others:
             row = _ProblemRow(
                 problem,
-                on_action,
+                None if shared_action else on_action,
                 self,
                 grouped=True,
                 hidden_advice=hidden,
                 divided=not plain,
-                card_key=key_for(problem),
+                card_key="" if shared_report else key_for(problem),
                 on_open=on_open,
+                compact=shared_action or shared_report,
             )
             self.add_widget(row)
             self.rows.append(row)
@@ -1189,10 +1152,10 @@ class _HistoryTable(QWidget):
             return
         painter = QPainter(self)
         painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
-        text = _theme_color("fg", QColor(255, 255, 255, 235))
-        muted = _theme_color("fg_muted", QColor(255, 255, 255, 165))
-        line = _theme_color("divider_strong", QColor(255, 255, 255, 26))
-        hover = _theme_color("surface_bg_hover", QColor(255, 255, 255, 18))
+        text = theme_color("fg", QColor(255, 255, 255, 235))
+        muted = theme_color("fg_muted", QColor(255, 255, 255, 165))
+        line = theme_color("divider_strong", QColor(255, 255, 255, 26))
+        hover = theme_color("surface_bg_hover", QColor(255, 255, 255, 18))
         font = QFont(self.font())
         font.setPixelSize(13)
         small = QFont(self.font())

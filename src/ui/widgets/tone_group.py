@@ -139,6 +139,7 @@ class ToneGroup(QWidget):
         else:
             self._body.setContentsMargins(14, 12, 12, 12)
 
+        self._header: QHBoxLayout | None = None
         self.title_label: StrongBodyLabel | None = None
         self.about_label: CaptionLabel | None = None
         if not plain:
@@ -150,6 +151,7 @@ class ToneGroup(QWidget):
             if count > 1:
                 header.addWidget(mute(CaptionLabel(str(count), self)), 0, Qt.AlignmentFlag.AlignVCenter)
             header.addStretch(1)
+            self._header = header
             self._body.addLayout(header)
             if about:
                 self.about_label = self.add_note(about)
@@ -158,6 +160,13 @@ class ToneGroup(QWidget):
 
     def add_widget(self, widget: QWidget) -> None:
         self._body.addWidget(widget)
+
+    def add_header_widget(self, widget: QWidget) -> bool:
+        """Ставит виджет в правый край заголовка: общее для всей группы действие. ``False`` — заголовка нет."""
+        if self._header is None:
+            return False
+        self._header.addWidget(widget, 0, Qt.AlignmentFlag.AlignVCenter)
+        return True
 
     def add_note(self, text: str) -> CaptionLabel:
         """Строка мелкого текста во всю ширину группы: пояснение или общий совет."""

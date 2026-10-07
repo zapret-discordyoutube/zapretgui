@@ -866,7 +866,9 @@ class BlockcheckPage(BasePage):
     def _close_subpage(self) -> None:
         """Esc: назад из подробностей карточки, DNS-сервера или отчёта."""
         if self._detail_view is not None and not self._detail_view.isHidden():
-            self._close_card_detail()
+            # Сначала шаг назад внутри отчёта (со страницы сервера — к списку хостингов).
+            if not self._detail_view.go_back():
+                self._close_card_detail()
         else:
             self._close_over_tabs()
 
