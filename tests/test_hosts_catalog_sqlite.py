@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.08.2")
+        self.assertEqual(catalog.catalog_version, "2026.10.08.3")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -128,8 +128,8 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 850)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 6815)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 786)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 6379)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -223,7 +223,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
     def test_runtime_reads_dns_and_direct_rows_from_sqlite(self) -> None:
         self.assertEqual(
             len(self.proxy_domains.get_service_domain_ip_rows("ChatGPT & Sora (OpenAI)", "xbox_dns")),
-            100,
+            99,
         )
         self.assertEqual(
             self.proxy_domains.get_service_domain_ip_rows("Discord", "hosts")[:2],
