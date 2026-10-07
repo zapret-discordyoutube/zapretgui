@@ -257,9 +257,21 @@ def services_report(services: dict, verdicts: dict, collected: dict) -> list[dic
     ]
 
 
-def voice_report(voice) -> dict | None:
+def voice_report(voice, burst=None) -> dict | None:
     if not voice:
         return None
+    report = _voice_section(voice)
+    if burst is not None:
+        # Серия из тридцати пакетов: не замирает ли UDP после первых двух десятков.
+        report["burst"] = {
+            "state": burst.code,
+            "text": burst.text,
+            "servers": [{"name": name, "series": list(series)} for name, series in burst.servers],
+        }
+    return report
+
+
+def _voice_section(voice) -> dict:
     return section_report(voice, [
             (item.name, "ok" if item.answered else ("fail" if item.decided else "unknown"), item.text)
             for item in voice.servers

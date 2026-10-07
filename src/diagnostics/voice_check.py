@@ -126,4 +126,5 @@ def summarize_voice(servers: tuple[VoiceServer, ...]) -> VoiceReport:
             strategy_advice,
         )
     answered = sum(1 for item in servers if item.answered)
-    return VoiceReport(Level.OK, f"Голосовые звонки: проверочные серверы отвечают по UDP ({answered} из {len(servers)})", servers)
+    # Ответ на один запрос — это «UDP доходит», а не «звонок пройдёт»: приложения режут и по содержимому пакетов.
+    return VoiceReport(Level.OK, f"Проверочные серверы звонков отвечают по UDP ({answered} из {len(servers)})", servers)

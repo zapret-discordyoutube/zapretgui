@@ -49,6 +49,7 @@ from diagnostics import (
     sections,
     system_state,
     telegram_check,
+    udp_burst,
     volume_probe,
 )
 from diagnostics import problems as problem_rules
@@ -634,6 +635,17 @@ def _wait_plain(future: Future):
     return future.result()
 
 
+def _attempt(emit: Emit, title: str, call: Callable[[], object]):
+    """Раздел, который идёт прямо сейчас. Его сбой оставляет строку в отчёте и не роняет проверку."""
+    try:
+        return call()
+    except _Stopped:
+        raise
+    except Exception as exc:
+        emit(f"❔ {title}: проверка не выполнилась ({exc})")
+        return None
+
+
 def _settle(run: _Run, future: Future | None, emit: Emit, title: str):
     """Итог раздела, который шёл в фоне. None — раздел не запускали или он сломался.
 
@@ -717,6 +729,7 @@ def run_blockcheck(
 
         # Звонки и обрыв на 16 КБ проверяются всегда: режим меняет только список сайтов.
         voice_future = run.submit(check_voice, run.submit, _wait_plain)
+        burst_future = run.submit(sections.check_udp_burst, run)
         freeze_future = run.submit(
             check_freeze,
             run.submit,
@@ -773,6 +786,10 @@ def run_blockcheck(
             ):
                 emit(line)
 
+        burst = _settle(run, burst_future, emit, "Серия пакетов UDP")
+        for line in udp_burst.lines(burst):
+            emit(line)
+
         telegram_facts = _settle(run, telegram_future, emit, "Дата-центры Telegram")
         telegram = (
             telegram_check.summarize_telegram(telegram_facts, zapret_running=zapret_running)
@@ -824,24 +841,11 @@ def run_blockcheck(
             if full
             else None
         )
-        habits = None
-        if full and not run.dns_cancelled():
-            try:
-                habits = sections.check_filter_habits(run, collected, emit)
-            except _Stopped:
-                raise
-            except Exception as exc:
-                emit(f"❔ Как работает фильтр: проверка не выполнилась ({exc})")
+        extra = full and not run.dns_cancelled()
+        habits = _attempt(emit, "Как работает фильтр", lambda: sections.check_filter_habits(run, collected, emit)) if extra else None
         if full:
             step(STEP_FILTER)
-        speed = None
-        if full and not run.dns_cancelled():
-            try:
-                speed = sections.check_speed(run, emit)
-            except _Stopped:
-                raise
-            except Exception as exc:
-                emit(f"❔ Скорость: проверка не выполнилась ({exc})")
+        speed = _attempt(emit, "Скорость", lambda: sections.check_speed(run, emit)) if full and not run.dns_cancelled() else None
 
         verdicts = {
             key: _service_verdict(service, collected[key], zapret_running=zapret_running)
@@ -860,6 +864,7 @@ def run_blockcheck(
             system=system,
             telegram=telegram,
         )
+        problems += problem_rules.burst_problems(burst)
         if dns_servers is not None:
             for finding in dns_servers["findings"]:
                 level = sections.DNS_FINDING_LEVEL.get(finding["level"])
@@ -873,7 +878,7 @@ def run_blockcheck(
                             parts=sections.dns_finding_parts(finding),
                         )
                     )
-            problems.sort(key=lambda item: problem_rules.LEVEL_ORDER.get(Level(item["level"]), 9))
+        problems.sort(key=lambda item: problem_rules.LEVEL_ORDER.get(Level(item["level"]), 9))
 
         services_report = report_text.services_report(services, verdicts, collected)
         registry_index = registry_wait(REGISTRY_WAIT_S)
@@ -891,7 +896,7 @@ def run_blockcheck(
             "scope": scope,
             "services": services_report,
             "registry": registry.summary(registry_index),
-            "voice": report_text.voice_report(voice),
+            "voice": report_text.voice_report(voice, burst),
             "freeze": report_text.freeze_report(freeze),
             "telegram": report_text.telegram_report(telegram),
             "network": network,

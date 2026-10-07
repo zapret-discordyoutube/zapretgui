@@ -65,6 +65,21 @@ def _zapret_action(zapret_running: bool | None) -> str:
     return "start_zapret" if zapret_running is False else "strategy"
 
 
+def burst_problems(burst) -> list[dict]:
+    """Проблема «UDP замирает после первых пакетов». Пусто — заморозки нет или вывода нет."""
+    if burst is None or burst.code != "freeze":
+        return []
+    return [
+        problem(
+            Level.WARN,
+            f"UDP замирает: {burst.text}",
+            ("Подберите стратегию для звонков: «Подбор стратегии» → «Голосовые звонки Discord и Telegram (STUN)».",),
+            action="strategy_voice",
+            kind=block_kind.KIND_VOICE,
+        )
+    ]
+
+
 def _whitelist_kind(foreign: list[str], collected: dict[str, list[Probe]]) -> str:
     """Как именно устроен «белый список» — по прямым пробам к зарубежным контрольным сайтам."""
     causes = {

@@ -461,6 +461,15 @@ def _voice_card(voice: dict) -> Card:
     )
     answered = sum(1 for item in items if item.get("ok"))
     sections = [Section(str(voice.get("headline") or "Голосовые серверы"), lines)]
+    burst = voice.get("burst") or {}
+    if burst.get("text"):
+        burst_state = {"ok": OK, "freeze": WARN}.get(str(burst.get("state")), UNKNOWN)
+        rows = [Line(burst_state, "Тридцать пакетов подряд", _capital(str(burst["text"])))]
+        rows += [Line(INFO, str(item.get("name") or ""), "ответов: " + ", ".join(item.get("series") or ())) for item in burst.get("servers") or ()]
+        sections.append(Section("Не замирает ли UDP", tuple(rows)))
+        if burst_state == WARN:
+            lines = lines + (Line(WARN, "UDP замирает", _capital(str(burst["text"]))),)
+            level = WARN if level == OK else level
     advice = [str(item) for item in voice.get("advice") or ()]
     if advice:
         sections.append(Section("Что делать", tuple(Line(INFO, item) for item in advice)))

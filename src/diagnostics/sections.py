@@ -26,6 +26,7 @@ from diagnostics import (
     report_text,
     speed_check,
     system_state,
+    udp_burst,
     upload_probe,
 )
 from diagnostics.limits import FILTER_MAX_TTL, FREEZE_READ_TIMEOUT
@@ -342,6 +343,14 @@ def find_filter_place(
     for line in filter_place.lines(place):
         emit(line)
     return place
+
+
+def check_udp_burst(run: Run) -> udp_burst.BurstVerdict | None:
+    """Серии UDP-пакетов: не замирает ли поток после первых двух десятков (см. ``diagnostics.udp_burst``)."""
+    facts = udp_burst.check_bursts(
+        lambda host, port: udp_burst.send_burst(host, port, cancel=run.probe_cancel), submit=run.submit
+    )
+    return None if run.dns_cancelled() else udp_burst.judge(facts)
 
 
 HABIT_SITES = 3
