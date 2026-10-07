@@ -779,6 +779,78 @@ class Winws2LaunchPresetValidationTests(unittest.TestCase):
             stable_start_window_seconds=0.35,
         )
 
+    def _conflict_runner(self):
+        from unittest.mock import Mock
+
+        from winws_runtime.runners.zapret2_runner import Winws2StrategyRunner
+
+        runner = object.__new__(Winws2StrategyRunner)
+        runner._last_spawn_exit_code = 10
+        runner._last_spawn_stderr = (
+            "windivert: error opening filter: The object is referenced by other "
+            "objects so cannot be deleted"
+        )
+        runner._maybe_run_windivert_auto_fix_after_failed_spawn = Mock(return_value=False)
+        runner._start_from_preset_file_locked = Mock(return_value=True)
+        return runner
+
+    def test_winws2_retries_windivert_conflict_even_after_cleanup(self) -> None:
+        # Конфликт чаще всего случается как раз после остановки прежнего
+        # winws (cleanup_required=True): Windows ещё не убрала его фильтры.
+        # Раньше именно в этом случае повтора не было вовсе.
+        runner = self._conflict_runner()
+
+        self.assertTrue(
+            runner._maybe_retry_after_failed_spawn_locked(
+                "preset.txt",
+                "Preset",
+                cleanup_required=True,
+                retry_count=0,
+                stable_start_window_seconds=0.35,
+            )
+        )
+
+        # force_cleanup=True с retry_count > 0 — повтор через восстановление.
+        runner._start_from_preset_file_locked.assert_called_once_with(
+            "preset.txt",
+            "Preset",
+            force_cleanup=True,
+            retry_count=1,
+            stable_start_window_seconds=0.35,
+        )
+
+    def test_winws2_windivert_conflict_retries_are_bounded(self) -> None:
+        from winws_runtime.runners.zapret2_runner import Winws2StrategyRunner
+
+        limit = Winws2StrategyRunner._WINDIVERT_CONFLICT_MAX_RETRIES
+        self.assertEqual(limit, 2)
+
+        runner = self._conflict_runner()
+        self.assertTrue(
+            runner._maybe_retry_after_failed_spawn_locked(
+                "preset.txt",
+                "Preset",
+                cleanup_required=True,
+                retry_count=limit - 1,
+                stable_start_window_seconds=0.35,
+            )
+        )
+        self.assertEqual(
+            runner._start_from_preset_file_locked.call_args.kwargs["retry_count"], limit
+        )
+
+        runner = self._conflict_runner()
+        self.assertFalse(
+            runner._maybe_retry_after_failed_spawn_locked(
+                "preset.txt",
+                "Preset",
+                cleanup_required=True,
+                retry_count=limit,
+                stable_start_window_seconds=0.35,
+            )
+        )
+        runner._start_from_preset_file_locked.assert_not_called()
+
     def test_winws2_does_not_retry_or_touch_driver_on_exit_87(self) -> None:
         from unittest.mock import Mock
 

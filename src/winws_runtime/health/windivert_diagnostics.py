@@ -39,11 +39,22 @@ _ERROR_SERVICE_MARKED_FOR_DELETE = 1072
 _ERROR_DRIVER_BLOCKED = 1275
 # EPT_S_NOT_REGISTERED: плавающая гонка SCM сразу после stop/cleanup.
 _ERROR_EPT_S_NOT_REGISTERED = 1753
-# FWP_E_IN_USE — HRESULT платформы фильтрации Windows: "The object is referenced
-# by other objects so cannot be deleted". WinDivert не может снять свои фильтры
-# и callout'ы, пока на них ссылается другой экземпляр драйвера. Практически это
-# означает "остатки прошлого запуска или чужая программа держат WinDivert".
-_FWP_E_IN_USE = 0x80320010
+# Коды платформы фильтрации Windows (WFP), значения — из winerror.h.
+# Каждый winws открывает в WFP свой сеанс и ставит в нём фильтры; когда процесс
+# завершается, Windows убирает эти фильтры сама и не мгновенно. Пока они не
+# убраны (или пока их держит чужая программа на WinDivert), новый запуск
+# получает один из двух кодов:
+# - FWP_E_ALREADY_EXISTS: "An object with that GUID or LUID already exists";
+# - FWP_E_IN_USE: "The object is referenced by other objects so cannot be deleted".
+# Сборка winws на Cygwin отдаёт кодом завершения только младший байт: 9 и 10.
+_FWP_E_ALREADY_EXISTS = 0x80320009
+_FWP_E_IN_USE = 0x8032000A
+
+_WFP_LEFTOVERS_SOLUTION = (
+    "Подождите несколько секунд и запустите снова. Если не помогает — закройте другие "
+    "программы обхода блокировок (GoodbyeDPI, другой Zapret, VPN на базе WinDivert) "
+    "или перезагрузите компьютер"
+)
 
 # Сколько ждать перед запуском, пока служба драйвера закончит выгружаться.
 _WINDIVERT_PRESPAWN_WAIT_SECONDS = 3.0
@@ -136,12 +147,20 @@ WINDIVERT_ERROR_TABLE: dict[int, WinDivertErrorRecord] = {
             solution="Проверьте настройки Device Guard / WDAC или отключите Secure Boot",
         ),
         WinDivertErrorRecord(
-            code=_FWP_E_IN_USE,
-            cause="Объекты WinDivert от предыдущего запуска ещё используются системой",
-            solution=(
-                "Закройте другие программы обхода блокировок (GoodbyeDPI, другой Zapret, "
-                "VPN на базе WinDivert) и повторите запуск. Если не помогает — перезагрузите компьютер"
+            code=_FWP_E_ALREADY_EXISTS,
+            cause=(
+                "Windows ещё не убрала фильтры WinDivert от прошлого запуска, "
+                "либо их держит другая программа"
             ),
+            solution=_WFP_LEFTOVERS_SOLUTION,
+        ),
+        WinDivertErrorRecord(
+            code=_FWP_E_IN_USE,
+            cause=(
+                "Фильтры WinDivert от прошлого запуска ещё заняты: Windows не успела "
+                "их убрать, либо их держит другая программа"
+            ),
+            solution=_WFP_LEFTOVERS_SOLUTION,
         ),
         WinDivertErrorRecord(
             code=_ERROR_EPT_S_NOT_REGISTERED,

@@ -71,11 +71,11 @@ def _system_state(*, adapters=True, antivirus="", conflict=None, probe=None):
 
 # Коды из AC2 плюс дополнительные коды диагностики exit-кодов.
 _REQUIRED_TABLE_CODES = (
-    5, 433, 577, 654, 1058, 1060, 1068, 1072, 1275, 8, 31, 87, 161, 1067, 0x80320010,
+    5, 433, 577, 654, 1058, 1060, 1068, 1072, 1275, 8, 31, 87, 161, 1067, 0x80320009, 0x8032000A,
 )
 
 # Коды, для которых пользовательский текст обязан называть причину и решение (AC8).
-_DESCRIBED_CODES = (5, 433, 1058, 1060, 1072, 1275, 577, 0x80320010)
+_DESCRIBED_CODES = (5, 433, 1058, 1060, 1072, 1275, 577, 0x80320009, 0x8032000A)
 
 
 class WinDivertErrorTableTests(unittest.TestCase):
@@ -282,9 +282,9 @@ class FwpInUseDiagnosisTests(unittest.TestCase):
 
     def test_text_signature_maps_to_fwp_in_use_record(self) -> None:
         diagnosis = self._diagnose()
-        record = WINDIVERT_ERROR_TABLE[0x80320010]
+        record = WINDIVERT_ERROR_TABLE[0x8032000A]
 
-        self.assertEqual(diagnosis.win32_error, 0x80320010)
+        self.assertEqual(diagnosis.win32_error, 0x8032000A)
         self.assertEqual(diagnosis.exit_code, 10)
         self.assertFalse(diagnosis.win32_error_inferred)
         self.assertEqual(diagnosis.cause, record.cause)
@@ -294,14 +294,14 @@ class FwpInUseDiagnosisTests(unittest.TestCase):
         diagnosis = self._diagnose(hint=hint)
 
         self.assertIn("GoodbyeDPI.exe", diagnosis.solution)
-        self.assertIn(WINDIVERT_ERROR_TABLE[0x80320010].solution, diagnosis.solution)
+        self.assertIn(WINDIVERT_ERROR_TABLE[0x8032000A].solution, diagnosis.solution)
 
     def test_message_shows_both_decimal_and_hex_code(self) -> None:
         from winws_runtime.health.winws_exit_diagnosis import format_winws_exit_diagnosis
 
         message = format_winws_exit_diagnosis(self._diagnose(), exe_name="winws2")
 
-        self.assertIn("0x80320010", message)
+        self.assertIn("0x8032000A", message)
         self.assertIn("код завершения процесса 10", message)
 
     def test_classified_as_retryable_conflict_not_user_problem(self) -> None:
@@ -315,6 +315,43 @@ class FwpInUseDiagnosisTests(unittest.TestCase):
         self.assertTrue(result.needs_aggressive_cleanup)
         self.assertEqual(result.kind, SpawnFailureKind.WINDIVERT_CONFLICT)
 
+    def test_codes_match_windows_headers(self) -> None:
+        # Значения из winerror.h. Раньше FWP_E_IN_USE был записан как
+        # 0x80320010 — это FWP_E_SESSION_ABORTED, другая ошибка: пользователю
+        # показывался чужой код, а полный код родной сборки не опознавался.
+        self.assertEqual(windivert_diagnostics._FWP_E_ALREADY_EXISTS, 0x80320009)
+        self.assertEqual(windivert_diagnostics._FWP_E_IN_USE, 0x8032000A)
+        # Младший байт — то, что сборка на Cygwin отдаёт кодом завершения.
+        self.assertEqual(windivert_diagnostics._FWP_E_ALREADY_EXISTS & 0xFF, 9)
+        self.assertEqual(windivert_diagnostics._FWP_E_IN_USE & 0xFF, 10)
+
+    def test_full_code_of_native_build_is_recognized_without_text(self) -> None:
+        from winws_runtime.health import winws_exit_diagnosis
+        from winws_runtime.runners.spawn_failure import classify_spawn_failure
+
+        for code in (0x80320009, 0x8032000A):
+            self.assertTrue(classify_spawn_failure(code).is_conflict, hex(code))
+            with patch.object(
+                winws_exit_diagnosis, "describe_windivert_conflict_hint", return_value=""
+            ):
+                diagnosis = winws_exit_diagnosis.diagnose_winws_exit(code, _BANNER)
+            self.assertEqual(diagnosis.cause, WINDIVERT_ERROR_TABLE[code].cause)
+
+    def test_already_exists_text_maps_to_its_own_record(self) -> None:
+        from winws_runtime.health import winws_exit_diagnosis
+
+        stderr = (
+            "windivert: error opening filter: An object with that GUID or LUID already exists"
+        )
+        with patch.object(
+            winws_exit_diagnosis, "describe_windivert_conflict_hint", return_value=""
+        ):
+            diagnosis = winws_exit_diagnosis.diagnose_winws_exit(9, f"{_BANNER}\n{stderr}")
+
+        self.assertEqual(diagnosis.win32_error, 0x80320009)
+        self.assertEqual(diagnosis.exit_code, 9)
+        self.assertEqual(diagnosis.cause, WINDIVERT_ERROR_TABLE[0x80320009].cause)
+
 
 class WindowsErrorCodeFormatTests(unittest.TestCase):
     def test_plain_win32_codes_stay_decimal(self) -> None:
@@ -326,7 +363,7 @@ class WindowsErrorCodeFormatTests(unittest.TestCase):
     def test_hresult_and_ntstatus_get_hex_form(self) -> None:
         from winws_runtime.health.windivert_diagnostics import format_windows_error_code
 
-        self.assertEqual(format_windows_error_code(0x80320010), "2150760464 / 0x80320010")
+        self.assertEqual(format_windows_error_code(0x8032000A), "2150760458 / 0x8032000A")
         self.assertEqual(format_windows_error_code(0xC0000142), "3221225794 / 0xC0000142")
 
     def test_post_mortem_reuses_the_same_formatter(self) -> None:

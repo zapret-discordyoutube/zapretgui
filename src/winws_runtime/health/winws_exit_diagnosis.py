@@ -23,6 +23,7 @@ from winws_runtime.health.winws_output import (
 from winws_runtime.health.windivert_diagnostics import (
     WINDIVERT_ERROR_TABLE,
     _ERROR_ACCESS_DENIED,
+    _FWP_E_ALREADY_EXISTS,
     _FWP_E_IN_USE,
     _ERROR_BAD_PATHNAME,
     _ERROR_DRIVER_BLOCKED,
@@ -150,8 +151,10 @@ _STDERR_TO_WIN32: List[Tuple[str, int]] = [
     ("driver blocked", _ERROR_DRIVER_BLOCKED),
     ("blocked from loading", _ERROR_DRIVER_BLOCKED),
     ("driver failed prior unload", _ERROR_DRIVER_FAILED_PRIOR_UNLOAD),
-    # FWP_E_IN_USE: winws2 печатает текст ошибки, а кодом завершения отдаёт
-    # усечённое значение, по которому этот случай не опознать.
+    # Остатки фильтров WFP от прошлого запуска. Сборка winws на Cygwin отдаёт
+    # кодом завершения только младший байт (9 и 10), поэтому опознаём по тексту.
+    ("guid or luid already exists", _FWP_E_ALREADY_EXISTS),
+    ("object with that guid", _FWP_E_ALREADY_EXISTS),
     ("referenced by other objects", _FWP_E_IN_USE),
     ("bad pathname", _ERROR_BAD_PATHNAME),
     ("service does not exist", _ERROR_SERVICE_DOES_NOT_EXIST),
@@ -446,17 +449,25 @@ def _handle_process_aborted(exit_code: int, stderr: str) -> WinDivertDiagnosis:
     return _diagnosis_from_table(_ERROR_PROCESS_ABORTED)
 
 
-def _handle_fwp_in_use(exit_code: int, stderr: str) -> WinDivertDiagnosis:
-    """FWP_E_IN_USE — WinDivert держат остатки прошлого запуска или чужая программа.
+def _diagnose_wfp_leftovers(code: int) -> WinDivertDiagnosis:
+    """Фильтры WFP от прошлого запуска ещё не убраны или их держит чужая программа.
 
-    Базовый текст говорит «закройте другие программы», а подсказка о конфликте
-    называет виновника по имени, если его удалось найти.
+    Базовый текст общий, а подсказка о конфликте называет виновника по имени,
+    если его удалось найти.
     """
-    diagnosis = _diagnosis_from_table(_FWP_E_IN_USE)
+    diagnosis = _diagnosis_from_table(code)
     hint = describe_windivert_conflict_hint()
     if hint:
         diagnosis.solution = f"{hint}. {diagnosis.solution}"
     return diagnosis
+
+
+def _handle_fwp_already_exists(exit_code: int, stderr: str) -> WinDivertDiagnosis:
+    return _diagnose_wfp_leftovers(_FWP_E_ALREADY_EXISTS)
+
+
+def _handle_fwp_in_use(exit_code: int, stderr: str) -> WinDivertDiagnosis:
+    return _diagnose_wfp_leftovers(_FWP_E_IN_USE)
 
 
 # Handler dispatch table
@@ -473,6 +484,7 @@ _EXIT_CODE_HANDLERS = {
     _ERROR_INVALID_PARAMETER: _handle_invalid_parameter,
     _ERROR_BAD_PATHNAME: _handle_bad_pathname,
     _ERROR_PROCESS_ABORTED: _handle_process_aborted,
+    _FWP_E_ALREADY_EXISTS: _handle_fwp_already_exists,
     _FWP_E_IN_USE: _handle_fwp_in_use,
 }
 

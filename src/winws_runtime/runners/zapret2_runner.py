@@ -1433,6 +1433,9 @@ class Winws2StrategyRunner(StrategyRunnerBase):
     # Историческая формулировка zapret2 для системной ошибки без ретрая.
     _WINDIVERT_SYSTEM_ERROR_NO_RETRY_LOG_MESSAGE = "WinDivert system error detected — retry will not help"
 
+    # Сколько раз повторять запуск, если мешают фильтры прошлого экземпляра.
+    _WINDIVERT_CONFLICT_MAX_RETRIES = 2
+
     def _relaunch_after_failed_spawn_locked(
         self,
         preset_path: str,
@@ -1523,18 +1526,25 @@ class Winws2StrategyRunner(StrategyRunnerBase):
         stable_start_window_seconds: float,
         cleanup_required: bool = False,
     ) -> bool:
-        """Hook: conflict-ретрай winws2 только для первого «быстрого» старта."""
+        """Hook: повторы winws2 при конфликте WinDivert, каждый после восстановления.
+
+        Повтор нужен и тогда, когда перед запуском уже останавливали прежний
+        winws: именно сразу после остановки Windows ещё не успевает убрать его
+        фильтры, и новый запуск натыкается на них.
+        """
         if (
-            (not cleanup_required)
-            and retry_count == 0
+            retry_count < self._WINDIVERT_CONFLICT_MAX_RETRIES
             and self._is_windivert_conflict_error(stderr_output, exit_code)
         ):
-            log("WinDivert conflict detected, retrying after recovery", "WARNING")
-            return self._start_from_preset_file_locked(
+            log(
+                "WinDivert conflict detected, retrying after recovery "
+                f"({retry_count + 1}/{self._WINDIVERT_CONFLICT_MAX_RETRIES})",
+                "WARNING",
+            )
+            return self._relaunch_after_failed_spawn_locked(
                 preset_path,
                 strategy_name,
-                force_cleanup=True,
-                retry_count=1,
+                retry_count=retry_count,
                 stable_start_window_seconds=stable_start_window_seconds,
             )
 
