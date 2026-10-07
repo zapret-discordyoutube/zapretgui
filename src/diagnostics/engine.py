@@ -736,17 +736,17 @@ def _probe_lines(probe: _Probe, *, full: bool) -> list[str]:
     return lines
 
 
-def _dns_provider_name(ip: str) -> tuple[str, str]:
-    """(название провайдера из списка программы, его раздел) или пустые строки."""
+def _dns_provider(ip: str) -> tuple[str, str, str]:
+    """(название сервера из списка программы, его раздел, пометка состояния) или пустые строки."""
     try:
-        from dns.dns_providers import DNS_PROVIDERS
+        from dns.dns_providers import find_provider_by_address
     except Exception:
-        return "", ""
-    for category, providers in DNS_PROVIDERS.items():
-        for name, info in providers.items():
-            if ip in (info.get("ipv4") or ()):
-                return str(name), str(category)
-    return "", ""
+        return "", "", ""
+    found = find_provider_by_address(ip)
+    if found is None:
+        return "", "", ""
+    category, name, info = found
+    return str(name), str(category), str(info.get("status", ""))
 
 
 def _environment_lines() -> list[str]:
@@ -760,16 +760,24 @@ def _environment_lines() -> list[str]:
     if servers:
         described: list[str] = []
         unblock_names: list[str] = []
+        blocked_names: list[str] = []
         for ip in servers:
-            name, category = _dns_provider_name(ip)
+            name, category, status = _dns_provider(ip)
             described.append(f"{ip} ({name})" if name else ip)
             if category == "Для ИИ" and name not in unblock_names:
                 unblock_names.append(name)
+            if status == "blocked" and name not in blocked_names:
+                blocked_names.append(name)
         lines.append(f"🌐 DNS-серверы системы: {', '.join(described)}")
         for name in unblock_names:
             lines.append(
                 f"ℹ️ {name} сам меняет адреса части сайтов, чтобы обходить блокировки. "
                 "Такие адреса проверяются по сертификату и подменой не считаются."
+            )
+        for name in blocked_names:
+            lines.append(
+                f"⚠️ {name} в России блокируется: обычные запросы к нему могут не доходить "
+                "или подменяться по дороге. Что отвечает на вашей линии, покажет вкладка «DNS-серверы»."
             )
     return lines
 

@@ -10,7 +10,17 @@ from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QFocusEvent, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import QApplication
 
-from dns.ui.provider_grid import ADD_TILE_KEY, DnsProviderGrid, DnsTile, GridTexts, latency_text, tile_accessible_text
+from dns.dns_providers import STATUS_AT_RISK, STATUS_BLOCKED
+from dns.ui.provider_grid import (
+    ADD_TILE_KEY,
+    DnsProviderGrid,
+    DnsTile,
+    GridTexts,
+    latency_text,
+    status_color,
+    status_text,
+    tile_accessible_text,
+)
 
 
 def _tiles() -> list[DnsTile]:
@@ -127,6 +137,52 @@ class DnsProviderGridTests(unittest.TestCase):
         self.assertEqual(latency_text(DnsTile(kind="provider", latency="timeout")), "нет ответа")
         self.assertEqual(latency_text(DnsTile(kind="provider")), "")
         self.assertEqual(tile_accessible_text(tile, english), "Google, not selected, 8.8.8.8, 1 ms, fastest")
+
+    def test_status_mark_is_named_and_read_aloud(self) -> None:
+        blocked = DnsTile(kind="provider", key="G", title="Google", address="8.8.8.8", status=STATUS_BLOCKED, has_dnssec=True)
+        at_risk = DnsTile(kind="provider", key="A", title="AdGuard", status=STATUS_AT_RISK)
+        english = GridTexts(status_blocked="blocked", status_at_risk="at risk", not_selected="not selected")
+
+        self.assertEqual(status_text(blocked), "блокируется")
+        self.assertEqual(status_text(at_risk), "под угрозой")
+        self.assertEqual(status_text(at_risk, english), "at risk")
+        self.assertEqual(status_text(DnsTile(kind="provider")), "")
+        self.assertEqual(tile_accessible_text(blocked, english), "Google, not selected, blocked, 8.8.8.8, DNSSEC")
+        self.assertNotEqual(status_color(STATUS_BLOCKED, True), status_color(STATUS_AT_RISK, True))
+        self.assertIsNone(status_color("", True))
+
+    def test_status_mark_and_group_note_are_painted(self) -> None:
+        """Пометка и пояснение группы меняют картинку, а не только данные."""
+
+        def picture(status: str, note: str) -> bytes:
+            grid = DnsProviderGrid()
+            self.addCleanup(grid.deleteLater)
+            grid.resize(560, 100)
+            grid.set_tiles(
+                [
+                    DnsTile(kind="group", title="Для ИИ", counter="1", note=note),
+                    DnsTile(kind="provider", key="G", title="Google", note="Надёжный", address="8.8.8.8", status=status),
+                ]
+            )
+            image = grid.grab().toImage()
+            return bytes(image.constBits().asarray(image.sizeInBytes()))
+
+        plain = picture("", "")
+        self.assertNotEqual(picture(STATUS_BLOCKED, ""), plain)
+        self.assertNotEqual(picture(STATUS_AT_RISK, ""), picture(STATUS_BLOCKED, ""))
+        self.assertNotEqual(picture("", "серверы сообщества"), plain)
+
+    def test_narrow_tile_keeps_address_and_drops_extra_marks(self) -> None:
+        grid = DnsProviderGrid()
+        self.addCleanup(grid.deleteLater)
+        grid.resize(270, 100)
+        tile = DnsTile(
+            kind="provider", key="Q", title="Quad9", address="149.112.112.112",
+            has_dnssec=True, has_ipv6=True, has_doh=True, latency="timeout",
+        )
+        grid.set_tiles([tile])
+
+        self.assertFalse(grid.grab().isNull())
 
     def test_paint_does_not_fail_for_every_tile_state(self) -> None:
         grid = self._grid()

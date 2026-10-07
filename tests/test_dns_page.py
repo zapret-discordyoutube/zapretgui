@@ -164,32 +164,32 @@ class DnsPageTests(unittest.TestCase):
         page = self._page()
         page.now_panel._chips[WIFI].setChecked(False)
 
-        page.grid.activated.emit("Google DNS")
+        page.grid.activated.emit("Quad9")
 
         payload = page._apply_lane.request.call_args.args[0]
         self.assertEqual(payload["action"], "provider")
         self.assertEqual(payload["adapters"], [ETH])
-        self.assertEqual(payload["name"], "Google DNS")
-        self.assertEqual(payload["data"]["ipv4"][0], "8.8.8.8")
+        self.assertEqual(payload["name"], "Quad9")
+        self.assertEqual(payload["data"]["ipv4"][0], "9.9.9.9")
         self.assertFalse(payload["ipv6_available"])
         pending = [tile.key for tile in self._provider_tiles(page) if tile.pending]
-        self.assertEqual(pending, ["Google DNS"])
-        self.assertTrue(page.grid.is_charging("Google DNS"))
+        self.assertEqual(pending, ["Quad9"])
+        self.assertTrue(page.grid.is_charging("Quad9"))
         self.assertTrue(page.now_panel.badge.is_busy())
         self.assertEqual(page.now_panel.detail_label.text(), "Применяю…")
 
-        plan = page_plans.build_provider_dns_apply_result_plan(name="Google DNS", adapter_count=1, success_count=1, ipv6=[])
-        google = replace(ETHERNET, static_ipv4=("8.8.8.8", "8.8.4.4"), static_ipv6=())
-        page._on_apply_done(payload, {"plan": plan, "state": replace(STATE, adapters=(google, WIFI_ADAPTER, SPARE_ADAPTER))})
+        plan = page_plans.build_provider_dns_apply_result_plan(name="Quad9", adapter_count=1, success_count=1, ipv6=[])
+        quad9 = replace(ETHERNET, static_ipv4=("9.9.9.9", "149.112.112.112"), static_ipv6=())
+        page._on_apply_done(payload, {"plan": plan, "state": replace(STATE, adapters=(quad9, WIFI_ADAPTER, SPARE_ADAPTER))})
 
         self.assertIsNone(page._pending_choice)
-        self.assertEqual(page.now_panel.title_label.text(), "Google DNS")
+        self.assertEqual(page.now_panel.title_label.text(), "Quad9")
         # DNS встал мгновенно: комета сначала замыкает круг, потом значок делает оборот.
-        self.assertTrue(page.grid.is_charging("Google DNS"))
+        self.assertTrue(page.grid.is_charging("Quad9"))
         page.grid._clock = lambda: 10**9
         page.grid._tick()
         self.assertFalse(page.grid.is_charging())
-        self.assertEqual(page.grid.settling_keys(), ["Google DNS"])
+        self.assertEqual(page.grid.settling_keys(), ["Quad9"])
         self.info_bar.warning.assert_not_called()
 
     def test_refreshed_adapters_keep_user_checks(self) -> None:
@@ -201,6 +201,67 @@ class DnsPageTests(unittest.TestCase):
 
         chips = page.now_panel._chips
         self.assertEqual([chips[key].isChecked() for key in (ETH, WIFI, SPARE)], [True, False, True])
+
+    def test_all_button_checks_every_adapter_and_restores_initial_checks(self) -> None:
+        page = self._page()
+        panel = page.now_panel
+        chips = panel._chips
+
+        self.assertFalse(panel.all_chip.isHidden())
+        self.assertFalse(panel.all_chip.isChecked())
+
+        panel.all_chip.click()
+        self.assertEqual(page._selected_adapters(), [ETH, WIFI, SPARE])
+        self.assertTrue(panel.all_chip.isChecked())
+
+        page.grid.activated.emit("Quad9")
+        self.assertEqual(page._apply_lane.request.call_args.args[0]["adapters"], [ETH, WIFI, SPARE])
+
+        chips[SPARE].setChecked(False)
+        self.assertFalse(panel.all_chip.isChecked())
+
+        chips[SPARE].setChecked(True)
+        panel.all_chip.click()
+        # Все уже были отмечены — возвращаются исходные отметки: только подключённые.
+        self.assertEqual(page._selected_adapters(), [ETH, WIFI])
+        self.assertFalse(panel.all_chip.isChecked())
+
+    def test_all_button_is_hidden_for_a_single_adapter(self) -> None:
+        page = self._page(state=replace(STATE, adapters=(ETHERNET,)))
+
+        self.assertTrue(page.now_panel.all_chip.isHidden())
+
+    def test_tiles_carry_status_dnssec_and_group_notes(self) -> None:
+        page = self._page()
+        tiles = {tile.key: tile for tile in self._provider_tiles(page)}
+
+        self.assertEqual(tiles["Google DNS"].status, "blocked")
+        self.assertEqual(tiles["AdGuard"].status, "at_risk")
+        self.assertEqual(tiles["Quad9"].status, "")
+        self.assertIn("В России блокируется", tiles["Cloudflare"].tooltip)
+        self.assertTrue(tiles["Quad9"].has_dnssec)
+        self.assertIn("DNSSEC", tiles["Quad9"].tooltip)
+        self.assertFalse(tiles["Яндекс DNS"].has_dnssec)
+
+        notes = {tile.title: tile.note for tile in page.grid.tiles() if tile.kind == "group"}
+        self.assertEqual(notes["Для ИИ"], "серверы сообщества — доверия к ним меньше")
+        self.assertEqual(notes["Популярные"], "")
+
+        # При фильтре заголовка группы нет — пояснение уходит в подсказку плитки.
+        page._set_filter("Для ИИ")
+        self.assertIn("доверия к ним меньше", self._provider_tiles(page)[0].tooltip)
+
+    def test_choosing_blocked_server_applies_it_and_warns(self) -> None:
+        page = self._page()
+
+        page.grid.activated.emit("Google DNS")
+
+        self.assertEqual(page._apply_lane.request.call_args.args[0]["name"], "Google DNS")
+        self.assertIn("Google DNS в России блокируется", self.info_bar.warning.call_args.kwargs["title"])
+
+        self.info_bar.reset_mock()
+        page.grid.activated.emit("AdGuard")
+        self.info_bar.warning.assert_not_called()
 
     def test_isp_warning_looks_only_at_connected_adapters(self) -> None:
         self.assertTrue(page_plans.should_show_isp_dns_warning([WIFI_ADAPTER, SPARE_ADAPTER], warning_already_shown=False))

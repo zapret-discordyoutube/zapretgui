@@ -26,7 +26,7 @@ from qfluentwidgets import CaptionLabel, InfoBar, InfoBarPosition, PushButton, R
 from app.ui_texts import tr as tr_catalog
 from dns import page_plans as dns_page_plans
 from dns.custom_providers import CUSTOM_DNS_CATEGORY, build_dns_providers_with_custom
-from dns.dns_providers import DNS_PROVIDERS
+from dns.dns_providers import DNS_PROVIDERS, STATUS_AT_RISK, STATUS_BLOCKED
 from dns.ui.custom_dns_dialog import CustomDnsDialog, unique_copy_name
 from dns.ui.now_panel import AdapterChip, DnsNowPanel, NowState
 from dns.ui.provider_grid import ADD_TILE_KEY, DnsProviderGrid, DnsTile, GridTexts
@@ -49,8 +49,25 @@ RECOMMENDED_PROVIDER = ("Безопасные", "Quad9")
 GROUP_TEXT_KEYS = {
     "Популярные": ("page.network.group.popular", "Популярные"),
     "Безопасные": ("page.network.group.secure", "Безопасные"),
+    "Малоизвестные": ("page.network.group.lesser_known", "Малоизвестные"),
     "Для ИИ": ("page.network.group.ai", "Для ИИ"),
     CUSTOM_DNS_CATEGORY: ("page.network.group.custom", "Свои DNS"),
+}
+# Короткое пояснение справа от названия группы.
+GROUP_NOTE_KEYS = {
+    "Малоизвестные": ("page.network.group.lesser_known.note", "реже попадают под блокировки"),
+    "Для ИИ": ("page.network.group.ai.note", "серверы сообщества — доверия к ним меньше"),
+}
+# Пометка сервера → строка подсказки плитки.
+STATUS_TOOLTIP_KEYS = {
+    STATUS_BLOCKED: (
+        "page.network.status.blocked.tooltip",
+        "В России блокируется: обычные запросы к этому серверу не доходят или подменяются по дороге.",
+    ),
+    STATUS_AT_RISK: (
+        "page.network.status.at_risk.tooltip",
+        "Под угрозой блокировки в России: пока работает, но может перестать отвечать.",
+    ),
 }
 FILTER_TEXT_KEYS = {
     FILTER_ALL: ("page.network.filter.all", "Все"),
@@ -156,6 +173,10 @@ class NetworkPage(BasePage):
         key, default = GROUP_TEXT_KEYS.get(group, ("", group))
         return self._t(key, default) if key else group
 
+    def _group_note(self, group: str) -> str:
+        key, default = GROUP_NOTE_KEYS.get(group, ("", ""))
+        return self._t(key, default) if key else ""
+
     def _filter_title(self, group: str) -> str:
         key, default = FILTER_TEXT_KEYS.get(group, GROUP_TEXT_KEYS.get(group, ("", group)))
         return self._t(key, default) if key else group
@@ -171,6 +192,8 @@ class NetworkPage(BasePage):
             fastest=self._t("page.network.tile.fastest", "быстрее всех"),
             custom_hint=self._t("page.network.tile.custom_hint", "свой DNS, меню правки — клавиша меню"),
             add=self._t("page.network.add_tile.title", "Свой DNS"),
+            status_blocked=self._t("page.network.status.blocked", "блокируется"),
+            status_at_risk=self._t("page.network.status.at_risk", "под угрозой"),
             grid_name=self._t("page.network.grid.name", "DNS-серверы"),
             grid_description=self._t(
                 "page.network.grid.description",
@@ -244,6 +267,14 @@ class NetworkPage(BasePage):
         panel.set_adapters_caption(
             self._t("page.network.adapters.caption", "Применять к:"),
             self._t("page.network.adapters.empty", "Сетевые адаптеры не найдены"),
+        )
+        panel.set_all_adapters_text(
+            self._t("page.network.adapters.all", "Все"),
+            self._t(
+                "page.network.adapters.all.tooltip",
+                "Отметить все сетевые интерфейсы: выбранный DNS встанет на каждый из них. "
+                "Повторное нажатие возвращает исходные отметки.",
+            ),
         )
         self.grid.set_texts(self._grid_texts())
 
@@ -459,7 +490,14 @@ class NetworkPage(BasePage):
         tiles: list[DnsTile] = []
         for group, items in groups:
             if self._filter == FILTER_ALL:
-                tiles.append(DnsTile(kind="group", title=self._group_title(group), counter=str(len(items)) if items else ""))
+                tiles.append(
+                    DnsTile(
+                        kind="group",
+                        title=self._group_title(group),
+                        counter=str(len(items)) if items else "",
+                        note=self._group_note(group),
+                    )
+                )
             for name, data in items.items():
                 address = self._primary_address(data)
                 if self._measuring and address not in self._latency:
@@ -472,11 +510,25 @@ class NetworkPage(BasePage):
                 ipv4 = dns_page_plans.normalize_dns_list(data.get("ipv4", []))
                 ipv6 = dns_page_plans.normalize_dns_list(data.get("ipv6", []))
                 custom = bool(data.get("custom_id"))
+                status = str(data.get("status", ""))
                 tooltip_lines = [f"{name} — {data.get('desc', '')}".rstrip(" —")]
+                if status in STATUS_TOOLTIP_KEYS:
+                    tooltip_lines.append(self._t(*STATUS_TOOLTIP_KEYS[status]))
+                group_note = self._group_note(group)
+                if group_note and self._filter != FILTER_ALL:
+                    # Заголовка группы при фильтре нет — пояснение уходит в подсказку.
+                    tooltip_lines.append(f"{self._group_title(group)}: {group_note}")
                 if ipv4:
                     tooltip_lines.append("IPv4: " + self._addresses_with_latency(ipv4))
                 if ipv6:
                     tooltip_lines.append("IPv6: " + self._addresses_with_latency(ipv6))
+                if data.get("dnssec"):
+                    tooltip_lines.append(
+                        self._t(
+                            "page.network.tile.dnssec",
+                            "DNSSEC: сервер проверяет подписи ответов и не отдаёт подделанные.",
+                        )
+                    )
                 if custom:
                     tooltip_lines.append(self._t("page.network.tile.custom_menu", "Правая кнопка мыши — изменить или удалить"))
                 tiles.append(
@@ -492,11 +544,13 @@ class NetworkPage(BasePage):
                         pending=name == chosen,
                         has_ipv6=bool(ipv6),
                         has_doh=self._doh_supported and bool(data.get("doh")),
+                        has_dnssec=bool(data.get("dnssec")),
                         custom=custom,
                         latency=latency,
                         latency_ms=latency_ms,
                         fastest=bool(fastest_address) and address == fastest_address,
                         tooltip="\n".join(tooltip_lines),
+                        status=status,
                     )
                 )
             if group == CUSTOM_DNS_CATEGORY:
@@ -557,6 +611,16 @@ class NetworkPage(BasePage):
         self._pending_choice = name
         self.grid.flash(name)
         self._render()
+        if data.get("status") == STATUS_BLOCKED:
+            self._info(
+                "warning",
+                self._t("page.network.status.blocked.chosen.title", "{name} в России блокируется", name=name),
+                self._t(
+                    "page.network.status.blocked.chosen.content",
+                    "DNS поставлен, как вы выбрали. Если сайты перестанут открываться, выберите другой сервер. "
+                    "Что отвечает на вашей линии, покажет BlockCheck → «DNS-серверы».",
+                ),
+            )
         self._apply_lane.request(
             {
                 "action": "provider",

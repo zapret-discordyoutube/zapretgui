@@ -2,9 +2,13 @@
 
 Плитка выглядит как карточка qfluentwidgets (CardWidget): те же фон,
 скругление и шрифты. Слева — значок сервера в круге его цвета, рядом
-название и пояснение, внизу — основной адрес, метки IPv6/DoH и результат
+название и пояснение, внизу — основной адрес, метки DNSSEC/IPv6/DoH и результат
 замера скорости с цветной точкой. Выбранная плитка мягко подкрашена
 акцентом и отмечена галочкой, без рамок. Последняя плитка — «Свой DNS».
+
+Перед пояснением может стоять цветная пометка состояния сервера в России:
+красная «блокируется» или жёлтая «под угрозой» (DnsTile.status). У заголовка
+группы справа от счётчика — короткое пояснение ко всей группе (DnsTile.note).
 
 Щелчок или Enter/пробел выбирает сервер, правая кнопка мыши (или клавиша
 меню) на своём DNS открывает меню правки.
@@ -32,6 +36,7 @@ from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPe
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 from qfluentwidgets import FluentIcon, getFont, isDarkTheme, themeColor
 
+from dns.dns_providers import STATUS_AT_RISK, STATUS_BLOCKED
 from profile.ui.profile_icon import profile_icon_pixmap
 from ui.accessibility import set_control_accessibility
 from ui.animation_policy import are_live_animations_enabled
@@ -159,6 +164,8 @@ class GridTexts:
     fastest: str = "быстрее всех"
     custom_hint: str = "свой DNS, меню правки — клавиша меню"
     add: str = "Свой DNS"
+    status_blocked: str = "блокируется"
+    status_at_risk: str = "под угрозой"
     grid_name: str = "DNS-серверы"
     grid_description: str = "Стрелки — выбор плитки, Enter или пробел — применить DNS."
 
@@ -168,6 +175,9 @@ class DnsTile:
     """Плитка сервера, плитка «Свой DNS» или заголовок группы.
 
     kind: "provider" | "add" | "group".
+    status: "" — обычный сервер, "blocked" — в России блокируется,
+    "at_risk" — может попасть под блокировку. У группы note — пояснение
+    справа от её названия.
     latency: "" — не замеряли, "measuring" — идёт замер, "ok" — есть
     время в latency_ms, "timeout" — сервер не ответил.
     """
@@ -183,12 +193,14 @@ class DnsTile:
     pending: bool = False
     has_ipv6: bool = False
     has_doh: bool = False
+    has_dnssec: bool = False
     custom: bool = False
     latency: str = ""
     latency_ms: float = 0.0
     fastest: bool = False
     counter: str = ""
     tooltip: str = ""
+    status: str = ""
 
     @property
     def clickable(self) -> bool:
@@ -201,6 +213,24 @@ def badge_color(color: str, tokens, dark: bool) -> QColor:
     if dark and result.lightnessF() < 0.55:
         result = result.lighter(150)
     return result
+
+
+def status_text(tile: DnsTile, texts: GridTexts = GridTexts()) -> str:
+    """Подпись пометки состояния или пустая строка."""
+    if tile.status == STATUS_BLOCKED:
+        return texts.status_blocked
+    if tile.status == STATUS_AT_RISK:
+        return texts.status_at_risk
+    return ""
+
+
+def status_color(status: str, dark: bool) -> QColor | None:
+    """Цвет пометки: красный — блокируется, жёлтый — под угрозой."""
+    if status == STATUS_BLOCKED:
+        return QColor("#f85149" if dark else "#cf222e")
+    if status == STATUS_AT_RISK:
+        return QColor("#d29922" if dark else "#9a6700")
+    return None
 
 
 def latency_text(tile: DnsTile, texts: GridTexts = GridTexts()) -> str:
@@ -219,10 +249,15 @@ def tile_accessible_text(tile: DnsTile, texts: GridTexts = GridTexts()) -> str:
     parts = [tile.title, texts.selected if tile.selected else texts.not_selected]
     if tile.pending:
         parts.append(texts.applying)
+    state = status_text(tile, texts)
+    if state:
+        parts.append(state)
     if tile.note:
         parts.append(tile.note)
     if tile.address:
         parts.append(tile.address)
+    if tile.has_dnssec:
+        parts.append("DNSSEC")
     speed = latency_text(tile, texts)
     if speed:
         parts.append(speed + (f", {texts.fastest}" if tile.fastest else ""))
@@ -496,6 +531,20 @@ class DnsProviderGrid(QWidget):
             painter.setFont(getFont(12))
             painter.setPen(to_qcolor(tokens.fg_faint))
             painter.drawText(area.adjusted(offset, 0, 0, -1), align, tile.counter)
+            offset += QFontMetrics(getFont(12)).horizontalAdvance(tile.counter)
+        else:
+            offset = QFontMetrics(title_font).horizontalAdvance(tile.title)
+        if tile.note:
+            note_font = getFont(12)
+            note_area = area.adjusted(offset + 14, 0, 0, -1)
+            if note_area.width() > 40:
+                painter.setFont(note_font)
+                painter.setPen(to_qcolor(tokens.fg_faint))
+                painter.drawText(
+                    note_area,
+                    align,
+                    QFontMetrics(note_font).elidedText(tile.note, Qt.TextElideMode.ElideRight, note_area.width()),
+                )
 
     def _card_path(self, rect: QRect) -> QPainterPath:
         path = QPainterPath()
@@ -595,15 +644,42 @@ class DnsProviderGrid(QWidget):
             QFontMetrics(title_font).elidedText(tile.title, Qt.TextElideMode.ElideRight, title_rect.width()),
         )
         note = self._texts.applying if looks_pending else tile.note
+        note_rect = QRect(text_left, rect.top() + pad + 19, right - text_left - mark_width, 18)
+        if not looks_pending:
+            note_rect.setLeft(note_rect.left() + self._paint_status(painter, note_rect, tile, dark))
         self._paint_text(
             painter,
-            QRect(text_left, rect.top() + pad + 19, right - text_left - mark_width, 18),
+            note_rect,
             note,
             size=12,
             color=QColor(themeColor()) if looks_pending else to_qcolor(tokens.fg_muted),
         )
         self._paint_footer(painter, QRect(rect.left() + pad, rect.bottom() - pad - 17, rect.width() - 2 * pad, 18), tile, tokens, dark)
         painter.restore()
+
+    def _paint_status(self, painter: QPainter, area: QRect, tile: DnsTile, dark: bool) -> int:
+        """Пометка «блокируется» / «под угрозой» в начале строки пояснения.
+
+        Возвращает ширину, занятую пометкой вместе с отступом после неё.
+        """
+        label = status_text(tile, self._texts)
+        color = status_color(tile.status, dark)
+        if not label or color is None:
+            return 0
+        font = getFont(10, QFont.Weight.DemiBold)
+        width = QFontMetrics(font).horizontalAdvance(label) + 12
+        if width > area.width():
+            return 0
+        box = QRectF(area.left(), area.center().y() - 7.5, width, 16)
+        back = QColor(color)
+        back.setAlpha(46 if dark else 30)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(back)
+        painter.drawRoundedRect(box, 8, 8)
+        painter.setFont(font)
+        painter.setPen(color)
+        painter.drawText(box, int(Qt.AlignmentFlag.AlignCenter), label)
+        return width + 6
 
     def _paint_mark(self, painter: QPainter, area: QRect, tile: DnsTile) -> None:
         """Галочка выбранного сервера; пока DNS применяется — пустое кольцо-гнездо."""
@@ -631,7 +707,7 @@ class DnsProviderGrid(QWidget):
         painter.restore()
 
     def _paint_footer(self, painter: QPainter, area: QRect, tile: DnsTile, tokens, dark: bool) -> None:
-        """Нижняя строка: адрес, метки IPv6/DoH и скорость справа."""
+        """Нижняя строка: адрес, метки DNSSEC/IPv6/DoH и скорость справа."""
         right = area.right()
         speed = latency_text(tile, self._texts)
         if speed:
@@ -666,11 +742,23 @@ class DnsProviderGrid(QWidget):
         painter.setFont(address_font)
         painter.setPen(to_qcolor(tokens.fg_muted))
         metrics = QFontMetrics(address_font)
-        badges = [label for label, on in (("IPv6", tile.has_ipv6), ("DoH", tile.has_doh)) if on]
+        badges = [
+            label
+            for label, on in (("DNSSEC", tile.has_dnssec), ("IPv6", tile.has_ipv6), ("DoH", tile.has_doh))
+            if on
+        ]
         badge_font = getFont(10, QFont.Weight.DemiBold)
         badge_metrics = QFontMetrics(badge_font)
-        badges_width = sum(badge_metrics.horizontalAdvance(label) + 14 for label in badges)
-        address_width = max(0, min(metrics.horizontalAdvance(tile.address), right - x - badges_width - 8))
+
+        def total_width() -> int:
+            return sum(badge_metrics.horizontalAdvance(label) + 14 for label in badges)
+
+        # Адрес важнее меток: на узкой плитке лишние метки убираются с конца.
+        while badges and metrics.horizontalAdvance(tile.address) + 10 + total_width() > right - x:
+            badges.pop()
+        badges_width = total_width()
+        # +2: ширина строки бывает дробной, без запаса полный адрес обрезался бы многоточием.
+        address_width = max(0, min(metrics.horizontalAdvance(tile.address) + 2, right - x - badges_width - 8))
         if tile.address and address_width > 12:
             painter.drawText(
                 QRect(x, area.top(), address_width, area.height()),
@@ -902,5 +990,7 @@ __all__ = [
     "paint_comet",
     "pop_scale",
     "latency_text",
+    "status_color",
+    "status_text",
     "tile_accessible_text",
 ]

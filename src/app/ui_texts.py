@@ -745,6 +745,18 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Пинг и сеть",
         "en": "Ping and network",
     },
+    "page.domain_lookup.section.path": {
+        "ru": "Путь до сервера",
+        "en": "Path to the server",
+    },
+    "page.domain_lookup.path.name": {
+        "ru": "Узлы по дороге до сервера",
+        "en": "Hops on the way to the server",
+    },
+    "page.domain_lookup.path.description": {
+        "ru": "Номер узла, его адрес и время ответа. Отметка показывает, за каким узлом стоит фильтр.",
+        "en": "Hop number, its address and response time. The mark shows after which hop the filter stands.",
+    },
     "page.domain_lookup.section.dns": {
         "ru": "Адреса с разных DNS-серверов",
         "en": "Addresses from different DNS servers",
@@ -2056,6 +2068,54 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.network.group.ai": {
         "ru": "Для ИИ",
         "en": "For AI",
+    },
+    "page.network.group.ai.note": {
+        "ru": "серверы сообщества — доверия к ним меньше",
+        "en": "community servers — trust them less",
+    },
+    "page.network.group.lesser_known": {
+        "ru": "Малоизвестные",
+        "en": "Lesser-known",
+    },
+    "page.network.group.lesser_known.note": {
+        "ru": "реже попадают под блокировки",
+        "en": "less likely to be blocked",
+    },
+    "page.network.status.blocked": {
+        "ru": "блокируется",
+        "en": "blocked",
+    },
+    "page.network.status.at_risk": {
+        "ru": "под угрозой",
+        "en": "at risk",
+    },
+    "page.network.status.blocked.tooltip": {
+        "ru": "В России блокируется: обычные запросы к этому серверу не доходят или подменяются по дороге.",
+        "en": "Blocked in Russia: plain queries to this server do not arrive or are replaced on the way.",
+    },
+    "page.network.status.at_risk.tooltip": {
+        "ru": "Под угрозой блокировки в России: пока работает, но может перестать отвечать.",
+        "en": "At risk of being blocked in Russia: works for now, but may stop answering.",
+    },
+    "page.network.status.blocked.chosen.title": {
+        "ru": "{name} в России блокируется",
+        "en": "{name} is blocked in Russia",
+    },
+    "page.network.status.blocked.chosen.content": {
+        "ru": "DNS поставлен, как вы выбрали. Если сайты перестанут открываться, выберите другой сервер. Что отвечает на вашей линии, покажет BlockCheck → «DNS-серверы».",
+        "en": "The DNS is set as you chose. If sites stop opening, pick another server. BlockCheck → “DNS servers” shows what answers on your line.",
+    },
+    "page.network.tile.dnssec": {
+        "ru": "DNSSEC: сервер проверяет подписи ответов и не отдаёт подделанные.",
+        "en": "DNSSEC: the server verifies answer signatures and drops forged ones.",
+    },
+    "page.network.adapters.all": {
+        "ru": "Все",
+        "en": "All",
+    },
+    "page.network.adapters.all.tooltip": {
+        "ru": "Отметить все сетевые интерфейсы: выбранный DNS встанет на каждый из них. Повторное нажатие возвращает исходные отметки.",
+        "en": "Check every network interface: the chosen DNS is applied to each of them. Press again to restore the initial checks.",
     },
     "page.network.group.custom": {
         "ru": "Свои DNS",

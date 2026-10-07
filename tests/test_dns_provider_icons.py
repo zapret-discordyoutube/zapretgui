@@ -61,6 +61,10 @@ class DnsProviderIconTests(unittest.TestCase):
         self.assertEqual(providers["Quad9"]["icon"], "simple:quad9:Q9")
         self.assertEqual(providers["AdGuard"]["icon"], "simple:adguard:AG")
         self.assertEqual(providers["OpenDNS"]["icon"], "own:opendns:OD")
+        self.assertEqual(providers["Google DNS"]["icon"], "simple:google:G")
+        self.assertEqual(providers["Gcore"]["icon"], "simple:gcore:GC")
+        self.assertEqual(providers["DNS4EU"]["icon"], "simple:europeanunion:EU")
+        self.assertEqual(providers["Яндекс DNS"]["icon"], "fa5b.yandex")
 
     def test_no_two_servers_look_the_same(self) -> None:
         looks = [(data["icon"], str(data["color"]).lower()) for data in _providers().values()]

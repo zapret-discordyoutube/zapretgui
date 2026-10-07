@@ -13,7 +13,34 @@ SVG "own:<имя>:<буквы>". У серверов из раздела «Дл�
 сертификат. "dot" указан только там, где сервер действительно отвечает по
 этому способу (проверено запросом 2026-10-07); у остальных проверка DoT не
 делается, чтобы не выдавать «не поддерживает» за «заблокирован».
+
+"dnssec": True — сервер проверяет подписи DNSSEC: на имя с заведомо
+испорченной подписью (dnssec-failed.org) он отвечает отказом, а не адресом
+(проверено запросом 2026-10-07). На плитке это метка «DNSSEC».
+
+"status" — пометка состояния сервера в России (плитка показывает её цветом):
+STATUS_BLOCKED — обычные запросы блокируются или перехватываются по дороге
+(Google и Cloudflare — с августа 2026); STATUS_AT_RISK — пока работает, но уже
+попадал под ограничения и может перестать отвечать. Пометка только
+предупреждает: выбрать такой сервер по-прежнему можно.
+
+Группа «Малоизвестные» — небольшие и нишевые серверы: из-за малой известности
+они реже попадают под блокировки. Группа «Для ИИ» — серверы сообщества,
+которые подменяют адреса закрытых для России сервисов; доверия к ним меньше,
+чем к крупным компаниям, и страница пишет об этом рядом с названием группы.
+
+Основные адреса (первый в "ipv4") не должны повторяться: по нему программа
+узнаёт, какой сервер стоит на адаптере. Это и остальные правила списка
+проверяет catalog_problems().
 """
+
+from __future__ import annotations
+
+import ipaddress
+
+STATUS_BLOCKED = "blocked"
+STATUS_AT_RISK = "at_risk"
+STATUSES = (STATUS_BLOCKED, STATUS_AT_RISK)
 
 DNS_PROVIDERS = {
     "Популярные": {
@@ -24,25 +51,31 @@ DNS_PROVIDERS = {
             "icon": "simple:cloudflare:CF",
             "color": "#f48120",
             "doh": "https://cloudflare-dns.com/dns-query",
-            "dot": "cloudflare-dns.com"
+            "dot": "cloudflare-dns.com",
+            "dnssec": True,
+            "status": STATUS_BLOCKED,
         },
         "Google DNS": {
             "ipv4": ["8.8.8.8", "8.8.4.4"],
             "ipv6": ["2001:4860:4860::8888", "2001:4860:4860::8844"],
             "desc": "Надёжный",
-            "icon": "fa5b.google",
+            "icon": "simple:google:G",
             "color": "#4285f4",
             "doh": "https://dns.google/dns-query",
-            "dot": "dns.google"
+            "dot": "dns.google",
+            "dnssec": True,
+            "status": STATUS_BLOCKED,
         },
-        "Dns.SB": {
-            "ipv4": ["185.222.222.222", "45.11.45.11"],
-            "ipv6": ["2a09::", "2a11::"],
-            "desc": "Без цензуры",
-            "icon": "fa5s.unlock-alt",
-            "color": "#00bcd4",
-            "doh": "https://doh.sb/dns-query",
-            "dot": "dot.sb"
+        # Отвечает быстро и в России не блокируется, но это российский сервер:
+        # запрещённые в России сайты он может не отдавать.
+        "Яндекс DNS": {
+            "ipv4": ["77.88.8.8", "77.88.8.1"],
+            "ipv6": ["2a02:6b8::feed:0ff", "2a02:6b8:0:1::feed:0ff"],
+            "desc": "Российский, быстрый",
+            "icon": "fa5b.yandex",
+            "color": "#fc3f1d",
+            "doh": "https://common.dot.dns.yandex.net/dns-query",
+            "dot": "common.dot.dns.yandex.net",
         },
     },
     "Безопасные": {
@@ -53,7 +86,8 @@ DNS_PROVIDERS = {
             "icon": "simple:quad9:Q9",
             "color": "#e91e63",
             "doh": "https://dns.quad9.net/dns-query",
-            "dot": "dns.quad9.net"
+            "dot": "dns.quad9.net",
+            "dnssec": True,
         },
         "AdGuard": {
             "ipv4": ["94.140.14.14", "94.140.15.15"],
@@ -62,7 +96,20 @@ DNS_PROVIDERS = {
             "icon": "simple:adguard:AG",
             "color": "#68bc71",
             "doh": "https://dns.adguard.com/dns-query",
-            "dot": "dns.adguard-dns.com"
+            "dot": "dns.adguard-dns.com",
+            "dnssec": True,
+            "status": STATUS_AT_RISK,
+        },
+        "AdGuard Семейный": {
+            "ipv4": ["94.140.14.15", "94.140.15.16"],
+            "ipv6": ["2a10:50c0::bad1:ff", "2a10:50c0::bad2:ff"],
+            "desc": "Без рекламы и 18+",
+            "icon": "simple:adguard:AG",
+            "color": "#3f9d8c",
+            "doh": "https://family.adguard-dns.com/dns-query",
+            "dot": "family.adguard-dns.com",
+            "dnssec": True,
+            "status": STATUS_AT_RISK,
         },
         "OpenDNS": {
             "ipv4": ["208.67.222.222", "208.67.220.220"],
@@ -71,17 +118,195 @@ DNS_PROVIDERS = {
             "icon": "own:opendns:OD",
             "color": "#fe7702",
             "doh": "https://doh.opendns.com/dns-query",
-            "dot": "dns.opendns.com"
+            "dot": "dns.opendns.com",
+            "dnssec": True,
+            "status": STATUS_AT_RISK,
+        },
+        "Яндекс Безопасный": {
+            "ipv4": ["77.88.8.88", "77.88.8.2"],
+            "ipv6": ["2a02:6b8::feed:bad", "2a02:6b8:0:1::feed:bad"],
+            "desc": "Антивирус, российский",
+            "icon": "fa5b.yandex",
+            "color": "#f5a623",
+            "doh": "https://safe.dot.dns.yandex.net/dns-query",
+            "dot": "safe.dot.dns.yandex.net",
+        },
+        "Яндекс Семейный": {
+            "ipv4": ["77.88.8.7", "77.88.8.3"],
+            "ipv6": ["2a02:6b8::feed:a11", "2a02:6b8:0:1::feed:a11"],
+            "desc": "Без 18+, российский",
+            "icon": "fa5b.yandex",
+            "color": "#7b61ff",
+            "doh": "https://family.dot.dns.yandex.net/dns-query",
+            "dot": "family.dot.dns.yandex.net",
+        },
+        # Российская компания по кибербезопасности; закрывает только вредоносные
+        # сайты, реестр блокировок не применяет (rutracker.org отдаёт настоящий адрес).
+        "BI.ZONE": {
+            "ipv4": ["185.191.32.7", "185.191.32.8"],
+            "ipv6": [],
+            "desc": "Антивирус, российский",
+            "icon": "fa5s.shield-virus",
+            "color": "#2dd4bf",
+            "doh": "https://public.sdns.bi.zone/9c0205cf-e32e-418e-adc0-e2575ebcf394",
+            "dot": "public.sdns.bi.zone",
+            "dnssec": True,
+        },
+        "DNS4EU Защитный": {
+            "ipv4": ["86.54.11.1", "86.54.11.201"],
+            "ipv6": ["2a13:1001::86:54:11:1", "2a13:1001::86:54:11:201"],
+            "desc": "Антивирус, Евросоюз",
+            "icon": "simple:europeanunion:EU",
+            "color": "#3b6fd4",
+            "doh": "https://protective.joindns4.eu/dns-query",
+            "dot": "protective.joindns4.eu",
+            "dnssec": True,
+        },
+        "CleanBrowsing": {
+            "ipv4": ["185.228.168.9", "185.228.169.9"],
+            "ipv6": ["2a0d:2a00:1::2", "2a0d:2a00:2::2"],
+            "desc": "Антивирус",
+            "icon": "fa5s.broom",
+            "color": "#38bdf8",
+            "doh": "https://doh.cleanbrowsing.org/doh/security-filter/",
+            "dot": "security-filter-dns.cleanbrowsing.org",
+            "dnssec": True,
+        },
+        "Control D Без рекламы": {
+            "ipv4": ["76.76.2.2", "76.76.10.2"],
+            "ipv6": ["2606:1a40::2", "2606:1a40:1::2"],
+            "desc": "Без рекламы и слежки",
+            "icon": "fa5s.ban",
+            "color": "#a78bfa",
+            "doh": "https://freedns.controld.com/p2",
+            "dnssec": True,
+        },
+    },
+    "Малоизвестные": {
+        "Dns.SB": {
+            "ipv4": ["185.222.222.222", "45.11.45.11"],
+            "ipv6": ["2a09::", "2a11::"],
+            "desc": "Без цензуры",
+            "icon": "fa5s.unlock-alt",
+            "color": "#00bcd4",
+            "doh": "https://doh.sb/dns-query",
+            "dot": "dot.sb",
+            "dnssec": True,
         },
         "dnsdoh.art": {
-            "ipv4": ["194.180.189.33", "194.180.189.33"],
+            "ipv4": ["194.180.189.33"],
             "ipv6": [],
             "desc": "Максимальная приватность",
             "icon": "fa5s.lock",
             "color": "#9c27b0",
             "doh": "https://dnsdoh.art:444/dns-query",
-            "dot": "dnsdoh.art"
-        }
+            "dot": "dnsdoh.art",
+            "dnssec": True,
+        },
+        "Control D": {
+            "ipv4": ["76.76.2.0", "76.76.10.0"],
+            "ipv6": ["2606:1a40::", "2606:1a40:1::"],
+            "desc": "Без фильтров и записи",
+            "icon": "fa5s.sliders-h",
+            "color": "#8b5cf6",
+            "doh": "https://freedns.controld.com/p0",
+            "dnssec": True,
+        },
+        "DNS4EU": {
+            "ipv4": ["86.54.11.100", "86.54.11.200"],
+            "ipv6": ["2a13:1001::86:54:11:100", "2a13:1001::86:54:11:200"],
+            "desc": "Без фильтров, Евросоюз",
+            "icon": "simple:europeanunion:EU",
+            "color": "#f5c518",
+            "doh": "https://unfiltered.joindns4.eu/dns-query",
+            "dot": "unfiltered.joindns4.eu",
+            "dnssec": True,
+        },
+        "Gcore": {
+            "ipv4": ["95.85.95.85", "2.56.220.2"],
+            "ipv6": ["2a03:90c0:999d::1", "2a03:90c0:9992::1"],
+            "desc": "Быстрый, без записи",
+            "icon": "simple:gcore:GC",
+            "color": "#ff4c00",
+        },
+        "DNS.Watch": {
+            "ipv4": ["84.200.69.80", "84.200.70.40"],
+            "ipv6": ["2001:1608:10:25::1c04:b12f", "2001:1608:10:25::9249:d69b"],
+            "desc": "Без цензуры и записи",
+            "icon": "fa5s.eye-slash",
+            "color": "#4ade80",
+            "dnssec": True,
+        },
+        "UltraDNS": {
+            "ipv4": ["64.6.64.6", "64.6.65.6"],
+            "ipv6": ["2620:74:1b::1:1", "2620:74:1c::2:2"],
+            "desc": "Надёжный, без фильтров",
+            "icon": "fa5s.bolt",
+            "color": "#facc15",
+            "dnssec": True,
+        },
+        # Регистратор чешских доменов .cz.
+        "CZ.NIC": {
+            "ipv4": ["193.17.47.1", "185.43.135.1"],
+            "ipv6": ["2001:148f:ffff::1", "2001:148f:fffe::1"],
+            "desc": "Без фильтров, Чехия",
+            "icon": "fa5s.landmark",
+            "color": "#60a5fa",
+            "doh": "https://odvr.nic.cz/dns-query",
+            "dot": "odvr.nic.cz",
+            "dnssec": True,
+        },
+        # Регистратор канадских доменов .ca; режим Private — без фильтров.
+        "CIRA Canadian Shield": {
+            "ipv4": ["149.112.121.10", "149.112.122.10"],
+            "ipv6": ["2620:10a:80bb::10", "2620:10a:80bc::10"],
+            "desc": "Без фильтров, Канада",
+            "icon": "fa5b.canadian-maple-leaf",
+            "color": "#ef4444",
+            "doh": "https://private.canadianshield.cira.ca/dns-query",
+            "dot": "private.canadianshield.cira.ca",
+            "dnssec": True,
+        },
+        # Общественная сеть Freifunk München (Германия).
+        "Freifunk München": {
+            "ipv4": ["5.1.66.255", "185.150.99.255"],
+            "ipv6": ["2001:678:e68:f000::", "2001:678:ed0:f000::"],
+            "desc": "Без цензуры и записи",
+            "icon": "fa5s.broadcast-tower",
+            "color": "#ec4899",
+            "doh": "https://doh.ffmuc.net/dns-query",
+            "dot": "dot.ffmuc.net",
+            "dnssec": True,
+        },
+        # Некоммерческая организация из США, держит узлы сети I2P.
+        "StormyCloud": {
+            "ipv4": ["23.128.248.2", "23.128.248.4"],
+            "ipv6": ["2602:fc05::2", "2602:fc05::4"],
+            "desc": "Без цензуры и записи",
+            "icon": "fa5s.cloud-rain",
+            "color": "#93c5fd",
+            "doh": "https://dns.stormycloud.org/dns-query",
+            "dnssec": True,
+        },
+        "dnsforge.de": {
+            "ipv4": ["176.9.93.198", "176.9.1.117"],
+            "ipv6": ["2a01:4f8:151:34aa::198", "2a01:4f8:141:316d::117"],
+            "desc": "Без рекламы и записи",
+            "icon": "fa5s.hammer",
+            "color": "#fb923c",
+            "doh": "https://dnsforge.de/dns-query",
+            "dot": "dnsforge.de",
+            "dnssec": True,
+        },
+        "Surfshark DNS": {
+            "ipv4": ["194.169.169.169"],
+            "ipv6": ["2a09:a707:169::"],
+            "desc": "Без записи запросов",
+            "icon": "simple:surfshark:SS",
+            "color": "#1ebfbf",
+            "doh": "https://dns.surfsharkdns.com/dns-query",
+            "dot": "dns.surfsharkdns.com",
+        },
     },
     "Для ИИ": {
         "Xbox DNS": {
@@ -91,7 +316,8 @@ DNS_PROVIDERS = {
             "icon": "fa5b.xbox",
             "color": "#107C10",
             "doh": "https://xbox-dns.ru/dns-query",
-            "dot": "xbox-dns.ru"
+            "dot": "xbox-dns.ru",
+            "dnssec": True,
         },
         "Xbox DNS v2": {
             "ipv4": ["87.228.47.200", "87.228.47.201"],
@@ -99,7 +325,8 @@ DNS_PROVIDERS = {
             "desc": "ChatGPT",
             "icon": "fa5b.xbox",
             "color": "#2EA043",
-            "doh": "https://xbox-dns.ru/dns-query"
+            "doh": "https://xbox-dns.ru/dns-query",
+            "dnssec": True,
         },
         "Xbox DNS (old)": {
             "ipv4": ["176.99.11.77", "80.78.247.254"],
@@ -112,7 +339,7 @@ DNS_PROVIDERS = {
         "Comss DNS": {
             "ipv4": ["83.220.169.155", "212.109.195.93"],
             "ipv6": [],
-            "desc": "ChatGPT",
+            "desc": "ChatGPT, Gemini, Claude",
             "icon": "fa5s.shield-alt",
             "color": "#2F80ED",
             "doh": "https://dns.comss.one/dns-query",
@@ -135,7 +362,8 @@ DNS_PROVIDERS = {
             "icon": "fa5s.cat",
             "color": "#F59E0B",
             "doh": "https://dns.astracat.network/dns-query",
-            "dot": "dns.astracat.network"
+            "dot": "dns.astracat.network",
+            "dnssec": True,
         },
         # Российская пара из официального geohide.ru/static/metadata/servers.json.
         # Подменяет ответы только для сайтов из своего списка (ChatGPT, Grok, Notion…).
@@ -150,6 +378,69 @@ DNS_PROVIDERS = {
         },
     }
 }
+
+
+def iter_providers():
+    """(группа, название, данные) для каждого сервера списка."""
+    for group, providers in DNS_PROVIDERS.items():
+        for name, data in providers.items():
+            yield group, name, data
+
+
+def find_provider_by_address(address: str) -> tuple[str, str, dict] | None:
+    """(группа, название, данные) сервера, которому принадлежит адрес (IPv4 или IPv6)."""
+    wanted = str(address or "").strip().lower()
+    if not wanted:
+        return None
+    for group, name, data in iter_providers():
+        for item in (*data.get("ipv4", ()), *data.get("ipv6", ())):
+            if str(item).strip().lower() == wanted:
+                return group, name, data
+    return None
+
+
+def catalog_problems() -> list[str]:
+    """Нарушения правил списка; у исправного списка — пусто.
+
+    Проверяет то, от чего зависит работа программы: адреса — настоящие IPv4 и
+    IPv6 без повторов, основной адрес не занят другим сервером, шифрованный
+    DoH задан адресом https, пометка состояния — из известных.
+    """
+    problems: list[str] = []
+    names: set[str] = set()
+    owners: dict[str, str] = {}
+    for _group, name, data in iter_providers():
+        if name in names:
+            problems.append(f"{name}: название повторяется")
+        names.add(name)
+        ipv4 = [str(item) for item in data.get("ipv4", ())]
+        ipv6 = [str(item) for item in data.get("ipv6", ())]
+        if not ipv4:
+            problems.append(f"{name}: нет адреса IPv4")
+        for version, addresses in ((4, ipv4), (6, ipv6)):
+            if len(set(addresses)) != len(addresses):
+                problems.append(f"{name}: адрес IPv{version} записан дважды")
+            for address in addresses:
+                try:
+                    valid = ipaddress.ip_address(address).version == version
+                except ValueError:
+                    valid = False
+                if not valid:
+                    problems.append(f"{name}: «{address}» — не адрес IPv{version}")
+                elif owners.setdefault(address, name) != name:
+                    problems.append(f"{name}: адрес {address} уже у сервера {owners[address]}")
+        doh = str(data.get("doh", ""))
+        if doh and not doh.startswith("https://"):
+            problems.append(f"{name}: адрес DoH должен начинаться с https://")
+        dot = str(data.get("dot", ""))
+        if dot and ("/" in dot or ":" in dot):
+            problems.append(f"{name}: в «dot» нужно только имя сервера")
+        if data.get("status", "") not in ("", *STATUSES):
+            problems.append(f"{name}: неизвестная пометка состояния «{data.get('status')}»")
+        if not str(data.get("desc", "")).strip() or not str(data.get("icon", "")).strip():
+            problems.append(f"{name}: нет пояснения или значка")
+    return problems
+
 
 def doh_templates() -> dict[str, str]:
     """{адрес сервера: шаблон DoH} для всех серверов списка (IPv4 и IPv6).

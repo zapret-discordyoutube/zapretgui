@@ -138,7 +138,11 @@ class DnsProviderCatalogTests(unittest.TestCase):
             for name, data in group.items():
                 for address in (*data["ipv4"], *data["ipv6"]):
                     with self.subTest(provider=name, address=address):
-                        self.assertEqual(templates[address], data["doh"])
+                        if data.get("doh"):
+                            self.assertEqual(templates[address], data["doh"])
+                        else:
+                            # У сервера без DoH шаблона нет: Windows не шифрует запросы к нему.
+                            self.assertNotIn(address, templates)
 
     def test_hosts_dns_services_are_available_as_dns_servers(self) -> None:
         ai = DNS_PROVIDERS["Для ИИ"]

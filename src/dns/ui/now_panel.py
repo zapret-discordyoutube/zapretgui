@@ -192,6 +192,9 @@ class DnsNowPanel(SimpleCardWidget):
         self.setObjectName("dnsNowPanel")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._chips: dict[str, PillPushButton] = {}
+        # Какие адаптеры отмечены изначально: к ним возвращает повторное нажатие «Все».
+        self._default_checked: dict[str, bool] = {}
+        self._bulk_toggle = False
         self._adapters_caption_text = "Применять к:"
         self._adapters_empty_text = "Сетевые адаптеры не найдены"
 
@@ -242,6 +245,14 @@ class DnsNowPanel(SimpleCardWidget):
         self.adapters_flow.setContentsMargins(0, 0, 0, 0)
         self.adapters_flow.setHorizontalSpacing(6)
         self.adapters_flow.setVerticalSpacing(6)
+        # «Все»: одним нажатием отмечает каждый сетевой интерфейс. Видна, когда их больше одного.
+        self.all_chip = PillPushButton(FluentIcon.ACCEPT, "Все", self.adapters_host)
+        self.all_chip.setCheckable(True)
+        self.all_chip.clicked.connect(self._on_all_chip_clicked)
+        self.adapters_flow.addWidget(self.all_chip)
+        self.all_chip.setVisible(False)
+        self._all_chip_tooltip = "Отметить все сетевые интерфейсы: выбранный DNS встанет на каждый из них."
+        self._sync_all_chip()
         adapters_box.addWidget(self.adapters_host, 1)
         bottom.addLayout(adapters_box, 1)
 
@@ -301,6 +312,11 @@ class DnsNowPanel(SimpleCardWidget):
         self._adapters_empty_text = empty_text
         self.adapters_caption.setText(caption if self._chips else empty_text)
 
+    def set_all_adapters_text(self, text: str, tooltip: str) -> None:
+        self.all_chip.setText(text)
+        self._all_chip_tooltip = tooltip
+        self._sync_all_chip()
+
     def set_notice(self, text: str) -> None:
         self.notice_label.setText(text)
         self.notice_label.setVisible(bool(text))
@@ -314,6 +330,7 @@ class DnsNowPanel(SimpleCardWidget):
             self.adapters_flow.removeWidget(chip)
             chip.deleteLater()
         self._chips = {}
+        self._default_checked = {item.key: item.checked for item in chips}
         for item in chips:
             icon = FluentIcon.WIFI if item.kind == "wifi" else FluentIcon.CONNECT
             chip = PillPushButton(icon, item.text, self.adapters_host)
@@ -326,6 +343,7 @@ class DnsNowPanel(SimpleCardWidget):
             self.adapters_flow.addWidget(chip)
             self._chips[item.key] = chip
         self.adapters_caption.setText(self._adapters_caption_text if chips else self._adapters_empty_text)
+        self._sync_all_chip()
 
     def update_adapter_tooltips(self, tooltips: dict[str, str]) -> None:
         for key, chip in self._chips.items():
@@ -347,7 +365,37 @@ class DnsNowPanel(SimpleCardWidget):
         chip = self.sender()
         if isinstance(chip, PillPushButton):
             self._sync_chip_accessibility(chip, str(chip.property("dnsTooltip") or ""))
+        if self._bulk_toggle:
+            return
+        self._sync_all_chip()
         self.adapters_changed.emit(self.selected_adapters())
+
+    def all_adapters_checked(self) -> bool:
+        return bool(self._chips) and all(chip.isChecked() for chip in self._chips.values())
+
+    def _on_all_chip_clicked(self) -> None:
+        """Отмечает все интерфейсы; если все уже отмечены — возвращает исходные отметки."""
+        check_all = not self.all_adapters_checked()
+        self._bulk_toggle = True
+        try:
+            for key, chip in self._chips.items():
+                chip.setChecked(True if check_all else self._default_checked.get(key, False))
+        finally:
+            self._bulk_toggle = False
+        self._sync_all_chip()
+        self.adapters_changed.emit(self.selected_adapters())
+
+    def _sync_all_chip(self) -> None:
+        checked = self.all_adapters_checked()
+        self.all_chip.setVisible(len(self._chips) > 1)
+        self.all_chip.setChecked(checked)
+        set_tooltip(self.all_chip, self._all_chip_tooltip)
+        state = "отмечены" if checked else "отмечены не все"
+        set_control_accessibility(
+            self.all_chip,
+            name=f"{self.all_chip.text()}: сетевые интерфейсы, {state}",
+            description=self._all_chip_tooltip,
+        )
 
     @staticmethod
     def _sync_chip_accessibility(chip: PillPushButton, tooltip: str) -> None:
