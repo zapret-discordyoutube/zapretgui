@@ -20,7 +20,13 @@ from diagnostics.run_context import Run
 from diagnostics.tls_probe import ProbeResult, https_get
 from utils.dns_reference import REFERENCE_RESOLVERS, ReferenceResolver
 from utils.dns_wire import TYPE_A, DnsQueryResult, query_doh
-from utils.windows_dns_query import DnsAnswer, hosts_file_ipv4, query_ipv4, system_dns_servers
+from utils.windows_dns_query import (
+    DnsAnswer,
+    hosts_file_ipv4,
+    query_ipv4,
+    system_dns_servers,
+)
+from utils.windows_icmp import HOP_SILENT, HOP_UNSUPPORTED, trace_hop_ipv4
 
 # Скачивание служебных списков (реестр): общий срок и предел размера.
 FILE_TIMEOUT_S = 40.0
@@ -34,6 +40,7 @@ __all__ = [
     "get",
     "hosts_ipv4",
     "known_address",
+    "ping_hop",
     "system_ipv4",
     "system_servers",
 ]
@@ -122,6 +129,19 @@ def download_file(url: str, etag: str = "", *, timeout: float = FILE_TIMEOUT_S, 
         return (None, etag) if error.code == 304 else None
     except (OSError, ValueError, EOFError):
         return None
+
+
+def ping_hop(ip: str, ttl: int, *, timeout_ms: int = 1000) -> tuple[str, float | None] | None:
+    """Один пинг со сроком жизни ``ttl``: (адрес ответившего узла, время) или None — ответа нет.
+
+    ``NotImplementedError`` — пинг в этой системе недоступен (не Windows).
+    """
+    result = trace_hop_ipv4(ip, ttl, timeout_ms=timeout_ms)
+    if result.kind == HOP_UNSUPPORTED:
+        raise NotImplementedError
+    if result.kind == HOP_SILENT:
+        return None
+    return str(result.address or ""), result.rtt_ms
 
 
 def system_ipv4(run: Run, host: str) -> DnsAnswer:

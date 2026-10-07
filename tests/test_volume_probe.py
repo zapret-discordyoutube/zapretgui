@@ -20,7 +20,7 @@ def _run(kind: str, received: int = 0, requests: int = 1) -> vp.VolumeRun:
     return vp.VolumeRun(kind, received, requests)
 
 
-PASSED = _run(vp.RUN_PASSED, 33_000, 4)
+PASSED = _run(vp.RUN_PASSED, 49_500, 4)
 
 
 class JudgeTests(unittest.TestCase):
@@ -28,7 +28,7 @@ class JudgeTests(unittest.TestCase):
         verdict = vp.judge(vp.VolumeFacts(PASSED))
 
         self.assertEqual(verdict.code, vp.VOLUME_OK)
-        self.assertIn("32 КБ без обрыва", verdict.text)
+        self.assertIn("48 КБ без обрыва", verdict.text)
 
     def test_cut_needs_two_stalls_in_the_window(self) -> None:
         verdict = vp.judge(vp.VolumeFacts(_run(vp.RUN_STALLED, 14_500, 20), _run(vp.RUN_STALLED, 13_800, 41)))
@@ -51,13 +51,13 @@ class JudgeTests(unittest.TestCase):
         self.assertIn("случайный сбой", vp.judge(vp.VolumeFacts(stalled, PASSED)).text)
 
     def test_window_passed_without_stall_means_no_cut(self) -> None:
-        """Запросы кончились раньше 32 КБ, но окно обрыва пройдено — обрыва нет."""
-        verdict = vp.judge(vp.VolumeFacts(_run(vp.RUN_CLOSED, 31_000, 60)))
+        """Запросы кончились раньше 48 КБ, но окно обрыва пройдено — обрыва нет."""
+        verdict = vp.judge(vp.VolumeFacts(_run(vp.RUN_CLOSED, 40_000, 60)))
 
         self.assertEqual(verdict.code, vp.VOLUME_OK)
 
     def test_stall_outside_the_window_is_not_a_cut(self) -> None:
-        for received in (0, 2_000, 30_000):
+        for received in (0, 2_000, 37_000):
             with self.subTest(received=received):
                 verdict = vp.judge(vp.VolumeFacts(_run(vp.RUN_STALLED, received)))
                 self.assertEqual(verdict.code, vp.VOLUME_UNKNOWN)
@@ -189,9 +189,9 @@ class DownloadTests(unittest.TestCase):
         result = self._download(self._serve(handle))
 
         self.assertEqual(result.kind, vp.RUN_PASSED)
-        # Ответ с заголовками — чуть больше 4 КБ, до 32 КБ нужно ровно девять: каждый
+        # Ответ с заголовками — чуть больше 4 КБ, до 48 КБ нужно ровно тринадцать: каждый
         # ответ дочитан до конца, и следующий запрос не съехал.
-        self.assertEqual(result.requests, 9)
+        self.assertEqual(result.requests, 13)
 
     def test_connection_that_freezes_is_stalled_with_its_volume(self) -> None:
         release = threading.Event()

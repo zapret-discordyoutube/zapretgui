@@ -246,7 +246,7 @@ class _Net:
         self.volume_asked.append(host)
         if self.volume_facts is not None:
             return self.volume_facts(host, ip)
-        return engine.volume_probe.VolumeFacts(engine.volume_probe.VolumeRun(engine.volume_probe.RUN_PASSED, 33_000, 4))
+        return engine.volume_probe.VolumeFacts(engine.volume_probe.VolumeRun(engine.volume_probe.RUN_PASSED, 49_500, 4))
 
     def _collect(self, host, result, **_kwargs):
         self.refined.append(host)
@@ -1173,7 +1173,7 @@ class BlockcheckScopeTests(unittest.TestCase):
 
         frozen = classify_download(_ok(body_cut=True, body_size=16_500))
         self.assertEqual(frozen[0], FreezeState.FREEZE)
-        self.assertEqual(classify_download(_ok(body_size=32_768))[0], FreezeState.OK)
+        self.assertEqual(classify_download(_ok(body_size=65_536))[0], FreezeState.OK)
         # Сброс сразу, без данных — не «доступ есть» и не «обрыв», а «не удалось проверить».
         self.assertEqual(classify_download(ProbeResult(ip="1.1.1.1", kind=KIND_RESET))[0], FreezeState.UNKNOWN)
         self.assertEqual(classify_download(_ok(body_size=2_000))[0], FreezeState.UNKNOWN)
@@ -1192,7 +1192,7 @@ class BlockcheckScopeTests(unittest.TestCase):
 
         def _download(host, _path):
             calls.append(host)
-            return None if host == "dead.example" else _ok(body_size=33_000)
+            return None if host == "dead.example" else _ok(body_size=65_000)
 
         with patch("blockcheck.data_lists.TCP_16_20_TARGETS", targets):
             servers = check_freeze(lambda fn, *a: _Done(fn(*a)), lambda f: f.result(), _download)
@@ -1535,7 +1535,7 @@ class BlockKindInReportTests(unittest.TestCase):
         net.volume_facts = lambda host, _ip: (
             vp.VolumeFacts(self._stalls(14_500, 20), self._stalls(14_100, 40))
             if host == "discord.com"
-            else vp.VolumeFacts(vp.VolumeRun(vp.RUN_PASSED, 33_000, 4))
+            else vp.VolumeFacts(vp.VolumeRun(vp.RUN_PASSED, 49_500, 4))
         )
         result = net.run(engine.run_blockcheck, "main", emit=lines.append)
 
@@ -1555,7 +1555,7 @@ class BlockKindInReportTests(unittest.TestCase):
         vp = engine.volume_probe
         net = _Net()
         net.volume_facts = lambda _host, _ip: vp.VolumeFacts(
-            self._stalls(14_500, 20), vp.VolumeRun(vp.RUN_PASSED, 33_000, 70)
+            self._stalls(14_500, 20), vp.VolumeRun(vp.RUN_PASSED, 49_500, 70)
         )
         lines: list[str] = []
         result = net.run(engine.run_blockcheck, "main", emit=lines.append)

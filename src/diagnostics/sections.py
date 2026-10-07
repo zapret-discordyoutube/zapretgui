@@ -234,6 +234,18 @@ DNS_FINDING_LEVEL = {"fail": Level.FAIL, "warn": Level.WARN}
 _DNS_FINDING_ICON = {"ok": "✅", "info": "ℹ️", "warn": "⚠️", "fail": "❌"}
 
 
+def dns_finding_parts(finding: dict) -> dict:
+    """Готовые части находки про DNS: заголовок, все серверы парами «сервис, адрес» и пояснение.
+
+    Пусто, если проверка их не дала: тогда экран делит фразу сам.
+    """
+    title = str(finding.get("title") or "")
+    if not title:
+        return {}
+    servers = [[str(pair[0]), str(pair[1])] for pair in finding.get("servers") or () if len(pair) == 2]
+    return {"title": title, "servers": servers, "note": str(finding.get("note") or "")}
+
+
 def finish_dns_servers(run: Run, future: Future, emit: Emit) -> dict | None:
     """Итог проверки DNS-серверов для полной проверки: печатает раздел и возвращает словарь."""
     try:
@@ -246,7 +258,7 @@ def finish_dns_servers(run: Run, future: Future, emit: Emit) -> dict | None:
     if not isinstance(result, dict):
         return None
     findings = [
-        {"level": str(item.get("level") or "info"), "text": str(item.get("text") or "")}
+        {"level": str(item.get("level") or "info"), "text": str(item.get("text") or ""), **dns_finding_parts(item)}
         for item in result.get("findings") or ()
         if item.get("text")
     ]
@@ -393,7 +405,13 @@ def check_network(run: Run, other_tools) -> dict:
         result = net_access.fetch(run, my_network.TRACE_HOST, server, my_network.TRACE_PATH, read_limit=2048)
         return bytes(result.body) if result.ok and result.body else None
 
-    facts = my_network.collect(fetch=_fetch, # Владельца сети спрашиваем шифрованным путём: иначе за него ответил бы перехватчик DNS.
+    def _probe(ttl: int) -> tuple[str, float | None] | None:
+        if run.dns_cancelled():
+            return None
+        return net_access.ping_hop(my_network.TRACE_SERVERS[0], ttl, timeout_ms=my_network.PING_TIMEOUT_MS)
+
+    facts = my_network.collect(
+        probe=_probe,fetch=_fetch, # Владельца сети спрашиваем шифрованным путём: иначе за него ответил бы перехватчик DNS.
         owner_of=lambda ip: lookup_ip_owner(ip, lambda name, rtype: net_access.doh_ask(run, name, rtype)),)
     lines = my_network.judge(facts, bypass_tools=other_tools)
     owner = facts.owner

@@ -515,7 +515,7 @@ class EveryHostingTests(unittest.TestCase):
             if host == "a.example":
                 return ProbeResult(ip="1.1.1.1", kind="ok", body_size=16_500, body_cut=True)
             if host == "b.example":
-                return ProbeResult(ip="1.1.1.2", kind="ok", body_size=32_768)
+                return ProbeResult(ip="1.1.1.2", kind="ok", body_size=65_536)
             return None
 
         seen = []

@@ -109,3 +109,97 @@ class NetworkCardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _sample(address="192.168.1.1", answered=5, avg=2.0, sent=5):
+    return net.HopSample(address, sent, answered, avg if answered else None)
+
+
+def _link(router=None, beyond=None, internet=None):
+    facts = net.NetworkFacts(
+        external_ip="109.252.1.1",
+        local_ip="192.168.1.8",
+        router=router or _sample(),
+        beyond=beyond,
+        internet=internet or _sample("1.1.1.1", avg=14.0),
+    )
+    return {line.name: line for line in net.judge(facts)}
+
+
+class HomeLinkTests(unittest.TestCase):
+    """Связь внутри своей сети: потери называются там, где они начинаются."""
+
+    def test_healthy_link_is_said_to_be_fine(self) -> None:
+        lines = _link(beyond=_sample("100.64.0.1"))
+
+        self.assertEqual((lines["Роутер"].state, lines["Связь с интернетом"].state), ("ok", "ok"))
+        self.assertIn("192.168.1.1 — отвечает за 2 мс, потерь нет", lines["Роутер"].text)
+        self.assertIn("CGNAT", lines["За роутером"].text)
+
+    def test_losses_to_the_router_are_a_home_problem(self) -> None:
+        lines = _link(router=_sample(answered=3), internet=_sample("1.1.1.1", answered=2))
+
+        self.assertEqual(lines["Роутер"].state, "warn")
+        self.assertIn("теряется 2 из 5", lines["Роутер"].text)
+        self.assertIn("слабом Wi‑Fi", lines["Роутер"].text)
+        self.assertIn("начинаются уже до роутера", lines["Связь с интернетом"].text)
+
+    def test_losses_only_beyond_the_router_are_the_provider(self) -> None:
+        lines = _link(internet=_sample("1.1.1.1", answered=3))
+
+        self.assertEqual((lines["Роутер"].state, lines["Связь с интернетом"].state), ("ok", "warn"))
+        self.assertIn("у провайдера", lines["Связь с интернетом"].text)
+
+    def test_one_lost_packet_is_not_a_finding(self) -> None:
+        lines = _link(router=_sample(answered=4), internet=_sample("1.1.1.1", answered=4))
+
+        self.assertEqual((lines["Роутер"].state, lines["Связь с интернетом"].state), ("ok", "ok"))
+
+    def test_slow_router_points_at_weak_wifi(self) -> None:
+        line = _link(router=_sample(avg=85.0))["Роутер"]
+
+        self.assertEqual(line.state, "warn")
+        self.assertIn("слабый сигнал Wi‑Fi", line.text)
+
+    def test_silence_is_not_called_a_fault(self) -> None:
+        lines = _link(router=_sample(answered=0), internet=_sample("1.1.1.1", answered=0))
+
+        # Роутер и провайдер вправе не отвечать на пинг.
+        self.assertNotIn("Роутер", lines)
+        self.assertEqual(lines["Связь с интернетом"].state, "unknown")
+        self.assertEqual(_link(router=_sample(answered=0))["Роутер"].state, "info")
+
+    def test_second_router_and_direct_connection_are_named(self) -> None:
+        self.assertIn("ещё один роутер", _link(beyond=_sample("192.168.0.1"))["За роутером"].text)
+        self.assertIn("внутренняя сеть провайдера", _link(beyond=_sample("10.20.0.1"))["За роутером"].text)
+        direct = _link(router=_sample("109.252.0.1"))
+        self.assertIn("без домашнего роутера", direct["Роутер"].text)
+        self.assertNotIn("За роутером", direct)
+
+    def test_without_ping_there_are_no_link_lines(self) -> None:
+        lines = {line.name for line in net.judge(net.NetworkFacts(external_ip="109.252.1.1", local_ip="192.168.1.8"))}
+
+        self.assertFalse({"Роутер", "Связь с интернетом"} & lines)
+
+    def test_measuring_counts_answers_and_averages_time(self) -> None:
+        answers = iter([("192.168.1.1", 2.0), None, ("192.168.1.1", 4.0), None, ("192.168.1.1", None)])
+        sample = net.measure_hop(lambda _ttl: next(answers), 1)
+
+        self.assertEqual((sample.address, sample.sent, sample.answered, sample.lost, sample.avg_ms), ("192.168.1.1", 5, 3, 2, 3.0))
+
+        def unsupported(_ttl):
+            raise NotImplementedError
+
+        self.assertIsNone(net.measure_hop(unsupported, 1))
+
+    def test_collect_measures_router_next_hop_and_internet(self) -> None:
+        asked: list[int] = []
+
+        def probe(ttl):
+            asked.append(ttl)
+            return ("1.1.1.1" if ttl == net.FAR_TTL else f"10.0.0.{ttl}", 5.0)
+
+        facts = net.collect(fetch=lambda _server: None, owner_of=lambda _ip: None, local=lambda: "", probe=probe)
+
+        self.assertEqual(sorted(set(asked)), [1, 2, net.FAR_TTL])
+        self.assertEqual((facts.router.address, facts.beyond.address, facts.internet.address), ("10.0.0.1", "10.0.0.2", "1.1.1.1"))

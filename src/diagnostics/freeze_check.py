@@ -2,7 +2,7 @@
 
 ТСПУ пропускает начало ответа, а после ~16 КБ соединение замирает или
 рвётся. Проверка качает по ~32 КБ с нескольких хостингов разных провайдеров:
-если у одних файл приходит целиком, а у других обрывается на 14–24 КБ —
+если у одних файл приходит целиком, а у других обрывается на 12–36 КБ —
 это и есть такой обрыв.
 
 Что было неверно раньше:
@@ -46,7 +46,7 @@ __all__ = [
     "summarize_freeze",
 ]
 
-READ_LIMIT = 32 * 1024
+READ_LIMIT = 64 * 1024
 TARGETS_COUNT = 6
 # Сколько серверов полной проверки опрашивать одновременно.
 EVERY_AT_ONCE = 12
@@ -154,7 +154,7 @@ def classify_download(result: ProbeResult | None) -> tuple[FreezeState, str]:
     if size >= FREEZE_MAX_BYTES:
         return FreezeState.OK, f"получено {kb} КБ без обрыва"
     if result.body_cut:
-        return FreezeState.UNKNOWN, f"загрузка оборвалась на {kb} КБ — вне окна 14–24 КБ, на этот обрыв не похоже"
+        return FreezeState.UNKNOWN, f"загрузка оборвалась на {kb} КБ — вне окна 12–36 КБ, на этот обрыв не похоже"
     status = int(result.status or 0)
     if status >= 300:
         return FreezeState.UNKNOWN, f"сервер не отдал файл (код {status})"

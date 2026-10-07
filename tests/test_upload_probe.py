@@ -278,21 +278,21 @@ class FreezeCheckUploadTests(unittest.TestCase):
 
     def test_stalling_upload_turns_clean_download_into_freeze(self) -> None:
         verdict = up.UploadVerdict(up.UPLOAD_BULK_STALLS, "отправка 64 КБ замирает")
-        server, asked = self._check(self._download(32 * 1024), verdict)
+        server, asked = self._check(self._download(64 * 1024), verdict)
 
         self.assertEqual((server.state, server.direction), (FreezeState.FREEZE, DIRECTION_UPLOAD))
         self.assertEqual(server.text, "загрузка проходит, но отправка 64 КБ замирает")
         self.assertEqual(asked, [("cdn.example", "/file.bin")])
 
     def test_working_upload_is_noted_and_unknown_changes_nothing(self) -> None:
-        fine, _ = self._check(self._download(32 * 1024), up.UploadVerdict(up.UPLOAD_OK, "проходит"))
+        fine, _ = self._check(self._download(64 * 1024), up.UploadVerdict(up.UPLOAD_OK, "проходит"))
         self.assertEqual(fine.state, FreezeState.OK)
         self.assertTrue(fine.text.endswith("; отправка тоже проходит"))
 
-        unknown, _ = self._check(self._download(32 * 1024), up.UploadVerdict(up.UPLOAD_UNKNOWN, "не на чем"))
-        self.assertEqual((unknown.state, unknown.text), (FreezeState.OK, "получено 32 КБ без обрыва"))
+        unknown, _ = self._check(self._download(64 * 1024), up.UploadVerdict(up.UPLOAD_UNKNOWN, "не на чем"))
+        self.assertEqual((unknown.state, unknown.text), (FreezeState.OK, "получено 64 КБ без обрыва"))
 
-        none, _ = self._check(self._download(32 * 1024), None)
+        none, _ = self._check(self._download(64 * 1024), None)
         self.assertEqual(none.state, FreezeState.OK)
 
     def test_upload_is_not_checked_when_download_already_failed(self) -> None:
