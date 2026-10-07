@@ -62,7 +62,11 @@ class StrategySearchLineEdit(SearchLineEdit):
 
 
 class StrategyToolbar(QWidget):
-    """Поиск, счётчик найденного, группировка и быстрые отборы."""
+    """Быстрые отборы и группировка; поиск со счётчиком открывается по Ctrl+F.
+
+    Поиск нужен редко, а место занимает всегда, поэтому по умолчанию его нет
+    на экране: строка появляется по Ctrl+F и убирается по Esc.
+    """
 
     search_changed = pyqtSignal(str)
     filter_changed = pyqtSignal(str)
@@ -74,14 +78,16 @@ class StrategyToolbar(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        search_row = QHBoxLayout()
+        self.search_row = QWidget(self)
+        search_row = QHBoxLayout(self.search_row)
+        search_row.setContentsMargins(0, 0, 0, 0)
         search_row.setSpacing(10)
-        self.search = StrategySearchLineEdit(self)
+        self.search = StrategySearchLineEdit(self.search_row)
         self.search.setPlaceholderText("Поиск: название, способ обхода, параметр, автор")
         self.search.setClearButtonEnabled(True)
         hint = (
             "Ищет по названию и прежнему названию, способу обхода словами, параметрам --lua-desync, "
-            "описанию и автору. Ctrl+F ставит курсор сюда, Esc очищает поиск."
+            "описанию и автору. Ctrl+F открывает и закрывает поиск, Esc закрывает его."
         )
         set_tooltip(self.search, hint)
         set_control_accessibility(
@@ -96,8 +102,15 @@ class StrategyToolbar(QWidget):
         self.summary = BodyLabel("")
         set_tooltip(self.summary, "Сколько стратегий сейчас показано из всех стратегий каталога.")
         search_row.addWidget(self.summary)
+        self.search_row.hide()
+        layout.addWidget(self.search_row)
 
-        self.grouping_combo = ComboBox(self)
+        self.filter_row = QWidget(self)
+        filter_layout = QHBoxLayout(self.filter_row)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
+        filter_layout.setSpacing(6)
+
+        self.grouping_combo = ComboBox(self.filter_row)
         for key, title in STRATEGY_GROUPINGS:
             self.grouping_combo.addItem(title, userData=key)
         self.grouping_combo.setMinimumWidth(190)
@@ -108,13 +121,6 @@ class StrategyToolbar(QWidget):
         set_tooltip(self.grouping_combo, grouping_hint)
         set_control_accessibility(self.grouping_combo, name="Группировка готовых стратегий", description=grouping_hint)
         self.grouping_combo.currentIndexChanged.connect(self._on_grouping_index_changed)
-        search_row.addWidget(self.grouping_combo)
-        layout.addLayout(search_row)
-
-        self.filter_row = QWidget(self)
-        filter_layout = QHBoxLayout(self.filter_row)
-        filter_layout.setContentsMargins(0, 0, 0, 0)
-        filter_layout.setSpacing(6)
         self.filter_buttons: dict[str, PillPushButton] = {}
         for key, title in QUICK_FILTERS:
             button = PillPushButton(title, self.filter_row)
@@ -129,7 +135,22 @@ class StrategyToolbar(QWidget):
             self.filter_buttons[key] = button
             filter_layout.addWidget(button)
         filter_layout.addStretch(1)
+        filter_layout.addWidget(self.grouping_combo)
         layout.addWidget(self.filter_row)
+
+    def search_open(self) -> bool:
+        return not self.search_row.isHidden()
+
+    def open_search(self) -> None:
+        self.search_row.show()
+        self.search.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.search.selectAll()
+
+    def close_search(self) -> None:
+        """Убирает строку поиска; запрос сбрасывается — спрятанный поиск не должен сужать список."""
+        if self.search.text():
+            self.search.clear()
+        self.search_row.hide()
 
     def _on_grouping_index_changed(self, index: int) -> None:
         self.grouping_changed.emit(str(self.grouping_combo.itemData(index) or ""))
@@ -158,9 +179,8 @@ class StrategyToolbar(QWidget):
             set_state_text(self.summary, f"Показано готовых стратегий: {text}")
 
     def set_long_list(self, long_list: bool) -> None:
-        """В коротком списке группировать и отбирать нечего: остаётся только поиск."""
-        self.filter_row.setVisible(bool(long_list))
-        self.grouping_combo.setVisible(bool(long_list))
+        """В коротком списке группировать и отбирать нечего: остаётся только поиск по Ctrl+F."""
+        self.filter_row.setHidden(not long_list)
 
 
 class TryNextPanel(SimpleCardWidget):

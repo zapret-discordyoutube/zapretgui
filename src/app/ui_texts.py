@@ -6152,19 +6152,24 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
         ),
     },
     "onboarding.step.profile_tabs.title": {
-        "ru": "Вкладки профиля",
-        "en": "Profile tabs",
+        "ru": "Разделы профиля",
+        "en": "Profile sections",
     },
     "onboarding.step.profile_tabs.body": {
         "ru": (
-            "Готовые стратегии — выбрать способ обхода для этого профиля и отметить, работает ли он. "
-            "Список сайтов — ваши записи списка сайтов или адресов. Текст профиля — строки профиля "
-            "так, как они записаны в пресете."
+            "Страница профиля сразу показывает готовые стратегии: здесь выбирают способ обхода и "
+            "отмечают, работает ли он.\n\n"
+            "Кнопки в шапке открывают остальные разделы. «Список сайтов» — ваши записи списка сайтов "
+            "или адресов. «Текст профиля» — строки профиля так, как они записаны в пресете.\n\n"
+            "Открытый раздел появляется в строке пути вверху; по ней же возвращаются к стратегиям."
         ),
         "en": (
-            "Ready strategies — choose the bypass method for this profile and mark whether it works. "
-            "Site list — your entries of the site or address list. Profile text — the profile lines "
-            "as they are written in the preset."
+            "The profile page shows the ready strategies right away: here you choose the bypass "
+            "method and mark whether it works.\n\n"
+            "The buttons in the header open the other sections. \"Site list\" holds your entries of "
+            "the site or address list. \"Profile text\" shows the profile lines as they are written "
+            "in the preset.\n\n"
+            "The open section appears in the path line at the top; use it to return to the strategies."
         ),
     },
     "onboarding.scene.you": {"ru": "Вы", "en": "You"},
@@ -6208,15 +6213,15 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
         ),
     },
     "onboarding.step.strategy_find.title": {
-        "ru": "Поиск и отборы",
-        "en": "Search and filters",
+        "ru": "Отборы и поиск",
+        "en": "Filters and search",
     },
     "onboarding.step.strategy_find.body": {
         "ru": (
-            "Поиск находит стратегию по названию, способу обхода словами («нарезка», «подделка»), "
-            "параметру или автору.\n\n"
-            "Кнопки под ним оставляют в списке только нужное: советуемые, отмеченные вами как "
-            "рабочие, ещё не опробованные или избранные.\n\n"
+            "Кнопки над списком оставляют в нём только нужное: советуемые, отмеченные вами как "
+            "рабочие, ещё не опробованные или избранные. Справа выбирается, по чему сгруппировать список.\n\n"
+            "Поиск открывается по Ctrl+F и находит стратегию по названию, способу обхода словами "
+            "(«нарезка», «подделка»), параметру или автору. Esc его закрывает.\n\n"
             "Метка справа на стратегии говорит, где она стоит в готовых пресетах: «в 13 пресетах» — "
             "на этом же сервисе, «на 28 сервисах» — на других, «у вас работает» — вы сами отмечали её "
             "рабочей на других профилях. Метка — это кнопка: она открывает подробности о стратегии. "
@@ -6224,10 +6229,10 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "Стратегии с одинаковым названием сложены в одну строку, кнопка «ещё 2» раскрывает варианты."
         ),
         "en": (
-            "Search finds a strategy by name, by bypass method in plain words, by parameter or by "
-            "author.\n\n"
-            "The buttons below keep only what you need in the list: recommended, marked by you as "
-            "working, not tried yet, or favourites.\n\n"
+            "The buttons above the list keep only what you need in it: recommended, marked by you as "
+            "working, not tried yet, or favourites. On the right you choose how to group the list.\n\n"
+            "Search opens with Ctrl+F and finds a strategy by name, by bypass method in plain words, "
+            "by parameter or by author. Esc closes it.\n\n"
             "The badge on the right of a strategy says where the ready-made presets use it: on this "
             "same service or on other services, or that you marked it as working on other profiles. "
             "The badge is a button: it opens the details of the strategy. A click on the name applies "

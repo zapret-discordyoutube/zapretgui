@@ -50,7 +50,7 @@ LONG_LIST_MIN_ROWS = 30
 _LIST_DESCRIPTION = (
     "Стрелки ходят по стратегиям, Enter или Пробел выбирает стратегию либо сворачивает группу. "
     "Клавиша меню или правая кнопка мыши открывает оценку стратегии и избранное, F1 — подробности о стратегии. "
-    "Ctrl+F ставит курсор в поиск."
+    "Ctrl+F открывает поиск."
 )
 
 
@@ -135,7 +135,11 @@ class ProfileStrategyListWidget(QWidget):
         self._grouping_combo = self._toolbar.grouping_combo
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFocusProxy(self._list)
-        QWidget.setTabOrder(self._search, self._grouping_combo)
+        buttons = list(self._toolbar.filter_buttons.values())
+        QWidget.setTabOrder(self._search, buttons[0])
+        for previous, following in zip(buttons, buttons[1:]):
+            QWidget.setTabOrder(previous, following)
+        QWidget.setTabOrder(buttons[-1], self._grouping_combo)
         QWidget.setTabOrder(self._grouping_combo, self._list)
 
         self._search_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Find), self)
@@ -455,13 +459,15 @@ class ProfileStrategyListWidget(QWidget):
             self.strategy_activated.emit(next_id)
 
     def _focus_search(self) -> None:
-        if not self.isVisible() or not self.isEnabled():
+        """Ctrl+F: открыть поиск, повторно — закрыть."""
+        if not self.isVisible() or not self.isEnabled() or self.details_open():
             return
-        self._search.setFocus(Qt.FocusReason.ShortcutFocusReason)
-        self._search.selectAll()
+        if self._toolbar.search_open():
+            self._leave_search()
+        else:
+            self._toolbar.open_search()
 
     def _leave_search(self) -> None:
-        """Esc в поиске: очистить запрос и вернуть фокус в список."""
-        if self._search.text():
-            self._search.clear()
+        """Esc в поиске: убрать строку поиска и вернуть фокус в список."""
+        self._toolbar.close_search()
         self._list.setFocus(Qt.FocusReason.OtherFocusReason)

@@ -32,7 +32,6 @@ from profile.ui.profile_user_profile_controller import ProfileUserProfileControl
 from profile.ui.compact_combo import (
     CompactDisplayComboBox,
     _current_strategy_id,
-    _join_accessible_options,
     _sync_combo_items_accessibility,
 )
 from profile.ui.strategy_list import ProfileStrategyListWidget
@@ -48,7 +47,6 @@ from qfluentwidgets import (
     InfoBar,
     LineEdit,
     FluentIcon,
-    SegmentedWidget,
     PushButton,
 )
 from ui.fluent_dialog import MessageBox
@@ -65,7 +63,6 @@ from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.message_box_accessibility import set_message_box_button_accessibility
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.queued_worker_state import QueuedWorkerState
-from ui.segmented_accessibility import set_segmented_items_accessibility
 from app.ui_texts import tr as tr_catalog
 from ui.theme import get_theme_tokens
 
@@ -197,29 +194,6 @@ def set_current_index_if_changed(widget, index: int) -> bool:
     except Exception:
         pass
     widget.setCurrentIndex(value)
-    return True
-
-
-def set_segmented_current_item_if_changed(widget, item_key: str) -> bool:
-    value = str(item_key or "")
-    try:
-        if str(widget.currentItem()) == value:
-            return False
-    except Exception:
-        pass
-    widget.setCurrentItem(value)
-    return True
-
-
-def set_tab_item_text_if_changed(widget, item_key: str, text: str) -> bool:
-    route_key = str(item_key or "")
-    value = str(text or "")
-    try:
-        if str(widget.itemText(route_key)) == value:
-            return False
-    except Exception:
-        pass
-    widget.setItemText(route_key, value)
     return True
 
 
@@ -492,7 +466,10 @@ class ProfileSetupPageBase(BasePage):
         self._profile_setup_payload_apply_scheduled = False
         self._pending_profile_setup_payload_apply = None
         self._strategy_stack = None
-        self._strategy_tabs = None
+        # Разделы «Список сайтов» и «Текст профиля» открываются кнопками в шапке
+        # и становятся следующим шагом строки пути, как подробности о стратегии.
+        self._editor_section_button = None
+        self._raw_section_button = None
         self._strategy_list = None
         self._strategy_tab = None
         self._list_file_editor_placeholder = None
@@ -684,6 +661,13 @@ class ProfileSetupPageBase(BasePage):
         self._summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         header_layout.addWidget(self._summary, 1)
 
+        self._editor_section_button = PushButton(LIST_TAB_TITLE_HOSTLIST, icon=FluentIcon.DOCUMENT)
+        self._editor_section_button.clicked.connect(lambda: self._open_section("editor"))
+        header_layout.addWidget(self._editor_section_button, 0, Qt.AlignmentFlag.AlignRight)
+        self._raw_section_button = PushButton(RAW_TAB_TITLE, icon=FluentIcon.CODE)
+        self._raw_section_button.clicked.connect(lambda: self._open_section("raw"))
+        header_layout.addWidget(self._raw_section_button, 0, Qt.AlignmentFlag.AlignRight)
+
         self._conditions_button = PushButton("Условия", icon=FluentIcon.FILTER)
         set_control_accessibility(
             self._conditions_button,
@@ -789,14 +773,7 @@ class ProfileSetupPageBase(BasePage):
         self._update_profile_setup_accessibility()
 
         self._strategy_stack = QStackedWidget(self)
-        self._strategy_tabs = SegmentedWidget()
-        self._strategy_tabs.addItem("strategies", STRATEGIES_TAB_TITLE, lambda: self._switch_strategy_tab(0))
-        self._strategy_tabs.addItem("editor", LIST_TAB_TITLE_HOSTLIST, lambda: self._switch_strategy_tab(1))
-        self._strategy_tabs.addItem("raw", RAW_TAB_TITLE, lambda: self._switch_strategy_tab(2))
-        set_segmented_current_item_if_changed(self._strategy_tabs, "strategies")
         self._sync_editor_tab_label(None)
-        self._strategy_tabs.currentItemChanged.connect(self._update_strategy_tabs_accessibility)
-        self.layout.addWidget(self._strategy_tabs)
 
         self._strategy_list = ProfileStrategyListWidget(self)
         self._strategy_list.strategy_activated.connect(self._on_strategy_list_activated)
@@ -816,7 +793,8 @@ class ProfileSetupPageBase(BasePage):
         self._strategy_stack.addWidget(self._raw_tab_placeholder)
 
         self.layout.addWidget(self._strategy_stack, 1)
-        QWidget.setTabOrder(self._strategy_tabs, self._strategy_list._search)
+        QWidget.setTabOrder(self._editor_section_button, self._raw_section_button)
+        QWidget.setTabOrder(self._raw_section_button, self._conditions_button)
         QWidget.setTabOrder(self._strategy_list._search, self._strategy_list._grouping_combo)
         QWidget.setTabOrder(self._strategy_list._grouping_combo, self._strategy_list._list)
         self._update_profile_setup_accessibility()
@@ -866,50 +844,50 @@ class ProfileSetupPageBase(BasePage):
             name="Режим out-range",
             description="Выберите режим --out-range для исходящих пакетов.",
         )
-        self._update_strategy_tabs_accessibility()
+        self._update_section_buttons_accessibility()
 
-    def _strategy_tab_accessible_labels(self) -> dict[str, str]:
-        labels = {
-            "strategies": STRATEGIES_TAB_TITLE,
-            "raw": RAW_TAB_TITLE,
-        }
-        if bool(getattr(self, "_editor_tab_available", False)):
-            labels["editor"] = _profile_editor_tab_title(getattr(self, "_payload", None))
-        return labels
+    def _update_section_buttons_accessibility(self) -> None:
+        editor_button = self.__dict__.get("_editor_section_button")
+        raw_button = self.__dict__.get("_raw_section_button")
+        if editor_button is not None:
+            title = _profile_editor_tab_title(self.__dict__.get("_payload"))
+            set_control_accessibility(
+                editor_button,
+                name=f"Открыть раздел: {title}",
+                description="Открывает записи файла списка этого profile. Вернуться к готовым стратегиям можно по строке пути.",
+            )
+        if raw_button is not None:
+            set_control_accessibility(
+                raw_button,
+                name=f"Открыть раздел: {RAW_TAB_TITLE}",
+                description="Показывает строки profile так, как они записаны в preset, и даёт править их вручную.",
+            )
 
-    def _update_strategy_tabs_accessibility(self, current: object | None = None) -> None:
-        tabs = self.__dict__.get("_strategy_tabs")
-        if tabs is None:
-            return
-        key = str(current or "").strip()
-        if not key:
-            try:
-                key = str(tabs.currentRouteKey() or "").strip()
-            except Exception:
-                key = ""
-        labels = self._strategy_tab_accessible_labels()
-        label = labels.get(key) or labels.get("strategies") or STRATEGIES_TAB_TITLE
-        state = f"Разделы профиля, выбрано: {label}"
-        options = _join_accessible_options([labels[key] for key in _STRATEGY_TAB_KEYS if key in labels])
-        description = f"Выберите раздел настройки профиля: {options}." if options else "Выберите раздел настройки профиля."
-        set_state_text(tabs, state)
-        set_control_accessibility(
-            tabs,
-            name=state,
-            description=description,
-        )
-        set_segmented_items_accessibility(
-            tabs,
-            name="Разделы профиля",
-            labels=labels,
-            item_tab_focus=False,
-        )
+    def _current_section(self) -> str:
+        stack = self.__dict__.get("_strategy_stack")
+        index = stack.currentIndex() if stack is not None else 0
+        return _STRATEGY_TAB_KEYS[index] if 0 <= index < 3 else "strategies"
+
+    def _section_title(self) -> str:
+        """Название открытого раздела для строки пути; пусто — готовые стратегии."""
+        section = self._current_section()
+        if section == "editor":
+            return _profile_editor_tab_title(self.__dict__.get("_payload"))
+        if section == "raw":
+            return RAW_TAB_TITLE
+        return ""
+
+    def _open_section(self, section: str) -> None:
+        """Открывает раздел страницы: "strategies", "editor" или "raw"."""
+        strategy_list = self.__dict__.get("_strategy_list")
+        if strategy_list is not None and strategy_list.details_open():
+            strategy_list.close_details()
+        index = _STRATEGY_TAB_KEYS.index(section) if section in _STRATEGY_TAB_KEYS else 0
+        self._switch_strategy_tab(index)
 
     def _switch_strategy_tab(self, index: int) -> None:
         if index == 1 and not self._editor_tab_available:
             index = 0
-            if self._strategy_tabs is not None:
-                set_segmented_current_item_if_changed(self._strategy_tabs, "strategies")
         if index == 1:
             self._ensure_editor_tab_built()
             self._request_list_file_editor_state()
@@ -917,8 +895,7 @@ class ProfileSetupPageBase(BasePage):
             self._ensure_raw_tab_built()
             self._apply_raw_tab_payload()
         set_current_index_if_changed(self._strategy_stack, index)
-        if self._strategy_tabs is not None:
-            self._update_strategy_tabs_accessibility(_STRATEGY_TAB_KEYS[index] if 0 <= index < 3 else "strategies")
+        self._rebuild_breadcrumb()
 
     def _ensure_editor_tab_built(self) -> None:
         if self._editor_tab_built:
@@ -1196,8 +1173,12 @@ class ProfileSetupPageBase(BasePage):
             self._breadcrumb.addItem("control", breadcrumb_key[0])
             self._breadcrumb.addItem("profiles", breadcrumb_key[1])
             self._breadcrumb.addItem("profile", breadcrumb_key[2])
-            # Открыты подробности о стратегии — это следующий шаг пути.
-            details_name = str(self.__dict__.get("_strategy_details_name") or "")
+            # Открытый раздел («Список сайтов», «Текст профиля») или
+            # подробности о стратегии — следующий шаг пути.
+            section_title = getattr(self, "_section_title", None)
+            details_name = (section_title() if callable(section_title) else "") or str(
+                getattr(self, "_strategy_details_name", "") or ""
+            )
             if details_name:
                 breadcrumb_key = (*breadcrumb_key, details_name)
                 self._breadcrumb.addItem("strategy", details_name)
@@ -1210,7 +1191,10 @@ class ProfileSetupPageBase(BasePage):
         # восстанавливаем полный путь до навигации, иначе при возврате на эту же
         # страницу крошки остаются обрезанными.
         if key == "profile":
-            # Возврат из подробностей о стратегии к списку стратегий профиля.
+            # Возврат из раздела или из подробностей о стратегии к списку стратегий.
+            if self._current_section() != "strategies":
+                self._open_section("strategies")
+                return
             strategy_list = self.__dict__.get("_strategy_list")
             if strategy_list is not None and strategy_list.details_open():
                 strategy_list.close_details()
@@ -1222,12 +1206,8 @@ class ProfileSetupPageBase(BasePage):
             self._open_profiles()
 
     def _on_strategy_details_changed(self, name: str) -> None:
-        """Подробности о стратегии занимают всю страницу: вкладки на это время убраны."""
+        """Подробности о стратегии — следующий шаг строки пути."""
         self._strategy_details_name = str(name or "")
-        if self._strategy_tabs is not None:
-            # setHidden, а не «видимость, если изменилась»: страница может быть
-            # ещё не показана, и тогда вкладки формально и так «не видны».
-            self._strategy_tabs.setHidden(bool(self._strategy_details_name))
         self._rebuild_breadcrumb()
 
     def _on_update_user_profile_clicked(self) -> None:
@@ -1487,7 +1467,7 @@ class ProfileSetupPageBase(BasePage):
             # Поля списка и диапазонов спрятаны в панели «Условия»: тур показывает кнопку и сводку.
             return [self.__dict__.get("_summary"), self.__dict__.get("_conditions_button")]
         if name == "tabs":
-            return self._strategy_tabs
+            return [self.__dict__.get("_editor_section_button"), self.__dict__.get("_raw_section_button")]
         if name in {"strategies", "strategy_try", "strategy_find"}:
             stack = self._strategy_stack
             if stack is None or stack.currentIndex() != 0:
@@ -1503,19 +1483,17 @@ class ProfileSetupPageBase(BasePage):
         return None
 
     def onboarding_set_state(self, state: str | None) -> None:
-        """Тур открывает вкладку списка сайтов, а потом возвращает «Готовые стратегии»."""
-        if self._strategy_tabs is None:
+        """Тур открывает раздел списка сайтов, а потом возвращает готовые стратегии."""
+        if self._strategy_stack is None:
             return
         if state == "editor":
             if not self._editor_tab_available:
                 return
             self._onboarding_switched_tab = True
-            set_segmented_current_item_if_changed(self._strategy_tabs, "editor")
-            self._switch_strategy_tab(1)
+            self._open_section("editor")
             return
         if self.__dict__.pop("_onboarding_switched_tab", False):
-            set_segmented_current_item_if_changed(self._strategy_tabs, "strategies")
-            self._switch_strategy_tab(0)
+            self._open_section("strategies")
 
     def handle_page_command(self, command: str, payload: dict) -> bool:
         if command == "open_profile":
@@ -1821,34 +1799,26 @@ class ProfileSetupPageBase(BasePage):
             self._loading = False
 
     def _set_list_file_editor_available(self, available: bool) -> None:
-        if self._strategy_tabs is None or self._strategy_stack is None:
-            self._editor_tab_available = available
-            return
-        if available == self._editor_tab_available:
-            return
-
+        """У profile без файла списка раздела «Список сайтов» нет: кнопка убрана."""
         self._editor_tab_available = available
-        if available:
-            editor_title = _profile_editor_tab_title(self._payload)
-            self._strategy_tabs.insertItem(1, "editor", editor_title, lambda: self._switch_strategy_tab(1))
-            self._update_strategy_tabs_accessibility()
-            return
-
-        if self._strategy_stack.currentIndex() == 1:
-            set_current_index_if_changed(self._strategy_stack, 0)
-            set_segmented_current_item_if_changed(self._strategy_tabs, "strategies")
-        self._strategy_tabs.removeWidget("editor")
-        self._update_strategy_tabs_accessibility()
+        button = self.__dict__.get("_editor_section_button")
+        if button is not None:
+            button.setHidden(not available)
+        if not available and self._strategy_stack is not None and self._strategy_stack.currentIndex() == 1:
+            self._open_section("strategies")
 
     def _sync_editor_tab_label(self, payload) -> None:
         editor_title = _profile_editor_tab_title(payload)
-        if self._strategy_tabs is not None and self._editor_tab_available:
-            set_tab_item_text_if_changed(self._strategy_tabs, "editor", editor_title)
-            set_tooltip(
-                self._strategy_tabs,
-                f"«{STRATEGIES_TAB_TITLE}» меняют строки --lua-desync. «{editor_title}» меняет файл hostlist/ipset. «{RAW_TAB_TITLE}» показывает строки профиля как в пресете и даёт править их вручную. Ctrl+F — поиск по готовым стратегиям.",
-            )
-            self._update_strategy_tabs_accessibility()
+        button = self.__dict__.get("_editor_section_button")
+        if button is not None:
+            set_widget_text_if_changed(button, editor_title)
+            set_tooltip(button, f"«{editor_title}» — записи файла hostlist/ipset этого profile.")
+        raw_button = self.__dict__.get("_raw_section_button")
+        if raw_button is not None:
+            set_tooltip(raw_button, f"«{RAW_TAB_TITLE}» показывает строки profile как в preset и даёт править их вручную.")
+        self._update_section_buttons_accessibility()
+        if self.__dict__.get("_strategy_stack") is not None and self._current_section() == "editor":
+            self._rebuild_breadcrumb()
 
     def _apply_list_file_editor_state(self, state) -> None:
         kind = str(getattr(state, "kind", "") or "").strip().lower()

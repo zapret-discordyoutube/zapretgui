@@ -178,9 +178,8 @@ class WidgetStateTests(_WidgetCase):
 
         self.assertEqual(sum(row.kind == ROW_STRATEGY for row in self._rows(widget)), 20)
         self.assertTrue(widget._toolbar.filter_row.isHidden())
-        self.assertTrue(widget._grouping_combo.isHidden())
         self.assertTrue(widget._try_panel.isHidden())
-        self.assertFalse(widget._search.isHidden())
+        self.assertTrue(widget._toolbar.search_row.isHidden())
 
     def test_click_on_strategy_asks_page_to_apply_it_and_keeps_screen_until_page_answers(self) -> None:
         widget = self._widget()
@@ -234,6 +233,27 @@ class WidgetStateTests(_WidgetCase):
 
 
 class SearchAndFilterTests(_WidgetCase):
+    def test_search_is_hidden_until_ctrl_f_and_escape_hides_it_again(self) -> None:
+        widget = self._widget()
+        self.assertTrue(widget._toolbar.search_row.isHidden())
+        self.assertFalse(widget._toolbar.filter_row.isHidden())
+        self.assertFalse(widget._grouping_combo.isHidden())
+
+        widget._focus_search()
+        self.assertFalse(widget._toolbar.search_row.isHidden())
+        widget._search.setText("beta v1")
+        narrowed = widget._plan.visible_count
+
+        QTest.keyClick(widget._search, Qt.Key.Key_Escape)
+        self.assertTrue(widget._toolbar.search_row.isHidden())
+        self.assertEqual(widget._search.text(), "")
+        # Спрятанный поиск не сужает список.
+        self.assertGreater(widget._plan.visible_count, narrowed)
+
+        widget._focus_search()
+        widget._focus_search()
+        self.assertTrue(widget._toolbar.search_row.isHidden())
+
     def test_search_shows_everything_found_and_updates_summary(self) -> None:
         widget = self._widget(open_group="")
 

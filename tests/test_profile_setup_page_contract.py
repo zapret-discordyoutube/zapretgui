@@ -10,7 +10,6 @@ from profile.ui.profile_setup_page import (
     ProfileSetupPageBase,
     _profile_has_list_file_editor,
     _profile_editor_tab_title,
-    set_segmented_current_item_if_changed,
 )
 from profile.profile_setup_loader import (
     ProfileEnabledSaveWorker,
@@ -170,15 +169,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
         self.assertEqual(page._add_profile_btn.enabled_calls, [])
 
-    def test_segmented_current_item_skips_duplicate_selection(self) -> None:
-        widget = SimpleNamespace(
-            currentItem=Mock(return_value="strategies"),
-            setCurrentItem=Mock(),
-        )
-
-        self.assertFalse(set_segmented_current_item_if_changed(widget, "strategies"))
-
-        widget.setCurrentItem.assert_not_called()
 
     def test_preset_setup_page_has_add_user_profile_action(self) -> None:
         apply_payload = inspect.getsource(PresetSetupPageBase._apply_payload)
@@ -5213,35 +5203,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
         page._start_enabled_save_worker.assert_called_once_with(True)
 
-    def test_profile_setup_page_has_list_file_editor_as_second_tab(self) -> None:
-        build = inspect.getsource(ProfileSetupPageBase._build_content)
-        ensure_editor = inspect.getsource(ProfileSetupPageBase._ensure_editor_tab_built)
-        apply_payload = inspect.getsource(ProfileSetupPageBase._apply_payload)
-        sync_label = inspect.getsource(ProfileSetupPageBase._sync_editor_tab_label)
-        switch_tab = inspect.getsource(ProfileSetupPageBase._switch_strategy_tab)
-        save_handler = inspect.getsource(ProfileSetupPageBase._on_list_file_save_clicked)
-        from profile.ui.profile_list_file_editor_controller import ProfileListFileEditorController
-
-        save_start_handler = inspect.getsource(ProfileListFileEditorController._start_list_file_save_worker)
-        validation = inspect.getsource(ProfileSetupPageBase._render_list_file_validation)
-
-        self.assertIn('addItem("editor", LIST_TAB_TITLE_HOSTLIST', build)
-        self.assertIn("_sync_editor_tab_label(payload)", apply_payload)
-        self.assertIn('set_tab_item_text_if_changed(self._strategy_tabs, "editor", editor_title)', sync_label)
-        self.assertNotIn("self._list_file_text = PlainTextEdit()", build)
-        self.assertIn("_ensure_editor_tab_built", switch_tab)
-        self.assertIn("_request_list_file_editor_state", switch_tab)
-        self.assertIn("_list_file_text", ensure_editor)
-        self.assertIn("_list_file_base_text", ensure_editor)
-        self.assertIn("ProfileListFileTab", ensure_editor)
-        from profile.ui import profile_list_file_tab
-
-        self.assertEqual(profile_list_file_tab.USER_TITLE, "Ваши записи")
-        self.assertNotIn("_apply_list_file_editor_state", apply_payload)
-        self.assertIn("_request_list_file_save", save_handler)
-        self.assertIn("create_profile_list_file_save_worker", save_start_handler)
-        self.assertNotIn("save_list_file_text", save_handler)
-        self.assertIn("Неверные строки", validation)
 
     def test_list_file_save_starts_worker_without_saving_in_gui_thread(self) -> None:
         class _Signal:
@@ -5871,30 +5832,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         self.assertEqual(_profile_editor_tab_title(ipset_payload), "Список адресов")
         self.assertEqual(_profile_editor_tab_title(exclude_payload), "Исключения")
 
-    def test_profile_setup_page_hides_editor_tab_when_profile_has_no_list_file(self) -> None:
-        build = inspect.getsource(ProfileSetupPageBase._build_content)
-        apply_payload = inspect.getsource(ProfileSetupPageBase._apply_payload)
-        apply_settings = inspect.getsource(ProfileSetupPageBase._apply_editable_settings)
-        page_source = inspect.getsource(ProfileSetupPageBase)
-        l7_payload = SimpleNamespace(
-            item=SimpleNamespace(
-                match_lines=("--filter-l7=stun,discord", "--payload=stun,discord_ip_discovery"),
-            ),
-        )
-        hostlist_payload = SimpleNamespace(
-            item=SimpleNamespace(
-                match_lines=("--filter-tcp=443", "--hostlist=lists/discord.txt"),
-            ),
-        )
-
-        self.assertIn('addItem("editor", LIST_TAB_TITLE_HOSTLIST', build)
-        self.assertIn("_set_list_file_editor_available(_profile_has_list_file_editor(payload))", apply_payload)
-        self.assertIn('removeWidget("editor")', page_source)
-        self.assertFalse(_profile_has_list_file_editor(l7_payload))
-        self.assertTrue(_profile_has_list_file_editor(hostlist_payload))
-        self.assertIn("filter_switchable", apply_settings)
-        self.assertIn("set_widget_visible_if_changed(self._filter_combo, filter_switchable)", apply_settings)
-        self.assertIn("set_widget_visible_if_changed(self._filter_value, filter_switchable)", apply_settings)
 
 
     def test_settings_autosave_starts_worker_without_saving_in_gui_thread(self) -> None:

@@ -142,20 +142,6 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
             self.assertTrue(buttons)
             self.assertTrue(all(button.focusPolicy() == Qt.FocusPolicy.NoFocus for button in buttons))
 
-    def test_strategy_tabs_read_current_section_for_screen_reader(self) -> None:
-        page = self._make_page()
-        self.addCleanup(page.deleteLater)
-
-        self.assertEqual(page._strategy_tabs.accessibleName(), "Разделы профиля, выбрано: Готовые стратегии")
-        self.assertIn("Готовые стратегии, Список сайтов или Текст профиля", page._strategy_tabs.accessibleDescription())
-
-        page._strategy_tabs.setCurrentItem("raw")
-
-        self.assertEqual(page._strategy_tabs.accessibleName(), "Разделы профиля, выбрано: Текст профиля")
-        self.assertEqual(
-            page._strategy_tabs.property("screenReaderStateText"),
-            "Разделы профиля, выбрано: Текст профиля",
-        )
 
 
     def test_range_mode_combo_options_are_named_for_screen_reader(self) -> None:

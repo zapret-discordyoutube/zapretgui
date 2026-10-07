@@ -240,7 +240,7 @@ class ProfileStrategyDetailsBreadcrumbTests(ProfileStrategyOpenGroupSaveTests):
     def _crumbs(self, page) -> list[str]:
         return [item.text for item in page._breadcrumb.items]
 
-    def test_details_add_breadcrumb_hide_tabs_and_crumb_returns_to_list(self) -> None:
+    def test_details_add_breadcrumb_and_crumb_returns_to_list(self) -> None:
         page = self._page()
         page._profile_key = "profile:0"
         page._apply_payload(self._payload(persistent_key="uid:youtube", open_group=None))
@@ -249,9 +249,53 @@ class ProfileStrategyDetailsBreadcrumbTests(ProfileStrategyOpenGroupSaveTests):
 
         strategy_list.show_details("host-05")
         self.assertEqual(self._crumbs(page), [*before, "host 05"])
-        self.assertTrue(page._strategy_tabs.isHidden())
 
         page._on_breadcrumb_item_changed("profile")
         self.assertFalse(strategy_list.details_open())
         self.assertEqual(self._crumbs(page), before)
-        self.assertFalse(page._strategy_tabs.isHidden())
+
+    def test_sections_open_by_header_buttons_as_next_breadcrumb_step(self) -> None:
+        """Вкладок на странице нет: «Список сайтов» и «Текст профиля» — шаги строки пути."""
+        page = self._page()
+        page._profile_key = "profile:0"
+        page._apply_payload(self._payload(persistent_key="uid:youtube", open_group=None))
+        before = self._crumbs(page)
+        self.assertFalse(hasattr(page, "_strategy_tabs"))
+        self.assertEqual(page._editor_section_button.text(), "Список сайтов")
+
+        page._raw_section_button.click()
+        self.assertEqual(page._strategy_stack.currentIndex(), 2)
+        self.assertEqual(self._crumbs(page), [*before, "Текст профиля"])
+
+        # Раздел списка сайтов читает файл в фоне; здесь проверяется только путь.
+        page._strategy_stack.setCurrentIndex(1)
+        page._rebuild_breadcrumb()
+        self.assertEqual(self._crumbs(page), [*before, "Список сайтов"])
+
+        page._on_breadcrumb_item_changed("profile")
+        self.assertEqual(page._strategy_stack.currentIndex(), 0)
+        self.assertEqual(self._crumbs(page), before)
+
+    def test_opening_a_section_closes_strategy_details(self) -> None:
+        page = self._page()
+        page._profile_key = "profile:0"
+        page._apply_payload(self._payload(persistent_key="uid:youtube", open_group=None))
+        before = self._crumbs(page)
+        page._strategy_list.show_details("host-05")
+
+        page._raw_section_button.click()
+
+        self.assertFalse(page._strategy_list.details_open())
+        self.assertEqual(self._crumbs(page), [*before, "Текст профиля"])
+
+    def test_profile_without_list_file_has_no_list_section_button(self) -> None:
+        page = self._page()
+        page._profile_key = "profile:0"
+        page._apply_payload(self._payload(persistent_key="uid:youtube", open_group=None))
+        page._strategy_stack.setCurrentIndex(1)
+
+        page._set_list_file_editor_available(False)
+
+        self.assertTrue(page._editor_section_button.isHidden())
+        self.assertEqual(page._strategy_stack.currentIndex(), 0)
+        self.assertFalse(page._raw_section_button.isHidden())

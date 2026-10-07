@@ -383,53 +383,6 @@ class _ValidationWorker:
 
 
 class ProfileSetupUiGuardTests(unittest.TestCase):
-    def test_strategy_tabs_items_read_name_and_selection_for_screen_reader(self) -> None:
-        import os
-
-        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-        from PyQt6.QtWidgets import QApplication
-        from qfluentwidgets import SegmentedWidget
-
-        from profile.ui.profile_setup_page import ProfileSetupPageBase
-
-        type(self)._app = QApplication.instance() or QApplication([])
-        self.assertIsNotNone(type(self)._app)
-
-        tabs = SegmentedWidget()
-        self.addCleanup(tabs.deleteLater)
-        tabs.addItem("strategies", "Готовые стратегии", lambda: None)
-        tabs.addItem("editor", "Список сайтов", lambda: None)
-        tabs.addItem("raw", "Текст профиля", lambda: None)
-        tabs.setCurrentItem("strategies")
-
-        page = ProfileSetupPageBase.__new__(ProfileSetupPageBase)
-        page._strategy_tabs = tabs
-        page._editor_tab_available = True
-        page._payload = None
-
-        ProfileSetupPageBase._update_strategy_tabs_accessibility(page, "strategies")
-
-        self.assertEqual(
-            tabs.items["strategies"].accessibleName(),
-            "Разделы профиля: Готовые стратегии, выбрано",
-        )
-        self.assertEqual(
-            tabs.items["editor"].accessibleName(),
-            "Разделы профиля: Список сайтов, не выбрано",
-        )
-
-        tabs.setCurrentItem("raw")
-        ProfileSetupPageBase._update_strategy_tabs_accessibility(page, "raw")
-
-        self.assertEqual(
-            tabs.items["strategies"].accessibleName(),
-            "Разделы профиля: Готовые стратегии, не выбрано",
-        )
-        self.assertEqual(
-            tabs.items["raw"].accessibleName(),
-            "Разделы профиля: Текст профиля, выбрано",
-        )
 
     def test_text_update_skips_duplicate_value(self) -> None:
         from profile.ui.profile_setup_page import set_widget_text_if_changed
@@ -476,16 +429,6 @@ class ProfileSetupUiGuardTests(unittest.TestCase):
         self.assertTrue(set_current_index_if_changed(widget, 0))
         self.assertEqual(widget.calls, [0])
 
-    def test_tab_item_text_update_skips_duplicate_value(self) -> None:
-        from profile.ui.profile_setup_page import set_tab_item_text_if_changed
-
-        widget = _TabTextWidget({"editor": "Редактор"})
-
-        self.assertFalse(set_tab_item_text_if_changed(widget, "editor", "Редактор"))
-        self.assertEqual(widget.calls, [])
-
-        self.assertTrue(set_tab_item_text_if_changed(widget, "editor", "Hostlist"))
-        self.assertEqual(widget.calls, [("editor", "Hostlist")])
 
     def test_property_update_skips_duplicate_value(self) -> None:
         from profile.ui.profile_setup_page import set_widget_property_if_changed

@@ -200,13 +200,6 @@ class RawTextTabTests(_TabsCase):
         # Редактор растягивается на всю высоту вкладки.
         self.assertGreater(tab.text.maximumHeight(), 10000)
 
-    def test_page_tabs_are_named_by_their_content(self) -> None:
-        page = self._page()
-
-        self.assertEqual(
-            [page._strategy_tabs.items[key].text() for key in ("strategies", "editor", "raw")],
-            ["Готовые стратегии", "Список сайтов", "Текст профиля"],
-        )
 
     def test_page_fills_the_editor_from_the_profile(self) -> None:
         page = self._page()
