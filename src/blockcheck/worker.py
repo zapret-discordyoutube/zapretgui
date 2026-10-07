@@ -34,6 +34,7 @@ class BlockcheckWorker(QObject):
         close_run_log: Callable[[str | None], None],
         load_geo_sites: Callable[[], object] | None = None,
         remember_run: Callable[[dict, str | None], dict] | None = None,
+        check_dns_servers: Callable[..., dict] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -44,6 +45,7 @@ class BlockcheckWorker(QObject):
         self._close_run_log_action = close_run_log
         self._load_geo_sites = load_geo_sites
         self._remember_run = remember_run
+        self._check_dns_servers = check_dns_servers
         self._cancelled = False
         self._running = False
         self._run_log_file = None
@@ -79,6 +81,7 @@ class BlockcheckWorker(QObject):
                 emit=self._emit,
                 should_stop=self.is_cancelled,
                 geo_service_for=self._geo_service_lookup(),
+                check_dns_servers=self._check_dns_servers,
             )
             if isinstance(report, dict) and report.get("stopped"):
                 report = None

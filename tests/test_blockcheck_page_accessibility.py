@@ -267,6 +267,24 @@ class SummaryPanelTests(unittest.TestCase):
         self.assertIn("Zapret выключен", panel.env_label.text())
 
 
+class ScopeChoiceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_full_check_is_the_third_choice_and_all_sites_stays_default(self) -> None:
+        page = _make_page()
+        combo = page._scope_combo
+
+        self.assertEqual([combo.itemData(index) for index in range(combo.count())], ["main", "all", "full"])
+        self.assertEqual(page._current_scope(), "all")
+        combo.setCurrentIndex(2)
+        self.assertEqual(page._current_scope(), "full")
+        self.assertIn("Полная проверка", combo.currentText())
+        page.set_ui_language("en")
+        self.assertEqual(combo.itemText(2), "Full check (about a minute)")
+
+
 class SummaryChangesTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -375,6 +393,59 @@ class SitesTableTests(unittest.TestCase):
 
         table.show_report({"services": [], "system": []})
         self.assertEqual(table.rowCount(), 0)
+
+    def test_full_check_adds_rows_for_dns_servers_and_filter_place(self) -> None:
+        report = {
+            "services": [],
+            "dns_servers": {
+                "level": "fail",
+                "findings": [{"level": "fail", "text": "Обычные DNS-запросы перехватываются по дороге."}],
+                "text": "полная таблица серверов",
+            },
+            "filter": {
+                "host": "rutracker.org",
+                "address": "104.21.32.39",
+                "found": True,
+                "hop": 2,
+                "text": "Фильтр стоит между узлом 1 (10.0.0.1) и узлом 2 (10.0.0.2)",
+                "hops": [
+                    {"ttl": 1, "address": "10.0.0.1", "rtt_ms": 0.4},
+                    {"ttl": 2, "address": "10.0.0.2", "rtt_ms": 42.0},
+                    {"ttl": 3, "address": "", "rtt_ms": None},
+                ],
+            },
+        }
+        table = BlockcheckSitesTable()
+        table.show_report(report)
+        rows = [[table.item(row, column).text() for column in range(3)] for row in range(table.rowCount())]
+
+        self.assertEqual(rows[0], ["DNS-серверы", "Есть проблемы", "Обычные DNS-запросы перехватываются по дороге."])
+        self.assertEqual(rows[1][:2], ["Место фильтра", "Найдено"])
+        self.assertEqual(rows[1][2], "по сайту rutracker.org: фильтр стоит между узлом 1 (10.0.0.1) и узлом 2 (10.0.0.2)")
+        # Найденное место — не «проблема сайта»: строка не красится и в счёт проблем не идёт.
+        self.assertIn("с проблемами 1", table.accessibleName())
+
+        from blockcheck.ui.check_results import FILTER_MARK, _filter_tooltip
+
+        tooltip = _filter_tooltip(report["filter"]).splitlines()
+        self.assertEqual(tooltip[1], " 1  10.0.0.1  < 1 мс")
+        self.assertEqual(tooltip[2], f"    {FILTER_MARK}")
+        self.assertEqual(tooltip[3], " 2  10.0.0.2  42 мс")
+        self.assertEqual(tooltip[4], " 3  не ответил")
+
+    def test_filter_not_found_and_unknown_dns_level_are_worded_neutrally(self) -> None:
+        table = BlockcheckSitesTable()
+        table.show_report(
+            {
+                "services": [],
+                "dns_servers": {"level": "unknown", "findings": [], "text": ""},
+                "filter": {"host": "x.com", "found": False, "hop": None, "text": "На первых 20 узлах фильтр не найден", "hops": []},
+            }
+        )
+
+        self.assertEqual(table.item(0, 1).text(), "Не проверено")
+        self.assertEqual(table.item(1, 1).text(), "Не найдено")
+        self.assertNotIn("здесь стоит фильтр", _service_details({"targets": []})[1])
 
     def test_blocked_quic_is_marked_for_open_site(self) -> None:
         service = {

@@ -55,6 +55,13 @@ class EntryTests(unittest.TestCase):
 
         self.assertEqual((entry["level"], entry["headline"], entry["title"]), ("ok", "Всё открывается", "Discord и YouTube"))
 
+    def test_full_check_has_its_own_title_and_is_not_compared_with_all_sites(self) -> None:
+        full = history.blockcheck_entry(_report(_service("YouTube", "fail"), scope="full"), when=WHEN)
+        earlier = [history.blockcheck_entry(_report(_service("YouTube", "ok"), scope="all"), when=WHEN)]
+
+        self.assertEqual(full["title"], "Полная проверка")
+        self.assertIsNone(history.previous_run(earlier, full))
+
     def test_overall_level_is_the_worst_problem_level(self) -> None:
         def level(*problems):
             return history.blockcheck_entry(_report(problems=problems), when=WHEN)["level"]
@@ -62,6 +69,54 @@ class EntryTests(unittest.TestCase):
         self.assertEqual(level(("warn", "a"), ("unknown", "b")), "warn")
         self.assertEqual(level(("unknown", "b")), "unknown")
         self.assertEqual(level(("warn", "a"), ("fail", "c")), "fail")
+
+
+class DnsServersAdapterTests(unittest.TestCase):
+    def test_report_becomes_plain_dictionary_for_the_engine(self) -> None:
+        from types import SimpleNamespace
+
+        from blockcheck import commands
+
+        report = SimpleNamespace(
+            findings=(
+                SimpleNamespace(level="info", text="Не отвечают совсем: X."),
+                SimpleNamespace(level="warn", text="DoT закрыт у: Y."),
+            )
+        )
+        stops: list = []
+
+        def run_server_check(*, on_progress=None, should_stop=None):
+            stops.append(should_stop)
+            return report
+
+        marker = lambda: False  # noqa: E731
+        with (
+            patch("dns.commands.run_server_check", run_server_check),
+            patch("dns.server_check_plans.build_text_report", lambda _report: "таблица"),
+        ):
+            result = commands.check_dns_servers(should_stop=marker)
+
+        self.assertEqual(result["level"], "warn")
+        self.assertEqual(result["findings"][1], {"level": "warn", "text": "DoT закрыт у: Y."})
+        self.assertEqual(result["text"], "таблица")
+        self.assertIs(stops[0], marker)
+
+    def test_level_is_worst_finding_or_unknown_without_findings(self) -> None:
+        from types import SimpleNamespace
+
+        from blockcheck import commands
+
+        def level(*levels):
+            report = SimpleNamespace(findings=tuple(SimpleNamespace(level=item, text="x") for item in levels))
+            with (
+                patch("dns.commands.run_server_check", lambda **_k: report),
+                patch("dns.server_check_plans.build_text_report", lambda _report: ""),
+            ):
+                return commands.check_dns_servers()["level"]
+
+        self.assertEqual(level("ok", "info"), "ok")
+        self.assertEqual(level("warn", "fail"), "fail")
+        self.assertEqual(level(), "unknown")
 
 
 class ChangesTests(unittest.TestCase):

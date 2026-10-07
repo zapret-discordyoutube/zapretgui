@@ -348,6 +348,23 @@ def _target_mark(item: dict) -> str:
     return "?" if str(item.get("state") or "") == "unknown" else "✗"
 
 
+_DNS_SERVERS_WORDS = {"ok": "В порядке", "warn": "Есть замечания", "fail": "Есть проблемы"}
+FILTER_MARK = "── здесь стоит фильтр ──"
+
+
+def _filter_tooltip(place: dict) -> str:
+    """Таблица узлов по дороге с отметкой места фильтра."""
+    lines = [f"{place.get('host', '')} ({place.get('address', '')}): {place.get('text', '')}"]
+    hop = place.get("hop") if place.get("found") else None
+    for item in place.get("hops") or ():
+        if item.get("ttl") == hop:
+            lines.append(f"    {FILTER_MARK}")
+        rtt = item.get("rtt_ms")
+        time_text = "" if rtt is None else ("< 1 мс" if rtt < 1 else f"{round(rtt)} мс")
+        lines.append(f"{item.get('ttl', ''):>2}  {item.get('address') or 'не ответил'}  {time_text}".rstrip())
+    return "\n".join(lines)
+
+
 _SYSTEM_MARKS = {"ok": "✓", "info": "·", "warn": "!", "fail": "✗", "unknown": "?"}
 
 
@@ -506,6 +523,29 @@ class BlockcheckSitesTable(TableWidget):
             level, word = _IPV6_ROW.get(str(ipv6.get("state") or ""), ("unknown", "Не проверено"))
             text = f"IPv6 {ipv6.get('text', '')}".strip()
             self._add_row("IPv6", level, word, text, text)
+        dns_servers = report.get("dns_servers")
+        if dns_servers:
+            level = str(dns_servers.get("level") or "unknown")
+            findings = list(dns_servers.get("findings") or ())
+            # Первой показывается самая важная находка: движок отдаёт их по важности.
+            details = str(findings[0].get("text") or "") if findings else ""
+            self._add_row(
+                "DNS-серверы",
+                level if level in ("ok", "warn", "fail") else "unknown",
+                _DNS_SERVERS_WORDS.get(level, "Не проверено"),
+                details,
+                str(dns_servers.get("text") or details),
+            )
+        filter_place = report.get("filter")
+        if filter_place:
+            text = str(filter_place.get("text") or "")
+            self._add_row(
+                "Место фильтра",
+                "unknown",
+                "Найдено" if filter_place.get("found") else "Не найдено",
+                f"по сайту {filter_place.get('host', '')}: {text[:1].lower()}{text[1:]}",
+                _filter_tooltip(filter_place),
+            )
         system = list(report.get("system") or ())
         if system:
             level, word, details, tooltip = _system_row(system)

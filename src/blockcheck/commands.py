@@ -29,6 +29,7 @@ def create_blockcheck_worker(
         append_run_log=append_blockcheck_run_log,
         close_run_log=close_blockcheck_run_log,
         remember_run=remember_blockcheck_run,
+        check_dns_servers=check_dns_servers,
         parent=parent,
     )
 
@@ -100,6 +101,18 @@ def append_blockcheck_run_log(path: str | None, message: str) -> None:
 
 def close_blockcheck_run_log(path: str | None) -> None:
     run_log_sessions.close(path)
+
+
+def check_dns_servers(*, should_stop=None) -> dict:
+    """Проверка DNS-серверов для «Полной проверки»: выводы и полный текст одним словарём."""
+    from dns import server_check_plans
+    from dns.commands import run_server_check
+
+    report = run_server_check(should_stop=should_stop)
+    findings = [{"level": str(item.level), "text": str(item.text)} for item in report.findings]
+    levels = {item["level"] for item in findings}
+    level = next((name for name in ("fail", "warn") if name in levels), "ok" if findings else "unknown")
+    return {"level": level, "findings": findings, "text": server_check_plans.build_text_report(report)}
 
 
 def remember_blockcheck_run(report: dict, log_file: str | None) -> dict:

@@ -643,6 +643,137 @@ class ClockSkewTests(unittest.TestCase):
         self.assertIsNone(self._skew(b"HTTP/1.1 200 OK\r\nServer: x\r\n\r\nDate: Mon, 01 Jan 2024 00:00:00 GMT")[0])
 
 
+class FullCheckTests(unittest.TestCase):
+    """«Полная проверка»: всё из «Всех сайтов» плюс DNS-серверы и место фильтра."""
+
+    DNS_OK = {
+        "level": "warn",
+        "findings": [
+            {"level": "fail", "text": "Обычные DNS-запросы перехватываются по дороге."},
+            {"level": "info", "text": "Не отвечают совсем: Xbox DNS (old)."},
+            {"level": "ok", "text": "Для защищённого DNS сейчас лучше всего подходит Cloudflare (1.1.1.1)."},
+        ],
+        "text": "Сервер  Адрес\nCloudflare  1.1.1.1",
+    }
+
+    def _run(self, scope="full", *, dns=None, quic_blocked=(), trace=None, filter_facts=None, https=None):
+        from diagnostics import path_trace
+
+        lines: list[str] = []
+        calls: dict = {"dns": 0, "trace": [], "locate": []}
+
+        def check_dns(*, should_stop=None):
+            calls["dns"] += 1
+            return dns if dns is not None else self.DNS_OK
+
+        def fake_trace(ip, **_kwargs):
+            calls["trace"].append(ip)
+            return trace or path_trace.RouteTrace(target=ip, supported=False)
+
+        def fake_locate(ip, name, *, max_ttl, cancel):
+            calls["locate"].append((ip, name, max_ttl))
+            return filter_facts or path_trace.FilterFacts(True, True, 6, 6)
+
+        net = _Net(https=https)
+        net.quic_facts = lambda host, ip: (
+            engine.quic_probe.QuicFacts(host=host, neutral_ms=40.0)
+            if host in quic_blocked
+            else engine.quic_probe.QuicFacts(host=host, real_ms=10.0)
+        )
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            for item in net.patches():
+                stack.enter_context(item)
+            stack.enter_context(patch.object(path_trace, "trace_route", fake_trace))
+            stack.enter_context(patch.object(path_trace, "locate_filter", fake_locate))
+            result = engine.run_blockcheck(scope, emit=lines.append, check_dns_servers=check_dns)
+        return result, lines, calls
+
+    def test_full_scope_checks_all_sites_and_dns_servers(self) -> None:
+        result, lines, calls = self._run()
+
+        self.assertEqual(result["scope"], "full")
+        self.assertIn("🔍 BlockCheck: Полная проверка", lines[0])
+        self.assertIn("telegram", {item["key"] for item in result["services"]})
+        self.assertEqual(calls["dns"], 1)
+        self.assertEqual(result["dns_servers"]["level"], "warn")
+        self.assertIn("━━━━━━━━ DNS-серверы ━━━━━━━━", lines)
+        self.assertIn("❌ Обычные DNS-запросы перехватываются по дороге.", lines)
+        self.assertIn("   Cloudflare  1.1.1.1", lines)
+
+    def test_dns_findings_that_matter_become_problems_with_dns_button(self) -> None:
+        result, _lines, _calls = self._run()
+        dns_problems = [item for item in result["problems"] if "DNS" in item["text"] and item["action"] == "dns"]
+
+        self.assertEqual([item["text"] for item in dns_problems], ["Обычные DNS-запросы перехватываются по дороге."])
+        self.assertEqual(dns_problems[0]["level"], "fail")
+        # Пометки и «лучший сервер» в список проблем не идут.
+        self.assertFalse([item for item in result["problems"] if "Xbox DNS" in item["text"] or "лучше всего" in item["text"]])
+
+    def test_filter_place_is_searched_for_site_with_quic_blocked_by_name(self) -> None:
+        from diagnostics import path_trace
+        from utils.windows_icmp import HOP_ROUTER
+
+        trace = path_trace.RouteTrace(
+            DISCORD_REAL[0], tuple(path_trace.Hop(ttl, HOP_ROUTER, f"10.0.0.{ttl}", 1.0) for ttl in range(1, 8)), reached=True
+        )
+        result, lines, calls = self._run(quic_blocked={"discord.com"}, trace=trace)
+
+        self.assertEqual(calls["locate"], [(DISCORD_REAL[0], "discord.com", engine.FILTER_MAX_TTL)])
+        self.assertEqual(calls["trace"], [DISCORD_REAL[0]])
+        place = result["filter"]
+        self.assertEqual((place["host"], place["found"], place["hop"]), ("discord.com", True, 6))
+        self.assertEqual(place["text"], "Фильтр стоит между узлом 5 (10.0.0.5) и узлом 6 (10.0.0.6)")
+        self.assertEqual(len(place["hops"]), 7)
+        self.assertIn("📍 По сайту discord.com: фильтр стоит между узлом 5 (10.0.0.5) и узлом 6 (10.0.0.6)", lines)
+
+    def test_no_filter_search_when_quic_is_not_blocked(self) -> None:
+        result, lines, calls = self._run()
+
+        self.assertEqual((calls["locate"], calls["trace"]), ([], []))
+        self.assertIsNone(result["filter"])
+        self.assertNotIn("━━━━━━━━ Где стоит фильтр ━━━━━━━━", lines)
+
+    def test_filter_is_searched_once_even_if_many_sites_are_blocked(self) -> None:
+        _result, _lines, calls = self._run(quic_blocked={"discord.com", "www.youtube.com", "telegram.org"})
+
+        self.assertEqual(len(calls["locate"]), 1)
+
+    def test_other_scopes_do_not_run_the_extra_checks(self) -> None:
+        for scope in ("all", "main"):
+            with self.subTest(scope=scope):
+                result, lines, calls = self._run(scope, quic_blocked={"discord.com"})
+                self.assertEqual((calls["dns"], calls["locate"]), (0, []))
+                self.assertIsNone(result["dns_servers"])
+                self.assertIsNone(result["filter"])
+
+    def test_unknown_scope_falls_back_to_main(self) -> None:
+        result, _lines, _calls = self._run("что-то")
+
+        self.assertEqual(result["scope"], "main")
+
+    def test_broken_dns_check_does_not_break_the_rest(self) -> None:
+        lines: list[str] = []
+
+        def broken(*, should_stop=None):
+            raise OSError("нет сети")
+
+        net = _Net()
+        result = net.run(engine.run_blockcheck, "full", emit=lines.append, check_dns_servers=broken)
+
+        self.assertIsNone(result["dns_servers"])
+        self.assertIn("❔ DNS-серверы: проверка не выполнилась (нет сети)", lines)
+        self.assertIn("Discord", result["working"])
+
+    def test_full_check_without_dns_function_still_runs(self) -> None:
+        net = _Net()
+        result = net.run(engine.run_blockcheck, "full", emit=lambda _line: None)
+
+        self.assertEqual(result["scope"], "full")
+        self.assertIsNone(result["dns_servers"])
+
+
 class EngineScenarioTests(unittest.TestCase):
     """Движок целиком, сеть подменена фейками."""
 

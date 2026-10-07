@@ -65,6 +65,7 @@ logger = logging.getLogger(__name__)
 
 SCOPE_MAIN = "main"
 SCOPE_ALL = "all"
+SCOPE_FULL = "full"
 
 
 def update_blockcheck_tabs_accessibility(pivot, *, current: object | None = None, language: str = "ru") -> None:
@@ -309,6 +310,9 @@ class BlockcheckPage(BasePage):
         )
         self._scope_combo.addItem(
             tr_catalog("page.blockcheck.scope_all", default="Все сайты"), userData=SCOPE_ALL
+        )
+        self._scope_combo.addItem(
+            tr_catalog("page.blockcheck.scope_full", default="Полная проверка (около минуты)"), userData=SCOPE_FULL
         )
         self._scope_combo.setCurrentIndex(1)
         self._scope_combo.setMinimumWidth(260)
@@ -1361,6 +1365,9 @@ class BlockcheckPage(BasePage):
             self._scope_label.setText(_tr("page.blockcheck.scope", "Что проверить:"))
             self._scope_combo.setItemText(0, _tr("page.blockcheck.scope_main", "Discord и YouTube"))
             self._scope_combo.setItemText(1, _tr("page.blockcheck.scope_all", "Все сайты"))
+            self._scope_combo.setItemText(
+                2, _tr("page.blockcheck.scope_full", "Полная проверка (около минуты)")
+            )
             self._update_scope_combo_accessibility()
             if self._domains_caption is not None:
                 self._domains_caption.setText(_tr("page.blockcheck.custom_domains", "Проверить ещё и свои домены:"))

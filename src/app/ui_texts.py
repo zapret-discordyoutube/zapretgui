@@ -541,6 +541,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Discord и YouTube",
         "en": "Discord and YouTube",
     },
+    "page.blockcheck.scope_full": {
+        "ru": "Полная проверка (около минуты)",
+        "en": "Full check (about a minute)",
+    },
     "page.blockcheck.scope_all": {
         "ru": "Все сайты",
         "en": "All sites",

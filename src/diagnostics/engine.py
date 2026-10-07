@@ -72,6 +72,7 @@ from utils.windows_dns_query import (
 
 __all__ = [
     "SCOPE_ALL",
+    "SCOPE_FULL",
     "SCOPE_MAIN",
     "SERVICES",
     "Service",
@@ -99,6 +100,9 @@ DISCOVERY_TIMEOUT = 6.0
 # голосовые серверы и загрузка файлов для проверки обрыва.
 RUN_DEADLINE = 30.0
 RUN_DEADLINE_ALL = 45.0
+# Полная проверка ждёт ещё DNS-серверы и поиск места фильтра.
+RUN_DEADLINE_FULL = 120.0
+FILTER_MAX_TTL = 20
 FREEZE_READ_TIMEOUT = 4.0
 
 
@@ -159,6 +163,9 @@ def _site(key: str, label: str, host: str, *, control: bool = False, domestic: b
 
 SCOPE_MAIN = "main"
 SCOPE_ALL = "all"
+# Всё, что в «Все сайты», плюс DNS-серверы и поиск места фильтра.
+SCOPE_FULL = "full"
+_SCOPE_TITLES = {SCOPE_MAIN: "Discord и YouTube", SCOPE_ALL: "Все сайты", SCOPE_FULL: "Полная проверка"}
 
 # «Discord и YouTube» — то, ради чего Zapret ставят чаще всего.
 SERVICES: dict[str, Service] = {
@@ -213,7 +220,7 @@ EXTRA_SERVICES: tuple[Service, ...] = (
 def build_services(scope: str, user_domains=()) -> dict[str, Service]:
     """Сервисы для проверки: основные, при «Все сайты» — остальные и свои домены."""
     services = dict(SERVICES)
-    if str(scope or "").strip().lower() != SCOPE_ALL:
+    if str(scope or "").strip().lower() not in (SCOPE_ALL, SCOPE_FULL):
         # Свои домены — часть режима «Все сайты»: так написано на экране.
         return services
     for service in EXTRA_SERVICES:
@@ -742,6 +749,15 @@ def _dns_provider(ip: str) -> tuple[str, str, str]:
         from dns.dns_providers import find_provider_by_address
     except Exception:
         return "", "", ""
+    if ip in ("127.0.0.1", "::1"):
+        # Адрес этого компьютера: отвечает встроенный шифрованный DNS, если он запущен.
+        try:
+            from dns.local_proxy import active_mode
+
+            mode = active_mode()
+        except Exception:
+            mode = ""
+        return (f"шифрованный DNS программы, режим {mode}" if mode else "локальный DNS на этом компьютере"), "", ""
     found = find_provider_by_address(ip)
     if found is None:
         return "", "", ""
@@ -1166,6 +1182,77 @@ _SYSTEM_ICON = {
 _SYSTEM_PROBLEM_LEVEL = {system_state.LEVEL_FAIL: Level.FAIL, system_state.LEVEL_WARN: Level.WARN}
 
 
+_DNS_FINDING_LEVEL = {"fail": Level.FAIL, "warn": Level.WARN}
+_DNS_FINDING_ICON = {"ok": "✅", "info": "ℹ️", "warn": "⚠️", "fail": "❌"}
+
+
+def _finish_dns_servers(run: _Run, future: Future, emit: Emit) -> dict | None:
+    """Итог проверки DNS-серверов для полной проверки: печатает раздел и возвращает словарь."""
+    try:
+        result = run.wait(future)
+    except _Stopped:
+        raise
+    except Exception as exc:
+        emit(f"❔ DNS-серверы: проверка не выполнилась ({exc})")
+        return None
+    if not isinstance(result, dict):
+        return None
+    findings = [
+        {"level": str(item.get("level") or "info"), "text": str(item.get("text") or "")}
+        for item in result.get("findings") or ()
+        if item.get("text")
+    ]
+    emit("")
+    emit("━━━━━━━━ DNS-серверы ━━━━━━━━")
+    for finding in findings:
+        emit(f"{_DNS_FINDING_ICON.get(finding['level'], 'ℹ️')} {finding['text']}")
+    text = str(result.get("text") or "")
+    for line in text.splitlines():
+        emit(f"   {line}")
+    return {"level": str(result.get("level") or "unknown"), "findings": findings, "text": text}
+
+
+def _find_filter_place(run: _Run, services: dict[str, Service], collected: dict[str, list[_Probe]], emit: Emit) -> dict | None:
+    """Где стоит фильтр — по первому сайту, QUIC к которому блокируют по имени."""
+    from diagnostics import path_trace
+
+    blocked = [
+        probe
+        for probes in collected.values()
+        for probe in probes
+        if probe.quic is not None
+        and probe.quic.code == quic_probe.QUIC_BLOCKED_BY_NAME
+        and probe.reach is not None
+        and probe.reach.ip
+        and ":" not in probe.reach.ip
+    ]
+    # Фильтр один на всю сеть: достаточно найти его по одному сайту.
+    if not blocked or run.dns_cancelled():
+        return None
+    probe = blocked[0]
+    ip = probe.reach.ip
+    trace = path_trace.trace_route(ip, should_stop=run.dns_cancelled)
+    facts = path_trace.locate_filter(ip, probe.host, max_ttl=FILTER_MAX_TTL, cancel=run.probe_cancel)
+    verdict = path_trace.judge_filter(facts, trace if trace.supported else None)
+    if verdict is None:
+        return None
+    emit("")
+    emit("━━━━━━━━ Где стоит фильтр ━━━━━━━━")
+    found = verdict.code == path_trace.FILTER_FOUND
+    emit(f"{'📍' if found else 'ℹ️'} По сайту {probe.host}: {verdict.text}")
+    return {
+        "host": probe.host,
+        "address": ip,
+        "found": found,
+        "hop": verdict.hop,
+        "text": _sentence(verdict.text),
+        "hops": [
+            {"ttl": hop.ttl, "address": hop.address, "rtt_ms": hop.rtt_ms}
+            for hop in (trace.hops if trace.supported else ())
+        ],
+    }
+
+
 def _blocked_references(reference: list[dict]) -> list[dict]:
     """Эталонные серверы, которые не ответили ни разу, хотя другие отвечали.
 
@@ -1207,26 +1294,32 @@ def run_blockcheck(
     emit: Emit,
     should_stop: ShouldStop | None = None,
     geo_service_for: Callable[[str], str] | None = None,
+    check_dns_servers: Callable[..., dict] | None = None,
 ) -> dict:
     """Проверка BlockCheck. Печатает отчёт через ``emit`` и возвращает итог для экрана.
 
     ``geo_service_for`` — поиск «адрес → сервис» по гео-сайтам каталога hosts:
     таким сайтам советуется hosts или DNS, а не подбор стратегии.
+    ``check_dns_servers`` — проверка DNS-серверов для полной проверки: получает
+    ``should_stop`` и возвращает ``{"level", "findings": [{"level", "text"}], "text"}``.
     """
     from diagnostics.freeze_check import check_freeze, summarize_freeze
     from diagnostics.voice_check import check_voice, summarize_voice
 
-    scope = SCOPE_ALL if str(scope or "").strip().lower() == SCOPE_ALL else SCOPE_MAIN
+    scope = str(scope or "").strip().lower()
+    if scope not in _SCOPE_TITLES:
+        scope = SCOPE_MAIN
+    full = scope == SCOPE_FULL
     services = build_services(scope, user_domains)
     targets_count = sum(len(service.targets) for service in services.values())
     run = _Run(
         should_stop,
         workers=targets_count * _WORKERS_PER_TARGET + 40,
-        deadline=RUN_DEADLINE_ALL if scope == SCOPE_ALL else RUN_DEADLINE,
+        deadline={SCOPE_ALL: RUN_DEADLINE_ALL, SCOPE_FULL: RUN_DEADLINE_FULL}.get(scope, RUN_DEADLINE),
     )
     started = time.monotonic()
     try:
-        title = "Все сайты" if scope == SCOPE_ALL else "Discord и YouTube"
+        title = _SCOPE_TITLES[scope]
         emit(f"🔍 BlockCheck: {title} — {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
         environment = _environment_lines()
         for line in environment:
@@ -1253,6 +1346,7 @@ def run_blockcheck(
 
         ipv6_future = run.submit(_check_ipv6, run)
         system_future = run.submit(_check_system, run, services)
+        dns_future = run.submit(check_dns_servers, should_stop=run.dns_cancelled) if full and check_dns_servers else None
 
         collected = _run_probes(run, services, full=True, emit=emit)
 
@@ -1311,6 +1405,9 @@ def run_blockcheck(
                 ):
                     emit(line)
 
+        dns_servers = _finish_dns_servers(run, dns_future, emit) if dns_future is not None else None
+        filter_place = _find_filter_place(run, services, collected, emit) if full else None
+
         verdicts = {
             key: _service_verdict(service, collected[key], zapret_running=zapret_running)
             for key, service in services.items()
@@ -1327,6 +1424,12 @@ def run_blockcheck(
             ipv6=ipv6,
             system=system,
         )
+        if dns_servers is not None:
+            for finding in dns_servers["findings"]:
+                level = _DNS_FINDING_LEVEL.get(finding["level"])
+                if level is not None:
+                    problems.append(_problem(level, finding["text"], action="dns"))
+            problems.sort(key=lambda item: _LEVEL_ORDER.get(Level(item["level"]), 9))
 
         emit("")
         emit("━━━━━━━━ 📊 Итог ━━━━━━━━")
@@ -1369,6 +1472,8 @@ def run_blockcheck(
             "spoofed_hosts": spoofed,
             "reference": run.reference_report(),
             "ipv6": {"state": ipv6.code, "text": ipv6.text} if ipv6 is not None else None,
+            "dns_servers": dns_servers,
+            "filter": filter_place,
             "system": [
                 {"key": item.key, "title": item.title, "level": item.level, "text": item.text, "advice": item.advice}
                 for item in system

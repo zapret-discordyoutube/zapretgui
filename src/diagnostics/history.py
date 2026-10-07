@@ -28,7 +28,7 @@ KIND_BLOCKCHECK = "blockcheck"
 # Название и номер формата выгрузки: по ним чужая программа поймёт, что перед ней.
 REPORT_FORMAT = "zapretgui.blockcheck/1"
 
-_SCOPE_TITLES = {"main": "Discord и YouTube", "all": "Все сайты"}
+_SCOPE_TITLES = {"main": "Discord и YouTube", "all": "Все сайты", "full": "Полная проверка"}
 _OPEN = ("ok", "warn")
 
 
