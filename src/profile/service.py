@@ -628,6 +628,16 @@ class ProfilePresetService:
         with self._profile_list_lock:
             return self._get_profile_setup_locked(profile_key)
 
+    def warm_strategy_usage(self) -> None:
+        """Заранее считает частоту стратегий в готовых пресетах.
+
+        Подсчёт разбирает все готовые пресеты и занимает доли секунды. Фоновый
+        прогрев после запуска делает его один раз, чтобы первое открытие
+        страницы профиля не платило за это.
+        """
+        catalogs_signature, catalogs = load_strategy_catalogs_with_signature(self._app_paths, self._engine)
+        load_builtin_strategy_usage(self._app_paths, self._engine, catalogs, catalogs_signature)
+
     def _get_profile_setup_locked(self, profile_key: str) -> ProfileSetupPayload | None:
         key = str(profile_key or "").strip()
         if not key:

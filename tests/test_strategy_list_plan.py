@@ -31,6 +31,7 @@ from profile.strategy_list import (
     default_open_group,
     next_to_try,
     try_progress,
+    try_stage,
     visible_rows,
 )
 from profile.strategy_list.plan import strategy_badge, usage_sentence
@@ -123,7 +124,8 @@ class OrderTests(unittest.TestCase):
 
         self.assertEqual(plan.groups[0].key, RECOMMENDED_GROUP)
         self.assertEqual(_ids(plan, RECOMMENDED_GROUP), ["fake-05", "fake-01", "split-03"])
-        self.assertEqual(plan.queue, ("fake-05", "fake-01", "split-03"))
+        self.assertEqual(plan.queue[:3], ("fake-05", "fake-01", "split-03"))
+        self.assertEqual(plan.recommended_count, 3)
         # Советуемая стратегия ушла из своей группы по способу, а не продублирована.
         self.assertNotIn("fake-05", _ids(plan, "fake"))
         self.assertEqual(plan.visible_count, plan.total_count)
@@ -146,7 +148,7 @@ class OrderTests(unittest.TestCase):
         plan = _plan(usage=everything)
 
         self.assertNotIn(RECOMMENDED_GROUP, [group.key for group in plan.groups])
-        self.assertEqual(plan.queue, ())
+        self.assertEqual(plan.recommended_count, 0)
 
     def test_zapret1_catalog_without_lua_desync_is_one_flat_list(self) -> None:
         entries = {f"s{number}": _entry(f"Strategy {number}", "--dpi-desync=fake") for number in range(40)}
@@ -287,6 +289,43 @@ class VisibleRowsTests(unittest.TestCase):
         self.assertEqual(default_open_group(_plan(usage={"fake-01": StrategyUsage(same_service=1, services=1)}), None), RECOMMENDED_GROUP)
 
 
+class FullQueueTests(unittest.TestCase):
+    """Перебор не кончается на советуемых: очередь проходит весь каталог."""
+
+    def test_queue_covers_whole_catalog_once_and_skips_pass(self) -> None:
+        entries = _entries()
+        entries["pass"] = _entry("Pass · ничего не делает", "--lua-desync=pass")
+        plan = build_plan(
+            PlanRequest(facts=build_strategy_facts(entries), usage={"fake-05": StrategyUsage(same_service=3, services=3)})
+        )
+
+        self.assertEqual(len(plan.queue), len(set(plan.queue)))
+        self.assertEqual(set(plan.queue), set(entries) - {"pass"})
+
+    def test_after_recommended_come_used_elsewhere_then_methods_take_turns(self) -> None:
+        usage = {
+            "fake-05": StrategyUsage(same_service=3, services=3),
+            "split-07": StrategyUsage(services=4),
+            "fake-02": StrategyUsage(services=9),
+        }
+        plan = _plan(usage=usage)
+        facts = build_strategy_facts(_entries())
+
+        self.assertEqual(plan.queue[:3], ("fake-05", "fake-02", "split-07"))
+        # Дальше способы чередуются: подряд не идут две стратегии одного способа,
+        # пока есть другие способы.
+        families = [facts[strategy_id].family_key for strategy_id in plan.queue[3:9]]
+        self.assertEqual(families, ["fake", "fake_split", "split", "fake", "fake_split", "split"])
+
+    def test_stage_switches_to_whole_catalog_when_recommended_are_rated(self) -> None:
+        plan = _plan(usage={"fake-05": StrategyUsage(same_service=3, services=3), "fake-01": StrategyUsage(same_service=1, services=1)})
+
+        self.assertEqual(try_stage(plan, {}), ("recommended", 0, 2))
+        rated = {key: ProfileStrategyState(rating="notwork") for key in ("fake-05", "fake-01")}
+        self.assertEqual(try_stage(plan, rated), ("all", 2, len(_entries())))
+        self.assertNotIn(next_to_try(plan.queue, rated, "fake-05"), ("", "fake-05", "fake-01"))
+
+
 class TryQueueTests(unittest.TestCase):
     def test_next_to_try_skips_current_and_rated(self) -> None:
         queue = ("a", "b", "c", "d")
@@ -343,6 +382,28 @@ class BuiltinUsageTests(unittest.TestCase):
         self.assertFalse(youtube.enabled)
         self.assertNotIn("split", usage.for_profile(youtube, "tcp"))
         self.assertEqual(usage.for_profile(youtube, "tcp")["fake"].same_service, 1)
+
+    def test_fast_catalog_lookup_agrees_with_profile_strategy_resolution(self) -> None:
+        """Подсчёт ищет стратегию по словарю; ответ обязан совпадать с тем, как
+        программа определяет выбранную стратегию профиля."""
+        from profile.derived_cache import catalog_name_for_profile, resolve_strategy_lines
+        from profile.strategy_usage import _CatalogIndex
+
+        catalogs = {
+            path.stem.lower(): _parse_catalog_file(path, path.stem.lower())
+            for path in (SRC / "system/strategy_catalogs/winws2").glob("*.txt")
+        }
+        indexes = {name: _CatalogIndex("winws2", entries) for name, entries in catalogs.items()}
+        checked = 0
+        for path in sorted((SRC / "presets/builtin/winws2").glob("*.txt"))[::7]:
+            for profile in parse_preset_text(path.read_text(encoding="utf-8"), engine="winws2", source_name=path.name).profiles:
+                catalog = catalog_name_for_profile(profile)
+                lines = profile.strategy.strategy_lines
+                expected, _name = resolve_strategy_lines(profile, catalogs.get(catalog, {}), lines)
+                found = indexes[catalog].strategy_id(lines) if catalog in indexes else ""
+                self.assertEqual(found, "" if expected in ("none", "custom") else expected, (path.name, profile.name))
+                checked += 1
+        self.assertGreater(checked, 300)
 
     def test_unknown_strategy_lines_are_not_counted(self) -> None:
         usage, (youtube, _discord) = self._usage([("--lua-desync=something_else", "--lua-desync=fake:blob=x")])

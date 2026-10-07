@@ -62,6 +62,9 @@ _MIN_SECTION = 2
 _MIN_GROUP_FOR_SECTIONS = 9
 _SOURCE_NUMBER = re.compile(r"\s*№\s*\d+$")
 _RATING_RANK = {"work": 0, "": 1, "notwork": 2}
+_FAMILY_RANK = {family.key: rank for rank, family in enumerate(STRATEGY_FAMILIES)}
+# «Ничего не делать» — не способ обхода: в перебор не входит.
+_NOT_FOR_QUEUE = frozenset({"pass"})
 
 
 def normalize_strategy_grouping(value: object) -> str:
@@ -102,6 +105,9 @@ class StrategyItem:
     is_current: bool
     tooltip: str
     accessible_text: str
+    # Способ обхода для значка плитки: ключ группы способа и её цвет.
+    family_key: str = ""
+    family_color: str = ""
     # Стратегии с одним названием («General ALT11 1.9.9» из пяти источников)
     # складываются в одну строку с числом вариантов; пусто — вариантов нет.
     twin_key: str = ""
@@ -152,8 +158,12 @@ class StrategyListPlan:
     # Список сужен поиском или отбором: найденное показывается целиком,
     # без сворачивания групп и вариантов.
     narrowed: bool = False
-    # Очередь «что пробовать»: советуемые для сервиса по убыванию частоты.
+    # Очередь «что пробовать» — весь каталог: сначала советуемые для сервиса
+    # по убыванию частоты, потом остальные. Если не помогло ни одно из
+    # советуемых, перебор на этом не кончается.
     queue: tuple[str, ...] = ()
+    # Сколько первых стратегий очереди — советуемые.
+    recommended_count: int = 0
 
     def group_of(self, strategy_id: str) -> str:
         for group in self.groups:
@@ -379,6 +389,8 @@ def _make_item(facts, state, usage, *, is_current: bool, detail: str) -> Strateg
         is_current=is_current,
         tooltip=_tooltip(facts, usage),
         accessible_text=_accessible_text(facts, state, is_current=is_current, badge_text=badge_text),
+        family_key=facts.family_key,
+        family_color=strategy_family(facts.family_key).color,
     )
 
 
@@ -423,6 +435,31 @@ def recommended_queue(facts: dict, usage: dict) -> tuple[str, ...]:
     return tuple(recommended)
 
 
+def full_queue(facts: dict, usage: dict, recommended: tuple[str, ...]) -> tuple[str, ...]:
+    """Очередь перебора по всему каталогу.
+
+    После советуемых идут стратегии, которые в готовых пресетах стоят хоть
+    где-то (чем на большем числе сервисов, тем раньше), затем остальные.
+    Остальные чередуются по способам обхода: если не помогла «подделка»,
+    следующей пробуется «нарезка», а не ещё одна похожая «подделка».
+    """
+    taken = set(recommended)
+    rest = [strategy_id for strategy_id in facts if strategy_id not in taken and strategy_id not in _NOT_FOR_QUEUE]
+    used = [strategy_id for strategy_id in rest if int(getattr(usage.get(strategy_id), "services", 0) or 0) > 0]
+    used.sort(key=lambda strategy_id: (-int(usage[strategy_id].services), facts[strategy_id].name.lower()))
+    used_set = set(used)
+    by_family: dict[str, list[str]] = {}
+    for strategy_id in sorted((item for item in rest if item not in used_set), key=lambda item: facts[item].name.lower()):
+        by_family.setdefault(facts[strategy_id].family_key, []).append(strategy_id)
+    queues = [by_family[key] for key in sorted(by_family, key=lambda key: _FAMILY_RANK.get(key, len(_FAMILY_RANK)))]
+    mixed: list[str] = []
+    while queues:
+        queues = [queue for queue in queues if queue]
+        for queue in queues:
+            mixed.append(queue.pop(0))
+    return (*recommended, *used, *mixed)
+
+
 def build_plan(request: PlanRequest) -> StrategyListPlan:
     facts = dict(request.facts or {})
     states = dict(request.states or {})
@@ -436,14 +473,15 @@ def build_plan(request: PlanRequest) -> StrategyListPlan:
     # Раскладка считается по всему каталогу, а не по найденному: иначе
     # стратегия переезжала бы из группы в группу, пока человек печатает запрос.
     group_of, infos = _groups_for(facts, grouping)
-    queue = recommended_queue(facts, usage)
+    recommended = recommended_queue(facts, usage)
     # Советовать имеет смысл только часть каталога.
-    if queue and len(queue) < len(facts):
-        for strategy_id in queue:
+    if recommended and len(recommended) < len(facts):
+        for strategy_id in recommended:
             group_of[strategy_id] = RECOMMENDED_GROUP
         infos = {**infos, RECOMMENDED_GROUP: _RECOMMENDED_INFO}
     else:
-        queue = ()
+        recommended = ()
+    queue = full_queue(facts, usage, recommended)
 
     members: dict[str, list[str]] = {}
     for strategy_id, group_key in group_of.items():
@@ -540,6 +578,7 @@ def build_plan(request: PlanRequest) -> StrategyListPlan:
         grouping=grouping,
         narrowed=narrowed,
         queue=queue,
+        recommended_count=len(recommended),
     )
 
 
@@ -564,3 +603,16 @@ def try_progress(queue, states) -> tuple[int, int]:
     queue = tuple(queue or ())
     tried = sum(1 for strategy_id in queue if str(getattr(states.get(strategy_id), "rating", "") or ""))
     return tried, len(queue)
+
+
+def try_stage(plan: StrategyListPlan, states) -> tuple[str, int, int]:
+    """Где сейчас перебор: (этап, оценено на этапе, всего на этапе).
+
+    Этап «recommended», пока среди советуемых есть неоценённые; потом «all».
+    """
+    recommended = plan.queue[: plan.recommended_count]
+    tried, total = try_progress(recommended, states)
+    if total and tried < total:
+        return "recommended", tried, total
+    tried, total = try_progress(plan.queue, states)
+    return "all", tried, total

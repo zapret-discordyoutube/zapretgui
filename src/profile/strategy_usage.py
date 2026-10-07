@@ -19,8 +19,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from profile.derived_cache import catalog_name_for_profile, resolve_strategy_lines
-from profile.models import build_profile_logical_key
+from profile.derived_cache import (
+    _entry_composite_identity,
+    _entry_identity_lines,
+    catalog_name_for_profile,
+    normalize_lines,
+)
+from profile.models import ENGINE_WINWS2, build_profile_logical_key
+from profile.strategy_shape import composite_identity, strategy_shape
 from profile.parser import parse_preset_text
 
 
@@ -65,7 +71,6 @@ class BuiltinStrategyUsage:
 
 EMPTY_BUILTIN_USAGE = BuiltinStrategyUsage(by_service={}, services={})
 
-_NOT_A_CATALOG_STRATEGY = frozenset({"none", "custom"})
 _USAGE_CACHE: dict[tuple[str, str], tuple[tuple[object, ...], BuiltinStrategyUsage]] = {}
 
 
@@ -74,9 +79,46 @@ def service_key(profile) -> str:
     return str(build_profile_logical_key(getattr(profile, "match_signature", "") or "") or "").strip()
 
 
+class _CatalogIndex:
+    """Стратегия каталога по строкам стратегии профиля — поиском по словарю.
+
+    Правила те же, что у ``derived_cache.resolve_strategy_lines``, но готовых
+    пресетов сотня с лишним, а профилей в них тысячи: перебирать весь каталог
+    на каждый профиль было самой дорогой частью подсчёта.
+    """
+
+    def __init__(self, engine: str, entries) -> None:
+        self._engine = engine
+        plain: dict[tuple, list[str]] = {}
+        composite: dict[tuple, list[str]] = {}
+        for entry in dict(entries or {}).values():
+            args = str(getattr(entry, "args", "") or "")
+            if engine == ENGINE_WINWS2 and getattr(entry, "is_composite", False):
+                composite.setdefault(_entry_composite_identity(args), []).append(entry.strategy_id)
+            else:
+                plain.setdefault(_entry_identity_lines(engine, args), []).append(entry.strategy_id)
+        self._plain = plain
+        self._composite = composite
+
+    def strategy_id(self, lines) -> str:
+        """Id стратегии каталога; пусто, если строки не совпали ровно с одной."""
+        if self._engine != ENGINE_WINWS2:
+            matches = self._plain.get(normalize_lines(lines), ())
+        else:
+            shape = strategy_shape(lines)
+            if not shape.lua_lines:
+                return ""
+            if shape.composite:
+                matches = self._composite.get(composite_identity(shape.body_lines), ())
+            else:
+                matches = self._plain.get(tuple(shape.lua_lines), ())
+        return matches[0] if len(matches) == 1 else ""
+
+
 def count_builtin_strategy_usage(preset_texts, *, engine: str, catalogs) -> BuiltinStrategyUsage:
     """Считает частоту по текстам готовых пресетов: [(имя файла, текст), ...]."""
     by_service: dict[str, dict[tuple[str, str], int]] = {}
+    indexes: dict[str, _CatalogIndex] = {}
     for source_name, text in preset_texts:
         try:
             preset = parse_preset_text(text, engine=engine, source_name=source_name)
@@ -91,10 +133,11 @@ def count_builtin_strategy_usage(preset_texts, *, engine: str, catalogs) -> Buil
             catalog = catalog_name_for_profile(profile)
             if not service or not catalog:
                 continue
-            strategy_id, _name = resolve_strategy_lines(
-                profile, catalogs.get(catalog, {}), getattr(profile.strategy, "strategy_lines", ()) or ()
-            )
-            if strategy_id in _NOT_A_CATALOG_STRATEGY:
+            index = indexes.get(catalog)
+            if index is None:
+                index = indexes[catalog] = _CatalogIndex(engine, catalogs.get(catalog, {}))
+            strategy_id = index.strategy_id(getattr(profile.strategy, "strategy_lines", ()) or ())
+            if not strategy_id:
                 continue
             vote = (service, (catalog, strategy_id))
             if vote in seen:

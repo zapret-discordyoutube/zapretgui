@@ -133,6 +133,15 @@ class StrategyListView(QListView):
         column = round(rect.left() / rect.width())
         return rect.adjusted(8 if column <= 0 else 4, 3, -8 if column >= columns - 1 else -4, -3)
 
+    def paintEvent(self, event):  # noqa: N802
+        # Цвета темы, шрифты и их мерки одинаковы у всех строк кадра: они
+        # собираются один раз здесь, а не заново для каждой плитки.
+        self._delegate.begin_pass()
+        try:
+            super().paintEvent(event)
+        finally:
+            self._delegate.end_pass()
+
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         # Размер плитки зависит от ширины списка: раскладка пересчитывается.

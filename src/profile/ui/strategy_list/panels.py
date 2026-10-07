@@ -206,7 +206,17 @@ class TryNextPanel(SimpleCardWidget):
         if self._has_next:
             self.next_requested.emit()
 
-    def show_state(self, *, name: str, plain_label: str, rating: str, next_name: str, tried: int, total: int) -> None:
+    def show_state(
+        self,
+        *,
+        name: str,
+        plain_label: str,
+        rating: str,
+        next_name: str,
+        tried: int,
+        total: int,
+        recommended_stage: bool = True,
+    ) -> None:
         title = f"Сейчас выбрана: {name}"
         if plain_label:
             title = f"{title} · {plain_label}"
@@ -219,8 +229,11 @@ class TryNextPanel(SimpleCardWidget):
             hint = "Вы отметили, что она не работает."
         else:
             hint = "Откройте сайт и проверьте. Потом отметьте, помогло или нет."
-        if total > 0:
+        if total > 0 and recommended_stage:
             hint = f"{hint} Проверено {tried} из {total} советуемых для этого сервиса."
+        elif total > 0:
+            # Советуемые кончились — перебор идёт дальше по всему каталогу.
+            hint = f"{hint} Советуемые проверены, дальше идут остальные: {tried} из {total}."
         if next_name:
             hint = f"{hint} Следующая: {next_name}."
         self.hint.setText(hint)

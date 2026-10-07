@@ -70,6 +70,9 @@ class ProfileFeature:
         started_at = time.perf_counter()
         view_state = build_profile_list_view_state(tuple(getattr(payload, "items", ()) or ()))
         log_ui_timing_since("warmup", method, "profile_warmup.view_state", started_at, important=True)
+        started_at = time.perf_counter()
+        service.warm_strategy_usage()
+        log_ui_timing_since("warmup", method, "profile_warmup.strategy_usage", started_at, important=True)
         return ProfileListLoadResult(
             payload=payload,
             view_state=view_state,

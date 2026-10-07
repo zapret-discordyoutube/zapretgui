@@ -28,7 +28,7 @@ from profile.strategy_list import (
     next_to_try,
     normalize_quick_filter,
     normalize_strategy_grouping,
-    try_progress,
+    try_stage,
     visible_rows,
 )
 from profile.ui.strategy_context_menu import (
@@ -261,7 +261,7 @@ class ProfileStrategyListWidget(QWidget):
             self._try_panel.hide()
             return
         next_id = next_to_try(plan.queue, self._states, current_id)
-        tried, total = try_progress(plan.queue, self._states)
+        stage, tried, total = try_stage(plan, self._states)
         self._try_panel.show_state(
             name=facts.name,
             plain_label=facts.plain_label,
@@ -269,6 +269,7 @@ class ProfileStrategyListWidget(QWidget):
             next_name=self._facts[next_id].name if next_id in self._facts else "",
             tried=tried,
             total=total,
+            recommended_stage=stage == "recommended",
         )
         self._try_panel.show()
 

@@ -308,8 +308,23 @@ class TryPanelTests(_WidgetCase):
         self.assertEqual([list(call) for call in ratings], [["fake-05", "work"]])
         self.assertEqual(len(activated), 0)
 
-    def test_queue_end_leaves_plain_fails_button(self) -> None:
+    def test_when_recommended_are_over_the_queue_goes_on_through_the_catalog(self) -> None:
         states = {key: ProfileStrategyState(rating="notwork") for key in ("split-03", "fake-01")}
+        widget = self._widget(current="fake-05", states=states)
+        activated = QSignalSpy(widget.strategy_activated)
+
+        self.assertEqual(widget._try_panel.fails_button.text(), "Не работает — следующая")
+        self.assertIn("Проверено 2 из 3 советуемых", widget._try_panel.hint.text())
+        widget._try_panel.fails_button.click()
+        self.assertEqual(len(activated), 1)
+        self.assertNotIn(activated[0][0], ("fake-05", "split-03", "fake-01"))
+
+        states["fake-05"] = ProfileStrategyState(rating="notwork")
+        widget.set_rows(entries=widget._entries, states=states, current_strategy_id=activated[0][0])
+        self.assertIn("Советуемые проверены, дальше идут остальные: 3 из 38.", widget._try_panel.hint.text())
+
+    def test_queue_end_leaves_plain_fails_button(self) -> None:
+        states = {key: ProfileStrategyState(rating="notwork") for key in _entries() if key != "fake-05"}
         widget = self._widget(current="fake-05", states=states)
         activated = QSignalSpy(widget.strategy_activated)
 
@@ -374,7 +389,7 @@ class KeyboardAndMenuTests(_WidgetCase):
         text = strategy_tooltip(row)
 
         self.assertIn("Эта стратегия выбрана для профиля.", text)
-        self.assertIn("Зелёная галочка", text)
+        self.assertIn("Зелёная галочка на значке", text)
         self.assertIn("Звезда", text)
         self.assertIn("Стоит на этом сервисе в 9 готовых пресетах.", text)
         self.assertIn("--lua-desync=fake:blob=x", text)
@@ -414,6 +429,34 @@ class LayoutAndAccessibilityTests(_WidgetCase):
         self.assertIs(widget.onboarding_target("strategy_try"), widget._try_panel)
         self.assertIs(widget.onboarding_target("strategy_find"), widget._toolbar)
         self.assertIsNone(without_panel.onboarding_target("strategy_try"))
+
+    def test_strategy_icons_are_painted_without_icon_fonts_and_cached(self) -> None:
+        """Значок плитки не зависит от шрифтов значков, которые есть не в каждой сборке."""
+        import inspect
+
+        from profile.ui.strategy_list import icons
+
+        source = inspect.getsource(icons)
+        self.assertNotIn("qtawesome", source)
+        self.assertNotIn("qta", source)
+        first = icons.strategy_icon("fake_split", "#6fb8ff", "work", 28, 1.0, "#2d2d2d")
+        self.assertFalse(first.isNull())
+        self.assertIs(icons.strategy_icon("fake_split", "#6fb8ff", "work", 28, 1.0, "#2d2d2d"), first)
+        plain = icons.strategy_icon("fake_split", "#6fb8ff", "", 28, 1.0, "#2d2d2d")
+        other = icons.strategy_icon("host", "#6fb8ff", "", 28, 1.0, "#2d2d2d")
+        self.assertNotEqual(plain.toImage(), first.toImage())
+        self.assertNotEqual(plain.toImage(), other.toImage())
+        self.assertNotEqual(icons.strategy_icon("unknown-family", "#6fb8ff", "", 28, 1.0, "#2d2d2d").toImage(), plain.toImage())
+
+    def test_one_frame_asks_theme_once_not_per_tile(self) -> None:
+        from profile.ui.strategy_list import delegate as delegate_module
+
+        widget = self._widget()
+        with patch.object(delegate_module, "_build_style", wraps=delegate_module._build_style) as build:
+            widget._list.viewport().grab()
+
+        self.assertGreater(sum(row.kind == ROW_STRATEGY for row in self._rows(widget)), 2)
+        self.assertEqual(build.call_count, 1)
 
     def test_widget_has_no_background_worker_and_one_refresh_path(self) -> None:
         import inspect

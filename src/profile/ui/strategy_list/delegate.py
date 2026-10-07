@@ -1,16 +1,24 @@
 """Отрисовка строк списка стратегий.
 
 Получает готовую строку (``VisibleRow``) и только рисует её: заголовок группы,
-подзаголовок или стратегию. Ничего не считает и не хранит.
+подзаголовок или стратегию.
+
+Список перерисовывается целиком при каждом шаге прокрутки, поэтому на одну
+плитку должно уходить как можно меньше обращений к Qt. Всё, что одинаково у
+всех строк кадра — цвета темы, шрифты, их мерки, — собирается один раз на кадр
+(``_Style``), а значок стратегии выводится готовой картинкой.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from PyQt6.QtCore import QModelIndex, QRect, QSize, Qt
-from PyQt6.QtGui import QFont, QFontMetrics, QPainter
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from profile.strategy_list import BADGE_RECOMMENDED, BADGE_WARNING, ROW_GROUP, ROW_SECTION, VisibleRow
+from profile.ui.strategy_list.icons import strategy_icon
 from profile.ui.strategy_list.model import ROW_ROLE
 from profile.ui.widgets.payload_badge import PAYLOAD_BADGE_HEIGHT, paint_payload_badge, payload_badge_width
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
@@ -24,23 +32,55 @@ SELECTED_TEXT = "Выбрана"
 MENU_HINT = "Правая кнопка мыши: отметить, работает ли стратегия, или добавить её в избранное."
 
 _ICON_SIZE = 14
+# Значок стратегии: крупный на плитке в две строки, мельче в строке в один столбец.
+_TILE_ICON_SIZE = 28
+_ROW_ICON_SIZE = 20
 _STAR_SIZE = 11
 _BADGE_HEIGHT = 18
 _FAVORITE_ICON = ("fa5s.star", "#d9a441")
-# Значок слева говорит, что человек знает о стратегии: ещё не пробовал,
-# работает или не работает. Способ обхода написан словами под названием.
-_STATUS_UNTRIED = "fa5.circle"
-_STATUS_WORKS = ("fa5s.check-circle", "#49a35f")
-_STATUS_NOT_WORKS = ("fa5s.times-circle", "#d85c5c")
 _BADGE_COLORS = {BADGE_RECOMMENDED: "#e5b454", BADGE_WARNING: "#e0795a"}
 
 
-def status_icon(rating: str, tokens) -> tuple[str, str]:
-    if rating == "work":
-        return _STATUS_WORKS
-    if rating == "notwork":
-        return _STATUS_NOT_WORKS
-    return _STATUS_UNTRIED, tokens.fg_faint
+@dataclass(frozen=True)
+class _Style:
+    """Всё, что одинаково у строк одного кадра: цвета темы, шрифты, мерки."""
+
+    tokens: object
+    fg: QColor
+    fg_muted: QColor
+    fg_faint: QColor
+    accent: QColor
+    accent_soft: QColor
+    # Цвет плитки под значком: им обведена отметка оценки на значке.
+    backdrop: str
+    font: QFont
+    small: QFont
+    metrics: QFontMetrics
+    small_metrics: QFontMetrics
+    selected_width: int
+
+
+def _build_style(base_font: QFont) -> _Style:
+    tokens = get_theme_tokens()
+    font = QFont(base_font)
+    font.setBold(False)
+    small = _smaller(font)
+    metrics = QFontMetrics(font)
+    fg = to_qcolor(tokens.fg, "#f5f5f5")
+    return _Style(
+        tokens=tokens,
+        fg=fg,
+        fg_muted=to_qcolor(tokens.fg_muted, "#b7bec8"),
+        fg_faint=to_qcolor(tokens.fg_faint, "#aeb5c1"),
+        accent=to_qcolor(tokens.accent_hex, "#5caee8"),
+        accent_soft=to_qcolor(tokens.accent_soft_bg_hover, tokens.accent_hex),
+        backdrop="#2d2d2d" if fg.lightness() > 128 else "#f4f4f4",
+        font=font,
+        small=small,
+        metrics=metrics,
+        small_metrics=QFontMetrics(small),
+        selected_width=metrics.horizontalAdvance(SELECTED_TEXT) + 18,
+    )
 
 
 def _smaller(font: QFont) -> QFont:
@@ -67,11 +107,9 @@ def strategy_tooltip(row: VisibleRow) -> str:
     if item.is_current:
         marks.append("Эта стратегия выбрана для профиля.")
     if item.rating == "work":
-        marks.append("Зелёная галочка: вы отметили, что эта стратегия работает.")
+        marks.append("Зелёная галочка на значке: вы отметили, что эта стратегия работает.")
     elif item.rating == "notwork":
-        marks.append("Красный крестик: вы отметили, что эта стратегия не работает.")
-    else:
-        marks.append("Пустой кружок: вы ещё не отмечали, работает ли эта стратегия.")
+        marks.append("Красный крестик на значке: вы отметили, что эта стратегия не работает.")
     if item.favorite:
         marks.append("Звезда: стратегия у вас в избранном.")
     if row.twin_count > 1:
@@ -84,6 +122,17 @@ class StrategyListDelegate(QStyledItemDelegate):
         super().__init__(view)
         self._view = view
         self._tooltip = FluentItemToolTipController(view)
+        self._pass_style: _Style | None = None
+
+    def begin_pass(self) -> None:
+        """Список начинает кадр: общее для всех строк собирается один раз."""
+        self._pass_style = _build_style(self._view.font())
+
+    def end_pass(self) -> None:
+        self._pass_style = None
+
+    def _style(self, painter: QPainter) -> _Style:
+        return self._pass_style or _build_style(painter.font())
 
     # ------------------------------------------------------------------
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:  # noqa: N802
@@ -129,28 +178,25 @@ class StrategyListDelegate(QStyledItemDelegate):
         width = QFontMetrics(_smaller(font)).horizontalAdvance(text) + 26
         return QRect(rect.right() - 10 - width, rect.center().y() - _BADGE_HEIGHT // 2, width, _BADGE_HEIGHT)
 
-    def _paint_pill(self, painter: QPainter, rect: QRect, text: str, color: str, font: QFont, *, strong: bool) -> None:
-        if rect.width() <= 0 or not text:
-            return
-        fill = to_qcolor(color, "#aeb5c1")
+    def _paint_pill(self, painter: QPainter, rect: QRect, text: str, color: QColor, font: QFont, *, strong: bool) -> None:
+        fill = QColor(color)
         fill.setAlpha(34 if strong else 22)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
         painter.drawRoundedRect(rect, rect.height() // 2, rect.height() // 2)
         painter.setFont(font)
-        painter.setPen(to_qcolor(color, "#aeb5c1"))
+        painter.setPen(color)
         painter.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), text)
 
     def _paint_strategy(self, painter: QPainter, option, index, row: VisibleRow) -> None:
         item = row.item
-        tokens = get_theme_tokens()
+        style = self._style(painter)
         rect = self._view.row_paint_rect(option.rect)
         two_lines = rect.height() >= 36
         dimmed = item.rating == "notwork" and not item.is_current
-        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        focused = bool(option.state & QStyle.StateFlag.State_HasFocus) or bool(
-            option.state & QStyle.StateFlag.State_Selected
-        )
+        state = option.state
+        hovered = bool(state & QStyle.StateFlag.State_MouseOver)
+        focused = bool(state & QStyle.StateFlag.State_HasFocus) or bool(state & QStyle.StateFlag.State_Selected)
 
         motion = active_row_motion(self._view)
         hover = row_hover_motion(self._view)
@@ -168,45 +214,47 @@ class StrategyListDelegate(QStyledItemDelegate):
             sheen=hover.sheen_progress(index) if live_hover else None,
         )
 
-        font = QFont(painter.font())
-        font.setBold(False)
-        small = _smaller(font)
-        metrics = QFontMetrics(font)
+        metrics = style.metrics
         center_y = rect.center().y()
         # Текст не сдвигается, когда стратегию выбирают: место под полоску
         # акцента оставлено у всех строк.
-        left = rect.left() + 18
+        left = rect.left() + 14
         right = rect.right() - 10
 
-        icon_name, icon_color = status_icon(item.rating, tokens)
+        icon_size = _TILE_ICON_SIZE if two_lines else _ROW_ICON_SIZE
         icon_dy = round(motion.icon_offset(index)) if motion is not None else 0
-        icon_rect = QRect(left, center_y - _ICON_SIZE // 2 + icon_dy, _ICON_SIZE, _ICON_SIZE)
-        moving = hover is not None and hover.icon_moving(index)
-        pixmap = get_cached_qta_pixmap(icon_name, color=icon_color, size=_ICON_SIZE * (2 if moving else 1))
-        if not pixmap.isNull():
-            painter.setOpacity(0.55 if dimmed else 1.0)
-            paint_icon_motion(painter, icon_rect, hover, index, lambda: painter.drawPixmap(icon_rect, pixmap))
+        icon_rect = QRect(left, center_y - icon_size // 2 + icon_dy, icon_size, icon_size)
+        pixmap = strategy_icon(
+            item.family_key,
+            item.family_color,
+            item.rating,
+            icon_size,
+            painter.device().devicePixelRatioF(),
+            style.backdrop,
+        )
+        if dimmed:
+            painter.setOpacity(0.6)
+        paint_icon_motion(painter, icon_rect, hover, index, lambda: painter.drawPixmap(icon_rect, pixmap))
+        if dimmed:
             painter.setOpacity(1.0)
-        left = icon_rect.right() + 10
+        left = icon_rect.right() + 11
 
         # Справа по порядку от края: кнопка вариантов, плашка «Выбрана», метка
         # про готовые пресеты, звезда избранного, типы пакетов. Что не
         # помещается рядом с названием — не рисуется.
         min_text = 150
-        chip_rect = self.twin_chip_rect(option.rect, row, font)
+        chip_rect = self.twin_chip_rect(option.rect, row, style.font) if row.twin_count > 1 else QRect()
         if chip_rect.width() > 0:
             right = chip_rect.left() - 8
 
         selected_rect = QRect()
-        if item.is_current:
-            width = metrics.horizontalAdvance(SELECTED_TEXT) + 18
-            if right - width - left >= min_text:
-                selected_rect = QRect(right - width, center_y - 10, width, 20)
-                right = selected_rect.left() - 8
+        if item.is_current and right - style.selected_width - left >= min_text:
+            selected_rect = QRect(right - style.selected_width, center_y - 10, style.selected_width, 20)
+            right = selected_rect.left() - 8
 
         badge_rect = QRect()
         if item.badge_text:
-            width = QFontMetrics(small).horizontalAdvance(item.badge_text) + 14
+            width = style.small_metrics.horizontalAdvance(item.badge_text) + 14
             if right - width - left >= min_text:
                 badge_rect = QRect(right - width, center_y - _BADGE_HEIGHT // 2, width, _BADGE_HEIGHT)
                 right = badge_rect.left() - 8
@@ -217,31 +265,35 @@ class StrategyListDelegate(QStyledItemDelegate):
             right = star_rect.left() - 8
 
         payload_rect = QRect()
-        payload_width = payload_badge_width(metrics, item.payload_badge)
-        if payload_width and right - payload_width - left >= min_text:
-            payload_rect = QRect(
-                right - payload_width, center_y - PAYLOAD_BADGE_HEIGHT // 2, payload_width, PAYLOAD_BADGE_HEIGHT
-            )
-            right = payload_rect.left() - 8
+        if item.payload_badge:
+            payload_width = payload_badge_width(metrics, item.payload_badge)
+            if payload_width and right - payload_width - left >= min_text:
+                payload_rect = QRect(
+                    right - payload_width, center_y - PAYLOAD_BADGE_HEIGHT // 2, payload_width, PAYLOAD_BADGE_HEIGHT
+                )
+                right = payload_rect.left() - 8
 
         text_width = max(0, right - left)
         flags = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         # Способ стоит после уточнения: первым взгляд читает, откуда стратегия.
-        second = " · ".join(part for part in (item.detail, item.plain_label) if part)
-        painter.setFont(font)
-        painter.setPen(to_qcolor(tokens.fg_muted if dimmed else tokens.fg, "#f5f5f5"))
+        if item.detail and item.plain_label:
+            second = f"{item.detail} · {item.plain_label}"
+        else:
+            second = item.detail or item.plain_label
+        painter.setFont(style.font)
+        painter.setPen(style.fg_muted if dimmed else style.fg)
         if two_lines and second:
             painter.drawText(
                 QRect(left, rect.top() + 4, text_width, 18),
                 flags,
                 metrics.elidedText(item.title, Qt.TextElideMode.ElideRight, text_width),
             )
-            painter.setFont(small)
-            painter.setPen(to_qcolor(tokens.fg_faint if dimmed else tokens.fg_muted, "#aeb5c1"))
+            painter.setFont(style.small)
+            painter.setPen(style.fg_faint if dimmed else style.fg_muted)
             painter.drawText(
                 QRect(left, rect.top() + 21, text_width, 15),
                 flags,
-                QFontMetrics(small).elidedText(second, Qt.TextElideMode.ElideRight, text_width),
+                style.small_metrics.elidedText(second, Qt.TextElideMode.ElideRight, text_width),
             )
         else:
             # В один столбец строка низкая: название и способ стоят в одну линию.
@@ -254,43 +306,50 @@ class StrategyListDelegate(QStyledItemDelegate):
             )
             rest = text_width - title_width - 14
             if not two_lines and item.plain_label and rest >= 80:
-                painter.setFont(small)
-                painter.setPen(to_qcolor(tokens.fg_faint if dimmed else tokens.fg_muted, "#aeb5c1"))
+                painter.setFont(style.small)
+                painter.setPen(style.fg_faint if dimmed else style.fg_muted)
                 painter.drawText(
                     QRect(left + title_width + 14, rect.top(), rest, rect.height()),
                     flags,
-                    QFontMetrics(small).elidedText(item.plain_label, Qt.TextElideMode.ElideRight, rest),
+                    style.small_metrics.elidedText(item.plain_label, Qt.TextElideMode.ElideRight, rest),
                 )
-        painter.setFont(font)
 
-        paint_payload_badge(painter, payload_rect, item.payload_badge, metrics, tokens)
+        if payload_rect.width() > 0:
+            painter.setFont(style.font)
+            paint_payload_badge(painter, payload_rect, item.payload_badge, metrics, style.tokens)
         if star_rect.width() > 0:
             star = get_cached_qta_pixmap(_FAVORITE_ICON[0], color=_FAVORITE_ICON[1], size=_STAR_SIZE)
             if not star.isNull():
                 painter.drawPixmap(star_rect, star)
-        painter.setOpacity(0.6 if dimmed else 1.0)
-        self._paint_pill(
-            painter,
-            badge_rect,
-            item.badge_text,
-            _BADGE_COLORS.get(item.badge_tone, tokens.fg_muted),
-            small,
-            strong=item.badge_tone in _BADGE_COLORS,
-        )
-        painter.setOpacity(1.0)
+        if badge_rect.width() > 0:
+            if dimmed:
+                painter.setOpacity(0.6)
+            tone_color = _BADGE_COLORS.get(item.badge_tone)
+            self._paint_pill(
+                painter,
+                badge_rect,
+                item.badge_text,
+                QColor(tone_color) if tone_color else style.fg_muted,
+                style.small,
+                strong=tone_color is not None,
+            )
+            if dimmed:
+                painter.setOpacity(1.0)
         if selected_rect.width() > 0:
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(to_qcolor(tokens.accent_soft_bg_hover, tokens.accent_hex))
+            painter.setBrush(style.accent_soft)
             painter.drawRoundedRect(selected_rect, 9, 9)
-            painter.setFont(font)
-            painter.setPen(to_qcolor(tokens.accent_hex, "#5caee8"))
+            painter.setFont(style.font)
+            painter.setPen(style.accent)
             painter.drawText(selected_rect, int(Qt.AlignmentFlag.AlignCenter), SELECTED_TEXT)
         if chip_rect.width() > 0:
-            self._paint_twin_chip(painter, chip_rect, row, small, tokens)
+            self._paint_twin_chip(painter, chip_rect, row, style)
 
-    def _paint_twin_chip(self, painter: QPainter, rect: QRect, row: VisibleRow, font: QFont, tokens) -> None:
+    def _paint_twin_chip(self, painter: QPainter, rect: QRect, row: VisibleRow, style: _Style) -> None:
         """Кнопка «ещё 4»: раскрывает стратегии с тем же названием."""
-        fill = to_qcolor(tokens.fg_muted, "#aeb5c1")
+        tokens = style.tokens
+        font = style.small
+        fill = QColor(style.fg_muted)
         fill.setAlpha(30)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
@@ -301,7 +360,7 @@ class StrategyListDelegate(QStyledItemDelegate):
         if not arrow.isNull():
             painter.drawPixmap(QRect(rect.right() - 15, rect.center().y() - 4, 8, 8), arrow)
         painter.setFont(font)
-        painter.setPen(to_qcolor(tokens.fg_muted, "#aeb5c1"))
+        painter.setPen(style.fg_muted)
         painter.drawText(
             rect.adjusted(8, 0, -18, 0),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),

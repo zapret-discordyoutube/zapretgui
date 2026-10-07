@@ -75,6 +75,8 @@ _DEFAULT_CARD_GRADIENT_STOPS_HOVER_LIGHT = ("#FFFFFF", "#E6EEFA")
 _DEFAULT_CARD_DISABLED_GRADIENT_STOPS_LIGHT = ("#F3F7FD", "#E6EEF9")
 
 _QTA_PIXMAP_CACHE_MAX = 512
+# Значки, которые не удалось нарисовать: о каждом в журнал пишется один раз.
+_QTA_FAILED_ICONS: set[str] = set()
 _QTA_PIXMAP_CACHE: OrderedDict[tuple[str, str, int], QPixmap] = OrderedDict()
 
 _THEME_DYNAMIC_LAYER_BEGIN = "/* __THEME_DYNAMIC_LAYER_BEGIN__ */"
@@ -685,11 +687,34 @@ def _parse_css_rgba_color(raw: str) -> QColor | None:
         return None
 
 
+# Разобранные цвета по их тексту. Отрисовка строк спрашивает одни и те же
+# десять-двадцать цветов темы тысячи раз за кадр, а разбор строки регулярным
+# выражением стоит дороже всей остальной работы с цветом.
+_QCOLOR_TEXT_CACHE: dict[str, QColor | None] = {}
+_QCOLOR_TEXT_CACHE_MAX = 512
+
+
 def _to_qcolor(value) -> QColor | None:
     if isinstance(value, QColor):
         return value if value.isValid() else None
 
-    text = str(value or "").strip()
+    text = value if isinstance(value, str) else str(value or "")
+    try:
+        cached = _QCOLOR_TEXT_CACHE[text]
+    except KeyError:
+        pass
+    else:
+        # Копия: вызывающий код может менять прозрачность полученного цвета.
+        return QColor(cached) if cached is not None else None
+
+    color = _parse_color_text(text.strip())
+    if len(_QCOLOR_TEXT_CACHE) >= _QCOLOR_TEXT_CACHE_MAX:
+        _QCOLOR_TEXT_CACHE.clear()
+    _QCOLOR_TEXT_CACHE[text] = color
+    return QColor(color) if color is not None else None
+
+
+def _parse_color_text(text: str) -> QColor | None:
     if not text:
         return None
 
@@ -710,12 +735,14 @@ def to_qcolor(value, fallback=None) -> QColor:
     Always returns a valid QColor (falls back to black if both values are invalid).
     """
     color = _to_qcolor(value)
-    if color is not None and color.isValid():
-        return QColor(color)
+    if color is not None:
+        # Свой QColor вызывающего кода возвращается копией, разобранный из
+        # текста — уже отдельный объект.
+        return QColor(color) if color is value else color
 
     fb = _to_qcolor(fallback)
-    if fb is not None and fb.isValid():
-        return QColor(fb)
+    if fb is not None:
+        return QColor(fb) if fb is fallback else fb
 
     return QColor(0, 0, 0)
 
@@ -1049,14 +1076,24 @@ def get_cached_qta_pixmap(
     key = (str(icon_name or ""), resolved_color, safe_size)
 
     cached = _QTA_PIXMAP_CACHE.get(key)
-    if cached is not None and not cached.isNull():
+    if cached is not None:
         _QTA_PIXMAP_CACHE.move_to_end(key)
         return QPixmap(cached)
 
     try:
         pixmap = _render_qta_pixmap(qta, icon_name, resolved_color, safe_size)
-    except Exception:
-        return QPixmap()
+    except Exception as exc:
+        # Неудача запоминается так же, как удача: иначе строка списка заново
+        # пыталась бы загрузить отсутствующий значок при каждой перерисовке.
+        if icon_name not in _QTA_FAILED_ICONS:
+            _QTA_FAILED_ICONS.add(str(icon_name))
+            try:
+                from log.log import log
+
+                log(f"Значок «{icon_name}» не нарисован: {exc}", "WARNING")
+            except Exception:
+                pass
+        pixmap = QPixmap()
 
     _QTA_PIXMAP_CACHE[key] = QPixmap(pixmap)
     _QTA_PIXMAP_CACHE.move_to_end(key)

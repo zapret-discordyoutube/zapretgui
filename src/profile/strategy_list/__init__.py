@@ -40,6 +40,7 @@ from profile.strategy_list.plan import (
     normalize_quick_filter,
     normalize_strategy_grouping,
     try_progress,
+    try_stage,
 )
 from profile.strategy_list.rows import (
     ROW_GROUP,
@@ -82,5 +83,6 @@ __all__ = [
     "normalize_quick_filter",
     "normalize_strategy_grouping",
     "try_progress",
+    "try_stage",
     "visible_rows",
 ]
