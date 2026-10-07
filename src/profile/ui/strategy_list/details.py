@@ -19,6 +19,7 @@ from qfluentwidgets import (
     CardWidget,
     FlowLayout,
     FluentIcon,
+    IconWidget,
     PrimaryPushButton,
     PushButton,
     ScrollArea,
@@ -28,6 +29,7 @@ from qfluentwidgets import (
     isDarkTheme,
 )
 
+from profile.strategy_families import strategy_family
 from profile.strategy_list.knowledge import StrategyStep, explain_strategy
 from app.ui_texts import tr as tr_catalog
 from profile.ui.profile_icon import profile_icon_pixmap
@@ -81,20 +83,24 @@ def _plural(count: int, one: str, few: str, many: str) -> str:
     return many
 
 
-def experience_lines(details: StrategyDetails) -> list[str]:
-    here = {
-        "work": "На этом профиле вы отметили, что она работает.",
-        "notwork": "На этом профиле вы отметили, что она не работает.",
-    }.get(details.rating, "На этом профиле вы её ещё не оценивали.")
-    lines = [here]
+def experience_rows(details: StrategyDetails) -> list[tuple[str, str, str]]:
+    """Отметки человека строками (значок, подпись, значение)."""
+    icon, here = {
+        "work": ("ACCEPT", "Работает"),
+        "notwork": ("CLOSE", "Не работает"),
+    }.get(details.rating, ("HELP", "Ещё не оценивали"))
+    rows = [(icon, "На этом профиле", here)]
     works, fails = details.personal
-    if works:
-        lines.append(f"На других профилях отмечена рабочей: {works}.")
-    if fails:
-        lines.append(f"На других профилях отмечена нерабочей: {fails}.")
+    if works or fails:
+        parts = []
+        if works:
+            parts.append(f"работает — {works}")
+        if fails:
+            parts.append(f"не работает — {fails}")
+        rows.append(("PEOPLE", "На других профилях", ", ".join(parts)))
     if details.favorite:
-        lines.append("Стратегия у вас в избранном.")
-    return lines
+        rows.append(("HEART", "Избранное", "Стратегия у вас в избранном"))
+    return rows
 
 
 def presets_text(count: int) -> str:
@@ -144,6 +150,66 @@ def _visible_color(color: str) -> str:
     return color
 
 
+_NOTE_ICONS = {
+    "protection": "CERTIFICATE",
+    "names": "TAG",
+    "content": "DOCUMENT",
+    "cut": "CUT",
+    "repeats": "SYNC",
+    "overlap": "COPY",
+    "tweak": "EDIT",
+    "origin": "INFO",
+}
+
+
+def _fluent_icon(name: str):
+    return getattr(FluentIcon, name, FluentIcon.INFO)
+
+
+def _soft_fill() -> str:
+    return "rgba(255, 255, 255, 0.045)" if isDarkTheme() else "rgba(0, 0, 0, 0.04)"
+
+
+class _Block(QFrame):
+    """Подписанный блок: значок, заголовок мелким текстом и содержимое под ним."""
+
+    def __init__(self, icon_name: str, caption: str, text: str, parent=None, *, detail: str = "", fill: bool = True) -> None:
+        super().__init__(parent)
+        self.setObjectName("strategyBlock")
+        if fill:
+            self.setStyleSheet(f"QFrame#strategyBlock {{ background: {_soft_fill()}; border-radius: 6px; }}")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10) if fill else layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        icon = IconWidget(_fluent_icon(icon_name), self)
+        icon.setFixedSize(16, 16)
+        layout.addWidget(icon, 0, Qt.AlignmentFlag.AlignTop)
+        texts = QVBoxLayout()
+        texts.setSpacing(2)
+        texts.addWidget(_text(CaptionLabel, caption, colors=_MUTED))
+        texts.addWidget(_text(BodyLabel, text, selectable=True))
+        if detail:
+            texts.addWidget(_text(CaptionLabel, detail, colors=_MUTED))
+        layout.addLayout(texts, 1)
+
+
+class _Warning(QFrame):
+    """То, о чём стоит знать: отдельная цветная строка со значком."""
+
+    def __init__(self, text: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("strategyWarning")
+        tint = "rgba(233, 160, 113, 0.14)" if isDarkTheme() else "rgba(181, 90, 42, 0.10)"
+        self.setStyleSheet(f"QFrame#strategyWarning {{ background: {tint}; border-radius: 6px; }}")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(10)
+        icon = IconWidget(FluentIcon.INFO, self)
+        icon.setFixedSize(16, 16)
+        layout.addWidget(icon, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(_text(BodyLabel, text, colors=_WARNING), 1)
+
+
 class _StepRow(CardWidget):
     """Шаг стратегии. Нажатие показывает анимацию этого шага."""
 
@@ -151,20 +217,50 @@ class _StepRow(CardWidget):
         super().__init__(parent)
         self.step = step
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(4)
-        title = _text(StrongBodyLabel, f"{number}. {step.title}")
-        layout.addWidget(title)
-        layout.addWidget(_text(BodyLabel, step.text))
-        for note in step.notes:
-            layout.addWidget(_text(BodyLabel, f"• {note}", colors=_MUTED))
-        if step.caution:
-            layout.addWidget(_text(BodyLabel, f"Обратите внимание: {step.caution}", colors=_WARNING))
-        layout.addWidget(_text(CaptionLabel, step.line, colors=_MUTED))
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(10)
+
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        icon = QLabel(self)
+        icon.setFixedSize(32, 32)
+        icon.setPixmap(
+            strategy_icon(step.family, strategy_family(step.family).color, "", 32, self.devicePixelRatioF(), "#2d2d2d")
+        )
+        head.addWidget(icon)
+        head.addWidget(_text(StrongBodyLabel, f"{number}. {step.title}"), 1)
+        if step.scene:
+            head.addWidget(_text(CaptionLabel, "показать на схеме", colors=_MUTED), 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(head)
+
+        about = QHBoxLayout()
+        about.setSpacing(8)
+        about.addWidget(_Block("PLAY", "Что происходит", step.text, self), 1)
+        if step.why:
+            about.addWidget(_Block("HELP", "Зачем", step.why, self), 1)
+        layout.addLayout(about)
+
+        if step.notes:
+            layout.addWidget(_text(CaptionLabel, "Настройки шага", colors=_MUTED))
+            # Плитки настроек в два столбца: значок, название, значение и пояснение.
+            for start in range(0, len(step.notes), 2):
+                row = QHBoxLayout()
+                row.setSpacing(8)
+                pair = step.notes[start : start + 2]
+                for note in pair:
+                    row.addWidget(_Block(_NOTE_ICONS.get(note.kind, "INFO"), note.label, note.value, self, detail=note.detail), 1)
+                if len(pair) == 1:
+                    row.addStretch(1)
+                layout.addLayout(row)
+
+        for caution in step.cautions:
+            layout.addWidget(_Warning(caution, self))
+
+        layout.addWidget(_text(CaptionLabel, f"В пресете: {step.line}", colors=_MUTED, selectable=True))
         if step.scene:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
             set_tooltip(self, "Нажмите, чтобы посмотреть схему этого шага.")
-        set_control_accessibility(self, name=f"Шаг {number}: {step.title}", description=step.text)
+        set_control_accessibility(self, name=f"Шаг {number}: {step.title}", description=f"{step.text} {step.why}".strip())
 
 
 class _PlaceCard(CardWidget):
@@ -364,8 +460,8 @@ class StrategyDetailsView(QWidget):
             set_control_accessibility(button, name=f"{button.text()}: {details.name}")
 
         self._experience_card.clear()
-        for line in experience_lines(details):
-            self._experience_card.body.addWidget(_text(BodyLabel, line))
+        for icon_name, caption, value in experience_rows(details):
+            self._experience_card.body.addWidget(_Block(icon_name, caption, value, self._experience_card, fill=False))
         if same_strategy:
             # Изменилась только оценка: остальные разделы те же, не перестраиваем.
             return
@@ -405,14 +501,14 @@ class StrategyDetailsView(QWidget):
 
         self._facts_card.clear()
         facts = [
-            ("Автор", details.author),
-            ("Пометка каталога", _LABELS.get(details.label, details.label)),
-            ("Прежнее название", details.old_name),
-            ("Имя в каталоге", details.strategy_id),
+            ("PEOPLE", "Автор", details.author),
+            ("TAG", "Пометка каталога", _LABELS.get(details.label, details.label)),
+            ("HISTORY", "Прежнее название", details.old_name),
+            ("CODE", "Имя в каталоге", details.strategy_id),
         ]
-        for name, value in facts:
+        for icon_name, name, value in facts:
             if value:
-                self._facts_card.body.addWidget(_text(BodyLabel, f"{name}: {value}", selectable=True))
+                self._facts_card.body.addWidget(_Block(icon_name, name, value, self._facts_card, fill=False))
 
         self._args_card.clear()
         self._args_card.body.addWidget(_text(BodyLabel, details.args or "—", selectable=True))

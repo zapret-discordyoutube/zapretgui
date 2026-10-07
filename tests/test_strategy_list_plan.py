@@ -469,37 +469,59 @@ class KnowledgeTests(unittest.TestCase):
         steps = explain_strategy(
             "--lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6:tls_mod=rnd,dupsid,sni=www.google.com\n"
             "--out-range=-d8\n"
-            "--lua-desync=multisplit:pos=1,midsld:seqovl=5"
+            "--lua-desync=multisplit:pos=1,midsld,sniext+1:seqovl=5"
         )
+        notes = [{note.kind: (note.label, note.value) for note in step.notes} for step in steps]
 
-        self.assertEqual([step.function for step in steps], ["fake", "multisplit"])
+        self.assertEqual([(step.function, step.family) for step in steps], [("fake", "fake"), ("multisplit", "split")])
         self.assertEqual(steps[0].title, "Подделка")
-        self.assertIn("Поддельные данные: стандартный запрос защищённого соединения к www.microsoft.com.", steps[0].notes)
-        self.assertIn("Отправляется 6 раз подряд.", steps[0].notes)
-        self.assertTrue(any("подпись" in note for note in steps[0].notes))
-        self.assertTrue(any("имя сайта www.google.com" in note for note in steps[0].notes))
-        # Подделка испорчена подписью — общее предупреждение о порче ей не нужно.
-        self.assertEqual(steps[0].caution, "")
-        self.assertIn("Места разреза: 1,midsld.", steps[1].notes)
-        self.assertTrue(any("скрытая подделка" in note for note in steps[1].notes))
+        self.assertEqual(notes[0]["content"], ("Что в подделке", "стандартный запрос защищённого соединения к www.microsoft.com"))
+        self.assertEqual(notes[0]["repeats"], ("Повторы", "6 раз подряд"))
+        self.assertEqual(notes[0]["protection"], ("Защита подделки от сайта", "Лишняя подпись"))
+        self.assertIn("имя сайта www.google.com", notes[0]["tweak"][1])
+        # Подделка защищена подписью — предупреждения о незащищённой подделке нет.
+        self.assertEqual(steps[0].cautions, ())
+        self.assertEqual(
+            notes[1]["cut"],
+            ("Где режется запрос", "после 1-го байта; посередине имени сайта; у поля с именем сайта (sniext+1)"),
+        )
+        self.assertEqual(notes[1]["overlap"][1], "Заглушка перед первой частью")
 
-    def test_unfooled_fake_and_fixed_ttl_carry_warnings(self) -> None:
+    def test_every_step_says_what_happens_and_why_in_plain_words(self) -> None:
+        from profile.strategy_list.knowledge import _FUNCTIONS, explain_strategy
+
+        for function in ("fake", "multisplit", "multidisorder", "fakedsplit", "hostfakesplit", "syndata", "wssize"):
+            step = explain_strategy(f"--lua-desync={function}")[0]
+            self.assertTrue(step.text.endswith("."), function)
+            self.assertTrue(step.why, function)
+            # Объяснение самодостаточно: не ссылается на другой шаг и не называет функций движка.
+            self.assertNotIn("Как ", step.text[:4], function)
+            self.assertFalse(any(name in f"{step.text} {step.why}" for name in _FUNCTIONS), function)
+
+    def test_warnings_are_separate_and_only_where_needed(self) -> None:
         from profile.strategy_list.knowledge import explain_strategy
 
         plain = explain_strategy("--lua-desync=fake:blob=x")[0]
         ttl = explain_strategy("--lua-desync=fake:blob=x:ip_ttl=4")[0]
-        timestamps = explain_strategy("--lua-desync=fake:blob=x:tcp_ts=-1000")[0]
+        both = explain_strategy("--lua-desync=hostfakesplit:host=a.ru:tcp_ts=-1000:ip_ttl=3")[0]
 
-        self.assertIn("«испортить»", plain.caution)
-        self.assertIn("у другого провайдера может не подойти", ttl.caution)
-        self.assertIn("метки времени", timestamps.caution)
+        self.assertEqual(len(plain.cautions), 1)
+        self.assertIn("нет защиты от сайта", plain.cautions[0])
+        self.assertEqual(len(ttl.cautions), 1)
+        self.assertIn("У другого подделка может дойти до сайта", ttl.cautions[0])
+        self.assertEqual(len(both.cautions), 3)
+        self.assertEqual(both.caution, " ".join(both.cautions))
 
     def test_own_and_unknown_functions_are_named_honestly(self) -> None:
         from profile.strategy_list.knowledge import explain_strategy
 
-        own, unknown = explain_strategy("--lua-desync=fakemultisplit:pos=1\n--lua-desync=tls_weird_thing")
+        own, unknown = explain_strategy("--lua-desync=hostfakesplit_multi:hosts=a.ru,b.ru\n--lua-desync=tls_weird_thing")
+        origin = next(note for note in own.notes if note.kind == "origin")
 
-        self.assertIn("нет в оригинальном Zapret 2", own.caution)
+        self.assertEqual((origin.value, origin.detail), ("Добавлен в ZapretGUI", "В оригинальном Zapret 2 его нет."))
+        self.assertIn("берутся по очереди из списка", own.text)
+        self.assertTrue(own.why)
+        self.assertEqual(next(note for note in own.notes if note.kind == "names").value, "a.ru, b.ru")
         self.assertEqual(unknown.title, "tls_weird_thing")
         self.assertIn("описания для неё нет", unknown.text)
 
