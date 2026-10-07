@@ -49,6 +49,7 @@ from qfluentwidgets import (
     LineEdit,
     FluentIcon,
     PushButton,
+    ToolButton,
 )
 from ui.fluent_dialog import MessageBox
 from settings.mode import ZAPRET1_MODE, ZAPRET2_MODE, is_preset_launch_method, is_zapret2_launch_method
@@ -674,14 +675,21 @@ class ProfileSetupPageBase(BasePage):
         self._summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         header_layout.addWidget(self._summary, 1)
 
-        self._editor_section_button = PushButton(LIST_TAB_TITLE_HOSTLIST, icon=FluentIcon.DOCUMENT)
+        # Редкие разделы — небольшие кнопки-значки: главным в шапке остаётся
+        # выключатель профиля. Название кнопки видно при наведении.
+        self._editor_section_button = ToolButton(FluentIcon.DOCUMENT)
+        set_tooltip(self._editor_section_button, f"«{LIST_TAB_TITLE_HOSTLIST}» — записи файла hostlist/ipset этого profile.")
         self._editor_section_button.clicked.connect(lambda: self._open_section("editor"))
         header_layout.addWidget(self._editor_section_button, 0, Qt.AlignmentFlag.AlignRight)
-        self._raw_section_button = PushButton(RAW_TAB_TITLE, icon=FluentIcon.CODE)
+        self._raw_section_button = ToolButton(FluentIcon.CODE)
+        set_tooltip(
+            self._raw_section_button,
+            f"«{RAW_TAB_TITLE}» показывает строки profile как в preset и даёт править их вручную.",
+        )
         self._raw_section_button.clicked.connect(lambda: self._open_section("raw"))
         header_layout.addWidget(self._raw_section_button, 0, Qt.AlignmentFlag.AlignRight)
 
-        self._conditions_button = PushButton("Условия", icon=FluentIcon.FILTER)
+        self._conditions_button = ToolButton(FluentIcon.FILTER)
         set_control_accessibility(
             self._conditions_button,
             name="Условия profile",
@@ -1136,7 +1144,7 @@ class ProfileSetupPageBase(BasePage):
         )
         set_tooltip(
             self._conditions_button,
-            "Открывает панель условий: файл списка и диапазоны пакетов, на которых работает стратегия.",
+            "«Условия» — панель с файлом списка и диапазонами пакетов, на которых работает стратегия.",
         )
         set_tooltip(
             self._enabled_checkbox,
@@ -1899,7 +1907,6 @@ class ProfileSetupPageBase(BasePage):
         editor_title = _profile_editor_tab_title(payload)
         button = self.__dict__.get("_editor_section_button")
         if button is not None:
-            set_widget_text_if_changed(button, editor_title)
             set_tooltip(button, f"«{editor_title}» — записи файла hostlist/ipset этого profile.")
         raw_button = self.__dict__.get("_raw_section_button")
         if raw_button is not None:

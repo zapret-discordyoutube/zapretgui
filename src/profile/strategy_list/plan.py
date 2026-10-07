@@ -31,25 +31,24 @@ _GROUPING_KEYS = frozenset(key for key, _title in STRATEGY_GROUPINGS)
 FILTER_ALL = "all"
 FILTER_RECOMMENDED = "recommended"
 FILTER_WORKS = "works"
-FILTER_UNTRIED = "untried"
 FILTER_FAVORITE = "favorite"
-# Быстрые отборы над списком; порядок кортежа — порядок кнопок.
+# Вкладки над списком; порядок кортежа — порядок вкладок. Первой стоит та, с
+# которой начинает новичок, весь каталог — последним.
 QUICK_FILTERS: tuple[tuple[str, str], ...] = (
-    (FILTER_ALL, "Все"),
     (FILTER_RECOMMENDED, "Советуемые"),
     (FILTER_WORKS, "Работают у меня"),
-    (FILTER_UNTRIED, "Не пробовал"),
     (FILTER_FAVORITE, "Избранное"),
+    (FILTER_ALL, "Все"),
 )
 _FILTER_KEYS = frozenset(key for key, _title in QUICK_FILTERS)
 
-BADGE_RECOMMENDED = "recommended"
 BADGE_NEUTRAL = "neutral"
 BADGE_WARNING = "warning"
 BADGE_PERSONAL = "personal"
 
-# Группа над всеми остальными: стратегии, которые в готовых пресетах стоят на
-# этом же сервисе (profile.strategy_usage). Есть при любой группировке.
+# Стратегии, которые в готовых пресетах стоят на этом же сервисе
+# (profile.strategy_usage). Отдельной группой они идут только на вкладке
+# «Советуемые»; во всём каталоге каждая лежит в группе своего способа обхода.
 RECOMMENDED_GROUP = "recommended"
 _SERIES_OTHER = "s_other"
 _SOURCE_NONE = "o_none"
@@ -100,6 +99,9 @@ class StrategyItem:
     title: str
     detail: str
     plain_label: str
+    # Вторая строка плитки: уточнение, способ обхода словами и где стратегия
+    # стоит в готовых пресетах. Способ опущен там, где он написан в заголовке группы.
+    caption: str
     badge_text: str
     badge_tone: str
     payload_badge: str
@@ -158,15 +160,23 @@ class StrategyListPlan:
     visible_count: int = 0
     current_strategy_id: str = "none"
     grouping: str = GROUPING_METHOD
-    # Список сужен поиском или отбором: найденное показывается целиком,
-    # без сворачивания групп и вариантов.
+    # Список сужен поиском или вкладкой: найденное показывается целиком,
+    # без сворачивания групп.
     narrowed: bool = False
+    # Список сужен именно поиском (а не вкладкой).
+    narrowed_by_query: bool = False
     # Очередь «что пробовать» — весь каталог: сначала советуемые для сервиса
     # по убыванию частоты, потом остальные. Если не помогло ни одно из
     # советуемых, перебор на этом не кончается.
     queue: tuple[str, ...] = ()
     # Сколько первых стратегий очереди — советуемые.
     recommended_count: int = 0
+    # Сколько стратегий каталога на каждой вкладке: ((ключ вкладки, число), …).
+    # Поиск на эти числа не влияет: они про каталог, а не про найденное.
+    tab_counts: tuple[tuple[str, int], ...] = ()
+
+    def tab_count(self, quick_filter: str) -> int:
+        return dict(self.tab_counts).get(quick_filter, 0)
 
     def group_of(self, strategy_id: str) -> str:
         for group in self.groups:
@@ -199,10 +209,10 @@ def _experience(experience: dict, strategy_id: str) -> tuple[int, int]:
 def strategy_badge(usage, label: str, personal: tuple[int, int] = (0, 0)) -> tuple[str, str]:
     """Метка справа на плитке: (текст, тон). Пусто — метки нет.
 
-    Сильнее всего собственный опыт человека: стратегия уже помогла ему на
-    других профилях. Дальше — где она стоит в готовых пресетах. Пометка
-    каталога «осторожно» важнее частоты на чужих сервисах, но не важнее того,
-    что стратегию ставили на этот же сервис.
+    Метка — это то, что человеку важно знать до выбора: стратегия уже помогла
+    ему на других профилях либо каталог просит с ней осторожности. Пометка
+    каталога не показывается у стратегии, которую ставят на этот же сервис
+    или на много других: готовые пресеты за неё уже поручились.
     """
     works, fails = personal
     if works > 0 and works >= fails:
@@ -210,14 +220,23 @@ def strategy_badge(usage, label: str, personal: tuple[int, int] = (0, 0)) -> tup
     same = int(getattr(usage, "same_service", 0) or 0)
     services = int(getattr(usage, "services", 0) or 0)
     if same > 0:
-        return f"в {same} {_plural(same, 'пресете', 'пресетах', 'пресетах')}", BADGE_RECOMMENDED
+        return "", ""
     if label == "caution":
         return "осторожно", BADGE_WARNING
-    if services >= 2:
-        return f"на {services} {_plural(services, 'сервисе', 'сервисах', 'сервисах')}", BADGE_NEUTRAL
-    if label == "experimental":
+    if label == "experimental" and services < 2:
         return "опытная", BADGE_NEUTRAL
     return "", ""
+
+
+def usage_caption(usage) -> str:
+    """Подпись под названием: где стратегия стоит в готовых пресетах. Пусто — нигде."""
+    same = int(getattr(usage, "same_service", 0) or 0)
+    services = int(getattr(usage, "services", 0) or 0)
+    if same > 0:
+        return f"на этом сервисе в {same} {_plural(same, 'пресете', 'пресетах', 'пресетах')}"
+    if services >= 2:
+        return f"на {services} {_plural(services, 'сервисе', 'сервисах', 'сервисах')}"
+    return ""
 
 
 def experience_sentence(personal: tuple[int, int]) -> str:
@@ -259,14 +278,12 @@ def _priority(facts, state, usage, personal: tuple[int, int] = (0, 0)) -> tuple:
     )
 
 
-def _matches_filter(quick_filter: str, state, usage) -> bool:
+def _on_tab(quick_filter: str, state, recommended: bool) -> bool:
+    """Лежит ли стратегия на вкладке."""
     if quick_filter == FILTER_RECOMMENDED:
-        return bool(getattr(usage, "recommended", False))
-    rating = str(getattr(state, "rating", "") or "")
+        return recommended
     if quick_filter == FILTER_WORKS:
-        return rating == "work"
-    if quick_filter == FILTER_UNTRIED:
-        return not rating
+        return str(getattr(state, "rating", "") or "") == "work"
     if quick_filter == FILTER_FAVORITE:
         return bool(getattr(state, "favorite", False))
     return True
@@ -389,10 +406,12 @@ def _status_words(state, *, is_current: bool) -> list[str]:
     return words
 
 
-def _accessible_text(facts, state, *, is_current: bool, badge_text: str) -> str:
+def _accessible_text(facts, state, *, is_current: bool, badge_text: str, usage_text: str) -> str:
     parts = [facts.name, *(word.lower() for word in _status_words(state, is_current=is_current))]
     if facts.plain_label:
         parts.append(f"способ: {facts.plain_label}")
+    if usage_text:
+        parts.append(usage_text)
     if badge_text:
         parts.append(badge_text)
     if facts.payload_badge_accessible:
@@ -400,14 +419,21 @@ def _accessible_text(facts, state, *, is_current: bool, badge_text: str) -> str:
     return ", ".join(parts)
 
 
-def _make_item(facts, state, usage, *, is_current: bool, detail: str, personal=(0, 0)) -> StrategyItem:
+def _make_item(
+    facts, state, usage, *, is_current: bool, detail: str, personal=(0, 0), show_method: bool = True
+) -> StrategyItem:
     badge_text, badge_tone = strategy_badge(usage, facts.label, personal)
+    usage_text = usage_caption(usage)
+    caption = NAME_SEPARATOR.join(
+        part for part in (detail, facts.plain_label if show_method else "", usage_text) if part
+    )
     return StrategyItem(
         strategy_id=facts.strategy_id,
         name=facts.name,
         title=facts.title,
         detail=detail,
         plain_label=facts.plain_label,
+        caption=caption,
         badge_text=badge_text,
         badge_tone=badge_tone,
         payload_badge=facts.payload_badge,
@@ -415,7 +441,9 @@ def _make_item(facts, state, usage, *, is_current: bool, detail: str, personal=(
         favorite=bool(getattr(state, "favorite", False)),
         is_current=is_current,
         tooltip=_tooltip(facts, usage, personal),
-        accessible_text=_accessible_text(facts, state, is_current=is_current, badge_text=badge_text),
+        accessible_text=_accessible_text(
+            facts, state, is_current=is_current, badge_text=badge_text, usage_text=usage_text
+        ),
         family_key=facts.family_key,
         family_color=strategy_family(facts.family_key).color,
     )
@@ -546,12 +574,25 @@ def build_plan(request: PlanRequest) -> StrategyListPlan:
     group_of, infos = _groups_for(facts, grouping)
     recommended = recommended_queue(facts, usage)
     # Советовать имеет смысл только часть каталога.
-    if recommended and len(recommended) < len(facts):
+    if not recommended or len(recommended) >= len(facts):
+        recommended = ()
+    if quick_filter == FILTER_RECOMMENDED:
+        # Вкладка «Советуемые» — один сплошной список, без групп по способу.
         for strategy_id in recommended:
             group_of[strategy_id] = RECOMMENDED_GROUP
         infos = {**infos, RECOMMENDED_GROUP: _RECOMMENDED_INFO}
-    else:
-        recommended = ()
+    recommended_set = set(recommended)
+    tab_counts = tuple(
+        (
+            key,
+            sum(
+                1
+                for strategy_id in facts
+                if _on_tab(key, states.get(strategy_id), strategy_id in recommended_set)
+            ),
+        )
+        for key, _title in QUICK_FILTERS
+    )
     experience = dict(request.experience or {})
     queue = full_queue(facts, usage, recommended, experience, states)
 
@@ -592,7 +633,7 @@ def build_plan(request: PlanRequest) -> StrategyListPlan:
             strategy_id
             for strategy_id in ids
             if (not query or query in facts[strategy_id].search_text)
-            and _matches_filter(quick_filter, states.get(strategy_id), usage.get(strategy_id))
+            and _on_tab(quick_filter, states.get(strategy_id), strategy_id in recommended_set)
         ]
         if not shown:
             continue
@@ -623,6 +664,8 @@ def build_plan(request: PlanRequest) -> StrategyListPlan:
                 is_current=strategy_id == current_id,
                 detail=detail,
                 personal=_experience(experience, strategy_id),
+                # В группе способа обхода способ уже написан в её заголовке.
+                show_method=not (grouping == GROUPING_METHOD and group_key != RECOMMENDED_GROUP),
             )
             key, title = section_of[strategy_id] if sectioned else ("", "")
             by_section.setdefault(key, []).append(item)
@@ -643,7 +686,8 @@ def build_plan(request: PlanRequest) -> StrategyListPlan:
                     StrategySection(
                         key=key,
                         title=section_titles[key],
-                        items=tuple(by_section[key]) if narrowed else _with_twins(group_key, key, by_section[key]),
+                        # При поиске каждая найденная стратегия видна сама по себе.
+                        items=tuple(by_section[key]) if query else _with_twins(group_key, key, by_section[key]),
                     )
                     for key in section_order
                 ),
@@ -657,8 +701,10 @@ def build_plan(request: PlanRequest) -> StrategyListPlan:
         current_strategy_id=current_id,
         grouping=grouping,
         narrowed=narrowed,
+        narrowed_by_query=bool(query),
         queue=queue,
         recommended_count=len(recommended),
+        tab_counts=tab_counts,
     )
 
 

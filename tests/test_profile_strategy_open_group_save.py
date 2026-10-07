@@ -261,7 +261,11 @@ class ProfileStrategyDetailsBreadcrumbTests(ProfileStrategyOpenGroupSaveTests):
         page._apply_payload(self._payload(persistent_key="uid:youtube", open_group=None))
         before = self._crumbs(page)
         self.assertFalse(hasattr(page, "_strategy_tabs"))
-        self.assertEqual(page._editor_section_button.text(), "Список сайтов")
+        # Кнопки шапки — значки: название раздела написано в подсказке и для чтения с экрана.
+        self.assertEqual(page._editor_section_button.text(), "")
+        self.assertIn("Список сайтов", page._editor_section_button.toolTip())
+        self.assertEqual(page._editor_section_button.accessibleName(), "Открыть раздел: Список сайтов")
+        self.assertIn("Условия", page._conditions_button.toolTip())
 
         page._raw_section_button.click()
         self.assertEqual(page._strategy_stack.currentIndex(), 2)

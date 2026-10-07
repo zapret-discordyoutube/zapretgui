@@ -6255,16 +6255,17 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
         "ru": (
             "Страница профиля сразу показывает готовые стратегии: здесь выбирают способ обхода и "
             "отмечают, работает ли он.\n\n"
-            "Кнопки в шапке открывают остальные разделы. «Список сайтов» — ваши записи списка сайтов "
-            "или адресов. «Текст профиля» — строки профиля так, как они записаны в пресете.\n\n"
+            "Кнопки-значки в шапке открывают остальные разделы; название кнопки видно при наведении. "
+            "«Список сайтов» — ваши записи списка сайтов или адресов. «Текст профиля» — строки "
+            "профиля так, как они записаны в пресете.\n\n"
             "Открытый раздел появляется в строке пути вверху; по ней же возвращаются к стратегиям."
         ),
         "en": (
             "The profile page shows the ready strategies right away: here you choose the bypass "
             "method and mark whether it works.\n\n"
-            "The buttons in the header open the other sections. \"Site list\" holds your entries of "
-            "the site or address list. \"Profile text\" shows the profile lines as they are written "
-            "in the preset.\n\n"
+            "The icon buttons in the header open the other sections; hover a button to see its name. "
+            "\"Site list\" holds your entries of the site or address list. \"Profile text\" shows "
+            "the profile lines as they are written in the preset.\n\n"
             "The open section appears in the path line at the top; use it to return to the strategies."
         ),
     },
@@ -6319,30 +6320,34 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
         ),
     },
     "onboarding.step.strategy_find.title": {
-        "ru": "Отборы и поиск",
-        "en": "Filters and search",
+        "ru": "Вкладки и поиск",
+        "en": "Tabs and search",
     },
     "onboarding.step.strategy_find.body": {
         "ru": (
-            "Кнопки над списком оставляют в нём только нужное: советуемые, отмеченные вами как "
-            "рабочие, ещё не опробованные или избранные. Справа выбирается, по чему сгруппировать список.\n\n"
+            "Вкладки над списком показывают его части, число рядом — сколько там стратегий. "
+            "«Советуемые» — те, что стоят на этом сервисе в готовых пресетах; с них и стоит начинать. "
+            "«Работают у меня» и «Избранное» — ваши отметки. «Все» — весь каталог по группам; "
+            "справа там выбирается, по чему его сгруппировать.\n\n"
             "Поиск открывается по Ctrl+F и находит стратегию по названию, способу обхода словами "
             "(«нарезка», «подделка»), параметру или автору. Esc его закрывает.\n\n"
-            "Метка справа на стратегии говорит, где она стоит в готовых пресетах: «в 13 пресетах» — "
-            "на этом же сервисе, «на 28 сервисах» — на других, «у вас работает» — вы сами отмечали её "
-            "рабочей на других профилях. Метка — это кнопка: она открывает подробности о стратегии. "
-            "Щелчок по названию применяет стратегию.\n\n"
+            "Подпись под названием говорит, где стратегия стоит в готовых пресетах: «на этом сервисе "
+            "в 13 пресетах» или «на 28 сервисах» — на других. Метка справа «у вас работает» значит, "
+            "что вы сами отмечали её рабочей на других профилях; метка — это кнопка, она открывает "
+            "подробности о стратегии. Щелчок по названию применяет стратегию.\n\n"
             "Стратегии с одинаковым названием сложены в одну строку, кнопка «ещё 2» раскрывает варианты."
         ),
         "en": (
-            "The buttons above the list keep only what you need in it: recommended, marked by you as "
-            "working, not tried yet, or favourites. On the right you choose how to group the list.\n\n"
+            "The tabs above the list show its parts, and the number next to a tab is how many "
+            "strategies it holds. \"Recommended\" are the ones ready-made presets use on this service; "
+            "start with them. \"Working for me\" and \"Favourites\" are your own marks. \"All\" is "
+            "the whole catalogue in groups; on the right there you choose how to group it.\n\n"
             "Search opens with Ctrl+F and finds a strategy by name, by bypass method in plain words, "
             "by parameter or by author. Esc closes it.\n\n"
-            "The badge on the right of a strategy says where the ready-made presets use it: on this "
-            "same service or on other services, or that you marked it as working on other profiles. "
-            "The badge is a button: it opens the details of the strategy. A click on the name applies "
-            "the strategy.\n\n"
+            "The caption under the name says where the ready-made presets use the strategy: on this "
+            "same service or on other services. The badge on the right says that you marked it as "
+            "working on other profiles; the badge is a button that opens the details of the strategy. "
+            "A click on the name applies the strategy.\n\n"
             "Strategies with the same name are folded into one row, and the \"more\" button expands "
             "the variants."
         ),

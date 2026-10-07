@@ -1,6 +1,6 @@
 """Список готовых стратегий на странице профиля.
 
-Виджет хранит только то, что выбрал человек (поиск, отбор, группировка,
+Виджет хранит только то, что выбрал человек (поиск, вкладка, группировка,
 раскрытые группы и варианты), и то, что прислала страница (каталог, оценки,
 частота в готовых пресетах, выбранная стратегия). Всё, что на экране,
 каждый раз выводится из этого заново одной функцией ``_refresh``:
@@ -13,12 +13,15 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
+from qfluentwidgets import BodyLabel
 
 from profile.strategy_list import (
     FILTER_ALL,
+    FILTER_RECOMMENDED,
     GROUPING_METHOD,
+    QUICK_FILTERS,
     ROW_STRATEGY,
     PlanRequest,
     StrategyListPlan,
@@ -39,7 +42,7 @@ from profile.ui.strategy_context_menu import (
     show_strategy_context_menu,
 )
 from profile.ui.strategy_list.details import StrategyDetails, StrategyDetailsView
-from profile.ui.strategy_list.panels import StrategyToolbar, TryNextPanel
+from profile.ui.strategy_list.panels import TAB_EMPTY_TEXTS, StrategyToolbar, TryNextPanel
 from profile.ui.strategy_list.view import StrategyListView
 from ui.accessibility import set_control_accessibility, set_state_text
 
@@ -133,16 +136,25 @@ class ProfileStrategyListWidget(QWidget):
         set_control_accessibility(self._list, name="Список готовых стратегий", description=_LIST_DESCRIPTION)
         layout.addWidget(self._list, 1)
 
+        # Пустая вкладка объясняет, как в неё что-то попадает, а не молчит.
+        self._empty = BodyLabel("", browse)
+        self._empty.setWordWrap(True)
+        self._empty.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        self._empty.setContentsMargins(24, 32, 24, 0)
+        self._empty.setTextColor(QColor(0, 0, 0, 150), QColor(255, 255, 255, 150))
+        self._empty.hide()
+        layout.addWidget(self._empty, 1)
+
         # Страница выстраивает порядок обхода клавишей Tab по этим именам.
         self._search = self._toolbar.search
         self._grouping_combo = self._toolbar.grouping_combo
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFocusProxy(self._list)
-        buttons = list(self._toolbar.filter_buttons.values())
-        QWidget.setTabOrder(self._search, buttons[0])
-        for previous, following in zip(buttons, buttons[1:]):
+        tabs = [self._toolbar.tabs.items[key] for key, _title in QUICK_FILTERS]
+        QWidget.setTabOrder(self._search, tabs[0])
+        for previous, following in zip(tabs, tabs[1:]):
             QWidget.setTabOrder(previous, following)
-        QWidget.setTabOrder(buttons[-1], self._grouping_combo)
+        QWidget.setTabOrder(tabs[-1], self._grouping_combo)
         QWidget.setTabOrder(self._grouping_combo, self._list)
 
         self._search_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Find), self)
@@ -201,9 +213,13 @@ class ProfileStrategyListWidget(QWidget):
             self._open_group_token = token
             self._open_twins.clear()
             self.close_details()
+            # Новый профиль открывается на советуемых: с них начинают перебор.
+            self._quick_filter = FILTER_RECOMMENDED
         plan = self._build_plan()
         if owner_changed or self._open_groups_stale(plan):
-            self._open_groups = self._initial_open_groups(plan, open_group if open_group_token is not None else None)
+            self._open_groups = self._initial_open_groups(
+                self._catalog_plan(plan), open_group if open_group_token is not None else None
+            )
         # У нового профиля список прокручивается к выбранной стратегии, но
         # раскрытую группу определяет только то, что человек оставил открытым.
         self._refresh(plan, scroll_to_current=owner_changed)
@@ -213,7 +229,13 @@ class ProfileStrategyListWidget(QWidget):
         if next_id == self._current_strategy_id:
             return
         self._current_strategy_id = next_id
-        self._refresh(open_current_group=True)
+        plan = self._build_plan()
+        if self._quick_filter != FILTER_ALL and not plan.narrowed_by_query and plan.item(next_id) is None:
+            # Выбранной стратегии на этой вкладке нет (перебор ушёл дальше
+            # советуемых): она не должна остаться за кадром.
+            self._quick_filter = FILTER_ALL
+            plan = self._build_plan()
+        self._refresh(plan, open_current_group=True)
 
     # ------------------------------------------------------------------
     # Подробности о стратегии
@@ -292,6 +314,18 @@ class ProfileStrategyListWidget(QWidget):
         return len(self._entries) > LONG_LIST_MIN_ROWS
 
     def _build_plan(self) -> StrategyListPlan:
+        plan = self._plan_for(self._quick_filter)
+        if self._quick_filter == FILTER_RECOMMENDED and not plan.recommended_count:
+            # Советовать этому профилю нечего: вкладки нет, виден весь каталог.
+            self._quick_filter = FILTER_ALL
+            plan = self._plan_for(FILTER_ALL)
+        return plan
+
+    def _catalog_plan(self, plan: StrategyListPlan) -> StrategyListPlan:
+        """Раскладка вкладки «Все»: раскрытые группы относятся только к ней."""
+        return plan if self._quick_filter == FILTER_ALL else self._plan_for(FILTER_ALL)
+
+    def _plan_for(self, quick_filter: str) -> StrategyListPlan:
         return build_plan(
             PlanRequest(
                 facts=self._facts,
@@ -300,7 +334,7 @@ class ProfileStrategyListWidget(QWidget):
                 experience=self._experience,
                 current_strategy_id=self._current_strategy_id,
                 query=self._search.text(),
-                quick_filter=self._quick_filter,
+                quick_filter=quick_filter,
                 grouping=self._grouping,
             )
         )
@@ -326,9 +360,10 @@ class ProfileStrategyListWidget(QWidget):
         plan = plan if plan is not None else self._build_plan()
         self._plan = plan
         reveal_current = open_current_group or scroll_to_current
-        if open_current_group and self._open_groups is not None and not plan.narrowed:
-            # Выбранная стратегия не должна оставаться в свёрнутой группе.
-            group_key = plan.group_of(plan.current_strategy_id)
+        if open_current_group and self._open_groups is not None and not plan.narrowed_by_query:
+            # Выбранная стратегия не должна оставаться в свёрнутой группе —
+            # в том числе когда человек вернётся на вкладку «Все» с другой.
+            group_key = self._catalog_plan(plan).group_of(plan.current_strategy_id)
             if group_key and group_key not in self._open_groups:
                 self._open_groups = {group_key}
         current_row = self._list.current_row()
@@ -346,10 +381,15 @@ class ProfileStrategyListWidget(QWidget):
                     self._list.set_current_key(first.key)
 
         long_list = self._long_list()
-        self._toolbar.set_long_list(long_list)
+        self._toolbar.set_tab_counts(dict(plan.tab_counts))
+        self._toolbar.set_layout_mode(
+            tabs=long_list or plan.recommended_count > 0,
+            grouping=long_list and self._quick_filter == FILTER_ALL,
+        )
         self._toolbar.set_grouping(self._grouping)
         self._toolbar.set_quick_filter(self._quick_filter)
         self._toolbar.set_summary(plan.visible_count, plan.total_count)
+        self._sync_empty_text(plan)
         self._sync_try_panel(plan)
         self._sync_list_state_text(plan)
         self._sync_details()
@@ -372,6 +412,19 @@ class ProfileStrategyListWidget(QWidget):
             recommended_stage=stage == "recommended",
         )
         self._try_panel.show()
+
+    def _sync_empty_text(self, plan: StrategyListPlan) -> None:
+        """Вместо пустого списка — пояснение, почему в нём ничего нет."""
+        if plan.visible_count or not plan.total_count:
+            text = ""
+        elif plan.narrowed_by_query:
+            text = "Ничего не найдено. Попробуйте другое слово или вкладку «Все»."
+        else:
+            text = TAB_EMPTY_TEXTS.get(self._quick_filter, "")
+        if self._empty.text() != text:
+            self._empty.setText(text)
+        self._empty.setHidden(not text)
+        self._list.setHidden(bool(text))
 
     def _sync_list_state_text(self, plan: StrategyListPlan) -> None:
         if not plan.total_count:

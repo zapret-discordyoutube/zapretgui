@@ -21,7 +21,7 @@ GROUP_ROW_HEIGHT = 31
 SECTION_ROW_HEIGHT = 26
 STRATEGY_ROW_HEIGHT = 31
 TILE_HEIGHT = 46
-# Плитка широкая: название, способ словами и метка «в N пресетах» должны
+# Плитка широкая: название и подпись «на этом сервисе в N пресетах» должны
 # читаться целиком, а не обрываться многоточием.
 TILE_MIN_WIDTH = 380
 MAX_TILE_COLUMNS = 3
@@ -34,7 +34,7 @@ class StrategyListView(QListView):
     group_toggle_requested = pyqtSignal(str, bool)
     # Кнопка «ещё N» у стратегии с одноимёнными вариантами: ключ набора.
     twins_toggle_requested = pyqtSignal(str)
-    # Нажали метку на плитке («в 13 пресетах»): открыть подробности о стратегии.
+    # Нажали метку на плитке («у вас работает»): открыть подробности о стратегии.
     details_requested = pyqtSignal(str)
     # Правая кнопка или клавиша меню на стратегии: (стратегия, где открыть меню).
     menu_requested = pyqtSignal(str, QPoint)

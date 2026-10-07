@@ -1,8 +1,11 @@
 """Значки стратегий, нарисованные линиями.
 
-Значок плитки — способ обхода (подделка, нарезка, перестановка…) в цветной
-подложке, а в его углу — оценка человека: зелёная галочка «работает» или
-красный крестик «не работает».
+На плитке списка стоит значок состояния (``state_icon``): пустой кружок — ещё
+не пробовали, зелёная галочка — работает, красный крестик — не работает, точка
+в кружке — выбрана сейчас. Способ обхода там написан словами.
+
+На странице подробностей — значок способа обхода (``strategy_icon``: подделка,
+нарезка, перестановка…) в цветной подложке, в его углу та же оценка человека.
 
 Значки рисуются кистью, а не шрифтом значков: они не зависят от того, какие
 шрифты попали в сборку программы. Каждый вид рисуется один раз и хранится
@@ -188,6 +191,65 @@ def strategy_icon(family_key: str, color: str, rating: str, size: int, device_ra
 
     if rating in ("work", "notwork"):
         _mark(painter, float(size), rating, QColor(backdrop) if QColor(backdrop).isValid() else QColor("#2b2b2b"))
+    painter.end()
+
+    if len(_CACHE) >= _CACHE_MAX:
+        _CACHE.clear()
+    _CACHE[key] = pixmap
+    return pixmap
+
+
+def state_icon(rating: str, is_current: bool, size: int, device_ratio: float, accent: str, idle: str) -> QPixmap:
+    """Готовая картинка значка состояния стратегии на плитке списка.
+
+    accent — цвет акцента темы (выбранная стратегия), idle — приглушённый цвет
+    текста (стратегия, которую ещё не пробовали).
+    """
+    key = ("state", rating, bool(is_current), int(size), round(float(device_ratio), 2), accent, idle)
+    cached = _CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    ratio = max(1.0, float(device_ratio))
+    pixmap = QPixmap(int(size * ratio), int(size * ratio))
+    pixmap.setDevicePixelRatio(ratio)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+    center = QPointF(size / 2, size / 2)
+    radius = size * 0.34
+    line = max(1.3, size * 0.06)
+    if rating in ("work", "notwork"):
+        color = _WORKS if rating == "work" else _NOT_WORKS
+        fill = QColor(color)
+        fill.setAlpha(46)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(fill)
+        painter.drawEllipse(center, radius, radius)
+        painter.setPen(_pen(color, line * 1.15))
+        x, y, step = center.x(), center.y(), radius * 0.46
+        if rating == "work":
+            painter.drawPolyline(
+                [QPointF(x - step, y), QPointF(x - step * 0.25, y + step * 0.8), QPointF(x + step, y - step * 0.7)]
+            )
+        else:
+            _line(painter, x - step * 0.8, y - step * 0.8, x + step * 0.8, y + step * 0.8)
+            _line(painter, x - step * 0.8, y + step * 0.8, x + step * 0.8, y - step * 0.8)
+    else:
+        color = QColor(accent if is_current else idle)
+        if not color.isValid():
+            color = QColor("#9aa6b2")
+        ring = QColor(color)
+        if not is_current:
+            ring.setAlpha(120)
+        painter.setPen(_pen(ring, line))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(center, radius - line / 2, radius - line / 2)
+        if is_current:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
+            painter.drawEllipse(center, radius * 0.42, radius * 0.42)
     painter.end()
 
     if len(_CACHE) >= _CACHE_MAX:

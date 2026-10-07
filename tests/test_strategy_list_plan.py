@@ -13,11 +13,10 @@ from profile.parser import parse_preset_text
 from profile.strategy_catalog import _parse_catalog_file
 from profile.strategy_list import (
     BADGE_NEUTRAL,
-    BADGE_RECOMMENDED,
     BADGE_WARNING,
+    FILTER_ALL,
     FILTER_FAVORITE,
     FILTER_RECOMMENDED,
-    FILTER_UNTRIED,
     FILTER_WORKS,
     GROUPING_SERIES,
     GROUPING_SOURCE,
@@ -34,7 +33,7 @@ from profile.strategy_list import (
     try_stage,
     visible_rows,
 )
-from profile.strategy_list.plan import strategy_badge, usage_sentence
+from profile.strategy_list.plan import strategy_badge, usage_caption, usage_sentence
 from profile.strategy_state import ProfileStrategyState
 from profile.strategy_usage import StrategyUsage, count_builtin_strategy_usage
 
@@ -113,22 +112,49 @@ class FactsTests(unittest.TestCase):
 
 
 class OrderTests(unittest.TestCase):
-    def test_recommended_group_is_first_and_sorted_by_frequency(self) -> None:
+    def test_recommended_tab_is_one_flat_list_sorted_by_frequency(self) -> None:
         usage = {
             "split-03": StrategyUsage(same_service=2, services=2),
             "fake-05": StrategyUsage(same_service=9, services=9),
             "fake-01": StrategyUsage(same_service=2, services=30),
             "fake-02": StrategyUsage(same_service=0, services=40),
         }
-        plan = _plan(usage=usage)
+        plan = _plan(usage=usage, quick_filter=FILTER_RECOMMENDED)
 
-        self.assertEqual(plan.groups[0].key, RECOMMENDED_GROUP)
+        # Одна группа на весь список: заголовков групп на вкладке нет.
+        self.assertEqual([group.key for group in plan.groups], [RECOMMENDED_GROUP])
         self.assertEqual(_ids(plan, RECOMMENDED_GROUP), ["fake-05", "fake-01", "split-03"])
+        self.assertEqual({row.kind for row in visible_rows(plan, open_groups=set())}, {ROW_STRATEGY})
         self.assertEqual(plan.queue[:3], ("fake-05", "fake-01", "split-03"))
         self.assertEqual(plan.recommended_count, 3)
-        # Советуемая стратегия ушла из своей группы по способу, а не продублирована.
-        self.assertNotIn("fake-05", _ids(plan, "fake"))
+
+    def test_whole_catalog_keeps_recommended_strategy_in_its_method_group(self) -> None:
+        """Во «Все» советуемых отдельной группой нет: каждая стратегия лежит в группе своего способа."""
+        usage = {"fake-05": StrategyUsage(same_service=9, services=9)}
+        plan = _plan(usage=usage)
+
+        self.assertNotIn(RECOMMENDED_GROUP, [group.key for group in plan.groups])
+        self.assertEqual(_ids(plan, "fake")[0], "fake-05")
         self.assertEqual(plan.visible_count, plan.total_count)
+        # Очередь перебора от вкладки не зависит.
+        self.assertEqual(plan.queue[0], "fake-05")
+        self.assertEqual(plan.recommended_count, 1)
+
+    def test_tab_counts_describe_the_catalog_not_the_search(self) -> None:
+        states = {
+            "fake-01": ProfileStrategyState(rating="work"),
+            "fake-02": ProfileStrategyState(rating="notwork", favorite=True),
+        }
+        usage = {"split-01": StrategyUsage(same_service=1, services=1), "fake-09": StrategyUsage(services=5)}
+        plan = _plan(states=states, usage=usage, query="gamma")
+
+        self.assertEqual(
+            dict(plan.tab_counts),
+            {FILTER_RECOMMENDED: 1, FILTER_WORKS: 1, FILTER_FAVORITE: 1, FILTER_ALL: len(_entries())},
+        )
+        self.assertEqual(plan.tab_count(FILTER_WORKS), 1)
+        # Первой стоит вкладка, с которой начинает новичок, весь каталог — последним.
+        self.assertEqual([key for key, _count in plan.tab_counts], [FILTER_RECOMMENDED, FILTER_WORKS, FILTER_FAVORITE, FILTER_ALL])
 
     def test_inside_group_working_first_then_favorites_then_usage_and_failed_last(self) -> None:
         states = {
@@ -143,12 +169,15 @@ class OrderTests(unittest.TestCase):
         self.assertEqual(order[-1], "fake-00")
 
     def test_no_recommended_group_without_usage_or_when_everything_is_used(self) -> None:
-        self.assertNotIn(RECOMMENDED_GROUP, [group.key for group in _plan().groups])
+        self.assertEqual(_plan().tab_count(FILTER_RECOMMENDED), 0)
         everything = {strategy_id: StrategyUsage(same_service=1, services=1) for strategy_id in _entries()}
         plan = _plan(usage=everything)
 
         self.assertNotIn(RECOMMENDED_GROUP, [group.key for group in plan.groups])
         self.assertEqual(plan.recommended_count, 0)
+        # Советовать весь каталог бессмысленно: вкладка пуста, значит её не будет.
+        self.assertEqual(plan.tab_count(FILTER_RECOMMENDED), 0)
+        self.assertEqual(_plan(usage=everything, quick_filter=FILTER_RECOMMENDED).visible_count, 0)
 
     def test_zapret1_catalog_without_lua_desync_is_one_flat_list(self) -> None:
         entries = {f"s{number}": _entry(f"Strategy {number}", "--dpi-desync=fake") for number in range(40)}
@@ -161,13 +190,35 @@ class OrderTests(unittest.TestCase):
 
 
 class BadgeTests(unittest.TestCase):
-    def test_badge_prefers_same_service_then_caution_then_other_services(self) -> None:
-        self.assertEqual(strategy_badge(StrategyUsage(same_service=13, services=13), ""), ("в 13 пресетах", BADGE_RECOMMENDED))
-        self.assertEqual(strategy_badge(StrategyUsage(same_service=1, services=1), "caution"), ("в 1 пресете", BADGE_RECOMMENDED))
+    def test_badge_only_warns_frequency_is_written_in_the_caption(self) -> None:
+        # Стратегию ставят на этот же сервис: пометка каталога уже не нужна.
+        self.assertEqual(strategy_badge(StrategyUsage(same_service=13, services=13), ""), ("", ""))
+        self.assertEqual(strategy_badge(StrategyUsage(same_service=1, services=1), "caution"), ("", ""))
         self.assertEqual(strategy_badge(StrategyUsage(services=28), "caution"), ("осторожно", BADGE_WARNING))
-        self.assertEqual(strategy_badge(StrategyUsage(services=28), ""), ("на 28 сервисах", BADGE_NEUTRAL))
+        self.assertEqual(strategy_badge(StrategyUsage(services=28), ""), ("", ""))
+        self.assertEqual(strategy_badge(StrategyUsage(services=28), "experimental"), ("", ""))
         self.assertEqual(strategy_badge(StrategyUsage(services=1), "experimental"), ("опытная", BADGE_NEUTRAL))
         self.assertEqual(strategy_badge(None, "stock"), ("", ""))
+
+    def test_usage_caption_says_where_ready_presets_use_the_strategy(self) -> None:
+        self.assertEqual(usage_caption(StrategyUsage(same_service=13, services=13)), "на этом сервисе в 13 пресетах")
+        self.assertEqual(usage_caption(StrategyUsage(same_service=1, services=1)), "на этом сервисе в 1 пресете")
+        self.assertEqual(usage_caption(StrategyUsage(services=28)), "на 28 сервисах")
+        self.assertEqual(usage_caption(StrategyUsage(services=1)), "")
+        self.assertEqual(usage_caption(None), "")
+
+    def test_caption_drops_the_method_where_the_group_header_already_names_it(self) -> None:
+        usage = {"fake-05": StrategyUsage(same_service=9, services=9), "twin-steam": StrategyUsage(services=4)}
+
+        by_method = _plan(usage=usage)
+        self.assertEqual(by_method.item("fake-05").caption, "на этом сервисе в 9 пресетах")
+        self.assertEqual(by_method.item("twin-steam").caption, "из Steam · на 4 сервисах")
+        self.assertEqual(by_method.item("fake-06").caption, "")
+        # На вкладке «Советуемые» и при другой группировке способа в заголовке нет.
+        recommended = _plan(usage=usage, quick_filter=FILTER_RECOMMENDED)
+        self.assertEqual(recommended.item("fake-05").caption, "подделка · на этом сервисе в 9 пресетах")
+        self.assertEqual(_plan(usage=usage, grouping=GROUPING_SERIES).item("fake-06").caption, "подделка")
+        self.assertIn("на этом сервисе в 9 пресетах", by_method.item("fake-05").accessible_text)
 
     def test_usage_sentence_separates_this_service_from_others(self) -> None:
         self.assertEqual(
@@ -191,8 +242,19 @@ class NarrowingTests(unittest.TestCase):
         plan = _plan(query="gamma")
 
         self.assertTrue(plan.narrowed)
+        self.assertTrue(plan.narrowed_by_query)
         self.assertEqual([section.key for group in plan.groups for section in group.sections], [""])
         self.assertTrue(all(not item.twin_key for group in plan.groups for item in group.items))
+
+    def test_tab_folds_same_named_strategies_like_the_whole_catalog(self) -> None:
+        """Вкладка — не поиск: одноимённые стратегии на ней сложены в одну строку."""
+        states = {key: ProfileStrategyState(favorite=True) for key in ("twin-steam", "twin-telegram")}
+        plan = _plan(states=states, quick_filter=FILTER_FAVORITE)
+
+        self.assertTrue(plan.narrowed)
+        self.assertFalse(plan.narrowed_by_query)
+        self.assertEqual(len({item.twin_key for group in plan.groups for item in group.items}), 1)
+        self.assertEqual(len([row for row in visible_rows(plan) if row.kind == ROW_STRATEGY]), 1)
 
     def test_quick_filters(self) -> None:
         states = {
@@ -203,7 +265,6 @@ class NarrowingTests(unittest.TestCase):
 
         self.assertEqual(_plan(states=states, quick_filter=FILTER_WORKS).visible_count, 1)
         self.assertEqual(_ids(_plan(states=states, quick_filter=FILTER_FAVORITE), "fake"), ["fake-02"])
-        self.assertEqual(_plan(states=states, quick_filter=FILTER_UNTRIED).visible_count, len(_entries()) - 2)
         self.assertEqual(_ids(_plan(usage=usage, quick_filter=FILTER_RECOMMENDED), RECOMMENDED_GROUP), ["split-01"])
 
     def test_groups_do_not_move_while_searching(self) -> None:
@@ -286,7 +347,8 @@ class VisibleRowsTests(unittest.TestCase):
         self.assertEqual(default_open_group(plan, ""), "")
         # Сохранённой группы больше нет в списке — открывается группа выбранной стратегии.
         self.assertEqual(default_open_group(plan, "s_gone"), "split")
-        self.assertEqual(default_open_group(_plan(usage={"fake-01": StrategyUsage(same_service=1, services=1)}), None), RECOMMENDED_GROUP)
+        # Стратегия не выбрана — открывается первая группа каталога.
+        self.assertEqual(default_open_group(_plan(usage={"fake-01": StrategyUsage(same_service=1, services=1)}), None), "fake")
 
 
 class FullQueueTests(unittest.TestCase):
@@ -459,7 +521,7 @@ class LearningOrderTests(unittest.TestCase):
 
     def test_personal_badge_needs_more_successes_than_failures(self) -> None:
         self.assertEqual(strategy_badge(StrategyUsage(same_service=5, services=5), "", (2, 1)), ("у вас работает · 2", "personal"))
-        self.assertEqual(strategy_badge(StrategyUsage(same_service=5, services=5), "", (1, 3)), ("в 5 пресетах", BADGE_RECOMMENDED))
+        self.assertEqual(strategy_badge(StrategyUsage(same_service=5, services=5), "", (1, 3)), ("", ""))
 
 
 class KnowledgeTests(unittest.TestCase):

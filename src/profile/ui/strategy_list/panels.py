@@ -1,4 +1,4 @@
-"""Панели над списком стратегий: поиск с отборами и «попробовать следующую»."""
+"""Панели над списком стратегий: поиск, вкладки и «попробовать следующую»."""
 
 from __future__ import annotations
 
@@ -10,15 +10,22 @@ from qfluentwidgets import (
     CaptionLabel,
     ComboBox,
     FluentIcon,
-    PillPushButton,
     PrimaryPushButton,
     PushButton,
     SearchLineEdit,
+    SegmentedWidget,
     SimpleCardWidget,
     StrongBodyLabel,
 )
 
-from profile.strategy_list import FILTER_ALL, QUICK_FILTERS, STRATEGY_GROUPINGS
+from profile.strategy_list import (
+    FILTER_ALL,
+    FILTER_FAVORITE,
+    FILTER_RECOMMENDED,
+    FILTER_WORKS,
+    QUICK_FILTERS,
+    STRATEGY_GROUPINGS,
+)
 from ui.accessibility import remove_line_edit_buttons_from_tab_order, set_control_accessibility, set_state_text
 from ui.fluent_widgets import set_tooltip
 
@@ -30,6 +37,20 @@ _NAVIGATION_KEYS = (
     Qt.Key.Key_PageDown,
     Qt.Key.Key_PageUp,
 )
+
+
+# Что лежит на вкладке: подсказка при наведении и текст для чтения с экрана.
+_TAB_HINTS = {
+    FILTER_RECOMMENDED: "Стратегии, которые в готовых пресетах стоят на этом же сервисе. Чем чаще, тем выше.",
+    FILTER_WORKS: "Стратегии, которые вы отметили рабочими у этого профиля.",
+    FILTER_FAVORITE: "Стратегии, которые вы добавили в избранное.",
+    FILTER_ALL: "Весь каталог готовых стратегий, разложенный по группам.",
+}
+# Что написать в пустом списке вкладки.
+TAB_EMPTY_TEXTS = {
+    FILTER_WORKS: "Здесь появятся стратегии, которые вы отметите кнопкой «Работает».",
+    FILTER_FAVORITE: "Здесь появятся стратегии, добавленные в избранное. Добавить можно правой кнопкой мыши по стратегии.",
+}
 
 
 def _muted(text: str = "") -> CaptionLabel:
@@ -62,7 +83,7 @@ class StrategySearchLineEdit(SearchLineEdit):
 
 
 class StrategyToolbar(QWidget):
-    """Быстрые отборы и группировка; поиск со счётчиком открывается по Ctrl+F.
+    """Вкладки списка и группировка; поиск со счётчиком открывается по Ctrl+F.
 
     Поиск нужен редко, а место занимает всегда, поэтому по умолчанию его нет
     на экране: строка появляется по Ctrl+F и убирается по Esc.
@@ -110,31 +131,29 @@ class StrategyToolbar(QWidget):
         filter_layout.setContentsMargins(0, 0, 0, 0)
         filter_layout.setSpacing(6)
 
+        # Вкладки с числами: одна строка отвечает и на «что тут есть», и на
+        # «сколько этого». Группы по способу обхода остаются только во «Все».
+        self.tabs = SegmentedWidget(self.filter_row)
+        self._tab_titles = dict(QUICK_FILTERS)
+        self._tab_counts: dict[str, int] = {}
+        for key, title in QUICK_FILTERS:
+            self.tabs.addItem(routeKey=key, text=title, onClick=lambda _checked=False, value=key: self._on_tab_clicked(value))
+            set_tooltip(self.tabs.items[key], _TAB_HINTS[key])
+        self.tabs.setCurrentItem(FILTER_ALL)
+        filter_layout.addWidget(self.tabs, 0, Qt.AlignmentFlag.AlignVCenter)
+        filter_layout.addStretch(1)
+
         self.grouping_combo = ComboBox(self.filter_row)
         for key, title in STRATEGY_GROUPINGS:
             self.grouping_combo.addItem(title, userData=key)
         self.grouping_combo.setMinimumWidth(190)
         grouping_hint = (
-            "По чему разложить стратегии ниже советуемых: по способу обхода, по серии (первое слово "
+            "По чему разложить весь каталог: по способу обхода, по серии (первое слово "
             "названия) или по источнику (уточнение «из …» в названии)."
         )
         set_tooltip(self.grouping_combo, grouping_hint)
         set_control_accessibility(self.grouping_combo, name="Группировка готовых стратегий", description=grouping_hint)
         self.grouping_combo.currentIndexChanged.connect(self._on_grouping_index_changed)
-        self.filter_buttons: dict[str, PillPushButton] = {}
-        for key, title in QUICK_FILTERS:
-            button = PillPushButton(title, self.filter_row)
-            button.setCheckable(True)
-            button.setChecked(key == FILTER_ALL)
-            set_control_accessibility(
-                button,
-                name=f"Отбор стратегий: {title}",
-                description="Показывает в списке только такие стратегии.",
-            )
-            button.clicked.connect(lambda _checked=False, value=key: self._on_filter_clicked(value))
-            self.filter_buttons[key] = button
-            filter_layout.addWidget(button)
-        filter_layout.addStretch(1)
         filter_layout.addWidget(self.grouping_combo)
         layout.addWidget(self.filter_row)
 
@@ -155,13 +174,36 @@ class StrategyToolbar(QWidget):
     def _on_grouping_index_changed(self, index: int) -> None:
         self.grouping_changed.emit(str(self.grouping_combo.itemData(index) or ""))
 
-    def _on_filter_clicked(self, key: str) -> None:
+    def _on_tab_clicked(self, key: str) -> None:
         self.set_quick_filter(key)
         self.filter_changed.emit(key)
 
+    def quick_filter(self) -> str:
+        return str(self.tabs.currentRouteKey() or FILTER_ALL)
+
     def set_quick_filter(self, key: str) -> None:
-        for value, button in self.filter_buttons.items():
-            button.setChecked(value == key)
+        self.tabs.setCurrentItem(key)
+
+    def set_tab_counts(self, counts: dict[str, int]) -> None:
+        """Числа на вкладках. Вкладки «Советуемые» нет, когда советовать нечего."""
+        counts = {key: int(counts.get(key, 0)) for key in self._tab_titles}
+        if counts == self._tab_counts:
+            return
+        self._tab_counts = counts
+        for key, title in self._tab_titles.items():
+            item = self.tabs.items[key]
+            item.setText(f"{title}  {counts[key]}")
+            set_control_accessibility(
+                item,
+                name=f"Вкладка стратегий: {title}",
+                description=f"{_TAB_HINTS[key]} Стратегий на вкладке: {counts[key]}.",
+            )
+        self.tabs.items[FILTER_RECOMMENDED].setHidden(counts[FILTER_RECOMMENDED] <= 0)
+        # Ширина вкладок изменилась: подсветка выбранной встаёт на новое место
+        # сразу, а не остаётся там, где вкладка была до смены чисел.
+        self.tabs.adjustSize()
+        self.tabs.layout().activate()
+        self.tabs._adjustIndicatorPos()
 
     def set_grouping(self, grouping: str) -> None:
         for index in range(self.grouping_combo.count()):
@@ -178,9 +220,15 @@ class StrategyToolbar(QWidget):
             self.summary.setText(text)
             set_state_text(self.summary, f"Показано готовых стратегий: {text}")
 
-    def set_long_list(self, long_list: bool) -> None:
-        """В коротком списке группировать и отбирать нечего: остаётся только поиск по Ctrl+F."""
-        self.filter_row.setHidden(not long_list)
+    def set_layout_mode(self, *, tabs: bool, grouping: bool) -> None:
+        """Что из строки вкладок нужно этому списку.
+
+        В коротком списке без советуемых выбирать не из чего — остаётся только
+        поиск по Ctrl+F. Группировка относится ко всему каталогу, поэтому
+        переключатель виден только на вкладке «Все».
+        """
+        self.filter_row.setHidden(not tabs)
+        self.grouping_combo.setHidden(not grouping)
 
 
 class TryNextPanel(SimpleCardWidget):

@@ -17,6 +17,9 @@ from PyQt6.QtTest import QSignalSpy, QTest
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from profile.strategy_list import (
+    FILTER_ALL,
+    FILTER_FAVORITE,
+    FILTER_RECOMMENDED,
     FILTER_WORKS,
     RECOMMENDED_GROUP,
     ROW_GROUP,
@@ -68,7 +71,10 @@ class _WidgetCase(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
-    def _widget(self, *, entries=None, states=None, current="fake-05", usage=USAGE, open_group=None, width=1300):
+    def _widget(
+        self, *, entries=None, states=None, current="fake-05", usage=USAGE, open_group=None, width=1300, tab=FILTER_ALL
+    ):
+        """tab — вкладка, на которую перешёл человек; None — та, что открылась сама."""
         host = QWidget()
         self.addCleanup(host.deleteLater)
         widget = ProfileStrategyListWidget(host)
@@ -84,8 +90,14 @@ class _WidgetCase(unittest.TestCase):
             grouping="method",
             usage=usage,
         )
+        if tab is not None and not widget._toolbar.filter_row.isHidden():
+            widget._toolbar.tabs.items[tab].click()
         self._app.processEvents()
         return widget
+
+    @staticmethod
+    def _strategy_ids(widget) -> list[str]:
+        return [row.strategy_id for row in widget._list.list_model().rows() if row.kind == ROW_STRATEGY]
 
     @staticmethod
     def _rows(widget):
@@ -201,13 +213,13 @@ class WidgetStateTests(_WidgetCase):
         self.assertEqual(self._open_groups(widget), ["split"])
         self.assertEqual(widget._list.current_row().strategy_id, "split-09")
 
-    def test_rating_update_without_usage_keeps_recommended_group(self) -> None:
-        widget = self._widget()
+    def test_rating_update_without_usage_keeps_recommended_tab(self) -> None:
+        widget = self._widget(tab=None)
 
         widget.set_rows(entries=widget._entries, states={"fake-01": ProfileStrategyState(rating="work")}, current_strategy_id="fake-05")
 
-        recommended = [row.strategy_id for row in self._rows(widget) if row.kind == ROW_STRATEGY and row.group_key == RECOMMENDED_GROUP]
-        self.assertEqual(recommended, ["fake-01", "fake-05", "split-03"])
+        self.assertEqual({row.group_key for row in self._rows(widget)}, {RECOMMENDED_GROUP})
+        self.assertEqual(self._strategy_ids(widget), ["fake-01", "fake-05", "split-03"])
 
     def test_twins_expand_by_click_on_the_chip(self) -> None:
         widget = self._widget(current="mix-0")
@@ -230,6 +242,7 @@ class WidgetStateTests(_WidgetCase):
         widget._on_twins_toggle(next(row for row in self._rows(widget) if row.twin_count > 1).item.twin_key)
 
         widget.set_rows(entries=widget._entries, states={}, current_strategy_id="mix-0", open_group_token="uid:other", open_group=None, usage=USAGE)
+        widget._toolbar.tabs.items[FILTER_ALL].click()
 
         self.assertEqual(sum(row.kind == ROW_STRATEGY and row.item.title == "Gamma 1.9" for row in self._rows(widget)), 1)
 
@@ -268,14 +281,83 @@ class SearchAndFilterTests(_WidgetCase):
         widget._search.clear()
         self.assertEqual(self._open_groups(widget), [])
 
-    def test_quick_filter_button_narrows_the_list(self) -> None:
+    def test_tab_click_narrows_the_list(self) -> None:
         widget = self._widget(states={"split-02": ProfileStrategyState(rating="work")})
 
-        widget._toolbar.filter_buttons[FILTER_WORKS].click()
+        widget._toolbar.tabs.items[FILTER_WORKS].click()
 
-        self.assertEqual([row.strategy_id for row in self._rows(widget) if row.kind == ROW_STRATEGY], ["split-02"])
-        self.assertTrue(widget._toolbar.filter_buttons[FILTER_WORKS].isChecked())
-        self.assertFalse(widget._toolbar.filter_buttons["all"].isChecked())
+        self.assertEqual(self._strategy_ids(widget), ["split-02"])
+        self.assertEqual(widget._toolbar.quick_filter(), FILTER_WORKS)
+        self.assertTrue(widget._toolbar.tabs.items[FILTER_WORKS].isSelected)
+        self.assertFalse(widget._toolbar.tabs.items[FILTER_ALL].isSelected)
+        # Группировка относится ко всему каталогу: на других вкладках её нет.
+        self.assertTrue(widget._grouping_combo.isHidden())
+
+    def test_new_profile_opens_on_recommended_flat_list(self) -> None:
+        """Новичок сразу видит то, с чего начинать, а не каталог из сотен строк."""
+        widget = self._widget(tab=None)
+
+        self.assertEqual(widget._toolbar.quick_filter(), FILTER_RECOMMENDED)
+        self.assertEqual({row.kind for row in self._rows(widget)}, {ROW_STRATEGY})
+        self.assertEqual(self._strategy_ids(widget), ["fake-05", "split-03", "fake-01"])
+        self.assertTrue(widget._grouping_combo.isHidden())
+
+    def test_tabs_show_how_many_strategies_they_hold(self) -> None:
+        widget = self._widget(states={"split-02": ProfileStrategyState(rating="work", favorite=True)}, tab=None)
+        texts = {key: item.text() for key, item in widget._toolbar.tabs.items.items()}
+
+        self.assertEqual(
+            texts,
+            {
+                FILTER_RECOMMENDED: "Советуемые  3",
+                FILTER_WORKS: "Работают у меня  1",
+                FILTER_FAVORITE: "Избранное  1",
+                FILTER_ALL: f"Все  {len(_entries())}",
+            },
+        )
+
+    def test_profile_without_recommendations_opens_whole_catalog_without_that_tab(self) -> None:
+        widget = self._widget(usage={}, tab=None)
+
+        self.assertEqual(widget._toolbar.quick_filter(), FILTER_ALL)
+        self.assertTrue(widget._toolbar.tabs.items[FILTER_RECOMMENDED].isHidden())
+        self.assertFalse(widget._toolbar.tabs.items[FILTER_WORKS].isHidden())
+        self.assertFalse(widget._grouping_combo.isHidden())
+
+    def test_empty_tab_explains_how_strategies_get_there(self) -> None:
+        widget = self._widget()
+
+        widget._toolbar.tabs.items[FILTER_WORKS].click()
+        self.assertTrue(widget._list.isHidden())
+        self.assertFalse(widget._empty.isHidden())
+        self.assertIn("«Работает»", widget._empty.text())
+
+        widget._toolbar.tabs.items[FILTER_ALL].click()
+        self.assertFalse(widget._list.isHidden())
+        self.assertTrue(widget._empty.isHidden())
+
+        widget._search.setText("такой стратегии нет")
+        self.assertIn("Ничего не найдено", widget._empty.text())
+
+    def test_strategy_chosen_outside_the_tab_moves_to_whole_catalog(self) -> None:
+        """Перебор ушёл дальше советуемых: выбранная стратегия не остаётся за кадром."""
+        widget = self._widget(tab=None)
+
+        widget.set_current_strategy_id("split-09")
+
+        self.assertEqual(widget._toolbar.quick_filter(), FILTER_ALL)
+        self.assertEqual(self._open_groups(widget), ["split"])
+        self.assertEqual(widget._list.current_row().strategy_id, "split-09")
+
+    def test_strategy_chosen_inside_the_tab_keeps_the_tab(self) -> None:
+        widget = self._widget(tab=None)
+
+        widget.set_current_strategy_id("split-03")
+
+        self.assertEqual(widget._toolbar.quick_filter(), FILTER_RECOMMENDED)
+        # Группа выбранной стратегии уже раскрыта к возврату на вкладку «Все».
+        widget._toolbar.tabs.items[FILTER_ALL].click()
+        self.assertEqual(self._open_groups(widget), ["split"])
 
     def test_enter_in_search_chooses_current_row_and_escape_clears(self) -> None:
         widget = self._widget()
@@ -328,7 +410,7 @@ class DetailsTests(_WidgetCase):
         widget = self._with_details(current="split-00")
         opened = QSignalSpy(widget.details_changed)
         applied = QSignalSpy(widget.strategy_activated)
-        widget._on_group_toggle("recommended", True)
+        widget._on_group_toggle("fake", True)
         row = next(row for row in self._rows(widget) if row.strategy_id == "fake-05")
         model = widget._list.list_model()
         index = model.index(model.row_of_key(row.key), 0)
@@ -382,7 +464,7 @@ class DetailsTests(_WidgetCase):
 
     def test_shift_click_and_double_click_open_details_without_applying(self) -> None:
         widget = self._with_details(current="split-00")
-        widget._on_group_toggle("recommended", True)
+        widget._on_group_toggle("fake", True)
         applied = QSignalSpy(widget.strategy_activated)
 
         self._press(widget, "i:fake-05", modifier=Qt.KeyboardModifier.ShiftModifier)
@@ -396,7 +478,7 @@ class DetailsTests(_WidgetCase):
 
     def test_single_click_applies_only_after_waiting_for_second_click(self) -> None:
         widget = self._with_details(current="split-00")
-        widget._on_group_toggle("recommended", True)
+        widget._on_group_toggle("fake", True)
         applied = QSignalSpy(widget.strategy_activated)
 
         self._press(widget, "i:fake-05")
@@ -642,7 +724,7 @@ class KeyboardAndMenuTests(_WidgetCase):
         text = strategy_tooltip(row)
 
         self.assertIn("Эта стратегия выбрана для профиля.", text)
-        self.assertIn("Зелёная галочка на значке", text)
+        self.assertIn("Зелёная галочка: вы отметили", text)
         self.assertIn("Звезда", text)
         self.assertIn("Стоит на этом сервисе в 9 готовых пресетах.", text)
         self.assertIn("--lua-desync=fake:blob=x", text)
@@ -669,11 +751,11 @@ class LayoutAndAccessibilityTests(_WidgetCase):
         self.assertEqual(widget._list.accessibleName(), "Список готовых стратегий: показано 38 из 38")
         self.assertEqual(widget._search.accessibleName(), "Поиск готовых стратегий")
         self.assertEqual(widget._grouping_combo.accessibleName(), "Группировка готовых стратегий")
-        self.assertEqual(widget._toolbar.filter_buttons["works"].accessibleName(), "Отбор стратегий: Работают у меня")
+        self.assertEqual(widget._toolbar.tabs.items["works"].accessibleName(), "Вкладка стратегий: Работают у меня")
         header = next(row for row in self._rows(widget) if row.kind == ROW_GROUP)
         index = widget._list.list_model().index(0, 0)
-        self.assertEqual(header.key, "g:recommended")
-        self.assertIn("Группа: Советуем для этого сервиса, стратегий: 3, раскрыта", index.data(Qt.ItemDataRole.AccessibleTextRole))
+        self.assertEqual(header.key, "g:fake")
+        self.assertIn("Группа: Подмена пакета, стратегий: 16, раскрыта", index.data(Qt.ItemDataRole.AccessibleTextRole))
 
     def test_onboarding_targets_point_at_panel_and_toolbar(self) -> None:
         widget = self._widget()
@@ -700,6 +782,21 @@ class LayoutAndAccessibilityTests(_WidgetCase):
         self.assertNotEqual(plain.toImage(), first.toImage())
         self.assertNotEqual(plain.toImage(), other.toImage())
         self.assertNotEqual(icons.strategy_icon("unknown-family", "#6fb8ff", "", 28, 1.0, "#2d2d2d").toImage(), plain.toImage())
+
+    def test_tile_icon_shows_what_the_person_knows_about_the_strategy(self) -> None:
+        """Значок плитки — состояние: не пробовал, работает, не работает, выбрана сейчас."""
+        from profile.ui.strategy_list import icons
+
+        def icon(rating: str, is_current: bool):
+            return icons.state_icon(rating, is_current, 28, 1.0, "#5caee8", "#b7bec8")
+
+        images = [icon(rating, current).toImage() for rating, current in (("", False), ("", True), ("work", False), ("notwork", False))]
+        self.assertTrue(all(not image.isNull() for image in images))
+        for position, image in enumerate(images):
+            self.assertNotIn(image, images[:position])
+        self.assertIs(icon("work", False), icon("work", False))
+        # Оценка важнее отметки «выбрана»: выбранную стратегию и так показывает плашка.
+        self.assertEqual(icon("work", True).toImage(), icon("work", False).toImage())
 
     def test_one_frame_asks_theme_once_not_per_tile(self) -> None:
         from profile.ui.strategy_list import delegate as delegate_module
