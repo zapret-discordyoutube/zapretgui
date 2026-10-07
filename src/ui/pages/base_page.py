@@ -76,6 +76,45 @@ class BasePage(_FluentScrollArea):
     # журнал экранов окна запишет его как шаг для кнопки «назад».
     navigation_screen_changed = pyqtSignal()
 
+    def set_navigation_back(self, go_back) -> None:
+        """Журнал экранов окна даёт странице свой шаг «назад»: им отвечает Esc."""
+        self._navigation_back = go_back
+
+    def navigation_step_back(self) -> bool:
+        """Вернуться на экран, где человек был до этого. False — возвращаться некуда."""
+        go_back = getattr(self, "_navigation_back", None)
+        if not callable(go_back):
+            return False
+        try:
+            return bool(go_back())
+        except Exception:
+            return False
+
+    def _typing_in_text_field(self) -> bool:
+        """Фокус в поле ввода: там Esc — клавиша поля, а не команда «назад»."""
+        focused = QApplication.focusWidget()
+        if focused is None:
+            return False
+        # По имени класса Qt: так распознаются и обычные поля, и их fluent-обёртки.
+        if not any(focused.inherits(name) for name in ("QLineEdit", "QPlainTextEdit", "QTextEdit")):
+            return False
+        read_only = getattr(focused, "isReadOnly", None)
+        return not (callable(read_only) and read_only())
+
+    def keyPressEvent(self, event):  # noqa: N802
+        # Esc — шаг назад по журналу экранов, как кнопка «назад» в шапке окна.
+        # Клавиша доходит сюда, только если её не забрал виджет в фокусе
+        # (открытое меню, строка поиска, диалог закрываются ею сами).
+        if (
+            event.key() == Qt.Key.Key_Escape
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+            and not self._typing_in_text_field()
+            and self.navigation_step_back()
+        ):
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def __init__(
         self,
         title: str,

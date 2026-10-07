@@ -443,7 +443,7 @@ class DetailsTests(_WidgetCase):
         self.assertIn("У подделки нет защиты от сайта", text)
         self.assertIn("YouTube · видео", text)
         self.assertIn("в 9 готовых пресетах · открыть", text)
-        self.assertIn("Слева вы, посередине проверка у провайдера, справа сайт.", text)
+        self.assertIn("Слева вы, посередине ТСПУ", text)
         self.assertEqual(widget._details_view._illustration.scene_key(), "fake")
         self.assertIn("На других профилях", text)
         self.assertIn("работает — 2, не работает — 1", text)

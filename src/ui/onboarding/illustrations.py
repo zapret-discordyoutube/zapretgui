@@ -21,6 +21,12 @@
 анализаторе: строка появляется, когда пакет вышел, и дописывает, что с ним
 сделали проверка провайдера и сайт. Текст журнала стоит на месте, поэтому его
 можно спокойно прочитать — в отличие от подписи на движущемся пакете.
+
+Главное в схеме — момент проверки. Поэтому каждый пакет, дойдя до ТСПУ,
+останавливается: вся дорожка замирает, пакет под лучом проверки увеличен, а
+в журнале появляется её решение. Потом движение продолжается. Остановки
+добавляют времени к кругу, но не меняют расстановку пакетов: внутри схемы
+счёт идёт в «фазе сцены», которая на время остановки просто не растёт.
 Сцены повторяются по кругу. Все переходы (появление реплики, вспышка у
 сайта, падение подделок) заканчиваются до STATIC_PHASE: когда анимации в
 системе выключены, рисуется этот неподвижный кадр с итогом.
@@ -33,7 +39,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, QSize, Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPen
@@ -44,14 +50,22 @@ from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import set_tooltip
 
 
-# Круг неторопливый: под каждым пакетом подпись, её нужно успеть прочитать.
-PERIOD_MS = 9000
+# За это время фаза сцены проходит полный круг, не считая остановок у проверки.
+PERIOD_MS = 10000
+# На столько дорожка замирает, когда пакет дошёл до ТСПУ: это главный момент схемы.
+HOLD_MS = 1700
+# Во столько раз увеличен пакет, пока его проверяют.
+HOLD_SCALE = 1.22
 FRAME_MS = 33
 # Высота дорожки с узлами; ниже неё идёт журнал пакетов.
-TRACK_HEIGHT = 150
-LOG_HEADER_HEIGHT = 20
-LOG_ROW_HEIGHT = 18
+TRACK_HEIGHT = 178
+LOG_HEADER_HEIGHT = 26
+LOG_ROW_HEIGHT = 22
 LOG_BOTTOM_PAD = 8
+# С этой ширины журнал встаёт справа от дорожки, а не под ней: схема занимает
+# всю ширину страницы, но дорожка не растягивается и пакеты не летят через весь экран.
+WIDE_FROM = 980
+WIDE_TRACK_SHARE = 0.56
 # Высота схемы, пока сцена не выбрана: дорожка и журнал на два пакета.
 ILLUSTRATION_HEIGHT = TRACK_HEIGHT + LOG_HEADER_HEIGHT + LOG_ROW_HEIGHT * 2 + LOG_BOTTOM_PAD
 # Сколько доли круга плашка идёт от «Вы» до сайта.
@@ -306,6 +320,8 @@ class TechniqueIllustration(QWidget):
         self._tr = tr_fn
         self._scene_key = ""
         self._phase = STATIC_PHASE
+        # Пакет, остановленный у проверки (-1 — дорожка движется).
+        self._held_packet = -1
         self._paused = False
         # С какого места круга идёт отсчёт после снятия с паузы, мс.
         self._clock_offset_ms = 0.0
@@ -335,7 +351,7 @@ class TechniqueIllustration(QWidget):
             return
         self._scene_key = key
         # Высота схемы зависит от сцены: в журнале по строке на пакет.
-        self.setFixedHeight(self.scene_height(key))
+        self.setFixedHeight(self._fit_height())
         self._restart()
 
     @staticmethod
@@ -360,7 +376,7 @@ class TechniqueIllustration(QWidget):
         if paused:
             self._timer.stop()
         else:
-            self._clock_offset_ms = self._phase * PERIOD_MS
+            self._clock_offset_ms = self.ms_at(self._phase)
             self._clock.start()
             self._timer.start()
         self._sync_pause_button()
@@ -373,6 +389,7 @@ class TechniqueIllustration(QWidget):
 
     def set_phase(self, phase: float) -> None:
         """Кадр в заданный момент круга (для снимков и тестов)."""
+        self._held_packet = -1
         self._phase = max(0.0, min(0.999, float(phase)))
         self.update()
 
@@ -388,7 +405,9 @@ class TechniqueIllustration(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().resizeEvent(event)
-        self.pause_button.move(self.width() - self.pause_button.width(), 0)
+        self.pause_button.move(int(self._track_width()) - self.pause_button.width(), 0)
+        if event.oldSize().width() != event.size().width() and self.height() != self._fit_height():
+            self.setFixedHeight(self._fit_height())
 
     def _can_animate(self) -> bool:
         return bool(self._scene_key) and self.isVisible() and are_live_animations_enabled()
@@ -411,9 +430,54 @@ class TechniqueIllustration(QWidget):
         self._timer.start()
         self.update()
 
+    def hold_points(self) -> list[tuple[float, int]]:
+        """Где дорожка замирает: (фаза сцены, номер пакета у проверки).
+
+        Половины одного слитого пакета проверяются вместе — остановка одна.
+        Пакет, который проверка не пропустила, стоит у неё и так.
+        """
+        scene = SCENES.get(self._scene_key)
+        if scene is None:
+            return []
+        layout = self._layout()
+        chips = self._chip_widths(scene, QFontMetrics(self._chip_font()))
+        times = self._scene_times(scene, layout, chips)
+        span = max(1.0, layout.end_x - layout.start_x)
+        at_gate = (layout.gate_x - layout.start_x) / span
+        points: list[tuple[float, int]] = []
+        for index, packet in enumerate(scene.packets):
+            if index > 0 and scene.packets[index - 1].glued_to_next:
+                continue
+            moment = times.verdict if packet.fate == "blocked" else times.starts[index] + scene.travel * at_gate
+            if 0.0 < moment < FADE_FROM:
+                points.append((moment, index))
+        return sorted(points)
+
+    def cycle_ms(self) -> float:
+        """Сколько длится круг вместе с остановками у проверки."""
+        return PERIOD_MS + HOLD_MS * len(self.hold_points())
+
+    def phase_at(self, ms: float) -> tuple[float, int]:
+        """Фаза сцены в момент ms от начала круга и номер пакета, который сейчас
+        проверяют (-1 — дорожка движется)."""
+        points = self.hold_points()
+        rest = float(ms) % (PERIOD_MS + HOLD_MS * len(points))
+        for moment, index in points:
+            reach = moment * PERIOD_MS
+            if rest < reach:
+                break
+            if rest < reach + HOLD_MS:
+                return moment, index
+            rest -= HOLD_MS
+        return min(0.999, rest / PERIOD_MS), -1
+
+    def ms_at(self, phase: float) -> float:
+        """Момент круга, в который фаза сцены впервые равна phase."""
+        return phase * PERIOD_MS + HOLD_MS * sum(1 for moment, _index in self.hold_points() if moment < phase)
+
     def _on_tick(self) -> None:
         elapsed = self._clock.elapsed() if self._clock.isValid() else 0
-        self._phase = ((self._clock_offset_ms + elapsed) % PERIOD_MS) / PERIOD_MS
+        self._phase, self._held_packet = self.phase_at(self._clock_offset_ms + elapsed)
         self.update()
 
     def _sync_pause_button(self) -> None:
@@ -450,14 +514,29 @@ class TechniqueIllustration(QWidget):
             "accent": QColor(themeColor()),
         }
 
-    def _layout(self) -> _Layout:
+    def _is_wide(self) -> bool:
+        return self.width() >= WIDE_FROM
+
+    def _track_width(self) -> float:
+        """Ширина дорожки с узлами: в широкой схеме справа от неё стоит журнал."""
         width = float(self.width())
-        node_w, gate_w = 78.0, 100.0
-        track_y = 70.0
-        you_rect = QRectF(4, track_y - 26, node_w, 52)
-        site_rect = QRectF(width - 4 - node_w, track_y - 26, node_w, 52)
-        gate_rect = QRectF(width / 2 - gate_w / 2, track_y - 36, gate_w, 72)
+        return round(width * WIDE_TRACK_SHARE) if self._is_wide() else width
+
+    def _layout(self) -> _Layout:
+        width = self._track_width()
+        node_w, gate_w = 88.0, 116.0
+        track_y = 86.0
+        you_rect = QRectF(4, track_y - 30, node_w, 60)
+        site_rect = QRectF(width - 4 - node_w, track_y - 30, node_w, 60)
+        gate_rect = QRectF(width / 2 - gate_w / 2, track_y - 42, gate_w, 84)
         return _Layout(you_rect, gate_rect, site_rect, you_rect.right() + 8, site_rect.left() - 8, track_y)
+
+    def _fit_height(self) -> int:
+        """Высота под нынешнюю ширину: журнал либо под дорожкой, либо справа от неё."""
+        scene = SCENES.get(self._scene_key)
+        rows = len(scene.packets) if scene is not None else 2
+        log_height = LOG_HEADER_HEIGHT + LOG_ROW_HEIGHT * rows + LOG_BOTTOM_PAD
+        return max(TRACK_HEIGHT, log_height + 8) if self._is_wide() else TRACK_HEIGHT + log_height
 
     def _mono_font(self, shrink: float, *, bold: bool = False) -> QFont:
         font = QFont(self.font())
@@ -468,10 +547,10 @@ class TechniqueIllustration(QWidget):
         return font
 
     def _chip_font(self) -> QFont:
-        return self._mono_font(1.0, bold=True)
+        return self._mono_font(0.0, bold=True)
 
     def _detail_font(self) -> QFont:
-        return self._mono_font(2.5)
+        return self._mono_font(1.0)
 
     def log_rows(self, phase: float) -> list[LogRow]:
         """Журнал пакетов в момент phase: что уже вышло и что с этим сделали."""
@@ -522,17 +601,25 @@ class TechniqueIllustration(QWidget):
 
     def _paint_log(self, painter: QPainter, phase: float, fade: float, colors) -> None:
         """Журнал под дорожкой: номер, пакет, длина, проверка провайдера, сайт."""
-        width = float(self.width())
-        top = float(TRACK_HEIGHT)
+        if self._is_wide():
+            # Широкая схема: журнал стоит справа от дорожки.
+            left = self._track_width() + 28.0
+            top = 6.0
+        else:
+            left = 0.0
+            top = float(TRACK_HEIGHT)
+        width = float(self.width()) - left
+        painter.save()
+        painter.translate(left, 0)
         font = self._detail_font()
         painter.setFont(font)
-        columns = (10.0, 44.0, width * 0.36, width * 0.47, width * 0.78)
+        columns = (10.0, 48.0, width * 0.38, width * 0.5, width * 0.8)
         flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         headers = (
             "№",
             self._tr("onboarding.scene.log.packet", "пакет"),
             self._tr("onboarding.scene.log.length", "длина"),
-            self._tr("onboarding.scene.log.gate", "проверка провайдера"),
+            self._tr("onboarding.scene.log.gate", "ТСПУ"),
             self._tr("onboarding.scene.log.site", "сайт"),
         )
         painter.setPen(colors["muted"])
@@ -563,6 +650,7 @@ class TechniqueIllustration(QWidget):
                 painter.setPen(color)
                 painter.drawText(QRectF(x, y, width - x, LOG_ROW_HEIGHT), flags, text)
         painter.setOpacity(1.0)
+        painter.restore()
 
     def _paint_grid(self, painter: QPainter, layout: "_Layout", colors) -> None:
         """Сетка фона и пунктирные оси трёх узлов."""
@@ -570,7 +658,7 @@ class TechniqueIllustration(QWidget):
         grid.setAlpha(max(8, grid.alpha() // 3))
         painter.setPen(QPen(grid, 1))
         # Сетка лежит только под дорожкой: журнал ниже читается на ровном фоне.
-        width, height = self.width(), TRACK_HEIGHT - 6
+        width, height = int(self._track_width()), TRACK_HEIGHT - 6
         for x in range(GRID_STEP, width, GRID_STEP):
             painter.drawLine(x, 0, x, height)
         for y in range(GRID_STEP, height, GRID_STEP):
@@ -704,11 +792,11 @@ class TechniqueIllustration(QWidget):
         self._paint_node(
             painter,
             layout.gate_rect,
-            self._tr("onboarding.scene.provider", "Провайдер"),
+            self._tr("onboarding.scene.provider", "ТСПУ"),
             colors,
             BLOCK_RED if blocked > 0.0 else None,
             tint_strength=blocked * fade,
-            text_rect=QRectF(layout.gate_rect.left(), layout.gate_rect.top() + 2, layout.gate_rect.width(), 20),
+            text_rect=QRectF(layout.gate_rect.left(), layout.gate_rect.top() + 3, layout.gate_rect.width(), 22),
         )
         self._paint_scan(painter, layout, frames, chips, phase, colors)
         painter.setPen(colors["muted"])
@@ -735,6 +823,17 @@ class TechniqueIllustration(QWidget):
         painter.save()
         painter.setClipRect(QRectF(layout.you_rect.right() + 1, 0, self.width(), self.height()))
         painter.setFont(chip_font)
+        held = self._held_packet
+        if held >= 0:
+            # Пакет под лучом проверки увеличен (и его слитая половина тоже):
+            # это тот момент, ради которого схема останавливается.
+            together = {held, held + 1} if scene.packets[held].glued_to_next else {held}
+            frames = [
+                replace(frame, scale=frame.scale * HOLD_SCALE) if frame.index in together else frame
+                for frame in frames
+            ]
+            # Увеличенный пакет рисуется последним — поверх соседей.
+            frames.sort(key=lambda frame: frame.index in together)
         for frame in frames:
             self._paint_chip(painter, metrics, frame, layout.track_y, frame.alpha * fade, colors)
         # Под пакетом — только его номер: по нему пакет находят в журнале ниже.
@@ -747,7 +846,7 @@ class TechniqueIllustration(QWidget):
             painter.setOpacity(frame.alpha * fade)
             painter.setPen(FAKE_AMBER if frame.kind == "fake" else colors["muted"])
             painter.drawText(
-                QRectF(frame.x - 30, layout.track_y + frame.dy + 14, 60, 14),
+                QRectF(frame.x - 30, layout.track_y + frame.dy + 17, 60, 16),
                 Qt.AlignmentFlag.AlignCenter,
                 f"#{frame.index + 1}",
             )
@@ -795,7 +894,7 @@ class TechniqueIllustration(QWidget):
 
     @staticmethod
     def _chip_width(metrics: QFontMetrics, text: str) -> float:
-        return float(metrics.horizontalAdvance(text) + 16)
+        return float(metrics.horizontalAdvance(text) + 20)
 
     def _paint_node(
         self,
@@ -914,7 +1013,7 @@ class TechniqueIllustration(QWidget):
     def _paint_chip(self, painter, metrics, frame: ChipFrame, track_y: float, alpha: float, colors) -> None:
         text, kind = frame.label, frame.kind
         width = self._chip_width(metrics, text)
-        rect = QRectF(-width / 2, -12, width, 24)
+        rect = QRectF(-width / 2, -14, width, 28)
         painter.save()
         painter.translate(frame.x, track_y + frame.dy)
         painter.rotate(frame.angle)

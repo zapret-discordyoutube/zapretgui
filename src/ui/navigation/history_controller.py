@@ -49,6 +49,10 @@ class WindowNavigationHistory:
         connect = getattr(signal, "connect", None)
         if callable(connect):
             connect(self.note_screen_changed)
+        # Esc на странице — тот же шаг «назад», что и кнопка в шапке окна.
+        give_back = getattr(page, "set_navigation_back", None)
+        if callable(give_back):
+            give_back(self.go_back)
 
     def note_screen_changed(self) -> None:
         """Что-то открылось. Запись откладывается до конца витка событий: страница

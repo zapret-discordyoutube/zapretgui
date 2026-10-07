@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -323,3 +323,62 @@ class ProfileStrategyDetailsBreadcrumbTests(ProfileStrategyOpenGroupSaveTests):
         self.assertEqual(page._strategy_stack.currentIndex(), 0)
 
         self.assertFalse(page._go_one_level_back())
+
+    def test_escape_first_asks_window_history_to_go_back(self) -> None:
+        """Esc — тот же шаг «назад», что кнопка в шапке окна: возвращает на экран,
+        где человек был до этого (например, с чужого профиля на подробности стратегии)."""
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+
+        page = self._page()
+        page._profile_key = "profile:0"
+        page._apply_payload(self._payload(persistent_key="uid:youtube", open_group=None))
+        calls = []
+        page.set_navigation_back(lambda: calls.append("back") or True)
+        page._strategy_list.show_details("host-05")
+
+        QTest.keyClick(page._strategy_list._details_view, Qt.Key.Key_Escape)
+
+        # Журнал экранов сам вернул на прежний экран — страница поверх этого ничего не делает.
+        self.assertEqual(calls, ["back"])
+        self.assertTrue(page._strategy_list.details_open())
+
+        # Журналу некуда идти — остаётся шаг внутри страницы.
+        page.set_navigation_back(lambda: calls.append("nothing") and False)
+        QTest.keyClick(page, Qt.Key.Key_Escape)
+        self.assertEqual(calls, ["back", "nothing"])
+        self.assertFalse(page._strategy_list.details_open())
+
+    def test_escape_in_text_field_is_not_a_step_back(self) -> None:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+        from PyQt6.QtWidgets import QLineEdit
+
+        page = self._page()
+        page.show()
+        self.addCleanup(page.close)
+        calls = []
+        page.set_navigation_back(lambda: calls.append("back") or True)
+        field = QLineEdit(page)
+        field.show()
+        # Без настоящего экрана окно не получает фокус, поэтому поле в фокусе подставлено.
+        with patch("ui.pages.base_page.QApplication.focusWidget", return_value=field):
+            QTest.keyClick(field, Qt.Key.Key_Escape)
+            self.assertEqual(calls, [])
+            # Поле только для чтения ничего не вводит: там Esc — снова шаг назад.
+            field.setReadOnly(True)
+            QTest.keyClick(field, Qt.Key.Key_Escape)
+            self.assertEqual(calls, ["back"])
+
+    def test_window_history_gives_every_page_its_back_step(self) -> None:
+        from types import SimpleNamespace
+
+        from ui.navigation.history_controller import WindowNavigationHistory
+
+        history = WindowNavigationHistory(SimpleNamespace(), SimpleNamespace())
+        given = []
+        page = SimpleNamespace(set_navigation_back=given.append)
+
+        history.attach_page(page)
+
+        self.assertEqual(given, [history.go_back])

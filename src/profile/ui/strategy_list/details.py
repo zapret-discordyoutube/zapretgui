@@ -384,9 +384,8 @@ class StrategyDetailsView(QWidget):
         )
         self._steps_layout = QVBoxLayout()
         self._steps_layout.setSpacing(10)
-        # Чем шире схема, тем быстрее по ней летят пакеты (круг один и тот же),
-        # поэтому на широкой странице она не растягивается на всю ширину.
-        self._illustration.setMaximumWidth(760)
+        # Схема занимает всю ширину: в широком окне журнал пакетов встаёт
+        # справа от дорожки, и сама дорожка не растягивается.
         self._steps_card.body.addWidget(self._illustration)
         self._steps_card.body.addWidget(self._scene_caption)
         self._steps_card.body.addLayout(self._steps_layout)
@@ -467,7 +466,8 @@ class StrategyDetailsView(QWidget):
             only = sum(1 for item in self._step_rows if item.step.scene) < 2
             self._scene_caption.setText(
                 ("" if only else f"Шаг {number}: {row.step.title.lower()}. ")
-                + "Слева вы, посередине проверка у провайдера, справа сайт."
+                + "Слева вы, посередине ТСПУ — оборудование провайдера, которое проверяет трафик, справа сайт. "
+                "У ТСПУ каждый пакет останавливается: в журнале видно, что с ним решили."
             )
             if self._illustration.scene_key() == scene:
                 # Та же схема выбрана снова — круг идёт с начала.

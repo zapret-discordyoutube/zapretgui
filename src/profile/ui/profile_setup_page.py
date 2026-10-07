@@ -1286,12 +1286,18 @@ class ProfileSetupPageBase(BasePage):
         return False
 
     def keyPressEvent(self, event):  # noqa: N802
-        # Esc возвращает на уровень выше. Сюда клавиша доходит, только если её
-        # не забрал виджет в фокусе (строка поиска закрывает ею сам поиск).
-        if event.key() == Qt.Key.Key_Escape and self._go_one_level_back():
-            event.accept()
-            return
+        # Esc возвращает туда, где человек был до этого: общий шаг «назад» по
+        # журналу экранов делает BasePage. Если журнала нет или в нём некуда
+        # идти, остаётся шаг внутри страницы — из раздела или подробностей о
+        # стратегии к готовым стратегиям.
         super().keyPressEvent(event)
+        if (
+            not event.isAccepted()
+            and event.key() == Qt.Key.Key_Escape
+            and not self._typing_in_text_field()
+            and self._go_one_level_back()
+        ):
+            event.accept()
 
     def _on_strategy_details_changed(self, name: str) -> None:
         """Подробности о стратегии — следующий шаг строки пути."""

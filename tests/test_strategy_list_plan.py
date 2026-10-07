@@ -736,6 +736,56 @@ class AnalyzerSceneTests(unittest.TestCase):
         self.assertEqual(six - two, 4 * LOG_ROW_HEIGHT)
         self.assertEqual(widget.height(), six)
 
+    def test_every_packet_stops_at_the_inspection_point(self) -> None:
+        """Главный момент схемы — проверка: у неё дорожка замирает на каждом пакете."""
+        from ui.onboarding.illustrations import HOLD_MS, PERIOD_MS
+
+        widget, _frames = self._frames("fake", 0.1)
+        points = widget.hold_points()
+        self.assertEqual([index for _moment, index in points], [0, 1])
+        self.assertEqual(widget.cycle_ms(), PERIOD_MS + 2 * HOLD_MS)
+
+        moment, index = points[0]
+        reach = moment * PERIOD_MS
+        # До остановки фаза идёт как обычно, во время неё стоит на месте, потом идёт дальше.
+        self.assertEqual(widget.phase_at(reach - 100)[1], -1)
+        self.assertEqual(widget.phase_at(reach + 1), (moment, index))
+        self.assertEqual(widget.phase_at(reach + HOLD_MS - 1), (moment, index))
+        after_phase, after_held = widget.phase_at(reach + HOLD_MS + 500)
+        self.assertEqual(after_held, -1)
+        self.assertAlmostEqual(after_phase, moment + 500 / PERIOD_MS, places=6)
+        # Пакет в этот момент стоит ровно у проверки.
+        held = next(frame for frame in widget.chip_frames(moment) if frame.index == index)
+        self.assertAlmostEqual(held.x, widget._layout().gate_x, delta=1.0)
+
+    def test_glued_packet_stops_once_and_resume_continues_from_the_same_frame(self) -> None:
+        from ui.onboarding.illustrations import PERIOD_MS
+
+        widget, _frames = self._frames("tcpseg", 0.1)
+        self.assertEqual(len(widget.hold_points()), 1)
+        for phase in (0.05, 0.3, 0.6):
+            self.assertAlmostEqual(widget.phase_at(widget.ms_at(phase) + 1)[0], phase, delta=2 / PERIOD_MS)
+
+    def test_wide_scheme_puts_the_log_beside_the_track(self) -> None:
+        from ui.onboarding.illustrations import TRACK_HEIGHT, WIDE_FROM
+
+        narrow, _frames = self._frames("fakedsplit", 0.5, width=620)
+        wide, _frames = self._frames("fakedsplit", 0.5, width=WIDE_FROM + 300)
+        wide.resize(WIDE_FROM + 300, wide._fit_height())
+
+        self.assertGreater(narrow._fit_height(), TRACK_HEIGHT)
+        self.assertLess(wide._fit_height(), narrow._fit_height())
+        # Дорожка не растягивается на всю ширину: сайт стоит левее журнала.
+        self.assertLess(wide._layout().site_rect.right(), wide.width() * 0.6)
+        self.assertEqual(narrow._layout().site_rect.right(), narrow.width() - 4)
+        self.assertFalse(wide.grab().toImage().isNull())
+
+    def test_inspection_node_is_called_tspu(self) -> None:
+        from app.ui_texts import tr
+
+        self.assertEqual(tr("onboarding.scene.provider", language="ru"), "ТСПУ")
+        self.assertEqual(tr("onboarding.scene.log.gate", language="ru"), "ТСПУ")
+
     def test_scene_runs_slowly_enough_to_read_captions(self) -> None:
         from ui.onboarding.illustrations import PERIOD_MS
 
