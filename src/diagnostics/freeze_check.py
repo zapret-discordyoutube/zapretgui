@@ -169,6 +169,16 @@ def _split_url(url: str) -> tuple[str, str]:
     return parts.hostname or "", path
 
 
+def _confirm_cut(first_text: str, again: tuple[FreezeState, str]) -> tuple[FreezeState, str]:
+    """Обрыв считается обрывом, только если повторился: фильтр режет каждый раз, сбой сети — нет."""
+    state, text = again
+    if state == FreezeState.FREEZE:
+        return FreezeState.FREEZE, f"{text} — дважды подряд"
+    if state == FreezeState.OK:
+        return FreezeState.OK, f"{text} со второго раза: первый обрыв был случайным сбоем"
+    return FreezeState.UNKNOWN, f"{first_text}, но при повторе обрыв не подтвердился ({text})"
+
+
 def _check_provider(
     provider: str,
     candidates: list[dict],
@@ -193,6 +203,8 @@ def _check_provider(
         ident = str(item.get("id") or "")
         tried += 1
         state, text = classify_download(download(host, path))
+        if state == FreezeState.FREEZE:
+            state, text = _confirm_cut(text, classify_download(download(host, path)))
         if state != FreezeState.UNKNOWN:
             break
     if state == FreezeState.UNKNOWN and tried > 1:
