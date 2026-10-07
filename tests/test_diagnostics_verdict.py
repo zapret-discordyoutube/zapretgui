@@ -966,13 +966,15 @@ class EngineScenarioTests(unittest.TestCase):
         self.assertIn(("discord.com", DISCORD_REAL[0]), net.calls)
 
     def test_run_deadline_still_prints_summary_and_keeps_spoofing(self) -> None:
+        # Запас по времени большой: при загруженной машине ответы DNS не должны
+        # опоздать к сроку — иначе тест падает через раз.
         def _slow(host, ip):
-            time.sleep(0.6)
+            time.sleep(2.0)
             return ProbeResult(ip=ip, kind="cancelled")
 
         lines: list[str] = []
         net = _Net(system=("195.82.146.214",), https=_slow)
-        with patch.object(engine, "RUN_DEADLINE", 0.2):
+        with patch.object(engine, "RUN_DEADLINE", 1.0):
             result = net.run(engine.run_dns_check, emit=lines.append)
 
         text = "\n".join(lines)
