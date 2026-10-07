@@ -718,6 +718,43 @@ def _filter_card(place: dict) -> Card:
     )
 
 
+_WAY_STATES = {"passed": (OK, "проходит"), "cut": (FAIL, "режется"), "unstable": (UNKNOWN, "через раз"), "no_control": (UNKNOWN, "сервер такое не принимает")}
+
+
+def _habits_card(habits: dict) -> Card:
+    """«Как работает фильтр»: какое дробление приветствия проходит и режется ли ECH."""
+    ech = habits.get("ech") or {}
+    ech_state = {"blocked": WARN, "fine": OK}.get(str(ech.get("state")), UNKNOWN)
+    lines = [Line(INFO, _capital(str(habits.get("headline") or "")))]
+    if habits.get("advice"):
+        lines.append(Line(INFO, "Какие стратегии пробовать", str(habits["advice"])))
+    if ech.get("text"):
+        lines.append(Line(ech_state, "ECH", _capital(str(ech["text"]))))
+    sections = []
+    for site in habits.get("sites") or ():
+        rows = [Line(INFO, "Вывод", _capital(str(site.get("text") or "")))]
+        if site.get("advice"):
+            rows.append(Line(INFO, "Какие стратегии пробовать", str(site["advice"])))
+        for way in site.get("ways") or ():
+            state, word = _WAY_STATES.get(str(way.get("state")), (UNKNOWN, ""))
+            rows.append(Line(state, str(way.get("title") or ""), word))
+        sections.append(Section(f"{site.get('host', '')} ({site.get('address', '')})", tuple(rows)))
+    if ech.get("text"):
+        rows = [Line(ech_state, "Шифрованное имя сайта (ECH)", _capital(str(ech["text"])))]
+        if ech.get("advice"):
+            rows.append(Line(INFO, "Что делать", str(ech["advice"])))
+        sections.append(Section("Cloudflare и ECH", tuple(rows)))
+    return Card(
+        key="habits",
+        icon="fa5s.cut",
+        title="Как работает фильтр",
+        level=WARN if ech_state == WARN else INFO,
+        status="ECH режется" if ech_state == WARN else ("Проверено дробление" if habits.get("sites") else "ECH проходит"),
+        lines=tuple(lines),
+        sections=tuple(sections),
+    )
+
+
 def _network_card(network: dict) -> Card:
     lines = tuple(
         Line(_state(item.get("state"), INFO), str(item.get("name") or ""), str(item.get("text") or ""))
@@ -811,6 +848,8 @@ def build_cards(report: dict) -> list[Card]:
         cards.append(_ipv6_card(report["ipv6"]))
     if report.get("filter"):
         cards.append(_filter_card(report["filter"]))
+    if report.get("habits"):
+        cards.append(_habits_card(report["habits"]))
     system = list(report.get("system") or ())
     if system:
         cards.append(_system_card(system))

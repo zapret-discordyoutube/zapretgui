@@ -49,7 +49,7 @@ from diagnostics.block_cause import (
 )
 from utils.socket_cancel import SocketCancel, close_quietly
 
-__all__ = ["BLOCKED_JA4", "CHROME_CIPHERS", "CHROME_EXTENSIONS", "build_hello", "ja4", "parse_hello", "send_hello"]
+__all__ = ["BLOCKED_JA4", "CHROME_CIPHERS", "CHROME_EXTENSIONS", "build_hello", "ja4", "name_offset", "parse_hello", "send_hello", "send_parts", "split_record"]
 
 # Отпечаток настольного Chrome, который режет фильтр (описан на wiki.zapret.moe).
 BLOCKED_JA4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd"
@@ -136,8 +136,14 @@ def _extension(kind: int, data: bytes) -> bytes:
     return struct.pack("!HH", kind, len(data)) + data
 
 
-def build_hello(host: str, *, rnd: Random = os.urandom) -> bytes:
-    """Запись TLS с приветствием Chrome для сайта ``host``."""
+def build_hello(host: str, *, rnd: Random = os.urandom, post_quantum: bool = True, ech: bool = True) -> bytes:
+    """Запись TLS с приветствием Chrome для сайта ``host``.
+
+    ``post_quantum=False`` — без постквантового ключа: приветствие втрое короче и
+    умещается в один пакет (нужно пробам, которые сами решают, где его резать).
+    ``ech=False`` — без расширения ECH. Оба варианта меняют отпечаток: это уже не
+    «почерк Chrome», а просто корректное приветствие.
+    """
     seeds = rnd(5)
     grease_cipher, grease_group, grease_first, grease_last, grease_version = (_grease(byte) for byte in seeds)
     if grease_last == grease_first:
@@ -147,12 +153,12 @@ def build_hello(host: str, *, rnd: Random = os.urandom) -> bytes:
     key_shares = (
         struct.pack("!HH", grease_group, 1)
         + b"\x00"
-        + struct.pack("!H", GROUP_X25519_MLKEM768)
-        + _vec16(_mlkem_public_key(rnd) + rnd(32))
+        + (struct.pack("!H", GROUP_X25519_MLKEM768) + _vec16(_mlkem_public_key(rnd) + rnd(32)) if post_quantum else b"")
         + struct.pack("!H", GROUP_X25519)
         + _vec16(rnd(32))
     )
-    ech = (
+    groups = _GROUPS if post_quantum else _GROUPS[1:]
+    ech_body = (
         b"\x00"  # внешнее приветствие
         + struct.pack("!HH", 0x0001, 0x0001)  # HKDF-SHA256, AES-128-GCM
         + rnd(1)
@@ -163,7 +169,7 @@ def build_hello(host: str, *, rnd: Random = os.urandom) -> bytes:
         EXT_SNI: _vec16(b"\x00" + _vec16(name)),
         EXT_MASTER_SECRET: b"",
         EXT_RENEGOTIATION: b"\x00",
-        EXT_GROUPS: _vec16(_u16s((grease_group, *_GROUPS))),
+        EXT_GROUPS: _vec16(_u16s((grease_group, *groups))),
         EXT_POINT_FORMATS: _vec8(b"\x00"),
         EXT_SESSION_TICKET: b"",
         EXT_ALPN: _vec16(_vec8(b"h2") + _vec8(b"http/1.1")),
@@ -175,10 +181,10 @@ def build_hello(host: str, *, rnd: Random = os.urandom) -> bytes:
         EXT_VERSIONS: _vec8(_u16s((grease_version, 0x0304, 0x0303))),
         EXT_COMPRESS_CERT: _vec8(_u16s((0x0002,))),  # brotli
         EXT_ALPS: _vec16(_vec8(b"h2")),
-        EXT_ECH: ech,
+        EXT_ECH: ech_body,
     }
     # Chrome перемешивает расширения в каждом соединении; GREASE стоят по краям.
-    order = list(CHROME_EXTENSIONS)
+    order = [kind for kind in CHROME_EXTENSIONS if ech or kind != EXT_ECH]
     shuffle = rnd(len(order))
     for index in range(len(order) - 1, 0, -1):
         other = shuffle[index] % (index + 1)
@@ -247,6 +253,22 @@ def ja4(record: bytes) -> str:
     )
 
 
+def name_offset(record: bytes, host: str) -> int:
+    """Где в записи лежит имя сайта. -1 — не нашли."""
+    return record.find(host.encode("idna"))
+
+
+def split_record(record: bytes, at: int) -> tuple[bytes, bytes]:
+    """Одно приветствие двумя записями TLS: разрез на байте ``at`` исходной записи.
+
+    Сервер обязан склеить такие записи; фильтр, который читает только первую, имени целиком не увидит.
+    """
+    body = record[5:]
+    cut = max(1, min(len(body) - 1, at - 5))
+    head = record[:3]
+    return head + _vec16(body[:cut]), head + _vec16(body[cut:])
+
+
 def _read_exact(sock: socket.socket, size: int) -> bytes:
     data = bytearray()
     while len(data) < size:
@@ -266,14 +288,26 @@ def send_hello(
     cancel: SocketCancel | None = None,
     rnd: Random = os.urandom,
 ) -> HelloResult:
-    """Шлёт приветствие Chrome на ``ip`` и сообщает, что пришло в ответ.
+    """Шлёт приветствие Chrome на ``ip`` и сообщает, что пришло в ответ (см. ``send_parts``)."""
+    return send_parts(ip, (build_hello(host, rnd=rnd),), port=port, timeout=timeout, cancel=cancel)
 
-    ``HELLO_OK`` — сервер ответил своим приветствием; ``HELLO_ALERT`` — сервер
+
+def send_parts(
+    ip: str,
+    parts: tuple[bytes, ...],
+    *,
+    pause: float = 0.0,
+    port: int = 443,
+    timeout: float = HELLO_TIMEOUT_S,
+    cancel: SocketCancel | None = None,
+) -> HelloResult:
+    """Шлёт готовое приветствие кусками ``parts`` (с паузой ``pause`` между ними) и сообщает, что пришло в ответ.
+
+    Каждый кусок уходит отдельным пакетом. ``HELLO_OK`` — сервер ответил своим приветствием; ``HELLO_ALERT`` — сервер
     ответил отказом (приветствие до него всё равно дошло); ``HELLO_RESET`` и
     ``HELLO_TIMEOUT`` — соединение установилось, но ответа на приветствие нет.
     """
     token = cancel or SocketCancel()
-    hello = build_hello(host, rnd=rnd)
     sock: socket.socket | None = None
     connected = False
     try:
@@ -283,8 +317,13 @@ def send_hello(
         sock.settimeout(timeout)
         sock.connect((ip, int(port)))
         connected = True
+        # Куски должны уйти отдельными пакетами, а не склеиться в один.
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         started = time.perf_counter()
-        sock.sendall(hello)
+        for index, part in enumerate(parts):
+            if index and pause:
+                time.sleep(pause)
+            sock.sendall(part)
         header = _read_exact(sock, 5)
         took = (time.perf_counter() - started) * 1000.0
         if len(header) < 5:

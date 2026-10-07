@@ -284,3 +284,16 @@ class FingerprintOnScreenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HelloVariantsTests(unittest.TestCase):
+    def test_variants_drop_exactly_what_they_say(self) -> None:
+        _c, without_ech, _n = browser_hello.parse_hello(browser_hello.build_hello("x.com", ech=False))
+        self.assertNotIn(browser_hello.EXT_ECH, without_ech)
+        self.assertEqual(len(without_ech), 15)
+
+        compact = browser_hello.build_hello("x.com", post_quantum=False)
+        # Без постквантового ключа приветствие умещается в один пакет.
+        self.assertLess(len(compact), 1200)
+        self.assertIn(browser_hello.EXT_ECH, browser_hello.parse_hello(compact)[1])
+        self.assertNotEqual(browser_hello.ja4(browser_hello.build_hello("x.com", ech=False)), browser_hello.BLOCKED_JA4)

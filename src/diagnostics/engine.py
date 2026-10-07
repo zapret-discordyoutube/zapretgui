@@ -824,6 +824,14 @@ def run_blockcheck(
             if full
             else None
         )
+        habits = None
+        if full and not run.dns_cancelled():
+            try:
+                habits = sections.check_filter_habits(run, collected, emit)
+            except _Stopped:
+                raise
+            except Exception as exc:
+                emit(f"❔ Как работает фильтр: проверка не выполнилась ({exc})")
         if full:
             step(STEP_FILTER)
         speed = None
@@ -895,6 +903,7 @@ def run_blockcheck(
             "ipv6": {"state": ipv6.code, "text": ipv6.text} if ipv6 is not None else None,
             "dns_servers": dns_servers,
             "filter": filter_place,
+            "habits": habits,
             "system": report_text.system_report(system),
             "environment": environment,
             "zapret_running": zapret_running,

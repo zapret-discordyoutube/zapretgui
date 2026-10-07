@@ -16,6 +16,7 @@ from collections.abc import Callable
 from concurrent.futures import Future
 
 from diagnostics import (
+    filter_habits,
     filter_place,
     ipv6_check,
     my_network,
@@ -341,6 +342,45 @@ def find_filter_place(
     for line in filter_place.lines(place):
         emit(line)
     return place
+
+
+HABIT_SITES = 3
+ECH_HOST = "www.cloudflare.com"
+
+
+def check_filter_habits(run: Run, collected: dict[str, list[Probe]], emit: Emit) -> dict | None:
+    """Как работает фильтр: какое дробление приветствия проходит и режется ли ECH."""
+    from diagnostics import block_cause, browser_hello
+
+    def _send(ip: str, parts: tuple[bytes, ...], pause: float) -> str:
+        return browser_hello.send_parts(ip, parts, pause=pause, cancel=run.probe_cancel).kind
+
+    probes = [probe for items in collected.values() for probe in items]
+    # Дробление сравнивается только там, где блокировка по имени уже доказана.
+    blocked: dict[str, Probe] = {}
+    for probe in probes:
+        ip = probe.reach.ip if probe.reach is not None else ""
+        if ip and ":" not in ip and probe.cause is not None and probe.cause.code == block_cause.CAUSE_BY_NAME:
+            blocked.setdefault(ip, probe)
+    cloudflare = next(
+        (probe for probe in probes if probe.host == ECH_HOST and probe.reach is not None and probe.reach.ok and ":" not in probe.reach.ip),
+        None,
+    )
+    if run.dns_cancelled() or (not blocked and cloudflare is None):
+        return None
+    ech_future = run.submit(filter_habits.check_ech, cloudflare.reach.ip, send=_send) if cloudflare is not None else None
+    split_futures = [
+        run.submit(filter_habits.check_split, probe.host, ip, send=_send, submit=run.submit)
+        for ip, probe in list(blocked.items())[:HABIT_SITES]
+    ]
+    splits = [verdict for verdict in (filter_habits.judge_split(run.wait(future)) for future in split_futures) if verdict is not None]
+    ech = filter_habits.judge_ech(run.wait(ech_future) if ech_future is not None else None)
+    report = filter_habits.summarize(splits, ech)
+    if report is None:
+        return None
+    for line in filter_habits.lines(report):
+        emit(line)
+    return report
 
 
 def tcp_reset_seen(probe: Probe) -> bool:
