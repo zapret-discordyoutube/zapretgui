@@ -78,3 +78,32 @@ class UnknownZapretStateTests(unittest.TestCase):
         frozen = tuple(FreezeServer(f"S{i}", FreezeState.FREEZE, "обрыв") for i in range(4))
         self.assertIn("Запустите Zapret", summarize_freeze(frozen, zapret_running=False).advice[0])
         self.assertNotIn("Запустите Zapret", summarize_freeze(frozen, zapret_running=None).advice[0])
+
+
+class LeadingCauseTests(unittest.TestCase):
+    """Причина и совет берутся у главного адреса, а не у того, где чужой сертификат."""
+
+    def _verdict(self, main, second):
+        from diagnostics.verdict import DnsState, TargetOutcome, summarize_service
+
+        outcomes = [
+            TargetOutcome(host="x.com", purpose="сайт", reach=main, dns=DnsState.OK, main=True),
+            TargetOutcome(host="cdn.x.com", purpose="картинки", reach=second, dns=DnsState.OK),
+        ]
+        return summarize_service("X", outcomes, zapret_running=True)
+
+    def test_foreign_certificate_on_a_side_address_does_not_hide_the_real_cause(self) -> None:
+        from diagnostics.verdict import ReachState, _ADVICE_CERT, _ADVICE_STRATEGY
+
+        verdict = self._verdict(ReachState.DPI, ReachState.CERT)
+
+        self.assertNotIn("чужой", verdict.headline)
+        self.assertEqual(verdict.advice[:2], (_ADVICE_STRATEGY, _ADVICE_CERT))
+
+    def test_foreign_certificate_on_the_main_address_is_still_the_cause(self) -> None:
+        from diagnostics.verdict import ReachState, _ADVICE_CERT
+
+        verdict = self._verdict(ReachState.CERT, ReachState.DPI)
+
+        self.assertIn("чужой", verdict.headline)
+        self.assertEqual(verdict.advice[0], _ADVICE_CERT)

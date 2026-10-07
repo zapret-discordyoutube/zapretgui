@@ -32,6 +32,11 @@ class HelloCompositionTests(unittest.TestCase):
         self.assertEqual(sorted(extensions), sorted(browser_hello.CHROME_EXTENSIONS))
         self.assertEqual(name, "x.com")
 
+    def test_fingerprint_is_the_one_the_filter_is_known_to_cut(self) -> None:
+        """Иначе строка «Как Chrome» проверяла бы почерк, на который фильтр не смотрит."""
+        for _ in range(4):
+            self.assertEqual(browser_hello.ja4(browser_hello.build_hello("x.com")), browser_hello.BLOCKED_JA4)
+
     def test_hello_takes_two_packets_like_a_real_browser(self) -> None:
         record = browser_hello.build_hello("x.com")
 

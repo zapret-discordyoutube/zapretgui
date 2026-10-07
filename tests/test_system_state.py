@@ -22,8 +22,10 @@ HEALTHY = ss.SystemFacts(
     proxy_server="",
     proxy_script="",
     tunnels=(),
+    tunnels_routed=(),
     hosts_readable=True,
     hosts_overrides=(),
+    hosts_managed=(),
     clock_skew_s=2.0,
 )
 
@@ -94,10 +96,35 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(unknown.level, ss.LEVEL_WARN)
 
     def test_other_bypass_tools_vpn_and_antivirus_are_notes_not_alarms(self) -> None:
-        bypass = _item(replace(HEALTHY, bypass_tools=("Xray",), tunnels=("WireGuard Tunnel",)), "bypass")
+        bypass = _item(
+            replace(HEALTHY, bypass_tools=("Xray",), tunnels=("WireGuard Tunnel",), tunnels_routed=("WireGuard Tunnel",)), "bypass"
+        )
         self.assertEqual(bypass.level, ss.LEVEL_INFO)
-        self.assertIn("запущены: Xray", bypass.text)
-        self.assertIn("активны VPN-подключения: WireGuard Tunnel", bypass.text)
+        self.assertIn("запущены: Xray — если они сейчас включены", bypass.text)
+        self.assertIn("интернет сейчас идёт через VPN-подключение: WireGuard Tunnel", bypass.text)
+
+    def test_connected_vpn_adapter_without_the_internet_route_changes_nothing(self) -> None:
+        """Radmin VPN, Hamachi, простаивающий Tailscale: адаптер есть, а интернет идёт мимо него."""
+        idle = _item(replace(HEALTHY, tunnels=("Tailscale",), tunnels_routed=()), "bypass")
+        self.assertEqual(idle.level, ss.LEVEL_OK)
+        self.assertIn("интернет идёт не через них", idle.text)
+        # Дорогу узнать не удалось — честно говорим, что не знаем.
+        unsure = _item(replace(HEALTHY, tunnels=("Tailscale",), tunnels_routed=None), "bypass")
+        self.assertEqual(unsure.level, ss.LEVEL_INFO)
+        self.assertIn("узнать не удалось", unsure.text)
+
+    def test_routed_tunnels_are_the_vpn_adapters_that_carry_the_internet(self) -> None:
+        from types import SimpleNamespace as Adapter
+
+        adapters = [
+            Adapter(index=7, ipv6_index=7, name="Ethernet", description="Realtek", connected=True),
+            Adapter(index=12, ipv6_index=0, name="wg0", description="WireGuard Tunnel", connected=True),
+            Adapter(index=15, ipv6_index=0, name="Tailscale", description="Tailscale Tunnel", connected=True),
+        ]
+        self.assertEqual(ss.routed_tunnels(adapters, 7), ())
+        self.assertEqual(ss.routed_tunnels(adapters, 12), ("wg0",))
+        self.assertEqual(ss.routed_tunnels(adapters, 7, 15), ("Tailscale",))
+        self.assertEqual(ss.routed_tunnels(adapters, 0), ())
 
         antivirus = _item(replace(HEALTHY, antivirus="Kaspersky"), "antivirus")
         self.assertEqual(antivirus.level, ss.LEVEL_INFO)
@@ -127,6 +154,40 @@ class JudgeTests(unittest.TestCase):
         self.assertIn("discord.com → 1.2.3.4", note.text)
 
         self.assertEqual(_item(replace(HEALTHY, hosts_readable=False), "hosts").level, ss.LEVEL_WARN)
+
+    def test_entries_written_by_the_program_itself_are_fine(self) -> None:
+        ours = (("telegram.org", "149.154.167.220"), ("X.com", "151.101.130.146"))
+        facts = replace(HEALTHY, hosts_overrides=ours, hosts_managed=(("telegram.org", "149.154.167.220"), ("x.com", "151.101.130.146")))
+        item = _item(facts, "hosts")
+
+        self.assertEqual(item.level, ss.LEVEL_OK)
+        self.assertIn("самой программой", item.text)
+
+    def test_only_foreign_entries_are_listed_next_to_our_own(self) -> None:
+        facts = replace(
+            HEALTHY,
+            hosts_overrides=(("telegram.org", "149.154.167.220"), ("discord.com", "1.2.3.4"), ("x.com", "9.9.9.9")),
+            # Имя наше, а адрес другой — запись уже не та, что вносила программа.
+            hosts_managed=(("telegram.org", "149.154.167.220"), ("x.com", "151.101.130.146")),
+        )
+        item = _item(facts, "hosts")
+
+        self.assertEqual(item.level, ss.LEVEL_INFO)
+        self.assertIn("discord.com → 1.2.3.4", item.text)
+        self.assertIn("x.com → 9.9.9.9", item.text)
+        self.assertNotIn("telegram.org →", item.text)
+        self.assertIn("Ещё 1 — записи самой программы", item.text)
+
+    def test_managed_block_is_read_from_the_hosts_file(self) -> None:
+        from hosts import hosts as hosts_module
+
+        text = "\n".join(
+            ["1.1.1.1 outside.example", hosts_module._MANAGED_HOSTS_BEGIN, "149.154.167.220 Telegram.org web.telegram.org", hosts_module._MANAGED_HOSTS_END]
+        )
+        with patch.object(hosts_module, "safe_read_hosts_file", return_value=text):
+            rows = ss._read_hosts_managed()
+
+        self.assertEqual(rows, (("telegram.org", "149.154.167.220"), ("web.telegram.org", "149.154.167.220")))
 
     def test_clock_far_off_is_warned_with_direction_and_size(self) -> None:
         ahead = _item(replace(HEALTHY, clock_skew_s=3 * 3600), "clock")

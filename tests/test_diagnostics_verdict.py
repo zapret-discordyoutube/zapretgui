@@ -448,7 +448,7 @@ class BlockCauseInReportTests(unittest.TestCase):
         result = net.run(engine.run_blockcheck, "main", emit=lines.append)
 
         note = next(line for line in lines if "Xray" in line)
-        self.assertIn("Работают другие программы обхода или VPN: Xray, Cloudflare WARP", note)
+        self.assertIn("Запущены другие программы обхода или VPN: Xray, Cloudflare WARP", note)
         self.assertLess(lines.index(note), next(i for i, line in enumerate(lines) if line.startswith("━━━━━━━━ Discord")))
         self.assertEqual(result["other_bypass_tools"], ["Xray", "Cloudflare WARP"])
 

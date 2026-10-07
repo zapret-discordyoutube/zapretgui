@@ -321,8 +321,12 @@ def _leading_kind(items: list[TargetOutcome]) -> str:
 
 
 def _reason_for(items: list[TargetOutcome], cert_cause: DnsState | None = None) -> str:
-    """Чем мешают: «блокировка по имени сайта», «сервер заблокирован по адресу», «обрыв после 16 КБ»."""
-    if any(item.reach == ReachState.CERT for item in items):
+    """Чем мешают: «блокировка по имени сайта», «сервер заблокирован по адресу», «обрыв после 16 КБ».
+
+    Причина — у первого сломанного адреса (главный идёт первым): чужой сертификат
+    у побочного адреса не должен подменять собой настоящую причину у главного.
+    """
+    if items and items[0].reach == ReachState.CERT:
         if cert_cause == DnsState.LOCAL:
             return "запись в файле hosts ведёт на чужой сервер"
         if cert_cause == DnsState.SPOOFED:
@@ -339,12 +343,15 @@ def _advice_for(
     cert_cause: DnsState | None = None,
     kind: str = "",
 ) -> tuple[str, ...]:
+    cert_advice = (
+        _ADVICE_HOSTS if cert_cause == DnsState.LOCAL else _ADVICE_DNS if cert_cause == DnsState.SPOOFED else _ADVICE_CERT
+    )
+    if states and states[0] == ReachState.CERT:
+        return (cert_advice,)
     if ReachState.CERT in states:
-        if cert_cause == DnsState.LOCAL:
-            return (_ADVICE_HOSTS,)
-        if cert_cause == DnsState.SPOOFED:
-            return (_ADVICE_DNS,)
-        return (_ADVICE_CERT,)
+        # Чужой сертификат только у побочного адреса: сначала совет по главной причине, потом про него.
+        rest = [state for state in states if state != ReachState.CERT]
+        return _advice_for(rest, zapret_running=zapret_running, kind=kind) + (cert_advice,)
     if ReachState.DPI in states or ReachState.FREEZE in states:
         # Вид блокировки важнее: закрытому адресу «запустите Zapret» обещал бы лишнее.
         if kind == KIND_IP:

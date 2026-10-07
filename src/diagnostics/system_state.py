@@ -90,9 +90,13 @@ class SystemFacts:
     proxy_script: str | None = None
     # Названия активных VPN-подключений.
     tunnels: tuple[str, ...] | None = None
+    # Те из них, через которые Windows сейчас отправляет трафик в интернет. None — не узнали.
+    tunnels_routed: tuple[str, ...] | None = None
     hosts_readable: bool | None = None
     # Проверяемые сайты, адрес которых задан в файле hosts: (сайт, адрес).
     hosts_overrides: tuple[tuple[str, str], ...] | None = None
+    # Записи, которые внесла сама программа («Редактор hosts»): (сайт, адрес). None — не узнали.
+    hosts_managed: tuple[tuple[str, str], ...] | None = None
     # На сколько секунд часы компьютера впереди настоящего времени (минус — отстают).
     clock_skew_s: float | None = None
 
@@ -236,6 +240,24 @@ def _read_tunnels() -> tuple[str, ...]:
     return tunnel_adapters(list_interfaces())
 
 
+def routed_tunnels(interfaces, ipv4_index: int, ipv6_index: int = 0) -> tuple[str, ...]:
+    """VPN-адаптеры, через которые идёт интернет: подключённый адаптер ещё не значит, что трафик в нём."""
+    used = {index for index in (int(ipv4_index or 0), int(ipv6_index or 0)) if index}
+    carrying = [
+        interface
+        for interface in interfaces
+        if {int(getattr(interface, "index", 0) or 0), int(getattr(interface, "ipv6_index", 0) or 0)} & used
+    ]
+    return tunnel_adapters(carrying)
+
+
+def _read_tunnels_routed() -> tuple[str, ...]:
+    from dns.winapi import internet_route, list_interfaces
+
+    route = internet_route()
+    return routed_tunnels(list_interfaces(), route.ipv4_index, route.ipv6_index)
+
+
 def _read_hosts_readable() -> bool:
     from hosts.hosts import safe_read_hosts_file
 
@@ -251,6 +273,15 @@ def _read_hosts_overrides(hosts: tuple[str, ...]) -> tuple[tuple[str, str], ...]
         if addresses:
             found.append((host, addresses[0]))
     return tuple(found)
+
+
+def _read_hosts_managed() -> tuple[tuple[str, str], ...]:
+    from hosts.hosts import _iter_managed_hosts_block_rows, safe_read_hosts_file
+
+    text = safe_read_hosts_file()
+    if not text:
+        return ()
+    return tuple((host.lower(), address) for host, address in _iter_managed_hosts_block_rows(str(text).splitlines()))
 
 
 def collect_facts(
@@ -282,8 +313,10 @@ def collect_facts(
         proxy_server=proxy[0] if proxy is not None else None,
         proxy_script=proxy[1] if proxy is not None else None,
         tunnels=_safe(_read_tunnels),
+        tunnels_routed=_safe(_read_tunnels_routed),
         hosts_readable=_safe(_read_hosts_readable),
         hosts_overrides=_safe(lambda: _read_hosts_overrides(tuple(check_hosts))),
+        hosts_managed=_safe(_read_hosts_managed),
         clock_skew_s=_safe(clock_skew) if clock_skew is not None else None,
     )
 
@@ -452,17 +485,30 @@ def judge(facts: SystemFacts, *, zapret_running: bool | None = None) -> tuple[Sy
     if facts.bypass_tools is None and facts.tunnels is None:
         items.append(_unknown("bypass", title))
     else:
+        # Подключённый VPN-адаптер и запущенная программа — ещё не «трафик идёт через них»:
+        # уверенно сказать это можно, только когда через адаптер проложена дорога в интернет.
+        routed = list(facts.tunnels_routed or ())
+        idle = [name for name in facts.tunnels or () if name not in routed] if facts.tunnels_routed is not None else []
+        unsure = list(facts.tunnels or ()) if facts.tunnels_routed is None else []
         parts = []
+        if routed:
+            parts.append(
+                f"интернет сейчас идёт через VPN-подключение: {_short(routed)} — проверки показывают сеть VPN, а не провайдера"
+            )
+        if unsure:
+            parts.append(f"подключены VPN-адаптеры: {_short(unsure)} — идёт ли через них интернет, узнать не удалось")
         if facts.bypass_tools:
-            parts.append(f"запущены: {_short(facts.bypass_tools)}")
-        if facts.tunnels:
-            parts.append(f"активны VPN-подключения: {_short(facts.tunnels)}")
+            parts.append(
+                f"запущены: {_short(facts.bypass_tools)} — если они сейчас включены, проверки показывают сеть вместе с ними"
+            )
         if parts:
+            add("bypass", title, LEVEL_INFO, "; ".join(parts))
+        elif idle:
             add(
                 "bypass",
                 title,
-                LEVEL_INFO,
-                "; ".join(parts) + ". Проверки при них показывают сеть вместе с ними, а не сеть провайдера",
+                LEVEL_OK,
+                f"VPN-адаптеры подключены ({_short(idle)}), но интернет идёт не через них — на проверки они не влияют",
             )
         else:
             add("bypass", title, LEVEL_OK, "не найдены")
@@ -515,13 +561,27 @@ def judge(facts: SystemFacts, *, zapret_running: bool | None = None) -> tuple[Sy
             "Откройте страницу «Редактор hosts» и нажмите «Восстановить права».",
         )
     elif facts.hosts_overrides:
-        shown = _short(f"{host} → {address}" for host, address in facts.hosts_overrides)
-        add(
-            "hosts",
-            title,
-            LEVEL_INFO,
-            f"в нём заданы адреса проверяемых сайтов: {shown}. Программы берут адрес оттуда, а не у DNS",
-        )
+        # Записи самой программы («Редактор hosts») — так и задумано; чужие — справка.
+        ours = {(host.lower(), address) for host, address in facts.hosts_managed or ()}
+        foreign = [(host, address) for host, address in facts.hosts_overrides if (host.lower(), address) not in ours]
+        own_count = len(facts.hosts_overrides) - len(foreign)
+        if not foreign:
+            add(
+                "hosts",
+                title,
+                LEVEL_OK,
+                f"адреса проверяемых сайтов ({own_count}) заданы самой программой через «Редактор hosts» — так и должно быть",
+            )
+        else:
+            shown = _short(f"{host} → {address}" for host, address in foreign)
+            own = f" Ещё {own_count} — записи самой программы, с ними всё в порядке." if own_count else ""
+            add(
+                "hosts",
+                title,
+                LEVEL_INFO,
+                f"в нём заданы адреса проверяемых сайтов не из программы: {shown}. "
+                f"Программы берут адрес оттуда, а не у DNS.{own}",
+            )
     else:
         add("hosts", title, LEVEL_OK, "записей для проверяемых сайтов нет")
 

@@ -12,6 +12,12 @@
 случайные «пустышки» GREASE. Отправляем его и смотрим только одно: пришёл ли
 от сервера ответ.
 
+Отпечаток JA4 этого приветствия — ``t13d1516h2_8daaf6152771_d8a2da3f94cd``
+(``BLOCKED_JA4``): тот самый, про который известно, что фильтр режет его на
+адресах датацентров. Chrome новее, Firefox и curl имеют другие отпечатки и под
+этот блок не попадают — поэтому вывод звучит «может не открываться в Chrome»,
+а не «в браузере не откроется».
+
 Чего проверка НЕ делает: соединение дальше приветствия не идёт. Блокировку,
 которая срабатывает позже (обрыв после 16 КБ именно для браузерного почерка),
 она не увидит.
@@ -23,6 +29,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import socket
 import struct
@@ -42,7 +49,10 @@ from diagnostics.block_cause import (
 )
 from utils.socket_cancel import SocketCancel, close_quietly
 
-__all__ = ["CHROME_CIPHERS", "CHROME_EXTENSIONS", "build_hello", "parse_hello", "send_hello"]
+__all__ = ["BLOCKED_JA4", "CHROME_CIPHERS", "CHROME_EXTENSIONS", "build_hello", "ja4", "parse_hello", "send_hello"]
+
+# Отпечаток настольного Chrome, который режет фильтр (описан на wiki.zapret.moe).
+BLOCKED_JA4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd"
 
 # Шифры настольного Chrome по порядку (без GREASE).
 CHROME_CIPHERS = (
@@ -219,6 +229,22 @@ def parse_hello(record: bytes) -> tuple[tuple[int, ...], tuple[int, ...], str]:
         if kind == EXT_SNI:
             name = data[5:].decode("ascii")
     return tuple(c for c in ciphers if real(c)), tuple(k for k in kinds if real(k)), name
+
+
+def ja4(record: bytes) -> str:
+    """Отпечаток JA4 приветствия: по нему фильтр узнаёт программу, порядок расширений на него не влияет."""
+
+    def short(text: str) -> str:
+        return hashlib.sha256(text.encode("ascii")).hexdigest()[:12]
+
+    ciphers, extensions, _name = parse_hello(record)
+    hashed = sorted(f"{kind:04x}" for kind in extensions if kind not in (EXT_SNI, EXT_ALPN))
+    signatures = ",".join(f"{value:04x}" for value in _SIGNATURES)
+    return (
+        f"t13d{len(ciphers):02d}{len(extensions):02d}h2_"
+        f"{short(','.join(sorted(f'{value:04x}' for value in ciphers)))}_"
+        f"{short(','.join(hashed) + '_' + signatures)}"
+    )
 
 
 def _read_exact(sock: socket.socket, size: int) -> bytes:
