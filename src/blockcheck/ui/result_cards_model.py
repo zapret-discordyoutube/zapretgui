@@ -610,27 +610,73 @@ def _hop_time(rtt: object) -> str:
 
 
 def _filter_card(place: dict) -> Card:
+    """«Место фильтра»: вывод, срок жизни для стратегий, сайты, по которым искали, и вся дорога с владельцами узлов."""
     found = bool(place.get("found"))
+    state = str(place.get("state") or ("found" if found else "not_found"))
     text = str(place.get("text") or "")
     hop = place.get("hop") if found else None
+    level = WARN if found or state in ("disagree", "disturbed") else (INFO if state == "none" else UNKNOWN)
+    status = {
+        "found": "В роутере или на компьютере" if hop == 1 else f"Между узлами {(hop or 1) - 1} и {hop}",
+        "disagree": "Узлы не совпали",
+        "disturbed": "Мешает программа обхода",
+        "none": "Блокировок по имени нет",
+    }.get(state, "Не найдено")
+    preview = [Line(level, _capital(text))]
+    if place.get("ttl_advice"):
+        preview.append(Line(INFO, "Для стратегий", str(place["ttl_advice"])))
+    sites = list(place.get("sites") or ())
+    if sites:
+        preview.append(Line(INFO, "Искали по сайтам", ", ".join(str(item.get("host") or "") for item in sites)))
+    elif place.get("host"):
+        preview.append(Line(INFO, "Дорога показана до", str(place["host"])))
+
+    sections = [Section("Вывод", tuple(preview[:2]))]
+    site_rows: list[Line] = []
+    for item in sites:
+        distance = f" · до сервера {item['distance']} узлов" if item.get("distance") else ""
+        site_rows.append(
+            Line(
+                WARN if item.get("found") else UNKNOWN,
+                f"{item.get('host', '')} ({item.get('address', '')}{distance})",
+                _capital(str(item.get("text") or "")),
+            )
+        )
+        for method in item.get("methods") or ():
+            site_rows.append(Line(INFO, f"   способ {method.get('title', '')}", str(method.get("text") or "")))
+    if site_rows:
+        sections.append(Section("По каким сайтам искали", tuple(site_rows)))
+    if place.get("reasons"):
+        sections.append(Section("На чём основан вывод", tuple(Line(INFO, str(reason)) for reason in place["reasons"])))
     hops = []
     for item in place.get("hops") or ():
         if item.get("ttl") == hop:
             hops.append(Line(FAIL, f"── {FILTER_MARK} ──"))
-        hops.append(Line(INFO, f"Узел {item.get('ttl', '')}", " · ".join(
-            part for part in (str(item.get("address") or "не ответил"), _hop_time(item.get("rtt_ms"))) if part
-        )))
-    target = f"{place.get('host', '')} ({place.get('address', '')})"
-    sections = [Section(f"По сайту {target}", (Line(WARN if found else INFO, _capital(text)),))]
+        answered = bool(item.get("address"))
+        hops.append(
+            Line(
+                INFO,
+                f"Узел {item.get('ttl', '')}",
+                " · ".join(
+                    part
+                    for part in (
+                        str(item.get("address") or "не ответил"),
+                        _hop_time(item.get("rtt_ms")),
+                        str(item.get("owner") or "") if answered else "",
+                    )
+                    if part
+                ),
+            )
+        )
     if hops:
-        sections.append(Section("Узлы по дороге до сервера", tuple(hops)))
+        sections.append(Section(f"Дорога до {place.get('host', '')} ({place.get('address', '')})", tuple(hops)))
     return Card(
         key="filter",
         icon="fa5s.route",
         title="Место фильтра",
-        level=WARN if found else UNKNOWN,
-        status=f"Перед узлом {hop}" if found and hop else "Не найдено",
-        lines=(Line(WARN if found else UNKNOWN, _capital(text)), Line(INFO, "Искали по сайту", str(place.get("host") or ""))),
+        level=level,
+        status=status,
+        lines=tuple(preview),
         sections=tuple(sections),
     )
 

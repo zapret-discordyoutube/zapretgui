@@ -812,7 +812,18 @@ def run_blockcheck(
         dns_servers = sections.finish_dns_servers(run, dns_future, emit) if dns_future is not None else None
         if full:
             step(STEP_DNS_SERVERS)
-        filter_place = sections.find_filter_place(run, services, collected, emit) if full else None
+        filter_place = (
+            sections.find_filter_place(
+                run,
+                collected,
+                emit,
+                zapret_running=zapret_running,
+                other_tools=other_tools,
+                own_asn=str((network or {}).get("asn") or ""),
+            )
+            if full
+            else None
+        )
         if full:
             step(STEP_FILTER)
         speed = None

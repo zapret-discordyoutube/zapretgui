@@ -16,6 +16,7 @@ from collections.abc import Callable
 from concurrent.futures import Future
 
 from diagnostics import (
+    filter_place,
     ipv6_check,
     my_network,
     net_access,
@@ -29,7 +30,7 @@ from diagnostics import (
 from diagnostics.limits import FILTER_MAX_TTL, FREEZE_READ_TIMEOUT
 from diagnostics.run_context import Probe, Run, Stopped
 from diagnostics.services import Service
-from diagnostics.tls_probe import ProbeResult
+from diagnostics.tls_probe import KIND_RESET, ProbeResult
 from diagnostics.verdict import Level
 from utils.dns_wire import TYPE_AAAA
 from utils.ip_owner import lookup_ip_owner
@@ -259,45 +260,80 @@ def finish_dns_servers(run: Run, future: Future, emit: Emit) -> dict | None:
     return {"level": str(result.get("level") or "unknown"), "findings": findings, "text": text}
 
 
-def find_filter_place(run: Run, services: dict[str, Service], collected: dict[str, list[Probe]], emit: Emit) -> dict | None:
-    """Где стоит фильтр — по первому сайту, QUIC к которому блокируют по имени."""
-    from diagnostics import path_trace
+def find_filter_place(
+    run: Run,
+    collected: dict[str, list[Probe]],
+    emit: Emit,
+    *,
+    zapret_running: bool | None = None,
+    other_tools=(),
+    own_asn: str = "",
+) -> dict | None:
+    """Где стоит фильтр — по нескольким сайтам, которые режут по имени (см. ``diagnostics.filter_place``)."""
+    from diagnostics import block_cause, path_trace
 
-    blocked = [
-        probe
+    candidates = filter_place.pick_candidates(
+        (
+            probe.host,
+            probe.reach.ip if probe.reach is not None else "",
+            probe.quic is not None and probe.quic.code == quic_probe.QUIC_BLOCKED_BY_NAME,
+            # По TCP ищется только фильтр, который рвёт соединение сбросом, и только доказанная блокировка по имени.
+            probe.cause is not None and probe.cause.code == block_cause.CAUSE_BY_NAME and tcp_reset_seen(probe),
+        )
         for probes in collected.values()
         for probe in probes
-        if probe.quic is not None
-        and probe.quic.code == quic_probe.QUIC_BLOCKED_BY_NAME
-        and probe.reach is not None
-        and probe.reach.ip
-        and ":" not in probe.reach.ip
-    ]
-    # Фильтр один на всю сеть: достаточно найти его по одному сайту.
-    if not blocked or run.dns_cancelled():
+    )
+    if run.dns_cancelled():
         return None
-    probe = blocked[0]
-    ip = probe.reach.ip
-    trace = path_trace.trace_route(ip, should_stop=run.dns_cancelled)
-    facts = path_trace.locate_filter(ip, probe.host, max_ttl=FILTER_MAX_TTL, cancel=run.probe_cancel)
-    verdict = path_trace.judge_filter(facts, trace if trace.supported else None)
-    if verdict is None:
+    # Блокировок по имени нет — дорогу всё равно показываем: по первому открывшемуся сайту.
+    plain = next(
+        (
+            probe
+            for probes in collected.values()
+            for probe in probes
+            if probe.reach is not None and probe.reach.ok and probe.reach.ip and ":" not in probe.reach.ip
+        ),
+        None,
+    )
+    pairs = {filter_place.METHOD_QUIC: path_trace.send_pair, filter_place.METHOD_TCP: path_trace.tcp_pair}
+
+    def _locate(method: str, host: str, ip: str) -> path_trace.FilterFacts:
+        return path_trace.locate_filter(ip, host, max_ttl=FILTER_MAX_TTL, cancel=run.probe_cancel, pair=pairs[method])
+
+    def _trace(ip: str) -> path_trace.RouteTrace:
+        return path_trace.trace_route(ip, should_stop=run.dns_cancelled)
+
+    facts = filter_place.collect(candidates, locate=_locate, trace=_trace, submit=run.submit)
+    if run.dns_cancelled():
         return None
-    emit("")
-    emit("━━━━━━━━ Где стоит фильтр ━━━━━━━━")
-    found = verdict.code == path_trace.FILTER_FOUND
-    emit(f"{'📍' if found else 'ℹ️'} По сайту {probe.host}: {verdict.text}")
-    return {
-        "host": probe.host,
-        "address": ip,
-        "found": found,
-        "hop": verdict.hop,
-        "text": report_text.sentence(verdict.text),
-        "hops": [
-            {"ttl": hop.ttl, "address": hop.address, "rtt_ms": hop.rtt_ms}
-            for hop in (trace.hops if trace.supported else ())
-        ],
-    }
+    judged = [(item, filter_place.judge_site(item)) for item in facts]
+    verdicts = [verdict for _item, verdict in judged if verdict is not None]
+    # Узлы показываем по сайту, где место найдено; если нигде — по первому.
+    shown_facts, shown = next(
+        ((item, verdict) for item, verdict in judged if verdict is not None and verdict.hop),
+        next(((item, verdict) for item, verdict in judged if verdict is not None), (None, None)),
+    )
+
+    def _owner(ip: str) -> tuple[str, str] | None:
+        owner = lookup_ip_owner(ip, lambda name, rtype: net_access.doh_ask(run, name, rtype))
+        return (owner.asn, owner.owner) if owner is not None and (owner.asn or owner.owner) else None
+
+    route = shown_facts.trace if shown_facts else None
+    if route is None and not candidates and plain is not None:
+        route = _trace(plain.reach.ip)
+    hops = filter_place.describe_hops(route, own_asn=own_asn, owner_of=_owner)
+    placement = filter_place.aggregate(verdicts, hops, zapret_running=zapret_running, other_tools=other_tools)
+    place = filter_place.report(placement, verdicts, hops, shown)
+    if shown is None and plain is not None and hops:
+        place["host"], place["address"] = plain.host, plain.reach.ip
+    for line in filter_place.lines(place):
+        emit(line)
+    return place
+
+
+def tcp_reset_seen(probe: Probe) -> bool:
+    """Основное соединение с сайтом оборвалось сбросом (а не тишиной)."""
+    return probe.reach is not None and probe.reach.kind == KIND_RESET
 
 
 def check_speed(run: Run, emit: Emit) -> dict | None:

@@ -191,7 +191,7 @@ class CardsModelTests(unittest.TestCase):
     def test_filter_card_marks_the_hop_in_details(self) -> None:
         card = self.cards["filter"]
 
-        self.assertEqual((card.level, card.status), ("warn", "Перед узлом 2"))
+        self.assertEqual((card.level, card.status), ("warn", "Между узлами 1 и 2"))
         hops = [line.name for line in card.sections[1].lines]
         self.assertEqual(hops, ["Узел 1", f"── {FILTER_MARK} ──", "Узел 2", "Узел 3"])
         self.assertEqual(card.sections[1].lines[0].text, "10.0.0.1 · < 1 мс")

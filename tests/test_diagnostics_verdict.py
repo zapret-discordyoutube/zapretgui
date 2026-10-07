@@ -713,7 +713,7 @@ class FullCheckTests(unittest.TestCase):
             calls["trace"].append(ip)
             return trace or path_trace.RouteTrace(target=ip, supported=False)
 
-        def fake_locate(ip, name, *, max_ttl, cancel):
+        def fake_locate(ip, name, *, max_ttl, cancel, **_kwargs):
             calls["locate"].append((ip, name, max_ttl))
             return filter_facts or path_trace.FilterFacts(True, True, 6, 6)
 
@@ -766,22 +766,37 @@ class FullCheckTests(unittest.TestCase):
         self.assertEqual(calls["locate"], [(DISCORD_REAL[0], "discord.com", sections.FILTER_MAX_TTL)])
         self.assertEqual(calls["trace"], [DISCORD_REAL[0]])
         place = result["filter"]
-        self.assertEqual((place["host"], place["found"], place["hop"]), ("discord.com", True, 6))
-        self.assertEqual(place["text"], "Фильтр стоит между узлом 5 (10.0.0.5) и узлом 6 (10.0.0.6)")
+        self.assertEqual((place["host"], place["found"], place["hop"], place["state"]), ("discord.com", True, 6, "found"))
+        self.assertIn("Фильтр стоит между узлами 5 и 6 от вас — в сети вашего провайдера", place["text"])
+        # Сайт один, и во время поиска работал Zapret: уверенность низкая, и об этом сказано.
+        self.assertEqual(place["confidence"], "low")
+        self.assertIn("Zapret", " ".join(place["reasons"]))
+        self.assertIn("срок жизни (TTL)", place["ttl_advice"])
+        self.assertEqual([hop["owner"] for hop in place["hops"][:2]], ["ваш роутер", "внутренняя сеть провайдера"])
         self.assertEqual(len(place["hops"]), 7)
-        self.assertIn("📍 По сайту discord.com: фильтр стоит между узлом 5 (10.0.0.5) и узлом 6 (10.0.0.6)", lines)
+        text = "\n".join(lines)
+        self.assertIn("━━━━━━━━ Где стоит фильтр ━━━━━━━━", text)
+        self.assertIn("── здесь стоит фильтр ──", text)
 
-    def test_no_filter_search_when_quic_is_not_blocked(self) -> None:
-        result, lines, calls = self._run()
+    def test_without_blocks_by_name_the_road_is_still_shown(self) -> None:
+        from diagnostics import path_trace
+        from utils.windows_icmp import HOP_ROUTER
 
-        self.assertEqual((calls["locate"], calls["trace"]), ([], []))
-        self.assertIsNone(result["filter"])
-        self.assertNotIn("━━━━━━━━ Где стоит фильтр ━━━━━━━━", lines)
+        trace = path_trace.RouteTrace("1.1.1.1", tuple(path_trace.Hop(ttl, HOP_ROUTER, f"10.0.0.{ttl}", 1.0) for ttl in range(1, 4)))
+        result, lines, calls = self._run(trace=trace)
 
-    def test_filter_is_searched_once_even_if_many_sites_are_blocked(self) -> None:
+        self.assertEqual((calls["locate"], len(calls["trace"])), ([], 1))
+        place = result["filter"]
+        self.assertEqual((place["state"], place["found"], len(place["hops"])), ("none", False, 3))
+        self.assertTrue(place["host"])
+        self.assertIn("искать место фильтра не по чему", place["text"])
+
+    def test_filter_is_searched_on_several_sites_but_one_address_only_once(self) -> None:
         _result, _lines, calls = self._run(quic_blocked={"discord.com", "www.youtube.com", "telegram.org"})
 
-        self.assertEqual(len(calls["locate"]), 1)
+        addresses = [ip for ip, _name, _ttl in calls["locate"]]
+        self.assertEqual(len(addresses), len(set(addresses)))
+        self.assertLessEqual(len(addresses), engine.sections.filter_place.MAX_SITES)
 
     def test_other_scopes_do_not_run_the_extra_checks(self) -> None:
         for scope in ("all", "main"):
