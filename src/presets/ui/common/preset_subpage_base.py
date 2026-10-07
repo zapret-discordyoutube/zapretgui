@@ -5,10 +5,11 @@ from pathlib import Path
 from typing import Callable
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget, QFileDialog
+from PyQt6.QtGui import QColor, QKeySequence, QShortcut
+from PyQt6.QtWidgets import QApplication, QHBoxLayout, QSizePolicy, QWidget, QFileDialog
 
 from ui.pages.base_page import BasePage
-from ui.fluent_widgets import style_semantic_caption_label
+from ui.fluent_widgets import set_tooltip, style_semantic_caption_label
 from ui.theme import get_themed_qta_icon
 from ui.accessibility import (
     remove_line_edit_buttons_from_tab_order,
@@ -45,7 +46,6 @@ from qfluentwidgets import (
     LineEdit,
     PushButton,
     RoundMenu,
-    SimpleCardWidget,
     StrongBodyLabel,
     TransparentToolButton,
 )
@@ -179,6 +179,11 @@ def _set_runtime_toggle_accessibility(button, plan: RuntimeToggleButtonPlan, *, 
         description=description,
     )
     set_state_text(button, name)
+
+
+# Второстепенные сведения в строке под заголовком (светлая и тёмная тема).
+_INFO_TEXT_LIGHT = QColor(96, 96, 96)
+_INFO_TEXT_DARK = QColor(160, 160, 160)
 
 
 def set_text_if_changed(widget, text: str) -> bool:
@@ -887,41 +892,9 @@ class PresetRawEditorPage(BasePage):
         self._rebuild_breadcrumb()
         self._breadcrumb.currentItemChanged.connect(self._on_breadcrumb_item_changed)
         top_layout.addWidget(self._breadcrumb, 1)
-        top_layout.addStretch(1)
 
-        self.menuButton = TransparentToolButton(_fluent_icon("MENU"), self)
-        menu_button_name = "Открыть меню действий пресета"
-        set_control_accessibility(
-            self.menuButton,
-            name=menu_button_name,
-            description="Открывает действия для пресета: переименовать, дублировать, экспортировать или удалить.",
-        )
-        set_state_text(self.menuButton, menu_button_name)
-        self.menuButton.clicked.connect(self._open_menu)
-        top_layout.addWidget(self.menuButton, 0)
-        self.add_widget(top_row)
-
-        self.summaryCard = SimpleCardWidget(self)
-        summary_layout = QVBoxLayout(self.summaryCard)
-        summary_layout.setContentsMargins(16, 16, 16, 16)
-        summary_layout.setSpacing(8)
-
-        self.statusLabel = StrongBodyLabel("Пресет", self.summaryCard)
-        self.metaLabel = CaptionLabel("", self.summaryCard)
-        self.metaLabel.setWordWrap(True)
-        self.pathLabel = CaptionLabel("", self.summaryCard)
-        self.pathLabel.setWordWrap(True)
-
-        summary_layout.addWidget(self.statusLabel)
-        summary_layout.addWidget(self.metaLabel)
-        summary_layout.addWidget(self.pathLabel)
-        self.add_widget(self.summaryCard)
-
-        actions = QWidget(self)
-        actions_layout = QHBoxLayout(actions)
-        actions_layout.setContentsMargins(0, 0, 0, 0)
-        actions_layout.setSpacing(8)
-
+        # Действия стоят в одной строке с путём к странице: отдельный ряд
+        # кнопок и карточка сведений отнимали высоту у текста пресета.
         self.activateButton = PushButton("Сделать активным", self)
         self.activateButton.setIcon(_fluent_icon("ACCEPT"))
         activate_button_name = "Сделать пресет активным"
@@ -932,7 +905,7 @@ class PresetRawEditorPage(BasePage):
         )
         set_state_text(self.activateButton, activate_button_name)
         self.activateButton.clicked.connect(self._activate_preset)
-        actions_layout.addWidget(self.activateButton)
+        top_layout.addWidget(self.activateButton)
 
         self.openExternalButton = PushButton("Открыть в редакторе", self)
         self.openExternalButton.setIcon(_fluent_icon("FOLDER"))
@@ -944,7 +917,7 @@ class PresetRawEditorPage(BasePage):
         )
         set_state_text(self.openExternalButton, open_external_button_name)
         self.openExternalButton.clicked.connect(self._open_external)
-        actions_layout.addWidget(self.openExternalButton)
+        top_layout.addWidget(self.openExternalButton)
 
         self.runtimeToggleButton = PushButton("Запустить", self)
         self.runtimeToggleButton.setIcon(_fluent_icon("PLAY"))
@@ -959,10 +932,57 @@ class PresetRawEditorPage(BasePage):
             runtime_available=self._runtime_actions is not None,
         )
         self.runtimeToggleButton.clicked.connect(self._toggle_runtime)
-        actions_layout.addWidget(self.runtimeToggleButton)
+        top_layout.addWidget(self.runtimeToggleButton)
 
-        actions_layout.addStretch(1)
-        self.add_widget(actions)
+        self.findButton = TransparentToolButton(_fluent_icon("SEARCH"), self)
+        find_button_name = "Поиск по тексту пресета"
+        set_control_accessibility(
+            self.findButton,
+            name=find_button_name,
+            description="Открывает строку поиска по тексту пресета (Ctrl+F).",
+        )
+        set_state_text(self.findButton, find_button_name)
+        set_tooltip(self.findButton, "Поиск по тексту пресета (Ctrl+F)")
+        self.findButton.clicked.connect(self._open_find_panel)
+        top_layout.addWidget(self.findButton, 0)
+
+        self.menuButton = TransparentToolButton(_fluent_icon("MENU"), self)
+        menu_button_name = "Открыть меню действий пресета"
+        set_control_accessibility(
+            self.menuButton,
+            name=menu_button_name,
+            description="Открывает действия для пресета: переименовать, дублировать, экспортировать или удалить.",
+        )
+        set_state_text(self.menuButton, menu_button_name)
+        self.menuButton.clicked.connect(self._open_menu)
+        top_layout.addWidget(self.menuButton, 0)
+        self.add_widget(top_row)
+
+        # Сведения о пресете — одна строка: вид пресета, источник обновления
+        # (если пресет привязан к ссылке) и путь к файлу. Имя уже стоит в
+        # пути к странице выше.
+        info_row = QWidget(self)
+        info_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        info_layout = QHBoxLayout(info_row)
+        info_layout.setContentsMargins(2, 0, 2, 0)
+        info_layout.setSpacing(12)
+
+        self.statusLabel = CaptionLabel("Пресет", info_row)
+        self.metaLabel = CaptionLabel("", info_row)
+        self.metaLabel.setTextColor(_INFO_TEXT_LIGHT, _INFO_TEXT_DARK)
+        self.metaLabel.setVisible(False)
+        self.pathLabel = CaptionLabel("", info_row)
+        self.pathLabel.setTextColor(_INFO_TEXT_LIGHT, _INFO_TEXT_DARK)
+        self.pathLabel.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # Длинный путь не должен распирать страницу: лишнее просто обрезается,
+        # целиком путь виден в подсказке.
+        self.pathLabel.setMinimumWidth(0)
+        self.pathLabel.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+        info_layout.addWidget(self.statusLabel)
+        info_layout.addWidget(self.metaLabel)
+        info_layout.addWidget(self.pathLabel, 1)
+        self.add_widget(info_row)
 
         self.add_widget(self.findBar)
         self.add_widget(self.editor, 1)
@@ -970,6 +990,18 @@ class PresetRawEditorPage(BasePage):
         self.footerStatusBar = PresetStatusBar(self)
         self.footerLabel = self.footerStatusBar.text_label
         self.add_widget(self.footerStatusBar)
+
+        # Сам редактор ловит Ctrl+F, только пока курсор стоит в тексте. Строка
+        # поиска скрыта, поэтому открываться она должна из любого места страницы.
+        self._find_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Find), self)
+        self._find_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._find_shortcut.activated.connect(self._open_find_panel)
+        self._find_shortcut.activatedAmbiguously.connect(self._open_find_panel)
+
+    def _open_find_panel(self) -> None:
+        if not self.isVisible() or not self.isEnabled():
+            return
+        self._raw_text_editor.open_find_panel()
 
     def set_preset_file_name(self, file_name: str) -> None:
         if not self._run_after_raw_preset_save(lambda: self.set_preset_file_name(file_name)):
@@ -1092,7 +1124,7 @@ class PresetRawEditorPage(BasePage):
             status = "Импортированный пресет"
         else:
             status = "Пользовательский пресет"
-        meta_text = f"Имя: {self._preset_name}"
+        meta_parts: list[str] = []
         remote_binding = self._remote_preset_binding()
         if remote_binding is not None:
             if bool(remote_binding.get("detached", False)):
@@ -1101,14 +1133,18 @@ class PresetRawEditorPage(BasePage):
                 status += " · обновляется по ссылке"
             source_url = str(remote_binding.get("url") or "")
             if source_url:
-                meta_text += f" · Источник: {source_url}"
+                meta_parts.append(f"Источник: {source_url}")
             updated_at = str(remote_binding.get("updated_at") or "")
             if updated_at:
-                meta_text += f" · Синхронизирован: {updated_at}"
+                meta_parts.append(f"Синхронизирован: {updated_at}")
         set_text_if_changed(self.statusLabel, status)
         set_visible_if_changed(self.activateButton, not is_active)
+        meta_text = " · ".join(meta_parts)
         set_text_if_changed(self.metaLabel, meta_text)
-        set_text_if_changed(self.pathLabel, str(self._preset_path or ""))
+        self.metaLabel.setVisible(bool(meta_text))
+        path_text = str(self._preset_path or "")
+        if set_text_if_changed(self.pathLabel, path_text):
+            self.pathLabel.setToolTip(path_text)
 
     def _remote_preset_binding(self):
         file_name = str(self._preset_file_name or "").strip()

@@ -98,6 +98,9 @@ class RawPresetTextEditor(QObject):
             pass
 
         self.find_controller = FindController(self.editor, self.find_bar, parent=self)
+        # Как и в остальных редакторах программы, строка поиска не занимает
+        # место постоянно: её открывает Ctrl+F (или Ctrl+H) и закрывает Esc.
+        self.find_bar.setVisible(False)
 
         self.save_timer = QTimer(parent)
         self.save_timer.setSingleShot(True)
@@ -106,6 +109,10 @@ class RawPresetTextEditor(QObject):
         self.commit_timer.setSingleShot(True)
         self.commit_timer.timeout.connect(self.commit_pending_content_change)
         self.setParent(parent)
+
+    def open_find_panel(self) -> None:
+        """Показывает строку поиска и ставит в неё курсор (то же, что Ctrl+F в тексте)."""
+        self.find_controller.open_panel()
 
     def install_application_event_filter(self, app) -> bool:
         if app is None:

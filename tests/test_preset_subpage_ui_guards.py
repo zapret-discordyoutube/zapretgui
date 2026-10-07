@@ -52,6 +52,15 @@ class _Label:
     def setText(self, text: str) -> None:  # noqa: N802
         self.text_value = str(text)
 
+    def setVisible(self, visible: bool) -> None:  # noqa: N802
+        self.visible = bool(visible)
+
+    def toolTip(self) -> str:  # noqa: N802
+        return getattr(self, "tooltip_value", "")
+
+    def setToolTip(self, text: str) -> None:  # noqa: N802
+        self.tooltip_value = str(text)
+
 
 class _Signal:
     def connect(self, _callback) -> None:

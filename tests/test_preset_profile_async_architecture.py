@@ -372,7 +372,7 @@ class PresetProfileAsyncArchitectureTests(unittest.TestCase):
         self.assertIn("FindReplaceBar(parent)", editor_init_source)
         self.assertIn("FindController(self.editor, self.find_bar", editor_init_source)
         self.assertIn("self.search_input = self.find_bar.search_input", editor_init_source)
-        self.assertIn("actions_layout.addStretch(1)", build_source)
+        self.assertIn("top_layout.addWidget(self.runtimeToggleButton)", build_source)
         self.assertIn("self.add_widget(self.findBar)", build_source)
         self.assertIn("self.find_controller.search_text(query)", search_source)
         self.assertIn("self.find_controller.find_next(reverse=", find_source)

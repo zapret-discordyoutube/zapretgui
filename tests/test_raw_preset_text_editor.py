@@ -267,6 +267,23 @@ class RawPresetTextEditorTests(unittest.TestCase):
         self.assertTrue(editor.content_publish_pending)
         self.assertIn("Изменения", footer_messages[-1])
 
+    def test_find_bar_is_hidden_until_search_is_requested(self) -> None:
+        editor = self._editor()
+
+        # Строка поиска не занимает место над текстом, пока её не позвали.
+        self.assertTrue(editor.find_bar.isHidden())
+
+        editor.editor.findRequested.emit(False)  # Ctrl+F в тексте
+        self.assertFalse(editor.find_bar.isHidden())
+        self.assertFalse(editor.find_bar.is_replace_visible())
+
+        editor.find_bar.closeRequested.emit()  # Esc или крестик
+        self.assertTrue(editor.find_bar.isHidden())
+
+        editor.editor.findRequested.emit(True)  # Ctrl+H
+        self.assertFalse(editor.find_bar.isHidden())
+        self.assertTrue(editor.find_bar.is_replace_visible())
+
     def test_editor_uses_shared_code_editor_widget(self) -> None:
         from ui.code_editor.editor import CodeEditor
         from ui.code_editor.find_bar import FindReplaceBar
