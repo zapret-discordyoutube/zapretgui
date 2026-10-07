@@ -72,7 +72,14 @@ class TraceRouteTests(unittest.TestCase):
         self.assertEqual(probe.calls, [])
 
 
-def _network(filter_hop: int | None, *, server_alive: bool = True, stateful: bool = True, lose: set | None = None):
+def _network(
+    filter_hop: int | None,
+    *,
+    server_alive: bool = True,
+    stateful: bool = True,
+    lose: set | None = None,
+    by_name: bool = True,
+):
     """Учебная сеть для поиска фильтра: он стоит перед узлом ``filter_hop`` и запоминает соединение."""
     asked: list[int | None] = []
     lose = set(lose or ())
@@ -84,6 +91,9 @@ def _network(filter_hop: int | None, *, server_alive: bool = True, stateful: boo
         if not server_alive:
             return False
         seen_by_filter = ttl is not None and filter_hop is not None and ttl >= filter_hop
+        # ``by_name=False`` — поток гасит роутер при любом имени, а не фильтр по имени.
+        if by_name and blocked_name == pt.NEUTRAL_NAME:
+            return True
         return not (seen_by_filter and stateful)
 
     pair.asked = asked
@@ -96,8 +106,39 @@ class LocateFilterTests(unittest.TestCase):
         facts = pt.locate_filter(TARGET, "rutracker.org", max_ttl=12, pair=pair)
 
         self.assertEqual((facts.control_ok, facts.stateful, facts.first_blocked_ttl), (True, True, 6))
-        # Контроль, проверка «запоминает ли» (дважды), затем сроки 1–5 по разу и 6 дважды.
-        self.assertEqual(pair.asked, [None, 128, 128, 1, 2, 3, 4, 5, 6, 6])
+        # Контроль, проверка «запоминает ли» (дважды), затем сроки 1–5 по разу и 6 дважды;
+        # потом два подтверждения: безобидное имя на том же сроке и следующий узел дважды.
+        self.assertEqual(pair.asked, [None, 128, 128, 1, 2, 3, 4, 5, 6, 6, 6, 7, 7])
+        self.assertEqual((facts.neutral_passes, facts.next_blocked), (True, True))
+        self.assertEqual(pt.judge_filter(facts).code, pt.FILTER_FOUND)
+
+    def test_flow_dying_with_a_harmless_name_too_is_not_a_filter(self) -> None:
+        """Роутер гасит поток, когда первый пакет не дошёл, каким бы ни было имя."""
+        facts = pt.locate_filter(TARGET, "rutracker.org", max_ttl=12, pair=_network(1, by_name=False))
+        verdict = pt.judge_filter(facts)
+
+        self.assertIs(facts.neutral_passes, False)
+        self.assertEqual((verdict.code, verdict.hop), (pt.FILTER_UNSURE, None))
+        self.assertIn("с безобидным именем", verdict.text)
+
+    def test_two_losses_in_a_row_are_not_confirmed_by_the_next_hop(self) -> None:
+        # Фильтра нет вовсе; на сроке жизни 3 оба пакета потерялись.
+        pair = _network(None, lose={6, 7})
+        # Проверка «запоминает ли» должна пройти, поэтому учебная сеть гасит только полный срок жизни.
+        real = pair
+
+        def lossy(ip, name, ttl, *, cancel):
+            if ttl == 128:
+                real.asked.append(ttl)
+                return False
+            return real(ip, name, ttl, cancel=cancel)
+
+        facts = pt.locate_filter(TARGET, "rutracker.org", max_ttl=12, pair=lossy)
+        verdict = pt.judge_filter(facts)
+
+        self.assertEqual((facts.first_blocked_ttl, facts.next_blocked), (3, False))
+        self.assertEqual(verdict.code, pt.FILTER_UNSURE)
+        self.assertIn("случайную потерю", verdict.text)
 
     def test_one_lost_packet_is_not_taken_for_the_filter(self) -> None:
         # Потерян ответ на пакет со сроком жизни 3: повтор проходит, поиск идёт дальше.

@@ -48,6 +48,8 @@ from utils.windows_icmp import HOP_ROUTER, HOP_SILENT, HOP_TARGET, HOP_UNSUPPORT
 __all__ = [
     "FILTER_FOUND",
     "FILTER_NOT_ON_PATH",
+    "FILTER_UNSURE",
+    "FILTER_UNSURE",
     "FILTER_NOT_STATEFUL",
     "FILTER_NO_CONTROL",
     "FilterFacts",
@@ -74,6 +76,11 @@ FILTER_FOUND = "found"
 FILTER_NO_CONTROL = "no_control"
 FILTER_NOT_STATEFUL = "not_stateful"
 FILTER_NOT_ON_PATH = "not_on_path"
+# Место вроде бы найдено, но контроль его не подтвердил.
+FILTER_UNSURE = "unsure"
+
+# Имя, которое не блокируют: с ним тот же опыт должен проходить.
+NEUTRAL_NAME = "example.com"
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +204,12 @@ class FilterFacts:
     # До какого срока жизни дошёл перебор.
     checked_up_to: int = 0
     cancelled: bool = False
+    # Контроль на найденном узле: с безобидным именем обычный пакет проходит.
+    # False — поток пропадает и без запрещённого имени: дело не в фильтре. None — не проверяли.
+    neutral_passes: bool | None = None
+    # На следующем узле запрещённый пакет тоже гасит поток. False — не гасит:
+    # находка была случайной потерей. None — не проверяли.
+    next_blocked: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,7 +260,19 @@ def locate_filter(
         if blocked is None:
             return FilterFacts(control_ok=True, stateful=True, checked_up_to=ttl - 1, cancelled=True)
         if blocked:
-            return FilterFacts(control_ok=True, stateful=True, first_blocked_ttl=ttl, checked_up_to=ttl)
+            # Два контроля, прежде чем называть место: тот же срок жизни с безобидным
+            # именем (поток должен выжить) и следующий узел (поток должен пропасть снова).
+            neutral = pair(ip, NEUTRAL_NAME, ttl, cancel=token)
+            beyond = silent_twice(ttl + 1) if neutral else None
+            return FilterFacts(
+                control_ok=True,
+                stateful=True,
+                first_blocked_ttl=ttl,
+                checked_up_to=ttl,
+                cancelled=neutral is None or (bool(neutral) and beyond is None),
+                neutral_passes=neutral,
+                next_blocked=beyond,
+            )
     return FilterFacts(control_ok=True, stateful=True, checked_up_to=max_ttl)
 
 
@@ -278,6 +303,18 @@ def judge_filter(facts: FilterFacts, trace: RouteTrace | None = None) -> FilterV
         return FilterVerdict(
             FILTER_NOT_ON_PATH,
             f"на первых {facts.checked_up_to} узлах фильтр не найден",
+        )
+    if facts.neutral_passes is False:
+        return FilterVerdict(
+            FILTER_UNSURE,
+            f"на узле {hop} поток пропадает и с безобидным именем — так ведёт себя роутер, а не фильтр по имени; "
+            "найти место фильтра этим способом здесь нельзя",
+        )
+    if facts.next_blocked is False:
+        return FilterVerdict(
+            FILTER_UNSURE,
+            f"узел {hop} один раз погасил поток, но на следующем узле это не повторилось — "
+            "похоже на случайную потерю пакетов, место фильтра не подтверждено",
         )
     if hop == 1:
         return FilterVerdict(
