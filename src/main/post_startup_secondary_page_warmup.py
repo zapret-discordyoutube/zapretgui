@@ -70,6 +70,7 @@ def install_secondary_page_warmup(
                 f"SecondaryPageWarmup-{page_name.name}",
                 lambda name=page_name: _warm_page(name),
                 delay_ms=delay,
+                speculative=True,
             )
 
     bind_startup_gate(

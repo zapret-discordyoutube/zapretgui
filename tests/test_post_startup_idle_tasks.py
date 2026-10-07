@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 from main import post_startup_idle_tasks as idle_tasks  # noqa: E402
 from main.post_startup_idle_tasks import (  # noqa: E402
     BACKGROUND_WAIT_MAX_MS,
+    SPECULATIVE_IDLE_MS,
+    SPECULATIVE_POLL_MS,
     BUSY_POLL_MS,
     HIDDEN_POLL_MS,
     IDLE_REQUIRED_MAX_MS,
@@ -163,6 +165,105 @@ class IdleUiTaskQueueBackgroundTests(unittest.TestCase):
             launch_busy[0] = False
             lane_busy.return_value = True
             self.assertTrue(queue._is_background_busy())
+
+
+class SpeculativeTaskTests(unittest.TestCase):
+    """Страница про запас собирается, только когда заминку окна некому заметить.
+
+    Замер на win10: шесть сборок в первые восемь секунд после запуска давали
+    шесть рывков анимации по 46–122 мс, хотя человек ничего не нажимал.
+    """
+
+    def test_watching_user_does_not_get_a_stall(self) -> None:
+        world = _World()
+        world.idle_ms = 5_000  # не трогает мышь, но смотрит на окно
+        queue = world.build()
+        ran: list[str] = []
+
+        queue.add("page", lambda: ran.append("page"), speculative=True)
+        queue._on_timer()
+
+        self.assertEqual(ran, [])
+        self.assertEqual(_armed_ms(queue), SPECULATIVE_POLL_MS)
+
+    def test_page_is_built_when_user_left(self) -> None:
+        world = _World()
+        world.idle_ms = SPECULATIVE_IDLE_MS
+        queue = world.build()
+        ran: list[str] = []
+
+        queue.add("page", lambda: ran.append("page"), speculative=True)
+        queue._on_timer()
+
+        self.assertEqual(ran, ["page"])
+
+    def test_page_is_built_while_user_works_in_another_program(self) -> None:
+        world = _World()
+        world.idle_ms = 0
+        world.app_active = False
+        queue = world.build()
+        ran: list[str] = []
+
+        queue.add("page", lambda: ran.append("page"), speculative=True)
+        queue._on_timer()
+
+        self.assertEqual(ran, ["page"])
+
+    def test_hidden_window_still_builds_no_pages(self) -> None:
+        world = _World()
+        world.shown = False
+        queue = world.build()
+        ran: list[str] = []
+
+        queue.add("page", lambda: ran.append("page"), speculative=True)
+        queue._on_timer()
+
+        self.assertEqual(ran, [])
+
+    def test_waiting_speculative_task_does_not_hold_ordinary_one(self) -> None:
+        # Окно «Что нового» стоит в очереди позже страниц про запас.
+        world = _World()
+        world.idle_ms = 5_000
+        queue = world.build()
+        ran: list[str] = []
+
+        queue.add("page-1", lambda: ran.append("page-1"), speculative=True)
+        queue.add("page-2", lambda: ran.append("page-2"), speculative=True)
+        queue.add("whats-new", lambda: ran.append("whats-new"))
+        queue._on_timer()
+
+        self.assertEqual(ran, ["whats-new"])
+        self.assertEqual(queue.pending_names(), ("page-1", "page-2"))
+
+    def test_ordinary_tasks_keep_their_order(self) -> None:
+        world = _World()
+        queue = world.build()
+        ran: list[str] = []
+
+        queue.add("first", lambda: ran.append("first"))
+        queue.add("second", lambda: ran.append("second"))
+        queue._on_timer()
+        world.advance(TASK_GAP_MS)
+        queue._on_timer()
+
+        self.assertEqual(ran, ["first", "second"])
+
+    def test_not_ready_task_is_not_started_early(self) -> None:
+        world = _World()
+        world.idle_ms = 5_000
+        queue = world.build()
+        ran: list[str] = []
+
+        queue.add("page", lambda: ran.append("page"), speculative=True)
+        queue.add("later", lambda: ran.append("later"), delay_ms=400)
+        queue._on_timer()
+
+        self.assertEqual(ran, [])
+        # Просыпаемся к ближайшему событию: готовности второй задачи.
+        self.assertEqual(_armed_ms(queue), 400)
+
+    def test_default_threshold_means_user_is_away(self) -> None:
+        self.assertGreaterEqual(SPECULATIVE_IDLE_MS, 10_000)
 
 
 class LaunchTransitionProbeTests(unittest.TestCase):

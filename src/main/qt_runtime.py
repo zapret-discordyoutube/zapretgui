@@ -36,10 +36,11 @@ def apply_gui_gil_switch_interval() -> None:
 
     Интервал меньше миллисекунды: на Windows ожидание замка тогда равно нулю,
     а не ~2 мс на каждое обращение окна к своему коду. Замеры и цена — в
-    ui.precise_timer. Включается сразу, ещё до окна: на запуск приходится
-    больше всего фоновой работы; дальше интервалом управляет видимость окна.
+    ui.gui_thread_priority. Включается сразу, ещё до окна: на запуск
+    приходится больше всего фоновой работы; дальше интервалом управляет
+    видимость окна.
     """
-    from ui.precise_timer import set_gui_gil_priority
+    from ui.gui_thread_priority import set_gui_gil_priority
 
     set_gui_gil_priority(True)
 
@@ -172,11 +173,6 @@ def ensure_qt_runtime() -> QApplication:
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     os.environ["QT_API"] = "pyqt6"
     apply_gui_gil_switch_interval()
-    # Точный таймер Windows включаем тоже сразу; дальше обеими настройками
-    # управляет видимость окна (ui.precise_timer).
-    from ui.precise_timer import set_precise_timer
-
-    set_precise_timer(True)
     _set_attr_if_exists("AA_EnableHighDpiScaling")
     _set_attr_if_exists("AA_UseHighDpiPixmaps")
 

@@ -41,6 +41,7 @@ def install_telegram_proxy_page_warmup(
             "TelegramProxyPageWarmup",
             _run_telegram_proxy_page_warmup,
             delay_ms=delay,
+            speculative=True,
         )
 
     bind_startup_gate(

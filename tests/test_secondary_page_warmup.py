@@ -25,9 +25,11 @@ class _RecordingIdleTasks:
 
     def __init__(self) -> None:
         self.tasks: list[tuple[str, object, int, bool]] = []
+        self.speculative: list[bool] = []
 
-    def add(self, name, callback, *, delay_ms=0, needs_shown_window=True) -> None:
+    def add(self, name, callback, *, delay_ms=0, needs_shown_window=True, speculative=False) -> None:
         self.tasks.append((name, callback, int(delay_ms), bool(needs_shown_window)))
+        self.speculative.append(bool(speculative))
 
     def run_all(self) -> None:
         for _name, callback, _delay, _needs_window in self.tasks:
@@ -51,6 +53,20 @@ class SecondaryPageWarmupTests(unittest.TestCase):
         self.assertIn(PageName.ZAPRET2_USER_PRESETS, pages)
         self.assertIn(PageName.APPEARANCE, pages)
         self.assertIn(PageName.PREMIUM, pages)
+
+    def test_pages_are_built_only_when_nobody_can_see_the_stall(self) -> None:
+        # Сборка страницы — заминка окна на десятки миллисекунд. Про запас она
+        # идёт, только когда человек не смотрит на программу.
+        idle_tasks = _RecordingIdleTasks()
+        with _immediate_startup_gate():
+            install_secondary_page_warmup(
+                _startup_host(),
+                log_startup_metric=Mock(),
+                idle_tasks=idle_tasks,
+            )
+
+        self.assertEqual(len(idle_tasks.speculative), len(SECONDARY_PAGE_WARMUP_PLAN))
+        self.assertTrue(all(idle_tasks.speculative))
 
     def test_pages_are_spread_out_in_time(self) -> None:
         delays = [delay for _page, delay in SECONDARY_PAGE_WARMUP_PLAN]

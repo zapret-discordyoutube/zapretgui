@@ -184,9 +184,10 @@ class BackendPageDataWarmupTests(unittest.TestCase):
         )
         metric = Mock()
         queued: list[tuple[str, object, int]] = []
+        speculative_flags: list[bool] = []
         idle_tasks = SimpleNamespace(
-            add=lambda name, callback, *, delay_ms=0, needs_shown_window=True: queued.append(
-                (name, callback, delay_ms)
+            add=lambda name, callback, *, delay_ms=0, needs_shown_window=True, speculative=False: (
+                speculative_flags.append(speculative) or queued.append((name, callback, delay_ms))
             )
         )
 
@@ -199,6 +200,8 @@ class BackendPageDataWarmupTests(unittest.TestCase):
 
         # Страница строится в GUI-потоке, поэтому её время выбирает очередь
         # пауз пользователя, а не таймер: 3000 мс — это «не раньше чем».
+        # Сборка идёт про запас: только когда заминку окна некому заметить.
+        self.assertEqual(speculative_flags, [True])
         self.assertEqual([(name, delay) for name, _cb, delay in queued], [("TelegramProxyPageWarmup", 3000)])
         startup_host.ensure_page.assert_not_called()
         queued[0][1]()

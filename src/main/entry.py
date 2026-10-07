@@ -230,12 +230,11 @@ def _finish_event_loop_bootstrap(*, app, window, application_controller, start_i
     )
 
     # Приоритет окна над фоновыми потоками (короткий интервал переключения
-    # замка Python и точный системный таймер) нужен, только пока окно на
-    # экране: в трее он зря расходовал бы энергию. Ссылка держится на окне,
-    # как и мост выше.
-    from ui.precise_timer import install_window_precise_timer
+    # замка Python) нужен, только пока окно на экране: в трее ждущие потоки
+    # зря крутили бы процессор. Ссылка держится на окне, как и мост выше.
+    from ui.gui_thread_priority import install_window_gil_priority
 
-    window._precise_timer = install_window_precise_timer(window)
+    window._gil_priority = install_window_gil_priority(window)
 
     if start_in_tray:
         log("Запуск приложения скрыто в трее", "TRAY")

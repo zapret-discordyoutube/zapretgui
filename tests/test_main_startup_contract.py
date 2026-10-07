@@ -449,8 +449,8 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(entry, "_configure_window_appearance", side_effect=lambda *_: calls.append("appearance")),
             patch("startup.show_window_bridge.ShowWindowBridge", Bridge),
             patch(
-                "ui.precise_timer.install_window_precise_timer",
-                side_effect=lambda _window: calls.append("precise_timer") or object(),
+                "ui.gui_thread_priority.install_window_gil_priority",
+                side_effect=lambda _window: calls.append("gil_priority") or object(),
             ),
             patch.object(
                 entry.QTimer,
@@ -477,8 +477,8 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         self.assertLess(calls.index("startup_interactive.emit"), calls.index("install_post_startup"))
         self.assertLess(calls.index("appearance"), calls.index("install_post_startup"))
         self.assertLess(calls.index("bridge.start"), calls.index("install_post_startup"))
-        # Точным таймером после запуска управляет видимость окна.
-        self.assertIn("precise_timer", calls)
+        # Приоритетом окна над фоном после запуска управляет видимость окна.
+        self.assertIn("gil_priority", calls)
 
     def test_post_startup_install_is_bound_to_interactive_ready(self) -> None:
         from main import entry
@@ -2846,9 +2846,10 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         queued_tasks: list[tuple[str, str, str]] = []
         ready_methods: list[str] = []
         idle_queue: list[tuple[str, int]] = []
+        speculative_flags: list[bool] = []
         idle_tasks = SimpleNamespace(
-            add=lambda name, callback, *, delay_ms=0, needs_shown_window=True: (
-                idle_queue.append((name, delay_ms)) or callback()
+            add=lambda name, callback, *, delay_ms=0, needs_shown_window=True, speculative=False: (
+                speculative_flags.append(speculative) or idle_queue.append((name, delay_ms)) or callback()
             )
         )
 
@@ -2884,6 +2885,8 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             idle_queue,
             [("ProfileSetupPageWarmup", 1000), ("PresetSetupPageWarmup", 2200)],
         )
+        # Сборка страниц идёт про запас: только когда заминку окна некому заметить.
+        self.assertEqual(speculative_flags, [True, True])
         # Список профилей сразу виден на главной странице — он идёт раньше
         # остальных фоновых задач. Частота стратегий нужна только странице
         # настройки профиля, а считается дольше всего, поэтому она идёт
