@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.06.1")
+        self.assertEqual(catalog.catalog_version, "2026.10.08.1")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -150,7 +150,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                     0,
                     dead_relay,
                 )
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM hosts_entries").fetchone()[0], 499)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM hosts_entries").fetchone()[0], 517)
         finally:
             connection.close()
 
@@ -180,7 +180,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         finally:
             connection.close()
 
-    def test_githubusercontent_ipv6_service_is_present_and_pure_ipv6(self) -> None:
+    def test_githubusercontent_service_has_ipv6_and_ipv4_for_every_host(self) -> None:
         connection = sqlite3.connect(PRIVATE_DATABASE)
         try:
             service = connection.execute(
@@ -201,13 +201,24 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         finally:
             connection.close()
 
-        self.assertEqual(len(rows), 72)
+        self.assertEqual(len(rows), 90)
         hostnames = {hostname for hostname, _ in rows}
         self.assertEqual(len(hostnames), 18)
         self.assertIn("raw.githubusercontent.com", hostnames)
         self.assertIn("objects.githubusercontent.com", hostnames)
+        # Без IPv4 сервис считается «только IPv6» и выключается у тех, у кого IPv6 нет.
+        ipv4_hostnames = {hostname for hostname, ip in rows if ip == "146.75.22.132"}
+        self.assertEqual(ipv4_hostnames, hostnames)
         for _, ip in rows:
-            self.assertTrue(ip.startswith("2606:50c0:800"), ip)
+            self.assertTrue(ip == "146.75.22.132" or ip.startswith("2606:50c0:800"), ip)
+        from hosts.catalog_repository import load_catalog
+
+        # Название больше не обещает «только IPv6», а service_id прежний: по нему
+        # в настройках хранится выбор пользователя.
+        self.assertEqual(
+            load_catalog(PRIVATE_DATABASE).service_id_by_name["GitHub загрузки/картинки"],
+            "hosts.githubusercontent_ipv6",
+        )
 
     def test_runtime_reads_dns_and_direct_rows_from_sqlite(self) -> None:
         self.assertEqual(

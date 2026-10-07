@@ -64,7 +64,11 @@ class TelegramHostsTextTests(unittest.TestCase):
         self.assertIn(TELEGRAM_HOSTS_MARKER, text)
         for domain in (
             "cdn1.telesco.pe",
+            "cdn.telesco.pe",
             "cdn4.telesco.pe",
+            "cdn6.telesco.pe",
+            "oauth.telegram.org",
+            "oauth.tg.dev",
             "desktop.telegram.org",
             "macos.telegram.org",
             "web.telegram.org",
