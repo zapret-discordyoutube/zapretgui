@@ -118,10 +118,9 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
         counters = QHBoxLayout()
         counters.setContentsMargins(0, 2, 0, 0)
         counters.setSpacing(8)
-        self.good_badge = CounterBadge("", self, tone="success", mark="✓")
-        self.remarks_badge = CounterBadge("с замечаниями", self, tone="warning", mark="!")
-        self.silent_badge = CounterBadge("не отвечают", self, tone="muted", mark="✗")
-        for badge in (self.good_badge, self.remarks_badge, self.silent_badge):
+        self.good_badge = CounterBadge("отвечают", self, tone="success", mark="✓")
+        self.silent_badge = CounterBadge("молчат", self, tone="muted", mark="✗")
+        for badge in (self.good_badge, self.silent_badge):
             badge.setVisible(False)
             counters.addWidget(badge)
         counters.addStretch(1)
@@ -207,20 +206,15 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
         set_state_text(self, f"Итог проверки DNS-серверов: {title}")
         self._schedule_min_height_sync()
 
-    def _show_tally(self, tally: verdicts.Tally, *, final: bool) -> None:
-        self.good_badge.set_caption("без замечаний" if final else "отвечают")
-        for badge, value in (
-            (self.good_badge, tally.good),
-            (self.remarks_badge, tally.remarks),
-            (self.silent_badge, tally.silent),
-        ):
+    def _show_tally(self, tally: verdicts.Tally) -> None:
+        for badge, value in ((self.good_badge, tally.good), (self.silent_badge, tally.silent)):
             # Сначала показать, потом менять число: спрятанный счётчик не подпрыгивает.
             badge.setVisible(value > 0)
             badge.set_value(value)
 
     def _hide_extras(self) -> None:
         self._clear_findings()
-        self._show_tally(verdicts.Tally(), final=False)
+        self._show_tally(verdicts.Tally())
         if self.open_settings_btn is not None:
             self.open_settings_btn.setVisible(False)
 
@@ -247,10 +241,10 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
         self.title_label.setText(title)
         self.progress_bar.setRange(0, max(1, int(total)))
         self.progress_bar.setValue(int(done))
-        self._show_tally(tally, final=False)
+        self._show_tally(tally)
         set_state_text(self.progress_bar, f"Проверка DNS-серверов: готово {done} из {total}")
 
-    def show_verdict(self, verdict: verdicts.Verdict, tally: verdicts.Tally, *, celebrate: bool = True) -> None:
+    def show_verdict(self, verdict: verdicts.Verdict, *, celebrate: bool = True) -> None:
         self._clear_findings()
         rows = [_FindingRow(item, self._findings_host) for item in verdict.items]
         for row in rows:
@@ -258,7 +252,8 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
         self._findings_host.setVisible(bool(rows))
         if self.open_settings_btn is not None:
             self.open_settings_btn.setVisible(verdict.suggests_encrypted_dns)
-        self._show_tally(tally, final=verdict.kind != verdicts.KIND_STOPPED)
+        # Счётчики нужны, пока проверка идёт; в итоге их сменяют полоса и фильтр над карточками.
+        self._show_tally(verdicts.Tally())
         self._set(verdict.kind, verdict.title, verdict.detail)
         if not celebrate:
             return

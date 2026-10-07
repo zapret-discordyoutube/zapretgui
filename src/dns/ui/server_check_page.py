@@ -1,147 +1,31 @@
 """Вкладка «DNS-серверы»: каждый адрес каждым способом и перехват по дороге.
 
 Живёт вкладкой страницы BlockCheck. Сама в сеть не ходит: просит фасад DNS
-запустить фоновую проверку и показывает строки по мере готовности.
+запустить фоновую проверку и показывает карточки серверов по мере готовности.
 """
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QHeaderView, QSizePolicy, QTableWidgetItem
-from qfluentwidgets import FluentIcon, PrimaryPushButton, PushButton, StrongBodyLabel, TableWidget, isDarkTheme
+from PyQt6.QtCore import QTimer
+from qfluentwidgets import FluentIcon, PrimaryPushButton, PushButton, StrongBodyLabel
 
-import dns.domain_lookup_plans as tones
 import dns.server_check_plans as plans
 import dns.server_check_verdict as verdicts
-from blockcheck.ui.fun_texts import phrases
 from app.ui_texts import tr as tr_catalog
-from dns.server_check import LEVEL_FAIL, LEVEL_WARN, TRANSPORTS
-from dns.ui.domain_lookup_page import _InfoLines, _tone_color
+from blockcheck.ui.fun_texts import phrases
+from dns.ui.domain_lookup_page import _InfoLines
+from dns.ui.server_check_cards import FILTER_ALL, ServerCardsView, SeverityBar, StatusFilter
 from dns.ui.server_check_widgets import ServerCheckVerdictPanel
 from log.log import log
-from ui.accessibility import set_control_accessibility, set_state_text
+from ui.accessibility import set_control_accessibility
 from ui.fluent_widgets import SettingsCard, set_tooltip
 from ui.latest_worker_lane import LatestWorkerLane
 from ui.log_report_dialog import show_log_report_dialog
 from ui.pages.base_page import BasePage
-from ui.theme_refresh import ThemeRefreshBinding
-from ui.widgets.fluent_item_tooltip import (
-    FLUENT_ITEM_TOOLTIP_ROLE,
-    install_fluent_item_tooltips,
-    set_fluent_item_tooltip,
-)
 from ui.widgets.stagger_float_in import float_in
 
-_FIRST_TRANSPORT_COLUMN = 2
-_NOTE_COLUMN = _FIRST_TRANSPORT_COLUMN + len(TRANSPORTS)
-_CELL_TONES = {
-    plans.CELL_OK: tones.TONE_SUCCESS,
-    plans.CELL_WARN: tones.TONE_WARNING,
-    plans.CELL_FAIL: tones.TONE_ERROR,
-}
-_NOTE_TONES = {LEVEL_FAIL: tones.TONE_ERROR, LEVEL_WARN: tones.TONE_WARNING}
-# Неважное («нет ответа» на пинг, «Без замечаний») — обычным цветом текста, но бледнее.
-# Отдельный «приглушённый» цвет темы на тёмном фоне таблицы почти не виден.
-_FADED_ALPHA = 150
 # Промежуточные результаты приходят пачками по несколько в секунду: показываем не чаще.
 _STAGE_INTERVAL_MS = 120
-# Таблица показывает столько строк, остальные прокручиваются внутри неё. Так Qt
-# рисует только видимые строки, а не все адреса разом при каждой перерисовке.
-_VISIBLE_ROWS = 12
-
-
-class DnsServersTable(TableWidget):
-    """Одна строка на адрес сервера, по столбцу на каждый способ связи."""
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setColumnCount(_NOTE_COLUMN + 1)
-        self.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        self.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
-        self.verticalHeader().setVisible(False)
-        self.setWordWrap(False)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        # Ширину столбцов считаем сами, один раз на пачку изменений. В режиме
-        # «по содержимому» Qt заново обмеряет весь столбец после каждой записи
-        # в ячейку — на полной таблице окно замирало на секунду.
-        header = self.horizontalHeader()
-        for column in range(_NOTE_COLUMN):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(_NOTE_COLUMN, QHeaderView.ResizeMode.Stretch)
-        install_fluent_item_tooltips(self)
-        self._rows: tuple[plans.ServerRow, ...] = ()
-        self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
-
-    def set_headers(self, server: str, address: str, note: str) -> None:
-        titles = [plans.TRANSPORT_TITLES[transport] for transport in TRANSPORTS]
-        self.setHorizontalHeaderLabels([server, address, *titles, note])
-        self._fit_columns()
-
-    def show_rows(self, rows) -> None:
-        rows = tuple(rows)
-        previous, self._rows = self._rows, rows
-        # Переписываем только строки, которые изменились.
-        changed = [index for index, row in enumerate(rows) if index >= len(previous) or previous[index] != row]
-        resized = len(rows) != len(previous)
-        if not changed and not resized:
-            return
-        self.setUpdatesEnabled(False)
-        try:
-            if resized:
-                self.setRowCount(len(rows))
-            for index in changed:
-                self._fill_row(index, rows[index])
-            self._fit_columns()
-        finally:
-            self.setUpdatesEnabled(True)
-        if resized:
-            self._fit_height()
-        problems = sum(1 for row in rows if row.level in (LEVEL_WARN, LEVEL_FAIL))
-        set_state_text(self, f"Проверка DNS-серверов: {len(rows)} адресов, с замечаниями {problems}")
-
-    def _fill_row(self, index: int, row: plans.ServerRow) -> None:
-        for column, text in enumerate((row.server, row.address, *row.cells, row.note)):
-            item = self.item(index, column)
-            if item is None:
-                item = QTableWidgetItem()
-                self.setItem(index, column, item)
-            if item.text() != text:
-                item.setText(text)
-            if item.data(FLUENT_ITEM_TOOLTIP_ROLE) != row.tooltip:
-                set_fluent_item_tooltip(item, row.tooltip)
-        self._paint_row(index, row)
-
-    def _fit_columns(self) -> None:
-        for column in range(_NOTE_COLUMN):
-            self.resizeColumnToContents(column)
-
-    def _fit_height(self) -> None:
-        height = self.horizontalHeader().height() + 2 * self.frameWidth() + 4
-        for row in range(min(self.rowCount(), _VISIBLE_ROWS)):
-            height += self.rowHeight(row)
-        self.setMinimumHeight(height)
-        self.setMaximumHeight(height)
-
-    def _paint(self, item, tone: str | None) -> None:
-        if item is None:
-            return
-        if tone is None:
-            faded = QColor(Qt.GlobalColor.white if isDarkTheme() else Qt.GlobalColor.black)
-            faded.setAlpha(_FADED_ALPHA)
-            item.setForeground(faded)
-        else:
-            item.setForeground(QColor(_tone_color(tone)))
-
-    def _paint_row(self, index: int, row: plans.ServerRow) -> None:
-        for offset, level in enumerate(row.cell_levels):
-            self._paint(self.item(index, _FIRST_TRANSPORT_COLUMN + offset), _CELL_TONES.get(level))
-        self._paint(self.item(index, _NOTE_COLUMN), _NOTE_TONES.get(row.note_level))
-
-    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
-        _ = tokens, force
-        for index, row in enumerate(self._rows):
-            self._paint_row(index, row)
 
 
 class ServerCheckPage(BasePage):
@@ -197,15 +81,21 @@ class ServerCheckPage(BasePage):
         self.verdict_panel.add_actions(self.start_button, self.stop_button, self.report_button)
         self.layout.addWidget(self.verdict_panel)
 
-        self.table_card = SettingsCard()
-        self.table_title = StrongBodyLabel("", self.table_card)
-        self.table_card.add_widget(self.table_title)
-        self.status_lines = _InfoLines(self.table_card)
-        self.table_card.add_widget(self.status_lines)
-        self.table = DnsServersTable(self.table_card)
-        self.table_card.add_widget(self.table)
-        self.table_card.setVisible(False)
-        self.layout.addWidget(self.table_card)
+        # Серверы: полоса «насколько всё плохо», фильтр по выводу и карточки.
+        self.servers_card = SettingsCard()
+        self.servers_title = StrongBodyLabel("", self.servers_card)
+        self.servers_card.add_widget(self.servers_title)
+        self.status_lines = _InfoLines(self.servers_card)
+        self.servers_card.add_widget(self.status_lines)
+        self.severity_bar = SeverityBar(self.servers_card)
+        self.servers_card.add_widget(self.severity_bar)
+        self.status_filter = StatusFilter(self.servers_card)
+        self.servers_card.add_widget(self.status_filter)
+        self.cards = ServerCardsView(self.servers_card)
+        self.status_filter.changed.connect(self.cards.set_filter)
+        self.servers_card.add_widget(self.cards)
+        self.servers_card.setVisible(False)
+        self.layout.addWidget(self.servers_card)
         self.layout.addStretch()
 
     def _apply_texts(self) -> None:
@@ -234,20 +124,7 @@ class ServerCheckPage(BasePage):
             name=self._t("button.report.name", "Открыть отчёт проверки DNS-серверов"),
             description=report_description,
         )
-        self.table_title.setText(self._t("section.table", "Серверы по адресам"))
-        self.table.set_headers(
-            self._t("column.server", "Сервер"),
-            self._t("column.address", "Адрес"),
-            self._t("column.note", "Замечания"),
-        )
-        set_control_accessibility(
-            self.table,
-            name=self._t("table.name", "DNS-серверы по адресам"),
-            description=self._t(
-                "table.description",
-                "Для каждого адреса: время ответа на пинг и каждым способом связи или причина отказа.",
-            ),
-        )
+        self.servers_title.setText(self._t("section.servers", "Серверы"))
         if self._report is not None:
             # Смена языка — не новый итог: без салюта и без выплывания строк.
             self._show_report(self._report, celebrate=False)
@@ -288,8 +165,9 @@ class ServerCheckPage(BasePage):
         # Старые результаты не копим: каждая проверка начинается с чистого экрана.
         self._report = None
         self._drop_staged()
-        self.table_card.setVisible(False)
-        self.table.show_rows(())
+        self.servers_card.setVisible(False)
+        self.status_filter.chips[FILTER_ALL].click()
+        self.cards.set_cards(())
         self.verdict_panel.set_pending(self._progress_title(0, 0), phrases("dns_servers", self._ui_language))
         self._set_running(True)
         self._lane.request()
@@ -310,7 +188,7 @@ class ServerCheckPage(BasePage):
         if not self._lane.runtime.is_current(request_id, cleanup_in_progress=self._closed):
             return
         if report.finished:
-            # Готовый отчёт следом придёт как итог: дважды подряд таблицу не рисуем.
+            # Готовый отчёт следом придёт как итог: дважды подряд его не показываем.
             return
         self._staged = report
         if not self._stage_timer.isActive():
@@ -343,17 +221,23 @@ class ServerCheckPage(BasePage):
 
     def _show_report(self, report, *, celebrate: bool = True) -> None:
         self._report = report
-        rows = plans.build_rows(report)
-        appeared = bool(rows) and self.table_card.isHidden()
-        self.table_card.setVisible(bool(rows))
-        self.table.show_rows(rows)
+        cards = plans.build_cards(report)
+        appeared = bool(cards) and self.servers_card.isHidden()
+        self.servers_card.setVisible(bool(cards))
+        counts = plans.count_cards(cards)
+        final = report.finished and celebrate
+        self.severity_bar.set_counts(counts, animate=final)
+        self.status_filter.set_counts(counts)
+        self.cards.set_cards(cards)
         # Пока проверка идёт, её ход виден в панели итога: вторая строка о том же не нужна.
         self.status_lines.set_lines((plans.build_status(report),) if report.finished else ())
-        if appeared and celebrate:
-            float_in(self.table_card)
+        if final:
+            self.cards.play_reveal()
+        elif appeared and celebrate:
+            float_in(self.servers_card)
         tally = verdicts.tally(report)
         if report.finished:
-            self.verdict_panel.show_verdict(verdicts.build_verdict(report), tally, celebrate=celebrate)
+            self.verdict_panel.show_verdict(verdicts.build_verdict(report), celebrate=celebrate)
         else:
             self.verdict_panel.show_progress(
                 self._progress_title(len(report.rows), report.total), len(report.rows), report.total, tally
@@ -388,4 +272,4 @@ class ServerCheckPage(BasePage):
         super().cleanup()
 
 
-__all__ = ["DnsServersTable", "ServerCheckPage"]
+__all__ = ["ServerCheckPage"]

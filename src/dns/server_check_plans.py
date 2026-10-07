@@ -1,4 +1,4 @@
-"""Как показывать отчёт проверки DNS-серверов: строки таблицы, итог и текст.
+"""Как показывать отчёт проверки DNS-серверов: карточки серверов, строки адресов, итог и текст.
 
 Чистые функции над ``dns.server_check.ServerCheckReport``: ни сети, ни Qt.
 """
@@ -20,6 +20,8 @@ from dns.server_check import (
     CODE_DOH_BLOCKED,
     CODE_DOH_NAME_BLOCKED,
     CODE_FOREIGN_ANSWERS,
+    CODE_INTERCEPTED,
+    CODE_SELF_FILTER,
     CODE_SPOOFED,
     CODE_DOT_BLOCKED,
     CODE_TCP_BLOCKED,
@@ -99,7 +101,57 @@ _SHORT_NOTES = {
     CODE_FOREIGN_ANSWERS: "Отвечает чужая сеть",
     CODE_DOH_NAME_BLOCKED: "DoH закрыт по имени",
     CODE_DEAD: "Не отвечает",
+    CODE_SELF_FILTER: "Сам не отдаёт часть сайтов",
 }
+# На карточке сервера ячеек по способам связи не видно, поэтому там называем и их.
+_CARD_NOTES = {
+    **_SHORT_NOTES,
+    CODE_UDP_BLOCKED: "Обычный DNS закрыт",
+    CODE_DOT_BLOCKED: "DoT закрыт",
+    CODE_DOH_BLOCKED: "DoH закрыт",
+    CODE_UNSTABLE: "Отвечает через раз",
+}
+
+# Что с сервером в целом — от этого зависят цвет карточки и её место в списке.
+CARD_NETWORK = "network"
+CARD_SELF = "self"
+CARD_PARTIAL = "partial"
+CARD_OK = "ok"
+CARD_SILENT = "silent"
+CARD_ORDER = (CARD_NETWORK, CARD_PARTIAL, CARD_SELF, CARD_OK, CARD_SILENT)
+CARD_TITLES = {
+    CARD_NETWORK: "Блокируется по дороге",
+    CARD_SELF: "Сам не отдаёт часть сайтов",
+    CARD_PARTIAL: "Работает не полностью",
+    CARD_OK: "Работает",
+    CARD_SILENT: "Не отвечает",
+}
+# Короткие подписи для фильтра и полосы «насколько всё плохо».
+CARD_GROUPS = {
+    CARD_NETWORK: "Блокируются",
+    CARD_SELF: "Сами фильтруют",
+    CARD_PARTIAL: "Не полностью",
+    CARD_OK: "Работают",
+    CARD_SILENT: "Молчат",
+}
+CARD_HINTS = {
+    CARD_NETWORK: (
+        "Мешает сеть — провайдер или его оборудование. Это доказано: сервер по обычному пути противоречит сам "
+        "себе, либо закрыто именно его имя, либо за него отвечает чужая сеть."
+    ),
+    CARD_SELF: "Так решил сам сервер: он не отдаёт эти сайты даже по шифрованному пути, который по дороге не подменить.",
+    CARD_PARTIAL: (
+        "Отвечает не всеми способами или через раз. Закрыть способ связи мог и провайдер, и сам сервер — "
+        "по одной проверке это не отличить. Если так же закрыто у многих разных серверов, дело в провайдере."
+    ),
+    CARD_OK: "Отвечает всеми способами, ответы никто не подменяет.",
+    CARD_SILENT: "Не отвечает ни одним способом: сервер выключен или закрыт для вашей сети целиком.",
+}
+# Находки, в которых сеть по дороге виновата доказанно: сервер сам себе противоречит
+# или без имени тот же адрес отвечает.
+_NETWORK_CODES = frozenset({CODE_SPOOFED, CODE_DOH_NAME_BLOCKED})
+# Способ связи закрыт, но кем — провайдером или самим сервером — по фактам не видно.
+_CLOSED_CODES = frozenset({CODE_DOH_BLOCKED, CODE_DOT_BLOCKED, CODE_UDP_BLOCKED})
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +166,27 @@ class ServerRow:
     # Важность строки целиком, с учётом закрытых способов связи.
     level: str
     tooltip: str
+
+
+@dataclass(frozen=True, slots=True)
+class ServerCard:
+    """Один сервер целиком: все его адреса и общий вывод."""
+
+    server: str
+    status: str
+    # Коротко, что не так; пусто — замечаний нет.
+    note: str
+    # Лучшее время шифрованного запроса (DoH), а если его нет — обычного.
+    best: str
+    # По каждому способу связи — состояния по адресам (CELL_*), для точек на карточке.
+    dots: tuple[tuple[str, ...], ...]
+    addresses: tuple[ServerRow, ...]
+    tooltip: str
+
+    @property
+    def spoken(self) -> str:
+        parts = [self.server, CARD_TITLES[self.status], self.note, self.best, f"адресов: {len(self.addresses)}"]
+        return ". ".join(part for part in parts if part)
 
 
 def format_ms(value: float | None) -> str:
@@ -211,6 +284,97 @@ def build_rows(report: ServerCheckReport) -> tuple[ServerRow, ...]:
     return tuple(rows)
 
 
+def _address_status(row: Observation, intercepted: bool) -> str:
+    dns_cells = [row.cell(transport) for transport in TRANSPORTS if transport != TRANSPORT_ICMP]
+    if not any(cell.state == STATE_OK for cell in dns_cells):
+        return CARD_SILENT if any(cell.state == STATE_FAIL for cell in dns_cells) else CARD_OK
+    codes = {finding.code for finding in row.findings}
+    # Чужая сеть в ответах — вина дороги, только если перехват подтверждён общим итогом.
+    if codes & _NETWORK_CODES or (intercepted and CODE_FOREIGN_ANSWERS in codes):
+        return CARD_NETWORK
+    if codes & _CLOSED_CODES or any(
+        finding.code == CODE_UNSTABLE and finding.level == LEVEL_WARN for finding in row.findings
+    ):
+        return CARD_PARTIAL
+    if CODE_SELF_FILTER in codes:
+        return CARD_SELF
+    return CARD_OK
+
+
+def _best_time(rows: list[Observation]) -> str:
+    for transport in (TRANSPORT_DOH, TRANSPORT_DOT, TRANSPORT_UDP):
+        times = [
+            row.cell(transport).elapsed_ms
+            for row in rows
+            if row.cell(transport).state == STATE_OK and row.cell(transport).elapsed_ms is not None
+        ]
+        if times:
+            return f"{TRANSPORT_TITLES[transport].split()[0]} {format_ms(min(times))}"
+    return ""
+
+
+def build_cards(report: ServerCheckReport) -> tuple[ServerCard, ...]:
+    """Карточки серверов: сначала те, кому доказанно мешает сеть, в конце — молчащие; внутри группы — по скорости."""
+    intercepted = any(finding.code == CODE_INTERCEPTED for finding in report.findings)
+    shown = dict(zip((id(row) for row in report.rows), build_rows(report)))
+    by_server: dict[str, list[Observation]] = {}
+    for row in report.rows:
+        by_server.setdefault(row.target.provider, []).append(row)
+
+    cards: list[tuple[int, float, ServerCard]] = []
+    for server, rows in by_server.items():
+        statuses = [_address_status(row, intercepted) for row in rows]
+        alive = [status for status in statuses if status != CARD_SILENT]
+        # Сервер жив, если отвечает хоть один его адрес; общий вывод — по худшему из живых.
+        status = min(alive, key=CARD_ORDER.index) if alive else CARD_SILENT
+        notes = list(
+            dict.fromkeys(
+                _CARD_NOTES[finding.code]
+                for level in (LEVEL_FAIL, LEVEL_WARN, LEVEL_INFO)
+                for row in rows
+                for finding in row.findings
+                if finding.level == level and finding.code in _CARD_NOTES and finding.code != CODE_DEAD
+            )
+        )
+        silent = len(statuses) - len(alive)
+        if alive and silent:
+            notes.append(f"Молчит адресов: {silent} из {len(rows)}")
+        best = _best_time(rows)
+        # Для порядка внутри группы: чем быстрее шифрованный ответ, тем выше.
+        speed = min(
+            (
+                row.cell(TRANSPORT_DOH).elapsed_ms or float("inf")
+                for row in rows
+                if row.cell(TRANSPORT_DOH).state == STATE_OK
+            ),
+            default=float("inf"),
+        )
+        addresses = tuple(shown[id(row)] for row in rows)
+        card = ServerCard(
+            server=server,
+            status=status,
+            note=" · ".join(notes),
+            best=best,
+            dots=tuple(
+                tuple(cell_level(transport, row.cell(transport)) for row in rows)
+                for transport in TRANSPORTS
+                if transport != TRANSPORT_ICMP
+            ),
+            addresses=addresses,
+            tooltip=f"{CARD_TITLES[status]}. {CARD_HINTS[status]}\n\n" + "\n\n".join(row.tooltip for row in addresses),
+        )
+        cards.append((CARD_ORDER.index(status), speed, card))
+    cards.sort(key=lambda item: (item[0], item[1], item[2].server.lower()))
+    return tuple(card for _order, _time, card in cards)
+
+
+def count_cards(cards) -> dict[str, int]:
+    counts = dict.fromkeys(CARD_ORDER, 0)
+    for card in cards:
+        counts[card.status] += 1
+    return counts
+
+
 def build_status(report: ServerCheckReport) -> InfoLine:
     done, total = len(report.rows), report.total
     if not report.finished:
@@ -280,6 +444,18 @@ __all__ = [
     "CELL_MUTED",
     "CELL_OK",
     "CELL_WARN",
+    "CARD_GROUPS",
+    "CARD_HINTS",
+    "CARD_NETWORK",
+    "CARD_OK",
+    "CARD_ORDER",
+    "CARD_SELF",
+    "CARD_PARTIAL",
+    "CARD_SILENT",
+    "CARD_TITLES",
+    "ServerCard",
+    "build_cards",
+    "count_cards",
     "TRANSPORT_TITLES",
     "ServerRow",
     "build_rows",

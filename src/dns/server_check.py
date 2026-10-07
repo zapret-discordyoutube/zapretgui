@@ -98,6 +98,7 @@ CODE_DOT_BLOCKED = "dot_blocked"
 CODE_DOH_BLOCKED = "doh_blocked"
 CODE_DOH_NAME_BLOCKED = "doh_name_blocked"
 CODE_UNSTABLE = "unstable"
+CODE_SELF_FILTER = "self_filter"
 CODE_BEST = "best"
 CODE_BYPASS_RUNNING = "bypass_running"
 CODE_ALL_FINE = "all_fine"
@@ -123,7 +124,7 @@ PING_TIMEOUT_MS = 1500
 PROBE_ATTEMPTS = 3
 # Почти все запросы — ожидание сети, поэтому адресов сразу много: общее время
 # проверки упирается в самый медленный (молчащий) адрес, а не в их число.
-MAX_PARALLEL_ADDRESSES = 48
+MAX_PARALLEL_ADDRESSES = 96
 RUN_DEADLINE_S = 75.0
 
 # После такого сбоя DoH по имени стоит попробовать тот же сервер без имени:
@@ -563,6 +564,33 @@ def _spoofed_domains(row: Observation) -> list[str]:
     return spoofed
 
 
+def resolvable_domains(rows: Iterable[Observation]) -> frozenset[str]:
+    """Контрольные сайты, настоящий адрес которых шифрованным путём дал хоть один сервер."""
+    return frozenset(
+        fact.domain
+        for row in rows
+        for fact in row.domains
+        if any(not is_stub_address(ip) for ip in fact.secure_ips)
+    )
+
+
+def _self_filtered_domains(row: Observation, resolvable: frozenset[str]) -> list[str]:
+    """Сайты, которые сервер не отдаёт сам: «сайта нет» или заглушка даже по шифрованному пути.
+
+    Шифрованный ответ по дороге не подменить, значит так решил сам сервер. Чтобы
+    не записать в фильтрацию сайт, которого и правда нет, берём только сайты,
+    настоящий адрес которых в этой же проверке дал другой сервер.
+    """
+    filtered: list[str] = []
+    for fact in row.domains:
+        if fact.domain not in resolvable:
+            continue
+        stub = bool(fact.secure_ips) and all(is_stub_address(ip) for ip in fact.secure_ips)
+        if fact.secure_status == STATUS_NXDOMAIN or stub:
+            filtered.append(fact.domain)
+    return filtered
+
+
 _SERIES_TITLES = ("обычный DNS (UDP)", "DNS по TCP", "DoT", "DoH")
 
 
@@ -574,8 +602,12 @@ def _unstable_level(shaky: list[tuple[str, Cell]]) -> str:
     return LEVEL_INFO
 
 
-def judge_row(row: Observation, owner_of) -> tuple[Finding, ...]:
-    """Выводы об одном адресе. Только по собранным фактам, без сети."""
+def judge_row(row: Observation, owner_of, resolvable: frozenset[str] = frozenset()) -> tuple[Finding, ...]:
+    """Выводы об одном адресе. Только по собранным фактам, без сети.
+
+    ``resolvable`` — контрольные сайты, которые точно существуют (см.
+    ``resolvable_domains``): по ним видно, что сервер фильтрует ответы сам.
+    """
     findings: list[Finding] = []
     udp, tcp = row.cell(TRANSPORT_UDP), row.cell(TRANSPORT_TCP)
     dot, doh = row.cell(TRANSPORT_DOT), row.cell(TRANSPORT_DOH)
@@ -593,6 +625,16 @@ def judge_row(row: Observation, owner_of) -> tuple[Finding, ...]:
                 CODE_SPOOFED,
                 f"обычные ответы подменяются: про {', '.join(spoofed)} приходит «сайта нет» или заглушка, "
                 "хотя по шифрованному пути тот же сервер даёт настоящий адрес",
+            )
+        )
+    filtered = _self_filtered_domains(row, resolvable)
+    if filtered:
+        findings.append(
+            Finding(
+                LEVEL_INFO,
+                CODE_SELF_FILTER,
+                f"сам не отдаёт адреса сайтов: {', '.join(filtered)} — так он отвечает и по шифрованному пути, "
+                "который по дороге не подменить; это решение самого сервера, а не провайдера",
             )
         )
     foreign = _foreign_network(row, owner_of)
@@ -665,6 +707,10 @@ def _shared_foreign_network(rows: Iterable[Observation], owner_of) -> tuple[IpOw
         if len(operators) >= 2:
             return owners[asn], providers_by_asn[asn]
     return None, []
+
+
+def _has(row: Observation, code: str, level: str = "") -> bool:
+    return any(finding.code == code and (not level or finding.level == level) for finding in row.findings)
 
 
 def _without_remarks(row: Observation) -> bool:
@@ -744,16 +790,35 @@ def judge_report(
     udp_closed = _transport_summary(rows, TRANSPORT_UDP, "Обычный DNS (UDP, порт 53)", (CODE_UDP_BLOCKED,))
     if udp_closed:
         findings.append(Finding(LEVEL_WARN, CODE_UDP_BLOCKED, udp_closed))
-    unstable = [finding for row in rows for finding in row.findings if finding.code == CODE_UNSTABLE]
-    if unstable:
-        shaky = [_label(row) for row in rows if any(finding.code == CODE_UNSTABLE for finding in row.findings)]
-        level = LEVEL_WARN if any(finding.level == LEVEL_WARN for finding in unstable) else LEVEL_INFO
-        hint = (
-            " Так бывает, когда блокировка включается не с первого запроса."
-            if level == LEVEL_WARN
-            else " Похоже на обычные потери в сети."
+    # Случайные потери и настоящие срывы — разные вещи: первые только считаем, вторые называем.
+    shaky = [_label(row) for row in rows if _has(row, CODE_UNSTABLE, LEVEL_WARN)]
+    if shaky:
+        findings.append(
+            Finding(
+                LEVEL_WARN,
+                CODE_UNSTABLE,
+                f"Отвечают через раз: {_short_list(shaky)}. Так бывает, когда блокировка включается не с первого запроса.",
+            )
         )
-        findings.append(Finding(level, CODE_UNSTABLE, f"Отвечают через раз: {_short_list(shaky)}.{hint}"))
+    lossy = sum(1 for row in rows if _has(row, CODE_UNSTABLE, LEVEL_INFO))
+    if lossy:
+        findings.append(
+            Finding(
+                LEVEL_INFO,
+                CODE_UNSTABLE,
+                f"Потеряли по одному запросу: {lossy} из {len(rows)} адресов. Похоже на обычные потери в сети.",
+            )
+        )
+    filtering = list(dict.fromkeys(row.target.provider for row in rows if _has(row, CODE_SELF_FILTER)))
+    if filtering:
+        findings.append(
+            Finding(
+                LEVEL_INFO,
+                CODE_SELF_FILTER,
+                f"Сами не отдают часть сайтов: {_short_list(filtering)}. Это решение самих серверов: "
+                "так они отвечают и по шифрованному пути.",
+            )
+        )
     dead = [_label(row) for row in rows if any(finding.code == CODE_DEAD for finding in row.findings)]
     if dead:
         findings.append(Finding(LEVEL_INFO, CODE_DEAD, f"Не отвечают совсем: {_short_list(dead)}."))
@@ -764,7 +829,7 @@ def judge_report(
         for row in rows
         if row.cell(TRANSPORT_DOH).ok
         and not row.cell(TRANSPORT_DOH).unstable
-        and not any(finding.code == CODE_SPOOFED for finding in row.findings)
+        and not any(finding.code in (CODE_SPOOFED, CODE_SELF_FILTER) for finding in row.findings)
     ]
     if usable:
         best = min(usable, key=lambda row: row.cell(TRANSPORT_DOH).elapsed_ms or float("inf"))
@@ -880,7 +945,8 @@ def run_server_check(
     if not user_stopped:
         owners = _lookup_owners(rows, SocketCancel())
     owner_map = dict(owners)
-    rows = tuple(replace(row, findings=judge_row(row, owner_map.get)) for row in rows)
+    resolvable = resolvable_domains(rows)
+    rows = tuple(replace(row, findings=judge_row(row, owner_map.get, resolvable)) for row in rows)
     report = ServerCheckReport(
         rows=rows,
         total=len(targets),
@@ -906,6 +972,7 @@ __all__ = [
     "CODE_DOT_BLOCKED",
     "CODE_FOREIGN_ANSWERS",
     "CODE_INTERCEPTED",
+    "CODE_SELF_FILTER",
     "CODE_SPOOFED",
     "CODE_TCP_BLOCKED",
     "CODE_UDP_BLOCKED",
@@ -930,6 +997,7 @@ __all__ = [
     "build_targets",
     "judge_report",
     "judge_row",
+    "resolvable_domains",
     "probe_address",
     "run_server_check",
 ]

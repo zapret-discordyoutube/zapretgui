@@ -50,10 +50,9 @@ class VerdictItem:
 
 @dataclass(frozen=True, slots=True)
 class Tally:
-    """Сколько адресов в каком состоянии — для счётчиков."""
+    """Сколько адресов отвечает и сколько молчит — для счётчиков хода проверки."""
 
     good: int = 0
-    remarks: int = 0
     silent: int = 0
 
 
@@ -91,16 +90,11 @@ def _is_silent(row: Observation) -> bool:
 
 
 def tally(report: ServerCheckReport) -> Tally:
-    """Пока проверка идёт, выводов по адресам ещё нет: считаем просто ответивших и молчащих."""
-    silent = sum(1 for row in report.rows if _is_silent(row))
-    if not report.finished or report.stopped:
-        return Tally(good=sum(1 for row in report.rows if _answers(row)), silent=silent)
-    remarks = sum(
-        1
-        for row in report.rows
-        if not _is_silent(row) and any(finding.level in (LEVEL_WARN, LEVEL_FAIL) for finding in row.findings)
+    """Сколько адресов уже ответило и сколько молчит — для счётчиков, пока проверка идёт."""
+    return Tally(
+        good=sum(1 for row in report.rows if _answers(row)),
+        silent=sum(1 for row in report.rows if _is_silent(row)),
     )
-    return Tally(good=len(report.rows) - silent - remarks, remarks=remarks, silent=silent)
 
 
 def build_verdict(report: ServerCheckReport) -> Verdict:
@@ -110,7 +104,7 @@ def build_verdict(report: ServerCheckReport) -> Verdict:
         return Verdict(
             KIND_STOPPED,
             "Проверка остановлена",
-            f"В таблице — то, что успели узнать: {done} из {total} адресов. Выводы делаются только по полной проверке.",
+            f"В карточках ниже — то, что успели узнать: {done} из {total} адресов. Выводы делаются только по полной проверке.",
         )
     if not report.rows:
         return Verdict(KIND_EMPTY, "Проверять нечего", "В списке нет ни одного DNS-сервера.")
@@ -144,7 +138,7 @@ def build_verdict(report: ServerCheckReport) -> Verdict:
             KIND_WARN,
             "Часть серверов отвечает через раз" if only_shaky else "Часть способов связи закрыта",
             "Подмены не видно, но не всякий сервер и не всяким способом доступен. "
-            "Выбирайте те, у кого в таблице все ячейки зелёные.",
+            "Выбирайте серверы с пометкой «Работает».",
             items,
         )
     if codes & {CODE_DEAD, CODE_UNSTABLE}:

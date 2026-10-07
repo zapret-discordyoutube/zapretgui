@@ -641,29 +641,9 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Открыть полный текст проверки — его можно скопировать и отправить.",
         "en": "Open the full text of the check — it can be copied and sent.",
     },
-    "page.server_check.section.table": {
-        "ru": "Серверы по адресам",
-        "en": "Servers by address",
-    },
-    "page.server_check.column.server": {
-        "ru": "Сервер",
-        "en": "Server",
-    },
-    "page.server_check.column.address": {
-        "ru": "Адрес",
-        "en": "Address",
-    },
-    "page.server_check.column.note": {
-        "ru": "Замечания",
-        "en": "Notes",
-    },
-    "page.server_check.table.name": {
-        "ru": "DNS-серверы по адресам",
-        "en": "DNS servers by address",
-    },
-    "page.server_check.table.description": {
-        "ru": "Для каждого адреса: время ответа на пинг и каждым способом связи или причина отказа.",
-        "en": "For every address: response time to ping and by every transport, or the reason of failure.",
+    "page.server_check.section.servers": {
+        "ru": "Серверы",
+        "en": "Servers",
     },
     "page.server_check.status.failed": {
         "ru": "Проверка не удалась",

@@ -402,7 +402,57 @@ class RowVerdictTests(unittest.TestCase):
         self.assertIn("Первые запросы проходят, а следующие уже нет.", finding.text)
 
 
+    def test_server_refusing_a_site_even_over_encrypted_path_filters_it_itself(self) -> None:
+        refused = sc.DomainFact("rutor.info", udp_status=STATUS_NXDOMAIN, secure_status=STATUS_NXDOMAIN)
+        stub = sc.DomainFact("rezka.ag", udp_status=STATUS_OK, udp_ips=("0.0.0.0",), secure_status=STATUS_OK, secure_ips=("0.0.0.0",))
+        row = _row(domains=(refused, stub))
+
+        # Сайта может и правда не быть: без подтверждения от другого сервера вывода нет.
+        self.assertEqual(sc.judge_row(row, OWNERS.get), ())
+        self.assertEqual(sc.judge_row(row, OWNERS.get, frozenset({"flibusta.is"})), ())
+
+        (finding,) = sc.judge_row(row, OWNERS.get, frozenset({"rutor.info", "rezka.ag"}))
+        # Это не подмена по дороге и не тревога: шифрованный ответ подменить нельзя.
+        self.assertEqual((finding.level, finding.code), (sc.LEVEL_INFO, sc.CODE_SELF_FILTER))
+        self.assertIn("rutor.info, rezka.ag", finding.text)
+        self.assertIn("решение самого сервера", finding.text)
+
+    def test_resolvable_sites_are_those_some_server_really_resolved(self) -> None:
+        honest = _row(GOOGLE, domains=(sc.DomainFact("rutor.info", secure_status=STATUS_OK, secure_ips=("6.6.6.6",)),))
+        stub = _row(QUAD9, domains=(sc.DomainFact("rezka.ag", secure_status=STATUS_OK, secure_ips=("0.0.0.0",)),))
+
+        self.assertEqual(sc.resolvable_domains((honest, stub)), frozenset({"rutor.info"}))
+
+
 class ReportVerdictTests(unittest.TestCase):
+    def test_single_lost_requests_are_counted_not_listed(self) -> None:
+        lost = sc.Cell(state=sc.STATE_OK, elapsed_ms=9.0, failure=FAILURE_TIMEOUT, reason="сервер молчит", trail=(True, False, True))
+        cut = sc.Cell(state=sc.STATE_OK, elapsed_ms=5.0, failure=FAILURE_RESET, reason="соединение оборвано", trail=(True, False, False))
+        rows = (_judged(_row(GOOGLE, udp=lost)), _judged(_row(QUAD9, doh=cut)), _judged(_row(PLAIN, udp=lost, dot=SKIP, doh=SKIP)))
+        shaky = [finding for finding in sc.judge_report(rows, False, OWNERS.get) if finding.code == sc.CODE_UNSTABLE]
+
+        # Настоящий срыв назван по имени; случайные потери — одной строкой с числом, без списка.
+        self.assertEqual([finding.level for finding in shaky], [sc.LEVEL_WARN, sc.LEVEL_INFO])
+        self.assertIn("Quad9 (9.9.9.9)", shaky[0].text)
+        self.assertNotIn("Google", shaky[0].text)
+        self.assertIn("Потеряли по одному запросу: 2 из 3 адресов", shaky[1].text)
+
+    def test_self_filtering_servers_are_named_once_and_not_recommended(self) -> None:
+        refused = sc.Finding(sc.LEVEL_INFO, sc.CODE_SELF_FILTER, "сам не отдаёт адреса сайтов: rutor.info")
+        rows = (
+            _row(GOOGLE, doh=_ok(5.0), findings=(refused,)),
+            _row(sc.CheckTarget("Google DNS", "8.8.4.4"), doh=_ok(6.0), findings=(refused,)),
+            _row(QUAD9, doh=_ok(80.0)),
+        )
+        findings = sc.judge_report(rows, False, OWNERS.get)
+
+        named = next(finding for finding in findings if finding.code == sc.CODE_SELF_FILTER)
+        self.assertEqual(named.level, sc.LEVEL_INFO)
+        self.assertEqual(named.text.count("Google DNS"), 1)
+        # Быстрый, но фильтрующий сервер лучшим не называется.
+        best = next(finding for finding in findings if finding.code == sc.CODE_BEST)
+        self.assertIn("Quad9 (9.9.9.9)", best.text)
+
     def test_shaky_servers_are_named_and_not_recommended(self) -> None:
         cut = sc.Cell(state=sc.STATE_OK, elapsed_ms=5.0, failure=FAILURE_RESET, reason="соединение оборвано", trail=(True, False, False))
         rows = (_judged(_row(GOOGLE, doh=cut)), _judged(_row(QUAD9, doh=_ok(80.0))))
