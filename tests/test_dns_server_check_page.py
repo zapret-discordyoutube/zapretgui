@@ -11,6 +11,7 @@ from blockcheck.ui.page import BlockcheckPage
 from dns import server_check as sc
 from dns import server_check_plans as plans
 from dns import server_check_verdict as verdicts
+from dns.ui.server_check_page import _VISIBLE_ROWS as VISIBLE_ROWS
 from dns.ui.server_check_page import DnsServersTable, ServerCheckPage
 from utils.dns_wire import FAILURE_REFUSED, FAILURE_TIMEOUT
 from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_IDLE
@@ -85,7 +86,9 @@ class PlanTests(unittest.TestCase):
         blocked, healthy = plans.build_rows(_report())
 
         # Закрытые DoT и DoH видны в ячейках; в замечаниях остаётся то, чего там нет.
-        self.assertEqual(blocked.note, "Обычные запросы выполняет сеть NSDI, а шифрованные — GOOGLE")
+        # Коротко, чтобы помещалось в столбец; полная фраза — в подсказке строки.
+        self.assertEqual(blocked.note, "Отвечает чужая сеть")
+        self.assertIn("Обычные запросы выполняет сеть NSDI, а шифрованные — GOOGLE", blocked.tooltip)
         self.assertEqual((blocked.note_level, blocked.level), (sc.LEVEL_INFO, sc.LEVEL_WARN))
         self.assertEqual((healthy.level, healthy.note), (sc.LEVEL_OK, "Без замечаний"))
 
@@ -119,7 +122,7 @@ class PlanTests(unittest.TestCase):
         )
         (shown,) = plans.build_rows(_report(rows=(spoofed,), total=1))
 
-        self.assertEqual(shown.note, "Обычные ответы подменяются (и ещё 1)")
+        self.assertEqual(shown.note, "Ответы подменяются · Отвечает чужая сеть")
         self.assertEqual(shown.note_level, sc.LEVEL_FAIL)
 
     def test_tooltip_keeps_full_reasons_and_who_answers(self) -> None:
@@ -248,6 +251,24 @@ class TableTests(unittest.TestCase):
             fit.assert_called_once()
         self.assertEqual(table.item(7, 6).text(), "1234 мс")
 
+    def test_long_table_scrolls_inside_instead_of_drawing_every_row(self) -> None:
+        table = DnsServersTable()
+        self.addCleanup(table.deleteLater)
+        table.set_headers("Сервер", "Адрес", "Замечания")
+
+        def height_for(count: int) -> int:
+            rows = tuple(
+                _row(sc.CheckTarget(f"Сервер {index}", f"10.0.{index}.1"), icmp=_ok(1.0), udp=_ok(2.0), tcp=_ok(3.0), dot=_ok(4.0), doh=_ok(5.0))
+                for index in range(count)
+            )
+            table.show_rows(plans.build_rows(_report(rows=rows, total=count, finished=False)))
+            return table.maximumHeight()
+
+        short, capped = height_for(3), height_for(VISIBLE_ROWS)
+        self.assertGreater(capped, short)
+        # Больше строк — та же высота: остальное прокручивается, а не рисуется.
+        self.assertEqual(height_for(43), capped)
+
 
 class ServerCheckPageTests(unittest.TestCase):
     @classmethod
@@ -355,7 +376,15 @@ class ServerCheckPageTests(unittest.TestCase):
         self.assertEqual(table.rowCount(), 2)
         shown = [table.item(0, column).text() for column in range(table.columnCount())]
         self.assertEqual(shown[:7], ["Google DNS", "8.8.8.8", "нет ответа", "12 мс", "30 мс", "молчит", "порт закрыт"])
-        self.assertIn("NSDI", shown[7])
+        self.assertEqual(shown[7], "Отвечает чужая сеть")
+        # Неважный текст («нет ответа» на пинг, «Без замечаний») на тёмной теме светлый:
+        # раньше цвет темы вида rgba(...) не разбирался и текст выходил чёрным по тёмному.
+        with patch("dns.ui.server_check_page.isDarkTheme", return_value=True):
+            table._apply_theme_refresh()
+        for faded in (table.item(0, 2), table.item(1, 7)):
+            color = faded.foreground().color()
+            self.assertEqual((color.red(), color.green(), color.blue()), (255, 255, 255))
+            self.assertGreater(color.alpha(), 100)
         self.assertEqual(table.item(1, 1).text(), "8.8.4.4")
         self.assertIn("с замечаниями 1", table.accessibleName())
 

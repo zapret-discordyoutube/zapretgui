@@ -216,6 +216,7 @@ class ProbeTests(unittest.TestCase):
         row = _Net(doh=doh).probe()
         cell = row.cell(sc.TRANSPORT_DOH)
 
+        # После срыва серия идёт дальше: второй срыв подряд — уже не случайная потеря.
         self.assertEqual((cell.state, cell.trail, cell.elapsed_ms), (sc.STATE_OK, (True, False, False), 40.0))
         self.assertTrue(cell.unstable and cell.fades)
         self.assertEqual(cell.failure, FAILURE_RESET)
@@ -232,14 +233,35 @@ class ProbeTests(unittest.TestCase):
 
         self.assertEqual(row.cell(sc.TRANSPORT_TCP).elapsed_ms, 30.0)
 
-    def test_dead_address_asks_without_name_alongside_the_retry(self) -> None:
-        net = _Net(doh=lambda address, name, host: TIMEOUT)
+    def test_silent_address_is_not_waited_for_twice(self) -> None:
+        net = _Net(doh=lambda address, name, host: TIMEOUT, tcp=lambda address, name: TIMEOUT)
         row = net.probe()
 
-        # По имени: запрос и повтор; без имени — один запрос, без второго срока ожидания.
-        self.assertEqual(sorted(call[3] for call in net.calls if call[0] == "doh"), ["", "dns.google", "dns.google"])
-        self.assertEqual(row.cell(sc.TRANSPORT_DOH).trail, (False, False))
+        # В TCP, DoT и DoH молчание не повторяем: потери там исправляет сама система.
+        self.assertEqual(sorted(call[3] for call in net.calls if call[0] == "doh"), ["", "dns.google"])
+        self.assertEqual(row.cell(sc.TRANSPORT_DOH).trail, (False,))
+        self.assertEqual(row.cell(sc.TRANSPORT_TCP).trail, (False,))
         self.assertTrue(row.doh_by_address.failed)
+
+    def test_slow_answer_by_name_starts_the_request_without_name_early(self) -> None:
+        release = threading.Event()
+        came_early: list[bool] = []
+
+        def doh(address, name, host):
+            if host and name == sc.PROBE_DOMAIN and not release.is_set():
+                came_early.append(release.wait(2))
+                return TIMEOUT
+            if not host:
+                release.set()
+            return _answer("5.5.5.5")
+
+        with patch.object(sc, "DOH_WITHOUT_NAME_AFTER_S", 0.05):
+            row = _Net(doh=doh).probe()
+
+        # Запрос без имени пришёл, пока первый по имени ещё висел, а не после него.
+        self.assertEqual(came_early, [True])
+        self.assertTrue(row.cell(sc.TRANSPORT_DOH).failed)
+        self.assertTrue(row.doh_by_address.ok)
 
     def test_doh_is_tried_without_name_only_when_name_may_be_blocked(self) -> None:
         def blocked_by_name(address, name, host):
@@ -368,6 +390,10 @@ class RowVerdictTests(unittest.TestCase):
         self.assertEqual((finding.level, finding.code), (sc.LEVEL_INFO, sc.CODE_UNSTABLE))
         self.assertIn("обычный DNS (UDP) — 2 из 3 запросов (сервер молчит)", finding.text)
         self.assertNotIn("Первые запросы проходят", finding.text)
+
+        # Два срыва из трёх — уже не случайность, даже если это просто молчание.
+        silent_twice = sc.Cell(state=sc.STATE_OK, elapsed_ms=9.0, failure=FAILURE_TIMEOUT, reason="сервер молчит", trail=(True, False, False))
+        self.assertEqual(self._findings(_row(tcp=silent_twice))[0].level, sc.LEVEL_WARN)
 
         cut = sc.Cell(state=sc.STATE_OK, elapsed_ms=40.0, failure=FAILURE_RESET, reason="соединение оборвано", trail=(True, False, False))
         (finding,) = self._findings(_row(doh=cut))

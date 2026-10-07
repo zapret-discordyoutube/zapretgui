@@ -39,6 +39,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -113,6 +114,8 @@ UDP_TIMEOUT_S = 1.5
 # На Windows отказ «порт закрыт» приходит примерно через две секунды.
 TCP_TIMEOUT_S = 4.0
 ENCRYPTED_TIMEOUT_S = 4.0
+# Через сколько секунд без ответа по имени пробуем тот же сервер DoH без имени.
+DOH_WITHOUT_NAME_AFTER_S = 1.0
 PING_COUNT = 2
 PING_TIMEOUT_MS = 1500
 # Сколько раз подряд спрашиваем сервер каждым способом. Блокировка иногда
@@ -120,7 +123,7 @@ PING_TIMEOUT_MS = 1500
 PROBE_ATTEMPTS = 3
 # Почти все запросы — ожидание сети, поэтому адресов сразу много: общее время
 # проверки упирается в самый медленный (молчащий) адрес, а не в их число.
-MAX_PARALLEL_ADDRESSES = 24
+MAX_PARALLEL_ADDRESSES = 48
 RUN_DEADLINE_S = 75.0
 
 # После такого сбоя DoH по имени стоит попробовать тот же сервер без имени:
@@ -319,19 +322,27 @@ def _twice(ask: Callable[[], DnsQueryResult]) -> DnsQueryResult:
 
 
 def _series(
-    ask: Callable[[], DnsQueryResult], on_first_failure: Callable[[DnsQueryResult], None] | None = None
+    ask: Callable[[], DnsQueryResult],
+    *,
+    retry_silence: bool = False,
+    on_first: Callable[[DnsQueryResult], None] | None = None,
 ) -> Cell:
     """Несколько запросов подряд одним способом, каждый — новым соединением.
 
-    Способ, который не ответил сразу, дальше не мучаем: молчание повторяем один
-    раз, отказ не повторяем вовсе. Ответивший спрашиваем до ``PROBE_ATTEMPTS``
-    раз — так видна блокировка, которая включается со второго или третьего запроса.
+    Ответивший способ спрашиваем ``PROBE_ATTEMPTS`` раз — так видна блокировка,
+    которая включается со второго или третьего запроса. После сорвавшегося
+    запроса серия продолжается: если следующий прошёл, это была случайная
+    потеря, а если нет — связь действительно закрылась.
+
+    ``retry_silence`` — повторить первый запрос, если на него промолчали. Нужно
+    только для UDP: там потерянный пакет никто не пересылает. В TCP, DoT и DoH
+    потери за срок ожидания исправляет сама система, и молчание там — уже ответ.
     """
     results = [ask()]
+    if on_first is not None:
+        on_first(results[0])
     if not results[0].answered:
-        if on_first_failure is not None:
-            on_first_failure(results[0])
-        if results[0].failure == FAILURE_TIMEOUT:
+        if retry_silence and results[0].failure == FAILURE_TIMEOUT:
             results.append(ask())
         if not results[-1].answered:
             failed = _cell(results[-1])
@@ -373,38 +384,30 @@ def _once_doh(target: CheckTarget, domain: str, cancel: SocketCancel, *, by_name
     )
 
 
-def _ask_doh(target: CheckTarget, domain: str, cancel: SocketCancel, *, by_name: bool = True) -> DnsQueryResult:
-    return _twice(lambda: _once_doh(target, domain, cancel, by_name=by_name))
-
-
 def _once_dot(target: CheckTarget, domain: str, cancel: SocketCancel) -> DnsQueryResult:
     return query_dot(
         target.address, domain, TYPE_A, tls_host=target.dot_host, timeout_s=ENCRYPTED_TIMEOUT_S, cancel=cancel
     )
 
 
-def _ask_dot(target: CheckTarget, domain: str, cancel: SocketCancel) -> DnsQueryResult:
-    return _twice(lambda: _once_dot(target, domain, cancel))
-
-
 def _once_tcp(target: CheckTarget, domain: str, cancel: SocketCancel) -> DnsQueryResult:
     return query_tcp(target.address, domain, TYPE_A, timeout_s=TCP_TIMEOUT_S, cancel=cancel)
 
 
-def _ask_tcp(target: CheckTarget, domain: str, cancel: SocketCancel) -> DnsQueryResult:
-    return _twice(lambda: _once_tcp(target, domain, cancel))
-
-
 def _secure_path(observation: Observation) -> tuple[str, Callable[[CheckTarget, str, SocketCancel], DnsQueryResult] | None]:
-    """Самый надёжный из ответивших путей в обход обычного UDP."""
+    """Самый надёжный из ответивших путей в обход обычного UDP.
+
+    Запрос этим путём не повторяется: потери в TCP исправляет сама система, а
+    второй срок ожидания на каждый контрольный вопрос удваивал время проверки.
+    """
     if observation.cell(TRANSPORT_DOH).ok:
-        return TRANSPORT_DOH, _ask_doh
+        return TRANSPORT_DOH, _once_doh
     if observation.doh_by_address is not None and observation.doh_by_address.ok:
-        return TRANSPORT_DOH, lambda target, domain, cancel: _ask_doh(target, domain, cancel, by_name=False)
+        return TRANSPORT_DOH, lambda target, domain, cancel: _once_doh(target, domain, cancel, by_name=False)
     if observation.cell(TRANSPORT_DOT).ok:
-        return TRANSPORT_DOT, _ask_dot
+        return TRANSPORT_DOT, _once_dot
     if observation.cell(TRANSPORT_TCP).ok:
-        return TRANSPORT_TCP, _ask_tcp
+        return TRANSPORT_TCP, _once_tcp
     return "", None
 
 
@@ -419,31 +422,37 @@ def probe_address(target: CheckTarget, cancel: SocketCancel, should_stop: Should
     """Все факты об одном адресе. Сеть — только здесь."""
     skip = Cell(state=STATE_SKIP, reason="сервер не объявлял этот способ")
     with ThreadPoolExecutor(max_workers=10, thread_name_prefix="dns-server") as pool:
-        # Запрос без имени уходит сразу после первого сбоя по имени и идёт рядом
-        # с повтором: молчащий адрес не заставляет ждать два срока подряд.
-        without_name: list[Future] = []
+        # DoH без имени сервера нужен, только если по имени он не ответил. Чтобы
+        # молчащий адрес не ждал два срока подряд, этот запрос уходит, как только
+        # первый запрос по имени сорвался или не уложился в DOH_WITHOUT_NAME_AFTER_S.
+        first_by_name: list[DnsQueryResult] = []
+        first_done = threading.Event()
 
-        def try_without_name(failed: DnsQueryResult) -> None:
-            if failed.failure in _NAME_BLOCK_FAILURES:
-                without_name.append(pool.submit(_once_doh, target, PROBE_DOMAIN, cancel, by_name=False))
+        def note_first(result: DnsQueryResult) -> None:
+            first_by_name.append(result)
+            first_done.set()
+
+        def ask_without_name() -> DnsQueryResult | None:
+            if first_done.wait(DOH_WITHOUT_NAME_AFTER_S):
+                first = first_by_name[0]
+                if first.answered or first.failure not in _NAME_BLOCK_FAILURES:
+                    return None
+            return _once_doh(target, PROBE_DOMAIN, cancel, by_name=False)
 
         icmp = pool.submit(_ping, target.address, should_stop)
-        udp = pool.submit(_series, lambda: _once_udp(target.address, PROBE_DOMAIN, cancel))
+        udp = pool.submit(_series, lambda: _once_udp(target.address, PROBE_DOMAIN, cancel), retry_silence=True)
         tcp = pool.submit(_series, lambda: _once_tcp(target, PROBE_DOMAIN, cancel))
         dot = pool.submit(_series, lambda: _once_dot(target, PROBE_DOMAIN, cancel)) if target.dot_host else None
-        doh = (
-            pool.submit(_series, lambda: _once_doh(target, PROBE_DOMAIN, cancel), try_without_name)
-            if target.doh_host
-            else None
-        )
+        doh = without_name = None
+        if target.doh_host:
+            doh = pool.submit(_series, lambda: _once_doh(target, PROBE_DOMAIN, cancel), on_first=note_first)
+            without_name = pool.submit(ask_without_name)
 
         doh_cell = doh.result() if doh is not None else skip
         doh_by_address: Cell | None = None
-        if without_name:
-            answer = _cell(without_name[0].result())
-            # Нужен, только если по имени сервер так и не ответил.
-            if doh_cell.failed and doh_cell.failure in _NAME_BLOCK_FAILURES:
-                doh_by_address = answer
+        answer = without_name.result() if without_name is not None else None
+        if answer is not None and doh_cell.failed and doh_cell.failure in _NAME_BLOCK_FAILURES:
+            doh_by_address = _cell(answer)
 
         observation = Observation(
             target=target,
@@ -513,7 +522,7 @@ def _lookup_owners(rows: Iterable[Observation], cancel: SocketCancel) -> tuple[t
     if not addresses:
         return ()
     ask = _reference_ask(cancel)
-    with ThreadPoolExecutor(max_workers=min(8, len(addresses)), thread_name_prefix="dns-owner") as pool:
+    with ThreadPoolExecutor(max_workers=min(24, len(addresses)), thread_name_prefix="dns-owner") as pool:
         found = list(pool.map(lambda ip: lookup_ip_owner(ip, ask), addresses))
     return tuple((ip, owner) for ip, owner in zip(addresses, found) if owner is not None)
 
@@ -558,7 +567,7 @@ _SERIES_TITLES = ("обычный DNS (UDP)", "DNS по TCP", "DoT", "DoH")
 
 
 def _unstable_level(shaky: list[tuple[str, Cell]]) -> str:
-    """Один потерянный запрос — обычный шум сети; обрыв или два срыва подряд — уже повод насторожиться."""
+    """Один запрос без ответа — случайная потеря. Обрыв или два срыва из трёх — уже не случайность."""
     for _title, cell in shaky:
         if cell.attempts - cell.answered >= 2 or cell.failure != FAILURE_TIMEOUT:
             return LEVEL_WARN

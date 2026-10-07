@@ -16,7 +16,11 @@ from dns.domain_lookup_plans import (
     InfoLine,
 )
 from dns.server_check import (
+    CODE_DEAD,
     CODE_DOH_BLOCKED,
+    CODE_DOH_NAME_BLOCKED,
+    CODE_FOREIGN_ANSWERS,
+    CODE_SPOOFED,
     CODE_DOT_BLOCKED,
     CODE_TCP_BLOCKED,
     CODE_UDP_BLOCKED,
@@ -86,6 +90,16 @@ _LEVEL_MARKS = {LEVEL_FAIL: "✗", LEVEL_WARN: "!", LEVEL_INFO: "·", LEVEL_OK: 
 _SHOWN_IN_CELLS = frozenset(
     {CODE_UDP_BLOCKED, CODE_TCP_BLOCKED, CODE_DOT_BLOCKED, CODE_DOH_BLOCKED, CODE_UNSTABLE}
 )
+
+
+# В столбце замечаний — два-три слова, чтобы текст помещался целиком.
+# Полная фраза с подробностями остаётся в подсказке строки и в отчёте.
+_SHORT_NOTES = {
+    CODE_SPOOFED: "Ответы подменяются",
+    CODE_FOREIGN_ANSWERS: "Отвечает чужая сеть",
+    CODE_DOH_NAME_BLOCKED: "DoH закрыт по имени",
+    CODE_DEAD: "Не отвечает",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,9 +191,7 @@ def build_rows(report: ServerCheckReport) -> tuple[ServerRow, ...]:
             key=lambda item: _LEVEL_ORDER[item.level],
         )
         if shown:
-            note = _sentence(shown[0].text)
-            if len(shown) > 1:
-                note = f"{note} (и ещё {len(shown) - 1})"
+            note = " · ".join(_SHORT_NOTES.get(finding.code) or _sentence(finding.text) for finding in shown)
             note_level = shown[0].level
         else:
             note = "Без замечаний" if report.finished and not row.findings else ""

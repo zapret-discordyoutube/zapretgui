@@ -9,7 +9,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QHeaderView, QSizePolicy, QTableWidgetItem
-from qfluentwidgets import FluentIcon, PrimaryPushButton, PushButton, StrongBodyLabel, TableWidget
+from qfluentwidgets import FluentIcon, PrimaryPushButton, PushButton, StrongBodyLabel, TableWidget, isDarkTheme
 
 import dns.domain_lookup_plans as tones
 import dns.server_check_plans as plans
@@ -39,11 +39,16 @@ _CELL_TONES = {
     plans.CELL_OK: tones.TONE_SUCCESS,
     plans.CELL_WARN: tones.TONE_WARNING,
     plans.CELL_FAIL: tones.TONE_ERROR,
-    plans.CELL_MUTED: tones.TONE_MUTED,
 }
 _NOTE_TONES = {LEVEL_FAIL: tones.TONE_ERROR, LEVEL_WARN: tones.TONE_WARNING}
+# Неважное («нет ответа» на пинг, «Без замечаний») — обычным цветом текста, но бледнее.
+# Отдельный «приглушённый» цвет темы на тёмном фоне таблицы почти не виден.
+_FADED_ALPHA = 150
 # Промежуточные результаты приходят пачками по несколько в секунду: показываем не чаще.
 _STAGE_INTERVAL_MS = 120
+# Таблица показывает столько строк, остальные прокручиваются внутри неё. Так Qt
+# рисует только видимые строки, а не все адреса разом при каждой перерисовке.
+_VISIBLE_ROWS = 12
 
 
 class DnsServersTable(TableWidget):
@@ -113,7 +118,7 @@ class DnsServersTable(TableWidget):
 
     def _fit_height(self) -> None:
         height = self.horizontalHeader().height() + 2 * self.frameWidth() + 4
-        for row in range(self.rowCount()):
+        for row in range(min(self.rowCount(), _VISIBLE_ROWS)):
             height += self.rowHeight(row)
         self.setMinimumHeight(height)
         self.setMaximumHeight(height)
@@ -122,14 +127,16 @@ class DnsServersTable(TableWidget):
         if item is None:
             return
         if tone is None:
-            item.setData(Qt.ItemDataRole.ForegroundRole, None)
+            faded = QColor(Qt.GlobalColor.white if isDarkTheme() else Qt.GlobalColor.black)
+            faded.setAlpha(_FADED_ALPHA)
+            item.setForeground(faded)
         else:
             item.setForeground(QColor(_tone_color(tone)))
 
     def _paint_row(self, index: int, row: plans.ServerRow) -> None:
         for offset, level in enumerate(row.cell_levels):
             self._paint(self.item(index, _FIRST_TRANSPORT_COLUMN + offset), _CELL_TONES.get(level))
-        self._paint(self.item(index, _NOTE_COLUMN), _NOTE_TONES.get(row.note_level, tones.TONE_MUTED))
+        self._paint(self.item(index, _NOTE_COLUMN), _NOTE_TONES.get(row.note_level))
 
     def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
         _ = tokens, force
