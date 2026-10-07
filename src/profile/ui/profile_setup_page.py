@@ -1256,20 +1256,34 @@ class ProfileSetupPageBase(BasePage):
         # Клик по крошке уже удалил из BreadcrumbBar элементы правее выбранного —
         # восстанавливаем полный путь до навигации, иначе при возврате на эту же
         # страницу крошки остаются обрезанными.
-        if key == "profile":
+        if key == "profile" and self._go_one_level_back():
             # Возврат из раздела или из подробностей о стратегии к списку стратегий.
-            if self._current_section() != "strategies":
-                self._open_section("strategies")
-                return
-            strategy_list = self.__dict__.get("_strategy_list")
-            if strategy_list is not None and strategy_list.details_open():
-                strategy_list.close_details()
-                return
+            return
         self._rebuild_breadcrumb()
         if key == "control":
             self._open_root()
         elif key == "profiles":
             self._open_profiles()
+
+    def _go_one_level_back(self) -> bool:
+        """Шаг назад по строке пути внутри страницы: из раздела или из
+        подробностей о стратегии — к готовым стратегиям. False — уже на них."""
+        if self._current_section() != "strategies":
+            self._open_section("strategies")
+            return True
+        strategy_list = self.__dict__.get("_strategy_list")
+        if strategy_list is not None and strategy_list.details_open():
+            strategy_list.close_details()
+            return True
+        return False
+
+    def keyPressEvent(self, event):  # noqa: N802
+        # Esc возвращает на уровень выше. Сюда клавиша доходит, только если её
+        # не забрал виджет в фокусе (строка поиска закрывает ею сам поиск).
+        if event.key() == Qt.Key.Key_Escape and self._go_one_level_back():
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _on_strategy_details_changed(self, name: str) -> None:
         """Подробности о стратегии — следующий шаг строки пути."""

@@ -15,6 +15,10 @@
 плашкой из двух половин с подписью «один пакет» (мусор seqovl в tcpseg).
 
 Так видно главное: проверка провайдера видит одно, а сайт получает другое.
+
+Схема оформлена как окно анализатора трафика: сетка, моноширинный шрифт,
+под каждым пакетом его номер и длина, у подделки — пометка FAKE. Круг идёт
+неторопливо, чтобы подписи успевали прочитать.
 Сцены повторяются по кругу. Все переходы (появление реплики, вспышка у
 сайта, падение подделок) заканчиваются до STATIC_PHASE: когда анимации в
 системе выключены, рисуется этот неподвижный кадр с итогом.
@@ -38,9 +42,10 @@ from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import set_tooltip
 
 
-PERIOD_MS = 5600
+# Круг неторопливый: под каждым пакетом подпись, её нужно успеть прочитать.
+PERIOD_MS = 9000
 FRAME_MS = 33
-ILLUSTRATION_HEIGHT = 156
+ILLUSTRATION_HEIGHT = 164
 # Сколько доли круга плашка идёт от «Вы» до сайта.
 TRAVEL = 0.45
 # С этого места круга всё плавно гаснет перед повтором.
@@ -62,6 +67,12 @@ BLOCK_RED = QColor(232, 17, 35)
 PASS_GREEN = QColor(60, 179, 113)
 FAKE_AMBER = QColor(240, 160, 48)
 JUNK_GREY = QColor(140, 140, 140)
+# Шаг сетки фона и шрифты «анализатора трафика».
+GRID_STEP = 26
+MONO_FAMILIES = ["Cascadia Mono", "Consolas", "JetBrains Mono", "DejaVu Sans Mono", "monospace"]
+# Радиус углов узлов и плашек: прямоугольные, как блоки в сниффере.
+NODE_RADIUS = 4.0
+CHIP_RADIUS = 2.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -414,10 +425,50 @@ class TechniqueIllustration(QWidget):
         gate_rect = QRectF(width / 2 - gate_w / 2, track_y - 36, gate_w, 72)
         return _Layout(you_rect, gate_rect, site_rect, you_rect.right() + 8, site_rect.left() - 8, track_y)
 
-    def _chip_font(self) -> QFont:
+    def _mono_font(self, shrink: float, *, bold: bool = False) -> QFont:
         font = QFont(self.font())
-        font.setPointSizeF(max(7.5, font.pointSizeF() - 1.0))
+        font.setFamilies(MONO_FAMILIES)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        font.setPointSizeF(max(7.0, font.pointSizeF() - shrink))
+        font.setBold(bold)
         return font
+
+    def _chip_font(self) -> QFont:
+        return self._mono_font(1.0, bold=True)
+
+    def _detail_font(self) -> QFont:
+        return self._mono_font(2.5)
+
+    @staticmethod
+    def chip_detail(frame: "ChipFrame", metrics: QFontMetrics) -> str:
+        """Подпись под пакетом, как строка анализатора: номер, длина, пометка.
+
+        Под узким пакетом полная подпись налезла бы на соседние, поэтому
+        берётся самая подробная из тех, что помещаются под своей плашкой.
+        """
+        payload = frame.label.split(". ", 1)[-1]
+        mark = {"fake": " FAKE", "junk": " JUNK", "syn": " SYN"}.get(frame.kind, "")
+        number = f"#{frame.index + 1}"
+        room = frame.width + CHIP_GAP - 2
+        for text in (f"{number} len={len(payload)}{mark}", f"{number} len={len(payload)}", number):
+            if metrics.horizontalAdvance(text) <= room:
+                return text
+        return number
+
+    def _paint_grid(self, painter: QPainter, layout: "_Layout", colors) -> None:
+        """Сетка фона и пунктирные оси трёх узлов."""
+        grid = QColor(colors["track"])
+        grid.setAlpha(max(8, grid.alpha() // 3))
+        painter.setPen(QPen(grid, 1))
+        width, height = self.width(), self.height()
+        for x in range(GRID_STEP, width, GRID_STEP):
+            painter.drawLine(x, 0, x, height)
+        for y in range(GRID_STEP, height, GRID_STEP):
+            painter.drawLine(0, y, width, y)
+        painter.setPen(QPen(colors["track"], 1, Qt.PenStyle.DotLine))
+        for rect in (layout.you_rect, layout.gate_rect, layout.site_rect):
+            x = rect.center().x()
+            painter.drawLine(QPointF(x, rect.bottom() + 18), QPointF(x, height - 4))
 
     def _chip_widths(self, scene: Scene, metrics: QFontMetrics) -> list[float]:
         return [self._chip_width(metrics, self._packet_label(packet, False)) for packet in scene.packets]
@@ -534,6 +585,8 @@ class TechniqueIllustration(QWidget):
         blocked = 0.0 if scene.site_result else _ease_out((phase - times.verdict) / POP)
         done = 0.0 if times.site_done is None else _ease_out((phase - times.site_done) / POP)
 
+        self._paint_grid(painter, layout, colors)
+
         # Дорожка.
         painter.setPen(QPen(colors["track"], 2, Qt.PenStyle.DashLine))
         painter.drawLine(
@@ -578,6 +631,23 @@ class TechniqueIllustration(QWidget):
         painter.setFont(chip_font)
         for frame in frames:
             self._paint_chip(painter, metrics, frame, layout.track_y, frame.alpha * fade, colors)
+        # Подписи пакетов: номер, длина и пометка подделки.
+        detail_font = self._detail_font()
+        detail_metrics = QFontMetrics(detail_font)
+        painter.setFont(detail_font)
+        glued = {frame.index for frame in frames if frame.glued}
+        for frame in frames:
+            # У слитых в один пакет плашек своя общая подпись «один пакет».
+            if frame.index in glued or frame.index - 1 in glued:
+                continue
+            painter.setOpacity(frame.alpha * fade)
+            painter.setPen(FAKE_AMBER if frame.kind == "fake" else colors["muted"])
+            painter.drawText(
+                QRectF(frame.x - 70, layout.track_y + frame.dy + 14, 140, 14),
+                Qt.AlignmentFlag.AlignCenter,
+                self.chip_detail(frame, detail_metrics),
+            )
+        painter.setOpacity(1.0)
         for frame in frames:
             if frame.glued:
                 self._paint_one_packet_caption(painter, frame, chips, layout, colors, fade)
@@ -643,7 +713,7 @@ class TechniqueIllustration(QWidget):
             border = self._mix(border, QColor(tint), tint_strength)
         painter.setPen(QPen(border, 1.5))
         painter.setBrush(fill)
-        painter.drawRoundedRect(rect, 10, 10)
+        painter.drawRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
         painter.setPen(colors["text"])
         font = QFont(self.font())
         font.setBold(True)
@@ -678,7 +748,7 @@ class TechniqueIllustration(QWidget):
         border.setAlpha(round(200 * glow))
         painter.setPen(QPen(border, 1.5))
         painter.setBrush(fill)
-        painter.drawRoundedRect(gate, 10, 10)
+        painter.drawRoundedRect(gate, NODE_RADIUS, NODE_RADIUS)
         sweep = 0.5 - 0.5 * math.cos(phase * math.tau * 9)
         x = gate.left() + 10 + (gate.width() - 20) * sweep
         beam = QLinearGradient(x, gate.top() + 22, x, gate.bottom() - 6)
@@ -760,9 +830,9 @@ class TechniqueIllustration(QWidget):
                 halo.setRight(rect.right())
             elif frame.flat == "left":
                 halo.setLeft(rect.left())
-            painter.drawPath(self._chip_shape(halo, 10, frame.flat))
+            painter.drawPath(self._chip_shape(halo, CHIP_RADIUS + 3, frame.flat))
             painter.setBrush(fill)
-            painter.drawPath(self._chip_shape(rect, 7, frame.flat))
+            painter.drawPath(self._chip_shape(rect, CHIP_RADIUS, frame.flat))
             text_color = _readable_text_on(fill)
         else:
             base = FAKE_AMBER if kind == "fake" else JUNK_GREY
@@ -770,7 +840,7 @@ class TechniqueIllustration(QWidget):
             fill.setAlpha(60)
             painter.setBrush(fill)
             painter.setPen(QPen(base, 1.5, Qt.PenStyle.DashLine))
-            painter.drawPath(self._chip_shape(rect, 7, frame.flat))
+            painter.drawPath(self._chip_shape(rect, CHIP_RADIUS, frame.flat))
             text_color = colors["text"]
         if "#" in text:
             self._paint_oob_text(painter, metrics, text, rect, text_color)

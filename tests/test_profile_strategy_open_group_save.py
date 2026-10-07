@@ -299,3 +299,23 @@ class ProfileStrategyDetailsBreadcrumbTests(ProfileStrategyOpenGroupSaveTests):
         self.assertTrue(page._editor_section_button.isHidden())
         self.assertEqual(page._strategy_stack.currentIndex(), 0)
         self.assertFalse(page._raw_section_button.isHidden())
+
+    def test_escape_goes_one_level_back_and_does_nothing_on_main_screen(self) -> None:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+
+        page = self._page()
+        page._profile_key = "profile:0"
+        page._apply_payload(self._payload(persistent_key="uid:youtube", open_group=None))
+        before = self._crumbs(page)
+
+        page._strategy_list.show_details("host-05")
+        QTest.keyClick(page._strategy_list._details_view, Qt.Key.Key_Escape)
+        self.assertFalse(page._strategy_list.details_open())
+        self.assertEqual(self._crumbs(page), before)
+
+        page._raw_section_button.click()
+        QTest.keyClick(page, Qt.Key.Key_Escape)
+        self.assertEqual(page._strategy_stack.currentIndex(), 0)
+
+        self.assertFalse(page._go_one_level_back())

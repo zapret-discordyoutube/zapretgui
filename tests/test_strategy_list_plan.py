@@ -545,3 +545,54 @@ class PlacesTests(unittest.TestCase):
 
         self.assertEqual(kinds, ["fake", "real", "fake", "fake", "real", "fake"])
         self.assertEqual((parts, reverse_parts), (["1", "2"], ["2", "1"]))
+
+
+class AnalyzerSceneTests(unittest.TestCase):
+    """Схема приёма оформлена как анализатор трафика: под пакетом — его номер и длина."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import os
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt6.QtWidgets import QApplication
+
+        cls._app = QApplication.instance() or QApplication([])
+
+    def _frames(self, scene: str, phase: float, width: int = 620):
+        from ui.onboarding.illustrations import TechniqueIllustration
+
+        widget = TechniqueIllustration(tr_fn=lambda _key, default: default)
+        self.addCleanup(widget.deleteLater)
+        widget.resize(width, widget.height())
+        widget.set_scene(scene)
+        widget.set_paused(True)
+        widget.set_phase(phase)
+        return widget, widget.chip_frames(phase)
+
+    def test_caption_names_number_length_and_fake_mark(self) -> None:
+        from PyQt6.QtGui import QFontMetrics
+
+        widget, frames = self._frames("fake", 0.3)
+        metrics = QFontMetrics(widget._detail_font())
+        captions = {frame.label: widget.chip_detail(frame, metrics) for frame in frames}
+
+        self.assertEqual(captions["google.com"], "#1 len=10 FAKE")
+        self.assertEqual(captions["youtube.com"], "#2 len=11")
+
+    def test_caption_under_narrow_packet_is_shortened_instead_of_overlapping(self) -> None:
+        from PyQt6.QtGui import QFontMetrics
+        from ui.onboarding.illustrations import CHIP_GAP
+
+        widget, frames = self._frames("fakedsplit", 0.42)
+        metrics = QFontMetrics(widget._detail_font())
+        for frame in frames:
+            caption = widget.chip_detail(frame, metrics)
+            self.assertTrue(caption.startswith(f"#{frame.index + 1}"))
+            if caption != f"#{frame.index + 1}":
+                self.assertLessEqual(metrics.horizontalAdvance(caption), frame.width + CHIP_GAP)
+
+    def test_scene_runs_slowly_enough_to_read_captions(self) -> None:
+        from ui.onboarding.illustrations import PERIOD_MS
+
+        self.assertGreaterEqual(PERIOD_MS, 8000)
