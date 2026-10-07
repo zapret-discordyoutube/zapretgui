@@ -786,6 +786,10 @@ def normalize_blockcheck(data: object) -> dict[str, Any]:
         ],
         "strategy_history": normalize_blockcheck_strategy_history(raw.get("strategy_history")),
         "check_history": normalize_check_history(raw.get("check_history")),
+        **{
+            key: normalize_check_history(raw.get(key))[-schema.TAB_HISTORY_LIMIT :]
+            for key in schema.TAB_HISTORY_KEYS
+        },
     }
 
 

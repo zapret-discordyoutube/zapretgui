@@ -113,6 +113,11 @@ class DomainLookupPageTests(unittest.TestCase):
         self.assertEqual(answers.rows[1].state, "fail")
         self.assertIn("a.example", _names(page.neighbors_rows))
         self.assertIn("AS64500", page.network_lines._lines[-1].text)
+        # Законченная проверка сразу попадает в «Прошлые проверки» на этой вкладке.
+        self.assertFalse(page.history_card.isHidden())
+        [past] = page.history_rows.groups()
+        self.assertEqual(past.title, "Прошлые проверки")
+        self.assertTrue(past.rows[0].name.startswith(_report().target))
         # Пути в этом отчёте нет — карточка скрыта.
         self.assertTrue(page.path_card.isHidden())
 

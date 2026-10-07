@@ -184,7 +184,25 @@ class DNSCheckPage(BasePage):
         self.domains_card.setVisible(False)
         self.layout.addWidget(self.domains_card)
 
+        # Прошлые проверки DNS подмены: когда проверяли и чем кончилось.
+        from dns.ui.domain_lookup_page import RowsView
+
+        self.history_card = SettingsCard()
+        self.history_rows = RowsView(self.history_card, icon="fa5s.history")
+        self.history_card.add_widget(self.history_rows)
+        self.history_card.setVisible(False)
+        self.layout.addWidget(self.history_card)
+
         self.layout.addStretch()
+
+    def set_history(self, runs) -> None:
+        """Показывает прошлые проверки (от старых к новым, как они лежат в настройках)."""
+        from dns.ui.domain_lookup_page import history_groups
+
+        self._history_runs = [dict(run) for run in runs or () if isinstance(run, dict)]
+        groups = history_groups(self._history_runs)
+        self.history_rows.show_groups(groups)
+        self.history_card.setVisible(bool(groups))
 
     def _open_log(self) -> None:
         self.report_requested.emit(
@@ -298,6 +316,12 @@ class DNSCheckPage(BasePage):
         self.summary_panel.show_results(results)
         self.domains_view.show_results(results)
         self.domains_card.setVisible(bool(self.domains_view.rows()))
+        from diagnostics.history import dns_check_entry
+
+        # Запись в настройки уже сделал фоновый поток проверки; здесь — только экран.
+        entry = dns_check_entry(dict(results or {}))
+        if entry is not None:
+            self.set_history([*getattr(self, "_history_runs", []), entry][-20:])
 
     def _on_check_worker_finished(self, request_id: int, _thread) -> None:
         if not self._is_current_request_finish(self.__dict__.get("_check_runtime"), request_id):

@@ -457,6 +457,25 @@ def build_status(report: DomainLookupReport) -> InfoLine:
     return InfoLine(f"Готово за {seconds}: адрес {report.primary_ip}, доменов найдено: {count_neighbors(report)}.", TONE_SUCCESS)
 
 
+def build_history_entry(report: DomainLookupReport) -> dict | None:
+    """Запись для истории вкладки. None — проверку прервали или цель не разобрана."""
+    from diagnostics import history
+
+    if report.kind == KIND_INVALID or not report.finished or report.stopped:
+        return None
+    problems = [f"{row.server}: {row.result}" for row in build_answer_rows(report) if row.level == LEVEL_FAIL]
+    verdict = _filter_verdict(report)
+    if verdict is not None and verdict.code == FILTER_FOUND:
+        problems.append(_capital_first(verdict.text))
+    if problems:
+        level = "fail"
+    elif not report.primary_ip or report.timed_out:
+        level = "warn"
+    else:
+        level = "ok"
+    return history.domain_entry(report.target, level, problems[0] if problems else build_status(report).text, problems)
+
+
 def build_text_report(report: DomainLookupReport) -> str:
     """Полный текстовый отчёт: для окна «Отчёт», копирования и поддержки."""
     lines: list[str] = [f"Проверка: {report.target}"]
@@ -514,6 +533,7 @@ __all__ = [
     "RowGroup",
     "build_answer_groups",
     "build_neighbor_groups",
+    "build_history_entry",
     "build_neighbors_text",
     "build_path_rows",
     "build_network_lines",

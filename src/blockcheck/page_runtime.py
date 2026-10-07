@@ -10,6 +10,9 @@ class BlockcheckPageInitialStatePlan:
     user_domains: tuple[str, ...]
     # Итоги прошлых проверок, от старых к новым.
     check_history: tuple[dict, ...] = ()
+    # Прошлые проверки вкладок «Проверка домена» и «DNS подмена».
+    domain_history: tuple[dict, ...] = ()
+    dns_history: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,11 +36,19 @@ def load_page_initial_state() -> BlockcheckPageInitialStatePlan:
         data = read_settings()
         blockcheck = dict(data.get("blockcheck") or {})
         domains = _normalize_user_domains(blockcheck.get("user_domains"))
-        runs = blockcheck.get("check_history")
-        history = tuple(dict(run) for run in runs if isinstance(run, dict)) if isinstance(runs, list) else ()
+
+        def _runs(key: str) -> tuple[dict, ...]:
+            runs = blockcheck.get(key)
+            return tuple(dict(run) for run in runs if isinstance(run, dict)) if isinstance(runs, list) else ()
+
+        return BlockcheckPageInitialStatePlan(
+            user_domains=domains,
+            check_history=_runs("check_history"),
+            domain_history=_runs("domain_history"),
+            dns_history=_runs("dns_history"),
+        )
     except Exception:
-        domains, history = (), ()
-    return BlockcheckPageInitialStatePlan(user_domains=domains, check_history=history)
+        return BlockcheckPageInitialStatePlan(user_domains=())
 
 
 def load_user_domains() -> list[str]:

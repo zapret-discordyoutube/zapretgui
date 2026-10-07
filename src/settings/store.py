@@ -15,6 +15,7 @@ except ImportError:  # pragma: no cover - WSL/static checks only
     winreg = None
 
 from config.runtime_layout import APPLICATION_PATHS
+from settings import schema
 from utils.exit_steps import register_exit_step
 from settings.mode import (
     DEFAULT_LAUNCH_METHOD,
@@ -808,6 +809,18 @@ def add_check_history_run(entry: dict[str, Any]) -> list[dict[str, Any]]:
         section["check_history"] = [*(runs if isinstance(runs, list) else []), _as_dict(entry)]
 
     return copy.deepcopy(update_blockcheck_settings(_append)["check_history"])
+
+def add_tab_history_run(key: str, entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Дописывает итог проверки вкладки (``domain_history`` / ``dns_history``) и возвращает её историю."""
+    if key not in schema.TAB_HISTORY_KEYS:
+        raise ValueError(f"unknown tab history: {key}")
+
+    def _append(section: dict[str, Any]) -> None:
+        runs = section.get(key)
+        section[key] = [*(runs if isinstance(runs, list) else []), _as_dict(entry)]
+
+    return copy.deepcopy(update_blockcheck_settings(_append)[key])
+
 
 def get_folders_settings() -> dict[str, Any]:
     return _read_section("folders")

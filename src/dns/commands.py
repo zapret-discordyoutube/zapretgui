@@ -46,7 +46,11 @@ def run_dns_poisoning_check(*, log_callback=None, should_stop=None) -> dict:
         emit=log_callback or (lambda _line: None),
         should_stop=should_stop,
     )
-    return dict(results or {})
+    results = dict(results or {})
+    from diagnostics.history import dns_check_entry
+
+    _remember_check("dns_history", dns_check_entry(results))
+    return results
 
 
 def save_dns_check_results(*, file_path: str, plain_text: str):
@@ -277,13 +281,29 @@ def build_domain_lookup_servers():
 def run_domain_lookup(target: str, *, use_external: bool = True, on_stage=None, should_stop=None):
     from dns.domain_lookup import run_domain_lookup as _run_domain_lookup
 
-    return _run_domain_lookup(
+    report = _run_domain_lookup(
         target,
         servers=build_domain_lookup_servers(),
         use_external=use_external,
         on_stage=on_stage,
         should_stop=should_stop,
     )
+    from dns.domain_lookup_plans import build_history_entry
+
+    _remember_check("domain_history", build_history_entry(report))
+    return report
+
+
+def _remember_check(key: str, entry: dict | None) -> None:
+    """Дописывает итог проверки в историю вкладки. Сбой записи проверку не ломает."""
+    if entry is None:
+        return
+    try:
+        from settings.store import add_tab_history_run
+
+        add_tab_history_run(key, entry)
+    except Exception:
+        pass
 
 
 def build_server_check_targets():

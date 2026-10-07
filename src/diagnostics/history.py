@@ -66,6 +66,61 @@ def blockcheck_entry(report: dict, *, log_file: str = "", when: datetime | None 
     }
 
 
+KIND_DOMAIN = "domain"
+KIND_DNS = "dns"
+
+
+def dns_check_entry(results: dict, *, when: datetime | None = None) -> dict | None:
+    """Запись о проверке DNS подмены. None — проверку остановили или она не дала данных."""
+    domains = dict(results.get("domains") or {})
+    if results.get("stopped") or not domains:
+        return None
+    levels = {"ok": "ok", "local": "ok", "spoofed": "fail"}
+    states = {str(host): levels.get(str(item.get("state") or ""), "unknown") for host, item in domains.items()}
+    spoofed = [host for host, level in states.items() if level == "fail"]
+    unknown = [host for host, level in states.items() if level == "unknown"]
+    if spoofed:
+        level, headline = "fail", f"Подменяются адреса: {', '.join(spoofed)}"
+    elif unknown:
+        level, headline = "warn", f"Подмены не видно, но не удалось проверить: {', '.join(unknown)}"
+    else:
+        level, headline = "ok", "DNS отвечает честно"
+    return {
+        "kind": KIND_DNS,
+        "time": (when or datetime.now()).isoformat(timespec="seconds"),
+        "title": "DNS подмена",
+        "level": level,
+        "headline": headline,
+        "problems": [f"{host}: {domains[host].get('reason') or 'адрес подменён'}" for host in spoofed],
+        "states": states,
+        "log_file": "",
+    }
+
+
+def domain_entry(target: str, level: str, headline: str, problems=(), *, when: datetime | None = None) -> dict:
+    """Запись о проверке одного домена: что проверяли, чем кончилось и что нашли."""
+    return {
+        "kind": KIND_DOMAIN,
+        "time": (when or datetime.now()).isoformat(timespec="seconds"),
+        "title": str(target),
+        "level": level if level in ("ok", "warn", "fail") else "unknown",
+        "headline": str(headline),
+        "problems": [str(item) for item in problems],
+        "states": {},
+        "log_file": "",
+    }
+
+
+def history_rows(runs) -> list[tuple[str, str, str]]:
+    """Прошлые проверки для экрана, свежие сверху: (уровень, «что · когда», итог)."""
+    rows = []
+    for run in reversed(list(runs or ())):
+        title = str(run.get("title") or "")
+        when = format_time(str(run.get("time") or ""))
+        rows.append((str(run.get("level") or "unknown"), " · ".join(part for part in (title, when) if part), str(run.get("headline") or "")))
+    return rows
+
+
 def previous_run(history: list[dict], entry: dict) -> dict | None:
     """Последний прошлый прогон того же вида и с тем же набором сайтов."""
     for run in reversed(history):

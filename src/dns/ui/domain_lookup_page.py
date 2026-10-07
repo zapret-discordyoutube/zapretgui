@@ -124,6 +124,18 @@ class RowsView(QWidget):
         set_state_text(self, "; ".join(f"{group.title}: строк {len(group.rows)}" for group in groups) or "нет данных")
 
 
+HISTORY_TITLE = "Прошлые проверки"
+HISTORY_SHOWN = 20
+
+
+def history_groups(runs, title: str = HISTORY_TITLE) -> tuple:
+    """Прошлые проверки вкладки одной группой строк, свежие сверху. Пусто — показывать нечего."""
+    from diagnostics.history import history_rows
+
+    rows = tuple(plans.Row(level, name, text) for level, name, text in history_rows(runs))
+    return (plans.RowGroup(title, rows),) if rows else ()
+
+
 class DomainLookupPage(BasePage):
     """Пинг, адреса с разных DNS и «кто ещё на этом адресе» для одного домена или IP."""
 
@@ -232,7 +244,13 @@ class DomainLookupPage(BasePage):
         self.dns_card.add_widget(self.dns_rows)
         self.layout.addWidget(self.dns_card)
 
-        for card in (self.ping_card, self.path_card, self.dns_card, self.neighbors_card):
+        # Прошлые проверки: что проверяли и чем кончилось. Видна, пока есть записи.
+        self.history_card = SettingsCard()
+        self.history_rows = RowsView(self.history_card, icon="fa5s.history")
+        self.history_card.add_widget(self.history_rows)
+        self.layout.addWidget(self.history_card)
+
+        for card in (self.ping_card, self.path_card, self.dns_card, self.neighbors_card, self.history_card):
             card.setVisible(False)
         self.layout.addStretch()
 
@@ -380,7 +398,21 @@ class DomainLookupPage(BasePage):
             return
         self._show_report(report)
 
+    def set_history(self, runs) -> None:
+        """Показывает прошлые проверки (от старых к новым, как они лежат в настройках)."""
+        self._history_runs = [dict(run) for run in runs or () if isinstance(run, dict)]
+        groups = history_groups(self._history_runs)
+        self.history_rows.show_groups(groups)
+        self.history_card.setVisible(bool(groups))
+
+    def _remember(self, report) -> None:
+        # Сама запись в настройки уже сделана фоновым потоком проверки; здесь — только экран.
+        entry = plans.build_history_entry(report)
+        if entry is not None:
+            self.set_history([*getattr(self, "_history_runs", []), entry][-HISTORY_SHOWN:])
+
     def _on_finished(self, report) -> None:
+        self._remember(report)
         if self._closed:
             return
         self._show_report(report)
