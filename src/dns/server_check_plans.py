@@ -68,6 +68,15 @@ TRANSPORT_TITLES = {
     TRANSPORT_DOH: "DoH 443",
 }
 
+# Что это за способ связи — одной строкой для новичка, на странице подробностей.
+TRANSPORT_ABOUT = {
+    TRANSPORT_ICMP: "Отклик сервера: жив ли адрес и далеко ли он",
+    TRANSPORT_UDP: "Обычный DNS — так спрашивает Windows по умолчанию",
+    TRANSPORT_TCP: "Обычный DNS по TCP — запасной путь для длинных ответов",
+    TRANSPORT_DOT: "Шифрованный DNS на отдельном порту",
+    TRANSPORT_DOH: "Шифрованный DNS внутри обычного HTTPS",
+}
+
 CELL_OK = "ok"
 # Отвечает, но не на каждый запрос.
 CELL_WARN = "warn"
@@ -210,6 +219,25 @@ class AddressDetails:
     who: tuple[str, ...]
     # (сайт, ответ обычным путём, ответ шифрованным, расходятся ли)
     domains: tuple[tuple[str, str, str, bool], ...]
+    # Время ответа каждым способом связи в миллисекундах; None — способ не ответил.
+    times_ms: tuple[float | None, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TransportSummary:
+    """Один способ связи по всем адресам сервера — для сводки на странице подробностей."""
+
+    title: str
+    about: str
+    # Сколько адресов ответило этим способом и у скольких он проверялся.
+    answered: int
+    total: int
+    # Худшее состояние среди адресов (CELL_*) — для цвета числа.
+    level: str
+    # Что с ним — словами.
+    note: str
+    # Состояние по каждому адресу (CELL_*), для точек.
+    dots: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -449,12 +477,54 @@ def build_details(report: ServerCheckReport, server: str) -> ServerDetails | Non
                     )
                     for fact in row.domains
                 ),
+                times_ms=tuple(
+                    row.cell(transport).elapsed_ms if row.cell(transport).state == STATE_OK else None
+                    for transport in TRANSPORTS
+                ),
             )
         )
     lines = [f"{server} — {CARD_TITLES[card.status]}", CARD_HINTS[card.status]]
     for row in card.addresses:
         lines.extend(["", row.tooltip])
     return ServerDetails(card=card, addresses=tuple(addresses), text="\n".join(lines))
+
+
+def build_transport_summary(details: ServerDetails) -> tuple[TransportSummary, ...]:
+    """Сводка по способам связи: у скольких адресов сервера каждый из них отвечает."""
+    result: list[TransportSummary] = []
+    for index, transport in enumerate(TRANSPORTS):
+        dots = tuple(address.cells[index][2] for address in details.addresses)
+        failed = dots.count(CELL_FAIL)
+        unstable = dots.count(CELL_WARN)
+        answered = dots.count(CELL_OK) + unstable
+        checked = answered + failed
+        ping = transport == TRANSPORT_ICMP
+        if not checked:
+            level = CELL_MUTED
+            # Молчание на пинг ошибкой не считается, поэтому провалов у него не бывает.
+            note = "молчит — для пинга это обычное дело" if ping else "не объявлен у сервера"
+        elif failed == checked:
+            level, note = CELL_FAIL, "закрыт на всех адресах"
+        elif failed:
+            level, note = CELL_FAIL, f"закрыт на адресах: {failed}"
+        elif unstable:
+            level, note = CELL_WARN, f"отвечает через раз на адресах: {unstable}"
+        elif ping and answered < len(dots):
+            level, note = CELL_OK, "часть адресов молчит — для пинга это обычное дело"
+        else:
+            level, note = CELL_OK, "отвечает без сбоев"
+        result.append(
+            TransportSummary(
+                title=TRANSPORT_TITLES[transport],
+                about=TRANSPORT_ABOUT[transport],
+                answered=answered,
+                total=len(dots) if ping or not checked else checked,
+                level=level,
+                note=note,
+                dots=dots,
+            )
+        )
+    return tuple(result)
 
 
 def count_cards(cards) -> dict[str, int]:
@@ -543,6 +613,9 @@ __all__ = [
     "CARD_SILENT",
     "CARD_TITLES",
     "AddressDetails",
+    "TRANSPORT_ABOUT",
+    "TransportSummary",
+    "build_transport_summary",
     "ServerCard",
     "ServerDetails",
     "build_cards",

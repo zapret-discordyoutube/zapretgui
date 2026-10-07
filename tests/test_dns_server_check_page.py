@@ -7,6 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QEvent, QSize, Qt
 from PyQt6.QtGui import QPixmap
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QStyleOptionViewItem
 
 from blockcheck.ui.page import BlockcheckPage
@@ -15,7 +16,7 @@ from dns import server_check_plans as plans
 from dns import server_check_verdict as verdicts
 from dns.dns_providers import DNS_PROVIDERS
 from dns.ui import server_check_cards as cards_module
-from dns.ui.server_check_details import details_html
+from dns.ui.server_check_details import ServerDetailView
 from dns.ui.server_check_cards import (
     _CARD_HEIGHT,
     _COLUMN_MIN_WIDTH,
@@ -364,17 +365,140 @@ class DetailsTests(unittest.TestCase):
         self.assertIn("DoT 853: сервер молчит", details.text)
         self.assertIsNone(plans.build_details(_report(), "Нет такого"))
 
-    def test_details_markup_escapes_text_and_marks_the_difference(self) -> None:
-        odd = sc.CheckTarget("Свой <b>сервер</b>", "10.0.0.53")
-        fact = sc.DomainFact("rutor.info", udp_status="nxdomain", secure_status="ok", secure_ips=("6.6.6.6",))
-        row = _row(odd, icmp=_ok(1.0), udp=_ok(2.0), tcp=_ok(3.0), dot=_ok(4.0), doh=_ok(5.0), domains=(fact,))
-        html = details_html(plans.build_details(_report(rows=(row,), total=1, findings=()), odd.provider))
+    def test_details_keep_answer_time_for_speed_bars(self) -> None:
+        details = plans.build_details(_report(), "Google DNS")
 
-        self.assertIn("Свой &lt;b&gt;сервер&lt;/b&gt;", html)
-        self.assertNotIn("<b>сервер</b>", html)
-        self.assertIn("Что сервер ответил про контрольные сайты", html)
-        self.assertIn("сайта нет</span>", html)
-        self.assertIn("10.0.0.53", html)
+        # Время есть только у ответившего способа: у закрытого полоске расти не от чего.
+        self.assertEqual(details.addresses[0].times_ms, (None, 12.4, 30.0, None, None))
+        self.assertEqual(details.addresses[1].times_ms, (0.4, 9.0, 20.0, 60.0, 55.0))
+
+    def test_summary_counts_addresses_per_transport(self) -> None:
+        shaky = sc.Cell(state=sc.STATE_OK, elapsed_ms=40.0, failure=FAILURE_TIMEOUT, reason="сервер молчит", trail=(True, False, True))
+        third = _row(
+            sc.CheckTarget("Google DNS", "2001:4860:4860::8888"),
+            icmp=_ok(1.0),
+            udp=shaky,
+            tcp=_ok(20.0),
+            dot=sc.Cell(state=sc.STATE_SKIP),
+            doh=_fail(FAILURE_TIMEOUT, "сервер молчит"),
+        )
+        details = plans.build_details(_report(rows=(BLOCKED, HEALTHY, third), total=3), "Google DNS")
+        ping, udp, tcp, dot, doh = plans.build_transport_summary(details)
+
+        # Молчание на пинг — не провал: считаем от всех адресов и не красим красным.
+        self.assertEqual((ping.title, ping.answered, ping.total, ping.level), ("Пинг", 2, 3, plans.CELL_OK))
+        self.assertIn("обычное дело", ping.note)
+        self.assertEqual((udp.answered, udp.total, udp.level), (3, 3, plans.CELL_WARN))
+        self.assertEqual(udp.note, "отвечает через раз на адресах: 1")
+        self.assertEqual((tcp.answered, tcp.total, tcp.level, tcp.note), (3, 3, plans.CELL_OK, "отвечает без сбоев"))
+        # Не объявленный на адресе способ в счёт не идёт.
+        self.assertEqual((dot.answered, dot.total, dot.level), (1, 2, plans.CELL_FAIL))
+        self.assertEqual(dot.dots, (plans.CELL_FAIL, plans.CELL_OK, plans.CELL_MUTED))
+        self.assertEqual((doh.answered, doh.total, doh.note), (1, 3, "закрыт на адресах: 2"))
+        self.assertTrue(all(item.about for item in (ping, udp, tcp, dot, doh)))
+
+        dead = _row(BACKUP, icmp=_fail(FAILURE_TIMEOUT, "x"), udp=_fail(FAILURE_TIMEOUT, "x"), tcp=_fail(FAILURE_TIMEOUT, "x"), dot=sc.Cell(state=sc.STATE_SKIP), doh=sc.Cell(state=sc.STATE_SKIP))
+        ping, udp, _tcp, dot, _doh = plans.build_transport_summary(plans.build_details(_report(rows=(dead,), total=1), "Google DNS"))
+        self.assertEqual((ping.level, udp.level, udp.note), (plans.CELL_MUTED, plans.CELL_FAIL, "закрыт на всех адресах"))
+        self.assertEqual((dot.level, dot.note), (plans.CELL_MUTED, "не объявлен у сервера"))
+
+    def _details(self):
+        odd = sc.CheckTarget("Свой <b>сервер</b>", "10.0.0.53")
+        backup = sc.CheckTarget("Свой <b>сервер</b>", "10.0.0.54")
+        fact = sc.DomainFact("rutor.info", udp_status="nxdomain", secure_status="ok", secure_ips=("6.6.6.6",))
+        same = sc.DomainFact("rezka.ag", udp_status="ok", udp_ips=("7.7.7.7",), secure_status="ok", secure_ips=("7.7.7.7",))
+        first = _row(
+            odd,
+            icmp=_ok(1.0),
+            udp=_ok(2.0),
+            tcp=_ok(3.0),
+            dot=_fail(FAILURE_TIMEOUT, "сервер молчит"),
+            doh=_ok(50.0),
+            domains=(fact, same),
+            udp_egress="4.4.4.4",
+            secure_egress="2.2.2.2",
+            findings=(sc.Finding(sc.LEVEL_WARN, sc.CODE_DOT_BLOCKED, "шифрованный DNS по DoT закрыт: сервер молчит"),),
+        )
+        second = _row(backup, icmp=_ok(1.0), udp=_ok(2.0), tcp=_ok(3.0), dot=_ok(4.0), doh=_ok(25.0))
+        return plans.build_details(_report(rows=(first, second), total=2, findings=()), odd.provider)
+
+    def test_page_shows_hero_summary_and_a_card_per_address(self) -> None:
+        details = self._details()
+        view = ServerDetailView()
+        self.addCleanup(view.deleteLater)
+        view.resize(1200, 600)
+        view.show_details(details, animate=False)
+
+        # Путь наверху, имя сервера как есть (без разбора разметки), вывод и его пояснение.
+        self.assertEqual(view.breadcrumb.count(), 2)
+        self.assertEqual(view.title_label.text(), "Свой <b>сервер</b>")
+        self.assertEqual(view.title_label.textFormat(), Qt.TextFormat.PlainText)
+        self.assertEqual(view.status_pill.text(), plans.CARD_TITLES[details.card.status])
+        self.assertEqual(view.hint_label.text(), plans.CARD_HINTS[details.card.status])
+        self.assertEqual(view.facts_label.text(), "адресов: 2 · DoH 25 мс")
+        # Замечания — отдельными метками, а не одной строкой через точку.
+        self.assertEqual([pill.text() for pill in view.note_pills], details.card.note.split(" · "))
+
+        # Сводка: пять способов связи, у каждого счёт адресов и пояснение для новичка.
+        self.assertEqual([tile.item.title for tile in view.summary_tiles], ["Пинг", "UDP 53", "TCP 53", "DoT 853", "DoH 443"])
+        self.assertEqual([tile.value_label.text() for tile in view.summary_tiles][3:], ["1 из 2", "2 из 2"])
+        self.assertTrue(all(tile.about_label.text() for tile in view.summary_tiles))
+
+        first, second = view.address_cards
+        self.assertEqual(first.address_label.text(), "10.0.0.53")
+        self.assertEqual([tile.value_label.text() for tile in first.tiles], ["1 мс", "2 мс", "3 мс", "молчит", "50 мс"])
+        # Причина отказа — словами под ячейкой; у ответившего способа её нет.
+        self.assertEqual(first.tiles[3].reason_label.text(), "сервер молчит")
+        self.assertTrue(first.tiles[0].reason_label.isHidden())
+        # Полоска скорости — доля от самого долгого ответа сервера; у закрытого способа она пустая.
+        self.assertEqual((first.tiles[4].bar._share, first.tiles[3].bar._share), (1.0, 0.0))
+        self.assertEqual(second.tiles[4].bar._share, 0.5)
+        self.assertEqual([row.title_label.text() for row in first.finding_rows], ["Шифрованный DNS по DoT закрыт: сервер молчит"])
+        self.assertEqual(first.who_labels[0].text(), "Обычные запросы выполняет: 4.4.4.4 (NSDI)")
+        # Контрольные сайты: расхождение обычного и шифрованного пути выделено, совпадение — нет.
+        differs, same = first.domains_table.rows
+        self.assertEqual([label.text() for label in differs], ["rutor.info", "сайта нет", "6.6.6.6"])
+        self.assertTrue(differs[1].font().bold())
+        self.assertFalse(same[1].font().bold())
+        self.assertIsNone(second.domains_table)
+        self.assertEqual((second.finding_rows, second.who_labels), ([], []))
+
+    def test_page_uses_the_width_closes_and_copies(self) -> None:
+        details = self._details()
+        view = ServerDetailView()
+        self.addCleanup(view.deleteLater)
+        view.resize(1200, 600)
+        view.show_details(details, animate=False)
+
+        # На широкой странице адреса стоят в два столбца, на узкой — один под другим.
+        self.assertEqual(view.columns(), 2)
+        view.resize(700, 600)
+        view._place_addresses()
+        self.assertEqual(view.columns(), 1)
+
+        closed: list[bool] = []
+        view.closed.connect(lambda: closed.append(True))
+        view._on_breadcrumb(view.SERVER_KEY)
+        self.assertEqual(closed, [])
+        view._on_breadcrumb(view.ROOT_KEY)
+        QTest.keyClick(view, Qt.Key.Key_Escape)
+        self.assertEqual(closed, [True, True])
+
+        view.copy_button.click()
+        self.assertEqual(QApplication.clipboard().text(), details.text)
+        self.assertEqual(view.copy_button.text(), "Скопировано")
+
+        # Счёт в сводке досчитывает от нуля, полоски скорости растут вместе с ним.
+        view._on_reveal(0.0)
+        self.assertEqual(view.summary_tiles[4].value_label.text(), "0 из 2")
+        self.assertEqual(view.address_cards[0].tiles[4].bar._progress, 0.0)
+        view._on_reveal(1.0)
+        self.assertEqual(view.summary_tiles[4].value_label.text(), "2 из 2")
+
+        # Другой сервер заменяет содержимое целиком, старые карточки не копятся.
+        view.show_details(plans.build_details(_report(), "Google DNS"), animate=False)
+        self.assertEqual([card.address_label.text() for card in view.address_cards], ["8.8.8.8", "8.8.4.4"])
+        self.assertEqual(view.title_label.text(), "Google DNS")
 
 
 class CardsViewTests(unittest.TestCase):
@@ -657,6 +781,27 @@ class ServerCheckPageTests(unittest.TestCase):
         self.assertEqual(page.severity_bar.counts()[plans.CARD_NETWORK], 1)
         self.assertEqual(page.status_filter.chips[plans.CARD_NETWORK].text(), "Блокируются 1")
         self.assertIn("с проблемами 1", page.cards.accessibleName())
+
+        # Нажатие на карточку открывает подробности сервера на всю страницу: вкладки и список уходят.
+        page._open_details("Google DNS")
+        detail = host._server_detail_view
+        self.assertIsInstance(detail, ServerDetailView)
+        self.assertFalse(detail.isHidden())
+        self.assertEqual(detail.details().card.server, "Google DNS")
+        self.assertTrue(host._tabs_pivot.isHidden())
+        self.assertTrue(page.isHidden())
+        # Строка пути возвращает ко вкладке со списком серверов.
+        detail.closed.emit()
+        self.assertTrue(detail.isHidden())
+        self.assertFalse(host._tabs_pivot.isHidden())
+        self.assertFalse(page.isHidden())
+        # Смена вкладки снаружи тоже закрывает подробности, а не оставляет их поверх.
+        page._open_details("Google DNS")
+        host._switch_tab(order.index("dns_servers"))
+        self.assertTrue(detail.isHidden())
+        self.assertFalse(host._tabs_pivot.isHidden())
+        page._open_details("Нет такого")
+        self.assertTrue(detail.isHidden())
 
         # Фильтр прячет лишнее, а новая проверка возвращает «Все».
         page.status_filter.chips[plans.CARD_NETWORK].click()

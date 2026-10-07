@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, pyqtSignal
 from qfluentwidgets import FluentIcon, PrimaryPushButton, PushButton, StrongBodyLabel
 
 import dns.server_check_plans as plans
@@ -15,7 +15,6 @@ from app.ui_texts import tr as tr_catalog
 from blockcheck.ui.fun_texts import phrases
 from dns.ui.domain_lookup_page import _InfoLines
 from dns.ui.server_check_cards import FILTER_ALL, ServerCardsView, SeverityBar, StatusFilter
-from dns.ui.server_check_details import show_server_details
 from dns.ui.server_check_widgets import ServerCheckVerdictPanel
 from log.log import log
 from ui.accessibility import set_control_accessibility
@@ -31,6 +30,9 @@ _STAGE_INTERVAL_MS = 120
 
 class ServerCheckPage(BasePage):
     """Какие DNS-серверы и какими способами доступны в этой сети."""
+
+    # Нажали на карточку сервера: страница-хозяин открывает его подробности (ServerDetails).
+    details_requested = pyqtSignal(object)
 
     def __init__(self, parent=None, *, dns_feature, embedded: bool = False, open_dns_settings=None):
         super().__init__(
@@ -250,7 +252,7 @@ class ServerCheckPage(BasePage):
             return
         details = plans.build_details(self._report, server)
         if details is not None:
-            show_server_details(self.window(), details)
+            self.details_requested.emit(details)
 
     def _open_report(self) -> None:
         if self._report is None:

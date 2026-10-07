@@ -160,6 +160,9 @@ class BlockcheckPage(BasePage):
         self._run_log_file: str | None = None
         self._tab_widgets: list[QWidget] = []
         self._detail_view: ResultDetailView | None = None
+        # Подробности одного DNS-сервера со вкладки «DNS-серверы».
+        self._server_detail_view = None
+        self._server_detail_return_scroll = 0
         self._strategy_tab_page = None
         self._domain_lookup_tab_page = None
         self._dns_servers_tab_page = None
@@ -554,6 +557,7 @@ class BlockcheckPage(BasePage):
                 embedded=True,
                 open_dns_settings=self._open_dns_settings,
             )
+            self._dns_servers_tab_page.details_requested.connect(self._open_server_detail)
             self._dns_servers_tab_page.setVisible(False)
             self.add_widget(self._dns_servers_tab_page)
             try:
@@ -651,6 +655,10 @@ class BlockcheckPage(BasePage):
         index = max(0, min(int(index), len(self.TAB_ORDER) - 1))
         tab_key = self.TAB_ORDER[index]
         self._active_tab_index = index
+        # Вкладку могут сменить и снаружи, пока открыты подробности сервера.
+        if self._server_detail_view is not None and not self._server_detail_view.isHidden():
+            self._server_detail_view.setVisible(False)
+            self._tabs_pivot.setVisible(True)
 
         if self._tabs_pivot is not None:
             try:
@@ -823,6 +831,34 @@ class BlockcheckPage(BasePage):
         self._detail_view.setVisible(False)
         self._tabs_pivot.setVisible(True)
         self._switch_tab(self._active_tab_index)
+
+    def _open_server_detail(self, details) -> None:
+        """Нажатие на карточку DNS-сервера: его подробности занимают всю страницу."""
+        if self._server_detail_view is None:
+            from dns.ui.server_check_details import ServerDetailView
+
+            self._server_detail_view = ServerDetailView(self.content)
+            self._server_detail_view.closed.connect(self._close_server_detail)
+            self._server_detail_view.setVisible(False)
+            self.add_widget(self._server_detail_view)
+        self._server_detail_return_scroll = self.verticalScrollBar().value()
+        if self._dns_servers_tab_page is not None:
+            self._dns_servers_tab_page.setVisible(False)
+        self._tabs_pivot.setVisible(False)
+        self._server_detail_view.setVisible(True)
+        self._server_detail_view.show_details(details)
+        self._server_detail_view.setFocus()
+        self._scroll_to_top()
+
+    def _close_server_detail(self) -> None:
+        if self._server_detail_view is None or self._server_detail_view.isHidden():
+            return
+        self._switch_tab(self._active_tab_index)
+        # Возвращаем к той же карточке, с которой уходили; список к этому мигу ещё раскладывается.
+        QTimer.singleShot(0, self._restore_server_detail_scroll)
+
+    def _restore_server_detail_scroll(self) -> None:
+        self.verticalScrollBar().setValue(self._server_detail_return_scroll)
 
     def _scroll_to_top(self) -> None:
         try:
