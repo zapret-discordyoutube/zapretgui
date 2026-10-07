@@ -130,6 +130,25 @@ try {
 } catch {
     Write-Line "Логотип не загружен: $($_.Exception.Message)"
 }
+# Белый силуэт логотипа (та же прозрачность, все точки белые): блик рисуется
+# им, поэтому свет идёт строго по форме значка и не задевает фон вокруг.
+$logoShine = $null
+if ($null -ne $logo) {
+    try {
+        $logoShine = New-Object System.Drawing.Bitmap($logo.Width, $logo.Height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $whiten = New-Object System.Drawing.Imaging.ColorMatrix
+        $whiten.Matrix00 = 0; $whiten.Matrix11 = 0; $whiten.Matrix22 = 0
+        $whiten.Matrix40 = 1; $whiten.Matrix41 = 1; $whiten.Matrix42 = 1
+        $attributes = New-Object System.Drawing.Imaging.ImageAttributes
+        $attributes.SetColorMatrix($whiten)
+        $painter = [System.Drawing.Graphics]::FromImage($logoShine)
+        $painter.DrawImage($logo, (New-Object System.Drawing.Rectangle(0, 0, $logo.Width, $logo.Height)), 0, 0, $logo.Width, $logo.Height, [System.Drawing.GraphicsUnit]::Pixel, $attributes)
+        $painter.Dispose(); $attributes.Dispose()
+    } catch {
+        $logoShine = $null
+        Write-Line "Блик логотипа недоступен: $($_.Exception.Message)"
+    }
+}
 
 $stages = @($spec.texts.stages)
 $jokes = @($spec.jokes | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
@@ -554,6 +573,12 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
     $glint = [Math]::Min(1.0, ($now % 2.4) / 1.7)
     $glintAt = Ease-InOut $glint
     $glintGlow = [Math]::Sin([Math]::PI * $glint)
+    # «Разведчик» — огонёк, который бежит по ещё не пройденной части кольца и
+    # полосы в противофазе с бликом: работа видна, даже когда проценты стоят.
+    $scout = [Math]::Min(1.0, (($now + 1.2) % 2.4) / 1.7)
+    $scoutAt = Ease-InOut $scout
+    $scoutGlow = [Math]::Sin([Math]::PI * $scout)
+    $bead = Mix-Color $C.Accent ([System.Drawing.Color]::White) 0.8
     $ringRect = New-Object System.Drawing.RectangleF(($ringX - $ringRadius), ($ringY - $ringRadius), $ringSize, $ringSize)
     $trackPen = New-Object System.Drawing.Pen($ringTrack, $ringStroke)
     $g.DrawEllipse($trackPen, $ringRect)
@@ -577,17 +602,69 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
                     $shinePen.Dispose()
                 }
             }
+            # Светлая «бусина» на переднем крае дуги.
+            if ($sweep -gt 4) {
+                $angle = (-90.0 + $sweep) * [Math]::PI / 180.0
+                $beadRadius = [single]($ringStroke * 0.24)
+                $beadBrush = New-Object System.Drawing.SolidBrush((With-Alpha $bead (0.72 + 0.2 * [Math]::Sin($now * 3.0))))
+                $g.FillEllipse($beadBrush, [single]($ringX + $ringRadius * [Math]::Cos($angle) - $beadRadius), [single]($ringY + $ringRadius * [Math]::Sin($angle) - $beadRadius), (2 * $beadRadius), (2 * $beadRadius))
+                $beadBrush.Dispose()
+            }
         }
     }
+    if ($S.Fill -lt 0.999 -and (360.0 - $sweep) -gt 30) {
+        $scoutPen = New-Object System.Drawing.Pen((With-Alpha $C.Accent (0.42 * $scoutGlow)), [single]($ringStroke * 0.45))
+        $scoutPen.StartCap = 'Round'; $scoutPen.EndCap = 'Round'
+        $g.DrawArc($scoutPen, $ringRect, [single](-90 + $sweep + 10 + (340.0 - $sweep - 10) * $scoutAt), [single]9)
+        $scoutPen.Dispose()
+    }
     if ($null -ne $logo) {
-        # Логотип едва заметно «дышит»; установщик закончил — один «вдох» сильнее.
-        $scale = 1 + 0.018 * [Math]::Sin($now * 1.8)
+        # Логотип появляется с увеличением, потом едва заметно «дышит» и парит.
+        # Этап закончился — короткий «вдох», установщик закончил — «вдох» сильнее.
+        $scale = (0.84 + 0.16 * (Ease-Back ($now / 0.6))) * (1 + 0.014 * [Math]::Sin($now * 1.8))
+        if ($flash -lt 1) { $scale += 0.06 * [Math]::Sin([Math]::PI * $flash) }
         if ($S.DoneJumpAt -ge 0) {
             $t = ($now - $S.DoneJumpAt) / 0.6
-            if ($t -lt 1) { $scale += 0.12 * [Math]::Sin([Math]::PI * $t) }
+            if ($t -lt 1) { $scale += 0.1 * [Math]::Sin([Math]::PI * $t) }
         }
         $size = [single]($ringSize * 0.52 * $scale)
-        $g.DrawImage($logo, (New-Object System.Drawing.RectangleF(($ringX - $size / 2), ($ringY - $size / 2), $size, $size)))
+        $logoLeft = [single]($ringX - $size / 2)
+        $logoTop = [single]($ringY - $size / 2 + 1.6 * $k * [Math]::Sin($now * 1.5))
+        $g.DrawImage($logo, (New-Object System.Drawing.RectangleF($logoLeft, $logoTop, $size, $size)))
+        # Раз в несколько секунд по значку наискось проходит световой блик.
+        $pass = ($now % 4.4) / 0.95
+        if ($null -ne $logoShine -and $pass -lt 1 -and $now -gt 1.0) {
+            $middle = $logoLeft - $size * 0.35 + $size * 1.7 * (Ease-InOut $pass)
+            $slant = $size * 0.16
+            $corners = [System.Drawing.PointF[]]@(
+                (New-Object System.Drawing.PointF($logoLeft, $logoTop)),
+                (New-Object System.Drawing.PointF(($logoLeft + $size), $logoTop)),
+                (New-Object System.Drawing.PointF($logoLeft, ($logoTop + $size)))
+            )
+            $source = New-Object System.Drawing.RectangleF(0, 0, $logoShine.Width, $logoShine.Height)
+            # Три вложенные полосы разной ширины: яркая середина, мягкие края.
+            foreach ($layer in @(@(0.2, 0.1), @(0.12, 0.13), @(0.05, 0.16))) {
+                $half = $size * $layer[0]
+                $band = New-Object System.Drawing.Drawing2D.GraphicsPath
+                $band.AddPolygon([System.Drawing.PointF[]]@(
+                    (New-Object System.Drawing.PointF(($middle - $half + $slant), $logoTop)),
+                    (New-Object System.Drawing.PointF(($middle + $half + $slant), $logoTop)),
+                    (New-Object System.Drawing.PointF(($middle + $half - $slant), ($logoTop + $size))),
+                    (New-Object System.Drawing.PointF(($middle - $half - $slant), ($logoTop + $size)))
+                ))
+                $fade = New-Object System.Drawing.Imaging.ColorMatrix
+                $fade.Matrix33 = [single]($layer[1] * [Math]::Sin([Math]::PI * $pass))
+                $attributes = New-Object System.Drawing.Imaging.ImageAttributes
+                $attributes.SetColorMatrix($fade)
+                $state = $g.Save()
+                $g.SetClip($band, [System.Drawing.Drawing2D.CombineMode]::Intersect)
+                # Силуэт полупрозрачный и размытый по смыслу: дорогое сглаживание ему не нужно.
+                $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::Bilinear
+                $g.DrawImage($logoShine, $corners, $source, [System.Drawing.GraphicsUnit]::Pixel, $attributes)
+                $g.Restore($state)
+                $attributes.Dispose(); $band.Dispose()
+            }
+        }
     }
     $leftColumn = New-Object System.Drawing.RectangleF($pad, ($ringY + $ringRadius + 14 * $k), $sideWidth, ($bigHeight + 2 * $k))
     $g.DrawString(('{0} %' -f [int][Math]::Round(100.0 * $share)), $F.Big, $fg, $leftColumn, $centered)
@@ -652,16 +729,30 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
             $b = New-Object System.Drawing.SolidBrush($C.Accent)
             $g.FillEllipse($b, $cx - $grow, $cy - $grow, 2 * $grow, 2 * $grow)
             $b.Dispose()
+            if ($doneFor -lt 0.6) {
+                # От галочки расходится тонкое кольцо: этап только что закончился.
+                $wave = Ease-Out ($doneFor / 0.6)
+                $waveRadius = [single]($r + 8 * $k * $wave)
+                $wavePen = New-Object System.Drawing.Pen((With-Alpha $C.Accent (0.4 * (1 - $wave))), [single](1.5 * $k))
+                $g.DrawEllipse($wavePen, $cx - $waveRadius, $cy - $waveRadius, 2 * $waveRadius, 2 * $waveRadius)
+                $wavePen.Dispose()
+            }
             Draw-Check $g $cx $cy ($k * 1.2) (Ease-Out (($doneFor - 0.12) / 0.3))
             $titleFont = $F.Stage; $titleColor = $C.Foreground
             if ($statuses.Count -gt 0) { $status = [string]$statuses[0] }
             if ($S.StartAt[$i] -ge 0) { $spent = Format-Duration ($doneAt - $S.StartAt[$i]) }
         } elseif ($isActive) {
             # Кольцо ожидания Windows: бледная дорожка и дуга, которая вращается, вытягиваясь и сжимаясь.
-            $ring = New-Object System.Drawing.Pen((With-Alpha $C.Accent 0.22), [single](3 * $k))
+            # Номер этапа растворяется, кольцо проявляется на его месте.
+            if ($lit -lt 0.98) {
+                $numberBrush = New-Object System.Drawing.SolidBrush((With-Alpha $C.Muted (1 - $lit)))
+                $g.DrawString([string]($i + 1), $F.Small, $numberBrush, $markRect, $centered)
+                $numberBrush.Dispose()
+            }
+            $ring = New-Object System.Drawing.Pen((With-Alpha $C.Accent (0.22 * $lit)), [single](3 * $k))
             $g.DrawEllipse($ring, $markRect)
             $ring.Dispose()
-            $arc = New-Object System.Drawing.Pen($C.Accent, [single](3 * $k))
+            $arc = New-Object System.Drawing.Pen((With-Alpha $C.Accent $lit), [single](3 * $k))
             $arc.StartCap = 'Round'; $arc.EndCap = 'Round'
             $turn = $now / 1.3
             $beat = $turn - [Math]::Floor($turn)
@@ -702,6 +793,38 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
             $statusBrush = New-Object System.Drawing.SolidBrush((With-Alpha $C.Muted 0.9))
             $g.DrawString($status, $F.Small, $statusBrush, (New-Object System.Drawing.RectangleF($textLeft, ($textTop + $fontHeight + 1 * $k), $textWidth, ($smallHeight + 2 * $k))), $oneLine)
             $statusBrush.Dispose()
+        }
+        if ($lit -gt 0.01) {
+            # Полоска хода самого этапа: у копирования — настоящая, по файлам;
+            # у остальных хода не видно, поэтому бежит отрезок, как в Windows 11.
+            # Закончив, этап заполняет её целиком, и она гаснет вместе с подсветкой.
+            $miniWidth = [single]($columnLeft + $columnWidth - 20 * $k - $textLeft)
+            $miniHeight = [single](3 * $k)
+            $miniTop = [single]($y + $cardHeight - 17 * $k)
+            $miniPath = New-RoundedPath (New-Object System.Drawing.RectangleF($textLeft, $miniTop, $miniWidth, $miniHeight)) ($miniHeight / 2)
+            $miniBrush = New-Object System.Drawing.SolidBrush((With-Alpha $ringTrack $lit))
+            $g.FillPath($miniBrush, $miniPath)
+            $miniBrush.Dispose()
+            $part = -1.0
+            if ($isDone) { $part = 1.0 }
+            elseif ($i -eq 1 -and $S.InstallStarted) { $part = [Math]::Max(0.0, [Math]::Min(1.0, ($S.Fill - 0.10) / 0.80)) }
+            if ($part -ge 0) {
+                $runLeft = $textLeft
+                $runWidth = [single]($miniWidth * $part)
+            } else {
+                $runWidth = [single]($miniWidth * 0.36)
+                $runLeft = [single]($textLeft - $runWidth + ($miniWidth + $runWidth) * (Ease-InOut (($now % 1.5) / 1.5)))
+            }
+            if ($runWidth -gt $miniHeight) {
+                $state = $g.Save()
+                $g.SetClip($miniPath, [System.Drawing.Drawing2D.CombineMode]::Intersect)
+                $runPath = New-RoundedPath (New-Object System.Drawing.RectangleF($runLeft, $miniTop, $runWidth, $miniHeight)) ($miniHeight / 2)
+                $runBrush = New-Object System.Drawing.SolidBrush((With-Alpha $C.Accent $lit))
+                $g.FillPath($runBrush, $runPath)
+                $runBrush.Dispose(); $runPath.Dispose()
+                $g.Restore($state)
+            }
+            $miniPath.Dispose()
         }
         End-Reveal $g $shown ($columnLeft - 8 * $k) ($y - 3 * $k) ($columnWidth + 16 * $k) ($cardHeight + 6 * $k)
         $y += $cardHeight + $cardGap
@@ -752,6 +875,24 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
         }
         $g.Restore($state)
         $fillPath.Dispose()
+    }
+
+    if ($S.Fill -lt 0.999) {
+        $middleY = [single]($barTop + $barHeight / 2)
+        $ahead = $barWidth - $fillWidth
+        if ($ahead -gt 60 * $k) {
+            $scoutX = [single]($pad + $fillWidth + 14 * $k + ($ahead - 42 * $k) * $scoutAt)
+            $scoutPen = New-Object System.Drawing.Pen((With-Alpha $C.Accent (0.5 * $scoutGlow)), [single]($barHeight * 0.6))
+            $scoutPen.StartCap = 'Round'; $scoutPen.EndCap = 'Round'
+            $g.DrawLine($scoutPen, $scoutX, $middleY, [single]($scoutX + 24 * $k), $middleY)
+            $scoutPen.Dispose()
+        }
+        if ($fillWidth -gt 2 * $barHeight) {
+            $beadRadius = [single]($barHeight * 0.34)
+            $beadBrush = New-Object System.Drawing.SolidBrush((With-Alpha $bead (0.72 + 0.2 * [Math]::Sin($now * 3.0))))
+            $g.FillEllipse($beadBrush, [single]($pad + $fillWidth - $barHeight / 2 - $beadRadius), [single]($middleY - $beadRadius), (2 * $beadRadius), (2 * $beadRadius))
+            $beadBrush.Dispose()
+        }
     }
 
     $footerText = [string]$spec.texts.footer
