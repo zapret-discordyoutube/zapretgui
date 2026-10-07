@@ -65,6 +65,7 @@ from diagnostics.services import (
     build_services,
 )
 from diagnostics.tls_probe import (
+    CONNECT_TIMEOUT,
     KIND_CONNECT,
     KIND_CANCELLED,
     KIND_CERT,
@@ -178,7 +179,7 @@ PROGRESS_STEPS = (STEP_SITES, STEP_HOSTINGS, STEP_VOICE, STEP_IPV6, STEP_SYSTEM,
 # потока на TLS 1.2 / TLS 1.3 / HTTP. Задачи ждут друг
 # друга внутри одного пула, поэтому
 # нехватка потоков — это не «медленнее», а взаимная блокировка.
-_WORKERS_PER_TARGET = 19 + 2 * len(REFERENCE_RESOLVERS)
+_WORKERS_PER_TARGET = 24 + 2 * len(REFERENCE_RESOLVERS)
 
 
 class _Stopped(Exception):
@@ -222,6 +223,8 @@ class _Probe:
     protocols: tuple[protocol_probe.ProtocolLine, ...] = ()
     # Все попытки основного запроса по порядку: (адрес, исход).
     tried: tuple[tuple[str, str], ...] = ()
+    # Все попытки кончились одинаково: ответа на соединение не было вовсе.
+    tried_silent: bool = False
     # Адрес из файла hosts не ответил, а настоящий адрес сайта открылся.
     hosts_stale: bool = False
 
@@ -233,6 +236,10 @@ class _Probe:
         бывает из-за устаревшей записи в hosts, потерянного пакета или антивируса.
         """
         if not self.tried or any(kind != KIND_CONNECT for _ip, kind in self.tried):
+            return False
+        # Отказ адреса и ошибка системы (нет сети, запрет сетевого экрана) — не молчание:
+        # так фильтр провайдера адреса не закрывает.
+        if not self.tried_silent:
             return False
         # Нужна перепроверка: второй адрес или повтор на том же после паузы.
         if len(self.tried) < 2:
@@ -528,6 +535,12 @@ def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
             # Остальные адреса пробуются разом: ждать их по очереди — это десятки секунд.
             futures = [run.submit(_one, ip) for ip in others]
             attempts.extend(future.result() for future in futures)
+            if all(item.kind == KIND_CONNECT for item in attempts) and not run.dns_cancelled():
+                # Все адреса пробовались в одну секунду: короткий сбой сети задел бы их
+                # разом. Ещё одна попытка после паузы отделяет сбой от блокировки.
+                _pause(run, RETRY_PAUSE_S)
+                if not run.dns_cancelled():
+                    attempts.append(_one(order[0]))
         elif attempts[0].kind != KIND_CERT:
             _pause(run, RETRY_PAUSE_S)
             if not run.dns_cancelled():
@@ -535,6 +548,11 @@ def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
 
     probe.attempts = len(attempts)
     probe.tried = tuple((item.ip, item.kind) for item in attempts if item.kind != KIND_CANCELLED)
+    probe.tried_silent = bool(probe.tried) and all(
+        item.kind == KIND_CONNECT and item.connect_fail == CONNECT_TIMEOUT
+        for item in attempts
+        if item.kind != KIND_CANCELLED
+    )
     opened = next((item for item in attempts if item.ok), None)
     probe.reach = opened or attempts[0]
     if opened is None and run.dns_cancelled() and len(probe.tried) < 2:
@@ -1141,10 +1159,22 @@ def _collect_problems(
     # Только настоящий провал контрольных сайтов: «не успели проверить»
     # (лимит времени) — не «нет интернета», иначе такой прогон спрятал бы
     # найденные блокировки остальных сайтов.
-    foreign_down = bool(foreign) and all(verdicts[key].level == Level.FAIL for key in foreign)
+    # «Не открывается» у контрольного сайта — только когда до него нет дороги.
+    # Обрыв после 16 КБ или чужой сертификат — это блокировка, которую лечат
+    # иначе, а не «закрыты все зарубежные адреса».
+    no_road = (ReachState.IP_BLOCK, ReachState.DPI)
+
+    def _down(key: str) -> bool:
+        probes = collected.get(key) or ()
+        return bool(probes) and all(probe.reach_state in no_road for probe in probes)
+
+    # Эталонные DNS-серверы — зарубежные адреса, к которым программа ходит напрямую.
+    # Если хоть один ответил, зарубежные адреса не закрыты и интернет есть.
+    foreign_reachable = any(item.get("ok") for item in reference or ())
+    foreign_down = bool(foreign) and all(_down(key) for key in foreign) and not foreign_reachable
     domestic_up = bool(domestic) and all(verdicts[key].level == Level.OK for key in domestic)
     whitelisted = foreign_down and domestic_up
-    offline = bool(controls) and all(verdicts[key].level == Level.FAIL for key in controls)
+    offline = bool(controls) and all(_down(key) for key in controls) and not foreign_reachable
     names = ", ".join(services[key].label for key in foreign)
     if whitelisted:
         problems.append(
@@ -1285,8 +1315,13 @@ def _collect_problems(
         problems.append(
             _problem(
                 Level.WARN,
-                f"QUIC (UDP 443) блокируется по имени для: {', '.join(quic_blocked)}. Сайты открываются обычным "
-                "соединением, но браузер сначала пробует QUIC, поэтому открытие и начало видео могут запаздывать",
+                f"QUIC (UDP 443) не проходит по имени для: {', '.join(quic_blocked)}. Сайты открываются обычным "
+                "соединением, но браузер сначала пробует QUIC, поэтому открытие и начало видео могут запаздывать"
+                + (
+                    ". Так режет провайдер, но так же действует и сам Zapret, если в пресете QUIC отключён намеренно"
+                    if zapret_running
+                    else ""
+                ),
                 (_ADVICE_QUIC,),
                 kind=block_kind.KIND_QUIC,
             )

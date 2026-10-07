@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from diagnostics.tls_probe import KIND_CANCELLED, ProbeResult
+from diagnostics.tls_probe import KIND_CONNECT, KIND_CANCELLED, ProbeResult
 
 __all__ = [
     "IPV6_ABSENT",
@@ -91,6 +91,12 @@ def judge(facts: Ipv6Facts) -> Ipv6Verdict:
         return Ipv6Verdict(IPV6_UNKNOWN, "проверить не успели")
     if facts.has_route is False:
         return Ipv6Verdict(IPV6_ABSENT, "в этой сети его нет — сайты открываются по IPv4, это нормально")
+    if any(result.kind != KIND_CONNECT for result in results):
+        # Сервер по IPv6 ответил, пусть и с ошибкой (сертификат, сброс): дорога есть.
+        return Ipv6Verdict(
+            IPV6_UNKNOWN,
+            "проверочные сайты по IPv6 отвечают, но с ошибкой — сам IPv6, похоже, работает",
+        )
     if not results:
         # Эталонные серверы не дали адресов: судить о самом IPv6 не по чему.
         return Ipv6Verdict(IPV6_UNKNOWN, "проверить не удалось: не получили адреса проверочных сайтов")

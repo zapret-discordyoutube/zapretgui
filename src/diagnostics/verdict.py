@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from diagnostics.block_kind import KIND_CUT, KIND_IP, kind_info, site_kind
+from diagnostics.block_kind import KIND_CUT, KIND_IP, KIND_NO_CONNECT, kind_info, site_kind
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
@@ -202,11 +202,11 @@ def describe_reach(result: ProbeResult | None, *, timeout: float = 0.0) -> str:
     if state == ReachState.IP_BLOCK:
         return "не удалось соединиться с сервером"
     if result.kind == KIND_TLS:
-        return "соединение рвётся при установке шифрования — так режет DPI"
+        return "соединение рвётся при установке шифрования — так обычно режет фильтр провайдера"
     if result.kind == KIND_RESET:
-        return "соединение сброшено — так режет DPI"
+        return "соединение сброшено — так обычно режет фильтр провайдера"
     if result.kind == KIND_TIMEOUT:
-        return f"подключение есть, но сервер не ответил за {timeout:.0f} с — так выглядит блокировка провайдером"
+        return f"подключение есть, но сервер не ответил за {timeout:.0f} с — похоже на блокировку провайдером"
     if result.kind == KIND_CANCELLED:
         return "проверка прервана — не хватило времени или нажата «Стоп»"
     return result.detail or "не удалось выполнить запрос"
@@ -393,7 +393,9 @@ def summarize_service(
         advice = _advice_for(states, zapret_running=zapret_running, cert_cause=cause, kind=kind)
         if spoofed and _ADVICE_DNS not in advice:
             advice = advice + (_ADVICE_DNS,)
-        return ServiceVerdict(Level.FAIL, headline, advice, dns_note, kind)
+        # «Причина не ясна» — не установленная блокировка: это замечание, а не тревога.
+        level = Level.WARN if kind == KIND_NO_CONNECT else Level.FAIL
+        return ServiceVerdict(level, headline, advice, dns_note, kind)
 
     if main.reach == ReachState.NO_ADDRESS:
         return ServiceVerdict(

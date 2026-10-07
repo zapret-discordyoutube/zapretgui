@@ -277,7 +277,7 @@ class _Net:
             patch.object(engine, "system_dns_servers", return_value=("83.220.169.155",)),
             patch.object(engine, "_zapret_status", return_value=(True, "✅ Zapret запущен")),
             patch.object(engine, "running_bypass_tools", return_value=self.bypass_tools),
-            patch.object(engine, "_discover_googlevideo", return_value=("rr1---sn-test.googlevideo.com", "")),
+            patch.object(engine, "_discover_googlevideo", return_value=(("rr1---sn-test.googlevideo.com",), "")),
             # Звонки и обрыв 16 КБ проверяются в любом режиме — без сети в тестах.
             patch("diagnostics.voice_check.check_voice", return_value=self.voice),
             patch("diagnostics.freeze_check.check_freeze", return_value=self.freeze),
@@ -1193,6 +1193,39 @@ class BlockcheckScopeTests(unittest.TestCase):
         self.assertIsNone(quick["telegram"])
         self.assertEqual(quick["network"]["external_ip"], "203.0.113.7")
 
+    def test_cut_on_foreign_controls_is_not_whitelist_mode(self) -> None:
+        """Google и Cloudflare обрываются после 16 КБ — это лечит Zapret, а не «закрыты все зарубежные адреса»."""
+        domestic = ("ya.ru", "vk.com")
+
+        def https(host, ip):
+            if host in domestic:
+                return _ok(ip)
+            return ProbeResult(ip=ip, kind="ok", status=200, body_size=16_500, body_cut=True)
+
+        result = self._run_all(https)
+
+        kinds = [item["kind"] for item in result["problems"]]
+        self.assertNotIn("network", kinds)
+        self.assertFalse(any("белых списков" in item["text"] for item in result["problems"]))
+        # И остальные находки не спрятаны «общей причиной».
+        self.assertTrue(any(item["kind"] == "cut16" for item in result["problems"]))
+
+    def test_answering_reference_server_refutes_no_internet_and_whitelist(self) -> None:
+        """Эталонный DNS-сервер — зарубежный адрес: раз он ответил, интернет есть и зарубежные адреса открыты."""
+        from diagnostics.freeze_check import FreezeServer, FreezeState
+        from diagnostics.voice_check import VoiceServer
+
+        net = _Net(
+            https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT, connect_fail="timeout"),
+            voice=(VoiceServer("CF", "stun", True, "отвечает"),),
+            freeze=(FreezeServer("Akamai", FreezeState.OK, "получено 32 КБ"),),
+        )
+        reference = [{"label": "Cloudflare", "address": "1.1.1.1", "ok": True, "answered": 5, "failed": 0, "reason": ""}]
+        with patch.object(engine._Run, "reference_report", return_value=reference):
+            result = net.run(engine.run_blockcheck, "all", emit=lambda _line: None)
+
+        self.assertFalse(any(item["kind"] == "network" for item in result["problems"]))
+
     def test_controls_down_means_no_internet_first(self) -> None:
         result = self._run_all(lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT))
 
@@ -1447,8 +1480,10 @@ class BlockKindInReportTests(unittest.TestCase):
             return engine.block_cause.CauseFacts(
                 host=host,
                 result=result,
-                neutral=engine.block_cause.HelloResult(engine.block_cause.HELLO_RESET),
+                # Тишина на любое имя, даже на разрешённое: так молчит фильтр, а не сам сервер.
+                neutral=engine.block_cause.HelloResult(engine.block_cause.HELLO_TIMEOUT),
                 nameless=engine.block_cause.HelloResult(engine.block_cause.HELLO_TIMEOUT),
+                allowed=engine.block_cause.HelloResult(engine.block_cause.HELLO_TIMEOUT),
             )
 
         net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET, stage="tls"), cause_facts=facts)

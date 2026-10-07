@@ -31,7 +31,7 @@ from urllib.parse import urlsplit
 
 from diagnostics.tls_probe import ProbeResult
 from diagnostics.upload_probe import UPLOAD_BULK_STALLS, UPLOAD_OK, UPLOAD_PACKET_LIMIT, UploadVerdict
-from diagnostics.verdict import FREEZE_MAX_BYTES, FREEZE_MIN_BYTES, Level, describe_reach
+from diagnostics.verdict import FREEZE_MAX_BYTES, FREEZE_MIN_BYTES, Level
 
 __all__ = [
     "DIRECTION_DOWNLOAD",
@@ -50,6 +50,19 @@ READ_LIMIT = 32 * 1024
 TARGETS_COUNT = 6
 # Сколько серверов полной проверки опрашивать одновременно.
 EVERY_AT_ONCE = 12
+# Один обрыв при стольких серверах без обрыва — единичный случай, а не вывод о сети.
+SINGLE_CUT_NEEDS_FINE = 4
+# «Обрывает» всерьёз: не меньше стольких серверов и не меньше трети проверенных.
+WIDESPREAD_CUTS = 3
+# Почему сервер проверить не удалось — без догадок о причине.
+_UNREACHED = {
+    "connect": "нет соединения с сервером",
+    "timeout": "сервер не ответил",
+    "reset": "соединение сброшено",
+    "tls": "шифрование не установилось",
+    "cert": "у сервера другой сертификат (он мог переехать)",
+    "cancelled": "проверку прервали",
+}
 # Сколько адресов одного провайдера пробовать, если первый не дал ответа.
 CANDIDATES_PER_PROVIDER = 3
 # Запасной адрес берётся, только пока с начала проверки прошло меньше этого:
@@ -131,7 +144,9 @@ def classify_download(result: ProbeResult | None) -> tuple[FreezeState, str]:
     if result is None:
         return FreezeState.UNKNOWN, "не удалось узнать адрес сервера"
     if not result.ok:
-        return FreezeState.UNKNOWN, f"не удалось проверить: {describe_reach(result)}"
+        # Причины здесь не называются: мёртвый или переехавший сервер из списка
+        # отвечал бы «чужой сертификат» — и это выглядело бы как перехват трафика.
+        return FreezeState.UNKNOWN, f"не удалось проверить: {_UNREACHED.get(result.kind, 'сервер не ответил как ожидалось')}"
     size = int(result.body_size)
     kb = size // 1024
     if result.body_cut and FREEZE_MIN_BYTES <= size <= FREEZE_MAX_BYTES:
@@ -139,7 +154,7 @@ def classify_download(result: ProbeResult | None) -> tuple[FreezeState, str]:
     if size >= FREEZE_MAX_BYTES:
         return FreezeState.OK, f"получено {kb} КБ без обрыва"
     if result.body_cut:
-        return FreezeState.UNKNOWN, f"загрузка оборвалась на {kb} КБ — не похоже на обрыв ТСПУ"
+        return FreezeState.UNKNOWN, f"загрузка оборвалась на {kb} КБ — вне окна 14–24 КБ, на этот обрыв не похоже"
     status = int(result.status or 0)
     if status >= 300:
         return FreezeState.UNKNOWN, f"сервер не отдал файл (код {status})"
@@ -271,14 +286,25 @@ def summarize_freeze(servers: tuple[FreezeServer, ...], *, zapret_running: bool 
         )
         directions = {item.direction for item in frozen}
         if directions == {DIRECTION_UPLOAD}:
-            what = "отправку данных на зарубежные серверы"
+            what = "отправка данных на зарубежные серверы"
         elif directions == {DIRECTION_DOWNLOAD}:
-            what = "загрузку с зарубежных серверов на 16–20 КБ"
+            what = "загрузка с зарубежных серверов на 16–20 КБ"
         else:
-            what = "загрузку с зарубежных серверов на 16–20 КБ и отправку данных на них"
+            what = "загрузка с зарубежных серверов на 16–20 КБ и отправка данных на них"
+        decided = len(frozen) + len(fine)
+        if len(frozen) == 1 and len(fine) >= SINGLE_CUT_NEEDS_FINE:
+            # Один сервер из многих — не картина сети: так бывает из-за самого сервера.
+            return FreezeReport(
+                Level.OK,
+                f"Обрыва на 16–20 КБ нет: без обрыва {len(fine)} из {decided} серверов, один оборвался — "
+                "единичный случай",
+                servers,
+            )
+        # «Обрывает» — когда это видно у нескольких серверов и у заметной их доли.
+        widespread = len(frozen) >= WIDESPREAD_CUTS and len(frozen) * 3 >= decided
         return FreezeReport(
-            Level.FAIL if len(frozen) >= len(fine) else Level.WARN,
-            f"Провайдер обрывает {what} ({len(frozen)} из {len(servers)})",
+            Level.FAIL if widespread else Level.WARN,
+            f"Обрывается {what}: {len(frozen)} из {decided} проверенных серверов",
             servers,
             advice,
         )

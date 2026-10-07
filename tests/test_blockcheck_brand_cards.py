@@ -61,6 +61,11 @@ class BrandLookupTests(unittest.TestCase):
         self.assertEqual(problem_brand(_problem("YouTube открывается, но не работают видео", kind="ip"))[0], "simple:youtube:YT")
         # В находке по DNS названы сервисы, но это не строка про сайт Cloudflare: у неё точка важности.
         self.assertIsNone(problem_brand(_problem("Обычные запросы к Cloudflare перехватываются", kind="dns")))
+        # Вид блокировки, которого здесь не знают, — всё равно про сайт: логотип подбирается.
+        self.assertEqual(problem_brand(_problem("Canva не открывается", kind="noconnect", title="Canva"))[0], "own:canva:CA")
+        # Своего логотипа нет — значок с карточки сайта, нейтральным цветом.
+        unknown = {**_problem("Meduza не открывается", kind="sni", title="Meduza"), "card_icon": "fa5s.newspaper"}
+        self.assertEqual(problem_brand(unknown), ("fa5s.newspaper", ""))
         # У звонков — логотип того, чьи звонки.
         self.assertEqual(problem_brand(_problem("Звонки в Telegram могут не работать: серверы молчат", kind="voice"))[0], "simple:telegram:TG")
 
@@ -181,6 +186,9 @@ class OpenReportTests(unittest.TestCase):
         QTest.mouseClick(shared.badges[1], Qt.MouseButton.LeftButton)
         QTest.keyClick(shared, Qt.Key.Key_Return)
         self.assertEqual(opened, ["site:x", "site:telegram"])
+        # Объяснение — одной линией; целиком оно в подсказке.
+        self.assertEqual([label.full_text() for label in shared.advice_labels], [same])
+        self.assertIn(same, shared.toolTip())
         self.assertEqual(system.card_key, "")
         QTest.mouseClick(system, Qt.MouseButton.LeftButton)
         self.assertEqual(len(opened), 2)
@@ -251,6 +259,10 @@ class ReportTests(unittest.TestCase):
         # Названия измерений стоят столбцом одной ширины — значения начинаются с одной линии.
         self.assertEqual(len({row.name_label.width() for row in akamai.rows}), 1)
         self.assertEqual(len({row.text_label.x() for row in akamai.rows}), 1)
+        # Отчёт короче окна: шапка и строки не растягиваются на всю его высоту.
+        self.assertGreater(view.height(), view.minimumHeight() + 150)
+        self.assertLess(view.hero.height(), 140)
+        self.assertLess(akamai.rows[0].height(), 50)
         # Строка с переносом не раздувается: страница просит высоту по содержимому.
         view.resize(1000, view.minimumHeight())
         self.app.processEvents()

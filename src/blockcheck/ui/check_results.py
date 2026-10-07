@@ -20,9 +20,10 @@ from collections.abc import Callable
 from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CaptionLabel, FlowLayout, PushButton, SimpleCardWidget, StrongBodyLabel, SubtitleLabel
+from qfluentwidgets import BodyLabel, CaptionLabel, FlowLayout, PushButton, TransparentPushButton, SimpleCardWidget, StrongBodyLabel, SubtitleLabel
 
 from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_groups
+from blockcheck.ui.result_cards import _ElidedLabel
 from blockcheck.ui.result_cards_model import build_cards
 from blockcheck.ui.brand_icons import BrandIcon, named_brand, site_brand
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
@@ -136,8 +137,9 @@ def group_problems(problems: list[dict]) -> list[tuple[str, list[dict]]]:
 # Важность словом — в подсказке к точке строки.
 _LEVEL_WORDS = {"fail": "Мешает работе", "warn": "Работает не полностью", "unknown": "Нет ответа"}
 _SITE_ICON = "fa5s.globe"
-# Виды, которые относятся к одному сайту: у таких строк логотип сайта.
-_SITE_KINDS = frozenset({"ip", "sni", "cut16", "stub", "cert", "unclear", KIND_OTHER})
+# Виды, которые не относятся к одному сайту: у таких строк точка важности, а не логотип.
+# Всё остальное — про сайт, в том числе виды, которых здесь ещё не знают.
+_NOT_SITE_KINDS = frozenset({"dns", "quic", "system", "network"})
 # Ширина столбца с названиями сайтов: объяснения справа начинаются с одной линии.
 NAME_COLUMN = 190
 _SERVER = re.compile(r"\s*([^,()]+?) \(([^()]+)\)")
@@ -251,12 +253,17 @@ def problem_brand(problem: dict) -> tuple[str, str] | None:
         # «Звонки в Telegram могут не работать» — логотип того, чьи звонки.
         brand = site_brand(str(problem.get("text") or "").partition(":")[0])
         return (brand.icon, brand.color) if brand is not None else None
-    if kind not in _SITE_KINDS:
+    if kind in _NOT_SITE_KINDS:
         return None
     first_word = str(problem.get("text") or "").split(" ", 1)[0]
-    brand = site_brand(str(problem.get("title") or ""), str(problem.get("target") or ""), first_word)
+    brand = site_brand(
+        str(problem.get("site_key") or ""), str(problem.get("title") or ""), str(problem.get("target") or ""), first_word
+    )
     if brand is not None:
         return brand.icon, brand.color
+    # Своего логотипа нет — значок с карточки этого сайта, нейтральным цветом.
+    if problem.get("card_icon"):
+        return str(problem["card_icon"]), ""
     return (_SITE_ICON, "") if problem.get("title") or problem.get("target") else None
 
 
@@ -351,9 +358,10 @@ def _theme_color(token: str, fallback: QColor) -> QColor:
 class _ProblemRow(QWidget):
     """Строка списка проблем: слева — что сломано, справа — объяснение, совет и кнопка.
 
-    Строка про сайт: в левом столбце логотип и название, объяснение начинается
-    с общей для группы линии. ``also`` — другие сайты с тем же объяснением: они
-    встают в тот же столбец, а текст пишется один раз.
+    Строка про сайт — в одну линию, как в таблице: логотип и название в левом
+    столбце, справа короткое объяснение (что не поместилось и советы — в
+    подсказке и в полном отчёте), кнопка без рамки. ``also`` — другие сайты с
+    тем же объяснением: они встают в тот же столбец, а текст пишется один раз.
     Остальные строки (DNS, компьютер, сеть): точка важности, заголовок и под
     ним пояснение; перечень DNS-серверов показан метками.
 
@@ -396,12 +404,13 @@ class _ProblemRow(QWidget):
             Qt.TextInteractionFlag.NoTextInteraction if self.card_key else Qt.TextInteractionFlag.TextSelectableByMouse
         )
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2 if bare else 9, 0, 2 if bare else 9)
+        titled_site = grouped and not bare and bool(problem.get("title"))
+        pad = 2 if bare else 6 if titled_site else 9
+        layout.setContentsMargins(0, pad, 0, pad)
         layout.setSpacing(12)
 
         tone = _level_tone(self._level)
         hollow = self._level not in ("fail", "ok")
-        titled_site = grouped and not bare and bool(problem.get("title"))
         self.badges: list[_SiteBadge] = []
         self.icon: BrandIcon | None = None
         self.dot: ToneDot | None = None
@@ -413,13 +422,15 @@ class _ProblemRow(QWidget):
             # Левый столбец: названия сайтов, по одному в строке.
             names = QVBoxLayout()
             names.setContentsMargins(0, 0, 0, 0)
-            names.setSpacing(6)
+            names.setSpacing(4)
             for order, item in enumerate(self.problems):
                 badge = _SiteBadge(item, self, card_key=keys[order] if keys else "", on_open=on_open)
                 badge.setFixedWidth(NAME_COLUMN)
                 names.addWidget(badge)
                 self.badges.append(badge)
-            names.addStretch(1)
+            # Один сайт стоит по центру строки, несколько — столбцом от её верха.
+            if len(self.problems) > 1:
+                names.addStretch(1)
             layout.addLayout(names)
             self.icon = self.badges[0].icon
             self.text_label = self.badges[0].name_label
@@ -478,7 +489,23 @@ class _ProblemRow(QWidget):
             texts.addWidget(self.detail_label)
         evidence = set(problem.get("evidence") or ())
         self.advice_labels: list[CaptionLabel] = []
-        for advice in problem.get("advice") or ():
+        own_advice = [str(item) for item in problem.get("advice") or () if item not in hidden_advice]
+        if titled_site and own_advice:
+            # Одна линия: свидетельство проверки (или первый совет). Остальное — под мышью и в отчёте.
+            facts = [item for item in own_advice if item in evidence]
+            # Совет, в отличие от факта, помечен стрелкой.
+            shown = " ".join(facts) if facts else f"→ {own_advice[0]}"
+            summary = mute(_ElidedLabel(shown, self))
+            font = summary.font()
+            font.setPixelSize(13)
+            summary.setFont(font)
+            texts.addWidget(summary)
+            self.advice_labels.append(summary)
+            advices = [f"→ {item}" for item in own_advice if item not in evidence]
+            self.hint_text = "\n".join([*facts, *advices])
+            set_tooltip(self, self.hint_text + ("\nНажмите, чтобы открыть полный отчёт" if self.card_key else ""))
+            own_advice = []
+        for advice in own_advice:
             if advice in hidden_advice:
                 continue
             # Свидетельство — это факт, а не действие: стрелка только у советов.
@@ -487,13 +514,15 @@ class _ProblemRow(QWidget):
             advice_label.setWordWrap(True)
             texts.addWidget(advice_label)
             self.advice_labels.append(advice_label)
-        texts.addStretch(1)
+        if not titled_site or len(self.problems) > 1:
+            texts.addStretch(1)
         layout.addLayout(texts, 1)
 
         action = str(problem.get("action") or "")
         self.action_button = None
         if on_action is not None and action in _ACTION_TEXT:
-            button = PushButton(_ACTION_TEXT[action], self)
+            # В плотной строке сайта кнопка без рамки: девять рамок подряд спорили бы с текстом.
+            button = (TransparentPushButton if titled_site else PushButton)(_ACTION_TEXT[action], self)
             target = str(problem.get("target") or "")
             button.clicked.connect(lambda _checked=False, a=action, t=target: on_action(a, t))
             set_control_accessibility(
@@ -504,7 +533,7 @@ class _ProblemRow(QWidget):
                     f"{f' для {target}' if target and action == 'strategy' else ''}."
                 ),
             )
-            layout.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
+            layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter if titled_site else Qt.AlignmentFlag.AlignTop)
             self.action_button = button
         state = " ".join(str(item.get("text") or "") for item in self.problems)
         if self.card_key:
@@ -512,7 +541,7 @@ class _ProblemRow(QWidget):
             self.chevron = BrandIcon("fa5s.chevron-right", "", self, size=10)
             layout.addWidget(self.chevron, 0, Qt.AlignmentFlag.AlignVCenter)
             set_control_accessibility(self, name=state, description="Нажмите, чтобы открыть полный отчёт.")
-            if not titled_site:
+            if not self.advice_labels or not titled_site:
                 set_tooltip(self, "Открыть полный отчёт")
         set_state_text(self, state)
         self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
@@ -598,7 +627,8 @@ class _ProblemGroup(ToneGroup):
                 cluster[0],
                 on_action,
                 self,
-                grouped=not plain,
+                # Строки без вида блокировки оформлены так же: заголовок отдельно от пояснения.
+                grouped=True,
                 hidden_advice=hidden,
                 also=cluster[1:],
                 divided=not plain,
@@ -778,12 +808,20 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
             title = f"Найдены проблемы: {len(blocking)}"
             mood = MOOD_ALARM if level == "fail" else MOOD_SAD
         self._show_changes(report)
-        # Строка открывает полный отчёт, только если под итогом есть такая карточка.
-        known = {card.key for card in build_cards(report)} if self._on_open is not None else set()
+        # Строка открывает полный отчёт, только если под итогом есть такая карточка;
+        # с карточки сайта берётся и значок, когда своего логотипа у сайта нет.
+        cards = {card.key: card for card in build_cards(report)}
+        keys = [problem_card_key(item, report) for item in problems]
+        problems = [
+            {**item, "site_key": key.removeprefix("site:"), "card_icon": cards[key].icon}
+            if key.startswith("site:") and key in cards
+            else item
+            for item, key in zip(problems, keys)
+        ]
 
         def card_key_for(problem: dict) -> str:
             key = problem_card_key(problem, report)
-            return key if key in known else ""
+            return key if key in cards and self._on_open is not None else ""
 
         rows: list[QWidget] = [
             _ProblemGroup(

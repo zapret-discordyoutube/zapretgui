@@ -123,11 +123,13 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(ahead.level, ss.LEVEL_WARN)
         self.assertIn("спешат на 3 ч", ahead.text)
 
-        behind = _item(replace(HEALTHY, clock_skew_s=-20 * 60), "clock")
-        self.assertIn("отстают на 20 мин", behind.text)
+        behind = _item(replace(HEALTHY, clock_skew_s=-90 * 60), "clock")
+        self.assertIn("отстают на", behind.text)
+        self.assertIn("могут показывать", behind.text)
         self.assertIn("отстают на 5 дн", _item(replace(HEALTHY, clock_skew_s=-5 * 86400), "clock").text)
-        # Пара минут расхождения сертификаты не ломает.
-        self.assertEqual(_item(replace(HEALTHY, clock_skew_s=-120), "clock").level, ss.LEVEL_OK)
+        # Минуты расхождения сертификаты не ломают: предупреждать не о чем.
+        for seconds in (-120, 301, -20 * 60):
+            self.assertEqual(_item(replace(HEALTHY, clock_skew_s=seconds), "clock").level, ss.LEVEL_OK)
 
     def test_worst_level_puts_failure_first_and_note_below_unknown(self) -> None:
         def items(*levels):

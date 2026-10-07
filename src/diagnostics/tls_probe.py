@@ -53,6 +53,10 @@ KIND_CONNECT = "connect"
 KIND_CANCELLED = "cancelled"
 KIND_ERROR = "error"
 
+CONNECT_TIMEOUT = "timeout"
+CONNECT_REFUSED = "refused"
+CONNECT_ERROR = "error"
+
 STAGE_CONNECT = "connect"
 STAGE_TLS = "tls"
 STAGE_READ = "read"
@@ -89,6 +93,9 @@ class ProbeResult:
     elapsed_ms: float = 0.0
     detail: str = ""
     body: bytes = b""
+    # Почему не установилось соединение: "timeout" — ответа нет вовсе, "refused" —
+    # адрес сам отказал, "error" — ошибка системы (нет сети, запрет сетевого экрана).
+    connect_fail: str = ""
 
     @property
     def ok(self) -> bool:
@@ -243,10 +250,10 @@ def https_get(
         if status is not None:
             return _result(KIND_OK, body_cut=True)
         if stage == STAGE_CONNECT:
-            return _result(KIND_CONNECT, "сервер не отвечает на подключение")
+            return _result(KIND_CONNECT, "сервер не отвечает на подключение", connect_fail=CONNECT_TIMEOUT)
         return _result(KIND_TIMEOUT)
     except ConnectionRefusedError:
-        return _result(KIND_CONNECT, "подключение отклонено")
+        return _result(KIND_CONNECT, "подключение отклонено", connect_fail=CONNECT_REFUSED)
     except ssl.SSLError as error:
         if status is not None:
             return _result(KIND_OK, body_cut=True)
@@ -259,7 +266,7 @@ def https_get(
         if status is not None:
             return _result(KIND_OK, body_cut=True)
         if stage == STAGE_CONNECT:
-            return _result(KIND_CONNECT, str(error))
+            return _result(KIND_CONNECT, str(error), connect_fail=CONNECT_ERROR)
         return _result(KIND_RESET, str(error))
     finally:
         for item in (wrapped, sock):

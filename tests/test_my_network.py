@@ -66,7 +66,7 @@ class JudgeTests(unittest.TestCase):
     def test_public_local_address_that_differs_from_external_means_proxy_or_vpn(self) -> None:
         lines = self._lines(external_ip="203.0.113.7", owner=OWNER, local_ip="144.31.107.88")
 
-        self.assertIn("через прокси или VPN", lines["Адрес компьютера"].text)
+        self.assertIn("прокси, VPN или общий адрес провайдера", lines["Адрес компьютера"].text)
 
     def test_unknown_is_said_plainly(self) -> None:
         lines = self._lines()

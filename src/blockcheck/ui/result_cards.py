@@ -1178,6 +1178,8 @@ class ResultDetailView(QWidget):
         self._sections_layout.setContentsMargins(0, 0, 0, 0)
         self._sections_layout.setSpacing(8)
         self._layout.addWidget(self._sections_host)
+        # Отчёт короче окна: лишняя высота уходит вниз, а не растягивает шапку и строки.
+        self._layout.addStretch(1)
         self.blocks: list[_SectionBlock] = []
 
     def card(self) -> Card | None:

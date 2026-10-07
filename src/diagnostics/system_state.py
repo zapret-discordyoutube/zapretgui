@@ -45,7 +45,8 @@ LEVEL_UNKNOWN = "unknown"
 MIN_WINDOWS_BUILD = 17763
 LOW_DISK_MB = 200
 # Сертификаты сайтов перестают проходить проверку при заметном расхождении часов.
-CLOCK_SKEW_LIMIT_S = 300
+# Сертификаты и шифрованный DNS начинают ломаться при расхождении в часы, а не в минуты.
+CLOCK_SKEW_LIMIT_S = 3600
 
 _LEVEL_ORDER = {LEVEL_FAIL: 0, LEVEL_WARN: 1, LEVEL_UNKNOWN: 2, LEVEL_INFO: 3, LEVEL_OK: 4}
 
@@ -521,7 +522,7 @@ def judge(facts: SystemFacts) -> tuple[SystemItem, ...]:
             "clock",
             title,
             LEVEL_WARN,
-            f"{direction} на {_minutes(facts.clock_skew_s)} — из-за этого сайты показывают ошибки сертификатов",
+            f"{direction} на {_minutes(facts.clock_skew_s)} — при таком расхождении сайты могут показывать ошибки сертификатов",
             "Включите автоматическую установку времени: Параметры Windows → Время и язык → Дата и время.",
         )
     else:

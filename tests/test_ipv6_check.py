@@ -38,10 +38,18 @@ class JudgeTests(unittest.TestCase):
         self.assertIn("нормально", verdict.text)
 
     def test_route_present_but_nothing_answers_is_broken(self) -> None:
-        verdict = v6.judge(_facts(_fail(), _fail(KIND_CONNECT), has_route=True))
+        verdict = v6.judge(_facts(_fail(KIND_CONNECT), _fail(KIND_CONNECT), has_route=True))
 
         self.assertEqual(verdict.code, v6.IPV6_BROKEN)
         self.assertIn("настроен, но не работает", verdict.text)
+
+    def test_server_answering_with_an_error_means_the_road_exists(self) -> None:
+        """Сертификат, сброс или сбой шифрования — сервер ответил: «IPv6 не работает» было бы неправдой."""
+        for kind in ("cert", "reset", "tls", "timeout"):
+            with self.subTest(kind=kind):
+                verdict = v6.judge(_facts(_fail(kind), _fail(KIND_CONNECT), has_route=True))
+                self.assertEqual(verdict.code, v6.IPV6_UNKNOWN)
+                self.assertIn("похоже, работает", verdict.text)
 
     def test_unknown_when_there_is_not_enough_to_judge(self) -> None:
         unknown = (

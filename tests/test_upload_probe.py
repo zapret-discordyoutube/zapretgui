@@ -278,11 +278,47 @@ class FreezeCheckUploadTests(unittest.TestCase):
         down = FreezeServer("B", FreezeState.FREEZE, "обрыв", DIRECTION_DOWNLOAD)
         upload = FreezeServer("C", FreezeState.FREEZE, "замирает", DIRECTION_UPLOAD)
 
-        self.assertIn("обрывает загрузку с зарубежных серверов на 16–20 КБ (1 из 2)", summarize_freeze((ok, down), zapret_running=True).headline)
+        self.assertIn(
+            "Обрывается загрузка с зарубежных серверов на 16–20 КБ: 1 из 2",
+            summarize_freeze((ok, down), zapret_running=True).headline,
+        )
         only_upload = summarize_freeze((ok, ok, upload), zapret_running=True)
-        self.assertIn("обрывает отправку данных на зарубежные серверы (1 из 3)", only_upload.headline)
+        self.assertIn("Обрывается отправка данных на зарубежные серверы: 1 из 3", only_upload.headline)
         self.assertEqual(only_upload.level, Level.WARN)
-        self.assertIn("и отправку данных на них", summarize_freeze((down, upload), zapret_running=True).headline)
+        self.assertIn("и отправка данных на них", summarize_freeze((down, upload), zapret_running=True).headline)
+
+    def test_one_cut_among_many_is_a_single_case_not_a_verdict(self) -> None:
+        ok = FreezeServer("A", FreezeState.OK, "ок")
+        down = FreezeServer("B", FreezeState.FREEZE, "обрыв", DIRECTION_DOWNLOAD)
+        unknown = FreezeServer("U", FreezeState.UNKNOWN, "не ответил")
+
+        single = summarize_freeze((ok,) * 20 + (down,), zapret_running=True)
+        self.assertEqual(single.level, Level.OK)
+        self.assertIn("единичный случай", single.headline)
+        # Один обрыв, один «без обрыва» и толпа неизвестных — это не «провайдер обрывает».
+        thin = summarize_freeze((down, ok) + (unknown,) * 57, zapret_running=True)
+        self.assertEqual(thin.level, Level.WARN)
+        self.assertIn("1 из 2 проверенных", thin.headline)
+
+    def test_failure_needs_several_servers_and_a_real_share(self) -> None:
+        ok = FreezeServer("A", FreezeState.OK, "ок")
+        down = FreezeServer("B", FreezeState.FREEZE, "обрыв", DIRECTION_DOWNLOAD)
+
+        self.assertEqual(summarize_freeze((down,) * 2 + (ok,) * 2, zapret_running=True).level, Level.WARN)
+        self.assertEqual(summarize_freeze((down,) * 3 + (ok,) * 40, zapret_running=True).level, Level.WARN)
+        self.assertEqual(summarize_freeze((down,) * 20 + (ok,) * 30, zapret_running=True).level, Level.FAIL)
+        self.assertEqual(summarize_freeze((down,) * 3 + (ok,) * 3, zapret_running=True).level, Level.FAIL)
+
+    def test_dead_server_is_not_described_as_traffic_interception(self) -> None:
+        from diagnostics.freeze_check import classify_download
+        from diagnostics.tls_probe import ProbeResult
+
+        state, text = classify_download(ProbeResult(ip="1.2.3.4", kind="cert", cert_problem="просрочен"))
+
+        self.assertEqual(state, FreezeState.UNKNOWN)
+        self.assertNotIn("перехват", text)
+        self.assertNotIn("антивирус", text)
+        self.assertIn("мог переехать", text)
 
 
 if __name__ == "__main__":

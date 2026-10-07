@@ -24,7 +24,8 @@ def _ok(ip: str) -> ProbeResult:
 
 
 def _dead(ip: str) -> ProbeResult:
-    return ProbeResult(ip=ip, kind=KIND_CONNECT)
+    """Адрес молчит: на соединение нет никакого ответа."""
+    return ProbeResult(ip=ip, kind=KIND_CONNECT, connect_fail="timeout")
 
 
 class ReachRecheckTests(unittest.TestCase):
@@ -85,6 +86,8 @@ class ReachRecheckTests(unittest.TestCase):
         probe, asked = self._reach(_dead)
 
         self.assertEqual(set(asked), set(REAL))
+        # Три адреса разом и ещё одна попытка на первом после паузы.
+        self.assertEqual(len(asked), 4)
         self.assertEqual(probe.tried, tuple((ip, KIND_CONNECT) for ip in asked))
         self.assertTrue(probe.address_confirmed)
         self.assertEqual(probe.kind, bk.KIND_IP)
@@ -120,6 +123,29 @@ class ReachRecheckTests(unittest.TestCase):
         self.assertEqual(probe.reach_state, ReachState.OK)
         self.assertTrue(probe.hosts_stale)
 
+    def test_refused_or_system_error_is_not_an_address_ban(self) -> None:
+        """Адрес сам отказал или система не дала соединиться (нет сети, сетевой экран): фильтр так не закрывает."""
+        for fail in ("refused", "error"):
+            with self.subTest(fail=fail):
+                probe, _asked = self._reach(lambda ip, fail=fail: ProbeResult(ip=ip, kind=KIND_CONNECT, connect_fail=fail))
+                self.assertFalse(probe.address_confirmed)
+                self.assertEqual(probe.kind, bk.KIND_NO_CONNECT)
+
+    def test_all_addresses_get_one_more_try_after_a_pause(self) -> None:
+        """Адреса пробуются в одну секунду: секундный сбой сети задел бы все. Нужна попытка позже."""
+        calls = {"n": 0}
+
+        def answer(ip):
+            calls["n"] += 1
+            # Первый залп (три адреса) не проходит, попытка после паузы — проходит.
+            return _dead(ip) if calls["n"] <= 3 else _ok(ip)
+
+        probe, asked = self._reach(answer)
+
+        self.assertEqual(len(asked), 4)
+        self.assertEqual(asked[-1], asked[0])
+        self.assertEqual(probe.reach_state, ReachState.OK)
+
     def test_mixed_failures_are_not_called_an_address_ban(self) -> None:
         """Один адрес не соединился, другой соединился и замолчал: это уже не «молчат все адреса»."""
         probe, _asked = self._reach(
@@ -132,7 +158,7 @@ class ReachRecheckTests(unittest.TestCase):
         many = tuple(f"10.0.0.{n}" for n in range(1, 10))
         _probe, asked = self._reach(_dead, system=many, reference=many)
 
-        self.assertEqual(len(asked), engine.REACH_ADDRESSES)
+        self.assertEqual(len(set(asked)), engine.REACH_ADDRESSES)
 
     def test_other_networks_are_tried_before_neighbours(self) -> None:
         """У сайта пять адресов одной сети молчат, а адрес другой сети открывается."""

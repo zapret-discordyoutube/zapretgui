@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from diagnostics import block_cause as bc
+from diagnostics import block_kind as bk
 from diagnostics.tls_probe import (
     KIND_CONNECT,
     KIND_OK,
@@ -18,6 +19,7 @@ from diagnostics.tls_probe import (
     KIND_TIMEOUT,
     STAGE_CONNECT,
     STAGE_READ,
+    KIND_TLS,
     STAGE_TLS,
     ProbeResult,
 )
@@ -233,9 +235,43 @@ class JudgeTests(unittest.TestCase):
         self.assertIn("без имени", without)
 
     def test_no_name_works_means_address_itself_is_closed_but_not_for_sure(self) -> None:
-        cause = bc.judge(_facts(neutral=RESET, nameless=SILENCE))
+        # Тишина на любое имя — так молчит фильтр: осторожный вывод «похоже, адрес».
+        cause = bc.judge(_facts(neutral=SILENCE, nameless=SILENCE))
+        self.assertEqual((cause.code, cause.confident), (bc.CAUSE_BY_ADDRESS, False))
+
+        # Сброс — так отвечает и сам сервер, не принимающий чужие имена: по пробам не отличить.
+        mixed = bc.judge(_facts(neutral=RESET, nameless=SILENCE))
+        self.assertEqual((mixed.code, mixed.confident), (bc.CAUSE_NO_NAME_WORKS, False))
+        self.assertEqual(bk.site_kind("dpi", mixed.code), bk.KIND_UNCLEAR)
+
+    def test_only_allowed_name_passing_is_a_name_whitelist_not_a_closed_address(self) -> None:
+        """Постороннее имя не прошло, а разрешённое прошло: адрес открыт, пускают по списку имён."""
+        cause = bc.judge(_facts(neutral=RESET, nameless=SILENCE, allowed=ANSWER))
+
+        self.assertEqual((cause.code, cause.confident), (bc.CAUSE_NAME_WHITELIST, True))
+        self.assertIn(bc.ALLOWED_NAME, cause.text)
+        self.assertEqual(bk.site_kind("dpi", cause.code), bk.KIND_SNI)
+
+    def test_even_allowed_name_failing_keeps_the_careful_address_verdict(self) -> None:
+        cause = bc.judge(_facts(neutral=SILENCE, nameless=SILENCE, allowed=SILENCE))
 
         self.assertEqual((cause.code, cause.confident), (bc.CAUSE_BY_ADDRESS, False))
+        self.assertIn("даже с разрешённым", cause.text)
+        self.assertIn("похоже", cause.text)
+        self.assertEqual(bc.judge(_facts(neutral=SILENCE, nameless=SILENCE, allowed=RESET)).code, bc.CAUSE_NO_NAME_WORKS)
+
+    def test_server_that_refuses_every_name_itself_is_not_blocked_by_name(self) -> None:
+        """Сайт сам отказал на настоящее имя — его отказ на постороннее ничего не доказывает."""
+        refused = _broken(KIND_TLS, STAGE_TLS)
+
+        self.assertIsNone(bc.judge(_facts(refused, neutral=REFUSAL, nameless=REFUSAL)))
+        # А полноценное шифрование с другим именем — по-прежнему доказательство.
+        self.assertEqual(bc.judge(_facts(refused, neutral=ANSWER, nameless=REFUSAL)).code, bc.CAUSE_BY_NAME)
+
+    def test_other_name_answering_wins_over_the_allowed_name(self) -> None:
+        cause = bc.judge(_facts(neutral=ANSWER, nameless=RESET, allowed=ANSWER))
+
+        self.assertEqual(cause.code, bc.CAUSE_BY_NAME)
 
     def test_no_conclusion_from_unclear_or_missing_probes(self) -> None:
         unclear = (
@@ -307,7 +343,13 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(
             sorted(calls, key=repr),
             sorted(
-                [("hello", "203.0.113.5", bc.NEUTRAL_NAME), ("hello", "203.0.113.5", None), ("http", "discord.com", "203.0.113.5")],
+                [
+                    ("hello", "203.0.113.5", bc.NEUTRAL_NAME),
+                    ("hello", "203.0.113.5", None),
+                    # Разрешённое имя — контроль от ложного «закрыт адрес» в сетях с белым списком имён.
+                    ("hello", "203.0.113.5", bc.ALLOWED_NAME),
+                    ("http", "discord.com", "203.0.113.5"),
+                ],
                 key=repr,
             ),
         )

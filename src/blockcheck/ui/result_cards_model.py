@@ -151,6 +151,7 @@ _PROTOCOL_STATES = {"ok": OK, "fail": FAIL, "info": INFO, "unknown": UNKNOWN}
 _SITE_STATUS = {OK: "Открывается", WARN: "Есть проблемы", FAIL: "Не открывается", UNKNOWN: "Не удалось проверить"}
 _CAUSE_WORDS = {
     "by_name": "блокировка по имени",
+    "name_whitelist": "проходят только разрешённые имена",
     "by_address": "закрыт адрес",
     "stub_page": "страница провайдера",
     "address_closed": "адрес закрыт",

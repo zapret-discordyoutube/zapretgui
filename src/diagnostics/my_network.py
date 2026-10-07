@@ -143,7 +143,7 @@ def judge(facts: NetworkFacts, *, bypass_tools=()) -> tuple[NetworkLine, ...]:
             NetworkLine(
                 "info",
                 "Адрес компьютера",
-                f"{facts.local_ip} — а снаружи виден другой адрес: трафик идёт через прокси или VPN",
+                f"{facts.local_ip} — а снаружи виден другой адрес: между ними прокси, VPN или общий адрес провайдера",
             )
         )
     elif facts.local_ip:

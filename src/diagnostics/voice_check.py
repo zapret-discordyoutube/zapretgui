@@ -101,16 +101,16 @@ def summarize_voice(servers: tuple[VoiceServer, ...]) -> VoiceReport:
     if not general_ok:
         return VoiceReport(
             Level.FAIL,
-            "Голосовые звонки могут не работать: UDP до голосовых серверов не проходит",
+            "Голосовые звонки могут не работать: проверочные серверы (STUN) не отвечают по UDP",
             servers,
             strategy_advice,
         )
     if not telegram_ok:
         return VoiceReport(
             Level.WARN,
-            "Звонки в Telegram могут не работать: его голосовые серверы не отвечают по UDP",
+            "Звонки в Telegram могут не работать: его проверочные серверы (STUN) не отвечают по UDP",
             servers,
             strategy_advice,
         )
     answered = sum(1 for item in servers if item.answered)
-    return VoiceReport(Level.OK, f"Голосовые звонки: UDP проходит (ответили {answered} из {len(servers)} серверов)", servers)
+    return VoiceReport(Level.OK, f"Голосовые звонки: проверочные серверы отвечают по UDP ({answered} из {len(servers)})", servers)

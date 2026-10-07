@@ -68,6 +68,8 @@ __all__ = [
 
 # Постороннее имя: существует, ни в одном списке блокировок его нет.
 NEUTRAL_NAME = "example.com"
+# Имя, которое провайдеры пропускают всегда: оно есть в «белых списках».
+ALLOWED_NAME = "vk.com"
 
 HELLO_OK = "ok"  # шифрование установилось
 HELLO_ALERT = "alert"  # сервер отказал сам — но ответил
@@ -79,7 +81,11 @@ HELLO_CANCELLED = "cancelled"
 
 CAUSE_STUB_PAGE = "stub_page"
 CAUSE_BY_NAME = "by_name"
+# К адресу пускают только имена из разрешённого списка.
+CAUSE_NAME_WHITELIST = "name_whitelist"
 CAUSE_BY_ADDRESS = "by_address"
+# Ни одно имя не прошло, но часть проб сброшена: адрес это или сам сервер — не ясно.
+CAUSE_NO_NAME_WORKS = "no_name_works"
 CAUSE_ADDRESS_CLOSED = "address_closed"
 CAUSE_ADDRESS_SILENT = "address_silent"
 
@@ -137,6 +143,8 @@ class CauseFacts:
     result: ProbeResult
     neutral: HelloResult | None = None
     nameless: HelloResult | None = None
+    # То же, но с именем, которое провайдеры заведомо пропускают (``ALLOWED_NAME``).
+    allowed: HelloResult | None = None
     http: HttpFacts | None = None
     # None — пинг не делали или он недоступен в системе.
     ping_ok: bool | None = None
@@ -343,7 +351,15 @@ def collect(
         )
     neutral = submit(tls_hello, ip, NEUTRAL_NAME, cancel=cancel)
     nameless = submit(tls_hello, ip, None, cancel=cancel)
-    return CauseFacts(host=host, result=result, neutral=neutral.result(), nameless=nameless.result(), http=http.result())
+    allowed = submit(tls_hello, ip, ALLOWED_NAME, cancel=cancel)
+    return CauseFacts(
+        host=host,
+        result=result,
+        neutral=neutral.result(),
+        nameless=nameless.result(),
+        allowed=allowed.result(),
+        http=http.result(),
+    )
 
 
 def _how(result: ProbeResult) -> str:
@@ -377,18 +393,44 @@ def judge(facts: CauseFacts) -> Cause | None:
     hellos = [item for item in (facts.neutral, facts.nameless) if item is not None and item.kind != HELLO_CANCELLED]
     if not hellos:
         return None
-    if any(item.answered for item in hellos):
-        other = "с посторонним именем" if facts.neutral is not None and facts.neutral.answered else "без имени"
+    # Сервер сам отказал на настоящее имя — тогда его отказ на постороннее ничего не
+    # доказывает: он просто так отвечает. Сравнение честно, только когда с
+    # настоящим именем соединение рвётся или молчит, а с другим — есть ответ.
+    refused_by_server = result.kind == KIND_TLS
+    passed = [item for item in hellos if item.kind == HELLO_OK or (item.answered and not refused_by_server)]
+    if passed:
+        neutral_passed = facts.neutral is not None and facts.neutral in passed
+        other = "с посторонним именем" if neutral_passed else "без имени"
         return Cause(
             CAUSE_BY_NAME,
             f"блокировка по имени сайта: с именем {facts.host} соединение {_how(result)}, "
             f"а {other} тот же сервер отвечает",
             confident=True,
         )
-    if all(item.kind in (HELLO_RESET, HELLO_TIMEOUT) for item in hellos):
+    allowed = facts.allowed
+    if allowed is not None and allowed.answered:
+        # Постороннее имя не прошло, а разрешённое прошло: к этому адресу пускают только
+        # имена из списка. Это тоже блокировка по имени, а не закрытый адрес.
+        return Cause(
+            CAUSE_NAME_WHITELIST,
+            f"к этому адресу проходят только разрешённые имена: с именем {ALLOWED_NAME} сервер отвечает, "
+            f"а с именем {facts.host} и с посторонним — нет",
+            confident=True,
+        )
+    probes = [*hellos, *([allowed] if allowed is not None and allowed.kind != HELLO_CANCELLED else [])]
+    checked = "ни с каким именем, даже с разрешённым" if allowed is not None and not allowed.answered else "ни с каким именем"
+    if all(item.kind == HELLO_TIMEOUT for item in probes):
+        # Тишина на любое имя — так молчит фильтр. Сервер, который сам не принимает
+        # чужие имена, отвечает отказом или сбросом, а не молчанием.
         return Cause(
             CAUSE_BY_ADDRESS,
-            "шифрование не устанавливается ни с каким именем — закрыт сам адрес или вся его сеть, "
-            "а не имя сайта",
+            f"шифрование не устанавливается {checked}, ответа нет вовсе — похоже, закрыт сам адрес "
+            "или вся его сеть, а не имя сайта",
+        )
+    if all(item.kind in (HELLO_RESET, HELLO_TIMEOUT) for item in probes):
+        return Cause(
+            CAUSE_NO_NAME_WORKS,
+            f"шифрование не устанавливается {checked}: закрыт адрес или сервер сам сбрасывает "
+            "соединения с чужими именами — по этим пробам не отличить",
         )
     return None
