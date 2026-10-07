@@ -1,7 +1,10 @@
 """Панель итога для вкладки «DNS-серверы».
 
 Как на соседних вкладках BlockCheck: медоед-талисман, одна главная фраза,
-пояснение простыми словами и находки строками — заголовок и подробности под ним.
+пояснение простыми словами и сразу под ним кнопки — они на виду, сколько бы
+находок ни набралось. Находки собраны в цветные группы по важности (та же
+``ui.widgets.tone_group``, что у проблем BlockCheck): что мешает, что
+работает не полностью, что советуем и что просто к сведению.
 Пока идёт проверка, здесь же полоса хода, счётчики и бегущие фразы.
 """
 
@@ -15,13 +18,14 @@ from qfluentwidgets import BodyLabel, CaptionLabel, ProgressBar, PushButton, Sim
 
 import dns.server_check_verdict as verdicts
 from blockcheck.ui.check_results import _HeightKeeper, tone_color
-from dns.server_check import LEVEL_FAIL, LEVEL_OK, LEVEL_WARN
+from dns.server_check import LEVEL_FAIL, LEVEL_INFO, LEVEL_OK, LEVEL_WARN
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.fun import CounterBadge, FunTicker, Mascot, burst_confetti
 from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 from ui.widgets.stagger_float_in import float_in
+from ui.widgets.tone_group import ToneGroup
 
 _LEVEL_ICONS = {
     LEVEL_FAIL: ("fa5s.times-circle", "error"),
@@ -42,6 +46,37 @@ _KIND_VIEW = {
     verdicts.KIND_EMPTY: ("fa5s.question-circle", "muted", MOOD_IDLE),
 }
 _FINDING_STEP_MS = 90
+# Группы находок сверху вниз: важность → (название, тон цвета).
+_FINDING_GROUPS = (
+    (LEVEL_FAIL, "Мешает работе", "error"),
+    (LEVEL_WARN, "Работает не полностью", "warning"),
+    (LEVEL_OK, "Что советуем", "success"),
+    (LEVEL_INFO, "К сведению", "muted"),
+)
+
+
+def _group_color(tone: str, tokens=None) -> str:
+    color = tone_color(tone, tokens)
+    if color:
+        return color
+    try:
+        from ui.theme import get_theme_tokens
+
+        return "#5f6470" if (tokens or get_theme_tokens()).is_light else "#a3a8b3"
+    except Exception:
+        return "#a3a8b3"
+
+
+def group_findings(items) -> list[tuple[str, str, str, list]]:
+    """Находки по важности: (важность, название группы, тон, находки). Пустых групп нет."""
+    known = {level for level, _title, _tone in _FINDING_GROUPS}
+    groups = []
+    for level, title, tone in _FINDING_GROUPS:
+        # Находка с незнакомой важностью не теряется — уходит «к сведению».
+        found = [item for item in items if item.level == level or (level == LEVEL_INFO and item.level not in known)]
+        if found:
+            groups.append((level, title, tone, found))
+    return groups
 
 
 class _FindingRow(QWidget):
@@ -125,6 +160,12 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
             counters.addWidget(badge)
         counters.addStretch(1)
         titles.addLayout(counters)
+        # Кнопки страницы («Проверить», «Остановить», «Отчёт») — сразу под главной
+        # фразой: под длинным списком находок их приходилось искать прокруткой.
+        self.actions = QHBoxLayout()
+        self.actions.setContentsMargins(0, 6, 0, 0)
+        self.actions.setSpacing(10)
+        titles.addLayout(self.actions)
         header.addLayout(titles, 1)
         root.addLayout(header)
 
@@ -134,16 +175,11 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
 
         self._findings_host = QWidget(self)
         self._findings_layout = QVBoxLayout(self._findings_host)
-        self._findings_layout.setContentsMargins(70, 2, 0, 0)
+        self._findings_layout.setContentsMargins(0, 4, 0, 0)
         self._findings_layout.setSpacing(8)
         self._findings_host.setVisible(False)
         root.addWidget(self._findings_host)
 
-        # Кнопки страницы («Проверить», «Остановить», «Отчёт») живут здесь же.
-        self.actions = QHBoxLayout()
-        self.actions.setContentsMargins(70, 2, 0, 0)
-        self.actions.setSpacing(10)
-        root.addLayout(self.actions)
         self.open_settings_btn = None
         if on_open_dns_settings is not None:
             button = PushButton("Открыть «Настройка DNS»", self)
@@ -163,12 +199,16 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
     def kind(self) -> str:
         return self._kind
 
-    def finding_rows(self) -> list[_FindingRow]:
+    def finding_groups(self) -> list[ToneGroup]:
         return [
-            self._findings_layout.itemAt(index).widget()
+            widget
             for index in range(self._findings_layout.count())
-            if isinstance(self._findings_layout.itemAt(index).widget(), _FindingRow)
+            if isinstance(widget := self._findings_layout.itemAt(index).widget(), ToneGroup)
         ]
+
+    def finding_rows(self) -> list[_FindingRow]:
+        """Все находки подряд — в том порядке, в каком они стоят на экране."""
+        return [row for group in self.finding_groups() for row in group.findChildren(_FindingRow)]
 
     def add_actions(self, *buttons) -> None:
         """Кнопки страницы в один ряд; кнопка «Настройка DNS» встаёт после них."""
@@ -185,10 +225,10 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
     # --- состояния ------------------------------------------------------------
 
     def _clear_findings(self) -> None:
-        for row in self.finding_rows():
-            self._findings_layout.removeWidget(row)
-            row.hide()
-            row.deleteLater()
+        for group in self.finding_groups():
+            self._findings_layout.removeWidget(group)
+            group.hide()
+            group.deleteLater()
         self._findings_host.setVisible(False)
 
     def _set(self, kind: str, title: str, detail: str) -> None:
@@ -246,9 +286,15 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
 
     def show_verdict(self, verdict: verdicts.Verdict, *, celebrate: bool = True) -> None:
         self._clear_findings()
-        rows = [_FindingRow(item, self._findings_host) for item in verdict.items]
-        for row in rows:
-            self._findings_layout.addWidget(row)
+        rows: list[ToneGroup] = []
+        for _level, title, tone, items in group_findings(verdict.items):
+            group = ToneGroup(
+                title, lambda tokens, tone=tone: _group_color(tone, tokens), self._findings_host, count=len(items)
+            )
+            for item in items:
+                group.add_widget(_FindingRow(item, group))
+            self._findings_layout.addWidget(group)
+            rows.append(group)
         self._findings_host.setVisible(bool(rows))
         if self.open_settings_btn is not None:
             self.open_settings_btn.setVisible(verdict.suggests_encrypted_dns)
@@ -257,7 +303,7 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
         self._set(verdict.kind, verdict.title, verdict.detail)
         if not celebrate:
             return
-        # Находки выплывают по очереди, а если всё хорошо — салют.
+        # Группы находок выплывают по очереди, а если всё хорошо — салют.
         for order, row in enumerate(rows):
             float_in(row, delay_ms=120 + order * _FINDING_STEP_MS)
         if verdict.kind == verdicts.KIND_OK:
@@ -273,4 +319,4 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
             pass
 
 
-__all__ = ["ServerCheckVerdictPanel"]
+__all__ = ["ServerCheckVerdictPanel", "group_findings"]

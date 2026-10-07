@@ -17,11 +17,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QHBoxLayout, QHeaderView, QLabel, QSizePolicy, QTableWidgetItem, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SimpleCardWidget, StrongBodyLabel, TableWidget
 
-from blockcheck.ui.block_kinds_view import KindPill, KindsOverview, kind_color, site_groups
+from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_groups
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.theme import get_cached_qta_pixmap
@@ -30,6 +30,7 @@ from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips, set_flu
 from ui.widgets.fun import FunTicker, Mascot, burst_confetti
 from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 from ui.widgets.stagger_float_in import float_in
+from ui.widgets.tone_group import ToneGroup
 
 ActionHandler = Callable[[str, str], None]
 
@@ -227,77 +228,33 @@ class _ProblemRow(QWidget):
             pass
 
 
-class _ProblemGroup(QWidget):
+class _ProblemGroup(ToneGroup):
     """Проблемы одного вида блокировки: цветная метка, пояснение, общий совет и строки."""
 
     def __init__(self, kind: str, problems: list[dict], on_action: ActionHandler | None, parent=None) -> None:
-        super().__init__(parent)
-        self._kind = kind
+        info = kind_info(kind)
         # «Остальное» — не вид блокировки: строки идут как раньше, без заголовка и подложки.
-        self._plain = kind == KIND_OTHER
-        self._color = QColor()
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0) if self._plain else layout.setContentsMargins(16, 10, 12, 10)
-        layout.setSpacing(6)
-
-        self.pill: KindPill | None = None
-        self.about_label: CaptionLabel | None = None
-        self.shared_labels: list[CaptionLabel] = []
-        hidden: tuple[str, ...] = ()
-        if not self._plain:
-            info = kind_info(kind)
-            header = QHBoxLayout()
-            header.setSpacing(8)
-            self.pill = KindPill(kind, self)
-            header.addWidget(self.pill, 0, Qt.AlignmentFlag.AlignVCenter)
-            if len(problems) > 1:
-                header.addWidget(CaptionLabel(f"· {len(problems)}", self), 0, Qt.AlignmentFlag.AlignVCenter)
-            header.addStretch(1)
-            layout.addLayout(header)
-            if info.about:
-                self.about_label = CaptionLabel(info.about, self)
-                self.about_label.setWordWrap(True)
-                layout.addWidget(self.about_label)
-            hidden = tuple(shared_advice(problems))
-            for advice in hidden:
-                label = CaptionLabel(f"→ {advice}", self)
-                label.setWordWrap(True)
-                layout.addWidget(label)
-                self.shared_labels.append(label)
-
+        plain = kind == KIND_OTHER
+        super().__init__(
+            info.title,
+            lambda tokens: kind_color(kind, tokens),
+            parent,
+            count=len(problems),
+            about=info.about,
+            plain=plain,
+        )
+        self._kind = kind
+        hidden = () if plain else tuple(shared_advice(problems))
+        self.shared_labels = [self.add_note(f"→ {advice}") for advice in hidden]
         self.rows = [
-            _ProblemRow(problem, on_action, self, grouped=not self._plain, hidden_advice=hidden)
-            for problem in problems
+            _ProblemRow(problem, on_action, self, grouped=not plain, hidden_advice=hidden) for problem in problems
         ]
         for row in self.rows:
-            layout.addWidget(row)
-        set_state_text(self, f"{kind_info(kind).title}, проблем: {len(problems)}")
-        self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
-        self._apply_theme_refresh()
+            self.add_widget(row)
+        set_state_text(self, f"{info.title}, проблем: {len(problems)}")
 
     def kind(self) -> str:
         return self._kind
-
-    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
-        _ = force
-        self._color = QColor(kind_color(self._kind, tokens))
-        self.update()
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        _ = event
-        if self._plain:
-            return
-        # Мягкая подложка в цвете вида и полоска-метка слева: рамок в окне без рамки нет.
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        fill = QColor(self._color)
-        fill.setAlphaF(0.07)
-        painter.setBrush(fill)
-        painter.drawRoundedRect(self.rect(), 8, 8)
-        painter.setBrush(self._color)
-        painter.drawRoundedRect(0, 10, 3, max(0, self.height() - 20), 1.5, 1.5)
-        painter.end()
 
 
 class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):

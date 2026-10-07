@@ -5,7 +5,11 @@
 и точки по способам связи. Адреса с временем ответа раскрываются по нажатию.
 
 Карточки рисует делегат списка, а не отдельные виджеты: Qt рисует только то,
-что видно в окошке списка, и сотня адресов ничего не стоит.
+что попало в видимую часть страницы, и сотня адресов ничего не стоит.
+
+Своей прокрутки у списка нет: он вытянут на всю высоту содержимого, а
+прокручивает его страница (иначе получалась полоса прокрутки внутри полосы
+прокрутки). На широком окне карточки идут в несколько колонок.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from ui.theme import get_theme_tokens, to_qcolor
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.theme_semantic import get_semantic_palette
 from ui.widgets.fluent_item_tooltip import FLUENT_ITEM_TOOLTIP_ROLE, install_fluent_item_tooltips
+from ui.widgets.share_bar import ShareBar
 
 CARD_ROLE = Qt.ItemDataRole.UserRole + 1
 EXPANDED_ROLE = Qt.ItemDataRole.UserRole + 2
@@ -30,7 +35,10 @@ FILTER_ALL = "all"
 _CARD_HEIGHT = 86
 _ADDRESS_HEIGHT = 24
 _EXPANDED_PADDING = 10
-_LIST_MAX_HEIGHT = 560
+# Карточка уже этого плохо читается: раскрытая таблица адресов перестаёт помещаться.
+_COLUMN_MIN_WIDTH = 620
+_COLUMN_GAP = 8
+_MAX_COLUMNS = 3
 _SIDE = 18
 _DOT = 8
 _ADDRESS_WIDTH = 250
@@ -76,22 +84,12 @@ def _cell_color(level: str) -> QColor:
     return _text_color(110)
 
 
-class SeverityBar(QWidget):
+class SeverityBar(ShareBar):
     """Одна полоса из цветных долей: сколько серверов работает, скольким мешают, сколько молчит."""
 
     def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(10)
+        super().__init__(status_color, parent)
         self._counts: dict[str, int] = {}
-        self._t = 1.0
-        self._anim = QVariantAnimation(self)
-        self._anim.setStartValue(0.0)
-        self._anim.setEndValue(1.0)
-        self._anim.setDuration(600)
-        self._anim.valueChanged.connect(self._on_value)
-        self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
 
     def counts(self) -> dict[str, int]:
         return dict(self._counts)
@@ -102,41 +100,7 @@ class SeverityBar(QWidget):
             f"{plans.CARD_GROUPS[status].lower()} {count}" for status, count in self._counts.items() if count
         )
         set_state_text(self, f"Серверы: {words or 'нет данных'}")
-        if animate and are_live_animations_enabled() and self.isVisible():
-            self._anim.stop()
-            self._anim.start()
-        else:
-            self._t = 1.0
-            self.update()
-
-    def _on_value(self, value) -> None:
-        # Та же плавность, что у выплывания карточек: быстро в начале, мягко в конце.
-        self._t = 1.0 - (1.0 - float(value)) ** 3
-        self.update()
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        _ = event
-        total = sum(self._counts.values())
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        rect = QRectF(self.rect()).adjusted(0, 1, 0, -1)
-        radius = rect.height() / 2
-        painter.setBrush(_text_color(22))
-        painter.drawRoundedRect(rect, radius, radius)
-        if total:
-            painter.setClipRect(QRectF(rect.left(), rect.top(), rect.width() * self._t, rect.height()))
-            x = rect.left()
-            for status in _BAR_ORDER:
-                count = self._counts.get(status, 0)
-                if not count:
-                    continue
-                width = rect.width() * count / total
-                painter.setBrush(status_color(status))
-                # Зазор в две точки отделяет доли друг от друга.
-                painter.drawRoundedRect(QRectF(x, rect.top(), max(2.0, width - 2), rect.height()), radius, radius)
-                x += width
-        painter.end()
+        self.set_segments(self._counts.items(), animate=animate and self.isVisible())
 
 
 class StatusChip(QAbstractButton):
@@ -280,12 +244,19 @@ class _CardDelegate(QStyledItemDelegate):
         super().__init__(view)
         self._view = view
 
+    # Список qfluentwidgets сообщает своему делегату о наведении, нажатии и
+    # выделении. Без этих методов программа падала при движении мыши над списком.
+    def setHoverRow(self, row: int) -> None:  # noqa: N802
+        self._view.set_hovered_row(row)
+
+    def setPressedRow(self, row: int) -> None:  # noqa: N802
+        _ = row
+
+    def setSelectedRows(self, indexes) -> None:  # noqa: N802
+        _ = indexes
+
     def sizeHint(self, option, index) -> QSize:  # noqa: N802
-        card = index.data(CARD_ROLE)
-        height = _CARD_HEIGHT
-        if card is not None and index.data(EXPANDED_ROLE):
-            height += _EXPANDED_PADDING + _ADDRESS_HEIGHT * len(card.addresses)
-        return QSize(option.rect.width(), height)
+        return QSize(self._view.column_width(), self._view.card_height(index))
 
     def paint(self, painter: QPainter, option, index) -> None:
         card = index.data(CARD_ROLE)
@@ -299,7 +270,9 @@ class _CardDelegate(QStyledItemDelegate):
         if reveal < 1.0:
             painter.setOpacity(reveal)
             painter.translate(0.0, (1.0 - reveal) * _REVEAL_RISE)
-        box = QRectF(option.rect).adjusted(0, 3, -8, -3)
+        # Зазор между колонками; у последней колонки его нет — край ровно по полосе сверху.
+        gap = 0 if self._view.is_last_column(index.row()) else _COLUMN_GAP
+        box = QRectF(option.rect).adjusted(0, 3, -gap, -3)
         accent = status_color(card.status)
 
         painter.setPen(Qt.PenStyle.NoPen)
@@ -409,26 +382,35 @@ class _CardDelegate(QStyledItemDelegate):
         top = box.top() + _CARD_HEIGHT - 4
         painter.setPen(QPen(_text_color(26), 1))
         painter.drawLine(QPointF(left, top), QPointF(box.right() - _SIDE, top))
+        # В узкой колонке таблица адресов сжимается, а не вылезает за карточку.
+        available = box.width() - 2 * _SIDE
+        address_width = int(min(_ADDRESS_WIDTH, available * 0.3))
+        cell_width = int(min(_CELL_WIDTH, (available - address_width) / len(_ADDRESS_LABELS)))
         for order, row in enumerate(card.addresses):
             y = top + _EXPANDED_PADDING / 2 + order * _ADDRESS_HEIGHT
             painter.setPen(_text_color(230))
             painter.drawText(
-                QRectF(left, y, _ADDRESS_WIDTH - 12, _ADDRESS_HEIGHT),
+                QRectF(left, y, address_width - 12, _ADDRESS_HEIGHT),
                 Qt.AlignmentFlag.AlignVCenter,
-                metrics.elidedText(row.address, Qt.TextElideMode.ElideMiddle, _ADDRESS_WIDTH - 12),
+                metrics.elidedText(row.address, Qt.TextElideMode.ElideMiddle, address_width - 12),
             )
-            x = left + _ADDRESS_WIDTH
+            x = left + address_width
             for label, text, level in zip(_ADDRESS_LABELS, row.cells, row.cell_levels):
                 painter.setPen(_text_color(120))
-                painter.drawText(QRectF(x, y, _CELL_WIDTH, _ADDRESS_HEIGHT), Qt.AlignmentFlag.AlignVCenter, label)
+                painter.drawText(QRectF(x, y, cell_width, _ADDRESS_HEIGHT), Qt.AlignmentFlag.AlignVCenter, label)
                 painter.setPen(_cell_color(level) if level != plans.CELL_MUTED else _text_color(150))
                 offset = metrics.horizontalAdvance(label) + 6
-                painter.drawText(QRectF(x + offset, y, _CELL_WIDTH - offset - 6, _ADDRESS_HEIGHT), Qt.AlignmentFlag.AlignVCenter, text)
-                x += _CELL_WIDTH
+                value_width = cell_width - offset - 6
+                painter.drawText(
+                    QRectF(x + offset, y, value_width, _ADDRESS_HEIGHT),
+                    Qt.AlignmentFlag.AlignVCenter,
+                    metrics.elidedText(text, Qt.TextElideMode.ElideRight, int(value_width)),
+                )
+                x += cell_width
 
 
 class ServerCardsView(ListView):
-    """Список карточек серверов с прокруткой внутри."""
+    """Карточки серверов: во всю высоту содержимого, на широком окне — в несколько колонок."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -443,6 +425,14 @@ class ServerCardsView(ListView):
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Своей прокрутки нет: список вытянут по содержимому, прокручивает страница.
+        self.scrollDelegate.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Карточки идут слева направо и переносятся на новую строку: так получаются колонки.
+        self.setFlow(ListView.Flow.LeftToRight)
+        self.setWrapping(True)
+        self.setResizeMode(ListView.ResizeMode.Adjust)
+        self.setSpacing(0)
+        self._laid_out_width = -1
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMouseTracking(True)
         self.viewport().installEventFilter(self)
@@ -501,20 +491,48 @@ class ServerCardsView(ListView):
     def is_expanded(self, row: int) -> bool:
         return bool(self._model.index(row).data(EXPANDED_ROLE))
 
+    # --- колонки и высота -----------------------------------------------------
+
+    def _inner_width(self) -> int:
+        # Именно окошко списка: оформление библиотеки оставляет поля по бокам,
+        # и по ширине самого виджета последняя колонка не поместилась бы.
+        return max(1, self.viewport().width())
+
+    def columns(self) -> int:
+        """Сколько колонок помещается: каждая не уже ``_COLUMN_MIN_WIDTH``."""
+        fit = (self._inner_width() + _COLUMN_GAP) // (_COLUMN_MIN_WIDTH + _COLUMN_GAP)
+        return max(1, min(_MAX_COLUMNS, fit))
+
+    def column_width(self) -> int:
+        # На точку уже окошка: Qt переносит карточку на новую строку, если ряд
+        # занял окошко ровно до края.
+        return max(1, (self._inner_width() - 1) // self.columns())
+
+    def is_last_column(self, row: int) -> bool:
+        return row % self.columns() == self.columns() - 1
+
+    def card_height(self, index) -> int:
+        card = index.data(CARD_ROLE)
+        if card is not None and index.data(EXPANDED_ROLE):
+            return _CARD_HEIGHT + _EXPANDED_PADDING + _ADDRESS_HEIGHT * len(card.addresses)
+        return _CARD_HEIGHT
+
     def _fit_height(self) -> None:
-        """Высота по содержимому, но не больше окошка: остальное прокручивается и не рисуется."""
-        height = 2 * self.frameWidth()
-        for row in range(self._model.rowCount()):
-            index = self._model.index(row)
-            card_height = _CARD_HEIGHT
-            if index.data(EXPANDED_ROLE):
-                card_height += _EXPANDED_PADDING + _ADDRESS_HEIGHT * len(index.data(CARD_ROLE).addresses)
-            height += card_height
-            if height >= _LIST_MAX_HEIGHT:
-                height = _LIST_MAX_HEIGHT
-                break
-        if height != self.maximumHeight():
+        """Высота ровно по содержимому: строка карточек высотой с самую высокую в ней."""
+        columns = self.columns()
+        heights = [self.card_height(self._model.index(row)) for row in range(self._model.rowCount())]
+        height = 2 * self.frameWidth() + sum(
+            max(heights[start : start + columns]) for start in range(0, len(heights), columns)
+        )
+        if height != self.maximumHeight() or height != self.minimumHeight():
             self.setFixedHeight(height)
+
+    def _relayout_for_width(self) -> None:
+        if self._inner_width() != self._laid_out_width:
+            # Ширина колонки зависит от ширины списка: размеры карточек надо пересчитать.
+            self._laid_out_width = self._inner_width()
+            self.scheduleDelayedItemsLayout()
+            self._fit_height()
 
     # --- появление ------------------------------------------------------------
 
@@ -543,6 +561,9 @@ class ServerCardsView(ListView):
     def hovered_row(self) -> int:
         return self._hovered
 
+    def set_hovered_row(self, row: int) -> None:
+        self._set_hovered(row)
+
     def _set_hovered(self, row: int) -> None:
         if row == self._hovered:
             return
@@ -553,7 +574,9 @@ class ServerCardsView(ListView):
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         if obj is self.viewport():
-            if event.type() == QEvent.Type.MouseMove:
+            if event.type() == QEvent.Type.Resize:
+                self._relayout_for_width()
+            elif event.type() == QEvent.Type.MouseMove:
                 self._set_hovered(self.indexAt(event.position().toPoint()).row())
             elif event.type() in (QEvent.Type.Leave, QEvent.Type.Hide):
                 self._set_hovered(-1)

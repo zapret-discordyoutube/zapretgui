@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QRect, QSize
+from PyQt6.QtCore import QEvent, QRect, QSize, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QApplication, QStyleOptionViewItem
 
@@ -13,7 +13,14 @@ from blockcheck.ui.page import BlockcheckPage
 from dns import server_check as sc
 from dns import server_check_plans as plans
 from dns import server_check_verdict as verdicts
-from dns.ui.server_check_cards import _CARD_HEIGHT, _LIST_MAX_HEIGHT, FILTER_ALL, ServerCardsView, SeverityBar, StatusFilter
+from dns.ui.server_check_cards import (
+    _CARD_HEIGHT,
+    _COLUMN_MIN_WIDTH,
+    FILTER_ALL,
+    ServerCardsView,
+    SeverityBar,
+    StatusFilter,
+)
 from dns.ui.server_check_page import ServerCheckPage
 from utils.dns_wire import FAILURE_REFUSED, FAILURE_TIMEOUT
 from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_IDLE
@@ -336,6 +343,7 @@ class CardsViewTests(unittest.TestCase):
         view = ServerCardsView()
         self.addCleanup(view.deleteLater)
         view.resize(1000, 400)
+        view.viewport().resize(992, 400)
         view.set_cards(plans.build_cards(_mixed_report()))
         return view
 
@@ -352,23 +360,83 @@ class CardsViewTests(unittest.TestCase):
         view.set_filter("что-то не то")
         self.assertEqual((view.filter(), len(view.cards())), (FILTER_ALL, 7))
 
-    def test_click_opens_addresses_and_list_never_grows_past_its_window(self) -> None:
+    def test_click_opens_addresses_and_list_is_as_tall_as_its_cards(self) -> None:
+        """Своей прокрутки у списка нет: он вытянут по содержимому, прокручивает страница."""
         view = self._view()
         delegate, index = view.itemDelegate(), view.model().index(5)
         option = QStyleOptionViewItem()
         option.rect = QRect(0, 0, 900, _CARD_HEIGHT)
         closed = delegate.sizeHint(option, index).height()
-        self.assertEqual((closed, view.maximumHeight()), (_CARD_HEIGHT, _LIST_MAX_HEIGHT))
+        self.assertEqual(view.columns(), 1)
+        self.assertEqual((closed, view.maximumHeight()), (_CARD_HEIGHT, 7 * _CARD_HEIGHT + 2 * view.frameWidth()))
+        self.assertEqual(view.minimumHeight(), view.maximumHeight())
 
         view.toggle(index)
         self.assertTrue(view.is_expanded(5))
-        # У «Медленного» два адреса: карточка выросла на две строки.
-        self.assertGreater(delegate.sizeHint(option, index).height(), closed + 40)
+        # У «Медленного» два адреса: карточка выросла на две строки, а с ней и весь список.
+        opened = delegate.sizeHint(option, index).height()
+        self.assertGreater(opened, closed + 40)
+        self.assertEqual(view.maximumHeight(), 6 * _CARD_HEIGHT + opened + 2 * view.frameWidth())
 
-        # Много серверов — окошко списка не растёт: лишнее прокручивается, а не рисуется.
+        # Много серверов — список растёт вместе с ними, а не прячет их под своей прокруткой.
         rows = tuple(row for number in range(60) for row in _server(f"Сервер {number}", f"10.1.{number}.1"))
         view.set_cards(plans.build_cards(_report(rows=rows, total=60, findings=())))
-        self.assertEqual(view.maximumHeight(), _LIST_MAX_HEIGHT)
+        self.assertEqual(view.maximumHeight(), 60 * _CARD_HEIGHT + 2 * view.frameWidth())
+        self.assertEqual(view.verticalScrollBarPolicy(), Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def test_wide_window_puts_cards_in_columns(self) -> None:
+        view = self._view()
+        frame = 2 * view.frameWidth()
+        view.viewport().resize(_COLUMN_MIN_WIDTH + 200, 400)
+        self.assertEqual(view.columns(), 1)
+
+        # Ширина считается по окошку списка: у самого виджета по бокам поля оформления.
+        view.viewport().resize(2 * _COLUMN_MIN_WIDTH + 40, 400)
+        self.assertEqual(view.columns(), 2)
+        view._relayout_for_width()
+        # Две колонки занимают чуть меньше окошка: ряд «ровно до края» Qt переносит на новую строку.
+        self.assertLess(2 * view.column_width(), view.viewport().width())
+        self.assertGreater(2 * view.column_width(), view.viewport().width() - 4)
+        self.assertEqual((view.is_last_column(0), view.is_last_column(1)), (False, True))
+        # Семь карточек в две колонки — четыре строки.
+        self.assertEqual(view.maximumHeight(), 4 * _CARD_HEIGHT + frame)
+
+        # Раскрытая карточка делает выше всю свою строку, но не соседние.
+        view.toggle(view.model().index(5))
+        option = QStyleOptionViewItem()
+        opened = view.itemDelegate().sizeHint(option, view.model().index(5)).height()
+        self.assertEqual(view.maximumHeight(), 3 * _CARD_HEIGHT + opened + frame)
+
+        # Очень широкое окно — не больше трёх колонок: карточки не дробятся в мелочь.
+        view.viewport().resize(6000, 400)
+        self.assertEqual(view.columns(), 3)
+
+    def test_cards_really_stand_side_by_side_on_a_wide_list(self) -> None:
+        """Проверка самой раскладки Qt, а не наших расчётов: вторая карточка стоит справа от первой."""
+        view = self._view()
+        view.resize(2 * _COLUMN_MIN_WIDTH + 60, 400)
+        view.show()
+        self._app.processEvents()
+        self._app.processEvents()
+
+        self.assertEqual(view.columns(), 2)
+        first, second, third = (view.visualRect(view.model().index(row)) for row in range(3))
+        self.assertEqual((first.y(), second.y()), (0, 0))
+        self.assertGreater(second.x(), first.x() + _COLUMN_MIN_WIDTH - 1)
+        self.assertEqual((third.x(), third.y()), (first.x(), _CARD_HEIGHT))
+        # Всё содержимое на виду: прокручивать внутри списка нечего.
+        self.assertEqual(view.verticalScrollBar().maximum(), 0)
+
+    def test_mouse_over_the_list_does_not_crash(self) -> None:
+        """Список библиотеки сообщает делегату о наведении; раньше на этом падала программа."""
+        view = self._view()
+
+        view._setHoverRow(2)
+        self.assertEqual(view.hovered_row(), 2)
+        view._setPressedRow(2)
+        view._setSelectedRows([view.model().index(2)])
+        view.leaveEvent(QEvent(QEvent.Type.Leave))
+        self.assertEqual(view.hovered_row(), -1)
 
     def test_cards_paint_in_both_states(self) -> None:
         view = self._view()

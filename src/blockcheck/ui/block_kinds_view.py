@@ -7,10 +7,9 @@
 в заголовке группы проблем и в таблице сайтов.
 
 - ``site_groups`` — чистый подсчёт по отчёту (без окон, проверяется тестом);
-- ``KindBar`` — полоса из цветных долей, заполняется слева направо;
+- ``KindBar`` — полоса из цветных долей (общая ``ui.widgets.share_bar``);
 - ``KindTile`` — плитка вида: число (досчитывает от нуля), название и сайты;
-- ``KindsOverview`` — полоса и плитки вместе;
-- ``KindPill`` — цветная метка вида для заголовка группы.
+- ``KindsOverview`` — полоса и плитки вместе.
 
 Анимация идёт меньше секунды после показа итога и подчиняется переключателю
 «живых анимаций».
@@ -22,7 +21,7 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import QEasingCurve, QRectF, Qt, QTimer, QVariantAnimation
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
-from PyQt6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import FlowLayout
 
 from diagnostics.block_kind import (
@@ -44,13 +43,13 @@ from ui.accessibility import set_state_text
 from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import set_tooltip
 from ui.theme_refresh import ThemeRefreshBinding
+from ui.widgets.share_bar import REVEAL_MS, ShareBar
 
 # Сайт открывается — не вид блокировки, но своя доля в полосе и своя плитка.
 GROUP_OPEN = "open"
 # Проверка не дала ответа.
 GROUP_UNKNOWN = "unknown"
 
-REVEAL_MS = 760
 TILE_STEP_MS = 80
 
 # Цвета видов: (тёмная тема, светлая тема). Три главных вида — красный,
@@ -161,75 +160,19 @@ def groups_state_text(groups: list[SiteGroup]) -> str:
     return f"Сайтов проверено: {total}. {parts[:1].upper()}{parts[1:]}"
 
 
-class KindBar(QWidget):
+class KindBar(ShareBar):
     """Полоса из цветных долей: какая часть сайтов открывается и чем мешают остальным."""
 
-    HEIGHT = 10
-    GAP = 3.0
-
     def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedHeight(self.HEIGHT)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        super().__init__(kind_color, parent)
         self._groups: list[SiteGroup] = []
-        self._reveal = 1.0
-        self._is_light = False
-        self._anim = QVariantAnimation(self)
-        self._anim.setStartValue(0.0)
-        self._anim.setEndValue(1.0)
-        self._anim.setDuration(REVEAL_MS)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._anim.valueChanged.connect(self._on_value)
-        self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
-        self._apply_theme_refresh()
 
     def groups(self) -> list[SiteGroup]:
         return list(self._groups)
 
     def set_groups(self, groups: list[SiteGroup], *, animate: bool = True) -> None:
         self._groups = [group for group in groups if group.count > 0]
-        self._anim.stop()
-        if animate and self._groups and are_live_animations_enabled():
-            self._reveal = 0.0
-            self._anim.start()
-        else:
-            self._reveal = 1.0
-        self.update()
-
-    def _on_value(self, value) -> None:
-        self._reveal = float(value)
-        self.update()
-
-    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
-        _ = force
-        self._is_light = _is_light(tokens)
-        self.update()
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        _ = event
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        rect = QRectF(self.rect())
-        radius = rect.height() / 2
-        track = QColor(0, 0, 0, 22) if self._is_light else QColor(255, 255, 255, 20)
-        painter.setBrush(track)
-        painter.drawRoundedRect(rect, radius, radius)
-        total = sum(group.count for group in self._groups)
-        if total:
-            gaps = self.GAP * (len(self._groups) - 1)
-            usable = max(0.0, rect.width() - gaps)
-            # Всё, что правее границы заполнения, не рисуется: доли «выезжают» слева.
-            painter.setClipRect(QRectF(rect.left(), rect.top(), rect.width() * self._reveal, rect.height()))
-            x = rect.left()
-            for group in self._groups:
-                width = usable * group.count / total
-                dark, light = _COLORS.get(group.key) or _COLORS[KIND_OTHER]
-                painter.setBrush(QColor(light if self._is_light else dark))
-                painter.drawRoundedRect(QRectF(x, rect.top(), width, rect.height()), radius, radius)
-                x += width + self.GAP
-        painter.end()
+        self.set_segments([(group.key, group.count) for group in self._groups], animate=animate)
 
 
 class KindTile(QWidget):
@@ -389,36 +332,10 @@ class KindsOverview(QWidget):
         self._tiles_host.updateGeometry()
 
 
-class KindPill(QLabel):
-    """Цветная метка вида блокировки — заголовок группы проблем."""
-
-    def __init__(self, kind: str, parent=None) -> None:
-        super().__init__(kind_info(kind).title, parent)
-        self._kind = kind
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        # Скругление в QSS работает, только пока радиус не больше половины высоты.
-        self.setFixedHeight(22)
-        self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
-        self._apply_theme_refresh()
-
-    def kind(self) -> str:
-        return self._kind
-
-    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
-        _ = force
-        color = QColor(kind_color(self._kind, tokens))
-        self.setStyleSheet(
-            f"QLabel {{ color: {color.name()}; "
-            f"background-color: rgba({color.red()}, {color.green()}, {color.blue()}, 0.16); "
-            "border-radius: 10px; padding: 0px 10px; font-weight: 600; }"
-        )
-
-
 __all__ = [
     "GROUP_OPEN",
     "GROUP_UNKNOWN",
     "KindBar",
-    "KindPill",
     "KindTile",
     "KindsOverview",
     "SiteGroup",
