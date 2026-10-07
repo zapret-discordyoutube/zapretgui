@@ -204,6 +204,47 @@ _EXACT_LUA_DESYNC_TECHNIQUES: dict[str, str] = {
 }
 
 
+# Способ обхода одним-двумя словами без терминов: плитка стратегии пишет их
+# под названием. Имена функций winws2 остаются в подсказке и в поиске.
+_PLAIN_WORDS: dict[str, str] = {
+    "fake": "подделка",
+    "split": "нарезка",
+    "multisplit": "нарезка",
+    "tcpseg": "нарезка",
+    "disorder": "перестановка",
+    "multidisorder": "перестановка",
+    "syndata": "данные в первом пакете",
+    "send": "повтор пакета",
+    "udplen": "длина пакета",
+    "oob": "лишний байт",
+    "pass": "без обхода",
+    "hostfakesplit": "подмена имени сайта",
+    "fakedsplit": "нарезка с подделками",
+    "fakemultisplit": "нарезка с подделками",
+    "fakeddisorder": "перестановка с подделками",
+    "fakemultidisorder": "перестановка с подделками",
+    "drop": "сброс пакета",
+    "wssize": "мелкое окно",
+    "pktmod": "правка пакета",
+    "tamper": "правка содержимого",
+}
+
+
+def strategy_plain_label(technique_keys, fallback: str = "") -> str:
+    """Способы стратегии простыми словами: «подделка + нарезка».
+
+    Незнакомый способ словами не описать — тогда остаётся техническая подпись.
+    """
+    words: list[str] = []
+    for key in tuple(technique_keys or ()):
+        word = _PLAIN_WORDS.get(str(key or ""))
+        if word is None:
+            return str(fallback or "")
+        if word not in words:
+            words.append(word)
+    return " + ".join(words) if words else str(fallback or "")
+
+
 def describe_strategy_visual(args_text: str) -> StrategyVisual:
     techniques = tuple(_extract_techniques(args_text))
     if not techniques:

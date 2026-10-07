@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from profile.strategy_grouping import GROUPING_METHOD, normalize_strategy_grouping
+from profile.strategy_list.plan import GROUPING_METHOD, normalize_strategy_grouping
 from settings import store as settings_store
 
 

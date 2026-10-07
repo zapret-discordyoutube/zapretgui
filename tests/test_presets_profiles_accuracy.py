@@ -421,16 +421,6 @@ class ReviewFollowUpTests(unittest.TestCase):
                 clock["now"] += 5.0
                 self.assertEqual(store.get_manifest("winws2", "Locked.txt").name, "Настоящее имя")
 
-    def test_in_place_row_update_supersedes_running_filter(self) -> None:
-        from profile.ui.profile_strategy_list_widget import ProfileStrategyListWidget
-
-        widget = ProfileStrategyListWidget.__new__(ProfileStrategyListWidget)
-        widget._strategy_filter_runtime = SimpleNamespace(is_running=lambda: True)
-        widget._request_tree_rebuild = Mock()
-
-        widget._supersede_running_strategy_filter()
-
-        widget._request_tree_rebuild.assert_called_once_with()
 
     def test_click_on_fallback_preset_persists_selection(self) -> None:
         from app.feature_facades.presets import PresetsFeature

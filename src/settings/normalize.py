@@ -438,7 +438,7 @@ def normalize_ui_state(data: object) -> dict[str, Any]:
 
 
 _STRATEGY_GROUP_KEY = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
-# Группировка списка готовых стратегий (profile.strategy_grouping). Обычная,
+# Группировка списка готовых стратегий (profile.strategy_list). Обычная,
 # по способу обхода, не записывается.
 _STRATEGY_LIST_GROUPINGS = frozenset({"series", "source"})
 

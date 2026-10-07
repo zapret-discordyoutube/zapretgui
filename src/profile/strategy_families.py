@@ -163,15 +163,6 @@ def strategy_family_keys(entries) -> dict[str, str]:
     }
 
 
-def strategy_sort_key(family_key: str, entry, state) -> tuple[int, bool, str]:
-    """Порядок строк списка: по группам, внутри группы избранные первыми, затем по имени."""
-    return (
-        strategy_family_rank(family_key),
-        not bool(getattr(state, "favorite", False)),
-        str(getattr(entry, "name", "") or "").lower(),
-    )
-
-
 def strategy_count_text(count: int) -> str:
     count = max(0, int(count or 0))
     if count % 10 == 1 and count % 100 != 11:
@@ -190,5 +181,4 @@ __all__ = [
     "strategy_family_key_for_entry",
     "strategy_family_keys",
     "strategy_family_rank",
-    "strategy_sort_key",
 ]

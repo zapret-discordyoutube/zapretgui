@@ -14,7 +14,7 @@ request_id живут на странице — поведенческие те�
 from __future__ import annotations
 
 from profile.strategy_state import ProfileStrategyState
-from profile.ui.profile_strategy_list_widget import _current_strategy_id
+from profile.ui.compact_combo import _current_strategy_id
 from ui.latest_value_worker_state import LatestValueWorkerState
 
 

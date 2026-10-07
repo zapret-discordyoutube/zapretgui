@@ -54,7 +54,7 @@ def range_hint(mode: str, value: str) -> str:
         phrase = _first_packets_phrase(int(value), with_data=mode == "d")
         if mode == "d":
             return f"Только {phrase}. Служебные пакеты без данных не считаются."
-        return f"Только {phrase} соединения, считая служебные."
+        return f"Только {phrase} соединения по счёту."
     if mode == "custom":
         return "Выражение winws2 записывается как есть, например s1<d1 или -d8."
     return ""

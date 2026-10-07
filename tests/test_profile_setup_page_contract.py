@@ -8,8 +8,6 @@ from unittest.mock import Mock, call, patch
 from profile.ui.profile_setup_page import (
     CompactDisplayComboBox,
     ProfileSetupPageBase,
-    ProfileStrategyListDelegate,
-    ProfileStrategyListWidget,
     _profile_has_list_file_editor,
     _profile_editor_tab_title,
     set_segmented_current_item_if_changed,
@@ -30,7 +28,6 @@ from profile.profile_setup_loader import (
     ProfileUserProfileDeleteWorker,
     ProfileUserProfileUpdateWorker,
 )
-from profile.strategy_list_filter import ProfileStrategyListFilterWorker, build_profile_strategy_list_plan
 from profile.state import ProfileListItem, ProfileSetupPayload
 from profile.strategy_catalog import StrategyEntry
 from profile.strategy_state import ProfileStrategyState
@@ -3138,259 +3135,14 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         self.assertEqual(finished[0][:3], (7, "set_enabled", "template:youtube"))
         self.assertEqual(finished[0][3], {"profile_key": "profile-2", "profile_item": created_item})
 
-    def test_strategy_list_repaints_viewport_rect_after_current_strategy_changes(self) -> None:
-        source = inspect.getsource(ProfileStrategyListWidget.set_current_strategy_id)
-        helper_source = inspect.getsource(ProfileStrategyListWidget._refresh_strategy_item)
 
-        self.assertIn("_refresh_strategy_item", source)
-        self.assertIn("viewport().update", helper_source)
-        self.assertNotIn("_list.update(self._list.visualItemRect", helper_source)
 
-    def test_strategy_list_updates_current_rows_by_id_without_full_scan(self) -> None:
-        init_source = inspect.getsource(ProfileStrategyListWidget.__init__)
-        # Список собирается в одном месте — из готового плана строк.
-        rebuild_source = inspect.getsource(ProfileStrategyListWidget._apply_strategy_list_plan)
-        source = inspect.getsource(ProfileStrategyListWidget.set_current_strategy_id)
 
-        self.assertIn("_item_by_strategy_id", init_source)
-        self.assertIn("_item_by_strategy_id.clear()", rebuild_source)
-        self.assertIn("_item_by_strategy_id[row.strategy_id] = item", rebuild_source)
-        self.assertIn("_apply_strategy_list_plan", inspect.getsource(ProfileStrategyListWidget._rebuild_tree))
-        self.assertNotIn("for row in range", source)
 
-    def test_strategy_list_skips_rebuild_when_rows_are_unchanged(self) -> None:
-        widget = ProfileStrategyListWidget.__new__(ProfileStrategyListWidget)
-        widget._entries = {}
-        widget._states = {}
-        widget._current_strategy_id = "none"
-        widget._rebuild_tree = Mock()
-        widget.set_current_strategy_id = Mock()
-        entries = {
-            "fake": SimpleNamespace(
-                name="Fake",
-                args="--lua-desync=fake",
-                visual=SimpleNamespace(icon_name="bolt", color="#fff", label="Fake", description="Fake TLS"),
-            )
-        }
-        states = {"fake": ProfileStrategyState(rating="work", favorite=False)}
 
-        ProfileStrategyListWidget.set_rows(
-            widget,
-            entries=entries,
-            states=states,
-            current_strategy_id="fake",
-        )
-        ProfileStrategyListWidget.set_rows(
-            widget,
-            entries=dict(entries),
-            states=dict(states),
-            current_strategy_id="fake",
-        )
 
-        widget._rebuild_tree.assert_called_once()
-        widget.set_current_strategy_id.assert_not_called()
 
-    def test_strategy_list_initial_rows_start_worker_without_search_delay(self) -> None:
-        from ui.latest_value_worker_state import LatestValueWorkerState
 
-        widget = ProfileStrategyListWidget.__new__(ProfileStrategyListWidget)
-        widget._entries = {}
-        widget._states = {}
-        widget._current_strategy_id = "none"
-        widget._item_by_strategy_id = {}
-        widget._rows_signature = None
-        widget._strategy_filter_runtime = SimpleNamespace(is_running=Mock(return_value=False))
-        widget._strategy_filter_state = LatestValueWorkerState(widget._strategy_filter_runtime, empty_value=None)
-        widget._strategy_filter_timer = SimpleNamespace(start=Mock())
-        widget._search = SimpleNamespace(text=Mock(return_value=""))
-        widget._run_debounced_tree_rebuild = Mock()
-        entries = {
-            "fake": SimpleNamespace(
-                name="Fake",
-                args="--lua-desync=fake",
-                visual=SimpleNamespace(icon_name="bolt", color="#fff", label="Fake", description="Fake TLS"),
-            )
-        }
-
-        ProfileStrategyListWidget.set_rows(
-            widget,
-            entries=entries,
-            states={},
-            current_strategy_id="fake",
-        )
-
-        widget._strategy_filter_timer.start.assert_not_called()
-        widget._run_debounced_tree_rebuild.assert_called_once()
-        self.assertEqual(widget._strategy_filter_state.pending[2:], ("fake", ""))
-
-    def test_strategy_list_search_rebuild_is_debounced_through_worker(self) -> None:
-        from ui.latest_value_worker_state import LatestValueWorkerState
-
-        widget = ProfileStrategyListWidget.__new__(ProfileStrategyListWidget)
-        widget._entries = {
-            "fake": SimpleNamespace(
-                name="Fake",
-                args="--lua-desync=fake",
-                visual=SimpleNamespace(icon_name="bolt", color="#fff", label="Fake", description="Fake TLS"),
-            )
-        }
-        widget._states = {"fake": ProfileStrategyState(rating="work", favorite=False)}
-        widget._current_strategy_id = "fake"
-        widget._strategy_filter_runtime = SimpleNamespace(is_running=Mock(return_value=False))
-        widget._strategy_filter_state = LatestValueWorkerState(widget._strategy_filter_runtime, empty_value=None)
-        widget._strategy_filter_timer = SimpleNamespace(start=Mock())
-        widget._search = SimpleNamespace(text=Mock(return_value="fake"))
-        widget._rebuild_tree = Mock(side_effect=AssertionError("search must not rebuild rows in GUI thread"))
-
-        ProfileStrategyListWidget._apply_filter(widget)
-
-        widget._strategy_filter_timer.start.assert_called_once_with(120)
-        widget._rebuild_tree.assert_not_called()
-        self.assertEqual(widget._strategy_filter_state.pending[2:], ("fake", "fake"))
-
-    def test_strategy_list_filter_worker_builds_rows_without_widgets(self) -> None:
-        entries = {
-            "fake": SimpleNamespace(
-                name="Fake TLS",
-                args="--lua-desync=fake",
-                visual=SimpleNamespace(icon_name="bolt", color="#fff", label="Fake", description="Fake TLS"),
-            ),
-            "udp": SimpleNamespace(
-                name="UDP",
-                args="--filter-udp=443",
-                visual=SimpleNamespace(icon_name="wifi", color="#0ff", label="UDP", description="UDP mode"),
-            ),
-        }
-        states = {
-            "fake": ProfileStrategyState(rating="work", favorite=True),
-            "udp": ProfileStrategyState(rating="", favorite=False),
-        }
-
-        plan = build_profile_strategy_list_plan(
-            entries=entries,
-            states=states,
-            current_strategy_id="fake",
-            search_text="tls",
-        )
-
-        self.assertEqual(plan.visible_count, 1)
-        self.assertEqual(plan.total_count, 2)
-        self.assertEqual(plan.rows[0].strategy_id, "fake")
-        self.assertEqual(plan.rows[0].status_text, "Выбрана • В избранном • Работает")
-        self.assertEqual(
-            plan.rows[0].accessible_text,
-            "Fake TLS, выбрана, в избранном, работает, Fake, Fake TLS. "
-            "Нажмите Enter или Пробел, чтобы выбрать стратегию.",
-        )
-
-    def test_strategy_list_filter_worker_emits_latest_plan(self) -> None:
-        loaded = []
-        failed = []
-        worker = ProfileStrategyListFilterWorker(
-            4,
-            entries={
-                "fake": SimpleNamespace(
-                    name="Fake",
-                    args="--lua-desync=fake",
-                    visual=SimpleNamespace(icon_name="bolt", color="#fff", label="Fake", description="Fake TLS"),
-                )
-            },
-            states={"fake": ProfileStrategyState(rating="", favorite=False)},
-            current_strategy_id="fake",
-            search_text="fake",
-        )
-        worker.loaded.connect(lambda request_id, plan: loaded.append((request_id, plan)))
-        worker.failed.connect(lambda request_id, error: failed.append((request_id, error)))
-
-        worker.run()
-
-        self.assertEqual(failed, [])
-        self.assertEqual(loaded[0][0], 4)
-        self.assertEqual(loaded[0][1].rows[0].strategy_id, "fake")
-
-    def test_strategy_list_updates_state_rows_without_rebuild_when_order_is_stable(self) -> None:
-        widget = ProfileStrategyListWidget.__new__(ProfileStrategyListWidget)
-        strategy_item = object()
-        entries = {
-            "fake": SimpleNamespace(
-                name="Fake",
-                args="--lua-desync=fake",
-                visual=SimpleNamespace(icon_name="bolt", color="#fff", label="Fake", description="Fake TLS"),
-            )
-        }
-        widget._entries = dict(entries)
-        widget._states = {"fake": ProfileStrategyState(rating="", favorite=False)}
-        widget._current_strategy_id = "fake"
-        widget._rows_signature = (("entry",), ("old-state",))
-        widget._item_by_strategy_id = {"fake": strategy_item}
-        widget._rebuild_tree = Mock(side_effect=AssertionError("strategy feedback must not rebuild the whole list"))
-        widget._refresh_strategy_item = Mock()
-
-        ProfileStrategyListWidget.set_rows(
-            widget,
-            entries=dict(entries),
-            states={"fake": ProfileStrategyState(rating="work", favorite=False)},
-            current_strategy_id="fake",
-        )
-
-        widget._rebuild_tree.assert_not_called()
-        widget._refresh_strategy_item.assert_called_once_with(strategy_item, "fake", is_current=True)
-
-    def test_strategy_list_moves_favorite_row_without_rebuild_when_order_changes(self) -> None:
-        class _FakeList:
-            def __init__(self, items):
-                self.items = list(items)
-
-            def row(self, item):
-                return self.items.index(item)
-
-            def takeItem(self, row):  # noqa: N802
-                return self.items.pop(row)
-
-            def insertItem(self, row, item):  # noqa: N802
-                self.items.insert(row, item)
-
-        widget = ProfileStrategyListWidget.__new__(ProfileStrategyListWidget)
-        first_item = object()
-        second_item = object()
-        entries = {
-            "first": SimpleNamespace(
-                name="Alpha",
-                args="--lua-desync=fake",
-                visual=SimpleNamespace(icon_name="bolt", color="#fff", label="Alpha", description="Alpha TLS"),
-            ),
-            "second": SimpleNamespace(
-                name="Beta",
-                args="--lua-desync=fake",
-                visual=SimpleNamespace(icon_name="bolt", color="#fff", label="Beta", description="Beta TLS"),
-            ),
-        }
-        fake_list = _FakeList([first_item, second_item])
-        widget._entries = dict(entries)
-        widget._states = {
-            "first": ProfileStrategyState(rating="", favorite=False),
-            "second": ProfileStrategyState(rating="", favorite=False),
-        }
-        widget._current_strategy_id = "second"
-        widget._rows_signature = (("entry",), ("old-state",))
-        widget._item_by_strategy_id = {"first": first_item, "second": second_item}
-        widget._list = fake_list
-        widget._rebuild_tree = Mock(side_effect=AssertionError("favorite move must not rebuild the whole list"))
-        widget._refresh_strategy_item = Mock()
-
-        ProfileStrategyListWidget.set_rows(
-            widget,
-            entries=dict(entries),
-            states={
-                "first": ProfileStrategyState(rating="", favorite=False),
-                "second": ProfileStrategyState(rating="", favorite=True),
-            },
-            current_strategy_id="second",
-        )
-
-        widget._rebuild_tree.assert_not_called()
-        self.assertEqual(fake_list.items, [second_item, first_item])
-        widget._refresh_strategy_item.assert_called_once_with(second_item, "second", is_current=True)
 
     def test_strategy_change_refreshes_only_changed_profile_row(self) -> None:
         page = PresetSetupPageBase.__new__(PresetSetupPageBase)
@@ -4983,12 +4735,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         delete_user_profile.assert_called_once_with(profile_id="user-1")
         self.assertEqual(deleted, [(8, "user-1", 2)])
 
-    def test_strategy_list_click_handlers_match_qlistwidget_signals(self) -> None:
-        clicked = inspect.signature(ProfileStrategyListWidget._on_item_clicked)
-        activated = inspect.signature(ProfileStrategyListWidget._on_item_activated)
-
-        self.assertEqual(tuple(clicked.parameters), ("self", "item"))
-        self.assertEqual(tuple(activated.parameters), ("self", "item"))
 
     def test_raw_tab_shows_only_the_profile_text(self) -> None:
         """Сводки «условия, стратегия, аргументы» больше нет: она повторяла шапку,
@@ -6150,20 +5896,6 @@ class ProfileSetupPageContractTests(unittest.TestCase):
         self.assertIn("set_widget_visible_if_changed(self._filter_combo, filter_switchable)", apply_settings)
         self.assertIn("set_widget_visible_if_changed(self._filter_value, filter_switchable)", apply_settings)
 
-    def test_strategy_list_rows_store_visual_description(self) -> None:
-        from profile.strategy_list_filter import build_profile_strategy_list_plan
-
-        set_rows = inspect.getsource(ProfileStrategyListWidget._apply_strategy_list_plan)
-        plan = inspect.getsource(build_profile_strategy_list_plan)
-        paint = inspect.getsource(ProfileStrategyListDelegate._paint_row)
-
-        self.assertIn("_ROLE_VISUAL_ICON_NAME", set_rows)
-        self.assertIn("_ROLE_VISUAL_LABEL_TEXT", set_rows)
-        self.assertIn("_ROLE_VISUAL_DESCRIPTION", set_rows)
-        self.assertIn("_ROLE_TOOLTIP_TEXT", set_rows)
-        self.assertIn('getattr(visual, "label"', plan)
-        self.assertIn("get_cached_qta_pixmap", paint)
-        self.assertNotIn("set" + "ToolTip", set_rows)
 
     def test_settings_autosave_starts_worker_without_saving_in_gui_thread(self) -> None:
         class _Signal:
@@ -6447,33 +6179,8 @@ class ProfileSetupPageContractTests(unittest.TestCase):
 
         log_mock.assert_not_called()
 
-    def test_strategy_list_uses_fluent_item_tooltip(self) -> None:
-        delegate_init = inspect.getsource(ProfileStrategyListDelegate.__init__)
-        help_event = inspect.getsource(ProfileStrategyListDelegate.helpEvent)
 
-        self.assertIn("FluentItemToolTipController", delegate_init)
-        self.assertIn("_ROLE_TOOLTIP_TEXT", help_event)
-        self.assertIn("show_text", help_event)
 
-    def test_strategy_and_preset_lists_share_hover_row_painter(self) -> None:
-        from profile.ui.profile_list_delegate import ProfileListDelegate
-
-        strategy_paint = inspect.getsource(ProfileStrategyListDelegate._paint_row)
-        preset_paint = inspect.getsource(PresetListDelegate._paint_preset_row)
-        profile_paint = inspect.getsource(ProfileListDelegate._paint_profile_row)
-
-        self.assertIn("paint_profile_hover_row", strategy_paint)
-        self.assertIn("profile_hover_row_rect", strategy_paint)
-        self.assertIn("paint_profile_hover_row", preset_paint)
-        self.assertIn("profile_hover_row_rect", preset_paint)
-        self.assertIn("paint_profile_hover_row", profile_paint)
-        self.assertIn("profile_hover_row_rect", profile_paint)
-
-    def test_strategy_list_uses_shared_fluent_scrollbar(self) -> None:
-        init = inspect.getsource(ProfileStrategyListWidget.__init__)
-
-        self.assertIn("install_fluent_scrollbars", init)
-        self.assertIn("ScrollPerPixel", init)
 
     def test_profile_detail_header_is_compact_and_tooltipped(self) -> None:
         build = inspect.getsource(ProfileSetupPageBase._build_content)

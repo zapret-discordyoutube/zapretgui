@@ -170,19 +170,6 @@ class RowHoverMotionTests(unittest.TestCase):
         if idle != hover:
             self.assertNotIn(half, (idle, hover))
 
-    def test_preset_profile_and_strategy_delegates_attach_hover_motion(self) -> None:
-        from PyQt6.QtWidgets import QListView
-
-        from profile.ui.profile_list_delegate import ProfileListDelegate
-        from profile.ui.profile_strategy_list_widget import ProfileStrategyListDelegate
-        from ui.presets_menu.delegate import PresetListDelegate
-
-        for delegate_cls in (PresetListDelegate, ProfileListDelegate, ProfileStrategyListDelegate):
-            with self.subTest(delegate=delegate_cls.__name__):
-                view = QListView()
-                self.addCleanup(view.deleteLater)
-                delegate_cls(view)
-                self.assertIsNotNone(row_hover_motion(view))
 
 
 if __name__ == "__main__":

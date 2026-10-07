@@ -29,16 +29,13 @@ from profile.ui.profile_setup_save_controllers import ProfileSetupSaveController
 from profile.ui.profile_setup_payload_controller import ProfileSetupPayloadController
 from profile.ui.profile_strategy_controller import ProfileStrategyController
 from profile.ui.profile_user_profile_controller import ProfileUserProfileController
-from profile.ui.profile_strategy_list_widget import (
+from profile.ui.compact_combo import (
     CompactDisplayComboBox,
-    ProfileStrategyListDelegate,
-    ProfileStrategyListView,
-    ProfileStrategyListWidget,
-    ProfileStrategySearchLineEdit,
     _current_strategy_id,
     _join_accessible_options,
     _sync_combo_items_accessibility,
 )
+from profile.ui.strategy_list import ProfileStrategyListWidget
 from profile.ui.profile_list_file_tab import BASE_TITLE, USER_TITLE, ProfileListFileTab, titled
 from profile.ui.profile_raw_text_tab import ProfileRawTextTab
 from profile.ui.strategy_context_menu import can_rate_strategy
@@ -818,9 +815,9 @@ class ProfileSetupPageBase(BasePage):
         self._strategy_stack.addWidget(self._raw_tab_placeholder)
 
         self.layout.addWidget(self._strategy_stack, 1)
-        QWidget.setTabOrder(self._strategy_tabs, self._strategy_list._grouping_combo)
-        QWidget.setTabOrder(self._strategy_list._grouping_combo, self._strategy_list._search)
-        QWidget.setTabOrder(self._strategy_list._search, self._strategy_list._list)
+        QWidget.setTabOrder(self._strategy_tabs, self._strategy_list._search)
+        QWidget.setTabOrder(self._strategy_list._search, self._strategy_list._grouping_combo)
+        QWidget.setTabOrder(self._strategy_list._grouping_combo, self._strategy_list._list)
         self._update_profile_setup_accessibility()
 
     def _update_combo_accessibility(self, combo, *, name: str, description: str) -> None:
@@ -1470,11 +1467,13 @@ class ProfileSetupPageBase(BasePage):
             return [self.__dict__.get("_summary"), self.__dict__.get("_conditions_button")]
         if name == "tabs":
             return self._strategy_tabs
-        if name == "strategies":
+        if name in {"strategies", "strategy_try", "strategy_find"}:
             stack = self._strategy_stack
             if stack is None or stack.currentIndex() != 0:
                 return None
-            return self._strategy_list
+            if name == "strategies":
+                return self._strategy_list
+            return self._strategy_list.onboarding_target(name)
         if name == "list_entries":
             stack = self._strategy_stack
             if stack is None or stack.currentIndex() != 1:
@@ -1786,6 +1785,7 @@ class ProfileSetupPageBase(BasePage):
                 open_group_token=str(getattr(item, "persistent_key", "") or self._profile_key or ""),
                 open_group=getattr(payload, "strategy_open_group", None),
                 grouping=getattr(payload, "strategy_grouping", None),
+                usage=getattr(payload, "strategy_usage", None),
             )
             set_widget_enabled_if_changed(self._strategy_list, not (item.in_preset and not item.enabled))
             self._list_file_dirty = True

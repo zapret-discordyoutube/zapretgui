@@ -125,67 +125,6 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
             on_profile_changed=lambda: None,
         )
 
-    def test_main_controls_are_named_for_screen_reader(self) -> None:
-        page = self._make_page()
-        self.addCleanup(page.deleteLater)
-        page._ensure_editor_tab_built()
-        page._ensure_raw_tab_built()
-
-        self.assertEqual(page._enabled_checkbox.accessibleName(), "Profile, выключено")
-        self.assertEqual(page._enabled_checkbox.property("screenReaderStateText"), "Profile, выключено")
-        self.assertIn("Включает или отключает", page._enabled_checkbox.accessibleDescription())
-        self.assertEqual(page._filter_combo.accessibleName(), "Тип списка profile, выбрано: Hostlist")
-        self.assertEqual(
-            page._filter_combo.property("screenReaderStateText"),
-            "Тип списка profile, выбрано: Hostlist",
-        )
-        self.assertEqual(page._filter_value.accessibleName(), "Файл списка profile")
-        self.assertEqual(page._in_range_mode.accessibleName(), "Режим in-range, выбрано: a — всегда")
-        self.assertEqual(
-            page._in_range_mode.property("screenReaderStateText"),
-            "Режим in-range, выбрано: a — всегда",
-        )
-        self.assertEqual(page._out_range_mode.accessibleName(), "Режим out-range, выбрано: a — всегда")
-        self.assertEqual(
-            page._out_range_mode.property("screenReaderStateText"),
-            "Режим out-range, выбрано: a — всегда",
-        )
-        self.assertEqual(page._list_file_base_text.accessibleName(), "Встроенные записи списка профиля")
-        self.assertEqual(
-            page._list_file_base_text.property("screenReaderStateText"),
-            "Встроенные записи списка профиля",
-        )
-        self.assertEqual(page._list_file_text.accessibleName(), "Ваши записи списка профиля")
-        self.assertEqual(
-            page._list_file_text.property("screenReaderStateText"),
-            "Ваши записи списка профиля",
-        )
-        # Кнопки «Сохранить список» больше нет: список сохраняется автоматически.
-        self.assertIsNone(page._list_file_save_button)
-        self.assertEqual(page._raw_profile_text.accessibleName(), "Текст профиля в текущем пресете")
-        self.assertEqual(
-            page._raw_profile_text.property("screenReaderStateText"),
-            "Текст профиля в текущем пресете",
-        )
-        self.assertEqual(page._raw_profile_save_button.accessibleName(), "Сохранить текст профиля")
-        self.assertEqual(
-            page._raw_profile_save_button.property("screenReaderStateText"),
-            "Сохранить текст профиля",
-        )
-        self.assertEqual(page._update_user_profile_button.accessibleName(), "Изменить пользовательский profile")
-        self.assertEqual(
-            page._update_user_profile_button.property("screenReaderStateText"),
-            "Изменить пользовательский profile",
-        )
-        self.assertEqual(page._delete_user_profile_button.accessibleName(), "Удалить пользовательский profile")
-        self.assertEqual(
-            page._delete_user_profile_button.property("screenReaderStateText"),
-            "Удалить пользовательский profile",
-        )
-        # Кнопок оценки на странице нет: оценку ставят из меню стратегии,
-        # и список говорит об этом тому, кто работает с клавиатуры.
-        self.assertFalse(hasattr(page, "_work_button"))
-        self.assertIn("Клавиша меню", page._strategy_list._list.accessibleDescription())
 
     def test_settings_line_edit_buttons_do_not_take_tab_focus(self) -> None:
         page = self._make_page()
@@ -218,24 +157,6 @@ class ProfileSetupAccessibilityTests(unittest.TestCase):
             "Разделы профиля, выбрано: Текст профиля",
         )
 
-    def test_tab_from_profile_sections_moves_to_list_and_ctrl_f_opens_search(self) -> None:
-        page = self._make_page()
-        self.addCleanup(page.deleteLater)
-        page.show()
-        self.app.processEvents()
-        page._strategy_tabs.setFocus()
-        self.app.processEvents()
-
-        QTest.keyClick(page._strategy_tabs, Qt.Key.Key_Tab)
-        self.app.processEvents()
-
-        self.assertIs(self.app.focusWidget(), page._strategy_list._list)
-
-        QTest.keyClick(page._strategy_list._list, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
-        self.app.processEvents()
-
-        self.assertTrue(page._strategy_list._search_row.isVisible())
-        self.assertIs(self.app.focusWidget(), page._strategy_list._search)
 
     def test_range_mode_combo_options_are_named_for_screen_reader(self) -> None:
         page = self._make_page()

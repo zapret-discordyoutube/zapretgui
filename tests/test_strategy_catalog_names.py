@@ -17,13 +17,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
 
+from profile.strategy_list import PlanRequest, build_plan, build_strategy_facts
 from profile.strategy_catalog import _parse_catalog_file
-from profile.strategy_list_filter import (
-    build_profile_strategy_list_plan,
-    strategy_matches_search,
-    strategy_tooltip_text,
-)
-from profile.ui.profile_strategy_list_widget import ProfileStrategyListWidget
 
 CATALOGS_ROOT = Path(__file__).resolve().parents[1] / "src" / "system" / "strategy_catalogs"
 
@@ -148,61 +143,31 @@ class StrategyFromBuiltinPresetNameTests(unittest.TestCase):
 
 
 class StrategyOldNameSearchTests(unittest.TestCase):
+    """Переименованную стратегию находят и по новому, и по прежнему названию."""
+
     @classmethod
     def setUpClass(cls) -> None:
-        cls._app = QApplication.instance() or QApplication([])
         cls.entries = _catalogs()["winws2/tcp.txt"]
+        cls.facts = build_strategy_facts(cls.entries)
+
+    def _found(self, query: str) -> set[str]:
+        plan = build_plan(PlanRequest(facts=self.facts, query=query))
+        return {item.strategy_id for group in plan.groups for item in group.items}
 
     def test_search_by_old_name_finds_the_renamed_strategy(self) -> None:
-        plan = build_profile_strategy_list_plan(
-            entries=self.entries,
-            states={},
-            current_strategy_id="none",
-            search_text="SIMPLE FAKE ALT 1.9.9 (game filter) / Telegram",
-        )
+        renamed = next(item for item in self.facts.values() if item.old_name and item.old_name.lower() not in item.name.lower())
 
-        self.assertEqual([row.name for row in plan.rows], ["General Simple Fake ALT 1.9.9 · из Telegram"])
-        self.assertIn(
-            "Раньше называлась: general SIMPLE FAKE ALT 1.9.9 (game filter) / Telegram",
-            plan.rows[0].tooltip_text,
-        )
+        self.assertIn(renamed.strategy_id, self._found(renamed.old_name))
+        self.assertIn(renamed.strategy_id, self._found(renamed.name))
 
-    def test_search_by_new_name_still_works(self) -> None:
-        plan = build_profile_strategy_list_plan(
-            entries=self.entries,
-            states={},
-            current_strategy_id="none",
-            search_text="Flowseal ALT8 1.10.3 · из YouTube",
-        )
+    def test_tooltip_mentions_old_name_only_for_renamed_strategy(self) -> None:
+        plan = build_plan(PlanRequest(facts=self.facts))
+        items = {item.strategy_id: item for group in plan.groups for item in group.items}
+        renamed = next(item for item in self.facts.values() if item.old_name)
+        kept = next(item for item in self.facts.values() if not item.old_name)
 
-        self.assertEqual([row.strategy_id for row in plan.rows], ["flowseal_1103_alt8_google"])
-
-    def test_list_built_without_background_worker_searches_old_names_too(self) -> None:
-        widget = ProfileStrategyListWidget()
-        self.addCleanup(widget.deleteLater)
-        widget._strategy_filter_runtime = None
-        widget.set_rows(entries=self.entries, states={}, current_strategy_id="none")
-
-        widget._search.setText("(game filter) / telegram")
-
-        shown = [
-            widget._list.item(row).data(widget._ROLE_NAME_TEXT)
-            for row in range(widget._list.count())
-            if widget._list.item(row).data(widget._ROLE_STRATEGY_ID)
-        ]
-        self.assertGreater(len(shown), 5)
-        for name in shown:
-            self.assertTrue(name.endswith("· из Telegram"), name)
-        item = widget._item_by_strategy_id["stock_missing_199_tcp_59"]
-        self.assertIn("Раньше называлась: general SIMPLE FAKE ALT", item.data(widget._ROLE_TOOLTIP_TEXT))
-
-    def test_strategy_that_kept_its_name_has_no_old_name_line(self) -> None:
-        text = strategy_tooltip_text(visual_description="Подмена пакета", args="--lua-desync=fake", old_name="")
-
-        self.assertEqual(text, "Подмена пакета\n\n--lua-desync=fake")
-        self.assertFalse(
-            strategy_matches_search("telegram", name="Fake", old_name="", args="--lua-desync=fake", visual_search="")
-        )
+        self.assertIn(f"Раньше называлась: {renamed.old_name}", items[renamed.strategy_id].tooltip)
+        self.assertNotIn("Раньше называлась", items[kept.strategy_id].tooltip)
 
 
 if __name__ == "__main__":

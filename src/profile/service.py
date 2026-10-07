@@ -71,6 +71,7 @@ from .serializer import (
 )
 from .strategy_state import ProfileStrategyState, ProfileStrategyStateStore
 from .strategy_catalog import StrategyEntry, load_strategy_catalogs_with_signature
+from .strategy_usage import load_builtin_strategy_usage
 from .strategy_shape import composite_identity, strategy_shape
 from .state import (
     ProfileListFileEditorState,
@@ -669,6 +670,9 @@ class ProfilePresetService:
             item=item,
             strategy_entries=dict(core.strategy_entries),
             strategy_states=strategy_states,
+            strategy_usage=load_builtin_strategy_usage(
+                self._app_paths, self._engine, catalogs, catalogs_signature
+            ).for_profile(profile),
             raw_profile_text=core.raw_profile_text,
             raw_strategy_text=raw_strategy_text,
             match_summary=core.match_summary,

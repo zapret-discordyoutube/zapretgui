@@ -24,7 +24,14 @@ class StrategyEntry:
     # Прежнее название (поле old_name каталога): по нему стратегию находит
     # поиск, а подсказка напоминает, как она называлась раньше.
     old_name: str = ""
+    # Пометка каталога: recommended, stock, experimental, caution, game, stable.
+    label: str = ""
+    author: str = ""
+    description: str = ""
 
+
+# Служебные поля записи каталога, которые список стратегий показывает человеку.
+_META_KEYS = frozenset({"label", "author", "description"})
 
 _STRATEGY_CATALOGS_CACHE: dict[
     tuple[str, str],
@@ -58,6 +65,7 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
     current_id: Optional[str] = None
     current_name = ""
     current_old_name = ""
+    current_meta: dict[str, str] = {}
     current_args: list[str] = []
 
     def _flush() -> None:
@@ -87,6 +95,9 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
             is_composite=shape.composite,
             payload_scopes=shape.payload_scopes if shape.composite else (),
             old_name=current_old_name,
+            label=current_meta.get("label", "").lower(),
+            author=current_meta.get("author", ""),
+            description=current_meta.get("description", ""),
         )
 
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -106,6 +117,7 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
             seen_ids.add(current_id)
             current_name = current_id
             current_old_name = ""
+            current_meta = {}
             current_args = []
             continue
         if current_id is None:
@@ -123,6 +135,8 @@ def _parse_catalog_file(path: Path, catalog_name: str) -> dict[str, StrategyEntr
                 current_name = value.strip()
             elif key == "old_name":
                 current_old_name = value.strip()
+            elif key in _META_KEYS:
+                current_meta[key] = value.strip()
 
     _flush()
     return strategies

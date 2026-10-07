@@ -260,6 +260,8 @@ _TOUR_STEPS: tuple[TourStep, ...] = (
     TourStep("ranges", _page_target("ranges"), page="profile_setup"),
     TourStep("profile_tabs", _page_target("tabs"), page="profile_setup"),
     TourStep("strategy_choice", _page_target("strategies"), page="profile_setup", illustration="blocked"),
+    TourStep("strategy_try", _page_target("strategy_try"), page="profile_setup", target_optional=True),
+    TourStep("strategy_find", _page_target("strategy_find"), page="profile_setup", target_optional=True),
     TourStep("technique_fake", page="profile_setup", illustration="fake"),
     TourStep("technique_multisplit", page="profile_setup", illustration="multisplit"),
     TourStep("technique_multidisorder", page="profile_setup", illustration="multidisorder"),

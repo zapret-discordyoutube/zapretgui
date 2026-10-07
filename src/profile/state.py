@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .strategy_catalog import StrategyEntry
+from .strategy_usage import StrategyUsage
 from .strategy_state import ProfileStrategyState
 
 
@@ -75,8 +76,11 @@ class ProfileSetupPayload:
     # Группа готовых стратегий, которую человек оставил открытой у этого
     # профиля: ключ группы, "" — всё свёрнуто, None — ещё не открывал.
     strategy_open_group: str | None = None
-    # По чему сгруппирован список готовых стратегий (profile.strategy_grouping).
+    # По чему сгруппирован список готовых стратегий (profile.strategy_list).
     strategy_grouping: str = "method"
+    # Частота стратегий в готовых пресетах (profile.strategy_usage): по ней
+    # список решает, что советовать для этого сервиса и в каком порядке.
+    strategy_usage: dict[str, StrategyUsage] = field(default_factory=dict)
     # Общие строки пресета (до первого профиля): редактор текста профиля берёт
     # из них объявленные фейки и подключённые lua-файлы для проверки.
     preset_preamble_text: str = ""

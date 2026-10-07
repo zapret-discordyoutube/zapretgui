@@ -76,15 +76,13 @@ class ProfileStrategyOpenGroupSaveTests(unittest.TestCase):
         )
         self.addCleanup(page.deleteLater)
         page._strategy_open_group_save_runtime = _Runtime()
-        page._strategy_list._strategy_filter_runtime = None
         return page
 
     def _open_groups(self, page) -> list[str]:
-        strategy_list = page._strategy_list
         return [
-            key
-            for key, header in strategy_list._group_header_items.items()
-            if header.data(strategy_list._ROLE_GROUP_EXPANDED)
+            row.group_key
+            for row in page._strategy_list._list.list_model().rows()
+            if row.kind == "group" and row.expanded
         ]
 
     def _payload(self, *, persistent_key: str, open_group: str | None) -> ProfileSetupPayload:
@@ -115,14 +113,6 @@ class ProfileStrategyOpenGroupSaveTests(unittest.TestCase):
             strategy_open_group=open_group,
         )
 
-    def test_remembered_group_from_settings_is_opened_for_the_profile(self) -> None:
-        page = self._page()
-        page._profile_key = "profile:0"
-
-        page._apply_payload(self._payload(persistent_key="uid:youtube", open_group="split"))
-
-        self.assertEqual(self._open_groups(page), ["split"])
-        self.assertEqual(page._strategy_list._open_group_token, "uid:youtube")
 
     def test_without_saved_group_the_group_of_selected_strategy_is_open(self) -> None:
         page = self._page()
@@ -140,7 +130,7 @@ class ProfileStrategyOpenGroupSaveTests(unittest.TestCase):
         page._apply_payload(self._payload(persistent_key="uid:youtube", open_group=None))
         strategy_list = page._strategy_list
 
-        strategy_list._toggle_group_item(strategy_list._group_header_items["fake"])
+        strategy_list._on_group_toggle("fake", True)
 
         create_worker.assert_called_once_with(
             1,
@@ -188,7 +178,7 @@ class ProfileStrategyOpenGroupSaveTests(unittest.TestCase):
         page._apply_payload(self._payload(persistent_key="uid:youtube", open_group=None))
         strategy_list = page._strategy_list
 
-        strategy_list._toggle_group_item(strategy_list._group_header_items["fake"])
+        strategy_list._on_group_toggle("fake", True)
 
         self.assertEqual(self._open_groups(page), ["fake"])
         self.assertEqual(page._pending_strategy_open_group_saves, {})

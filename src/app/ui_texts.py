@@ -3409,6 +3409,18 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "{done} из {total} файлов",
         "en": "{done} of {total} files",
     },
+    "update_dialog.restart.status.done": {
+        "ru": "Готово",
+        "en": "Done",
+    },
+    "update_dialog.restart.status.active": {
+        "ru": "Выполняется",
+        "en": "In progress",
+    },
+    "update_dialog.restart.status.waiting": {
+        "ru": "Ожидает",
+        "en": "Waiting",
+    },
     "update_dialog.restart.footer": {
         "ru": "Окно закроется само, когда откроется новая версия",
         "en": "This window closes by itself when the new version opens",
@@ -6171,6 +6183,54 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     "onboarding.scene.bubble.fake_host": {"ru": "abc.ru — пропущу", "en": "abc.ru — let it pass"},
     "onboarding.scene.bubble.junk": {"ru": "Мусор — пропущу", "en": "Junk — let it pass"},
     "onboarding.scene.bubble.odd": {"ru": "Странно, но пропущу", "en": "Odd, but let it pass"},
+    "onboarding.step.strategy_try.title": {
+        "ru": "Не помогло — следующая",
+        "en": "Did not help — next one",
+    },
+    "onboarding.step.strategy_try.body": {
+        "ru": (
+            "Панель над списком показывает, какая стратегия выбрана сейчас. Откройте сайт и "
+            "проверьте.\n\n"
+            "Открылся — нажмите «Работает». Нет — «Не работает — следующая»: программа запомнит "
+            "оценку и сразу включит следующую стратегию из советуемых для этого сервиса. Так можно "
+            "пройти всю очередь, не разбираясь в названиях.\n\n"
+            "Кружок слева от стратегии показывает вашу оценку: пустой — ещё не пробовали, зелёная "
+            "галочка — работает, красный крестик — не работает."
+        ),
+        "en": (
+            "The panel above the list shows which strategy is selected now. Open the site and "
+            "check.\n\n"
+            "If it opened, press \"Works\". If not, press \"Does not work — next\": the program "
+            "remembers your mark and immediately switches to the next strategy recommended for this "
+            "service. This way you can go through the whole queue without studying the names.\n\n"
+            "The circle to the left of a strategy shows your mark: empty — not tried yet, green "
+            "check — works, red cross — does not work."
+        ),
+    },
+    "onboarding.step.strategy_find.title": {
+        "ru": "Поиск и отборы",
+        "en": "Search and filters",
+    },
+    "onboarding.step.strategy_find.body": {
+        "ru": (
+            "Поиск находит стратегию по названию, способу обхода словами («нарезка», «подделка»), "
+            "параметру или автору.\n\n"
+            "Кнопки под ним оставляют в списке только нужное: советуемые, отмеченные вами как "
+            "рабочие, ещё не опробованные или избранные.\n\n"
+            "Метка справа на стратегии говорит, где она стоит в готовых пресетах: «в 13 пресетах» — "
+            "на этом же сервисе, «на 28 сервисах» — на других. Стратегии с одинаковым названием "
+            "сложены в одну строку, кнопка «ещё 2» раскрывает варианты."
+        ),
+        "en": (
+            "Search finds a strategy by name, by bypass method in plain words, by parameter or by "
+            "author.\n\n"
+            "The buttons below keep only what you need in the list: recommended, marked by you as "
+            "working, not tried yet, or favourites.\n\n"
+            "The badge on the right of a strategy says where the ready-made presets use it: on this "
+            "same service or on other services. Strategies with the same name are folded into one "
+            "row, and the \"more\" button expands the variants."
+        ),
+    },
     "onboarding.step.strategy_choice.title": {
         "ru": "Какую стратегию выбрать? Лучшей нет",
         "en": "Which strategy to pick? There is no best one",
@@ -6182,8 +6242,10 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "Сверху — как обычно работает блокировка: проверка у провайдера читает имя сайта в "
             "первом пакете и обрывает соединение. Стратегия — это набор техник, которые мешают ей "
             "прочитать имя. Где-то помогает нарезка, где-то подсунутый фейк, где-то их сочетание.\n\n"
-            "В списке стратегии собраны в группы по этим техникам. Не помогла стратегия из одной "
-            "группы — попробуйте другую группу, а не соседнюю строку.\n\n"
+            "Первой в списке стоит группа «Советуем для этого сервиса»: в ней стратегии, которые в "
+            "готовых пресетах уже стоят на этом же сервисе, самые частые выше. С них и стоит начинать. "
+            "Ниже остальные стратегии собраны в группы по техникам: не помогла одна группа — "
+            "попробуйте другую, а не соседнюю строку.\n\n"
             "Дальше — коротко о главных техниках. Разберитесь, что делает каждая, и оставляйте то, "
             "что работает у вашего провайдера: поменяли стратегию — проверили сайт."
         ),
@@ -6193,8 +6255,10 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "Above is how blocking usually works: the provider's inspection reads the site name in "
             "the first packet and cuts the connection. A strategy is a set of techniques that stop "
             "it from reading the name. Sometimes splitting helps, sometimes a fake, sometimes both.\n\n"
-            "In the list, strategies are grouped by these techniques. If a strategy from one group "
-            "did not help, try another group rather than the next row.\n\n"
+            "The first group in the list is \"Recommended for this service\": strategies that the "
+            "ready-made presets already use for this same service, the most frequent on top. Start "
+            "with them. Below, the remaining strategies are grouped by technique: if one group did "
+            "not help, try another group rather than the next row.\n\n"
             "Next is a short look at the main techniques. Learn what each one does and keep what "
             "works for your provider: change the strategy, then check the site."
         ),

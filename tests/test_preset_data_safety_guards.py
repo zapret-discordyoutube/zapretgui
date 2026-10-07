@@ -146,17 +146,6 @@ class ProfileListQueuePresetBindingTests(unittest.TestCase):
         )
 
 
-class DynamicWidgetWorkersHaveNoParentTests(unittest.TestCase):
-    def test_list_and_filter_workers_are_not_owned_by_recreated_widgets(self) -> None:
-        import inspect
-
-        from profile.ui import profile_strategy_list_widget, profiles_list
-
-        # Виджет удаляется вместе с работающим QThread-ребёнком — Qt роняет
-        # программу. Живым воркер держит гейт, затем finished -> deleteLater.
-        self.assertNotIn("parent=self", inspect.getsource(profiles_list.ProfilesList._start_view_state_worker))
-        filter_factory = profile_strategy_list_widget.ProfileStrategyListWidget.create_strategy_filter_worker
-        self.assertNotIn("parent=self", inspect.getsource(filter_factory))
 
 
 if __name__ == "__main__":
