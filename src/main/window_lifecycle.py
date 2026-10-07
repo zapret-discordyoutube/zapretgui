@@ -104,9 +104,16 @@ class WindowLifecycleMixin:
         except Exception:
             pass
 
-    def request_exit(self, stop_dpi: bool) -> None:
-        """Общий вход для tray и adapter-слоя."""
-        self._require_application_lifecycle().request_exit(stop_dpi=bool(stop_dpi))
+    def request_exit(self, stop_dpi: bool, farewell: bool = True) -> None:
+        """Общий вход для tray и adapter-слоя.
+
+        farewell=False — выход не по команде человека (установка обновления):
+        прощальный экран не показывается.
+        """
+        self._require_application_lifecycle().request_exit(
+            stop_dpi=bool(stop_dpi),
+            farewell=bool(farewell),
+        )
 
     def exit_keep_dpi(self) -> None:
         """Полный выход из GUI без остановки DPI."""

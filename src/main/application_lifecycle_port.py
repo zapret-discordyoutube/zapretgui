@@ -41,6 +41,19 @@ class ApplicationLifecycleWindowPort:
         )
 
 
+    def begin_exit_screen(self, *, stop_dpi: bool, bypass_running: bool):
+        """Прощальный экран поверх окна. Возвращает сеанс с finish(on_done)."""
+        from ui.exit_screen import begin_exit_screen
+        from ui.navigation.text_sync import resolve_ui_language
+
+        return begin_exit_screen(
+            self._window,
+            stop_dpi=stop_dpi,
+            bypass_running=bypass_running,
+            language=resolve_ui_language(self._window),
+        )
+
+
 def build_application_lifecycle_window_port(window) -> ApplicationLifecycleWindowPort:
     return ApplicationLifecycleWindowPort(window)
 

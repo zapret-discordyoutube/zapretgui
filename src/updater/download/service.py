@@ -159,7 +159,8 @@ class UpdateInstallService(QObject):
             return
         log("Установщик запущен; приложение закрывается штатно", "🔁 UPDATE")
         self.launched.emit()
-        QTimer.singleShot(0, lambda: self._runtime_actions.request_exit(stop_dpi=False))
+        # Без прощального экрана: человек видит окно обновления, а не «до встречи».
+        QTimer.singleShot(0, lambda: self._runtime_actions.request_exit(stop_dpi=False, farewell=False))
 
     def _on_task_restart_dpi(self) -> None:
         if self._shutting_down:

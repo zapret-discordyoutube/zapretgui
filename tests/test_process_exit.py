@@ -27,6 +27,13 @@ def _ensure_app() -> QCoreApplication:
     return QCoreApplication.instance() or QCoreApplication([])
 
 
+class _ImmediateExitScreen:
+    """Прощальный экран в тестах выхода: «дальше» вызывается сразу."""
+
+    def finish(self, on_done) -> None:
+        on_done()
+
+
 class _LoopThread(QThread):
     """Поток, который послушно выходит по requestInterruption()."""
 
@@ -322,6 +329,7 @@ class ExitOrderContractTests(unittest.TestCase):
 
         calls: list[str] = []
         window_port = Mock()
+        window_port.begin_exit_screen.return_value = _ImmediateExitScreen()
         window_port.persist_geometry.side_effect = lambda **_: calls.append("persist_geometry")
         window_port.persist_sidebar_state.side_effect = lambda **_: calls.append("persist_sidebar_state")
         runtime_feature = Mock()
@@ -364,8 +372,10 @@ class ExitOrderContractTests(unittest.TestCase):
         qapplication.closeAllWindows.side_effect = lambda: calls.append("closeAllWindows")
         qapplication.quit.side_effect = lambda: calls.append("quit")
 
+        window_port = Mock()
+        window_port.begin_exit_screen.return_value = _ImmediateExitScreen()
         lifecycle = lifecycle_module.ApplicationLifecycle(
-            window_port=Mock(),
+            window_port=window_port,
             close_state=Mock(),
             runtime_feature=runtime_feature,
             premium_feature=Mock(),

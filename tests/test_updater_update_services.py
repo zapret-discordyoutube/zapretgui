@@ -442,7 +442,7 @@ class UpdateInstallServiceTests(unittest.TestCase):
         self.assertTrue(_wait(lambda: actions.request_exit.called))
 
         launched.assert_called_once_with()
-        actions.request_exit.assert_called_once_with(stop_dpi=False)
+        actions.request_exit.assert_called_once_with(stop_dpi=False, farewell=False)
         actions.mark_stopped.assert_called_once_with()
 
     def test_failure_is_reported_and_service_is_free_again(self) -> None:

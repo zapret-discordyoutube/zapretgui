@@ -20,7 +20,8 @@ class UpdaterInstallArchitectureTest(unittest.TestCase):
         source = inspect.getsource(install_service.UpdateInstallService._on_task_done)
 
         self.assertIn("QTimer.singleShot", source)
-        self.assertIn("request_exit(stop_dpi=False)", source)
+        # Без прощального экрана: программа закрывается не по команде человека.
+        self.assertIn("request_exit(stop_dpi=False, farewell=False)", source)
         self.assertNotIn("os._exit", inspect.getsource(install_service))
 
 

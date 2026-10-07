@@ -97,7 +97,7 @@ class ServersPageAssemblyTests(unittest.TestCase):
 
         self.assertTrue(_wait(lambda: self.request_exit.called))
         self.downloaded.assert_called_once_with()
-        self.request_exit.assert_called_once_with(stop_dpi=False)
+        self.request_exit.assert_called_once_with(stop_dpi=False, farewell=False)
 
     def test_startup_result_opens_window_and_details_bring_it_back_after_later(self) -> None:
         token = self.feature.begin_update_check(source="startup")

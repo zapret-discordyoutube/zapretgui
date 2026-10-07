@@ -5,6 +5,13 @@ from PyQt6.QtWidgets import QApplication
 from log.log import log
 
 
+class _ImmediateExit:
+    """Выход без прощального экрана: «дальше» вызывается сразу."""
+
+    def finish(self, on_done) -> None:
+        on_done()
+
+
 class ApplicationLifecycle:
     """Исполняет выход из приложения; окно только передаёт сюда событие."""
 
@@ -25,26 +32,55 @@ class ApplicationLifecycle:
         self._telegram_proxy_feature = telegram_proxy_feature
         self._tray_feature = tray_feature
 
-    def request_exit(self, *, stop_dpi: bool) -> None:
+    def request_exit(self, *, stop_dpi: bool, farewell: bool = True) -> None:
         if stop_dpi:
-            self.exit_stop_dpi()
+            self.exit_stop_dpi(farewell=farewell)
         else:
-            self.exit_keep_dpi()
+            self.exit_keep_dpi(farewell=farewell)
 
-    def exit_keep_dpi(self) -> None:
+    def exit_keep_dpi(self, *, farewell: bool = True) -> None:
+        """Выход без остановки DPI.
+
+        farewell=False — выход не по команде человека (программа закрывается,
+        чтобы поставить обновление): прощальный экран не показывается.
+        """
+        exit_screen = self._begin_exit_screen(farewell, stop_dpi=False)
         self._prepare_full_exit(stop_dpi=False)
         log("Запрошен выход: выйти без остановки DPI", "INFO")
-        self._quit_application()
+        exit_screen.finish(self._quit_application)
 
-    def exit_stop_dpi(self) -> None:
+    def exit_stop_dpi(self, *, farewell: bool = True) -> None:
+        exit_screen = self._begin_exit_screen(farewell, stop_dpi=True)
         self._prepare_full_exit(stop_dpi=True)
         log("Запрошен выход: остановить DPI и выйти", "INFO")
 
-        if self._start_async_stop_and_exit():
+        def _leave() -> None:
+            exit_screen.finish(self._quit_application)
+
+        if self._start_async_stop_and_exit(on_stopped=_leave):
             return
 
         self._shutdown_dpi_before_exit_sync(reason="exit_stop_dpi")
-        self._quit_application()
+        _leave()
+
+    def _begin_exit_screen(self, farewell: bool, *, stop_dpi: bool):
+        """Прощальный экран поверх окна; без него — сеанс, который выходит сразу."""
+        if farewell:
+            try:
+                return self._window_port.begin_exit_screen(
+                    stop_dpi=stop_dpi,
+                    bypass_running=self._is_bypass_running(),
+                )
+            except Exception as e:
+                log(f"Прощальный экран не показан: {e}", "DEBUG")
+        return _ImmediateExit()
+
+    def _is_bypass_running(self) -> bool:
+        try:
+            snapshot = self._runtime_feature.snapshot()
+            return bool(getattr(snapshot, "running", getattr(snapshot, "launch_running", False)))
+        except Exception:
+            return False
 
     def exit_for_windows_session_end(self) -> None:
         close_state = self._close_state
@@ -95,9 +131,9 @@ class ApplicationLifecycle:
         self._window_port.persist_sidebar_state(context="request_exit", level="DEBUG")
         self._tray_feature.hide_icon_for_exit()
 
-    def _start_async_stop_and_exit(self) -> bool:
+    def _start_async_stop_and_exit(self, *, on_stopped) -> bool:
         try:
-            return bool(self._runtime_feature.stop_and_exit(on_stopped=self._quit_application))
+            return bool(self._runtime_feature.stop_and_exit(on_stopped=on_stopped))
         except Exception as e:
             log(f"stop_and_exit_async не удалось: {e}", "WARNING")
             return False
