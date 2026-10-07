@@ -16,6 +16,7 @@ from ui.presets_menu.common import fluent_icon, make_menu_action
 
 COMMAND_RATING = "rating"
 COMMAND_FAVORITE = "favorite"
+COMMAND_DETAILS = "details"
 
 # Стратегии без готового набора аргументов оценивать нечем.
 _UNRATED_STRATEGY_IDS = frozenset({"", "none", "custom"})
@@ -52,6 +53,8 @@ def build_strategy_context_menu(
             menu_item.setData(Qt.ItemDataRole.AccessibleDescriptionRole, accessible_text)
         action_map[action] = (command, payload)
 
+    _add_action("Подробнее о стратегии", icon_name="INFO", command=COMMAND_DETAILS, payload=True)
+    menu.addSeparator()
     if rating == "work":
         _add_action("Снять отметку «Работает»", icon_name="ACCEPT", command=COMMAND_RATING, payload="")
     else:
@@ -88,6 +91,7 @@ def show_strategy_context_menu(
 
 
 __all__ = [
+    "COMMAND_DETAILS",
     "COMMAND_FAVORITE",
     "COMMAND_RATING",
     "build_strategy_context_menu",

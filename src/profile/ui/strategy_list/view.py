@@ -34,6 +34,8 @@ class StrategyListView(QListView):
     group_toggle_requested = pyqtSignal(str, bool)
     # Кнопка «ещё N» у стратегии с одноимёнными вариантами: ключ набора.
     twins_toggle_requested = pyqtSignal(str)
+    # Нажали метку на плитке («в 13 пресетах»): открыть подробности о стратегии.
+    details_requested = pyqtSignal(str)
     # Правая кнопка или клавиша меню на стратегии: (стратегия, где открыть меню).
     menu_requested = pyqtSignal(str, QPoint)
 
@@ -150,12 +152,29 @@ class StrategyListView(QListView):
     # ------------------------------------------------------------------
     # Мышь
     # ------------------------------------------------------------------
-    def _twin_key_at(self, index, pos: QPoint) -> str:
+    def _button_at(self, index, pos: QPoint) -> str:
+        """Какую кнопку плитки нажали: "twins", "details" или "" — саму плитку."""
         row = self.row_for_index(index)
-        if row is None or row.kind != ROW_STRATEGY or row.twin_count < 2:
+        if row is None or row.kind != ROW_STRATEGY:
             return ""
-        chip = self._delegate.twin_chip_rect(self.visualRect(index), row, self.font())
-        return row.item.twin_key if chip.contains(pos) else ""
+        chip, badge = self._delegate.hit_rects(self.visualRect(index), row)
+        if chip.contains(pos):
+            return "twins"
+        if badge.contains(pos):
+            return "details"
+        return ""
+
+    def mouseMoveEvent(self, event):  # noqa: N802
+        super().mouseMoveEvent(event)
+        # Над кнопкой плитки курсор-рука: видно, что метку можно нажать.
+        pos = event.position().toPoint()
+        over_button = bool(self._button_at(self.indexAt(pos), pos))
+        if over_button != bool(self.__dict__.get("_hand_cursor")):
+            self._hand_cursor = over_button
+            if over_button:
+                self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+            else:
+                self.viewport().unsetCursor()
 
     def mouseReleaseEvent(self, event):  # noqa: N802
         if event.button() != Qt.MouseButton.LeftButton:
@@ -169,9 +188,13 @@ class StrategyListView(QListView):
         if row.kind == ROW_GROUP:
             self.group_toggle_requested.emit(row.group_key, not row.expanded)
         elif row.kind == ROW_STRATEGY:
-            twin_key = self._twin_key_at(index, event.position().toPoint())
-            if twin_key:
-                self.twins_toggle_requested.emit(twin_key)
+            # Кнопки на плитке делают своё; щелчок по названию или свободному
+            # месту плитки применяет стратегию.
+            button = self._button_at(index, event.position().toPoint())
+            if button == "twins":
+                self.twins_toggle_requested.emit(row.item.twin_key)
+            elif button == "details":
+                self.details_requested.emit(row.strategy_id)
             else:
                 self.strategy_chosen.emit(row.strategy_id)
 
@@ -201,6 +224,10 @@ class StrategyListView(QListView):
             wanted = key == Qt.Key.Key_Right
             if row.expanded != wanted:
                 self.group_toggle_requested.emit(row.group_key, wanted)
+            event.accept()
+            return
+        if row is not None and row.kind == ROW_STRATEGY and key == Qt.Key.Key_F1:
+            self.details_requested.emit(row.strategy_id)
             event.accept()
             return
         if row is not None and row.kind == ROW_STRATEGY and key == Qt.Key.Key_Menu:

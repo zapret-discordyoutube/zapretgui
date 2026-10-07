@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
 from profile.strategy_list import (
     FILTER_ALL,
@@ -32,11 +32,13 @@ from profile.strategy_list import (
     visible_rows,
 )
 from profile.ui.strategy_context_menu import (
+    COMMAND_DETAILS,
     COMMAND_FAVORITE,
     COMMAND_RATING,
     can_rate_strategy,
     show_strategy_context_menu,
 )
+from profile.ui.strategy_list.details import StrategyDetails, StrategyDetailsView
 from profile.ui.strategy_list.panels import StrategyToolbar, TryNextPanel
 from profile.ui.strategy_list.view import StrategyListView
 from ui.accessibility import set_control_accessibility, set_state_text
@@ -47,7 +49,7 @@ LONG_LIST_MIN_ROWS = 30
 
 _LIST_DESCRIPTION = (
     "Стрелки ходят по стратегиям, Enter или Пробел выбирает стратегию либо сворачивает группу. "
-    "Клавиша меню или правая кнопка мыши открывает оценку стратегии и избранное. "
+    "Клавиша меню или правая кнопка мыши открывает оценку стратегии и избранное, F1 — подробности о стратегии. "
     "Ctrl+F ставит курсор в поиск."
 )
 
@@ -63,6 +65,9 @@ class ProfileStrategyListWidget(QWidget):
     strategy_rating_requested = pyqtSignal(str, str)
     # Избранное: (стратегия, добавить или убрать).
     strategy_favorite_requested = pyqtSignal(str, bool)
+    # Открыта или закрыта страница подробностей: название стратегии, пусто —
+    # снова виден список. Страница профиля дописывает его в строку пути.
+    details_changed = pyqtSignal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -71,7 +76,11 @@ class ProfileStrategyListWidget(QWidget):
         self._facts: dict = {}
         self._states: dict = {}
         self._usage: dict = {}
+        self._experience: dict = {}
+        self._places: dict = {}
         self._current_strategy_id = "none"
+        # Стратегия, чьи подробности открыты; пусто — виден список.
+        self._details_id = ""
         # Что выбрал человек.
         self._grouping = GROUPING_METHOD
         self._grouping_chosen_here = False
@@ -82,9 +91,20 @@ class ProfileStrategyListWidget(QWidget):
         self._open_group_token = ""
         self._plan = StrategyListPlan()
 
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self._pages = QStackedWidget(self)
+        outer.addWidget(self._pages)
+        browse = QWidget(self._pages)
+        layout = QVBoxLayout(browse)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
+        self._pages.addWidget(browse)
+        self._details_view = StrategyDetailsView(self._pages)
+        self._details_view.strategy_chosen.connect(self._on_strategy_chosen)
+        self._details_view.rating_requested.connect(self.strategy_rating_requested)
+        self._details_view.favorite_requested.connect(self.strategy_favorite_requested)
+        self._pages.addWidget(self._details_view)
 
         self._try_panel = TryNextPanel(self)
         self._try_panel.rated.connect(self._on_current_rated)
@@ -105,6 +125,7 @@ class ProfileStrategyListWidget(QWidget):
         self._list.group_toggle_requested.connect(self._on_group_toggle)
         self._list.twins_toggle_requested.connect(self._on_twins_toggle)
         self._list.menu_requested.connect(self._show_strategy_menu)
+        self._list.details_requested.connect(self.show_details)
         self._toolbar.search.navigate_results.connect(self._list.move_from_search)
         set_control_accessibility(self._list, name="Список готовых стратегий", description=_LIST_DESCRIPTION)
         layout.addWidget(self._list, 1)
@@ -137,6 +158,8 @@ class ProfileStrategyListWidget(QWidget):
         open_group: str | None = None,
         grouping: str | None = None,
         usage=None,
+        experience=None,
+        places=None,
     ) -> None:
         """Показывает стратегии профиля.
 
@@ -155,6 +178,11 @@ class ProfileStrategyListWidget(QWidget):
         if usage is not None:
             # None — частота та же, что прислали раньше (обновились только оценки).
             self._usage = dict(usage)
+        if experience is not None:
+            # Отметки человека у других профилей (None — те же, что были).
+            self._experience = dict(experience)
+        if places is not None:
+            self._places = dict(places)
         self._current_strategy_id = str(current_strategy_id or "none").strip() or "none"
         if grouping is not None and not self._grouping_chosen_here:
             self._grouping = normalize_strategy_grouping(grouping)
@@ -165,6 +193,7 @@ class ProfileStrategyListWidget(QWidget):
             # Другой профиль: раскрытое относилось к прежнему списку.
             self._open_group_token = token
             self._open_twins.clear()
+            self.close_details()
         plan = self._build_plan()
         if owner_changed or self._open_groups_stale(plan):
             self._open_groups = self._initial_open_groups(plan, open_group if open_group_token is not None else None)
@@ -178,6 +207,64 @@ class ProfileStrategyListWidget(QWidget):
             return
         self._current_strategy_id = next_id
         self._refresh(open_current_group=True)
+
+    # ------------------------------------------------------------------
+    # Подробности о стратегии
+    # ------------------------------------------------------------------
+    def details_open(self) -> bool:
+        return bool(self._details_id)
+
+    def show_details(self, strategy_id: str) -> None:
+        """Открывает страницу подробностей вместо списка."""
+        strategy_id = str(strategy_id or "")
+        if strategy_id not in self._facts:
+            return
+        self._details_id = strategy_id
+        self._sync_details()
+        self._pages.setCurrentWidget(self._details_view)
+        self.details_changed.emit(self._facts[strategy_id].name)
+
+    def close_details(self) -> None:
+        if not self._details_id:
+            return
+        strategy_key = f"i:{self._details_id}"
+        self._details_id = ""
+        self._pages.setCurrentIndex(0)
+        # Возврат к тому же месту списка, с которого уходили.
+        self._list.set_current_key(strategy_key, scroll=True)
+        self._list.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.details_changed.emit("")
+
+    def _sync_details(self) -> None:
+        """Страница подробностей показывает то же состояние, что и список."""
+        facts = self._facts.get(self._details_id)
+        if facts is None:
+            if self._details_id:
+                self.close_details()
+            return
+        state = self._states.get(facts.strategy_id)
+        usage = self._usage.get(facts.strategy_id)
+        item = self._plan.item(facts.strategy_id)
+        self._details_view.show_details(
+            StrategyDetails(
+                strategy_id=facts.strategy_id,
+                name=facts.name,
+                plain_label=facts.plain_label,
+                family_key=facts.family_key,
+                family_color=item.family_color if item is not None else "",
+                args=facts.args,
+                description=facts.description,
+                author=facts.author,
+                label=facts.label,
+                old_name=facts.old_name,
+                rating=str(getattr(state, "rating", "") or ""),
+                favorite=bool(getattr(state, "favorite", False)),
+                is_current=facts.strategy_id == self._current_strategy_id,
+                places=tuple(self._places.get(facts.strategy_id, ())),
+                same_service=int(getattr(usage, "same_service", 0) or 0),
+                personal=tuple(self._experience.get(facts.strategy_id) or (0, 0)),
+            )
+        )
 
     def onboarding_target(self, name: str):
         """Что подсветить обучающей экскурсии; None — этой части сейчас нет на экране."""
@@ -199,6 +286,7 @@ class ProfileStrategyListWidget(QWidget):
                 facts=self._facts,
                 states=self._states,
                 usage=self._usage,
+                experience=self._experience,
                 current_strategy_id=self._current_strategy_id,
                 query=self._search.text(),
                 quick_filter=self._quick_filter,
@@ -253,6 +341,7 @@ class ProfileStrategyListWidget(QWidget):
         self._toolbar.set_summary(plan.visible_count, plan.total_count)
         self._sync_try_panel(plan)
         self._sync_list_state_text(plan)
+        self._sync_details()
 
     def _sync_try_panel(self, plan: StrategyListPlan) -> None:
         current_id = plan.current_strategy_id
@@ -349,7 +438,9 @@ class ProfileStrategyListWidget(QWidget):
             rating=str(getattr(state, "rating", "") or ""),
             favorite=bool(getattr(state, "favorite", False)),
         )
-        if command == COMMAND_RATING:
+        if command == COMMAND_DETAILS:
+            self.show_details(strategy_id)
+        elif command == COMMAND_RATING:
             self.strategy_rating_requested.emit(strategy_id, str(value or ""))
         elif command == COMMAND_FAVORITE:
             self.strategy_favorite_requested.emit(strategy_id, bool(value))

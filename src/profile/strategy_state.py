@@ -69,6 +69,32 @@ class ProfileStrategyStateStore:
         }
         return states, _open_group_from_row(profile_row)
 
+    def get_strategy_experience(self, profile_key: str) -> dict[str, tuple[int, int]]:
+        """Что человек отметил у ДРУГИХ профилей: {стратегия: (работает, не работает)}.
+
+        По этому список стратегий учится на отметках человека: стратегия,
+        которая уже помогла на двух сервисах, на третьем пробуется первой.
+        Отметки самого профиля сюда не входят — они у него и так на виду.
+        """
+        own_key = _normalize_profile_key(profile_key)
+        profiles = self._read().get("profiles")
+        experience: dict[str, list[int]] = {}
+        if not isinstance(profiles, dict):
+            return {}
+        for other_key, profile_row in profiles.items():
+            if other_key == own_key or not isinstance(profile_row, dict):
+                continue
+            strategies = profile_row.get("strategies")
+            if not isinstance(strategies, dict):
+                continue
+            for strategy_id, row in strategies.items():
+                rating = _normalize_rating(row.get("rating")) if isinstance(row, dict) else ""
+                if rating not in ("work", "notwork"):
+                    continue
+                counts = experience.setdefault(str(strategy_id), [0, 0])
+                counts[0 if rating == "work" else 1] += 1
+        return {strategy_id: (counts[0], counts[1]) for strategy_id, counts in experience.items()}
+
     def set_strategy_state(
         self,
         profile_key: str,

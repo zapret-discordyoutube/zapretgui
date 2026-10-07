@@ -17,7 +17,7 @@ from PyQt6.QtCore import QModelIndex, QRect, QSize, Qt
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
-from profile.strategy_list import BADGE_RECOMMENDED, BADGE_WARNING, ROW_GROUP, ROW_SECTION, VisibleRow
+from profile.strategy_list import BADGE_PERSONAL, BADGE_RECOMMENDED, BADGE_WARNING, ROW_GROUP, ROW_SECTION, VisibleRow
 from profile.ui.strategy_list.icons import strategy_icon
 from profile.ui.strategy_list.model import ROW_ROLE
 from profile.ui.widgets.payload_badge import PAYLOAD_BADGE_HEIGHT, paint_payload_badge, payload_badge_width
@@ -37,8 +37,10 @@ _TILE_ICON_SIZE = 28
 _ROW_ICON_SIZE = 20
 _STAR_SIZE = 11
 _BADGE_HEIGHT = 18
+# Сколько места обязано остаться названию: иначе метки справа не рисуются.
+_MIN_TEXT_WIDTH = 150
 _FAVORITE_ICON = ("fa5s.star", "#d9a441")
-_BADGE_COLORS = {BADGE_RECOMMENDED: "#e5b454", BADGE_WARNING: "#e0795a"}
+_BADGE_COLORS = {BADGE_RECOMMENDED: "#e5b454", BADGE_WARNING: "#e0795a", BADGE_PERSONAL: "#5fbf7a"}
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,8 @@ def strategy_tooltip(row: VisibleRow) -> str:
         marks.append("Звезда: стратегия у вас в избранном.")
     if row.twin_count > 1:
         marks.append(f"У стратегии {row.twin_count} варианта с этим названием — они отличаются источником.")
+    if item.badge_text:
+        marks.append(f"Метка «{item.badge_text}» — кнопка: открывает подробности о стратегии.")
     return "\n\n".join(part for part in ("\n".join(marks), item.tooltip, MENU_HINT) if part)
 
 
@@ -169,14 +173,45 @@ class StrategyListDelegate(QStyledItemDelegate):
         painter.restore()
 
     # ------------------------------------------------------------------
-    def twin_chip_rect(self, option_rect: QRect, row: VisibleRow, font: QFont) -> QRect:
-        """Где на плитке стоит кнопка вариантов; пустой прямоугольник — её нет."""
-        text = twin_chip_text(row)
-        if not text:
-            return QRect()
+    def _side_rects(self, rect: QRect, row: VisibleRow, style: _Style, left: int) -> tuple[QRect, QRect, QRect, int]:
+        """Где на плитке стоят кнопка вариантов, плашка «Выбрана» и метка.
+
+        Одна раскладка для отрисовки и для щелчка мыши: кнопка нажимается
+        ровно там, где нарисована. Возвращает ещё правую границу текста.
+        """
+        item = row.item
+        center_y = rect.center().y()
+        right = rect.right() - 10
+        chip_rect = QRect()
+        chip_text = twin_chip_text(row)
+        if chip_text:
+            width = style.small_metrics.horizontalAdvance(chip_text) + 26
+            chip_rect = QRect(right - width, center_y - _BADGE_HEIGHT // 2, width, _BADGE_HEIGHT)
+            right = chip_rect.left() - 8
+        selected_rect = QRect()
+        if item.is_current and right - style.selected_width - left >= _MIN_TEXT_WIDTH:
+            selected_rect = QRect(right - style.selected_width, center_y - 10, style.selected_width, 20)
+            right = selected_rect.left() - 8
+        badge_rect = QRect()
+        if item.badge_text:
+            width = style.small_metrics.horizontalAdvance(item.badge_text) + 14
+            if right - width - left >= _MIN_TEXT_WIDTH:
+                badge_rect = QRect(right - width, center_y - _BADGE_HEIGHT // 2, width, _BADGE_HEIGHT)
+                right = badge_rect.left() - 8
+        return chip_rect, selected_rect, badge_rect, right
+
+    def _text_left(self, rect: QRect) -> int:
+        icon_size = _TILE_ICON_SIZE if rect.height() >= 36 else _ROW_ICON_SIZE
+        return rect.left() + 14 + icon_size + 10
+
+    def hit_rects(self, option_rect: QRect, row: VisibleRow) -> tuple[QRect, QRect]:
+        """Кнопки плитки для щелчка мыши: (варианты, метка-подробности)."""
+        if row.item is None:
+            return QRect(), QRect()
+        style = self._pass_style or _build_style(self._view.font())
         rect = self._view.row_paint_rect(option_rect)
-        width = QFontMetrics(_smaller(font)).horizontalAdvance(text) + 26
-        return QRect(rect.right() - 10 - width, rect.center().y() - _BADGE_HEIGHT // 2, width, _BADGE_HEIGHT)
+        chip_rect, _selected, badge_rect, _right = self._side_rects(rect, row, style, self._text_left(rect))
+        return chip_rect, badge_rect
 
     def _paint_pill(self, painter: QPainter, rect: QRect, text: str, color: QColor, font: QFont, *, strong: bool) -> None:
         fill = QColor(color)
@@ -237,27 +272,13 @@ class StrategyListDelegate(QStyledItemDelegate):
         paint_icon_motion(painter, icon_rect, hover, index, lambda: painter.drawPixmap(icon_rect, pixmap))
         if dimmed:
             painter.setOpacity(1.0)
-        left = icon_rect.right() + 11
+        left = self._text_left(rect)
 
         # Справа по порядку от края: кнопка вариантов, плашка «Выбрана», метка
         # про готовые пресеты, звезда избранного, типы пакетов. Что не
         # помещается рядом с названием — не рисуется.
-        min_text = 150
-        chip_rect = self.twin_chip_rect(option.rect, row, style.font) if row.twin_count > 1 else QRect()
-        if chip_rect.width() > 0:
-            right = chip_rect.left() - 8
-
-        selected_rect = QRect()
-        if item.is_current and right - style.selected_width - left >= min_text:
-            selected_rect = QRect(right - style.selected_width, center_y - 10, style.selected_width, 20)
-            right = selected_rect.left() - 8
-
-        badge_rect = QRect()
-        if item.badge_text:
-            width = style.small_metrics.horizontalAdvance(item.badge_text) + 14
-            if right - width - left >= min_text:
-                badge_rect = QRect(right - width, center_y - _BADGE_HEIGHT // 2, width, _BADGE_HEIGHT)
-                right = badge_rect.left() - 8
+        min_text = _MIN_TEXT_WIDTH
+        chip_rect, selected_rect, badge_rect, right = self._side_rects(rect, row, style, left)
 
         star_rect = QRect()
         if item.favorite and right - _STAR_SIZE - left >= min_text:

@@ -17,6 +17,7 @@
 from profile.strategy_list.facts import StrategyFacts, build_strategy_facts
 from profile.strategy_list.plan import (
     BADGE_NEUTRAL,
+    BADGE_PERSONAL,
     BADGE_RECOMMENDED,
     BADGE_WARNING,
     FILTER_ALL,
@@ -53,6 +54,7 @@ from profile.strategy_list.rows import (
 
 __all__ = [
     "BADGE_NEUTRAL",
+    "BADGE_PERSONAL",
     "BADGE_RECOMMENDED",
     "BADGE_WARNING",
     "FILTER_ALL",

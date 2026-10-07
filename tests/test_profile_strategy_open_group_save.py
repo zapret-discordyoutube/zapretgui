@@ -231,3 +231,27 @@ class ProfileStrategyOpenGroupWorkerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProfileStrategyDetailsBreadcrumbTests(ProfileStrategyOpenGroupSaveTests):
+    __test__ = True
+    """Подробности о стратегии — следующий шаг строки пути страницы профиля."""
+
+    def _crumbs(self, page) -> list[str]:
+        return [item.text for item in page._breadcrumb.items]
+
+    def test_details_add_breadcrumb_hide_tabs_and_crumb_returns_to_list(self) -> None:
+        page = self._page()
+        page._profile_key = "profile:0"
+        page._apply_payload(self._payload(persistent_key="uid:youtube", open_group=None))
+        strategy_list = page._strategy_list
+        before = self._crumbs(page)
+
+        strategy_list.show_details("host-05")
+        self.assertEqual(self._crumbs(page), [*before, "host 05"])
+        self.assertTrue(page._strategy_tabs.isHidden())
+
+        page._on_breadcrumb_item_changed("profile")
+        self.assertFalse(strategy_list.details_open())
+        self.assertEqual(self._crumbs(page), before)
+        self.assertFalse(page._strategy_tabs.isHidden())

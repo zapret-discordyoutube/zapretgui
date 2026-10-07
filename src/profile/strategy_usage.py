@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from profile.derived_cache import (
@@ -53,6 +53,19 @@ class BuiltinStrategyUsage:
     by_service: dict[str, dict[tuple[str, str], int]]
     # {(каталог, id стратегии): число разных сервисов}
     services: dict[tuple[str, str], int]
+    # {сервис: его название в готовых пресетах} — для страницы подробностей.
+    service_names: dict[str, str] = field(default_factory=dict)
+
+    def places(self, catalog_name: str, strategy_id: str) -> tuple[tuple[str, int], ...]:
+        """Где стратегия стоит в готовых пресетах: (название сервиса, число пресетов)."""
+        key = (str(catalog_name or ""), str(strategy_id or ""))
+        rows = [
+            (self.service_names.get(service, service), int(counts[key]))
+            for service, counts in self.by_service.items()
+            if key in counts
+        ]
+        rows.sort(key=lambda row: (-row[1], row[0].lower()))
+        return tuple(rows)
 
     def for_profile(self, profile, catalog_name: str | None = None) -> dict[str, StrategyUsage]:
         """Частота стратегий каталога этого профиля: {id стратегии: частота}."""
@@ -118,6 +131,7 @@ class _CatalogIndex:
 def count_builtin_strategy_usage(preset_texts, *, engine: str, catalogs) -> BuiltinStrategyUsage:
     """Считает частоту по текстам готовых пресетов: [(имя файла, текст), ...]."""
     by_service: dict[str, dict[tuple[str, str], int]] = {}
+    service_names: dict[str, str] = {}
     indexes: dict[str, _CatalogIndex] = {}
     for source_name, text in preset_texts:
         try:
@@ -143,6 +157,7 @@ def count_builtin_strategy_usage(preset_texts, *, engine: str, catalogs) -> Buil
             if vote in seen:
                 continue
             seen.add(vote)
+            service_names.setdefault(service, str(profile.name or profile.display_name or service))
             counts = by_service.setdefault(service, {})
             counts[vote[1]] = counts.get(vote[1], 0) + 1
 
@@ -150,7 +165,7 @@ def count_builtin_strategy_usage(preset_texts, *, engine: str, catalogs) -> Buil
     for counts in by_service.values():
         for strategy in counts:
             services[strategy] = services.get(strategy, 0) + 1
-    return BuiltinStrategyUsage(by_service=by_service, services=services)
+    return BuiltinStrategyUsage(by_service=by_service, services=services, service_names=service_names)
 
 
 def load_builtin_strategy_usage(app_paths, engine: str, catalogs, catalogs_signature) -> BuiltinStrategyUsage:

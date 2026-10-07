@@ -59,6 +59,7 @@ class StrategyMenuItemsTests(_MenuCase):
         self.assertEqual(
             self._menu(),
             {
+                "Подробнее о стратегии": ("details", True),
                 "Работает": (COMMAND_RATING, "work"),
                 "Не работает": (COMMAND_RATING, "notwork"),
                 "В избранное": (COMMAND_FAVORITE, True),
@@ -69,6 +70,7 @@ class StrategyMenuItemsTests(_MenuCase):
         self.assertEqual(
             self._menu(rating="work"),
             {
+                "Подробнее о стратегии": ("details", True),
                 "Снять отметку «Работает»": (COMMAND_RATING, ""),
                 "Не работает": (COMMAND_RATING, "notwork"),
                 "В избранное": (COMMAND_FAVORITE, True),
@@ -77,6 +79,7 @@ class StrategyMenuItemsTests(_MenuCase):
         self.assertEqual(
             self._menu(rating="notwork", favorite=True),
             {
+                "Подробнее о стратегии": ("details", True),
                 "Работает": (COMMAND_RATING, "work"),
                 "Снять отметку «Не работает»": (COMMAND_RATING, ""),
                 "Убрать из избранного": (COMMAND_FAVORITE, False),

@@ -432,3 +432,91 @@ class BuiltinUsageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LearningOrderTests(unittest.TestCase):
+    """Программа учится на отметках человека с других профилей."""
+
+    def test_queue_starts_with_proven_and_ends_with_failed_elsewhere(self) -> None:
+        usage = {"fake-05": StrategyUsage(same_service=3, services=3)}
+        plan = _plan(usage=usage, experience={"split-04": (1, 0), "split-09": (3, 1), "fake-08": (0, 2), "mix-1": (1, 4)})
+
+        self.assertEqual(plan.queue[:3], ("split-09", "split-04", "fake-05"))
+        self.assertEqual(plan.queue[-2:], ("fake-08", "mix-1"))
+        self.assertEqual(len(plan.queue), len(set(plan.queue)))
+
+    def test_method_that_keeps_failing_is_tried_after_other_methods(self) -> None:
+        from profile.strategy_list.plan import family_scores
+
+        facts = build_strategy_facts(_entries())
+        states = {key: ProfileStrategyState(rating="notwork") for key in ("fake-00", "fake-01", "fake-02")}
+        plan = _plan(states=states)
+        families = [facts[strategy_id].family_key for strategy_id in plan.queue[:6]]
+
+        self.assertEqual(family_scores(facts, states, {}), {"fake": -3})
+        # «Подделка» трижды не помогла: в каждом круге она теперь последняя.
+        self.assertEqual(families, ["fake_split", "split", "fake", "fake_split", "split", "fake"])
+
+    def test_personal_badge_needs_more_successes_than_failures(self) -> None:
+        self.assertEqual(strategy_badge(StrategyUsage(same_service=5, services=5), "", (2, 1)), ("у вас работает · 2", "personal"))
+        self.assertEqual(strategy_badge(StrategyUsage(same_service=5, services=5), "", (1, 3)), ("в 5 пресетах", BADGE_RECOMMENDED))
+
+
+class KnowledgeTests(unittest.TestCase):
+    def test_steps_follow_strategy_lines_in_order(self) -> None:
+        from profile.strategy_list.knowledge import explain_strategy
+
+        steps = explain_strategy(
+            "--lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6:tls_mod=rnd,dupsid,sni=www.google.com\n"
+            "--out-range=-d8\n"
+            "--lua-desync=multisplit:pos=1,midsld:seqovl=5"
+        )
+
+        self.assertEqual([step.function for step in steps], ["fake", "multisplit"])
+        self.assertEqual(steps[0].title, "Подделка")
+        self.assertIn("Поддельные данные: стандартный запрос защищённого соединения к www.microsoft.com.", steps[0].notes)
+        self.assertIn("Отправляется 6 раз подряд.", steps[0].notes)
+        self.assertTrue(any("подпись" in note for note in steps[0].notes))
+        self.assertTrue(any("имя сайта www.google.com" in note for note in steps[0].notes))
+        # Подделка испорчена подписью — общее предупреждение о порче ей не нужно.
+        self.assertEqual(steps[0].caution, "")
+        self.assertIn("Места разреза: 1,midsld.", steps[1].notes)
+        self.assertTrue(any("скрытая подделка" in note for note in steps[1].notes))
+
+    def test_unfooled_fake_and_fixed_ttl_carry_warnings(self) -> None:
+        from profile.strategy_list.knowledge import explain_strategy
+
+        plain = explain_strategy("--lua-desync=fake:blob=x")[0]
+        ttl = explain_strategy("--lua-desync=fake:blob=x:ip_ttl=4")[0]
+        timestamps = explain_strategy("--lua-desync=fake:blob=x:tcp_ts=-1000")[0]
+
+        self.assertIn("«испортить»", plain.caution)
+        self.assertIn("у другого провайдера может не подойти", ttl.caution)
+        self.assertIn("метки времени", timestamps.caution)
+
+    def test_own_and_unknown_functions_are_named_honestly(self) -> None:
+        from profile.strategy_list.knowledge import explain_strategy
+
+        own, unknown = explain_strategy("--lua-desync=fakemultisplit:pos=1\n--lua-desync=tls_weird_thing")
+
+        self.assertIn("нет в оригинальном Zapret 2", own.caution)
+        self.assertEqual(unknown.title, "tls_weird_thing")
+        self.assertIn("описания для неё нет", unknown.text)
+
+    def test_every_catalog_function_gets_a_step(self) -> None:
+        from profile.strategy_list.knowledge import explain_strategy
+
+        catalog = _parse_catalog_file(SRC / "system/strategy_catalogs/winws2/tcp.txt", "tcp")
+        for strategy_id, entry in catalog.items():
+            lines = [line for line in entry.args.splitlines() if line.startswith("--lua-desync=")]
+            self.assertEqual(len(explain_strategy(entry.args)), len(lines), strategy_id)
+
+
+class PlacesTests(unittest.TestCase):
+    def test_places_list_services_with_preset_counts(self) -> None:
+        usage, (youtube, _discord) = BuiltinUsageTests()._usage(
+            [("--lua-desync=fake:blob=x", "--lua-desync=fake:blob=x"), ("--lua-desync=fake:blob=x", "--lua-desync=multisplit:pos=1")]
+        )
+
+        self.assertEqual(usage.places("tcp", "fake"), (("YouTube", 2), ("Discord", 1)))
+        self.assertEqual(usage.places("tcp", "missing"), ())

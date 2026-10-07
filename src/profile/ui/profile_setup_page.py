@@ -805,6 +805,7 @@ class ProfileSetupPageBase(BasePage):
         # Оценку и избранное ставят из меню стратегии по правой кнопке мыши.
         self._strategy_list.strategy_rating_requested.connect(self._on_strategy_rating_requested)
         self._strategy_list.strategy_favorite_requested.connect(self._on_strategy_favorite_requested)
+        self._strategy_list.details_changed.connect(self._on_strategy_details_changed)
         self._strategy_stack.addWidget(self._strategy_list)
 
         # Вкладки списка и текста профиля собираются при первом открытии.
@@ -1195,6 +1196,11 @@ class ProfileSetupPageBase(BasePage):
             self._breadcrumb.addItem("control", breadcrumb_key[0])
             self._breadcrumb.addItem("profiles", breadcrumb_key[1])
             self._breadcrumb.addItem("profile", breadcrumb_key[2])
+            # Открыты подробности о стратегии — это следующий шаг пути.
+            details_name = str(self.__dict__.get("_strategy_details_name") or "")
+            if details_name:
+                breadcrumb_key = (*breadcrumb_key, details_name)
+                self._breadcrumb.addItem("strategy", details_name)
             set_breadcrumb_accessibility(self._breadcrumb, breadcrumb_key)
         finally:
             self._breadcrumb.blockSignals(False)
@@ -1203,11 +1209,26 @@ class ProfileSetupPageBase(BasePage):
         # Клик по крошке уже удалил из BreadcrumbBar элементы правее выбранного —
         # восстанавливаем полный путь до навигации, иначе при возврате на эту же
         # страницу крошки остаются обрезанными.
+        if key == "profile":
+            # Возврат из подробностей о стратегии к списку стратегий профиля.
+            strategy_list = self.__dict__.get("_strategy_list")
+            if strategy_list is not None and strategy_list.details_open():
+                strategy_list.close_details()
+                return
         self._rebuild_breadcrumb()
         if key == "control":
             self._open_root()
         elif key == "profiles":
             self._open_profiles()
+
+    def _on_strategy_details_changed(self, name: str) -> None:
+        """Подробности о стратегии занимают всю страницу: вкладки на это время убраны."""
+        self._strategy_details_name = str(name or "")
+        if self._strategy_tabs is not None:
+            # setHidden, а не «видимость, если изменилась»: страница может быть
+            # ещё не показана, и тогда вкладки формально и так «не видны».
+            self._strategy_tabs.setHidden(bool(self._strategy_details_name))
+        self._rebuild_breadcrumb()
 
     def _on_update_user_profile_clicked(self) -> None:
         if self._payload is None:
@@ -1786,6 +1807,8 @@ class ProfileSetupPageBase(BasePage):
                 open_group=getattr(payload, "strategy_open_group", None),
                 grouping=getattr(payload, "strategy_grouping", None),
                 usage=getattr(payload, "strategy_usage", None),
+                experience=getattr(payload, "strategy_experience", None),
+                places=getattr(payload, "strategy_places", None),
             )
             set_widget_enabled_if_changed(self._strategy_list, not (item.in_preset and not item.enabled))
             self._list_file_dirty = True

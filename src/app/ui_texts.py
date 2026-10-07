@@ -6218,8 +6218,10 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "Кнопки под ним оставляют в списке только нужное: советуемые, отмеченные вами как "
             "рабочие, ещё не опробованные или избранные.\n\n"
             "Метка справа на стратегии говорит, где она стоит в готовых пресетах: «в 13 пресетах» — "
-            "на этом же сервисе, «на 28 сервисах» — на других. Стратегии с одинаковым названием "
-            "сложены в одну строку, кнопка «ещё 2» раскрывает варианты."
+            "на этом же сервисе, «на 28 сервисах» — на других, «у вас работает» — вы сами отмечали её "
+            "рабочей на других профилях. Метка — это кнопка: она открывает подробности о стратегии. "
+            "Щелчок по названию применяет стратегию.\n\n"
+            "Стратегии с одинаковым названием сложены в одну строку, кнопка «ещё 2» раскрывает варианты."
         ),
         "en": (
             "Search finds a strategy by name, by bypass method in plain words, by parameter or by "
@@ -6227,8 +6229,11 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "The buttons below keep only what you need in the list: recommended, marked by you as "
             "working, not tried yet, or favourites.\n\n"
             "The badge on the right of a strategy says where the ready-made presets use it: on this "
-            "same service or on other services. Strategies with the same name are folded into one "
-            "row, and the \"more\" button expands the variants."
+            "same service or on other services, or that you marked it as working on other profiles. "
+            "The badge is a button: it opens the details of the strategy. A click on the name applies "
+            "the strategy.\n\n"
+            "Strategies with the same name are folded into one row, and the \"more\" button expands "
+            "the variants."
         ),
     },
     "onboarding.step.strategy_choice.title": {

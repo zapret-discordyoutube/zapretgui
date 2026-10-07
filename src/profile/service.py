@@ -22,6 +22,7 @@ from ui.performance_metrics import log_ui_timing_since
 from .derived_cache import (
     PresetSourcesCache,
     ProfileDerivedCache,
+    catalog_name_for_profile,
     profile_raw_text,
     profile_strategy_shape,
     strategy_identity_lines,
@@ -676,13 +677,19 @@ class ProfilePresetService:
             profile.persistent_key,
             tuple(core.strategy_entries),
         )
+        builtin_usage = load_builtin_strategy_usage(self._app_paths, self._engine, catalogs, catalogs_signature)
+        usage_catalog = catalog_name_for_profile(profile)
         return ProfileSetupPayload(
             item=item,
             strategy_entries=dict(core.strategy_entries),
             strategy_states=strategy_states,
-            strategy_usage=load_builtin_strategy_usage(
-                self._app_paths, self._engine, catalogs, catalogs_signature
-            ).for_profile(profile),
+            strategy_usage=builtin_usage.for_profile(profile, usage_catalog),
+            strategy_places={
+                strategy_id: builtin_usage.places(usage_catalog, strategy_id)
+                for (catalog_name, strategy_id) in builtin_usage.services
+                if catalog_name == usage_catalog
+            },
+            strategy_experience=self._state_store.get_strategy_experience(profile.persistent_key),
             raw_profile_text=core.raw_profile_text,
             raw_strategy_text=raw_strategy_text,
             match_summary=core.match_summary,
