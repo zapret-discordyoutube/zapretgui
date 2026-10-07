@@ -25,9 +25,10 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
 
 from PyQt6 import sip
-from PyQt6.QtCore import QElapsedTimer, QEvent, QPoint, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient, QShortcut
 from PyQt6.QtWidgets import QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -71,9 +72,9 @@ MOTION_TAU_MS = 90.0
 FADE_MS = 260.0
 CONTENT_FADE_MS = 240.0
 PULSE_PERIOD_MS = 1700.0
-# Украшения карточки: прогресс сверху и точки шагов.
+# Украшения карточки: прогресс сверху и строка глав.
 PROGRESS_TAU_MS = 180.0
-DOTS_TAU_MS = 110.0
+CHAPTER_TAU_MS = 140.0
 SHINE_PERIOD_MS = 2600.0
 SHINE_SHARE = 0.45  # доля периода, пока по полоске бежит блик
 FLASH_MS = 450.0
@@ -91,6 +92,10 @@ HOLE_RADIUS = 10.0
 DIM_ALPHA = 140
 HERO_DIM_ALPHA = 175
 BLUR_DELAY_MS = 280
+# Отступ от края прокручиваемой области до цели: на странице — с запасом под
+# карточку, в боковом меню — небольшой.
+PAGE_SCROLL_MARGIN = 96
+NAV_SCROLL_MARGIN = 12
 BLUR_DELAY_AFTER_PAGE_MS = 520
 
 
@@ -136,149 +141,133 @@ def _fill_placeholders(text: str, values: dict) -> str:
     return _PLACEHOLDER.sub(lambda match: str(values.get(match.group(1)) or "—"), str(text or ""))
 
 
-class _ProgressDots(QWidget):
-    """Точки прогресса: текущий шаг — вытянутая акцентная «таблетка».
+@dataclass(frozen=True, slots=True)
+class TourChapter:
+    """Глава тура: подряд идущие шаги с одним названием."""
 
-    По точке можно нажать и перейти на любой шаг. Когда шагов много, точки
-    ужимаются под ширину карточки, а не вылезают за неё.
+    title: str
+    # Номер первого шага главы среди шагов тура и сколько их в ней.
+    first: int
+    count: int
+    # Подсказка при наведении на отрезок главы.
+    hint: str = ""
+
+
+class _ChapterBar(QWidget):
+    """Главы тура отрезками: пройденные закрашены, текущая заполняется по шагам.
+
+    Раньше здесь стоял ряд точек — по одной на шаг. Когда шагов стало под
+    сотню, точка сжалась до трёх пикселей, и попасть по ней было нельзя.
+    Глав около десятка: отрезок широкий, нажимается на всю высоту строки.
+    Нажатие ведёт к первому шагу главы, дальше — «Далее» или стрелки.
     """
 
     stepClicked = pyqtSignal(int)
 
-    DOT = 6.0
-    ACTIVE = 18.0
-    SPACING = 6.0
-    MIN_DOT = 3.0
-    MIN_SPACING = 2.0
+    HEIGHT = 22
+    BAR = 6.0
+    HOVER_BAR = 10.0
+    GAP = 5.0
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._count = 0
-        self._current = 0
-        # Плавающий «текущий шаг»: таблетка перетекает к нему, а не прыгает.
-        self._position = 0.0
-        self._glow = 0.0
+        self._chapters: list[TourChapter] = []
+        self._step = 0
+        # Плавающее число пройденных шагов: заливка дотекает до нового шага, а не прыгает.
+        self._progress = 0.0
         self._hover = -1
-        self._titles: list[str] = []
         self._tooltip = FluentItemToolTipController(self)
-        self.setFixedHeight(16)
+        self.setFixedHeight(self.HEIGHT)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def set_progress(self, current: int, count: int, titles: list[str] | None = None) -> None:
-        count = max(0, int(count))
-        if count != self._count:
-            # Новый тур или другое число шагов — встаём сразу, без перетекания.
-            self._position = float(max(0, int(current)))
-        self._current = max(0, int(current))
-        self._count = count
-        if titles is not None:
-            self._titles = list(titles)
+    def set_chapters(self, chapters: list[TourChapter]) -> None:
+        self._chapters = list(chapters)
+        self._progress = float(self._step + 1)
         self.update()
 
-    def position(self) -> float:
-        return self._position
+    def chapters(self) -> list[TourChapter]:
+        return list(self._chapters)
+
+    def set_step(self, index: int) -> None:
+        self._step = max(0, int(index))
+        self.update()
+
+    def progress(self) -> float:
+        return self._progress
+
+    def current_chapter(self) -> int:
+        for index, chapter in enumerate(self._chapters):
+            if chapter.first <= self._step < chapter.first + chapter.count:
+                return index
+        return -1
 
     def advance(self, dt: float, animated: bool) -> bool:
-        """Шаг анимации; True — таблетка ещё в пути."""
-        target = float(self._current)
-        if not animated:
-            self._position = target
+        """Шаг анимации; True — заливка ещё в пути."""
+        target = float(self._step + 1)
+        delta = target - self._progress
+        if not animated or abs(delta) < 0.004:
+            self._progress = target
             return False
-        self._glow = (self._glow + dt / BREATH_PERIOD_MS) % 1.0
-        delta = target - self._position
-        if abs(delta) < 0.004:
-            self._position = target
-            return False
-        self._position += delta * (1.0 - math.exp(-dt / DOTS_TAU_MS))
+        self._progress += delta * (1.0 - math.exp(-dt / CHAPTER_TAU_MS))
         return True
 
-    def dot_rects(self) -> list[QRectF]:
-        """Где нарисована каждая точка; ужимает шаг, если все не влезают."""
-        if not self._count:
+    def segment_rects(self) -> list[QRectF]:
+        """Отрезки глав одной ширины: короткая глава нажимается так же легко, как длинная."""
+        count = len(self._chapters)
+        if not count:
             return []
-        dot, spacing = self.DOT, self.SPACING
-        others = self._count - 1
-        natural = others * (dot + spacing) + self.ACTIVE
-        available = float(max(1, self.width()))
-        if others and natural > available:
-            scale = max(0.0, (available - self.ACTIVE) / (others * (dot + spacing)))
-            dot = max(self.MIN_DOT, dot * scale)
-            spacing = max(self.MIN_SPACING, spacing * scale)
-        rects: list[QRectF] = []
-        x = 0.0
-        y = (self.height() - dot) / 2
-        for index in range(self._count):
-            # Чем ближе к плавающему текущему шагу, тем шире: на полпути
-            # обе соседние точки наполовину таблетки — она «перетекает».
-            share = max(0.0, 1.0 - abs(index - self._position))
-            width = dot + (self.ACTIVE - dot) * share
-            rects.append(QRectF(x, y, width, dot))
-            x += width + spacing
-        return rects
+        gap = self.GAP if count > 1 else 0.0
+        width = max(1.0, (float(self.width()) - gap * (count - 1)) / count)
+        return [QRectF(index * (width + gap), 0.0, width, float(self.height())) for index in range(count)]
 
-    def index_at(self, x: float) -> int:
-        rects = self.dot_rects()
-        if not rects:
+    def chapter_at(self, x: float) -> int:
+        rects = self.segment_rects()
+        if not rects or x < 0 or x > self.width():
             return -1
-        best = min(range(len(rects)), key=lambda index: abs(rects[index].center().x() - x))
-        rect = rects[best]
-        tolerance = max(4.0, rect.width())
-        return best if rect.left() - tolerance <= x <= rect.right() + tolerance else -1
+        # Промежуток между отрезками относится к ближайшему из них: мимо не нажать.
+        return min(range(len(rects)), key=lambda index: abs(rects[index].center().x() - x))
+
+    def fill_share(self, index: int) -> float:
+        """Какая доля главы пройдена, от 0 до 1."""
+        chapter = self._chapters[index]
+        return max(0.0, min(1.0, (self._progress - chapter.first) / max(1, chapter.count)))
 
     def paintEvent(self, event):  # noqa: N802 (Qt override)
         _ = event
-        if not self._count:
+        if not self._chapters:
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        muted = QColor(255, 255, 255, 70) if isDarkTheme() else QColor(0, 0, 0, 60)
+        muted = QColor(255, 255, 255, 56) if isDarkTheme() else QColor(0, 0, 0, 46)
         accent = QColor(themeColor())
-        rects = self.dot_rects()
-        # Мягкий пульсирующий ореол вокруг таблетки.
-        if rects:
-            low = max(0, min(len(rects) - 1, int(math.floor(self._position))))
-            high = min(len(rects) - 1, low + 1)
-            k = self._position - low
-            center = rects[low].center().x() * (1.0 - k) + rects[high].center().x() * k
-            breath = 0.5 + 0.5 * math.sin(self._glow * 2 * math.pi)
-            halo = QColor(accent)
-            halo.setAlpha(int(34 + 30 * breath))
-            painter.setBrush(halo)
-            half_width = self.ACTIVE / 2 + 3 + 1.5 * breath
-            half_height = rects[low].height() / 2 + 3 + 1.5 * breath
-            painter.drawRoundedRect(
-                QRectF(center - half_width, self.height() / 2 - half_height, 2 * half_width, 2 * half_height),
-                half_height,
-                half_height,
-            )
-        for index, rect in enumerate(rects):
-            if index == self._hover and index != self._current:
-                rect = rect.adjusted(-1.5, -1.5, 1.5, 1.5)
-            # Точки закрашиваются по мере того, как до них доходит таблетка.
-            fill = max(0.0, min(1.0, self._position - index + 1.0))
-            if index == self._hover:
-                fill = 1.0
-            color = QColor(
-                int(muted.red() + (accent.red() - muted.red()) * fill),
-                int(muted.green() + (accent.green() - muted.green()) * fill),
-                int(muted.blue() + (accent.blue() - muted.blue()) * fill),
-                int(muted.alpha() + (255 - muted.alpha()) * fill),
-            )
-            painter.setBrush(color)
-            radius = rect.height() / 2
-            painter.drawRoundedRect(rect, radius, radius)
+        current = self.current_chapter()
+        for index, rect in enumerate(self.segment_rects()):
+            thickness = self.HOVER_BAR if index == self._hover else (self.BAR + 2.0 if index == current else self.BAR)
+            bar = QRectF(rect.left(), (self.height() - thickness) / 2, rect.width(), thickness)
+            radius = thickness / 2
+            painter.setBrush(muted)
+            painter.drawRoundedRect(bar, radius, radius)
+            share = self.fill_share(index)
+            if share <= 0.0:
+                continue
+            painter.save()
+            track = QPainterPath()
+            track.addRoundedRect(bar, radius, radius)
+            painter.setClipPath(track)
+            painter.fillRect(QRectF(bar.left(), bar.top(), bar.width() * share, bar.height()), accent)
+            painter.restore()
         painter.end()
 
     def mouseMoveEvent(self, event):  # noqa: N802 (Qt override)
-        index = self.index_at(event.position().x())
+        index = self.chapter_at(event.position().x())
         if index != self._hover:
             self._hover = index
             self.update()
-            if 0 <= index < len(self._titles):
-                self._tooltip.show_text(f"{index + 1}. {self._titles[index]}", event.globalPosition().toPoint())
+            if 0 <= index < len(self._chapters) and self._chapters[index].hint:
+                self._tooltip.show_text(self._chapters[index].hint, event.globalPosition().toPoint())
             else:
                 self._tooltip.hide()
         event.accept()
@@ -296,9 +285,9 @@ class _ProgressDots(QWidget):
         event.accept()
         if event.button() != Qt.MouseButton.LeftButton:
             return
-        index = self.index_at(event.position().x())
+        index = self.chapter_at(event.position().x())
         if index >= 0:
-            self.stepClicked.emit(index)
+            self.stepClicked.emit(self._chapters[index].first)
 
 
 class _TourCard(QWidget):
@@ -359,8 +348,8 @@ class _TourCard(QWidget):
         layout.addWidget(self.wiki_button, 0, Qt.AlignmentFlag.AlignLeft)
 
         layout.addSpacing(8)
-        self.dots = _ProgressDots(self.content)
-        layout.addWidget(self.dots)
+        self.chapter_bar = _ChapterBar(self.content)
+        layout.addWidget(self.chapter_bar)
         layout.addSpacing(4)
 
         buttons = QHBoxLayout()
@@ -389,12 +378,12 @@ class _TourCard(QWidget):
             self._flash = 0.0
 
     def advance_decor(self, dt: float, animated: bool) -> bool:
-        """Шаг украшений: прогресс сверху и точки. True — ещё есть движение."""
-        dots_moving = self.dots.advance(dt, animated)
+        """Шаг украшений: прогресс сверху и строка глав. True — ещё есть движение."""
+        chapters_moving = self.chapter_bar.advance(dt, animated)
         if not animated:
             self._progress = self._progress_target
             self._flash = 0.0
-            return dots_moving
+            return chapters_moving
         self._shine = (self._shine + dt / SHINE_PERIOD_MS) % 1.0
         self._breath = (self._breath + dt / BREATH_PERIOD_MS) % 1.0
         self._flash = max(0.0, self._flash - dt / FLASH_MS)
@@ -403,12 +392,12 @@ class _TourCard(QWidget):
             self._progress = self._progress_target
         else:
             self._progress += delta * (1.0 - math.exp(-dt / PROGRESS_TAU_MS))
-        return dots_moving or self._flash > 0.0 or self._progress != self._progress_target
+        return chapters_moving or self._flash > 0.0 or self._progress != self._progress_target
 
     def update_decor(self) -> None:
-        """Перерисовать только полоску сверху и ряд точек."""
+        """Перерисовать только полоску сверху и строку глав."""
         self.update(0, 0, self.width(), DECOR_REGION_HEIGHT)
-        self.dots.update()
+        self.chapter_bar.update()
 
     def _paint_progress_strip(self, painter: QPainter, accent: QColor) -> None:
         width = float(self.width())
@@ -563,7 +552,7 @@ class OnboardingOverlay(QWidget):
         self._card.skip_button.clicked.connect(self.skip)
         self._card.back_button.clicked.connect(self.go_back)
         self._card.next_button.clicked.connect(self.go_next)
-        self._card.dots.stepClicked.connect(self.go_to)
+        self._card.chapter_bar.stepClicked.connect(self.go_to)
         self._card.hide()
 
         self._clock = QElapsedTimer()
@@ -605,7 +594,7 @@ class OnboardingOverlay(QWidget):
         if not self._steps:
             self.deleteLater()
             return False
-        self._step_titles = [self._tr(f"onboarding.step.{step.key}.title", step.key) for step in self._steps]
+        self._card.chapter_bar.set_chapters(self._build_chapters())
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
@@ -622,6 +611,27 @@ class OnboardingOverlay(QWidget):
 
     def is_finishing(self) -> bool:
         return self._finishing
+
+    def _chapter_title(self, step: TourStep) -> str:
+        return self._tr(f"onboarding.chapter.{step.chapter}", "") if step.chapter else ""
+
+    def _build_chapters(self) -> list[TourChapter]:
+        """Главы — подряд идущие шаги с одним ключом главы."""
+        runs: list[tuple[TourStep, int, int]] = []
+        for index, step in enumerate(self._steps):
+            if runs and runs[-1][0].chapter == step.chapter:
+                first_step, first, count = runs[-1]
+                runs[-1] = (first_step, first, count + 1)
+            else:
+                runs.append((step, index, 1))
+        hint = self._tr("onboarding.chapter.hint", "{chapter} · шагов: {count}")
+        chapters = []
+        for step, first, count in runs:
+            title = self._chapter_title(step)
+            chapters.append(
+                TourChapter(title=title, first=first, count=count, hint=hint.format(chapter=title, count=count) if title else "")
+            )
+        return chapters
 
     def current_step_key(self) -> str:
         if 0 <= self._index < len(self._steps):
@@ -640,7 +650,7 @@ class OnboardingOverlay(QWidget):
         self._enter_step(self._index + 1, direction=1)
 
     def go_to(self, index: int) -> None:
-        """Переход на любой шаг — по нажатию на его точку."""
+        """Переход на любой шаг — по нажатию на отрезок главы это её первый шаг."""
         index = int(index)
         if self._finishing or index == self._index or not 0 <= index < len(self._steps):
             return
@@ -808,7 +818,7 @@ class OnboardingOverlay(QWidget):
         self._index = index
         step = self._steps[index]
         self._targets = targets
-        self._ensure_targets_visible(targets)
+        self._keep_targets_in_view(targets)
         self._apply_step_texts(step, has_target=bool(targets))
         self._dim_target = float(HERO_DIM_ALPHA if (step.hero or not targets) else DIM_ALPHA)
 
@@ -837,9 +847,11 @@ class OnboardingOverlay(QWidget):
                 icon = QApplication.windowIcon()
             card.hero_icon.setPixmap(icon.pixmap(QSize(56, 56)) if icon is not None and not icon.isNull() else icon_placeholder())
         card.counter_label.setVisible(not step.hero)
-        card.counter_label.setText(
-            self._tr("onboarding.counter", "Шаг {current} из {total}").format(current=self._index + 1, total=total)
+        counter = self._tr("onboarding.counter", "Шаг {current} из {total}").format(
+            current=self._index + 1, total=total
         )
+        chapter = self._chapter_title(step)
+        card.counter_label.setText(f"{chapter} · {counter}" if chapter else counter)
         card.hero_title.setVisible(step.hero)
         card.title_label.setVisible(not step.hero)
         title = _unbreakable_options(title)
@@ -855,7 +867,7 @@ class OnboardingOverlay(QWidget):
             card.wiki_button.setUrl(step.wiki_url)
             card.wiki_button.setText(wiki_text)
             card.wiki_button.setAccessibleName(f"{wiki_text}: {title}")
-        card.dots.set_progress(self._index, total, self.__dict__.get("_step_titles"))
+        card.chapter_bar.set_step(self._index)
         card.set_progress((self._index + 1) / max(1, total), animate=self._animated)
 
         card.back_button.setVisible(self._index > 0)
@@ -888,30 +900,107 @@ class OnboardingOverlay(QWidget):
             return {}
         return dict(values) if isinstance(values, dict) else {}
 
-    def _ensure_targets_visible(self, targets: list[TourTarget]) -> None:
-        widgets = [target_widget(target) for target in targets]
-        widgets = [widget for widget in widgets if is_alive_widget(widget)]
-        if not widgets:
-            return
-        scroll_areas = []
+    # ── слежение за целью ────────────────────────────────────────────
+    #
+    # Цель шага живёт на странице, которая меняется сама: список догружается,
+    # панель появляется, карточки выплывают. Поэтому оверлей не «прокручивает
+    # к цели один раз при входе в шаг», а каждый кадр приводит экран к одному
+    # и тому же виду: цель найдена → стоит в видимой части страницы → окошко
+    # прожектора обводит то, что от неё действительно видно.
+
+    def _scroll_areas(self) -> list[tuple[QWidget, int]]:
+        """Прокручиваемые области, где бывает цель: страница и боковое меню."""
+        areas: list[tuple[QWidget, int]] = []
         page = self._ctx.current_page
-        if is_alive_widget(page) and hasattr(page, "ensureWidgetVisible"):
-            scroll_areas.append(page)
+        if is_alive_widget(page) and hasattr(page, "verticalScrollBar") and hasattr(page, "viewport"):
+            areas.append((page, PAGE_SCROLL_MARGIN))
         navigation = getattr(self._window, "navigationInterface", None)
-        panel = getattr(navigation, "panel", None)
-        nav_scroll = getattr(panel, "scrollArea", None)
+        nav_scroll = getattr(getattr(navigation, "panel", None), "scrollArea", None)
         if is_alive_widget(nav_scroll):
-            scroll_areas.append(nav_scroll)
-        for area in scroll_areas:
+            areas.append((nav_scroll, NAV_SCROLL_MARGIN))
+        return areas
+
+    def _keep_targets_in_view(self, targets: list[TourTarget]) -> None:
+        """Ставит прокрутку так, чтобы цель была видна. Если она уже видна, ничего не трогает."""
+        targets = [target for target in targets if is_target_shown(target)]
+        if not targets:
+            return
+        for area, margin in self._scroll_areas():
             try:
                 content = area.widget()
             except (AttributeError, RuntimeError):
                 continue
             if content is None:
                 continue
-            for widget in (widgets[-1], widgets[0]):
-                if content.isAncestorOf(widget):
-                    area.ensureWidgetVisible(widget, 0, 96 if area is page else 12)
+            rect: QRect | None = None
+            for target in targets:
+                widget = target_widget(target)
+                if not content.isAncestorOf(widget):
+                    continue
+                local = target[1] if isinstance(target, tuple) else widget.rect()
+                in_content = QRect(widget.mapTo(content, local.topLeft()), local.size())
+                rect = in_content if rect is None else rect.united(in_content)
+            if rect is not None:
+                self._scroll_area_to(area, rect, margin)
+
+    @staticmethod
+    def _scroll_area_to(area: QWidget, rect: QRect, margin: int) -> None:
+        """Прокрутка, при которой прямоугольник содержимого виден с отступом ``margin``.
+
+        Цель выше области показывается с начала: стандартный ensureWidgetVisible
+        в этом случае ставит в центр её середину, и верх цели уезжает за край.
+        """
+        bar = area.verticalScrollBar()
+        view_height = area.viewport().height()
+        if view_height <= 0:
+            return
+        value = bar.value()
+        if rect.height() >= view_height:
+            wanted = rect.top() - min(margin, 8)
+        else:
+            margin = min(margin, (view_height - rect.height()) // 2)
+            wanted = value
+            if rect.top() - margin < value:
+                wanted = rect.top() - margin
+            elif rect.bottom() + margin > value + view_height:
+                wanted = rect.bottom() + margin - view_height
+        wanted = max(bar.minimum(), min(int(wanted), bar.maximum()))
+        if wanted != value:
+            bar.setValue(wanted)
+
+    def _visible_part(self, widget: QWidget, local: QRect) -> QRect:
+        """Часть цели, не обрезанная прокручиваемыми областями, в координатах окна."""
+        window = self._window
+        rect = QRect(widget.mapTo(window, local.topLeft()), local.size())
+        parent = widget.parentWidget()
+        while parent is not None and parent is not window and not rect.isEmpty():
+            rect = rect.intersected(QRect(parent.mapTo(window, QPoint(0, 0)), parent.size()))
+            parent = parent.parentWidget()
+        return rect
+
+    def _track_target(self) -> QRectF | None:
+        """Кадр слежения: найти цель, удержать её на экране, вернуть место для окошка."""
+        if 0 <= self._index < len(self._steps) and not self._finishing:
+            # Цель ищем каждый кадр: список может догрузиться, пункт меню — появиться позже.
+            self._targets = self._resolve_targets(self._steps[self._index])
+            self._keep_targets_in_view(self._targets)
+        rect: QRectF | None = None
+        for target in self._targets:
+            if not is_target_shown(target):
+                continue
+            widget = target_widget(target)
+            visible = self._visible_part(widget, target[1] if isinstance(target, tuple) else widget.rect())
+            if visible.isEmpty():
+                continue
+            part = QRectF(visible.translated(-self.pos()))
+            rect = part if rect is None else rect.united(part)
+        if rect is None:
+            return None
+        rect = rect.adjusted(-HOLE_PADDING, -HOLE_PADDING, HOLE_PADDING, HOLE_PADDING)
+        rect = rect.intersected(QRectF(self.rect()).adjusted(2, 2, -2, -2))
+        if rect.width() < 4 or rect.height() < 4:
+            return None
+        return rect
 
     def _tr(self, key: str, default: str) -> str:
         return tr_catalog(key, language=self._language, default=default)
@@ -923,29 +1012,6 @@ class OnboardingOverlay(QWidget):
             interval = STATIC_FRAME_MS
         if self._frame_timer.interval() != interval or not self._frame_timer.isActive():
             self._frame_timer.start(interval)
-
-    def _current_target_rect(self) -> QRectF | None:
-        if 0 <= self._index < len(self._steps) and not self._finishing:
-            # Цель ищем каждый кадр: список может догрузиться, страница —
-            # прокрутиться, пункт меню — появиться позже.
-            self._targets = self._resolve_targets(self._steps[self._index])
-        rect: QRectF | None = None
-        window = self._window
-        for target in self._targets:
-            if not is_target_shown(target):
-                continue
-            widget = target_widget(target)
-            local = target[1] if isinstance(target, tuple) else widget.rect()
-            top_left = widget.mapTo(window, local.topLeft()) - self.pos()
-            widget_rect = QRectF(top_left.x(), top_left.y(), local.width(), local.height())
-            rect = widget_rect if rect is None else rect.united(widget_rect)
-        if rect is None:
-            return None
-        rect = rect.adjusted(-HOLE_PADDING, -HOLE_PADDING, HOLE_PADDING, HOLE_PADDING)
-        rect = rect.intersected(QRectF(self.rect()).adjusted(2, 2, -2, -2))
-        if rect.width() < 4 or rect.height() < 4:
-            return None
-        return rect
 
     def _card_target_rect(self, hole: QRectF | None) -> QRectF:
         width = float(self._card_size.width())
@@ -1027,7 +1093,7 @@ class OnboardingOverlay(QWidget):
             self._complete_finish()
             return
 
-        target_hole = self._current_target_rect()
+        target_hole = self._track_target()
         if target_hole is None:
             if self._hole is not None:
                 moving = True

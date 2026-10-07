@@ -499,6 +499,15 @@ class AppearancePage(BasePage):
     def on_page_activated(self) -> None:
         self._schedule_lower_sections_build()
 
+    def onboarding_target(self, name: str):
+        """Экскурсия показывает три главных блока страницы."""
+        attribute = {
+            "theme": "_display_mode_card",
+            "accent": "_accent_group",
+            "performance": "_performance_group",
+        }.get(name)
+        return self.__dict__.get(attribute) if attribute else None
+
     def on_page_hidden(self) -> None:
         self._lower_sections_build_scheduled = False
 

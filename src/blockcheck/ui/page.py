@@ -157,6 +157,10 @@ class BlockcheckPage(BasePage):
         self._open_dns_settings = open_dns_settings
         self._last_report: dict | None = None
         self._report_lines: list[str] = []
+        # Настоящие прошлые проверки: экскурсия на время подменяет их примером.
+        self._history_runs: tuple = ()
+        # Проводник обучающей экскурсии; появляется, когда она дошла до этой страницы.
+        self._tour_guide = None
         # Блок «Отчёт / Подготовить обращение» есть только после проверки:
         # до неё там показывать нечего.
         self._support_footer_available = False
@@ -254,6 +258,10 @@ class BlockcheckPage(BasePage):
 
     def _show_history(self, runs) -> None:
         """Обновляет карточку «Прошлые проверки»; без записей и на чужой вкладке она скрыта."""
+        self._history_runs = tuple(runs or ())
+        if self._tour_demo_shown():
+            # На экране пример экскурсии: настоящие записи встанут на место после неё.
+            return
         self._history_list.show_history(runs)
         on_main_tab = self.TAB_ORDER[self._active_tab_index] == self.TAB_BLOCKCHECK
         self._history_card.setVisible(bool(self._history_list.lines()) and on_main_tab)
@@ -707,13 +715,15 @@ class BlockcheckPage(BasePage):
         show_blockcheck = tab_key == self.TAB_BLOCKCHECK
         for widget in self._tab_widgets:
             widget.setVisible(show_blockcheck)
-        if self._results_card is not None and self._last_report is None:
+        # Пример экскурсии показывает те же карточки, что и законченная проверка.
+        has_report = self._last_report is not None or self._tour_demo_shown()
+        if self._results_card is not None and not has_report:
             self._results_card.setVisible(False)
         if not self._run_runtime.is_running():
             self._progress_card.setVisible(False)
         if not self._history_list.lines():
             self._history_card.setVisible(False)
-        if not self._support_footer_available:
+        if not self._support_footer_available and not self._tour_demo_shown():
             self._footer_card.setVisible(False)
 
         if self._strategy_tab_page is not None:
@@ -828,10 +838,12 @@ class BlockcheckPage(BasePage):
         self._last_report = report
         if "history" in report:
             self._show_history(report["history"])
-        self._summary_panel.show_report(report)
-        self._results_card.setVisible(True)
-        # Карточки выплывают по очереди следом за итогом.
-        self._result_cards.show_report(report)
+        # Пока на экране пример экскурсии, итог ждёт: он встанет на место, когда пример уберут.
+        if not self._tour_demo_shown():
+            self._summary_panel.show_report(report)
+            self._results_card.setVisible(True)
+            # Карточки выплывают по очереди следом за итогом.
+            self._result_cards.show_report(report)
         elapsed = float(report.get("elapsed") or 0.0)
         self._set_status_text(
             tr_catalog("page.blockcheck.done", default="Готово") + f" за {elapsed:.0f} с — итог ниже"
@@ -1037,8 +1049,7 @@ class BlockcheckPage(BasePage):
             )
         )
 
-    def _open_past_check(self, run: dict) -> None:
-        """Нажатие на строку «Прошлых проверок»: та проверка целиком, назад ведёт строка пути."""
+    def _ensure_past_check_view(self):
         if self._past_check_view is None:
             from blockcheck.ui.past_check_view import PastCheckView
 
@@ -1048,11 +1059,49 @@ class BlockcheckPage(BasePage):
             self._past_check_view.child_opened.connect(self._open_card_child)
             self._past_check_view.setVisible(False)
             self.add_widget(self._past_check_view)
+        return self._past_check_view
+
+    def _open_past_check(self, run: dict) -> None:
+        """Нажатие на строку «Прошлых проверок»: та проверка целиком, назад ведёт строка пути."""
+        view = self._ensure_past_check_view()
         # Отчёт каждой проверки сохранён рядом с её журналом; читает его функция BlockCheck, не страница.
         report = self._blockcheck.load_past_blockcheck_report(str(run.get("log_file") or ""))
-        self._show_over_tabs(self._past_check_view)
-        self._past_check_view.show_run(run, report)
-        self._past_check_view.setFocus()
+        self._show_over_tabs(view)
+        view.show_run(run, report)
+        view.setFocus()
+
+    # ------------------------------------------------------------------
+    # Обучающая экскурсия
+    # ------------------------------------------------------------------
+    def _tour_demo_shown(self) -> bool:
+        guide = self._tour_guide
+        return guide is not None and guide.report_demo_shown()
+
+    def _ensure_tour_guide(self):
+        if self._tour_guide is None:
+            from blockcheck.ui.onboarding_guide import BlockcheckTourGuide
+
+            self._tour_guide = BlockcheckTourGuide(self)
+        return self._tour_guide
+
+    def onboarding_target(self, name: str):
+        return self._ensure_tour_guide().target(name)
+
+    def onboarding_set_state(self, state: str | None) -> None:
+        """Экскурсия открывает нужную вкладку и рисует пример проверки (см. blockcheck.ui.onboarding_guide)."""
+        if state is None and self._tour_guide is None:
+            return
+        self._ensure_tour_guide().set_state(state)
+
+    def _show_last_report(self) -> None:
+        """Итог и карточки последней проверки этого запуска; без неё страница пустая."""
+        report = self._last_report
+        if report is None:
+            self._summary_panel.set_idle()
+            self._result_cards.clear()
+            return
+        self._summary_panel.show_report(report)
+        self._result_cards.show_report(report, animate=False)
 
     def _open_section_text(self, title: str, text: str) -> None:
         """«Открыть на всю страницу» у длинного текста в отчёте карточки."""

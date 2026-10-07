@@ -288,6 +288,10 @@ class CustomDnsServerPage(BasePage):
     def on_page_activated(self) -> None:
         (self.name_edit if self.is_editing() else self.doh_edit).setFocus(Qt.FocusReason.OtherFocusReason)
 
+    def onboarding_target(self, name: str):
+        """Экскурсия показывает форму нового сервера целиком."""
+        return self.card if name == "form" else None
+
     def cleanup(self) -> None:
         self._closed = True
         self._save_lane.close()

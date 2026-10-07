@@ -56,6 +56,11 @@ _LIST_DESCRIPTION = (
     "Ctrl+F открывает поиск."
 )
 
+# Сколько советуемых стратегий называет пример панели «Не помогло — следующая».
+TRY_PANEL_EXAMPLE_QUEUE = 5
+# Цель экскурсии → карточка на странице подробностей о стратегии.
+_ONBOARDING_DETAILS_CARDS = {"details_steps": "_steps_card", "details_places": "_places_card"}
+
 
 class ProfileStrategyListWidget(QWidget):
     strategy_activated = pyqtSignal(str)
@@ -305,7 +310,17 @@ class ProfileStrategyListWidget(QWidget):
             return None if self._try_panel.isHidden() else self._try_panel
         if name == "strategy_find":
             return self._toolbar
+        if name in _ONBOARDING_DETAILS_CARDS:
+            if not self.details_open():
+                return None
+            return getattr(self._details_view, _ONBOARDING_DETAILS_CARDS[name])
         return None
+
+    def onboarding_example_strategy_id(self) -> str:
+        """Стратегия, чьи подробности экскурсия открывает как пример: выбранная в профиле, иначе первая."""
+        if self._current_strategy_id in self._facts:
+            return self._current_strategy_id
+        return next(iter(self._facts), "")
 
     # ------------------------------------------------------------------
     # Состояние → экран
@@ -394,7 +409,37 @@ class ProfileStrategyListWidget(QWidget):
         self._sync_list_state_text(plan)
         self._sync_details()
 
+    def show_try_panel_example(self) -> None:
+        """Экскурсия показывает панель на примере, если у профиля её сейчас нет.
+
+        Панели нет в коротком списке и когда выбрана стратегия, которую нельзя
+        оценить, — а объяснять её новичку всё равно нужно.
+        """
+        if not self._try_panel.isHidden() or self.details_open():
+            return
+        names = [facts.name for facts in self._facts.values()]
+        if not names:
+            return
+        self._try_panel_example = True
+        self._try_panel.show_state(
+            name=names[0],
+            plain_label=next(iter(self._facts.values())).plain_label,
+            rating="",
+            next_name=names[1] if len(names) > 1 else "",
+            tried=0,
+            total=min(len(names), TRY_PANEL_EXAMPLE_QUEUE),
+        )
+        self._try_panel.show()
+
+    def hide_try_panel_example(self) -> None:
+        if not self.__dict__.pop("_try_panel_example", False):
+            return
+        self._sync_try_panel(self._plan)
+
     def _sync_try_panel(self, plan: StrategyListPlan) -> None:
+        if self.__dict__.get("_try_panel_example"):
+            # На экране пример экскурсии: настоящее состояние вернётся, когда она его уберёт.
+            return
         current_id = plan.current_strategy_id
         facts = self._facts.get(current_id)
         if facts is None or not can_rate_strategy(current_id) or not self._long_list():

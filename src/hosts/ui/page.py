@@ -63,6 +63,8 @@ _GROUP_HINTS = {
     CATEGORY_AI: ("page.hosts.group.ai.hint", "сами закрыты для России, нужен DNS-профиль"),
     CATEGORY_OTHER: ("page.hosts.group.other.hint", "через DNS-профиль"),
 }
+# Цели экскурсии: первая плитка группы показывает, как группа устроена.
+_ONBOARDING_TILE_CATEGORIES = {"direct_tile": CATEGORY_DIRECT, "ai_tile": CATEGORY_AI}
 
 
 
@@ -661,6 +663,28 @@ class HostsPage(BasePage):
         self.dns_all_button.setMenu(menu)
         if old_menu is not None:
             old_menu.deleteLater()
+
+    # ------------------------------------------------------------------
+    # Экскурсия
+    # ------------------------------------------------------------------
+
+    def onboarding_target(self, name: str):
+        if name == "summary":
+            return [self.file_button, self.dns_all_button, self.all_off_button, self.summary_card]
+        if name in _ONBOARDING_TILE_CATEGORIES:
+            key = self._onboarding_tile_key(_ONBOARDING_TILE_CATEGORIES[name])
+            return (self.tiles, self.tiles.tile_rect(key)) if key else None
+        return None
+
+    def _onboarding_tile_key(self, category: str) -> str:
+        """Первая плитка группы — пример для экскурсии; при поиске её может не быть на экране."""
+        draft = self._draft
+        if draft is None:
+            return ""
+        for entry in draft.snapshot.services:
+            if entry.category == category and not entry.unavailable_reason:
+                return entry.name
+        return ""
 
     def _render_tiles(self) -> None:
         draft = self._draft

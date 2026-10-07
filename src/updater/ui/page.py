@@ -238,6 +238,12 @@ class ServersPage(BasePage):
         else:
             self.update_card.show_manual_hint()
 
+    def onboarding_target(self, name: str):
+        """Экскурсия показывает карточку обновления и таблицу серверов под ней."""
+        if name == "update":
+            return [self.__dict__.get("update_card"), self.__dict__.get("servers_table")]
+        return None
+
     def on_page_activated(self) -> None:
         if self._idle_view_applied:
             return

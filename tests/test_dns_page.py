@@ -87,6 +87,53 @@ class DnsPageTests(unittest.TestCase):
             page.on_page_activated()
         return page
 
+    # ── экскурсия ────────────────────────────────────────────
+
+    def test_tour_opens_ai_group_and_returns_the_previous_filter(self) -> None:
+        page = self._page()
+        page.filter_bar.setCurrentItem("Безопасные")
+        page._set_filter("Безопасные")
+        self.assertIsNone(page.onboarding_target("ai"))
+
+        page.onboarding_set_state("ai")
+
+        self.assertEqual(page.onboarding_target("ai"), [page.filter_row, page.grid])
+        self.assertEqual({tile.key for tile in self._provider_tiles(page)}, set(DNS_PROVIDERS["Для ИИ"]))
+        self.assertEqual(page.filter_bar.currentRouteKey(), "Для ИИ")
+
+        page.onboarding_set_state(None)
+
+        self.assertEqual(page._filter, "Безопасные")
+        self.assertEqual(page.filter_bar.currentRouteKey(), "Безопасные")
+        self.assertEqual({tile.key for tile in self._provider_tiles(page)}, set(DNS_PROVIDERS["Безопасные"]))
+
+    def test_tour_points_at_filters_with_the_automatic_tile_and_opens_empty_form(self) -> None:
+        page = self._page()
+
+        filter_row, (grid, rect) = page.onboarding_target("providers")
+
+        self.assertIs(filter_row, page.filter_row)
+        self.assertIs(grid, page.grid)
+        self.assertEqual(rect, page.grid.tile_rect(AUTO_CHOICE))
+        self.assertFalse(rect.isEmpty())
+        self.assertIs(page.onboarding_target("now"), page.now_panel)
+        self.assertTrue(page.onboarding_open_subpage("custom_dns"))
+        self.open_custom_server.assert_called_once_with(None)
+        self.assertFalse(page.onboarding_open_subpage("hosts_file"))
+
+    def test_one_time_provider_dns_advice_waits_until_the_tour_is_over(self) -> None:
+        # Во время экскурсии совет всплыл бы поверх неё и пропал зря: он показывается один раз.
+        with patch("ui.onboarding.is_onboarding_tour_active", return_value=True):
+            page = self._page()
+            page._isp_lane.request.assert_not_called()
+            page.on_page_activated()
+            page._isp_lane.request.assert_not_called()
+
+        page.on_page_activated()
+        page._isp_lane.request.assert_called_once_with()
+        page.on_page_activated()
+        page._isp_lane.request.assert_called_once_with()
+
     @staticmethod
     def _provider_tiles(page):
         """Плитки серверов без плитки «Автоматически»."""

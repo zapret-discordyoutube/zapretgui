@@ -765,6 +765,53 @@ class LayoutAndAccessibilityTests(_WidgetCase):
         self.assertIs(widget.onboarding_target("strategy_find"), widget._toolbar)
         self.assertIsNone(without_panel.onboarding_target("strategy_try"))
 
+    def test_tour_shows_the_try_panel_as_an_example_when_profile_has_none(self) -> None:
+        # Выбрана стратегия, которую нельзя оценить: панели у профиля нет.
+        widget = self._widget(current="custom")
+        panel = widget._try_panel
+        self.assertTrue(panel.isHidden())
+
+        widget.show_try_panel_example()
+
+        self.assertIs(widget.onboarding_target("strategy_try"), panel)
+        self.assertIn("Сейчас выбрана: Alpha v0", panel.title.text())
+        self.assertIn("Проверено 0 из 5 советуемых", panel.hint.text())
+        self.assertIn("Следующая: Alpha v1", panel.hint.text())
+        # Обновление списка под экскурсией пример не снимает.
+        widget._sync_try_panel(widget._plan)
+        self.assertFalse(panel.isHidden())
+
+        widget.hide_try_panel_example()
+        self.assertTrue(panel.isHidden())
+
+    def test_tour_leaves_the_real_try_panel_as_it_is(self) -> None:
+        widget = self._widget()
+        title = widget._try_panel.title.text()
+        self.assertFalse(widget._try_panel.isHidden())
+
+        widget.show_try_panel_example()
+        widget.hide_try_panel_example()
+
+        self.assertEqual(widget._try_panel.title.text(), title)
+        self.assertFalse(widget._try_panel.isHidden())
+
+    def test_tour_shows_details_of_the_chosen_strategy_as_an_example(self) -> None:
+        widget = self._widget()
+        without_choice = self._widget(current="custom")
+
+        # Пример — выбранная в профиле стратегия; без выбора — первая из списка.
+        self.assertEqual(widget.onboarding_example_strategy_id(), "fake-05")
+        self.assertEqual(without_choice.onboarding_example_strategy_id(), "fake-00")
+        # Пока открыт список, карточек подробностей на экране нет.
+        self.assertIsNone(widget.onboarding_target("details_steps"))
+
+        widget.show_details(widget.onboarding_example_strategy_id())
+
+        self.assertIs(widget.onboarding_target("details_steps"), widget._details_view._steps_card)
+        self.assertIs(widget.onboarding_target("details_places"), widget._details_view._places_card)
+        widget.close_details()
+        self.assertIsNone(widget.onboarding_target("details_places"))
+
     def test_strategy_icons_are_painted_without_icon_fonts_and_cached(self) -> None:
         """Значок плитки не зависит от шрифтов значков, которые есть не в каждой сборке."""
         import inspect

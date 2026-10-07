@@ -46,6 +46,8 @@ from ui.presets_menu.common import fluent_icon, make_menu_action
 AUTO_CHOICE = "__auto__"
 FILTER_ALL = "all"
 RECOMMENDED_PROVIDER = ("Безопасные", "Quad9")
+# Группа, которую экскурсия открывает как пример обхода гео-ограничений.
+ONBOARDING_AI_GROUP = "Для ИИ"
 
 # Группы из dns_providers → ключ перевода подписи.
 GROUP_TEXT_KEYS = {
@@ -322,6 +324,7 @@ class NetworkPage(BasePage):
         """
         if self._load_started and not self._closed:
             self._load_lane.request()
+            self._request_isp_warning_if_due()
             return
         self._run_runtime_init_once()
 
@@ -361,7 +364,55 @@ class NetworkPage(BasePage):
         first = not self._loaded
         self._apply_state(state)
         if first:
-            self._isp_lane.request()
+            self._isp_warning_due = True
+            self._request_isp_warning_if_due()
+
+    def _request_isp_warning_if_due(self) -> None:
+        """Разовый совет про DNS провайдера. Во время экскурсии он бы
+        всплыл поверх неё и пропал зря, поэтому ждёт обычного открытия страницы."""
+        if not self.__dict__.get("_isp_warning_due") or self._closed:
+            return
+        from ui.onboarding import is_onboarding_tour_active
+
+        if is_onboarding_tour_active(self.window()):
+            return
+        self._isp_warning_due = False
+        self._isp_lane.request()
+
+    # ── экскурсия ───────────────────────────────────────────
+
+    def onboarding_target(self, name: str):
+        if name == "now":
+            return self.now_panel
+        if name == "providers":
+            # Отбор групп и первая плитка «Автоматически»: вся сетка слишком велика.
+            return [self.filter_row, (self.grid, self.grid.tile_rect(AUTO_CHOICE))]
+        if name == "ai":
+            return [self.filter_row, self.grid] if self._filter == ONBOARDING_AI_GROUP else None
+        return None
+
+    def onboarding_set_state(self, state: str | None) -> None:
+        """Экскурсия открывает группу «Для ИИ», а потом возвращает прежний отбор."""
+        if state == "ai":
+            if ONBOARDING_AI_GROUP not in self._providers or self._filter == ONBOARDING_AI_GROUP:
+                return
+            self._onboarding_previous_filter = self._filter
+            self._show_filter(ONBOARDING_AI_GROUP)
+            return
+        previous = self.__dict__.pop("_onboarding_previous_filter", None)
+        if previous is not None:
+            self._show_filter(previous)
+
+    def _show_filter(self, key: str) -> None:
+        self.filter_bar.setCurrentItem(key)
+        self._set_filter(key)
+
+    def onboarding_open_subpage(self, key: str) -> bool:
+        """Экскурсия открывает «Свой DNS» с пустой формой — как плитка «Добавить»."""
+        if key != "custom_dns":
+            return False
+        self._open_custom_server(None)
+        return True
 
     def _apply_state(self, state) -> None:
         """Новый снимок адаптеров; отметки уже известных адаптеров сохраняются."""

@@ -155,6 +155,7 @@ class HostsFilePage(BasePage):
         self.save_button.clicked.connect(self._save)
         top_layout.addWidget(self.save_button)
         self.add_widget(top_row)
+        self._top_row = top_row
 
         self.hint_label = CaptionLabel(self.content)
         self.hint_label.setWordWrap(True)
@@ -237,6 +238,12 @@ class HostsFilePage(BasePage):
         # Несохранённые правки не затираем: перечитываем только чистый текст.
         if not self.is_dirty():
             self._request_load()
+
+    def onboarding_target(self, name: str):
+        """Экскурсия показывает цвета владельцев строк и кнопки над редактором."""
+        if name == "legend":
+            return [self.__dict__.get("_top_row"), self.hint_label]
+        return None
 
     def cleanup(self) -> None:
         self._cleanup_in_progress = True

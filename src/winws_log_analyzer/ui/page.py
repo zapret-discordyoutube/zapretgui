@@ -33,6 +33,8 @@ _VERDICT_COLORS = {
     VERDICT_MODIFIED: QColor("#e0a854"),
     VERDICT_DROP: QColor("#e05454"),
 }
+ONBOARDING_SAMPLE_PATH_TEXT = "Пример для экскурсии. Свой лог откройте кнопкой «Открыть файл…»"
+
 _VERDICT_TITLES = {
     VERDICT_UNMODIFIED: "ok",
     VERDICT_MODIFIED: "mod",
@@ -91,6 +93,44 @@ class WinwsLogAnalyzerPage(BasePage):
         super().cleanup()
         self._filter_timer.stop()
         self._runtime.stop(blocking=False)
+
+    # -------------------------------------------------------------- экскурсия
+
+    def onboarding_target(self, name: str):
+        ui = self._ui
+        if name == "source":
+            return ui.source_card
+        if name == "connections":
+            return ui.connections_table
+        if name == "packets":
+            return [ui.packets_title, ui.packets_table]
+        return None
+
+    def onboarding_set_state(self, state: str | None) -> None:
+        """Пока своего лога нет, экскурсия кладёт в таблицы пример разбора и потом убирает его."""
+        ui = self._ui
+        if state == "sample":
+            # Свой лог уже разобран или разбирается: показываем его, а не пример.
+            if self._result is not None or self._runtime.is_running():
+                return
+            from winws_log_analyzer.ui.onboarding_demo import demo_parse_result
+
+            self._onboarding_before_sample = (ui.path_label.text(), ui.summary_label.text(), ui.summary_label.isHidden())
+            self._result = demo_parse_result()
+            ui.path_label.setText(ONBOARDING_SAMPLE_PATH_TEXT)
+            self._show_summary(self._result)
+            self._refresh_connections_table()
+            ui.connections_table.selectRow(0)
+            return
+        before = self.__dict__.pop("_onboarding_before_sample", None)
+        if before is None:
+            return
+        path_text, summary_text, summary_hidden = before
+        self._result = None
+        ui.path_label.setText(path_text)
+        ui.summary_label.setText(summary_text)
+        ui.summary_label.setHidden(summary_hidden)
+        self._refresh_connections_table()
 
     # ------------------------------------------------------------ drag&drop
 

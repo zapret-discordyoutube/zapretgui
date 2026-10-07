@@ -490,7 +490,13 @@ class DpiSettingsPage(BasePage):
 
     def on_page_activated(self) -> None:
         self._run_runtime_init_once()
-    
+
+    def onboarding_target(self, name: str):
+        """Экскурсия показывает карточку с тремя режимами работы."""
+        if name == "modes":
+            return self.__dict__.get("_method_card")
+        return None
+
     def _update_method_selection(self, method: str):
         """Обновляет визуальное состояние выбора метода"""
         selected_method = normalize_launch_method(method, default="")

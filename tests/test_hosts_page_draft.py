@@ -365,6 +365,29 @@ class HostsPageTests(unittest.TestCase):
         callback = self.write_callbacks[-1]["on_loaded"]
         callback(len(self.write_callbacks), SimpleNamespace(success=success, snapshot=snapshot, message=message))
 
+    def test_tour_points_at_the_first_tile_of_each_group(self) -> None:
+        from dataclasses import replace
+
+        from hosts.page_snapshot import CATEGORY_AI
+
+        snapshot = _manual_snapshot()
+        with_ai = replace(
+            snapshot,
+            services=(*snapshot.services, HostsServiceEntry("Gemini", CATEGORY_AI, "fa5s.globe", None, ("p1",), None)),
+        )
+        page = self._page(with_ai)
+
+        grid, direct_rect = page.onboarding_target("direct_tile")
+        _grid, ai_rect = page.onboarding_target("ai_tile")
+
+        self.assertIs(grid, page.tiles)
+        self.assertEqual(direct_rect, page.tiles.tile_rect("Direct"))
+        self.assertEqual(ai_rect, page.tiles.tile_rect("Gemini"))
+        self.assertFalse(direct_rect.isEmpty() or ai_rect.isEmpty())
+        self.assertIn(page.summary_card, page.onboarding_target("summary"))
+        # Группы «ИИ-сервисы» в каталоге нет — шаг экскурсии остаётся без цели, а не падает.
+        self.assertIsNone(self._page(snapshot).onboarding_target("ai_tile"))
+
     def test_click_on_tile_writes_hosts_right_away(self) -> None:
         page = self._page(_manual_snapshot())
 

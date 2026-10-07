@@ -30,6 +30,22 @@ CONTROL_PAGE_NAMES: tuple[PageName, ...] = (
     PageName.ORCHESTRA,
 )
 
+# Страницы, общие для всех режимов: инструменты, диагностика, оформление.
+COMMON_TOUR_PAGES: dict[str, PageName] = {
+    "dpi_settings": PageName.DPI_SETTINGS,
+    "dns": PageName.NETWORK,
+    "custom_dns": PageName.NETWORK_CUSTOM_DNS,
+    "hosts": PageName.HOSTS,
+    "hosts_file": PageName.HOSTS_FILE,
+    "telegram": PageName.TELEGRAM_PROXY,
+    "telegram_advanced": PageName.TELEGRAM_PROXY_ADVANCED,
+    "blockcheck": PageName.BLOCKCHECK,
+    "appearance": PageName.APPEARANCE,
+    "logs": PageName.LOGS,
+    "about": PageName.ABOUT,
+    "updates": PageName.SERVERS,
+}
+
 # Страницы тура для каждого режима: ключ шага → страница программы.
 MODE_TOUR_PAGES: dict[PageName, dict[str, PageName]] = {
     PageName.ZAPRET2_MODE_CONTROL: {
@@ -39,6 +55,9 @@ MODE_TOUR_PAGES: dict[PageName, dict[str, PageName]] = {
         "preset_setup": PageName.ZAPRET2_PRESET_SETUP,
         "profile_order": PageName.ZAPRET2_PROFILE_ORDER,
         "profile_setup": PageName.ZAPRET2_PROFILE_SETUP,
+        # Фейки и разбор журнала движка есть только у winws2.
+        "fakes_page": PageName.FAKES,
+        "log_analyzer": PageName.WINWS_LOG_ANALYZER,
     },
     PageName.ZAPRET1_MODE_CONTROL: {
         "control": PageName.ZAPRET1_MODE_CONTROL,
@@ -59,6 +78,8 @@ MODE_TOUR_PAGES: dict[PageName, dict[str, PageName]] = {
 TOUR_SUBPAGE_PARENTS: dict[str, str] = {
     "preset_editor": "user_presets",
     "profile_setup": "preset_setup",
+    # «Свой DNS» открывает страница DNS: она подаёт пустую форму нового сервера.
+    "custom_dns": "dns",
 }
 
 TourTarget = QWidget | tuple[QWidget, QRect]
@@ -101,6 +122,8 @@ class TourStep:
     # Живые значения для текста: страница отдаёт их через
     # onboarding_text_values(text_key), тур подставляет в {…} текста.
     text_key: str = ""
+    # Глава тура: её название стоит в счётчике шагов (ключ onboarding.chapter.<глава>).
+    chapter: str = ""
 
 
 def is_alive_widget(widget) -> bool:
@@ -144,7 +167,10 @@ def resolve_control_page_name(window) -> PageName | None:
 
 def build_tour_context(window) -> TourContext:
     control_page_name = resolve_control_page_name(window)
-    pages = dict(MODE_TOUR_PAGES.get(control_page_name, {})) if control_page_name is not None else {}
+    pages: dict[str, PageName] = {}
+    if control_page_name is not None:
+        pages.update(COMMON_TOUR_PAGES)
+        pages.update(MODE_TOUR_PAGES.get(control_page_name, {}))
     return TourContext(window=window, control_page_name=control_page_name, pages=pages)
 
 
@@ -227,58 +253,159 @@ def _preset_section(section: str) -> TourStep:
     )
 
 
+def _chapter(key: str, *steps: TourStep) -> tuple[TourStep, ...]:
+    return tuple(replace(step, chapter=key) for step in steps)
+
+
+def _blockcheck(key: str, target: str, state: str, *, optional: bool = False) -> TourStep:
+    """Шаг на странице BlockCheck: страница показывает нужную вкладку или пример."""
+    return TourStep(key, _page_target(target), page="blockcheck", page_state=state, target_optional=optional)
+
+
+# Главы идут в том порядке, в каком новичок знакомится с программой: сначала
+# главная и пресеты, потом инструменты вокруг них.
 _TOUR_STEPS: tuple[TourStep, ...] = (
-    TourStep("welcome", hero=True),
-    TourStep("how_it_works", hero=True),
-    TourStep("building_blocks", hero=True),
-    TourStep("control_nav", _nav_item(*CONTROL_PAGE_NAMES), page="control"),
-    TourStep("start", _page_target("start"), page="control"),
-    TourStep("status", _page_target("status"), page="control"),
-    TourStep("preset", _page_target("preset"), page="control"),
-    TourStep("presets_list", _page_target("presets_list"), page="user_presets", target_optional=True),
-    TourStep("preset_menu", _page_target("preset_menu"), page="user_presets", page_state="preset_menu"),
-    TourStep("preset_file", _page_target("editor"), page="preset_editor", target_optional=True),
-    _preset_section("header"),
-    _preset_section("lua_init"),
-    _preset_section("engine_options"),
-    _preset_section("interception"),
-    _preset_section("blobs"),
-    _preset_section("profile"),
-    _preset_section("profile_name"),
-    _preset_section("profile_match"),
-    _preset_section("profile_packets"),
-    _preset_section("profile_strategy"),
-    _preset_section("profile_new"),
-    TourStep("presets_toolbar", _page_target("presets_toolbar"), page="user_presets"),
-    TourStep("profiles_list", _page_target("profiles_list"), page="preset_setup", target_optional=True),
-    TourStep("profile_group", _page_target("first_group"), page="preset_setup"),
-    TourStep("profile_row", _page_target("first_profile"), page="preset_setup"),
-    TourStep("profile_menu", _page_target("profile_menu"), page="preset_setup", page_state="profile_menu"),
-    TourStep("profiles_toolbar", _page_target("profiles_toolbar"), page="preset_setup"),
-    TourStep("profile_order", _page_target("order_list"), page="profile_order", target_optional=True),
-    TourStep("list_type", _page_target("list_type"), page="profile_setup", target_optional=True),
-    TourStep("ranges", _page_target("ranges"), page="profile_setup"),
-    TourStep("profile_tabs", _page_target("tabs"), page="profile_setup"),
-    TourStep("strategy_choice", _page_target("strategies"), page="profile_setup", illustration="blocked"),
-    TourStep("strategy_try", _page_target("strategy_try"), page="profile_setup", target_optional=True),
-    TourStep("strategy_find", _page_target("strategy_find"), page="profile_setup", target_optional=True),
-    TourStep("technique_fake", page="profile_setup", illustration="fake"),
-    TourStep("technique_multisplit", page="profile_setup", illustration="multisplit"),
-    TourStep("technique_multidisorder", page="profile_setup", illustration="multidisorder"),
-    TourStep("technique_fakedsplit", page="profile_setup", illustration="fakedsplit"),
-    TourStep("technique_hostfakesplit", page="profile_setup", illustration="hostfakesplit"),
-    TourStep("technique_tcpseg", page="profile_setup", illustration="tcpseg"),
-    TourStep("technique_oob", page="profile_setup", illustration="oob"),
-    TourStep("technique_syndata", page="profile_setup", illustration="syndata"),
-    TourStep("list_entries", _page_target("list_entries"), page="profile_setup", page_state="editor"),
-    TourStep("fakes", _page_target("fakes"), page="control"),
-    TourStep("dpi_mode", _nav_item(PageName.DPI_SETTINGS, PageName.ORCHESTRA_SETTINGS)),
-    TourStep("program_settings", _page_target("program_settings"), page="control"),
-    TourStep("tools", _nav_group("system")),
-    TourStep("geo_blocks", _nav_items(PageName.NETWORK, PageName.HOSTS)),
-    TourStep("diagnostics", _nav_group("diagnostics")),
-    TourStep("appearance", _nav_group("appearance")),
-    TourStep("finish", _page_target("tour_card"), page="control", target_optional=True),
+    *_chapter(
+        "intro",
+        TourStep("welcome", hero=True),
+        TourStep("how_it_works", hero=True),
+        TourStep("building_blocks", hero=True),
+    ),
+    *_chapter(
+        "control",
+        TourStep("control_nav", _nav_item(*CONTROL_PAGE_NAMES), page="control"),
+        TourStep("start", _page_target("start"), page="control"),
+        TourStep("status", _page_target("status"), page="control"),
+        TourStep("preset", _page_target("preset"), page="control"),
+        TourStep("quick_actions", _page_target("quick_actions"), page="control"),
+        TourStep("program_settings", _page_target("program_settings"), page="control"),
+        TourStep("windows_settings", _page_target("windows_settings"), page="control"),
+        TourStep("fine_tuning", _page_target("fine_tuning"), page="control"),
+    ),
+    *_chapter(
+        "presets",
+        TourStep("presets_list", _page_target("presets_list"), page="user_presets", target_optional=True),
+        TourStep("preset_menu", _page_target("preset_menu"), page="user_presets", page_state="preset_menu"),
+        TourStep("preset_file", _page_target("editor"), page="preset_editor", target_optional=True),
+        _preset_section("header"),
+        _preset_section("lua_init"),
+        _preset_section("engine_options"),
+        _preset_section("interception"),
+        _preset_section("blobs"),
+        _preset_section("profile"),
+        _preset_section("profile_name"),
+        _preset_section("profile_match"),
+        _preset_section("profile_packets"),
+        _preset_section("profile_strategy"),
+        _preset_section("profile_new"),
+        TourStep("presets_toolbar", _page_target("presets_toolbar"), page="user_presets"),
+    ),
+    *_chapter(
+        "profiles",
+        TourStep("profiles_list", _page_target("profiles_list"), page="preset_setup", target_optional=True),
+        TourStep("profile_group", _page_target("first_group"), page="preset_setup"),
+        TourStep("profile_row", _page_target("first_profile"), page="preset_setup"),
+        TourStep("profile_menu", _page_target("profile_menu"), page="preset_setup", page_state="profile_menu"),
+        TourStep("profiles_toolbar", _page_target("profiles_toolbar"), page="preset_setup"),
+        TourStep("profile_order", _page_target("order_list"), page="profile_order", target_optional=True),
+    ),
+    *_chapter(
+        "strategies",
+        TourStep("list_type", _page_target("list_type"), page="profile_setup", target_optional=True),
+        TourStep("ranges", _page_target("ranges"), page="profile_setup"),
+        TourStep("profile_tabs", _page_target("tabs"), page="profile_setup"),
+        TourStep("strategy_choice", _page_target("strategies"), page="profile_setup", illustration="blocked"),
+        TourStep(
+            "strategy_try",
+            _page_target("strategy_try"),
+            page="profile_setup",
+            page_state="try_panel",
+            target_optional=True,
+        ),
+        TourStep("strategy_find", _page_target("strategy_find"), page="profile_setup", target_optional=True),
+        TourStep("strategy_details", _page_target("details_steps"), page="profile_setup", page_state="details"),
+        TourStep("strategy_details_places", _page_target("details_places"), page="profile_setup", page_state="details"),
+        TourStep("profile_geo_notice", _page_target("geo_notice"), page="profile_setup", page_state="geo_notice"),
+        TourStep("technique_fake", page="profile_setup", illustration="fake"),
+        TourStep("technique_multisplit", page="profile_setup", illustration="multisplit"),
+        TourStep("technique_multidisorder", page="profile_setup", illustration="multidisorder"),
+        TourStep("technique_fakedsplit", page="profile_setup", illustration="fakedsplit"),
+        TourStep("technique_hostfakesplit", page="profile_setup", illustration="hostfakesplit"),
+        TourStep("technique_tcpseg", page="profile_setup", illustration="tcpseg"),
+        TourStep("technique_oob", page="profile_setup", illustration="oob"),
+        TourStep("technique_syndata", page="profile_setup", illustration="syndata"),
+        TourStep("list_entries", _page_target("list_entries"), page="profile_setup", page_state="editor"),
+    ),
+    *_chapter(
+        "fakes",
+        TourStep("fakes", _page_target("fakes"), page="control"),
+        TourStep("fakes_table", _page_target("table"), page="fakes_page", target_optional=True),
+        TourStep("fakes_blob", _page_target("blob"), page="fakes_page", page_state="blob"),
+        TourStep("fakes_own", _page_target("actions"), page="fakes_page"),
+    ),
+    *_chapter(
+        "mode",
+        TourStep("dpi_mode", _nav_item(PageName.DPI_SETTINGS, PageName.ORCHESTRA_SETTINGS)),
+        TourStep("dpi_modes", _page_target("modes"), page="dpi_settings"),
+    ),
+    *_chapter(
+        "tools",
+        TourStep("tools", _nav_group("system")),
+        TourStep("dns_now", _page_target("now"), page="dns"),
+        TourStep("dns_providers", _page_target("providers"), page="dns"),
+        TourStep("dns_ai", _page_target("ai"), page="dns", page_state="ai"),
+        TourStep("dns_custom", _page_target("form"), page="custom_dns"),
+        TourStep("geo_blocks", _nav_items(PageName.NETWORK, PageName.HOSTS)),
+        TourStep("hosts_summary", _page_target("summary"), page="hosts"),
+        TourStep("hosts_direct", _page_target("direct_tile"), page="hosts", target_optional=True),
+        TourStep("hosts_ai", _page_target("ai_tile"), page="hosts", target_optional=True),
+        TourStep("hosts_file", _page_target("legend"), page="hosts_file"),
+        TourStep("telegram_status", _page_target("status"), page="telegram"),
+        TourStep("telegram_connect", _page_target("connect"), page="telegram"),
+        TourStep("telegram_settings", _page_target("settings"), page="telegram"),
+        TourStep("telegram_hosts", _page_target("hosts"), page="telegram"),
+        TourStep("telegram_logs", _page_target("logs"), page="telegram", page_state="logs"),
+        TourStep("telegram_advanced", _page_target("upstream"), page="telegram_advanced"),
+        TourStep("telegram_cloudflare", _page_target("cloudflare"), page="telegram_advanced"),
+    ),
+    *_chapter(
+        "diagnostics",
+        TourStep("diagnostics", _nav_group("diagnostics")),
+        _blockcheck("blockcheck_start", "start", "main"),
+        _blockcheck("blockcheck_domains", "domains", "main"),
+        _blockcheck("blockcheck_summary", "summary", "report"),
+        _blockcheck("blockcheck_cards", "cards", "report"),
+        _blockcheck("blockcheck_checks", "checks", "report"),
+        _blockcheck("blockcheck_card_detail", "card_detail", "card_detail"),
+        _blockcheck("blockcheck_history", "history", "report"),
+        _blockcheck("blockcheck_past_check", "past_check", "past_check"),
+        _blockcheck("blockcheck_report", "footer", "report"),
+        _blockcheck("blockcheck_tabs", "tabs", "main"),
+        _blockcheck("strategy_scan", "scan_control", "strategy_scan"),
+        _blockcheck("strategy_scan_result", "scan_result", "strategy_scan_result"),
+        _blockcheck("domain_lookup", "tab_page", "domain_lookup", optional=True),
+        _blockcheck("dns_servers_check", "tab_page", "dns_servers", optional=True),
+        _blockcheck("dns_spoofing_check", "tab_page", "dns_spoofing", optional=True),
+        TourStep("log_analyzer_source", _page_target("source"), page="log_analyzer"),
+        TourStep("log_analyzer_connections", _page_target("connections"), page="log_analyzer", page_state="sample"),
+        TourStep("log_analyzer_packets", _page_target("packets"), page="log_analyzer", page_state="sample"),
+    ),
+    *_chapter(
+        "appearance",
+        TourStep("appearance", _nav_group("appearance")),
+        TourStep("appearance_theme", _page_target("theme"), page="appearance"),
+        TourStep("appearance_accent", _page_target("accent"), page="appearance"),
+        TourStep("appearance_performance", _page_target("performance"), page="appearance"),
+        TourStep("logs_view", _page_target("log"), page="logs", page_state="logs"),
+        TourStep("logs_send", _page_target("send"), page="logs", page_state="send"),
+        TourStep("about_version", _page_target("version"), page="about", page_state="about"),
+        TourStep("about_help", _page_target("help"), page="about", page_state="help"),
+        TourStep("updates", _page_target("update"), page="updates"),
+    ),
+    *_chapter(
+        "finish",
+        TourStep("finish", _page_target("tour_card"), page="control", target_optional=True),
+    ),
 )
 
 # Ссылки на вики живут в config.urls вместе с остальными адресами.
@@ -288,6 +415,7 @@ TOUR_STEPS: tuple[TourStep, ...] = tuple(
 
 
 __all__ = [
+    "COMMON_TOUR_PAGES",
     "CONTROL_PAGE_NAMES",
     "MODE_TOUR_PAGES",
     "TOUR_STEPS",

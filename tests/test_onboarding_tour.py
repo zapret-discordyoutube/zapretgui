@@ -15,7 +15,8 @@ if str(PROJECT_SRC) not in sys.path:
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget  # noqa: E402
+from PyQt6.QtCore import QPoint, QRect  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QPushButton, QScrollArea, QVBoxLayout, QWidget  # noqa: E402
 
 
 def _app() -> QApplication:
@@ -589,6 +590,62 @@ class TourStepCatalogTests(unittest.TestCase):
         self.assertIn("закрашенная — профиль включён", row)
         self.assertNotIn("Hostlist или IPset", row)
 
+    def test_step_keys_are_unique_and_pages_exist_in_zapret2_mode(self) -> None:
+        from app.page_names import PageName
+        from ui.onboarding.steps import COMMON_TOUR_PAGES, MODE_TOUR_PAGES, TOUR_STEPS, TOUR_SUBPAGE_PARENTS
+
+        keys = [step.key for step in TOUR_STEPS]
+        self.assertEqual(len(keys), len(set(keys)))
+        pages = {**COMMON_TOUR_PAGES, **MODE_TOUR_PAGES[PageName.ZAPRET2_MODE_CONTROL]}
+        self.assertEqual(sorted({step.page for step in TOUR_STEPS if step.page} - set(pages)), [])
+        for child, parent in TOUR_SUBPAGE_PARENTS.items():
+            self.assertIn(child, pages)
+            self.assertIn(parent, pages)
+        # Общие страницы есть в каждом режиме, а фейки и разбор лога — только у winws2.
+        for mode_pages in MODE_TOUR_PAGES.values():
+            self.assertEqual(set(mode_pages) & set(COMMON_TOUR_PAGES), set())
+        self.assertNotIn("fakes_page", MODE_TOUR_PAGES[PageName.ZAPRET1_MODE_CONTROL])
+        self.assertNotIn("log_analyzer", MODE_TOUR_PAGES[PageName.ZAPRET1_MODE_CONTROL])
+
+    def test_every_step_belongs_to_a_named_chapter_and_chapters_do_not_mix(self) -> None:
+        from app.ui_texts import TEXTS
+        from ui.onboarding.steps import TOUR_STEPS
+
+        order: list[str] = []
+        for step in TOUR_STEPS:
+            self.assertTrue(step.chapter, step.key)
+            if not order or order[-1] != step.chapter:
+                order.append(step.chapter)
+        # Глава идёт одним куском: вернуться к уже пройденной нельзя.
+        self.assertEqual(len(order), len(set(order)))
+        self.assertEqual(order[0], "intro")
+        self.assertEqual(order[-1], "finish")
+        for chapter in order:
+            for language in ("ru", "en"):
+                self.assertTrue(str((TEXTS.get(f"onboarding.chapter.{chapter}") or {}).get(language) or "").strip(), chapter)
+
+    def test_tour_visits_the_pages_added_after_presets_and_profiles(self) -> None:
+        from ui.onboarding.steps import TOUR_STEPS
+
+        pages = {step.page for step in TOUR_STEPS}
+        for page in (
+            "fakes_page",
+            "dpi_settings",
+            "dns",
+            "custom_dns",
+            "hosts",
+            "hosts_file",
+            "telegram",
+            "telegram_advanced",
+            "blockcheck",
+            "log_analyzer",
+            "appearance",
+            "logs",
+            "about",
+            "updates",
+        ):
+            self.assertIn(page, pages)
+
     def test_every_step_has_title_and_body_in_both_languages(self) -> None:
         from app.ui_texts import TEXTS
         from ui.onboarding.steps import TOUR_STEPS
@@ -938,25 +995,32 @@ class OnboardingCardBehaviourTests(unittest.TestCase):
             window.close()
             window.deleteLater()
 
-    def test_many_dots_fit_the_card_and_a_click_opens_that_step(self) -> None:
+    def test_click_on_a_chapter_segment_opens_its_first_step(self) -> None:
         from PyQt6.QtCore import QPoint, Qt
         from PyQt6.QtTest import QTest
 
         from ui.onboarding.steps import TourStep
 
-        steps = tuple(TourStep(f"step_{index}", hero=True) for index in range(60))
+        # Шесть глав по десять шагов: отрезков шесть, а не шестьдесят точек.
+        steps = tuple(TourStep(f"step_{index}", hero=True, chapter=f"chapter_{index // 10}") for index in range(60))
         window, _page, overlay = self._overlay(steps)
         try:
             overlay.start()
             for _ in range(30):
                 QApplication.processEvents()
-            dots = overlay._card.dots
-            rects = dots.dot_rects()
-            self.assertEqual(len(rects), 60)
-            self.assertLessEqual(rects[-1].right(), dots.width() + 0.5)
-            target = rects[41].center().toPoint()
-            QTest.mouseClick(dots, Qt.MouseButton.LeftButton, pos=QPoint(target.x(), target.y()))
-            self.assertEqual(overlay.current_step_key(), "step_41")
+            bar = overlay._card.chapter_bar
+            rects = bar.segment_rects()
+            self.assertEqual(len(rects), 6)
+            self.assertLessEqual(rects[-1].right(), bar.width() + 0.5)
+            # Нажимается вся высота строки, а не тонкая полоска.
+            self.assertGreaterEqual(min(rect.width() for rect in rects), 40)
+            self.assertEqual(rects[0].height(), bar.height())
+            QTest.mouseClick(bar, Qt.MouseButton.LeftButton, pos=QPoint(int(rects[4].center().x()), 2))
+            self.assertEqual(overlay.current_step_key(), "step_40")
+            # Щелчок в промежуток между отрезками тоже куда-то ведёт: мимо не нажать.
+            between = int((rects[1].right() + rects[2].left()) / 2)
+            QTest.mouseClick(bar, Qt.MouseButton.LeftButton, pos=QPoint(between, bar.height() - 2))
+            self.assertIn(overlay.current_step_key(), ("step_10", "step_20"))
         finally:
             overlay.finish("skipped", immediate=True)
             window.close()
@@ -1000,6 +1064,206 @@ class OnboardingCardBehaviourTests(unittest.TestCase):
             overlay.finish("skipped", immediate=True)
             window.close()
             window.deleteLater()
+
+
+class _TallGridPage(QScrollArea):
+    """Прокручиваемая страница с одной высокой «сеткой»: цель — прямоугольник внутри неё."""
+
+    GRID_HEIGHT = 3000
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        content = QWidget(self)
+        layout = QVBoxLayout(content)
+        self.panel = QPushButton("Панель над сеткой", content)
+        self.panel.setFixedHeight(60)
+        layout.addWidget(self.panel)
+        self.grid = QWidget(content)
+        self.grid.setFixedHeight(self.GRID_HEIGHT)
+        layout.addWidget(self.grid)
+        self.late_button = QPushButton("Появится позже", content)
+        self.late_button.hide()
+        layout.addWidget(self.late_button)
+        self.setWidget(content)
+        self.tile_rect = QRect(20, 2400, 300, 90)
+
+    def onboarding_target(self, name):
+        if name == "tile":
+            return (self.grid, self.tile_rect)
+        if name == "late":
+            return self.late_button
+        if name == "panel":
+            return self.panel
+        if name == "grid":
+            return self.grid
+        return None
+
+
+class OnboardingChapterAndScrollTests(unittest.TestCase):
+    def setUp(self) -> None:
+        _app()
+
+    def _overlay(self, steps, page_cls=_FakePage):
+        from app.page_names import PageName
+        from ui.onboarding import overlay as overlay_module
+        from ui.onboarding.steps import TourContext
+
+        window = QWidget()
+        self.addCleanup(window.deleteLater)
+        window.resize(900, 640)
+        layout = QVBoxLayout(window)
+        page = page_cls(window)
+        layout.addWidget(page)
+
+        class Host:
+            def show_page(self, _name, allow_internal=False):
+                return True
+
+            def get_loaded_page(self, _name):
+                return page
+
+            def current_page(self):
+                return page
+
+        window.ui_session = SimpleNamespace(nav_items={}, nav_header_by_group={}, nav_headers=[], page_host=Host())
+        window.show()
+        QApplication.processEvents()
+        context = TourContext(
+            window=window,
+            control_page_name=PageName.ZAPRET2_MODE_CONTROL,
+            pages={"control": PageName.ZAPRET2_MODE_CONTROL},
+            current_page=page,
+        )
+        with patch.object(overlay_module, "are_live_animations_enabled", return_value=False):
+            overlay = overlay_module.OnboardingOverlay(window, context, steps)
+        self.addCleanup(lambda: overlay.finish("skipped", immediate=True))
+        return window, page, overlay
+
+    def test_counter_and_segment_hint_name_the_chapter(self) -> None:
+        from ui.onboarding.steps import TourStep, _page_target
+
+        steps = (
+            TourStep("start", _page_target("start"), page="control", chapter="control"),
+            TourStep("status", _page_target("start"), page="control", chapter="control"),
+            TourStep("preset", _page_target("start"), page="control"),
+        )
+        _window, _page, overlay = self._overlay(steps)
+        overlay.start()
+
+        self.assertEqual(overlay._card.counter_label.text(), "Главная страница · Шаг 1 из 3")
+        first, second = overlay._card.chapter_bar.chapters()
+        self.assertEqual((first.first, first.count, first.hint), (0, 2, "Главная страница · шагов: 2"))
+        # Шаги без главы — отдельный отрезок без подсказки, счётчик у них как раньше.
+        self.assertEqual((second.first, second.count, second.hint), (2, 1, ""))
+        overlay.go_to(2)
+        self.assertEqual(overlay._card.counter_label.text(), "Шаг 3 из 3")
+
+    def test_chapters_of_the_whole_tour_stay_easy_to_click_in_a_narrow_card(self) -> None:
+        from ui.onboarding.overlay import TourChapter, _ChapterBar
+        from ui.onboarding.steps import TOUR_STEPS
+
+        chapters: list[TourChapter] = []
+        for index, step in enumerate(TOUR_STEPS):
+            if chapters and chapters[-1].title == step.chapter:
+                chapters[-1] = TourChapter(step.chapter, chapters[-1].first, chapters[-1].count + 1)
+            else:
+                chapters.append(TourChapter(step.chapter, index, 1))
+        self.assertGreater(len(TOUR_STEPS), 90)
+        self.assertLessEqual(len(chapters), 12)
+        bar = _ChapterBar()
+        self.addCleanup(bar.deleteLater)
+        bar.set_chapters(chapters)
+
+        # 212 точек — строка в самой узкой карточке (окно шириной под 300).
+        for width in (212, 452):
+            bar.resize(width, bar.HEIGHT)
+            rects = bar.segment_rects()
+            self.assertLessEqual(rects[-1].right(), width + 0.5)
+            self.assertGreaterEqual(min(rect.width() for rect in rects), 12, width)
+            # Глава из одного шага («Финиш») нажимается так же, как длинная.
+            self.assertAlmostEqual(rects[-1].width(), rects[0].width(), places=3)
+            self.assertEqual(bar.chapter_at(rects[-1].center().x()), len(chapters) - 1)
+
+        # Пройденные главы закрашены целиком, текущая — по доле шагов, дальние пустые.
+        diagnostics = next(index for index, chapter in enumerate(chapters) if chapter.title == "diagnostics")
+        bar.set_step(chapters[diagnostics].first)
+        bar.advance(16.0, animated=False)
+        self.assertEqual(bar.current_chapter(), diagnostics)
+        self.assertEqual(bar.fill_share(diagnostics - 1), 1.0)
+        self.assertAlmostEqual(bar.fill_share(diagnostics), 1 / chapters[diagnostics].count, places=6)
+        self.assertEqual(bar.fill_share(diagnostics + 1), 0.0)
+
+    def test_tile_deep_in_a_tall_grid_is_scrolled_into_view(self) -> None:
+        from ui.onboarding.steps import TourStep, _page_target
+
+        steps = (TourStep("tile", _page_target("tile"), page="control"),)
+        window, page, overlay = self._overlay(steps, _TallGridPage)
+        overlay.start()
+        overlay._on_frame()
+
+        tile_top = page.grid.mapTo(window, page.tile_rect.topLeft()).y()
+        self.assertGreater(tile_top, 0)
+        self.assertLess(tile_top + page.tile_rect.height(), window.height())
+        self.assertIsNotNone(overlay._hole)
+
+    def test_target_that_slid_under_the_edge_is_brought_back_whole(self) -> None:
+        """Страница сама прокрутилась после входа в шаг — от панели осталась полоска."""
+        from ui.onboarding.overlay import HOLE_PADDING
+        from ui.onboarding.steps import TourStep, _page_target
+
+        steps = (TourStep("panel", _page_target("panel"), page="control"),)
+        _window, page, overlay = self._overlay(steps, _TallGridPage)
+        overlay.start()
+        overlay._on_frame()
+        whole = page.panel.height() + 2 * HOLE_PADDING
+        self.assertAlmostEqual(overlay._hole.height(), whole, delta=1)
+
+        page.verticalScrollBar().setValue(page.panel.y() + page.panel.height() - 6)
+        self.assertLess(page.panel.visibleRegion().boundingRect().height(), 10)
+        overlay._on_frame()
+
+        self.assertEqual(page.panel.visibleRegion().boundingRect().height(), page.panel.height())
+        self.assertAlmostEqual(overlay._hole.height(), whole, delta=1)
+
+    def test_target_taller_than_the_page_is_shown_from_its_top_and_lit_only_where_seen(self) -> None:
+        from ui.onboarding.overlay import HOLE_PADDING
+        from ui.onboarding.steps import TourStep, _page_target
+
+        steps = (TourStep("grid", _page_target("grid"), page="control"),)
+        window, page, overlay = self._overlay(steps, _TallGridPage)
+        # Под страницей — полоса окна, которая к ней не относится.
+        footer = QPushButton("Низ окна", window)
+        footer.setFixedHeight(200)
+        window.layout().addWidget(footer)
+        QApplication.processEvents()
+        overlay.start()
+        overlay._on_frame()
+
+        # Qt сам поставил бы в центр середину сетки, и её начало уехало бы за край.
+        top = page.grid.mapTo(page.viewport(), QPoint(0, 0)).y()
+        self.assertGreaterEqual(top, 0)
+        self.assertLessEqual(top, 16)
+        # Окошко — только видимая часть сетки: на полосу под страницей оно не заходит.
+        page_bottom = page.viewport().mapTo(window, QPoint(0, page.viewport().height())).y() - overlay.y()
+        self.assertLessEqual(overlay._hole.bottom(), page_bottom + HOLE_PADDING + 1)
+        self.assertLess(overlay._hole.bottom(), footer.y() - overlay.y() + footer.height() / 2)
+
+    def test_target_that_appears_later_below_the_window_is_scrolled_to(self) -> None:
+        from ui.onboarding.steps import TourStep, _page_target
+
+        steps = (TourStep("late", _page_target("late"), page="control", target_optional=True),)
+        _window, page, overlay = self._overlay(steps, _TallGridPage)
+        overlay.start()
+        overlay._on_frame()
+        self.assertIsNone(overlay._hole)
+
+        page.late_button.show()
+        QApplication.processEvents()
+        overlay._on_frame()
+
+        self.assertIsNotNone(overlay._hole)
+        self.assertGreater(page.verticalScrollBar().value(), 0)
 
 
 class OnboardingDecorTests(unittest.TestCase):
@@ -1063,26 +1327,28 @@ class OnboardingDecorTests(unittest.TestCase):
             overlay.go_to(3)
             self.assertAlmostEqual(overlay._card.progress(), 0.8, places=6)
             overlay._on_frame()
-            self.assertEqual(overlay._card.dots.position(), 3.0)
+            self.assertEqual(overlay._card.chapter_bar.progress(), 4.0)
         finally:
             overlay.finish("skipped", immediate=True)
             window.close()
             window.deleteLater()
 
-    def test_pill_flows_to_a_far_step_and_clicks_hit_what_is_visible(self) -> None:
+    def test_chapter_fill_flows_to_a_far_step(self) -> None:
         window, overlay = self._overlay(12, animated=True)
-        dots = overlay._card.dots
+        bar = overlay._card.chapter_bar
         try:
             self._run(overlay, 0.5)
+            self.assertEqual(bar.progress(), 1.0)
             overlay.go_to(9)
             self._run(overlay, 0.04)
-            self.assertGreater(dots.position(), 0.0)
-            self.assertLess(dots.position(), 9.0)
-            # Во время движения точки сдвинуты: нажатие по видимой точке 4 ведёт на шаг 4.
-            rect = dots.dot_rects()[4]
-            self.assertEqual(dots.index_at(rect.center().x()), 4)
-            self._run(overlay, 1.2)
-            self.assertEqual(dots.position(), 9.0)
+            # Заливка дотекает до нового шага, а не прыгает.
+            self.assertGreater(bar.progress(), 1.0)
+            self.assertLess(bar.progress(), 10.0)
+            self._run(overlay, 1.5)
+            self.assertEqual(bar.progress(), 10.0)
+            # Тур без глав — один отрезок на всю ширину, как обычная полоса хода.
+            self.assertEqual(len(bar.segment_rects()), 1)
+            self.assertAlmostEqual(bar.fill_share(0), 10 / 12, places=6)
         finally:
             overlay.finish("skipped", immediate=True)
             window.close()

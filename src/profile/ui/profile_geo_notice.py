@@ -340,6 +340,10 @@ class ProfileGeoNoticeCard(FlyoutViewBase):
         self._shadow.sync_geometry()
 
 
+# Сервис, на котором экскурсия показывает карточку.
+EXAMPLE_SERVICES = ("Gemini",)
+
+
 class ProfileGeoNotice(QObject):
     """Решает, показывать ли карточку открытому профилю, и держит её в углу страницы.
 
@@ -366,6 +370,8 @@ class ProfileGeoNotice(QObject):
         self._services: tuple[str, ...] = ()
         # Сервисы, чью карточку человек закрыл крестиком в этом запуске программы.
         self._dismissed: set[tuple[str, ...]] = set()
+        # На экране пример обучающей экскурсии, а не итог проверки профиля.
+        self._example_shown = False
         self._check_timer = QTimer(self)
         self._check_timer.setSingleShot(True)
         self._check_timer.setInterval(_CHECK_DELAY_MS)
@@ -421,10 +427,31 @@ class ProfileGeoNotice(QObject):
         if found != self._services:
             self._services = found
             self.card.set_services(found)
+        # Настоящая карточка заняла место примера: экскурсия её уже не уберёт.
+        self._example_shown = False
         self.card.popup()
 
     def _hide(self) -> None:
         self._services = ()
+        if self._example_shown:
+            # Пример держит экскурсия: проверка профиля, которая ничего не нашла, его не снимает.
+            return
+        self.card.dismiss()
+
+    def show_example(self) -> None:
+        """Обучающая экскурсия показывает карточку на примере, если настоящей на экране нет."""
+        if self.card.is_shown() or self._cleanup_in_progress:
+            return
+        self._example_shown = True
+        self.card.set_services(EXAMPLE_SERVICES)
+        self.card.popup()
+        # Экскурсии нужна сама карточка сразу, а не её плавное появление.
+        self.card.finish_appearing()
+
+    def hide_example(self) -> None:
+        if not self._example_shown:
+            return
+        self._example_shown = False
         self.card.dismiss()
 
     def _on_close(self) -> None:

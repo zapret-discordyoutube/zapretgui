@@ -159,10 +159,27 @@ def test_page_fills_table_and_runs_actions_through_workers():
         request_id, kwargs = started["_load_runtime"]
         kwargs["worker_factory"](request_id)
         deps.create_snapshot_worker.assert_called_once_with(request_id, parent=page)
+        # Экскурсия пришла раньше данных: пример выберется, когда строки появятся.
+        page.onboarding_set_state("blob")
+        assert page._ui.blob_line_edit.text() == ""
         kwargs["on_loaded"](request_id, _snapshot())
 
         table = page._ui.table
         assert table.rowCount() == 3
+        assert page.onboarding_target("table") is table
+        assert page.onboarding_target("blob") is page._ui.blob_card
+        assert page.onboarding_target("actions") is page._ui.actions_bar
+        assert page._ui.blob_line_edit.text() == "--blob=tls_google:@bin/tls_clienthello_www_google_com.bin"
+        # Уходя, экскурсия снимает свой выбор.
+        page.onboarding_set_state(None)
+        assert table.selectedItems() == []
+        assert page._ui.blob_line_edit.text() == ""
+        # Выбор пользователя экскурсия не трогает.
+        table.selectRow(1)
+        page.onboarding_set_state("blob")
+        page.onboarding_set_state(None)
+        assert page._ui.blob_line_edit.text() == "--blob=quic1:@bin/quic_1.bin"
+        table.clearSelection()
         assert table.item(0, 0).text() == "tls_google"
         # В подсказке ячейки «Файл» — полное значение.
         assert table.item(0, 1).data(FLUENT_ITEM_TOOLTIP_ROLE) == table.item(0, 1).text()

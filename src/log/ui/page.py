@@ -277,6 +277,29 @@ class LogsPage(BasePage):
         # прохода цикла Qt, чтобы пользователь не видел лишнее «Загрузка...».
         self._apply_warmed_overview_if_available()
 
+    def onboarding_target(self, name: str):
+        if name == "log":
+            if self.stacked_widget.currentIndex() != 0:
+                return None
+            return [self.tabs_pivot, self.__dict__.get("log_card")]
+        if name == "send":
+            if self.stacked_widget.currentIndex() != 1:
+                return None
+            return [self.tabs_pivot, self.__dict__.get("send_card"), self.__dict__.get("_send_actions_bar")]
+        return None
+
+    def onboarding_set_state(self, state: str | None) -> None:
+        """Экскурсия открывает вкладку с логом или с отправкой, а потом возвращает прежнюю."""
+        index = {"logs": 0, "send": 1}.get(str(state or ""))
+        if index is None:
+            previous = self.__dict__.pop("_onboarding_previous_tab", None)
+            if previous is not None:
+                self._switch_tab(previous)
+            return
+        if self.stacked_widget.currentIndex() != index:
+            self.__dict__.setdefault("_onboarding_previous_tab", self.stacked_widget.currentIndex())
+            self._switch_tab(index)
+
     def on_page_hidden(self) -> None:
         self._runtime_init_scheduled = False
         self._logs_secondary_build_scheduled = False

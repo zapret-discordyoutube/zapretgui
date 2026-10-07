@@ -55,7 +55,7 @@ def quick_action_specs(text_prefix: str) -> tuple[QuickActionSpec, ...]:
             icon_name="tour",
             icon_color="#b39ddb",
             title=("page.control.onboarding_tour.title", "Как пользоваться программой"),
-            content=("page.control.onboarding_tour.desc", "Пошаговая экскурсия: пресеты, профили и стратегии"),
+            content=("page.control.onboarding_tour.desc", "Пошаговая экскурсия по всем разделам программы"),
             accessible_name=("page.control.onboarding_tour.accessible_name", "Показать обучающий тур"),
         ),
         QuickActionSpec(

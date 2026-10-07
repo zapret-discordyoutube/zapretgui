@@ -5742,14 +5742,16 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
         "ru": (
             "Zapret помогает открыть сайты и приложения, которые провайдер блокирует или замедляет: "
             "YouTube, Discord и многие другие.\n\n"
-            "За пару минут покажем, как программа устроена и где что находится. Листать можно кнопкой "
-            "«Далее» или стрелками на клавиатуре, закрыть — клавишей Esc."
+            "Покажем, как программа устроена и где что находится. Экскурсия большая и разбита на главы — "
+            "название главы стоит над заголовком шага. Листать можно кнопкой «Далее» или стрелками на "
+            "клавиатуре, перейти сразу к нужной главе — нажав на её отрезок внизу карточки, закрыть — клавишей Esc."
         ),
         "en": (
             "Zapret helps you open sites and apps that your provider blocks or slows down: "
             "YouTube, Discord and many others.\n\n"
-            "In a couple of minutes we will show how the app works and where everything is. Use "
-            "Next or the arrow keys to move on, press Esc to close the tour."
+            "We will show how the app works and where everything is. The tour is long and split into "
+            "chapters — the chapter name stands above the step title. Use Next or the arrow keys to move "
+            "on, click a chapter segment at the bottom of the card to jump straight to it, press Esc to close."
         ),
     },
     "onboarding.step.how_it_works.title": {
@@ -5870,15 +5872,16 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
             "перечислены профили и их стратегии. Программа запускает его как есть, ничего не "
             "добавляя от себя.\n\n"
             "Готовые пресеты уже есть в программе. Выбранный отмечен в списке, чтобы сменить его, "
-            "просто нажмите на другой. Провайдеры блокируют по-разному, поэтому, если сайт не открывается, "
-            "первым делом попробуйте другой пресет."
+            "просто нажмите на другой. Двойной щелчок открывает пресет в редакторе и ничего не меняет. "
+            "Провайдеры блокируют по-разному, поэтому, если сайт не открывается, первым делом попробуйте "
+            "другой пресет."
         ),
         "en": (
             "This is the My presets page. A preset is a text file (.txt) with engine settings: it lists "
             "profiles and their strategies. The app runs it as is and adds nothing on its own.\n\n"
             "Ready presets are already included. The selected one is marked in the list; click another "
-            "one to switch. Providers block in different ways, so if a site does not open, try another "
-            "preset first."
+            "one to switch. A double click opens a preset in the editor and changes nothing. Providers "
+            "block in different ways, so if a site does not open, try another preset first."
         ),
     },
     "onboarding.step.preset_menu.title": {
@@ -6745,8 +6748,8 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
         "en": "How to use the app",
     },
     "page.control.onboarding_tour.desc": {
-        "ru": "Пошаговая экскурсия: пресеты, профили и стратегии",
-        "en": "A step-by-step tour: presets, profiles and strategies",
+        "ru": "Пошаговая экскурсия по всем разделам программы",
+        "en": "A step-by-step tour of every section of the app",
     },
     "page.control.onboarding_tour.accessible_name": {
         "ru": "Показать обучающий тур",
@@ -6755,6 +6758,11 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
 }
 
 TEXTS.update(TEXTS_ONBOARDING)
+
+# Главы экскурсии и её шаги по остальным разделам программы — в отдельном модуле.
+from app.ui_texts_tour import TEXTS_TOUR  # noqa: E402
+
+TEXTS.update(TEXTS_TOUR)
 
 
 NAV_PAGE_TEXT_KEYS: dict[PageName, str] = {

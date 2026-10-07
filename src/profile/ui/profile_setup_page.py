@@ -1563,7 +1563,10 @@ class ProfileSetupPageBase(BasePage):
             return [self.__dict__.get("_summary"), self.__dict__.get("_conditions_button")]
         if name == "tabs":
             return [self.__dict__.get("_editor_section_button"), self.__dict__.get("_raw_section_button")]
-        if name in {"strategies", "strategy_try", "strategy_find"}:
+        if name == "geo_notice":
+            geo_notice = self.__dict__.get("_geo_notice")
+            return geo_notice.card if geo_notice is not None else None
+        if name in {"strategies", "strategy_try", "strategy_find", "details_steps", "details_places"}:
             stack = self._strategy_stack
             if stack is None or stack.currentIndex() != 0:
                 return None
@@ -1578,15 +1581,36 @@ class ProfileSetupPageBase(BasePage):
         return None
 
     def onboarding_set_state(self, state: str | None) -> None:
-        """Тур открывает раздел списка сайтов, а потом возвращает готовые стратегии."""
+        """Тур на время шага открывает список сайтов, подробности о стратегии или пример
+        карточки про гео-сервис, а потом возвращает готовые стратегии."""
         if self._strategy_stack is None:
             return
+        geo_notice = self.__dict__.get("_geo_notice")
         if state == "editor":
             if not self._editor_tab_available:
                 return
             self._onboarding_switched_tab = True
             self._open_section("editor")
             return
+        if state == "details":
+            strategy_id = self._strategy_list.onboarding_example_strategy_id()
+            if strategy_id and self._strategy_stack.currentIndex() == 0 and not self._strategy_list.details_open():
+                self._onboarding_opened_details = True
+                self._strategy_list.show_details(strategy_id)
+            return
+        if state == "geo_notice":
+            if geo_notice is not None:
+                geo_notice.show_example()
+            return
+        if state == "try_panel":
+            if self._strategy_stack.currentIndex() == 0:
+                self._strategy_list.show_try_panel_example()
+            return
+        if geo_notice is not None:
+            geo_notice.hide_example()
+        self._strategy_list.hide_try_panel_example()
+        if self.__dict__.pop("_onboarding_opened_details", False):
+            self._strategy_list.close_details()
         if self.__dict__.pop("_onboarding_switched_tab", False):
             self._open_section("strategies")
 

@@ -234,6 +234,33 @@ class TelegramProxyPage(BasePage):
         # Только чтение hosts: страница показывает состояние, но сама файл не меняет.
         self._request_telegram_hosts_status()
 
+    def onboarding_target(self, name: str):
+        """Цели экскурсии. Верхняя карточка делится на две части: запуск и подключение Telegram."""
+        if name == "status":
+            return [self._status_dot, self._status_label, self._btn_toggle]
+        if name == "connect":
+            return [self._setup_title_label, self._setup_open_btn, self._setup_copy_btn, self._setup_zastogram_btn]
+        if name == "settings":
+            return self._settings_card
+        if name == "hosts":
+            return self._hosts_card
+        if name == "logs":
+            if self._stacked.currentIndex() != 1:
+                return None
+            return [self._pivot, self.__dict__.get("_log_edit")]
+        return None
+
+    def onboarding_set_state(self, state: str | None) -> None:
+        """Экскурсия открывает вкладку «Логи», а потом возвращает прежнюю."""
+        if state == "logs":
+            if self._stacked.currentIndex() != 1:
+                self._onboarding_previous_tab = self._stacked.currentIndex()
+                self._switch_tab(1)
+            return
+        previous = self.__dict__.pop("_onboarding_previous_tab", None)
+        if previous is not None:
+            self._switch_tab(previous)
+
     def _setup_ui(self):
         started_at = time.perf_counter()
         shell = build_telegram_proxy_shell(

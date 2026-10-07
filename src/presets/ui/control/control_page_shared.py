@@ -62,8 +62,14 @@ class ControlPageActionMixin:
             return getattr(self, "status_card", None)
         if name == "preset":
             return getattr(getattr(self, "top_summary", None), "preset_item", None)
+        if name == "quick_actions":
+            return getattr(self, "quick_actions_grid", None)
         if name == "program_settings":
             return getattr(self, "program_settings_card", None)
+        if name == "windows_settings":
+            return getattr(self, "windows_settings_card", None)
+        if name == "fine_tuning":
+            return getattr(self, "additional_settings_card", None)
         if name == "fakes":
             # Фейки есть только в Zapret 2; в Zapret 1 атрибута нет — шаг пропустится.
             return getattr(self, "fakes_card", None)

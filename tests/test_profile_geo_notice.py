@@ -77,6 +77,45 @@ class ProfileGeoNoticeTests(unittest.TestCase):
         # Тестам нужна настоящая карточка, а не её снимок на время появления.
         self.notice.card.finish_appearing()
 
+    def test_tour_example_stands_at_once_and_only_the_tour_removes_it(self) -> None:
+        card = self.notice.card
+
+        self.notice.show_example()
+
+        # Экскурсии нужна сама карточка, а не её плавное появление.
+        self.assertTrue(card.isVisible())
+        self.assertFalse(card._snapshot.isVisible())
+        self.assertEqual(card.title_label.text(), "Gemini: стратегия не поможет")
+        # Профиль под экскурсией открылся и проверился: гео-сервисов в нём нет.
+        self.notice.request("profile:youtube")
+        self.notice._on_loaded(1, "profile:youtube", ())
+        self.assertTrue(card.isVisible())
+
+        self.notice.hide_example()
+        self.assertFalse(card.is_shown())
+        # Пример — не закрытая крестиком карточка: настоящая потом покажется.
+        self._answer("profile:gemini", ("Gemini",))
+        self.assertTrue(card.isVisible())
+
+    def test_real_card_takes_the_place_of_the_example_and_outlives_the_tour(self) -> None:
+        card = self.notice.card
+        self.notice.show_example()
+
+        self._answer("profile:claude", ("Claude",))
+        self.assertEqual(card.title_label.text(), "Claude: стратегия не поможет")
+        self.notice.hide_example()
+
+        self.assertTrue(card.isVisible())
+
+    def test_example_is_not_drawn_over_a_real_card(self) -> None:
+        self._answer("profile:claude", ("Claude",))
+
+        self.notice.show_example()
+        self.notice.hide_example()
+
+        self.assertEqual(self.notice.card.title_label.text(), "Claude: стратегия не поможет")
+        self.assertTrue(self.notice.card.isVisible())
+
     def test_card_is_hidden_until_geo_service_is_found(self) -> None:
         self.assertFalse(self.notice.card.is_shown())
         self._answer("profile:youtube", ())

@@ -178,6 +178,35 @@ class AboutPage(BasePage):
         except Exception:
             pass
 
+    def onboarding_target(self, name: str):
+        if name == "version":
+            if self.stacked_widget.currentIndex() != 0:
+                return None
+            # Карточка версии отдельно не хранится: её очерчивают заголовок и кнопки.
+            return [
+                self.__dict__.get(attribute)
+                for attribute in ("about_section_version_label", "about_app_name_label", "update_btn", "whats_new_btn")
+            ]
+        if name == "help":
+            if self.stacked_widget.currentIndex() != 1:
+                return None
+            groups = list((self.__dict__.get("_help_groups") or {}).values())
+            # Всех ссылок на экран не поместить: показываем вкладки и первую группу.
+            return [self.tabs_pivot, *groups[:1]]
+        return None
+
+    def onboarding_set_state(self, state: str | None) -> None:
+        """Экскурсия открывает вкладку «О программе» или «Справка», а потом возвращает прежнюю."""
+        index = {"about": 0, "help": 1}.get(str(state or ""))
+        if index is None:
+            previous = self.__dict__.pop("_onboarding_previous_tab", None)
+            if previous is not None:
+                self._switch_tab(previous)
+            return
+        if self.stacked_widget.currentIndex() != index:
+            self.__dict__.setdefault("_onboarding_previous_tab", self.stacked_widget.currentIndex())
+            self._switch_tab(index)
+
     def switch_to_tab(self, key: str) -> None:
         """External API: switch to About/Support/Help tab by key."""
         if self._cleanup_in_progress:
@@ -386,6 +415,7 @@ class AboutPage(BasePage):
             on_open_link=self._open_help_link,
         )
         self._help_link_cards = widgets.cards
+        self._help_groups = widgets.groups
 
     def _open_help_link(self, action_name: str) -> None:
         self._request_about_open_action(

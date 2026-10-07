@@ -150,6 +150,14 @@ class TelegramProxyAdvancedPage(BasePage):
         self._on_upstream_state_changed(self._telegram_proxy.get_proxy_manager().upstream_state)
         self._request_state_reload()
 
+    def onboarding_target(self, name: str):
+        """Экскурсия показывает группы целиком: строки внутри появляются только при включённых выключателях."""
+        if name == "upstream":
+            return self.__dict__.get("_upstream_card")
+        if name == "cloudflare":
+            return self.__dict__.get("_cloudflare_card")
+        return None
+
     def _request_state_reload(self) -> None:
         if self._cleanup_in_progress:
             return

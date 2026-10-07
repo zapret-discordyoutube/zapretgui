@@ -84,8 +84,30 @@ def test_page_smoke_fills_tables(result, tmp_path, monkeypatch):
         # Страница принимает перетаскивание файлов.
         assert page.acceptDrops()
 
+        # Экскурсия: пока своего лога нет, в таблицах пример; после неё страница снова пустая.
+        empty_path_text = page._ui.path_label.text()
+        page.onboarding_set_state("sample")
+        assert page._ui.connections_table.rowCount() == 4
+        assert page._ui.connections_table.item(0, 0).text() == "discord.com"
+        assert page._ui.packets_table.rowCount() == 6
+        assert "Пример" in page._ui.path_label.text()
+        assert not page._ui.summary_label.isHidden()
+        assert page.onboarding_target("connections") is page._ui.connections_table
+        page.onboarding_set_state(None)
+        assert page._result is None
+        assert page._ui.connections_table.rowCount() == 0
+        assert page._ui.packets_table.rowCount() == 0
+        assert page._ui.path_label.text() == empty_path_text
+        assert page._ui.summary_label.isHidden()
+
         request_id = page._runtime.next_request_id()
         page._on_parse_loaded(request_id, result)
+
+        # Свой лог экскурсия примером не подменяет.
+        page.onboarding_set_state("sample")
+        assert page._result is result
+        page.onboarding_set_state(None)
+        assert page._result is result
 
         table = page._ui.connections_table
         assert table.rowCount() == len(result.connections)

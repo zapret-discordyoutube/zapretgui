@@ -199,6 +199,35 @@ class FakesPage(BasePage):
         self._snapshot = snapshot
         self._refresh_table()
         self._update_action_state()
+        # Экскурсия могла прийти раньше данных: пример выбирается, когда строки появились.
+        self._apply_onboarding_state()
+
+    # ------------------------------------------------------------ экскурсия
+
+    def onboarding_target(self, name: str):
+        ui = self._ui
+        if name == "table":
+            return ui.table
+        if name == "blob":
+            return ui.blob_card
+        if name == "actions":
+            return ui.actions_bar
+        return None
+
+    def onboarding_set_state(self, state: str | None) -> None:
+        """Экскурсия выбирает первый фейк, чтобы «Строка для пресета» была не пустой, а потом снимает выбор."""
+        self._onboarding_state = state
+        self._apply_onboarding_state()
+
+    def _apply_onboarding_state(self) -> None:
+        table = self._ui.table
+        if self.__dict__.get("_onboarding_state") == "blob":
+            if self._selected_row() is None and table.rowCount() > 0:
+                self._onboarding_selected_example = True
+                table.selectRow(0)
+            return
+        if self.__dict__.pop("_onboarding_selected_example", False):
+            table.clearSelection()
 
     def _loading_phrase(self) -> str:
         from ui.fun_phrases import loading_phrase_for
