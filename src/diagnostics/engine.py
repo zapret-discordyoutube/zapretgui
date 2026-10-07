@@ -45,6 +45,7 @@ from diagnostics import (
     net_access,
     protocol_probe,
     quic_probe,
+    registry,
     sections,
     system_state,
     telegram_check,
@@ -56,6 +57,7 @@ from diagnostics.limits import (
     DISCOVERY_TIMEOUT,
     DNS_ATTEMPTS,
     REACH_ADDRESSES,
+    REGISTRY_WAIT_S,
     RECHECK_AT_ONCE,
     RECHECK_NEEDS_S,
     RECHECK_SITES,
@@ -710,6 +712,9 @@ def run_blockcheck(
             )
         emit("⏳ Проверяем так же, как браузер: TLS 1.3, правильные адреса сайтов…")
 
+        # Список реестра РКН обновляется в стороне; к концу проверки берём то, что успело.
+        registry_wait = sections.start_registry()
+
         # Звонки и обрыв на 16 КБ проверяются всегда: режим меняет только список сайтов.
         voice_future = run.submit(check_voice, run.submit, _wait_plain)
         freeze_future = run.submit(
@@ -843,6 +848,12 @@ def run_blockcheck(
                     problems.append(problem_rules.problem(level, finding["text"], action="dns", kind=block_kind.KIND_DNS))
             problems.sort(key=lambda item: problem_rules.LEVEL_ORDER.get(Level(item["level"]), 9))
 
+        services_report = report_text.services_report(services, verdicts, collected)
+        registry_index = registry_wait(REGISTRY_WAIT_S)
+        registry.annotate(services_report, registry_index)
+        for line in registry.lines(services_report, registry_index):
+            emit(line)
+
         elapsed = time.monotonic() - started
         for line in report_text.summary_lines(
             problems, working, timed_out=run.timed_out, deadline=run.deadline_seconds, elapsed=elapsed
@@ -851,7 +862,8 @@ def run_blockcheck(
 
         return {
             "scope": scope,
-            "services": report_text.services_report(services, verdicts, collected),
+            "services": services_report,
+            "registry": registry.summary(registry_index),
             "voice": report_text.voice_report(voice),
             "freeze": report_text.freeze_report(freeze),
             "telegram": report_text.telegram_report(telegram),

@@ -201,6 +201,22 @@ def _target_state(item: dict) -> str:
     return UNKNOWN if str(item.get("state") or "") == UNKNOWN else FAIL
 
 
+def _registry_text(item: dict) -> str:
+    mark = item.get("registry") or {}
+    parts = []
+    name = str(mark.get("name") or "")
+    if name:
+        parts.append("сайт значится в реестре" if name == item.get("host") else f"в реестре значится {name}")
+    if mark.get("network"):
+        parts.append(f"адрес сервера входит в список заблокированных ({mark['network']})")
+    if parts:
+        return "; ".join(parts)
+    # Для открывающегося сайта оговорка лишняя, для закрытого — главное.
+    if item.get("ok"):
+        return "не значится"
+    return "не значится — блокировать могут и без записи в реестре"
+
+
 def _site_card(service: dict) -> Card:
     key = str(service.get("key") or "")
     targets = list(service.get("targets") or ())
@@ -230,6 +246,8 @@ def _site_card(service: dict) -> Card:
         chips.append(("DNS подменён", WARN))
     if any(item.get("hosts_stale") for item in targets):
         chips.append(("запись в hosts устарела", WARN))
+    if any((item.get("registry") or {}).get("listed") for item in targets):
+        chips.append(("в реестре РКН", INFO))
     if service.get("control"):
         chips.append(("контрольный", INFO))
 
@@ -261,6 +279,8 @@ def _site_card(service: dict) -> Card:
             )
         if item.get("cause_text"):
             rows.append(Line(FAIL, "Как блокируют", str(item["cause_text"])))
+        if "registry" in item:
+            rows.append(Line(INFO, "Реестр РКН", _registry_text(item)))
         if item.get("quic_text"):
             rows.append(
                 Line(WARN if item.get("quic") == "blocked_by_name" else INFO, "QUIC (UDP 443)", str(item["quic_text"]))

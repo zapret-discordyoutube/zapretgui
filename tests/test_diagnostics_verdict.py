@@ -224,6 +224,7 @@ class _Net:
         self.speed: dict | None = None
         # TLS 1.2 / TLS 1.3 / HTTP по отдельности: по умолчанию проверку будто сняли.
         self.protocol_facts = None
+        self.registry = engine.registry.Index()
         self.protocols_asked: list[tuple[str, str]] = []
         self.ipv6 = sections.ipv6_check.Ipv6Verdict(sections.ipv6_check.IPV6_ABSENT, "в этой сети его нет")
         # Состояние системы читает реестр и службы: в сценариях движка оно задаётся явно.
@@ -291,6 +292,8 @@ class _Net:
             patch.object(net_access, "hosts_file_ipv4", return_value=()),
             patch.object(net_access, "system_dns_servers", return_value=("83.220.169.155",)),
             patch.object(sections, "zapret_status", return_value=(True, "✅ Zapret запущен")),
+            # Список реестра РКН качается из сети и лежит на диске: в сценариях движка его нет.
+            patch.object(sections, "start_registry", return_value=lambda _seconds: self.registry),
             patch.object(engine, "running_bypass_tools", return_value=self.bypass_tools),
             patch.object(engine, "_discover_googlevideo", return_value=(("rr1---sn-test.googlevideo.com",), "")),
             # Звонки и обрыв 16 КБ проверяются в любом режиме — без сети в тестах.

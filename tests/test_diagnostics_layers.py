@@ -15,7 +15,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "diagnostics"
 
 # Функции, которые открывают соединение или спрашивают DNS.
 NETWORK_CALLS = {"https_get", "query_doh", "query_ipv4", "hosts_file_ipv4", "system_dns_servers"}
-UPPER_LAYERS = ("engine.py", "sections.py", "problems.py", "report_text.py")
+UPPER_LAYERS = ("engine.py", "sections.py", "problems.py", "report_text.py", "registry.py")
 
 
 def imported_names(source: str) -> set[str]:

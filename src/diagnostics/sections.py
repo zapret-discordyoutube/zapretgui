@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Future
@@ -19,6 +20,7 @@ from diagnostics import (
     my_network,
     net_access,
     quic_probe,
+    registry,
     report_text,
     speed_check,
     system_state,
@@ -33,6 +35,41 @@ from utils.dns_wire import TYPE_AAAA
 from utils.ip_owner import lookup_ip_owner
 
 Emit = Callable[[str], None]
+
+
+def start_registry() -> Callable[[float], registry.Index]:
+    """Запускает обновление списка реестра РКН и возвращает «ждалку» его итога.
+
+    Список качается своим потоком, а не потоком прогона: если сеть медленная,
+    проверка его не ждёт и берёт тот, что уже лежит на диске, а скачивание
+    доходит до конца само — следующей проверке достанется свежий.
+    """
+    folder = registry.default_folder()
+    done = threading.Event()
+    result: list[registry.Index] = []
+
+    def _fetch(url: str, etag: str) -> registry.Fetched | None:
+        got = net_access.download_file(url, etag)
+        if got is None:
+            return None
+        body, new_etag = got
+        return registry.Fetched(body=body, etag=new_etag, unchanged=body is None)
+
+    def _work() -> None:
+        try:
+            result.append(registry.refresh(folder, _fetch))
+        except Exception:
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(target=_work, name="blockcheck-registry", daemon=True).start()
+
+    def wait(seconds: float) -> registry.Index:
+        done.wait(max(0.0, seconds))
+        return result[0] if result else registry.load(folder)
+
+    return wait
 
 
 def _dns_provider(ip: str) -> tuple[str, str, str]:

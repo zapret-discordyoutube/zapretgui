@@ -10,6 +10,9 @@
 
 from __future__ import annotations
 
+import gzip
+import urllib.error
+import urllib.request
 from collections.abc import Callable
 
 from diagnostics.limits import DNS_TIMEOUT, DOH_TIMEOUT, HTTPS_TIMEOUT, READ_TIMEOUT
@@ -19,8 +22,13 @@ from utils.dns_reference import REFERENCE_RESOLVERS, ReferenceResolver
 from utils.dns_wire import TYPE_A, DnsQueryResult, query_doh
 from utils.windows_dns_query import DnsAnswer, hosts_file_ipv4, query_ipv4, system_dns_servers
 
+# Скачивание служебных списков (реестр): общий срок и предел размера.
+FILE_TIMEOUT_S = 40.0
+FILE_LIMIT_BYTES = 64 * 1024 * 1024
+
 __all__ = [
     "doh_ask",
+    "download_file",
     "doh_lookup",
     "fetch",
     "get",
@@ -90,6 +98,30 @@ def fetch(
 def get(run: Run, host: str, ip: str, path: str, *, read_limit: int = 0) -> ProbeResult:
     """Обычный запрос «открывается ли сайт» с общими сроками."""
     return fetch(run, host, ip, path, read_limit=read_limit)
+
+
+def download_file(url: str, etag: str = "", *, timeout: float = FILE_TIMEOUT_S, limit: int = FILE_LIMIT_BYTES):
+    """Скачивает файл целиком. (содержимое, метка версии) или None — не вышло.
+
+    ``etag`` — метка версии, которая уже есть: если на сервере та же, файл не
+    качается и содержимое возвращается как ``None`` при той же метке.
+    Сжатие включено: список реестра по сети идёт вчетверо меньше.
+    """
+    request = urllib.request.Request(url, headers={"Accept-Encoding": "gzip", "User-Agent": "ZapretGUI"})
+    if etag:
+        request.add_header("If-None-Match", etag)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read(limit + 1)
+            if len(body) > limit:
+                return None
+            if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                body = gzip.decompress(body)
+            return body, str(response.headers.get("ETag") or "")
+    except urllib.error.HTTPError as error:
+        return (None, etag) if error.code == 304 else None
+    except (OSError, ValueError, EOFError):
+        return None
 
 
 def system_ipv4(run: Run, host: str) -> DnsAnswer:
