@@ -40,7 +40,7 @@ from qfluentwidgets import (
 
 from blockcheck.ui.block_kinds_view import kind_color
 from blockcheck.ui.brand_icons import BrandIcon, named_brand, site_brand
-from blockcheck.ui.finding_parts import ServerChip, split_finding, split_server_list
+from blockcheck.ui.finding_parts import CardsFlow, FindingCard, split_finding, split_server_list
 from blockcheck.ui.server_matrix import ServerMatrix, parse_server_table
 from blockcheck.ui.result_cards_model import PREVIEW_LINES, Card, Counter, DotGroup, Line, Section, build_cards, build_counters
 from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_state_text
@@ -51,6 +51,7 @@ from ui.code_editor.log_syntax import LogSyntaxHighlighter
 from ui.fluent_widgets import set_tooltip
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
+from ui.widgets.elided_label import ElidedLabel as _ElidedLabel
 from ui.widgets.hover_hint import HoverHint
 from ui.widgets.share_bar import ShareBar
 from ui.widgets.stagger_float_in import float_in
@@ -123,48 +124,6 @@ def _chip_style(text_color: str, tokens=None) -> str:
 
 def _muted_text(tokens=None) -> str:
     return "rgba(0, 0, 0, 0.62)" if _is_light(tokens) else "rgba(255, 255, 255, 0.62)"
-
-
-class _ElidedLabel(CaptionLabel):
-    """Одна строка: что не помещается, уходит в многоточие и в подсказку."""
-
-    def __init__(self, text: str = "", parent=None, *, align=Qt.AlignmentFlag.AlignLeft, strong: bool = False) -> None:
-        # Только с родителем: у FluentLabel вызов с текстом заново зовёт __init__(parent).
-        super().__init__(parent)
-        if strong:
-            font = self.font()
-            font.setPixelSize(14)
-            font.setWeight(QFont.Weight.DemiBold)
-            self.setFont(font)
-        self._full = ""
-        self._align = align
-        self.setAlignment(align | Qt.AlignmentFlag.AlignVCenter)
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        self.set_full_text(text)
-
-    def full_text(self) -> str:
-        return self._full
-
-    def set_full_text(self, text: str) -> None:
-        self._full = str(text or "")
-        self._elide()
-
-    def sizeHint(self) -> QSize:  # noqa: N802
-        metrics = QFontMetrics(self.font())
-        return QSize(metrics.horizontalAdvance(self._full) + 2, metrics.height() + 2)
-
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
-        return QSize(24, QFontMetrics(self.font()).height() + 2)
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self._elide()
-
-    def _elide(self) -> None:
-        metrics = QFontMetrics(self.font())
-        shown = metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, max(8, self.width()))
-        super().setText(shown)
-        self.setToolTip(self._full if shown != self._full else "")
 
 
 class _StateIcon(QLabel):
@@ -726,6 +685,9 @@ class ResultCardsView(QWidget):
         self.sites_title.setVisible(bool(sites))
         self.checks_title.setVisible(bool(checks))
         self.sites_grid.show_cards(sites, animate=animate)
+        # Широкая карточка занимает весь ряд: стоя посреди списка, она оставляла перед собой
+        # ряд с одной карточкой и пустотой. Широкие идут первыми, остальные заполняют ряды подряд.
+        checks = sorted(checks, key=lambda card: not card.wide)
         self.checks_grid.show_cards(checks, animate=animate, first_delay_ms=200)
         broken = sum(1 for card in cards if card.level in ("fail", "warn"))
         set_state_text(self, f"Результаты BlockCheck: карточек {len(cards)}, с проблемами {broken}")
@@ -1067,66 +1029,22 @@ def wants_findings(section: Section, card: Card) -> bool:
     return card.key == "dns_servers" and bool(section.lines) and not any(line.text for line in section.lines)
 
 
-class _FindingRow(QWidget):
-    """Вывод про DNS по частям: заголовок, серверы метками со счётчиком и пояснение."""
-
-    def __init__(self, line: Line, parent=None, *, divided: bool = False) -> None:
-        super().__init__(parent)
-        self.line = line
-        self._divided = divided
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 8, 0, 8)
-        layout.setSpacing(10)
-        state = line.state
-        holder = QWidget(self)
-        holder.setFixedSize(16, 20)
-        ToneDot(lambda tokens: state_color(state, tokens), holder, size=7, hollow=state in _HOLLOW_STATES).move(4, 6)
-        layout.addWidget(holder, 0, Qt.AlignmentFlag.AlignTop)
-
-        texts = QVBoxLayout()
-        texts.setSpacing(3)
-        title, detail = split_finding(line.name)
-        servers, more, rest = split_server_list(detail)
-        self.name_label = StrongBodyLabel(title, self)
-        self.name_label.setWordWrap(True)
-        self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        texts.addWidget(self.name_label)
-        self.server_chips: list[ServerChip] = []
-        self.more_label: CaptionLabel | None = None
-        if servers:
-            chips = QWidget(self)
-            flow = FlowLayout(chips, needAni=False)
-            flow.setContentsMargins(0, 2, 0, 2)
-            flow.setHorizontalSpacing(6)
-            flow.setVerticalSpacing(4)
-            for name, addresses in servers:
-                chip = ServerChip(name, addresses, chips)
-                flow.addWidget(chip)
-                self.server_chips.append(chip)
-            if more:
-                self.more_label = mute(CaptionLabel(f"и ещё {more}", chips))
-                self.more_label.setFixedHeight(22)
-                flow.addWidget(self.more_label)
-            texts.addWidget(chips)
-        self.text_label: BodyLabel | None = None
-        if rest:
-            self.text_label = mute(BodyLabel(rest, self))
-            self.text_label.setWordWrap(True)
-            self.text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            texts.addWidget(self.text_label)
-        layout.addLayout(texts, 1)
-        set_state_text(self, line.name)
-        self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        _ = event
-        if not self._divided:
-            return
-        painter = QPainter(self)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 20) if _is_light() else QColor(255, 255, 255, 18))
-        painter.drawRect(0, 0, self.width(), 1)
-        painter.end()
+def finding_card(line: Line, parent=None) -> FindingCard:
+    """Вывод про DNS карточкой: заголовок, серверы метками, остальное — в подсказке."""
+    title, detail = split_finding(line.name)
+    servers, more, rest = split_server_list(detail)
+    state = line.state
+    return FindingCard(
+        title,
+        parent,
+        servers=servers,
+        more=more,
+        note=rest,
+        hint="\n".join(part for part in (title, detail) if part),
+        color_for=lambda tokens: state_color(state, tokens),
+        hollow=state in _HOLLOW_STATES,
+        state_text=line.name,
+    )
 
 
 def wants_tiles(section: Section, card: Card) -> bool:
@@ -1331,7 +1249,8 @@ class _SectionBlock(QWidget):
         name_width = max(NAME_COLUMN_MIN, min(NAME_COLUMN_MAX, widest + 12))
         # Перечень серверов — сеткой карточек одним виджетом; остальное — строками таблицы.
         self.grid: TilesGrid | None = None
-        self.rows: list[_ReportRow] = []
+        self.rows: list = []
+        self.findings_flow: CardsFlow | None = None
         if tiles:
             self.grid = TilesGrid([line_tile(line) for line in section.lines], self)
             self.grid.opened.connect(lambda index: self.line_opened.emit(section.lines[index]))
@@ -1339,9 +1258,14 @@ class _SectionBlock(QWidget):
             layout.addWidget(self.grid)
             layout.addSpacing(6)
         elif findings:
-            self.rows = [_FindingRow(line, self, divided=True) for line in section.lines]
-            for row in self.rows:
-                layout.addWidget(row)
+            # Выводы — сеткой карточек, как находки DNS в итоге проверки.
+            self.findings_flow = CardsFlow(self, min_width=FindingCard.MIN_WIDTH, card_height=FindingCard.HEIGHT)
+            self.rows = [finding_card(line, self.findings_flow) for line in section.lines]
+            for card in self.rows:
+                self.findings_flow.add(card)
+            layout.addSpacing(2)
+            layout.addWidget(self.findings_flow)
+            layout.addSpacing(6)
         else:
             self.rows = [
                 _ReportRow(line, line_icon(line, section), name_width, self, divided=True) for line in section.lines

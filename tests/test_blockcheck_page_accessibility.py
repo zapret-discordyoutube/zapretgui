@@ -393,14 +393,16 @@ class BlockKindsOnScreenTests(unittest.TestCase):
         # Все строки по-прежнему доступны списком: группы, затем «Открываются».
         self.assertEqual(len(panel.problem_rows()), 6)
 
-    def test_problem_without_kind_keeps_the_plain_look(self) -> None:
+    def test_problem_without_kind_gets_its_own_titled_group(self) -> None:
         panel = BlockcheckSummaryPanel()
         self.addCleanup(panel.deleteLater)
         panel.show_report(dict(_REPORT))
 
         [group] = panel.problem_groups()
         self.assertEqual(group.kind(), "other")
-        self.assertIsNone(group.title_label)
+        # Заголовок и пояснение есть: без них карточки висели между группами как случайные.
+        self.assertEqual(group.title_label.text(), "Остальное")
+        self.assertIn("не определила", group.about_label.text())
         # Сайт без вида блокировки — такая же карточка: название, что с ним, причина в подсказке.
         card = group.rows[0]
         self.assertEqual((card.title, card.note), ("X (Twitter)", "не открывается"))

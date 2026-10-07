@@ -19,14 +19,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QEvent, QRectF, Qt, QTimer, pyqtSignal
-from PyQt6.QtCore import QSize
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, FlowLayout, PushButton, TransparentPushButton, TransparentToolButton, SimpleCardWidget, StrongBodyLabel, SubtitleLabel
 
 from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_groups
-from blockcheck.ui.finding_parts import ServerChip, split_server_list, theme_color
-from blockcheck.ui.result_cards import _ElidedLabel
+from blockcheck.ui.finding_parts import CardsFlow, FindingCard, ServerChip, split_server_list, theme_color
+from ui.widgets.elided_label import ElidedLabel as _ElidedLabel
 from blockcheck.ui.result_cards_model import build_cards
 from blockcheck.ui.brand_icons import BrandIcon, site_brand
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
@@ -131,9 +130,10 @@ def group_problems(problems: list[dict]) -> list[tuple[str, list[dict]]]:
         kind = str(problem.get("kind") or KIND_OTHER)
         groups.setdefault(kind if kind in KINDS else KIND_OTHER, []).append(problem)
 
-    def _rank(item: tuple[str, list[dict]]) -> tuple[int, int]:
+    def _rank(item: tuple[str, list[dict]]) -> tuple[int, int, int]:
         kind, rows = item
-        return min(level_order.get(str(row.get("level")), 9) for row in rows), kind_order.get(kind, 99)
+        # «Остальное» — всегда последним: без названного вида блокировки ему не место между группами.
+        return kind == KIND_OTHER, min(level_order.get(str(row.get("level")), 9) for row in rows), kind_order.get(kind, 99)
 
     return sorted(groups.items(), key=_rank)
 
@@ -418,53 +418,27 @@ class _SiteCard(QWidget):
         painter.end()
 
 
-class _CardsFlow(QWidget):
-    """Сетка карточек сайтов: колонок столько, сколько помещается, карточки делят ширину поровну."""
-
-    MIN_WIDTH = 210
-    GAP = 6
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self._cards: list[_SiteCard] = []
-        policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        policy.setHeightForWidth(True)
-        self.setSizePolicy(policy)
-
-    def cards(self) -> list[_SiteCard]:
-        return list(self._cards)
-
-    def add(self, card: _SiteCard) -> None:
-        card.setParent(self)
-        self._cards.append(card)
-
-    def columns_for(self, width: int) -> int:
-        return max(1, (int(width) + self.GAP) // (self.MIN_WIDTH + self.GAP))
-
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
-        return True
-
-    def heightForWidth(self, width: int) -> int:  # noqa: N802
-        rows = -(-len(self._cards) // self.columns_for(width))
-        return max(0, rows * (_SiteCard.HEIGHT + self.GAP) - self.GAP)
-
-    def sizeHint(self) -> QSize:  # noqa: N802
-        width = max(self.MIN_WIDTH, self.width())
-        return QSize(width, self.heightForWidth(width))
-
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
-        return QSize(self.MIN_WIDTH, _SiteCard.HEIGHT)
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        columns = self.columns_for(self.width())
-        width = (self.width() - self.GAP * (columns - 1)) // columns
-        for index, card in enumerate(self._cards):
-            row, column = divmod(index, columns)
-            card.setGeometry(column * (width + self.GAP), row * (_SiteCard.HEIGHT + self.GAP), width, _SiteCard.HEIGHT)
-        height = self.heightForWidth(self.width())
-        if height != self.minimumHeight():
-            self.setFixedHeight(height)
+def problem_finding_card(problem: dict, parent=None) -> FindingCard:
+    """Находка не про сайт (DNS и подобное) карточкой; пояснение и совет — в подсказке."""
+    level = str(problem.get("level") or "unknown")
+    tone = _level_tone(level)
+    title, detail = split_problem_text(problem)
+    title, named_sites = split_named_sites(title)
+    servers, more, rest = split_server_list(detail) if problem.get("kind") == "dns" else ([], 0, detail)
+    evidence = set(problem.get("evidence") or ())
+    advice = [str(item) if item in evidence else f"→ {item}" for item in problem.get("advice") or ()]
+    return FindingCard(
+        title,
+        parent,
+        servers=[*[(name, []) for name in named_sites], *servers, *(problem.get("chips") or ())],
+        more=more,
+        note=rest,
+        hint="\n".join(part for part in (title, detail, *advice) if part),
+        color_for=lambda tokens: tone_color(tone, tokens) or _NEUTRAL_DOT,
+        hollow=level not in ("fail", "ok"),
+        level_word=_LEVEL_WORDS.get(level, ""),
+        state_text=str(problem.get("text") or ""),
+    )
 
 
 class _ProblemRow(QWidget):
@@ -655,6 +629,9 @@ class _ProblemRow(QWidget):
         painter.end()
 
 
+_OTHER_ABOUT = "Что именно мешает, проверка не определила — подробности в подсказке и в отчёте по нажатию."
+
+
 class _ProblemGroup(ToneGroup):
     """Проблемы одного вида блокировки: заголовок с цветной точкой, пояснение, карточки сайтов и строки.
 
@@ -673,15 +650,16 @@ class _ProblemGroup(ToneGroup):
         on_open: OpenHandler | None = None,
     ) -> None:
         info = kind_info(kind)
-        # «Остальное» — не вид блокировки: идёт без заголовка.
-        plain = kind == KIND_OTHER
+        # «Остальное» — не вид блокировки, но заголовок и подложка у группы те же:
+        # без них карточки сайтов висели между группами как случайные.
+        plain = False
         key_for = card_key_for or (lambda _problem: "")
         super().__init__(
             info.title,
             lambda tokens: kind_color(kind, tokens),
             parent,
             count=len(problems),
-            about=info.about,
+            about=info.about or _OTHER_ABOUT,
             plain=plain,
         )
         self._kind = kind
@@ -690,10 +668,10 @@ class _ProblemGroup(ToneGroup):
         sites = [problem for problem in problems if is_site_problem(problem)]
         others = [problem for problem in problems if not is_site_problem(problem)]
 
-        self.rows: list[_SiteCard | _ProblemRow] = []
-        self.flow: _CardsFlow | None = None
+        self.rows: list[_SiteCard | FindingCard | _ProblemRow] = []
+        self.flow: CardsFlow | None = None
         if sites:
-            self.flow = _CardsFlow(self)
+            self.flow = CardsFlow(self)
             for problem in sites:
                 card = _SiteCard(problem, on_action, self.flow, card_key=key_for(problem), on_open=on_open)
                 self.flow.add(card)
@@ -728,6 +706,17 @@ class _ProblemGroup(ToneGroup):
                 self.report_button, name=f"Полный отчёт: {info.title}", description="Открывает страницу со всеми измерениями."
             )
             self.add_header_widget(self.report_button)
+        # Несколько находок с общим действием и отчётом — карточками: заголовок и метки,
+        # без абзацев пояснений (они в подсказке и в полном отчёте).
+        self.findings_flow: CardsFlow | None = None
+        if shared_action and shared_report:
+            self.findings_flow = CardsFlow(self, min_width=FindingCard.MIN_WIDTH, card_height=FindingCard.HEIGHT)
+            for problem in others:
+                card = problem_finding_card(problem, self.findings_flow)
+                self.findings_flow.add(card)
+                self.rows.append(card)
+            self.add_widget(self.findings_flow)
+            others = []
         for problem in others:
             row = _ProblemRow(
                 problem,

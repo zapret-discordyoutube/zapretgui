@@ -107,10 +107,13 @@ class ReportOnScreenTests(unittest.TestCase):
         self.app.processEvents()
 
         conclusions, table = view.blocks
-        [row] = conclusions.rows
-        self.assertEqual(row.name_label.text(), "Отвечают через раз")
-        self.assertEqual([chip.text for chip in row.server_chips], ["Quad9 ×2"])
-        self.assertEqual((row.more_label.text(), row.text_label.text()), ("и ещё 3", "Так бывает."))
+        # Вывод — карточка: заголовок и серверы метками; пояснение целиком — в подсказке.
+        [card] = conclusions.rows
+        self.assertEqual(conclusions.findings_flow.cards(), [card])
+        self.assertEqual(card.title, "Отвечают через раз")
+        self.assertEqual([chip.text for chip in card.server_chips], ["Quad9 ×2"])
+        self.assertEqual(card.more_label.text(), "и ещё 3")
+        self.assertIn("Так бывает.", card.hint_text)
         # Таблица — сводкой по сервисам; сырой текст открывается кнопкой, а не лежит на странице.
         self.assertEqual([service.name for service in table.matrix.services()], ["Cloudflare", "Quad9"])
         self.assertIsNone(table.editor)
@@ -178,9 +181,38 @@ class GroupActionsTests(unittest.TestCase):
         self.assertEqual(group.shared_action_button.text(), "Настройка DNS")
         # Строки не повторяют кнопку и не открывают один и тот же отчёт каждая.
         self.assertEqual([(row.action_button, row.card_key) for row in group.rows], [(None, ""), (None, "")])
+        # Находки — карточки одной сетки: заголовок и метки серверов, без абзацев пояснений.
+        self.assertEqual(group.findings_flow.cards(), group.rows)
+        self.assertEqual([card.title for card in group.rows], ["Обычные ответы подменяются у серверов", "Отвечают через раз"])
+        self.assertEqual([chip.text for chip in group.rows[0].server_chips], ["Cloudflare"])
         group.shared_action_button.click()
         group.report_button.click()
         self.assertEqual((acted, opened), ([("dns", "")], ["dns_servers"]))
+
+    def test_group_without_a_kind_goes_last(self) -> None:
+        from blockcheck.ui.check_results import group_problems
+
+        problems = [
+            {"level": "fail", "kind": "other", "text": "WhatsApp не открывается"},
+            {"level": "warn", "kind": "dns", "text": "Отвечают через раз"},
+            {"level": "fail", "kind": "ip", "text": "Telegram не открывается"},
+        ]
+        self.assertEqual([kind for kind, _rows in group_problems(problems)], ["ip", "dns", "other"])
+
+    def test_wide_card_goes_first_so_no_card_is_left_alone_in_a_row(self) -> None:
+        from blockcheck.ui.result_cards import ResultCardsView
+
+        view = ResultCardsView()
+        self.addCleanup(view.deleteLater)
+        report = {
+            "services": [],
+            "ipv6": {"state": "absent", "text": "в этой сети его нет"},
+            "freeze": {"level": "ok", "headline": "", "advice": [], "items": [], "servers": [{"provider": "AWS", "id": "A", "host": "a", "state": "ok", "text": "ок", "direction": "download", "seconds": 1.0}]},
+        }
+        view.show_report(report, animate=False)
+        keys = [card.card.key for card in view.checks_grid.cards()]
+        self.assertEqual(keys[0], "hostings")
+        self.assertIn("ipv6", keys[1:])
 
     def test_single_row_keeps_its_own_button(self) -> None:
         panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open=lambda _key: None)
