@@ -8,6 +8,14 @@
 Всё нарисовано в квадрате 100×100 тем же порядком слоёв, что и на логотипе.
 Части, которые двигаются, принимают параметры ``BadgerPose``: моргание,
 взгляд, челюсть («кусь»), лапа, ухо и блеск молнии.
+
+Пока медоед просто стоит и дышит, от кадра к кадру у него двигаются только
+челюсть и лапа. Тело, голова, ухо, глаз и молния не меняются, а это самая
+дорогая часть рисунка: большие контуры с градиентами и обводками. Поэтому
+``paint_logo_badger`` умеет брать их готовыми слоями (``ui.paint_layer_cache``)
+и дорисовывать поверх только подвижное. Медоед на сцене перерисовывается около
+28 раз в секунду; замер на Windows: на его рисование уходило около 290 мс за
+30 секунд, стало около 200 (остаток — жесты и моргание, они рисуются напрямую).
 """
 
 from __future__ import annotations
@@ -18,6 +26,8 @@ from functools import lru_cache
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
+
+from ui.paint_layer_cache import LayerCache
 
 
 # Цвета сняты с логотипа.
@@ -258,12 +268,43 @@ def _closed_eye_path() -> QPainterPath:
     return _path([(51.5, 15.5), (56.0, 18.0, 60.5, 15.5)], close=False)
 
 
-def paint_logo_badger(painter: QPainter, pose: BadgerPose = BadgerPose()) -> None:
-    """Рисует медоеда с логотипа в квадрате 100×100."""
+# Области слоёв в квадрате 100×100, с запасом на обводки и поворот уха.
+_BACK_RECT = QRectF(-4.0, -3.0, 108.0, 108.0)
+_BOLT_RECT = QRectF(52.0, 36.0, 52.0, 48.0)
+# Готовые слои общие для всех медоедов программы. Спокойный медоед дышит —
+# его масштаб проходит около полусотни ступеней (DrawnBadger.set_breath), и
+# у каждой ступени свой слой тела и свой слой молнии.
+_LAYERS = LayerCache(capacity=160)
+
+
+def paint_logo_badger(painter: QPainter, pose: BadgerPose = BadgerPose(), *, steady: bool = False) -> None:
+    """Рисует медоеда с логотипа в квадрате 100×100.
+
+    ``steady`` — медоед сейчас не моргает и не делает жест: ухо, глаз и взгляд
+    стоят на месте. Тогда неподвижные части берутся готовыми слоями, а заново
+    рисуются только челюсть и лапа. Без ``steady`` всё рисуется напрямую.
+    """
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(Qt.PenStyle.NoPen)
 
+    if steady and pose.blink <= 0.0:
+        key = ("back", round(pose.ear, 3), round(pose.eye_open, 3), round(pose.look, 3))
+        _LAYERS.draw(painter, key, _BACK_RECT, lambda layer: _paint_back(layer, pose))
+    else:
+        _paint_back(painter, pose)
+
+    _paint_jaw(painter, pose.jaw)
+    if steady and pose.bolt_glow <= 0.0:
+        _LAYERS.draw(painter, "bolt", _BOLT_RECT, lambda layer: _paint_bolt(layer, 0.0))
+    else:
+        _paint_bolt(painter, pose.bolt_glow)
+    _paint_paw(painter, pose.paw)
+    painter.restore()
+
+
+def _paint_back(painter: QPainter, pose: BadgerPose) -> None:
+    """Всё, что лежит под челюстью: тело, складка, шея, пасть, голова, ухо, глаз и ноздря."""
     body = QLinearGradient(QPointF(30.0, 5.0), QPointF(55.0, 100.0))
     body.setColorAt(0.0, BODY_TOP)
     body.setColorAt(1.0, BODY_BOTTOM)
@@ -304,11 +345,6 @@ def paint_logo_badger(painter: QPainter, pose: BadgerPose = BadgerPose()) -> Non
     # Ноздря на кончике морды.
     painter.setBrush(STRIPE)
     painter.drawEllipse(QPointF(83.5, 23.0), 1.6, 1.9)
-
-    _paint_jaw(painter, pose.jaw)
-    _paint_bolt(painter, pose.bolt_glow)
-    _paint_paw(painter, pose.paw)
-    painter.restore()
 
 
 def _paint_ear(painter: QPainter, angle: float) -> None:

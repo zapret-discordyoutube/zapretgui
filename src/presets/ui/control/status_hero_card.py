@@ -13,6 +13,11 @@
 
 Цвет и волна — короткие анимации по событию. Без работающего обхода, при
 скрытой странице и при выключенных «живых анимациях» карточка кадров не рисует.
+
+Свечение меняется каждый кадр, а рамка, фон и подкраска под ним — нет. Но
+перерисовывать под свечением приходится всё, и рамка со сглаженными углами
+съедала половину времени кадра. Поэтому неподвижная часть карточки хранится
+готовым слоем (``ui.paint_layer_cache``): кадр — это слой и два пятна света.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from PyQt6.QtWidgets import QBoxLayout
 from qfluentwidgets import CardWidget, isDarkTheme
 
 from ui.animation_policy import are_live_animations_enabled
+from ui.paint_layer_cache import LayerCache
 
 
 TINT_FADE_MS = 420
@@ -107,6 +113,8 @@ class StatusHeroCard(CardWidget):
         self._phase = ""
         # None — свечение неподвижно; иначе время потока сцены в секундах.
         self._shimmer_t: float | None = None
+        # Готовый слой рамки, фона и подкраски (обычный вид и вид под мышью).
+        self._layers = LayerCache(capacity=3)
 
         # QVariantAnimation, а не QPropertyAnimation: при выключенных
         # анимациях WinUI общий fallback подменяет QPropertyAnimation.start.
@@ -262,17 +270,25 @@ class StatusHeroCard(CardWidget):
                 self._wave.stop()
                 self._wave_t = 0.0
 
-    def paintEvent(self, event) -> None:  # noqa: N802
-        super().paintEvent(event)
-        if not self._tint.isValid():
-            return
+    def _base_key(self) -> tuple:
+        """Всё, от чего зависит неподвижная часть карточки."""
+        return (
+            self.width(),
+            self.height(),
+            float(self.borderRadius),
+            isDarkTheme(),
+            bool(self.isHover),
+            bool(self.isPressed),
+            self.backgroundColor.rgba(),
+            self._tint.rgba(),
+        )
+
+    def _paint_base(self, painter: QPainter) -> None:
+        """Рамка и фон карточки и подкраска цветом состояния поверх них."""
+        self._paint_card_frame(painter)
+
         rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
         radius = float(self.borderRadius)
-
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-
         strength = TINT_ALPHA_DARK if isDarkTheme() else TINT_ALPHA_LIGHT
         near = QColor(self._tint)
         near.setAlphaF(strength)
@@ -282,11 +298,76 @@ class StatusHeroCard(CardWidget):
         gradient.setColorAt(0.0, near)
         gradient.setColorAt(0.55, far)
         gradient.setColorAt(1.0, far)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(gradient)
         # Скруглённая фигура вместо обрезки по контуру: обрезка со сглаживанием
         # в несколько раз дороже, а кадры свечения идут постоянно.
         painter.drawRoundedRect(rect, radius, radius)
 
+    def _paint_card_frame(self, painter: QPainter) -> None:
+        """Рамка и фон обычной карточки — то же, что рисует ``CardWidget.paintEvent``.
+
+        Библиотека рисует их только прямо на виджете, а в готовый слой нужно
+        нарисовать своим ``painter``, поэтому рисунок повторён здесь. За
+        совпадением с библиотекой следит тест
+        ``test_card_frame_matches_the_library_card`` (tests/test_control_animations.py).
+        """
+        w, h = self.width(), self.height()
+        r = self.borderRadius
+        d = 2 * r
+        dark = isDarkTheme()
+
+        top = QPainterPath()
+        top.arcMoveTo(1, h - d - 1, d, d, 240)
+        top.arcTo(1, h - d - 1, d, d, 225, -60)
+        top.lineTo(1, r)
+        top.arcTo(1, 1, d, d, -180, -90)
+        top.lineTo(w - r, 1)
+        top.arcTo(w - d - 1, 1, d, d, 90, -90)
+        top.lineTo(w - 1, h - r)
+        top.arcTo(w - d - 1, h - d - 1, d, d, 0, -60)
+        top_color = QColor(0, 0, 0, 20)
+        if dark:
+            if self.isPressed:
+                top_color = QColor(255, 255, 255, 18)
+            elif self.isHover:
+                top_color = QColor(255, 255, 255, 13)
+        else:
+            top_color = QColor(0, 0, 0, 15)
+        painter.strokePath(top, top_color)
+
+        bottom = QPainterPath()
+        bottom.arcMoveTo(1, h - d - 1, d, d, 240)
+        bottom.arcTo(1, h - d - 1, d, d, 240, 30)
+        bottom.lineTo(w - r - 1, h - 1)
+        bottom.arcTo(w - d - 1, h - d - 1, d, d, 270, 30)
+        bottom_color = top_color
+        if not dark and self.isHover and not self.isPressed:
+            bottom_color = QColor(0, 0, 0, 27)
+        painter.strokePath(bottom, bottom_color)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self.backgroundColor)
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), r, r)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        if not self._tint.isValid():
+            super().paintEvent(event)
+            return
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        radius = float(self.borderRadius)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        if self._tint_fade.state() == QVariantAnimation.State.Running:
+            # Цвет перетекает: подкраска каждый кадр другая, слой не годится.
+            self._paint_base(painter)
+        else:
+            self._layers.draw(painter, self._base_key(), QRectF(self.rect()), self._paint_base)
+
+        strength = TINT_ALPHA_DARK if isDarkTheme() else TINT_ALPHA_LIGHT
         shimmer_t = self._shimmer_t
         area = self.shimmer_rect()
         if shimmer_t is not None and area.width() > 0:

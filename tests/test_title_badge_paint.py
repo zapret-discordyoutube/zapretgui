@@ -95,5 +95,89 @@ class RunningBadgePulseTests(unittest.TestCase):
         self.assertFalse(badge.is_pulsing())
 
 
+class LaunchBadgeReadyRingTests(unittest.TestCase):
+    """Кольцо с точкой берётся готовой картинкой для каждого шага пульса."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def _pulsing_badge(self):
+        from unittest import mock
+
+        import ui.launch_title_badge as badge_module
+
+        patcher = mock.patch.object(badge_module, "are_live_animations_enabled", return_value=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        badge = badge_module.LaunchTitleBadge(language_provider=lambda: "ru")
+        self.addCleanup(badge.deleteLater)
+        badge.set_state(phase="running", launch_method="direct_zapret2")
+        self.assertTrue(badge.is_pulsing())
+        return badge, badge_module
+
+    def test_pulse_moves_in_steps_of_one_screen_frame(self) -> None:
+        from unittest import mock
+
+        badge, badge_module = self._pulsing_badge()
+        steps = badge_module.PULSE_STEPS
+        self.assertEqual(steps, 108)  # 1,8 с по 1/60 с
+        for elapsed in (0.0, 5.0, 16.0, 17.0, 40.0, 900.0, 1799.0, 1801.0, 3 * 1800.0 + 250.0):
+            with mock.patch.object(badge._pulse, "elapsed_ms", return_value=elapsed):
+                badge._on_pulse_frame()
+            exact = (elapsed % badge_module.RUNNING_PULSE_MS) / badge_module.RUNNING_PULSE_MS
+            self.assertAlmostEqual(badge._pulse_t * steps, round(badge._pulse_t * steps), places=6)
+            # Отстаёт от точной фазы меньше чем на один кадр экрана.
+            self.assertLessEqual(badge._pulse_t, exact + 1e-9)
+            self.assertLess(exact - badge._pulse_t, 1.0 / steps)
+
+    def test_ring_of_a_pulse_step_is_painted_once(self) -> None:
+        from unittest import mock
+
+        from test_paint_layer_cache import render
+
+        badge, badge_module = self._pulsing_badge()
+        painted: list[float] = []
+        original = badge_module.LaunchTitleBadge._paint_dot
+
+        def counting(painter, shape, center, color, *, ring_t, halo):
+            painted.append(ring_t)
+            original(painter, shape, center, color, ring_t=ring_t, halo=halo)
+
+        with mock.patch.object(badge_module.LaunchTitleBadge, "_paint_dot", staticmethod(counting)):
+            for _circle in range(3):
+                for step in (0, 20, 40, 107):
+                    badge._pulse_t = step / badge_module.PULSE_STEPS
+                    render(badge, 1.0)
+        self.assertEqual(len(painted), 4)
+        self.assertEqual(len(badge._layers), 4)
+
+    def test_ready_ring_looks_like_direct_painting(self) -> None:
+        from unittest import mock
+
+        from test_paint_layer_cache import ROUNDING, difference, paint_directly, render
+        from ui.paint_layer_cache import LayerCache
+
+        badge, badge_module = self._pulsing_badge()
+        for scale in (1.0, 1.25, 1.5, 2.0):
+            for step in (0, 13, 54, 90, 107):
+                with self.subTest(scale=scale, step=step):
+                    badge._pulse_t = step / badge_module.PULSE_STEPS
+                    with mock.patch.object(LayerCache, "draw", paint_directly):
+                        expected = render(badge, scale)
+                    self.assertLessEqual(difference(expected, render(badge, scale)), ROUNDING)
+                    self.assertLessEqual(difference(expected, render(badge, scale)), ROUNDING)
+
+    def test_busy_and_stopped_badges_paint_the_dot_directly(self) -> None:
+        from test_paint_layer_cache import render
+
+        badge, _badge_module = self._pulsing_badge()
+        for phase in ("starting", "stopped", "failed"):
+            badge.set_state(phase=phase, launch_method="direct_zapret2")
+            self.assertFalse(badge.is_pulsing())
+            render(badge, 1.0)
+        self.assertEqual(len(badge._layers), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

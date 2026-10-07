@@ -17,6 +17,8 @@ import ui.widgets.fun.mascot as mascot_module
 import ui.widgets.motion_icon as motion_module
 import ui.widgets.soft_visibility as soft_module
 import ui.widgets.tile_grid as tile_module
+from test_paint_layer_cache import difference, paint_directly, render, share_above
+from ui.paint_layer_cache import LayerCache
 from ui.widgets.soft_visibility import set_visible_softly, soft_visibility_target
 from donater.premium_display import TIER_ACTIVE, TIER_FREE, PremiumDisplay
 from presets.ui.control.status_hero_card import StatusHeroCard
@@ -704,6 +706,228 @@ class StatusHeroCardTests(unittest.TestCase):
         image.fill(QColor(0, 0, 0, 0))
         card.render(image)
         self.assertFalse(image.isNull())
+
+
+# В целом кадре слои лежат друг на друге (карточка, пол сцены, стена, медоед),
+# и округление при смешивании цветов складывается: до трёх единиц из 255 в
+# отдельных точках на сглаженных краях. Больше чем на единицу расходятся
+# считаные точки — меньше сотой доли процента.
+STACKED_ROUNDING = 3
+STACKED_SHARE_ABOVE_ONE = 0.0001
+
+
+class StatusCardReadyLayersTests(unittest.TestCase):
+    """Неподвижные части карточки и сцены рисуются один раз — и выглядят так же."""
+
+    def assert_same_look(self, expected, actual) -> None:
+        self.assertLessEqual(difference(expected, actual), STACKED_ROUNDING)
+        self.assertLess(share_above(expected, actual, 1), STACKED_SHARE_ABOVE_ONE)
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def setUp(self) -> None:
+        import ui.widgets.fun.logo_badger as logo
+
+        for module in (dot_module, scene_module, hero_module, mascot_module):
+            patcher = mock.patch.object(module, "are_live_animations_enabled", return_value=True)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        logo._LAYERS.clear()
+        self.addCleanup(logo._LAYERS.clear)
+
+    def _page(self, phase: str = "running", color: str = "#6ccb5f", *, offset: tuple[int, int] = (23, 31)):
+        """Карточка со сценой внутри страницы. Скрытая: цвет и ворота сразу в конечном виде."""
+        root = QWidget()
+        root.resize(900, 240)
+        card = StatusHeroCard(root)
+        card.setGeometry(offset[0], offset[1], 820, 167)
+        scene = BypassScene(card)
+        scene.set_clickable(True)
+        scene.move(16, 39)
+        card.bind_scene(scene)
+        scene.set_color(color)
+        scene.set_phase(phase)
+        self.addCleanup(root.deleteLater)
+        return root, card, scene
+
+    @staticmethod
+    def _frame(card, scene, flow_time: float) -> None:
+        """Состояние одного кадра потока: пакеты, свечение, дыхание и поза медоеда."""
+        import math
+
+        scene._flow_time = flow_time
+        scene._pulse_phase = 0.4
+        if scene.phase() == "running":
+            card._shimmer_t = flow_time
+            scene.mascot().set_breath(math.sin(2 * math.pi * flow_time / scene_module.BREATH_PERIOD_S))
+        scene.mascot().set_scene_pose(0.3 * (flow_time % 1.0), 5.0 * (flow_time % 2.0), 0.0)
+
+    def test_card_frame_matches_the_library_card(self) -> None:
+        from PyQt6.QtCore import QPoint
+        from PyQt6.QtGui import QImage, QPainter, QRegion
+        from qfluentwidgets import Theme, isDarkTheme, setTheme
+
+        self.addCleanup(setTheme, Theme.DARK if isDarkTheme() else Theme.LIGHT)
+        for theme in (Theme.DARK, Theme.LIGHT):
+            setTheme(theme)
+            for hover in (False, True):
+                with self.subTest(theme=theme, hover=hover):
+                    card = StatusHeroCard()
+                    card.resize(400, 120)
+                    self.addCleanup(card.deleteLater)
+                    card.isHover = hover
+                    # Без цвета состояния карточку рисует сама библиотека.
+                    self.assertFalse(card.tint().isValid())
+                    library = QImage(400, 120, QImage.Format.Format_ARGB32_Premultiplied)
+                    library.fill(QColor("#20262e"))
+                    card.render(library, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)
+
+                    ours = QImage(400, 120, QImage.Format.Format_ARGB32_Premultiplied)
+                    ours.fill(QColor("#20262e"))
+                    painter = QPainter(ours)
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    card._paint_card_frame(painter)
+                    painter.end()
+                    self.assertEqual(library, ours)
+
+    def test_running_frame_with_ready_layers_looks_like_direct_painting(self) -> None:
+        for scale in (1.0, 1.25, 1.5, 2.0):
+            for flow_time in (0.7, 3.33):
+                with self.subTest(scale=scale, flow_time=flow_time):
+                    root, card, scene = self._page()
+                    self._frame(card, scene, flow_time)
+                    with mock.patch.object(LayerCache, "draw", paint_directly):
+                        expected = render(root, scale)
+                    self.assert_same_look(expected, render(root, scale))
+                    self.assert_same_look(expected, render(root, scale))
+                    # Слои действительно в деле: карточка, а у сцены — пол, стена и кнопка.
+                    self.assertEqual(len(card._layers), 1)
+                    self.assertEqual(len(scene._layers), 3)
+
+    def test_stopped_and_starting_scenes_with_ready_layers_look_like_direct_painting(self) -> None:
+        for phase, color in (("stopped", "#ff6b6b"), ("starting", "#f5a623"), ("failed", "#ff6b6b")):
+            for scale in (1.0, 1.5):
+                with self.subTest(phase=phase, scale=scale):
+                    root, card, scene = self._page(phase, color)
+                    self._frame(card, scene, 1.3)
+                    with mock.patch.object(LayerCache, "draw", paint_directly):
+                        expected = render(root, scale)
+                    self.assert_same_look(expected, render(root, scale))
+                    self.assert_same_look(expected, render(root, scale))
+
+    def test_still_parts_are_painted_once_for_all_frames(self) -> None:
+        root, card, scene = self._page()
+        with mock.patch.object(card, "_paint_base", wraps=card._paint_base) as base, mock.patch.object(
+            scene, "_paint_ground", wraps=scene._paint_ground
+        ) as ground, mock.patch.object(scene, "_paint_wall", wraps=scene._paint_wall) as wall, mock.patch.object(
+            scene, "_paint_core", wraps=scene._paint_core
+        ) as core, mock.patch.object(scene, "_paint_link", wraps=scene._paint_link) as link:
+            for frame in range(8):
+                self._frame(card, scene, 0.05 * frame)
+                render(root, 1.0)
+        for still in (base, ground, wall, core):
+            self.assertEqual(still.call_count, 1)
+        # Дуга и пакеты — живые: рисуются в каждом кадре.
+        self.assertEqual(link.call_count, 8)
+
+    def test_new_look_gets_a_new_layer(self) -> None:
+        root, card, scene = self._page()
+        self._frame(card, scene, 0.5)
+        render(root, 1.0)
+        with mock.patch.object(card, "_paint_base", wraps=card._paint_base) as base, mock.patch.object(
+            scene, "_paint_core", wraps=scene._paint_core
+        ) as core:
+            # Кнопку нажали: она меньше.
+            scene._pressed = True
+            render(root, 1.0)
+            self.assertEqual(core.call_count, 1)
+            scene._pressed = False
+            # Карточка стала шире — рамка другая.
+            card.resize(card.width() + 40, card.height())
+            render(root, 1.0)
+            render(root, 1.0)
+            self.assertEqual(base.call_count, 1)
+
+    def test_moving_scene_is_painted_directly(self) -> None:
+        root, card, scene = self._page()
+        self._frame(card, scene, 0.5)
+        self.assertTrue(scene._is_still())
+        with mock.patch.object(scene, "_paint_ground", wraps=scene._paint_ground) as ground, mock.patch.object(
+            scene, "_paint_core", wraps=scene._paint_core
+        ) as core:
+            scene._open_t = 0.6  # ворота едут
+            self.assertFalse(scene._is_still())
+            render(root, 1.0)
+            render(root, 1.0)
+            scene._open_t = 1.0
+            scene._shake_t = 0.3  # сцену трясёт
+            self.assertFalse(scene._is_still())
+            render(root, 1.0)
+            scene._shake_t = 0.0
+            self.assertEqual(ground.call_count, 3)
+
+            scene._pop_t = 0.4  # кнопка «вздыхает»
+            before = core.call_count
+            render(root, 1.0)
+            render(root, 1.0)
+            self.assertEqual(core.call_count, before + 2)
+        # Слоя кнопки нет; пол и стена на последних кадрах уже стояли.
+        self.assertEqual(len(scene._layers), 2)
+
+    def test_stopped_wall_shakes_directly_and_stands_as_a_layer(self) -> None:
+        root, card, scene = self._page("stopped", "#ff6b6b")
+        impacts: list[float] = []
+        original = scene._paint_wall
+
+        def record(painter, center, color, open_t, impact):
+            impacts.append(impact)
+            original(painter, center, color, open_t, impact)
+
+        with mock.patch.object(scene, "_paint_wall", side_effect=record), mock.patch.object(
+            scene, "is_beating", return_value=True
+        ):
+            # Пакет только что ударился о стену: она вздрагивает — без слоя.
+            scene._pulse_phase = scene_module.BLOCKED_PACKET_STARTS[0] + 0.45 * scene_module.BLOCKED_PACKET_SPAN
+            render(root, 1.0)
+            render(root, 1.0)
+            self.assertEqual(len(impacts), 2)
+            self.assertGreater(min(impacts), 0.0)
+            # Пакеты ещё не вылетели: стена стоит и берётся слоем.
+            scene._pulse_phase = 0.01
+            render(root, 1.0)
+            render(root, 1.0)
+            self.assertEqual(impacts[2:], [0.0])
+
+    def test_color_fade_paints_the_card_directly(self) -> None:
+        root, card, scene = self._page()
+        with mock.patch.object(card, "_paint_base", wraps=card._paint_base) as base:
+            with mock.patch.object(card._tint_fade, "state", return_value=card._tint_fade.State.Running):
+                render(root, 1.0)
+                render(root, 1.0)
+            self.assertEqual(base.call_count, 2)
+            self.assertEqual(len(card._layers), 0)
+            render(root, 1.0)
+            render(root, 1.0)
+            self.assertEqual(base.call_count, 3)
+
+    def test_motion_region_is_built_once_per_size(self) -> None:
+        from PyQt6.QtGui import QRegion
+
+        _root, _card, scene = self._page()
+        first = scene._motion_region()
+        with mock.patch.object(scene, "_lanes", wraps=scene._lanes) as lanes:
+            again = scene._motion_region()
+            lanes.assert_not_called()
+        self.assertEqual(first, again)
+        # Вызывающий получает свою копию: её можно менять.
+        again += QRegion(0, 0, 5, 5)
+        self.assertEqual(scene._motion_region(), first)
+
+        scene.set_stretched(True)
+        scene.resize(500, scene.height())
+        self.assertNotEqual(scene._motion_region(), first)
 
 
 class MotionIconTests(unittest.TestCase):

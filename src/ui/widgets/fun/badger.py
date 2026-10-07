@@ -51,6 +51,10 @@ BODY_HEIGHT_RATIO = 1.3
 
 # Лапа с молнией в покое чуть покачивается в такт дыханию (градусы).
 PAW_BREATH_SWING = 7.0
+# Дыхание идёт ступенями: одна ступень растягивает медоеда меньше чем на 0,1
+# точки экрана. Ступени повторяются на каждом вдохе, поэтому готовый слой тела
+# для каждой из них рисуется один раз (см. ui.widgets.fun.logo_badger).
+BREATH_STEP = 0.04
 
 
 def _ease_in_out(t: float) -> float:
@@ -245,11 +249,16 @@ class DrawnBadger(Mascot):
     def set_breath(self, value: float) -> None:
         # Дыхание двигает и лапы, поэтому перерисовываем его и при чуть меньшем шаге.
         value = max(-1.0, min(1.0, float(value)))
-        if abs(value - self._breath) < 0.04:
+        value = round(value / BREATH_STEP) * BREATH_STEP
+        if value == self._breath:
             return
         self._breath = value
         if not self._gesture:
             self.update()
+
+    def is_steady(self) -> bool:
+        """Медоед не моргает и не делает жест: ухо, глаз и взгляд стоят на месте."""
+        return not self._gesture and self._blink <= 0.0
 
     # ---- отрисовка -----------------------------------------------------
 
@@ -271,7 +280,7 @@ class DrawnBadger(Mascot):
 
     def paint_badger(self, painter: QPainter) -> None:
         """Рисует медоеда с логотипа в квадрате 100×100 в текущей позе."""
-        paint_logo_badger(painter, self.logo_pose())
+        paint_logo_badger(painter, self.logo_pose(), steady=self.is_steady())
 
 
 __all__ = ["DrawnBadger"]

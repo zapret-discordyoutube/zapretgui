@@ -10,7 +10,9 @@ from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 import ui.widgets.fun.mascot as mascot_module
-from ui.widgets.fun.badger import BLINK_PAUSE_MAX_MS, BLINK_PAUSE_MIN_MS, DrawnBadger
+from test_paint_layer_cache import ROUNDING, difference, paint_directly, render
+from ui.paint_layer_cache import LayerCache
+from ui.widgets.fun.badger import BLINK_PAUSE_MAX_MS, BLINK_PAUSE_MIN_MS, BREATH_STEP, DrawnBadger
 from ui.widgets.fun.logo_badger import BadgerPose, paint_logo_badger
 from ui.widgets.fun.mascot import GESTURE_TOSS, MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 
@@ -253,6 +255,107 @@ class LogoBadgerShapeCacheTests(unittest.TestCase):
             self._render(BadgerPose(jaw=step / 5.0, paw=10.0 * step, bolt_glow=step / 5.0))
         after = {name: getattr(logo, name)().elementCount() for name in before}
         self.assertEqual(before, after)
+
+
+class DrawnBadgerReadyLayersTests(unittest.TestCase):
+    """Спокойный медоед берёт тело и молнию готовыми слоями — и выглядит так же."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def setUp(self) -> None:
+        import ui.widgets.fun.logo_badger as logo
+
+        self.logo = logo
+        logo._LAYERS.clear()
+        self.addCleanup(logo._LAYERS.clear)
+
+    def _badger(self, *, offset: tuple[int, int] = (3, 7)) -> tuple[DrawnBadger, QWidget]:
+        host = QWidget()
+        host.resize(120, 120)
+        badger = DrawnBadger(host, size=64)
+        badger.move(*offset)
+        self.addCleanup(host.deleteLater)
+        return badger, host
+
+    def test_breath_moves_in_steps_that_repeat_on_every_breath(self) -> None:
+        import math
+
+        badger, _host = self._badger()
+        seen = set()
+        for frame in range(3 * 72):
+            badger.set_breath(math.sin(2 * math.pi * frame / 72))
+            seen.add(badger._breath)
+            self.assertAlmostEqual(badger._breath / BREATH_STEP, round(badger._breath / BREATH_STEP), places=6)
+        # Ступеней конечное число — у каждой свой готовый слой.
+        self.assertLessEqual(len(seen), round(2 / BREATH_STEP) + 1)
+
+    def test_steady_badger_paints_body_and_bolt_once(self) -> None:
+        badger, host = self._badger()
+        with mock.patch.object(self.logo, "_paint_back", wraps=self.logo._paint_back) as back, mock.patch.object(
+            self.logo, "_paint_bolt", wraps=self.logo._paint_bolt
+        ) as bolt, mock.patch.object(self.logo, "_paint_jaw", wraps=self.logo._paint_jaw) as jaw:
+            for step in range(6):
+                # Сцена двигает челюсть и лапу — тело и молния при этом те же.
+                badger.set_scene_pose(step / 6.0, 4.0 * step, 0.0)
+                render(host, 1.0)
+        self.assertEqual(back.call_count, 1)
+        self.assertEqual(bolt.call_count, 1)
+        self.assertEqual(jaw.call_count, 6)
+
+    def test_each_breath_step_has_its_own_layer_and_reuses_it(self) -> None:
+        badger, host = self._badger()
+        with mock.patch.object(self.logo, "_paint_back", wraps=self.logo._paint_back) as back:
+            for _breath_cycle in range(3):
+                for breath in (0.0, 0.48, 1.0, 0.48, 0.0, -0.52, -1.0):
+                    badger.set_breath(breath)
+                    render(host, 1.0)
+        self.assertEqual(back.call_count, 5)
+
+    def test_blink_gesture_and_bolt_shine_are_painted_directly(self) -> None:
+        badger, host = self._badger()
+        render(host, 1.0)
+        with mock.patch.object(self.logo, "_paint_back", wraps=self.logo._paint_back) as back, mock.patch.object(
+            self.logo, "_paint_bolt", wraps=self.logo._paint_bolt
+        ) as bolt:
+            badger._blink = 0.5
+            self.assertFalse(badger.is_steady())
+            render(host, 1.0)
+            render(host, 1.0)
+            self.assertEqual(back.call_count, 2)
+            badger._blink = 0.0
+
+            badger._gesture, badger._t = "look", 0.3
+            self.assertFalse(badger.is_steady())
+            render(host, 1.0)
+            self.assertEqual(back.call_count, 3)
+            badger._gesture, badger._t = "", 0.0
+
+            # Блик по молнии: тело из слоя, молния рисуется заново.
+            self.assertTrue(badger.is_steady())
+            before = bolt.call_count
+            badger.set_scene_pose(0.0, 12.0, 0.6)
+            render(host, 1.0)
+            render(host, 1.0)
+            self.assertEqual(back.call_count, 3)
+            self.assertEqual(bolt.call_count, before + 2)
+
+    def test_ready_layers_look_like_direct_painting(self) -> None:
+        for scale in (1.0, 1.25, 1.5, 2.0):
+            # Спокойный дышит, насторожённый стоит с наклоном, грустный осел.
+            for mood in (MOOD_IDLE, MOOD_ALARM, MOOD_SAD):
+                for breath in (0.0, 0.48, -1.0):
+                    with self.subTest(scale=scale, mood=mood, breath=breath):
+                        badger, host = self._badger()
+                        badger._mood = mood
+                        badger.set_breath(breath)
+                        badger.set_scene_pose(0.4, 9.0, 0.0)
+                        with mock.patch.object(LayerCache, "draw", paint_directly):
+                            expected = render(host, scale)
+                        self.assertLessEqual(difference(expected, render(host, scale)), ROUNDING)
+                        self.assertLessEqual(difference(expected, render(host, scale)), ROUNDING)
+        self.assertGreater(len(self.logo._LAYERS), 0)
 
 
 if __name__ == "__main__":

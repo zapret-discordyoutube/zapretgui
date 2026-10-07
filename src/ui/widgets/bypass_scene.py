@@ -22,6 +22,11 @@ Zapret. Справа сайты. Лапа медоеда с молнией «Z»
 анимации». В остановленном состоянии это короткий залп и пауза (таймер
 между залпами одиночный), а на ходу перерисовываются только дорожки и кнопка.
 Пасть и лапу медоеда сцена двигает сама по положению пакетов, без своих таймеров.
+
+Пока обход работает, карточка под сценой переливается и каждый кадр
+перерисовывает сцену целиком. Неподвижное в ней — пол, глобус, дорожки,
+стена и сама кнопка со значком — берётся готовыми слоями
+(``ui.paint_layer_cache``); заново рисуются только пакеты, дуга и ореол кнопки.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from PyQt6.QtWidgets import QSizePolicy
 from qfluentwidgets import isDarkTheme
 
 from ui.animation_policy import are_live_animations_enabled
+from ui.paint_layer_cache import LayerCache
 from ui.pulsing_dot import PulsingDot
 from ui.widgets.fun.badger import DrawnBadger
 from ui.widgets.fun.mascot import GESTURE_TOSS, MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
@@ -183,6 +189,10 @@ class BypassScene(PulsingDot):
         self._hover_t = 0.0
         self._open_t = 0.0
         self._shake_t = 0.0
+        # Готовые слои неподвижных частей и область, которая меняется от кадра к кадру.
+        self._layers = LayerCache(capacity=8)
+        self._motion_key: tuple | None = None
+        self._motion: QRegion | None = None
 
         # QVariantAnimation, а не QPropertyAnimation: при выключенных
         # анимациях общий fallback подменяет QPropertyAnimation.start.
@@ -590,12 +600,17 @@ class BypassScene(PulsingDot):
         Сам медоед в область не входит: он перерисовывается только когда
         меняется его поза (иначе каждый кадр перерисовывался бы весь значок).
         """
-        left, right, top, bottom = self._lanes()
-        y, height = int(top) - 12, int(bottom - top) + 24
-        region = QRegion(QRect(int(left) - 8, y, int(right - left) + 10, height))
-        center = self.gate_center()
-        wall = QRect(center.x() - 8, 0, 16, self.height())
-        return region | QRegion(self.button_rect()) | QRegion(wall)
+        # Область зависит только от размеров сцены, а нужна на каждом кадре.
+        key = (self.width(), self.height(), self._mascot.geometry())
+        if key != self._motion_key or self._motion is None:
+            left, right, top, bottom = self._lanes()
+            y, height = int(top) - 12, int(bottom - top) + 24
+            region = QRegion(QRect(int(left) - 8, y, int(right - left) + 10, height))
+            center = self.gate_center()
+            wall = QRect(center.x() - 8, 0, 16, self.height())
+            self._motion = region | QRegion(self.button_rect()) | QRegion(wall)
+            self._motion_key = key
+        return QRegion(self._motion)
 
     # ---- отрисовка -----------------------------------------------------
 
@@ -614,7 +629,58 @@ class BypassScene(PulsingDot):
         gate = BUTTON_RADIUS + 3.0
         open_t = self._open_t
         color = self._shown_color
+        # Готовые слои — только пока сама картинка стоит: ворота не едут, цвет
+        # не перетекает, сцену не трясёт. Иначе слой устаревал бы каждый кадр.
+        still = self._is_still()
+        look = (color.rgba(), open_t, left, right, top, bottom, center.x(), center.y(), self.width(), self.height())
 
+        if still:
+            self._layers.draw(
+                painter,
+                ("ground", isDarkTheme(), look),
+                QRectF(self.rect()),
+                lambda layer: self._paint_ground(layer, center, left, right, top, bottom, gate, color, open_t),
+            )
+        else:
+            self._paint_ground(painter, center, left, right, top, bottom, gate, color, open_t)
+
+        impact = 0.0
+        if self._is_flowing():
+            self._paint_stream(painter, center, left, right, (top, bottom), gate, color, open_t)
+        elif self._phase:
+            impact = self._paint_blocked(painter, center, left, top, bottom, gate, color)
+
+        if still and impact <= 0.0 and self._phase not in BUSY_PHASES:
+            # Стена стоит: не вздрагивает от удара и не мерцает при запуске.
+            self._layers.draw(
+                painter,
+                ("wall", look),
+                QRectF(center.x() - 6.0, 0.0, 12.0, float(self.height())),
+                lambda layer: self._paint_wall(layer, center, color, open_t, 0.0),
+            )
+        else:
+            self._paint_wall(painter, center, color, open_t, impact)
+        self._paint_link(painter, center, color, open_t)
+        if self._phase == "running" and self.is_beating():
+            # Ореол работающей кнопки мягко дышит.
+            impact = 0.5 + 0.5 * math.sin(2 * math.pi * self._flow_time / HALO_PERIOD_S)
+        self._paint_pop_ring(painter, center, color)
+        self._paint_button(painter, center, impact, still=still)
+        if self._phase in BUSY_PHASES:
+            self._paint_spinner(painter, center, color)
+        painter.end()
+
+    def _is_still(self) -> bool:
+        """Неподвижные части сцены сейчас действительно не меняются."""
+        return (
+            self._shake_t <= 0.0
+            and self._open_t in (0.0, 1.0)
+            and self._fade.state() != QVariantAnimation.State.Running
+        )
+
+    def _paint_ground(self, painter, center, left, right, top, bottom, gate, color, open_t: float) -> None:
+        """Пол под медоедом, глобус и дорожки — всё, поверх чего летят пакеты."""
+        painter.setPen(Qt.PenStyle.NoPen)
         self._paint_floor(painter)
         self._paint_endpoints(painter, center, color, open_t)
 
@@ -630,23 +696,6 @@ class BypassScene(PulsingDot):
         painter.setBrush(beyond)
         for y in (top, bottom):
             painter.drawRect(QRectF(center.x() + gate, y - 0.5, right - center.x() - gate, 1.0))
-
-        impact = 0.0
-        if self._is_flowing():
-            self._paint_stream(painter, center, left, right, (top, bottom), gate, color, open_t)
-        elif self._phase:
-            impact = self._paint_blocked(painter, center, left, top, bottom, gate, color)
-
-        self._paint_wall(painter, center, color, open_t, impact)
-        self._paint_link(painter, center, color, open_t)
-        if self._phase == "running" and self.is_beating():
-            # Ореол работающей кнопки мягко дышит.
-            impact = 0.5 + 0.5 * math.sin(2 * math.pi * self._flow_time / HALO_PERIOD_S)
-        self._paint_pop_ring(painter, center, color)
-        self._paint_button(painter, center, impact)
-        if self._phase in BUSY_PHASES:
-            self._paint_spinner(painter, center, color)
-        painter.end()
 
     def _paint_endpoints(self, painter: QPainter, center: QPointF, color: QColor, open_t: float) -> None:
         pen = QPen(RAW_COLOR)
@@ -939,7 +988,7 @@ class BypassScene(PulsingDot):
         painter.drawEllipse(center, radius, radius)
         painter.setPen(Qt.PenStyle.NoPen)
 
-    def _paint_button(self, painter: QPainter, center: QPointF, impact: float) -> None:
+    def _paint_button(self, painter: QPainter, center: QPointF, impact: float, *, still: bool = False) -> None:
         hover = self._hover_t if self._clickable else 0.0
         core_r = BUTTON_RADIUS * (PRESS_SCALE if self._pressed else 1.0) * self._pop_scale()
 
@@ -950,6 +999,25 @@ class BypassScene(PulsingDot):
         glow_r = core_r + 4.0 * (1.0 + 0.4 * impact + 0.8 * hover)
         painter.drawEllipse(center, glow_r, glow_r)
 
+        if still and self._pop_t <= 0.0:
+            # Сама кнопка со значком между кадрами не меняется — дышит только ореол.
+            key = (
+                "core", self._shown_color.rgba(), core_r,
+                self._clickable, self.is_click_enabled(), center.x(), center.y(),
+            )
+            reach = core_r + 2.0
+            self._layers.draw(
+                painter,
+                key,
+                QRectF(center.x() - reach, center.y() - reach, reach * 2, reach * 2),
+                lambda layer: self._paint_core(layer, center, core_r),
+            )
+        else:
+            self._paint_core(painter, center, core_r)
+
+    def _paint_core(self, painter: QPainter, center: QPointF, core_r: float) -> None:
+        """Круг кнопки и значок питания на нём."""
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(self._shown_color)
         painter.drawEllipse(center, core_r, core_r)
 

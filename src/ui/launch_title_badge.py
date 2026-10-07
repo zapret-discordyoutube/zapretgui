@@ -12,7 +12,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import QSizePolicy
 from qfluentwidgets import TransparentPushButton, setCustomStyleSheet
@@ -23,6 +23,7 @@ from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import set_tooltip
 from ui.frame_clock import frame_clock
 from ui.launch_control import BUSY_LAUNCH_PHASES, mode_label_for_launch_method, normalize_launch_phase, phase_color
+from ui.paint_layer_cache import LayerCache
 from ui.theme import get_theme_tokens, to_qcolor
 from ui.theme_semantic import get_semantic_palette
 from ui.title_badge_paint import badge_qss, badge_shape, current_theme_name
@@ -46,6 +47,13 @@ RUNNING_RING_GROWTH = 5.5
 # нагрузкой программы в покое: каждый кадр — перерисовка заголовка и отправка
 # окна на экран.
 BADGE_FRAME_MS = 33
+# Фаза кольца идёт шагами в один кадр экрана (1/60 с): мельче экран всё равно
+# не покажет. За полный круг шагов конечное число, и на каждом круге они те же,
+# поэтому кольцо, ореол и точку для каждого шага можно нарисовать один раз
+# (ui.paint_layer_cache) и дальше накладывать готовой картинкой.
+PULSE_STEPS = round(RUNNING_PULSE_MS * 60 / 1000)
+# Ширина области слева, в которую помещается кольцо вокруг точки.
+PULSE_LAYER_WIDTH = 24.0
 STOPPED_DOT_COLOR = "#9aa0a6"
 
 
@@ -123,6 +131,8 @@ class LaunchTitleBadge(TransparentPushButton):
         # Цвета значка для текущей фазы и темы: считаются один раз, а не на каждый кадр.
         self._paint_colors_key: tuple | None = None
         self._paint_colors: tuple[QColor, QColor, QColor] | None = None
+        # Готовые картинки кольца с точкой: по одной на шаг пульса.
+        self._layers = LayerCache(capacity=PULSE_STEPS + 8)
         self.hide()
 
     def phase(self) -> str:
@@ -200,7 +210,8 @@ class LaunchTitleBadge(TransparentPushButton):
         return self._pulse.isActive()
 
     def _on_pulse_frame(self) -> None:
-        self._pulse_t = (self._pulse.elapsed_ms() % RUNNING_PULSE_MS) / RUNNING_PULSE_MS
+        phase = (self._pulse.elapsed_ms() % RUNNING_PULSE_MS) / RUNNING_PULSE_MS
+        self._pulse_t = int(phase * PULSE_STEPS) / PULSE_STEPS
         self.update()
 
     def is_breathing(self) -> bool:
@@ -262,32 +273,47 @@ class LaunchTitleBadge(TransparentPushButton):
             glow = QColor(color)
             glow.setAlphaF(0.2 * math.sin(math.pi * p))
             painter.fillPath(shape, glow)
+            # Кольцо, ореол и точка этого шага пульса — готовой картинкой.
+            self._layers.draw(
+                painter,
+                ("pulse", round(p * PULSE_STEPS), color.rgba(), self.width(), self.height()),
+                QRectF(0.0, 0.0, PULSE_LAYER_WIDTH, float(self.height())),
+                lambda layer: self._paint_dot(layer, shape, center, color, ring_t=p, halo=1.0),
+            )
+        elif self.is_breathing():
+            # Запуск или остановка: ореол дышит.
+            strength = 0.35 + 0.65 * (0.5 - 0.5 * math.cos(2.0 * math.pi * self._breath_t))
+            self._paint_dot(painter, shape, center, color, ring_t=None, halo=strength)
+        else:
+            self._paint_dot(painter, shape, center, color, ring_t=None, halo=1.0 if self._phase == "running" else None)
+        painter.end()
+
+    @staticmethod
+    def _paint_dot(painter, shape, center: QPointF, color: QColor, *, ring_t: float | None, halo: float | None) -> None:
+        """Точка состояния: расходящееся кольцо (``ring_t`` — фаза 0..1), мягкий ореол и сама точка."""
+        if ring_t is not None:
             painter.save()
             painter.setClipPath(shape)
             # Кольцо расходится от точки и тает.
             ring = QColor(color)
-            ring.setAlphaF(0.95 * (1.0 - p) ** 1.3)
+            ring.setAlphaF(0.95 * (1.0 - ring_t) ** 1.3)
             painter.setPen(QPen(ring, 2.0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            radius = BADGE_DOT_RADIUS + 1.0 + RUNNING_RING_GROWTH * (1.0 - (1.0 - p) ** 2)
+            radius = BADGE_DOT_RADIUS + 1.0 + RUNNING_RING_GROWTH * (1.0 - (1.0 - ring_t) ** 2)
             painter.drawEllipse(center, radius, radius)
             painter.restore()
-            painter.setPen(Qt.PenStyle.NoPen)
+        painter.setPen(Qt.PenStyle.NoPen)
 
-        if self._phase == "running" or self.is_breathing():
+        if halo is not None:
             # Мягкий ореол: у «работает» постоянный, у запуска/остановки дышит.
-            strength = 1.0
-            if self.is_breathing():
-                strength = 0.35 + 0.65 * (0.5 - 0.5 * math.cos(2.0 * math.pi * self._breath_t))
-            halo = QColor(color)
-            halo.setAlphaF(0.35 * strength)
-            painter.setBrush(halo)
-            radius = BADGE_DOT_RADIUS + 2.5 * strength
+            soft = QColor(color)
+            soft.setAlphaF(0.35 * halo)
+            painter.setBrush(soft)
+            radius = BADGE_DOT_RADIUS + 2.5 * halo
             painter.drawEllipse(center, radius, radius)
 
         painter.setBrush(color)
         painter.drawEllipse(center, BADGE_DOT_RADIUS, BADGE_DOT_RADIUS)
-        painter.end()
 
     def _apply_style(self, phase: str) -> None:
         style_key = "busy" if phase in BUSY_LAUNCH_PHASES else phase
