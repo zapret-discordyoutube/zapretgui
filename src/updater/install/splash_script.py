@@ -119,6 +119,10 @@ $F = @{
     Joke   = New-Object System.Drawing.Font($fontFamily, 10, [System.Drawing.FontStyle]::Italic)
     Small  = New-Object System.Drawing.Font($fontFamily, 9)
 }
+# Шутка занимает одну строку: длинная обрезается многоточием, а не лезет на проценты.
+$oneLine = New-Object System.Drawing.StringFormat
+$oneLine.FormatFlags = [System.Drawing.StringFormatFlags]::NoWrap
+$oneLine.Trimming = [System.Drawing.StringTrimming]::EllipsisCharacter
 
 $logo = $null
 try {
@@ -142,6 +146,13 @@ $S = @{
     StartedAt    = (Get-Date)
     Stage        = 0
     StageSince   = 0.0
+    # Когда этап стал готовым (-1 — ещё нет): от этого момента идёт анимация галочки.
+    DoneAt       = @(-1.0, -1.0, -1.0)
+    LastTick     = 0.0
+    # Сглаженная скорость полосы (доля в секунду): по ней наклоняется логотип.
+    Speed        = 0.0
+    RevealState  = $null
+    Frames       = 0
     Fill         = 0.0
     SucceededAt  = -1.0
     DoneJumpAt   = -1.0
@@ -168,7 +179,6 @@ $S = @{
     InstallStarted   = $false
     InstallSucceeded = $false
     LogClosed    = $false
-    Indeterminate = $false
 }
 
 function Next-Joke {
@@ -190,8 +200,10 @@ function Start-Closing([bool]$fast, [string]$reason) {
 
 function Set-Stage([int]$stage) {
     if ($stage -le $S.Stage) { return }
+    $now = $S.Clock.Elapsed.TotalSeconds
+    for ($i = $S.Stage; $i -lt $stage -and $i -lt $S.DoneAt.Count; $i++) { $S.DoneAt[$i] = $now }
     $S.Stage = $stage
-    $S.StageSince = $S.Clock.Elapsed.TotalSeconds
+    $S.StageSince = $now
     if ($stage -ge 2 -and $S.SucceededAt -lt 0) { $S.SucceededAt = $S.StageSince }
     Next-Joke
 }
@@ -345,13 +357,12 @@ function New-RoundedPath([System.Drawing.RectangleF]$rect, [single]$radius) {
     return $path
 }
 
-# Полоса честная: проценты — только там, где известен настоящий ход.
+# Полоса идёт только вперёд: назад и туда-обратно она не ходит никогда.
 #   закрываем старую версию        0–5 %
-#   установщик готовится           бегущий отрезок (хода не видно)
-#   копирование файлов             5–90 % — по числу скопированных файлов
-#   установщик завершает           90–95 %
-#   открываем новую версию         95–100 %, «почти конец»
-# -1 — хода не видно: окно рисует бегущий отрезок вместо процентов.
+#   установщик готовится           5–10 % — хода не видно, полоса тихо подползает
+#   копирование файлов             10–90 % — по числу скопированных файлов
+#   установщик завершает           92–94 %
+#   открываем новую версию         95–99 %, «почти конец»; 100 % — она открылась
 function Target-Fill {
     $now = $S.Clock.Elapsed.TotalSeconds
     if ($S.Closing -and -not $S.CloseFast) { return 1.0 }
@@ -361,12 +372,83 @@ function Target-Fill {
         return 0.92
     }
     if ($S.InstallStarted) {
-        if ($S.Expected -le 0) { return -1.0 }
-        $share = [Math]::Min(1.0, $S.FilesDone / [double]$S.Expected)
-        return 0.05 + 0.85 * $share
+        if ($S.Expected -gt 0) {
+            $share = [Math]::Min(1.0, $S.FilesDone / [double]$S.Expected)
+        } else {
+            # Сколько файлов всего — неизвестно: растём по счёту, но до конца не доходим.
+            $share = 1 - [Math]::Exp(-$S.FilesDone / 300.0)
+        }
+        return 0.10 + 0.80 * $share
     }
-    if ($S.Stage -ge 1) { return -1.0 }
+    if ($S.Stage -ge 1) { return 0.05 + 0.05 * (1 - [Math]::Exp(-($now - $S.StageSince) / 4.0)) }
     return 0.05 * (1 - [Math]::Exp(-$now / 1.2))
+}
+
+# Плавный выход к цели: быстро в начале, мягко в конце.
+function Ease-Out([double]$t) {
+    $t = [Math]::Max(0.0, [Math]::Min(1.0, $t))
+    return 1 - [Math]::Pow(1 - $t, 3)
+}
+
+# То же, но с небольшим перелётом за цель и возвратом — «пружина».
+function Ease-Back([double]$t) {
+    $t = [Math]::Max(0.0, [Math]::Min(1.0, $t))
+    $u = $t - 1
+    return 1 + 2.4 * $u * $u * $u + 1.4 * $u * $u
+}
+
+# Появление по очереди: часть окна выезжает снизу и проявляется. Проявление —
+# заслонка цвета фона поверх уже нарисованного: так не нужно делать
+# полупрозрачной каждую кисть. Возвращает, насколько часть уже проявилась.
+function Begin-Reveal([System.Drawing.Graphics]$g, [double]$delay, [double]$k) {
+    $shown = Ease-Out (($S.Clock.Elapsed.TotalSeconds - $delay) / 0.45)
+    $S.RevealState = $g.Save()
+    if ($shown -lt 1) { $g.TranslateTransform(0, [single](12 * $k * (1 - $shown))) }
+    return $shown
+}
+
+function End-Reveal([System.Drawing.Graphics]$g, [double]$shown, [single]$x, [single]$y, [single]$w, [single]$h) {
+    if ($shown -lt 1) {
+        $veil = New-Object System.Drawing.SolidBrush((With-Alpha $C.Background (1 - $shown)))
+        $g.FillRectangle($veil, $x, $y, $w, $h)
+        $veil.Dispose()
+    }
+    $g.Restore($S.RevealState)
+}
+
+function Mix-Color([System.Drawing.Color]$from, [System.Drawing.Color]$to, [double]$t) {
+    $t = [Math]::Max(0.0, [Math]::Min(1.0, $t))
+    return [System.Drawing.Color]::FromArgb(
+        255,
+        [int]($from.R + ($to.R - $from.R) * $t),
+        [int]($from.G + ($to.G - $from.G) * $t),
+        [int]($from.B + ($to.B - $from.B) * $t)
+    )
+}
+
+# Галочка рисуется росчерком: $q — какая её часть уже проведена.
+function Draw-Check([System.Drawing.Graphics]$g, [double]$cx, [double]$cy, [double]$k, [double]$q) {
+    if ($q -le 0) { return }
+    $ax = $cx - 4.5 * $k; $ay = $cy + 0.3 * $k
+    $bx = $cx - 1.3 * $k; $by = $cy + 3.5 * $k
+    $ex = $cx + 4.8 * $k; $ey = $cy - 3.6 * $k
+    $first = [Math]::Sqrt(($bx - $ax) * ($bx - $ax) + ($by - $ay) * ($by - $ay))
+    $second = [Math]::Sqrt(($ex - $bx) * ($ex - $bx) + ($ey - $by) * ($ey - $by))
+    $drawn = [Math]::Min(1.0, $q) * ($first + $second)
+    $p = New-Object System.Drawing.Pen($C.OnAccent, [single](2.1 * $k))
+    $p.StartCap = 'Round'; $p.EndCap = 'Round'; $p.LineJoin = 'Round'
+    if ($drawn -le $first) {
+        $t = $drawn / $first
+        $g.DrawLine($p, [single]$ax, [single]$ay, [single]($ax + ($bx - $ax) * $t), [single]($ay + ($by - $ay) * $t))
+    } else {
+        $t = ($drawn - $first) / $second
+        $g.DrawLines($p, [System.Drawing.PointF[]]@(
+            (New-Object System.Drawing.PointF($ax, $ay)),
+            (New-Object System.Drawing.PointF($bx, $by)),
+            (New-Object System.Drawing.PointF(($bx + ($ex - $bx) * $t), ($by + ($ey - $by) * $t)))
+        ))
+    }
+    $p.Dispose()
 }
 
 function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
@@ -375,6 +457,7 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
     $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
     $k = [single]($g.DpiX / 96.0)
     $now = $S.Clock.Elapsed.TotalSeconds
+    $S.Frames += 1
 
     $g.Clear($C.Background)
     $borderPen = New-Object System.Drawing.Pen($C.Border, [single]1)
@@ -382,111 +465,146 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
     $borderPen.Dispose()
 
     $pad = [single](36 * $k)
-    $contentWidth = [single]([Math]::Min($width - 2 * $pad, 720 * $k))
+    $contentWidth = [single]([Math]::Min($width - 2 * $pad, 640 * $k))
     $left = [single](($width - $contentWidth) / 2)
-    $blockHeight = [single](430 * $k)
+    $rowHeight = [single](44 * $k)
+    $logoSize = [single](34 * $k)
+    $trackHeight = [single](6 * $k)
+    $titleHeight = $F.Title.GetHeight($g)
+    $subHeight = $F.Sub.GetHeight($g)
+    $jokeHeight = $F.Joke.GetHeight($g)
+    $blockHeight = $titleHeight + 4 * $k + $subHeight + 28 * $k + $stages.Count * $rowHeight + 18 * $k +
+        $logoSize + 10 * $k + $trackHeight + 14 * $k + $jokeHeight + 20 * $k + $F.Small.GetHeight($g)
     $top = [single]([Math]::Max($pad, ($height - $blockHeight) / 2))
+
+    # Заслонка появления чуть шире содержимого: сглаженные края букв и кружков.
+    $veilLeft = [single]($left - 8 * $k)
+    $veilWidth = [single]($contentWidth + 16 * $k)
 
     # Заголовок и подзаголовок.
     $fg = New-Object System.Drawing.SolidBrush($C.Foreground)
     $muted = New-Object System.Drawing.SolidBrush($C.Muted)
+    $shown = Begin-Reveal $g 0.0 $k
     $g.DrawString([string]$spec.texts.title, $F.Title, $fg, $left, $top)
-    $y = $top + $F.Title.GetHeight($g) + 4 * $k
+    $y = $top + $titleHeight + 4 * $k
     $g.DrawString([string]$spec.texts.subtitle, $F.Sub, $muted, $left, $y)
-    $y += $F.Sub.GetHeight($g) + 30 * $k
+    End-Reveal $g $shown $veilLeft ($top - 4 * $k) $veilWidth ($titleHeight + $subHeight + 16 * $k)
+    $y += $subHeight + 28 * $k
 
-    # Этапы: готовые — галочка, текущий — пульсирующее кольцо.
+    # Этапы — столбик с соединительной линией: готовый этап закрашивает кружок
+    # и линию до следующего, текущий крутит дугу, будущие приглушены.
+    $r = [single](10 * $k)
+    $cx = $left + $r + 1 * $k
     for ($i = 0; $i -lt $stages.Count; $i++) {
-        $cx = $left + 11 * $k
-        $cy = $y + 11 * $k
-        $r = [single](10 * $k)
-        if ($i -lt $S.Stage -or ($S.Stage -ge 2 -and $i -eq 2 -and $S.Fill -ge 0.99)) {
-            $b = New-Object System.Drawing.SolidBrush($C.Accent)
-            $g.FillEllipse($b, $cx - $r, $cy - $r, 2 * $r, 2 * $r)
-            $b.Dispose()
-            $p = New-Object System.Drawing.Pen($C.OnAccent, [single](2.2 * $k))
-            $p.StartCap = 'Round'; $p.EndCap = 'Round'
-            $g.DrawLines($p, [System.Drawing.PointF[]]@(
-                (New-Object System.Drawing.PointF(($cx - 4.5 * $k), ($cy + 0.2 * $k))),
-                (New-Object System.Drawing.PointF(($cx - 1.2 * $k), ($cy + 3.6 * $k))),
-                (New-Object System.Drawing.PointF(($cx + 5 * $k), ($cy - 3.8 * $k)))
-            ))
-            $p.Dispose()
-            $font = $F.Stage; $brush = $fg
-        } elseif ($i -eq $S.Stage) {
-            $pulse = 0.5 + 0.5 * [Math]::Sin($now * 4.2)
-            $halo = New-Object System.Drawing.SolidBrush((With-Alpha $C.Accent (0.12 + 0.18 * $pulse)))
-            $hr = $r + 4 * $k * $pulse
-            $g.FillEllipse($halo, $cx - $hr, $cy - $hr, 2 * $hr, 2 * $hr)
-            $halo.Dispose()
-            $p = New-Object System.Drawing.Pen($C.Accent, [single](2.4 * $k))
-            $g.DrawEllipse($p, $cx - $r, $cy - $r, 2 * $r, 2 * $r)
-            $p.Dispose()
-            # Бегущая дуга внутри кольца: этап в работе.
-            $arc = New-Object System.Drawing.Pen($C.Accent, [single](2.4 * $k))
-            $arc.StartCap = 'Round'; $arc.EndCap = 'Round'
-            $inner = $r - 4.5 * $k
-            $g.DrawArc($arc, $cx - $inner, $cy - $inner, 2 * $inner, 2 * $inner, [single](($now * 300) % 360), [single]110)
-            $arc.Dispose()
-            $font = $F.StageB; $brush = $fg
-        } else {
-            $p = New-Object System.Drawing.Pen((With-Alpha $C.Muted 0.6), [single](1.6 * $k))
-            $g.DrawEllipse($p, $cx - $r, $cy - $r, 2 * $r, 2 * $r)
-            $p.Dispose()
-            $font = $F.Stage; $brush = $muted
+        $cy = $y + $rowHeight / 2
+        $shown = Begin-Reveal $g (0.08 + 0.07 * $i) $k
+        $doneAt = [double]$S.DoneAt[$i]
+        $isDone = ($doneAt -ge 0)
+        $doneFor = $now - $doneAt
+        if ($i -lt $stages.Count - 1) {
+            $lineTop = $cy + $r + 5 * $k
+            $lineHeight = $rowHeight - 2 * $r - 10 * $k
+            $linePen = New-Object System.Drawing.Pen($C.Track, [single](2 * $k))
+            $linePen.StartCap = 'Round'; $linePen.EndCap = 'Round'
+            $g.DrawLine($linePen, $cx, $lineTop, $cx, ($lineTop + $lineHeight))
+            $linePen.Dispose()
+            if ($isDone) {
+                $grown = Ease-Out (($doneFor - 0.15) / 0.4)
+                if ($grown -gt 0) {
+                    $linePen = New-Object System.Drawing.Pen($C.Accent, [single](2 * $k))
+                    $linePen.StartCap = 'Round'; $linePen.EndCap = 'Round'
+                    $g.DrawLine($linePen, $cx, $lineTop, $cx, [single]($lineTop + $lineHeight * $grown))
+                    $linePen.Dispose()
+                }
+            }
         }
-        $textY = $cy - $font.GetHeight($g) / 2
+        if ($isDone) {
+            # Кружок заливается от центра, затем росчерком появляется галочка.
+            $ring = New-Object System.Drawing.Pen((With-Alpha $C.Accent 0.3), [single](2 * $k))
+            $g.DrawEllipse($ring, $cx - $r, $cy - $r, 2 * $r, 2 * $r)
+            $ring.Dispose()
+            $grow = [single]($r * (0.35 + 0.65 * (Ease-Back ($doneFor / 0.38))))
+            $b = New-Object System.Drawing.SolidBrush($C.Accent)
+            $g.FillEllipse($b, $cx - $grow, $cy - $grow, 2 * $grow, 2 * $grow)
+            $b.Dispose()
+            if ($doneFor -lt 0.55) {
+                # Расходящееся кольцо: этап только что закончился.
+                $wave = Ease-Out ($doneFor / 0.55)
+                $waveRadius = [single]($r + 7 * $k * $wave)
+                $wavePen = New-Object System.Drawing.Pen((With-Alpha $C.Accent (0.45 * (1 - $wave))), [single](1.6 * $k))
+                $g.DrawEllipse($wavePen, $cx - $waveRadius, $cy - $waveRadius, 2 * $waveRadius, 2 * $waveRadius)
+                $wavePen.Dispose()
+            }
+            Draw-Check $g $cx $cy $k (Ease-Out (($doneFor - 0.12) / 0.3))
+            $font = $F.Stage; $color = $C.Foreground
+        } elseif ($i -eq $S.Stage) {
+            # Бледное кольцо и дуга, которая бежит по нему и «дышит» длиной.
+            $ring = New-Object System.Drawing.Pen((With-Alpha $C.Accent 0.25), [single](2.2 * $k))
+            $g.DrawEllipse($ring, $cx - $r, $cy - $r, 2 * $r, 2 * $r)
+            $ring.Dispose()
+            $arc = New-Object System.Drawing.Pen($C.Accent, [single](2.2 * $k))
+            $arc.StartCap = 'Round'; $arc.EndCap = 'Round'
+            $sweep = 95 + 45 * [Math]::Sin($now * 2.1)
+            $g.DrawArc($arc, $cx - $r, $cy - $r, 2 * $r, 2 * $r, [single](($now * 250) % 360), [single]$sweep)
+            $arc.Dispose()
+            $font = $F.StageB
+            $color = Mix-Color $C.Muted $C.Foreground (Ease-Out (($now - $S.StageSince) / 0.3))
+        } else {
+            $p = New-Object System.Drawing.Pen((With-Alpha $C.Muted 0.45), [single](1.6 * $k))
+            $g.DrawEllipse($p, $cx - $r, $cy - $r, 2 * $r, 2 * $r)
+            $p.Dispose()
+            $font = $F.Stage; $color = $C.Muted
+        }
         $label = [string]$stages[$i]
-        $g.DrawString($label, $font, $brush, ($left + 32 * $k), $textY)
+        $textLeft = $left + 34 * $k
+        $brush = New-Object System.Drawing.SolidBrush($color)
+        $g.DrawString($label, $font, $brush, $textLeft, ($cy - $font.GetHeight($g) / 2))
+        $brush.Dispose()
         if ($i -eq 1 -and $S.Stage -eq 1 -and $S.InstallStarted -and $S.Expected -gt 0) {
             # Настоящий ход копирования рядом с этапом: «312 из 682 файлов».
             $done = [Math]::Min($S.FilesDone, $S.Expected)
             $counter = ([string]$spec.texts.files_template).Replace('{done}', [string]$done).Replace('{total}', [string]$S.Expected)
             $labelWidth = $g.MeasureString($label, $font).Width
-            $g.DrawString("·  $counter", $F.Sub, $muted, ($left + 32 * $k + $labelWidth + 6 * $k), ($cy - $F.Sub.GetHeight($g) / 2))
+            $g.DrawString("·  $counter", $F.Sub, $muted, ($textLeft + $labelWidth + 6 * $k), ($cy - $subHeight / 2))
         }
-        $y += 36 * $k
+        End-Reveal $g $shown $veilLeft $y $veilWidth $rowHeight
+        $y += $rowHeight
     }
-    $y += 34 * $k
+    $y += 18 * $k
 
-    # Дорожка: градиент цвета акцента и бегущий блик, по ней бежит логотип.
-    $logoSize = [single](38 * $k)
-    $trackHeight = [single](10 * $k)
-    $trackLeft = $left + $logoSize / 2
-    $trackWidth = $contentWidth - $logoSize
-    $trackTop = $y + $logoSize * 1.45
+    # Полоса во всю ширину: тонкая дорожка, заливка цвета акцента с мягким
+    # бликом и свечением на переднем крае.
+    $trackLeft = $left
+    $trackWidth = $contentWidth
+    $trackTop = $y + $logoSize + 10 * $k
+    $shown = Begin-Reveal $g 0.32 $k
     $trackRect = New-Object System.Drawing.RectangleF($trackLeft, $trackTop, $trackWidth, $trackHeight)
     $trackPath = New-RoundedPath $trackRect ($trackHeight / 2)
     $trackBrush = New-Object System.Drawing.SolidBrush($C.Track)
     $g.FillPath($trackBrush, $trackPath)
     $trackBrush.Dispose(); $trackPath.Dispose()
 
-    if ($S.Indeterminate) {
-        # Хода не видно: отрезок бегает туда-обратно, логотип — вместе с ним.
-        $bounce = 0.5 - 0.5 * [Math]::Cos(2 * [Math]::PI * (($now % 2.2) / 2.2))
-        $fillWidth = [single]($trackWidth * 0.28)
-        $fillLeft = [single]($trackLeft + ($trackWidth - $fillWidth) * $bounce)
-    } else {
-        $fillWidth = [single]([Math]::Max(0.0, $trackWidth * $S.Fill))
-        $fillLeft = [single]$trackLeft
-    }
-    if ($fillWidth -gt 1) {
-        $fillRect = New-Object System.Drawing.RectangleF($fillLeft, $trackTop, $fillWidth, $trackHeight)
+    $fillWidth = [single]([Math]::Max(0.0, $trackWidth * $S.Fill))
+    $headX = $trackLeft + $fillWidth
+    if ($fillWidth -gt $trackHeight) {
+        $fillRect = New-Object System.Drawing.RectangleF($trackLeft, $trackTop, $fillWidth, $trackHeight)
         $fillPath = New-RoundedPath $fillRect ($trackHeight / 2)
-        $dark = [System.Drawing.Color]::FromArgb(255, [int]($C.Accent.R * 0.85), [int]($C.Accent.G * 0.85), [int]($C.Accent.B * 0.85))
-        $light = [System.Drawing.Color]::FromArgb(255, [int][Math]::Min(255.0, $C.Accent.R + 60.0), [int][Math]::Min(255.0, $C.Accent.G + 60.0), [int][Math]::Min(255.0, $C.Accent.B + 60.0))
-        $gradRect = New-Object System.Drawing.RectangleF(($fillLeft - 1), $trackTop, ($fillWidth + 2), $trackHeight)
+        $dark = [System.Drawing.Color]::FromArgb(255, [int]($C.Accent.R * 0.88), [int]($C.Accent.G * 0.88), [int]($C.Accent.B * 0.88))
+        $light = [System.Drawing.Color]::FromArgb(255, [int][Math]::Min(255.0, $C.Accent.R + 36.0), [int][Math]::Min(255.0, $C.Accent.G + 36.0), [int][Math]::Min(255.0, $C.Accent.B + 36.0))
+        $gradRect = New-Object System.Drawing.RectangleF(($trackLeft - 1), $trackTop, ($fillWidth + 2), $trackHeight)
         $grad = New-Object System.Drawing.Drawing2D.LinearGradientBrush($gradRect, $dark, $light, [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
         $g.FillPath($grad, $fillPath)
         $grad.Dispose()
         if ($S.Fill -lt 0.999) {
-            $band = [single]([Math]::Max($fillWidth * 0.35, 40 * $k))
-            $phase = ($now % 1.6) / 1.6
-            $center = $fillLeft - $band + ($fillWidth + 2 * $band) * $phase
+            # Блик проходит по заливке раз в две с небольшим секунды: видно, что работа идёт.
+            $band = [single]([Math]::Max($fillWidth * 0.3, 36 * $k))
+            $phase = ($now % 2.2) / 2.2
+            $center = $trackLeft - $band + ($fillWidth + 2 * $band) * $phase
             $shineRect = New-Object System.Drawing.RectangleF(($center - $band), $trackTop, (2 * $band), $trackHeight)
-            $shine = New-Object System.Drawing.Drawing2D.LinearGradientBrush($shineRect, [System.Drawing.Color]::FromArgb(0, 255, 255, 255), [System.Drawing.Color]::FromArgb(0, 255, 255, 255), [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
+            $clear = [System.Drawing.Color]::FromArgb(0, 255, 255, 255)
+            $shine = New-Object System.Drawing.Drawing2D.LinearGradientBrush($shineRect, $clear, $clear, [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
             $blend = New-Object System.Drawing.Drawing2D.ColorBlend(3)
-            $blend.Colors = [System.Drawing.Color[]]@([System.Drawing.Color]::FromArgb(0, 255, 255, 255), [System.Drawing.Color]::FromArgb(120, 255, 255, 255), [System.Drawing.Color]::FromArgb(0, 255, 255, 255))
+            $blend.Colors = [System.Drawing.Color[]]@($clear, [System.Drawing.Color]::FromArgb(95, 255, 255, 255), $clear)
             $blend.Positions = [single[]]@(0, 0.5, 1)
             $shine.InterpolationColors = $blend
             $state = $g.Save()
@@ -494,63 +612,67 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
             $g.FillRectangle($shine, $shineRect)
             $g.Restore($state)
             $shine.Dispose()
+
+            $glowRadius = [single](9 * $k)
+            $glowPath = New-Object System.Drawing.Drawing2D.GraphicsPath
+            $glowPath.AddEllipse(($headX - $glowRadius - $trackHeight / 2), ($trackTop + $trackHeight / 2 - $glowRadius), (2 * $glowRadius), (2 * $glowRadius))
+            $glow = New-Object System.Drawing.Drawing2D.PathGradientBrush -ArgumentList $glowPath
+            $glow.CenterColor = With-Alpha $C.Accent (0.4 + 0.15 * [Math]::Sin($now * 2.6))
+            $glow.SurroundColors = [System.Drawing.Color[]]@((With-Alpha $C.Accent 0.0))
+            $g.FillPath($glow, $glowPath)
+            $glow.Dispose(); $glowPath.Dispose()
         }
         $fillPath.Dispose()
     }
 
-    # Логотип бежит по краю закрашенной части: подскок, покачивание, след.
-    if ($S.Indeterminate) {
-        $runnerX = $fillLeft + $fillWidth / 2
-    } else {
-        $runnerX = $trackLeft + $fillWidth
-    }
-    $hop = 0.0; $angle = 0.0; $squash = 1.0
-    if ($S.DoneJumpAt -ge 0) {
-        $t = ($now - $S.DoneJumpAt) / 1.1
-        if ($t -lt 1) {
-            $hop = $logoSize * 0.5 * [Math]::Sin([Math]::PI * $t)
-            $angle = 360 * $t
-        }
-    } else {
-        $stride = ($now % 0.52) / 0.52
-        $hop = $logoSize * 0.16 * [Math]::Abs([Math]::Sin([Math]::PI * $stride))
-        $angle = 9 * [Math]::Sin([Math]::PI * ($now % 1.04) / 0.52) + 6
-        $squash = 1 - 0.07 * (1 - [Math]::Abs([Math]::Sin([Math]::PI * $stride)))
-        for ($i = 1; $i -le 5; $i++) {
-            $dotBrush = New-Object System.Drawing.SolidBrush((With-Alpha $C.Accent ([Math]::Max(0.0, 0.5 - $i * 0.09))))
-            $dr = [single]((3.2 - $i * 0.4) * $k)
-            $dx = $runnerX - ($logoSize * 0.35 + $i * 7 * $k)
-            $dy = $trackTop - 5 * $k + [Math]::Sin($now * 11 + $i) * 1.5 * $k
-            $g.FillEllipse($dotBrush, $dx - $dr, $dy - $dr, 2 * $dr, 2 * $dr)
-            $dotBrush.Dispose()
-        }
-    }
+    # Логотип едет над передним краем заливки и слегка покачивается; когда
+    # установщик закончил — один мягкий «вдох» вместо кувырка.
     if ($null -ne $logo) {
+        $runnerX = [Math]::Max($left + $logoSize / 2, [Math]::Min($left + $contentWidth - $logoSize / 2, [double]$headX))
+        $bob = 1.6 * $k * [Math]::Sin($now * 2.4)
+        # Наклон вперёд по скорости полосы: чем быстрее идёт установка, тем сильнее.
+        $lean = [Math]::Min(11.0, $S.Speed * 130.0)
+        $scale = 1.0
+        if ($S.DoneJumpAt -ge 0) {
+            $t = ($now - $S.DoneJumpAt) / 0.6
+            if ($t -lt 1) { $scale = 1 + 0.16 * [Math]::Sin([Math]::PI * $t) }
+        }
+        $size = [single]($logoSize * $scale)
         $state = $g.Save()
-        $g.TranslateTransform([single]$runnerX, [single]($trackTop - 2 * $k - $hop))
-        $g.ScaleTransform([single](2 - $squash), [single]$squash)
-        $g.TranslateTransform(0, [single](-$logoSize / 2))
-        $g.RotateTransform([single]$angle)
-        $g.DrawImage($logo, (New-Object System.Drawing.RectangleF((-$logoSize / 2), (-$logoSize / 2), $logoSize, $logoSize)))
+        $g.TranslateTransform([single]$runnerX, [single]($trackTop - 10 * $k - $logoSize / 2 + $bob))
+        $g.RotateTransform([single]$lean)
+        $g.DrawImage($logo, (New-Object System.Drawing.RectangleF((-$size / 2), (-$size / 2), $size, $size)))
         $g.Restore($state)
     }
-    $y = $trackTop + $trackHeight + 22 * $k
+    End-Reveal $g $shown $veilLeft $y $veilWidth ($logoSize + 10 * $k + $trackHeight + 14 * $k)
+    $y = $trackTop + $trackHeight + 14 * $k
+    $shown = Begin-Reveal $g 0.42 $k
+
+    # Под полосой: слева шутка, справа проценты.
+    $percent = '{0} %' -f [int][Math]::Round(100.0 * [Math]::Min(1.0, $S.Fill))
+    $percentWidth = $g.MeasureString($percent, $F.Sub).Width
+    $g.DrawString($percent, $F.Sub, $muted, ($left + $contentWidth - $percentWidth), ($y + ($jokeHeight - $subHeight) / 2))
 
     # Шутка: старая уплывает вверх и тает, новая выплывает снизу.
-    $swap = [Math]::Min(1.0, ($now - $S.JokeAt) / 0.42)
-    $shift = 14 * $k
+    $swap = Ease-Out (($now - $S.JokeAt) / 0.45)
+    $shift = 10 * $k
+    $jokeWidth = [single]($contentWidth - $percentWidth - 16 * $k)
     if ($swap -lt 1 -and $S.PrevJoke) {
         $b = New-Object System.Drawing.SolidBrush((With-Alpha $C.Muted (1 - $swap)))
-        $g.DrawString($S.PrevJoke, $F.Joke, $b, $left, ($y - $shift * $swap))
+        $g.DrawString($S.PrevJoke, $F.Joke, $b, (New-Object System.Drawing.RectangleF($left, ($y - $shift * $swap), $jokeWidth, ($jokeHeight + 2 * $k))), $oneLine)
         $b.Dispose()
     }
     if ($S.Joke) {
         $b = New-Object System.Drawing.SolidBrush((With-Alpha $C.Muted $swap))
-        $g.DrawString($S.Joke, $F.Joke, $b, $left, ($y + $shift * (1 - $swap)))
+        $g.DrawString($S.Joke, $F.Joke, $b, (New-Object System.Drawing.RectangleF($left, ($y + $shift * (1 - $swap)), $jokeWidth, ($jokeHeight + 2 * $k))), $oneLine)
         $b.Dispose()
     }
-    $y += $F.Joke.GetHeight($g) + 26 * $k
-    $g.DrawString([string]$spec.texts.footer, $F.Small, $muted, $left, $y)
+    $y += $jokeHeight + 20 * $k
+    $footer = New-Object System.Drawing.SolidBrush((With-Alpha $C.Muted 0.75))
+    $g.DrawString([string]$spec.texts.footer, $F.Small, $footer, $left, $y)
+    $footer.Dispose()
+    $revealTop = $trackTop + $trackHeight + 14 * $k - $shift
+    End-Reveal $g $shown $veilLeft $revealTop $veilWidth ($y + $F.Small.GetHeight($g) + 8 * $k - $revealTop)
     $fg.Dispose(); $muted.Dispose()
 }
 
@@ -628,6 +750,7 @@ Next-Joke
 Poll-State
 
 $timer = New-Object System.Windows.Forms.Timer
+# 30 кадров в секунду: кадр стоит около 9 мс, чаще — отнимать процессор у установщика.
 $timer.Interval = 33
 $timer.Add_Tick({
     # Страховка вне общего try: что бы ни ломалось ниже, окно уйдёт.
@@ -640,22 +763,27 @@ $timer.Add_Tick({
         $now = $S.Clock.Elapsed.TotalSeconds
         if ($now - $S.LastPoll -ge 0.25) { $S.LastPoll = $now; Poll-State }
         if ($now - $S.JokeAt -ge 2.8) { Next-Joke }
+        $dt = [Math]::Max(0.0, [Math]::Min(0.1, $now - $S.LastTick))
+        $S.LastTick = $now
+        # Сглаживание по времени, а не по кадрам, и только вперёд: полоса
+        # одинаково плавная при любой частоте кадров и никогда не идёт назад.
         $target = Target-Fill
-        if ($target -lt 0) {
-            $S.Indeterminate = $true
-        } else {
-            $S.Indeterminate = $false
-            $S.Fill = $S.Fill + ($target - $S.Fill) * 0.18
-        }
-        # Установка закончена — логотип радостно подпрыгивает.
+        $before = $S.Fill
+        $S.Fill = [Math]::Max($S.Fill, $S.Fill + ($target - $S.Fill) * (1 - [Math]::Exp(-$dt / 0.22)))
+        if ($dt -gt 0) { $S.Speed += (($S.Fill - $before) / $dt - $S.Speed) * (1 - [Math]::Exp(-$dt / 0.25)) }
+        # Установка закончена — логотип делает один мягкий «вдох».
         if ($S.InstallSucceeded -and $S.Fill -ge 0.9 -and $S.DoneJumpAt -lt 0) { $S.DoneJumpAt = $now }
+        if ($S.Stage -ge 2 -and $S.Fill -ge 0.99 -and $S.DoneAt[2] -lt 0) { $S.DoneAt[2] = $now }
         if ($S.Closing) {
-            $fade = if ($S.CloseFast) { 0.15 } else { 0.35 }
-            $left = 1 - ($now - $S.ClosingAt) / $fade
+            # Обычное закрытие: полоса доходит до конца, ставится последняя
+            # галочка, и только потом окно тает. При неудаче — уходит сразу.
+            $hold = if ($S.CloseFast) { 0.0 } else { 0.4 }
+            $fade = if ($S.CloseFast) { 0.15 } else { 0.3 }
+            $left = 1 - ($now - $S.ClosingAt - $hold) / $fade
             if ($left -le 0) { $timer.Stop(); $form.Close(); return }
             Set-FormOpacity ([Math]::Min($S.Opacity, $left))
         } elseif ($S.Opacity -lt 1) {
-            Set-FormOpacity ([Math]::Min(1.0, $S.Opacity + 0.16))
+            Set-FormOpacity ([Math]::Min(1.0, $S.Opacity + $dt / 0.2))
             if ($S.Opacity -lt 1 -and $now -gt 1.5) {
                 # Появление застряло: окно должно быть видно, а не красиво.
                 Set-FormOpacity 1.0
@@ -695,6 +823,7 @@ if (-not $S.Snapshot) {
     # Окно больше не ждёт: обычные запуски программы метку не пишут.
     try { Remove-Item -LiteralPath $SpecPath -Force -ErrorAction SilentlyContinue } catch { }
 }
+Write-Line ("Кадров: {0} за {1:0.0} с" -f $S.Frames, $S.Clock.Elapsed.TotalSeconds)
 Write-Line '--- окно-продолжение закрыто ---'
 exit 0
 """.lstrip()

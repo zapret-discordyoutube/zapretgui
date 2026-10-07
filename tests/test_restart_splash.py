@@ -276,19 +276,41 @@ class SplashScriptContractTests(unittest.TestCase):
         # [Math]::Min(1, 0.16) в PowerShell — целочисленный вызов, равный 0:
         # так окно навсегда оставалось прозрачным. Только дробные литералы.
         self.assertNotRegex(script, r"\[Math\]::(?:Min|Max)\(\s*\d+\s*,")
-        self.assertIn("Set-FormOpacity ([Math]::Min(1.0, $S.Opacity + 0.16))", script)
+        self.assertIn("Set-FormOpacity ([Math]::Min(1.0, $S.Opacity + $dt / 0.2))", script)
         self.assertIn("Появление не завершилось само", script)
-        # Полоса по настоящему ходу: журнал установщика, без выдуманного
-        # роста по времени; установка кончилась — 95 %, дальше «почти конец».
+        # Копирование — по настоящему ходу: журнал установщика.
         self.assertIn("function Read-SetupLog", script)
         self.assertIn("-- File entry --", script)
         self.assertIn("Starting the installation process.", script)
         self.assertIn("Installation process succeeded.", script)
-        fill = script[script.index("function Target-Fill"):script.index("function Draw-Frame")]
-        self.assertIn("return -1.0", fill)
-        self.assertIn("0.05 + 0.85 * $share", fill)
+        fill = script[script.index("function Target-Fill"):script.index("function Ease-Out")]
+        self.assertIn("0.10 + 0.80 * $share", fill)
         self.assertIn("return 0.95 + 0.04", fill)
         self.assertNotIn("/ 22.0", fill)
+
+    def test_progress_bar_only_moves_forward(self) -> None:
+        """Полоса не бегает туда-обратно и не откатывается между этапами.
+
+        Раньше, пока установщик готовился, вместо заливки рисовался отрезок,
+        который ходил из края в край вместе с логотипом, а потом полоса
+        прыгала обратно на 5 %.
+        """
+        script = render_splash_script()
+        fill = script[script.index("function Target-Fill"):script.index("function Ease-Out")]
+
+        # Нет режима «хода не видно»: у каждого этапа своя доля полосы.
+        self.assertNotIn("Indeterminate", script)
+        self.assertNotIn("return -1.0", fill)
+        self.assertNotIn("$bounce", script)
+        # Подготовка установщика тихо подползает от 5 к 10 %, копирование — с 10 %.
+        self.assertIn("return 0.05 + 0.05 * (1 - [Math]::Exp(-($now - $S.StageSince) / 4.0))", fill)
+        # Новое значение не меньше прежнего, а сглаживание идёт по времени.
+        self.assertIn(
+            "$S.Fill = [Math]::Max($S.Fill, $S.Fill + ($target - $S.Fill) * (1 - [Math]::Exp(-$dt / 0.22)))",
+            script,
+        )
+
+    def test_script_takes_nothing_from_install_folder(self) -> None:
         # Ничего не берёт из каталога установки: он как раз заменяется.
         self.assertNotIn("_internal", SPLASH_SCRIPT_TEMPLATE)
 
