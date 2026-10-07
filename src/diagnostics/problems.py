@@ -27,6 +27,8 @@ ADVICE_IPV6 = (
     "если не поможет — снимите галочку «IP версии 6» в свойствах сетевого адаптера Windows."
 )
 SYSTEM_PROBLEM_LEVEL = {system_state.LEVEL_FAIL: Level.FAIL, system_state.LEVEL_WARN: Level.WARN}
+# Сайты, которые QUIC поддерживают наверняка: по ним отличают «у сайта нет QUIC» от «UDP 443 закрыт».
+QUIC_CONTROL_HOSTS = ("www.google.com", "www.youtube.com", "www.cloudflare.com")
 ADVICE_QUIC = (
     "В пресете должен быть profile для UDP 443 (QUIC) с этими сайтами. Проще всего выбрать готовый пресет, "
     "где он есть, или отключить QUIC в браузере (в Chrome: chrome://flags → Experimental QUIC protocol)."
@@ -240,6 +242,37 @@ def collect_problems(
                 kind=block_kind.KIND_DNS,
             )
         )
+    # Сайты, которые QUIC заведомо поддерживают, — контроль: если молчат и они,
+    # закрыт весь UDP 443, а не QUIC отдельных сайтов.
+    quic_known = [
+        probe
+        for probes in collected.values()
+        for probe in probes
+        if probe.host in QUIC_CONTROL_HOSTS and getattr(probe, "quic", None) is not None
+    ]
+    quic_answers = any(
+        getattr(probe, "quic", None) is not None and probe.quic.code == quic_probe.QUIC_OK
+        for probes in collected.values()
+        for probe in probes
+    )
+    if (
+        len(quic_known) >= 2
+        and all(probe.quic.code == quic_probe.QUIC_SILENT for probe in quic_known)
+        and not quic_answers
+        and not offline
+    ):
+        problems.append(
+            problem(
+                Level.WARN,
+                "QUIC (UDP 443) не отвечает ни у одного сайта, включая "
+                f"{', '.join(sorted(probe.host for probe in quic_known))}, которые его точно поддерживают, — "
+                "похоже, UDP 443 закрыт целиком: провайдером, роутером или пресетом Zapret. Сайты открываются "
+                "обычным соединением, но браузер сначала пробует QUIC и теряет на этом время",
+                (ADVICE_QUIC,),
+                kind=block_kind.KIND_QUIC,
+            )
+        )
+
     # QUIC заблокирован, а сам сайт открывается: это не «сайт не работает», но
     # браузер сначала пробует QUIC и переходит на обычное соединение с задержкой.
     quic_blocked = [

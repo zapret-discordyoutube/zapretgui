@@ -1278,6 +1278,40 @@ class BlockcheckScopeTests(unittest.TestCase):
 
         self.assertFalse(any(item["kind"] == "network" for item in result["problems"]))
 
+    def _run_with_quic(self, code_for):
+        from diagnostics.freeze_check import FreezeServer, FreezeState
+        from diagnostics.voice_check import VoiceServer
+
+        net = _Net(
+            https=lambda host, ip: _ok(ip),
+            voice=(VoiceServer("CF", "stun", True, "отвечает"),),
+            freeze=(FreezeServer("Akamai", FreezeState.OK, "получено 32 КБ"),),
+        )
+        quic = engine.quic_probe
+
+        def facts(host, _ip):
+            code = code_for(host)
+            if code == quic.QUIC_OK:
+                return quic.QuicFacts(host=host, real_ms=10.0)
+            return quic.QuicFacts(host=host)
+
+        net.quic_facts = facts
+        return net.run(engine.run_blockcheck, "all", emit=lambda _line: None)
+
+    def test_silent_quic_on_sites_that_surely_support_it_means_udp_443_is_closed(self) -> None:
+        quic = engine.quic_probe
+        closed = self._run_with_quic(lambda _host: quic.QUIC_SILENT)
+
+        [problem] = [item for item in closed["problems"] if item["kind"] == "quic"]
+        self.assertIn("UDP 443 закрыт целиком", problem["text"])
+        self.assertIn("www.google.com", problem["text"])
+
+    def test_one_answering_site_means_udp_443_is_not_closed(self) -> None:
+        quic = engine.quic_probe
+        result = self._run_with_quic(lambda host: quic.QUIC_OK if host == "www.google.com" else quic.QUIC_SILENT)
+
+        self.assertFalse(any("закрыт целиком" in item["text"] for item in result["problems"]))
+
     def test_controls_down_means_no_internet_first(self) -> None:
         result = self._run_all(lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT))
 
