@@ -56,13 +56,15 @@ _DETECTOR_CALLBACKS_FAIL = (
     "standard_failure_detector",
     "combined_failure_detector",
     "udp_aggressive_failure_detector",
+    "white_failure_detector",
 )
 _DETECTOR_CALLBACKS_SUCCESS = (
     "standard_success_detector",
     "combined_success_detector",
     "udp_protocol_success_detector",
+    "white_success_detector",
 )
-_HOSTKEY_CALLBACKS = ("standard_hostkey", "udp_global_hostkey")
+_HOSTKEY_CALLBACKS = ("standard_hostkey", "udp_global_hostkey", "subnet_hostkey")
 
 
 def _a(name: str, summary: str, kind: str = "text", values: tuple[str, ...] = ()) -> LuaArgSpec:
@@ -179,6 +181,12 @@ LUA_ARGS: dict[str, LuaArgSpec] = {
         _a("udp_in", "Детектор: UDP-неудача — получено не больше стольких пакетов.", "int"),
         _a("reqhost", "Ключ сайта — имя из запроса.", "flag"),
         _a("nld", "Ключ сайта — домен N-го уровня.", "int"),
+        _a("mask", "Ключ subnet_hostkey: длина префикса подсети IPv4 (по умолчанию 24).", "int"),
+        _a("mask6", "Ключ subnet_hostkey: длина префикса подсети IPv6 (по умолчанию 48).", "int"),
+        _a("stall_lo", "Детектор white: зависание, если от сервера пришло не меньше стольких байт.", "int"),
+        _a("stall_hi", "Детектор white: зависание, если от сервера пришло не больше стольких байт. 0 — не искать.", "int"),
+        _a("stall_time", "Детектор white: сколько секунд тишины перед закрытием считать зависанием.", "int"),
+        _a("stall_any", "Детектор white: считать зависанием и оборванный на конце ответа поток.", "flag"),
         _a("stall_out", "Детектор: сколько исходящих без ответа считать зависанием.", "int"),
         _a("udp_fail_out", "Детектор UDP: отправлено не меньше стольких пакетов.", "int"),
         _a("udp_fail_in", "Детектор UDP: получено не больше стольких пакетов.", "int"),
@@ -403,7 +411,7 @@ LUA_FUNCTIONS: tuple[LuaFunctionSpec, ...] = (
     _f("circular", _AUTO, "Перебирать стратегии (метки strategy=N) и переключаться при неудаче.",
        ("fails", "time", "success_detector", "failure_detector", "hostkey", "key",
         "maxseq", "retrans", "reset", "inseq", "no_http_redirect", "no_rst", "udp_out", "udp_in",
-        "reqhost", "nld")),
+        "reqhost", "nld", "mask", "mask6", "stall_lo", "stall_hi", "stall_time", "stall_any")),
     _f("condition", _AUTO, "Выполнить следующие инстансы, только если выполнено условие iff.",
        ("iff", "neg", "instances", "pattern", "percent", "cond_code"), strict=True),
     _f("per_instance_condition", _AUTO, "Проверять условие cond у каждого следующего инстанса.",
@@ -490,6 +498,8 @@ LUA_FUNCTIONS: tuple[LuaFunctionSpec, ...] = (
        ("pos", "mode", "seqovl", "seqovl_pattern", "blob", "optional", "nodrop"), _CUSTOM),
     _f("decoy_hello", _CUSTOM_FILE, "Отправить ClientHello-приманку с другим SNI.",
        ("blob", "optional", "tls_mod", "repeats"), _ALL),
+    _f("white_seqovl", _CUSTOM_FILE, "Белый ClientHello в перекрытии (seqovl) перед настоящим, дальше multisplit.",
+       ("sni", "blob", "pos", "seqovl", "seqovl_pattern", "optional", "nodrop"), _ALL),
     _f("tlsrec", _CUSTOM_FILE, "Разделить одну TLS-запись на две.", ("pos",), ("dir", "payload")),
     _f("rst_desync", _CUSTOM_FILE, "Ложные RST с низким TTL.", ("repeats", "shift", "ack"), _ALL),
     _f("desync_combo", _CUSTOM_FILE, "RST, приманки, деление TLS-записи и disorder вместе.",
