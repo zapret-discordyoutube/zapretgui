@@ -31,21 +31,17 @@ def _apply_application_icon(app: QApplication) -> str:
     return icon_path
 
 
-GIL_SWITCH_INTERVAL_SEC = 0.001
-
-
 def apply_gui_gil_switch_interval() -> None:
-    """Даёт GUI-потоку чаще перехватывать GIL у фоновых воркеров.
+    """Даёт GUI-потоку перехватывать замок Python у фоновых потоков без ожидания.
 
-    Дефолтные 5 мс означают, что CPU-bound фоновая загрузка удерживает GIL
-    целыми кадрами: замеры джиттера показали худшие задержки кадра 48–54 мс
-    против 15–22 мс с интервалом 1 мс.
+    Интервал меньше миллисекунды: на Windows ожидание замка тогда равно нулю,
+    а не ~2 мс на каждое обращение окна к своему коду. Замеры и цена — в
+    ui.precise_timer. Включается сразу, ещё до окна: на запуск приходится
+    больше всего фоновой работы; дальше интервалом управляет видимость окна.
     """
-    try:
-        if sys.getswitchinterval() > GIL_SWITCH_INTERVAL_SEC:
-            sys.setswitchinterval(GIL_SWITCH_INTERVAL_SEC)
-    except (AttributeError, ValueError):
-        pass
+    from ui.precise_timer import set_gui_gil_priority
+
+    set_gui_gil_priority(True)
 
 
 def preload_darkdetect_without_wmi() -> None:
@@ -176,10 +172,8 @@ def ensure_qt_runtime() -> QApplication:
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     os.environ["QT_API"] = "pyqt6"
     apply_gui_gil_switch_interval()
-    # Интервал выше работает только вместе с точным таймером Windows: без
-    # него GUI-поток ждёт GIL у фоновых задач по 16 мс вместо 2 (ui.precise_timer).
-    # Включаем сразу — на запуск приходится больше всего фоновой работы; дальше
-    # таймером управляет видимость окна.
+    # Точный таймер Windows включаем тоже сразу; дальше обеими настройками
+    # управляет видимость окна (ui.precise_timer).
     from ui.precise_timer import set_precise_timer
 
     set_precise_timer(True)

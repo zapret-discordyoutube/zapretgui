@@ -69,6 +69,11 @@ class StartupAutostartOrderTests(unittest.TestCase):
                 "start_daemon_thread",
                 side_effect=lambda name, target: background_targets.append((str(name), target)),
             ),
+            patch.object(
+                startup_coordinator,
+                "enqueue_subsystem_task",
+                side_effect=lambda _queue, name, target: background_targets.append((str(name), target)),
+            ),
         ):
             coordinator.run_async_init()
             while scheduled:

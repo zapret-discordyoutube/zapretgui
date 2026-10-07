@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, QObject, QTimer
+from PyQt6.QtCore import QAbstractAnimation, QEvent, QObject, QTimer
 from PyQt6.QtWidgets import QWidget
 
 from log.log import log
@@ -31,10 +31,6 @@ from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 from ui.accessibility import set_control_accessibility, set_state_text
 
 
-SIDEBAR_SEARCH_AFTER_INTERACTIVE_MS = 300
-SIDEBAR_HIDDEN_MODE_ITEMS_AFTER_INTERACTIVE_MS = 700
-SIDEBAR_SECONDARY_GROUPS_AFTER_INTERACTIVE_MS = 150
-SIDEBAR_SECONDARY_GROUP_STEP_MS = 6
 SIDEBAR_EXPANDED_UI_STATE_KEY = "sidebar_expanded"
 SIDEBAR_INTENT_RECHECK_AFTER_INIT_MS = 1500
 
@@ -559,9 +555,6 @@ def _set_nav_item_accessibility(item, text: str) -> None:
 
 
 def _install_sidebar_search(window) -> None:
-    import time as _time
-
-    started_at = _time.perf_counter()
     session = get_window_ui_session(window)
     if session is None:
         return
@@ -589,97 +582,6 @@ def _install_sidebar_search(window) -> None:
     setup_sidebar_search_completer(window)
     attach_sidebar_search_to_titlebar(window)
     update_titlebar_search_width(window)
-    try:
-        window.log_startup_metric(
-            "StartupSidebarSearchReady",
-            f"{(_time.perf_counter() - started_at) * 1000:.0f}ms",
-        )
-    except Exception:
-        pass
-
-
-def _schedule_sidebar_search_after_interactive(window) -> None:
-    session = get_window_ui_session(window)
-    if session is None:
-        return
-    if session.sidebar_search_widget_cls is None:
-        return
-
-    scheduled = False
-
-    def _schedule(*_args) -> None:
-        nonlocal scheduled
-        if scheduled:
-            return
-        scheduled = True
-        try:
-            window.log_startup_metric(
-                "StartupSidebarSearchQueued",
-                f"{SIDEBAR_SEARCH_AFTER_INTERACTIVE_MS}ms after interactive",
-            )
-        except Exception:
-            pass
-        QTimer.singleShot(
-            SIDEBAR_SEARCH_AFTER_INTERACTIVE_MS,
-            lambda: _install_sidebar_search(window),
-        )
-
-    try:
-        if bool(getattr(window.startup_state, "interactive_logged", False)):
-            _schedule()
-            return
-    except Exception:
-        _schedule()
-        return
-
-    try:
-        window.startup_interactive_ready.connect(_schedule)
-    except Exception:
-        _schedule()
-
-
-def _install_hidden_mode_nav_items(window) -> None:
-    import time as _time
-
-    started_at = _time.perf_counter()
-    session = get_window_ui_session(window)
-    if session is None:
-        return
-
-    try:
-        method = window.get_launch_method()
-    except Exception:
-        method = None
-    visibility_by_page = get_nav_visibility(method)
-    added_count = 0
-
-    for page_name, should_show in visibility_by_page.items():
-        if bool(should_show):
-            continue
-        if page_name in session.nav_items:
-            continue
-        add_nav_item(
-            window,
-            page_name,
-            session.nav_scroll_position,
-            initial_visible=False,
-            insert_index=_resolve_scroll_insert_index(window, page_name, method),
-            pump_ui=False,
-            launch_method=method,
-        )
-        if page_name in session.nav_items:
-            added_count += 1
-            session.nav_mode_visibility[page_name] = False
-
-    if added_count:
-        apply_nav_visibility_filter(window, method=method)
-    try:
-        window.log_startup_metric(
-            "StartupHiddenModeNavReady",
-            f"{added_count} items, {(_time.perf_counter() - started_at) * 1000:.0f}ms",
-        )
-    except Exception:
-        pass
 
 
 def _add_sidebar_group(window, group_plan, initial_visibility, launch_method: str | None = None) -> None:
@@ -744,142 +646,6 @@ def _resolve_nav_visibility_method(window, method: str | None) -> str:
     return DEFAULT_LAUNCH_METHOD
 
 
-def _install_secondary_sidebar_groups(window) -> None:
-    import time as _time
-
-    started_at = _time.perf_counter()
-    session = get_window_ui_session(window)
-    if session is None:
-        return
-
-    try:
-        method = window.get_launch_method()
-    except Exception:
-        method = ""
-    initial_visibility = get_nav_visibility(method)
-    group_plans = tuple(
-        group_plan
-        for group_plan in build_sidebar_group_plans(method)
-        if group_plan.group_name != "root"
-    )
-
-    # Группы ставятся по одной через таймер, поэтому wall-clock метрики почти
-    # целиком состоит из ожидания в очереди событий GUI, занятой стартом.
-    # Собственную работу считаем отдельно, иначе метрика выглядит как тормоз
-    # сайдбара, хотя тормозит очередь.
-    work_seconds = 0.0
-
-    def _finish() -> None:
-        nonlocal work_seconds
-        finish_started_at = _time.perf_counter()
-        _refresh_existing_nav_mode_visibility(window, method)
-        apply_nav_visibility_filter(window, method=method)
-        work_seconds += _time.perf_counter() - finish_started_at
-        try:
-            window.log_startup_metric(
-                "StartupSecondarySidebarReady",
-                f"{(_time.perf_counter() - started_at) * 1000:.0f}ms wall"
-                f" | {work_seconds * 1000:.0f}ms work"
-                f" | {len(group_plans)} groups",
-            )
-        except Exception:
-            pass
-
-    def _install_next_group(index: int = 0) -> None:
-        nonlocal work_seconds
-        if get_window_ui_session(window) is None:
-            return
-        if index >= len(group_plans):
-            _finish()
-            return
-
-        group_started_at = _time.perf_counter()
-        _add_sidebar_group(window, group_plans[index], initial_visibility, method)
-        work_seconds += _time.perf_counter() - group_started_at
-        QTimer.singleShot(
-            SIDEBAR_SECONDARY_GROUP_STEP_MS,
-            lambda next_index=index + 1: _install_next_group(next_index),
-        )
-
-    _install_next_group()
-
-
-def _schedule_secondary_sidebar_groups_after_interactive(window) -> None:
-    session = get_window_ui_session(window)
-    if session is None:
-        return
-
-    scheduled = False
-
-    def _schedule(*_args) -> None:
-        nonlocal scheduled
-        if scheduled:
-            return
-        scheduled = True
-        try:
-            window.log_startup_metric(
-                "StartupSecondarySidebarQueued",
-                f"{SIDEBAR_SECONDARY_GROUPS_AFTER_INTERACTIVE_MS}ms after interactive",
-            )
-        except Exception:
-            pass
-        QTimer.singleShot(
-            SIDEBAR_SECONDARY_GROUPS_AFTER_INTERACTIVE_MS,
-            lambda: _install_secondary_sidebar_groups(window),
-        )
-
-    try:
-        if bool(getattr(window.startup_state, "interactive_logged", False)):
-            _schedule()
-            return
-    except Exception:
-        _schedule()
-        return
-
-    try:
-        window.startup_interactive_ready.connect(_schedule)
-    except Exception:
-        _schedule()
-
-
-def _schedule_hidden_mode_nav_items_after_interactive(window) -> None:
-    session = get_window_ui_session(window)
-    if session is None:
-        return
-
-    scheduled = False
-
-    def _schedule(*_args) -> None:
-        nonlocal scheduled
-        if scheduled:
-            return
-        scheduled = True
-        try:
-            window.log_startup_metric(
-                "StartupHiddenModeNavQueued",
-                f"{SIDEBAR_HIDDEN_MODE_ITEMS_AFTER_INTERACTIVE_MS}ms after interactive",
-            )
-        except Exception:
-            pass
-        QTimer.singleShot(
-            SIDEBAR_HIDDEN_MODE_ITEMS_AFTER_INTERACTIVE_MS,
-            lambda: _install_hidden_mode_nav_items(window),
-        )
-
-    try:
-        if bool(getattr(window.startup_state, "interactive_logged", False)):
-            _schedule()
-            return
-    except Exception:
-        _schedule()
-        return
-
-    try:
-        window.startup_interactive_ready.connect(_schedule)
-    except Exception:
-        _schedule()
-
-
 def init_navigation(window) -> None:
     session = get_window_ui_session(window)
     if session is None:
@@ -899,14 +665,16 @@ def init_navigation(window) -> None:
     session.sidebar_search_titlebar_attached = False
     initial_visibility = get_nav_visibility(current_method)
 
-    _schedule_sidebar_search_after_interactive(window)
-    _schedule_secondary_sidebar_groups_after_interactive(window)
-    _schedule_hidden_mode_nav_items_after_interactive(window)
-
+    # Меню и поиск собираются целиком до первого показа окна. Раньше группы
+    # ниже первой, поле поиска и пункты других режимов ставились таймерами
+    # уже после показа: окно на глазах достраивалось, а сама достройка шла
+    # одновременно с фоновыми задачами запуска и из-за общего замка Python
+    # (GIL) занимала сотни миллисекунд вместо десяти. Пункты режимов, которые
+    # сейчас скрыты, здесь не создаются вовсе: их добавляет sync_nav_visibility
+    # при смене режима.
     for group_plan in build_sidebar_group_plans(current_method):
-        if group_plan.group_name != "root":
-            continue
         _add_sidebar_group(window, group_plan, initial_visibility, current_method)
+    _install_sidebar_search(window)
 
     for hidden in get_hidden_pages_for_method(current_method):
         page = _get_loaded_pages(window).get(hidden)
@@ -926,6 +694,26 @@ def init_navigation(window) -> None:
     )
     _refresh_existing_nav_mode_visibility(window, current_method)
     apply_nav_visibility_filter(window, method=current_method)
+    _settle_sidebar_header_animations(session)
+
+
+def _settle_sidebar_header_animations(session) -> None:
+    """Ставит заголовки групп меню на место сразу, без анимации роста.
+
+    qfluentwidgets при разворачивании панели растягивает каждый заголовок от
+    нуля до полной высоты за 150 мс. При запуске панель разворачивается ещё до
+    показа окна, и анимация доигрывала уже на экране: в первом кадре меню было
+    без заголовков, а потом пункты на глазах съезжали вниз.
+    """
+    for header, _pages, _header_key in session.nav_headers:
+        animation = getattr(header, "heightAni", None)
+        if animation is None:
+            continue
+        try:
+            if animation.state() == QAbstractAnimation.State.Running:
+                animation.setCurrentTime(animation.totalDuration())
+        except Exception:
+            continue
 
 
 def sync_nav_visibility(window, method: str | None = None) -> None:

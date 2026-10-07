@@ -13,6 +13,13 @@
 * только когда пользователь не трогает мышь и клавиатуру;
 * чем дольше длилась прошлая задача, тем длиннее пауза нужна для следующей —
   на медленном компьютере очередь сама становится осторожнее;
+* только когда молчит фон: общая дорожка фоновых задач запуска
+  (main.post_startup_threading) пуста и обход не запускается. Сборка страницы
+  тысячи раз отпускает общий замок Python (каждый addWidget, каждое
+  подключение сигнала) и рядом с занятым фоновым потоком идёт в полтора-четыре
+  раза дольше (72 мс → 113 мс рядом с одним, 254 мс рядом с тремя; замер на
+  win10), а окно на это время замирает. Пока страница собирается, дорожка в
+  свою очередь не начинает следующую задачу;
 * пока окно свёрнуто или убрано в трей, страницы не строятся вовсе: их никто
   не видит, а память и процессор при входе в Windows нужны другим.
 
@@ -31,6 +38,7 @@ from PyQt6.QtGui import QGuiApplication
 
 from log.log import log
 from main import startup_audit
+from main.post_startup_threading import gui_build_turn, is_local_lane_busy
 from ui.user_idle import user_idle_ms
 
 
@@ -45,6 +53,9 @@ TASK_GAP_MS = 400
 BUSY_POLL_MS = 200
 # Пока окно скрыто, спешить некуда — проверяем редко, чтобы не будить процесс.
 HIDDEN_POLL_MS = 2_000
+# Дольше этого задача занятый фон не ждёт: через очередь идут и окна «Что
+# нового» и обновления, и зависшая фоновая задача не должна спрятать их навсегда.
+BACKGROUND_WAIT_MAX_MS = 20_000
 
 
 @dataclass(slots=True)
@@ -65,6 +76,7 @@ class IdleUiTaskQueue(QObject):
         is_alive: Callable[[], bool],
         is_window_shown: Callable[[], bool],
         idle_ms: Callable[[], int | None] = user_idle_ms,
+        is_background_busy: Callable[[], bool] = is_local_lane_busy,
         is_app_active: Callable[[], bool] | None = None,
         mouse_pressed: Callable[[], bool] | None = None,
         clock: Callable[[], float] = time.monotonic,
@@ -74,6 +86,7 @@ class IdleUiTaskQueue(QObject):
         self._is_alive = is_alive
         self._is_window_shown = is_window_shown
         self._idle_ms = idle_ms
+        self._is_background_busy = is_background_busy
         self._is_app_active = is_app_active or _is_app_active
         self._mouse_pressed = mouse_pressed or _is_mouse_pressed
         self._clock = clock
@@ -159,6 +172,12 @@ class IdleUiTaskQueue(QObject):
 
     def _retry_delay_ms(self, task: _IdleTask) -> int:
         """0 — задачу можно выполнять сейчас, иначе через сколько проверить снова."""
+        waited_ms = (self._clock() - task.ready_at) * 1000.0
+        if waited_ms < BACKGROUND_WAIT_MAX_MS and self._safe(self._is_background_busy, default=False):
+            # Рядом с занятым фоновым потоком сборка идёт в разы дольше, и
+            # окно замирает на всё это время — даже скрытое окно задержало
+            # бы тогда сам запуск.
+            return BUSY_POLL_MS
         shown = self._safe(self._is_window_shown, default=True)
         if not shown:
             # Скрытое окно никто не видит: рывок незаметен, ждать паузы незачем.
@@ -177,7 +196,8 @@ class IdleUiTaskQueue(QObject):
         startup_audit.audit_timer_fired(task.name, 0)
         started_at = time.perf_counter()
         try:
-            task.callback()
+            with gui_build_turn():
+                task.callback()
         except Exception as exc:
             log(f"Отложенная задача интерфейса {task.name} не выполнена: {exc}", "DEBUG")
         self._last_task_ms = (time.perf_counter() - started_at) * 1000.0
@@ -201,17 +221,26 @@ def _is_mouse_pressed() -> bool:
     return QGuiApplication.mouseButtons() != Qt.MouseButton.NoButton
 
 
-def build_idle_ui_task_queue(startup_host) -> IdleUiTaskQueue:
+def build_idle_ui_task_queue(startup_host, *, is_launch_busy: Callable[[], bool] | None = None) -> IdleUiTaskQueue:
+    """is_launch_busy — обход сейчас запускается или останавливается."""
+
+    def _is_background_busy() -> bool:
+        if is_local_lane_busy():
+            return True
+        return bool(is_launch_busy()) if is_launch_busy is not None else False
+
     # Родитель — приложение: очередь живёт, пока крутится цикл событий, а не
     # пока на неё случайно ссылается чьё-то замыкание.
     return IdleUiTaskQueue(
         is_alive=startup_host.is_alive,
         is_window_shown=startup_host.is_window_shown,
+        is_background_busy=_is_background_busy,
         parent=QCoreApplication.instance(),
     )
 
 
 __all__ = [
+    "BACKGROUND_WAIT_MAX_MS",
     "BUSY_POLL_MS",
     "HIDDEN_POLL_MS",
     "IDLE_AFTER_TASK_FACTOR",

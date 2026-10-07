@@ -104,8 +104,7 @@ class PreciseTimerWiringTests(unittest.TestCase):
 
         source = inspect.getsource(qt_runtime.ensure_qt_runtime)
 
-        # На запуск приходится больше всего фоновой работы, а без точного
-        # таймера интервал переключения GIL в 1 мс на Windows не действует.
+        # На запуск приходится больше всего фоновой работы.
         self.assertIn("set_precise_timer(True)", source)
         self.assertLess(source.index("apply_gui_gil_switch_interval()"), source.index("set_precise_timer(True)"))
 

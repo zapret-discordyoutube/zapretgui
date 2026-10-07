@@ -70,13 +70,25 @@ class ProfileFeature:
         started_at = time.perf_counter()
         view_state = build_profile_list_view_state(tuple(getattr(payload, "items", ()) or ()))
         log_ui_timing_since("warmup", method, "profile_warmup.view_state", started_at, important=True)
-        started_at = time.perf_counter()
-        service.warm_strategy_usage()
-        log_ui_timing_since("warmup", method, "profile_warmup.strategy_usage", started_at, important=True)
         return ProfileListLoadResult(
             payload=payload,
             view_state=view_state,
         )
+
+    def warm_profile_strategy_usage(self, launch_method: str) -> None:
+        """Заранее считает частоту стратегий в готовых пресетах.
+
+        Нужна только странице настройки профиля, поэтому идёт отдельно от
+        списка профилей: это самая долгая часть прогрева, и главной странице
+        её ждать незачем.
+        """
+        from settings.mode import normalize_launch_method
+
+        method = normalize_launch_method(launch_method)
+        service = self._commands()._profile_preset_service(self, method)
+        started_at = time.perf_counter()
+        service.warm_strategy_usage()
+        log_ui_timing_since("warmup", method, "profile_warmup.strategy_usage", started_at, important=True)
 
     def list_preset_order_profiles(self, launch_method: str):
         return self._commands().list_preset_order_profiles(self, launch_method)

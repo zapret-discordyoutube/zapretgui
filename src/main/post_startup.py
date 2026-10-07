@@ -140,10 +140,26 @@ def install_secondary_page_warmup(*args, **kwargs):
     return install(*args, **kwargs)
 
 
-def build_idle_ui_task_queue(startup_host):
+def build_idle_ui_task_queue(startup_host, **kwargs):
     from main.post_startup_idle_tasks import build_idle_ui_task_queue as build
 
-    return build(startup_host)
+    return build(startup_host, **kwargs)
+
+
+# Обход запускается или останавливается: рабочий поток запуска занят, а на
+# главной странице идёт анимация пуска.
+_LAUNCH_TRANSITION_PHASES = frozenset({"autostart_pending", "starting", "stopping"})
+
+
+def _launch_transition_probe(ui_state_store):
+    if ui_state_store is None:
+        return None
+
+    def _is_launch_busy() -> bool:
+        phase = str(ui_state_store.snapshot().launch_phase or "").strip().lower()
+        return phase in _LAUNCH_TRANSITION_PHASES
+
+    return _is_launch_busy
 
 
 def install_update_check(*args, **kwargs):
@@ -182,8 +198,12 @@ class PostStartupDeps:
 def install_post_startup_tasks(deps: PostStartupDeps) -> None:
     startup_host = deps.startup_host
     # Сборка скрытых страниц занимает GUI-поток, поэтому идёт через общую
-    # очередь: по одной странице и только в паузах пользователя.
-    idle_tasks = build_idle_ui_task_queue(startup_host)
+    # очередь: по одной странице, только в паузах пользователя и только пока
+    # молчит фон — дорожка фоновых задач пуста и обход не запускается.
+    idle_tasks = build_idle_ui_task_queue(
+        startup_host,
+        is_launch_busy=_launch_transition_probe(getattr(deps, "ui_state_store", None)),
+    )
     on_profile_warmup_ready = None
     if deps.presets_feature is not None and deps.ui_state_store is not None:
         on_profile_warmup_ready = lambda method: deps.presets_feature.refresh_profile_strategy_summary_in_store(

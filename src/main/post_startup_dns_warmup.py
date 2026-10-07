@@ -28,7 +28,7 @@ def install_dns_page_data_warmup(
 
     def _start_dns_page_data_warmup() -> None:
         log_startup_metric("StartupPostInitNetworkDataWarmupStarted", "backend_cache")
-        enqueue_subsystem_task("dns", "DnsPageDataWarmup", _run_dns_page_data_warmup)
+        enqueue_subsystem_task("dns", "DnsPageDataWarmup", _run_dns_page_data_warmup, warmup=True)
 
     def _schedule_dns_page_data_warmup() -> None:
         if not is_startup_host_alive(startup_host):

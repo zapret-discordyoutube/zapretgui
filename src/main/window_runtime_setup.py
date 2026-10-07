@@ -9,7 +9,6 @@ from main.window_page_deps_setup import attach_window_ui_root
 from main.window_startup_setup import attach_startup_deps_to_window
 from main.window_startup_signal_setup import (
     connect_window_startup_signals,
-    show_initial_window_if_needed,
     start_window_deferred_init,
 )
 
@@ -50,7 +49,8 @@ def attach_app_runtime_to_window(window, app_runtime, *, page_actions_factory) -
         window,
         continue_startup=startup_runtime.continue_deferred_init,
     )
-    show_initial_window_if_needed(window)
+    # Окно здесь не показывается: его показывает _deferred_init, когда
+    # содержимое уже собрано (см. main/startup_contract.md).
     start_window_deferred_init(window)
 
 

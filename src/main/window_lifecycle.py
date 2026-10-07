@@ -15,6 +15,7 @@ from main.runtime_state import (
     startup_elapsed_ms,
 )
 from ui.frame_clock import frame_clock
+from ui.window_first_frame import begin_first_frame_reveal
 from ui.window_preset_file_drop import handle_native_preset_file_drop
 from ui.windows_file_drop import WM_DROPFILES
 from ui.windows_screen_presence import (
@@ -27,8 +28,8 @@ from ui.windows_screen_presence import (
 class _FirstPaintProbe(QObject):
     """Один раз отмечает в журнале первое рисование окна.
 
-    StartupTTFF — это только событие показа: окно уже «показано», но пока
-    главный поток собирает страницу, на экране ещё ничего нет.
+    StartupTTFF — это только событие показа: окно уже «показано», но рисует
+    его Qt позже, когда дойдёт очередь событий (ui.window_first_frame).
     """
 
     def eventFilter(self, watched, event):  # noqa: N802 (Qt override)
@@ -236,6 +237,9 @@ class WindowLifecycleMixin:
             emit_startup_metric("StartupTTFF", "first showEvent")
             self._first_paint_probe = _FirstPaintProbe()
             self.installEventFilter(self._first_paint_probe)
+            # showEvent приходит до вывода окна на экран: прячем окно от экрана
+            # до первой отрисовки, иначе Windows покажет его пустым и белым.
+            self._first_frame_reveal = begin_first_frame_reveal(self)
 
         geometry_runtime = self._get_window_geometry_runtime()
         if geometry_runtime is not None:

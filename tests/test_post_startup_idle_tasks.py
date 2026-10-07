@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from main import post_startup_idle_tasks as idle_tasks  # noqa: E402
 from main.post_startup_idle_tasks import (  # noqa: E402
+    BACKGROUND_WAIT_MAX_MS,
     BUSY_POLL_MS,
     HIDDEN_POLL_MS,
     IDLE_REQUIRED_MAX_MS,
@@ -39,12 +40,14 @@ class _World:
         self.app_active = True
         self.mouse_pressed = False
         self.idle_ms: int | None = 10_000
+        self.background_busy = False
 
     def build(self) -> IdleUiTaskQueue:
         queue = IdleUiTaskQueue(
             is_alive=lambda: self.alive,
             is_window_shown=lambda: self.shown,
             idle_ms=lambda: self.idle_ms,
+            is_background_busy=lambda: self.background_busy,
             is_app_active=lambda: self.app_active,
             mouse_pressed=lambda: self.mouse_pressed,
             clock=lambda: self.now,
@@ -60,6 +63,136 @@ class _World:
 
 def _armed_ms(queue: IdleUiTaskQueue) -> int:
     return int(queue._timer.start.call_args.args[0])
+
+
+class IdleUiTaskQueueBackgroundTests(unittest.TestCase):
+    """Страница не собирается, пока рядом работает фоновая задача.
+
+    Замер на win10: сборка страницы настройки профиля — 72 мс при молчащем
+    фоне, 113 мс рядом с одним занятым фоновым потоком и 254 мс рядом с тремя;
+    окно на это время замирает.
+    """
+
+    def test_task_waits_while_background_is_busy(self) -> None:
+        world = _World()
+        world.background_busy = True
+        queue = world.build()
+        ran: list[str] = []
+
+        queue.add("page", lambda: ran.append("page"))
+        queue._on_timer()
+
+        self.assertEqual(ran, [])
+        self.assertEqual(queue.pending_names(), ("page",))
+        self.assertEqual(_armed_ms(queue), BUSY_POLL_MS)
+
+        world.background_busy = False
+        world.advance(BUSY_POLL_MS)
+        queue._on_timer()
+
+        self.assertEqual(ran, ["page"])
+
+    def test_hidden_window_also_waits_for_background(self) -> None:
+        # В трее рывок не виден, но сборка рядом с фоновой задачей растянула
+        # бы сам запуск: обе работы шли бы в разы дольше.
+        world = _World()
+        world.shown = False
+        world.background_busy = True
+        queue = world.build()
+        ran: list[str] = []
+
+        queue.add("update-dialog", lambda: ran.append("x"), needs_shown_window=False)
+        queue._on_timer()
+
+        self.assertEqual(ran, [])
+        self.assertEqual(_armed_ms(queue), BUSY_POLL_MS)
+
+    def test_stuck_background_does_not_hide_task_forever(self) -> None:
+        # Через очередь идут окна «Что нового» и обновления.
+        world = _World()
+        world.background_busy = True
+        queue = world.build()
+        ran: list[str] = []
+
+        queue.add("whats-new", lambda: ran.append("x"))
+        queue._on_timer()
+        self.assertEqual(ran, [])
+
+        world.advance(BACKGROUND_WAIT_MAX_MS)
+        queue._on_timer()
+
+        self.assertEqual(ran, ["x"])
+
+    def test_background_lane_does_not_start_task_while_page_is_built(self) -> None:
+        from main import post_startup_threading as threading_module
+
+        world = _World()
+        queue = world.build()
+        seen: list[bool] = []
+
+        queue.add("page", lambda: seen.append(threading_module._GUI_BUILD_DONE.is_set()))
+        queue._on_timer()
+
+        self.assertEqual(seen, [False])
+        self.assertTrue(threading_module._GUI_BUILD_DONE.is_set())
+
+    def test_failed_page_build_releases_background_lane(self) -> None:
+        from main import post_startup_threading as threading_module
+
+        world = _World()
+        queue = world.build()
+
+        def _fail() -> None:
+            raise RuntimeError("boom")
+
+        queue.add("page", _fail)
+        queue._on_timer()
+
+        self.assertTrue(threading_module._GUI_BUILD_DONE.is_set())
+
+    def test_default_queue_watches_lane_and_launch_transition(self) -> None:
+        launch_busy = [False]
+        host = type("Host", (), {"is_alive": lambda self: True, "is_window_shown": lambda self: True})()
+
+        with patch.object(idle_tasks, "is_local_lane_busy", return_value=False) as lane_busy:
+            queue = idle_tasks.build_idle_ui_task_queue(host, is_launch_busy=lambda: launch_busy[0])
+            self.addCleanup(queue.stop)
+            self.assertFalse(queue._is_background_busy())
+            launch_busy[0] = True
+            self.assertTrue(queue._is_background_busy())
+            launch_busy[0] = False
+            lane_busy.return_value = True
+            self.assertTrue(queue._is_background_busy())
+
+
+class LaunchTransitionProbeTests(unittest.TestCase):
+    """Пока обход запускается или останавливается, страницы не собираются."""
+
+    def test_probe_follows_launch_phase(self) -> None:
+        from types import SimpleNamespace
+
+        from main import post_startup
+
+        state = SimpleNamespace(launch_phase="autostart_pending")
+        probe = post_startup._launch_transition_probe(SimpleNamespace(snapshot=lambda: state))
+
+        for phase, busy in (
+            ("autostart_pending", True),
+            ("starting", True),
+            ("stopping", True),
+            ("running", False),
+            ("stopped", False),
+            ("", False),
+            (None, False),
+        ):
+            with self.subTest(phase=phase):
+                state.launch_phase = phase
+                self.assertEqual(probe(), busy)
+
+    def test_no_store_means_no_probe(self) -> None:
+        from main import post_startup
+
+        self.assertIsNone(post_startup._launch_transition_probe(None))
 
 
 class IdleUiTaskQueueTests(unittest.TestCase):

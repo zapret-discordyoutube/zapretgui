@@ -5,7 +5,7 @@ from typing import Callable
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from log.log import log
-from main.post_startup_threading import start_daemon_thread
+from main.post_startup_threading import enqueue_subsystem_task, start_daemon_thread
 from main.qt_dispatch import run_queued
 
 
@@ -304,7 +304,10 @@ class StartupCoordinator:
                     }
                 )
 
-        start_daemon_thread(f"StartupStep-{task_name}", _worker)
+        # На общую дорожку, а не в свой поток: шаг занят диском и процессором
+        # (сборка списков адресов) и рядом с остальными фоновыми задачами
+        # запуска делил бы с ними и с окном замок Python.
+        enqueue_subsystem_task("startup", f"StartupStep-{task_name}", _worker)
 
     def _on_background_step_finished(self, payload: object) -> None:
         data = payload if isinstance(payload, dict) else {}

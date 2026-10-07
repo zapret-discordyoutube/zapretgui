@@ -289,7 +289,7 @@ class PresetSidebarNavigationTests(unittest.TestCase):
             "Кнопка «Замерить скорость» покажет, какой сервер отвечает быстрее.",
         )
 
-    def test_initial_sidebar_build_skips_secondary_and_hidden_other_mode_items(self) -> None:
+    def test_initial_sidebar_build_adds_every_visible_group_and_skips_other_mode_items(self) -> None:
         from app.page_names import PageName
         from settings.mode import ZAPRET2_MODE
         import ui.navigation.sidebar_builder as sidebar_builder
@@ -340,21 +340,6 @@ class PresetSidebarNavigationTests(unittest.TestCase):
         with (
             patch.object(
                 sidebar_builder,
-                "_schedule_sidebar_search_after_interactive",
-                side_effect=lambda current_window: None,
-            ),
-            patch.object(
-                sidebar_builder,
-                "_schedule_secondary_sidebar_groups_after_interactive",
-                side_effect=lambda current_window: None,
-            ),
-            patch.object(
-                sidebar_builder,
-                "_schedule_hidden_mode_nav_items_after_interactive",
-                side_effect=lambda current_window: None,
-            ),
-            patch.object(
-                sidebar_builder,
                 "add_nav_item",
                 side_effect=lambda current_window, page_name, *_args, **_kwargs: added_pages.append(page_name),
             ),
@@ -362,18 +347,27 @@ class PresetSidebarNavigationTests(unittest.TestCase):
         ):
             sidebar_builder.init_navigation(window)
 
-        self.assertIn(PageName.ZAPRET2_MODE_CONTROL, added_pages)
+        # Всё, что пользователь видит в меню, готово к первому показу окна.
         for page_name in (
+            PageName.ZAPRET2_MODE_CONTROL,
             PageName.ZAPRET2_USER_PRESETS,
             PageName.ZAPRET2_PRESET_SETUP,
+            PageName.NETWORK,
+            PageName.LOGS,
+        ):
+            self.assertIn(page_name, added_pages)
+        # Пункты другого режима не создаются: их добавит sync_nav_visibility
+        # при смене режима.
+        for page_name in (
             PageName.ZAPRET1_MODE_CONTROL,
             PageName.ZAPRET1_USER_PRESETS,
             PageName.ZAPRET1_PRESET_SETUP,
-            PageName.NETWORK,
         ):
             self.assertNotIn(page_name, added_pages)
+        self.assertEqual(len(added_pages), len(set(added_pages)))
 
-    def test_initial_sidebar_build_defers_secondary_groups_until_after_interactive(self) -> None:
+    def test_initial_sidebar_build_leaves_nothing_for_after_first_paint(self) -> None:
+        """Меню и поиск не достраиваются на глазах после показа окна."""
         from app.page_names import PageName
         from settings.mode import ZAPRET2_MODE
         import ui.navigation.sidebar_builder as sidebar_builder
@@ -384,10 +378,6 @@ class PresetSidebarNavigationTests(unittest.TestCase):
 
             def connect(self, callback) -> None:
                 self.connected.append(callback)
-
-            def emit(self) -> None:
-                for callback in list(self.connected):
-                    callback("ui_ready")
 
         class FakeNavigationInterface:
             def __init__(self) -> None:
@@ -403,11 +393,11 @@ class PresetSidebarNavigationTests(unittest.TestCase):
                 self.minimum_expand_width = width
 
         added_pages: list[PageName] = []
-        signal = FakeSignal()
+        interactive_signal = FakeSignal()
         session = SimpleNamespace(
             nav_scroll_position=None,
             ui_language="ru",
-            sidebar_search_widget_cls=None,
+            sidebar_search_widget_cls=object,
             nav_items={},
             nav_headers=[],
             nav_header_by_group={},
@@ -424,50 +414,48 @@ class PresetSidebarNavigationTests(unittest.TestCase):
             ui_session=session,
             navigationInterface=FakeNavigationInterface(),
             startup_state=SimpleNamespace(interactive_logged=False),
-            startup_interactive_ready=signal,
+            startup_interactive_ready=interactive_signal,
             get_launch_method=lambda: ZAPRET2_MODE,
             log_startup_metric=Mock(),
         )
-        scheduled: list[tuple[int, object]] = []
+        scheduled: list[int] = []
+        search_installed_after: list[int] = []
 
         def _fake_add_nav_item(current_window, page_name, *_args, **_kwargs):
             added_pages.append(page_name)
             session.nav_items[page_name] = SimpleNamespace(setVisible=Mock())
 
         with (
-            patch.object(sidebar_builder, "_schedule_sidebar_search_after_interactive", side_effect=lambda current_window: None),
-            patch.object(sidebar_builder, "_schedule_hidden_mode_nav_items_after_interactive", side_effect=lambda current_window: None),
-            patch.object(sidebar_builder.QTimer, "singleShot", side_effect=lambda delay_ms, callback: scheduled.append((delay_ms, callback))),
+            patch.object(
+                sidebar_builder.QTimer,
+                "singleShot",
+                side_effect=lambda delay_ms, callback: scheduled.append(int(delay_ms)),
+            ),
+            patch.object(
+                sidebar_builder,
+                "_install_sidebar_search",
+                side_effect=lambda current_window: search_installed_after.append(len(added_pages)),
+            ),
             patch.object(sidebar_builder, "add_nav_item", side_effect=_fake_add_nav_item),
             patch("settings.store.get_ui_state_settings", return_value={"sidebar_expanded": True}),
         ):
             sidebar_builder.init_navigation(window)
 
-            self.assertIn(PageName.ZAPRET2_MODE_CONTROL, added_pages)
-            self.assertNotIn(PageName.ZAPRET2_USER_PRESETS, added_pages)
-            self.assertNotIn(PageName.ZAPRET2_PRESET_SETUP, added_pages)
-            self.assertNotIn(PageName.NETWORK, added_pages)
-            # Сразу после init_navigation запланирована только страховочная
-            # перепроверка состояния сайдбара, но не вторичные группы.
-            self.assertEqual(
-                [delay for delay, _callback in scheduled],
-                [sidebar_builder.SIDEBAR_INTENT_RECHECK_AFTER_INIT_MS],
-            )
-
-            signal.emit()
-
-            self.assertEqual(len(scheduled), 2)
-            self.assertLessEqual(scheduled[1][0], 1_000)
-
-            next_callback_index = 0
-            while next_callback_index < len(scheduled):
-                scheduled[next_callback_index][1]()
-                next_callback_index += 1
-
-        self.assertIn(PageName.ZAPRET2_USER_PRESETS, added_pages)
-        self.assertIn(PageName.ZAPRET2_PRESET_SETUP, added_pages)
-        self.assertIn(PageName.NETWORK, added_pages)
-        self.assertIn(PageName.LOGS, added_pages)
+        for page_name in (
+            PageName.ZAPRET2_MODE_CONTROL,
+            PageName.ZAPRET2_USER_PRESETS,
+            PageName.ZAPRET2_PRESET_SETUP,
+            PageName.NETWORK,
+            PageName.LOGS,
+        ):
+            self.assertIn(page_name, added_pages)
+        # Поиск ставится один раз и после всех пунктов: подсказки поиска
+        # собираются из готового меню.
+        self.assertEqual(search_installed_after, [len(added_pages)])
+        # Единственный таймер — страховочная перепроверка состояния панели.
+        self.assertEqual(scheduled, [sidebar_builder.SIDEBAR_INTENT_RECHECK_AFTER_INIT_MS])
+        # Достройка не ждёт готовности интерфейса: ждать больше нечего.
+        self.assertEqual(interactive_signal.connected, [])
 
     def test_initial_sidebar_build_restores_saved_expanded_state(self) -> None:
         from settings.mode import ZAPRET2_MODE
@@ -522,16 +510,6 @@ class PresetSidebarNavigationTests(unittest.TestCase):
         store_warmed_sidebar_expanded(True)
 
         with (
-            patch.object(
-                sidebar_builder,
-                "_schedule_sidebar_search_after_interactive",
-                side_effect=lambda current_window: None,
-            ),
-            patch.object(
-                sidebar_builder,
-                "_schedule_hidden_mode_nav_items_after_interactive",
-                side_effect=lambda current_window: None,
-            ),
             patch.object(
                 sidebar_builder,
                 "add_nav_item",
@@ -602,16 +580,6 @@ class PresetSidebarNavigationTests(unittest.TestCase):
         with (
             patch.object(
                 sidebar_builder,
-                "_schedule_sidebar_search_after_interactive",
-                side_effect=lambda current_window: None,
-            ),
-            patch.object(
-                sidebar_builder,
-                "_schedule_hidden_mode_nav_items_after_interactive",
-                side_effect=lambda current_window: None,
-            ),
-            patch.object(
-                sidebar_builder,
                 "add_nav_item",
                 side_effect=lambda current_window, page_name, *_args, **_kwargs: None,
             ),
@@ -676,8 +644,6 @@ class PresetSidebarNavigationTests(unittest.TestCase):
         )
 
         with (
-            patch.object(sidebar_builder, "_schedule_sidebar_search_after_interactive", side_effect=lambda *_args: None),
-            patch.object(sidebar_builder, "_schedule_hidden_mode_nav_items_after_interactive", side_effect=lambda *_args: None),
             patch.object(sidebar_builder, "add_nav_item", side_effect=lambda *_args, **_kwargs: None),
             patch("settings.store.get_ui_state_settings", return_value={"sidebar_expanded": True}),
         ):
@@ -756,16 +722,6 @@ class PresetSidebarNavigationTests(unittest.TestCase):
         self.addCleanup(store_warmed_sidebar_expanded, None)
 
         with (
-            patch.object(
-                sidebar_builder,
-                "_schedule_sidebar_search_after_interactive",
-                side_effect=lambda current_window: None,
-            ),
-            patch.object(
-                sidebar_builder,
-                "_schedule_hidden_mode_nav_items_after_interactive",
-                side_effect=lambda current_window: None,
-            ),
             patch.object(
                 sidebar_builder,
                 "add_nav_item",
@@ -858,16 +814,6 @@ class PresetSidebarNavigationTests(unittest.TestCase):
         self.addCleanup(store_warmed_sidebar_expanded, None)
 
         with (
-            patch.object(
-                sidebar_builder,
-                "_schedule_sidebar_search_after_interactive",
-                side_effect=lambda current_window: None,
-            ),
-            patch.object(
-                sidebar_builder,
-                "_schedule_hidden_mode_nav_items_after_interactive",
-                side_effect=lambda current_window: None,
-            ),
             patch.object(
                 sidebar_builder,
                 "add_nav_item",
@@ -1485,57 +1431,6 @@ class PresetSidebarNavigationTests(unittest.TestCase):
         self.assertIs(window.addSubInterface.call_args.args[0], loaded_page)
         self.assertIn(PageName.ZAPRET2_MODE_CONTROL, session.nav_items)
 
-    def test_sidebar_search_is_delayed_until_interactive_ready(self) -> None:
-        import ui.navigation.sidebar_builder as sidebar_builder
-
-        class Signal:
-            def __init__(self) -> None:
-                self._callbacks = []
-
-            def connect(self, callback) -> None:
-                self._callbacks.append(callback)
-
-            def emit(self) -> None:
-                for callback in list(self._callbacks):
-                    callback("ui_ready")
-
-        signal = Signal()
-        window = SimpleNamespace(
-            ui_session=SimpleNamespace(
-                sidebar_search_widget_cls=object,
-            ),
-            startup_state=SimpleNamespace(interactive_logged=False),
-            startup_interactive_ready=signal,
-        )
-        scheduled = []
-        installed = []
-
-        with (
-            patch.object(
-                sidebar_builder.QTimer,
-                "singleShot",
-                side_effect=lambda delay_ms, callback: scheduled.append((int(delay_ms), callback)),
-            ),
-            patch.object(
-                sidebar_builder,
-                "_install_sidebar_search",
-                side_effect=lambda current_window: installed.append(current_window),
-            ),
-        ):
-            sidebar_builder._schedule_sidebar_search_after_interactive(window)
-            self.assertEqual(scheduled, [])
-            self.assertEqual(installed, [])
-
-            signal.emit()
-
-            self.assertEqual(len(scheduled), 1)
-            self.assertEqual(scheduled[0][0], sidebar_builder.SIDEBAR_SEARCH_AFTER_INTERACTIVE_MS)
-            self.assertEqual(installed, [])
-
-            scheduled[0][1]()
-
-        self.assertEqual(installed, [window])
-
     def test_sidebar_search_keeps_typing_global_even_when_page_has_local_handler(self) -> None:
         import ui.navigation.search as sidebar_search
 
@@ -1888,56 +1783,6 @@ class PresetSidebarNavigationTests(unittest.TestCase):
 
         search_input.setText.assert_not_called()
         page._on_profile_search_text_changed.assert_not_called()
-
-    def test_hidden_mode_sidebar_items_are_delayed_until_interactive_ready(self) -> None:
-        import ui.navigation.sidebar_builder as sidebar_builder
-
-        class Signal:
-            def __init__(self) -> None:
-                self._callbacks = []
-
-            def connect(self, callback) -> None:
-                self._callbacks.append(callback)
-
-            def emit(self) -> None:
-                for callback in list(self._callbacks):
-                    callback("ui_ready")
-
-        signal = Signal()
-        window = SimpleNamespace(
-            ui_session=SimpleNamespace(),
-            startup_state=SimpleNamespace(interactive_logged=False),
-            startup_interactive_ready=signal,
-            log_startup_metric=Mock(),
-        )
-        scheduled = []
-        installed = []
-
-        with (
-            patch.object(
-                sidebar_builder.QTimer,
-                "singleShot",
-                side_effect=lambda delay_ms, callback: scheduled.append((int(delay_ms), callback)),
-            ),
-            patch.object(
-                sidebar_builder,
-                "_install_hidden_mode_nav_items",
-                side_effect=lambda current_window: installed.append(current_window),
-            ),
-        ):
-            sidebar_builder._schedule_hidden_mode_nav_items_after_interactive(window)
-            self.assertEqual(scheduled, [])
-            self.assertEqual(installed, [])
-
-            signal.emit()
-
-            self.assertEqual(len(scheduled), 1)
-            self.assertEqual(scheduled[0][0], sidebar_builder.SIDEBAR_HIDDEN_MODE_ITEMS_AFTER_INTERACTIVE_MS)
-            self.assertEqual(installed, [])
-
-            scheduled[0][1]()
-
-        self.assertEqual(installed, [window])
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from main.post_startup_gate import bind_startup_gate, is_startup_host_alive
-from main.post_startup_threading import schedule_after, start_daemon_thread
+from main.post_startup_threading import enqueue_subsystem_task, schedule_after
 
 
 # Нужны только фоновым задачам после старта (подписка, обновления,
@@ -23,9 +23,10 @@ AFTER_INTERACTIVE_IMPORT_WARMUP_MODULES = (
     "tray",
 )
 # Первую секунду после появления окна интерфейс занят сам: страница
-# «всплывает», достраивается боковое меню. Фоновый импорт в это время
-# делил бы с GUI-потоком GIL, поэтому начинается позже — но раньше значка
-# в трее, которому эти модули нужны.
+# «всплывает». Фоновый импорт в это время делил бы с GUI-потоком GIL, поэтому
+# начинается позже — но раньше значка в трее, которому эти модули нужны.
+# Идёт по общей дорожке фоновых задач запуска: импорт — чистая работа
+# процессора и диска.
 AFTER_INTERACTIVE_IMPORT_WARMUP_DELAY_MS = 1_000
 
 
@@ -39,7 +40,7 @@ def install_after_interactive_import_warmup(startup_host, *, log_startup_metric)
     def _start_warmup() -> None:
         if not is_startup_host_alive(startup_host):
             return
-        start_daemon_thread("import-warmup-after-interactive", _run_warmup)
+        enqueue_subsystem_task("imports", "import-warmup-after-interactive", _run_warmup)
 
     def _schedule_warmup() -> None:
         if not is_startup_host_alive(startup_host):

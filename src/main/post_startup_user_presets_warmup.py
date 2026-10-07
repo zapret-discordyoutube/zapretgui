@@ -55,6 +55,7 @@ def install_user_presets_warmup(
                 "presets",
                 f"UserPresetsWarmup-{method}",
                 lambda method=method: _run_user_presets_warmup_method(method),
+                warmup=True,
             )
 
     def _schedule_user_presets_warmup() -> None:

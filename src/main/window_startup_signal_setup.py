@@ -13,6 +13,7 @@ def connect_window_startup_signals(window, *, continue_startup) -> None:
 
 
 def show_initial_window_if_needed(window) -> None:
+    """Первый показ окна. Вызывается после сборки интерфейса (_deferred_init)."""
     if window.start_in_tray or window.isVisible():
         return
 
@@ -22,7 +23,7 @@ def show_initial_window_if_needed(window) -> None:
         "StartupWindowInitShowCall",
         f"{(_time.perf_counter() - t_show) * 1000:.0f}ms",
     )
-    log("Основное окно показано (FluentWindow, init в фоне)", "DEBUG")
+    log("Основное окно показано (FluentWindow, интерфейс собран)", "DEBUG")
 
 
 def start_window_deferred_init(window) -> None:

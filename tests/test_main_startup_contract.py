@@ -94,6 +94,11 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 "start_daemon_thread",
                 side_effect=lambda name, target: background_targets.append((name, target)),
             ),
+            patch.object(
+                startup_coordinator,
+                "enqueue_subsystem_task",
+                side_effect=lambda _queue, name, target: background_targets.append((str(name), target)),
+            ),
         ):
             coordinator.run_async_init()
             self.assertEqual(runtime.calls, [])
@@ -197,6 +202,11 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 side_effect=lambda name, target: background_targets.append((name, target)),
                 create=True,
             ),
+            patch.object(
+                startup_coordinator,
+                "enqueue_subsystem_task",
+                side_effect=lambda _queue, name, target: background_targets.append((name, target)),
+            ),
         ):
             coordinator.run_async_init()
             while scheduled:
@@ -288,6 +298,11 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 side_effect=lambda name, target: background_targets.append((name, target)),
                 create=True,
             ),
+            patch.object(
+                startup_coordinator,
+                "enqueue_subsystem_task",
+                side_effect=lambda _queue, name, target: background_targets.append((name, target)),
+            ),
         ):
             coordinator.run_async_init()
             while scheduled:
@@ -339,7 +354,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(window_runtime_setup, "attach_window_ui_root", side_effect=lambda *args, **kwargs: calls.append("ui_root")),
             patch.object(window_runtime_setup, "restore_window_geometry", side_effect=lambda *_: calls.append("geometry")),
             patch.object(window_runtime_setup, "connect_window_startup_signals", side_effect=lambda *args, **kwargs: calls.append("signals")),
-            patch.object(window_runtime_setup, "show_initial_window_if_needed", side_effect=lambda *_: calls.append("show")),
             patch.object(window_runtime_setup, "start_window_deferred_init", side_effect=lambda *_: calls.append("deferred")),
         ):
             window_runtime_setup.attach_app_runtime_to_window(
@@ -358,10 +372,11 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 "ui_root",
                 "geometry",
                 "signals",
-                "show",
                 "deferred",
             ],
         )
+        # Окно показывает _deferred_init, когда интерфейс уже собран.
+        self.assertFalse(hasattr(window_runtime_setup, "show_initial_window_if_needed"))
 
     def test_main_defers_late_bootstrap_until_qt_event_loop_runs(self) -> None:
         from main import entry
@@ -665,59 +680,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
 
         self.assertEqual(calls, ["begin:thread:DemoWorker", "target", "end:thread:DemoWorker:11"])
 
-    def test_startup_threading_uses_separate_serial_queues_per_subsystem(self) -> None:
-        import threading
-        import time
-        from main import post_startup_threading
-
-        queue_suffix = str(time.monotonic_ns())
-        calls: list[str] = []
-        first_started = threading.Event()
-        release_first = threading.Event()
-        second_done = threading.Event()
-        other_done = threading.Event()
-
-        def first_hosts_task() -> None:
-            calls.append("hosts:first:start")
-            first_started.set()
-            release_first.wait(2)
-            calls.append("hosts:first:end")
-
-        def second_hosts_task() -> None:
-            calls.append("hosts:second")
-            second_done.set()
-
-        def profile_task() -> None:
-            calls.append("profile:first")
-            other_done.set()
-
-        post_startup_threading.enqueue_subsystem_task(
-            f"hosts-{queue_suffix}",
-            "HostsWarmup-1",
-            first_hosts_task,
-        )
-        post_startup_threading.enqueue_subsystem_task(
-            f"hosts-{queue_suffix}",
-            "HostsWarmup-2",
-            second_hosts_task,
-        )
-        post_startup_threading.enqueue_subsystem_task(
-            f"profile-{queue_suffix}",
-            "ProfileWarmup-1",
-            profile_task,
-        )
-
-        self.assertTrue(first_started.wait(1.0))
-        self.assertTrue(other_done.wait(1.0))
-        self.assertFalse(second_done.wait(0.05))
-        self.assertIn("profile:first", calls)
-
-        release_first.set()
-        self.assertTrue(second_done.wait(1.0))
-        self.assertLess(calls.index("hosts:first:start"), calls.index("hosts:first:end"))
-        self.assertLess(calls.index("hosts:first:end"), calls.index("hosts:second"))
-        self.assertLess(calls.index("profile:first"), calls.index("hosts:first:end"))
-
     def test_startup_audit_summary_installed_by_post_startup_tasks(self) -> None:
         from main import post_startup
 
@@ -782,8 +744,6 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                     "[12:00:02] [⏱ STARTUP] ⏱ Startup StartupPostInit: 1900ms | post_init_scheduled",
                     "[12:00:02] [⏱ STARTUP] ⏱ Startup StartupPostInitDeferredStart: 2300ms | zapret2_mode",
                     "[12:00:02] [⏱ STARTUP] ⏱ Startup StartupNetworkDataWarmupQueued: 2400ms | 1200ms after interactive",
-                    "[12:00:02] [⏱ STARTUP] ⏱ Startup StartupSidebarSearchQueued: 2500ms | 1000ms after interactive",
-                    "[12:00:02] [⏱ STARTUP] ⏱ Startup StartupHiddenModeNavQueued: 2800ms | 1600ms after interactive",
                 )
             )
         )
@@ -1682,13 +1642,21 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 side_effect=lambda delay_ms, callback: scheduled.append((delay_ms, callback)),
             ),
             patch.object(window_startup, "emit_startup_metric") as metric,
+            patch.object(
+                window_startup,
+                "show_initial_window_if_needed",
+                side_effect=lambda _window: calls.append("show"),
+            ),
         ):
             window_startup.WindowStartupMixin._deferred_init(window)
 
+        # Окно показывают уже собранным: показанное до сборки, оно стояло на
+        # экране пустым и белым всё время сборки.
         self.assertEqual(
             calls,
             [
                 "build_ui",
+                "show",
                 "interactive:ui_ready",
             ],
         )
@@ -1701,6 +1669,26 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         self.assertEqual(calls[-1], "continue_startup")
         metric.assert_called_once_with("StartupContinueAfterUiReadyDispatch", "continue_startup_requested")
         window.mark_startup_interactive.assert_called_once_with("ui_ready")
+
+    def test_deferred_init_still_shows_window_when_ui_build_fails(self) -> None:
+        import main.window_startup as window_startup
+
+        calls: list[str] = []
+        window = object.__new__(window_startup.WindowStartupMixin)
+        window.startup_state = SimpleNamespace(deferred_init_started=False)
+        window.build_ui = Mock(side_effect=RuntimeError("boom"))
+        window.mark_startup_interactive = Mock()
+
+        with patch.object(
+            window_startup,
+            "show_initial_window_if_needed",
+            side_effect=lambda _window: calls.append("show"),
+        ):
+            window_startup.WindowStartupMixin._deferred_init(window)
+
+        # Пустое окно лучше невидимой программы: его хотя бы можно закрыть.
+        self.assertEqual(calls, ["show"])
+        window.mark_startup_interactive.assert_not_called()
 
     def test_eager_page_creation_does_not_pump_qt_events_before_interactive(self) -> None:
         import inspect
@@ -2784,6 +2772,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         dns_feature = SimpleNamespace(warm_page_data_cache=Mock(return_value=object()))
         metric = Mock()
         delays: list[int] = []
+        warmup_flags: list[bool] = []
         queued_tasks: list[tuple[str, str]] = []
 
         with (
@@ -2795,7 +2784,9 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(
                 post_startup_dns_warmup,
                 "enqueue_subsystem_task",
-                side_effect=lambda queue, name, target: queued_tasks.append((queue, name)) or target(),
+                side_effect=lambda queue, name, target, warmup=False: (
+                    warmup_flags.append(warmup) or queued_tasks.append((queue, name)) or target()
+                ),
             ),
         ):
             install_dns_page_data_warmup(
@@ -2805,6 +2796,9 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             )
             signal.emit("interactive")
 
+        # Подготовка данных страницы заранее — прогрев: она пропускает вперёд
+        # всё, что нужно программе для работы.
+        self.assertTrue(warmup_flags and all(warmup_flags))
         self.assertEqual(delays, [10000])
         self.assertEqual(queued_tasks, [("dns", "DnsPageDataWarmup")])
         dns_feature.warm_page_data_cache.assert_called_once_with()
@@ -2843,10 +2837,13 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             ensure_page=Mock(return_value=warmed_preset_setup_page),
             show_page=Mock(),
         )
-        profile_feature = SimpleNamespace(warm_profile_list=Mock(return_value=object()))
+        profile_feature = SimpleNamespace(
+            warm_profile_list=Mock(return_value=object()),
+            warm_profile_strategy_usage=Mock(),
+        )
         metric = Mock()
         delays: list[int] = []
-        queued_tasks: list[tuple[str, str]] = []
+        queued_tasks: list[tuple[str, str, str]] = []
         ready_methods: list[str] = []
         idle_queue: list[tuple[str, int]] = []
         idle_tasks = SimpleNamespace(
@@ -2864,7 +2861,10 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(
                 post_startup_profile_warmup,
                 "enqueue_subsystem_task",
-                side_effect=lambda queue, name, target: queued_tasks.append((queue, name)) or target(),
+                side_effect=lambda queue, name, target, warmup=False, on_screen=False: (
+                    queued_tasks.append((queue, name, "on_screen" if on_screen else "warmup" if warmup else ""))
+                    or target()
+                ),
             ),
         ):
             install_profile_warmup(
@@ -2884,11 +2884,19 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             idle_queue,
             [("ProfileSetupPageWarmup", 1000), ("PresetSetupPageWarmup", 2200)],
         )
+        # Список профилей сразу виден на главной странице — он идёт раньше
+        # остальных фоновых задач. Частота стратегий нужна только странице
+        # настройки профиля, а считается дольше всего, поэтому она идёт
+        # прогревом: после всех обычных фоновых задач запуска.
         self.assertEqual(
             queued_tasks,
-            [("profile", "ProfileWarmup-zapret1_mode")],
+            [
+                ("profile", "ProfileWarmup-zapret1_mode", "on_screen"),
+                ("profile", "ProfileStrategyUsageWarmup-zapret1_mode", "warmup"),
+            ],
         )
         self.assertEqual(ready_methods, ["zapret1_mode"])
+        profile_feature.warm_profile_strategy_usage.assert_called_once_with("zapret1_mode")
         self.assertEqual(
             [recorded_call.args[0] for recorded_call in profile_feature.warm_profile_list.call_args_list],
             ["zapret1_mode"],
@@ -2934,6 +2942,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         presets_feature = SimpleNamespace(warm_preset_list_metadata_cache=Mock(return_value={"a.txt": {}}))
         metric = Mock()
         delays: list[int] = []
+        warmup_flags: list[bool] = []
         queued_tasks: list[tuple[str, str]] = []
 
         with (
@@ -2945,7 +2954,9 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             patch.object(
                 post_startup_user_presets_warmup,
                 "enqueue_subsystem_task",
-                side_effect=lambda queue, name, target: queued_tasks.append((queue, name)) or target(),
+                side_effect=lambda queue, name, target, warmup=False: (
+                    warmup_flags.append(warmup) or queued_tasks.append((queue, name)) or target()
+                ),
             ),
         ):
             install_user_presets_warmup(
@@ -2956,6 +2967,9 @@ class StartupRuntimeSetupTests(unittest.TestCase):
             )
             signal.emit("interactive")
 
+        # Подготовка данных страницы заранее — прогрев: она пропускает вперёд
+        # всё, что нужно программе для работы.
+        self.assertTrue(warmup_flags and all(warmup_flags))
         self.assertEqual(delays, [8000, 15000])
         self.assertEqual(
             queued_tasks,
@@ -3080,6 +3094,13 @@ class _BaseWindowEvents:
 
 
 class WindowLifecycleEarlyEventTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Окна в этих тестах — заготовки без настоящего HWND; скрытие окна до
+        # первого кадра проверяет tests/test_window_first_frame.py.
+        patcher = patch("main.window_lifecycle.begin_first_frame_reveal")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_first_show_logs_first_paint_once(self) -> None:
         from PyQt6.QtCore import QEvent
 

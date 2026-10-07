@@ -12,6 +12,7 @@ from main.runtime_state import (
     startup_elapsed_ms,
 )
 from main.window_close_state import WindowCloseState
+from main.window_startup_signal_setup import show_initial_window_if_needed
 from main.window_startup_state import WindowStartupState
 from main.window_visual_state import WindowVisualState
 
@@ -46,7 +47,14 @@ class WindowStartupMixin:
         self.startup_state.subscription_ready = True
 
     def _deferred_init(self) -> None:
-        """Heavy initialization — runs after first frame is shown."""
+        """Собирает интерфейс и только потом показывает окно.
+
+        Раньше окно показывали до сборки, «чтобы появилось пораньше». На деле
+        Windows выводила на экран пустое белое окно, и оно стояло так всё время
+        сборки (180 мс на быстром компьютере, 260 мс и больше на обычном), а
+        потом сменялось тёмным интерфейсом: программа появлялась в два приёма.
+        Теперь окно появляется один раз и сразу готовым.
+        """
         if self.startup_state.deferred_init_started:
             return
         self.startup_state.deferred_init_started = True
@@ -62,8 +70,11 @@ class WindowStartupMixin:
         except Exception as e:
             log(f"Startup: build_ui failed: {e}", "ERROR")
             log(traceback.format_exc(), "DEBUG")
+            # Пустое окно лучше невидимой программы: его хотя бы можно закрыть.
+            show_initial_window_if_needed(self)
             return
 
+        show_initial_window_if_needed(self)
         self.mark_startup_interactive("ui_ready")
         log(f"⏱ Startup: build_ui {(_time.perf_counter() - build_started_at) * 1000:.0f}ms", "DEBUG")
         log(f"⏱ Startup: deferred init total {(_time.perf_counter() - total_started_at) * 1000:.0f}ms", "DEBUG")

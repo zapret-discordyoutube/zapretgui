@@ -102,12 +102,32 @@ def install_profile_warmup(
             return
         log_ui_timing_since("warmup", page_name, "ui_page.profile_setup", started_at, important=True)
 
+    def _run_strategy_usage_warmup(method: str) -> None:
+        if not is_startup_host_alive(startup_host):
+            return
+        try:
+            profile_feature.warm_profile_strategy_usage(method)
+        except Exception as exc:
+            log(f"Фоновый подсчёт частоты стратегий {method} не выполнен: {exc}", "DEBUG")
+
     def _start_profile_warmup(method: str) -> None:
         log_startup_metric("StartupProfileWarmupStarted", method)
+        # Список профилей сразу виден на главной странице (плитка «Профили» и
+        # значки сервисов), поэтому идёт раньше остальных фоновых задач.
         enqueue_subsystem_task(
             "profile",
             f"ProfileWarmup-{method}",
             lambda: _run_profile_warmup_method(method),
+            on_screen=True,
+        )
+        # Частота стратегий нужна только странице настройки профиля, а
+        # считается дольше всего остального (разбор всех готовых пресетов),
+        # поэтому идёт прогревом: после всего, что нужно программе для работы.
+        enqueue_subsystem_task(
+            "profile",
+            f"ProfileStrategyUsageWarmup-{method}",
+            lambda: _run_strategy_usage_warmup(method),
+            warmup=True,
         )
 
     def _schedule_profile_warmup() -> None:

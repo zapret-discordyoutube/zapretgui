@@ -36,7 +36,7 @@ def install_hosts_page_warmup(
     def _start_hosts_page_warmup() -> None:
         if not is_startup_host_alive(startup_host):
             return
-        enqueue_subsystem_task("hosts", "HostsPageDataWarmup", _run_hosts_page_data_warmup)
+        enqueue_subsystem_task("hosts", "HostsPageDataWarmup", _run_hosts_page_data_warmup, warmup=True)
 
     def _schedule_hosts_page_warmup() -> None:
         if not is_startup_host_alive(startup_host):

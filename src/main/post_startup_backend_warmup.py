@@ -35,11 +35,12 @@ def install_backend_page_data_warmup(
         log_startup_metric("StartupBackendPageDataWarmupStarted", "appearance, logs")
         for name, callback in warmups:
             enqueue_subsystem_task(
-                name.lower(),
+                "pages",
                 f"BackendPageDataWarmup-{name}",
                 lambda name=name, callback=callback: (
                     is_startup_host_alive(startup_host) and _run_named_warmup(name, callback)
                 ),
+                warmup=True,
             )
 
     def _start_premium_page_data_warmup() -> None:
@@ -49,6 +50,7 @@ def install_backend_page_data_warmup(
             "BackendPageDataWarmup-Premium",
             lambda: is_startup_host_alive(startup_host)
             and _run_named_warmup("Premium", premium_feature.warm_page_data_cache),
+            warmup=True,
         )
 
     def _schedule_backend_page_data_warmup() -> None:

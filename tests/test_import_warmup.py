@@ -69,7 +69,7 @@ class ImportWarmupTests(unittest.TestCase):
         )
         scheduled: list[tuple[int, object]] = []
         with (
-            patch.object(warmup, "start_daemon_thread") as start_thread,
+            patch.object(warmup, "enqueue_subsystem_task") as start_thread,
             patch.object(
                 warmup,
                 "schedule_after",
@@ -92,8 +92,13 @@ class ImportWarmupTests(unittest.TestCase):
 
             scheduled[0][1]()
 
+        # Импорт — чистая работа процессора: идёт по общей дорожке фоновых
+        # задач запуска, а не отдельным потоком рядом с ними.
         start_thread.assert_called_once()
-        self.assertEqual(start_thread.call_args.args[0], "import-warmup-after-interactive")
+        self.assertEqual(start_thread.call_args.args[1], "import-warmup-after-interactive")
+        from main.post_startup_threading import WAITING_QUEUES
+
+        self.assertNotIn(start_thread.call_args.args[0], WAITING_QUEUES)
 
     def test_tray_and_telegram_proxy_modules_are_warmed_in_background(self) -> None:
         # Значок в трее создаётся в GUI-потоке: первый импорт его модулей и
