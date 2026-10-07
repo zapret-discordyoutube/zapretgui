@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from hosts.geo_sites import GeoSites, geo_services_for_site_list
@@ -70,22 +71,85 @@ class ProfileGeoNoticeTests(unittest.TestCase):
         self.host.show()
         self.addCleanup(self.host.deleteLater)
 
-    def _answer(self, profile_key: str, services: tuple[str, ...]) -> None:
-        self.notice.request(profile_key)
+    def _answer(self, profile_key: str, services: tuple[str, ...], item=None) -> None:
+        self.notice.request(profile_key, item)
         self.notice._on_loaded(1, profile_key, services)
+        # Тестам нужна настоящая карточка, а не её снимок на время появления.
+        self.notice.card.finish_appearing()
 
     def test_card_is_hidden_until_geo_service_is_found(self) -> None:
-        self.assertFalse(self.notice.card.isVisible())
+        self.assertFalse(self.notice.card.is_shown())
         self._answer("profile:youtube", ())
-        self.assertFalse(self.notice.card.isVisible())
+        self.assertFalse(self.notice.card.is_shown())
+
+    def test_card_appears_as_a_snapshot_and_then_becomes_real(self) -> None:
+        card = self.notice.card
+        self.notice.request("profile:gemini")
+        self.notice._on_loaded(1, "profile:gemini", ("Gemini AI",))
+
+        # Пока карточка проявляется, на странице её снимок: настоящие кнопки
+        # и тень не двигаются и не перерисовываются на каждом кадре.
+        self.assertTrue(card.is_shown())
+        self.assertTrue(card._snapshot.isVisible())
+        self.assertFalse(card.isVisible())
+        self.assertFalse(card._shadow.isVisible())
+        self.assertTrue(card._snapshot.geometry().contains(card.geometry()))
+        self.assertTrue(card._snapshot.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents))
+        place_before = card.pos()
+
+        card._appear.setCurrentTime(card._appear.duration())
+        self._app.processEvents()
+
+        self.assertFalse(card._snapshot.isVisible())
+        self.assertTrue(card.isVisible())
+        self.assertTrue(card._shadow.isVisible())
+        self.assertEqual(card.pos(), place_before)
+
+    def test_repeated_answer_does_not_replay_the_appearance(self) -> None:
+        self._answer("profile:gemini", ("Gemini AI",))
+        self.notice.request("profile:gemini")
+        self.notice._on_loaded(1, "profile:gemini", ("Gemini AI",))
+        self.assertTrue(self.notice.card.isVisible())
+        self.assertFalse(self.notice.card._snapshot.isVisible())
+
+    def test_site_icon_replaces_the_globe(self) -> None:
+        card = self.notice.card
+        self.assertIs(card._icon_stack.currentWidget(), card.globe_icon)
+
+        item = SimpleNamespace(display_name="YouTube", match_lines=("--hostlist=lists/youtube.txt",))
+        self._answer("profile:youtube", ("YouTube",), item)
+        self.assertIs(card._icon_stack.currentWidget(), card.site_icon)
+        self.assertFalse(card.site_icon.pixmap().isNull())
+
+        # Профиль без строки (значок неизвестен) возвращает глобус.
+        self._answer("profile:other", ("Other",))
+        self.assertIs(card._icon_stack.currentWidget(), card.globe_icon)
+
+    def test_check_waits_for_the_page_and_runs_once(self) -> None:
+        from profile.ui.profile_geo_notice import ProfileGeoNotice
+
+        create_worker = Mock()
+        notice = ProfileGeoNotice(self.host, create_worker=create_worker)
+        notice._runtime.start_qthread_worker = Mock()
+
+        notice.request("profile:gemini")
+        notice.request("profile:gemini")
+        self.assertTrue(notice._check_timer.isActive())
+        notice._runtime.start_qthread_worker.assert_not_called()
+
+        notice._check_timer.stop()
+        notice._check_timer.timeout.emit()
+        notice._runtime.start_qthread_worker.assert_called_once()
+
+        notice.request("profile:gemini")
+        notice.cleanup()
+        self.assertFalse(notice._check_timer.isActive())
 
     def test_geo_profile_shows_card_in_the_bottom_right_corner(self) -> None:
         from profile.ui.profile_geo_notice import CARD_MARGIN
 
         self._answer("profile:gemini", ("Gemini AI",))
         card = self.notice.card
-        card._slide.stop()
-        card.place(animated=False)
 
         self.assertTrue(card.isVisible())
         self.assertEqual(card.title_label.text(), "Gemini AI: стратегия не поможет")
@@ -106,13 +170,20 @@ class ProfileGeoNoticeTests(unittest.TestCase):
     def test_opening_another_profile_hides_the_card_at_once(self) -> None:
         self._answer("profile:gemini", ("Gemini AI",))
         self.notice.request("profile:youtube")
-        self.assertFalse(self.notice.card.isVisible())
+        self.assertFalse(self.notice.card.is_shown())
         self.assertFalse(self.notice.card._shadow.isVisible())
+
+    def test_opening_another_profile_while_appearing_hides_the_snapshot(self) -> None:
+        self.notice.request("profile:gemini")
+        self.notice._on_loaded(1, "profile:gemini", ("Gemini AI",))
+        self.notice.request("profile:youtube")
+        self._app.processEvents()
+        self.assertFalse(self.notice.card.is_shown())
 
     def test_stale_answer_for_another_profile_is_ignored(self) -> None:
         self.notice.request("profile:youtube")
         self.notice._on_loaded(1, "profile:gemini", ("Gemini AI",))
-        self.assertFalse(self.notice.card.isVisible())
+        self.assertFalse(self.notice.card.is_shown())
 
     def test_closed_card_does_not_come_back_for_the_same_service(self) -> None:
         self._answer("profile:gemini", ("Gemini AI",))

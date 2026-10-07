@@ -1882,7 +1882,7 @@ class ProfileSetupPageBase(BasePage):
             self._rebuild_breadcrumb()
             geo_notice = self.__dict__.get("_geo_notice")
             if geo_notice is not None:
-                geo_notice.request(self._profile_key)
+                geo_notice.request(self._profile_key, item)
         finally:
             self._loading = False
 
