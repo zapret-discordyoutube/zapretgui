@@ -453,6 +453,43 @@ def _telegram_card(telegram: dict) -> Card:
     )
 
 
+_SPEED_STATUS = {OK: "Разницы нет", WARN: "Зарубежные медленнее", UNKNOWN: "Не удалось сравнить"}
+
+
+def _speed_card(speed: dict) -> Card:
+    level = _state(speed.get("level"))
+    lines = tuple(
+        Line(
+            _state(item.get("state"), INFO),
+            f"{item.get('name', '')} (Россия)" if item.get("domestic") else str(item.get("name") or ""),
+            str(item.get("text") or ""),
+        )
+        for item in speed.get("items") or ()
+    )
+    return Card(
+        key="speed",
+        icon="fa5s.tachometer-alt",
+        title="Скорость",
+        level=level,
+        status=_SPEED_STATUS.get(level, "Не проверено"),
+        lines=lines,
+        sections=(
+            Section(str(speed.get("headline") or "Скорость загрузки"), lines),
+            Section(
+                "Что это за проверка",
+                (
+                    Line(
+                        INFO,
+                        "С каждого сервера качается два-три мегабайта, не дольше нескольких секунд. Сама цифра "
+                        "зависит от тарифа, поэтому зарубежные серверы сравниваются с российскими. "
+                        "«Медленнее» говорится, только когда медленны все зарубежные сразу и разница — в разы.",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
 # Состояние IPv6 → (уровень, слово). «Нет в сети» — норма, поэтому не зелёное и не красное.
 _IPV6 = {
     "ok": (OK, "Работает"),
@@ -660,6 +697,8 @@ def build_cards(report: dict) -> list[Card]:
         cards.append(dns)
     if report.get("dns_servers"):
         cards.append(_dns_servers_card(report["dns_servers"]))
+    if report.get("speed"):
+        cards.append(_speed_card(report["speed"]))
     if report.get("ipv6"):
         cards.append(_ipv6_card(report["ipv6"]))
     if report.get("filter"):

@@ -220,6 +220,7 @@ class _Net:
         self.volume_asked: list[str] = []
         self.network: dict = {"external_ip": "", "provider": "", "lines": []}
         self.telegram: tuple = ()
+        self.speed: dict | None = None
         # TLS 1.2 / TLS 1.3 / HTTP по отдельности: по умолчанию проверку будто сняли.
         self.protocol_facts = None
         self.protocols_asked: list[tuple[str, str]] = []
@@ -283,6 +284,7 @@ class _Net:
             patch.object(engine, "_check_ipv6", side_effect=lambda _run: self.ipv6),
             # «Ваша сеть» и дата-центры Telegram ходят в сеть сами: в сценариях движка их нет.
             patch.object(engine, "_check_network", side_effect=lambda _run, _tools: self.network),
+            patch.object(engine, "_check_speed", side_effect=lambda _run, _emit: self.speed),
             patch.object(engine.telegram_check, "check_telegram", side_effect=lambda *_a, **_k: self.telegram),
             patch.object(engine, "_check_system", side_effect=lambda _run, _services: self.system_items),
             patch.object(engine, "hosts_file_ipv4", return_value=()),
@@ -1311,6 +1313,22 @@ class BlockcheckScopeTests(unittest.TestCase):
         result = self._run_with_quic(lambda host: quic.QUIC_OK if host == "www.google.com" else quic.QUIC_SILENT)
 
         self.assertFalse(any("закрыт целиком" in item["text"] for item in result["problems"]))
+
+    def test_speed_is_measured_only_in_the_full_check(self) -> None:
+        from diagnostics.freeze_check import FreezeServer, FreezeState
+        from diagnostics.voice_check import VoiceServer
+
+        def run(scope):
+            net = _Net(
+                https=lambda host, ip: _ok(ip),
+                voice=(VoiceServer("CF", "stun", True, "отвечает"),),
+                freeze=(FreezeServer("Akamai", FreezeState.OK, "получено 32 КБ"),),
+            )
+            net.speed = {"level": "ok", "headline": "Заметной разницы в скорости нет", "items": []}
+            return net.run(engine.run_blockcheck, scope, emit=lambda _line: None)
+
+        self.assertEqual(run("full")["speed"]["level"], "ok")
+        self.assertIsNone(run("all")["speed"])
 
     def test_controls_down_means_no_internet_first(self) -> None:
         result = self._run_all(lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT))

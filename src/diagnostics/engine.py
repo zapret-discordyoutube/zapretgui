@@ -47,6 +47,7 @@ from diagnostics import (
     my_network,
     protocol_probe,
     quic_probe,
+    speed_check,
     system_state,
     telegram_check,
     upload_probe,
@@ -982,6 +983,58 @@ def _find_filter_place(run: _Run, services: dict[str, Service], collected: dict[
 
 
 
+def _check_speed(run: _Run, emit: Emit) -> dict | None:
+    """Скорость зарубежных серверов против российских. Идёт последней, когда остальная нагрузка спала."""
+
+    def _download(server: speed_check.SpeedServer) -> tuple[int, float] | None:
+        ip = _freeze_address(run, server.host)
+        if not ip:
+            return None
+        started = time.monotonic()
+        stop_at = started + speed_check.SAMPLE_SECONDS
+        result = https_get(
+            server.host,
+            ip,
+            server.path,
+            timeout=HTTPS_TIMEOUT,
+            read_limit=speed_check.SAMPLE_BYTES,
+            read_timeout=READ_TIMEOUT,
+            # Качаем не дольше отведённого: на медленной линии три мегабайта шли бы минуту.
+            body_done=lambda _body: time.monotonic() >= stop_at,
+            cancel=run.probe_cancel,
+        )
+        if not result.ok:
+            return None
+        return int(result.body_size), time.monotonic() - started
+
+    samples = speed_check.check_speed(_download, should_stop=run.dns_cancelled)
+    if not samples:
+        return None
+    report = speed_check.summarize_speed(samples)
+    emit("")
+    emit("━━━━━━━━ Скорость ━━━━━━━━")
+    for item in samples:
+        place = "Россия" if item.server.domestic else "за границей"
+        emit(f"{'ℹ️' if item.kbps is not None else '❔'} {item.server.name} ({place}): {speed_check.speed_text(item.kbps)}")
+    emit(f"{report_text.LEVEL_ICON[report.level]} {report.headline}")
+    slow = report.level == Level.WARN
+    return {
+        "level": report.level.value,
+        "headline": report.headline,
+        "items": [
+            {
+                "name": item.server.name,
+                "host": item.server.host,
+                "domestic": item.server.domestic,
+                "kbps": None if item.kbps is None else round(item.kbps, 1),
+                "state": "unknown" if item.kbps is None else ("warn" if slow and not item.server.domestic else "ok"),
+                "text": speed_check.speed_text(item.kbps),
+            }
+            for item in samples
+        ],
+    }
+
+
 def _check_network(run: _Run, other_tools) -> dict:
     """«Ваша сеть»: внешний адрес, провайдер и адрес компьютера — готовым словарём для отчёта."""
 
@@ -1215,6 +1268,14 @@ def run_blockcheck(
         filter_place = _find_filter_place(run, services, collected, emit) if full else None
         if full:
             step(STEP_FILTER)
+        speed = None
+        if full and not run.dns_cancelled():
+            try:
+                speed = _check_speed(run, emit)
+            except _Stopped:
+                raise
+            except Exception as exc:
+                emit(f"❔ Скорость: проверка не выполнилась ({exc})")
 
         verdicts = {
             key: _service_verdict(service, collected[key], zapret_running=zapret_running)
@@ -1306,6 +1367,7 @@ def run_blockcheck(
                 ],
             } if telegram else None,
             "network": network,
+            "speed": speed,
             "problems": problems,
             "working": working,
             "spoofed_hosts": spoofed,
