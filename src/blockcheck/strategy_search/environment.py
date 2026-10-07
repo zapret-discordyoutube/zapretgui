@@ -50,13 +50,13 @@ class RealEnvironment:
         log: Callable[[str], None] = lambda _message: None,
     ) -> None:
         from config.runtime_layout import APPLICATION_PATHS
-        from diagnostics.tls_probe import ProbeCancel
+        from utils.socket_cancel import SocketCancel
 
         self._shutdown_sync = shutdown_sync
         self._load_fakes_catalog = load_fakes_catalog
         self._log = log
         self._root = str(APPLICATION_PATHS.root)
-        self._cancel = ProbeCancel()
+        self._cancel = SocketCancel()
         self._fakes_catalog = None
         self._fakes_error = ""
         self._fakes_loaded = False

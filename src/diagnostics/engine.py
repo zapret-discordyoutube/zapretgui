@@ -27,19 +27,17 @@ BlockCheck отвечает на вопрос «какие сайты откры
 
 from __future__ import annotations
 
-import json
 import sys
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
-from urllib.parse import quote
 
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
-    ProbeCancel,
     ProbeResult,
     https_get,
 )
@@ -58,6 +56,9 @@ from diagnostics.verdict import (
     judge_reach,
     summarize_service,
 )
+from utils.dns_reference import REFERENCE_RESOLVERS, ReferenceResolver
+from utils.dns_wire import FAILURE_CANCELLED, TYPE_A, TYPE_AAAA, DnsQueryResult, failure_text, query_doh
+from utils.socket_cancel import SocketCancel
 from utils.windows_dns_query import (
     DNS_STATUS_NAME_ERROR,
     ERROR_CANCELLED,
@@ -66,7 +67,6 @@ from utils.windows_dns_query import (
     query_ipv4,
     system_dns_servers,
 )
-from utils.windows_http import HttpCancel, https_request
 
 __all__ = [
     "SCOPE_ALL",
@@ -110,12 +110,8 @@ def _timed_out_line(deadline: float) -> str:
 # соединение с зарубежными CDN ровно на этом объёме).
 BODY_PROBE_BYTES = 64 * 1024
 
-_DOH_ENDPOINTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("1.1.1.1", "/dns-query?name={name}&type={type}", ("Accept: application/dns-json",)),
-    ("8.8.8.8", "/resolve?name={name}&type={type}", ()),
-)
-DNS_TYPE_A = 1
-DNS_TYPE_AAAA = 28
+DNS_TYPE_A = TYPE_A
+DNS_TYPE_AAAA = TYPE_AAAA
 
 _WATCH_PAGE = "/watch?v=jNQXAC9IVRw&hl=en"
 _WATCH_PAGE_MAX_BYTES = 2_000_000
@@ -222,6 +218,13 @@ def build_services(scope: str, user_domains=()) -> dict[str, Service]:
     return services
 
 
+# Сколько потоков нужно одной цели в худшем случае: сама цель, три запроса к
+# DNS системы, два эталона (A и AAAA) по запросу на каждый эталонный сервер и
+# несколько HTTPS-запросов. Задачи ждут друг друга внутри одного пула, поэтому
+# нехватка потоков — это не «медленнее», а взаимная блокировка.
+_WORKERS_PER_TARGET = 8 + 2 * len(REFERENCE_RESOLVERS)
+
+
 class _Stopped(Exception):
     pass
 
@@ -266,15 +269,50 @@ class _Run:
         self._should_stop = should_stop
         self._user_stopped = False
         self.timed_out = False
-        self.http_cancel = HttpCancel()
-        self.probe_cancel = ProbeCancel()
+        self.probe_cancel = SocketCancel()
+        self._reference_lock = threading.Lock()
+        # Эталонный сервер → [сколько раз ответил, сколько раз нет, последняя причина].
+        self._reference: dict[ReferenceResolver, list] = {}
         self.deadline_seconds = RUN_DEADLINE if deadline is None else float(deadline)
         self.deadline = time.monotonic() + self.deadline_seconds
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="diag")
 
     def _cancel_all(self) -> None:
-        self.http_cancel.cancel()
         self.probe_cancel.cancel()
+
+    def note_reference(self, resolver: ReferenceResolver, result: DnsQueryResult) -> None:
+        # Снятый по «Стопу» или по лимиту времени запрос ничего не говорит о сервере.
+        if result.failure == FAILURE_CANCELLED:
+            return
+        with self._reference_lock:
+            entry = self._reference.setdefault(resolver, [0, 0, ""])
+            if result.answered:
+                entry[0] += 1
+            else:
+                entry[1] += 1
+                entry[2] = failure_text(result)
+
+    def reference_report(self) -> list[dict]:
+        """Состояние эталонных серверов за прогон, в постоянном порядке."""
+        with self._reference_lock:
+            seen = {resolver: tuple(entry) for resolver, entry in self._reference.items()}
+        report: list[dict] = []
+        for resolver in REFERENCE_RESOLVERS:
+            if resolver not in seen:
+                continue
+            answered, failed, reason = seen[resolver]
+            report.append(
+                {
+                    "label": resolver.label,
+                    "address": resolver.address,
+                    # Сервер считается недоступным, только если не ответил ни разу.
+                    "ok": answered > 0,
+                    "answered": answered,
+                    "failed": failed,
+                    "reason": reason if not answered else "",
+                }
+            )
+        return report
 
     def stopped(self) -> bool:
         if self._user_stopped:
@@ -324,39 +362,24 @@ class _Run:
 
 
 def _doh_lookup(run: _Run, host: str, record_type: int = DNS_TYPE_A) -> tuple[bool, tuple[str, ...]]:
-    """Эталонные адреса по DNS-over-HTTPS. (ответил ли хоть один, адреса)."""
+    """Эталонные адреса по DNS-over-HTTPS. (ответил ли хоть один, адреса).
 
-    def _one(endpoint: tuple[str, str, tuple[str, ...]]) -> tuple[bool, list[str]]:
-        server, path, headers = endpoint
-        result = https_request(
-            server,
-            path.format(name=quote(host), type=record_type),
-            headers=headers,
-            timeout=DOH_TIMEOUT,
-            max_body=64 * 1024,
-            cancel=run.http_cancel,
-        )
-        if result.status != 200 or not result.body:
-            return False, []
-        try:
-            data = json.loads(result.body.decode("utf-8", errors="ignore"))
-        except ValueError:
-            return False, []
-        answers = [
-            str(item.get("data") or "")
-            for item in data.get("Answer") or []
-            if isinstance(item, dict) and item.get("type") == record_type
-        ]
-        return data.get("Status") == 0 or bool(answers), answers
+    Спрашиваются все эталонные серверы сразу, ответы складываются. Кто из них
+    не ответил и почему — запоминается в прогоне и попадает в отчёт.
+    """
 
-    futures = [run.submit(_one, endpoint) for endpoint in _DOH_ENDPOINTS]
+    def _one(resolver: ReferenceResolver) -> DnsQueryResult:
+        return query_doh(resolver.address, host, record_type, timeout_s=DOH_TIMEOUT, cancel=run.probe_cancel)
+
+    futures = [(resolver, run.submit(_one, resolver)) for resolver in REFERENCE_RESOLVERS]
     answered = False
     ips: list[str] = []
-    for future in futures:
-        ok, answers = future.result()
-        answered = answered or ok
-        for ip in answers:
-            if ip and ip not in ips:
+    for resolver, future in futures:
+        result = future.result()
+        run.note_reference(resolver, result)
+        answered = answered or result.answered
+        for ip in result.values(record_type):
+            if ip not in ips:
                 ips.append(ip)
     return answered, tuple(ips)
 
@@ -822,6 +845,7 @@ def _collect_problems(
     freeze,
     zapret_running: bool | None,
     geo_service_for: Callable[[str], str] | None = None,
+    reference: list[dict] | None = None,
 ) -> tuple[list[dict], list[str], list[str]]:
     """Итог для экрана: проблемы по важности, открывающиеся сервисы, подменённые DNS."""
     problems: list[dict] = []
@@ -906,8 +930,31 @@ def _collect_problems(
                 action="dns",
             )
         )
+    for item in _blocked_references(reference or []):
+        problems.append(_problem(Level.WARN, _reference_text(item), (_ADVICE_BLOCKED_REFERENCE,), action="dns"))
     problems.sort(key=lambda item: _LEVEL_ORDER.get(Level(item["level"]), 9))
     return problems, working, spoofed
+
+
+def _blocked_references(reference: list[dict]) -> list[dict]:
+    """Эталонные серверы, которые не ответили ни разу, хотя другие отвечали.
+
+    Если молчат все, дело не в отдельном сервере: это уже «нет интернета» или
+    «эталон недоступен», и об этом сказано в другом месте отчёта.
+    """
+    down = [item for item in reference if not item["ok"]]
+    return down if len(down) < len(reference) else []
+
+
+def _reference_text(item: dict) -> str:
+    reason = f": {item['reason']}" if item["reason"] else ""
+    return f"Шифрованный DNS {item['label']} ({item['address']}) недоступен{reason}"
+
+
+_ADVICE_BLOCKED_REFERENCE = (
+    "Похоже, этот сервер закрыт у вашего провайдера. Не выбирайте его для защищённого DNS: "
+    "Windows молча вернётся к обычным запросам, которые видны и подменяются."
+)
 
 
 def _section_lines(title: str, report, rows) -> list[str]:
@@ -940,7 +987,7 @@ def run_blockcheck(
     targets_count = sum(len(service.targets) for service in services.values())
     run = _Run(
         should_stop,
-        workers=targets_count * 10 + 24,
+        workers=targets_count * _WORKERS_PER_TARGET + 24,
         deadline=RUN_DEADLINE_ALL if scope == SCOPE_ALL else RUN_DEADLINE,
     )
     started = time.monotonic()
@@ -1008,6 +1055,7 @@ def run_blockcheck(
             freeze=freeze,
             zapret_running=zapret_running,
             geo_service_for=geo_service_for,
+            reference=run.reference_report(),
         )
 
         emit("")
@@ -1048,6 +1096,7 @@ def run_blockcheck(
             "problems": problems,
             "working": working,
             "spoofed_hosts": spoofed,
+            "reference": run.reference_report(),
             "environment": environment,
             "zapret_running": zapret_running,
             "zapret_line": zapret_line,
@@ -1076,7 +1125,7 @@ def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
     """Проверка DNS подмены для вкладки «Проверка DNS подмены»."""
     services = build_services(SCOPE_MAIN)
     targets_count = sum(len(service.targets) for service in services.values())
-    run = _Run(should_stop, workers=targets_count * 10)
+    run = _Run(should_stop, workers=targets_count * _WORKERS_PER_TARGET)
     started = time.monotonic()
     try:
         emit("🔍 ПРОВЕРКА DNS ПОДМЕНЫ")
@@ -1112,9 +1161,14 @@ def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
             emit("✅ Явной подмены не найдено. Часть адресов (❔) отличается от эталона, а проверить их не удалось — для CDN это обычно нормально.")
         else:
             emit("✅ DNS работает честно. Если сайты не открываются — дело не в DNS, а в блокировке соединения.")
+        reference = run.reference_report()
+        for item in _blocked_references(reference):
+            emit(f"⚠️ {_reference_text(item)}")
+            emit(f"   👉 {_ADVICE_BLOCKED_REFERENCE}")
         emit(f"Проверка заняла {time.monotonic() - started:.1f} с.")
         return {
             "summary": {"dns_poisoning_detected": spoofed},
+            "reference": reference,
             "domains": {
                 probe.host: {
                     "state": probe.judgement.state.value if probe.judgement else "",

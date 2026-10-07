@@ -14,7 +14,6 @@ from diagnostics.tls_probe import (
     KIND_RESET,
     KIND_TIMEOUT,
     KIND_TLS,
-    ProbeCancel,
     ProbeResult,
     https_get,
 )
@@ -27,6 +26,16 @@ from diagnostics.verdict import (
     judge_reach,
     summarize_service,
 )
+from utils.dns_wire import (
+    FAILURE_CANCELLED,
+    FAILURE_TIMEOUT,
+    STATUS_ERROR,
+    STATUS_OK,
+    STATUS_TIMEOUT,
+    DnsQueryResult,
+    DnsRecord,
+)
+from utils.socket_cancel import SocketCancel
 from utils.windows_dns_query import DNS_STATUS_NAME_ERROR, DnsAnswer
 
 DISCORD_REAL = ("162.159.137.232", "162.159.138.232")
@@ -230,6 +239,90 @@ class _Net:
             return fn(*args, **kwargs)
 
 
+class ReferenceResolverTests(unittest.TestCase):
+    """Эталон собирается с нескольких серверов; закрытый провайдером сервер виден в отчёте."""
+
+    @staticmethod
+    def _answer(rtype, *ips) -> DnsQueryResult:
+        records = tuple(DnsRecord(name="x", rtype=rtype, ttl=60, value=ip) for ip in ips)
+        return DnsQueryResult(status=STATUS_OK, rcode=0, records=records, elapsed_ms=10.0)
+
+    def _run(self, doh, fn, *args, **kwargs):
+        from contextlib import ExitStack
+
+        net = _Net()
+        with ExitStack() as stack:
+            for item in net.patches():
+                if getattr(item, "attribute", "") != "_doh_lookup":
+                    stack.enter_context(item)
+            stack.enter_context(patch.object(engine, "query_doh", doh))
+            return fn(*args, **kwargs)
+
+    def _doh(self, *, silent=(), cancelled=()):
+        def doh(server, _host, rtype, **_kwargs):
+            if server in silent:
+                return DnsQueryResult(status=STATUS_TIMEOUT, failure=FAILURE_TIMEOUT)
+            if server in cancelled:
+                return DnsQueryResult(status=STATUS_ERROR, failure=FAILURE_CANCELLED)
+            return self._answer(rtype, *DISCORD_REAL) if rtype == engine.DNS_TYPE_A else self._answer(rtype)
+
+        return doh
+
+    def test_blocked_reference_server_is_named_with_reason_and_dns_button(self) -> None:
+        lines: list[str] = []
+        result = self._run(self._doh(silent=("8.8.8.8",)), engine.run_blockcheck, "main", emit=lines.append)
+
+        state = {item["address"]: item for item in result["reference"]}
+        self.assertFalse(state["8.8.8.8"]["ok"])
+        self.assertEqual(state["8.8.8.8"]["reason"], "сервер молчит")
+        self.assertTrue(state["1.1.1.1"]["ok"])
+        problem = next(item for item in result["problems"] if "8.8.8.8" in item["text"])
+        self.assertEqual((problem["level"], problem["action"]), ("warn", "dns"))
+        self.assertIn("Шифрованный DNS Google (8.8.8.8) недоступен: сервер молчит", "\n".join(lines))
+        # Остальные серверы ответили — эталон есть, сайты проверены как обычно.
+        self.assertIn("Discord", result["working"])
+
+    def test_dns_tab_also_names_blocked_reference_server(self) -> None:
+        lines: list[str] = []
+        result = self._run(self._doh(silent=("8.8.8.8",)), engine.run_dns_check, emit=lines.append)
+
+        self.assertIn("Шифрованный DNS Google (8.8.8.8) недоступен", "\n".join(lines))
+        self.assertFalse(result["summary"]["dns_poisoning_detected"])
+        self.assertFalse({item["address"]: item["ok"] for item in result["reference"]}["8.8.8.8"])
+
+    def test_when_every_reference_is_silent_no_single_server_is_blamed(self) -> None:
+        """Молчат все — это не «провайдер закрыл Google», а нет связи вовсе."""
+        everyone = tuple(resolver.address for resolver in engine.REFERENCE_RESOLVERS)
+        lines: list[str] = []
+        result = self._run(self._doh(silent=everyone), engine.run_blockcheck, "main", emit=lines.append)
+
+        self.assertTrue(all(not item["ok"] for item in result["reference"]))
+        self.assertFalse([item for item in result["problems"] if "Шифрованный DNS" in item["text"]])
+        self.assertIn("эталон: недоступен", "\n".join(lines))
+
+    def test_query_stopped_by_time_limit_says_nothing_about_the_server(self) -> None:
+        result = self._run(self._doh(cancelled=("8.8.8.8",)), engine.run_blockcheck, "main", emit=lambda _line: None)
+
+        self.assertNotIn("8.8.8.8", {item["address"] for item in result["reference"]})
+        self.assertFalse([item for item in result["problems"] if "Шифрованный DNS" in item["text"]])
+
+    def test_answers_of_all_reference_servers_are_merged(self) -> None:
+        by_server = {"1.1.1.1": ("1.1.1.10",), "8.8.8.8": ("8.8.8.80", "1.1.1.10")}
+
+        def doh(server, _host, rtype, **_kwargs):
+            return self._answer(rtype, *by_server.get(server, ()))
+
+        run = engine._Run(None, workers=8)
+        try:
+            with patch.object(engine, "query_doh", doh):
+                answered, ips = engine._doh_lookup(run, "example.com")
+        finally:
+            run.close()
+
+        self.assertTrue(answered)
+        self.assertEqual(ips, ("1.1.1.10", "8.8.8.80"))
+
+
 class EngineScenarioTests(unittest.TestCase):
     """Движок целиком, сеть подменена фейками."""
 
@@ -381,10 +474,18 @@ class EngineMixedAnswerTests(unittest.TestCase):
 
     def _mixed_net(self, https):
         stub = "95.1.1.1"
-        answers = iter([DnsAnswer(ips=(stub,)), DnsAnswer(ips=DISCORD_REAL), DnsAnswer(ips=DISCORD_REAL)] * 20)
+        # У каждого сайта своя очередь ответов: с общей очередью потоки делили бы
+        # ответы как придётся, и «чужой» адрес доставался бы не тому сайту.
+        lock = threading.Lock()
+        queues: dict[str, object] = {}
 
-        def _system(_host):
-            return next(answers)
+        def _system(host):
+            with lock:
+                answers = queues.setdefault(
+                    host,
+                    iter([DnsAnswer(ips=(stub,)), DnsAnswer(ips=DISCORD_REAL), DnsAnswer(ips=DISCORD_REAL)]),
+                )
+                return next(answers)
 
         return _Net(system=_system, https=https), stub
 
@@ -426,7 +527,7 @@ class EngineMixedAnswerTests(unittest.TestCase):
         """Лимит времени снял медленную загрузку после 16 КБ — это не обрыв ТСПУ."""
         from diagnostics import tls_probe
 
-        cancel = ProbeCancel()
+        cancel = SocketCancel()
         chunks = [b"HTTP/1.1 200 OK\r\n\r\n" + b"x" * 16_000]
 
         class _Tls:

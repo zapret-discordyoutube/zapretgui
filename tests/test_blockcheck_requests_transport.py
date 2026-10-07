@@ -13,10 +13,7 @@ PROJECT_SRC = PROJECT_ROOT / "src"
 if str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
 
-from blockcheck.config import ISP_REDIRECT_MARKERS  # noqa: E402
 from blockcheck.googlevideo_discovery import _fetch_watch_page  # noqa: E402
-from blockcheck.isp_page_detector import detect_isp_page  # noqa: E402
-from blockcheck.models import TestStatus as BlockcheckStatus  # noqa: E402
 
 
 class _Response:
@@ -72,13 +69,7 @@ class _Session:
 class RequestsDependencyBoundaryTests(unittest.TestCase):
     def test_retired_httpx_is_absent_from_runtime_and_blockcheck(self) -> None:
         runtime = (PROJECT_ROOT / "requirements-runtime.txt").read_text("utf-8")
-        sources = "\n".join(
-            (PROJECT_SRC / "blockcheck" / name).read_text("utf-8")
-            for name in (
-                "googlevideo_discovery.py",
-                "isp_page_detector.py",
-            )
-        )
+        sources = (PROJECT_SRC / "blockcheck" / "googlevideo_discovery.py").read_text("utf-8")
 
         self.assertNotIn("httpx", runtime.lower())
         self.assertNotIn("httpx", sources.lower())
@@ -94,18 +85,6 @@ class RequestsDependencyBoundaryTests(unittest.TestCase):
         self.assertTrue(session.calls[0][1]["stream"])
         self.assertEqual(session.max_redirects, 5)
 
-    def test_isp_redirect_is_still_detected(self) -> None:
-        marker = ISP_REDIRECT_MARKERS[0]
-        redirect = type("Redirect", (), {"headers": {"location": f"https://{marker}/"}})()
-        session = _Session(_Response(history=(redirect,)))
-
-        with patch("requests.Session", return_value=session):
-            result = detect_isp_page("blocked.example", timeout=5)
-
-        self.assertEqual(result.status, BlockcheckStatus.FAIL)
-        self.assertEqual(result.error_code, "ISP_PAGE")
-        self.assertFalse(session.calls[0][1]["verify"])
-        self.assertEqual(session.max_redirects, 5)
 
 if __name__ == "__main__":
     unittest.main()

@@ -154,35 +154,6 @@ class NetResolveDeadlineTests(unittest.TestCase):
             net_resolve.clear_cache()
 
 
-class PreflightHangRegressionTests(unittest.TestCase):
-    def test_check_one_domain_bounded_by_dns_timeout(self) -> None:
-        """Раньше: 25с при PREFLIGHT_DNS_TIMEOUT=3 из-за shutdown(wait=True)."""
-        import blockcheck.preflight as preflight
-
-        with _BlackholeDNS():
-            started = time.monotonic()
-            result = preflight.check_one_domain("blackhole.test", cancelled=lambda: False)
-            elapsed = time.monotonic() - started
-
-        budget = preflight.PREFLIGHT_DNS_TIMEOUT + 3.0
-        self.assertLess(
-            elapsed, budget,
-            f"preflight домена занял {elapsed:.1f}с при лимите {budget:.1f}с",
-        )
-        self.assertIsNotNone(result.dns_result)
-        self.assertEqual(result.dns_result.error_code, "DNS_TIMEOUT")
-
-    def test_no_pool_is_left_waiting_on_uncancellable_dns(self) -> None:
-        """finally не должен ждать задачу, которую нельзя отменить."""
-        import inspect
-
-        import blockcheck.preflight as preflight
-
-        source = inspect.getsource(preflight.check_one_domain)
-        self.assertIn("shutdown(wait=False", source)
-        self.assertNotIn("shutdown(wait=True", source)
-        self.assertNotIn("wait=not cancelled", source)
-
 class NoUnboundedResolutionTests(unittest.TestCase):
     """Статический guard: блокирующий резолв не должен вернуться в код."""
 

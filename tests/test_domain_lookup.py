@@ -36,7 +36,7 @@ def _answer(rtype: int, *values: str) -> DnsQueryResult:
 
 
 def _fake_query(server, name, rtype, **_kwargs):
-    if server == engine.CANARY_SERVER or server == DEAD.address:
+    if server == DEAD.address:
         return DnsQueryResult(status=STATUS_TIMEOUT)
     if name.endswith(".in-addr.arpa"):
         return _answer(TYPE_PTR, "host.example.net.")
@@ -81,6 +81,7 @@ class _Network:
         patches = [
             patch.object(engine, "query_server", _fake_query),
             patch.object(engine, "query_doh", _fake_query),
+            patch.object(engine, "canary_answered", lambda _domain: False),
             patch.object(engine, "_http", http_spy),
             patch.object(engine, "fetch_cert_names", lambda ip, server_name=None: CertNames("ok", ("cert.example",), "cn.example")),
             patch.object(engine, "_tcp_connect", lambda ip, port=443: engine.TcpReport(ip, port, "ok", 5.0)),
@@ -275,7 +276,7 @@ class RunTests(unittest.TestCase):
 
     def test_intercepted_dns_is_detected_by_canary(self) -> None:
         _Network(self)
-        with patch.object(engine, "query_server", lambda server, name, rtype, **k: _answer(TYPE_A, "93.184.216.34")):
+        with patch.object(engine, "canary_answered", lambda _domain: True):
             report = engine.run_domain_lookup("example.com", servers=[GOOD], use_external=False)
 
         self.assertTrue(report.intercepted)

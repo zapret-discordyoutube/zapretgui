@@ -20,11 +20,9 @@
 
 from __future__ import annotations
 
-import ipaddress
 from dataclasses import dataclass, field
 from enum import Enum
 
-from blockcheck.config import KNOWN_BLOCK_IPS
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
@@ -35,6 +33,7 @@ from diagnostics.tls_probe import (
     KIND_TLS,
     ProbeResult,
 )
+from utils.address_kinds import AddressKind, address_kind, is_stub_address
 from utils.windows_dns_query import DNS_STATUS_NAME_ERROR, DNS_STATUS_NO_RECORDS
 
 __all__ = [
@@ -64,36 +63,6 @@ class DnsState(Enum):
 class DnsJudgement:
     state: DnsState
     reason: str
-
-
-# VPN-клиенты в режиме fake-ip (sing-box, Clash, Happ) отдают адреса из этого
-# диапазона и сами подставляют настоящий сервер. Это не провайдер.
-_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
-
-
-def _is_stub_ip(ip: str) -> bool:
-    if ip in KNOWN_BLOCK_IPS:
-        return True
-    try:
-        address = ipaddress.ip_address(ip)
-    except ValueError:
-        return False
-    if address in _FAKE_IP_NETWORK:
-        return False
-    return (
-        address.is_private
-        or address.is_loopback
-        or address.is_unspecified
-        or address.is_link_local
-        or address.is_reserved
-    )
-
-
-def _is_fake_ip(ip: str) -> bool:
-    try:
-        return ipaddress.ip_address(ip) in _FAKE_IP_NETWORK
-    except ValueError:
-        return False
 
 
 def judge_dns(
@@ -141,11 +110,11 @@ def judge_dns(
             )
         return DnsJudgement(DnsState.UNKNOWN, "DNS-сервер не дал адрес, сравнить не с чем")
 
-    fake_ips = [ip for ip in system_ips if _is_fake_ip(ip)]
+    fake_ips = [ip for ip in system_ips if address_kind(ip) == AddressKind.FAKE_IP]
     if fake_ips:
         return DnsJudgement(DnsState.LOCAL, f"адрес {fake_ips[0]} выдал VPN-клиент (режим fake-ip) — это не провайдер")
 
-    stubs = [ip for ip in system_ips if _is_stub_ip(ip)]
+    stubs = [ip for ip in system_ips if is_stub_address(ip)]
     if stubs:
         return DnsJudgement(DnsState.SPOOFED, f"DNS вернул адрес-заглушку {stubs[0]} вместо настоящего сервера")
 

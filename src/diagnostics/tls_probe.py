@@ -14,7 +14,7 @@ WinHTTP-проверка показывала «блокировку DPI». Зд
 в заголовок Host. Сертификат проверяется для имени сайта, поэтому чужой
 сервер по подменённому адресу виден сразу.
 
-Отмена: ``ProbeCancel.cancel()`` закрывает сокеты из другого потока, и
+Отмена: ``SocketCancel.cancel()`` закрывает сокеты из другого потока, и
 блокирующий вызов сразу возвращается.
 """
 
@@ -28,6 +28,8 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from utils.socket_cancel import SocketCancel, close_quietly
+
 __all__ = [
     "KIND_CANCELLED",
     "KIND_CERT",
@@ -37,7 +39,6 @@ __all__ = [
     "KIND_RESET",
     "KIND_TIMEOUT",
     "KIND_TLS",
-    "ProbeCancel",
     "ProbeResult",
     "https_get",
 ]
@@ -92,51 +93,6 @@ class ProbeResult:
     @property
     def ok(self) -> bool:
         return self.kind == KIND_OK
-
-
-class ProbeCancel:
-    """Общая кнопка «Стоп» для пачки запросов из разных потоков."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._sockets: set[socket.socket] = set()
-        self._cancelled = False
-
-    @property
-    def cancelled(self) -> bool:
-        return self._cancelled
-
-    def cancel(self) -> None:
-        with self._lock:
-            self._cancelled = True
-            sockets = list(self._sockets)
-            self._sockets.clear()
-        for sock in sockets:
-            _close_quietly(sock)
-
-    def _track(self, sock: socket.socket) -> bool:
-        with self._lock:
-            if self._cancelled:
-                return False
-            self._sockets.add(sock)
-            return True
-
-    def _release(self, sock: socket.socket) -> None:
-        with self._lock:
-            self._sockets.discard(sock)
-
-
-def _close_quietly(sock: socket.socket | None) -> None:
-    if sock is None:
-        return
-    try:
-        sock.shutdown(socket.SHUT_RDWR)
-    except OSError:
-        pass
-    try:
-        sock.close()
-    except OSError:
-        pass
 
 
 _context_lock = threading.Lock()
@@ -198,7 +154,7 @@ def https_get(
     read_timeout: float = 3.0,
     body_done: Callable[[bytes], bool] | None = None,
     headers: Sequence[str] = _BROWSER_HEADERS,
-    cancel: ProbeCancel | None = None,
+    cancel: SocketCancel | None = None,
 ) -> ProbeResult:
     """GET ``https://host/path`` по адресу ``ip`` (SNI и Host — ``host``).
 
@@ -209,7 +165,7 @@ def https_get(
     """
     started = time.perf_counter()
     deadline = started + max(0.2, float(timeout))
-    token = cancel or ProbeCancel()
+    token = cancel or SocketCancel()
     stage = STAGE_CONNECT
     sock: socket.socket | None = None
     wrapped: ssl.SSLSocket | None = None
@@ -245,14 +201,14 @@ def https_get(
     try:
         family = socket.AF_INET6 if ":" in ip else socket.AF_INET
         sock = socket.socket(family, socket.SOCK_STREAM)
-        if not token._track(sock):
+        if not token.track(sock):
             return _result(KIND_CANCELLED)
         sock.settimeout(_remaining())
         sock.connect((ip, int(port)))
 
         stage = STAGE_TLS
         wrapped = _client_context().wrap_socket(sock, server_hostname=host, do_handshake_on_connect=False)
-        token._track(wrapped)
+        token.track(wrapped)
         wrapped.settimeout(_remaining())
         wrapped.do_handshake()
         tls_version = str(wrapped.version() or "")
@@ -308,5 +264,5 @@ def https_get(
     finally:
         for item in (wrapped, sock):
             if item is not None:
-                token._release(item)
-                _close_quietly(item)
+                token.release(item)
+                close_quietly(item)

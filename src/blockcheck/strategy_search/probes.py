@@ -72,9 +72,13 @@ def resolve_target_addresses(host: str, port: int, *, udp: bool = False) -> tupl
 
 def stub_addresses(addresses: Sequence[str]) -> list[str]:
     """Адреса-заглушки провайдера или РКН среди ответа DNS."""
-    from blockcheck.config import KNOWN_BLOCK_IPS
+    from utils.address_kinds import AddressKind, address_kind
 
-    return [address for address in addresses if address in KNOWN_BLOCK_IPS]
+    return [
+        address
+        for address in addresses
+        if address_kind(address) in (AddressKind.BLOCK_STUB, AddressKind.SELF)
+    ]
 
 
 # --- HTTPS ------------------------------------------------------------------------

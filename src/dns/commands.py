@@ -137,7 +137,6 @@ def build_domain_lookup_servers():
     from dns.custom_providers import build_dns_providers_with_custom
     from dns.dns_providers import DNS_PROVIDERS
     from dns.domain_lookup import (
-        DOH_SERVERS,
         EXTRA_SERVERS,
         SERVER_CUSTOM,
         SERVER_DOH,
@@ -146,6 +145,7 @@ def build_domain_lookup_servers():
         DnsServer,
     )
     from dns.custom_providers import CUSTOM_DNS_CATEGORY
+    from utils.dns_reference import REFERENCE_RESOLVERS
 
     servers: list = []
     try:
@@ -154,7 +154,10 @@ def build_domain_lookup_servers():
         servers.extend(DnsServer(label=address, address=address, kind=SERVER_SYSTEM) for address in system_dns_servers())
     except Exception:
         pass
-    servers.extend(DnsServer(label=label, address=address, kind=SERVER_DOH) for label, address in DOH_SERVERS)
+    servers.extend(
+        DnsServer(label=f"{resolver.label} (шифрованный)", address=resolver.address, kind=SERVER_DOH)
+        for resolver in REFERENCE_RESOLVERS
+    )
 
     try:
         from settings.store import get_custom_dns_servers

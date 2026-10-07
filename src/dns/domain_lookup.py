@@ -24,9 +24,11 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
-from ipaddress import ip_address, ip_network
+from ipaddress import ip_address
 
+from utils.address_kinds import AddressKind, address_kind, block_stub_owner
 from utils.cert_names import fetch_cert_names
+from utils.dns_interception import canary_answered
 from utils.dns_wire import (
     STATUS_EMPTY,
     STATUS_ERROR,
@@ -39,6 +41,7 @@ from utils.dns_wire import (
     TYPE_CNAME,
     TYPE_PTR,
     TYPE_TXT,
+    failure_text,
     query_doh,
     query_server,
     reverse_name,
@@ -80,9 +83,6 @@ PING_TIMEOUT_MS = 2000
 TCP_TIMEOUT_S = 3.0
 EXTERNAL_TIMEOUT_S = 8.0
 MAX_PARALLEL = 16
-# TEST-NET-1 (RFC 5737): настоящего DNS-сервера здесь нет. Ответил — значит
-# запросы перехватываются по пути и «разные DNS» на деле один и тот же.
-CANARY_SERVER = "192.0.2.53"
 # Независимые открытые DNS-серверы в дополнение к списку программы: чем больше
 # разных владельцев, тем виднее, кто отвечает не как все.
 EXTRA_SERVERS: tuple[tuple[str, str], ...] = (
@@ -95,18 +95,8 @@ EXTRA_SERVERS: tuple[tuple[str, str], ...] = (
     ("Comodo", "8.26.56.26"),
     ("UltraDNS", "156.154.70.1"),
 )
-# Шифрованные запросы (DNS поверх HTTPS) прямо по адресу сервера: их нельзя
-# незаметно подменить по пути, поэтому это эталон для сравнения.
-DOH_SERVERS: tuple[tuple[str, str], ...] = (
-    ("Cloudflare (шифрованный)", "1.1.1.1"),
-    ("Google (шифрованный)", "8.8.8.8"),
-    ("AdGuard (шифрованный)", "94.140.14.140"),
-    ("OpenDNS (шифрованный)", "208.67.222.222"),
-)
 # Запасные серверы для служебных запросов (обратное имя, владелец сети).
 _HELPER_SERVERS = ("1.1.1.1", "8.8.8.8", "9.9.9.9")
-# Адреса из этого диапазона раздают VPN-клиенты (fake-ip), это не подмена провайдером.
-_FAKE_IP_NETWORK = ip_network("198.18.0.0/15")
 _THC_URL = "https://ip.thc.org/api/v1/lookup"
 _THC_PAGE_SIZE = 100
 _THC_MAX_PAGES = 3
@@ -258,26 +248,23 @@ def normalize_target(value: str) -> tuple[str, str, str]:
     return KIND_DOMAIN, host, ""
 
 
+_KIND_NOTES: dict[AddressKind, tuple[str, str]] = {
+    AddressKind.PUBLIC: (LEVEL_OK, ""),
+    AddressKind.FAKE_IP: (LEVEL_WARN, "адрес VPN-клиента (fake-ip)"),
+    AddressKind.SELF: (LEVEL_FAIL, "заглушка (адрес самого компьютера)"),
+    AddressKind.LOCAL: (LEVEL_WARN, "локальный адрес"),
+    AddressKind.CARRIER: (LEVEL_WARN, "адрес внутренней сети провайдера"),
+    AddressKind.SERVICE: (LEVEL_WARN, "служебный адрес"),
+    AddressKind.INVALID: (LEVEL_UNKNOWN, "непонятный адрес"),
+}
+
+
 def classify_ip(ip: str) -> tuple[str, str]:
     """Оценка адреса из DNS-ответа: (уровень, пояснение). Обычный адрес — ("ok", "")."""
-    from blockcheck.config import KNOWN_BLOCK_IP_OWNERS, KNOWN_BLOCK_IPS
-
-    if ip in KNOWN_BLOCK_IPS:
-        owner = KNOWN_BLOCK_IP_OWNERS.get(ip, "")
-        return LEVEL_FAIL, f"заглушка ({owner})" if owner else "заглушка"
-    try:
-        address = ip_address(ip)
-    except ValueError:
-        return LEVEL_UNKNOWN, "непонятный адрес"
-    if address.version == 4 and address in _FAKE_IP_NETWORK:
-        return LEVEL_WARN, "адрес VPN-клиента (fake-ip)"
-    if address.is_loopback or address.is_unspecified:
-        return LEVEL_FAIL, "заглушка (адрес самого компьютера)"
-    if address.is_private or address.is_link_local:
-        return LEVEL_WARN, "локальный адрес"
-    if address.is_reserved or address.is_multicast:
-        return LEVEL_WARN, "служебный адрес"
-    return LEVEL_OK, ""
+    kind = address_kind(ip)
+    if kind == AddressKind.BLOCK_STUB:
+        return LEVEL_FAIL, f"заглушка ({block_stub_owner(ip)})"
+    return _KIND_NOTES[kind]
 
 
 def pick_ipv6(answers: Iterable[ResolverAnswer], primary_ip: str) -> str:
@@ -307,7 +294,7 @@ def _ask_server(server: DnsServer, domain: str) -> ResolverAnswer:
     else:
         first = query_server(server.address, domain, TYPE_A, timeout_s=DNS_TIMEOUT_S, attempts=2)
     if not first.answered:
-        return ResolverAnswer(server=server, status=first.status, level=LEVEL_UNKNOWN, note=first.detail)
+        return ResolverAnswer(server=server, status=first.status, level=LEVEL_UNKNOWN, note=failure_text(first))
     if server.kind == SERVER_DOH:
         second = query_doh(server.address, domain, TYPE_AAAA)
     else:
@@ -343,10 +330,6 @@ def _ask_windows(domain: str) -> ResolverAnswer:
     if not ipv4 and not ipv6:
         return ResolverAnswer(server=server, status=STATUS_ERROR, level=LEVEL_UNKNOWN, elapsed_ms=elapsed)
     return ResolverAnswer(server=server, status=STATUS_OK, ipv4=tuple(ipv4), ipv6=tuple(ipv6), elapsed_ms=elapsed)
-
-
-def _canary_answers(domain: str) -> bool:
-    return query_server(CANARY_SERVER, domain, TYPE_A, timeout_s=1.0, attempts=1).answered
 
 
 def _ping(ip: str, should_stop: Callable[[], bool]) -> PingReport:
@@ -832,7 +815,7 @@ def _resolve_stage(run: _Run, report: DomainLookupReport, servers, publish) -> D
     futures: dict[Future, object] = {run.pool.submit(_ask_windows, domain): -1}
     for index, server in enumerate(servers):
         futures[run.pool.submit(_ask_server, server, domain)] = index
-    futures[run.pool.submit(_canary_answers, domain)] = "canary"
+    futures[run.pool.submit(canary_answered, domain)] = "canary"
 
     collected: dict[int, ResolverAnswer] = {}
     intercepted = False
@@ -920,8 +903,6 @@ def _address_stage(run: _Run, report: DomainLookupReport, servers, use_external:
 
 
 __all__ = [
-    "CANARY_SERVER",
-    "DOH_SERVERS",
     "EXTRA_SERVERS",
     "KIND_DOMAIN",
     "KIND_INVALID",
