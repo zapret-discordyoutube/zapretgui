@@ -388,7 +388,12 @@ class OrchestraRatingsPage(BasePage):
             return
 
         if not self._has_loaded_once:
-            self._set_stats_text(self._tr("page.orchestra.ratings.stats.loading", "Загрузка..."))
+            from ui.fun_phrases import loading_phrase_for
+
+            loading_text = self._tr("page.orchestra.ratings.stats.loading", "Загрузка...")
+            self._set_stats_text(
+                loading_text, shown=loading_phrase_for(self, self._ui_language, default=loading_text)
+            )
             self.history_text.setPlainText(
                 self._tr("page.orchestra.ratings.history.placeholder", "История стратегий появится после обучения...")
             )
@@ -433,7 +438,8 @@ class OrchestraRatingsPage(BasePage):
         history_text.setFocus(Qt.FocusReason.OtherFocusReason)
         return True
 
-    def _set_stats_text(self, text: str) -> None:
+    def _set_stats_text(self, text: str, *, shown: str = "") -> None:
+        # ``shown`` — что видно на экране; программам чтения с экрана идёт точный ``text``.
         value = str(text or "").strip()
-        self.stats_label.setText(value)
+        self.stats_label.setText(str(shown or value))
         set_state_text(self.stats_label, f"Статистика рейтингов: {value}")

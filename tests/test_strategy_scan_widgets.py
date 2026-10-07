@@ -161,6 +161,7 @@ class FunTextsTests(unittest.TestCase):
         kinds = (
             "scan_network", "scan_baseline", "scan_control", "fake", "split", "disorder", "syndata", "oob",
             "seqovl", "hostfake", "udp", "scan_generic", "scan_found", "blockcheck", "dns", "dns_servers",
+            "dns_lookup",
         )  # fmt: skip
         for language in ("ru", "en"):
             seen: dict[str, str] = {}

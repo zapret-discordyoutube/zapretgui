@@ -22,6 +22,7 @@ from qfluentwidgets import (
 from config.urls import WINWS_LOG_ANALYZER_INFO_URL
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import SettingsCard, set_tooltip
+from ui.widgets.fun import FunTicker
 
 CONNECTION_COLUMNS = [
     "Хост",
@@ -180,6 +181,9 @@ def build_winws_log_analyzer_ui(page) -> SimpleNamespace:
     ui.progress_bar = ProgressBar()
     ui.progress_bar.setVisible(False)
     ui.source_card.add_widget(ui.progress_bar)
+    ui.ticker = FunTicker(ui.source_card)
+    ui.ticker.setVisible(False)
+    ui.source_card.add_widget(ui.ticker)
 
     page.add_widget(ui.source_card)
 

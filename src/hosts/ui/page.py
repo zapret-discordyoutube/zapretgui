@@ -588,13 +588,20 @@ class HostsPage(BasePage):
                 get_cached_qta_pixmap("fa5s.lock", color=get_semantic_palette().warning, size=18)
             )
 
+    def _loading_phrase(self) -> str:
+        from ui.fun_phrases import loading_phrase_for
+
+        return loading_phrase_for(
+            self, self._ui_language, default=self._tr("page.hosts.loading", "Загрузка…")
+        )
+
     def _render_summary(self) -> None:
         snapshot = self._snapshot
         tokens = get_theme_tokens()
         semantic = get_semantic_palette()
         if snapshot is None:
             services, lines = 0, 0
-            title = self._tr("page.hosts.loading", "Загрузка…")
+            title = self._loading_phrase()
         else:
             block = snapshot.block(BLOCK_ZAPRETGUI)
             lines = block.count if block is not None else 0
@@ -658,7 +665,7 @@ class HostsPage(BasePage):
     def _render_tiles(self) -> None:
         draft = self._draft
         if draft is None:
-            self.tiles.set_tiles([HostsTile(kind="empty", title=self._tr("page.hosts.loading", "Загрузка…"))])
+            self.tiles.set_tiles([HostsTile(kind="empty", title=self._loading_phrase())])
             return
         labels = dict(draft.snapshot.dns_profiles)
         off_label = self._tr("page.hosts.profile.off", "Выкл.")

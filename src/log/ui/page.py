@@ -734,9 +734,11 @@ class LogsPage(BasePage):
         # Счётчик ошибок
         self._errors_count = 0
         try:
-            self.stats_label.setText(
-                tr_catalog("page.logs.stats.loading", language=self._ui_language, default="📊 Загрузка...")
-            )
+            from ui.fun_phrases import loading_phrase_for
+
+            loading_text = tr_catalog("page.logs.stats.loading", language=self._ui_language, default="📊 Загрузка...")
+            # На экране — фраза повеселее, программам чтения с экрана — точный текст.
+            self.stats_label.setText(loading_phrase_for(self, self._ui_language, default=loading_text))
             set_state_text(
                 self.stats_label,
                 _logs_accessible_state(
@@ -745,7 +747,7 @@ class LogsPage(BasePage):
                         language=self._ui_language,
                         default="Статистика логов",
                     ),
-                    self.stats_label.text(),
+                    loading_text,
                 ),
             )
         except Exception:

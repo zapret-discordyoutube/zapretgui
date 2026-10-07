@@ -740,11 +740,21 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
     def _open_preset_setup_page(self) -> None:
         self._open_preset_setup_callback()
 
+    def _busy_phrase_for(self, text: str) -> str:
+        sticky = self.__dict__.get("_busy_phrase")
+        if sticky is None:
+            from ui.fun_phrases import StickyPhrase
+
+            sticky = self.__dict__["_busy_phrase"] = StickyPhrase()
+        return sticky.busy(text, self.__dict__.get("_ui_language"))
+
     def set_loading(self, loading: bool, text: str = ""):
         set_progress_active_if_changed(self.progress_bar, loading)
         set_visible_softly(self.progress_bar, loading)
         set_visible_softly(self.loading_label, loading and bool(text))
-        set_text_if_changed(self.loading_label, text)
+        # На экране — фраза повеселее; для программ чтения с экрана и для
+        # логики остаётся точный служебный текст.
+        set_text_if_changed(self.loading_label, self._busy_phrase_for(text) if loading else text)
         set_loading_status_accessibility(self.loading_label, active=loading, text=text)
         self.status_dot.set_click_locked(loading)
         set_enabled_if_changed(self.close_btn, not loading)

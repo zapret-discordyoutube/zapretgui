@@ -172,6 +172,7 @@ class WinwsLogAnalyzerPage(BasePage):
         ui.summary_label.setVisible(False)
         ui.progress_bar.setValue(0)
         ui.progress_bar.setVisible(True)
+        self._set_ticker_running(True)
 
         def _bind_worker(worker) -> None:
             worker.progress.connect(self._on_parse_progress)
@@ -184,6 +185,17 @@ class WinwsLogAnalyzerPage(BasePage):
             bind_worker=_bind_worker,
         )
 
+    def _set_ticker_running(self, running: bool) -> None:
+        ticker = self._ui.ticker
+        ticker.setVisible(running)
+        if running:
+            from ui.fun_phrases import phrases
+
+            ticker.set_phrases(phrases("log_analysis", self._ui_language))
+            ticker.start()
+        else:
+            ticker.stop()
+
     def _on_parse_progress(self, bytes_read: int, bytes_total: int) -> None:
         if bytes_total > 0:
             self._ui.progress_bar.setValue(min(100, int(bytes_read * 100 / bytes_total)))
@@ -193,6 +205,7 @@ class WinwsLogAnalyzerPage(BasePage):
             return
         self._result = result
         self._ui.progress_bar.setVisible(False)
+        self._set_ticker_running(False)
         self._show_summary(result)
         self._refresh_connections_table()
 
@@ -200,6 +213,7 @@ class WinwsLogAnalyzerPage(BasePage):
         if not self._runtime.is_current(request_id, cleanup_in_progress=self._cleanup_in_progress):
             return
         self._ui.progress_bar.setVisible(False)
+        self._set_ticker_running(False)
         self._ui.summary_label.setText(f"Ошибка чтения лога: {message}")
         self._ui.summary_label.setVisible(True)
 

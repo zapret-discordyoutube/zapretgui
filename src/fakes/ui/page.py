@@ -173,7 +173,7 @@ class FakesPage(BasePage):
         self._snapshot_dirty = False
         self._ui.refresh_btn.set_loading(True)
         if self._snapshot is None:
-            self._ui.summary_label.setText("Загрузка…")
+            self._ui.summary_label.setText(self._loading_phrase())
         self._load_runtime.stop(blocking=False)
         self._load_runtime.start_qthread_worker(
             worker_factory=lambda request_id: self._deps.create_snapshot_worker(request_id, parent=self),
@@ -200,10 +200,15 @@ class FakesPage(BasePage):
         self._refresh_table()
         self._update_action_state()
 
+    def _loading_phrase(self) -> str:
+        from ui.fun_phrases import loading_phrase_for
+
+        return loading_phrase_for(self, self._ui_language, default="Загрузка…")
+
     def _summary_text(self) -> str:
         snapshot = self._snapshot
         if snapshot is None:
-            return "Загрузка…"
+            return self._loading_phrase()
         rows = snapshot.rows
         own = sum(1 for row in rows if row.is_user)
         parts = [f"Всего: {len(rows)}", f"своих: {own}"]
