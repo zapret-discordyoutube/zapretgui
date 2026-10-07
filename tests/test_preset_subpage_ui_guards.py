@@ -403,6 +403,8 @@ class PresetSubpageUiGuardTests(unittest.TestCase):
         page.statusLabel = _Label()
         page.metaLabel = _Label()
         page.pathLabel = _Label()
+        page.metaGroup = _Label()
+        page.statusIcon = Mock()
         page.activateButton = _Button()
         callbacks = []
 
@@ -429,6 +431,11 @@ class PresetSubpageUiGuardTests(unittest.TestCase):
         self.assertEqual(page._active_preset_name, "Default")
         self.assertFalse(page.activateButton.visible)
         self.assertEqual(page.statusLabel.text_value, "Активный пресет")
+        # Включённый пресет отмечен тем же значком, что и кнопка «Сделать активным».
+        from qfluentwidgets import FluentIcon
+
+        page.statusIcon.setIcon.assert_called_with(FluentIcon.ACCEPT)
+        self.assertFalse(page.metaGroup.visible)
 
     def test_pending_raw_text_apply_is_ignored_after_new_load_is_requested(self) -> None:
         from presets.ui.common.preset_subpage_base import PresetRawEditorPage

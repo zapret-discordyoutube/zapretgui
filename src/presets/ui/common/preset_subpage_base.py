@@ -42,6 +42,7 @@ from qfluentwidgets import (
     BreadcrumbBar,
     CaptionLabel,
     FluentIcon,
+    IconWidget,
     InfoBar,
     LineEdit,
     PushButton,
@@ -184,6 +185,25 @@ def _set_runtime_toggle_accessibility(button, plan: RuntimeToggleButtonPlan, *, 
 # Второстепенные сведения в строке под заголовком (светлая и тёмная тема).
 _INFO_TEXT_LIGHT = QColor(96, 96, 96)
 _INFO_TEXT_DARK = QColor(160, 160, 160)
+
+
+# Значок вида пресета в строке сведений.
+_ORIGIN_ICONS = {"builtin": "LIBRARY", "imported": "DOWNLOAD", "user": "EDIT"}
+_INFO_ICON_SIZE = 14
+
+
+def _info_group(parent, icon_name: str, text: str):
+    """Значок с подписью для строки сведений: (контейнер, значок, подпись)."""
+    group = QWidget(parent)
+    layout = QHBoxLayout(group)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(6)
+    icon = IconWidget(_fluent_icon(icon_name), group)
+    icon.setFixedSize(_INFO_ICON_SIZE, _INFO_ICON_SIZE)
+    label = CaptionLabel(text, group)
+    layout.addWidget(icon, 0, Qt.AlignmentFlag.AlignVCenter)
+    layout.addWidget(label)
+    return group, icon, label
 
 
 def set_text_if_changed(widget, text: str) -> bool:
@@ -965,23 +985,28 @@ class PresetRawEditorPage(BasePage):
         info_row.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         info_layout = QHBoxLayout(info_row)
         info_layout.setContentsMargins(2, 0, 2, 0)
-        info_layout.setSpacing(12)
+        info_layout.setSpacing(16)
 
-        self.statusLabel = CaptionLabel("Пресет", info_row)
-        self.metaLabel = CaptionLabel("", info_row)
+        # У каждого сведения свой значок — тот же, что на кнопке с похожим
+        # смыслом: «включён» как у «Сделать активным», «импортирован» как у
+        # «Импорт», папка как у «Открыть папку».
+        status_group, self.statusIcon, self.statusLabel = _info_group(info_row, "DOCUMENT", "Пресет")
+        self.metaGroup, _meta_icon, self.metaLabel = _info_group(info_row, "CLOUD", "")
         self.metaLabel.setTextColor(_INFO_TEXT_LIGHT, _INFO_TEXT_DARK)
-        self.metaLabel.setVisible(False)
-        self.pathLabel = CaptionLabel("", info_row)
+        self.metaGroup.setVisible(False)
+        path_group, _path_icon, self.pathLabel = _info_group(info_row, "FOLDER", "")
         self.pathLabel.setTextColor(_INFO_TEXT_LIGHT, _INFO_TEXT_DARK)
         self.pathLabel.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         # Длинный путь не должен распирать страницу: лишнее просто обрезается,
         # целиком путь виден в подсказке.
         self.pathLabel.setMinimumWidth(0)
         self.pathLabel.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        path_group.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        path_group.layout().setStretch(1, 1)
 
-        info_layout.addWidget(self.statusLabel)
-        info_layout.addWidget(self.metaLabel)
-        info_layout.addWidget(self.pathLabel, 1)
+        info_layout.addWidget(status_group)
+        info_layout.addWidget(self.metaGroup)
+        info_layout.addWidget(path_group, 1)
         self.add_widget(info_row)
 
         self.add_widget(self.findBar)
@@ -1112,6 +1137,12 @@ class PresetRawEditorPage(BasePage):
             is_active = active_name.lower() == self._preset_name.lower()
         origin = str(self._preset_origin or "user").strip().lower() or "user"
 
+        if is_active:
+            status_icon = "ACCEPT"
+        else:
+            status_icon = _ORIGIN_ICONS.get(origin, "EDIT")
+        self.statusIcon.setIcon(_fluent_icon(status_icon))
+
         if is_active and origin == "builtin":
             status = "Активный встроенный пресет"
         elif is_active and origin == "imported":
@@ -1141,7 +1172,7 @@ class PresetRawEditorPage(BasePage):
         set_visible_if_changed(self.activateButton, not is_active)
         meta_text = " · ".join(meta_parts)
         set_text_if_changed(self.metaLabel, meta_text)
-        self.metaLabel.setVisible(bool(meta_text))
+        self.metaGroup.setVisible(bool(meta_text))
         path_text = str(self._preset_path or "")
         if set_text_if_changed(self.pathLabel, path_text):
             self.pathLabel.setToolTip(path_text)
