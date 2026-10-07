@@ -176,24 +176,27 @@ class FunTextsTests(unittest.TestCase):
 
     def test_every_verdict_state_has_thirty_jokes_of_its_own(self) -> None:
         # Под заголовком итога каждый раз новая шутка: в наборе состояния их не меньше 30,
-        # и одна шутка не стоит в двух наборах. Английскому интерфейсу строка не показывается.
+        # и одна шутка не стоит в двух наборах. У каждого набора есть английский перевод.
         kinds = (
             "stopped", "error", "bc_idle", "bc_ok", "bc_unknown", "bc_problems",
             "dns_idle", "dns_ok", "dns_spoofed", "dns_partial", "dns_unverified",
             "srv_idle", "srv_empty", "srv_intercepted", "srv_spoofed", "srv_shaky", "srv_closed",
             "srv_notes", "srv_ok",
+            "scan_idle", "scan_found", "scan_open", "scan_not_found", "scan_no_internet", "scan_address_block",
+            "scan_dns_stub", "scan_unresolved", "scan_winws", "scan_network_lost",
         )  # fmt: skip
-        seen: dict[str, str] = {}
-        for kind in kinds:
-            pool = state_lines(kind)
-            self.assertGreaterEqual(len(pool), 30, kind)
-            for line in pool:
-                self.assertLessEqual(len(line), 60, line)
-                self.assertNotIn(line, seen, (kind, seen.get(line)))
-                seen[line] = kind
-            self.assertIn(state_line(kind), pool)
-            self.assertEqual(state_lines(kind, "en"), ())
-        self.assertGreater(len({state_line("bc_idle") for _ in range(40)}), 5)
+        for language in ("ru", "en"):
+            seen: dict[str, str] = {}
+            for kind in kinds:
+                pool = state_lines(kind, language)
+                self.assertGreaterEqual(len(pool), 30, (language, kind))
+                for line in pool:
+                    self.assertLessEqual(len(line), 60, line)
+                    self.assertNotIn(line, seen, (language, kind, seen.get(line)))
+                    seen[line] = kind
+                self.assertIn(state_line(kind, language), pool)
+            self.assertNotEqual(state_lines("bc_ok", "ru"), state_lines("bc_ok", "en"))
+        self.assertGreater(len({state_line("bc_idle", "ru") for _ in range(40)}), 5)
         self.assertEqual(state_line("нет такого"), "")
 
     def test_state_line_is_shown_in_a_stopped_ticker(self) -> None:
@@ -201,13 +204,28 @@ class FunTextsTests(unittest.TestCase):
 
         ticker = FunTicker()
         self.addCleanup(ticker.deleteLater)
-        show_state_line(ticker, "bc_ok")
-        self.assertIn(ticker.text(), state_lines("bc_ok"))
+        show_state_line(ticker, "bc_ok", "ru")
+        self.assertIn(ticker.text(), state_lines("bc_ok", "ru"))
         self.assertFalse(ticker.is_running())
         self.assertFalse(ticker.isHidden())
         show_state_line(ticker, "bc_ok", "en")
+        self.assertIn(ticker.text(), state_lines("bc_ok", "en"))
+        show_state_line(ticker, "")
         self.assertEqual(ticker.text(), "")
         self.assertTrue(ticker.isHidden())
+
+    def test_scan_panel_shows_a_joke_under_idle_and_outcome_titles(self) -> None:
+        panel = ScanProgressPanel()
+        self.addCleanup(panel.deleteLater)
+        panel.fun_language = "ru"
+        panel.show_idle()
+        self.assertIn(panel.ticker.text(), state_lines("scan_idle", "ru"))
+        panel.show_outcome(kind="found", title="Ура! Нашлась 1 надёжная стратегия", detail="")
+        self.assertIn(panel.ticker.text(), state_lines("scan_found", "ru"))
+        panel.show_outcome(kind="cancelled", title="Подбор остановлен", detail="")
+        self.assertIn(panel.ticker.text(), state_lines("stopped", "ru"))
+        panel.show_outcome(kind="что-то новое", title="Подбор остановлен", detail="")
+        self.assertIn(panel.ticker.text(), state_lines("error", "ru"))
 
     def test_strategy_gets_only_its_own_phrases(self) -> None:
         self.assertEqual(strategy_phrases("--lua-desync=multisplit"), phrases("split"))

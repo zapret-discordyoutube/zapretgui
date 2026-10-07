@@ -31,6 +31,7 @@ from qfluentwidgets import (
 
 from blockcheck.ui.check_results import _HeightKeeper, tone_color
 from blockcheck.ui.brand_icons import BrandIcon
+from blockcheck.ui.fun_texts import show_state_line
 from ui.accessibility import enable_keyboard_click, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import SemanticNotice, set_tooltip
@@ -376,6 +377,21 @@ class GeoSiteNotice(QWidget):
         return self.notice.text()
 
 
+# Вид итога подбора → набор шуток под заголовком; остальное — общий набор «не удалось».
+_OUTCOME_FUN_LINES = {
+    "found": "scan_found",
+    "open": "scan_open",
+    "not_found": "scan_not_found",
+    "cancelled": "stopped",
+    "no_internet": "scan_no_internet",
+    "address_block": "scan_address_block",
+    "dns_stub": "scan_dns_stub",
+    "unresolved": "scan_unresolved",
+    "winws": "scan_winws",
+    "network_lost": "scan_network_lost",
+}
+
+
 class ScanProgressPanel(_HeightKeeper, SimpleCardWidget):
     """Талисман, заголовок, шаги, прогресс, весёлая строка и итог."""
 
@@ -383,6 +399,8 @@ class ScanProgressPanel(_HeightKeeper, SimpleCardWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        # Язык интерфейса для шуток под заголовком; пусто — язык программы.
+        self.fun_language: str | None = None
         # Размеры шапки — те же, что у панелей остальных вкладок раздела (образец — «DNS-серверы»).
         root = QHBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
@@ -483,8 +501,8 @@ class ScanProgressPanel(_HeightKeeper, SimpleCardWidget):
         )
         self.steps.setVisible(False)
         self.progress_bar.setVisible(False)
-        self.ticker.stop()
-        self.ticker.setVisible(False)
+        # Заголовок точный; под ним — одна шутка про это состояние.
+        show_state_line(self.ticker, "scan_idle", self.fun_language)
         self.found_badge.setVisible(False)
         self._actions_host.setVisible(False)
         self._schedule_min_height_sync()
@@ -535,8 +553,7 @@ class ScanProgressPanel(_HeightKeeper, SimpleCardWidget):
         self._state = kind
         self._running = False
         self._happy_timer.stop()
-        self.ticker.stop()
-        self.ticker.setVisible(False)
+        show_state_line(self.ticker, _OUTCOME_FUN_LINES.get(kind, "error"), self.fun_language)
         self.progress_bar.setVisible(False)
         # Число найденных уже в заголовке итога.
         self.found_badge.setVisible(False)

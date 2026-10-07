@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import random
 
+from blockcheck.ui.fun_state_lines_en import EN as _STATE_LINES_EN
 from blockcheck.ui.fun_state_lines_ru import RU as _STATE_LINES_RU
 from blockcheck.ui.fun_texts_en import EN as _EN
 from blockcheck.ui.fun_texts_ru import RU as _RU
@@ -53,11 +54,22 @@ def strategy_phrases(strategy_args: str, language: str | None = None) -> tuple[s
 _rng = random.Random()
 
 
+def _interface_language() -> str:
+    """Язык интерфейса для панелей, которым его не передали."""
+    try:
+        from settings.appearance import peek_warmed_ui_language
+
+        return str(peek_warmed_ui_language() or "")
+    except Exception:
+        return ""
+
+
 def state_lines(kind: str, language: str | None = None) -> tuple[str, ...]:
-    """Набор шуток под заголовком итога. Для английского интерфейса набора нет."""
-    if str(language or "").lower().startswith("en"):
-        return ()
-    return _STATE_LINES_RU.get(kind, ())
+    """Набор шуток под заголовком итога на языке интерфейса."""
+    if language is None:
+        language = _interface_language()
+    table = _STATE_LINES_EN if str(language or "").lower().startswith("en") else _STATE_LINES_RU
+    return table.get(kind) or _STATE_LINES_RU.get(kind, ())
 
 
 def state_line(kind: str, language: str | None = None) -> str:
