@@ -79,6 +79,22 @@ def group_findings(items) -> list[tuple[str, str, str, list]]:
     return groups
 
 
+def _fun_lines_kind(kind: str, title: str) -> str:
+    """Какой набор шуток подходит итогу: у двух видов итога по два разных заголовка."""
+    if kind == "warn":
+        return "srv_shaky" if "через раз" in title else "srv_closed"
+    if kind == "fail":
+        return "srv_intercepted" if "перехватывают" in title else "srv_spoofed"
+    return {
+        "idle": "srv_idle",
+        "ok": "srv_ok",
+        "notes": "srv_notes",
+        "empty": "srv_empty",
+        "stopped": "stopped",
+        "error": "error",
+    }.get(kind, "")
+
+
 class _FindingRow(QWidget):
     """Одна находка: цветной значок, заголовок обычным цветом и подробности мелко."""
 
@@ -123,6 +139,8 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
     def __init__(self, on_open_dns_settings: Callable[[], None] | None = None, parent=None) -> None:
         super().__init__(parent)
         self._kind = "idle"
+        # Язык интерфейса для шуток под заголовком; задаёт страница.
+        self.fun_language: str | None = None
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(10)
@@ -237,9 +255,13 @@ class ServerCheckVerdictPanel(_HeightKeeper, SimpleCardWidget):
         self.detail_label.setText(detail)
         self.detail_label.setVisible(bool(detail))
         pending = self._kind == "pending"
-        if not pending:
-            self.ticker.stop()
-        self.ticker.setVisible(pending)
+        if pending:
+            self.ticker.setVisible(True)
+        else:
+            # Заголовок итога точный; под ним — одна шутка про это состояние.
+            from blockcheck.ui.fun_texts import show_state_line
+
+            show_state_line(self.ticker, _fun_lines_kind(self._kind, title), self.fun_language)
         self.progress_bar.setVisible(pending)
         self.mascot.set_mood(_KIND_VIEW[self._kind][2])
         self._apply_theme_refresh()

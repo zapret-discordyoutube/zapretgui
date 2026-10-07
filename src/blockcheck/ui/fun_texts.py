@@ -12,6 +12,9 @@
 
 from __future__ import annotations
 
+import random
+
+from blockcheck.ui.fun_state_lines_ru import RU as _STATE_LINES_RU
 from blockcheck.ui.fun_texts_en import EN as _EN
 from blockcheck.ui.fun_texts_ru import RU as _RU
 
@@ -47,4 +50,27 @@ def strategy_phrases(strategy_args: str, language: str | None = None) -> tuple[s
     return phrases(technique_kind(strategy_args), language)
 
 
-__all__ = ["phrases", "strategy_phrases", "technique_kind"]
+_rng = random.Random()
+
+
+def state_lines(kind: str, language: str | None = None) -> tuple[str, ...]:
+    """Набор шуток под заголовком итога. Для английского интерфейса набора нет."""
+    if str(language or "").lower().startswith("en"):
+        return ()
+    return _STATE_LINES_RU.get(kind, ())
+
+
+def state_line(kind: str, language: str | None = None) -> str:
+    """Одна шутка под заголовок итога, каждый раз новая; пусто — показывать нечего."""
+    pool = state_lines(kind, language)
+    return _rng.choice(pool) if pool else ""
+
+
+def show_state_line(ticker, kind: str, language: str | None = None) -> None:
+    """Ставит в остановленную бегущую строку одну шутку состояния (или прячет строку)."""
+    text = state_line(kind, language) if kind else ""
+    ticker.stop(text)
+    ticker.setVisible(bool(text))
+
+
+__all__ = ["phrases", "show_state_line", "state_line", "state_lines", "strategy_phrases", "technique_kind"]

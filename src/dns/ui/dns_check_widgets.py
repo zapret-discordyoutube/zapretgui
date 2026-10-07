@@ -47,6 +47,18 @@ def _reference_note(results: dict) -> str:
     return f"Не ответили эталонные серверы: {names}. Сравнение сделано по остальным."
 
 
+_UNVERIFIED_TITLE = "Проверить DNS не удалось"
+# Состояние панели → набор шуток под заголовком.
+_FUN_LINES = {
+    "idle": "dns_idle",
+    "ok": "dns_ok",
+    "spoofed": "dns_spoofed",
+    "partial": "dns_partial",
+    "stopped": "stopped",
+    "error": "error",
+}
+
+
 def summarize_dns_results(results: dict | None) -> dict:
     """Итог проверки для панели: вид, заголовок, объяснение и число подмен."""
     summary = _summarize(results or {})
@@ -55,7 +67,7 @@ def summarize_dns_results(results: dict | None) -> dict:
         reference = list((results or {}).get("reference") or ())
         if summary["kind"] == "ok" and all(not item.get("ok") for item in reference):
             # Без эталона «честный DNS» утверждать нельзя.
-            summary = {"kind": "partial", "title": "Проверить DNS не удалось", "detail": ""}
+            summary = {"kind": "partial", "title": _UNVERIFIED_TITLE, "detail": ""}
         summary["detail"] = f"{summary['detail']} {note}".strip()
     return summary
 
@@ -170,8 +182,13 @@ class DnsSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self.detail_label.setText(detail)
         self.detail_label.setVisible(bool(detail))
         if kind != "pending":
-            self.ticker.stop()
-            self.ticker.setVisible(False)
+            # Заголовок итога точный; под ним — одна шутка про это состояние.
+            from blockcheck.ui.fun_texts import show_state_line
+
+            fun = _FUN_LINES.get(kind, "")
+            if kind == "partial" and title == _UNVERIFIED_TITLE:
+                fun = "dns_unverified"
+            show_state_line(self.ticker, fun)
         if self.open_settings_btn is not None:
             self._actions_host.setVisible(kind == "spoofed")
         self.mascot.set_mood(mood)

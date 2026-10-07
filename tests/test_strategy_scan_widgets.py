@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QApplication
 
 from blockcheck.scan_models import StrategyScanReport
 from blockcheck.strategy_scan_page_plans import build_panel_outcome
-from blockcheck.ui.fun_texts import phrases, strategy_phrases, technique_kind
+from blockcheck.ui.fun_texts import phrases, show_state_line, state_line, state_lines, strategy_phrases, technique_kind
 from blockcheck.ui.strategy_scan_widgets import ChoiceRadios, ChoiceTiles, ScanProgressPanel
 
 
@@ -173,6 +173,41 @@ class FunTextsTests(unittest.TestCase):
                     self.assertNotIn(phrase, seen, (language, kind, seen.get(phrase)))
                     seen[phrase] = kind
         self.assertNotEqual(phrases("blockcheck", "ru"), phrases("blockcheck", "en"))
+
+    def test_every_verdict_state_has_thirty_jokes_of_its_own(self) -> None:
+        # Под заголовком итога каждый раз новая шутка: в наборе состояния их не меньше 30,
+        # и одна шутка не стоит в двух наборах. Английскому интерфейсу строка не показывается.
+        kinds = (
+            "stopped", "error", "bc_idle", "bc_ok", "bc_unknown", "bc_problems",
+            "dns_idle", "dns_ok", "dns_spoofed", "dns_partial", "dns_unverified",
+            "srv_idle", "srv_empty", "srv_intercepted", "srv_spoofed", "srv_shaky", "srv_closed",
+            "srv_notes", "srv_ok",
+        )  # fmt: skip
+        seen: dict[str, str] = {}
+        for kind in kinds:
+            pool = state_lines(kind)
+            self.assertGreaterEqual(len(pool), 30, kind)
+            for line in pool:
+                self.assertLessEqual(len(line), 60, line)
+                self.assertNotIn(line, seen, (kind, seen.get(line)))
+                seen[line] = kind
+            self.assertIn(state_line(kind), pool)
+            self.assertEqual(state_lines(kind, "en"), ())
+        self.assertGreater(len({state_line("bc_idle") for _ in range(40)}), 5)
+        self.assertEqual(state_line("нет такого"), "")
+
+    def test_state_line_is_shown_in_a_stopped_ticker(self) -> None:
+        from ui.widgets.fun import FunTicker
+
+        ticker = FunTicker()
+        self.addCleanup(ticker.deleteLater)
+        show_state_line(ticker, "bc_ok")
+        self.assertIn(ticker.text(), state_lines("bc_ok"))
+        self.assertFalse(ticker.is_running())
+        self.assertFalse(ticker.isHidden())
+        show_state_line(ticker, "bc_ok", "en")
+        self.assertEqual(ticker.text(), "")
+        self.assertTrue(ticker.isHidden())
 
     def test_strategy_gets_only_its_own_phrases(self) -> None:
         self.assertEqual(strategy_phrases("--lua-desync=multisplit"), phrases("split"))

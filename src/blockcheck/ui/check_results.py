@@ -899,11 +899,13 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
                 widget.deleteLater()
         self._problems_host.setVisible(False)
 
-    def _set_state(self, level: str, title: str, env: str = "", *, mood: str = MOOD_IDLE) -> None:
+    def _set_state(self, level: str, title: str, env: str = "", *, mood: str = MOOD_IDLE, fun: str = "") -> None:
         self._level = level if level in _LEVEL_ICONS else "unknown"
         if level != "pending":
-            self.ticker.stop()
-            self.ticker.setVisible(False)
+            # Заголовок итога точный; под ним — одна шутка про это состояние.
+            from blockcheck.ui.fun_texts import show_state_line
+
+            show_state_line(self.ticker, fun)
         self.mascot.set_mood(mood)
         self.title_label.setText(title)
         self.env_label.setText(env)
@@ -918,6 +920,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
             "idle",
             "Сеть ещё не проверялась",
             "Нажмите «Проверить»: покажем, какие сайты открываются и что делать с остальными.",
+            fun="bc_idle",
         )
 
     def set_pending(self) -> None:
@@ -932,7 +935,9 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
     def set_stopped(self, text: str = "Проверка остановлена") -> None:
         self._clear_problems()
         failed = "ошибк" in str(text or "").lower()
-        self._set_state("unknown", text, "", mood=MOOD_ALARM if failed else MOOD_IDLE)
+        self._set_state(
+            "unknown", text, "", mood=MOOD_ALARM if failed else MOOD_IDLE, fun="error" if failed else "stopped"
+        )
 
     def show_report(self, report: dict) -> None:
         self._clear_problems()
@@ -948,13 +953,14 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
             ]
         blocking = [item for item in problems if item.get("level") in ("fail", "warn")]
         if not problems:
-            level, title, mood = "ok", "Всё открывается", MOOD_HAPPY
+            level, title, mood, fun = "ok", "Всё открывается", MOOD_HAPPY, "bc_ok"
         elif not blocking:
-            level, title, mood = "unknown", "Часть проверок не дала ответа", MOOD_IDLE
+            level, title, mood, fun = "unknown", "Часть проверок не дала ответа", MOOD_IDLE, "bc_unknown"
         else:
             level = "fail" if any(item.get("level") == "fail" for item in blocking) else "warn"
             title = f"Найдены проблемы: {len(blocking)}"
             mood = MOOD_ALARM if level == "fail" else MOOD_SAD
+            fun = "bc_problems"
         self._show_changes(report)
         # Строка открывает полный отчёт, только если под итогом есть такая карточка;
         # с карточки сайта берётся и значок, когда своего логотипа у сайта нет.
@@ -1003,7 +1009,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         groups = site_groups(report)
         self.overview.setVisible(bool(groups))
         self.overview.show_groups(groups)
-        self._set_state(level, title, _environment_text(report), mood=mood)
+        self._set_state(level, title, _environment_text(report), mood=mood, fun=fun)
         # Группы выплывают по очереди, а если всё хорошо — салют.
         for order, row in enumerate(rows):
             float_in(row, delay_ms=160 + order * 90)

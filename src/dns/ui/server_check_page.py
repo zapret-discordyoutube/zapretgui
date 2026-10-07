@@ -77,6 +77,7 @@ class ServerCheckPage(BasePage):
 
     def _build_ui(self) -> None:
         self.verdict_panel = ServerCheckVerdictPanel(on_open_dns_settings=self._open_dns_settings)
+        self.verdict_panel.fun_language = self._ui_language
         self.start_button = PrimaryPushButton(FluentIcon.PLAY, "", self.verdict_panel)
         self.start_button.clicked.connect(self.start_check)
         self.stop_button = PushButton(FluentIcon.CANCEL, "", self.verdict_panel)
@@ -275,6 +276,7 @@ class ServerCheckPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
+        self.verdict_panel.fun_language = self._ui_language
         try:
             self._apply_texts()
         except Exception:
