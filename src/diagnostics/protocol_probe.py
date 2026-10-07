@@ -223,7 +223,7 @@ def _browser_line(facts: ProtocolFacts) -> ProtocolLine | None:
                 "режется",
                 f"обычное приветствие к этому адресу проходит, а такое, как у Chrome, — нет ({how}, проверено дважды). "
                 "Похоже на блокировку по «почерку» браузера: в Chrome сайт может не открываться, "
-                "а в Firefox — открываться",
+                "а в Firefox или в свежем Chrome (у него почерк уже другой) — открываться",
                 code=CODE_FINGERPRINT,
             )
         return ProtocolLine(
