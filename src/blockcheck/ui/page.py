@@ -255,6 +255,13 @@ class BlockcheckPage(BasePage):
         self._initial_state = initial_state
         self._apply_initial_domain_chips(tuple(getattr(initial_state, "user_domains", ()) or ()))
         self._show_history(tuple(getattr(initial_state, "check_history", ()) or ()))
+        self._push_tab_histories()
+
+    def _push_tab_histories(self) -> None:
+        """Отдаёт вкладкам «Проверка домена» и «DNS подмена» их прошлые проверки (если вкладки уже созданы)."""
+        for page, key in ((self._domain_lookup_tab_page, "domain_history"), (self._dns_spoofing_tab_page, "dns_history")):
+            if page is not None and hasattr(page, "set_history"):
+                page.set_history(tuple(getattr(self._initial_state, key, ()) or ()))
 
     def _show_history(self, runs) -> None:
         """Обновляет карточку «Прошлые проверки»; без записей и на чужой вкладке она скрыта."""
@@ -560,6 +567,7 @@ class BlockcheckPage(BasePage):
                 embedded=True,
             )
             self._domain_lookup_tab_page.report_requested.connect(self._open_log_report)
+            self._push_tab_histories()
             self._domain_lookup_tab_page.setVisible(False)
             self.add_widget(self._domain_lookup_tab_page)
             try:
@@ -613,6 +621,7 @@ class BlockcheckPage(BasePage):
                 open_dns_settings=self._open_dns_settings,
             )
             self._dns_spoofing_tab_page.report_requested.connect(self._open_log_report)
+            self._push_tab_histories()
             self._dns_spoofing_tab_page.setVisible(False)
             self.add_widget(self._dns_spoofing_tab_page)
 
