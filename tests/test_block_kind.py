@@ -87,8 +87,8 @@ class HeadlineNamesTheKindTests(unittest.TestCase):
         self.assertIn("Редакторе hosts", advice)
         # Гео-сайтам этот совет заменяют на hosts так же, как обычный «подберите стратегию».
         self.assertIn(advice, ADVICE_VIA_ZAPRET)
-        # Zapret выключен — сначала его надо запустить.
-        self.assertIn("Запустите Zapret", self._verdict(ReachState.DPI, bk.KIND_IP, running=False).advice[0])
+        # Zapret выключен — совет тот же осторожный: закрытому адресу «запустите Zapret» обещал бы лишнее.
+        self.assertEqual(self._verdict(ReachState.DPI, bk.KIND_IP, running=False).advice, (advice,))
 
     def test_cut_after_16kb_is_not_called_closed(self) -> None:
         verdict = self._verdict(ReachState.FREEZE)

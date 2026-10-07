@@ -281,7 +281,8 @@ class JudgeTests(unittest.TestCase):
 
         self.assertEqual((cause.code, cause.confident), (bc.CAUSE_BY_ADDRESS, False))
         self.assertIn("даже с разрешённым", cause.text)
-        self.assertIn("похоже", cause.text)
+        self.assertIn("Похоже", cause.text)
+        self.assertIn("белых списков", cause.text)
         self.assertEqual(bc.judge(_facts(neutral=SILENCE, nameless=SILENCE, allowed=RESET)).code, bc.CAUSE_NO_NAME_WORKS)
 
     def test_server_that_refuses_every_name_itself_is_not_blocked_by_name(self) -> None:
@@ -371,7 +372,9 @@ class CollectTests(unittest.TestCase):
                     ("hello", "203.0.113.5", bc.NEUTRAL_NAME),
                     ("hello", "203.0.113.5", None),
                     # Разрешённое имя — контроль от ложного «закрыт адрес» в сетях с белым списком имён.
-                    ("hello", "203.0.113.5", bc.ALLOWED_NAME),
+                    *[("hello", "203.0.113.5", name) for name in bc.ALLOWED_NAMES],
+                    # Настоящее имя ещё раз: один обрыв — не сравнение.
+                    ("hello", "203.0.113.5", "discord.com"),
                     ("http", "discord.com", "203.0.113.5"),
                 ],
                 key=repr,
@@ -396,3 +399,67 @@ class CollectTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RealNameRecheckTests(unittest.TestCase):
+    """Вывод «по имени» уверенный, только если настоящее имя оборвалось и при повторе."""
+
+    def test_real_name_cut_twice_is_a_confident_block_by_name(self) -> None:
+        cause = bc.judge(_facts(neutral=ANSWER, nameless=ANSWER, real_again=RESET))
+
+        self.assertEqual((cause.code, cause.confident), (bc.CAUSE_BY_NAME, True))
+        self.assertIn("дважды подряд", cause.text)
+
+    def test_real_name_passing_on_the_second_try_is_not_a_block(self) -> None:
+        self.assertIsNone(bc.judge(_facts(neutral=ANSWER, nameless=ANSWER, real_again=ANSWER)))
+
+    def test_unclear_repeat_keeps_the_cause_but_not_the_confidence(self) -> None:
+        cause = bc.judge(_facts(neutral=ANSWER, nameless=ANSWER, real_again=bc.HelloResult(bc.HELLO_CANCELLED)))
+
+        self.assertEqual((cause.code, cause.confident), (bc.CAUSE_BY_NAME, False))
+
+    def test_whitelist_names_the_allowed_name_that_answered(self) -> None:
+        cause = bc.judge(_facts(neutral=SILENCE, nameless=SILENCE, allowed=ANSWER, allowed_name="max.ru", real_again=SILENCE))
+
+        self.assertEqual(cause.code, bc.CAUSE_NAME_WHITELIST)
+        self.assertIn("с именем max.ru сервер отвечает", cause.text)
+
+    def test_first_allowed_name_that_answers_is_taken(self) -> None:
+        from unittest.mock import patch
+
+        def hello(ip, name, **_kwargs):
+            return ANSWER if name == "ya.ru" else SILENCE
+
+        with ThreadPoolExecutor(8) as pool, patch.object(bc, "tls_hello", hello), patch.object(bc, "http_probe", lambda *a, **k: bc.HttpFacts()):
+            facts = bc.collect("discord.com", _broken(), submit=pool.submit, cancel=SocketCancel())
+
+        self.assertEqual((facts.allowed_name, facts.allowed, facts.real_again), ("ya.ru", ANSWER, SILENCE))
+        self.assertEqual(bc.judge(facts).code, bc.CAUSE_NAME_WHITELIST)
+
+
+class WhitelistKindTests(unittest.TestCase):
+    """«Белый список» называется по прямым пробам: по именам он или по адресам."""
+
+    def _kind(self, *codes):
+        from diagnostics import problems
+        from diagnostics.run_context import Probe
+        from diagnostics.services import Target
+
+        probes = []
+        for code in codes:
+            probe = Probe(target=Target("example.org", "сайт"), service="control", host="example.org")
+            probe.cause = bc.Cause(code, "") if code else None
+            probes.append(probe)
+        return problems._whitelist_kind(["control"], {"control": probes})
+
+    def test_allowed_names_passing_means_a_list_of_names(self) -> None:
+        self.assertIn("с разрешёнными именами сайтов", self._kind(bc.CAUSE_NAME_WHITELIST, bc.CAUSE_NAME_WHITELIST))
+
+    def test_no_name_passing_after_connect_means_a_list_of_addresses(self) -> None:
+        text = self._kind(bc.CAUSE_BY_ADDRESS, bc.CAUSE_NAME_WHITELIST)
+
+        self.assertIn("соединение с зарубежными адресами устанавливается", text)
+        self.assertIn("только разрешённые адреса", text)
+
+    def test_without_probes_nothing_extra_is_claimed(self) -> None:
+        self.assertEqual(self._kind(""), "провайдер пропускает только разрешённые адреса")

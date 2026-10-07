@@ -71,6 +71,8 @@ CODE_BROWSER_ONLY = "browser_only"
 
 # Пауза перед повтором браузерного приветствия: один сбой — ещё не вывод.
 BROWSER_RETRY_PAUSE_S = 0.5
+# Шаг между стартами проб к одному имени.
+STAGGER_S = 0.25
 
 STATE_OK = "ok"
 STATE_FAIL = "fail"
@@ -115,6 +117,14 @@ def _timed_http(host: str, ip: str, cancel: SocketCancel) -> tuple[HttpFacts, fl
     return facts, ((time.perf_counter() - started) * 1000.0 if facts.status is not None else None)
 
 
+def _later(delay: float, token: SocketCancel, call: Callable, *args, **kwargs):
+    """Вызов через ``delay`` секунд; «Стоп» ждать не заставляет."""
+    deadline = time.monotonic() + delay
+    while time.monotonic() < deadline and not token.cancelled:
+        time.sleep(0.02)
+    return call(*args, **kwargs)
+
+
 def _browser_hello(host: str, ip: str, cancel: SocketCancel) -> HelloResult:
     """Приветствие Chrome; сбой перепроверяется один раз после паузы."""
     result = browser_hello.send_hello(ip, host, cancel=cancel)
@@ -130,9 +140,11 @@ def _browser_hello(host: str, ip: str, cancel: SocketCancel) -> HelloResult:
 
 def collect(host: str, ip: str, *, submit: Callable, cancel: SocketCancel) -> ProtocolFacts:
     """Четыре пробы к одному адресу, одновременно."""
+    # Три шифрованных соединения с одним именем уходят не разом, а с шагом: пачка одновременных
+    # соединений к одному сайту сама бывает поводом для фильтра придержать их все.
     tls12 = submit(tls_hello, ip, host, cancel=cancel, version=TLS_1_2)
-    tls13 = submit(tls_hello, ip, host, cancel=cancel, version=TLS_1_3)
-    browser = submit(_browser_hello, host, ip, cancel)
+    tls13 = submit(_later, STAGGER_S, cancel, tls_hello, ip, host, cancel=cancel, version=TLS_1_3)
+    browser = submit(_later, 2 * STAGGER_S, cancel, _browser_hello, host, ip, cancel)
     http = submit(_timed_http, host, ip, cancel)
     http_facts, http_ms = http.result()
     return ProtocolFacts(

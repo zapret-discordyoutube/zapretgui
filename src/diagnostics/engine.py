@@ -150,7 +150,7 @@ PROGRESS_STEPS = (STEP_SITES, STEP_HOSTINGS, STEP_VOICE, STEP_IPV6, STEP_SYSTEM,
 # потоков на TLS 1.2 / TLS 1.3 / «как Chrome» / HTTP. Задачи ждут друг
 # друга внутри одного пула, поэтому
 # нехватка потоков — это не «медленнее», а взаимная блокировка.
-_WORKERS_PER_TARGET = 25 + 2 * len(REFERENCE_RESOLVERS)
+_WORKERS_PER_TARGET = 28 + 2 * len(REFERENCE_RESOLVERS)
 
 
 # ---------------------------------------------------------------------------

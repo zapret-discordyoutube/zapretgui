@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from diagnostics import (
+    block_cause,
     block_kind,
     ipv6_check,
     protocol_probe,
@@ -62,6 +63,24 @@ BYPASSABLE = (ReachState.DPI, ReachState.FREEZE)
 def _zapret_action(zapret_running: bool | None) -> str:
     """Кнопка у обходимой блокировки. «Запустить» — только когда точно известно, что Zapret не запущен."""
     return "start_zapret" if zapret_running is False else "strategy"
+
+
+def _whitelist_kind(foreign: list[str], collected: dict[str, list[Probe]]) -> str:
+    """Как именно устроен «белый список» — по прямым пробам к зарубежным контрольным сайтам."""
+    causes = {
+        probe.cause.code for key in foreign for probe in collected.get(key, ()) if probe.cause is not None
+    }
+    if causes == {block_cause.CAUSE_NAME_WHITELIST}:
+        return (
+            "к зарубежным адресам проходят только соединения с разрешёнными именами сайтов — "
+            "с такими именами те же серверы отвечают"
+        )
+    if block_cause.CAUSE_BY_ADDRESS in causes:
+        return (
+            "соединение с зарубежными адресами устанавливается, но шифрование не проходит ни с каким именем, "
+            "даже с разрешённым, — пропускают только разрешённые адреса"
+        )
+    return "провайдер пропускает только разрешённые адреса"
 
 
 def no_geo_service(_host: str) -> str:
@@ -148,8 +167,7 @@ def collect_problems(
             problem(
                 Level.FAIL,
                 f"Открываются только российские сайты ({', '.join(services[key].label for key in domestic)}), "
-                f"а зарубежные контрольные ({names}) — нет. Похоже на режим «белых списков»: провайдер "
-                "пропускает только разрешённые адреса",
+                f"а зарубежные контрольные ({names}) — нет. Похоже на режим «белых списков»: {_whitelist_kind(foreign, collected)}",
                 (
                     "В таком режиме Zapret не помогает: закрыты сами адреса, а не отдельные сайты. "
                     "Обычно это временное ограничение, чаще в мобильных сетях — проверьте другую сеть.",
