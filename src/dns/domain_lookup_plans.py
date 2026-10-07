@@ -141,6 +141,8 @@ def build_answer_rows(report: DomainLookupReport) -> tuple[AnswerRow, ...]:
             tooltip_lines.append("IPv6: " + ", ".join(answer.ipv6))
         if answer.cnames:
             tooltip_lines.append("Псевдонимы (CNAME): " + " → ".join(answer.cnames))
+        if answer.ttl is not None:
+            tooltip_lines.append(f"Ответ считается свежим ещё {answer.ttl} с (TTL)")
         if answer.note:
             tooltip_lines.append(answer.note)
         rows.append(
@@ -314,12 +316,12 @@ def build_text_report(report: DomainLookupReport) -> str:
 
     if report.kind == KIND_DOMAIN:
         lines += ["", "=== Адреса с разных DNS ===", build_dns_summary(report).text]
-        for row in build_answer_rows(report):
-            lines.append(f"{row.server} [{row.address}] ({row.time}): {row.result}")
-            for answer in report.answers:
-                if _server_name(answer) == row.server and answer.cnames:
-                    lines.append("    CNAME: " + " → ".join(answer.cnames))
-                    break
+        # Строки идут в том же порядке, что и ответы: одна строка на сервер.
+        for row, answer in zip(build_answer_rows(report), report.answers):
+            ttl = f", TTL {answer.ttl} с" if answer.ttl is not None else ""
+            lines.append(f"{row.server} [{row.address}] ({row.time}{ttl}): {row.result}")
+            if answer.cnames:
+                lines.append("    CNAME: " + " → ".join(answer.cnames))
 
     ping_lines = build_ping_lines(report)
     if ping_lines:

@@ -128,6 +128,10 @@ class ResolverAnswer:
     elapsed_ms: float | None = None
     level: str = LEVEL_OK
     note: str = ""
+    # Сколько секунд ответ считается свежим (наименьшее из адресных записей).
+    # Настоящий сервер отдаёт убывающий остаток, заглушки часто ставят ноль
+    # или круглое число. None — в ответе адресов нет.
+    ttl: int | None = None
 
     @property
     def addresses(self) -> tuple[str, ...]:
@@ -310,6 +314,12 @@ def _ask_server(server: DnsServer, domain: str) -> ResolverAnswer:
         status = STATUS_EMPTY
     else:
         status = first.status
+    ttls = [
+        record.ttl
+        for result, rtype in ((first, TYPE_A), (second, TYPE_AAAA))
+        for record in result.records
+        if record.rtype == rtype
+    ]
     return ResolverAnswer(
         server=server,
         status=status,
@@ -317,6 +327,7 @@ def _ask_server(server: DnsServer, domain: str) -> ResolverAnswer:
         ipv6=ipv6,
         cnames=cnames,
         elapsed_ms=first.elapsed_ms,
+        ttl=min(ttls) if ttls else None,
     )
 
 

@@ -17,6 +17,7 @@ from utils.dns_wire import (
     STATUS_TIMEOUT,
     TYPE_A,
     TYPE_AAAA,
+    TYPE_CNAME,
     TYPE_PTR,
     TYPE_TXT,
     DnsQueryResult,
@@ -273,6 +274,30 @@ class RunTests(unittest.TestCase):
         self.assertEqual(network.http_calls, [])
         self.assertIsNone(report.network)
         self.assertEqual({item.key: item.status for item in report.sources}[engine.SOURCE_THC], engine.SOURCE_SKIPPED)
+
+    def test_lowest_ttl_of_address_records_is_kept_and_shown(self) -> None:
+        def with_ttl(server, name, rtype, **_kwargs):
+            if rtype == TYPE_A:
+                records = (
+                    DnsRecord(name="x", rtype=TYPE_CNAME, ttl=5, value="alias.example"),
+                    DnsRecord(name="x", rtype=TYPE_A, ttl=1693, value="93.184.216.34"),
+                    DnsRecord(name="x", rtype=TYPE_A, ttl=300, value="93.184.216.35"),
+                )
+            else:
+                records = (DnsRecord(name="x", rtype=TYPE_AAAA, ttl=1332, value="2606:2800:220:1::1"),)
+            return DnsQueryResult(status=STATUS_OK, rcode=0, records=records, elapsed_ms=12.0)
+
+        _Network(self)
+        with patch.object(engine, "query_server", with_ttl):
+            report = engine.run_domain_lookup("example.com", servers=[GOOD, DEAD], use_external=False)
+
+        good = next(item for item in report.answers if item.server == GOOD)
+        # Берётся наименьшее время адресных записей; у псевдонима оно своё и не в счёт.
+        self.assertEqual(good.ttl, 300)
+        row = next(item for item in plans.build_answer_rows(report) if item.server == "Хороший")
+        self.assertIn("Ответ считается свежим ещё 300 с (TTL)", row.tooltip)
+        self.assertIn("TTL 300 с", plans.build_text_report(report))
+        self.assertIn("CNAME: alias.example", plans.build_text_report(report))
 
     def test_intercepted_dns_is_detected_by_canary(self) -> None:
         _Network(self)
