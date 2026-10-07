@@ -1,5 +1,5 @@
 # Preset: shadow probes (circular)
-# BuiltinVersion: 2.42
+# BuiltinVersion: 2.43
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -118,9 +118,9 @@
 --ipset-exclude=lists/ipset-ru.txt
 --ipset-exclude=lists/ipset-dns.txt
 --ipset-exclude=lists/ipset-exclude.txt
---out-range=-d10
---in-range=-s1
---lua-desync=shadow_probe:probes=4:wait=400:waves=3:nld=2
+--out-range=-s34228
+--in-range=-s29500
+--lua-desync=shadow_probe:probes=4:wait=400:waves=8:nld=2:retrans=2:inseq=28000
 --payload=all
 --lua-desync=fake:blob=fake_tls:tcp_md5:strategy=1
 --lua-desync=fake:blob=fake_tls:repeats=6:tcp_ack=-66000:tcp_ts_up:strategy=2
