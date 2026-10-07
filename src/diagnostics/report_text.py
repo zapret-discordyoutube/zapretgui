@@ -260,7 +260,11 @@ def services_report(services: dict, verdicts: dict, collected: dict) -> list[dic
 def voice_report(voice) -> dict | None:
     if not voice:
         return None
-    return section_report(voice, [(item.name, "ok" if item.answered else "fail", item.text) for item in voice.servers])
+    return section_report(voice, [
+            (item.name, "ok" if item.answered else ("fail" if item.decided else "unknown"), item.text)
+            for item in voice.servers
+        ],
+    )
 
 
 def freeze_report(freeze) -> dict | None:

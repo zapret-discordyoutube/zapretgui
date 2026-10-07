@@ -51,3 +51,30 @@ class FreezeRecheckTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnknownZapretStateTests(unittest.TestCase):
+    """«Не удалось узнать, запущен ли Zapret» — не «не запущен»: запускать его не советуем."""
+
+    def test_start_is_advised_only_when_zapret_is_known_to_be_off(self) -> None:
+        from diagnostics import problems
+        from diagnostics.verdict import ReachState, _ADVICE_START, _advice_for
+
+        self.assertEqual(problems._zapret_action(False), "start_zapret")
+        self.assertEqual(problems._zapret_action(None), "strategy")
+        self.assertEqual(problems._zapret_action(True), "strategy")
+        self.assertEqual(_advice_for([ReachState.DPI], zapret_running=False), (_ADVICE_START,))
+        self.assertNotIn(_ADVICE_START, _advice_for([ReachState.DPI], zapret_running=None))
+
+    def test_closed_address_is_never_told_to_start_zapret(self) -> None:
+        from diagnostics.block_kind import KIND_IP
+        from diagnostics.verdict import ReachState, _ADVICE_START, _advice_for
+
+        self.assertNotIn(_ADVICE_START, _advice_for([ReachState.DPI], zapret_running=False, kind=KIND_IP))
+
+    def test_freeze_advice_follows_the_same_rule(self) -> None:
+        from diagnostics.freeze_check import FreezeServer, summarize_freeze
+
+        frozen = tuple(FreezeServer(f"S{i}", FreezeState.FREEZE, "обрыв") for i in range(4))
+        self.assertIn("Запустите Zapret", summarize_freeze(frozen, zapret_running=False).advice[0])
+        self.assertNotIn("Запустите Zapret", summarize_freeze(frozen, zapret_running=None).advice[0])

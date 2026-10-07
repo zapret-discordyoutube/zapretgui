@@ -311,8 +311,12 @@ def _minutes(seconds: float) -> str:
     return f"{round(hours)} ч" if hours < 48 else f"{round(hours / 24)} дн"
 
 
-def judge(facts: SystemFacts) -> tuple[SystemItem, ...]:
-    """Строки отчёта о системе, в постоянном порядке."""
+def judge(facts: SystemFacts, *, zapret_running: bool | None = None) -> tuple[SystemItem, ...]:
+    """Строки отчёта о системе, в постоянном порядке.
+
+    ``zapret_running`` — работает ли сейчас Zapret: если да, «мешающие программы»
+    ему на деле не помешали, и это справка, а не предупреждение.
+    """
     items: list[SystemItem] = []
 
     def add(key: str, title: str, level: str, text: str, advice: str = "") -> None:
@@ -426,13 +430,20 @@ def judge(facts: SystemFacts) -> tuple[SystemItem, ...]:
         found = list(facts.conflicts or ())
         if facts.goodbyedpi_services:
             found.append(f"служба GoodbyeDPI ({_short(facts.goodbyedpi_services)})")
-        if found:
+        if found and zapret_running:
+            add(
+                "conflicts",
+                title,
+                LEVEL_INFO,
+                f"найдены: {_short(found)}. Они могут мешать драйверу перехвата, но Zapret сейчас запущен и работает",
+            )
+        elif found:
             add(
                 "conflicts",
                 title,
                 LEVEL_WARN,
-                f"найдены: {_short(found)}. Они используют тот же драйвер или перехватывают его работу",
-                "Закройте эти программы перед запуском Zapret.",
+                f"найдены: {_short(found)}. Они могут занимать тот же драйвер перехвата или мешать его работе",
+                "Если Zapret не запускается — закройте эти программы и попробуйте снова.",
             )
         else:
             add("conflicts", title, LEVEL_OK, "не найдены")

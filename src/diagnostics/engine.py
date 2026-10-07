@@ -736,7 +736,7 @@ def run_blockcheck(
             else None
         )
         ipv6_future = run.submit(sections.check_ipv6, run)
-        system_future = run.submit(sections.check_system, run, services)
+        system_future = run.submit(sections.check_system, run, services, zapret_running)
         dns_future = run.submit(check_dns_servers, should_stop=run.dns_cancelled) if full and check_dns_servers else None
 
         collected = _run_probes(
@@ -764,7 +764,7 @@ def run_blockcheck(
             for line in report_text.section_lines(
                 "Голосовые звонки (UDP)",
                 voice,
-                [("✅" if item.answered else "❌", item.name, item.text) for item in voice.servers],
+                [("✅" if item.answered else ("❌" if item.decided else "❔"), item.name, item.text) for item in voice.servers],
             ):
                 emit(line)
 

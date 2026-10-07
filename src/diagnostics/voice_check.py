@@ -29,6 +29,9 @@ class VoiceServer:
     host: str
     answered: bool
     text: str
+    # Проверка состоялась: сервер ответил или промолчал. False — до него не дошло
+    # дело (не узнали адрес, ошибка самой проверки): это не говорит ничего о UDP.
+    decided: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,20 +53,21 @@ def _parse_target(value: str) -> tuple[str, int]:
         return raw, 3478
 
 
-def _describe(result) -> tuple[bool, str]:
+def _describe(result) -> tuple[bool, str, bool]:
+    """(ответил ли, пояснение, состоялась ли проверка)."""
     status = str(getattr(getattr(result, "status", None), "value", getattr(result, "status", "")) or "").lower()
     code = str(getattr(result, "error_code", "") or "")
     if status == "ok":
-        return True, "отвечает"
+        return True, "отвечает", True
     if code in _ANSWERED_CODES:
-        return True, "отвечает (ответ необычный, но UDP проходит)"
+        return True, "отвечает (ответ необычный, но UDP проходит)", True
     if code == "TIMEOUT":
-        return False, "не ответил — UDP до него не доходит"
+        return False, "не ответил — UDP до него не доходит", True
     if code == "DNS_ERR":
-        return False, "не удалось узнать адрес сервера"
+        return False, "не удалось узнать адрес сервера — проверить его не вышло", False
     if code == "RESET":
-        return False, "сервер отклонил запрос (порт закрыт)"
-    return False, str(getattr(result, "detail", "") or "ошибка проверки")
+        return False, "сервер отклонил запрос (порт закрыт)", True
+    return False, str(getattr(result, "detail", "") or "ошибка проверки"), False
 
 
 def check_voice(submit: Callable[..., Future], wait: Callable[[Future], object]) -> tuple[VoiceServer, ...]:
@@ -79,10 +83,10 @@ def check_voice(submit: Callable[..., Future], wait: Callable[[Future], object])
     servers: list[VoiceServer] = []
     for name, host, future in planned:
         try:
-            answered, text = _describe(wait(future))
+            answered, text, decided = _describe(wait(future))
         except Exception as exc:  # отдельный сервер не должен ронять отчёт
-            answered, text = False, f"ошибка проверки ({exc})"
-        servers.append(VoiceServer(name=name, host=host, answered=answered, text=text))
+            answered, text, decided = False, f"ошибка проверки ({exc})", False
+        servers.append(VoiceServer(name=name, host=host, answered=answered, text=text, decided=decided))
     return tuple(servers)
 
 
@@ -91,8 +95,17 @@ def summarize_voice(servers: tuple[VoiceServer, ...]) -> VoiceReport:
     они, это блокировка звонков Telegram, а не «UDP вообще не проходит»."""
     if not servers:
         return VoiceReport(Level.UNKNOWN, "Голосовые серверы не проверялись", servers)
-    telegram = [item for item in servers if "telegram" in f"{item.name} {item.host}".lower()]
-    general = [item for item in servers if item not in telegram]
+    # Судим только по серверам, проверка которых состоялась: «не узнали адрес» — не «UDP закрыт».
+    decided = [item for item in servers if item.decided]
+    if not decided:
+        return VoiceReport(
+            Level.UNKNOWN,
+            "Голосовые серверы проверить не удалось: не получилось узнать их адреса",
+            servers,
+            ("Повторите проверку. Если повторяется — проверьте DNS в разделе «Настройка DNS».",),
+        )
+    telegram = [item for item in decided if "telegram" in f"{item.name} {item.host}".lower()]
+    general = [item for item in decided if item not in telegram]
     general_ok = any(item.answered for item in general) if general else True
     telegram_ok = any(item.answered for item in telegram) if telegram else True
     strategy_advice = (

@@ -88,6 +88,34 @@ class CollectTests(unittest.TestCase):
             facts = up.collect(HOST, "203.0.113.5", "/file", submit=pool.submit, cancel=SocketCancel())
         return facts, calls
 
+    def _collect_bulk(self, answers):
+        """Большая отправка отвечает по очереди ``answers``; остальные проходят."""
+        bulk_calls = []
+
+        def fake_post(host, ip, path, chunks, **kwargs):
+            if sum(map(len, chunks)) != up.BULK_BYTES:
+                return _answered()
+            bulk_calls.append(1)
+            return answers[min(len(bulk_calls), len(answers)) - 1]
+
+        with ThreadPoolExecutor(2) as pool, patch.object(up, "post", fake_post):
+            facts = up.collect(HOST, "203.0.113.5", "/file", submit=pool.submit, cancel=SocketCancel())
+        return facts, len(bulk_calls)
+
+    def test_single_stall_is_rechecked_and_does_not_count(self) -> None:
+        facts, calls = self._collect_bulk([STALLED, _answered()])
+
+        self.assertEqual((calls, up.judge(facts).code), (2, up.UPLOAD_OK))
+
+    def test_stall_twice_in_a_row_is_the_finding(self) -> None:
+        facts, calls = self._collect_bulk([STALLED, STALLED])
+
+        self.assertEqual((calls, up.judge(facts).code), (2, up.UPLOAD_BULK_STALLS))
+        self.assertIn("дважды подряд", up.judge(facts).text)
+
+    def test_passing_upload_is_sent_once(self) -> None:
+        self.assertEqual(self._collect_bulk([_answered()])[1], 1)
+
     def test_control_goes_first_and_checks_that_server_waits_for_body(self) -> None:
         facts, calls = self._collect(_answered())
 

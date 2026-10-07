@@ -63,10 +63,19 @@ class SpeedCollectTests(unittest.TestCase):
         self.assertAlmostEqual(samples[0].kbps, 3 * 1024 / 1.5)
 
     def test_too_little_data_and_failures_give_no_speed(self) -> None:
-        answers = iter([(50_000, 4.0), None, (0, 0.0), (3 * MB, 2.0), (3 * MB, 2.0)])
+        # Мало данных за короткое время — файл кончился: замер не показателен.
+        answers = iter([(50_000, 0.5), None, (0, 0.0), (3 * MB, 2.0), (3 * MB, 2.0)])
         samples = sc.check_speed(lambda _server: next(answers))
 
         self.assertEqual([item.kbps is None for item in samples], [True, True, True, False, False])
+
+    def test_server_that_gave_little_in_the_whole_time_is_a_slow_measurement(self) -> None:
+        """Иначе зажатые серверы выпадали бы из сравнения, и замедление не замечалось бы."""
+        samples = sc.check_speed(lambda server: (3 * MB, 1.0) if server.domestic else (80_000, sc.SAMPLE_SECONDS))
+
+        slow = [item.kbps for item in samples if not item.server.domestic]
+        self.assertTrue(all(kbps is not None and kbps < 30 for kbps in slow))
+        self.assertEqual(sc.summarize_speed(samples).level.value, "warn")
 
     def test_stop_ends_the_measuring(self) -> None:
         samples = sc.check_speed(lambda _server: (3 * MB, 1.0), should_stop=lambda: True)

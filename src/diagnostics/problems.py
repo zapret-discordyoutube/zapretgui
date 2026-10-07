@@ -31,7 +31,7 @@ from diagnostics.services import Service
 from diagnostics.verdict import ADVICE_DNS, ADVICE_VIA_ZAPRET, DnsState, Level, ReachState, ServiceVerdict, advice_geo_site
 
 ADVICE_IPV6 = (
-    "Из-за этого сайты открываются с задержкой: браузер сначала ждёт IPv6. Перезагрузите роутер; "
+    "Из-за этого сайты могут открываться с задержкой: браузер сначала пробует IPv6. Перезагрузите роутер; "
     "если не поможет — снимите галочку «IP версии 6» в свойствах сетевого адаптера Windows."
 )
 SYSTEM_PROBLEM_LEVEL = {system_state.LEVEL_FAIL: Level.FAIL, system_state.LEVEL_WARN: Level.WARN}
@@ -57,6 +57,11 @@ ADVICE_FINGERPRINT = (
 
 # Блокировки, которые обходит стратегия Zapret.
 BYPASSABLE = (ReachState.DPI, ReachState.FREEZE)
+
+
+def _zapret_action(zapret_running: bool | None) -> str:
+    """Кнопка у обходимой блокировки. «Запустить» — только когда точно известно, что Zapret не запущен."""
+    return "start_zapret" if zapret_running is False else "strategy"
 
 
 def no_geo_service(_host: str) -> str:
@@ -180,7 +185,7 @@ def collect_problems(
             bypassable = next((probe for probe in broken if probe.reach_state in BYPASSABLE), None)
             action = ""
             if bypassable is not None:
-                action = "strategy" if zapret_running else "start_zapret"
+                action = _zapret_action(zapret_running)
             target = (bypassable or broken[0]).host
             # Гео-сайт сам ограничивает доступ из России: стратегия его не
             # чинит, и совет «подберите стратегию» увёл бы пользователя не туда.
@@ -240,7 +245,7 @@ def collect_problems(
                 f"{service.label}: проверка сайт открывает, но соединение «как у Chrome» не проходит — "
                 "в браузере он может не открываться",
                 evidence + (ADVICE_FINGERPRINT,),
-                action="strategy" if zapret_running else "start_zapret",
+                action=_zapret_action(zapret_running),
                 target=marked[0].host,
                 kind=block_kind.KIND_FINGERPRINT,
                 title=service.label,
@@ -254,7 +259,7 @@ def collect_problems(
                 freeze.level,
                 freeze.headline,
                 freeze.advice,
-                action="strategy" if zapret_running else "start_zapret",
+                action=_zapret_action(zapret_running),
                 kind=block_kind.KIND_CUT,
             )
         )

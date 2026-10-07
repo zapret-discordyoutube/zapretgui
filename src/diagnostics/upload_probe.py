@@ -191,9 +191,22 @@ def collect(host: str, ip: str, path: str, *, submit: Callable, cancel: SocketCa
     small = post(host, ip, path, [os.urandom(SMALL_BYTES)], early_wait=EARLY_ANSWER_WAIT_S, cancel=cancel)
     if small.kind != POST_ANSWERED:
         return UploadFacts(small=small)
-    bulk = submit(post, host, ip, path, _split(os.urandom(BULK_BYTES), BULK_CHUNK), cancel=cancel)
-    drip = submit(post, host, ip, path, _split(os.urandom(DRIP_BYTES), DRIP_CHUNK), pause=DRIP_PAUSE_S, cancel=cancel)
+    bulk = submit(_post_confirmed, host, ip, path, _split(os.urandom(BULK_BYTES), BULK_CHUNK), cancel=cancel)
+    drip = submit(
+        _post_confirmed, host, ip, path, _split(os.urandom(DRIP_BYTES), DRIP_CHUNK), pause=DRIP_PAUSE_S, cancel=cancel
+    )
     return UploadFacts(small=small, bulk=bulk.result(), drip=drip.result())
+
+
+def _post_confirmed(host: str, ip: str, path: str, chunks: list[bytes], **kwargs) -> PostResult:
+    """Отправка; замирание перепроверяется один раз и засчитывается, только если повторилось.
+
+    Фильтр режет каждый раз, а сервер, который однажды долго думал над ответом, — нет.
+    """
+    first = post(host, ip, path, chunks, **kwargs)
+    if first.kind != POST_STALLED:
+        return first
+    return post(host, ip, path, chunks, **kwargs)
 
 
 def judge(facts: UploadFacts) -> UploadVerdict:
@@ -211,13 +224,13 @@ def judge(facts: UploadFacts) -> UploadVerdict:
     if facts.bulk.kind == POST_STALLED:
         return UploadVerdict(
             UPLOAD_BULK_STALLS,
-            f"отправка {BULK_BYTES // 1024} КБ замирает, хотя короткую отправку тот же сервер принимает",
+            f"отправка {BULK_BYTES // 1024} КБ замирает дважды подряд, хотя короткую отправку тот же сервер принимает",
         )
     if facts.drip.kind == POST_STALLED:
         packets = DRIP_BYTES // DRIP_CHUNK
         return UploadVerdict(
             UPLOAD_PACKET_LIMIT,
-            f"соединение замирает на {packets} мелких пакетах, хотя большой объём проходит — "
+            f"соединение дважды замирает на {packets} мелких пакетах, хотя большой объём проходит — "
             "режут по числу пакетов, а не по объёму",
         )
     if facts.bulk.kind != POST_ANSWERED or facts.drip.kind != POST_ANSWERED:

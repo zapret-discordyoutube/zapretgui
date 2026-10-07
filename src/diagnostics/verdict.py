@@ -346,9 +346,13 @@ def _advice_for(
             return (_ADVICE_DNS,)
         return (_ADVICE_CERT,)
     if ReachState.DPI in states or ReachState.FREEZE in states:
-        if not zapret_running:
+        # Вид блокировки важнее: закрытому адресу «запустите Zapret» обещал бы лишнее.
+        if kind == KIND_IP:
+            return (_ADVICE_STRATEGY_OR_ADDRESS,)
+        # «Не удалось узнать, запущен ли Zapret» — не «не запущен»: запускать не советуем.
+        if zapret_running is False:
             return (_ADVICE_START,)
-        return (_ADVICE_STRATEGY_OR_ADDRESS,) if kind == KIND_IP else (_ADVICE_STRATEGY,)
+        return (_ADVICE_STRATEGY,)
     if ReachState.IP_BLOCK in states:
         return (_ADVICE_IP,) if kind == KIND_IP else (_ADVICE_NO_CONNECT,)
     return ("Повторите проверку через минуту.",)

@@ -175,10 +175,12 @@ def clock_skew(run: Run) -> float | None:
     return None
 
 
-def check_system(run: Run, services: dict[str, Service]) -> tuple[system_state.SystemItem, ...]:
+def check_system(
+    run: Run, services: dict[str, Service], zapret_running: bool | None = None
+) -> tuple[system_state.SystemItem, ...]:
     hosts = tuple(dict.fromkeys(target.host for service in services.values() for target in service.targets))
     facts = system_state.collect_facts(check_hosts=hosts, clock_skew=lambda: clock_skew(run))
-    return system_state.judge(facts)
+    return system_state.judge(facts, zapret_running=zapret_running)
 
 
 SYSTEM_ICON = {

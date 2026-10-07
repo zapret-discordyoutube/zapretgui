@@ -71,7 +71,11 @@ def collect(
         addresses = lookup(host)
         if not addresses:
             return host, "", None
-        return host, addresses[0], get(host, addresses[0])
+        result = get(host, addresses[0])
+        if result.kind == KIND_CONNECT:
+            # Одно несоединение бывает и от нагрузки самой проверки: «не работает» — только после повтора.
+            result = get(host, addresses[0])
+        return host, addresses[0], result
 
     futures = [submit(one, host) for host in hosts]
     try:

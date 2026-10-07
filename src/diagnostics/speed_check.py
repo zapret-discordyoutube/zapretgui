@@ -103,7 +103,11 @@ def check_speed(
             samples.append(SpeedSample(server))
             continue
         received, seconds = got
-        kbps = received / 1024 / seconds if received >= MIN_BYTES and seconds > 0 else None
+        # Мало данных за короткое время — файл кончился, замер не показателен. Мало данных
+        # за всё отведённое время — это и есть медленный сервер: выбросить его значило бы
+        # не заметить как раз замедление.
+        enough = received >= MIN_BYTES or (received > 0 and seconds >= SAMPLE_SECONDS * 0.9)
+        kbps = received / 1024 / seconds if enough and seconds > 0 else None
         samples.append(SpeedSample(server, kbps, int(received), float(seconds)))
     return tuple(samples)
 

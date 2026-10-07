@@ -287,7 +287,7 @@ class _Net:
             patch.object(sections, "check_network", side_effect=lambda _run, _tools: self.network),
             patch.object(sections, "check_speed", side_effect=lambda _run, _emit: self.speed),
             patch.object(engine.telegram_check, "check_telegram", side_effect=lambda *_a, **_k: self.telegram),
-            patch.object(sections, "check_system", side_effect=lambda _run, _services: self.system_items),
+            patch.object(sections, "check_system", side_effect=lambda _run, _services, _zapret=None: self.system_items),
             patch.object(net_access, "hosts_file_ipv4", return_value=()),
             patch.object(net_access, "system_dns_servers", return_value=("83.220.169.155",)),
             patch.object(sections, "zapret_status", return_value=(True, "✅ Zapret запущен")),
@@ -1127,8 +1127,14 @@ class BlockcheckScopeTests(unittest.TestCase):
 
         from diagnostics.voice_check import _describe, summarize_voice, VoiceServer
 
-        answered, _text = _describe(SimpleNamespace(status=SimpleNamespace(value="fail"), error_code="PARSE_ERR", detail=""))
-        self.assertTrue(answered)
+        answered, _text, decided = _describe(SimpleNamespace(status=SimpleNamespace(value="fail"), error_code="PARSE_ERR", detail=""))
+        self.assertTrue(answered and decided)
+        # Адрес сервера узнать не удалось — это не «UDP закрыт»: такие серверы в вывод не идут.
+        _answered, _text, decided = _describe(SimpleNamespace(status=SimpleNamespace(value="fail"), error_code="DNS_ERR", detail=""))
+        self.assertFalse(decided)
+        unresolved = VoiceServer("A", "a", False, "не удалось узнать адрес", decided=False)
+        self.assertEqual(summarize_voice((unresolved, unresolved)).level, Level.UNKNOWN)
+        self.assertEqual(summarize_voice((unresolved, VoiceServer("B", "b", True, "да"))).level, Level.OK)
         report = summarize_voice((VoiceServer("A", "a", False, "нет"), VoiceServer("B", "b", False, "нет")))
         self.assertEqual(report.level, Level.FAIL)
         # На win10 молчали только серверы Telegram — это про звонки Telegram, не «UDP вообще».

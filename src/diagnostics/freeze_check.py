@@ -293,7 +293,7 @@ def summarize_freeze(servers: tuple[FreezeServer, ...], *, zapret_running: bool 
     if frozen:
         advice = (
             ("Подберите стратегию: в «Подборе стратегии» укажите сайт, который грузится не до конца.",)
-            if zapret_running
+            if zapret_running is not False
             else ("Запустите Zapret на странице «Управление Zapret 2» — стратегии обходят этот обрыв.",)
         )
         directions = {item.direction for item in frozen}

@@ -86,6 +86,20 @@ class CollectTests(unittest.TestCase):
         self.assertEqual([(host, ip) for host, ip, _result in facts.probes], [("www.google.com", "2001:db8::10"), ("www.cloudflare.com", "")])
         self.assertIsNone(facts.probes[1][2])
 
+    def test_failed_connection_is_tried_once_more(self) -> None:
+        """Одно несоединение бывает от нагрузки самой проверки: «не работает» — только после повтора."""
+        answers = iter([_fail(KIND_CONNECT), _ok()])
+        with ThreadPoolExecutor(2) as pool:
+            facts = v6.collect(
+                has_route=lambda: True,
+                lookup=lambda _host: ("2001:db8::10",),
+                get=lambda _host, _ip: next(answers),
+                submit=pool.submit,
+                hosts=("www.google.com",),
+            )
+
+        self.assertEqual(v6.judge(facts).code, v6.IPV6_OK)
+
     def test_failed_route_lookup_is_unknown_not_crash(self) -> None:
         def broken() -> bool:
             raise OSError("нет доступа")

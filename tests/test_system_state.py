@@ -83,6 +83,16 @@ class JudgeTests(unittest.TestCase):
         self.assertIn("Process Hacker", item.text)
         self.assertIn("служба GoodbyeDPI (GoodbyeDPI)", item.text)
 
+    def test_interfering_programs_are_only_a_note_while_zapret_works(self) -> None:
+        facts = replace(HEALTHY, conflicts=("Process Hacker",))
+        item = next(entry for entry in ss.judge(facts, zapret_running=True) if entry.key == "conflicts")
+
+        self.assertEqual(item.level, ss.LEVEL_INFO)
+        self.assertIn("Zapret сейчас запущен и работает", item.text)
+        # Не знаем, запущен ли Zapret, — предупреждение остаётся.
+        unknown = next(entry for entry in ss.judge(facts, zapret_running=None) if entry.key == "conflicts")
+        self.assertEqual(unknown.level, ss.LEVEL_WARN)
+
     def test_other_bypass_tools_vpn_and_antivirus_are_notes_not_alarms(self) -> None:
         bypass = _item(replace(HEALTHY, bypass_tools=("Xray",), tunnels=("WireGuard Tunnel",)), "bypass")
         self.assertEqual(bypass.level, ss.LEVEL_INFO)
