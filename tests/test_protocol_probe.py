@@ -73,6 +73,7 @@ class ProtocolJudgeTests(unittest.TestCase):
             ThreadPoolExecutor(max_workers=4) as pool,
             patch.object(pp, "tls_hello", side_effect=_hello),
             patch.object(pp, "http_probe", return_value=bc.HttpFacts(status=200)),
+            patch.object(pp.browser_hello, "send_hello", return_value=bc.HelloResult(bc.HELLO_OK, ms=7.0)),
         ):
             facts = pp.collect("x.com", "1.2.3.4", submit=pool.submit, cancel=SocketCancel())
 
@@ -132,7 +133,7 @@ class ProtocolCardsTests(unittest.TestCase):
         self.assertIn("запись устарела", rows["Файл hosts"])
         self.assertEqual(rows["TLS 1.3"], "сброшено")
         counters = {counter.caption: counter.value for counter in build_counters(self.REPORT)}
-        self.assertEqual(counters["проб TLS 1.2 / 1.3 / HTTP"], 2)
+        self.assertEqual(counters["проб TLS 1.2 / 1.3 / Chrome / HTTP"], 2)
 
 
 class ServiceListTests(unittest.TestCase):

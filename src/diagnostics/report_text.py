@@ -167,10 +167,10 @@ def target_report(probe: Probe) -> dict:
         "cause_text": sentence(probe.cause.text) if probe.cause else "",
         "quic": probe.quic.code if probe.quic else "",
         "quic_text": probe.quic.text if probe.quic else "",
-        # Тот же адрес по TLS 1.2, TLS 1.3 и HTTP отдельно.
+        # Тот же адрес по TLS 1.2, TLS 1.3, «как Chrome» и HTTP отдельно.
         "protocols": [
             {"key": line.key, "title": line.title, "state": line.state, "word": line.word, "text": line.text,
-             "ms": None if line.ms is None else round(line.ms, 1)}
+             "ms": None if line.ms is None else round(line.ms, 1), "code": line.code}
             for line in probe.protocols
         ],
         "address": probe.reach.ip if probe.reach is not None else "",

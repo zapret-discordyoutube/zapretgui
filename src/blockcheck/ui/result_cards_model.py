@@ -179,9 +179,14 @@ def site_level(service: dict) -> str:
     сайта»: о ней общая строка в итоге, а здесь — метка."""
     level = _state(service.get("level"))
     targets = list(service.get("targets") or ())
-    if level == WARN and targets and all(item.get("ok") for item in targets):
-        return OK
+    if level in (OK, WARN) and targets and all(item.get("ok") for item in targets):
+        # Сайт открывается, но приветствие с составом Chrome не проходит: в браузере он может висеть.
+        return WARN if _by_fingerprint(targets) else OK
     return level
+
+
+def _by_fingerprint(targets: list) -> bool:
+    return any(proto.get("code") == "fingerprint" for item in targets for proto in item.get("protocols") or ())
 
 
 def site_kind(service: dict, level: str) -> str:
@@ -716,7 +721,7 @@ def build_counters(report: dict) -> list[Counter]:
     counters = [Counter(len(services), "сайтов", "fa5s.globe"), Counter(targets, "адресов сайтов", "fa5s.link")]
     protocols = sum(len(item.get("protocols") or ()) for service in services for item in service.get("targets") or ())
     if protocols:
-        counters.append(Counter(protocols, "проб TLS 1.2 / 1.3 / HTTP", "fa5s.lock"))
+        counters.append(Counter(protocols, "проб TLS 1.2 / 1.3 / Chrome / HTTP", "fa5s.lock"))
     quic = sum(1 for service in services for item in service.get("targets") or () if item.get("quic"))
     if quic:
         counters.append(Counter(quic, "проверок QUIC", "fa5s.bolt"))
