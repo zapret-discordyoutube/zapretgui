@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QListView
 
 from .common import (
     PRESET_DROP_MARKER_PROPERTY,
     preset_canonical_drop_target_for_next_row,
+    preset_columns_for_width,
     preset_drop_marker_for_target,
     preset_drop_target_for_position,
     set_current_index_if_changed,
@@ -34,7 +35,26 @@ class LinkedWheelListView(ListView):
         self._drag_start_pos: QPoint | None = None
         self._drag_source: tuple[str, str] | None = None
         self._draggable_kinds = {str(kind) for kind in (draggable_kinds or {"preset"})}
+        # Пресеты укладываются слева направо с переносом: в широком окне они
+        # встают в несколько столбцов. Ширину строк задаёт PresetListDelegate,
+        # заголовок папки всегда занимает линию целиком.
+        self.setFlow(QListView.Flow.LeftToRight)
+        self.setWrapping(True)
+        self.setResizeMode(QListView.ResizeMode.Adjust)
         self.set_drop_marker(-1, "")
+
+    def preset_column_count(self) -> int:
+        if not self.isWrapping():
+            return 1
+        return preset_columns_for_width(self.viewport().width())[0]
+
+    def resizeEvent(self, event):  # noqa: N802
+        if event.size().width() != event.oldSize().width():
+            # Ширина столбцов зависит от ширины списка. Сам QListView
+            # пересчитывает раскладку только через 0,1 с — строки успевают
+            # мелькнуть в старом размере.
+            self.scheduleDelayedItemsLayout()
+        super().resizeEvent(event)
 
     def set_screen_reader_list_name(self, name: str) -> None:
         value = " ".join(str(name or "").strip().split())
@@ -88,7 +108,7 @@ class LinkedWheelListView(ListView):
             index = model.index(row, 0)
             if not index.isValid():
                 continue
-            rect = self.visualRect(index).adjusted(0, -4, 0, 4)
+            rect = self.visualRect(index).adjusted(-4, -4, 4, 4)
             if rect.isValid():
                 self.viewport().update(rect)
 
@@ -97,12 +117,16 @@ class LinkedWheelListView(ListView):
         if not drop_index.isValid():
             return {"marker": {"row": -1, "mode": ""}, "destination_kind": "end", "destination_row": -1}, "", ""
         destination_kind = str(drop_index.data(PresetListModel.KindRole) or "")
+        row_rect = self.visualRect(drop_index)
+        # В нескольких столбцах пресеты идут слева направо, поэтому место
+        # «перед» или «после» строки выбирает её левая или правая половина.
+        side_by_side = self.preset_column_count() > 1
         target = preset_drop_target_for_position(
             drop_index.row(),
             destination_kind,
-            y=point.y(),
-            row_top=self.visualRect(drop_index).top(),
-            row_height=self.visualRect(drop_index).height(),
+            y=point.x() if side_by_side else point.y(),
+            row_top=row_rect.left() if side_by_side else row_rect.top(),
+            row_height=row_rect.width() if side_by_side else row_rect.height(),
         )
         if target["destination_kind"] == "preset_after":
             model = self.model()
@@ -259,8 +283,12 @@ class LinkedWheelListView(ListView):
     def keyPressEvent(self, event):
         key = event.key()
         modifiers = event.modifiers()
-        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
-            direction = -1 if key == Qt.Key.Key_Up else 1
+        side_by_side = self.preset_column_count() > 1
+        arrow_keys = [Qt.Key.Key_Up, Qt.Key.Key_Down]
+        if side_by_side:
+            arrow_keys += [Qt.Key.Key_Left, Qt.Key.Key_Right]
+        if key in arrow_keys:
+            direction = -1 if key in (Qt.Key.Key_Up, Qt.Key.Key_Left) else 1
             if modifiers & Qt.KeyboardModifier.ControlModifier:
                 if self._request_current_preset_move(direction):
                     event.accept()
@@ -270,7 +298,13 @@ class LinkedWheelListView(ListView):
                 | Qt.KeyboardModifier.MetaModifier
                 | Qt.KeyboardModifier.ShiftModifier
             ):
-                if self._move_current_to_adjacent_preset(direction):
+                # В столбцах стрелки вверх и вниз ведут на линию выше или ниже,
+                # а соседний по порядку пресет стоит слева или справа.
+                if side_by_side and key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                    moved = self._move_current_to_preset_on_adjacent_line(direction)
+                else:
+                    moved = self._move_current_to_adjacent_preset(direction)
+                if moved:
                     event.accept()
                     return
         if event.key() in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
@@ -320,6 +354,43 @@ class LinkedWheelListView(ListView):
         # На границе списка стрелка считается обработанной: иначе базовый
         # QListView может перевести выделение на заголовок папки.
         return current.isValid()
+
+    def _move_current_to_preset_on_adjacent_line(self, direction: int) -> bool:
+        model = self.model()
+        current = self.currentIndex()
+        if model is None or not current.isValid():
+            return self._move_current_to_adjacent_preset(direction)
+
+        step = -1 if int(direction) < 0 else 1
+        current_rect = self.visualRect(current)
+        line_top = None
+        best = None
+        best_distance = 0
+        row = current.row() + step
+        while 0 <= row < model.rowCount():
+            candidate = model.index(row, 0)
+            row += step
+            if str(candidate.data(PresetListModel.KindRole) or "") != "preset":
+                if line_top is not None:
+                    break
+                continue
+            rect = self.visualRect(candidate)
+            if rect.top() == current_rect.top():
+                continue
+            if line_top is None:
+                line_top = rect.top()
+            elif rect.top() != line_top:
+                break
+            distance = abs(rect.left() - current_rect.left())
+            if best is None or distance < best_distance:
+                best = candidate
+                best_distance = distance
+
+        if best is not None:
+            self.setCurrentIndex(best)
+            self.scrollTo(best)
+        # На границе списка стрелка тоже считается обработанной (см. выше).
+        return True
 
     def _activate_current_index_from_keyboard(self) -> bool:
         index = self.currentIndex()

@@ -19,6 +19,29 @@ _CSS_RGBA_COLOR_RE = re.compile(
     re.IGNORECASE,
 )
 PRESET_DROP_MARKER_PROPERTY = "presetDropMarker"
+# Уже этого имя пресета перестаёт помещаться рядом со значком и кнопками строки.
+PRESET_COLUMN_MIN_WIDTH = 420
+PRESET_COLUMN_MAX_COUNT = 4
+
+
+def preset_full_row_width(view_width: int) -> int:
+    """Ширина строки во весь список (заголовок папки, пустой список).
+
+    На точку уже списка: QListView переносит элемент на новую линию, как
+    только тот дотягивается до правого края, и перед первой строкой
+    появилась бы пустая линия.
+    """
+    try:
+        return max(0, int(view_width) - 1)
+    except Exception:
+        return 0
+
+
+def preset_columns_for_width(view_width: int) -> tuple[int, int]:
+    """Сколько столбцов пресетов помещается в список и какой они ширины."""
+    total = preset_full_row_width(view_width)
+    count = max(1, min(PRESET_COLUMN_MAX_COUNT, total // PRESET_COLUMN_MIN_WIDTH))
+    return count, total // count
 
 
 def set_current_index_if_changed(view, index) -> bool:
@@ -57,6 +80,12 @@ def preset_drop_target_for_position(
     row_top: int,
     row_height: int,
 ) -> dict[str, object]:
+    """Куда попадёт пресет, если отпустить его над строкой.
+
+    `y`, `row_top` и `row_height` — положение мыши и строки вдоль той оси, по
+    которой пресеты идут друг за другом: сверху вниз в одном столбце и слева
+    направо, когда столбцов несколько.
+    """
     kind = str(destination_kind or "").strip()
     try:
         row_index = int(row)
@@ -253,6 +282,8 @@ def to_qcolor(value, fallback_hex: str = "#000000") -> QColor:
 
 
 __all__ = [
+    "PRESET_COLUMN_MAX_COUNT",
+    "PRESET_COLUMN_MIN_WIDTH",
     "PRESET_DROP_MARKER_PROPERTY",
     "cached_icon",
     "fluent_icon",
@@ -260,8 +291,10 @@ __all__ = [
     "normalize_preset_icon_color",
     "pick_contrast_color",
     "preset_canonical_drop_target_for_next_row",
+    "preset_columns_for_width",
     "preset_drop_marker_for_target",
     "preset_drop_target_for_position",
+    "preset_full_row_width",
     "to_qcolor",
     "tr_text",
 ]

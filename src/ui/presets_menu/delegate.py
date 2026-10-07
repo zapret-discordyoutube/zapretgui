@@ -4,7 +4,7 @@ from typing import Optional
 
 from PyQt6.QtCore import QEvent, QModelIndex, QRect, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFontMetrics, QHelpEvent, QMouseEvent, QPainter, QPen, QTransform
-from PyQt6.QtWidgets import QListView, QStyledItemDelegate, QStyle, QStyleOptionViewItem
+from PyQt6.QtWidgets import QApplication, QListView, QStyledItemDelegate, QStyle, QStyleOptionViewItem
 
 from ui.theme import get_theme_tokens
 from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
@@ -18,6 +18,8 @@ from .common import (
     cached_icon,
     normalize_preset_icon_color,
     pick_contrast_color,
+    preset_columns_for_width,
+    preset_full_row_width,
     set_current_index_if_changed,
     to_qcolor,
     tr_text,
@@ -52,6 +54,10 @@ class PresetListDelegate(QStyledItemDelegate):
 
     _PENDING_SHAKE_ROTATIONS = (0, -8, 8, -6, 6, -4, 4, -2, 0)
     _PENDING_SHAKE_INTERVAL_MS = 50
+    # Сколько щелчок ждёт второго, прежде чем включить пресет.
+    _DOUBLE_CLICK_WAIT_MS = 300
+    _DATE_GAP = 12
+    _REMOTE_ICON_SPACE = 20
 
     def __init__(self, view: QListView, *, language_scope: str = "winws2", help_name_role: str = "name"):
         super().__init__(view)
@@ -71,6 +77,10 @@ class PresetListDelegate(QStyledItemDelegate):
         self._pending_shake_rotation = 0
         self._pending_shake_timer = QTimer(self)
         self._pending_shake_timer.timeout.connect(self._advance_pending_shake)
+        self._pending_activation = ""
+        self._activation_timer = QTimer(self)
+        self._activation_timer.setSingleShot(True)
+        self._activation_timer.timeout.connect(self._emit_pending_activation)
         self._tooltip = FluentItemToolTipController(view.viewport())
         attach_row_hover_motion(view, row_filter=_is_preset_row)
         self.set_ui_language("ru")
@@ -89,6 +99,7 @@ class PresetListDelegate(QStyledItemDelegate):
 
     def reset_interaction_state(self):
         self._clear_pending_destructive(update=False)
+        self._cancel_pending_activation()
         self.setHoverRow(-1)
         self.setPressedRow(-1)
         self.setSelectedRows([])
@@ -123,15 +134,29 @@ class PresetListDelegate(QStyledItemDelegate):
             icon_left = row_rect.left() + 12 + depth * 18
         return QRect(icon_left, row_rect.center().y() - 10, 20, 20)
 
+    def _view_width(self) -> int:
+        try:
+            return int(self._view.viewport().width())
+        except Exception:
+            return 0
+
+    def _side_by_side(self) -> bool:
+        return preset_columns_for_width(self._view_width())[0] > 1
+
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
+        # Ширина строки и есть раскладка: список переносит строки слева
+        # направо, поэтому пресеты шириной в столбец встают в ряд, а заголовок
+        # папки шириной во весь список всегда занимает отдельную линию.
+        view_width = self._view_width()
+        full_width = preset_full_row_width(view_width)
         kind = index.data(PresetListModel.KindRole)
         if kind == "folder":
-            return QSize(0, FOLDER_HEADER_HEIGHT)
+            return QSize(full_width, FOLDER_HEADER_HEIGHT)
         if kind == "section":
-            return QSize(0, self._SECTION_HEIGHT)
+            return QSize(full_width, self._SECTION_HEIGHT)
         if kind == "empty":
-            return QSize(0, self._EMPTY_HEIGHT)
-        return QSize(0, self._ROW_HEIGHT)
+            return QSize(full_width, self._EMPTY_HEIGHT)
+        return QSize(preset_columns_for_width(view_width)[1], self._ROW_HEIGHT)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
         kind = index.data(PresetListModel.KindRole)
@@ -185,12 +210,34 @@ class PresetListDelegate(QStyledItemDelegate):
         action = self._action_at(option.rect, kind, is_active, is_builtin, depth, event.position().toPoint())
 
         if action:
+            self._cancel_pending_activation()
             self._handle_action_click(item_id, action, event, index)
             return True
 
         self._clear_pending_destructive(update=False)
-        self.action_triggered.emit("activate", item_id)
+        second_click = self._activation_timer.isActive() and self._pending_activation == item_id
+        if second_click or event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            # Двойной щелчок и Shift+щелчок открывают страницу пресета и не
+            # включают его: посмотреть текст — не то же самое, что запустить.
+            self._cancel_pending_activation()
+            self.action_triggered.emit("open", item_id)
+            return True
+
+        # Обычный щелчок включает пресет не сразу: сначала ждём, не придёт ли
+        # второй, иначе двойной щелчок заодно перезапускал бы обход.
+        self._pending_activation = item_id
+        self._activation_timer.start(min(self._DOUBLE_CLICK_WAIT_MS, QApplication.doubleClickInterval()))
         return True
+
+    def _cancel_pending_activation(self) -> None:
+        self._activation_timer.stop()
+        self._pending_activation = ""
+
+    def _emit_pending_activation(self) -> None:
+        item_id = self._pending_activation
+        self._pending_activation = ""
+        if item_id:
+            self.action_triggered.emit("activate", item_id)
 
     def helpEvent(self, event: QHelpEvent, view, option: QStyleOptionViewItem, index: QModelIndex) -> bool:
         kind = str(index.data(PresetListModel.KindRole) or "")
@@ -386,20 +433,21 @@ class PresetListDelegate(QStyledItemDelegate):
             painter.setBrush(fill)
             painter.setPen(QPen(accent, 2))
             painter.drawRoundedRect(rect, 6, 6)
-        elif marker.get("mode") == "before":
-            line_rect = profile_hover_row_rect(option.rect).adjusted(12, 0, -12, 0)
+        elif marker.get("mode") in ("before", "after"):
+            before = marker.get("mode") == "before"
+            row_rect = profile_hover_row_rect(option.rect)
             pen = QPen(accent, 3)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
-            y = line_rect.top() + 2
-            painter.drawLine(line_rect.left(), y, line_rect.right(), y)
-        elif marker.get("mode") == "after":
-            line_rect = profile_hover_row_rect(option.rect).adjusted(12, 0, -12, 0)
-            pen = QPen(accent, 3)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            painter.setPen(pen)
-            y = line_rect.bottom() - 2
-            painter.drawLine(line_rect.left(), y, line_rect.right(), y)
+            if self._side_by_side():
+                # В столбцах пресеты стоят рядом, место вставки — сбоку от строки.
+                line_rect = row_rect.adjusted(0, 4, 0, -4)
+                x = line_rect.left() + 2 if before else line_rect.right() - 2
+                painter.drawLine(x, line_rect.top(), x, line_rect.bottom())
+            else:
+                line_rect = row_rect.adjusted(12, 0, -12, 0)
+                y = line_rect.top() + 2 if before else line_rect.bottom() - 2
+                painter.drawLine(line_rect.left(), y, line_rect.right(), y)
 
         painter.restore()
 
@@ -481,8 +529,8 @@ class PresetListDelegate(QStyledItemDelegate):
 
         text_left = icon_rect.right() + 10
         actions = self._action_rects(rect, "preset", is_active, is_builtin)
-        # Место под кнопки и дату занято всегда, даже пока они скрыты: имя не
-        # должно перестраиваться, когда на строку наводят мышь.
+        # Место под кнопки занято всегда, даже пока они скрыты: имя не должно
+        # перестраиваться, когда на строку наводят мышь.
         right_bound = rect.right() - 12
         if actions:
             right_bound = actions[0][1].left() - 10
@@ -521,30 +569,23 @@ class PresetListDelegate(QStyledItemDelegate):
                 rating_rect = QRect(right_cursor - rating_width, rect.center().y() - 9, rating_width, 18)
                 right_cursor = rating_rect.left() - self._BADGE_GAP
 
-        date_rect = QRect()
-        name_right_bound = right_cursor
-        if date_text:
-            date_available_width = max(0, right_cursor - text_left)
-            if date_available_width > 48:
-                desired_date_width = meta_metrics.horizontalAdvance(date_text)
-                date_width = min(desired_date_width, max(72, date_available_width // 3))
-                date_rect = QRect(
-                    max(text_left, right_cursor - date_width),
-                    rect.center().y() - 9,
-                    min(date_width, date_available_width),
-                    18,
-                )
-                if date_rect.width() > 0:
-                    name_right_bound = max(text_left, date_rect.left() - 12)
-                else:
-                    date_rect = QRect()
-
-        name_rect = QRect(text_left, rect.center().y() - 10, max(0, name_right_bound - text_left), 20)
+        name_rect = QRect(text_left, rect.center().y() - 10, max(0, right_cursor - text_left), 20)
 
         name_font = painter.font()
         name_font.setBold(is_active)
         painter.setFont(name_font)
         name_metrics = QFontMetrics(name_font)
+
+        # Имя важнее даты: в узком столбце дата появляется под мышью, только
+        # если помещается рядом с полным именем и ничего у него не отнимает.
+        date_rect = QRect()
+        if date_text:
+            date_width = meta_metrics.horizontalAdvance(date_text)
+            name_end = text_left + name_metrics.horizontalAdvance(name)
+            if bool(index.data(PresetListModel.RemoteRole)):
+                name_end += self._REMOTE_ICON_SPACE
+            if right_cursor - date_width - self._DATE_GAP >= name_end:
+                date_rect = QRect(right_cursor - date_width, rect.center().y() - 9, date_width, 18)
         elided_name = name_metrics.elidedText(name, Qt.TextElideMode.ElideRight, name_rect.width())
         name_flags = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         repeated_prefix = name[: int(index.data(PresetListModel.RepeatedPrefixLengthRole) or 0)]

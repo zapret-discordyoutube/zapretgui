@@ -141,8 +141,7 @@ class PresetDragIndicatorTests(unittest.TestCase):
 
         self.assertIn("_paint_drop_marker", delegate_source)
         self.assertIn('marker.get("mode") == "folder"', delegate_source)
-        self.assertIn('marker.get("mode") == "before"', delegate_source)
-        self.assertIn('marker.get("mode") == "after"', delegate_source)
+        self.assertIn('marker.get("mode") in ("before", "after")', delegate_source)
         self.assertIn("drag_marker_visible", delegate_source)
         self.assertIn("active=is_active and not drag_marker_visible", delegate_source)
         self.assertIn("show_active_marker=False", delegate_source)
