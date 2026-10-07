@@ -328,6 +328,31 @@ class SitesTableTests(unittest.TestCase):
         table.show_report({"services": [], "ipv6": None})
         self.assertEqual(table.rowCount(), 0)
 
+    def test_computer_state_gets_one_row_with_the_worst_problem_first(self) -> None:
+        def item(level, title, text):
+            return {"key": title, "title": title, "level": level, "text": text, "advice": ""}
+
+        healthy = [item("ok", "Права администратора", "есть"), item("info", "Антивирус", "работает Kaspersky")]
+        table = BlockcheckSitesTable()
+        table.show_report({"services": [], "system": healthy})
+        self.assertEqual([table.item(0, c).text() for c in range(3)], ["Компьютер", "В порядке", "проверено пунктов: 2"])
+
+        broken = healthy + [item("warn", "Системный прокси", "включён"), item("fail", "Служба фильтрации Windows (BFE)", "не работает")]
+        table.show_report({"services": [], "system": broken})
+        shown = [table.item(0, c).text() for c in range(3)]
+        self.assertEqual(shown[:2], ["Компьютер", "Мешает работе"])
+        self.assertEqual(shown[2], "Служба фильтрации Windows (BFE): не работает (и ещё 1)")
+        self.assertIn("с проблемами 1", table.accessibleName())
+
+        table.show_report({"services": [], "system": healthy + [item("warn", "Системный прокси", "включён")]})
+        self.assertEqual([table.item(0, c).text() for c in range(1, 3)], ["Есть замечания", "Системный прокси: включён"])
+
+        table.show_report({"services": [], "system": [item("unknown", "Часы компьютера", "проверить не удалось")]})
+        self.assertEqual(table.item(0, 1).text(), "Не проверено")
+
+        table.show_report({"services": [], "system": []})
+        self.assertEqual(table.rowCount(), 0)
+
     def test_blocked_quic_is_marked_for_open_site(self) -> None:
         service = {
             "targets": [

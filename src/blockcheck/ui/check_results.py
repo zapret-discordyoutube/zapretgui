@@ -330,6 +330,29 @@ def _target_mark(item: dict) -> str:
     return "?" if str(item.get("state") or "") == "unknown" else "✗"
 
 
+_SYSTEM_MARKS = {"ok": "✓", "info": "·", "warn": "!", "fail": "✗", "unknown": "?"}
+
+
+def _system_row(items: list[dict]) -> tuple[str, str, str, str]:
+    """Одна строка о состоянии компьютера: (уровень, слово результата, подробности, подсказка)."""
+    failed = [item for item in items if item.get("level") == "fail"]
+    warned = [item for item in items if item.get("level") == "warn"]
+    tooltip = "\n".join(
+        f"{_SYSTEM_MARKS.get(str(item.get('level')), '?')} {item.get('title', '')}: {item.get('text', '')}"
+        for item in items
+    )
+    if failed or warned:
+        shown = failed or warned
+        details = f"{shown[0].get('title', '')}: {shown[0].get('text', '')}"
+        rest = len(failed) + len(warned) - 1
+        if rest:
+            details = f"{details} (и ещё {rest})"
+        return ("fail", "Мешает работе", details, tooltip) if failed else ("warn", "Есть замечания", details, tooltip)
+    if items and all(item.get("level") == "unknown" for item in items):
+        return "unknown", "Не проверено", "состояние системы узнать не удалось", tooltip
+    return "ok", "В порядке", f"проверено пунктов: {len(items)}", tooltip
+
+
 # Состояние IPv6 → (уровень строки, слово результата). «Нет в сети» — норма,
 # поэтому зелёным или красным она не красится.
 _IPV6_ROW = {
@@ -465,6 +488,10 @@ class BlockcheckSitesTable(TableWidget):
             level, word = _IPV6_ROW.get(str(ipv6.get("state") or ""), ("unknown", "Не проверено"))
             text = f"IPv6 {ipv6.get('text', '')}".strip()
             self._add_row("IPv6", level, word, text, text)
+        system = list(report.get("system") or ())
+        if system:
+            level, word, details, tooltip = _system_row(system)
+            self._add_row("Компьютер", level, word, details, tooltip)
         self._apply_theme_refresh()
         self._fit_height()
         broken = sum(1 for level in self._levels if level in ("fail", "warn"))

@@ -35,7 +35,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from diagnostics import block_cause, ipv6_check, quic_probe, upload_probe
+from diagnostics import block_cause, ipv6_check, quic_probe, system_state, upload_probe
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
@@ -953,6 +953,7 @@ def _collect_problems(
     geo_service_for: Callable[[str], str] | None = None,
     reference: list[dict] | None = None,
     ipv6: ipv6_check.Ipv6Verdict | None = None,
+    system: tuple[system_state.SystemItem, ...] = (),
 ) -> tuple[list[dict], list[str], list[str]]:
     """Итог для экрана: проблемы по важности, открывающиеся сервисы, подменённые DNS."""
     problems: list[dict] = []
@@ -1083,6 +1084,11 @@ def _collect_problems(
                 (_ADVICE_QUIC,),
             )
         )
+    # Неполадки самого компьютера показываются всегда: они объясняют и «нет интернета».
+    for item in system:
+        level = _SYSTEM_PROBLEM_LEVEL.get(item.level)
+        if level is not None:
+            problems.append(_problem(level, f"{item.title}: {item.text}", (item.advice,) if item.advice else ()))
     if ipv6 is not None and ipv6.code == ipv6_check.IPV6_BROKEN and not offline:
         problems.append(_problem(Level.WARN, f"IPv6 {ipv6.text}", (_ADVICE_IPV6,)))
     for item in _blocked_references(reference or []):
@@ -1120,6 +1126,44 @@ _ADVICE_IPV6 = (
     "Из-за этого сайты открываются с задержкой: браузер сначала ждёт IPv6. Перезагрузите роутер; "
     "если не поможет — снимите галочку «IP версии 6» в свойствах сетевого адаптера Windows."
 )
+
+
+_CLOCK_HOST = "www.google.com"
+
+
+def _clock_skew(run: _Run) -> float | None:
+    """На сколько секунд часы компьютера впереди времени сервера. None — узнать не удалось."""
+    from email.utils import parsedate_to_datetime
+
+    addresses = _doh_lookup(run, _CLOCK_HOST)[1]
+    if not addresses:
+        return None
+    result = _get(run, _CLOCK_HOST, addresses[0], "/generate_204", read_limit=1)
+    local = time.time()
+    for line in result.body.split(b"\r\n\r\n", 1)[0].split(b"\r\n")[1:]:
+        name, _colon, value = line.partition(b":")
+        if name.strip().lower() == b"date":
+            try:
+                return local - parsedate_to_datetime(value.decode("ascii", errors="ignore").strip()).timestamp()
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _check_system(run: _Run, services: dict[str, Service]) -> tuple[system_state.SystemItem, ...]:
+    hosts = tuple(dict.fromkeys(target.host for service in services.values() for target in service.targets))
+    facts = system_state.collect_facts(check_hosts=hosts, clock_skew=lambda: _clock_skew(run))
+    return system_state.judge(facts)
+
+
+_SYSTEM_ICON = {
+    system_state.LEVEL_OK: "✅",
+    system_state.LEVEL_INFO: "ℹ️",
+    system_state.LEVEL_WARN: "⚠️",
+    system_state.LEVEL_FAIL: "❌",
+    system_state.LEVEL_UNKNOWN: "❔",
+}
+_SYSTEM_PROBLEM_LEVEL = {system_state.LEVEL_FAIL: Level.FAIL, system_state.LEVEL_WARN: Level.WARN}
 
 
 def _blocked_references(reference: list[dict]) -> list[dict]:
@@ -1208,6 +1252,7 @@ def run_blockcheck(
         )
 
         ipv6_future = run.submit(_check_ipv6, run)
+        system_future = run.submit(_check_system, run, services)
 
         collected = _run_probes(run, services, full=True, emit=emit)
 
@@ -1221,6 +1266,19 @@ def run_blockcheck(
         if ipv6 is not None:
             emit("━━━━━━━━ IPv6 ━━━━━━━━")
             emit(f"{_IPV6_ICON[ipv6.code]} IPv6 {ipv6.text}")
+
+        system: tuple[system_state.SystemItem, ...] = ()
+        try:
+            system = tuple(run.wait(system_future))
+        except _Stopped:
+            raise
+        except Exception as exc:
+            emit(f"❔ Состояние системы: проверка не выполнилась ({exc})")
+        if system:
+            emit("")
+            emit("━━━━━━━━ Состояние системы ━━━━━━━━")
+            for item in system:
+                emit(f"{_SYSTEM_ICON[item.level]} {item.title}: {item.text}")
 
         voice = freeze = None
         if voice_future is not None:
@@ -1267,6 +1325,7 @@ def run_blockcheck(
             geo_service_for=geo_service_for,
             reference=run.reference_report(),
             ipv6=ipv6,
+            system=system,
         )
 
         emit("")
@@ -1310,6 +1369,10 @@ def run_blockcheck(
             "spoofed_hosts": spoofed,
             "reference": run.reference_report(),
             "ipv6": {"state": ipv6.code, "text": ipv6.text} if ipv6 is not None else None,
+            "system": [
+                {"key": item.key, "title": item.title, "level": item.level, "text": item.text, "advice": item.advice}
+                for item in system
+            ],
             "environment": environment,
             "zapret_running": zapret_running,
             "zapret_line": zapret_line,

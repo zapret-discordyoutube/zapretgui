@@ -206,6 +206,8 @@ class _Net:
         self.quic_facts = None
         self.quic_asked: list[tuple[str, str]] = []
         self.ipv6 = engine.ipv6_check.Ipv6Verdict(engine.ipv6_check.IPV6_ABSENT, "в этой сети его нет")
+        # Состояние системы читает реестр и службы: в сценариях движка оно задаётся явно.
+        self.system_items: tuple = ()
 
     def _quic(self, host, ip, **_kwargs):
         self.quic_asked.append((host, ip))
@@ -245,6 +247,7 @@ class _Net:
             patch.object(engine.block_cause, "collect", side_effect=self._collect),
             patch.object(engine.quic_probe, "collect", side_effect=self._quic),
             patch.object(engine, "_check_ipv6", side_effect=lambda _run: self.ipv6),
+            patch.object(engine, "_check_system", side_effect=lambda _run, _services: self.system_items),
             patch.object(engine, "hosts_file_ipv4", return_value=()),
             patch.object(engine, "system_dns_servers", return_value=("83.220.169.155",)),
             patch.object(engine, "_zapret_status", return_value=(True, "✅ Zapret запущен")),
@@ -555,6 +558,89 @@ class FreezeUploadWiringTests(unittest.TestCase):
         ):
             self.assertIsNone(engine._upload(stopped, "cdn.example", "/"))
         collect.assert_not_called()
+
+
+class SystemStateInReportTests(unittest.TestCase):
+    @staticmethod
+    def _item(key, level, text, advice=""):
+        return engine.system_state.SystemItem(key, f"Заголовок {key}", level, text, advice)
+
+    def _run(self, *items, https=None):
+        lines: list[str] = []
+        net = _Net(https=https)
+        net.system_items = tuple(items)
+        return net.run(engine.run_blockcheck, "main", emit=lines.append), lines
+
+    def test_every_item_is_printed_and_returned(self) -> None:
+        ok = self._item("admin", "ok", "есть")
+        note = self._item("antivirus", "info", "работает Kaspersky", "Добавьте в исключения")
+        result, lines = self._run(ok, note)
+
+        self.assertIn("━━━━━━━━ Состояние системы ━━━━━━━━", lines)
+        self.assertIn("✅ Заголовок admin: есть", lines)
+        self.assertIn("ℹ️ Заголовок antivirus: работает Kaspersky", lines)
+        self.assertEqual([item["key"] for item in result["system"]], ["admin", "antivirus"])
+        self.assertEqual(result["system"][1]["advice"], "Добавьте в исключения")
+        # Пометки и «всё хорошо» в список проблем не попадают.
+        self.assertFalse([item for item in result["problems"] if item["text"].startswith("Заголовок")])
+
+    def test_failures_and_warnings_become_problems_with_advice(self) -> None:
+        result, _lines = self._run(
+            self._item("bfe", "fail", "не работает", "Запустите службу"),
+            self._item("proxy", "warn", "включён"),
+            self._item("clock", "unknown", "проверить не удалось"),
+        )
+        problems = {item["text"]: item for item in result["problems"] if item["text"].startswith("Заголовок")}
+
+        self.assertEqual(set(problems), {"Заголовок bfe: не работает", "Заголовок proxy: включён"})
+        self.assertEqual(problems["Заголовок bfe: не работает"]["level"], "fail")
+        self.assertEqual(problems["Заголовок bfe: не работает"]["advice"], ["Запустите службу"])
+        self.assertEqual(problems["Заголовок proxy: включён"]["advice"], [])
+        # Неполадка компьютера стоит выше предупреждений о сети.
+        self.assertEqual(result["problems"][0]["text"], "Заголовок bfe: не работает")
+
+    def test_system_problem_is_shown_even_when_nothing_opens(self) -> None:
+        """Остановленная служба сама может быть причиной «нет интернета» — молчать о ней нельзя."""
+        net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT))
+        net.system_items = (self._item("bfe", "fail", "не работает"),)
+        result = net.run(engine.run_blockcheck, "all", emit=lambda _line: None)
+
+        self.assertTrue([item for item in result["problems"] if item["text"] == "Заголовок bfe: не работает"])
+
+    def test_no_section_when_nothing_was_collected(self) -> None:
+        result, lines = self._run()
+
+        self.assertNotIn("━━━━━━━━ Состояние системы ━━━━━━━━", lines)
+        self.assertEqual(result["system"], [])
+
+
+class ClockSkewTests(unittest.TestCase):
+    def _skew(self, body: bytes | None, addresses=("142.250.1.1",)):
+        run = engine._Run(None, workers=4)
+        self.addCleanup(run.close)
+        result = ProbeResult(ip="142.250.1.1", kind=KIND_OK, status=204, body=body or b"")
+        with (
+            patch.object(engine, "_doh_lookup", return_value=(bool(addresses), tuple(addresses))),
+            patch.object(engine, "https_get", return_value=result) as get,
+            patch.object(engine.time, "time", return_value=1_800_000_000.0),
+        ):
+            return engine._clock_skew(run), get
+
+    def test_skew_is_local_time_minus_server_date(self) -> None:
+        from email.utils import formatdate
+
+        body = b"HTTP/1.1 204 No Content\r\nDate: " + formatdate(1_800_000_000 - 7200, usegmt=True).encode() + b"\r\n\r\n"
+        skew, get = self._skew(body)
+
+        self.assertEqual(skew, 7200.0)
+        self.assertEqual(get.call_args.args[:3], ("www.google.com", "142.250.1.1", "/generate_204"))
+
+    def test_no_address_no_date_or_bad_date_is_unknown(self) -> None:
+        self.assertIsNone(self._skew(b"", addresses=())[0])
+        self.assertIsNone(self._skew(b"HTTP/1.1 204 No Content\r\nServer: x\r\n\r\n")[0])
+        self.assertIsNone(self._skew(b"HTTP/1.1 204 No Content\r\nDate: yesterday\r\n\r\n")[0])
+        # Строка «Date:» в теле ответа — не заголовок.
+        self.assertIsNone(self._skew(b"HTTP/1.1 200 OK\r\nServer: x\r\n\r\nDate: Mon, 01 Jan 2024 00:00:00 GMT")[0])
 
 
 class EngineScenarioTests(unittest.TestCase):
