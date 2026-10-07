@@ -4,18 +4,21 @@ from __future__ import annotations
 
 Порядок источников:
 
-1. Forgejo — главный. Любой его определённый ответ побеждает зеркала.
-2. Зеркала — только если Forgejo ответил ошибкой или не уложился в срок.
-   Чтобы при заблокированном Forgejo не ждать его тайм-аутов впустую,
-   зеркала запускаются параллельно, если Forgejo молчит дольше
-   ``MIRROR_FALLBACK_DELAY_SECONDS``. В обычном случае проверка стоит один
-   поход в Forgejo, и зеркала не трогаются.
+1. Forgejo — главный. У него фора ``MIRROR_FALLBACK_DELAY_SECONDS``: пока она
+   идёт, зеркала не трогаются, и в обычном случае проверка стоит один поход
+   в Forgejo.
+2. Зеркала — запасные. Они запускаются, как только Forgejo ответил ошибкой
+   или промолчал всю фору. Дальше побеждает первый успешный ответ — Forgejo
+   или зеркала: готовый ответ зеркала не ждёт тайм-аутов заблокированного
+   Forgejo.
 
 Результат — всегда ``ReleaseLookup``: либо выпуск, либо понятная ошибка. «Не
 удалось узнать» никогда не превращается в «обновлений нет». Кэшей нет:
 каждый вызов — свежий ответ.
 """
 
+import queue
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -25,11 +28,15 @@ from log.log import log
 
 from ..channel_utils import normalize_update_channel
 from . import forgejo, mirrors
-from .http import BackgroundCall, short_error
+from .http import Outcome, short_error
 
 
 MIRROR_FALLBACK_DELAY_SECONDS = 3.0
 FORGEJO_DEADLINE_SECONDS = 20.0
+NO_ANSWER_IN_TIME = "нет ответа за отведённое время"
+
+_FORGEJO = "forgejo"
+_MIRRORS = "mirrors"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,34 +62,57 @@ def lookup_latest_release(
 ) -> ReleaseLookup:
     selected = normalize_update_channel(channel)
     started = time.monotonic()
+    answers: queue.Queue[tuple[str, Outcome[dict[str, Any]]]] = queue.Queue()
 
-    forgejo_call = BackgroundCall(lambda: fetch_forgejo(selected), name="update-forgejo")
-    outcome = forgejo_call.wait(fallback_delay)
-    if outcome is not None and outcome.ok:
-        return ReleaseLookup(outcome.value)
+    def ask(source: str, fetch: Callable[[str], dict[str, Any]]) -> None:
+        def run() -> None:
+            try:
+                answers.put((source, Outcome(value=fetch(selected))))
+            except BaseException as exc:  # noqa: BLE001 — итог передаётся ждущему
+                answers.put((source, Outcome(error=exc)))
 
-    mirrors_call = BackgroundCall(lambda: fetch_mirrors(selected), name="update-mirrors")
-    if outcome is None:
-        remaining = forgejo_deadline - (time.monotonic() - started)
-        outcome = forgejo_call.wait(remaining)
-        if outcome is not None and outcome.ok:
+        threading.Thread(target=run, name=f"update-{source}", daemon=True).start()
+
+    # Источник → момент, после которого его ответ уже не ждём.
+    waiting: dict[str, float] = {_FORGEJO: started + float(forgejo_deadline)}
+    errors: dict[str, str] = {}
+    mirrors_start_at: float | None = started + float(fallback_delay)
+    ask(_FORGEJO, fetch_forgejo)
+
+    def fail(source: str, reason: str) -> None:
+        errors[source] = reason
+        if source == _FORGEJO:
+            log(f"⚠️ Forgejo: {reason}; проверяем зеркала", "🔄 RELEASE")
+
+    while True:
+        now = time.monotonic()
+        for source in [source for source, deadline in waiting.items() if now >= deadline]:
+            del waiting[source]
+            fail(source, NO_ANSWER_IN_TIME)
+        if mirrors_start_at is not None and (_FORGEJO in errors or now >= mirrors_start_at):
+            mirrors_start_at = None
+            waiting[_MIRRORS] = now + float(mirrors_deadline)
+            ask(_MIRRORS, fetch_mirrors)
+        if not waiting:
+            break
+
+        wake_at = min(waiting.values())
+        if mirrors_start_at is not None:
+            wake_at = min(wake_at, mirrors_start_at)
+        try:
+            source, outcome = answers.get(timeout=max(wake_at - time.monotonic(), 0.0))
+        except queue.Empty:
+            continue
+        if waiting.pop(source, None) is None:
+            # Ответ пришёл после своего срока: источник уже записан в ошибки.
+            continue
+        if outcome.ok:
             return ReleaseLookup(outcome.value)
+        fail(source, short_error(outcome.error, limit=300 if source == _MIRRORS else 120))
 
-    forgejo_error = (
-        short_error(outcome.error) if outcome is not None and outcome.error is not None
-        else "нет ответа за отведённое время"
+    message = (
+        f"Не удалось узнать новейшую версию. Forgejo: {errors[_FORGEJO]}. Зеркала: {errors[_MIRRORS]}"
     )
-    log(f"⚠️ Forgejo: {forgejo_error}; проверяем зеркала", "🔄 RELEASE")
-
-    mirror_outcome = mirrors_call.wait(mirrors_deadline)
-    if mirror_outcome is not None and mirror_outcome.ok:
-        return ReleaseLookup(mirror_outcome.value)
-    mirror_error = (
-        short_error(mirror_outcome.error, limit=300)
-        if mirror_outcome is not None and mirror_outcome.error is not None
-        else "нет ответа за отведённое время"
-    )
-    message = f"Не удалось узнать новейшую версию. Forgejo: {forgejo_error}. Зеркала: {mirror_error}"
     log(f"❌ {message}", "🔄 RELEASE")
     return ReleaseLookup(None, message)
 

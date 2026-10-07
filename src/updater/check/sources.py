@@ -126,7 +126,8 @@ def probe_update_sources(
 ) -> bool:
     """Опрашивает Forgejo и все зеркала. True, если хоть один источник ответил.
 
-    Первое по порядку ответившее зеркало помечается текущим.
+    Первое по порядку ответившее зеркало помечается текущим. Вызывающий
+    не обязан ждать конца: строки приходят по мере ответов.
     """
     selected = servers if servers is not None else mirrors.mirror_servers()
     jobs: list[tuple[str, Callable[[], tuple[str, dict]]]] = [("forgejo", lambda: _forgejo_row(language))]
@@ -145,7 +146,28 @@ def probe_update_sources(
     for job_id, job in jobs:
         threading.Thread(target=runner, args=(job_id, job), name=f"update-status-{job_id}", daemon=True).start()
 
-    online_mirrors: dict[str, tuple[str, dict]] = {}
+    # Текущим помечается первое по порядку ответившее зеркало — сразу, как
+    # только ответили все зеркала перед ним: молчащее зеркало в конце списка
+    # отметку не задерживает.
+    mirror_rows: dict[str, tuple[str, dict]] = {}
+    current_marked = False
+
+    def mark_current(*, final: bool) -> None:
+        nonlocal current_marked
+        if current_marked:
+            return
+        for server in selected:
+            found = mirror_rows.get(str(server.get("id") or server.get("host")))
+            if found is None:
+                if final:
+                    continue
+                return
+            name, status = found
+            if status.get("status") == "online":
+                current_marked = True
+                emit_row(name, {**status, "is_current": True})
+                return
+
     any_online = False
     finish_at = time.monotonic() + float(deadline)
     for _ in jobs:
@@ -159,15 +181,11 @@ def probe_update_sources(
         emit_row(name, status)
         if status.get("status") == "online":
             any_online = True
-            if job_id != "forgejo":
-                online_mirrors[job_id] = (name, status)
+        if job_id != "forgejo":
+            mirror_rows[job_id] = (name, status)
+            mark_current(final=False)
 
-    for server in selected:
-        found = online_mirrors.get(str(server.get("id") or server.get("host")))
-        if found is not None:
-            name, status = found
-            emit_row(name, {**status, "is_current": True})
-            break
+    mark_current(final=True)
     return any_online
 
 

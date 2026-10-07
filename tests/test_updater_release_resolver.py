@@ -67,12 +67,13 @@ class ReleaseSourceOrderTests(unittest.TestCase):
         self.assertIn("forgejo down", lookup.error)
         self.assertIn("mirrors down", lookup.error)
 
-    def test_silent_forgejo_starts_mirrors_without_waiting_its_timeout(self) -> None:
+    def test_silent_forgejo_does_not_hold_back_a_ready_mirror_answer(self) -> None:
+        """Раньше готовый ответ зеркала ждал весь срок молчащего Forgejo."""
         forgejo_released = threading.Event()
         self.addCleanup(forgejo_released.set)
 
         def slow_forgejo(_channel: str) -> dict:
-            forgejo_released.wait(5.0)
+            forgejo_released.wait(10.0)
             raise RuntimeError("тайм-аут")
 
         started = time.monotonic()
@@ -81,26 +82,69 @@ class ReleaseSourceOrderTests(unittest.TestCase):
             fetch_forgejo=slow_forgejo,
             fetch_mirrors=lambda _channel: _release("1.0.0.8", "mirror"),
             fallback_delay=0.05,
-            forgejo_deadline=0.2,
+            forgejo_deadline=10.0,
         )
 
         self.assertTrue(lookup.ok)
         self.assertEqual(lookup.release["source"], "mirror")
         self.assertLess(time.monotonic() - started, 2.0)
 
-    def test_late_but_successful_forgejo_still_wins_over_mirror(self) -> None:
+    def test_forgejo_inside_its_head_start_wins_and_mirrors_are_not_asked(self) -> None:
+        asked: list[str] = []
+
         def late_forgejo(_channel: str) -> dict:
             time.sleep(0.1)
+            return _release("1.0.0.8", "Forgejo")
+
+        def fetch_mirrors(channel: str) -> dict:
+            asked.append(channel)
+            return _release("1.0.0.7", "mirror")
+
+        lookup = lookup_latest_release(
+            "dev",
+            fetch_forgejo=late_forgejo,
+            fetch_mirrors=fetch_mirrors,
+            fallback_delay=2.0,
+        )
+
+        self.assertEqual(lookup.release["source"], "Forgejo")
+        self.assertEqual(asked, [])
+
+    def test_late_forgejo_still_answers_when_mirrors_fail(self) -> None:
+        def late_forgejo(_channel: str) -> dict:
+            time.sleep(0.2)
             return _release("1.0.0.8", "Forgejo")
 
         lookup = lookup_latest_release(
             "dev",
             fetch_forgejo=late_forgejo,
-            fetch_mirrors=lambda _channel: _release("1.0.0.7", "mirror"),
+            fetch_mirrors=_fail("mirrors down"),
             fallback_delay=0.01,
         )
 
         self.assertEqual(lookup.release["source"], "Forgejo")
+
+    def test_silent_everything_is_an_error_after_the_deadlines(self) -> None:
+        released = threading.Event()
+        self.addCleanup(released.set)
+
+        def silent(_channel: str) -> dict:
+            released.wait(10.0)
+            raise RuntimeError("тайм-аут")
+
+        started = time.monotonic()
+        lookup = lookup_latest_release(
+            "dev",
+            fetch_forgejo=silent,
+            fetch_mirrors=silent,
+            fallback_delay=0.01,
+            forgejo_deadline=0.1,
+            mirrors_deadline=0.1,
+        )
+
+        self.assertFalse(lookup.ok)
+        self.assertEqual(lookup.error.count("нет ответа за отведённое время"), 2)
+        self.assertLess(time.monotonic() - started, 2.0)
 
 
 class MirrorReleaseTests(unittest.TestCase):

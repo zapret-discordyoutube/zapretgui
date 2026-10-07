@@ -11,7 +11,7 @@ runtime.
 import inspect
 import time
 import unittest
-from threading import Event
+from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -64,6 +64,53 @@ class SourceRowsTests(unittest.TestCase):
 
         self.assertTrue(rows["Primary"]["is_current"])
         self.assertEqual(rows["Primary"]["dev_version"], "21.1.5.45")
+
+    def test_current_mirror_is_marked_without_waiting_for_a_silent_later_one(self) -> None:
+        """Раньше отметка «активный» ждала ответа всех зеркал, включая мёртвое."""
+        silent_released = Event()
+        self.addCleanup(silent_released.set)
+        marked = Event()
+        silent = {**SERVER, "id": "silent", "name": "Silent"}
+
+        def fetch(server):
+            if server["id"] == "silent":
+                silent_released.wait(10)
+                raise MirrorReleaseError("нет ответа")
+            return VERSIONS, "HTTPS", "https://x", False, 0.02
+
+        def emit_row(name, status) -> None:
+            if name == "Primary" and status.get("is_current"):
+                marked.set()
+
+        def probe() -> None:
+            with (
+                patch("updater.release.forgejo.probe_forgejo", return_value=0.01),
+                patch("updater.release.mirrors.fetch_versions", side_effect=fetch),
+            ):
+                sources.probe_update_sources(language="ru", emit_row=emit_row, servers=[SERVER, silent], deadline=10)
+
+        thread = Thread(target=probe, daemon=True)
+        thread.start()
+        self.assertTrue(marked.wait(2.0))
+        silent_released.set()
+        thread.join(5)
+
+    def test_dead_first_mirror_passes_the_current_mark_to_the_next_one(self) -> None:
+        rows: list[tuple[str, dict]] = []
+        dead = {**SERVER, "id": "dead", "name": "Dead"}
+
+        def fetch(server):
+            if server["id"] == "dead":
+                raise MirrorReleaseError("нет ответа")
+            return VERSIONS, "HTTPS", "https://x", False, 0.02
+
+        with (
+            patch("updater.release.forgejo.probe_forgejo", return_value=0.01),
+            patch("updater.release.mirrors.fetch_versions", side_effect=fetch),
+        ):
+            sources.probe_update_sources(language="ru", emit_row=lambda *row: rows.append(row), servers=[dead, SERVER])
+
+        self.assertEqual([name for name, status in rows if status.get("is_current")], ["Primary"])
 
     def test_telegram_row_is_diagnostic_and_cannot_announce_an_update(self) -> None:
         rows: list[tuple[str, dict]] = []

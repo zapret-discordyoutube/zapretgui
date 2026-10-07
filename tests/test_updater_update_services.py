@@ -8,6 +8,7 @@ from __future__ import annotations
 закрывается всегда.
 """
 
+import threading
 import time
 import unittest
 from types import SimpleNamespace
@@ -151,6 +152,50 @@ class CheckFlowTests(unittest.TestCase):
         self.assertEqual(outcome.release["version"], "1.0.0.9")
         self.assertEqual(dpi.stops, [])
         telegram.assert_called_once()
+
+    def test_found_release_does_not_wait_for_a_silent_source_row(self) -> None:
+        """Раньше карточка показывала «Проверка…», пока не ответит мёртвое зеркало."""
+        table_released = threading.Event()
+        self.addCleanup(table_released.set)
+
+        def slow_table(**_kwargs) -> bool:
+            table_released.wait(10.0)
+            return True
+
+        started = time.monotonic()
+        outcome = run_update_check(
+            "dev",
+            language="ru",
+            emit_row=lambda *_row: None,
+            dpi=_Dpi().guard(),
+            lookup=lambda _channel: ReleaseLookup({"version": "1.0.0.9"}),
+            probe=slow_table,
+            probe_telegram=Mock(),
+        )
+
+        self.assertEqual(outcome.release["version"], "1.0.0.9")
+        self.assertLess(time.monotonic() - started, 2.0)
+
+    def test_failed_lookup_waits_for_the_table_before_touching_dpi(self) -> None:
+        """Повтор без DPI решается по таблице: её итог нельзя угадывать заранее."""
+        dpi = _Dpi()
+
+        def late_table(**_kwargs) -> bool:
+            time.sleep(0.2)
+            return True
+
+        outcome = run_update_check(
+            "dev",
+            language="ru",
+            emit_row=lambda *_row: None,
+            dpi=dpi.guard(),
+            lookup=lambda _channel: ReleaseLookup(None, "плохой выпуск"),
+            probe=late_table,
+            probe_telegram=Mock(),
+        )
+
+        self.assertEqual(outcome.error, "плохой выпуск")
+        self.assertEqual(dpi.stops, [])
 
     def test_unreachable_sources_retry_once_without_dpi_and_restore_it(self) -> None:
         dpi = _Dpi()
