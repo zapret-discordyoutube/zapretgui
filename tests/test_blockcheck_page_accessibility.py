@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from blockcheck.page_run_workflow import request_blockcheck_stop, reset_blockcheck_running_ui, start_blockcheck_page_run
-from blockcheck.ui.check_results import BlockcheckSitesTable, BlockcheckSummaryPanel, _service_details
+from blockcheck.ui.check_results import BlockcheckSummaryPanel
 from blockcheck.ui.page import BlockcheckPage
 
 
@@ -88,7 +88,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertIn("BlockCheck, Подбор стратегии, Проверка домена, DNS-серверы или DNS подмена", page._tabs_pivot.accessibleDescription())
         self.assertEqual(
             page._scope_combo.accessibleName(),
-            "Что проверить BlockCheck, выбрано: Все сайты",
+            "Что проверить BlockCheck, выбрано: Полная проверка (около минуты)",
         )
         self.assertEqual(page._start_btn.text(), "Проверить")
         self.assertEqual(page._start_btn.accessibleName(), "Запустить BlockCheck")
@@ -96,7 +96,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertFalse(page._report_btn.isEnabled())
         self.assertEqual(page._report_btn.accessibleName(), "Открыть подробный отчёт BlockCheck")
         self.assertEqual(page._prepare_support_btn.accessibleName(), "Подготовить обращение по BlockCheck")
-        self.assertEqual(page._sites_table.accessibleName(), "Результаты BlockCheck по сайтам: пока нет результатов")
+        self.assertEqual(page._result_cards.accessibleName(), "Результаты BlockCheck: пока нет результатов")
         self.assertEqual(page._summary_panel.level, "idle")
 
     def test_hidden_progress_bars_do_not_animate(self) -> None:
@@ -120,7 +120,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
 
         self.assertEqual(
             menu.view.item(0).data(Qt.ItemDataRole.AccessibleTextRole),
-            "Что проверить BlockCheck: Discord и YouTube, не выбран",
+            "Что проверить BlockCheck: Полная проверка (около минуты), выбран",
         )
 
     def test_cards_have_no_headers_to_save_space(self) -> None:
@@ -171,14 +171,15 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertTrue(page._footer_card.isHidden())
         page._switch_tab(0)
         self.assertFalse(page._footer_card.isHidden())
-        names = [page._sites_table.item(row, 0).text() for row in range(page._sites_table.rowCount())]
-        # Сначала сломанное; YouTube открывается — подмена DNS только в подробностях.
+        cards = {widget.card.title: widget.card for widget in page._result_cards.cards()}
+        names = list(cards)
+        # Сначала сломанное; YouTube открывается — подмена DNS только меткой.
         self.assertEqual(names[0], "X (Twitter)")
-        youtube_row = names.index("YouTube")
-        self.assertEqual(page._sites_table.item(youtube_row, 1).text(), "✓ Открывается")
-        self.assertIn("DNS подменён", page._sites_table.item(youtube_row, 2).text())
+        self.assertEqual(cards["YouTube"].status, "Открывается")
+        self.assertIn(("DNS подменён", "warn"), cards["YouTube"].chips)
         self.assertIn("Голосовые звонки (UDP)", names)
-        self.assertIn("Обрыв на 16–20 КБ", names)
+        # Ход проверки после итога убирается.
+        self.assertTrue(page._progress_card.isHidden())
 
     def test_stopped_run_does_not_leave_pending_summary(self) -> None:
         page = _make_page()
@@ -401,25 +402,6 @@ class BlockKindsOnScreenTests(unittest.TestCase):
         self.assertIsNone(group.pill)
         self.assertEqual(group.rows[0].text_label.text(), "X (Twitter) не открывается: соединение блокирует провайдер")
 
-    def test_table_names_the_kind_instead_of_plain_not_opening(self) -> None:
-        table = BlockcheckSitesTable()
-        self.addCleanup(table.deleteLater)
-        table.show_report(dict(_KINDS_REPORT))
-
-        words = {table.item(row, 0).text(): table.item(row, 1).text() for row in range(table.rowCount())}
-        self.assertEqual(words["Telegram"], "✗ По адресу (IP)")
-        self.assertEqual(words["X"], "✗ По имени (SNI)")
-        self.assertEqual(words["Spotify"], "✗ Обрыв после 16 КБ")
-        self.assertEqual(words["Discord"], "✓ Открывается")
-        self.assertEqual(words["Reddit"], "? Не удалось проверить")
-        # У каждого вида свой цвет слова — тот же, что у плитки.
-        colors = {
-            name: table.item(row, 1).foreground().color().name()
-            for row in range(table.rowCount())
-            if (name := table.item(row, 0).text()) in ("Telegram", "X", "Spotify")
-        }
-        self.assertEqual(len(set(colors.values())), 3)
-
 
 class HistoryCardTests(unittest.TestCase):
     @classmethod
@@ -481,17 +463,17 @@ class ScopeChoiceTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_full_check_is_the_third_choice_and_all_sites_stays_default(self) -> None:
+    def test_full_check_is_the_first_choice_and_the_default(self) -> None:
         page = _make_page()
         combo = page._scope_combo
 
-        self.assertEqual([combo.itemData(index) for index in range(combo.count())], ["main", "all", "full"])
-        self.assertEqual(page._current_scope(), "all")
-        combo.setCurrentIndex(2)
+        self.assertEqual([combo.itemData(index) for index in range(combo.count())], ["full", "all", "main"])
         self.assertEqual(page._current_scope(), "full")
         self.assertIn("Полная проверка", combo.currentText())
+        combo.setCurrentIndex(1)
+        self.assertEqual(page._current_scope(), "all")
         page.set_ui_language("en")
-        self.assertEqual(combo.itemText(2), "Full check (about a minute)")
+        self.assertEqual(combo.itemText(0), "Full check (about a minute)")
 
 
 class SummaryChangesTests(unittest.TestCase):
@@ -515,171 +497,6 @@ class SummaryChangesTests(unittest.TestCase):
         panel.show_report({"problems": [], "changes": ["снова открываются: Discord"], "previous_time": "x"})
         panel.set_pending()
         self.assertTrue(panel.changes_label.isHidden())
-
-
-class SitesTableTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.app = QApplication.instance() or QApplication([])
-
-    def test_table_grows_to_fit_all_rows(self) -> None:
-        """Строки «Звонки» и «Обрыв» не должны прятаться под прокруткой таблицы."""
-        table = BlockcheckSitesTable()
-        table.show_report(dict(_REPORT))
-
-        self.assertEqual(table.rowCount(), 4)
-        self.assertEqual(table.minimumHeight(), table.maximumHeight())
-        self.assertGreater(table.minimumHeight(), table.horizontalHeader().height())
-
-
-    def test_block_cause_is_named_in_details_and_explained_in_tooltip(self) -> None:
-        report = {
-            "services": [
-                {
-                    "key": "x",
-                    "label": "X (Twitter)",
-                    "level": "fail",
-                    "headline": "X (Twitter) не открывается: соединение блокирует провайдер",
-                    "targets": [
-                        {
-                            "host": "x.com",
-                            "purpose": "сайт",
-                            "short": "соединение сброшено — так режет DPI",
-                            "text": "соединение сброшено — так режет DPI (1.2.3.4)",
-                            "cause": "by_name",
-                            "cause_text": "Блокировка по имени сайта: с именем x.com соединение обрывается",
-                        }
-                    ],
-                }
-            ]
-        }
-        table = BlockcheckSitesTable()
-        table.show_report(report)
-
-        self.assertEqual(table.item(0, 2).text(), "соединение сброшено — так режет DPI · блокировка по имени сайта")
-        tooltip = _service_details(report["services"][0])[1]
-        self.assertIn("   Блокировка по имени сайта: с именем x.com соединение обрывается", tooltip)
-
-    def test_ipv6_gets_its_own_row(self) -> None:
-        cases = {
-            "broken": ("Не работает", "IPv6 настроен, но не работает"),
-            "absent": ("Нет в сети", "IPv6 в этой сети его нет"),
-            "ok": ("Работает", "IPv6 работает (ответ за 12 мс)"),
-        }
-        for state, (word, details) in cases.items():
-            with self.subTest(state=state):
-                table = BlockcheckSitesTable()
-                table.show_report({"services": [], "ipv6": {"state": state, "text": details[len("IPv6 "):]}})
-                shown = [table.item(0, column).text() for column in range(3)]
-                self.assertEqual(shown, ["IPv6", word, details])
-        table = BlockcheckSitesTable()
-        table.show_report({"services": [], "ipv6": {"state": "broken", "text": "настроен, но не работает"}})
-        self.assertIn("с проблемами 1", table.accessibleName())
-        table.show_report({"services": [], "ipv6": None})
-        self.assertEqual(table.rowCount(), 0)
-
-    def test_computer_state_gets_one_row_with_the_worst_problem_first(self) -> None:
-        def item(level, title, text):
-            return {"key": title, "title": title, "level": level, "text": text, "advice": ""}
-
-        healthy = [item("ok", "Права администратора", "есть"), item("info", "Антивирус", "работает Kaspersky")]
-        table = BlockcheckSitesTable()
-        table.show_report({"services": [], "system": healthy})
-        self.assertEqual([table.item(0, c).text() for c in range(3)], ["Компьютер", "В порядке", "проверено пунктов: 2"])
-
-        broken = healthy + [item("warn", "Системный прокси", "включён"), item("fail", "Служба фильтрации Windows (BFE)", "не работает")]
-        table.show_report({"services": [], "system": broken})
-        shown = [table.item(0, c).text() for c in range(3)]
-        self.assertEqual(shown[:2], ["Компьютер", "Мешает работе"])
-        self.assertEqual(shown[2], "Служба фильтрации Windows (BFE): не работает (и ещё 1)")
-        self.assertIn("с проблемами 1", table.accessibleName())
-
-        table.show_report({"services": [], "system": healthy + [item("warn", "Системный прокси", "включён")]})
-        self.assertEqual([table.item(0, c).text() for c in range(1, 3)], ["Есть замечания", "Системный прокси: включён"])
-
-        table.show_report({"services": [], "system": [item("unknown", "Часы компьютера", "проверить не удалось")]})
-        self.assertEqual(table.item(0, 1).text(), "Не проверено")
-
-        table.show_report({"services": [], "system": []})
-        self.assertEqual(table.rowCount(), 0)
-
-    def test_full_check_adds_rows_for_dns_servers_and_filter_place(self) -> None:
-        report = {
-            "services": [],
-            "dns_servers": {
-                "level": "fail",
-                "findings": [{"level": "fail", "text": "Обычные DNS-запросы перехватываются по дороге."}],
-                "text": "полная таблица серверов",
-            },
-            "filter": {
-                "host": "rutracker.org",
-                "address": "104.21.32.39",
-                "found": True,
-                "hop": 2,
-                "text": "Фильтр стоит между узлом 1 (10.0.0.1) и узлом 2 (10.0.0.2)",
-                "hops": [
-                    {"ttl": 1, "address": "10.0.0.1", "rtt_ms": 0.4},
-                    {"ttl": 2, "address": "10.0.0.2", "rtt_ms": 42.0},
-                    {"ttl": 3, "address": "", "rtt_ms": None},
-                ],
-            },
-        }
-        table = BlockcheckSitesTable()
-        table.show_report(report)
-        rows = [[table.item(row, column).text() for column in range(3)] for row in range(table.rowCount())]
-
-        self.assertEqual(rows[0], ["DNS-серверы", "Есть проблемы", "Обычные DNS-запросы перехватываются по дороге."])
-        self.assertEqual(rows[1][:2], ["Место фильтра", "Найдено"])
-        self.assertEqual(rows[1][2], "по сайту rutracker.org: фильтр стоит между узлом 1 (10.0.0.1) и узлом 2 (10.0.0.2)")
-        # Найденное место — не «проблема сайта»: строка не красится и в счёт проблем не идёт.
-        self.assertIn("с проблемами 1", table.accessibleName())
-
-        from blockcheck.ui.check_results import FILTER_MARK, _filter_tooltip
-
-        tooltip = _filter_tooltip(report["filter"]).splitlines()
-        self.assertEqual(tooltip[1], " 1  10.0.0.1  < 1 мс")
-        self.assertEqual(tooltip[2], f"    {FILTER_MARK}")
-        self.assertEqual(tooltip[3], " 2  10.0.0.2  42 мс")
-        self.assertEqual(tooltip[4], " 3  не ответил")
-
-    def test_filter_not_found_and_unknown_dns_level_are_worded_neutrally(self) -> None:
-        table = BlockcheckSitesTable()
-        table.show_report(
-            {
-                "services": [],
-                "dns_servers": {"level": "unknown", "findings": [], "text": ""},
-                "filter": {"host": "x.com", "found": False, "hop": None, "text": "На первых 20 узлах фильтр не найден", "hops": []},
-            }
-        )
-
-        self.assertEqual(table.item(0, 1).text(), "Не проверено")
-        self.assertEqual(table.item(1, 1).text(), "Не найдено")
-        self.assertNotIn("здесь стоит фильтр", _service_details({"targets": []})[1])
-
-    def test_blocked_quic_is_marked_for_open_site(self) -> None:
-        service = {
-            "targets": [
-                {
-                    "host": "www.youtube.com",
-                    "short": "открывается",
-                    "text": "открывается (20 мс)",
-                    "ok": True,
-                    "quic": "blocked_by_name",
-                    "quic_text": "блокируется по имени сайта",
-                }
-            ]
-        }
-        short, tooltip = _service_details(service)
-
-        self.assertEqual(short, "открывается · QUIC заблокирован")
-        self.assertIn("   QUIC (UDP 443): блокируется по имени сайта", tooltip)
-        working = {"targets": [{"host": "x", "short": "открывается", "text": "ок", "quic": "ok", "quic_text": "отвечает за 5 мс"}]}
-        self.assertEqual(_service_details(working)[0], "открывается")
-
-    def test_unknown_cause_code_is_not_shown_raw(self) -> None:
-        service = {"targets": [{"host": "x.com", "short": "не открывается", "text": "…", "cause": "новый_код"}]}
-
-        self.assertEqual(_service_details(service)[0], "не открывается")
 
 
 class _ButtonStub:

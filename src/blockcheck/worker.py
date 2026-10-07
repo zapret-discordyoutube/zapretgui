@@ -23,6 +23,8 @@ class BlockcheckWorker(QObject):
     # Итог проверки (словарь из run_blockcheck), None — если её остановили,
     # {"failed": True, "error": …} — если проверка упала.
     finished = pyqtSignal(object)
+    # Ход проверки: шаг, сколько готово и сколько всего (см. engine.PROGRESS_STEPS).
+    progress = pyqtSignal(str, int, int)
 
     def __init__(
         self,
@@ -82,6 +84,7 @@ class BlockcheckWorker(QObject):
                 should_stop=self.is_cancelled,
                 geo_service_for=self._geo_service_lookup(),
                 check_dns_servers=self._check_dns_servers,
+                progress=self.progress.emit,
             )
             if isinstance(report, dict) and report.get("stopped"):
                 report = None

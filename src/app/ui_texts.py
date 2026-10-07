@@ -538,16 +538,16 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "What to check:",
     },
     "page.blockcheck.scope_main": {
-        "ru": "Discord и YouTube",
-        "en": "Discord and YouTube",
+        "ru": "Только Discord и YouTube (быстро)",
+        "en": "Discord and YouTube only (quick)",
     },
     "page.blockcheck.scope_full": {
         "ru": "Полная проверка (около минуты)",
         "en": "Full check (about a minute)",
     },
     "page.blockcheck.scope_all": {
-        "ru": "Все сайты",
-        "en": "All sites",
+        "ru": "Только сайты (быстро)",
+        "en": "Sites only (quick)",
     },
     "page.blockcheck.report": {
         "ru": "Отчёт",
@@ -814,12 +814,12 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Stop",
     },
     "page.blockcheck.ready": {
-        "ru": "Проверяем так же, как браузер. Займёт 5–30 секунд",
-        "en": "Checked the way a browser opens sites. Takes 5–30 seconds",
+        "ru": "Сайты, хостинги, DNS, звонки и сам компьютер — около минуты",
+        "en": "Sites, hostings, DNS, calls and this computer — about a minute",
     },
     "page.blockcheck.running": {
-        "ru": "Проверяем… обычно это 5–30 секунд",
-        "en": "Checking… usually 5–30 seconds",
+        "ru": "Проверяем… ход виден ниже",
+        "en": "Checking… progress is shown below",
     },
     "page.blockcheck.stopping": {
         "ru": "Останавливаем…",

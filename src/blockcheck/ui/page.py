@@ -19,7 +19,8 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QHBoxLayout, QWidget
 
 import blockcheck.page_runtime as blockcheck_page_runtime
-from blockcheck.ui.check_results import BlockcheckHistoryList, BlockcheckSitesTable, BlockcheckSummaryPanel
+from blockcheck.ui.check_results import BlockcheckHistoryList, BlockcheckSummaryPanel
+from blockcheck.ui.result_cards import ProgressSteps, ResultCardsView, ResultDetailView
 from blockcheck.ui.domain_chip import DomainChip
 from blockcheck.ui.domains_build import build_blockcheck_domains_ui
 from blockcheck.ui.helpers import (
@@ -158,6 +159,7 @@ class BlockcheckPage(BasePage):
         self._support_footer_available = False
         self._run_log_file: str | None = None
         self._tab_widgets: list[QWidget] = []
+        self._detail_view: ResultDetailView | None = None
         self._strategy_tab_page = None
         self._domain_lookup_tab_page = None
         self._dns_servers_tab_page = None
@@ -312,24 +314,26 @@ class BlockcheckPage(BasePage):
         self._scope_combo = ComboBox()
         # userData — именованным: второй позиционный аргумент у qfluentwidgets —
         # значок, и значение терялось (старый выбор режима всегда давал «Полную»).
-        self._scope_combo.addItem(
-            tr_catalog("page.blockcheck.scope_main", default="Discord и YouTube"), userData=SCOPE_MAIN
-        )
-        self._scope_combo.addItem(
-            tr_catalog("page.blockcheck.scope_all", default="Все сайты"), userData=SCOPE_ALL
-        )
+        # Полная проверка стоит первой и выбрана при каждом открытии: она собирает
+        # больше всего сведений. Остальные режимы — быстрые, когда нужен один ответ.
         self._scope_combo.addItem(
             tr_catalog("page.blockcheck.scope_full", default="Полная проверка (около минуты)"), userData=SCOPE_FULL
         )
-        self._scope_combo.setCurrentIndex(1)
-        self._scope_combo.setMinimumWidth(260)
+        self._scope_combo.addItem(
+            tr_catalog("page.blockcheck.scope_all", default="Только сайты (быстро)"), userData=SCOPE_ALL
+        )
+        self._scope_combo.addItem(
+            tr_catalog("page.blockcheck.scope_main", default="Только Discord и YouTube (быстро)"), userData=SCOPE_MAIN
+        )
+        self._scope_combo.setCurrentIndex(0)
+        self._scope_combo.setMinimumWidth(320)
         self._update_scope_combo_accessibility()
         self._scope_combo.currentIndexChanged.connect(self._update_scope_combo_accessibility)
         row.addWidget(self._scope_combo)
         row.addSpacing(8)
 
         self._status_label = CaptionLabel(
-            tr_catalog("page.blockcheck.ready", default="Проверяем так же, как браузер. Займёт 5–30 секунд")
+            tr_catalog("page.blockcheck.ready", default="Сайты, хостинги, DNS, звонки и сам компьютер — около минуты")
         )
         self._set_status_text(self._status_label.text())
         row.addWidget(self._status_label, 1)
@@ -402,11 +406,20 @@ class BlockcheckPage(BasePage):
         self._summary_panel = BlockcheckSummaryPanel(on_action=self._on_problem_action, parent=self.content)
         self._add_tab_widget(self._summary_panel)
 
+        # Ход проверки по шагам: виден, только пока она идёт.
+        self._progress_card = SettingsCard()
+        self._progress_steps = ProgressSteps()
+        self._progress_card.add_widget(self._progress_steps)
+        self._add_tab_widget(self._progress_card)
+        self._progress_card.setVisible(False)
+
+        # Карточки: по одной на сайт и на каждую проверку. Нажатие открывает подробности.
         self._results_card = SettingsCard()
-        self._sites_table = BlockcheckSitesTable()
-        self._results_card.add_widget(self._sites_table)
+        self._result_cards = ResultCardsView()
+        self._result_cards.opened.connect(self._open_card_detail)
+        self._results_card.add_widget(self._result_cards)
         self._add_tab_widget(self._results_card)
-        # Пустая таблица с одной шапкой до первой проверки — лишний мусор.
+        # До первой проверки показывать нечего.
         self._results_card.setVisible(False)
 
         # ── Прошлые проверки ──
@@ -660,6 +673,8 @@ class BlockcheckPage(BasePage):
             widget.setVisible(show_blockcheck)
         if self._results_card is not None and self._last_report is None:
             self._results_card.setVisible(False)
+        if not self._run_runtime.is_running():
+            self._progress_card.setVisible(False)
         if not self._history_list.lines():
             self._history_card.setVisible(False)
         if not self._support_footer_available:
@@ -709,13 +724,18 @@ class BlockcheckPage(BasePage):
         self._last_report = None
         self._report_lines = []
         self._summary_panel.set_pending()
-        self._sites_table.clear_rows()
+        self._result_cards.clear()
         self._results_card.setVisible(False)
+        scope = self._current_scope()
+        self._progress_steps.start(
+            ("sites", "hostings", "voice", "ipv6", "system") + (("dns_servers", "filter") if scope == SCOPE_FULL else ())
+        )
+        self._progress_card.setVisible(True)
         self._report_btn.setEnabled(False)
         self._set_support_footer_available(False)
         start_blockcheck_page_run(
             blockcheck_feature=self._blockcheck,
-            scope=self._current_scope(),
+            scope=scope,
             user_domains=self._get_extra_domains(),
             parent=self,
             run_runtime=self._run_runtime,
@@ -729,8 +749,14 @@ class BlockcheckPage(BasePage):
             on_log=self._on_log,
             on_run_log_started=self._on_run_log_started,
             on_finished=self._on_finished,
+            on_progress=self._on_progress,
         )
         self._set_status_text(self._status_label.text())
+
+    def _on_progress(self, step: str, done: int, total: int) -> None:
+        if self._cleanup_in_progress:
+            return
+        self._progress_steps.set_progress(step, done, total)
 
     def _on_log(self, message: str):
         if self._cleanup_in_progress:
@@ -741,6 +767,7 @@ class BlockcheckPage(BasePage):
         if self._cleanup_in_progress:
             return
         self._reset_ui()
+        self._progress_card.setVisible(False)
         self._report_btn.setEnabled(bool(self._report_lines))
         self._set_support_footer_available(True)
         if isinstance(report, dict) and report.get("failed"):
@@ -766,17 +793,42 @@ class BlockcheckPage(BasePage):
         if "history" in report:
             self._show_history(report["history"])
         self._summary_panel.show_report(report)
-        self._sites_table.show_report(report)
         self._results_card.setVisible(True)
-        # Список сайтов выплывает следом за итогом.
-        from ui.widgets.stagger_float_in import float_in
-
-        float_in(self._results_card, delay_ms=250)
+        # Карточки выплывают по очереди следом за итогом.
+        self._result_cards.show_report(report)
         elapsed = float(report.get("elapsed") or 0.0)
         self._set_status_text(
             tr_catalog("page.blockcheck.done", default="Готово") + f" за {elapsed:.0f} с — итог ниже"
         )
         self._set_support_status("")
+
+    def _open_card_detail(self, card) -> None:
+        """Нажатие на карточку: подробности этой проверки занимают всю страницу."""
+        if self._detail_view is None:
+            self._detail_view = ResultDetailView(self.content)
+            self._detail_view.closed.connect(self._close_card_detail)
+            self._detail_view.setVisible(False)
+            self.add_widget(self._detail_view)
+        for widget in self._tab_widgets:
+            widget.setVisible(False)
+        self._tabs_pivot.setVisible(False)
+        self._detail_view.show_card(card)
+        self._detail_view.setVisible(True)
+        self._detail_view.setFocus()
+        self._scroll_to_top()
+
+    def _close_card_detail(self) -> None:
+        if self._detail_view is None or self._detail_view.isHidden():
+            return
+        self._detail_view.setVisible(False)
+        self._tabs_pivot.setVisible(True)
+        self._switch_tab(self._active_tab_index)
+
+    def _scroll_to_top(self) -> None:
+        try:
+            self.verticalScrollBar().setValue(0)
+        except Exception:
+            pass
 
     def _open_report(self) -> None:
         show_report_dialog(self.window(), "\n".join(self._report_lines))
@@ -1381,11 +1433,10 @@ class BlockcheckPage(BasePage):
             self._update_tabs_accessibility()
             # Карточки без шапок: set_title не вызывается, он добавил бы шапку обратно.
             self._scope_label.setText(_tr("page.blockcheck.scope", "Что проверить:"))
-            self._scope_combo.setItemText(0, _tr("page.blockcheck.scope_main", "Discord и YouTube"))
-            self._scope_combo.setItemText(1, _tr("page.blockcheck.scope_all", "Все сайты"))
-            self._scope_combo.setItemText(
-                2, _tr("page.blockcheck.scope_full", "Полная проверка (около минуты)")
-            )
+            # Порядок тот же, что при создании списка: полная проверка первая.
+            self._scope_combo.setItemText(0, _tr("page.blockcheck.scope_full", "Полная проверка (около минуты)"))
+            self._scope_combo.setItemText(1, _tr("page.blockcheck.scope_all", "Только сайты (быстро)"))
+            self._scope_combo.setItemText(2, _tr("page.blockcheck.scope_main", "Только Discord и YouTube (быстро)"))
             self._update_scope_combo_accessibility()
             if self._domains_caption is not None:
                 self._domains_caption.setText(_tr("page.blockcheck.custom_domains", "Проверить ещё и свои домены:"))

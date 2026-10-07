@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Future
@@ -40,12 +41,15 @@ __all__ = [
     "FreezeState",
     "check_freeze",
     "classify_download",
+    "every_freeze_target",
     "pick_freeze_targets",
     "summarize_freeze",
 ]
 
 READ_LIMIT = 32 * 1024
 TARGETS_COUNT = 6
+# Сколько серверов полной проверки опрашивать одновременно.
+EVERY_AT_ONCE = 12
 # Сколько адресов одного провайдера пробовать, если первый не дал ответа.
 CANDIDATES_PER_PROVIDER = 3
 # Запасной адрес берётся, только пока с начала проверки прошло меньше этого:
@@ -74,6 +78,11 @@ class FreezeServer:
     text: str
     # В какую сторону шли данные, когда соединение замерло.
     direction: str = DIRECTION_DOWNLOAD
+    provider: str = ""
+    host: str = ""
+    # Метка сервера в списке: страна и номер («DE.AWS-01»).
+    ident: str = ""
+    seconds: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +115,15 @@ def pick_freeze_targets(
     names = [name for name in _PREFERRED_PROVIDERS if name in by_provider]
     names += [name for name in by_provider if name not in _PREFERRED_PROVIDERS]
     return [(name, by_provider[name]) for name in names[: max(0, int(count))]]
+
+
+def every_freeze_target(targets) -> list[tuple[str, list[dict]]]:
+    """Все HTTPS-адреса списка, каждый отдельной проверкой: так идёт полная проверка."""
+    return [
+        (str(item.get("provider") or ""), [item])
+        for item in targets
+        if str(item.get("url") or "").startswith("https://")
+    ]
 
 
 def classify_download(result: ProbeResult | None) -> tuple[FreezeState, str]:
@@ -148,13 +166,16 @@ def _check_provider(
     Если загрузка прошла без обрыва, на том же сервере проверяется отправка:
     ограничение работает в обе стороны.
     """
+    started = time.monotonic()
     host = ""
+    ident = ""
     state, text = FreezeState.UNKNOWN, "нет адресов для проверки"
     tried = 0
     for item in candidates:
         if tried and not fallback_allowed():
             break
         host, path = _split_url(str(item.get("url") or ""))
+        ident = str(item.get("id") or "")
         tried += 1
         state, text = classify_download(download(host, path))
         if state != FreezeState.UNKNOWN:
@@ -162,13 +183,23 @@ def _check_provider(
     if state == FreezeState.UNKNOWN and tried > 1:
         text = f"{text} (запасные адреса тоже не помогли, всего адресов: {tried})"
     name = f"{provider} ({host})" if host else provider
+    direction = DIRECTION_DOWNLOAD
     if state == FreezeState.OK and upload is not None:
         verdict = upload(host, path)
         if verdict is not None and verdict.code in (UPLOAD_BULK_STALLS, UPLOAD_PACKET_LIMIT):
-            return FreezeServer(name, FreezeState.FREEZE, f"загрузка проходит, но {verdict.text}", DIRECTION_UPLOAD)
-        if verdict is not None and verdict.code == UPLOAD_OK:
+            state, text, direction = FreezeState.FREEZE, f"загрузка проходит, но {verdict.text}", DIRECTION_UPLOAD
+        elif verdict is not None and verdict.code == UPLOAD_OK:
             text = f"{text}; отправка тоже проходит"
-    return FreezeServer(name=name, state=state, text=text)
+    return FreezeServer(
+        name=name,
+        state=state,
+        text=text,
+        direction=direction,
+        provider=provider,
+        host=host,
+        ident=ident,
+        seconds=time.monotonic() - started,
+    )
 
 
 def check_freeze(
@@ -178,8 +209,15 @@ def check_freeze(
     upload: Callable[[str, str], UploadVerdict | None] | None = None,
     *,
     budget: float = FALLBACK_BUDGET,
+    every: bool = False,
+    on_server: Callable[[FreezeServer, int, int], None] | None = None,
 ) -> tuple[FreezeServer, ...]:
     """Провайдеры проверяются параллельно, адреса одного провайдера — по очереди.
+
+    ``every`` — полная проверка: каждый адрес списка проверяется сам по себе,
+    без запасных, не больше ``EVERY_AT_ONCE`` одновременно (десятки соединений
+    разом сами дали бы ложные обрывы). ``on_server(сервер, готово, всего)``
+    зовётся по мере готовности — для хода проверки на экране.
 
     ``download(host, path)`` и ``upload(host, path)`` сами выбирают IP. Запасной
     адрес пробуется, только пока не вышел ``budget`` секунд с начала проверки.
@@ -192,16 +230,33 @@ def check_freeze(
     def _fallback_allowed() -> bool:
         return time.monotonic() - started < budget
 
-    planned = [
-        (provider, submit(_check_provider, provider, candidates, download, _fallback_allowed, upload))
-        for provider, candidates in pick_freeze_targets(TCP_16_20_TARGETS)
-    ]
+    picked = every_freeze_target(TCP_16_20_TARGETS) if every else pick_freeze_targets(TCP_16_20_TARGETS)
+    gate = threading.BoundedSemaphore(EVERY_AT_ONCE)
+    lock = threading.Lock()
+    done = [0]
+
+    def _one(provider: str, candidates: list[dict]) -> FreezeServer:
+        with gate:
+            server = _check_provider(provider, candidates, download, _fallback_allowed, upload)
+        if on_server is not None:
+            with lock:
+                done[0] += 1
+                ready = done[0]
+            try:
+                on_server(server, ready, len(picked))
+            except Exception:
+                pass
+        return server
+
+    planned = [(provider, submit(_one, provider, candidates)) for provider, candidates in picked]
     servers: list[FreezeServer] = []
     for provider, future in planned:
         try:
             servers.append(wait(future))
         except Exception as exc:
-            servers.append(FreezeServer(name=provider, state=FreezeState.UNKNOWN, text=f"ошибка проверки ({exc})"))
+            servers.append(
+                FreezeServer(name=provider, state=FreezeState.UNKNOWN, text=f"ошибка проверки ({exc})", provider=provider)
+            )
     return tuple(servers)
 
 

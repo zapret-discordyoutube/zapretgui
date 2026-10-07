@@ -8,8 +8,8 @@
 
 Проблемы собраны в группы по виду блокировки: у группы цветная метка, одно
 пояснение простыми словами и общий совет, а внутри — строки сайтов с кнопкой
-(«Подобрать стратегию»). Список сайтов — одна строка на сервис: открывается ли
-он и чем именно ему мешают.
+(«Подобрать стратегию»). Карточки сайтов и остальных проверок лежат отдельно —
+в ``result_cards``.
 """
 
 from __future__ import annotations
@@ -17,16 +17,14 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QHBoxLayout, QHeaderView, QLabel, QSizePolicy, QTableWidgetItem, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SimpleCardWidget, StrongBodyLabel, TableWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SimpleCardWidget, StrongBodyLabel
 
 from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_groups
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
-from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips, set_fluent_item_tooltip
 from ui.widgets.fun import FunTicker, Mascot, burst_confetti
 from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 from ui.widgets.stagger_float_in import float_in
@@ -42,35 +40,6 @@ _LEVEL_ICONS = {
     "pending": ("fa5s.hourglass-half", "muted"),
     "idle": ("fa5s.stethoscope", "muted"),
 }
-_RESULT_WORDS = {
-    "ok": "✓ Открывается",
-    "warn": "⚠ Есть проблемы",
-    "fail": "✗ Не открывается",
-    "unknown": "? Не удалось проверить",
-}
-_SECTION_WORDS = {
-    "voice": {
-        "ok": "✓ Работают",
-        "warn": "⚠ С перебоями",
-        "fail": "✗ Не работают",
-        "unknown": "? Не удалось проверить",
-    },
-    "freeze": {
-        "ok": "✓ Обрыва нет",
-        "warn": "✗ Обрывается",
-        "fail": "✗ Обрывается",
-        "unknown": "? Не удалось проверить",
-    },
-}
-# Сервер, который не удалось проверить, — «?», а не «✗»: это не «не работает».
-_ITEM_MARKS = {"ok": "✓", "fail": "✗", "freeze": "✗", "unknown": "?"}
-
-
-def _item_mark(item: dict) -> str:
-    state = str(item.get("state") or ("ok" if item.get("ok") else "fail"))
-    return _ITEM_MARKS.get(state, "?")
-
-
 _ACTION_TEXT = {
     "strategy": "Подобрать стратегию",
     "strategy_voice": "Подобрать стратегию для звонков",
@@ -453,126 +422,6 @@ def _environment_text(report: dict) -> str:
     return " · ".join(parts)
 
 
-def _target_mark(item: dict) -> str:
-    """✓ открывается, ? проверка не дала ответа, ✗ не открывается."""
-    if item.get("ok"):
-        return "✓"
-    return "?" if str(item.get("state") or "") == "unknown" else "✗"
-
-
-_DNS_SERVERS_WORDS = {"ok": "В порядке", "warn": "Есть замечания", "fail": "Есть проблемы"}
-FILTER_MARK = "── здесь стоит фильтр ──"
-
-
-def _filter_tooltip(place: dict) -> str:
-    """Таблица узлов по дороге с отметкой места фильтра."""
-    lines = [f"{place.get('host', '')} ({place.get('address', '')}): {place.get('text', '')}"]
-    hop = place.get("hop") if place.get("found") else None
-    for item in place.get("hops") or ():
-        if item.get("ttl") == hop:
-            lines.append(f"    {FILTER_MARK}")
-        rtt = item.get("rtt_ms")
-        time_text = "" if rtt is None else ("< 1 мс" if rtt < 1 else f"{round(rtt)} мс")
-        lines.append(f"{item.get('ttl', ''):>2}  {item.get('address') or 'не ответил'}  {time_text}".rstrip())
-    return "\n".join(lines)
-
-
-_SYSTEM_MARKS = {"ok": "✓", "info": "·", "warn": "!", "fail": "✗", "unknown": "?"}
-
-
-def _system_row(items: list[dict]) -> tuple[str, str, str, str]:
-    """Одна строка о состоянии компьютера: (уровень, слово результата, подробности, подсказка)."""
-    failed = [item for item in items if item.get("level") == "fail"]
-    warned = [item for item in items if item.get("level") == "warn"]
-    tooltip = "\n".join(
-        f"{_SYSTEM_MARKS.get(str(item.get('level')), '?')} {item.get('title', '')}: {item.get('text', '')}"
-        for item in items
-    )
-    if failed or warned:
-        shown = failed or warned
-        details = f"{shown[0].get('title', '')}: {shown[0].get('text', '')}"
-        rest = len(failed) + len(warned) - 1
-        if rest:
-            details = f"{details} (и ещё {rest})"
-        return ("fail", "Мешает работе", details, tooltip) if failed else ("warn", "Есть замечания", details, tooltip)
-    if items and all(item.get("level") == "unknown" for item in items):
-        return "unknown", "Не проверено", "состояние системы узнать не удалось", tooltip
-    return "ok", "В порядке", f"проверено пунктов: {len(items)}", tooltip
-
-
-# Состояние IPv6 → (уровень строки, слово результата). «Нет в сети» — норма,
-# поэтому зелёным или красным она не красится.
-_IPV6_ROW = {
-    "ok": ("ok", "Работает"),
-    "absent": ("unknown", "Нет в сети"),
-    "broken": ("warn", "Не работает"),
-    "unknown": ("unknown", "Не проверено"),
-}
-
-# Как блокируют — коротко для ячейки; полный текст причины идёт в подсказку строки.
-_CAUSE_WORDS = {
-    "by_name": "блокировка по имени сайта",
-    "by_address": "закрыт адрес или его сеть",
-    "stub_page": "страница провайдера о блокировке",
-    "address_closed": "адрес закрыт для соединений",
-    "address_silent": "адрес не отвечает",
-}
-
-
-def _service_details(service: dict) -> tuple[str, str]:
-    """(коротко для ячейки, подробно для подсказки)."""
-    targets = list(service.get("targets") or ())
-    if len(targets) > 1:
-        short = " · ".join(f"{_target_mark(item)} {item.get('purpose', '')}" for item in targets)
-    elif targets:
-        short = str(targets[0].get("short") or "")
-    else:
-        short = ""
-    causes = list(dict.fromkeys(_CAUSE_WORDS[item["cause"]] for item in targets if item.get("cause") in _CAUSE_WORDS))
-    if causes:
-        short = f"{short} · {', '.join(causes)}" if short else ", ".join(causes)
-    if any(item.get("quic") == "blocked_by_name" for item in targets):
-        short = f"{short} · QUIC заблокирован" if short else "QUIC заблокирован"
-    if service.get("dns_note"):
-        short = f"{short} · DNS подменён" if short else "DNS подменён"
-    lines = []
-    for item in targets:
-        lines.append(f"{item.get('host', '')}: {item.get('text', '')}")
-        if item.get("cause_text"):
-            lines.append(f"   {item['cause_text']}")
-        if item.get("quic_text"):
-            lines.append(f"   QUIC (UDP 443): {item['quic_text']}")
-    tooltip = "\n".join(lines)
-    headline = str(service.get("headline") or "")
-    if headline:
-        tooltip = f"{headline}\n\n{tooltip}" if tooltip else headline
-    return short, tooltip
-
-
-def _row_level(service: dict) -> str:
-    """Уровень для строки списка. Подмена DNS при открывающемся сайте — не «проблема
-    сайта»: о ней одна общая строка в итоге, а здесь — пометка в подробностях."""
-    level = str(service.get("level") or "unknown")
-    targets = list(service.get("targets") or ())
-    if level == "warn" and targets and all(item.get("ok") for item in targets):
-        return "ok"
-    return level
-
-
-def _row_kind(service: dict, level: str) -> str:
-    """Вид блокировки для строки сайта. Пусто — сайт открывается или вид неизвестен."""
-    kind = str(service.get("kind") or "")
-    return kind if level in ("fail", "warn") and kind in KINDS and kind != KIND_OTHER else ""
-
-
-def _result_word(level: str, kind: str) -> str:
-    """«✗ По имени (SNI)» вместо общего «✗ Не открывается», когда вид блокировки известен."""
-    if not kind:
-        return _RESULT_WORDS.get(level, "")
-    short = kind_info(kind).short
-    return f"{'✗' if level == 'fail' else '⚠'} {short[:1].upper()}{short[1:]}"
-
-
 HISTORY_SHOWN = 6
 _HISTORY_MARKS = {"ok": "✓", "warn": "!", "fail": "✗", "unknown": "?"}
 
@@ -633,141 +482,3 @@ class BlockcheckHistoryList(_HeightKeeper, QWidget):
         for label, (level, _text) in zip(self._labels, self._lines):
             color = tone_color(_level_tone(level), tokens)
             label.setStyleSheet(f"color: {color};" if color else "")
-
-
-class BlockcheckSitesTable(TableWidget):
-    """Одна строка на сервис: название, открывается ли, что именно не так."""
-
-    COLUMNS = ("Сайт", "Результат", "Подробности")
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setColumnCount(len(self.COLUMNS))
-        self.setHorizontalHeaderLabels(list(self.COLUMNS))
-        self.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        self.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
-        self.verticalHeader().setVisible(False)
-        self.setWordWrap(False)
-        # Высота — ровно по строкам (см. _fit_height): таблица не растягивает карточку.
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        header = self.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        set_control_accessibility(
-            self,
-            name="Результаты BlockCheck по сайтам",
-            description="Для каждого сайта: открывается ли он и что именно не так. Подробности — в подсказке строки.",
-        )
-        set_state_text(self, "Результаты BlockCheck по сайтам: пока нет результатов")
-        install_fluent_item_tooltips(self)
-        self._levels: list[str] = []
-        # Вид блокировки строки: им красится слово результата (тот же цвет, что у плитки).
-        self._kinds: list[str] = []
-        self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
-
-    def clear_rows(self) -> None:
-        self.setRowCount(0)
-        self._levels = []
-        self._kinds = []
-        self.setMinimumHeight(0)
-        self.setMaximumHeight(16777215)
-        set_state_text(self, "Результаты BlockCheck по сайтам: пока нет результатов")
-
-    def _add_row(
-        self, name: str, level: str, result_text: str, details: str, tooltip: str, kind: str = ""
-    ) -> None:
-        row = self.rowCount()
-        self.insertRow(row)
-        for column, text in enumerate((name, result_text, details)):
-            item = QTableWidgetItem(text)
-            set_fluent_item_tooltip(item, tooltip or details)
-            self.setItem(row, column, item)
-        self._levels.append(level)
-        self._kinds.append(kind)
-
-    def show_report(self, report: dict) -> None:
-        self.clear_rows()
-        services = list(report.get("services") or ())
-        # Сначала то, что сломано: пользователь ищет глазами именно это.
-        order = {"fail": 0, "warn": 1, "unknown": 2, "ok": 3}
-        for service in sorted(services, key=lambda item: order.get(_row_level(item), 9)):
-            level = _row_level(service)
-            short, tooltip = _service_details(service)
-            name = str(service.get("label") or "")
-            if service.get("control"):
-                name = f"{name} (контрольный)"
-            kind = _row_kind(service, level)
-            self._add_row(name, level, _result_word(level, kind), short, tooltip, kind)
-        for key, title in (("freeze", "Обрыв на 16–20 КБ"), ("voice", "Голосовые звонки (UDP)")):
-            section = report.get(key)
-            if not section:
-                continue
-            level = str(section.get("level") or "unknown")
-            tooltip = "\n".join(
-                f"{_item_mark(item)} {item.get('name', '')}: {item.get('text', '')}"
-                for item in section.get("items") or ()
-            )
-            headline = str(section.get("headline") or "")
-            # «Голосовые звонки: отвечают 1 из 2…» — название уже в первой колонке.
-            if headline.startswith("Голосовые звонки: "):
-                headline = headline[len("Голосовые звонки: "):]
-            self._add_row(title, level, _SECTION_WORDS[key].get(level, ""), headline, tooltip)
-        ipv6 = report.get("ipv6")
-        if ipv6:
-            level, word = _IPV6_ROW.get(str(ipv6.get("state") or ""), ("unknown", "Не проверено"))
-            text = f"IPv6 {ipv6.get('text', '')}".strip()
-            self._add_row("IPv6", level, word, text, text)
-        dns_servers = report.get("dns_servers")
-        if dns_servers:
-            level = str(dns_servers.get("level") or "unknown")
-            findings = list(dns_servers.get("findings") or ())
-            # Первой показывается самая важная находка: движок отдаёт их по важности.
-            details = str(findings[0].get("text") or "") if findings else ""
-            self._add_row(
-                "DNS-серверы",
-                level if level in ("ok", "warn", "fail") else "unknown",
-                _DNS_SERVERS_WORDS.get(level, "Не проверено"),
-                details,
-                str(dns_servers.get("text") or details),
-            )
-        filter_place = report.get("filter")
-        if filter_place:
-            text = str(filter_place.get("text") or "")
-            self._add_row(
-                "Место фильтра",
-                "unknown",
-                "Найдено" if filter_place.get("found") else "Не найдено",
-                f"по сайту {filter_place.get('host', '')}: {text[:1].lower()}{text[1:]}",
-                _filter_tooltip(filter_place),
-            )
-        system = list(report.get("system") or ())
-        if system:
-            level, word, details, tooltip = _system_row(system)
-            self._add_row("Компьютер", level, word, details, tooltip)
-        self._apply_theme_refresh()
-        self._fit_height()
-        broken = sum(1 for level in self._levels if level in ("fail", "warn"))
-        set_state_text(
-            self,
-            f"Результаты BlockCheck по сайтам: {self.rowCount()} строк, с проблемами {broken}",
-        )
-
-    def _fit_height(self) -> None:
-        """Таблица во всю высоту: строки «Звонки» и «Обрыв 16 КБ» не прячутся под прокруткой."""
-        height = self.horizontalHeader().height() + 2 * self.frameWidth() + 4
-        for row in range(self.rowCount()):
-            height += self.rowHeight(row)
-        self.setMinimumHeight(height)
-        self.setMaximumHeight(height)
-
-    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
-        _ = force
-        for row, level in enumerate(self._levels):
-            item = self.item(row, 1)
-            if item is None:
-                continue
-            kind = self._kinds[row] if row < len(self._kinds) else ""
-            color = kind_color(kind, tokens) if kind else tone_color(_level_tone(level), tokens)
-            if color:
-                item.setForeground(QColor(color))

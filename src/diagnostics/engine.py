@@ -79,6 +79,7 @@ from utils.windows_dns_query import (
 
 __all__ = [
     "SCOPE_ALL",
+    "PROGRESS_STEPS",
     "SCOPE_FULL",
     "SCOPE_MAIN",
     "SERVICES",
@@ -172,6 +173,15 @@ SCOPE_MAIN = "main"
 SCOPE_ALL = "all"
 # Всё, что в «Все сайты», плюс DNS-серверы и поиск места фильтра.
 SCOPE_FULL = "full"
+# Шаги хода проверки: что и в каком порядке показывает экран, пока она идёт.
+STEP_SITES = "sites"
+STEP_HOSTINGS = "hostings"
+STEP_VOICE = "voice"
+STEP_IPV6 = "ipv6"
+STEP_SYSTEM = "system"
+STEP_DNS_SERVERS = "dns_servers"
+STEP_FILTER = "filter"
+PROGRESS_STEPS = (STEP_SITES, STEP_HOSTINGS, STEP_VOICE, STEP_IPV6, STEP_SYSTEM, STEP_DNS_SERVERS, STEP_FILTER)
 _SCOPE_TITLES = {SCOPE_MAIN: "Discord и YouTube", SCOPE_ALL: "Все сайты", SCOPE_FULL: "Полная проверка"}
 
 # «Discord и YouTube» — то, ради чего Zapret ставят чаще всего.
@@ -871,8 +881,26 @@ def _run_probes(
     *,
     full: bool,
     emit: Emit,
+    on_done: Callable[[int, int], None] | None = None,
 ) -> dict[str, list[_Probe]]:
-    """Запускает все цели сразу и печатает их блоки по порядку."""
+    """Запускает все цели сразу и печатает их блоки по порядку.
+
+    ``on_done(готово, всего)`` зовётся после каждой проверенной цели.
+    """
+    total = sum(len(service.targets) for service in services.values())
+    lock = threading.Lock()
+    done = [0]
+
+    def _probe(*args, **kwargs) -> _Probe:
+        try:
+            return _probe_target(*args, **kwargs)
+        finally:
+            if on_done is not None:
+                with lock:
+                    done[0] += 1
+                    ready = done[0]
+                on_done(ready, total)
+
     planned: list[tuple[str, Target, Future]] = []
     for key, service in services.items():
         for target in service.targets:
@@ -881,7 +909,7 @@ def _run_probes(
             # Объём по одному соединению — это десятки запросов подряд: контрольные
             # сайты ими не нагружаем, их всё равно не блокируют.
             volume = full and not service.control
-            planned.append((key, target, run.submit(_probe_target, run, target, key, full=full, volume=volume)))
+            planned.append((key, target, run.submit(_probe, run, target, key, full=full, volume=volume)))
 
     collected: dict[str, list[_Probe]] = {key: [] for key in services}
     current_service = ""
@@ -1416,8 +1444,12 @@ def run_blockcheck(
     should_stop: ShouldStop | None = None,
     geo_service_for: Callable[[str], str] | None = None,
     check_dns_servers: Callable[..., dict] | None = None,
+    progress: Callable[[str, int, int], None] | None = None,
 ) -> dict:
     """Проверка BlockCheck. Печатает отчёт через ``emit`` и возвращает итог для экрана.
+
+    ``progress(шаг, готово, всего)`` — ход проверки для экрана; шаги перечислены
+    в ``PROGRESS_STEPS``. Зовётся из рабочих потоков.
 
     ``geo_service_for`` — поиск «адрес → сервис» по гео-сайтам каталога hosts:
     таким сайтам советуется hosts или DNS, а не подбор стратегии.
@@ -1432,10 +1464,20 @@ def run_blockcheck(
         scope = SCOPE_MAIN
     full = scope == SCOPE_FULL
     services = build_services(scope, user_domains)
+
+    def step(name: str, done: int = 1, total: int = 1) -> None:
+        if progress is None:
+            return
+        try:
+            progress(name, done, total)
+        except Exception:
+            pass
+
     targets_count = sum(len(service.targets) for service in services.values())
     run = _Run(
         should_stop,
-        workers=targets_count * _WORKERS_PER_TARGET + 40,
+        # Полная проверка держит по потоку на каждый хостинг из списка.
+        workers=targets_count * _WORKERS_PER_TARGET + (120 if full else 40),
         deadline={SCOPE_ALL: RUN_DEADLINE_ALL, SCOPE_FULL: RUN_DEADLINE_FULL}.get(scope, RUN_DEADLINE),
     )
     started = time.monotonic()
@@ -1463,13 +1505,17 @@ def run_blockcheck(
             _wait_plain,
             lambda host, path: _download(run, host, path),
             lambda host, path: _upload(run, host, path),
+            every=full,
+            on_server=lambda _server, done, total: step(STEP_HOSTINGS, done, total),
         )
 
         ipv6_future = run.submit(_check_ipv6, run)
         system_future = run.submit(_check_system, run, services)
         dns_future = run.submit(check_dns_servers, should_stop=run.dns_cancelled) if full and check_dns_servers else None
 
-        collected = _run_probes(run, services, full=True, emit=emit)
+        collected = _run_probes(
+            run, services, full=True, emit=emit, on_done=lambda done, total: step(STEP_SITES, done, total)
+        )
 
         ipv6 = None
         try:
@@ -1478,6 +1524,7 @@ def run_blockcheck(
             raise
         except Exception as exc:
             emit(f"❔ IPv6: проверка не выполнилась ({exc})")
+        step(STEP_IPV6)
         if ipv6 is not None:
             emit("━━━━━━━━ IPv6 ━━━━━━━━")
             emit(f"{_IPV6_ICON[ipv6.code]} IPv6 {ipv6.text}")
@@ -1489,6 +1536,7 @@ def run_blockcheck(
             raise
         except Exception as exc:
             emit(f"❔ Состояние системы: проверка не выполнилась ({exc})")
+        step(STEP_SYSTEM)
         if system:
             emit("")
             emit("━━━━━━━━ Состояние системы ━━━━━━━━")
@@ -1503,6 +1551,7 @@ def run_blockcheck(
                 raise
             except Exception as exc:
                 emit(f"❔ Голосовые серверы: проверка не выполнилась ({exc})")
+            step(STEP_VOICE)
             if voice is not None:
                 for line in _section_lines(
                     "Голосовые звонки (UDP)",
@@ -1527,7 +1576,11 @@ def run_blockcheck(
                     emit(line)
 
         dns_servers = _finish_dns_servers(run, dns_future, emit) if dns_future is not None else None
+        if full:
+            step(STEP_DNS_SERVERS)
         filter_place = _find_filter_place(run, services, collected, emit) if full else None
+        if full:
+            step(STEP_FILTER)
 
         verdicts = {
             key: _service_verdict(service, collected[key], zapret_running=zapret_running)
@@ -1588,7 +1641,21 @@ def run_blockcheck(
             ) if voice else None,
             "freeze": _section_report(
                 freeze, [(item.name, item.state.value, item.text) for item in freeze.servers]
-            ) if freeze else None,
+            ) | {
+                # По серверу: провайдер, метка, в какую сторону оборвалось и за сколько проверили.
+                "servers": [
+                    {
+                        "provider": item.provider,
+                        "host": item.host,
+                        "id": item.ident,
+                        "state": item.state.value,
+                        "text": item.text,
+                        "direction": item.direction,
+                        "seconds": round(item.seconds, 1),
+                    }
+                    for item in freeze.servers
+                ]
+            } if freeze else None,
             "problems": problems,
             "working": working,
             "spoofed_hosts": spoofed,
