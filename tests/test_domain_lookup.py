@@ -23,7 +23,9 @@ from utils.dns_wire import (
     DnsQueryResult,
     DnsRecord,
 )
-from utils.windows_icmp import WindowsPingResult
+from diagnostics.path_trace import FilterFacts, Hop, RouteTrace
+from diagnostics.quic_probe import QUIC_BLOCKED_BY_NAME, QUIC_OK, QuicVerdict
+from utils.windows_icmp import HOP_ROUTER, HOP_SILENT, HOP_TARGET, WindowsPingResult
 
 GOOD = engine.DnsServer("Хороший", "9.9.9.9")
 STUB = engine.DnsServer("Провайдер", "10.0.0.53", engine.SERVER_SYSTEM)
@@ -71,8 +73,11 @@ def _fake_http(method, url, **kwargs):
 class _Network:
     """Подменяет всю сеть движка: тесты не выходят в интернет."""
 
-    def __init__(self, test: unittest.TestCase, *, http=_fake_http) -> None:
+    def __init__(self, test: unittest.TestCase, *, http=_fake_http, route=None, quic=None) -> None:
         self.http_calls: list[str] = []
+        # Путь и QUIC ходят в сеть сами: по умолчанию «трассировка недоступна» и «QUIC не проверяли».
+        self.route = route or (lambda ip: RouteTrace(target=ip, supported=False))
+        self.quic = quic or (lambda domain, ip: (None, None))
 
         def http_spy(method, url, **kwargs):
             self.http_calls.append(url)
@@ -83,6 +88,8 @@ class _Network:
             patch.object(engine, "query_server", _fake_query),
             patch.object(engine, "query_doh", _fake_query),
             patch.object(engine, "canary_answered", lambda _domain: False),
+            patch.object(engine, "trace_route", lambda ip, **_k: self.route(ip)),
+            patch.object(engine, "_inspect_quic", lambda domain, ip, max_ttl, cancel: self.quic(domain, ip)),
             patch.object(engine, "_http", http_spy),
             patch.object(engine, "fetch_cert_names", lambda ip, server_name=None: CertNames("ok", ("cert.example",), "cn.example")),
             patch.object(engine, "_tcp_connect", lambda ip, port=443: engine.TcpReport(ip, port, "ok", 5.0)),
@@ -274,6 +281,108 @@ class RunTests(unittest.TestCase):
         self.assertEqual(network.http_calls, [])
         self.assertIsNone(report.network)
         self.assertEqual({item.key: item.status for item in report.sources}[engine.SOURCE_THC], engine.SOURCE_SKIPPED)
+
+    @staticmethod
+    def _route(ip):
+        hops = tuple(Hop(ttl, HOP_ROUTER, f"10.0.0.{ttl}", float(ttl)) for ttl in range(1, 7))
+        return RouteTrace(target=ip, hops=hops + (Hop(7, HOP_TARGET, ip, 40.0),), reached=True)
+
+    def test_path_quic_and_filter_place_reach_the_report(self) -> None:
+        blocked = QuicVerdict(QUIC_BLOCKED_BY_NAME, "блокируется по имени сайта")
+        asked: list = []
+
+        def quic(domain, ip):
+            asked.append((domain, ip))
+            return blocked, FilterFacts(True, True, 6, 6)
+
+        _Network(self, route=self._route, quic=quic)
+        report = engine.run_domain_lookup("example.com", servers=[GOOD], use_external=False)
+
+        self.assertEqual(asked, [("example.com", "93.184.216.34")])
+        self.assertTrue(report.route.reached)
+        self.assertEqual(report.quic, blocked)
+        lines = [line.text for line in plans.build_path_lines(report)]
+        self.assertEqual(lines[0], "До сервера 7 узлов, ответили 7.")
+        self.assertEqual(lines[1], "QUIC (UDP 443): блокируется по имени сайта.")
+        self.assertEqual(lines[2], "Фильтр стоит между узлом 5 (10.0.0.5) и узлом 6 (10.0.0.6).")
+        self.assertEqual(plans.build_path_lines(report)[2].tone, plans.TONE_ERROR)
+        table = plans.build_path_text(report).splitlines()
+        # Отметка стоит между пятым и шестым узлом.
+        self.assertEqual(table.index(f"    {plans.FILTER_MARK}"), 5)
+        self.assertTrue(table[4].startswith(" 5  10.0.0.5"))
+        self.assertTrue(table[6].startswith(" 6  10.0.0.6"))
+        text = plans.build_text_report(report)
+        self.assertIn("=== Путь до сервера ===", text)
+        self.assertIn(plans.FILTER_MARK, text)
+
+    def test_open_site_has_path_and_quic_but_no_filter_line(self) -> None:
+        _Network(self, route=self._route, quic=lambda domain, ip: (QuicVerdict(QUIC_OK, "отвечает за 12 мс"), None))
+        report = engine.run_domain_lookup("example.com", servers=[GOOD], use_external=False)
+
+        lines = plans.build_path_lines(report)
+        self.assertEqual([line.text for line in lines], ["До сервера 7 узлов, ответили 7.", "QUIC (UDP 443): отвечает за 12 мс."])
+        self.assertEqual(lines[1].tone, plans.TONE_SUCCESS)
+        self.assertNotIn(plans.FILTER_MARK, plans.build_path_text(report))
+
+    def test_plain_address_gets_path_but_no_quic(self) -> None:
+        asked: list = []
+        _Network(self, route=self._route, quic=lambda domain, ip: asked.append(domain) or (None, None))
+        report = engine.run_domain_lookup("93.184.216.34", servers=[GOOD], use_external=False)
+
+        self.assertEqual(asked, [])
+        self.assertTrue(report.route.reached)
+        self.assertIsNone(report.quic)
+
+    def test_unreached_target_is_explained_without_alarm(self) -> None:
+        def route(ip):
+            return RouteTrace(target=ip, hops=(Hop(1, HOP_ROUTER, "10.0.0.1", 1.0), Hop(2, HOP_SILENT), Hop(3, HOP_ROUTER, "10.0.0.3", 2.0)))
+
+        _Network(self, route=route)
+        report = engine.run_domain_lookup("example.com", servers=[GOOD], use_external=False)
+
+        line = plans.build_path_lines(report)[0]
+        self.assertIn("последний ответивший узел — 3-й (10.0.0.3)", line.text)
+        self.assertIn("это ещё не блокировка", line.text)
+        self.assertEqual(line.tone, plans.TONE_MUTED)
+        self.assertIn(" 2  не ответил", plans.build_path_text(report))
+
+    def test_filter_place_is_searched_only_when_quic_is_blocked_by_name(self) -> None:
+        from utils.socket_cancel import SocketCancel
+
+        located: list = []
+
+        def locate(ip, name, *, max_ttl, cancel):
+            located.append((ip, name, max_ttl))
+            return FilterFacts(True, True, 6, 6)
+
+        for verdict, expected in (
+            (QuicVerdict(QUIC_OK, "отвечает"), []),
+            (None, []),
+            (QuicVerdict(QUIC_BLOCKED_BY_NAME, "блокируется"), [("203.0.113.5", "example.com", 20)]),
+        ):
+            with self.subTest(verdict=verdict):
+                located.clear()
+                with (
+                    patch.object(engine, "collect_quic", lambda *a, **k: object()),
+                    patch.object(engine, "judge_quic", lambda _facts: verdict),
+                    patch.object(engine, "locate_filter", locate),
+                ):
+                    result = engine._inspect_quic("example.com", "203.0.113.5", 20, SocketCancel())
+                self.assertEqual(located, expected)
+                self.assertEqual(result[0], verdict)
+                self.assertEqual(result[1] is not None, bool(expected))
+
+    def test_hop_count_is_declined_correctly(self) -> None:
+        self.assertEqual([plans._hops_word(n) for n in (1, 2, 4, 5, 11, 12, 21, 22, 25, 111)],
+                         ["узел", "узла", "узла", "узлов", "узлов", "узлов", "узел", "узла", "узлов", "узлов"])
+
+    def test_no_path_section_when_tracing_is_unavailable(self) -> None:
+        _Network(self)
+        report = engine.run_domain_lookup("example.com", servers=[GOOD], use_external=False)
+
+        self.assertEqual(plans.build_path_lines(report), ())
+        self.assertEqual(plans.build_path_text(report), "")
+        self.assertNotIn("Путь до сервера", plans.build_text_report(report))
 
     def test_lowest_ttl_of_address_records_is_kept_and_shown(self) -> None:
         def with_ttl(server, name, rtype, **_kwargs):

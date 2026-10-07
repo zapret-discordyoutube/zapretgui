@@ -26,6 +26,10 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
 from ipaddress import ip_address
 
+from diagnostics.path_trace import FilterFacts, RouteTrace, locate_filter, trace_route
+from diagnostics.quic_probe import QUIC_BLOCKED_BY_NAME, QuicVerdict
+from diagnostics.quic_probe import collect as collect_quic
+from diagnostics.quic_probe import judge as judge_quic
 from utils.address_kinds import AddressKind, address_kind, block_stub_owner
 from utils.cert_names import fetch_cert_names
 from utils.dns_interception import canary_answered
@@ -47,6 +51,7 @@ from utils.dns_wire import (
     reverse_name,
 )
 from utils.ip_owner import lookup_ip_owner
+from utils.socket_cancel import SocketCancel
 
 KIND_DOMAIN = "domain"
 KIND_IP = "ip"
@@ -83,6 +88,8 @@ PING_COUNT = 4
 PING_TIMEOUT_MS = 2000
 TCP_TIMEOUT_S = 3.0
 EXTERNAL_TIMEOUT_S = 8.0
+# Дальше этого узла место фильтра не ищем: он стоит в сети провайдера, близко.
+PATH_MAX_TTL = 20
 MAX_PARALLEL = 16
 # Независимые открытые DNS-серверы в дополнение к списку программы: чем больше
 # разных владельцев, тем виднее, кто отвечает не как все.
@@ -205,6 +212,12 @@ class DomainLookupReport:
     tcp: TcpReport | None = None
     network: NetworkInfo | None = None
     sources: tuple[NeighborSource, ...] = ()
+    # Путь до адреса по узлам. None — ещё не готов.
+    route: RouteTrace | None = None
+    # Проходит ли QUIC к этому сайту (только для доменов).
+    quic: QuicVerdict | None = None
+    # Где стоит фильтр; ищется, только если QUIC блокируют по имени.
+    filter_facts: FilterFacts | None = None
     finished: bool = False
     stopped: bool = False
     timed_out: bool = False
@@ -705,6 +718,8 @@ class _Run:
         self._should_stop = should_stop
         self._deadline = time.monotonic() + RUN_DEADLINE_S
         self.pool = ThreadPoolExecutor(max_workers=MAX_PARALLEL, thread_name_prefix="domain-lookup")
+        # Снимает пробы QUIC, когда проверку остановили или вышло время.
+        self.cancel = SocketCancel()
 
     def stopped(self) -> bool:
         try:
@@ -730,6 +745,7 @@ class _Run:
                     yield futures[future], None
 
     def close(self) -> None:
+        self.cancel.cancel()
         self.pool.shutdown(wait=False, cancel_futures=True)
 
 
@@ -824,6 +840,16 @@ def _resolve_stage(run: _Run, report: DomainLookupReport, servers, publish) -> D
     return report
 
 
+def _inspect_quic(domain: str, ip: str, max_ttl: int, cancel: SocketCancel) -> tuple[QuicVerdict | None, FilterFacts | None]:
+    """QUIC к сайту, а если его блокируют по имени — ещё и место фильтра."""
+    # Свой маленький пул: общий занят другими пробами, а эти три ждут друг друга.
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="domain-quic") as pool:
+        verdict = judge_quic(collect_quic(domain, ip, submit=pool.submit, cancel=cancel))
+    if verdict is None or verdict.code != QUIC_BLOCKED_BY_NAME:
+        return verdict, None
+    return verdict, locate_filter(ip, domain, max_ttl=max_ttl, cancel=cancel)
+
+
 def _address_stage(run: _Run, report: DomainLookupReport, servers, use_external: bool, publish) -> DomainLookupReport:
     ip = report.primary_ip
     public = is_public_ip(ip)
@@ -843,6 +869,10 @@ def _address_stage(run: _Run, report: DomainLookupReport, servers, use_external:
     ipv6 = pick_ipv6(report.answers, ip)
     if ipv6:
         futures[run.pool.submit(_ping, ipv6, run.halted)] = "ping6"
+    if ":" not in ip:
+        futures[run.pool.submit(trace_route, ip, should_stop=run.halted)] = "route"
+        if domain and public:
+            futures[run.pool.submit(_inspect_quic, domain, ip, PATH_MAX_TTL, run.cancel)] = "quic"
     if domain:
         order.append(SOURCE_CERT_NAMED)
         futures[run.pool.submit(_lookup_cert, ip, SOURCE_CERT_NAMED, domain)] = SOURCE_CERT_NAMED
@@ -875,6 +905,10 @@ def _address_stage(run: _Run, report: DomainLookupReport, servers, use_external:
             report = replace(report, ping6=result)
         elif key == "tcp" and isinstance(result, TcpReport):
             report = replace(report, tcp=result)
+        elif key == "route" and isinstance(result, RouteTrace):
+            report = replace(report, route=result)
+        elif key == "quic" and isinstance(result, tuple):
+            report = replace(report, quic=result[0], filter_facts=result[1])
         elif key in ("network", "ripestat"):
             if not isinstance(result, NetworkInfo):
                 continue

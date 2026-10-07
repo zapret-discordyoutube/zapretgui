@@ -369,3 +369,72 @@ def ping_ipv4_host_winapi(
         _IcmpCloseHandle(handle)
 
     return _summarize(rtts, sent, resolved_ip, last_status, ttl)
+
+
+# ---------------------------------------------------------------------------
+# Шаг трассировки: кто отвечает, когда у пакета кончается срок жизни
+# ---------------------------------------------------------------------------
+
+IP_TTL_EXPIRED_TRANSIT = 11013
+
+HOP_ROUTER = "router"  # ответил промежуточный узел: срок жизни пакета истёк на нём
+HOP_TARGET = "target"  # ответил сам адрес назначения
+HOP_SILENT = "silent"  # никто не ответил за отведённое время
+HOP_UNSUPPORTED = "unsupported"
+
+
+@dataclass(frozen=True, slots=True)
+class TraceHopResult:
+    kind: str
+    address: str = ""
+    rtt_ms: float | None = None
+
+
+def trace_hop_ipv4(ip: str, ttl: int, *, timeout_ms: int) -> TraceHopResult:
+    """Один пакет пинга со сроком жизни ``ttl`` узлов.
+
+    У пакета есть счётчик: каждый узел по дороге уменьшает его на единицу, а
+    тот, на ком он обнулился, сообщает об этом отправителю. Отправляя пакеты
+    со сроком 1, 2, 3…, получаем адреса узлов по порядку. Так работает
+    ``tracert``; здесь то же самое, но без запуска посторонней программы.
+    """
+    if not _is_windows_icmp_available():
+        return TraceHopResult(HOP_UNSUPPORTED)
+    try:
+        destination = _ipv4_to_dword(ip)
+    except OSError:
+        return TraceHopResult(HOP_UNSUPPORTED)
+    handle = _IcmpCreateFile()
+    if not handle or handle == ctypes.c_void_p(-1).value:
+        return TraceHopResult(HOP_UNSUPPORTED)
+
+    request_data = b"zapret"
+    # Ответ об истёкшем сроке жизни несёт ещё заголовок исходного пакета.
+    reply_size = ctypes.sizeof(ICMP_ECHO_REPLY) + len(request_data) + 64
+    options = IP_OPTION_INFORMATION(Ttl=max(1, min(255, int(ttl))), Tos=0, Flags=0, OptionsSize=0, OptionsData=None)
+    try:
+        request_buffer = ctypes.create_string_buffer(request_data)
+        reply_buffer = ctypes.create_string_buffer(reply_size)
+        replies = _IcmpSendEcho(
+            handle,
+            destination,
+            request_buffer,
+            len(request_data),
+            ctypes.byref(options),
+            reply_buffer,
+            reply_size,
+            max(1, int(timeout_ms)),
+        )
+        if not replies:
+            return TraceHopResult(HOP_SILENT)
+        reply = ICMP_ECHO_REPLY.from_buffer(reply_buffer)
+        status = int(reply.Status)
+        address = socket.inet_ntoa(struct.pack("<I", int(reply.Address)))
+        rtt = float(reply.RoundTripTime)
+        if status == IP_SUCCESS:
+            return TraceHopResult(HOP_TARGET, address, rtt)
+        if status == IP_TTL_EXPIRED_TRANSIT:
+            return TraceHopResult(HOP_ROUTER, address, rtt)
+        return TraceHopResult(HOP_SILENT)
+    finally:
+        _IcmpCloseHandle(handle)

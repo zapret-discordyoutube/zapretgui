@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from diagnostics.path_trace import FILTER_FOUND, judge_filter
+from diagnostics.quic_probe import QUIC_BLOCKED_BY_NAME, QUIC_OK, QUIC_SILENT
 from dns.domain_lookup import (
     KIND_DOMAIN,
     KIND_INVALID,
@@ -200,6 +202,78 @@ def _ping_line(ping: PingReport, title: str) -> InfoLine:
     )
 
 
+# ---------------------------------------------------------------------------
+# Путь до сервера
+# ---------------------------------------------------------------------------
+
+FILTER_MARK = "── здесь стоит фильтр ──"
+
+_QUIC_TONES = {QUIC_OK: TONE_SUCCESS, QUIC_BLOCKED_BY_NAME: TONE_ERROR, QUIC_SILENT: TONE_MUTED}
+
+
+def _hops_word(count: int) -> str:
+    """«1 узел», «2 узла», «5 узлов»."""
+    if count % 10 == 1 and count % 100 != 11:
+        return "узел"
+    if count % 10 in (2, 3, 4) and count % 100 not in (12, 13, 14):
+        return "узла"
+    return "узлов"
+
+
+def _filter_verdict(report: DomainLookupReport):
+    if report.filter_facts is None:
+        return None
+    return judge_filter(report.filter_facts, report.route)
+
+
+def build_path_lines(report: DomainLookupReport) -> tuple[InfoLine, ...]:
+    """Коротко: сколько узлов до сервера, что с QUIC и где стоит фильтр."""
+    lines: list[InfoLine] = []
+    route = report.route
+    if route is not None and route.supported:
+        answered = sum(1 for hop in route.hops if hop.address)
+        if route.reached:
+            count = len(route.hops)
+            lines.append(InfoLine(f"До сервера {count} {_hops_word(count)}, ответили {answered}.", TONE_MUTED))
+        elif route.hops:
+            lines.append(
+                InfoLine(
+                    f"Пинг до сервера не дошёл: последний ответивший узел — {route.hops[-1].ttl}-й "
+                    f"({route.hops[-1].address}). Многие серверы на пинг не отвечают, это ещё не блокировка.",
+                    TONE_MUTED,
+                )
+            )
+        else:
+            lines.append(InfoLine("Ни один узел по дороге не ответил на пинг.", TONE_WARNING))
+    if report.quic is not None:
+        lines.append(InfoLine(f"QUIC (UDP 443): {report.quic.text}.", _QUIC_TONES.get(report.quic.code, TONE_MUTED)))
+    verdict = _filter_verdict(report)
+    if verdict is not None:
+        tone = TONE_ERROR if verdict.code == FILTER_FOUND else TONE_MUTED
+        lines.append(InfoLine(f"{verdict.text[:1].upper()}{verdict.text[1:]}.", tone))
+    return tuple(lines)
+
+
+def build_path_text(report: DomainLookupReport) -> str:
+    """Таблица узлов; перед узлом, за которым уже работает фильтр, стоит отметка."""
+    route = report.route
+    if route is None or not route.supported or not route.hops:
+        return ""
+    verdict = _filter_verdict(report)
+    filter_hop = verdict.hop if verdict is not None and verdict.code == FILTER_FOUND else None
+    width = max(len(hop.address) for hop in route.hops) or 1
+    rows: list[str] = []
+    for hop in route.hops:
+        if hop.ttl == filter_hop:
+            rows.append(f"    {FILTER_MARK}")
+        address = hop.address or "не ответил"
+        time_text = "" if hop.rtt_ms is None else ("< 1 мс" if hop.rtt_ms < 1 else f"{round(hop.rtt_ms)} мс")
+        rows.append(f"{hop.ttl:>2}  {address:<{max(width, len('не ответил'))}}  {time_text}".rstrip())
+    if filter_hop is not None and filter_hop > route.hops[-1].ttl:
+        rows.append(f"    {FILTER_MARK}")
+    return "\n".join(rows)
+
+
 def build_ping_lines(report: DomainLookupReport) -> tuple[InfoLine, ...]:
     if not report.primary_ip:
         if report.kind == KIND_DOMAIN and report.finished:
@@ -326,6 +400,12 @@ def build_text_report(report: DomainLookupReport) -> str:
     ping_lines = build_ping_lines(report)
     if ping_lines:
         lines += ["", "=== Пинг ===", *(line.text for line in ping_lines)]
+    path_lines = build_path_lines(report)
+    if path_lines:
+        lines += ["", "=== Путь до сервера ===", *(line.text for line in path_lines)]
+        path_text = build_path_text(report)
+        if path_text:
+            lines += [path_text]
 
     network_lines = build_network_lines(report)
     if network_lines:
@@ -342,6 +422,7 @@ def build_text_report(report: DomainLookupReport) -> str:
 
 
 __all__ = [
+    "FILTER_MARK",
     "NEIGHBORS_SHOWN_LIMIT",
     "TONE_ACCENT",
     "TONE_ERROR",
@@ -354,6 +435,8 @@ __all__ = [
     "build_dns_summary",
     "build_neighbors_text",
     "build_network_lines",
+    "build_path_lines",
+    "build_path_text",
     "build_ping_lines",
     "build_status",
     "build_text_report",

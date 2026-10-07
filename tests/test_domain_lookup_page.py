@@ -106,6 +106,30 @@ class DomainLookupPageTests(unittest.TestCase):
         self.assertIn("заглушка (Ростелеком)", page.dns_table.item(1, 2).text())
         self.assertIn("a.example", page.neighbors_text.toPlainText())
         self.assertIn("AS64500", page.network_lines._lines[-1].text)
+        # Пути в этом отчёте нет — карточка скрыта.
+        self.assertTrue(page.path_card.isHidden())
+
+        # Отчёт с путём и найденным фильтром: карточка видна, в таблице узлов стоит отметка.
+        from diagnostics.path_trace import FilterFacts, Hop, RouteTrace
+        from diagnostics.quic_probe import QUIC_BLOCKED_BY_NAME, QuicVerdict
+        from dns import domain_lookup_plans as lookup_plans
+        from utils.windows_icmp import HOP_ROUTER, HOP_TARGET
+
+        hops = tuple(Hop(ttl, HOP_ROUTER, f"10.0.0.{ttl}", 1.0) for ttl in range(1, 4)) + (Hop(4, HOP_TARGET, "93.184.216.34", 40.0),)
+        page._on_finished(
+            _report(
+                route=RouteTrace("93.184.216.34", hops, reached=True),
+                quic=QuicVerdict(QUIC_BLOCKED_BY_NAME, "блокируется по имени сайта"),
+                filter_facts=FilterFacts(True, True, 3, 3),
+            )
+        )
+        self.assertFalse(page.path_card.isHidden())
+        self.assertEqual(page.path_title.text(), "Путь до сервера")
+        self.assertIn("Фильтр стоит между узлом 2 (10.0.0.2) и узлом 3 (10.0.0.3).", [line.text for line in page.path_lines._lines])
+        self.assertIn(lookup_plans.FILTER_MARK, page.path_text.toPlainText())
+        self.assertIn("Фильтр стоит", page.path_text.accessibleName())
+        page._on_finished(_report())
+        self.assertTrue(page.path_card.isHidden())
 
         # Проверка адреса (не домена): таблицы DNS нет.
         page._on_finished(_report(kind=engine.KIND_IP, target="93.184.216.34", answers=()))

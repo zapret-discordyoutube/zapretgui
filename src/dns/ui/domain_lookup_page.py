@@ -162,6 +162,7 @@ class DomainLookupPage(BasePage):
         self._report = None
         # Что сейчас показано в поле соседей: сравниваем с этой строкой, а не читаем текст обратно из поля.
         self._neighbors_shown_text = ""
+        self._path_shown_text = ""
         self._running = False
         self._lane = LatestWorkerLane(
             name="domain_lookup",
@@ -222,6 +223,17 @@ class DomainLookupPage(BasePage):
         self.ping_card.add_widget(self.network_lines)
         self.layout.addWidget(self.ping_card)
 
+        self.path_card = SettingsCard()
+        self.path_title = StrongBodyLabel("", self.path_card)
+        self.path_card.add_widget(self.path_title)
+        self.path_lines = _InfoLines(self.path_card)
+        self.path_card.add_widget(self.path_lines)
+        self.path_text = ScrollBlockingPlainTextEdit(self.path_card)
+        self.path_text.setReadOnly(True)
+        self.path_text.setFont(QFont("Consolas", 9))
+        self.path_card.add_widget(self.path_text)
+        self.layout.addWidget(self.path_card)
+
         self.neighbors_card = SettingsCard()
         self.neighbors_title = StrongBodyLabel("", self.neighbors_card)
         self.neighbors_card.add_widget(self.neighbors_title)
@@ -240,7 +252,7 @@ class DomainLookupPage(BasePage):
         self.dns_card.add_widget(self.dns_table)
         self.layout.addWidget(self.dns_card)
 
-        for card in (self.ping_card, self.dns_card, self.neighbors_card):
+        for card in (self.ping_card, self.path_card, self.dns_card, self.neighbors_card):
             card.setVisible(False)
         self.layout.addStretch()
 
@@ -280,6 +292,15 @@ class DomainLookupPage(BasePage):
             ),
         )
         self.ping_title.setText(self._t("section.ping", "Пинг и сеть"))
+        self.path_title.setText(self._t("section.path", "Путь до сервера"))
+        set_control_accessibility(
+            self.path_text,
+            name=self._t("path.name", "Узлы по дороге до сервера"),
+            description=self._t(
+                "path.description",
+                "Номер узла, его адрес и время ответа. Отметка показывает, за каким узлом стоит фильтр.",
+            ),
+        )
         self.dns_title.setText(self._t("section.dns", "Адреса с разных DNS-серверов"))
         self.neighbors_title.setText(self._t("section.neighbors", "Кто ещё на этом адресе"))
         self.dns_table.set_headers(
@@ -348,11 +369,13 @@ class DomainLookupPage(BasePage):
             return
         # Старые результаты не копим: каждая проверка начинается с чистого экрана.
         self._report = None
-        for card in (self.ping_card, self.dns_card, self.neighbors_card):
+        for card in (self.ping_card, self.path_card, self.dns_card, self.neighbors_card):
             card.setVisible(False)
         self.dns_table.setRowCount(0)
         self.neighbors_text.clear()
         self._neighbors_shown_text = ""
+        self.path_text.clear()
+        self._path_shown_text = ""
         self.status_lines.set_lines((plans.InfoLine(f"Проверяем {target}…", plans.TONE_ACCENT),))
         self._set_running(True)
         self._lane.request({"target": target, "use_external": self.external_check.isChecked()})
@@ -398,6 +421,19 @@ class DomainLookupPage(BasePage):
         self.ping_lines.set_lines(ping_lines)
         self.network_lines.set_lines(plans.build_network_lines(report))
         self.ping_card.setVisible(bool(ping_lines))
+
+        path_lines = plans.build_path_lines(report)
+        self.path_card.setVisible(bool(path_lines))
+        if path_lines:
+            self.path_lines.set_lines(path_lines)
+        path_text = plans.build_path_text(report)
+        self.path_text.setVisible(bool(path_text))
+        if path_text != self._path_shown_text:
+            self._path_shown_text = path_text
+            self.path_text.setPlainText(path_text)
+            lines = min(32, max(2, path_text.count("\n") + 1))
+            self.path_text.setFixedHeight(lines * self.path_text.fontMetrics().lineSpacing() + 24)
+        set_state_text(self.path_text, " ".join(line.text for line in path_lines) or "Путь до сервера: нет данных")
 
         rows = plans.build_answer_rows(report)
         self.dns_card.setVisible(bool(rows))
