@@ -507,6 +507,56 @@ class Ipv6InReportTests(unittest.TestCase):
         self.assertLess(section, lines.index("━━━━━━━━ 📊 Итог ━━━━━━━━"))
 
 
+class FreezeUploadWiringTests(unittest.TestCase):
+    """Отправка проверяется на том же адресе, по которому шла загрузка."""
+
+    def _run(self):
+        run = engine._Run(None, workers=4)
+        self.addCleanup(run.close)
+        return run
+
+    def test_address_is_found_once_and_reused_for_upload(self) -> None:
+        run = self._run()
+        asked: list = []
+
+        def collect(host, ip, path, **_kwargs):
+            asked.append((host, ip, path))
+            return engine.upload_probe.UploadFacts(engine.upload_probe.PostResult(engine.upload_probe.POST_STALLED))
+
+        with (
+            patch.object(engine, "hosts_file_ipv4", return_value=("203.0.113.9",)) as hosts,
+            patch.object(engine, "https_get", return_value=_ok("203.0.113.9")) as get,
+            patch.object(engine.upload_probe, "collect", collect),
+        ):
+            engine._download(run, "cdn.example", "/file.bin")
+            verdict = engine._upload(run, "cdn.example", "/file.bin")
+
+        self.assertEqual(hosts.call_count, 1)
+        self.assertEqual(get.call_args.args[:2], ("cdn.example", "203.0.113.9"))
+        self.assertEqual(asked, [("cdn.example", "203.0.113.9", "/file.bin")])
+        self.assertEqual(verdict.code, engine.upload_probe.UPLOAD_UNKNOWN)
+
+    def test_no_address_or_stopped_run_means_no_upload_probe(self) -> None:
+        run = self._run()
+        with (
+            patch.object(engine, "hosts_file_ipv4", return_value=()),
+            patch.object(engine, "query_ipv4", return_value=DnsAnswer()),
+            patch.object(engine, "_doh_lookup", return_value=(False, ())),
+            patch.object(engine.upload_probe, "collect") as collect,
+        ):
+            self.assertIsNone(engine._upload(run, "nowhere.example", "/"))
+        collect.assert_not_called()
+
+        stopped = engine._Run(lambda: True, workers=4)
+        self.addCleanup(stopped.close)
+        with (
+            patch.object(engine, "hosts_file_ipv4", return_value=("203.0.113.9",)),
+            patch.object(engine.upload_probe, "collect") as collect,
+        ):
+            self.assertIsNone(engine._upload(stopped, "cdn.example", "/"))
+        collect.assert_not_called()
+
+
 class EngineScenarioTests(unittest.TestCase):
     """Движок целиком, сеть подменена фейками."""
 

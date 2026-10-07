@@ -29,9 +29,12 @@ from enum import Enum
 from urllib.parse import urlsplit
 
 from diagnostics.tls_probe import ProbeResult
+from diagnostics.upload_probe import UPLOAD_BULK_STALLS, UPLOAD_OK, UPLOAD_PACKET_LIMIT, UploadVerdict
 from diagnostics.verdict import FREEZE_MAX_BYTES, FREEZE_MIN_BYTES, Level, describe_reach
 
 __all__ = [
+    "DIRECTION_DOWNLOAD",
+    "DIRECTION_UPLOAD",
     "FreezeReport",
     "FreezeServer",
     "FreezeState",
@@ -60,11 +63,17 @@ class FreezeState(Enum):
     UNKNOWN = "unknown"
 
 
+DIRECTION_DOWNLOAD = "download"
+DIRECTION_UPLOAD = "upload"
+
+
 @dataclass(frozen=True, slots=True)
 class FreezeServer:
     name: str
     state: FreezeState
     text: str
+    # В какую сторону шли данные, когда соединение замерло.
+    direction: str = DIRECTION_DOWNLOAD
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,8 +141,13 @@ def _check_provider(
     candidates: list[dict],
     download: Callable[[str, str], ProbeResult | None],
     fallback_allowed: Callable[[], bool],
+    upload: Callable[[str, str], UploadVerdict | None] | None = None,
 ) -> FreezeServer:
-    """Пробует адреса провайдера по очереди, пока один не даст ясный ответ."""
+    """Пробует адреса провайдера по очереди, пока один не даст ясный ответ.
+
+    Если загрузка прошла без обрыва, на том же сервере проверяется отправка:
+    ограничение работает в обе стороны.
+    """
     host = ""
     state, text = FreezeState.UNKNOWN, "нет адресов для проверки"
     tried = 0
@@ -147,20 +161,29 @@ def _check_provider(
             break
     if state == FreezeState.UNKNOWN and tried > 1:
         text = f"{text} (запасные адреса тоже не помогли, всего адресов: {tried})"
-    return FreezeServer(name=f"{provider} ({host})" if host else provider, state=state, text=text)
+    name = f"{provider} ({host})" if host else provider
+    if state == FreezeState.OK and upload is not None:
+        verdict = upload(host, path)
+        if verdict is not None and verdict.code in (UPLOAD_BULK_STALLS, UPLOAD_PACKET_LIMIT):
+            return FreezeServer(name, FreezeState.FREEZE, f"загрузка проходит, но {verdict.text}", DIRECTION_UPLOAD)
+        if verdict is not None and verdict.code == UPLOAD_OK:
+            text = f"{text}; отправка тоже проходит"
+    return FreezeServer(name=name, state=state, text=text)
 
 
 def check_freeze(
     submit: Callable[..., Future],
     wait: Callable[[Future], object],
     download: Callable[[str, str], ProbeResult | None],
+    upload: Callable[[str, str], UploadVerdict | None] | None = None,
     *,
     budget: float = FALLBACK_BUDGET,
 ) -> tuple[FreezeServer, ...]:
     """Провайдеры проверяются параллельно, адреса одного провайдера — по очереди.
 
-    ``download(host, path)`` сам выбирает IP. Запасной адрес пробуется, только
-    пока не вышел ``budget`` секунд с начала проверки.
+    ``download(host, path)`` и ``upload(host, path)`` сами выбирают IP. Запасной
+    адрес пробуется, только пока не вышел ``budget`` секунд с начала проверки.
+    Отправка проверяется, только если загрузка с этого сервера прошла.
     """
     from blockcheck.data_lists import TCP_16_20_TARGETS
 
@@ -170,7 +193,7 @@ def check_freeze(
         return time.monotonic() - started < budget
 
     planned = [
-        (provider, submit(_check_provider, provider, candidates, download, _fallback_allowed))
+        (provider, submit(_check_provider, provider, candidates, download, _fallback_allowed, upload))
         for provider, candidates in pick_freeze_targets(TCP_16_20_TARGETS)
     ]
     servers: list[FreezeServer] = []
@@ -191,9 +214,16 @@ def summarize_freeze(servers: tuple[FreezeServer, ...], *, zapret_running: bool 
             if zapret_running
             else ("Запустите Zapret на странице «Управление Zapret 2» — стратегии обходят этот обрыв.",)
         )
+        directions = {item.direction for item in frozen}
+        if directions == {DIRECTION_UPLOAD}:
+            what = "отправку данных на зарубежные серверы"
+        elif directions == {DIRECTION_DOWNLOAD}:
+            what = "загрузку с зарубежных серверов на 16–20 КБ"
+        else:
+            what = "загрузку с зарубежных серверов на 16–20 КБ и отправку данных на них"
         return FreezeReport(
             Level.FAIL if len(frozen) >= len(fine) else Level.WARN,
-            f"Провайдер обрывает загрузку с зарубежных серверов на 16–20 КБ ({len(frozen)} из {len(servers)})",
+            f"Провайдер обрывает {what} ({len(frozen)} из {len(servers)})",
             servers,
             advice,
         )

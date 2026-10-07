@@ -35,7 +35,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from diagnostics import block_cause, ipv6_check, quic_probe
+from diagnostics import block_cause, ipv6_check, quic_probe, upload_probe
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
@@ -284,6 +284,8 @@ class _Run:
         self._user_stopped = False
         self.timed_out = False
         self.probe_cancel = SocketCancel()
+        # Сервер проверки обрыва → адрес, по которому к нему ходили.
+        self.freeze_addresses: dict[str, str] = {}
         self._reference_lock = threading.Lock()
         # Эталонный сервер → [сколько раз ответил, сколько раз нет, последняя причина].
         self._reference: dict[ReferenceResolver, list] = {}
@@ -871,24 +873,48 @@ def _target_report(probe: _Probe) -> dict:
     }
 
 
-def _download(run: _Run, host: str, path: str) -> ProbeResult | None:
-    """Загрузка файла для проверки обрыва: адрес из hosts/DNS системы, иначе эталон."""
+def _freeze_address(run: _Run, host: str) -> str:
+    """Адрес сервера для проверки обрыва: из hosts/DNS системы, иначе эталон. Пусто — не нашли.
+
+    Адрес запоминается на прогон: отправка проверяется на том же адресе, что и загрузка.
+    """
+    known = run.freeze_addresses.get(host)
+    if known is not None:
+        return known
     ips = list(hosts_file_ipv4(host)) or list(query_ipv4(host, timeout=DNS_TIMEOUT, cancelled=run.dns_cancelled).ips)
     if not ips:
         ips = list(_doh_lookup(run, host)[1])
-    if not ips:
+    address = ips[0] if ips else ""
+    if address:
+        run.freeze_addresses[host] = address
+    return address
+
+
+def _download(run: _Run, host: str, path: str) -> ProbeResult | None:
+    """Загрузка файла для проверки обрыва."""
+    ip = _freeze_address(run, host)
+    if not ip:
         return None
     from diagnostics.freeze_check import READ_LIMIT
 
     return https_get(
         host,
-        ips[0],
+        ip,
         path,
         timeout=HTTPS_TIMEOUT,
         read_limit=READ_LIMIT,
         read_timeout=FREEZE_READ_TIMEOUT,
         cancel=run.probe_cancel,
     )
+
+
+def _upload(run: _Run, host: str, path: str) -> upload_probe.UploadVerdict | None:
+    """Проверка отправки данных на тот же сервер. None — адреса нет или проверку сняли."""
+    ip = _freeze_address(run, host)
+    if not ip or run.dns_cancelled():
+        return None
+    facts = upload_probe.collect(host, ip, path, submit=run.submit, cancel=run.probe_cancel)
+    return upload_probe.judge(facts)
 
 
 def _wait_plain(future: Future):
@@ -1170,6 +1196,7 @@ def run_blockcheck(
             run.submit,
             _wait_plain,
             lambda host, path: _download(run, host, path),
+            lambda host, path: _upload(run, host, path),
         )
 
         ipv6_future = run.submit(_check_ipv6, run)
