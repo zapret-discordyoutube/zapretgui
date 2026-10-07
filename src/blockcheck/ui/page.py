@@ -19,7 +19,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QHBoxLayout, QWidget
 
 import blockcheck.page_runtime as blockcheck_page_runtime
-from blockcheck.ui.check_results import BlockcheckSitesTable, BlockcheckSummaryPanel
+from blockcheck.ui.check_results import BlockcheckHistoryList, BlockcheckSitesTable, BlockcheckSummaryPanel
 from blockcheck.ui.domain_chip import DomainChip
 from blockcheck.ui.domains_build import build_blockcheck_domains_ui
 from blockcheck.ui.helpers import (
@@ -234,6 +234,13 @@ class BlockcheckPage(BasePage):
         self._log_ui_timing("blockcheck_ui.initial_state.load", self._initial_state_load_started_at)
         self._initial_state = initial_state
         self._apply_initial_domain_chips(tuple(getattr(initial_state, "user_domains", ()) or ()))
+        self._show_history(tuple(getattr(initial_state, "check_history", ()) or ()))
+
+    def _show_history(self, runs) -> None:
+        """Обновляет карточку «Прошлые проверки»; без записей и на чужой вкладке она скрыта."""
+        self._history_list.show_history(runs)
+        on_main_tab = self.TAB_ORDER[self._active_tab_index] == self.TAB_BLOCKCHECK
+        self._history_card.setVisible(bool(self._history_list.lines()) and on_main_tab)
 
     def _on_initial_state_failed(self, request_id: int, error: str) -> None:
         if not self._initial_state_runtime.is_current(
@@ -401,6 +408,13 @@ class BlockcheckPage(BasePage):
         self._add_tab_widget(self._results_card)
         # Пустая таблица с одной шапкой до первой проверки — лишний мусор.
         self._results_card.setVisible(False)
+
+        # ── Прошлые проверки ──
+        self._history_card = SettingsCard()
+        self._history_list = BlockcheckHistoryList()
+        self._history_card.add_widget(self._history_list)
+        self._add_tab_widget(self._history_card)
+        self._history_card.setVisible(False)
 
         # ── Отчёт и обращение ──
         self._footer_card = SettingsCard()
@@ -646,6 +660,8 @@ class BlockcheckPage(BasePage):
             widget.setVisible(show_blockcheck)
         if self._results_card is not None and self._last_report is None:
             self._results_card.setVisible(False)
+        if not self._history_list.lines():
+            self._history_card.setVisible(False)
         if not self._support_footer_available:
             self._footer_card.setVisible(False)
 
@@ -747,6 +763,8 @@ class BlockcheckPage(BasePage):
             )
             return
         self._last_report = report
+        if "history" in report:
+            self._show_history(report["history"])
         self._summary_panel.show_report(report)
         self._sites_table.show_report(report)
         self._results_card.setVisible(True)

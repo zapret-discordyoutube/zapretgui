@@ -447,6 +447,68 @@ def _row_level(service: dict) -> str:
     return level
 
 
+HISTORY_SHOWN = 6
+_HISTORY_MARKS = {"ok": "✓", "warn": "!", "fail": "✗", "unknown": "?"}
+
+
+def history_lines(runs, limit: int = HISTORY_SHOWN) -> list[tuple[str, str]]:
+    """Строки карточки «Прошлые проверки», новые сверху: (уровень, текст)."""
+    from diagnostics.history import format_time
+
+    lines: list[tuple[str, str]] = []
+    for run in reversed(list(runs or ())[-max(1, int(limit)) :]):
+        level = str(run.get("level") or "unknown")
+        level = level if level in _HISTORY_MARKS else "unknown"
+        parts = [format_time(str(run.get("time") or "")), str(run.get("title") or "")]
+        text = " · ".join(part for part in parts if part)
+        lines.append((level, f"{_HISTORY_MARKS[level]} {text} — {run.get('headline') or 'итог не записан'}"))
+    return lines
+
+
+class BlockcheckHistoryList(_HeightKeeper, QWidget):
+    """Прошлые проверки: когда, что проверяли и чем кончилось."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(4)
+        self.title_label = StrongBodyLabel("Прошлые проверки", self)
+        self._layout.addWidget(self.title_label)
+        self._labels: list[CaptionLabel] = []
+        self._lines: list[tuple[str, str]] = []
+        self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
+
+    def lines(self) -> list[tuple[str, str]]:
+        return list(self._lines)
+
+    def show_history(self, runs) -> None:
+        self._lines = history_lines(runs)
+        while len(self._labels) < len(self._lines):
+            label = CaptionLabel("", self)
+            label.setWordWrap(True)
+            self._layout.addWidget(label)
+            self._labels.append(label)
+        for index, label in enumerate(self._labels):
+            visible = index < len(self._lines)
+            label.setVisible(visible)
+            if visible:
+                label.setText(self._lines[index][1])
+        self._apply_theme_refresh()
+        set_state_text(self, "Прошлые проверки: " + ("; ".join(text for _level, text in self._lines) or "пока нет"))
+        self._schedule_min_height_sync()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_min_height()
+
+    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
+        _ = force
+        for label, (level, _text) in zip(self._labels, self._lines):
+            color = tone_color(_level_tone(level), tokens)
+            label.setStyleSheet(f"color: {color};" if color else "")
+
+
 class BlockcheckSitesTable(TableWidget):
     """Одна строка на сервис: название, открывается ли, что именно не так."""
 

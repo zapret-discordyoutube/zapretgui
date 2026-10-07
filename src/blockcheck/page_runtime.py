@@ -8,6 +8,8 @@ from support_request_actions import prepare_blockcheck_support_request
 @dataclass(frozen=True, slots=True)
 class BlockcheckPageInitialStatePlan:
     user_domains: tuple[str, ...]
+    # Итоги прошлых проверок, от старых к новым.
+    check_history: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,9 +33,11 @@ def load_page_initial_state() -> BlockcheckPageInitialStatePlan:
         data = read_settings()
         blockcheck = dict(data.get("blockcheck") or {})
         domains = _normalize_user_domains(blockcheck.get("user_domains"))
+        runs = blockcheck.get("check_history")
+        history = tuple(dict(run) for run in runs if isinstance(run, dict)) if isinstance(runs, list) else ()
     except Exception:
-        domains = ()
-    return BlockcheckPageInitialStatePlan(user_domains=domains)
+        domains, history = (), ()
+    return BlockcheckPageInitialStatePlan(user_domains=domains, check_history=history)
 
 
 def load_user_domains() -> list[str]:

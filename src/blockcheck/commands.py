@@ -126,7 +126,7 @@ def remember_blockcheck_run(report: dict, log_file: str | None) -> dict:
 
     entry = history.blockcheck_entry(report, log_file=str(log_file or ""))
     previous = history.previous_run(get_check_history(), entry)
-    add_check_history_run(entry)
+    runs = add_check_history_run(entry)
 
     json_file = ""
     if log_file:
@@ -144,6 +144,7 @@ def remember_blockcheck_run(report: dict, log_file: str | None) -> dict:
         "changes": history.describe_changes(previous, entry),
         "previous_time": str(previous.get("time") or "") if previous else "",
         "json_file": json_file,
+        "history": runs,
     }
 
 

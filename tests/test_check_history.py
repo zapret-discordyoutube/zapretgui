@@ -254,6 +254,7 @@ class StoreAndRememberTests(unittest.TestCase):
         second = commands.remember_blockcheck_run(second_report, log_file)
 
         self.assertEqual(second["changes"], ["перестали открываться: YouTube"])
+        self.assertEqual([run["level"] for run in second["history"]], ["ok", "fail"])
         self.assertTrue(second["previous_time"])
         self.assertEqual(len(self.store.get_check_history()), 2)
         document = json.loads(Path(second["json_file"]).read_text("utf-8"))
@@ -292,6 +293,7 @@ class WorkerTests(unittest.TestCase):
 
         self.assertEqual(report["changes"], ["перестали открываться: YouTube"])
         self.assertEqual(report["json_file"], "x.json")
+        self.assertEqual(report["history"], [])
         self.assertIn("🕘 С прошлой проверки (06.10 10:00) перестали открываться: YouTube.", lines)
 
     def test_failed_history_write_does_not_cost_the_result(self) -> None:

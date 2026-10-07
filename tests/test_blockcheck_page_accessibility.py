@@ -267,6 +267,61 @@ class SummaryPanelTests(unittest.TestCase):
         self.assertIn("Zapret выключен", panel.env_label.text())
 
 
+class HistoryCardTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    RUNS = [
+        {"kind": "blockcheck", "time": "2026-10-05T09:00:00", "title": "Все сайты", "level": "ok", "headline": "Всё открывается"},
+        {"kind": "blockcheck", "time": "2026-10-06T10:00:00", "title": "Все сайты", "level": "fail", "headline": "YouTube не открывается"},
+        {"kind": "blockcheck", "time": "2026-10-07T20:15:00", "title": "Полная проверка", "level": "катастрофа", "headline": ""},
+    ]
+
+    def test_lines_are_newest_first_with_time_scope_and_outcome(self) -> None:
+        from blockcheck.ui.check_results import history_lines
+
+        lines = history_lines(self.RUNS)
+
+        self.assertEqual(lines[0], ("unknown", "? 07.10 20:15 · Полная проверка — итог не записан"))
+        self.assertEqual(lines[1], ("fail", "✗ 06.10 10:00 · Все сайты — YouTube не открывается"))
+        self.assertEqual(lines[2], ("ok", "✓ 05.10 09:00 · Все сайты — Всё открывается"))
+        # Показываются только последние записи.
+        self.assertEqual(len(history_lines(self.RUNS * 5, limit=4)), 4)
+        self.assertEqual(history_lines([]), [])
+
+    def test_card_is_hidden_until_there_is_history_and_follows_new_runs(self) -> None:
+        page = _make_page()
+        self.assertTrue(page._history_card.isHidden())
+
+        page._show_history(self.RUNS[:2])
+        self.assertFalse(page._history_card.isHidden())
+        self.assertEqual(len(page._history_list.lines()), 2)
+        self.assertIn("YouTube не открывается", page._history_list.accessibleName())
+
+        # Свежая проверка приносит обновлённую историю вместе с отчётом.
+        page._on_finished({"problems": [], "services": [], "elapsed": 1.0, "history": self.RUNS})
+        self.assertEqual(len(page._history_list.lines()), 3)
+
+        # На другой вкладке карточка скрыта, при возврате — снова видна.
+        page._switch_tab(page.TAB_ORDER.index("strategy_scan"))
+        self.assertTrue(page._history_card.isHidden())
+        page._switch_tab(0)
+        self.assertFalse(page._history_card.isHidden())
+
+    def test_history_comes_with_initial_page_state(self) -> None:
+        from blockcheck import page_runtime
+
+        settings = {"blockcheck": {"user_domains": ["example.com"], "check_history": self.RUNS[:1] + ["мусор"]}}
+        with patch("settings.store.read_settings", return_value=settings):
+            state = page_runtime.load_page_initial_state()
+
+        self.assertEqual(state.user_domains, ("example.com",))
+        self.assertEqual(len(state.check_history), 1)
+        with patch("settings.store.read_settings", side_effect=OSError("нет базы")):
+            self.assertEqual(page_runtime.load_page_initial_state().check_history, ())
+
+
 class ScopeChoiceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

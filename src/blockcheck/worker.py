@@ -115,6 +115,7 @@ class BlockcheckWorker(QObject):
         report["changes"] = changes
         report["previous_time"] = str(note.get("previous_time") or "")
         report["json_file"] = str(note.get("json_file") or "")
+        report["history"] = [dict(run) for run in note.get("history") or () if isinstance(run, dict)]
         if changes:
             from diagnostics.history import format_time
 
