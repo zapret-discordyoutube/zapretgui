@@ -214,8 +214,10 @@ class SplashSpecTests(unittest.TestCase):
 
         for value in colors.values():
             self.assertRegex(value, r"^#[0-9a-f]{6}$")
-        # Полупрозрачный белый над тёмной карточкой — серый, а не белый.
-        self.assertEqual(colors["foreground"], "#959595")
+        # Полупрозрачный белый над тёмным фоном страницы — серый, а не белый.
+        self.assertEqual(colors["foreground"], "#939393")
+        # Фон и карточки — цвета главного окна программы.
+        self.assertEqual((colors["background"], colors["card"]), ("#272727", "#323232"))
 
     def test_spec_takes_place_of_update_window(self) -> None:
         from PyQt6.QtWidgets import QWidget
@@ -309,9 +311,14 @@ class SplashScriptContractTests(unittest.TestCase):
         self.assertNotIn("$bounce", script)
         # Подготовка установщика тихо подползает от 5 к 10 %, копирование — с 10 %.
         self.assertIn("return 0.05 + 0.05 * (1 - [Math]::Exp(-($now - $S.StageSince) / 4.0))", fill)
-        # Новое значение не меньше прежнего, а сглаживание идёт по времени.
+        # Новое значение не меньше прежнего, а сглаживание идёт по времени —
+        # в оба звена: и цель с запасом, и сама полоса только растут.
         self.assertIn(
-            "$S.Fill = [Math]::Max($S.Fill, $S.Fill + ($target - $S.Fill) * (1 - [Math]::Exp(-$dt / 0.22)))",
+            "$S.Lead = [Math]::Max($S.Lead, $S.Lead + ($target - $S.Lead) * (1 - [Math]::Exp(-$dt / 0.14)))",
+            script,
+        )
+        self.assertIn(
+            "$S.Fill = [Math]::Max($S.Fill, $S.Fill + ($S.Lead - $S.Fill) * (1 - [Math]::Exp(-$dt / 0.16)))",
             script,
         )
 

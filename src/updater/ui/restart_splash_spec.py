@@ -19,8 +19,13 @@ from updater.install.splash import RestartSplashSpec
 from updater.ui import plans
 from updater.ui.fun_texts import phrases as fun_phrases
 
-_DARK_CARD = QColor("#2b2b2b")
-_LIGHT_CARD = QColor("#f9f9f9")
+# Слои главного окна программы (qfluentwidgets): фон страницы и карточка на
+# нём. Окно-продолжение рисуется теми же цветами — оно выглядит частью
+# программы, а не отдельным окном со своей палитрой.
+_DARK_PAGE = QColor("#272727")
+_DARK_CARD = QColor("#323232")
+_LIGHT_PAGE = QColor("#f9f9f9")
+_LIGHT_CARD = QColor("#ffffff")
 _LOGO_SIDE = 128
 
 
@@ -39,15 +44,17 @@ def _solid(value: str, over: QColor, fallback: str) -> str:
 
 
 def splash_colors(tokens) -> dict[str, str]:
+    page = _LIGHT_PAGE if tokens.is_light else _DARK_PAGE
     card = _LIGHT_CARD if tokens.is_light else _DARK_CARD
     return {
-        "background": card.name(),
+        "background": page.name(),
+        "card": card.name(),
         "border": "#e0e0e0" if tokens.is_light else "#3d3d3d",
-        "foreground": _solid(tokens.fg, card, "#ffffff"),
-        "muted": _solid(tokens.fg_muted, card, "#9aa0a6"),
-        "accent": _solid(tokens.accent_hex, card, "#60cdff"),
+        "foreground": _solid(tokens.fg, page, "#ffffff"),
+        "muted": _solid(tokens.fg_muted, page, "#9aa0a6"),
+        "accent": _solid(tokens.accent_hex, page, "#60cdff"),
         "track": "#e3e3e3" if tokens.is_light else "#3d3d3d",
-        "on_accent": _solid(tokens.accent_fg, QColor(_solid(tokens.accent_hex, card, "#60cdff")), "#000000"),
+        "on_accent": _solid(tokens.accent_fg, QColor(_solid(tokens.accent_hex, page, "#60cdff")), "#000000"),
     }
 
 

@@ -100,7 +100,8 @@ function With-Alpha([System.Drawing.Color]$color, [double]$alpha) {
 }
 
 $C = @{
-    Background = Get-Color ([string]$spec.colors.background) '#202020'
+    Background = Get-Color ([string]$spec.colors.background) '#272727'
+    Card       = Get-Color ([string]$spec.colors.card) '#323232'
     Border     = Get-Color ([string]$spec.colors.border) '#3a3a3a'
     Foreground = Get-Color ([string]$spec.colors.foreground) '#ffffff'
     Muted      = Get-Color ([string]$spec.colors.muted) '#9aa0a6'
@@ -148,12 +149,15 @@ $S = @{
     CurrentFile  = ''
     LastTick     = 0.0
     RevealState  = $null
-    WashRect     = $null
-    WashFrom     = $null
+    Base         = $null
     Frames       = 0
     Fill         = 0.0
     SucceededAt  = -1.0
     DoneJumpAt   = -1.0
+    # Когда закончился последний этап: от этого момента идёт вспышка по полосе и кольцу.
+    FlashAt      = -1.0
+    # Промежуточное звено сглаживания: полоса идёт за ним, а оно — за целью.
+    Lead         = 0.0
     Closing      = $false
     ClosingAt    = 0.0
     CloseFast    = $false
@@ -200,6 +204,7 @@ function Set-Stage([int]$stage) {
     if ($stage -le $S.Stage) { return }
     $now = $S.Clock.Elapsed.TotalSeconds
     for ($i = $S.Stage; $i -lt $stage -and $i -lt $S.DoneAt.Count; $i++) { $S.DoneAt[$i] = $now }
+    if ($now -gt 0.5) { $S.FlashAt = $now }
     for ($i = $S.Stage + 1; $i -le $stage -and $i -lt $S.StartAt.Count; $i++) { $S.StartAt[$i] = $now }
     $S.Stage = $stage
     $S.StageSince = $now
@@ -393,6 +398,13 @@ function Ease-Out([double]$t) {
     return 1 - [Math]::Pow(1 - $t, 3)
 }
 
+# Плавный разгон и плавное торможение: так движется блик по полосе и кольцу.
+function Ease-InOut([double]$t) {
+    $t = [Math]::Max(0.0, [Math]::Min(1.0, $t))
+    if ($t -lt 0.5) { return 4 * $t * $t * $t }
+    return 1 - [Math]::Pow(2 - 2 * $t, 3) / 2
+}
+
 # То же, но с небольшим перелётом за цель и возвратом — «пружина».
 function Ease-Back([double]$t) {
     $t = [Math]::Max(0.0, [Math]::Min(1.0, $t))
@@ -401,7 +413,7 @@ function Ease-Back([double]$t) {
 }
 
 # Появление по очереди: часть окна выезжает снизу и проявляется. Проявление —
-# заслонка в цвет фона (с тем же переливом) поверх уже нарисованного: так не нужно делать
+# заслонка цвета фона поверх уже нарисованного: так не нужно делать
 # полупрозрачной каждую кисть. Возвращает, насколько часть уже проявилась.
 function Begin-Reveal([System.Drawing.Graphics]$g, [double]$delay, [double]$k) {
     $shown = Ease-Out (($S.Clock.Elapsed.TotalSeconds - $delay) / 0.45)
@@ -412,7 +424,7 @@ function Begin-Reveal([System.Drawing.Graphics]$g, [double]$delay, [double]$k) {
 
 function End-Reveal([System.Drawing.Graphics]$g, [double]$shown, [single]$x, [single]$y, [single]$w, [single]$h) {
     if ($shown -lt 1) {
-        $veil = New-Object System.Drawing.Drawing2D.LinearGradientBrush($S.WashRect, (With-Alpha $S.WashFrom (1 - $shown)), (With-Alpha $C.Background (1 - $shown)), [System.Drawing.Drawing2D.LinearGradientMode]::ForwardDiagonal)
+        $veil = New-Object System.Drawing.SolidBrush((With-Alpha $S.Base (1 - $shown)))
         $g.FillRectangle($veil, $x, $y, $w, $h)
         $veil.Dispose()
     }
@@ -469,30 +481,29 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
     $now = $S.Clock.Elapsed.TotalSeconds
     $S.Frames += 1
 
-    # Вид — как в «Параметрах» Windows 11: слева кольцо хода с логотипом,
-    # справа заголовок и этапы карточками, внизу полоса. Карточка — чуть
-    # светлее фона, с едва заметной обводкой и скруглением 8.
+    # Вид — как у страниц самой программы (Windows 11): слева карточка с
+    # кольцом хода и логотипом, справа заголовок и этапы карточками, внизу полоса.
     $isDark = ($C.Background.GetBrightness() -lt 0.5)
     $white = [System.Drawing.Color]::White
     $black = [System.Drawing.Color]::Black
+    # Цвета — главного окна программы: плоский фон страницы и карточки на нём,
+    # без обводок и цветного налёта. Текущая карточка — на ступень светлее,
+    # будущая — на полступени ближе к фону.
+    $base = $C.Background
+    $cardColor = $C.Card
+    $cardDimColor = Mix-Color $base $cardColor 0.55
     if ($isDark) {
-        $cardColor = Mix-Color $C.Background $white 0.05
-        $cardLitColor = Mix-Color $C.Background $white 0.1
-        $cardEdge = Mix-Color $C.Background $white 0.115
+        $cardLitColor = Mix-Color $cardColor $white 0.065
+        $ringTrack = Mix-Color $cardColor $white 0.1
     } else {
-        $cardColor = Mix-Color $C.Background $white 0.75
-        $cardLitColor = $white
-        $cardEdge = Mix-Color $C.Background $black 0.09
+        $cardLitColor = $cardColor
+        $ringTrack = Mix-Color $base $black 0.1
     }
-    $ringTrack = Mix-Color $C.Background $C.Foreground 0.1
-
-    # Фон с глубиной: от левого верхнего угла идёт едва заметный оттенок акцента.
-    $S.WashRect = New-Object System.Drawing.RectangleF(0, 0, $width, $height)
-    $S.WashFrom = Mix-Color $C.Background $C.Accent $(if ($isDark) { 0.1 } else { 0.07 })
-    $wash = New-Object System.Drawing.Drawing2D.LinearGradientBrush($S.WashRect, $S.WashFrom, $C.Background, [System.Drawing.Drawing2D.LinearGradientMode]::ForwardDiagonal)
-    $g.FillRectangle($wash, $S.WashRect)
-    $wash.Dispose()
-    $borderPen = New-Object System.Drawing.Pen($C.Border, [single]1)
+    # В светлой теме белая карточка на почти белом фоне держится на тонкой кромке.
+    $cardEdge = if ($isDark) { $cardColor } else { Mix-Color $base $black 0.075 }
+    $S.Base = $base
+    $g.Clear($base)
+    $borderPen = New-Object System.Drawing.Pen((Mix-Color $base $C.Foreground 0.1), [single]1)
     $g.DrawRectangle($borderPen, 0, 0, $width - 1, $height - 1)
     $borderPen.Dispose()
 
@@ -534,26 +545,37 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
     $ringX = [single]($pad + $sideWidth / 2)
     $ringY = [single]($blockTop + ($blockHeight - $underRing) / 2)
     $ringStroke = [single](10 * $k)
+    # Этап закончился — кольцо на мгновение становится толще.
+    $flash = if ($S.FlashAt -ge 0) { ($now - $S.FlashAt) / 0.7 } else { 2.0 }
+    $arcStroke = $ringStroke
+    if ($flash -lt 1) { $arcStroke = [single]($ringStroke * (1 + 0.22 * [Math]::Sin([Math]::PI * $flash))) }
+    # Блик идёт 1,7 с с разгоном и торможением, затем 0,7 с пауза; на концах
+    # пути он проявляется и гаснет, а не возникает из ниоткуда.
+    $glint = [Math]::Min(1.0, ($now % 2.4) / 1.7)
+    $glintAt = Ease-InOut $glint
+    $glintGlow = [Math]::Sin([Math]::PI * $glint)
     $ringRect = New-Object System.Drawing.RectangleF(($ringX - $ringRadius), ($ringY - $ringRadius), $ringSize, $ringSize)
     $trackPen = New-Object System.Drawing.Pen($ringTrack, $ringStroke)
     $g.DrawEllipse($trackPen, $ringRect)
     $trackPen.Dispose()
     $sweep = [single](360.0 * $share)
     if ($sweep -gt 0.5) {
-        $arcPen = New-Object System.Drawing.Pen($C.Accent, $ringStroke)
+        $arcPen = New-Object System.Drawing.Pen($C.Accent, $arcStroke)
         $arcPen.StartCap = 'Round'; $arcPen.EndCap = 'Round'
         $g.DrawArc($arcPen, $ringRect, [single]-90, $sweep)
         $arcPen.Dispose()
         if ($S.Fill -lt 0.999) {
-            # Блик бежит по закрашенной дуге от начала к переднему краю.
-            $at = $sweep * (($now % 2.2) / 2.2)
-            $from = [Math]::Max(0.0, $at - 14.0)
-            $to = [Math]::Min([double]$sweep, $at + 14.0)
-            if ($to - $from -gt 1) {
-                $shinePen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(80, 255, 255, 255), [single]($ringStroke * 0.5))
-                $shinePen.StartCap = 'Round'; $shinePen.EndCap = 'Round'
-                $g.DrawArc($shinePen, $ringRect, [single](-90 + $from), [single]($to - $from))
-                $shinePen.Dispose()
+            # Блик на дуге — три слоя разной длины: яркая середина, мягкие края.
+            $at = $sweep * $glintAt
+            foreach ($layer in @(@(18.0, 26), @(11.0, 34), @(5.0, 44))) {
+                $from = [Math]::Max(0.0, $at - $layer[0])
+                $to = [Math]::Min([double]$sweep, $at + $layer[0])
+                if ($to - $from -gt 1) {
+                    $shinePen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb([int]($layer[1] * $glintGlow), 255, 255, 255), [single]($ringStroke * 0.55))
+                    $shinePen.StartCap = 'Round'; $shinePen.EndCap = 'Round'
+                    $g.DrawArc($shinePen, $ringRect, [single](-90 + $from), [single]($to - $from))
+                    $shinePen.Dispose()
+                }
             }
         }
     }
@@ -606,7 +628,8 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
         elseif ($isDone) { $lit = 1 - (Ease-Out ($doneFor / 0.45)) }
         $cardRect = New-Object System.Drawing.RectangleF($columnLeft, $y, $columnWidth, $cardHeight)
         $cardPath = New-RoundedPath $cardRect ([single](8 * $k))
-        $cardBrush = New-Object System.Drawing.SolidBrush((Mix-Color $cardColor $cardLitColor $lit))
+        $restColor = if ($isDone -or $isActive) { $cardColor } else { $cardDimColor }
+        $cardBrush = New-Object System.Drawing.SolidBrush((Mix-Color $restColor $cardLitColor $lit))
         $g.FillPath($cardBrush, $cardPath)
         $cardBrush.Dispose()
         $edgePen = New-Object System.Drawing.Pen($cardEdge, [single]1)
@@ -634,13 +657,18 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
             if ($statuses.Count -gt 0) { $status = [string]$statuses[0] }
             if ($S.StartAt[$i] -ge 0) { $spent = Format-Duration ($doneAt - $S.StartAt[$i]) }
         } elseif ($isActive) {
-            # Кольцо ожидания Windows: бледная дорожка и дуга, которая бежит и «дышит» длиной.
+            # Кольцо ожидания Windows: бледная дорожка и дуга, которая вращается, вытягиваясь и сжимаясь.
             $ring = New-Object System.Drawing.Pen((With-Alpha $C.Accent 0.22), [single](3 * $k))
             $g.DrawEllipse($ring, $markRect)
             $ring.Dispose()
             $arc = New-Object System.Drawing.Pen($C.Accent, [single](3 * $k))
             $arc.StartCap = 'Round'; $arc.EndCap = 'Round'
-            $g.DrawArc($arc, $markRect, [single](($now * 250) % 360), [single](95 + 45 * [Math]::Sin($now * 2.1)))
+            $turn = $now / 1.3
+            $beat = $turn - [Math]::Floor($turn)
+            $head = Ease-InOut ($beat * 2)
+            $tail = Ease-InOut ($beat * 2 - 1)
+            $spin = ($now * 130 + [Math]::Floor($turn) * 270 + $tail * 270) % 360
+            $g.DrawArc($arc, $markRect, [single]$spin, [single](18 + 270 * ($head - $tail)))
             $arc.Dispose()
             $titleFont = $F.StageB
             $titleColor = Mix-Color $C.Muted $C.Foreground $lit
@@ -688,26 +716,41 @@ function Draw-Frame([System.Drawing.Graphics]$g, [int]$width, [int]$height) {
     $fillWidth = [single]($barWidth * $share)
     if ($fillWidth -gt $barHeight) {
         $fillPath = New-RoundedPath (New-Object System.Drawing.RectangleF($pad, $barTop, $fillWidth, $barHeight)) ($barHeight / 2)
-        $fillBrush = New-Object System.Drawing.SolidBrush($C.Accent)
+        # Заливка светлеет к переднему краю: видно, куда идёт ход.
+        $fillRect = New-Object System.Drawing.RectangleF(($pad - 1), $barTop, ($fillWidth + 2), $barHeight)
+        $fillBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($fillRect, (Mix-Color $C.Accent $S.Base 0.22), $C.Accent, [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
         $g.FillPath($fillBrush, $fillPath)
         $fillBrush.Dispose()
+        $clear = [System.Drawing.Color]::FromArgb(0, 255, 255, 255)
+        $state = $g.Save()
+        $g.SetClip($fillPath)
         if ($S.Fill -lt 0.999) {
-            # Неяркий блик проходит по заливке: видно, что работа идёт.
-            $band = [single]([Math]::Max($fillWidth * 0.3, 40 * $k))
-            $center = $pad - $band + ($fillWidth + 2 * $band) * (($now % 2.4) / 2.4)
+            # Блик: тот же ход, что и на кольце, — они идут в такт.
+            $band = [single]([Math]::Max($fillWidth * 0.22, 36 * $k))
+            $center = $pad - $band + ($fillWidth + 2 * $band) * $glintAt
             $shineRect = New-Object System.Drawing.RectangleF(($center - $band), $barTop, (2 * $band), $barHeight)
-            $clear = [System.Drawing.Color]::FromArgb(0, 255, 255, 255)
             $shine = New-Object System.Drawing.Drawing2D.LinearGradientBrush($shineRect, $clear, $clear, [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
             $blend = New-Object System.Drawing.Drawing2D.ColorBlend(3)
-            $blend.Colors = [System.Drawing.Color[]]@($clear, [System.Drawing.Color]::FromArgb(80, 255, 255, 255), $clear)
+            $blend.Colors = [System.Drawing.Color[]]@($clear, [System.Drawing.Color]::FromArgb([int](105 * $glintGlow), 255, 255, 255), $clear)
             $blend.Positions = [single[]]@(0, 0.5, 1)
             $shine.InterpolationColors = $blend
-            $state = $g.Save()
-            $g.SetClip($fillPath)
             $g.FillRectangle($shine, $shineRect)
-            $g.Restore($state)
             $shine.Dispose()
         }
+        if ($flash -lt 1) {
+            # Этап закончился — по полосе один раз пробегает яркая вспышка и гаснет.
+            $band = [single]([Math]::Max($fillWidth * 0.35, 60 * $k))
+            $center = $pad + ($fillWidth + $band) * (Ease-Out $flash)
+            $flashRect = New-Object System.Drawing.RectangleF(($center - $band), $barTop, (2 * $band), $barHeight)
+            $flashBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush($flashRect, $clear, $clear, [System.Drawing.Drawing2D.LinearGradientMode]::Horizontal)
+            $blend = New-Object System.Drawing.Drawing2D.ColorBlend(3)
+            $blend.Colors = [System.Drawing.Color[]]@($clear, [System.Drawing.Color]::FromArgb([int](170 * (1 - $flash)), 255, 255, 255), $clear)
+            $blend.Positions = [single[]]@(0, 0.5, 1)
+            $flashBrush.InterpolationColors = $blend
+            $g.FillRectangle($flashBrush, $flashRect)
+            $flashBrush.Dispose()
+        }
+        $g.Restore($state)
         $fillPath.Dispose()
     }
 
@@ -857,11 +900,14 @@ $timer.Add_Tick({
         $S.LastTick = $now
         # Сглаживание по времени, а не по кадрам, и только вперёд: полоса
         # одинаково плавная при любой частоте кадров и никогда не идёт назад.
+        # Звеньев два: полоса не дёргается с места и не встаёт как вкопанная,
+        # а разгоняется и тормозит — у движения появляется вес.
         $target = Target-Fill
-        $S.Fill = [Math]::Max($S.Fill, $S.Fill + ($target - $S.Fill) * (1 - [Math]::Exp(-$dt / 0.22)))
+        $S.Lead = [Math]::Max($S.Lead, $S.Lead + ($target - $S.Lead) * (1 - [Math]::Exp(-$dt / 0.14)))
+        $S.Fill = [Math]::Max($S.Fill, $S.Fill + ($S.Lead - $S.Fill) * (1 - [Math]::Exp(-$dt / 0.16)))
         # Установка закончена — логотип в кольце делает один «вдох».
         if ($S.InstallSucceeded -and $S.Fill -ge 0.9 -and $S.DoneJumpAt -lt 0) { $S.DoneJumpAt = $now }
-        if ($S.Stage -ge 2 -and $S.Fill -ge 0.99 -and $S.DoneAt[2] -lt 0) { $S.DoneAt[2] = $now }
+        if ($S.Stage -ge 2 -and $S.Fill -ge 0.99 -and $S.DoneAt[2] -lt 0) { $S.DoneAt[2] = $now; $S.FlashAt = $now }
         if ($S.Closing) {
             # Обычное закрытие: полоса доходит до конца, ставится последняя
             # галочка, и только потом окно тает. При неудаче — уходит сразу.
