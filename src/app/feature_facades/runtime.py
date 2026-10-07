@@ -8,7 +8,6 @@ from typing import Any
 from app.feature_facades.runtime_parts import RuntimeCommandPort
 from app.feature_facades.runtime_parts import RuntimeDependencies
 from app.feature_facades.runtime_parts import RuntimeEvents
-from app.feature_facades.runtime_parts import RuntimeFlags
 from app.feature_facades.runtime_parts import RuntimeLifecyclePort
 from app.feature_facades.runtime_parts import RuntimeObjects
 from app.feature_facades.runtime_parts import RuntimeUiPort
@@ -27,7 +26,6 @@ class RuntimeFeature:
     ui_port: RuntimeUiPort = field(init=False)
     lifecycle: RuntimeLifecyclePort = field(init=False)
     dependencies: RuntimeDependencies = field(init=False)
-    flags: RuntimeFlags = field(init=False)
     objects: RuntimeObjects = field(init=False)
     events: RuntimeEvents = field(init=False)
     commands: RuntimeCommandPort = field(init=False)
@@ -54,7 +52,6 @@ class RuntimeFeature:
             profile_feature=profile_feature,
             orchestra_feature=orchestra_feature,
         )
-        self.flags = RuntimeFlags()
         self.objects = RuntimeObjects(runtime_service=runtime_service)
         self.events = RuntimeEvents(
             runtime_service=runtime_service,

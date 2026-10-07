@@ -313,6 +313,49 @@ class LearnedStrategiesLuaTests(unittest.TestCase):
     стратегии.
     """
 
+    def _whitelist_runner(self, root: str):
+        from orchestra import orchestra_runner as module
+
+        with patch.object(module, "get_orchestra_keep_debug_file", return_value=False), \
+                patch.object(module, "get_orchestra_auto_restart_on_discord_fail", return_value=False), \
+                patch.object(module, "get_orchestra_discord_fails_for_restart", return_value=3):
+            runner = module.OrchestraRunner(zapret_path=root)
+        runner.load_whitelist = lambda: runner.whitelist
+        runner.save_whitelist = lambda: None
+        return module, runner
+
+    def test_whitelist_change_is_applied_to_running_engine_without_restart(self) -> None:
+        # whitelist.txt передан движку как --hostlist-exclude, поэтому после
+        # пересборки файла достаточно сигнала «перечитать списки».
+        shipped_path = PRIVATE_LUA_DIR / "circular-config.txt"
+        if shipped_path.is_file():
+            self.assertIn("--hostlist-exclude=user/lua/whitelist.txt", shipped_path.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as tmp:
+            module, runner = self._whitelist_runner(tmp)
+            runner.whitelist = {"example.org"}
+            runner.running_process = MagicMock()
+            runner.running_process.poll.return_value = None
+            with patch(
+                "winws_runtime.runtime.system_ops.reload_own_engine_lists_runtime", return_value=1
+            ) as reload:
+                self.assertTrue(runner.add_to_whitelist("new.example.com"))
+                self.assertEqual(reload.call_count, 1)
+                self.assertTrue(runner.remove_from_whitelist("new.example.com"))
+                self.assertEqual(reload.call_count, 2)
+            # Сигнал подан уже после пересборки файла.
+            self.assertNotIn("new.example.com", Path(runner.whitelist_path).read_text(encoding="utf-8"))
+
+    def test_whitelist_change_without_running_orchestra_sends_no_signal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            module, runner = self._whitelist_runner(tmp)
+            runner.whitelist = set()
+            with patch(
+                "winws_runtime.runtime.system_ops.reload_own_engine_lists_runtime", return_value=0
+            ) as reload:
+                self.assertTrue(runner.add_to_whitelist("new.example.com"))
+            reload.assert_not_called()
+            self.assertIn("new.example.com", Path(runner.whitelist_path).read_text(encoding="utf-8"))
+
     def test_blocked_strategies_are_preloaded_without_circular_filter(self) -> None:
         from types import SimpleNamespace
 

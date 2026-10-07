@@ -26,6 +26,7 @@ from winws_runtime.engine.driver import (
 )
 from winws_runtime.engine.process_control import (
     list_engine_processes,
+    reload_engine_lists,
     stop_engine_processes,
 )
 
@@ -80,6 +81,20 @@ def stop_own_winws_processes_runtime(*, timeout: float = 5.0) -> bool:
     except Exception as e:
         log(f"Ошибка остановки процессов winws: {e}", "WARNING")
         return False
+
+
+def reload_own_engine_lists_runtime() -> int:
+    """Просит свои запущенные winws перечитать файлы списков без перезапуска.
+
+    Возвращает, сколько процессов приняли сигнал (0 — движок не запущен или
+    это старая сборка без такой возможности). Это несколько системных вызовов,
+    ожидания нет; ошибок наружу не бросает.
+    """
+    try:
+        return int(reload_engine_lists(own_engine_exe_paths()))
+    except Exception as e:
+        log(f"Ошибка обновления списков в winws: {e}", "DEBUG")
+        return 0
 
 
 def has_own_winws_process() -> bool:

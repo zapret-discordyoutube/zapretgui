@@ -56,7 +56,6 @@ def on_dpi_start_finished(runtime_owner, success, error_message):
 
             log("DPI запущен асинхронно", "INFO")
             set_runtime_owner_status(runtime_owner, "✅ DPI успешно запущен")
-            runtime_owner._runtime_feature.flags.mark_intentional_start()
             maybe_restart_discord_after_runtime_apply(runtime_owner, skip_first_start=True)
 
             pending_warnings = list(runtime_owner._pending_launch_warnings or [])

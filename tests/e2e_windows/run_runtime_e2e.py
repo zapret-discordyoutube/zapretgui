@@ -227,7 +227,7 @@ def scenario_unexpected_death_is_reported_at_once(lab: Lab) -> None:
     assert lab.unexpected_exit.wait(3.0), "неожиданная смерть процесса не замечена"
     elapsed = time.perf_counter() - started
     assert elapsed < 1.5, f"смерть процесса замечена через {elapsed:.2f} с"
-    assert process.poll() != process_control.ENGINE_STOP_EXIT_CODE
+    assert process.poll() != process_control.ENGINE_KILL_EXIT_CODE
     lab.runner2.stop(cleanup_services=True)
 
 

@@ -69,18 +69,6 @@ class RuntimeDependencies:
 
 
 @dataclass(slots=True)
-class RuntimeFlags:
-    manually_stopped: bool = False
-    intentional_start: bool = False
-
-    def mark_manual_stop(self) -> None:
-        self.manually_stopped = True
-
-    def mark_intentional_start(self) -> None:
-        self.intentional_start = True
-
-
-@dataclass(slots=True)
 class RuntimeObjects:
     runtime_service: Any
     process_monitor_manager: Any = None

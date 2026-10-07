@@ -29,7 +29,6 @@ def stop_dpi_async(
 
     runtime_owner._runtime_service().set_busy(True, "Остановка Zapret...")
     runtime_owner._begin_runtime_stop()
-    runtime_owner._runtime_feature.flags.mark_manual_stop()
 
     start_worker_thread(
         runtime_owner,

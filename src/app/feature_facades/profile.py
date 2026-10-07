@@ -9,6 +9,16 @@ from profile.state import StrategyApplyResult
 from ui.performance_metrics import log_ui_timing_since
 
 
+def _reload_engine_lists_after_list_save() -> None:
+    """Сообщает запущенному движку, что файлы списков изменились. Не бросает."""
+    try:
+        from winws_runtime.runtime.system_ops import reload_own_engine_lists_runtime
+
+        reload_own_engine_lists_runtime()
+    except Exception:
+        pass
+
+
 @dataclass(frozen=True, slots=True)
 class ProfileFeature:
     _presets_feature: Any
@@ -170,13 +180,18 @@ class ProfileFeature:
             filter_kind: str = "",
             filter_value: str = "",
         ):
-            return self.save_profile_list_file_text(
+            state = self.save_profile_list_file_text(
                 clean_launch_method,
                 profile_key,
                 text,
                 filter_kind=filter_kind,
                 filter_value=filter_value,
             )
+            # Файл списка (lists/<имя>.txt) пересобран: запущенный winws
+            # перечитает его сам, перезапуск не нужен. Это пара системных
+            # вызовов без ожидания, и идут они в потоке сохранения.
+            _reload_engine_lists_after_list_save()
+            return state
 
         def _load_profile_setup(profile_key: str):
             return self.get_profile_setup(clean_launch_method, profile_key)

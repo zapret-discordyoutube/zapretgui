@@ -28,6 +28,44 @@ class ProfileListViewStateWorkerTests(unittest.TestCase):
         self.assertNotIn("profile.ui.profile_list_model", warm_source)
         self.assertNotIn("profile.ui.profile_list_model", worker_source)
 
+    def test_list_file_save_worker_tells_running_engine_to_reload_lists(self) -> None:
+        # Файл списка записан в потоке сохранения; движок перечитывает его
+        # сигналом, перезапуск не нужен. Сигнал подаётся не в потоке интерфейса.
+        from app.feature_facades.profile import ProfileFeature
+
+        calls: list[str] = []
+        feature = ProfileFeature(SimpleNamespace(), SimpleNamespace())
+        worker = None
+        with (
+            patch.object(ProfileFeature, "save_profile_list_file_text", lambda self, *a, **k: calls.append("save") or "state"),
+            patch.object(ProfileFeature, "get_profile_setup", lambda self, *a, **k: calls.append("load") or "payload"),
+            patch(
+                "winws_runtime.runtime.system_ops.reload_own_engine_lists_runtime",
+                side_effect=lambda: calls.append("reload") or 1,
+            ),
+        ):
+            worker = feature.create_profile_list_file_save_worker(
+                1, "zapret2", profile_key="p", text="example.com"
+            )
+            worker.run()
+
+        self.assertEqual(calls, ["save", "reload", "load"])
+
+    def test_list_file_save_failure_does_not_signal_engine(self) -> None:
+        from app.feature_facades.profile import ProfileFeature
+
+        feature = ProfileFeature(SimpleNamespace(), SimpleNamespace())
+        with (
+            patch.object(ProfileFeature, "save_profile_list_file_text", side_effect=ValueError("bad")),
+            patch("winws_runtime.runtime.system_ops.reload_own_engine_lists_runtime") as reload,
+        ):
+            worker = feature.create_profile_list_file_save_worker(
+                1, "zapret2", profile_key="p", text="x"
+            )
+            worker.run()
+
+        reload.assert_not_called()
+
     def test_profile_feature_has_no_duplicate_result_cache(self) -> None:
         from app.feature_facades.profile import ProfileFeature
 

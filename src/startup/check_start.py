@@ -1,7 +1,6 @@
 #startup/check_start.py
 import ctypes
 import os
-import re
 import sys
 import winreg
 
@@ -259,46 +258,6 @@ def check_windows_version() -> tuple[bool, str]:
     return False, ""
 
 
-def contains_special_chars(path: str) -> bool:
-    """
-    True, если путь содержит:
-      • пробел
-      • (опционально) цифру
-      • символ НЕ из списка: буквы/цифры (включая кириллицу), _ . : \\ /
-    """
-    if " " in path:
-        return True            # пробел — сразу ошибка
-
-    # если хотите запретить цифры — раскомментируйте строку ниже
-    # if re.search(r"\d", path):
-    #     return True
-
-    # проверяем оставшиеся символы
-    #  ^ – отрицание; разрешаем Unicode-слова (включая кириллицу) + _ . : \ /
-    #  \w в Python включает буквы/цифры/underscore для Unicode.
-    return bool(re.search(r"[^\w\.:\\/]", path, flags=re.UNICODE))
-
-def check_path_for_special_chars():
-    """Проверяет пути программы на наличие специальных символов."""
-    path = _application_root_path()
-    if contains_special_chars(path):
-        error_message = (
-            f"Путь содержит специальные символы: {path}\n\n"
-            "Программа может работать некорректно, если в пути есть пробелы или специальные знаки.\n"
-            "Рекомендуется переместить программу в папку (или корень диска) без пробелов/спецсимволов "
-            "(например, C:\\zapret или D:\\zapret) и запустить её снова."
-        )
-        try:
-            from log.log import log
-
-            log(f"ERROR: Путь содержит специальные символы: {path}", level="❌ ERROR")
-        except ImportError:
-            print(f"ERROR: Путь содержит специальные символы: {path}")
-
-        return True, error_message
-
-    return False, ""
-
 def collect_startup_notifications() -> list[dict]:
     """Собирает стартовые системные события в одном fluent-формате."""
     notifications: list[dict] = []
@@ -363,20 +322,6 @@ def collect_startup_notifications() -> list[dict]:
                 queue="startup",
                 duration=15000,
                 dedupe_key="startup.onedrive_path",
-            )
-        )
-
-    has_special_chars, error_message = check_path_for_special_chars()
-    if has_special_chars and error_message:
-        notifications.append(
-            advisory_notification(
-                level="warning",
-                title="Проверка при запуске",
-                content=error_message,
-                source="startup.special_chars_path",
-                queue="startup",
-                duration=15000,
-                dedupe_key="startup.special_chars_path",
             )
         )
 

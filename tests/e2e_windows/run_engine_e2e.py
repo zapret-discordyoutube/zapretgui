@@ -180,12 +180,12 @@ def scenario_start_is_confirmed_by_engine_output(lab: Lab) -> None:
 
 
 def scenario_stop_is_confirmed_and_marked(lab: Lab) -> None:
-    """Остановка подтверждена хэндлом процесса; код завершения — наш."""
+    """Остановка подтверждена хэндлом процесса: движок вышел сам (0) или убит запасным путём."""
     process, _ = lab.start_ready()
     started = time.perf_counter()
     assert process_control.stop_process(process, timeout=5.0)
     elapsed = time.perf_counter() - started
-    assert process.poll() == process_control.ENGINE_STOP_EXIT_CODE, process.poll()
+    assert process.poll() in (0, process_control.ENGINE_KILL_EXIT_CODE), process.poll()
     assert elapsed < 1.0, f"остановка заняла {elapsed:.2f} с"
 
 

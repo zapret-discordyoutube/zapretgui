@@ -256,10 +256,10 @@ class OrchestraAccessibilityTests(unittest.TestCase):
         page = OrchestraWhitelistPage(orchestra_feature=_OrchestraFeatureStub())
         self.addCleanup(page.deleteLater)
 
-        self.assertEqual(page.restart_warning.accessibleName(), "Предупреждение: изменения белого списка применятся после перезапуска оркестратора")
+        self.assertEqual(page.restart_warning.accessibleName(), "Изменения белого списка применяются сразу, перезапуск оркестратора не нужен")
         self.assertEqual(
             page.restart_warning.property("screenReaderStateText"),
-            "Предупреждение: изменения белого списка применятся после перезапуска оркестратора",
+            "Изменения белого списка применяются сразу, перезапуск оркестратора не нужен",
         )
         self.assertEqual(page.domain_input.accessibleName(), "Домен для белого списка")
         self.assertEqual(page.domain_input.property("screenReaderStateText"), "Домен для белого списка")

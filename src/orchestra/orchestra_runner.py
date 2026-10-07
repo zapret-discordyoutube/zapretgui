@@ -1827,8 +1827,9 @@ class OrchestraRunner:
         self.user_whitelist.append(domain)
         self.whitelist.add(domain)
         self.save_whitelist()
-        # Регенерируем whitelist.txt чтобы он был актуален при следующем запуске
+        # Регенерируем whitelist.txt и сразу просим запущенный winws2 его перечитать
         self._generate_whitelist_file()
+        self._reload_running_engine_lists()
         log(f"Добавлен в whitelist: {domain}", "INFO")
         return True
 
@@ -1854,8 +1855,9 @@ class OrchestraRunner:
         self.user_whitelist.remove(domain)
         self.whitelist.discard(domain)
         self.save_whitelist()
-        # Регенерируем whitelist.txt
+        # Регенерируем whitelist.txt и сразу просим запущенный winws2 его перечитать
         self._generate_whitelist_file()
+        self._reload_running_engine_lists()
         log(f"Удалён из whitelist: {domain}", "INFO")
         return True
 
@@ -1912,6 +1914,23 @@ class OrchestraRunner:
 
     # REMOVED: _write_strategies_from_file() - стратегии теперь встроены в circular-config.txt
     # REMOVED: _generate_circular_config() - конфиг теперь статический в /home/privacy/zapret/lua/circular-config.txt
+
+    def _reload_running_engine_lists(self) -> None:
+        """Просит запущенный winws2 перечитать whitelist.txt без перезапуска.
+
+        Файл передан движку как ``--hostlist-exclude=user/lua/whitelist.txt``
+        (circular-config.txt), поэтому после его пересборки достаточно
+        сигнала «перечитать списки». Если оркестратор не запущен, делать
+        нечего: при старте движок прочитает свежий файл сам.
+        """
+        if not self.is_running():
+            return
+        try:
+            from winws_runtime.runtime.system_ops import reload_own_engine_lists_runtime
+
+            reload_own_engine_lists_runtime()
+        except Exception as e:
+            log(f"Не удалось сообщить winws2 об изменении whitelist: {e}", "DEBUG")
 
     def _generate_whitelist_file(self) -> bool:
         """Генерирует файл whitelist.txt для winws2 --hostlist-exclude"""

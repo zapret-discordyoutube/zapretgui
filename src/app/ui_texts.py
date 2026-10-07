@@ -2581,9 +2581,9 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Домены, которые НЕ обрабатываются оркестратором. Эти сайты работают без DPI bypass.",
         "en": "Domains not processed by orchestrator. These sites run without DPI bypass.",
     },
-    "page.orchestra.whitelist.warning.restart_required": {
-        "ru": "⚠️ Изменения применятся после перезапуска оркестратора",
-        "en": "⚠️ Changes apply after orchestrator restart",
+    "page.orchestra.whitelist.notice.applied_now": {
+        "ru": "✅ Изменения применяются сразу, перезапуск оркестратора не нужен",
+        "en": "✅ Changes apply immediately, no orchestrator restart needed",
     },
     "page.orchestra.whitelist.card.add": {
         "ru": "Добавить домен",

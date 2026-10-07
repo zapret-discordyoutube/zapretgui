@@ -267,6 +267,23 @@ class SystemOpsTests(unittest.TestCase):
         ):
             self.assertFalse(system_ops.stop_own_winws_processes_runtime())
 
+    def test_own_engine_lists_reload_uses_own_paths_and_never_raises(self) -> None:
+        from winws_runtime.runtime import system_ops
+
+        own_paths = [r"C:\Zapret\Dev\exe\winws2.exe"]
+        with (
+            patch.object(system_ops, "own_engine_exe_paths", return_value=own_paths),
+            patch.object(system_ops, "reload_engine_lists", return_value=2) as reload,
+        ):
+            self.assertEqual(system_ops.reload_own_engine_lists_runtime(), 2)
+        reload.assert_called_once_with(own_paths)
+
+        with (
+            patch.object(system_ops, "own_engine_exe_paths", return_value=own_paths),
+            patch.object(system_ops, "reload_engine_lists", side_effect=RuntimeError("boom")),
+        ):
+            self.assertEqual(system_ops.reload_own_engine_lists_runtime(), 0)
+
     def test_old_cleanup_ladder_is_gone(self) -> None:
         from winws_runtime.runtime import system_ops
 

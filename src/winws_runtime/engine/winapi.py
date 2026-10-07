@@ -37,6 +37,9 @@ PROCESS_TERMINATE = 0x0001
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 SYNCHRONIZE = 0x00100000
 
+# --- Именованные события ----------------------------------------------------
+EVENT_MODIFY_STATE = 0x0002
+
 # --- Ожидание ---------------------------------------------------------------
 WAIT_OBJECT_0 = 0x00000000
 WAIT_TIMEOUT = 0x00000102
@@ -64,6 +67,7 @@ SERVICE_DISABLED = 4
 SERVICE_CONTROL_STOP = 1
 
 # --- Коды ошибок ------------------------------------------------------------
+ERROR_FILE_NOT_FOUND = 2
 ERROR_ACCESS_DENIED = 5
 ERROR_INVALID_PARAMETER = 87
 ERROR_INSUFFICIENT_BUFFER = 122
@@ -126,6 +130,8 @@ _KERNEL32_SIGNATURES: dict[str, tuple[object, list]] = {
     "CloseHandle": (BOOL, [HANDLE]),
     "TerminateProcess": (BOOL, [HANDLE, ctypes.c_uint32]),
     "GetExitCodeProcess": (BOOL, [HANDLE, ctypes.POINTER(DWORD)]),
+    "OpenEventW": (HANDLE, [DWORD, BOOL, LPCWSTR]),
+    "SetEvent": (BOOL, [HANDLE]),
     "WaitForSingleObject": (DWORD, [HANDLE, DWORD]),
     "WaitForMultipleObjects": (DWORD, [DWORD, ctypes.POINTER(HANDLE), BOOL, DWORD]),
     "QueryFullProcessImageNameW": (BOOL, [HANDLE, DWORD, LPWSTR, ctypes.POINTER(DWORD)]),
@@ -250,6 +256,26 @@ def wait_for_all_handles(handles: Sequence[int], timeout_seconds: float) -> bool
     if result == WAIT_TIMEOUT:
         return False
     raise _fail("WaitForMultipleObjects")
+
+
+def signal_named_event(name: str) -> None:
+    """Подаёт сигнал именованному событию, которое создал чужой процесс.
+
+    Так движку сообщают «остановись» и «перечитай списки». Бросает
+    WinApiError; код 2 (``ERROR_FILE_NOT_FOUND``) означает, что события нет:
+    процесс собран без поддержки таких сигналов или это вообще не движок.
+    """
+    _require()
+    ctypes.set_last_error(0)
+    handle = _kernel32.OpenEventW(EVENT_MODIFY_STATE, 0, str(name))
+    if not handle:
+        raise _fail("OpenEventW")
+    try:
+        ctypes.set_last_error(0)
+        if not _kernel32.SetEvent(handle):
+            raise _fail("SetEvent")
+    finally:
+        close_handle(int(handle))
 
 
 def query_image_path(handle: int) -> str:

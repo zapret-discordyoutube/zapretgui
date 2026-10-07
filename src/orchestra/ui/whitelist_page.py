@@ -227,8 +227,8 @@ class OrchestraWhitelistPage(BasePage):
         # === Предупреждение о рестарте ===
         self.restart_warning = CaptionLabel(
             self._tr(
-                "page.orchestra.whitelist.warning.restart_required",
-                "⚠️ Изменения применятся после перезапуска оркестратора",
+                "page.orchestra.whitelist.notice.applied_now",
+                "✅ Изменения применяются сразу, перезапуск оркестратора не нужен",
             )
         )
         self.restart_warning.hide()
@@ -382,8 +382,8 @@ class OrchestraWhitelistPage(BasePage):
 
         self.restart_warning.setText(
             self._tr(
-                "page.orchestra.whitelist.warning.restart_required",
-                "⚠️ Изменения применятся после перезапуска оркестратора",
+                "page.orchestra.whitelist.notice.applied_now",
+                "✅ Изменения применяются сразу, перезапуск оркестратора не нужен",
             )
         )
         if self._add_card is not None and hasattr(self._add_card, "_title_label"):
@@ -422,11 +422,11 @@ class OrchestraWhitelistPage(BasePage):
         def _set_named_state(widget, text: str) -> None:
             set_state_text(widget, text)
 
-        restart_warning_name = "Предупреждение: изменения белого списка применятся после перезапуска оркестратора"
+        restart_warning_name = "Изменения белого списка применяются сразу, перезапуск оркестратора не нужен"
         set_control_accessibility(
             self.restart_warning,
             name=restart_warning_name,
-            description="Если оркестратор запущен, изменения вступят в силу после его перезапуска.",
+            description="Если оркестратор запущен, он сам перечитает белый список; перезапуск не нужен.",
         )
         _set_named_state(self.restart_warning, restart_warning_name)
         set_control_accessibility(
@@ -707,7 +707,7 @@ class OrchestraWhitelistPage(BasePage):
             row.setVisible(search in domain if search else True)
 
     def _show_restart_warning(self):
-        """Показывает предупреждение о необходимости рестарта"""
+        """Показывает пометку, что изменения уже применены (перезапуск не нужен)"""
         if self._is_orchestra_running():
             self.restart_warning.show()
 
