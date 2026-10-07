@@ -64,7 +64,7 @@ _DETECTOR_CALLBACKS_SUCCESS = (
     "udp_protocol_success_detector",
     "white_success_detector",
 )
-_HOSTKEY_CALLBACKS = ("standard_hostkey", "udp_global_hostkey", "subnet_hostkey")
+_HOSTKEY_CALLBACKS = ("standard_hostkey", "udp_global_hostkey", "subnet_hostkey", "white_hostkey")
 
 
 def _a(name: str, summary: str, kind: str = "text", values: tuple[str, ...] = ()) -> LuaArgSpec:

@@ -1,5 +1,5 @@
 # Preset: white sni (circular)
-# BuiltinVersion: 2.43
+# BuiltinVersion: 2.44
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -121,7 +121,7 @@
 --ipset-exclude=lists/ipset-exclude.txt
 --out-range=-s34228
 --in-range=-s29500
---lua-desync=circular:key=white_sni:hostkey=subnet_hostkey:mask=24:mask6=48:state=white_sni_state.txt:fails=2:time=300:retrans=2:inseq=28000:no_http_redirect:success_detector=white_success_detector:failure_detector=white_failure_detector
+--lua-desync=circular:key=white_sni:hostkey=white_hostkey:nld=2:mask=24:mask6=48:state=white_sni_state.txt:fails=2:time=300:retrans=2:reset:inseq=28000:no_http_redirect:success_detector=white_success_detector:failure_detector=white_failure_detector
 --payload=tls_client_hello
 --lua-desync=white_seqovl:sni=web.max.ru:pos=2:strategy=1
 --lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=web.max.ru:tcp_ts=-600000:repeats=6:strategy=2
