@@ -91,6 +91,7 @@ CODE_DOT_BLOCKED = "dot_blocked"
 CODE_DOH_BLOCKED = "doh_blocked"
 CODE_DOH_NAME_BLOCKED = "doh_name_blocked"
 CODE_BEST = "best"
+CODE_BYPASS_RUNNING = "bypass_running"
 CODE_ALL_FINE = "all_fine"
 
 # Безобидное имя для самой проверки связи и замера времени.
@@ -193,6 +194,8 @@ class ServerCheckReport:
     # Ответил ли адрес, где DNS-сервера нет. None — ещё не проверено.
     canary: bool | None = None
     owners: tuple[tuple[str, IpOwner], ...] = ()
+    # Программы обхода и VPN, работавшие во время проверки (вместе с Zapret).
+    bypass: tuple[str, ...] = ()
     findings: tuple[Finding, ...] = ()
     finished: bool = False
     stopped: bool = False
@@ -564,9 +567,24 @@ def _transport_summary(rows: tuple[Observation, ...], transport: str, title: str
     return f"{title} закрыт у: {_short_list([_label(row) for row in closed])}."
 
 
-def judge_report(rows: tuple[Observation, ...], canary: bool | None, owner_of) -> tuple[Finding, ...]:
+def judge_report(
+    rows: tuple[Observation, ...],
+    canary: bool | None,
+    owner_of,
+    bypass: tuple[str, ...] = (),
+) -> tuple[Finding, ...]:
     """Общий итог по всем адресам: сначала самое важное."""
     findings: list[Finding] = []
+    if bypass:
+        # Первой строкой: от этого зависит, как читать всё остальное.
+        findings.append(
+            Finding(
+                LEVEL_INFO,
+                CODE_BYPASS_RUNNING,
+                f"Во время проверки работали: {', '.join(bypass)}. Такие программы меняют соединения и DNS, "
+                "поэтому результат показывает сеть вместе с ними, а не «чистую» сеть провайдера.",
+            )
+        )
     network, providers = _shared_foreign_network(rows, owner_of)
     if canary or network is not None:
         evidence: list[str] = []
@@ -629,7 +647,9 @@ def judge_report(rows: tuple[Observation, ...], canary: bool | None, owner_of) -
                 f"Без замечаний: {clean} из {len(rows)} адресов.",
             )
         )
-    elif rows and not any(finding.level in (LEVEL_WARN, LEVEL_FAIL) for finding in findings):
+    elif rows and not any(finding.level in (LEVEL_WARN, LEVEL_FAIL, LEVEL_OK) for finding in findings) and not any(
+        finding.code == CODE_DEAD for finding in findings
+    ):
         findings.append(Finding(LEVEL_OK, CODE_ALL_FINE, "Замечаний нет."))
     return tuple(findings)
 
@@ -650,9 +670,15 @@ def run_server_check(
     *,
     on_progress: Progress | None = None,
     should_stop: ShouldStop | None = None,
+    bypass: Iterable[str] = (),
 ) -> ServerCheckReport:
-    """Проверяет все адреса и возвращает отчёт. Промежуточные отчёты уходят в ``on_progress``."""
+    """Проверяет все адреса и возвращает отчёт. Промежуточные отчёты уходят в ``on_progress``.
+
+    ``bypass`` — программы обхода и VPN, запущенные сейчас: они попадают в отчёт
+    как оговорка к результатам.
+    """
     targets = tuple(targets)
+    bypass = tuple(bypass)
     started = time.monotonic()
     cancel = SocketCancel()
     deadline = started + RUN_DEADLINE_S
@@ -673,6 +699,7 @@ def run_server_check(
             rows=tuple(state.rows[index] for index in sorted(state.rows)),
             total=len(targets),
             canary=state.canary,
+            bypass=bypass,
             elapsed_s=time.monotonic() - started,
             **extra,
         )
@@ -728,7 +755,8 @@ def run_server_check(
         total=len(targets),
         canary=state.canary,
         owners=owners,
-        findings=() if user_stopped else judge_report(rows, state.canary, owner_map.get),
+        bypass=bypass,
+        findings=() if user_stopped else judge_report(rows, state.canary, owner_map.get, bypass),
         finished=True,
         stopped=user_stopped,
         timed_out=timed_out,
@@ -740,6 +768,7 @@ def run_server_check(
 __all__ = [
     "CODE_ALL_FINE",
     "CODE_BEST",
+    "CODE_BYPASS_RUNNING",
     "CODE_DEAD",
     "CODE_DOH_BLOCKED",
     "CODE_DOH_NAME_BLOCKED",

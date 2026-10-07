@@ -397,6 +397,20 @@ class ReportVerdictTests(unittest.TestCase):
         self.assertEqual(dead.level, sc.LEVEL_INFO)
         self.assertIn("Google DNS (8.8.8.8)", dead.text)
 
+    def test_running_bypass_tools_are_named_first_as_a_caveat(self) -> None:
+        rows = (_judged(_row(GOOGLE)),)
+        findings = sc.judge_report(rows, True, OWNERS.get, ("Zapret", "Xray"))
+
+        self.assertEqual((findings[0].level, findings[0].code), (sc.LEVEL_INFO, sc.CODE_BYPASS_RUNNING))
+        self.assertIn("Zapret, Xray", findings[0].text)
+        # Оговорка не отменяет остальные выводы.
+        self.assertIn(sc.CODE_INTERCEPTED, _codes(findings))
+
+    def test_dead_servers_alone_do_not_get_all_clear(self) -> None:
+        findings = self._report([_row(PLAIN, udp=_fail(), tcp=_fail(), dot=SKIP, doh=SKIP)])
+
+        self.assertEqual(_codes(findings), [sc.CODE_DEAD])
+
     def test_servers_without_encryption_and_without_problems_are_fine(self) -> None:
         findings = self._report([_row(PLAIN, dot=SKIP, doh=SKIP)])
 
@@ -452,6 +466,15 @@ class RunTests(unittest.TestCase):
 
         self.assertTrue(report.finished and report.stopped)
         self.assertEqual(report.findings, ())
+
+    def test_bypass_caveat_reaches_report_and_its_text(self) -> None:
+        from dns import server_check_plans as plans
+
+        report = self._run(_Net(), bypass=["Zapret"])
+
+        self.assertEqual(report.bypass, ("Zapret",))
+        self.assertEqual(report.findings[0].code, sc.CODE_BYPASS_RUNNING)
+        self.assertIn("Работали во время проверки: Zapret", plans.build_text_report(report))
 
     def test_empty_list_finishes_at_once(self) -> None:
         report = self._run(_Net(), targets=())

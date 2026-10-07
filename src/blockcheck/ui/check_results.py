@@ -330,6 +330,16 @@ def _target_mark(item: dict) -> str:
     return "?" if str(item.get("state") or "") == "unknown" else "✗"
 
 
+# Как блокируют — коротко для ячейки; полный текст причины идёт в подсказку строки.
+_CAUSE_WORDS = {
+    "by_name": "блокировка по имени сайта",
+    "by_address": "закрыт адрес или его сеть",
+    "stub_page": "страница провайдера о блокировке",
+    "address_closed": "адрес закрыт для соединений",
+    "address_silent": "адрес не отвечает",
+}
+
+
 def _service_details(service: dict) -> tuple[str, str]:
     """(коротко для ячейки, подробно для подсказки)."""
     targets = list(service.get("targets") or ())
@@ -339,11 +349,17 @@ def _service_details(service: dict) -> tuple[str, str]:
         short = str(targets[0].get("short") or "")
     else:
         short = ""
+    causes = list(dict.fromkeys(_CAUSE_WORDS[item["cause"]] for item in targets if item.get("cause") in _CAUSE_WORDS))
+    if causes:
+        short = f"{short} · {', '.join(causes)}" if short else ", ".join(causes)
     if service.get("dns_note"):
         short = f"{short} · DNS подменён" if short else "DNS подменён"
-    tooltip = "\n".join(
-        f"{item.get('host', '')}: {item.get('text', '')}" for item in targets
-    )
+    lines = []
+    for item in targets:
+        lines.append(f"{item.get('host', '')}: {item.get('text', '')}")
+        if item.get("cause_text"):
+            lines.append(f"   {item['cause_text']}")
+    tooltip = "\n".join(lines)
     headline = str(service.get("headline") or "")
     if headline:
         tooltip = f"{headline}\n\n{tooltip}" if tooltip else headline

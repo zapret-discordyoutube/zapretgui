@@ -214,6 +214,8 @@ def build_text_report(report: ServerCheckReport) -> str:
         lines.append("Итог:")
         lines.extend(f"  {_LEVEL_MARKS[finding.level]} {finding.text}" for finding in report.findings)
         lines.append("")
+    if report.bypass:
+        lines.append(f"Работали во время проверки: {', '.join(report.bypass)}")
     if report.canary is not None:
         answered = "ОТВЕТИЛ — запросы перехватываются" if report.canary else "молчит, как и должен"
         lines.append(f"Контрольный адрес без DNS-сервера: {answered}")

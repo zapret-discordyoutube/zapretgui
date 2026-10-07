@@ -189,7 +189,7 @@ class _Done:
 class _Net:
     """Фейковая сеть для движка: DNS, эталон и HTTPS по адресу."""
 
-    def __init__(self, *, system=DISCORD_REAL, reference=DISCORD_REAL, status=0, https=None, reference_v6=(), voice=(), freeze=()):
+    def __init__(self, *, system=DISCORD_REAL, reference=DISCORD_REAL, status=0, https=None, reference_v6=(), voice=(), freeze=(), cause_facts=None):
         self.voice = voice
         self.freeze = freeze
         self.system = system
@@ -198,6 +198,16 @@ class _Net:
         self.status = status
         self.https = https or (lambda host, ip: _ok(ip))
         self.calls: list[tuple[str, str]] = []
+        # Что «показали» дополнительные пробы: по умолчанию ничего не выяснили.
+        self.cause_facts = cause_facts
+        self.refined: list[str] = []
+        self.bypass_tools: tuple[str, ...] = ()
+
+    def _collect(self, host, result, **_kwargs):
+        self.refined.append(host)
+        if self.cause_facts is not None:
+            return self.cause_facts(host, result)
+        return engine.block_cause.CauseFacts(host=host, result=result)
 
     def patches(self):
         def _https_get(host, ip, *_args, **_kwargs):
@@ -221,9 +231,12 @@ class _Net:
                 ),
             ),
             patch.object(engine, "https_get", side_effect=_https_get),
+            # Уточнение причины ходит в сеть само: в сценариях движка оно подменено.
+            patch.object(engine.block_cause, "collect", side_effect=self._collect),
             patch.object(engine, "hosts_file_ipv4", return_value=()),
             patch.object(engine, "system_dns_servers", return_value=("83.220.169.155",)),
             patch.object(engine, "_zapret_status", return_value=(True, "✅ Zapret запущен")),
+            patch.object(engine, "running_bypass_tools", return_value=self.bypass_tools),
             patch.object(engine, "_discover_googlevideo", return_value=("rr1---sn-test.googlevideo.com", "")),
             # Звонки и обрыв 16 КБ проверяются в любом режиме — без сети в тестах.
             patch("diagnostics.voice_check.check_voice", return_value=self.voice),
@@ -321,6 +334,65 @@ class ReferenceResolverTests(unittest.TestCase):
 
         self.assertTrue(answered)
         self.assertEqual(ips, ("1.1.1.10", "8.8.8.80"))
+
+
+class BlockCauseInReportTests(unittest.TestCase):
+    """Сайт не открылся: в отчёте сказано, режут по имени или по адресу."""
+
+    @staticmethod
+    def _reset_on_hello(host, ip):
+        return ProbeResult(ip=ip, kind=KIND_RESET, stage="tls")
+
+    def test_block_by_name_is_shown_in_report_and_first_in_advice(self) -> None:
+        def facts(host, result):
+            return engine.block_cause.CauseFacts(
+                host=host,
+                result=result,
+                neutral=engine.block_cause.HelloResult(engine.block_cause.HELLO_OK),
+                nameless=engine.block_cause.HelloResult(engine.block_cause.HELLO_RESET),
+            )
+
+        lines: list[str] = []
+        net = _Net(https=self._reset_on_hello, cause_facts=facts)
+        result = net.run(engine.run_blockcheck, "main", emit=lines.append)
+
+        self.assertIn("   🔎 Блокировка по имени сайта: с именем discord.com соединение обрывается", "\n".join(lines))
+        discord = next(item for item in result["services"] if item["key"] == "discord")
+        main = next(item for item in discord["targets"] if item["main"])
+        self.assertEqual(main["cause"], "by_name")
+        self.assertTrue(main["cause_text"].startswith("Блокировка по имени сайта"))
+        problem = next(item for item in result["problems"] if item["target"] == "discord.com")
+        self.assertTrue(problem["advice"][0].startswith("Блокировка по имени сайта"))
+        # От блокировки по имени стратегия помогает: кнопка подбора остаётся.
+        self.assertEqual(problem["action"], "strategy")
+
+    def test_working_site_is_not_probed_again(self) -> None:
+        net = _Net()
+        result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+
+        self.assertEqual(net.refined, [])
+        self.assertTrue(all(target["cause"] == "" for item in result["services"] for target in item["targets"]))
+
+    def test_unclear_probes_add_nothing_to_report(self) -> None:
+        lines: list[str] = []
+        net = _Net(https=self._reset_on_hello)
+        result = net.run(engine.run_blockcheck, "main", emit=lines.append)
+
+        self.assertIn("discord.com", net.refined)
+        self.assertNotIn("🔎", "\n".join(lines))
+        problem = next(item for item in result["problems"] if item["target"] == "discord.com")
+        self.assertIn("Подбор стратегии", problem["advice"][0])
+
+    def test_other_bypass_tools_are_named_before_results(self) -> None:
+        lines: list[str] = []
+        net = _Net()
+        net.bypass_tools = ("Xray", "Cloudflare WARP")
+        result = net.run(engine.run_blockcheck, "main", emit=lines.append)
+
+        note = next(line for line in lines if "Xray" in line)
+        self.assertIn("Работают другие программы обхода или VPN: Xray, Cloudflare WARP", note)
+        self.assertLess(lines.index(note), next(i for i, line in enumerate(lines) if line.startswith("━━━━━━━━ Discord")))
+        self.assertEqual(result["other_bypass_tools"], ["Xray", "Cloudflare WARP"])
 
 
 class EngineScenarioTests(unittest.TestCase):
@@ -683,6 +755,42 @@ class BlockcheckScopeTests(unittest.TestCase):
         result = self._run_all(lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT))
 
         self.assertIn("контрольные сайты", result["problems"][0]["text"])
+
+    def test_only_domestic_sites_open_means_whitelist_mode(self) -> None:
+        domestic = {"ya.ru", "vk.com"}
+
+        def _https(host, ip):
+            return _ok(ip) if host in domestic else ProbeResult(ip=ip, kind=KIND_CONNECT)
+
+        result = self._run_all(_https)
+        first = result["problems"][0]
+
+        self.assertEqual(first["level"], "fail")
+        self.assertIn("белых списков", first["text"])
+        self.assertIn("Яндекс, ВКонтакте", first["text"])
+        self.assertIn("Google, Cloudflare", first["text"])
+        self.assertIn("Zapret не помогает", first["advice"][0])
+        self.assertNotIn("контрольные сайты", first["text"].split("зарубежные")[0])
+        # Причина одна и названа: кнопок «Подобрать стратегию» у каждого сайта нет.
+        self.assertFalse([item for item in result["problems"] if item["action"] in ("strategy", "start_zapret")])
+        yandex = next(item for item in result["services"] if item["key"] == "yandex")
+        self.assertTrue(yandex["control"] and yandex["domestic"])
+
+    def test_foreign_controls_open_is_not_whitelist_mode(self) -> None:
+        """Один закрытый сайт при живых зарубежных контрольных — обычная блокировка."""
+        result = self._run_all(
+            lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET) if host == "x.com" else _ok(ip)
+        )
+
+        self.assertFalse(any("белых списков" in item["text"] for item in result["problems"]))
+        self.assertTrue(any(item["target"] == "x.com" and item["action"] == "strategy" for item in result["problems"]))
+
+    def test_domestic_site_down_too_is_no_internet_not_whitelist(self) -> None:
+        result = self._run_all(lambda host, ip: ProbeResult(ip=ip, kind=KIND_CONNECT))
+        first = result["problems"][0]["text"]
+
+        self.assertIn("Не открываются даже контрольные сайты (Google, Cloudflare, Яндекс, ВКонтакте)", first)
+        self.assertNotIn("белых списков", first)
 
     def test_working_sites_keep_service_order_and_offline_hides_site_noise(self) -> None:
         # У YouTube подменён DNS (уровень «предупреждение»), но в «Открываются»

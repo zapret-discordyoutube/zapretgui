@@ -35,6 +35,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from diagnostics import block_cause
 from diagnostics.tls_probe import (
     KIND_CANCELLED,
     KIND_CERT,
@@ -56,6 +57,7 @@ from diagnostics.verdict import (
     judge_reach,
     summarize_service,
 )
+from utils.bypass_tools import running_bypass_tools
 from utils.dns_reference import REFERENCE_RESOLVERS, ReferenceResolver
 from utils.dns_wire import FAILURE_CANCELLED, TYPE_A, TYPE_AAAA, DnsQueryResult, failure_text, query_doh
 from utils.socket_cancel import SocketCancel
@@ -144,10 +146,15 @@ class Service:
     # Контрольный сайт: его почти никогда не блокируют. Если не открываются
     # даже контрольные — дело в подключении, а не в блокировках.
     control: bool = False
+    # Российский контрольный сайт. Если открываются только такие, а зарубежные
+    # контрольные нет — провайдер пропускает лишь разрешённые адреса.
+    domestic: bool = False
 
 
-def _site(key: str, label: str, host: str, *, control: bool = False) -> Service:
-    return Service(key, label, (Target(host, "сайт", read_body=True, main=True),), control=control)
+def _site(key: str, label: str, host: str, *, control: bool = False, domestic: bool = False) -> Service:
+    return Service(
+        key, label, (Target(host, "сайт", read_body=True, main=True),), control=control, domestic=domestic
+    )
 
 
 SCOPE_MAIN = "main"
@@ -198,6 +205,8 @@ EXTRA_SERVICES: tuple[Service, ...] = (
     _site("rutracker", "RuTracker", "rutracker.org"),
     _site("google", "Google", "www.google.com", control=True),
     _site("cloudflare", "Cloudflare", "www.cloudflare.com", control=True),
+    _site("yandex", "Яндекс", "ya.ru", control=True, domestic=True),
+    _site("vk", "ВКонтакте", "vk.com", control=True, domestic=True),
 )
 
 
@@ -220,9 +229,10 @@ def build_services(scope: str, user_domains=()) -> dict[str, Service]:
 
 # Сколько потоков нужно одной цели в худшем случае: сама цель, три запроса к
 # DNS системы, два эталона (A и AAAA) по запросу на каждый эталонный сервер и
-# несколько HTTPS-запросов. Задачи ждут друг друга внутри одного пула, поэтому
+# несколько HTTPS-запросов и четыре пробы уточнения причины. Задачи ждут друг
+# друга внутри одного пула, поэтому
 # нехватка потоков — это не «медленнее», а взаимная блокировка.
-_WORKERS_PER_TARGET = 8 + 2 * len(REFERENCE_RESOLVERS)
+_WORKERS_PER_TARGET = 12 + 2 * len(REFERENCE_RESOLVERS)
 
 
 class _Stopped(Exception):
@@ -255,6 +265,8 @@ class _Probe:
     ipv6_result: ProbeResult | None = None
     judgement: DnsJudgement | None = None
     reach_state: ReachState = ReachState.UNKNOWN
+    # Как именно блокируют (по имени сайта, по адресу, страницей провайдера), если удалось выяснить.
+    cause: block_cause.Cause | None = None
 
 
 class _Run:
@@ -583,7 +595,32 @@ def _probe_target(run: _Run, target: Target, service: str, *, full: bool) -> _Pr
             probe.reference_ipv6 = doh6_future.result()[1]
         _check_reach(run, probe, read_limit=read_limit)
         probe.reach_state = judge_reach(probe.reach)
+        _refine_cause(run, probe)
     return probe
+
+
+def _ping_ok(ip: str) -> bool | None:
+    """Отвечает ли адрес на пинг. None — пинг в этой системе недоступен."""
+    from utils.windows_icmp import ping_ipv4_host_winapi, ping_ipv6_winapi
+
+    if ":" in ip:
+        result = ping_ipv6_winapi(ip, count=2, timeout_ms=1500)
+    else:
+        result = ping_ipv4_host_winapi(ip, count=2, timeout_ms=1500, resolved_ip=ip)
+    if result.error_code == "UNSUPPORTED":
+        return None
+    return bool(result.ok)
+
+
+def _refine_cause(run: _Run, probe: _Probe) -> None:
+    """Сайт не открылся: выясняем, режут по имени или по адресу."""
+    result = probe.reach
+    if not block_cause.needs_refining(result) or run.dns_cancelled():
+        return
+    facts = block_cause.collect(probe.host, result, submit=run.submit, cancel=run.probe_cancel, ping=_ping_ok)
+    # Проверку могли снять, пока шли пробы: по обрывкам вывод не делаем.
+    if not run.dns_cancelled():
+        probe.cause = block_cause.judge(facts)
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +684,10 @@ def _dns_lines(probe: _Probe, indent: str) -> list[str]:
     return lines
 
 
+def _sentence(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
 def _probe_lines(probe: _Probe, *, full: bool) -> list[str]:
     title = f"{probe.host} — {probe.target.purpose}"
     if not full:
@@ -660,6 +701,8 @@ def _probe_lines(probe: _Probe, *, full: bool) -> list[str]:
     if probe.reach_state == ReachState.UNKNOWN:
         icon = "❔"
     lines = [f"{icon} {title}: {_reach_text(probe)}"]
+    if probe.cause is not None:
+        lines.append(f"   🔎 {_sentence(probe.cause.text)}")
     if probe.discovery_note:
         lines.append(f"   ℹ️ {probe.discovery_note}")
     lines.extend(_dns_lines(probe, "   "))
@@ -795,6 +838,8 @@ def _target_report(probe: _Probe) -> dict:
         "short": _short_text(probe),
         "dns_state": probe.judgement.state.value if probe.judgement else "",
         "dns_reason": probe.judgement.reason if probe.judgement else "",
+        "cause": probe.cause.code if probe.cause else "",
+        "cause_text": _sentence(probe.cause.text) if probe.cause else "",
         "note": probe.discovery_note,
     }
 
@@ -851,19 +896,41 @@ def _collect_problems(
     problems: list[dict] = []
 
     controls = [key for key, service in services.items() if service.control]
+    foreign = [key for key in controls if not services[key].domestic]
+    domestic = [key for key in controls if services[key].domestic]
     # Только настоящий провал контрольных сайтов: «не успели проверить»
     # (лимит времени) — не «нет интернета», иначе такой прогон спрятал бы
     # найденные блокировки остальных сайтов.
+    foreign_down = bool(foreign) and all(verdicts[key].level == Level.FAIL for key in foreign)
+    domestic_up = bool(domestic) and all(verdicts[key].level == Level.OK for key in domestic)
+    whitelisted = foreign_down and domestic_up
     offline = bool(controls) and all(verdicts[key].level == Level.FAIL for key in controls)
-    if offline:
+    names = ", ".join(services[key].label for key in foreign)
+    if whitelisted:
         problems.append(
             _problem(
                 Level.FAIL,
-                "Не открываются даже контрольные сайты (Google, Cloudflare) — похоже, нет интернета "
-                "или всё соединение режет антивирус, прокси или VPN",
+                f"Открываются только российские сайты ({', '.join(services[key].label for key in domestic)}), "
+                f"а зарубежные контрольные ({names}) — нет. Похоже на режим «белых списков»: провайдер "
+                "пропускает только разрешённые адреса",
+                (
+                    "В таком режиме Zapret не помогает: закрыты сами адреса, а не отдельные сайты. "
+                    "Обычно это временное ограничение, чаще в мобильных сетях — проверьте другую сеть.",
+                ),
+            )
+        )
+    elif offline:
+        problems.append(
+            _problem(
+                Level.FAIL,
+                f"Не открываются даже контрольные сайты ({', '.join(services[key].label for key in controls)}) — "
+                "похоже, нет интернета или всё соединение режет антивирус, прокси или VPN",
                 ("Проверьте подключение к интернету и повторите проверку.",),
             )
         )
+    # В обоих случаях причина общая и уже названа: совет «подберите стратегию»
+    # у каждого сайта был бы неправдой и шумом.
+    offline = offline or whitelisted
 
     # Сервисы идут в том же порядке, что и в отчёте: «Открываются: …» не должен
     # начинаться с сайтов, у которых просто подменён DNS. Проблемы по важности
@@ -899,7 +966,10 @@ def _collect_problems(
                     item for item in advice if item not in _ADVICE_VIA_ZAPRET
                 )
                 action = "hosts"
-            problems.append(_problem(verdict.level, verdict.headline, advice, action=action, target=target))
+            causes = tuple(
+                dict.fromkeys(_sentence(probe.cause.text) + "." for probe in broken if probe.cause is not None)
+            )
+            problems.append(_problem(verdict.level, verdict.headline, causes + advice, action=action, target=target))
         elif verdict.level == Level.UNKNOWN:
             if not offline:
                 problems.append(_problem(Level.UNKNOWN, verdict.headline, verdict.advice))
@@ -999,6 +1069,12 @@ def run_blockcheck(
             emit(line)
         zapret_running, zapret_line = _zapret_status()
         emit(zapret_line)
+        other_tools = running_bypass_tools()
+        if other_tools:
+            emit(
+                f"ℹ️ Работают другие программы обхода или VPN: {', '.join(other_tools)}. "
+                "Результат показывает сеть вместе с ними, а не «чистую» сеть провайдера."
+            )
         emit("⏳ Проверяем так же, как браузер: TLS 1.3, правильные адреса сайтов…")
 
         # Звонки и обрыв на 16 КБ проверяются всегда: режим меняет только список сайтов.
@@ -1079,6 +1155,7 @@ def run_blockcheck(
                     "key": key,
                     "label": service.label,
                     "control": service.control,
+                    "domestic": service.domestic,
                     "level": verdicts[key].level.value,
                     "headline": verdicts[key].headline,
                     "advice": list(verdicts[key].advice),
@@ -1100,6 +1177,7 @@ def run_blockcheck(
             "environment": environment,
             "zapret_running": zapret_running,
             "zapret_line": zapret_line,
+            "other_bypass_tools": list(other_tools),
             "timed_out": run.timed_out,
             "elapsed": elapsed,
             "dns_poisoning_detected": bool(spoofed),

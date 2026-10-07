@@ -212,4 +212,24 @@ def build_server_check_targets():
 def run_server_check(*, on_progress=None, should_stop=None):
     from dns.server_check import run_server_check as _run_server_check
 
-    return _run_server_check(build_server_check_targets(), on_progress=on_progress, should_stop=should_stop)
+    return _run_server_check(
+        build_server_check_targets(),
+        on_progress=on_progress,
+        should_stop=should_stop,
+        bypass=_running_bypass(),
+    )
+
+
+def _running_bypass() -> tuple[str, ...]:
+    """Zapret и другие программы обхода, запущенные сейчас: оговорка к результатам проверки."""
+    from utils.bypass_tools import bypass_tools_among
+
+    try:
+        from settings.mode import ALL_WINWS_EXE_NAME_SET
+        from utils.windows_process_probe import iter_process_records_winapi
+
+        names = [str(name or "").lower() for _pid, name in iter_process_records_winapi()]
+    except Exception:
+        return ()
+    zapret = ("Zapret",) if any(name in ALL_WINWS_EXE_NAME_SET for name in names) else ()
+    return zapret + bypass_tools_among(names)

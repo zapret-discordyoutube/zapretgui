@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from blockcheck.page_run_workflow import request_blockcheck_stop, reset_blockcheck_running_ui, start_blockcheck_page_run
-from blockcheck.ui.check_results import BlockcheckSitesTable, BlockcheckSummaryPanel
+from blockcheck.ui.check_results import BlockcheckSitesTable, BlockcheckSummaryPanel, _service_details
 from blockcheck.ui.page import BlockcheckPage
 
 
@@ -280,6 +280,40 @@ class SitesTableTests(unittest.TestCase):
         self.assertEqual(table.rowCount(), 4)
         self.assertEqual(table.minimumHeight(), table.maximumHeight())
         self.assertGreater(table.minimumHeight(), table.horizontalHeader().height())
+
+
+    def test_block_cause_is_named_in_details_and_explained_in_tooltip(self) -> None:
+        report = {
+            "services": [
+                {
+                    "key": "x",
+                    "label": "X (Twitter)",
+                    "level": "fail",
+                    "headline": "X (Twitter) не открывается: соединение блокирует провайдер",
+                    "targets": [
+                        {
+                            "host": "x.com",
+                            "purpose": "сайт",
+                            "short": "соединение сброшено — так режет DPI",
+                            "text": "соединение сброшено — так режет DPI (1.2.3.4)",
+                            "cause": "by_name",
+                            "cause_text": "Блокировка по имени сайта: с именем x.com соединение обрывается",
+                        }
+                    ],
+                }
+            ]
+        }
+        table = BlockcheckSitesTable()
+        table.show_report(report)
+
+        self.assertEqual(table.item(0, 2).text(), "соединение сброшено — так режет DPI · блокировка по имени сайта")
+        tooltip = _service_details(report["services"][0])[1]
+        self.assertIn("   Блокировка по имени сайта: с именем x.com соединение обрывается", tooltip)
+
+    def test_unknown_cause_code_is_not_shown_raw(self) -> None:
+        service = {"targets": [{"host": "x.com", "short": "не открывается", "text": "…", "cause": "новый_код"}]}
+
+        self.assertEqual(_service_details(service)[0], "не открывается")
 
 
 class _ButtonStub:
