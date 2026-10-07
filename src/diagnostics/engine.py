@@ -1301,71 +1301,18 @@ def run_blockcheck(
                     problems.append(problem_rules.problem(level, finding["text"], action="dns", kind=block_kind.KIND_DNS))
             problems.sort(key=lambda item: problem_rules.LEVEL_ORDER.get(Level(item["level"]), 9))
 
-        emit("")
-        emit("━━━━━━━━ 📊 Итог ━━━━━━━━")
-        if run.timed_out:
-            emit(report_text.timed_out_line(run.deadline_seconds))
-        icon = {"ok": "✅", "warn": "⚠️", "fail": "❌", "unknown": "❔"}
-        for problem in problems:
-            emit(f"{icon[problem['level']]} {problem['text']}")
-            for advice in problem["advice"]:
-                emit(f"   👉 {advice}")
-        if working:
-            emit(f"✅ Открываются: {', '.join(working)}")
         elapsed = time.monotonic() - started
-        emit(f"Проверка заняла {elapsed:.1f} с.")
+        for line in report_text.summary_lines(
+            problems, working, timed_out=run.timed_out, deadline=run.deadline_seconds, elapsed=elapsed
+        ):
+            emit(line)
 
         return {
             "scope": scope,
-            "services": [
-                {
-                    "key": key,
-                    "label": service.label,
-                    "control": service.control,
-                    "domestic": service.domestic,
-                    "level": verdicts[key].level.value,
-                    "kind": verdicts[key].kind,
-                    "headline": verdicts[key].headline,
-                    "advice": list(verdicts[key].advice),
-                    "dns_note": verdicts[key].dns_note,
-                    "targets": [report_text.target_report(probe) for probe in collected[key]],
-                }
-                for key, service in services.items()
-            ],
-            "voice": report_text.section_report(
-                voice, [(item.name, "ok" if item.answered else "fail", item.text) for item in voice.servers]
-            ) if voice else None,
-            "freeze": report_text.section_report(
-                freeze, [(item.name, item.state.value, item.text) for item in freeze.servers]
-            ) | {
-                # По серверу: провайдер, метка, в какую сторону оборвалось и за сколько проверили.
-                "servers": [
-                    {
-                        "provider": item.provider,
-                        "host": item.host,
-                        "id": item.ident,
-                        "state": item.state.value,
-                        "text": item.text,
-                        "direction": item.direction,
-                        "seconds": round(item.seconds, 1),
-                    }
-                    for item in freeze.servers
-                ]
-            } if freeze else None,
-            "telegram": {
-                "level": telegram.level.value,
-                "headline": telegram.headline,
-                "advice": list(telegram.advice),
-                "items": [
-                    {
-                        "name": item.center.name,
-                        "address": item.center.address,
-                        "state": report_text.telegram_state(item),
-                        "text": report_text.telegram_text(item),
-                    }
-                    for item in telegram.servers
-                ],
-            } if telegram else None,
+            "services": report_text.services_report(services, verdicts, collected),
+            "voice": report_text.voice_report(voice),
+            "freeze": report_text.freeze_report(freeze),
+            "telegram": report_text.telegram_report(telegram),
             "network": network,
             "speed": speed,
             "problems": problems,
@@ -1375,10 +1322,7 @@ def run_blockcheck(
             "ipv6": {"state": ipv6.code, "text": ipv6.text} if ipv6 is not None else None,
             "dns_servers": dns_servers,
             "filter": filter_place,
-            "system": [
-                {"key": item.key, "title": item.title, "level": item.level, "text": item.text, "advice": item.advice}
-                for item in system
-            ],
+            "system": report_text.system_report(system),
             "environment": environment,
             "zapret_running": zapret_running,
             "zapret_line": zapret_line,

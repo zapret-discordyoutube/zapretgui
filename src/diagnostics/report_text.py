@@ -215,3 +215,96 @@ def section_report(report, rows) -> dict:
         # выглядеть как «не работает».
         "items": [{"name": name, "ok": state == "ok", "state": state, "text": text} for name, state, text in rows],
     }
+
+
+# ---------------------------------------------------------------------------
+# Отчёт целиком: части словаря, который получают экран и файл
+# ---------------------------------------------------------------------------
+
+_SUMMARY_ICON = {"ok": "✅", "warn": "⚠️", "fail": "❌", "unknown": "❔"}
+
+
+def summary_lines(problems: list[dict], working: list[str], *, timed_out: bool, deadline: float, elapsed: float) -> list[str]:
+    """Раздел «Итог» журнала: проблемы с советами, что открывается и сколько шла проверка."""
+    lines = ["", "━━━━━━━━ 📊 Итог ━━━━━━━━"]
+    if timed_out:
+        lines.append(timed_out_line(deadline))
+    for item in problems:
+        lines.append(f"{_SUMMARY_ICON[item['level']]} {item['text']}")
+        lines.extend(f"   👉 {advice}" for advice in item["advice"])
+    if working:
+        lines.append(f"✅ Открываются: {', '.join(working)}")
+    lines.append(f"Проверка заняла {elapsed:.1f} с.")
+    return lines
+
+
+def services_report(services: dict, verdicts: dict, collected: dict) -> list[dict]:
+    """Сервисы с итогом и всеми их адресами — в том порядке, в каком проверялись."""
+    return [
+        {
+            "key": key,
+            "label": service.label,
+            "control": service.control,
+            "domestic": service.domestic,
+            "level": verdicts[key].level.value,
+            "kind": verdicts[key].kind,
+            "headline": verdicts[key].headline,
+            "advice": list(verdicts[key].advice),
+            "dns_note": verdicts[key].dns_note,
+            "targets": [target_report(probe) for probe in collected[key]],
+        }
+        for key, service in services.items()
+    ]
+
+
+def voice_report(voice) -> dict | None:
+    if not voice:
+        return None
+    return section_report(voice, [(item.name, "ok" if item.answered else "fail", item.text) for item in voice.servers])
+
+
+def freeze_report(freeze) -> dict | None:
+    """Обрыв по хостингам: общий итог и запись на каждый сервер."""
+    if not freeze:
+        return None
+    report = section_report(freeze, [(item.name, item.state.value, item.text) for item in freeze.servers])
+    # По серверу: провайдер, метка, в какую сторону оборвалось и за сколько проверили.
+    report["servers"] = [
+        {
+            "provider": item.provider,
+            "host": item.host,
+            "id": item.ident,
+            "state": item.state.value,
+            "text": item.text,
+            "direction": item.direction,
+            "seconds": round(item.seconds, 1),
+        }
+        for item in freeze.servers
+    ]
+    return report
+
+
+def telegram_report(telegram) -> dict | None:
+    if not telegram:
+        return None
+    return {
+        "level": telegram.level.value,
+        "headline": telegram.headline,
+        "advice": list(telegram.advice),
+        "items": [
+            {
+                "name": item.center.name,
+                "address": item.center.address,
+                "state": telegram_state(item),
+                "text": telegram_text(item),
+            }
+            for item in telegram.servers
+        ],
+    }
+
+
+def system_report(system) -> list[dict]:
+    return [
+        {"key": item.key, "title": item.title, "level": item.level, "text": item.text, "advice": item.advice}
+        for item in system
+    ]
