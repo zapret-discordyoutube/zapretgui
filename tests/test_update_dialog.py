@@ -188,6 +188,35 @@ class UpdateDialogTests(_DialogCase):
         self.addCleanup(dialog.deleteLater)
         return dialog
 
+    def test_closed_dialog_no_longer_follows_the_flow(self) -> None:
+        flow = UpdateFlow()
+        flow.set_offer(_offer())
+        dialog = self._dialog(flow)
+        dialog._render = Mock()
+
+        # Окно ещё затухает, но ход обновления ему уже не нужен.
+        dialog.reject()
+        flow.start_download()
+
+        dialog._render.assert_not_called()
+        self.assertIsNone(dialog._flow_connection)
+
+    def test_deleted_dialog_survives_a_late_flow_signal(self) -> None:
+        """В сборке Nuitka PyQt не рвёт связь сигнала с удалённым окном."""
+        from PyQt6 import sip
+
+        flow = UpdateFlow()
+        flow.set_offer(_offer())
+        dialog = UpdateDialog(self.host, flow=flow)
+        dialog.open()
+        QApplication.processEvents()
+        sip.delete(dialog)
+
+        # Сигнал всё-таки дошёл до удалённого окна: падать нельзя.
+        dialog._on_flow_changed()
+
+        self.assertIsNone(dialog._flow_connection)
+
     def test_offer_shows_all_versions_and_offer_buttons(self) -> None:
         flow = UpdateFlow()
         flow.set_offer(_offer())

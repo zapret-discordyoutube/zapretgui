@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRectF, QTimer, QUrl, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QTextDocument
 from PyQt6.QtWidgets import QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
@@ -370,8 +371,11 @@ class UpdateDialog(_ReleaseDialogBase):
         for button in (self.skip_btn, self.later_btn, self.hide_btn, self.close_btn, self.install_btn):
             self._buttons_right.addWidget(button)
 
-        self._flow.changed.connect(self._render)
-        self.finished.connect(self._detach_flow)
+        # Связь с ходом обновления хранится и разрывается по самой связи.
+        # В сборке Nuitka PyQt не рвёт её при удалении окна, а отписка по
+        # методу там не находит подписку: закрытое окно продолжало получать
+        # сигналы и падало на уже удалённых подписях.
+        self._flow_connection = self._flow.changed.connect(self._on_flow_changed)
         self._render()
 
     # --- действия -------------------------------------------------------------
@@ -396,12 +400,29 @@ class UpdateDialog(_ReleaseDialogBase):
         self.hide_clicked.emit()
         self.reject()
 
-    def _detach_flow(self, _code: int = 0) -> None:
-        try:
-            self._flow.changed.disconnect(self._render)
-        except (TypeError, RuntimeError):
-            pass
-        self.ticker.stop()
+    def done(self, code):  # noqa: ANN001
+        # Окно закрывается с затуханием: отписываемся сразу, а не после него.
+        self._detach_flow()
+        super().done(code)
+
+    def _detach_flow(self) -> None:
+        connection, self._flow_connection = self._flow_connection, None
+        if connection is not None:
+            try:
+                QObject.disconnect(connection)
+            except (TypeError, RuntimeError):
+                pass
+        if not sip.isdeleted(self):
+            self.ticker.stop()
+
+    def _on_flow_changed(self) -> None:
+        if self._flow_connection is None:
+            return
+        if sip.isdeleted(self):
+            # Окно удалили без закрытия (например, вместе с окном программы).
+            self._detach_flow()
+            return
+        self._render()
 
     # --- отрисовка ------------------------------------------------------------
 
