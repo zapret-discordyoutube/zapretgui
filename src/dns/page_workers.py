@@ -151,9 +151,13 @@ class DnsApplyWorker(QThread):
         apply_dns: Callable[..., Any],
         reset_to_auto: Callable[[list], Any],
         load_state: Callable[[], Any],
+        start_local_proxy: Callable[[str], Any],
+        stop_local_proxy_if_unused: Callable[[], Any],
         parent=None,
     ):
         super().__init__(parent)
+        self._start_local_proxy = start_local_proxy
+        self._stop_local_proxy_if_unused = stop_local_proxy_if_unused
         self._request_id = int(request_id)
         self._action = str(action or "").strip()
         self._adapters = [str(item) for item in (adapters or ()) if str(item or "").strip()]
@@ -194,15 +198,34 @@ class DnsApplyWorker(QThread):
             )
             if not provider_plan.valid:
                 return {"plan": provider_plan, "state": None}
-            command_result = self._apply_dns(self._adapters, provider_plan.ipv4, provider_plan.ipv6)
+            ipv6 = provider_plan.ipv6
+            local_mode = str(self._data.get("local_proxy") or "")
+            if local_mode:
+                # Шифрованный DNS: сначала движок должен ответить на запрос, и только
+                # потом адаптеры получают 127.0.0.1 — иначе пропал бы весь интернет.
+                started = self._start_local_proxy(local_mode)
+                if not started.success:
+                    failed = dns_page_plans.NetworkProviderDnsPlan(
+                        valid=False, ipv4=[], ipv6=[], log_level="WARNING", log_message=str(started.message or "")
+                    )
+                    return {"plan": failed, "state": self._load_state()}
+                if not started.listen_ipv6:
+                    ipv6 = []
+            command_result = self._apply_dns(self._adapters, provider_plan.ipv4, ipv6)
             plan = dns_page_plans.build_provider_dns_apply_result_plan(
                 name=self._name,
                 adapter_count=len(self._adapters),
                 success_count=int(command_result.affected_count or 0),
-                ipv6=provider_plan.ipv6,
+                ipv6=ipv6,
                 error=str(command_result.message or ""),
             )
         else:
             raise ValueError(f"Неизвестное DNS действие: {self._action}")
 
+        if not (self._action == "provider" and self._data.get("local_proxy")):
+            # Выбран обычный DNS: движок шифрованного DNS больше никому не нужен — убрать.
+            try:
+                self._stop_local_proxy_if_unused()
+            except Exception as exc:
+                log(f"DnsApplyWorker: не удалось остановить шифрованный DNS: {exc}", "WARNING")
         return {"plan": plan, "state": self._load_state()}

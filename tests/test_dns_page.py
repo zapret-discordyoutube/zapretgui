@@ -263,6 +263,38 @@ class DnsPageTests(unittest.TestCase):
         page.grid.activated.emit("AdGuard")
         self.info_bar.warning.assert_not_called()
 
+    def test_encrypted_dns_tile_is_selected_by_the_running_mode(self) -> None:
+        local = replace(ETHERNET, static_ipv4=("127.0.0.1",), static_ipv6=("::1",))
+        adapters = (local, WIFI_ADAPTER, SPARE_ADAPTER)
+
+        page = self._page(state=replace(STATE, adapters=adapters, local_proxy_mode="anonymized"))
+        page.now_panel._chips[WIFI].setChecked(False)
+        selected = [tile.key for tile in self._provider_tiles(page) if tile.selected]
+        self.assertEqual(selected, ["DNSCrypt анонимный"])
+        self.assertEqual(page.now_panel.title_label.text(), "DNSCrypt анонимный")
+
+        # Движок не работает: 127.0.0.1 на адаптере — чужой локальный DNS, а не наш режим.
+        page = self._page(state=replace(STATE, adapters=adapters, local_proxy_mode=""))
+        page.now_panel._chips[WIFI].setChecked(False)
+        self.assertEqual([tile.key for tile in self._provider_tiles(page) if tile.selected], [])
+        self.assertEqual(page.now_panel.title_label.text(), "Свой DNS")
+
+    def test_choosing_encrypted_dns_sends_its_mode_to_the_worker(self) -> None:
+        page = self._page()
+
+        page.grid.activated.emit("DNSCrypt")
+
+        payload = page._apply_lane.request.call_args.args[0]
+        self.assertEqual(payload["data"]["local_proxy"], "dnscrypt")
+        self.assertEqual(payload["data"]["ipv4"], ["127.0.0.1"])
+        self.assertIn("dnscrypt-proxy", {tile.key: tile for tile in self._provider_tiles(page)}["DNSCrypt"].tooltip)
+
+        # Движок не ответил: страница показывает причину, DNS не менялся.
+        failed = page_plans.NetworkProviderDnsPlan(valid=False, ipv4=[], ipv6=[], log_level="WARNING", log_message="Порт 53 занят")
+        page._on_apply_done(payload, {"plan": failed, "state": STATE})
+        self.assertEqual(self.info_bar.warning.call_args.kwargs["content"], "Порт 53 занят")
+        self.assertIsNone(page._pending_choice)
+
     def test_isp_warning_looks_only_at_connected_adapters(self) -> None:
         self.assertTrue(page_plans.should_show_isp_dns_warning([WIFI_ADAPTER, SPARE_ADAPTER], warning_already_shown=False))
         self.assertFalse(page_plans.should_show_isp_dns_warning([WIFI_ADAPTER], warning_already_shown=True))
@@ -352,7 +384,11 @@ class DnsPageTests(unittest.TestCase):
         self.assertIn("1.1.1.1", servers)
         self.assertTrue(all(":" not in server for server in servers))
         self.assertFalse(page.now_panel.measure_button.isEnabled())
-        self.assertEqual({tile.latency for tile in self._provider_tiles(page)}, {"measuring"})
+        self.assertNotIn("127.0.0.1", servers)
+        network_tiles = [tile for tile in self._provider_tiles(page) if tile.address != "127.0.0.1"]
+        self.assertEqual({tile.latency for tile in network_tiles}, {"measuring"})
+        # Режимы шифрованного DNS живут на этом компьютере и не замеряются.
+        self.assertEqual({tile.latency for tile in self._provider_tiles(page) if tile.address == "127.0.0.1"}, {""})
 
         page._on_latency_done(DnsLatencyReport(results={"1.1.1.1": 30.0, "8.8.8.8": 9.6, "9.9.9.9": None}))
 
@@ -494,7 +530,7 @@ class DnsPageTests(unittest.TestCase):
 
         self.assertEqual(page.now_panel.measure_button.text(), "Measure speed")
         self.assertEqual(page.now_panel.title_label.text(), "Adapters use different DNS")
-        self.assertEqual(page.grid.tiles()[0].title, "Popular")
+        self.assertEqual(page.grid.tiles()[0].title, "Encrypted")
 
     def test_cleanup_closes_every_lane(self) -> None:
         page = self._page()

@@ -26,6 +26,13 @@ def install_dns_address_migration(
             log(f"Замена старых адресов DNS не выполнена: {exc}", "WARNING")
             return
         log_startup_metric("StartupDnsAddressMigrationFinished", f"changed={changed_count}")
+        # Шифрованный DNS: адаптер смотрит на 127.0.0.1, а движок не работает — поднять заново.
+        try:
+            repaired = str(dns_feature.repair_local_dns_proxy() or "")
+        except Exception as exc:
+            log(f"Проверка шифрованного DNS не выполнена: {exc}", "WARNING")
+            return
+        log_startup_metric("StartupLocalDnsProxyChecked", f"repaired={int(bool(repaired))}")
 
     def _start_dns_address_migration() -> None:
         if not is_startup_host_alive(startup_host):

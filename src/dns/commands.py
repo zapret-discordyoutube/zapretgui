@@ -114,6 +114,24 @@ def apply_dns(adapters: list[str], ipv4: list[str], ipv6: list[str]) -> DnsComma
     return _apply_dns(adapters, ipv4, ipv6)
 
 
+def start_local_proxy(mode: str) -> DnsCommandResult:
+    from dns.runtime import start_local_proxy as _start_local_proxy
+
+    return _start_local_proxy(mode)
+
+
+def stop_local_proxy_if_unused() -> bool:
+    from dns.runtime import stop_local_proxy_if_unused as _stop_local_proxy_if_unused
+
+    return _stop_local_proxy_if_unused()
+
+
+def repair_local_proxy() -> str:
+    from dns.runtime import repair_local_proxy as _repair_local_proxy
+
+    return _repair_local_proxy()
+
+
 def reset_to_auto(adapters: list[str]) -> DnsCommandResult:
     from dns.runtime import reset_to_auto as _reset_to_auto
 
@@ -135,7 +153,7 @@ def measure_dns_latency(servers: list[str]):
 def build_domain_lookup_servers():
     """Серверы для вкладки «Проверка домена»: системные, шифрованные, из списка программы и свои."""
     from dns.custom_providers import build_dns_providers_with_custom
-    from dns.dns_providers import DNS_PROVIDERS
+    from dns.dns_providers import network_providers
     from dns.domain_lookup import (
         EXTRA_SERVERS,
         SERVER_CUSTOM,
@@ -165,7 +183,8 @@ def build_domain_lookup_servers():
         custom_servers = get_custom_dns_servers()
     except Exception:
         custom_servers = []
-    providers = build_dns_providers_with_custom(DNS_PROVIDERS, custom_servers)
+    # Режимы встроенного шифрованного DNS — не серверы в сети: у них один адрес 127.0.0.1.
+    providers = build_dns_providers_with_custom(network_providers(), custom_servers)
     for category, group in providers.items():
         kind = SERVER_CUSTOM if category == CUSTOM_DNS_CATEGORY else SERVER_PROVIDER
         for name, data in group.items():
@@ -191,7 +210,7 @@ def run_domain_lookup(target: str, *, use_external: bool = True, on_stage=None, 
 def build_server_check_targets():
     """Адреса для вкладки «DNS-серверы»: все серверы программы и свои, IPv6 — если он есть."""
     from dns.custom_providers import build_dns_providers_with_custom
-    from dns.dns_providers import DNS_PROVIDERS
+    from dns.dns_providers import network_providers
     from dns.server_check import build_targets
 
     try:
@@ -206,7 +225,7 @@ def build_server_check_targets():
         ipv6 = bool(internet_route().has_ipv6)
     except Exception:
         ipv6 = False
-    return build_targets(build_dns_providers_with_custom(DNS_PROVIDERS, custom_servers), ipv6=ipv6)
+    return build_targets(build_dns_providers_with_custom(network_providers(), custom_servers), ipv6=ipv6)
 
 
 def run_server_check(*, on_progress=None, should_stop=None):

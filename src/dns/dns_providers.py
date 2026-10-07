@@ -29,6 +29,13 @@ STATUS_BLOCKED — обычные запросы блокируются или �
 которые подменяют адреса закрытых для России сервисов; доверия к ним меньше,
 чем к крупным компаниям, и страница пишет об этом рядом с названием группы.
 
+Группа «Шифрованные» — не серверы, а режимы встроенного движка
+dnscrypt-proxy (dns.local_proxy): ключ "local_proxy" называет режим, а адрес
+у всех один — 127.0.0.1, сам этот компьютер. Выбор такой плитки сначала
+запускает движок и только потом прописывает адаптеру 127.0.0.1. Замер
+скорости, проверка серверов и поиск сервера по адресу эти записи пропускают
+(network_providers()): какой режим работает, знает только сам движок.
+
 Основные адреса (первый в "ipv4") не должны повторяться: по нему программа
 узнаёт, какой сервер стоит на адаптере. Это и остальные правила списка
 проверяет catalog_problems().
@@ -42,7 +49,38 @@ STATUS_BLOCKED = "blocked"
 STATUS_AT_RISK = "at_risk"
 STATUSES = (STATUS_BLOCKED, STATUS_AT_RISK)
 
+LOCAL_PROXY_GROUP = "Шифрованные"
+
 DNS_PROVIDERS = {
+    LOCAL_PROXY_GROUP: {
+        "DNSCrypt": {
+            "ipv4": ["127.0.0.1"],
+            "ipv6": ["::1"],
+            "desc": "Шифрует запросы",
+            "icon": "fa5s.key",
+            "color": "#22d3ee",
+            "dnssec": True,
+            "local_proxy": "dnscrypt",
+        },
+        "DNSCrypt анонимный": {
+            "ipv4": ["127.0.0.1"],
+            "ipv6": ["::1"],
+            "desc": "Скрывает ваш адрес",
+            "icon": "fa5s.user-secret",
+            "color": "#a3e635",
+            "dnssec": True,
+            "local_proxy": "anonymized",
+        },
+        "ODoH": {
+            "ipv4": ["127.0.0.1"],
+            "ipv6": ["::1"],
+            "desc": "Через HTTPS, пробный",
+            "icon": "fa5s.mask",
+            "color": "#f472b6",
+            "dnssec": True,
+            "local_proxy": "odoh",
+        },
+    },
     "Популярные": {
         "Cloudflare": {
             "ipv4": ["1.1.1.1", "1.0.0.1"],
@@ -387,12 +425,25 @@ def iter_providers():
             yield group, name, data
 
 
+def network_providers(providers: dict | None = None) -> dict:
+    """Список без режимов встроенного движка: только настоящие серверы в сети."""
+    source = DNS_PROVIDERS if providers is None else providers
+    result: dict = {}
+    for group, items in source.items():
+        kept = {name: data for name, data in items.items() if not data.get("local_proxy")}
+        if kept:
+            result[group] = kept
+    return result
+
+
 def find_provider_by_address(address: str) -> tuple[str, str, dict] | None:
     """(группа, название, данные) сервера, которому принадлежит адрес (IPv4 или IPv6)."""
     wanted = str(address or "").strip().lower()
     if not wanted:
         return None
     for group, name, data in iter_providers():
+        if data.get("local_proxy"):
+            continue
         for item in (*data.get("ipv4", ()), *data.get("ipv6", ())):
             if str(item).strip().lower() == wanted:
                 return group, name, data
@@ -406,13 +457,29 @@ def catalog_problems() -> list[str]:
     IPv6 без повторов, основной адрес не занят другим сервером, шифрованный
     DoH задан адресом https, пометка состояния — из известных.
     """
+    from dns.local_proxy_catalog import MODES
+
     problems: list[str] = []
     names: set[str] = set()
     owners: dict[str, str] = {}
-    for _group, name, data in iter_providers():
+    modes: set[str] = set()
+    for group, name, data in iter_providers():
         if name in names:
             problems.append(f"{name}: название повторяется")
         names.add(name)
+        mode = str(data.get("local_proxy", ""))
+        if mode or group == LOCAL_PROXY_GROUP:
+            # Режим встроенного движка: адрес у всех один — этот компьютер.
+            if mode not in MODES or mode in modes or group != LOCAL_PROXY_GROUP:
+                problems.append(f"{name}: неверный или повторный режим шифрованного DNS «{mode}»")
+            modes.add(mode)
+            if list(data.get("ipv4", ())) != ["127.0.0.1"] or list(data.get("ipv6", ())) != ["::1"]:
+                problems.append(f"{name}: у режима шифрованного DNS адреса должны быть 127.0.0.1 и ::1")
+            if data.get("doh") or data.get("dot") or data.get("status"):
+                problems.append(f"{name}: у режима шифрованного DNS не бывает DoH, DoT и пометки состояния")
+            if not str(data.get("desc", "")).strip() or not str(data.get("icon", "")).strip():
+                problems.append(f"{name}: нет пояснения или значка")
+            continue
         ipv4 = [str(item) for item in data.get("ipv4", ())]
         ipv6 = [str(item) for item in data.get("ipv6", ())]
         if not ipv4:

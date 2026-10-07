@@ -26,7 +26,7 @@ from qfluentwidgets import CaptionLabel, InfoBar, InfoBarPosition, PushButton, R
 from app.ui_texts import tr as tr_catalog
 from dns import page_plans as dns_page_plans
 from dns.custom_providers import CUSTOM_DNS_CATEGORY, build_dns_providers_with_custom
-from dns.dns_providers import DNS_PROVIDERS, STATUS_AT_RISK, STATUS_BLOCKED
+from dns.dns_providers import DNS_PROVIDERS, LOCAL_PROXY_GROUP, STATUS_AT_RISK, STATUS_BLOCKED
 from dns.ui.custom_dns_dialog import CustomDnsDialog, unique_copy_name
 from dns.ui.now_panel import AdapterChip, DnsNowPanel, NowState
 from dns.ui.provider_grid import ADD_TILE_KEY, DnsProviderGrid, DnsTile, GridTexts
@@ -47,6 +47,7 @@ RECOMMENDED_PROVIDER = ("Безопасные", "Quad9")
 
 # Группы из dns_providers → ключ перевода подписи.
 GROUP_TEXT_KEYS = {
+    LOCAL_PROXY_GROUP: ("page.network.group.encrypted", "Шифрованные"),
     "Популярные": ("page.network.group.popular", "Популярные"),
     "Безопасные": ("page.network.group.secure", "Безопасные"),
     "Малоизвестные": ("page.network.group.lesser_known", "Малоизвестные"),
@@ -55,6 +56,10 @@ GROUP_TEXT_KEYS = {
 }
 # Короткое пояснение справа от названия группы.
 GROUP_NOTE_KEYS = {
+    LOCAL_PROXY_GROUP: (
+        "page.network.group.encrypted.note",
+        "запросы шифрует встроенный dnscrypt-proxy — их не подменить и не закрыть по имени",
+    ),
     "Малоизвестные": ("page.network.group.lesser_known.note", "реже попадают под блокировки"),
     "Для ИИ": ("page.network.group.ai.note", "серверы сообщества — доверия к ним меньше"),
 }
@@ -106,6 +111,8 @@ class NetworkPage(BasePage):
         self._adapters: tuple = ()
         self._ipv6_available = False
         self._doh_supported = False
+        # Режим работающего шифрованного DNS; по нему находится его плитка.
+        self._local_proxy_mode = ""
         self._loaded = False
         self._load_started = False
         self._closed = False
@@ -329,6 +336,7 @@ class NetworkPage(BasePage):
         self._adapters = tuple(getattr(state, "adapters", ()) or ())
         self._ipv6_available = bool(getattr(state, "ipv6_available", False))
         self._doh_supported = bool(getattr(state, "doh_supported", False))
+        self._local_proxy_mode = str(getattr(state, "local_proxy_mode", "") or "")
         self._loaded = True
         if [adapter.guid for adapter in self._adapters] != known or not known:
             self.now_panel.set_adapters([self._adapter_chip(adapter) for adapter in self._adapters])
@@ -362,6 +370,7 @@ class NetworkPage(BasePage):
         return dns_page_plans.build_current_dns_plan(
             adapters=self._selected_adapter_objects(),
             providers=self._providers,
+            local_proxy_mode=self._local_proxy_mode,
         )
 
     def _render(self) -> None:
@@ -443,6 +452,9 @@ class NetworkPage(BasePage):
 
     def _all_addresses(self, data: dict) -> list[str]:
         """Все адреса сервера, которые имеет смысл замерять в этой сети."""
+        if data.get("local_proxy"):
+            # Режим шифрованного DNS живёт на этом компьютере: замерять дорогу до него незачем.
+            return []
         addresses = dns_page_plans.normalize_dns_list(data.get("ipv4", []))
         if self._ipv6_available:
             addresses = [*addresses, *dns_page_plans.normalize_dns_list(data.get("ipv6", []))]
@@ -472,7 +484,7 @@ class NetworkPage(BasePage):
             address
             for group in self._providers.values()
             for data in group.values()
-            if (address := self._primary_address(data))
+            if not data.get("local_proxy") and (address := self._primary_address(data))
         }
         measured = {
             address: value
@@ -500,7 +512,10 @@ class NetworkPage(BasePage):
                 )
             for name, data in items.items():
                 address = self._primary_address(data)
-                if self._measuring and address not in self._latency:
+                local_proxy = bool(data.get("local_proxy"))
+                if local_proxy:
+                    latency, latency_ms = "", 0.0
+                elif self._measuring and address not in self._latency:
                     latency, latency_ms = "measuring", 0.0
                 elif address in self._latency:
                     value = self._latency[address]
@@ -514,6 +529,14 @@ class NetworkPage(BasePage):
                 tooltip_lines = [f"{name} — {data.get('desc', '')}".rstrip(" —")]
                 if status in STATUS_TOOLTIP_KEYS:
                     tooltip_lines.append(self._t(*STATUS_TOOLTIP_KEYS[status]))
+                if local_proxy:
+                    tooltip_lines.append(
+                        self._t(
+                            "page.network.tile.local_proxy",
+                            "Программа запустит на компьютере службу dnscrypt-proxy и пропишет адаптеру "
+                            "адрес 127.0.0.1. Если шифрованные серверы не ответят, DNS не изменится.",
+                        )
+                    )
                 group_note = self._group_note(group)
                 if group_note and self._filter != FILTER_ALL:
                     # Заголовка группы при фильтре нет — пояснение уходит в подсказку.
@@ -548,7 +571,7 @@ class NetworkPage(BasePage):
                         custom=custom,
                         latency=latency,
                         latency_ms=latency_ms,
-                        fastest=bool(fastest_address) and address == fastest_address,
+                        fastest=bool(fastest_address) and address == fastest_address and not local_proxy,
                         tooltip="\n".join(tooltip_lines),
                         status=status,
                     )
@@ -766,7 +789,7 @@ class NetworkPage(BasePage):
         best_name, best_ms = "", None
         for group in self._providers.values():
             for name, data in group.items():
-                value = self._latency.get(self._primary_address(data))
+                value = None if data.get("local_proxy") else self._latency.get(self._primary_address(data))
                 if value is not None and (best_ms is None or value < best_ms):
                     best_name, best_ms = name, value
         if not self._latency:

@@ -7,6 +7,7 @@ from typing import Callable
 @dataclass(frozen=True, slots=True)
 class DnsFeature:
     migrate_outdated_dns_addresses: Callable
+    repair_local_dns_proxy: Callable
     warm_page_data_cache: Callable
     consume_warmed_page_data: Callable
     create_dns_check_worker: Callable
@@ -34,6 +35,8 @@ def build_dns_feature() -> DnsFeature:
     load_state = lambda *args, **kwargs: _public().load_state(*args, **kwargs)
     apply_dns = lambda *args, **kwargs: _public().apply_dns(*args, **kwargs)
     reset_to_auto = lambda *args, **kwargs: _public().reset_to_auto(*args, **kwargs)
+    start_local_proxy = lambda *args, **kwargs: _public().start_local_proxy(*args, **kwargs)
+    stop_local_proxy_if_unused = lambda *args, **kwargs: _public().stop_local_proxy_if_unused(*args, **kwargs)
     is_isp_dns_warning_shown = lambda *args, **kwargs: _public().is_isp_dns_warning_shown(*args, **kwargs)
     mark_isp_dns_warning_shown = lambda *args, **kwargs: _public().mark_isp_dns_warning_shown(*args, **kwargs)
     flush_dns_cache = lambda *args, **kwargs: _public().flush_dns_cache(*args, **kwargs)
@@ -87,6 +90,8 @@ def build_dns_feature() -> DnsFeature:
             apply_dns=apply_dns,
             reset_to_auto=reset_to_auto,
             load_state=load_state,
+            start_local_proxy=start_local_proxy,
+            stop_local_proxy_if_unused=stop_local_proxy_if_unused,
             parent=parent,
         )
 
@@ -142,6 +147,7 @@ def build_dns_feature() -> DnsFeature:
 
     return DnsFeature(
         migrate_outdated_dns_addresses=lambda *args, **kwargs: _public().migrate_outdated_dns_addresses(*args, **kwargs),
+        repair_local_dns_proxy=lambda *args, **kwargs: _public().repair_local_proxy(*args, **kwargs),
         warm_page_data_cache=lambda *args, **kwargs: _public().warm_state(*args, **kwargs),
         consume_warmed_page_data=lambda *args, **kwargs: _public().consume_warmed_state(*args, **kwargs),
         create_dns_check_worker=_create_dns_check_worker,
