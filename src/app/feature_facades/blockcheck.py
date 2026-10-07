@@ -119,6 +119,9 @@ class BlockcheckFeature:
     def remember_blockcheck_run(self, *args, **kwargs):
         return self._worker_commands().remember_blockcheck_run(*args, **kwargs)
 
+    def load_past_blockcheck_report(self, *args, **kwargs):
+        return self._worker_commands().load_past_blockcheck_report(*args, **kwargs)
+
     def load_page_initial_state(self, *args, **kwargs):
         return self._worker_commands().load_page_initial_state(*args, **kwargs)
 

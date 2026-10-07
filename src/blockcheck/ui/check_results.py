@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 
-from PyQt6.QtCore import QEvent, Qt, QTimer
-from PyQt6.QtGui import QColor, QPainter
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtCore import QEvent, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QToolTip, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, FlowLayout, PushButton, TransparentPushButton, SimpleCardWidget, StrongBodyLabel, SubtitleLabel
 
 from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_groups
@@ -874,7 +875,11 @@ def _environment_text(report: dict) -> str:
     return " · ".join(parts)
 
 
+# Сколько прошлых проверок видно сразу и сколько — по кнопке «Показать все».
 HISTORY_SHOWN = 6
+HISTORY_ALL = 50
+# Столько проблем одного прогона хранит история (settings.schema.CHECK_HISTORY_PROBLEMS_LIMIT).
+HISTORY_PROBLEMS_KEPT = 12
 _HISTORY_MARKS = {"ok": "✓", "warn": "!", "fail": "✗", "unknown": "?"}
 
 
@@ -892,45 +897,282 @@ def history_lines(runs, limit: int = HISTORY_SHOWN) -> list[tuple[str, str]]:
     return lines
 
 
-class BlockcheckHistoryList(_HeightKeeper, QWidget):
-    """Прошлые проверки: когда, что проверяли и чем кончилось."""
+@dataclass(frozen=True, slots=True)
+class HistoryRow:
+    """Одна прошлая проверка для таблицы: когда, что проверяли, чем кончилось и что изменилось."""
+
+    level: str
+    when: str
+    scope: str
+    # «Открывается 4 из 9 · проблем: 14».
+    outcome: str
+    # По сравнению с предыдущей такой же проверкой.
+    changes: str
+    opened: int = 0
+    blocked: int = 0
+    unknown: int = 0
+    # Первая проблема прогона — для подсказки.
+    headline: str = ""
+
+
+_OPEN_STATES = ("ok", "warn")
+
+
+def history_rows(runs, limit: int = HISTORY_SHOWN) -> list[HistoryRow]:
+    """Строки таблицы «Прошлые проверки», новые сверху.
+
+    Итог — сколько сайтов открывалось и сколько было проблем, а не одна первая
+    проблема: по ней шесть разных прогонов выглядели одинаково. «Что
+    изменилось» — сравнение с предыдущей проверкой того же набора сайтов.
+    """
+    from diagnostics.history import describe_changes, format_time, previous_run
+
+    runs = list(runs or ())
+    rows: list[HistoryRow] = []
+    for index in range(len(runs) - 1, max(-1, len(runs) - 1 - max(1, int(limit))), -1):
+        run = runs[index]
+        level = str(run.get("level") or "unknown")
+        level = level if level in _HISTORY_MARKS else "unknown"
+        states = [str(state) for state in (run.get("states") or {}).values()]
+        opened = sum(1 for state in states if state in _OPEN_STATES)
+        blocked = sum(1 for state in states if state == "fail")
+        problems = len(run.get("problems") or ())
+        if states:
+            parts = [f"Открывается {opened} из {len(states)}"]
+            if problems:
+                # В истории хранится не больше стольких проблем прогона — дальше счёт неточный.
+                parts.append(f"проблем: {problems}{'+' if problems >= HISTORY_PROBLEMS_KEPT else ''}")
+            outcome = " · ".join(parts)
+        else:
+            outcome = str(run.get("headline") or "итог не записан")
+        previous = previous_run(runs[:index], run)
+        if previous is None:
+            changes = "первая такая проверка"
+        else:
+            found = describe_changes(previous, run)
+            changes = "; ".join(found) if found else "без изменений"
+        rows.append(
+            HistoryRow(
+                level=level,
+                when=format_time(str(run.get("time") or "")),
+                scope=str(run.get("title") or ""),
+                outcome=outcome,
+                changes=f"{changes[:1].upper()}{changes[1:]}",
+                opened=opened,
+                blocked=blocked,
+                unknown=len(states) - opened - blocked,
+                headline=str(run.get("headline") or ""),
+            )
+        )
+    return rows
+
+
+class _HistoryTable(QWidget):
+    """Таблица прошлых проверок, которую рисует один виджет: значок итога, время, набор, полоса, итог, перемены."""
+
+    HEADER = 24
+    ROW = 30
+    _COLUMNS = (("Когда", 104), ("Что проверяли", 160), ("Итог", 350))
+    _LAST = "Что изменилось с прошлой такой проверки"
+    _ICONS = {"ok": "fa5s.check-circle", "warn": "fa5s.exclamation-triangle", "fail": "fa5s.times-circle", "unknown": "fa5s.question-circle"}
+
+    # Нажали строку: её номер сверху.
+    opened = pyqtSignal(int)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._rows: list[HistoryRow] = []
+        self._hover = -1
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(0)
+        self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
+
+    def rows(self) -> list[HistoryRow]:
+        return list(self._rows)
+
+    def set_rows(self, rows: list[HistoryRow]) -> None:
+        self._rows = list(rows)
+        self.setFixedHeight(self.HEADER + self.ROW * len(self._rows) if self._rows else 0)
+        self.update()
+
+    def row_at(self, y: float) -> int:
+        index = int((y - self.HEADER) // self.ROW) if y >= self.HEADER else -1
+        return index if 0 <= index < len(self._rows) else -1
+
+    def hint(self, index: int) -> str:
+        row = self._rows[index]
+        lines = [f"{row.when} · {row.scope}", row.outcome, f"{self._LAST}: {row.changes[:1].lower()}{row.changes[1:]}"]
+        if row.headline and row.headline != row.outcome:
+            lines.append(f"Первая проблема: {row.headline}")
+        return "\n".join(lines)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        hover = self.row_at(event.position().y())
+        if hover != self._hover:
+            self._hover = hover
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hover = -1
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        index = self.row_at(event.position().y())
+        if event.button() == Qt.MouseButton.LeftButton and index >= 0:
+            self.opened.emit(index)
+        super().mouseReleaseEvent(event)
+
+    def event(self, event) -> bool:
+        if event.type() == QEvent.Type.ToolTip:
+            index = self.row_at(event.pos().y())
+            if index >= 0:
+                QToolTip.showText(event.globalPos(), self.hint(index) + "\nНажмите, чтобы открыть эту проверку", self)
+            else:
+                QToolTip.hideText()
+            return True
+        return super().event(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        _ = event
+        if not self._rows:
+            return
+        painter = QPainter(self)
+        painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
+        text = _theme_color("fg", QColor(255, 255, 255, 235))
+        muted = _theme_color("fg_muted", QColor(255, 255, 255, 165))
+        line = _theme_color("divider_strong", QColor(255, 255, 255, 26))
+        hover = _theme_color("surface_bg_hover", QColor(255, 255, 255, 18))
+        font = QFont(self.font())
+        font.setPixelSize(13)
+        small = QFont(self.font())
+        small.setPixelSize(12)
+        metrics = QFontMetrics(font)
+        left, bar_width = 30, 64
+        flags = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        painter.setFont(small)
+        painter.setPen(muted)
+        x = left
+        for caption, width in self._COLUMNS:
+            painter.drawText(QRectF(x, 0, width, self.HEADER), flags, caption)
+            x += width
+        painter.drawText(QRectF(x, 0, max(0, self.width() - x), self.HEADER), flags, self._LAST)
+
+        for index, row in enumerate(self._rows):
+            top = self.HEADER + index * self.ROW
+            painter.setPen(Qt.PenStyle.NoPen)
+            if index == self._hover:
+                painter.setBrush(hover)
+                painter.drawRoundedRect(QRectF(0, top + 1, self.width(), self.ROW - 1), 5, 5)
+            else:
+                painter.setBrush(line)
+                painter.drawRect(QRectF(0, top, self.width(), 1))
+            color = tone_color(_level_tone(row.level)) or _NEUTRAL_DOT
+            try:
+                icon = get_cached_qta_pixmap(self._ICONS[row.level], color=color, size=14)
+                painter.drawPixmap(6, int(top + (self.ROW - 14) / 2), 14, 14, icon)
+            except Exception:
+                pass
+            painter.setFont(font)
+            x = left
+            painter.setPen(muted)
+            painter.drawText(QRectF(x, top, self._COLUMNS[0][1], self.ROW), flags, row.when)
+            x += self._COLUMNS[0][1]
+            painter.setPen(text)
+            width = self._COLUMNS[1][1]
+            painter.drawText(QRectF(x, top, width, self.ROW), flags, metrics.elidedText(row.scope, Qt.TextElideMode.ElideRight, width - 10))
+            x += width
+            # Полоса: какая доля сайтов открывалась, была закрыта и осталась без ответа.
+            total = row.opened + row.blocked + row.unknown
+            width = self._COLUMNS[2][1]
+            text_left = x
+            if total:
+                painter.setPen(Qt.PenStyle.NoPen)
+                bar_x = float(x)
+                for share, tone in ((row.opened, "success"), (row.blocked, "error"), (row.unknown, "")):
+                    if not share:
+                        continue
+                    part = (bar_width - 4) * share / total
+                    painter.setBrush(QColor(tone_color(tone) or _NEUTRAL_DOT))
+                    painter.drawRoundedRect(QRectF(bar_x, top + self.ROW / 2 - 2.5, max(2.0, part), 5), 2.5, 2.5)
+                    bar_x += part + 2
+                text_left = x + bar_width + 10
+            painter.setPen(text)
+            painter.drawText(
+                QRectF(text_left, top, x + width - text_left, self.ROW),
+                flags,
+                metrics.elidedText(row.outcome, Qt.TextElideMode.ElideRight, int(x + width - text_left - 10)),
+            )
+            x += width
+            painter.setPen(muted)
+            rest = max(0, self.width() - x - 26)
+            painter.drawText(QRectF(x, top, rest, self.ROW), flags, metrics.elidedText(row.changes, Qt.TextElideMode.ElideRight, rest))
+            # Стрелка справа — знак, что строка открывается.
+            painter.drawText(QRectF(self.width() - 20, top, 14, self.ROW), int(Qt.AlignmentFlag.AlignCenter), "›")
+        painter.end()
+
+
+class BlockcheckHistoryList(QWidget):
+    """Прошлые проверки таблицей: когда, что проверяли, сколько открывалось и что изменилось.
+
+    Строка открывает ту проверку целиком. Сразу видны последние, остальные (до
+    ``HISTORY_ALL``) — по кнопке «Показать все».
+    """
+
+    # Просят открыть прошлую проверку: её запись из истории.
+    run_opened = pyqtSignal(dict)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(4)
+        self._layout.setSpacing(6)
+        header = QHBoxLayout()
         self.title_label = StrongBodyLabel("Прошлые проверки", self)
-        self._layout.addWidget(self.title_label)
-        self._labels: list[CaptionLabel] = []
+        header.addWidget(self.title_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        header.addStretch(1)
+        self.more_button = TransparentPushButton("", self)
+        self.more_button.clicked.connect(self._toggle_all)
+        header.addWidget(self.more_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._layout.addLayout(header)
+        self.table = _HistoryTable(self)
+        self.table.opened.connect(self._on_row_opened)
+        self._layout.addWidget(self.table)
         self._lines: list[tuple[str, str]] = []
-        self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
+        self._runs: list[dict] = []
+        self._all = False
+
+    def _toggle_all(self) -> None:
+        self._all = not self._all
+        self._fill()
+
+    def _on_row_opened(self, index: int) -> None:
+        # Строки идут новыми сверху, записи истории — старыми сверху.
+        if 0 <= index < len(self._runs):
+            self.run_opened.emit(dict(self._runs[len(self._runs) - 1 - index]))
+
+    def _fill(self) -> None:
+        total = min(len(self._runs), HISTORY_ALL)
+        self.table.set_rows(history_rows(self._runs, HISTORY_ALL if self._all else HISTORY_SHOWN))
+        self.more_button.setVisible(total > HISTORY_SHOWN)
+        self.more_button.setText("Свернуть" if self._all else f"Показать все: {total}")
 
     def lines(self) -> list[tuple[str, str]]:
         return list(self._lines)
 
+    def rows(self) -> list[HistoryRow]:
+        return self.table.rows()
+
     def show_history(self, runs) -> None:
         self._lines = history_lines(runs)
-        while len(self._labels) < len(self._lines):
-            label = CaptionLabel("", self)
-            label.setWordWrap(True)
-            self._layout.addWidget(label)
-            self._labels.append(label)
-        for index, label in enumerate(self._labels):
-            visible = index < len(self._lines)
-            label.setVisible(visible)
-            if visible:
-                label.setText(self._lines[index][1])
-        self._apply_theme_refresh()
-        set_state_text(self, "Прошлые проверки: " + ("; ".join(text for _level, text in self._lines) or "пока нет"))
-        self._schedule_min_height_sync()
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self._sync_min_height()
-
-    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
-        _ = force
-        for label, (level, _text) in zip(self._labels, self._lines):
-            color = tone_color(_level_tone(level), tokens)
-            label.setStyleSheet(f"color: {color};" if color else "")
+        self._runs = [dict(run) for run in runs or ()]
+        self._fill()
+        set_state_text(
+            self,
+            "Прошлые проверки: "
+            + ("; ".join(f"{row.when}, {row.scope}: {row.outcome}, {row.changes}" for row in self.rows()) or "пока нет"),
+        )

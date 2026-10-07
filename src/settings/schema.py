@@ -39,7 +39,7 @@ VALID_TRAY_CLOSE_MODES = frozenset(
     }
 )
 # Сколько прошлых проверок сети помнит программа.
-CHECK_HISTORY_LIMIT = 30
+CHECK_HISTORY_LIMIT = 50
 # Ограничения на одну запись истории: настройки читаются целиком, раздувать их нельзя.
 CHECK_HISTORY_TEXT_LIMIT = 400
 CHECK_HISTORY_PROBLEMS_LIMIT = 12

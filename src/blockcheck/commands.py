@@ -103,6 +103,25 @@ def close_blockcheck_run_log(path: str | None) -> None:
     run_log_sessions.close(path)
 
 
+def load_past_blockcheck_report(log_file: str | None) -> dict | None:
+    """Сохранённый отчёт прошлой проверки (лежит рядом с её журналом). ``None`` — файла нет или он не читается."""
+    import json
+
+    from diagnostics.history import REPORT_FORMAT
+
+    if not log_file:
+        return None
+    try:
+        with open(os.path.splitext(str(log_file))[0] + ".json", encoding="utf-8") as stream:
+            document = json.load(stream)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(document, dict) or document.get("format") != REPORT_FORMAT:
+        return None
+    report = document.get("report")
+    return report if isinstance(report, dict) else None
+
+
 def check_dns_servers(*, should_stop=None) -> dict:
     """Проверка DNS-серверов для «Полной проверки»: выводы и полный текст одним словарём."""
     from dns import server_check_plans

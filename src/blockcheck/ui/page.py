@@ -165,6 +165,8 @@ class BlockcheckPage(BasePage):
         self._detail_view: ResultDetailView | None = None
         # Страницы поверх вкладок: подробности одного DNS-сервера и подробный отчёт или лог.
         self._server_detail_view = None
+        # Прошлая проверка из блока «Прошлые проверки», на всю страницу.
+        self._past_check_view = None
         self._log_report_view = None
         self._over_tabs_return_scroll = 0
         # Что открыто поверх вкладок, для журнала экранов окна; None — видна сама вкладка.
@@ -440,6 +442,7 @@ class BlockcheckPage(BasePage):
         # ── Прошлые проверки ──
         self._history_card = SettingsCard()
         self._history_list = BlockcheckHistoryList()
+        self._history_list.run_opened.connect(self._open_past_check)
         self._history_card.add_widget(self._history_list)
         self._add_tab_widget(self._history_card)
         self._history_card.setVisible(False)
@@ -676,7 +679,7 @@ class BlockcheckPage(BasePage):
         self._over_tabs_screen = None
         self.navigation_screen_changed.emit()
         # Вкладку могут сменить и снаружи, пока поверх открыты подробности или отчёт.
-        for view in (self._detail_view, self._server_detail_view, self._log_report_view):
+        for view in (self._detail_view, self._server_detail_view, self._log_report_view, self._past_check_view):
             if view is not None and not view.isHidden():
                 view.setVisible(False)
                 self._tabs_pivot.setVisible(True)
@@ -884,6 +887,7 @@ class BlockcheckPage(BasePage):
             self._detail_view,
             self._server_detail_view,
             self._log_report_view,
+            self._past_check_view,
         ):
             if page is not None and page is not view:
                 page.setVisible(False)
@@ -893,7 +897,7 @@ class BlockcheckPage(BasePage):
         self._scroll_to_top()
 
     def _close_over_tabs(self) -> None:
-        views = (self._server_detail_view, self._log_report_view)
+        views = (self._server_detail_view, self._log_report_view, self._past_check_view)
         if all(view is None or view.isHidden() for view in views):
             return
         self._switch_tab(self._active_tab_index)
@@ -994,6 +998,22 @@ class BlockcheckPage(BasePage):
                 description="Технические подробности проверки: адреса, ответы DNS и время ответа серверов.",
             )
         )
+
+    def _open_past_check(self, run: dict) -> None:
+        """Нажатие на строку «Прошлых проверок»: та проверка целиком, назад ведёт строка пути."""
+        if self._past_check_view is None:
+            from blockcheck.ui.past_check_view import PastCheckView
+
+            self._past_check_view = PastCheckView(on_action=self._on_problem_action, parent=self.content)
+            self._past_check_view.closed.connect(self._close_over_tabs)
+            self._past_check_view.card_opened.connect(self._open_card_detail)
+            self._past_check_view.setVisible(False)
+            self.add_widget(self._past_check_view)
+        # Отчёт каждой проверки сохранён рядом с её журналом; читает его функция BlockCheck, не страница.
+        report = self._blockcheck.load_past_blockcheck_report(str(run.get("log_file") or ""))
+        self._show_over_tabs(self._past_check_view)
+        self._past_check_view.show_run(run, report)
+        self._past_check_view.setFocus()
 
     def _open_section_text(self, title: str, text: str) -> None:
         """«Открыть на всю страницу» у длинного текста в отчёте карточки."""
