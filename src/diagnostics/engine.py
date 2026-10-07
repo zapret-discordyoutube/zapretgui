@@ -134,7 +134,7 @@ RUN_DEADLINE = 30.0
 SITES_AT_ONCE = 14
 RUN_DEADLINE_ALL = 45.0
 # Полная проверка ждёт ещё DNS-серверы и поиск места фильтра.
-RUN_DEADLINE_FULL = 120.0
+RUN_DEADLINE_FULL = 180.0
 FILTER_MAX_TTL = 20
 FREEZE_READ_TIMEOUT = 4.0
 
@@ -460,7 +460,27 @@ def _reach_candidates(probe: _Probe, order: list[str]) -> list[str]:
     for ip in (*order, *probe.dns.ips, *probe.reference_ips):
         if ip and ip not in seen:
             seen.append(ip)
-    return seen
+    if not seen:
+        return seen
+    # После первого адреса — сначала адреса из других сетей: соседние адреса
+    # одной сети обычно закрыты или открыты все разом, и четыре попытки в
+    # одну сеть ничего не перепроверили бы.
+    first, rest = seen[0], seen[1:]
+    by_network: dict[str, list[str]] = {}
+    for ip in rest:
+        by_network.setdefault(_network_of(ip), []).append(ip)
+    groups = sorted(by_network.items(), key=lambda item: item[0] == _network_of(first))
+    spread: list[str] = []
+    while any(items for _network, items in groups):
+        for _network, items in groups:
+            if items:
+                spread.append(items.pop(0))
+    return [first, *spread]
+
+
+def _network_of(ip: str) -> str:
+    """Сеть адреса для грубого сравнения: первые два числа IPv4."""
+    return ".".join(ip.split(".")[:2]) if "." in ip else ip.split(":")[0]
 
 
 def _pause(run: _Run, seconds: float) -> None:
@@ -514,6 +534,10 @@ def _check_reach(run: _Run, probe: _Probe, *, read_limit: int) -> None:
     probe.tried = tuple((item.ip, item.kind) for item in attempts if item.kind != KIND_CANCELLED)
     opened = next((item for item in attempts if item.ok), None)
     probe.reach = opened or attempts[0]
+    if opened is None and run.dns_cancelled() and len(probe.tried) < 2:
+        # Время вышло раньше перепроверки: один сбой — это «не успели», а не «не открывается».
+        probe.reach = ProbeResult(ip=attempts[0].ip, kind=KIND_CANCELLED)
+        return
     if opened is not None and opened.ip not in order:
         # Открылся адрес не из того источника, с которого начинали.
         probe.reach_source = SOURCE_SYSTEM if opened.ip in probe.dns.ips else SOURCE_REFERENCE

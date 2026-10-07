@@ -134,6 +134,36 @@ class ReachRecheckTests(unittest.TestCase):
 
         self.assertEqual(len(asked), engine.REACH_ADDRESSES)
 
+    def test_other_networks_are_tried_before_neighbours(self) -> None:
+        """У сайта пять адресов одной сети молчат, а адрес другой сети открывается."""
+        same = tuple(f"87.240.132.{n}" for n in range(1, 6))
+        other = "93.186.225.194"
+        probe, asked = self._reach(
+            lambda ip: _ok(ip) if ip == other else _dead(ip), system=same + (other,), reference=same + (other,)
+        )
+
+        self.assertIn(other, asked)
+        self.assertEqual(probe.reach_state, ReachState.OK)
+        self.assertEqual(probe.reach.ip, other)
+
+    def test_deadline_before_the_recheck_means_not_enough_time(self) -> None:
+        probe = engine._Probe(target=engine.Target("x.com", "сайт", main=True), service="x", host="x.com")
+        probe.dns = DnsAnswer(ips=REAL)
+        probe.reference_ips = REAL
+        run = engine._Run(None, workers=4, deadline=60)
+        self.addCleanup(run.close)
+
+        def _get(_run, _host, ip, _path, **_kwargs):
+            # Общий лимит времени истекает, пока идёт первый запрос.
+            run.deadline = 0.0
+            return _dead(ip)
+
+        with patch.object(engine, "_get", side_effect=_get):
+            engine._check_reach(run, probe, read_limit=0)
+
+        self.assertEqual(judge_reach(probe.reach), ReachState.UNKNOWN)
+        self.assertEqual(probe.kind, "")
+
     def test_report_tells_which_addresses_were_tried(self) -> None:
         probe, asked = self._reach(_dead)
         report = engine._target_report(probe)
