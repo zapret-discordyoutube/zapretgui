@@ -26,6 +26,23 @@
 ответит. Наименьший ``k``, при котором ответа нет, и есть место фильтра: он
 стоит между узлами ``k-1`` и ``k``.
 
+Расстояние до сервера
+---------------------
+Перебор идёт только по узлам ДО сервера. Пакет со сроком жизни, которого
+хватает до самого сервера, доходит до него — и всё, что случится дальше, это
+поведение сервера, а не фильтра на дороге. Поэтому сначала измеряется
+расстояние (``tcp_distance``): соединение устанавливается только тогда, когда
+срока жизни хватило до сервера; наименьший такой срок и есть расстояние. Не
+измерили — место фильтра не ищем вовсе.
+
+Второй способ, по TCP
+---------------------
+Для фильтра, который рвёт соединение сбросом. Соединяемся как обычно, затем
+шлём приветствие с запрещённым именем со сроком жизни ``k``: до сервера оно
+не дойдёт, а если фильтр ближе ``k`` — он пришлёт сброс. Тихий фильтр (просто
+перестаёт пропускать) этим способом не находится: контроль это видит и вывода
+не даёт.
+
 Способу не нужны ни особые права, ни ответы промежуточных узлов (для обычных
 соединений сетевой экран Windows их программам не отдаёт): наблюдаем только
 за собственным соединением. Перед поиском делается контроль — без него вывод
@@ -36,6 +53,8 @@
 from __future__ import annotations
 
 import socket
+import struct
+import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -48,7 +67,8 @@ from utils.windows_icmp import HOP_ROUTER, HOP_SILENT, HOP_TARGET, HOP_UNSUPPORT
 __all__ = [
     "FILTER_FOUND",
     "FILTER_NOT_ON_PATH",
-    "FILTER_UNSURE",
+    "FILTER_AT_TARGET",
+    "FILTER_NO_DISTANCE",
     "FILTER_UNSURE",
     "FILTER_NOT_STATEFUL",
     "FILTER_NO_CONTROL",
@@ -59,13 +79,14 @@ __all__ = [
     "judge_filter",
     "locate_filter",
     "send_pair",
+    "tcp_distance",
+    "tcp_pair",
     "trace_route",
 ]
 
 MAX_HOPS = 30
 HOP_ATTEMPTS = 2
 HOP_TIMEOUT_MS = 1200
-NEUTRAL_NAME = "example.com"
 # Сколько ждать ответа сервера на обычный пакет.
 REPLY_TIMEOUT_S = 1.5
 # Пауза между запрещённым пакетом и обычным: фильтр должен успеть его увидеть.
@@ -78,6 +99,14 @@ FILTER_NOT_STATEFUL = "not_stateful"
 FILTER_NOT_ON_PATH = "not_on_path"
 # Место вроде бы найдено, но контроль его не подтвердил.
 FILTER_UNSURE = "unsure"
+# Расстояние до сервера измерить не удалось: без него нельзя отличить фильтр от самого сервера.
+FILTER_NO_DISTANCE = "no_distance"
+# Поток гаснет, только когда пакет доходит до сервера: на дороге к нему фильтра не видно.
+FILTER_AT_TARGET = "at_target"
+
+# Сколько ждать соединения при измерении расстояния и сброса при поиске по TCP.
+DISTANCE_TIMEOUT_S = 1.5
+TCP_WINDOW_S = 1.2
 
 # Имя, которое не блокируют: с ним тот же опыт должен проходить.
 NEUTRAL_NAME = "example.com"
@@ -193,6 +222,108 @@ def send_pair(
             close_quietly(sock)
 
 
+def _connects_with(ip: str, ttl: int, port: int, timeout: float, token: SocketCancel) -> bool:
+    sock: socket.socket | None = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if not token.track(sock):
+            return False
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, max(1, min(255, int(ttl))))
+        sock.settimeout(timeout)
+        sock.connect((ip, int(port)))
+        return True
+    except OSError:
+        return False
+    finally:
+        if sock is not None:
+            token.release(sock)
+            close_quietly(sock)
+
+
+def tcp_distance(
+    ip: str,
+    *,
+    port: int = 443,
+    max_hops: int = MAX_HOPS,
+    timeout: float = DISTANCE_TIMEOUT_S,
+    cancel: SocketCancel | None = None,
+) -> int | None:
+    """Сколько узлов до сервера: наименьший срок жизни, с которым соединение устанавливается.
+
+    Меряется той же дорогой, какой пойдут пробы (TCP 443), и не зависит от того,
+    отвечают ли узлы на пинг. None — соединиться не удалось ни с каким сроком
+    жизни, расстояние неизвестно.
+    """
+    if ":" in ip:
+        return None
+    token = cancel or SocketCancel()
+    with ThreadPoolExecutor(max_workers=max_hops, thread_name_prefix="distance") as pool:
+        reached = list(pool.map(lambda ttl: _connects_with(ip, ttl, port, timeout, token), range(1, max_hops + 1)))
+    if token.cancelled or not any(reached):
+        return None
+    first = reached.index(True) + 1
+    # Дорога одна: если хватило ``first`` узлов, должно хватать и большего срока. Разрозненные
+    # попадания (балансировка по разным дорогам, потери) — расстояние ненадёжно.
+    if not all(reached[first - 1 : first + 2]):
+        return None
+    return first
+
+
+def tcp_pair(
+    ip: str,
+    name: str,
+    ttl: int | None,
+    *,
+    port: int = 443,
+    window: float = TCP_WINDOW_S,
+    cancel: SocketCancel | None = None,
+) -> bool | None:
+    """Проба по TCP. True — соединение живо, False — погашено, None — проверку сняли.
+
+    ``ttl is None`` — контроль: приветствие с именем ``name`` обычным сроком
+    жизни, «живо» значит, что сервер ответил. Иначе приветствие уходит со сроком
+    жизни ``ttl``, и «погашено» значит, что за ``window`` секунд пришёл сброс:
+    сервер такого пакета не видел, сбросить мог только фильтр на дороге.
+    """
+    from diagnostics.browser_hello import build_hello
+
+    token = cancel or SocketCancel()
+    sock: socket.socket | None = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if not token.track(sock):
+            return None
+        sock.settimeout(DISTANCE_TIMEOUT_S)
+        sock.connect((ip, int(port)))
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        if ttl is not None:
+            # Срок жизни остаётся низким всё окно: повторные отправки системы тоже не дойдут до сервера.
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, max(1, min(255, int(ttl))))
+        sock.sendall(build_hello(name))
+        sock.settimeout(window)
+        try:
+            answer = sock.recv(16)
+        except (socket.timeout, TimeoutError):
+            # Тишина: при контроле сервер не ответил, при пробе — сброса не было.
+            return None if token.cancelled else ttl is not None
+        # Данные — ответ сервера; пустое чтение — соединение закрыли.
+        return bool(answer)
+    except (ConnectionResetError, ConnectionAbortedError):
+        return None if token.cancelled else False
+    except OSError:
+        return None if token.cancelled else False
+    finally:
+        if sock is not None:
+            try:
+                # Свой сброс должен дойти до сервера, иначе у него повиснет полуоткрытое соединение.
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, _FULL_TTL)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("hh" if sys.platform == "win32" else "ii", 1, 0))
+            except OSError:
+                pass
+            token.release(sock)
+            close_quietly(sock)
+
+
 @dataclass(frozen=True, slots=True)
 class FilterFacts:
     # Обычный пакет один получил ответ.
@@ -210,6 +341,8 @@ class FilterFacts:
     # На следующем узле запрещённый пакет тоже гасит поток. False — не гасит:
     # находка была случайной потерей. None — не проверяли.
     next_blocked: bool | None = None
+    # Сколько узлов до сервера. None — измерить не удалось. 0 — не измеряли (старые данные).
+    distance: int | None = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,9 +360,21 @@ def locate_filter(
     max_ttl: int = MAX_HOPS,
     cancel: SocketCancel | None = None,
     pair: Callable[..., bool | None] = send_pair,
+    distance_of: Callable[..., int | None] = tcp_distance,
 ) -> FilterFacts:
-    """Перебирает срок жизни запрещённого пакета, пока обычный не останется без ответа."""
+    """Перебирает срок жизни запрещённого пакета, пока обычный не останется без ответа.
+
+    Перебор идёт только по узлам до сервера (``distance_of``): пакет, которому
+    хватило срока жизни до сервера, о фильтре на дороге ничего не говорит.
+    """
     token = cancel or SocketCancel()
+    distance = distance_of(ip, cancel=token)
+    if token.cancelled:
+        return FilterFacts(cancelled=True)
+    if distance is None:
+        return FilterFacts(distance=None)
+    # Последний узел, на котором пакет ещё не у сервера.
+    last = min(max(1, int(max_ttl)), distance - 1)
 
     def ask(ttl: int | None) -> bool | None:
         return pair(ip, blocked_name, ttl, cancel=token)
@@ -246,24 +391,25 @@ def locate_filter(
 
     control = ask(None) or ask(None)
     if control is None:
-        return FilterFacts(cancelled=True)
+        return FilterFacts(cancelled=True, distance=distance)
     if not control:
-        return FilterFacts(control_ok=False)
+        return FilterFacts(control_ok=False, distance=distance)
     stateful = silent_twice(_FULL_TTL)
     if stateful is None:
-        return FilterFacts(control_ok=True, cancelled=True)
+        return FilterFacts(control_ok=True, cancelled=True, distance=distance)
     if not stateful:
-        return FilterFacts(control_ok=True, stateful=False)
+        return FilterFacts(control_ok=True, stateful=False, distance=distance)
 
-    for ttl in range(1, max(1, int(max_ttl)) + 1):
+    for ttl in range(1, last + 1):
         blocked = silent_twice(ttl)
         if blocked is None:
-            return FilterFacts(control_ok=True, stateful=True, checked_up_to=ttl - 1, cancelled=True)
+            return FilterFacts(control_ok=True, stateful=True, checked_up_to=ttl - 1, cancelled=True, distance=distance)
         if blocked:
             # Два контроля, прежде чем называть место: тот же срок жизни с безобидным
             # именем (поток должен выжить) и следующий узел (поток должен пропасть снова).
             neutral = pair(ip, NEUTRAL_NAME, ttl, cancel=token)
-            beyond = silent_twice(ttl + 1) if neutral else None
+            # Следующий узел проверяем, только если он тоже ещё не сервер.
+            beyond = (silent_twice(ttl + 1) if ttl + 1 <= last else True) if neutral else None
             return FilterFacts(
                 control_ok=True,
                 stateful=True,
@@ -272,8 +418,9 @@ def locate_filter(
                 cancelled=neutral is None or (bool(neutral) and beyond is None),
                 neutral_passes=neutral,
                 next_blocked=beyond,
+                distance=distance,
             )
-    return FilterFacts(control_ok=True, stateful=True, checked_up_to=max_ttl)
+    return FilterFacts(control_ok=True, stateful=True, checked_up_to=last, distance=distance)
 
 
 def _hop_name(trace: RouteTrace | None, ttl: int) -> str:
@@ -287,6 +434,17 @@ def judge_filter(facts: FilterFacts, trace: RouteTrace | None = None) -> FilterV
     """Вывод о месте фильтра или None, если проверку сняли."""
     if facts.cancelled:
         return None
+    if facts.distance is None:
+        return FilterVerdict(
+            FILTER_NO_DISTANCE,
+            "не удалось измерить, сколько узлов до сервера, — без этого фильтр на дороге не отличить от самого сервера",
+        )
+    if facts.distance == 1:
+        return FilterVerdict(
+            FILTER_NO_DISTANCE,
+            "соединение с сервером устанавливается уже на первом узле: его принимает не сервер, а роутер, прокси, "
+            "VPN или антивирус по дороге — искать место фильтра за ними нельзя",
+        )
     if not facts.control_ok:
         return FilterVerdict(
             FILTER_NO_CONTROL,
@@ -299,7 +457,20 @@ def judge_filter(facts: FilterFacts, trace: RouteTrace | None = None) -> FilterV
             "соединение, и найти его место этим способом нельзя",
         )
     hop = facts.first_blocked_ttl
+    # Сервер по трассе пингом может оказаться ближе, чем по TCP: берём меньшее.
+    target_at = min(
+        [value for value in (facts.distance, len(trace.hops) if trace is not None and trace.reached else 0) if value]
+        or [0]
+    )
+    if hop is not None and target_at and hop >= target_at:
+        hop = None
     if hop is None:
+        if target_at and (facts.first_blocked_ttl is not None or facts.checked_up_to >= target_at - 1):
+            return FilterVerdict(
+                FILTER_AT_TARGET,
+                f"на {max(0, target_at - 1)} узлах до сервера фильтр не найден: соединение гаснет, только когда "
+                "пакет доходит до самого сервера или последнего участка перед ним",
+            )
         return FilterVerdict(
             FILTER_NOT_ON_PATH,
             f"на первых {facts.checked_up_to} узлах фильтр не найден",

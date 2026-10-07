@@ -4,6 +4,7 @@ import socket
 import struct
 import threading
 import unittest
+from unittest.mock import patch
 
 from diagnostics import path_trace as pt
 from utils.socket_cancel import SocketCancel
@@ -72,6 +73,11 @@ class TraceRouteTests(unittest.TestCase):
         self.assertEqual(probe.calls, [])
 
 
+def _locate(*args, distance: int | None = 30, **kwargs):
+    """Поиск фильтра в учебной сети: расстояние до сервера задано, в настоящую сеть никто не ходит."""
+    return pt.locate_filter(*args, distance_of=lambda _ip, cancel=None: distance, **kwargs)
+
+
 def _network(
     filter_hop: int | None,
     *,
@@ -103,7 +109,7 @@ def _network(
 class LocateFilterTests(unittest.TestCase):
     def test_filter_is_found_at_first_blocked_lifetime(self) -> None:
         pair = _network(6)
-        facts = pt.locate_filter(TARGET, "rutracker.org", max_ttl=12, pair=pair)
+        facts = _locate(TARGET, "rutracker.org", max_ttl=12, pair=pair)
 
         self.assertEqual((facts.control_ok, facts.stateful, facts.first_blocked_ttl), (True, True, 6))
         # Контроль, проверка «запоминает ли» (дважды), затем сроки 1–5 по разу и 6 дважды;
@@ -114,7 +120,7 @@ class LocateFilterTests(unittest.TestCase):
 
     def test_flow_dying_with_a_harmless_name_too_is_not_a_filter(self) -> None:
         """Роутер гасит поток, когда первый пакет не дошёл, каким бы ни было имя."""
-        facts = pt.locate_filter(TARGET, "rutracker.org", max_ttl=12, pair=_network(1, by_name=False))
+        facts = _locate(TARGET, "rutracker.org", max_ttl=12, pair=_network(1, by_name=False))
         verdict = pt.judge_filter(facts)
 
         self.assertIs(facts.neutral_passes, False)
@@ -133,7 +139,7 @@ class LocateFilterTests(unittest.TestCase):
                 return False
             return real(ip, name, ttl, cancel=cancel)
 
-        facts = pt.locate_filter(TARGET, "rutracker.org", max_ttl=12, pair=lossy)
+        facts = _locate(TARGET, "rutracker.org", max_ttl=12, pair=lossy)
         verdict = pt.judge_filter(facts)
 
         self.assertEqual((facts.first_blocked_ttl, facts.next_blocked), (3, False))
@@ -143,36 +149,127 @@ class LocateFilterTests(unittest.TestCase):
     def test_one_lost_packet_is_not_taken_for_the_filter(self) -> None:
         # Потерян ответ на пакет со сроком жизни 3: повтор проходит, поиск идёт дальше.
         pair = _network(6, lose={6})
-        facts = pt.locate_filter(TARGET, "rutracker.org", max_ttl=12, pair=pair)
+        facts = _locate(TARGET, "rutracker.org", max_ttl=12, pair=pair)
 
         self.assertEqual(facts.first_blocked_ttl, 6)
         self.assertEqual(pair.asked[3:8], [1, 2, 3, 3, 4])
 
     def test_no_search_without_working_control(self) -> None:
         pair = _network(6, server_alive=False)
-        facts = pt.locate_filter(TARGET, "github.com", pair=pair)
+        facts = _locate(TARGET, "github.com", pair=pair)
 
         self.assertEqual((facts.control_ok, facts.first_blocked_ttl), (False, None))
         self.assertEqual(pair.asked, [None, None])
 
     def test_no_search_when_filter_does_not_remember_the_connection(self) -> None:
         pair = _network(6, stateful=False)
-        facts = pt.locate_filter(TARGET, "www.youtube.com", pair=pair)
+        facts = _locate(TARGET, "www.youtube.com", pair=pair)
 
         self.assertEqual((facts.control_ok, facts.stateful, facts.first_blocked_ttl), (True, False, None))
         self.assertEqual(pair.asked, [None, 128])
 
     def test_filter_farther_than_search_limit_is_not_found(self) -> None:
-        facts = pt.locate_filter(TARGET, "rutracker.org", max_ttl=4, pair=_network(9))
+        facts = _locate(TARGET, "rutracker.org", max_ttl=4, pair=_network(9))
 
         self.assertEqual((facts.first_blocked_ttl, facts.checked_up_to), (None, 4))
 
     def test_cancel_stops_the_search_without_a_result(self) -> None:
         answers = iter([True, False, False, True, None])
-        facts = pt.locate_filter(TARGET, "rutracker.org", pair=lambda *a, **k: next(answers))
+        facts = _locate(TARGET, "rutracker.org", pair=lambda *a, **k: next(answers))
 
         self.assertTrue(facts.cancelled)
         self.assertIsNone(pt.judge_filter(facts))
+
+
+class DistanceTests(unittest.TestCase):
+    def test_search_never_reaches_the_server(self) -> None:
+        # Фильтра на дороге нет, сервер на 5-м узле и сам гасит поток после запрещённого имени.
+        pair = _network(5)
+        facts = _locate(TARGET, "rutracker.org", max_ttl=20, pair=pair, distance=5)
+
+        self.assertEqual((facts.first_blocked_ttl, facts.checked_up_to, facts.distance), (None, 4, 5))
+        self.assertLessEqual(max(ttl for ttl in pair.asked if ttl not in (None, 128)), 4)
+        self.assertEqual(pt.judge_filter(facts).code, pt.FILTER_AT_TARGET)
+
+    def test_filter_right_before_the_server_is_confirmed_without_going_past_it(self) -> None:
+        pair = _network(4)
+        facts = _locate(TARGET, "rutracker.org", pair=pair, distance=5)
+
+        self.assertEqual((facts.first_blocked_ttl, facts.next_blocked), (4, True))
+        self.assertNotIn(5, pair.asked)
+        self.assertEqual(pt.judge_filter(facts).hop, 4)
+
+    def test_unknown_distance_means_no_search_at_all(self) -> None:
+        pair = _network(3)
+        facts = _locate(TARGET, "rutracker.org", pair=pair, distance=None)
+
+        self.assertEqual((pair.asked, facts.distance), ([], None))
+        self.assertEqual(pt.judge_filter(facts).code, pt.FILTER_NO_DISTANCE)
+
+    def test_distance_is_the_smallest_lifetime_that_connects(self) -> None:
+        def measure(reached_from: int, holes=()):
+            with patch.object(pt, "_connects_with", lambda ip, ttl, *_a: ttl >= reached_from and ttl not in holes):
+                return pt.tcp_distance(TARGET, max_hops=12)
+
+        self.assertEqual(measure(7), 7)
+        self.assertIsNone(measure(99))
+        # Соединилось на 7, а на 8 нет — дорог несколько или пакеты теряются: расстоянию верить нельзя.
+        self.assertIsNone(measure(7, holes=(8,)))
+        self.assertIsNone(pt.tcp_distance("2001:db8::1"))
+
+
+class _TcpServer:
+    """Сервер на этом компьютере: принимает соединение и отвечает заданным образом."""
+
+    def __init__(self, behaviour: str) -> None:
+        self.behaviour = behaviour
+        self.listener = socket.socket()
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen(1)
+        self.port = self.listener.getsockname()[1]
+        self.stop = threading.Event()
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self) -> None:
+        conn, _addr = self.listener.accept()
+        try:
+            conn.settimeout(2)
+            conn.recv(4096)
+            if self.behaviour == "answer":
+                conn.sendall(b"\x16\x03\x03\x00\x04")
+                self.stop.wait(1)
+            elif self.behaviour == "reset":
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            else:
+                self.stop.wait(2)
+        except OSError:
+            pass
+        finally:
+            conn.close()
+            self.listener.close()
+
+
+class TcpPairTests(unittest.TestCase):
+    def _pair(self, behaviour: str, ttl):
+        server = _TcpServer(behaviour)
+        self.addCleanup(server.stop.set)
+        return pt.tcp_pair("127.0.0.1", "x.com", ttl, port=server.port, window=0.5)
+
+    def test_control_is_alive_only_when_the_server_answers(self) -> None:
+        self.assertIs(self._pair("answer", None), True)
+        self.assertIs(self._pair("silent", None), False)
+        self.assertIs(self._pair("reset", None), False)
+
+    def test_probe_is_killed_only_by_a_reset(self) -> None:
+        self.assertIs(self._pair("reset", 64), False)
+        # Тишина — не сброс: тихий фильтр этим способом не ловится, и контроль «запоминает ли» это покажет.
+        self.assertIs(self._pair("silent", 64), True)
+
+    def test_silent_filter_gives_no_verdict_by_tcp(self) -> None:
+        # Запрещённое имя с полным сроком жизни не вызывает сброса — способ неприменим.
+        facts = _locate(TARGET, "x.com", pair=lambda ip, name, ttl, *, cancel: True, distance=9)
+
+        self.assertEqual(pt.judge_filter(facts).code, pt.FILTER_NOT_STATEFUL)
 
 
 class JudgeFilterTests(unittest.TestCase):
@@ -208,13 +305,38 @@ class JudgeFilterTests(unittest.TestCase):
         cases = {
             pt.FILTER_NO_CONTROL: pt.FilterFacts(control_ok=False),
             pt.FILTER_NOT_STATEFUL: pt.FilterFacts(control_ok=True, stateful=False),
-            pt.FILTER_NOT_ON_PATH: pt.FilterFacts(True, True, None, 20),
+            pt.FILTER_NOT_ON_PATH: pt.FilterFacts(True, True, None, 4),
+            pt.FILTER_NO_DISTANCE: pt.FilterFacts(distance=None),
         }
         for code, facts in cases.items():
             with self.subTest(code=code):
                 verdict = pt.judge_filter(facts, self.TRACE)
                 self.assertEqual((verdict.code, verdict.hop), (code, None))
-        self.assertIn("на первых 20 узлах", pt.judge_filter(cases[pt.FILTER_NOT_ON_PATH]).text)
+        self.assertIn("на первых 4 узлах", pt.judge_filter(cases[pt.FILTER_NOT_ON_PATH]).text)
+
+    def test_filter_is_never_placed_at_or_beyond_the_server(self) -> None:
+        """Случай из жизни: сервер на 17-м узле, а программа писала «фильтр между узлом 17 и 18»."""
+        trace = pt.RouteTrace(
+            target=TARGET,
+            hops=tuple(pt.Hop(ttl, HOP_ROUTER, f"10.0.0.{ttl}", 1.0) for ttl in range(1, 17)) + (pt.Hop(17, "target", TARGET, 1.0),),
+            reached=True,
+        )
+        for hop in (17, 18, 25):
+            with self.subTest(hop=hop):
+                facts = pt.FilterFacts(True, True, hop, hop, neutral_passes=True, next_blocked=True)
+                verdict = pt.judge_filter(facts, trace)
+                self.assertEqual((verdict.code, verdict.hop), (pt.FILTER_AT_TARGET, None))
+                self.assertNotIn("между", verdict.text)
+        # То же, когда расстояние известно по TCP, а пинг до сервера не дошёл.
+        by_tcp = pt.FilterFacts(True, True, 9, 9, neutral_passes=True, next_blocked=True, distance=9)
+        self.assertEqual(pt.judge_filter(by_tcp).code, pt.FILTER_AT_TARGET)
+        self.assertEqual(pt.judge_filter(pt.FilterFacts(True, True, 8, 8, neutral_passes=True, next_blocked=True, distance=9)).hop, 8)
+
+    def test_connection_accepted_at_the_first_hop_is_a_local_proxy_not_a_distance(self) -> None:
+        verdict = pt.judge_filter(pt.FilterFacts(True, True, None, 0, distance=1))
+
+        self.assertEqual(verdict.code, pt.FILTER_NO_DISTANCE)
+        self.assertIn("прокси", verdict.text)
 
 
 class SendPairTests(unittest.TestCase):
