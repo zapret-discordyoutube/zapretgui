@@ -32,9 +32,35 @@ _STATE_VIEW = {
 _ORDER = {"spoofed": 0, "local": 1, "unknown": 2, "ok": 3}
 
 
+def _reference_note(results: dict) -> str:
+    """Что с эталонными серверами, с которыми сравнивались ответы. Пусто — все ответили."""
+    reference = [dict(item) for item in results.get("reference") or () if isinstance(item, dict)]
+    down = [item for item in reference if not item.get("ok")]
+    if not reference or not down:
+        return ""
+    if len(down) == len(reference):
+        return "Ни один эталонный сервер не ответил — сравнивать ответы было не с чем."
+    names = ", ".join(
+        f"{item.get('label', '')} ({item.get('address', '')})" + (f" — {item['reason']}" if item.get("reason") else "")
+        for item in down
+    )
+    return f"Не ответили эталонные серверы: {names}. Сравнение сделано по остальным."
+
+
 def summarize_dns_results(results: dict | None) -> dict:
     """Итог проверки для панели: вид, заголовок, объяснение и число подмен."""
-    results = results or {}
+    summary = _summarize(results or {})
+    note = _reference_note(results or {})
+    if note and summary["kind"] not in ("stopped", "error"):
+        reference = list((results or {}).get("reference") or ())
+        if summary["kind"] == "ok" and all(not item.get("ok") for item in reference):
+            # Без эталона «честный DNS» утверждать нельзя.
+            summary = {"kind": "partial", "title": "Проверить DNS не удалось", "detail": ""}
+        summary["detail"] = f"{summary['detail']} {note}".strip()
+    return summary
+
+
+def _summarize(results: dict) -> dict:
     if results.get("stopped"):
         return {"kind": "stopped", "title": "Проверка остановлена", "detail": ""}
     domains = dict(results.get("domains") or {})
