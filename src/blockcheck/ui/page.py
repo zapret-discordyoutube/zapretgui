@@ -418,7 +418,10 @@ class BlockcheckPage(BasePage):
 
         # ── Итог и список сайтов ──
         self._summary_panel = BlockcheckSummaryPanel(
-            on_action=self._on_problem_action, parent=self.content, on_open=self._open_card_by_key
+            on_action=self._on_problem_action,
+            parent=self.content,
+            on_open=self._open_card_by_key,
+            on_open_child=self._open_card_child_by_key,
         )
         # Esc закрывает любую подстраницу раздела, где бы ни стоял фокус.
         self._escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
@@ -863,6 +866,16 @@ class BlockcheckPage(BasePage):
         if widget is not None:
             self._open_card_detail(widget.card)
 
+    def _open_card_child_by_key(self, key: str, child) -> None:
+        """Нажатие на находку в итоге: отчёт карточки и сразу страница этой находки внутри него."""
+        widget = self._result_cards.card(key)
+        if widget is not None:
+            self._open_card_child(widget.card, child)
+
+    def _open_card_child(self, card, child) -> None:
+        self._open_card_detail(card)
+        self._detail_view.open_child(child)
+
     def _close_subpage(self) -> None:
         """Esc: назад из подробностей карточки, DNS-сервера или отчёта."""
         if self._detail_view is not None and not self._detail_view.isHidden():
@@ -1035,6 +1048,7 @@ class BlockcheckPage(BasePage):
             self._past_check_view = PastCheckView(on_action=self._on_problem_action, parent=self.content)
             self._past_check_view.closed.connect(self._close_over_tabs)
             self._past_check_view.card_opened.connect(self._open_card_detail)
+            self._past_check_view.child_opened.connect(self._open_card_child)
             self._past_check_view.setVisible(False)
             self.add_widget(self._past_check_view)
         # Отчёт каждой проверки сохранён рядом с её журналом; читает его функция BlockCheck, не страница.

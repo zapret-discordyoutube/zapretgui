@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QEvent, QRectF, Qt
+from PyQt6.QtCore import QEvent, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
@@ -113,6 +113,8 @@ def count_state(ok: int, warn: int, fail: int) -> str:
 class ServerMatrix(QWidget):
     """Сводка по сервисам: значок и название, число адресов и ячейка на каждый способ связи."""
 
+    # Нажали строку сервиса: её номер.
+    opened = pyqtSignal(int)
     HEADER = 26
     ROW = 28
     NAME = 230
@@ -126,6 +128,7 @@ class ServerMatrix(QWidget):
         self._hover = -1
         self._hint = HoverHint(self)
         self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(self.HEADER + self.ROW * len(self._services))
         self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
@@ -145,6 +148,7 @@ class ServerMatrix(QWidget):
         for row in service.rows:
             cells = ", ".join(f"{title} — {cell or '—'}" for title, cell in zip(self._columns, row.cells))
             lines.append(f"{row.address}: {cells}")
+        lines.append("Нажмите, чтобы открыть страницу сервиса")
         return "\n".join(lines)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
@@ -160,6 +164,16 @@ class ServerMatrix(QWidget):
         self._hint.hide()
         self.update()
         super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        index = self.row_at(event.position().y())
+        self._hint.hide()
+        if event.button() == Qt.MouseButton.LeftButton and index >= 0:
+            self.opened.emit(index)
+        super().mouseReleaseEvent(event)
+
+    def columns(self) -> list[str]:
+        return list(self._columns)
 
     def event(self, event) -> bool:
         if event.type() == QEvent.Type.ToolTip:

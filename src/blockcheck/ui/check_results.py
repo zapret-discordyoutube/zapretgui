@@ -20,12 +20,13 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import QEvent, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QAbstractScrollArea, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, FlowLayout, PushButton, TransparentPushButton, TransparentToolButton, SimpleCardWidget, StrongBodyLabel, SubtitleLabel
 
 from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_groups
 from blockcheck.ui.finding_parts import CardsFlow, FindingCard, ServerChip, split_server_list, theme_color
 from ui.widgets.elided_label import ElidedLabel as _ElidedLabel
+from blockcheck.ui.result_cards import finding_detail_card
 from blockcheck.ui.result_cards_model import build_cards
 from blockcheck.ui.brand_icons import BrandIcon, site_brand
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
@@ -42,6 +43,8 @@ from ui.widgets.tone_group import ToneDot, ToneGroup, dot_on_first_line, mute
 ActionHandler = Callable[[str, str], None]
 # Открыть полный отчёт по карточке: получает её ключ («site:youtube», «hostings» …).
 OpenHandler = Callable[[str], None]
+# Открыть страницу на уровень глубже: ключ карточки-родителя и готовый отчёт находки.
+OpenChildHandler = Callable[[str, object], None]
 
 _LEVEL_ICONS = {
     "ok": ("fa5s.check-circle", "success"),
@@ -648,6 +651,7 @@ class _ProblemGroup(ToneGroup):
         *,
         card_key_for: Callable[[dict], str] | None = None,
         on_open: OpenHandler | None = None,
+        on_open_child: OpenChildHandler | None = None,
     ) -> None:
         info = kind_info(kind)
         # «Остальное» — не вид блокировки, но заголовок и подложка у группы те же:
@@ -713,6 +717,14 @@ class _ProblemGroup(ToneGroup):
             self.findings_flow = CardsFlow(self, min_width=FindingCard.MIN_WIDTH, card_height=FindingCard.HEIGHT)
             for problem in others:
                 card = problem_finding_card(problem, self.findings_flow)
+                if on_open_child is not None:
+                    # Карточка открывает свою страницу: полный текст находки, серверы и пояснение.
+                    card.set_clickable()
+                    card.clicked.connect(
+                        lambda item=problem, parent_key=key: on_open_child(
+                            parent_key, finding_detail_card(str(item.get("text") or ""), str(item.get("level") or ""))
+                        )
+                    )
                 self.findings_flow.add(card)
                 self.rows.append(card)
             self.add_widget(self.findings_flow)
@@ -741,11 +753,17 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
     """Итог проверки: одна фраза, картина блокировок и проблемы по видам с советами."""
 
     def __init__(
-        self, on_action: ActionHandler | None = None, parent=None, *, on_open: OpenHandler | None = None
+        self,
+        on_action: ActionHandler | None = None,
+        parent=None,
+        *,
+        on_open: OpenHandler | None = None,
+        on_open_child: OpenChildHandler | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_action = on_action
         self._on_open = on_open
+        self._on_open_child = on_open_child
         self._level = "idle"
 
         root = QVBoxLayout(self)
@@ -784,6 +802,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
 
         # Картина блокировок: полоса и плитки по видам.
         self.overview = KindsOverview(self)
+        self.overview.tile_opened.connect(self.scroll_to_group)
         self.overview.setVisible(False)
         root.addWidget(self.overview)
 
@@ -809,6 +828,20 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
             elif isinstance(widget, _ProblemRow):
                 rows.append(widget)
         return rows
+
+    def scroll_to_group(self, kind: str) -> bool:
+        """Нажатие на плитку вида блокировки: страница прокручивается к его группе. ``False`` — группы нет."""
+        group = next((item for item in self.problem_groups() if item.kind() == kind), None)
+        parent = self.parentWidget()
+        while parent is not None and not isinstance(parent, QAbstractScrollArea):
+            parent = parent.parentWidget()
+        if group is None or parent is None:
+            return False
+        parent.ensureWidgetVisible(group, 0, 24)
+        # Заголовок группы — у верхнего края окна, а не у нижнего.
+        bar = parent.verticalScrollBar()
+        bar.setValue(min(bar.maximum(), group.mapTo(parent.widget(), group.rect().topLeft()).y() - 12))
+        return True
 
     def problem_groups(self) -> list[_ProblemGroup]:
         return [
@@ -924,7 +957,13 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
 
         rows: list[QWidget] = [
             _ProblemGroup(
-                kind, items, self._on_action, self._problems_host, card_key_for=card_key_for, on_open=self._on_open
+                kind,
+                items,
+                self._on_action,
+                self._problems_host,
+                card_key_for=card_key_for,
+                on_open=self._on_open,
+                on_open_child=self._on_open_child,
             )
             for kind, items in group_problems(problems)
         ]

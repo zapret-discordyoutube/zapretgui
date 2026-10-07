@@ -41,7 +41,7 @@ from qfluentwidgets import (
 from blockcheck.ui.block_kinds_view import kind_color
 from blockcheck.ui.brand_icons import BrandIcon, named_brand, site_brand
 from blockcheck.ui.finding_parts import CardsFlow, FindingCard, split_finding, split_server_list
-from blockcheck.ui.server_matrix import ServerMatrix, parse_server_table
+from blockcheck.ui.server_matrix import ServerMatrix, ServiceSummary, cell_state, parse_server_table
 from blockcheck.ui.result_cards_model import PREVIEW_LINES, Card, Counter, DotGroup, Line, Section, build_cards, build_counters
 from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
@@ -847,7 +847,7 @@ def section_icon(section: Section, card: Card) -> tuple[str, str]:
     """(значок, фирменный цвет) раздела отчёта. Цвет пустой — значок нейтральный."""
     if section.title == _ADVICE_TITLE:
         return "fa5s.lightbulb", ""
-    if section.title in (_ABOUT_TITLE, "Что это значит"):
+    if section.title in (_ABOUT_TITLE, "Что это значит", "Что найдено"):
         return "fa5s.info-circle", ""
     if section.title == "Результат":
         return "fa5s.clipboard-check", ""
@@ -1021,6 +1021,54 @@ def server_card(line: Line, section: Section) -> Card:
             Section("Результат", (Line(line.state, "Итог", text.group(1) if text is not None else line.text),)),
             Section("Что это значит", (Line("info", _SERVER_MEANING[state]),)),
         ),
+    )
+
+
+_STATE_WORDS = {"ok": "В порядке", "warn": "Работает не полностью", "fail": "Мешает работе"}
+
+
+def finding_detail_card(text: str, state: str) -> Card:
+    """Отчёт по одной находке: что найдено, какие серверы названы и что это значит."""
+    title, detail = split_finding(text)
+    servers, more, rest = split_server_list(detail)
+    sections = [Section("Что найдено", (Line(state, str(text)),))]
+    if servers:
+        lines = [Line("info", name, ", ".join(addresses) or "адрес не назван") for name, addresses in servers]
+        if more:
+            lines.append(Line("info", f"и ещё {more}", "полный список — в отчёте «DNS-серверы», кнопка «Подробный текст»"))
+        sections.append(Section("Серверы", tuple(lines)))
+    if rest:
+        sections.append(Section("Что это значит", (Line("info", rest),)))
+    level = state if state in ("ok", "warn", "fail") else "unknown"
+    return Card(
+        key=f"finding:{title}",
+        icon="fa5s.network-wired",
+        title=title,
+        level=level,
+        status=_STATE_WORDS.get(state, "К сведению"),
+        sections=tuple(sections),
+    )
+
+
+def service_card(service: ServiceSummary, columns: list[str]) -> Card:
+    """Отчёт по одному DNS-сервису: что ответил каждый его адрес каждым способом связи."""
+    sections = []
+    for row in service.rows:
+        lines = tuple(
+            Line(cell_state(cell) if cell_state(cell) != "none" else "info", title, cell or "не проверялось")
+            for title, cell in zip(columns, row.cells)
+        )
+        sections.append(Section(row.address, lines))
+    working = sum(1 for row in service.rows if any(cell_state(cell) in ("ok", "warn") for cell in row.cells[1:]))
+    total = len(service.rows)
+    level = "ok" if working == total else "fail" if working == 0 else "warn"
+    return Card(
+        key=f"dns_service:{service.name}",
+        icon="fa5s.network-wired",
+        title=service.name,
+        level=level,
+        status=f"Отвечает {working} из {total} адресов",
+        sections=tuple(sections),
     )
 
 
@@ -1203,8 +1251,8 @@ class _SectionBlock(QWidget):
 
     # Просят открыть текст раздела на всю страницу: (название, текст).
     text_opened = pyqtSignal(str, str)
-    # Нажали карточку сервера: строка измерения этого сервера.
-    line_opened = pyqtSignal(object)
+    # Нажали карточку раздела (сервер, находку, сервис): отчёт на уровень глубже.
+    child_opened = pyqtSignal(object)
 
     def __init__(
         self,
@@ -1253,7 +1301,7 @@ class _SectionBlock(QWidget):
         self.findings_flow: CardsFlow | None = None
         if tiles:
             self.grid = TilesGrid([line_tile(line) for line in section.lines], self)
-            self.grid.opened.connect(lambda index: self.line_opened.emit(section.lines[index]))
+            self.grid.opened.connect(lambda index: self.child_opened.emit(server_card(section.lines[index], section)))
             layout.addSpacing(2)
             layout.addWidget(self.grid)
             layout.addSpacing(6)
@@ -1261,7 +1309,9 @@ class _SectionBlock(QWidget):
             # Выводы — сеткой карточек, как находки DNS в итоге проверки.
             self.findings_flow = CardsFlow(self, min_width=FindingCard.MIN_WIDTH, card_height=FindingCard.HEIGHT)
             self.rows = [finding_card(line, self.findings_flow) for line in section.lines]
-            for card in self.rows:
+            for card, line in zip(self.rows, section.lines):
+                card.set_clickable()
+                card.clicked.connect(lambda item=line: self.child_opened.emit(finding_detail_card(item.name, item.state)))
                 self.findings_flow.add(card)
             layout.addSpacing(2)
             layout.addWidget(self.findings_flow)
@@ -1282,6 +1332,9 @@ class _SectionBlock(QWidget):
         if table:
             # Таблица серверов — сводкой по сервисам; сам текст открывается кнопкой в заголовке.
             self.matrix = ServerMatrix(columns, table, self)
+            self.matrix.opened.connect(
+                lambda index: self.child_opened.emit(service_card(self.matrix.services()[index], self.matrix.columns()))
+            )
             layout.addWidget(self.matrix)
             layout.addSpacing(6)
         if section.text:
@@ -1560,7 +1613,7 @@ class ResultDetailView(QWidget):
                 findings=wants_findings(section, card),
             )
             block.text_opened.connect(self.text_opened)
-            block.line_opened.connect(lambda line, source=section: self.open_child(server_card(line, source)))
+            block.child_opened.connect(self.open_child)
             self.blocks.append(block)
         for order, block in enumerate(self.blocks):
             self._sections_layout.addWidget(block)

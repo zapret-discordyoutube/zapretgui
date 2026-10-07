@@ -118,6 +118,17 @@ class ReportOnScreenTests(unittest.TestCase):
         self.assertEqual([service.name for service in table.matrix.services()], ["Cloudflare", "Quad9"])
         self.assertIsNone(table.editor)
         self.assertEqual(table.open_text_button.text(), "Подробный текст")
+        # Строка сводки открывает страницу сервиса: по разделу на адрес, по строке на способ связи.
+        table.matrix.opened.emit(0)
+        self.assertEqual((view.card().title, view.card().status), ("Cloudflare", "Отвечает 2 из 2 адресов"))
+        self.assertEqual([section.title for section in view.card().sections], ["1.1.1.1", "2606:4700:4700::1111"])
+        self.assertEqual([(line.name, line.state) for line in view.card().sections[1].lines][-1], ("DoH 443", "fail"))
+        self.assertTrue(view.go_back())
+        # Карточка вывода открывает страницу находки с полным текстом.
+        QTest.mouseClick(view.blocks[0].rows[0], Qt.MouseButton.LeftButton)
+        self.assertEqual(view.card().title, "Отвечают через раз")
+        self.assertEqual([section.title for section in view.card().sections], ["Что найдено", "Серверы", "Что это значит"])
+        self.assertTrue(view.go_back())
         self.assertIn("2606:4700:4700::1111: Пинг — 4 мс, UDP 53 — 41 мс · 2 из 3", table.matrix.hint(0))
 
     def test_server_page_tells_what_was_checked_and_what_it_means(self) -> None:
@@ -213,6 +224,62 @@ class GroupActionsTests(unittest.TestCase):
         keys = [card.card.key for card in view.checks_grid.cards()]
         self.assertEqual(keys[0], "hostings")
         self.assertIn("ipv6", keys[1:])
+
+    def test_finding_card_is_short_and_opens_its_own_page(self) -> None:
+        from blockcheck.ui.finding_parts import short_title
+
+        self.assertEqual(
+            short_title("DNS подменяет ответы для www.youtube.com, rutracker.org и ещё 9"),
+            ("DNS подменяет ответы", ["www.youtube.com", "rutracker.org"], 9),
+        )
+        self.assertEqual(short_title("Шифрованный DNS AdGuard (94.140.14.140) недоступен"), ("Шифрованный DNS AdGuard недоступен", [], 0))
+
+        children = []
+        panel = BlockcheckSummaryPanel(
+            on_action=lambda *_args: None, on_open=lambda _key: None, on_open_child=lambda key, child: children.append((key, child))
+        )
+        self.addCleanup(panel.deleteLater)
+        long = "Обычные DNS-запросы перехватываются по дороге (провайдером или роутером): запросы выполняет одна сеть. Отвечает перехватчик"
+        panel.show_report(
+            {
+                "dns_servers": {"level": "fail", "findings": [{"level": "fail", "text": "x"}], "text": ""},
+                "problems": [{**self._dns(long), "level": "fail"}, self._dns("DNS подменяет ответы для www.youtube.com, rutracker.org и ещё 9. Браузер этого не замечает")],
+            }
+        )
+        [group] = panel.problem_groups()
+        first, second = group.rows
+        # На карточке — коротко; полный заголовок и текст — в подсказке и на странице находки.
+        self.assertEqual(first.title, "Обычные DNS-запросы перехватываются по дороге")
+        self.assertIn("(провайдером или роутером)", first.hint_text)
+        self.assertEqual((second.title, [chip.text for chip in second.server_chips], second.more_label.text()), ("DNS подменяет ответы", ["www.youtube.com", "rutracker.org"], "и ещё 9"))
+        QTest.mouseClick(first, Qt.MouseButton.LeftButton)
+        [(key, child)] = children
+        self.assertEqual((key, child.title), ("dns_servers", "Обычные DNS-запросы перехватываются по дороге (провайдером или роутером)"))
+        self.assertEqual(child.sections[0].lines[0].name, long)
+        self.assertEqual(child.sections[-1].title, "Что это значит")
+
+    def test_tile_scrolls_the_page_to_its_group(self) -> None:
+        area = QScrollArea()
+        self.addCleanup(area.deleteLater)
+        area.setWidgetResizable(True)
+        panel = BlockcheckSummaryPanel()
+        area.setWidget(panel)
+        area.resize(900, 260)
+        area.show()
+        problems = [
+            {"level": "fail", "kind": "ip", "title": f"Сайт {index}", "text": f"Сайт {index} не открывается", "target": f"s{index}.example", "advice": [], "evidence": [], "action": ""}
+            for index in range(40)
+        ] + [self._dns("Отвечают через раз: Quad9 (9.9.9.9)")]
+        panel.show_report({"problems": problems, "services": [{"key": "a", "label": "Сайт 0", "level": "fail", "kind": "ip", "targets": []}]})
+        self.app.processEvents()
+
+        self.assertTrue(panel.scroll_to_group("dns"))
+        self.assertGreater(area.verticalScrollBar().value(), 0)
+        self.assertFalse(panel.scroll_to_group("нет такой"))
+        # Сигнал плитки ведёт туда же.
+        area.verticalScrollBar().setValue(0)
+        panel.overview.tiles()[0].opened.emit("dns")
+        self.assertGreater(area.verticalScrollBar().value(), 0)
 
     def test_single_row_keeps_its_own_button(self) -> None:
         panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open=lambda _key: None)

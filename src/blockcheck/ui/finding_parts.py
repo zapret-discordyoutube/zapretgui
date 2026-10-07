@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from PyQt6.QtCore import QEvent, QSize, Qt
+from PyQt6.QtCore import QEvent, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import CaptionLabel
@@ -24,6 +24,31 @@ from ui.widgets.tone_group import ToneDot, mute
 
 _SERVER = re.compile(r"\s*([^,()]+?) \(([^()]+)\)")
 _MORE = re.compile(r"\s*и ещё (\d+)")
+
+
+_BRACKETS = re.compile(r"\s*\([^()]*\)")
+_FOR_LIST = re.compile(r"^(.*?) для (\S+\.\S+.*)$")
+
+
+def short_title(title: str) -> tuple[str, list[str], int]:
+    """Заголовок для карточки: без скобок и без перечня сайтов. Возвращает (заголовок, сайты, сколько не названо).
+
+    «DNS подменяет ответы для www.youtube.com, rutracker.org и ещё 9» →
+    («DNS подменяет ответы», [«www.youtube.com», «rutracker.org»], 9). Полный
+    заголовок остаётся в подсказке и на странице находки.
+    """
+    text = str(title or "").strip()
+    names: list[str] = []
+    more = 0
+    match = _FOR_LIST.match(text)
+    if match is not None:
+        text, tail = match.group(1), match.group(2)
+        found = _MORE.search(tail)
+        if found is not None:
+            more = int(found.group(1))
+            tail = tail[: found.start()]
+        names = [name.strip() for name in tail.split(",") if name.strip()]
+    return _BRACKETS.sub("", text).strip(), names, more
 
 
 def split_finding(text: str) -> tuple[str, str]:
@@ -164,9 +189,11 @@ class FindingCard(QWidget):
     стоит в итоге проверки и в отчёте «DNS-серверы».
     """
 
-    HEIGHT = 58
-    MIN_WIDTH = 340
+    HEIGHT = 54
+    MIN_WIDTH = 300
     CHIPS_SHOWN = 3
+    # Нажали карточку (когда ей есть что открыть).
+    clicked = pyqtSignal()
 
     def __init__(
         self,
@@ -183,8 +210,13 @@ class FindingCard(QWidget):
         state_text: str = "",
     ) -> None:
         super().__init__(parent)
-        self.title = str(title or "")
+        # На карточке — короткий заголовок; сайты из него встают метками рядом с серверами.
+        self.full_title = str(title or "")
+        self.title, sites, more_sites = short_title(self.full_title)
+        servers = [*[(name, []) for name in sites], *servers]
+        more = int(more) + more_sites
         self._hover = False
+        self._clickable = False
         # Действие и отчёт у таких карточек общие — они стоят в заголовке группы.
         self.action_button = None
         self.card_key = ""
@@ -204,6 +236,9 @@ class FindingCard(QWidget):
         texts.setSpacing(3)
         texts.addStretch(1)
         self.text_label = ElidedLabel(self.title, self, strong=True)
+        font = self.text_label.font()
+        font.setPixelSize(13)
+        self.text_label.setFont(font)
         texts.addWidget(self.text_label)
         self.server_chips: list[ServerChip] = []
         self.more_label: CaptionLabel | None = None
@@ -234,21 +269,47 @@ class FindingCard(QWidget):
         set_state_text(self, state_text or self.title)
         self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
 
+    def set_clickable(self) -> None:
+        """Карточка открывает свою страницу: рука вместо стрелки, Enter с клавиатуры, строка в подсказке."""
+        self._clickable = True
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        set_tooltip(self, f"{self.hint_text}\nНажмите, чтобы открыть подробности")
+
     def event(self, event) -> bool:
         if event.type() in (QEvent.Type.HoverEnter, QEvent.Type.HoverLeave):
             self._hover = event.type() == QEvent.Type.HoverEnter
             self.update()
         return super().event(event)
 
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if self._clickable and event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if self._clickable and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+            self.clicked.emit()
+            return
+        super().keyPressEvent(event)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        self.update()
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        super().focusOutEvent(event)
+        self.update()
+
     def paintEvent(self, event) -> None:  # noqa: N802
         _ = event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        token = "surface_bg_hover" if self._hover else "surface_bg"
+        token = "surface_bg_hover" if self._hover or self.hasFocus() else "surface_bg"
         painter.setBrush(theme_color(token, QColor(255, 255, 255, 18 if self._hover else 10)))
         painter.drawRoundedRect(self.rect(), 6, 6)
         painter.end()
 
 
-__all__ = ["CardsFlow", "FindingCard", "ServerChip", "split_finding", "split_server_list", "theme_color"]
+__all__ = ["CardsFlow", "FindingCard", "ServerChip", "short_title", "split_finding", "split_server_list", "theme_color"]

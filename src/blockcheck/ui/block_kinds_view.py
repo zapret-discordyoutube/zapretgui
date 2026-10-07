@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QEasingCurve, QEvent, QRectF, Qt, QTimer, QVariantAnimation
+from PyQt6.QtCore import QEasingCurve, QEvent, QRectF, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PyQt6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import FlowLayout
@@ -183,7 +183,10 @@ class KindBar(ShareBar):
 
 
 class KindTile(QWidget):
-    """Плитка вида: крупное число, название и сайты, которых это касается."""
+    """Плитка вида: крупное число, название и сайты, которых это касается. Нажатие ведёт к её группе."""
+
+    # Нажали плитку: ключ её вида.
+    opened = pyqtSignal(str)
 
     WIDTH = 248
     MIN_WIDTH = 200
@@ -203,6 +206,7 @@ class KindTile(QWidget):
         self._hover = False
         # Под мышью плитка подсвечивается, а в подсказке — все её сайты и пояснение.
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._anim = QVariantAnimation(self)
         self._anim.setStartValue(0.0)
         self._anim.setEndValue(float(group.count))
@@ -255,6 +259,11 @@ class KindTile(QWidget):
             self._hover = event.type() == QEvent.Type.HoverEnter
             self.update()
         return super().event(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+            self.opened.emit(self._group.key)
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         _ = event
@@ -309,6 +318,9 @@ class KindTile(QWidget):
 class KindsOverview(QWidget):
     """Полоса и плитки: сколько сайтов открывается и чем мешают остальным."""
 
+    # Нажали плитку: ключ её вида.
+    tile_opened = pyqtSignal(str)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -362,6 +374,7 @@ class KindsOverview(QWidget):
         groups = [group for group in groups if group.count > 0]
         for order, group in enumerate(groups):
             tile = KindTile(group, self._tiles_host)
+            tile.opened.connect(self.tile_opened)
             self._flow.addWidget(tile)
             tile.show()
             self._tiles.append(tile)
