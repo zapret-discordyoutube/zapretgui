@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QPoint, QRect, QSize, Qt, pyqtSignal
-from PyQt6.QtWidgets import QAbstractItemView, QAbstractScrollArea, QListView, QSizePolicy, QStyle
+from PyQt6.QtCore import QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtWidgets import QAbstractItemView, QAbstractScrollArea, QApplication, QListView, QSizePolicy, QStyle
 
 from profile.strategy_list import ROW_GROUP, ROW_SECTION, ROW_STRATEGY
 from profile.ui.strategy_list.delegate import StrategyListDelegate
@@ -73,6 +73,13 @@ class StrategyListView(QListView):
         # При выборе другой стратегии полоска акцента переезжает к новой строке.
         attach_active_row_motion(self, ACTIVE_ROLE, row_rect_fn=self.row_paint_rect)
         attach_row_hover_motion(self, row_filter=self._row_hover_allowed)
+        # Обычный щелчок применяет стратегию не сразу, а после короткого
+        # ожидания второго щелчка: двойной щелчок открывает подробности и
+        # применять стратегию при этом не должен.
+        self._pending_choice = ""
+        self._choice_timer = QTimer(self)
+        self._choice_timer.setSingleShot(True)
+        self._choice_timer.timeout.connect(self.flush_pending_choice)
 
     # ------------------------------------------------------------------
     # Строки
@@ -183,6 +190,8 @@ class StrategyListView(QListView):
         index = self.indexAt(event.position().toPoint())
         row = self.row_for_index(index)
         super().mouseReleaseEvent(event)
+        if self.__dict__.pop("_skip_release", False):
+            return
         if row is None:
             return
         if row.kind == ROW_GROUP:
@@ -193,10 +202,46 @@ class StrategyListView(QListView):
             button = self._button_at(index, event.position().toPoint())
             if button == "twins":
                 self.twins_toggle_requested.emit(row.item.twin_key)
-            elif button == "details":
+            elif button == "details" or event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                # Метка на плитке и Shift+щелчок открывают подробности сразу.
+                self._cancel_pending_choice()
+                self.details_requested.emit(row.strategy_id)
+            elif self._pending_choice == row.strategy_id and self._choice_timer.isActive():
+                # Второй щелчок по той же плитке пришёл раньше события двойного щелчка.
+                self._cancel_pending_choice()
                 self.details_requested.emit(row.strategy_id)
             else:
-                self.strategy_chosen.emit(row.strategy_id)
+                self._pending_choice = row.strategy_id
+                self._choice_timer.start(QApplication.doubleClickInterval())
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802
+        index = self.indexAt(event.position().toPoint())
+        row = self.row_for_index(index)
+        if event.button() != Qt.MouseButton.LeftButton or row is None or row.kind != ROW_STRATEGY:
+            super().mouseDoubleClickEvent(event)
+            return
+        if self._button_at(index, event.position().toPoint()):
+            # Кнопки плитки двойным щелчком нажимаются как обычным.
+            event.accept()
+            return
+        # Двойной щелчок открывает подробности о стратегии и не применяет её.
+        self._cancel_pending_choice()
+        # Отпускание кнопки после двойного щелчка приходит отдельным событием:
+        # оно не должно начать ожидание заново и применить стратегию.
+        self._skip_release = True
+        self.details_requested.emit(row.strategy_id)
+        event.accept()
+
+    def _cancel_pending_choice(self) -> None:
+        self._choice_timer.stop()
+        self._pending_choice = ""
+
+    def flush_pending_choice(self) -> None:
+        """Ожидание второго щелчка кончилось: стратегия применяется."""
+        self._choice_timer.stop()
+        strategy_id, self._pending_choice = self._pending_choice, ""
+        if strategy_id:
+            self.strategy_chosen.emit(strategy_id)
 
     def contextMenuEvent(self, event):  # noqa: N802
         index = self.indexAt(event.pos())

@@ -23,6 +23,7 @@ from qfluentwidgets import (
     PrimaryPushButton,
     PushButton,
     ScrollArea,
+    TransparentToolButton,
     SimpleCardWidget,
     StrongBodyLabel,
     SubtitleLabel,
@@ -170,97 +171,105 @@ def _soft_fill() -> str:
     return "rgba(255, 255, 255, 0.045)" if isDarkTheme() else "rgba(0, 0, 0, 0.04)"
 
 
-class _Block(QFrame):
-    """Подписанный блок: значок, заголовок мелким текстом и содержимое под ним."""
+class _Row(QWidget):
+    """Строка «значок, подпись, значение» без подложки — для сведений и опыта."""
 
-    def __init__(self, icon_name: str, caption: str, text: str, parent=None, *, detail: str = "", fill: bool = True) -> None:
+    def __init__(self, icon_name: str, caption: str, text: str, parent=None) -> None:
         super().__init__(parent)
-        self.setObjectName("strategyBlock")
-        if fill:
-            self.setStyleSheet(f"QFrame#strategyBlock {{ background: {_soft_fill()}; border-radius: 6px; }}")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10) if fill else layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
         icon = IconWidget(_fluent_icon(icon_name), self)
         icon.setFixedSize(16, 16)
         layout.addWidget(icon, 0, Qt.AlignmentFlag.AlignTop)
         texts = QVBoxLayout()
-        texts.setSpacing(2)
+        texts.setSpacing(0)
         texts.addWidget(_text(CaptionLabel, caption, colors=_MUTED))
         texts.addWidget(_text(BodyLabel, text, selectable=True))
-        if detail:
-            texts.addWidget(_text(CaptionLabel, detail, colors=_MUTED))
         layout.addLayout(texts, 1)
 
 
-class _Warning(QFrame):
-    """То, о чём стоит знать: отдельная цветная строка со значком."""
+class _Chip(QFrame):
+    """Настройка шага короткой меткой: значок и несколько слов, пояснение — в подсказке."""
 
-    def __init__(self, text: str, parent=None) -> None:
+    def __init__(self, note, parent=None) -> None:
         super().__init__(parent)
-        self.setObjectName("strategyWarning")
-        tint = "rgba(233, 160, 113, 0.14)" if isDarkTheme() else "rgba(181, 90, 42, 0.10)"
-        self.setStyleSheet(f"QFrame#strategyWarning {{ background: {tint}; border-radius: 6px; }}")
+        self.setObjectName("strategyChip")
+        self.setStyleSheet(f"QFrame#strategyChip {{ background: {_soft_fill()}; border-radius: 12px; }}")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(10)
-        icon = IconWidget(FluentIcon.INFO, self)
-        icon.setFixedSize(16, 16)
-        layout.addWidget(icon, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(_text(BodyLabel, text, colors=_WARNING), 1)
+        layout.setContentsMargins(10, 4, 12, 4)
+        layout.setSpacing(6)
+        icon = IconWidget(_fluent_icon(_NOTE_ICONS.get(note.kind, "INFO")), self)
+        icon.setFixedSize(14, 14)
+        layout.addWidget(icon)
+        layout.addWidget(CaptionLabel(note.chip))
+        set_tooltip(self, note.hint)
+        set_control_accessibility(self, name=note.chip, description=note.hint)
 
 
-class _StepRow(CardWidget):
-    """Шаг стратегии. Нажатие показывает анимацию этого шага."""
+class _StepRow(QWidget):
+    """Шаг стратегии: значок приёма, что происходит и зачем, метки настроек.
 
-    def __init__(self, number: int, step: StrategyStep, parent=None) -> None:
+    Лёгкая вёрстка без вложенных подложек: шаги отделены друг от друга тонкой
+    линией, а не карточками в карточке.
+    """
+
+    # Просят показать схему этого шага.
+    scene_chosen = pyqtSignal()
+
+    def __init__(self, number: int, step: StrategyStep, parent=None, *, with_scene_button: bool = False) -> None:
         super().__init__(parent)
         self.step = step
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(10)
-
-        head = QHBoxLayout()
-        head.setSpacing(10)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 4, 0, 4)
+        outer.setSpacing(12)
         icon = QLabel(self)
         icon.setFixedSize(32, 32)
         icon.setPixmap(
             strategy_icon(step.family, strategy_family(step.family).color, "", 32, self.devicePixelRatioF(), "#2d2d2d")
         )
-        head.addWidget(icon)
+        outer.addWidget(icon, 0, Qt.AlignmentFlag.AlignTop)
+
+        layout = QVBoxLayout()
+        layout.setSpacing(6)
+        head = QHBoxLayout()
+        head.setSpacing(8)
         head.addWidget(_text(StrongBodyLabel, f"{number}. {step.title}"), 1)
-        if step.scene:
-            head.addWidget(_text(CaptionLabel, "показать на схеме", colors=_MUTED), 0, Qt.AlignmentFlag.AlignVCenter)
+        self.scene_button = None
+        if with_scene_button and step.scene:
+            # Кнопка есть только там, где схем несколько: у единственной схемы выбирать нечего.
+            self.scene_button = TransparentToolButton(FluentIcon.PLAY, self)
+            self.scene_button.setFixedSize(28, 28)
+            set_tooltip(self.scene_button, "Показать этот шаг на схеме")
+            set_control_accessibility(self.scene_button, name=f"Показать на схеме шаг {number}: {step.title}")
+            self.scene_button.clicked.connect(self.scene_chosen)
+            head.addWidget(self.scene_button)
         layout.addLayout(head)
 
-        about = QHBoxLayout()
-        about.setSpacing(8)
-        about.addWidget(_Block("PLAY", "Что происходит", step.text, self), 1)
+        layout.addWidget(_text(BodyLabel, step.text, selectable=True))
         if step.why:
-            about.addWidget(_Block("HELP", "Зачем", step.why, self), 1)
-        layout.addLayout(about)
+            layout.addWidget(_text(BodyLabel, step.why, colors=_MUTED, selectable=True))
 
         if step.notes:
-            layout.addWidget(_text(CaptionLabel, "Настройки шага", colors=_MUTED))
-            # Плитки настроек в два столбца: значок, название, значение и пояснение.
-            for start in range(0, len(step.notes), 2):
-                row = QHBoxLayout()
-                row.setSpacing(8)
-                pair = step.notes[start : start + 2]
-                for note in pair:
-                    row.addWidget(_Block(_NOTE_ICONS.get(note.kind, "INFO"), note.label, note.value, self, detail=note.detail), 1)
-                if len(pair) == 1:
-                    row.addStretch(1)
-                layout.addLayout(row)
+            chips = QWidget(self)
+            flow = FlowLayout(chips, needAni=False)
+            flow.setContentsMargins(0, 2, 0, 2)
+            flow.setHorizontalSpacing(6)
+            flow.setVerticalSpacing(6)
+            for note in step.notes:
+                flow.addWidget(_Chip(note, chips))
+            layout.addWidget(chips)
 
         for caution in step.cautions:
-            layout.addWidget(_Warning(caution, self))
-
-        layout.addWidget(_text(CaptionLabel, f"В пресете: {step.line}", colors=_MUTED, selectable=True))
-        if step.scene:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
-            set_tooltip(self, "Нажмите, чтобы посмотреть схему этого шага.")
-        set_control_accessibility(self, name=f"Шаг {number}: {step.title}", description=f"{step.text} {step.why}".strip())
+            line = QHBoxLayout()
+            line.setSpacing(8)
+            mark = IconWidget(FluentIcon.INFO, self)
+            mark.setFixedSize(14, 14)
+            line.addWidget(mark, 0, Qt.AlignmentFlag.AlignTop)
+            line.addWidget(_text(BodyLabel, caution, colors=_WARNING, selectable=True), 1)
+            layout.addLayout(line)
+        outer.addLayout(layout, 1)
+        self.setAccessibleName(f"Шаг {number}: {step.title}")
 
 
 class _PlaceCard(CardWidget):
@@ -370,7 +379,7 @@ class StrategyDetailsView(QWidget):
             self._steps_card, tr_fn=lambda key, default: tr_catalog(key, default=default)
         )
         self._steps_layout = QVBoxLayout()
-        self._steps_layout.setSpacing(8)
+        self._steps_layout.setSpacing(10)
         self._steps_card.body.addWidget(self._illustration)
         self._steps_card.body.addWidget(self._scene_caption)
         self._steps_card.body.addLayout(self._steps_layout)
@@ -422,9 +431,14 @@ class StrategyDetailsView(QWidget):
         self._scene_caption.setVisible(bool(scene))
         if scene:
             number = self._step_rows.index(row) + 1
+            only = sum(1 for item in self._step_rows if item.step.scene) < 2
             self._scene_caption.setText(
-                f"Схема шага {number}: {row.step.title.lower()}. Слева вы, посередине проверка у провайдера, справа сайт."
+                ("" if only else f"Шаг {number}: {row.step.title.lower()}. ")
+                + "Слева вы, посередине проверка у провайдера, справа сайт."
             )
+            if self._illustration.scene_key() == scene:
+                # Та же схема выбрана снова — круг идёт с начала.
+                self._illustration.set_scene("")
             self._illustration.set_scene(scene)
 
     def _copy_args(self) -> None:
@@ -461,7 +475,7 @@ class StrategyDetailsView(QWidget):
 
         self._experience_card.clear()
         for icon_name, caption, value in experience_rows(details):
-            self._experience_card.body.addWidget(_Block(icon_name, caption, value, self._experience_card, fill=False))
+            self._experience_card.body.addWidget(_Row(icon_name, caption, value, self._experience_card))
         if same_strategy:
             # Изменилась только оценка: остальные разделы те же, не перестраиваем.
             return
@@ -473,10 +487,15 @@ class StrategyDetailsView(QWidget):
         self._step_rows = []
         if not steps:
             self._steps_layout.addWidget(_text(BodyLabel, "У стратегии нет строк обхода: трафик идёт как есть."))
+        scenes = sum(1 for step in steps if step.scene)
         for number, step in enumerate(steps, 1):
-            row = _StepRow(number, step, self._steps_card)
-            if step.scene:
-                row.clicked.connect(lambda shown=row: self._show_scene(shown))
+            if number > 1:
+                divider = QFrame(self._steps_card)
+                divider.setFixedHeight(1)
+                divider.setStyleSheet(f"background: {_soft_fill()};")
+                self._steps_layout.addWidget(divider)
+            row = _StepRow(number, step, self._steps_card, with_scene_button=scenes > 1)
+            row.scene_chosen.connect(lambda shown=row: self._show_scene(shown))
             self._step_rows.append(row)
             self._steps_layout.addWidget(row)
         # Сразу видна схема первого шага, у которого она есть.
@@ -508,7 +527,7 @@ class StrategyDetailsView(QWidget):
         ]
         for icon_name, name, value in facts:
             if value:
-                self._facts_card.body.addWidget(_Block(icon_name, name, value, self._facts_card, fill=False))
+                self._facts_card.body.addWidget(_Row(icon_name, name, value, self._facts_card))
 
         self._args_card.clear()
         self._args_card.body.addWidget(_text(BodyLabel, details.args or "—", selectable=True))

@@ -29,7 +29,10 @@ from ui.widgets.hover_row import paint_profile_hover_row
 from ui.widgets.row_hover_motion import paint_icon_motion, row_hover_motion
 
 SELECTED_TEXT = "Выбрана"
-MENU_HINT = "Правая кнопка мыши: отметить, работает ли стратегия, или добавить её в избранное."
+MENU_HINT = (
+    "Щелчок применяет стратегию. Двойной щелчок или Shift+щелчок открывает подробности о ней.\n"
+    "Правая кнопка мыши: отметить, работает ли стратегия, или добавить её в избранное."
+)
 
 _ICON_SIZE = 14
 # Значок стратегии: крупный на плитке в две строки, мельче в строке в один столбец.

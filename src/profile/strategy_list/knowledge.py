@@ -29,6 +29,23 @@ class StepNote:
     def text(self) -> str:
         return f"{self.label}: {self.value}" + (f" — {self.detail}" if self.detail else "")
 
+    @property
+    def chip(self) -> str:
+        """Короткая подпись для метки на странице; пояснение уходит в подсказку."""
+        if self.kind == "protection":
+            return f"Защита: {self.value[:1].lower()}{self.value[1:]}"
+        if self.kind in ("origin", "overlap"):
+            return self.value
+        if self.kind == "content":
+            return f"В подделке: {self.value}"
+        if self.kind == "cut":
+            return f"Разрез: {self.value}"
+        return f"{self.label}: {self.value}"
+
+    @property
+    def hint(self) -> str:
+        return " ".join(part for part in (f"{self.label}.", self.detail) if part)
+
 
 @dataclass(frozen=True)
 class StrategyStep:

@@ -100,6 +100,8 @@ class _WidgetCase(unittest.TestCase):
         widget._list.scrollTo(index)
         rect = widget._list.visualRect(index)
         QTest.mouseClick(widget._list.viewport(), Qt.MouseButton.LeftButton, pos=at or QPoint(rect.left() + 60, rect.center().y()))
+        # Обычный щелчок применяет стратегию после ожидания второго щелчка — тест не ждёт.
+        widget._list.flush_pending_choice()
 
 
 class ModelTests(unittest.TestCase):
@@ -352,21 +354,56 @@ class DetailsTests(_WidgetCase):
 
         self.assertIn("Alpha v5", text)
         self.assertIn("1. Подделка", text)
-        self.assertIn("Что происходит", text)
         self.assertIn("Перед вашим настоящим запросом программа отправляет ещё один — поддельный", text)
-        self.assertIn("Зачем", text)
-        self.assertIn("Что в подделке", text)
+        self.assertIn("Фильтр провайдера первым читает подделку", text)
+        self.assertIn("В подделке: x", text)
         # У подделки нет защиты — предупреждение стоит отдельной строкой.
         self.assertIn("У подделки нет защиты от сайта", text)
         self.assertIn("YouTube · видео", text)
         self.assertIn("в 9 готовых пресетах · открыть", text)
-        self.assertIn("Схема шага 1: подделка.", text)
+        self.assertIn("Слева вы, посередине проверка у провайдера, справа сайт.", text)
         self.assertEqual(widget._details_view._illustration.scene_key(), "fake")
         self.assertIn("На других профилях", text)
         self.assertIn("работает — 2, не работает — 1", text)
         self.assertIn("--lua-desync=fake:blob=x", text)
         self.assertEqual(widget._details_view._apply_button.text(), "Выбрана")
         self.assertFalse(widget._details_view._apply_button.isEnabled())
+
+    def _press(self, widget, key: str, *, modifier=Qt.KeyboardModifier.NoModifier, double: bool = False) -> None:
+        model = widget._list.list_model()
+        index = model.index(model.row_of_key(key), 0)
+        widget._list.scrollTo(index)
+        rect = widget._list.visualRect(index)
+        point = QPoint(rect.left() + 60, rect.center().y())
+        if double:
+            QTest.mouseDClick(widget._list.viewport(), Qt.MouseButton.LeftButton, modifier, point)
+        else:
+            QTest.mouseClick(widget._list.viewport(), Qt.MouseButton.LeftButton, modifier, point)
+
+    def test_shift_click_and_double_click_open_details_without_applying(self) -> None:
+        widget = self._with_details(current="split-00")
+        widget._on_group_toggle("recommended", True)
+        applied = QSignalSpy(widget.strategy_activated)
+
+        self._press(widget, "i:fake-05", modifier=Qt.KeyboardModifier.ShiftModifier)
+        self.assertEqual(widget._details_view.strategy_id(), "fake-05")
+        widget.close_details()
+
+        self._press(widget, "i:fake-01", double=True)
+        self.assertEqual(widget._details_view.strategy_id(), "fake-01")
+        widget._list.flush_pending_choice()
+        self.assertEqual(len(applied), 0)
+
+    def test_single_click_applies_only_after_waiting_for_second_click(self) -> None:
+        widget = self._with_details(current="split-00")
+        widget._on_group_toggle("recommended", True)
+        applied = QSignalSpy(widget.strategy_activated)
+
+        self._press(widget, "i:fake-05")
+        self.assertEqual(len(applied), 0)
+        widget._list.flush_pending_choice()
+        self.assertEqual([list(call) for call in applied], [["fake-05"]])
+        self.assertFalse(widget.details_open())
 
     def test_service_card_opens_its_profile_only_when_preset_has_one(self) -> None:
         from profile.ui.strategy_list.details import _PlaceCard
@@ -390,9 +427,26 @@ class DetailsTests(_WidgetCase):
 
         self.assertEqual([row.step.scene for row in view._step_rows], ["fake", "multidisorder", ""])
         self.assertEqual(view._illustration.scene_key(), "fake")
-        view._step_rows[1].clicked.emit()
+        # Кнопка «показать на схеме» есть у шагов со схемой и нет у шага без неё.
+        self.assertEqual([row.scene_button is not None for row in view._step_rows], [True, True, False])
+        view._step_rows[1].scene_button.click()
         self.assertEqual(view._illustration.scene_key(), "multidisorder")
-        self.assertIn("Схема шага 2", view._scene_caption.text())
+        self.assertIn("Шаг 2: перестановка.", view._scene_caption.text())
+
+    def test_single_scheme_has_no_show_button_and_steps_are_not_nested_cards(self) -> None:
+        from qfluentwidgets import CardWidget
+
+        widget = self._with_details()
+        widget.show_details("fake-05")
+        view = widget._details_view
+
+        self.assertEqual([row.scene_button for row in view._step_rows], [None])
+        self.assertFalse(isinstance(view._step_rows[0], CardWidget))
+        self.assertNotIn("Шаг 1", view._scene_caption.text())
+        # Настройка шага — короткая метка, а пояснение к ней — в подсказке.
+        chips = [chip for chip in view._step_rows[0].findChildren(QWidget) if chip.objectName() == "strategyChip"]
+        self.assertEqual([chip.accessibleName() for chip in chips], ["В подделке: x"])
+        self.assertEqual(chips[0].accessibleDescription(), "Что в подделке.")
 
     def test_details_buttons_ask_the_page_and_follow_new_state(self) -> None:
         widget = self._with_details()
