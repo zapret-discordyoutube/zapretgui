@@ -17,18 +17,21 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SimpleCardWidget, StrongBodyLabel
+from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SimpleCardWidget, StrongBodyLabel, SubtitleLabel
 
 from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_groups
+from blockcheck.ui.brand_icons import BrandIcon, brands_in_text, site_brand
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
 from ui.accessibility import set_control_accessibility, set_state_text
+from ui.fluent_widgets import set_tooltip
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.fun import FunTicker, Mascot, burst_confetti
 from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
 from ui.widgets.stagger_float_in import float_in
-from ui.widgets.tone_group import ToneGroup
+from ui.widgets.tone_group import ToneDot, ToneGroup, mute
 
 ActionHandler = Callable[[str, str], None]
 
@@ -68,6 +71,10 @@ def tone_color(tone: str, tokens=None) -> str:
         }.get(tone, "")
     except Exception:
         return {"success": "#6ccb5f", "warning": "#ff9800", "error": "#ff6b6b"}.get(tone, "")
+
+
+# Точка строки без своего цвета («нет ответа»).
+_NEUTRAL_DOT = "#9aa0aa"
 
 
 def _level_tone(level: str) -> str:
@@ -122,12 +129,65 @@ def group_problems(problems: list[dict]) -> list[tuple[str, list[dict]]]:
     return sorted(groups.items(), key=_rank)
 
 
-class _ProblemRow(QWidget):
-    """Одна проблема: значок, текст, пояснения и кнопка.
+# Важность словом. У ошибки слова нет: в списке проблем она и так подразумевается,
+# а пометка на каждой карточке превратилась бы в шум. Помечаются исключения.
+_LEVEL_WORDS = {"warn": "работает не полностью", "unknown": "нет ответа"}
+# Значок карточки, когда у неё нет логотипа сайта: по виду проблемы.
+_KIND_ICONS = {
+    "dns": "fa5s.network-wired",
+    "quic": "fa5s.bolt",
+    "voice": "fa5s.phone-alt",
+    "cut16": "fa5s.server",
+    "system": "fa5s.desktop",
+    "network": "fa5s.wifi",
+    "cert": "fa5s.certificate",
+}
+_SITE_ICON = "fa5s.globe"
+# Виды, которые относятся к одному сайту: у таких карточек логотип сайта.
+_SITE_KINDS = frozenset({"ip", "sni", "cut16", "stub", "cert", "unclear", KIND_OTHER})
 
-    ``grouped`` — строка стоит в группе, вид блокировки назван в заголовке
-    группы: вместо полной фразы хватает короткого названия (``title``).
-    ``hidden_advice`` — советы, уже показанные в заголовке группы.
+
+def split_problem_text(problem: dict) -> tuple[str, str]:
+    """Заголовок карточки и пояснение к нему.
+
+    У сайта, который не открывается целиком, заголовок — его название. Остальные
+    проблемы приходят одной фразой: находки по DNS пишутся как «что случилось:
+    подробности», прочие — «что случилось. Что это значит» или «что: как».
+    """
+    title = str(problem.get("title") or "").strip()
+    text = str(problem.get("text") or "").strip()
+    if title:
+        return title, ""
+    separators = (": ", ". ") if problem.get("kind") == "dns" else (". ", ": ")
+    head, tail = text, ""
+    for separator in separators:
+        head, found, tail = text.partition(separator)
+        tail = tail.strip()
+        if found and tail:
+            break
+    else:
+        return text, ""
+    tail = f"{tail[:1].upper()}{tail[1:]}"
+    return head.rstrip("."), tail if tail.endswith((".", "!", "?")) else f"{tail}."
+
+
+def problem_brand(problem: dict) -> tuple[str, str]:
+    """(значок, фирменный цвет) карточки. Цвет пустой — значок нейтральный."""
+    kind = str(problem.get("kind") or KIND_OTHER)
+    if kind in _SITE_KINDS:
+        first_word = str(problem.get("text") or "").split(" ", 1)[0]
+        brand = site_brand(str(problem.get("title") or ""), str(problem.get("target") or ""), first_word)
+        if brand is not None:
+            return brand.icon, brand.color
+    return _KIND_ICONS.get(kind, _SITE_ICON if problem.get("target") or problem.get("title") else "fa5s.info-circle"), ""
+
+
+class _ProblemRow(QWidget):
+    """Одна проблема карточкой: значок, заголовок, важность, пояснение, совет и кнопка.
+
+    ``grouped`` — карточка стоит в группе, вид блокировки назван в заголовке
+    группы. ``hidden_advice`` — советы, уже показанные в заголовке группы.
+    ``bare`` — строка без подложки и значка: «Открываются: …» под проблемами.
     """
 
     def __init__(
@@ -138,31 +198,87 @@ class _ProblemRow(QWidget):
         *,
         grouped: bool = False,
         hidden_advice=(),
+        bare: bool = False,
     ) -> None:
         super().__init__(parent)
         self._level = str(problem.get("level") or "unknown")
+        self._bare = bare
+        self._surface = QColor()
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
-        layout.setSpacing(10)
+        layout.setContentsMargins(*((0, 2, 0, 2) if bare else (14, 12, 12, 12)))
+        layout.setSpacing(12)
 
-        self._icon = QLabel(self)
-        self._icon.setFixedSize(18, 18)
-        layout.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignTop)
+        tone = _level_tone(self._level)
+        hollow = self._level not in ("fail", "ok")
+        self.icon: BrandIcon | None = None
+        if bare:
+            self.dot = ToneDot(lambda tokens: tone_color(tone, tokens) or _NEUTRAL_DOT, self, hollow=hollow)
+            dot_box = QVBoxLayout()
+            dot_box.setContentsMargins(0, 6, 0, 0)
+            dot_box.addWidget(self.dot)
+            dot_box.addStretch(1)
+            layout.addLayout(dot_box)
+        else:
+            icon_name, icon_color = problem_brand(problem)
+            self.icon = BrandIcon(icon_name, icon_color, self, size=22)
+            layout.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignTop)
 
         texts = QVBoxLayout()
-        texts.setSpacing(2)
-        title = str(problem.get("title") or "") if grouped else ""
-        self.text_label = BodyLabel(title or str(problem.get("text") or ""), self)
+        texts.setSpacing(3)
+        if bare or not grouped:
+            title, detail = str(problem.get("text") or ""), ""
+        else:
+            title, detail = split_problem_text(problem)
+        self.text_label = BodyLabel(title, self) if bare else StrongBodyLabel(title, self)
         self.text_label.setWordWrap(True)
+        self.text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         texts.addWidget(self.text_label)
+
+        # Важность — кольцом и словом, и только когда это не обычная ошибка.
+        self.level_label: CaptionLabel | None = None
+        # DNS-сервисы, названные в находке, — их значками.
+        brands = brands_in_text(str(problem.get("text") or "")) if problem.get("kind") == "dns" and not bare else []
+        self.brand_icons: list[BrandIcon] = []
+        if not bare and (self._level in _LEVEL_WORDS or brands):
+            level_row = QHBoxLayout()
+            level_row.setSpacing(6)
+            if self._level in _LEVEL_WORDS:
+                self.dot = ToneDot(lambda tokens: tone_color(tone, tokens) or _NEUTRAL_DOT, self, size=7, hollow=hollow)
+                level_row.addWidget(self.dot, 0, Qt.AlignmentFlag.AlignVCenter)
+                self.level_label = mute(CaptionLabel(_LEVEL_WORDS[self._level], self))
+                level_row.addWidget(self.level_label, 0, Qt.AlignmentFlag.AlignVCenter)
+                if brands:
+                    level_row.addSpacing(6)
+            for brand in brands:
+                icon = BrandIcon(brand.icon, brand.color, self, size=14)
+                set_tooltip(icon, brand.name)
+                level_row.addWidget(icon, 0, Qt.AlignmentFlag.AlignVCenter)
+                level_row.addWidget(mute(CaptionLabel(brand.name, self)), 0, Qt.AlignmentFlag.AlignVCenter)
+                level_row.addSpacing(6)
+                self.brand_icons.append(icon)
+            level_row.addStretch(1)
+            texts.addLayout(level_row)
+
+        self.detail_label: BodyLabel | None = None
+        if detail:
+            self.detail_label = BodyLabel(detail, self)
+            self.detail_label.setWordWrap(True)
+            self.detail_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            mute(self.detail_label)
+            texts.addSpacing(3)
+            texts.addWidget(self.detail_label)
         evidence = set(problem.get("evidence") or ())
         self.advice_labels: list[CaptionLabel] = []
         for advice in problem.get("advice") or ():
             if advice in hidden_advice:
                 continue
             # Свидетельство — это факт, а не действие: стрелка только у советов.
-            advice_label = CaptionLabel(str(advice) if advice in evidence else f"→ {advice}", self)
+            is_evidence = advice in evidence
+            advice_label = BodyLabel(str(advice), self) if is_evidence else CaptionLabel(f"→ {advice}", self)
+            mute(advice_label)
             advice_label.setWordWrap(True)
+            if is_evidence and not self.advice_labels and not detail:
+                texts.addSpacing(3)
             texts.addWidget(advice_label)
             self.advice_labels.append(advice_label)
         layout.addLayout(texts, 1)
@@ -181,7 +297,7 @@ class _ProblemRow(QWidget):
                     f"{f' для {target}' if target and action == 'strategy' else ''}."
                 ),
             )
-            layout.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
+            layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
             self.action_button = button
         set_state_text(self, str(problem.get("text") or ""))
         self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
@@ -189,16 +305,28 @@ class _ProblemRow(QWidget):
 
     def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
         _ = force
-        icon_name, tone = _LEVEL_ICONS.get(self._level, _LEVEL_ICONS["unknown"])
-        color = tone_color(tone, tokens) or None
         try:
-            self._icon.setPixmap(get_cached_qta_pixmap(icon_name, color=color, size=16, muted_fallback=color is None))
+            from ui.theme import get_theme_tokens, to_qcolor
+
+            self._surface = to_qcolor((tokens or get_theme_tokens()).surface_bg, "#0affffff")
         except Exception:
-            pass
+            self._surface = QColor(255, 255, 255, 10)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        _ = event
+        if self._bare:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._surface)
+        painter.drawRoundedRect(self.rect(), 6, 6)
+        painter.end()
 
 
 class _ProblemGroup(ToneGroup):
-    """Проблемы одного вида блокировки: цветная метка, пояснение, общий совет и строки."""
+    """Проблемы одного вида блокировки: заголовок с цветной точкой, пояснение, общий совет и карточки."""
 
     def __init__(self, kind: str, problems: list[dict], on_action: ActionHandler | None, parent=None) -> None:
         info = kind_info(kind)
@@ -211,6 +339,7 @@ class _ProblemGroup(ToneGroup):
             count=len(problems),
             about=info.about,
             plain=plain,
+            flat=not plain,
         )
         self._kind = kind
         hidden = () if plain else tuple(shared_advice(problems))
@@ -235,8 +364,8 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self._level = "idle"
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 14, 16, 14)
-        root.setSpacing(8)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(12)
 
         header = QHBoxLayout()
         header.setSpacing(12)
@@ -248,17 +377,17 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
         self._icon = QLabel(self)
-        self._icon.setFixedSize(24, 24)
+        self._icon.setFixedSize(20, 20)
         title_row.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.title_label = StrongBodyLabel("", self)
+        self.title_label = SubtitleLabel("", self)
         self.title_label.setWordWrap(True)
         title_row.addWidget(self.title_label, 1)
         titles.addLayout(title_row)
-        self.env_label = CaptionLabel("", self)
+        self.env_label = mute(CaptionLabel("", self))
         self.env_label.setWordWrap(True)
         titles.addWidget(self.env_label)
         # Что изменилось с прошлой такой же проверки.
-        self.changes_label = CaptionLabel("", self)
+        self.changes_label = mute(CaptionLabel("", self))
         self.changes_label.setWordWrap(True)
         self.changes_label.setVisible(False)
         titles.addWidget(self.changes_label)
@@ -275,8 +404,8 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
 
         self._problems_host = QWidget(self)
         self._problems_layout = QVBoxLayout(self._problems_host)
-        self._problems_layout.setContentsMargins(0, 4, 0, 0)
-        self._problems_layout.setSpacing(8)
+        self._problems_layout.setContentsMargins(0, 0, 0, 0)
+        self._problems_layout.setSpacing(16)
         root.addWidget(self._problems_host)
 
         self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
@@ -346,8 +475,8 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self._clear_problems()
         self._set_state(
             "idle",
-            "Медоед готов проверить вашу сеть",
-            "Нажмите «Проверить»: посмотрим, какие сайты открываются, и подскажем, что делать с остальными.",
+            "Сеть ещё не проверялась",
+            "Нажмите «Проверить»: покажем, какие сайты открываются и что делать с остальными.",
         )
 
     def set_pending(self) -> None:
@@ -369,12 +498,12 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         problems = list(report.get("problems") or ())
         blocking = [item for item in problems if item.get("level") in ("fail", "warn")]
         if not problems:
-            level, title, mood = "ok", "Всё открывается — провайдер сегодня добрый 🎉", MOOD_HAPPY
+            level, title, mood = "ok", "Всё открывается", MOOD_HAPPY
         elif not blocking:
             level, title, mood = "unknown", "Часть проверок не дала ответа", MOOD_IDLE
         else:
             level = "fail" if any(item.get("level") == "fail" for item in blocking) else "warn"
-            title = f"Найдены проблемы: {len(blocking)} — ниже, что с ними делать"
+            title = f"Найдены проблемы: {len(blocking)}"
             mood = MOOD_ALARM if level == "fail" else MOOD_SAD
         self._show_changes(report)
         rows: list[QWidget] = [
@@ -383,7 +512,11 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         ]
         working = list(report.get("working") or ())
         if working and problems:
-            rows.append(_ProblemRow({"level": "ok", "text": f"Открываются: {', '.join(working)}"}, None, self._problems_host))
+            rows.append(
+                _ProblemRow(
+                    {"level": "ok", "text": f"Открываются: {', '.join(working)}"}, None, self._problems_host, bare=True
+                )
+            )
         for row in rows:
             self._problems_layout.addWidget(row)
         self._problems_host.setVisible(bool(rows))
@@ -402,7 +535,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         icon_name, tone = _LEVEL_ICONS.get(self._level, _LEVEL_ICONS["unknown"])
         color = tone_color(tone, tokens) or None
         try:
-            self._icon.setPixmap(get_cached_qta_pixmap(icon_name, color=color, size=24, muted_fallback=color is None))
+            self._icon.setPixmap(get_cached_qta_pixmap(icon_name, color=color, size=20, muted_fallback=color is None))
         except Exception:
             pass
 

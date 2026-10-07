@@ -378,7 +378,7 @@ class BlockKindsOnScreenTests(unittest.TestCase):
         groups = panel.problem_groups()
         self.assertEqual([group.kind() for group in groups], ["ip", "sni", "cut16", "dns"])
         sni = groups[1]
-        self.assertEqual(sni.pill.text(), "Блокировка по имени (SNI)")
+        self.assertEqual(sni.title_label.text(), "Блокировка по имени (SNI)")
         self.assertIn("SNI", sni.about_label.text())
         # Одинаковый у обоих сайтов совет показан один раз — в заголовке группы.
         self.assertEqual([label.text() for label in sni.shared_labels], ["→ Подберите другую стратегию"])
@@ -399,7 +399,7 @@ class BlockKindsOnScreenTests(unittest.TestCase):
 
         [group] = panel.problem_groups()
         self.assertEqual(group.kind(), "other")
-        self.assertIsNone(group.pill)
+        self.assertIsNone(group.title_label)
         self.assertEqual(group.rows[0].text_label.text(), "X (Twitter) не открывается: соединение блокирует провайдер")
 
 

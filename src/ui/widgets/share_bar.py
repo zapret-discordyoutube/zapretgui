@@ -37,8 +37,8 @@ def _is_light() -> bool:
 class ShareBar(QWidget):
     """Скруглённая полоса: доли идут слева направо в том порядке, в каком их дали."""
 
-    HEIGHT = 10
-    GAP = 3.0
+    HEIGHT = 6
+    GAP = 2.0
 
     def __init__(self, color_of: ColorOf, parent=None) -> None:
         super().__init__(parent)

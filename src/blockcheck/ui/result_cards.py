@@ -3,8 +3,9 @@
 Что показывать, решает ``result_cards_model`` (чистые данные). Здесь только
 рисование:
 
-- ``ResultCard`` — карточка: значок, название, слово результата, строки
-  измерений, метки. Нажатие открывает подробности;
+- ``ResultCard`` — карточка: логотип сайта в фирменном цвете, название,
+  под ним слово результата, строки измерений, метки. Нажатие открывает
+  подробности;
 - ``CardsGrid`` — сетка: сама решает, сколько колонок помещается в ширину
   окна, и ставит карточку в самую короткую колонку, чтобы на широком экране
   не оставалось пустот;
@@ -13,9 +14,9 @@
 - ``ProgressSteps`` — ход проверки по шагам, пока она идёт;
 - ``ResultDetailView`` — подробности одной карточки на всю страницу.
 
-Рамок нет: окно программы без рамок, состояние показывают цвет подложки,
-полоска слева и значок. Анимации короткие и подчиняются переключателю
-«живых анимаций».
+Рамок нет: окно программы без рамок. Подложка у всех карточек одна,
+нейтральная; состояние показывают цветная точка и слово результата.
+Анимации короткие и подчиняются переключателю «живых анимаций».
 """
 
 from __future__ import annotations
@@ -35,14 +36,16 @@ from qfluentwidgets import (
 )
 
 from blockcheck.ui.block_kinds_view import kind_color
+from blockcheck.ui.brand_icons import BrandIcon, site_brand
 from blockcheck.ui.result_cards_model import PREVIEW_LINES, Card, Counter, DotGroup, Line, Section, build_cards, build_counters
 from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.stagger_float_in import float_in
+from ui.widgets.tone_group import ToneDot, mute
 
-CARD_RADIUS = 10
+CARD_RADIUS = 8
 GRID_GAP = 10
 REVEAL_MS = 700
 
@@ -55,10 +58,10 @@ _STATE_ICONS = {
 }
 # (тёмная тема, светлая тема)
 _STATE_COLORS = {
-    "ok": ("#6ccb5f", "#0f7b0f"),
-    "warn": ("#ffa033", "#a85d00"),
-    "fail": ("#ff5c5c", "#c42b1c"),
-    "unknown": ("#a3a8b3", "#5f6470"),
+    "ok": ("#5bb974", "#1a7f37"),
+    "warn": ("#d99a4e", "#955800"),
+    "fail": ("#e5645d", "#b3261e"),
+    "unknown": ("#9aa0aa", "#5f6470"),
     "info": ("#8f96a3", "#6b7180"),
 }
 
@@ -84,12 +87,21 @@ def card_color(card: Card, tokens=None) -> str:
     return kind_color(card.kind, tokens) if card.kind else state_color(card.level, tokens)
 
 
-def _pill_style(color: QColor) -> str:
-    return (
-        f"QLabel {{ color: {color.name()}; "
-        f"background-color: rgba({color.red()}, {color.green()}, {color.blue()}, 0.16); "
-        "border-radius: 10px; padding: 0px 9px; font-weight: 600; }"
-    )
+# Состояния, у которых точка — кольцо, а не закрашенный круг: так «предупреждение»
+# и «нет ответа» отличаются от «ошибки» и «работает» не только цветом.
+_HOLLOW_STATES = frozenset({"warn", "unknown", "info"})
+# Метка говорит о проблеме — её текст в цвете состояния; остальные метки приглушены.
+_LOUD_CHIPS = frozenset({"warn", "fail"})
+
+
+def _chip_style(text_color: str, tokens=None) -> str:
+    light = _is_light(tokens)
+    back = "rgba(0, 0, 0, 0.05)" if light else "rgba(255, 255, 255, 0.06)"
+    return f"QLabel {{ color: {text_color}; background-color: {back}; border-radius: 4px; padding: 0px 7px; }}"
+
+
+def _muted_text(tokens=None) -> str:
+    return "rgba(0, 0, 0, 0.62)" if _is_light(tokens) else "rgba(255, 255, 255, 0.62)"
 
 
 class _ElidedLabel(CaptionLabel):
@@ -177,7 +189,16 @@ class _LineRow(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(7)
-        layout.addWidget(_StateIcon(line.state, self), 0, Qt.AlignmentFlag.AlignTop if wrap else Qt.AlignmentFlag.AlignVCenter)
+        state = line.state
+        dot = ToneDot(lambda tokens: state_color(state, tokens), self, size=7, hollow=state in _HOLLOW_STATES)
+        if wrap:
+            dot_box = QVBoxLayout()
+            dot_box.setContentsMargins(0, 7, 0, 0)
+            dot_box.addWidget(dot)
+            dot_box.addStretch(1)
+            layout.addLayout(dot_box)
+        else:
+            layout.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
         if wrap:
             # Подробный вид: текст переносится, название — жирнее.
             # Строка без пояснения — обычный текст (совет, описание), с пояснением — «что: как».
@@ -189,11 +210,14 @@ class _LineRow(QWidget):
             layout.addWidget(label, 1)
         else:
             self.name_label = _ElidedLabel(line.name, self)
-            layout.addWidget(self.name_label, 3 if line.text else 1)
             if line.text:
-                self.text_label = _ElidedLabel(line.text, self, align=Qt.AlignmentFlag.AlignRight)
-                self.text_label.setStyleSheet("color: rgba(140, 146, 158, 1);")
-                layout.addWidget(self.text_label, 4)
+                # Название — целиком, сколько есть места; сокращается пояснение справа.
+                self.name_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+                layout.addWidget(self.name_label, 0)
+                self.text_label = mute(_ElidedLabel(line.text, self, align=Qt.AlignmentFlag.AlignRight))
+                layout.addWidget(self.text_label, 1)
+            else:
+                layout.addWidget(self.name_label, 1)
         set_state_text(self, f"{line.name}: {line.text}" if line.text else line.name)
 
 
@@ -337,21 +361,36 @@ class ResultCard(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
+        self._surface = QColor(255, 255, 255, 10)
+        self._surface_hover = QColor(255, 255, 255, 18)
+
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 11, 12, 11)
+        root.setContentsMargins(14, 12, 14, 12)
         root.setSpacing(6)
 
         header = QHBoxLayout()
-        header.setSpacing(8)
-        self._icon = _StateIcon(card.level, self, size=16, icon=card.icon)
+        header.setSpacing(11)
+        # Логотип сайта — в фирменном цвете; у остальных проверок значок нейтральный.
+        brand = site_brand(card.key.removeprefix("site:"), card.title) if card.site else None
+        self._icon = BrandIcon(brand.icon if brand else card.icon, brand.color if brand else "", self, size=22)
         header.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
-        # Название уступает место слову результата: на узкой карточке сокращается оно.
+        # Слово результата стоит под названием, а не рядом: так оба текста видны целиком.
+        titles = QVBoxLayout()
+        titles.setSpacing(1)
         self.title_label = _ElidedLabel(card.title, self, strong=True)
-        header.addWidget(self.title_label, 1, Qt.AlignmentFlag.AlignVCenter)
-        self.status_label = QLabel(card.status, self)
-        self.status_label.setFixedHeight(22)
-        header.addWidget(self.status_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        titles.addWidget(self.title_label)
+        status_row = QHBoxLayout()
+        status_row.setSpacing(6)
+        self._status_dot = ToneDot(
+            lambda tokens: card_color(card, tokens), self, size=7, hollow=card.level in _HOLLOW_STATES
+        )
+        status_row.addWidget(self._status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.status_label = _ElidedLabel(card.status, self)
+        status_row.addWidget(self.status_label, 1, Qt.AlignmentFlag.AlignVCenter)
+        titles.addLayout(status_row)
+        header.addLayout(titles, 1)
         root.addLayout(header)
+        root.addSpacing(2)
 
         self.rows = [_LineRow(line, self) for line in card.lines[:PREVIEW_LINES]]
         for row in self.rows:
@@ -359,8 +398,7 @@ class ResultCard(QWidget):
         self.more_label: CaptionLabel | None = None
         hidden = len(card.lines) - len(self.rows)
         if hidden > 0:
-            self.more_label = CaptionLabel(f"и ещё {hidden} — нажмите, чтобы увидеть всё", self)
-            self.more_label.setStyleSheet("color: rgba(140, 146, 158, 1);")
+            self.more_label = mute(CaptionLabel(f"и ещё {hidden} — нажмите, чтобы увидеть всё", self))
             root.addWidget(self.more_label)
 
         self.dots: HostingDots | None = None
@@ -402,11 +440,20 @@ class ResultCard(QWidget):
     def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
         _ = force
         self._color = QColor(card_color(self.card, tokens))
-        self._icon.set_color(self._color.name())
-        self.status_label.setStyleSheet(_pill_style(self._color))
+        self.status_label.setTextColor(self._color, self._color)
         for chip in self.chip_labels:
-            color = QColor(state_color(str(chip.property("chipState") or "info"), tokens))
-            chip.setStyleSheet(_pill_style(color).replace("font-weight: 600;", "font-weight: 400;"))
+            state = str(chip.property("chipState") or "info")
+            chip.setStyleSheet(
+                _chip_style(state_color(state, tokens) if state in _LOUD_CHIPS else _muted_text(tokens), tokens)
+            )
+        try:
+            from ui.theme import get_theme_tokens, to_qcolor
+
+            tokens = tokens or get_theme_tokens()
+            self._surface = to_qcolor(tokens.surface_bg, "#0affffff")
+            self._surface_hover = to_qcolor(tokens.surface_bg_hover, "#12ffffff")
+        except Exception:
+            pass
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -414,12 +461,8 @@ class ResultCard(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
-        fill = QColor(self._color)
-        fill.setAlphaF(0.15 if self._hover or self.hasFocus() else 0.08)
-        painter.setBrush(fill)
+        painter.setBrush(self._surface_hover if self._hover or self.hasFocus() else self._surface)
         painter.drawRoundedRect(self.rect(), CARD_RADIUS, CARD_RADIUS)
-        painter.setBrush(self._color)
-        painter.drawRoundedRect(0, 12, 3, max(0, self.height() - 24), 1.5, 1.5)
         painter.end()
 
     def event(self, event) -> bool:
@@ -536,7 +579,7 @@ class _CounterTile(QWidget):
         layout.addWidget(_StateIcon("info", self, size=13, icon=counter.icon), 0, Qt.AlignmentFlag.AlignVCenter)
         self.value_label = StrongBodyLabel(str(counter.value), self)
         layout.addWidget(self.value_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addWidget(CaptionLabel(counter.caption, self), 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(mute(CaptionLabel(counter.caption, self)), 0, Qt.AlignmentFlag.AlignVCenter)
         self._anim = QVariantAnimation(self)
         self._anim.setStartValue(0.0)
         self._anim.setEndValue(1.0)
@@ -562,7 +605,7 @@ class _CounterTile(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(0, 0, 0, 14) if _is_light() else QColor(255, 255, 255, 13))
-        painter.drawRoundedRect(self.rect(), 8, 8)
+        painter.drawRoundedRect(self.rect(), 6, 6)
         painter.end()
 
 
@@ -829,13 +872,12 @@ class ResultDetailView(QWidget):
 
         header = QHBoxLayout()
         header.setSpacing(10)
-        self._icon = _StateIcon("info", self, size=22)
-        self._icon.setFixedSize(26, 26)
+        self._icon = BrandIcon("fa5s.globe", "", self, size=24)
         header.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
         self.title_label = SubtitleLabel("", self)
         header.addWidget(self.title_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.status_label = QLabel("", self)
-        self.status_label.setFixedHeight(22)
+        header.addSpacing(4)
+        self.status_label = BodyLabel("", self)
         header.addWidget(self.status_label, 0, Qt.AlignmentFlag.AlignVCenter)
         header.addStretch(1)
         self.copy_button = PushButton("Скопировать", self)
@@ -871,6 +913,8 @@ class ResultDetailView(QWidget):
             self.breadcrumb.blockSignals(False)
         self.title_label.setText(card.title)
         self.status_label.setText(card.status)
+        brand = site_brand(card.key.removeprefix("site:"), card.title) if card.site else None
+        self._icon.set_icon(brand.icon if brand else card.icon, brand.color if brand else "")
         for block in self.blocks:
             block.setParent(None)
             block.deleteLater()
@@ -887,8 +931,7 @@ class ResultDetailView(QWidget):
         if self._card is None:
             return
         color = QColor(card_color(self._card, tokens))
-        self._icon.set_icon(self._card.icon, color.name())
-        self.status_label.setStyleSheet(_pill_style(color))
+        self.status_label.setTextColor(color, color)
 
     def _on_breadcrumb(self, key: str) -> None:
         if key == self.ROOT_KEY:

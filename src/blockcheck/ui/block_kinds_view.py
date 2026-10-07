@@ -3,13 +3,14 @@
 Итог BlockCheck отвечает на вопрос «что не так». Здесь — ответ на вопрос
 «чем именно мешают»: сколько сайтов открывается, сколько закрыто по адресу
 (IP), сколько режут по имени сайта (SNI) и у скольких загрузка обрывается
-после 16 КБ. У каждого вида свой цвет — он один и тот же в полосе, на плитке,
-в заголовке группы проблем и в таблице сайтов.
+после 16 КБ. У каждого вида свой цвет — он один и тот же в полосе, в точке на
+плитке, в заголовке группы проблем и в таблице сайтов. Цвет — только метка:
+сами плитки нейтральные, чтобы экран читался как сводка, а не как светофор.
 
 - ``site_groups`` — чистый подсчёт по отчёту (без окон, проверяется тестом);
 - ``KindBar`` — полоса из цветных долей (общая ``ui.widgets.share_bar``);
 - ``KindTile`` — плитка вида: число (досчитывает от нуля), название и сайты;
-- ``KindsOverview`` — полоса и плитки вместе.
+- ``KindsOverview`` — полоса и плитки вместе; плитки делят ширину поровну.
 
 Анимация идёт меньше секунды после показа итога и подчиняется переключателю
 «живых анимаций».
@@ -44,6 +45,7 @@ from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import set_tooltip
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.share_bar import REVEAL_MS, ShareBar
+from ui.widgets.tone_group import paint_dot
 
 # Сайт открывается — не вид блокировки, но своя доля в полосе и своя плитка.
 GROUP_OPEN = "open"
@@ -54,21 +56,22 @@ TILE_STEP_MS = 80
 
 # Цвета видов: (тёмная тема, светлая тема). Три главных вида — красный,
 # оранжевый и фиолетовый — подобраны так, чтобы различаться и без названий.
+# Тона приглушённые: цвет здесь метка, а не сигнал тревоги.
 _COLORS: dict[str, tuple[str, str]] = {
-    GROUP_OPEN: ("#6ccb5f", "#0f7b0f"),
-    KIND_IP: ("#ff5c5c", "#c42b1c"),
-    KIND_SNI: ("#ffa033", "#a85d00"),
-    KIND_CUT: ("#b68cff", "#6a3fc8"),
-    KIND_STUB: ("#ff7eb6", "#b3266e"),
-    KIND_CERT: ("#f2c94c", "#7a5c00"),
-    KIND_DNS: ("#62b5ff", "#0f5fb5"),
-    KIND_QUIC: ("#4fd1d9", "#00707a"),
-    KIND_VOICE: ("#4fd1d9", "#00707a"),
-    KIND_NETWORK: ("#ff5c5c", "#c42b1c"),
-    KIND_SYSTEM: ("#ffa033", "#a85d00"),
-    KIND_UNCLEAR: ("#a3a8b3", "#5f6470"),
-    KIND_OTHER: ("#a3a8b3", "#5f6470"),
-    GROUP_UNKNOWN: ("#a3a8b3", "#5f6470"),
+    GROUP_OPEN: ("#5bb974", "#1a7f37"),
+    KIND_IP: ("#e5645d", "#b3261e"),
+    KIND_SNI: ("#d99a4e", "#955800"),
+    KIND_CUT: ("#a48be0", "#6a3fc8"),
+    KIND_STUB: ("#d17aa5", "#a3266a"),
+    KIND_CERT: ("#cdb15a", "#765a00"),
+    KIND_DNS: ("#6aa7de", "#0f5fb5"),
+    KIND_QUIC: ("#5bbac0", "#00707a"),
+    KIND_VOICE: ("#5bbac0", "#00707a"),
+    KIND_NETWORK: ("#e5645d", "#b3261e"),
+    KIND_SYSTEM: ("#d99a4e", "#955800"),
+    KIND_UNCLEAR: ("#9aa0aa", "#5f6470"),
+    KIND_OTHER: ("#9aa0aa", "#5f6470"),
+    GROUP_UNKNOWN: ("#9aa0aa", "#5f6470"),
 }
 
 _OPEN_TITLE = "Открываются"
@@ -179,6 +182,7 @@ class KindTile(QWidget):
     """Плитка вида: крупное число, название и сайты, которых это касается."""
 
     WIDTH = 248
+    MIN_WIDTH = 200
     HEIGHT = 60
 
     def __init__(self, group: SiteGroup, parent=None) -> None:
@@ -190,6 +194,7 @@ class KindTile(QWidget):
         self._color = QColor(_COLORS.get(group.key, _COLORS[KIND_OTHER])[0])
         self._text = QColor("#f2f2f2")
         self._muted = QColor("#a3a8b3")
+        self._surface = QColor(255, 255, 255, 10)
         self._anim = QVariantAnimation(self)
         self._anim.setStartValue(0.0)
         self._anim.setEndValue(float(group.count))
@@ -230,6 +235,7 @@ class KindTile(QWidget):
             tokens = tokens or get_theme_tokens()
             self._text = to_qcolor(tokens.fg, "#f2f2f2")
             self._muted = to_qcolor(tokens.fg_muted, "#a3a8b3")
+            self._surface = to_qcolor(tokens.surface_bg, "#0affffff")
         except Exception:
             pass
         self._color = QColor(kind_color(self._group.key, tokens))
@@ -240,17 +246,15 @@ class KindTile(QWidget):
         painter = QPainter(self)
         painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        fill = QColor(self._color)
-        fill.setAlphaF(0.13)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(fill)
-        painter.drawRoundedRect(rect, 8, 8)
+        painter.setBrush(self._surface)
+        painter.drawRoundedRect(rect, 6, 6)
 
         number_font = QFont(self.font())
-        number_font.setPixelSize(26)
+        number_font.setPixelSize(24)
         number_font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(number_font)
-        painter.setPen(self._color)
+        painter.setPen(self._text)
         number_width = 52
         painter.drawText(
             QRectF(rect.left() + 6, rect.top(), number_width, rect.height()),
@@ -259,17 +263,20 @@ class KindTile(QWidget):
         )
 
         left = rect.left() + 6 + number_width + 4
+        # Цветная точка перед названием — та же, что у группы проблем ниже.
+        paint_dot(painter, QRectF(left, rect.top() + 15, 8, 8), self._color)
+        painter.setPen(self._text)
+        title_left = left + 8 + 7
         width = rect.right() - left - 10
         title_font = QFont(self.font())
         title_font.setPixelSize(13)
         title_font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(title_font)
-        painter.setPen(self._text)
         metrics = QFontMetrics(title_font)
         painter.drawText(
-            QRectF(left, rect.top() + 10, width, 18),
+            QRectF(title_left, rect.top() + 10, width - 15, 18),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            metrics.elidedText(self._group.title, Qt.TextElideMode.ElideRight, int(width)),
+            metrics.elidedText(self._group.title, Qt.TextElideMode.ElideRight, int(width - 15)),
         )
         names_font = QFont(self.font())
         names_font.setPixelSize(12)
@@ -307,6 +314,25 @@ class KindsOverview(QWidget):
     def tiles(self) -> list[KindTile]:
         return list(self._tiles)
 
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._fit_tiles()
+
+    def _fit_tiles(self) -> None:
+        """Плитки делят строку поровну и встают вровень с краями полосы."""
+        # Запас в пару точек: раскладка переносит плитку, если та встаёт край в край.
+        available = self.contentsRect().width() - 2
+        if not self._tiles or available <= 0:
+            return
+        gap = self._flow.horizontalSpacing()
+        columns = max(1, min(len(self._tiles), (available + gap) // (KindTile.MIN_WIDTH + gap)))
+        width = (available - gap * (columns - 1)) // columns
+        if self._tiles[0].width() == width:
+            return
+        for tile in self._tiles:
+            tile.setFixedWidth(width)
+        self._tiles_host.updateGeometry()
+
     def clear(self) -> None:
         self._flow.takeAllWidgets()
         for tile in self._tiles:
@@ -329,6 +355,7 @@ class KindsOverview(QWidget):
         self.bar.set_groups(groups, animate=animate)
         set_state_text(self, groups_state_text(groups))
         self._tiles_host.setVisible(bool(self._tiles))
+        self._fit_tiles()
         self._tiles_host.updateGeometry()
 
 
