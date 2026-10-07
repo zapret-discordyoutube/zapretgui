@@ -1,5 +1,5 @@
 # Preset: white sni (circular)
-# BuiltinVersion: 2.44
+# BuiltinVersion: 2.45
 # IconColor: #a8c5ff
 
 --lua-init=@lua/zapret-lib.lua
@@ -12,7 +12,7 @@
 --lua-init=@lua/fakemultidisorder.lua
 
 --ctrack-disable=0
---writable
+--writable=user/winws2
 --ipcache-lifetime=8400
 --ipcache-hostname=1
 
