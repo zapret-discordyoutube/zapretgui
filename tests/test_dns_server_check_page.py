@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QEvent, QRect, QSize, Qt
+from PyQt6.QtCore import QEvent, QSize, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QApplication, QStyleOptionViewItem
 
@@ -13,6 +13,9 @@ from blockcheck.ui.page import BlockcheckPage
 from dns import server_check as sc
 from dns import server_check_plans as plans
 from dns import server_check_verdict as verdicts
+from dns.dns_providers import DNS_PROVIDERS
+from dns.ui import server_check_cards as cards_module
+from dns.ui.server_check_details import details_html
 from dns.ui.server_check_cards import (
     _CARD_HEIGHT,
     _COLUMN_MIN_WIDTH,
@@ -22,6 +25,7 @@ from dns.ui.server_check_cards import (
     StatusFilter,
 )
 from dns.ui.server_check_page import ServerCheckPage
+from ui.widgets.fluent_item_tooltip import FLUENT_ITEM_TOOLTIP_ROLE
 from utils.dns_wire import FAILURE_REFUSED, FAILURE_TIMEOUT
 from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_IDLE
 from utils.ip_owner import IpOwner
@@ -334,6 +338,45 @@ class CardPlanTests(unittest.TestCase):
         self.assertEqual([card.status for card in cards], [plans.CARD_OK, plans.CARD_SILENT])
 
 
+class DetailsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def test_details_tell_everything_about_every_address(self) -> None:
+        fact = sc.DomainFact("rutor.info", udp_status="nxdomain", secure_status="ok", secure_ips=("6.6.6.6",))
+        blocked = sc.Observation(
+            target=GOOGLE, cells=BLOCKED.cells, findings=BLOCKED.findings, udp_egress="4.4.4.4", secure_egress="2.2.2.2", domains=(fact,)
+        )
+        details = plans.build_details(_report(rows=(blocked, HEALTHY)), "Google DNS")
+
+        self.assertEqual([address.address for address in details.addresses], ["8.8.8.8", "8.8.4.4"])
+        first = details.addresses[0]
+        self.assertEqual(first.status, plans.CARD_NETWORK)
+        # Причина отказа — словами, а не одним коротким словом из карточки.
+        self.assertIn(("DoT 853", "молчит", plans.CELL_FAIL, "сервер молчит"), first.cells)
+        self.assertIn((sc.LEVEL_WARN, "Шифрованный DNS по DoH закрыт: порт закрыт"), first.findings)
+        self.assertEqual(first.who[0], "Обычные запросы выполняет: 4.4.4.4 (NSDI)")
+        self.assertEqual(first.domains, (("rutor.info", "сайта нет", "6.6.6.6", True),))
+        self.assertEqual(details.addresses[1].status, plans.CARD_OK)
+        # Текст для кнопки «Скопировать» — тот же рассказ без разметки.
+        self.assertIn("Google DNS — Блокируется по дороге", details.text)
+        self.assertIn("DoT 853: сервер молчит", details.text)
+        self.assertIsNone(plans.build_details(_report(), "Нет такого"))
+
+    def test_details_markup_escapes_text_and_marks_the_difference(self) -> None:
+        odd = sc.CheckTarget("Свой <b>сервер</b>", "10.0.0.53")
+        fact = sc.DomainFact("rutor.info", udp_status="nxdomain", secure_status="ok", secure_ips=("6.6.6.6",))
+        row = _row(odd, icmp=_ok(1.0), udp=_ok(2.0), tcp=_ok(3.0), dot=_ok(4.0), doh=_ok(5.0), domains=(fact,))
+        html = details_html(plans.build_details(_report(rows=(row,), total=1, findings=()), odd.provider))
+
+        self.assertIn("Свой &lt;b&gt;сервер&lt;/b&gt;", html)
+        self.assertNotIn("<b>сервер</b>", html)
+        self.assertIn("Что сервер ответил про контрольные сайты", html)
+        self.assertIn("сайта нет</span>", html)
+        self.assertIn("10.0.0.53", html)
+
+
 class CardsViewTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -360,28 +403,28 @@ class CardsViewTests(unittest.TestCase):
         view.set_filter("что-то не то")
         self.assertEqual((view.filter(), len(view.cards())), (FILTER_ALL, 7))
 
-    def test_click_opens_addresses_and_list_is_as_tall_as_its_cards(self) -> None:
+    def test_click_asks_to_open_details_and_list_is_as_tall_as_its_cards(self) -> None:
         """Своей прокрутки у списка нет: он вытянут по содержимому, прокручивает страница."""
         view = self._view()
-        delegate, index = view.itemDelegate(), view.model().index(5)
-        option = QStyleOptionViewItem()
-        option.rect = QRect(0, 0, 900, _CARD_HEIGHT)
-        closed = delegate.sizeHint(option, index).height()
+        view.viewport().resize(_COLUMN_MIN_WIDTH + 100, 400)
+        view._relayout_for_width()
+        frame = 2 * view.frameWidth()
         self.assertEqual(view.columns(), 1)
-        self.assertEqual((closed, view.maximumHeight()), (_CARD_HEIGHT, 7 * _CARD_HEIGHT + 2 * view.frameWidth()))
-        self.assertEqual(view.minimumHeight(), view.maximumHeight())
+        self.assertEqual((view.minimumHeight(), view.maximumHeight()), (7 * _CARD_HEIGHT + frame,) * 2)
 
-        view.toggle(index)
-        self.assertTrue(view.is_expanded(5))
-        # У «Медленного» два адреса: карточка выросла на две строки, а с ней и весь список.
-        opened = delegate.sizeHint(option, index).height()
-        self.assertGreater(opened, closed + 40)
-        self.assertEqual(view.maximumHeight(), 6 * _CARD_HEIGHT + opened + 2 * view.frameWidth())
+        # Нажатие и Enter не раскрывают карточку на месте, а просят открыть подробности по серверу.
+        opened: list[str] = []
+        view.opened.connect(opened.append)
+        view.clicked.emit(view.model().index(5))
+        view.activated.emit(view.model().index(0))
+        self.assertEqual(opened, ["Медленный", "Закрытый"])
+        self.assertEqual(view.maximumHeight(), 7 * _CARD_HEIGHT + frame)
+        self.assertIn("Нажмите, чтобы открыть подробности", view.model().index(5).data(FLUENT_ITEM_TOOLTIP_ROLE))
 
         # Много серверов — список растёт вместе с ними, а не прячет их под своей прокруткой.
         rows = tuple(row for number in range(60) for row in _server(f"Сервер {number}", f"10.1.{number}.1"))
         view.set_cards(plans.build_cards(_report(rows=rows, total=60, findings=())))
-        self.assertEqual(view.maximumHeight(), 60 * _CARD_HEIGHT + 2 * view.frameWidth())
+        self.assertEqual(view.maximumHeight(), 60 * _CARD_HEIGHT + frame)
         self.assertEqual(view.verticalScrollBarPolicy(), Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
     def test_wide_window_puts_cards_in_columns(self) -> None:
@@ -398,14 +441,11 @@ class CardsViewTests(unittest.TestCase):
         self.assertLess(2 * view.column_width(), view.viewport().width())
         self.assertGreater(2 * view.column_width(), view.viewport().width() - 4)
         self.assertEqual((view.is_last_column(0), view.is_last_column(1)), (False, True))
-        # Семь карточек в две колонки — четыре строки.
+        # Семь карточек в две колонки — четыре ряда одного роста.
         self.assertEqual(view.maximumHeight(), 4 * _CARD_HEIGHT + frame)
-
-        # Раскрытая карточка делает выше всю свою строку, но не соседние.
-        view.toggle(view.model().index(5))
         option = QStyleOptionViewItem()
-        opened = view.itemDelegate().sizeHint(option, view.model().index(5)).height()
-        self.assertEqual(view.maximumHeight(), 3 * _CARD_HEIGHT + opened + frame)
+        size = view.itemDelegate().sizeHint(option, view.model().index(5))
+        self.assertEqual((size.width(), size.height()), (view.column_width(), _CARD_HEIGHT))
 
         # Очень широкое окно — не больше трёх колонок: карточки не дробятся в мелочь.
         view.viewport().resize(6000, 400)
@@ -438,16 +478,52 @@ class CardsViewTests(unittest.TestCase):
         view.leaveEvent(QEvent(QEvent.Type.Leave))
         self.assertEqual(view.hovered_row(), -1)
 
-    def test_cards_paint_in_both_states(self) -> None:
+    def test_cards_paint_with_icon_and_road_for_every_verdict(self) -> None:
         view = self._view()
-        view.toggle(view.model().index(0))
-        pixmap = QPixmap(QSize(1000, 400))
+        pixmap = QPixmap(QSize(1000, 700))
         pixmap.fill()
         view.render(pixmap)
-        # Делегат отработал без ошибок и нарисовал цветное: полоски выводов, точки, плашки.
+        # Делегат отработал без ошибок на всех выводах и нарисовал цветное: значки, дорожки, точки, плашки.
         image = pixmap.toImage()
-        colors = {image.pixel(x, y) for x in range(0, 1000, 3) for y in range(0, 400, 3)}
-        self.assertGreater(len(colors), 12)
+        colors = {image.pixel(x, y) for x in range(0, 1000, 3) for y in range(0, 700, 3)}
+        self.assertGreater(len(colors), 20)
+        # Значок и цвет сервера приходят из каталога.
+        cloudflare = sc.build_targets(DNS_PROVIDERS)[0]
+        self.assertTrue(cloudflare.icon and cloudflare.color.startswith("#"), cloudflare)
+        (card,) = plans.build_cards(_report(rows=(_row(cloudflare, icmp=_ok(1), udp=_ok(1), tcp=_ok(1), dot=_ok(1), doh=_ok(1)),), total=1, findings=()))
+        self.assertEqual((card.icon, card.color), (cloudflare.icon, cloudflare.color))
+
+    def test_road_runs_only_while_cards_are_on_screen_and_repaints_only_its_strip(self) -> None:
+        view = self._view()
+        self.assertFalse(view.is_road_running())
+        # Неподвижная картинка: без такта кадров запросы стоят на месте.
+        self.assertEqual(view.road_phase(0), view.road_phase(0))
+
+        view.show()
+        self._app.processEvents()
+        self.assertTrue(view.is_road_running())
+
+        # Первый кадр после показа Qt рисует целиком (раскладка списка), дальше — только полоски.
+        view._on_road_frame()
+        self._app.processEvents()
+
+        # Кадр дорожек просит перерисовать только полоски, и делегат рисует только их.
+        with patch.object(view.itemDelegate(), "_road", wraps=view.itemDelegate()._road) as road, patch(
+            "dns.ui.server_check_cards.profile_icon_pixmap", wraps=cards_module.profile_icon_pixmap
+        ) as icon:
+            view._on_road_frame()
+            self.assertFalse(view._road_region.isEmpty())
+            self._app.processEvents()
+            self.assertGreater(road.call_count, 0)
+            icon.assert_not_called()
+
+        # Живые анимации выключены — такт останавливается, картинка остаётся.
+        with patch("dns.ui.server_check_cards.are_live_animations_enabled", return_value=False):
+            view._on_road_frame()
+        self.assertFalse(view.is_road_running())
+
+        view.hide()
+        self.assertFalse(view.is_road_running())
 
     def test_bar_and_filter_show_how_bad_it_is(self) -> None:
         counts = plans.count_cards(plans.build_cards(_mixed_report()))

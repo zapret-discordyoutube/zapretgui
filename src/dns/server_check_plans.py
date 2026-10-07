@@ -50,6 +50,10 @@ from utils.dns_wire import (
     FAILURE_TIMEOUT,
     FAILURE_TLS,
     FAILURE_UNREACHABLE,
+    STATUS_EMPTY,
+    STATUS_ERROR,
+    STATUS_NXDOMAIN,
+    STATUS_TIMEOUT,
     TRANSPORT_DOH,
     TRANSPORT_DOT,
     TRANSPORT_TCP,
@@ -182,11 +186,38 @@ class ServerCard:
     dots: tuple[tuple[str, ...], ...]
     addresses: tuple[ServerRow, ...]
     tooltip: str
+    # Значок и цвет сервера из каталога; пусто — у своего сервера пользователя.
+    icon: str = ""
+    color: str = ""
 
     @property
     def spoken(self) -> str:
         parts = [self.server, CARD_TITLES[self.status], self.note, self.best, f"адресов: {len(self.addresses)}"]
         return ". ".join(part for part in parts if part)
+
+
+@dataclass(frozen=True, slots=True)
+class AddressDetails:
+    """Всё, что известно об одном адресе, — для окна подробностей."""
+
+    address: str
+    status: str
+    # (способ связи, что показал, CELL_*, причина словами)
+    cells: tuple[tuple[str, str, str, str], ...]
+    # (важность LEVEL_*, фраза целиком)
+    findings: tuple[tuple[str, str], ...]
+    # Кто на самом деле выполняет запросы — строками.
+    who: tuple[str, ...]
+    # (сайт, ответ обычным путём, ответ шифрованным, расходятся ли)
+    domains: tuple[tuple[str, str, str, bool], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ServerDetails:
+    card: ServerCard
+    addresses: tuple[AddressDetails, ...]
+    # Тот же рассказ простым текстом — для кнопки «Скопировать».
+    text: str
 
 
 def format_ms(value: float | None) -> str:
@@ -361,11 +392,69 @@ def build_cards(report: ServerCheckReport) -> tuple[ServerCard, ...]:
                 if transport != TRANSPORT_ICMP
             ),
             addresses=addresses,
-            tooltip=f"{CARD_TITLES[status]}. {CARD_HINTS[status]}\n\n" + "\n\n".join(row.tooltip for row in addresses),
+            tooltip=f"{CARD_TITLES[status]}. {CARD_HINTS[status]}\nНажмите, чтобы открыть подробности по адресам.",
+            icon=rows[0].target.icon,
+            color=rows[0].target.color,
         )
         cards.append((CARD_ORDER.index(status), speed, card))
     cards.sort(key=lambda item: (item[0], item[1], item[2].server.lower()))
     return tuple(card for _order, _time, card in cards)
+
+
+# Что сервер ответил про сайт, когда адресов в ответе нет, — словами вместо служебных названий.
+_ANSWER_WORDS = {
+    STATUS_NXDOMAIN: "сайта нет",
+    STATUS_TIMEOUT: "нет ответа",
+    STATUS_EMPTY: "пустой ответ",
+    STATUS_ERROR: "ошибка",
+}
+
+
+def _answer_text(status: str, ips: tuple[str, ...]) -> str:
+    return ", ".join(ips) if ips else _ANSWER_WORDS.get(status, status or "—")
+
+
+def build_details(report: ServerCheckReport, server: str) -> ServerDetails | None:
+    """Подробности по одному серверу: каждый адрес, каждый способ связи, все выводы целиком."""
+    card = next((item for item in build_cards(report) if item.server == server), None)
+    if card is None:
+        return None
+    intercepted = any(finding.code == CODE_INTERCEPTED for finding in report.findings)
+    addresses: list[AddressDetails] = []
+    for row in report.rows:
+        if row.target.provider != server:
+            continue
+        cells = []
+        for transport in TRANSPORTS:
+            cell = row.cell(transport)
+            reason = cell.reason if cell.state in (STATE_FAIL, STATE_SKIP) or cell.unstable else ""
+            cells.append((TRANSPORT_TITLES[transport], cell_text(transport, cell), cell_level(transport, cell), reason))
+        who = []
+        if row.udp_egress or row.secure_egress:
+            who.append(f"Обычные запросы выполняет: {_owner_text(report, row.udp_egress) or 'не узнали'}")
+            who.append(f"Шифрованные запросы выполняет: {_owner_text(report, row.secure_egress) or 'не узнали'}")
+        addresses.append(
+            AddressDetails(
+                address=row.target.address,
+                status=_address_status(row, intercepted),
+                cells=tuple(cells),
+                findings=tuple((finding.level, _sentence(finding.text)) for finding in row.findings),
+                who=tuple(who),
+                domains=tuple(
+                    (
+                        fact.domain,
+                        _answer_text(fact.udp_status, fact.udp_ips),
+                        _answer_text(fact.secure_status, fact.secure_ips),
+                        fact.udp_status != fact.secure_status or fact.udp_ips != fact.secure_ips,
+                    )
+                    for fact in row.domains
+                ),
+            )
+        )
+    lines = [f"{server} — {CARD_TITLES[card.status]}", CARD_HINTS[card.status]]
+    for row in card.addresses:
+        lines.extend(["", row.tooltip])
+    return ServerDetails(card=card, addresses=tuple(addresses), text="\n".join(lines))
 
 
 def count_cards(cards) -> dict[str, int]:
@@ -453,8 +542,11 @@ __all__ = [
     "CARD_PARTIAL",
     "CARD_SILENT",
     "CARD_TITLES",
+    "AddressDetails",
     "ServerCard",
+    "ServerDetails",
     "build_cards",
+    "build_details",
     "count_cards",
     "TRANSPORT_TITLES",
     "ServerRow",

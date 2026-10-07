@@ -142,6 +142,9 @@ class CheckTarget:
     doh_host: str = ""
     doh_port: int = 443
     doh_path: str = "/dns-query"
+    # Значок и цвет сервера из каталога — только для показа.
+    icon: str = ""
+    color: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +281,8 @@ def build_targets(providers: dict, *, ipv6: bool = False) -> tuple[CheckTarget, 
                         doh_host=doh.hostname or "",
                         doh_port=doh.port or 443,
                         doh_path=doh.path or "/dns-query",
+                        icon=str(data.get("icon") or "").strip(),
+                        color=str(data.get("color") or "").strip(),
                     )
                 )
     return tuple(targets)

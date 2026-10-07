@@ -15,6 +15,7 @@ from app.ui_texts import tr as tr_catalog
 from blockcheck.ui.fun_texts import phrases
 from dns.ui.domain_lookup_page import _InfoLines
 from dns.ui.server_check_cards import FILTER_ALL, ServerCardsView, SeverityBar, StatusFilter
+from dns.ui.server_check_details import show_server_details
 from dns.ui.server_check_widgets import ServerCheckVerdictPanel
 from log.log import log
 from ui.accessibility import set_control_accessibility
@@ -93,6 +94,7 @@ class ServerCheckPage(BasePage):
         self.servers_card.add_widget(self.status_filter)
         self.cards = ServerCardsView(self.servers_card)
         self.status_filter.changed.connect(self.cards.set_filter)
+        self.cards.opened.connect(self._open_details)
         self.servers_card.add_widget(self.cards)
         self.servers_card.setVisible(False)
         self.layout.addWidget(self.servers_card)
@@ -242,6 +244,13 @@ class ServerCheckPage(BasePage):
             self.verdict_panel.show_progress(
                 self._progress_title(len(report.rows), report.total), len(report.rows), report.total, tally
             )
+
+    def _open_details(self, server: str) -> None:
+        if self._report is None:
+            return
+        details = plans.build_details(self._report, server)
+        if details is not None:
+            show_server_details(self.window(), details)
 
     def _open_report(self) -> None:
         if self._report is None:
