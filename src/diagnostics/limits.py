@@ -1,0 +1,64 @@
+"""Сроки, пределы и размеры проверки BlockCheck — в одном месте.
+
+Здесь только числа и пояснения к ним: сколько ждать ответа, сколько адресов
+пробовать, сколько сайтов проверять одновременно. Логики нет.
+"""
+
+from __future__ import annotations
+
+__all__ = [
+    "DISCOVERY_TIMEOUT",
+    "DNS_ATTEMPTS",
+    "DNS_TIMEOUT",
+    "DOH_TIMEOUT",
+    "FILTER_MAX_TTL",
+    "FREEZE_READ_TIMEOUT",
+    "HTTPS_TIMEOUT",
+    "REACH_ADDRESSES",
+    "REACH_ATTEMPTS",
+    "READ_TIMEOUT",
+    "RETRY_PAUSE_S",
+    "RUN_DEADLINE",
+    "RUN_DEADLINE_ALL",
+    "RUN_DEADLINE_FULL",
+    "SITES_AT_ONCE",
+    "SOURCE_HOSTS",
+    "SOURCE_REFERENCE",
+    "SOURCE_SYSTEM",
+    "VIDEO_SERVERS",
+]
+
+DNS_TIMEOUT = 4.0
+# Провайдер подменяет DNS не каждый раз: один запрос давал то «подмена», то
+# «всё честно». Три запроса подряд ловят и такую подмену.
+DNS_ATTEMPTS = 3
+DOH_TIMEOUT = 5.0
+HTTPS_TIMEOUT = 5.0
+READ_TIMEOUT = 3.0
+REACH_ATTEMPTS = 2
+# Сколько разных адресов сайта пробовать, прежде чем сказать «не открывается».
+# Браузер перебирает все адреса из ответа DNS; у крупных сайтов их несколько,
+# и закрытым бывает только один.
+REACH_ADDRESSES = 4
+# Пауза перед повтором на единственном адресе: потерянный пакет не должен
+# выглядеть блокировкой.
+RETRY_PAUSE_S = 1.0
+# Сколько видеосерверов YouTube пробовать: плеер тоже переключается на запасные.
+VIDEO_SERVERS = 3
+DISCOVERY_TIMEOUT = 6.0
+# Верхняя граница на всю проверку: дальше недопроверенное помечается как
+# «нет ответа», а не подвешивает окно. Для «Всех сайтов» — дольше: там ещё
+# голосовые серверы и загрузка файлов для проверки обрыва.
+RUN_DEADLINE = 30.0
+# Сколько сайтов проверять одновременно.
+SITES_AT_ONCE = 14
+RUN_DEADLINE_ALL = 45.0
+# Полная проверка ждёт ещё DNS-серверы и поиск места фильтра.
+RUN_DEADLINE_FULL = 180.0
+FILTER_MAX_TTL = 20
+FREEZE_READ_TIMEOUT = 4.0
+
+# Откуда взят адрес, по которому проверяли сайт.
+SOURCE_HOSTS = "hosts"
+SOURCE_SYSTEM = "system"
+SOURCE_REFERENCE = "reference"

@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from diagnostics import block_kind as bk
-from diagnostics import engine
+from diagnostics import engine, report_text
 from diagnostics.tls_probe import KIND_CONNECT, KIND_OK, KIND_TIMEOUT, ProbeResult
 from diagnostics.verdict import ReachState, judge_reach
 from utils.windows_dns_query import DnsAnswer
@@ -61,7 +61,7 @@ class ReachRecheckTests(unittest.TestCase):
         self.assertTrue(probe.hosts_stale)
         self.assertNotEqual(probe.reach_source, engine.SOURCE_HOSTS)
         self.assertEqual(probe.kind, "")
-        self.assertIn("запись в нём устарела", engine._reach_text(probe))
+        self.assertIn("запись в нём устарела", report_text.reach_text(probe))
 
     def test_hosts_address_alone_never_proves_an_address_ban(self) -> None:
         """Других адресов узнать не удалось: проверена запись в hosts, а не сайт."""
@@ -91,7 +91,7 @@ class ReachRecheckTests(unittest.TestCase):
         self.assertEqual(probe.tried, tuple((ip, KIND_CONNECT) for ip in asked))
         self.assertTrue(probe.address_confirmed)
         self.assertEqual(probe.kind, bk.KIND_IP)
-        self.assertIn("не ответил ни один из 3 адресов", engine._reach_text(probe))
+        self.assertIn("не ответил ни один из 3 адресов", report_text.reach_text(probe))
 
     def test_single_address_is_retried_after_a_pause(self) -> None:
         """Потерянный пакет: первая попытка не прошла, повтор на том же адресе — прошёл."""
@@ -192,7 +192,7 @@ class ReachRecheckTests(unittest.TestCase):
 
     def test_report_tells_which_addresses_were_tried(self) -> None:
         probe, asked = self._reach(_dead)
-        report = engine._target_report(probe)
+        report = report_text.target_report(probe)
 
         self.assertEqual(report["tried"], [{"address": ip, "result": "connect"} for ip in asked])
         self.assertTrue(report["address_confirmed"])

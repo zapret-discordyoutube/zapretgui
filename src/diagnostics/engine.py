@@ -37,8 +37,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field
+from concurrent.futures import Future
 from datetime import datetime
 
 from diagnostics import (
@@ -53,6 +52,31 @@ from diagnostics import (
     upload_probe,
     volume_probe,
 )
+from diagnostics import problems as problem_rules
+from diagnostics import report_text
+from diagnostics.limits import (
+    DISCOVERY_TIMEOUT,
+    DNS_ATTEMPTS,
+    DNS_TIMEOUT,
+    DOH_TIMEOUT,
+    FILTER_MAX_TTL,
+    FREEZE_READ_TIMEOUT,
+    HTTPS_TIMEOUT,
+    REACH_ADDRESSES,
+    READ_TIMEOUT,
+    RETRY_PAUSE_S,
+    RUN_DEADLINE,
+    RUN_DEADLINE_ALL,
+    RUN_DEADLINE_FULL,
+    SITES_AT_ONCE,
+    SOURCE_HOSTS,
+    SOURCE_REFERENCE,
+    SOURCE_SYSTEM,
+    VIDEO_SERVERS,
+)
+from diagnostics.run_context import Probe as _Probe
+from diagnostics.run_context import Run as _Run
+from diagnostics.run_context import Stopped as _Stopped
 from diagnostics.services import (
     GOOGLEVIDEO_FALLBACK_HOST,
     SCOPE_ALL,
@@ -73,26 +97,20 @@ from diagnostics.tls_probe import (
     https_get,
 )
 from diagnostics.verdict import (
-    ADVICE_DNS as _ADVICE_DNS,
-    ADVICE_VIA_ZAPRET as _ADVICE_VIA_ZAPRET,
     FREEZE_MAX_BYTES,
-    advice_geo_site as _advice_geo_site,
-    DnsJudgement,
     DnsState,
     Level,
     ReachState,
     ServiceVerdict,
     TargetOutcome,
-    describe_reach,
     judge_dns,
     judge_reach,
     summarize_service,
 )
 from utils.bypass_tools import running_bypass_tools
 from utils.dns_reference import REFERENCE_RESOLVERS, ReferenceResolver
-from utils.dns_wire import FAILURE_CANCELLED, TYPE_A, TYPE_AAAA, DnsQueryResult, failure_text, query_doh
+from utils.dns_wire import TYPE_A, TYPE_AAAA, DnsQueryResult, query_doh
 from utils.ip_owner import lookup_ip_owner
-from utils.socket_cancel import SocketCancel
 from utils.windows_dns_query import (
     DNS_STATUS_NAME_ERROR,
     ERROR_CANCELLED,
@@ -112,42 +130,8 @@ __all__ = [
 Emit = Callable[[str], None]
 ShouldStop = Callable[[], bool]
 
-DNS_TIMEOUT = 4.0
-# Провайдер подменяет DNS не каждый раз: один запрос давал то «подмена», то
-# «всё честно». Три запроса подряд ловят и такую подмену.
-DNS_ATTEMPTS = 3
-DOH_TIMEOUT = 5.0
-HTTPS_TIMEOUT = 5.0
-READ_TIMEOUT = 3.0
-REACH_ATTEMPTS = 2
-# Сколько разных адресов сайта пробовать, прежде чем сказать «не открывается».
-# Браузер перебирает все адреса из ответа DNS; у крупных сайтов их несколько,
-# и закрытым бывает только один.
-REACH_ADDRESSES = 4
-# Пауза перед повтором на единственном адресе: потерянный пакет не должен
-# выглядеть блокировкой.
-RETRY_PAUSE_S = 1.0
-# Сколько видеосерверов YouTube пробовать: плеер тоже переключается на запасные.
-VIDEO_SERVERS = 3
-DISCOVERY_TIMEOUT = 6.0
-# Верхняя граница на всю проверку: дальше недопроверенное помечается как
-# «нет ответа», а не подвешивает окно. Для «Всех сайтов» — дольше: там ещё
-# голосовые серверы и загрузка файлов для проверки обрыва.
-RUN_DEADLINE = 30.0
-# Сколько сайтов проверять одновременно.
-SITES_AT_ONCE = 14
-RUN_DEADLINE_ALL = 45.0
-# Полная проверка ждёт ещё DNS-серверы и поиск места фильтра.
-RUN_DEADLINE_FULL = 180.0
-FILTER_MAX_TTL = 20
-FREEZE_READ_TIMEOUT = 4.0
 
 
-def _timed_out_line(deadline: float) -> str:
-    return (
-        f"⚠️ Часть проверок не уложилась в {deadline:.0f} с и была прервана — "
-        "их результат неизвестен."
-    )
 
 # Сколько тела ответа читать, чтобы заметить обрыв после ~16 КБ (ТСПУ режет
 # соединение с зарубежными CDN ровно на этом объёме).
@@ -159,9 +143,6 @@ DNS_TYPE_AAAA = TYPE_AAAA
 _WATCH_PAGE = "/watch?v=jNQXAC9IVRw&hl=en"
 _WATCH_PAGE_MAX_BYTES = 2_000_000
 
-SOURCE_HOSTS = "hosts"
-SOURCE_SYSTEM = "system"
-SOURCE_REFERENCE = "reference"
 
 
 # Шаги хода проверки: что и в каком порядке показывает экран, пока она идёт.
@@ -182,185 +163,10 @@ PROGRESS_STEPS = (STEP_SITES, STEP_HOSTINGS, STEP_VOICE, STEP_IPV6, STEP_SYSTEM,
 _WORKERS_PER_TARGET = 24 + 2 * len(REFERENCE_RESOLVERS)
 
 
-class _Stopped(Exception):
-    pass
 
 
-@dataclass(slots=True)
-class _Probe:
-    target: Target
-    service: str
-    host: str
-    discovery_note: str = ""
-    dns: DnsAnswer = field(default_factory=DnsAnswer)
-    # Сколько из DNS_ATTEMPTS запросов получили «такого сайта нет».
-    dns_nxdomain: int = 0
-    hosts_ips: tuple[str, ...] = ()
-    reference_ips: tuple[str, ...] = ()
-    reference_ok: bool = False
-    reference_ipv6: tuple[str, ...] = ()
-    # HTTPS-запрос к адресу из hosts или DNS системы (проверка сертификата).
-    local_check: ProbeResult | None = None
-    # DNS ответил и адресом из эталона, и другим: запрос к этому другому
-    # адресу решает, CDN это или подмена «через раз».
-    suspect_check: ProbeResult | None = None
-    # Итоговый запрос «открывается ли» и откуда взят его адрес.
-    reach: ProbeResult | None = None
-    reach_source: str = ""
-    attempts: int = 0
-    # Была ли запасная попытка по IPv6 и чем она кончилась.
-    ipv6_result: ProbeResult | None = None
-    judgement: DnsJudgement | None = None
-    reach_state: ReachState = ReachState.UNKNOWN
-    # Как именно блокируют (по имени сайта, по адресу, страницей провайдера), если удалось выяснить.
-    cause: block_cause.Cause | None = None
-    # Проходит ли QUIC (UDP 443) к этому сайту. None — не проверяли или проверку сняли.
-    quic: quic_probe.QuicVerdict | None = None
-    # Проходит ли по одному соединению больше 16 КБ. None — не проверяли:
-    # сайт не открылся или главная страница и так больше.
-    volume: volume_probe.VolumeVerdict | None = None
-    # Тот же адрес по TLS 1.2, TLS 1.3 и HTTP отдельно. Пусто — не проверяли.
-    protocols: tuple[protocol_probe.ProtocolLine, ...] = ()
-    # Все попытки основного запроса по порядку: (адрес, исход).
-    tried: tuple[tuple[str, str], ...] = ()
-    # Все попытки кончились одинаково: ответа на соединение не было вовсе.
-    tried_silent: bool = False
-    # Адрес из файла hosts не ответил, а настоящий адрес сайта открылся.
-    hosts_stale: bool = False
-
-    @property
-    def address_confirmed(self) -> bool:
-        """Несоединение перепроверено: молчат все адреса сайта, и другим путём он не открылся.
-
-        Только тогда оно называется «баном по адресу». Одно неудачное соединение
-        бывает из-за устаревшей записи в hosts, потерянного пакета или антивируса.
-        """
-        if not self.tried or any(kind != KIND_CONNECT for _ip, kind in self.tried):
-            return False
-        # Отказ адреса и ошибка системы (нет сети, запрет сетевого экрана) — не молчание:
-        # так фильтр провайдера адреса не закрывает.
-        if not self.tried_silent:
-            return False
-        # Нужна перепроверка: второй адрес или повтор на том же после паузы.
-        if len(self.tried) < 2:
-            return False
-        # Адреса только из hosts — это проверка записи в hosts, а не сайта.
-        if self.hosts_ips and {ip for ip, _kind in self.tried} <= set(self.hosts_ips):
-            return False
-        # QUIC к тому же адресу отвечает — дорога до адреса открыта, браузер сайт откроет.
-        if self.quic is not None and self.quic.code == quic_probe.QUIC_OK:
-            return False
-        return True
-
-    @property
-    def kind(self) -> str:
-        """Вид блокировки: по адресу, по имени сайта, обрыв после 16 КБ… Пусто — сайт открывается."""
-        return block_kind.site_kind(
-            self.reach_state.value,
-            self.cause.code if self.cause else "",
-            address_confirmed=self.address_confirmed,
-        )
 
 
-class _Run:
-    """Общие для одного прогона пул потоков, дедлайн и отмена.
-
-    «Стоп» пользователя и истёкший общий лимит — разные вещи: после «Стопа»
-    отчёт не печатается, а по лимиту незавершённые запросы снимаются, и отчёт
-    выводится с пометкой, что часть проверок не успела.
-    """
-
-    def __init__(self, should_stop: ShouldStop | None, *, workers: int, deadline: float | None = None) -> None:
-        self._should_stop = should_stop
-        self._user_stopped = False
-        self.timed_out = False
-        self.probe_cancel = SocketCancel()
-        # Сервер проверки обрыва → адрес, по которому к нему ходили.
-        self.freeze_addresses: dict[str, str] = {}
-        self._reference_lock = threading.Lock()
-        # Эталонный сервер → [сколько раз ответил, сколько раз нет, последняя причина].
-        self._reference: dict[ReferenceResolver, list] = {}
-        self.deadline_seconds = RUN_DEADLINE if deadline is None else float(deadline)
-        self.deadline = time.monotonic() + self.deadline_seconds
-        self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="diag")
-
-    def _cancel_all(self) -> None:
-        self.probe_cancel.cancel()
-
-    def note_reference(self, resolver: ReferenceResolver, result: DnsQueryResult) -> None:
-        # Снятый по «Стопу» или по лимиту времени запрос ничего не говорит о сервере.
-        if result.failure == FAILURE_CANCELLED:
-            return
-        with self._reference_lock:
-            entry = self._reference.setdefault(resolver, [0, 0, ""])
-            if result.answered:
-                entry[0] += 1
-            else:
-                entry[1] += 1
-                entry[2] = failure_text(result)
-
-    def reference_report(self) -> list[dict]:
-        """Состояние эталонных серверов за прогон, в постоянном порядке."""
-        with self._reference_lock:
-            seen = {resolver: tuple(entry) for resolver, entry in self._reference.items()}
-        report: list[dict] = []
-        for resolver in REFERENCE_RESOLVERS:
-            if resolver not in seen:
-                continue
-            answered, failed, reason = seen[resolver]
-            report.append(
-                {
-                    "label": resolver.label,
-                    "address": resolver.address,
-                    # Сервер считается недоступным, только если не ответил ни разу.
-                    "ok": answered > 0,
-                    "answered": answered,
-                    "failed": failed,
-                    "reason": reason if not answered else "",
-                }
-            )
-        return report
-
-    def stopped(self) -> bool:
-        if self._user_stopped:
-            return True
-        try:
-            if self._should_stop is not None and self._should_stop():
-                self._user_stopped = True
-                self._cancel_all()
-        except Exception:
-            return False
-        return self._user_stopped
-
-    def expired(self) -> bool:
-        if time.monotonic() < self.deadline:
-            return False
-        if not self.timed_out:
-            self.timed_out = True
-            # Всё, что ещё висит, снимаем: запросы и DNS вернутся сразу.
-            self._cancel_all()
-        return True
-
-    def dns_cancelled(self) -> bool:
-        return self.stopped() or self.expired()
-
-    def submit(self, fn, *args, **kwargs) -> Future:
-        return self.pool.submit(fn, *args, **kwargs)
-
-    def wait(self, future: Future):
-        """Ждёт результат, не пропуская «Стоп» и общий дедлайн."""
-        while True:
-            if self.stopped():
-                raise _Stopped()
-            self.expired()
-            try:
-                return future.result(timeout=0.1)
-            except TimeoutError:
-                continue
-
-    def close(self) -> None:
-        self._cancel_all()
-        self.pool.shutdown(wait=False, cancel_futures=True)
 
 
 # ---------------------------------------------------------------------------
@@ -741,117 +547,26 @@ def _check_volume(run: _Run, probe: _Probe) -> None:
         probe.reach_state = ReachState.FREEZE
 
 
-def _fail_text(probe: _Probe) -> str:
-    """Почему адрес не открылся — одной фразой."""
-    if probe.volume is not None and probe.volume.code == volume_probe.VOLUME_CUT:
-        return f"{probe.volume.text} — так провайдер обрывает загрузку"
-    return describe_reach(probe.reach, timeout=HTTPS_TIMEOUT)
 
 
 # ---------------------------------------------------------------------------
 # Текст отчёта
 # ---------------------------------------------------------------------------
 
-_LEVEL_ICON = {Level.OK: "✅", Level.WARN: "⚠️", Level.FAIL: "❌", Level.UNKNOWN: "❔"}
-_DNS_ICON = {DnsState.OK: "✅", DnsState.SPOOFED: "❌", DnsState.LOCAL: "ℹ️", DnsState.UNKNOWN: "❔"}
-_SOURCE_NOTE = {
-    SOURCE_HOSTS: ", адрес из файла hosts",
-    SOURCE_REFERENCE: ", адрес по DNS-over-HTTPS",
-}
 
 
-def _ips_text(ips: tuple[str, ...], limit: int = 3) -> str:
-    if not ips:
-        return "—"
-    shown = ", ".join(ips[:limit])
-    return f"{shown} и ещё {len(ips) - limit}" if len(ips) > limit else shown
 
 
-def _reach_text(probe: _Probe) -> str:
-    """Одна строка: открывается ли адрес и почему нет."""
-    result = probe.reach
-    source = _SOURCE_NOTE.get(probe.reach_source, "")
-    if probe.reach_state == ReachState.OK and result is not None:
-        tls = f", {result.tls_version.replace('TLSv', 'TLS ')}" if result.tls_version else ""
-        if ":" in result.ip:
-            return f"открывается по IPv6, по IPv4 — нет ({result.elapsed_ms:.0f} мс{tls}, {result.ip})"
-        stale = " — адрес из файла hosts не ответил, запись в нём устарела" if probe.hosts_stale else ""
-        return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source}){stale}"
-    text = _fail_text(probe)
-    if result is None or not result.ip:
-        return text
-    addresses = len({ip for ip, _kind in probe.tried})
-    if addresses > 1:
-        tries = f", не ответил ни один из {addresses} адресов"
-    else:
-        tries = f", попыток: {probe.attempts}" if probe.attempts > 1 else ""
-    ipv6 = ", по IPv6 тоже не открылся" if probe.ipv6_result is not None else ""
-    return f"{text} ({result.ip}{source}{tries}{ipv6})"
 
 
-def _dns_detail(probe: _Probe) -> str:
-    parts: list[str] = []
-    if probe.hosts_ips:
-        parts.append(f"hosts: {_ips_text(probe.hosts_ips)}")
-    if probe.dns.ips:
-        flaky = f" (а {probe.dns_nxdomain} из {DNS_ATTEMPTS} раз — «сайта нет»)" if probe.dns_nxdomain else ""
-        parts.append(f"DNS системы: {_ips_text(probe.dns.ips)}{flaky}")
-    else:
-        parts.append(f"DNS системы: нет адреса ({probe.dns.detail})")
-    if probe.reference_ips:
-        parts.append(f"эталон: {_ips_text(probe.reference_ips)}")
-    elif not probe.reference_ok:
-        parts.append("эталон: недоступен")
-    return " · ".join(parts)
 
 
-def _dns_lines(probe: _Probe, indent: str) -> list[str]:
-    judgement = probe.judgement
-    lines: list[str] = []
-    if judgement is not None:
-        lines.append(f"{indent}{_DNS_ICON[judgement.state]} DNS: {judgement.reason}")
-    lines.append(f"{indent}   {_dns_detail(probe)}")
-    return lines
 
 
-# Молчание по QUIC — не поломка: сервер может его не поддерживать.
-_QUIC_ICON = {
-    quic_probe.QUIC_OK: "✅",
-    quic_probe.QUIC_BLOCKED_BY_NAME: "❌",
-    quic_probe.QUIC_SILENT: "ℹ️",
-}
 
 
-def _sentence(text: str) -> str:
-    return text[:1].upper() + text[1:]
 
 
-def _probe_lines(probe: _Probe, *, full: bool) -> list[str]:
-    title = f"{probe.host} — {probe.target.purpose}"
-    if not full:
-        lines = [title]
-        if probe.discovery_note:
-            lines.append(f"  ℹ️ {probe.discovery_note}")
-        lines.extend(_dns_lines(probe, "  "))
-        return lines
-
-    icon = "✅" if probe.reach_state == ReachState.OK else "❌"
-    if probe.reach_state == ReachState.UNKNOWN:
-        icon = "❔"
-    lines = [f"{icon} {title}: {_reach_text(probe)}"]
-    if probe.kind:
-        lines.append(f"   🏷 Вид блокировки: {block_kind.kind_info(probe.kind).title}")
-    if probe.cause is not None:
-        lines.append(f"   🔎 {_sentence(probe.cause.text)}")
-    if probe.volume is not None and probe.volume.code != volume_probe.VOLUME_CUT:
-        icon = "✅" if probe.volume.code == volume_probe.VOLUME_OK else "ℹ️"
-        lines.append(f"   {icon} Обрыв после 16 КБ: {probe.volume.text}")
-    if probe.quic is not None:
-        lines.append(f"   {_QUIC_ICON[probe.quic.code]} QUIC (UDP 443): {probe.quic.text}")
-    if probe.discovery_note:
-        lines.append(f"   ℹ️ {probe.discovery_note}")
-    lines.extend(_dns_lines(probe, "   "))
-    return lines
 
 
 def _dns_provider(ip: str) -> tuple[str, str, str]:
@@ -986,7 +701,7 @@ def _run_probes(
             emit(f"❔ {target.host} — {target.purpose}: проверка не выполнилась ({exc})")
             continue
         collected[key].append(probe)
-        for line in _probe_lines(probe, full=full):
+        for line in report_text.probe_lines(probe, full=full):
             emit(line)
     emit("")
     return collected
@@ -1007,47 +722,8 @@ def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: 
     return summarize_service(service.label, outcomes, zapret_running=zapret_running)
 
 
-def _short_text(probe: _Probe) -> str:
-    if probe.reach_state != ReachState.OK:
-        return _fail_text(probe)
-    if probe.reach is not None and ":" in probe.reach.ip:
-        return "открывается только по IPv6"
-    return "открывается"
 
 
-def _target_report(probe: _Probe) -> dict:
-    return {
-        "host": probe.host,
-        "purpose": probe.target.purpose,
-        "main": probe.target.main,
-        "state": probe.reach_state.value,
-        "ok": probe.reach_state == ReachState.OK,
-        "text": _reach_text(probe),
-        "short": _short_text(probe),
-        "dns_state": probe.judgement.state.value if probe.judgement else "",
-        "dns_reason": probe.judgement.reason if probe.judgement else "",
-        # Вид блокировки одним словом (ip / sni / cut16 / …) и его название.
-        "kind": probe.kind,
-        "kind_title": block_kind.kind_info(probe.kind).title if probe.kind else "",
-        "volume": probe.volume.code if probe.volume else "",
-        "volume_text": probe.volume.text if probe.volume else "",
-        "cause": probe.cause.code if probe.cause else "",
-        "cause_text": _sentence(probe.cause.text) if probe.cause else "",
-        "quic": probe.quic.code if probe.quic else "",
-        "quic_text": probe.quic.text if probe.quic else "",
-        # Тот же адрес по TLS 1.2, TLS 1.3 и HTTP отдельно.
-        "protocols": [
-            {"key": line.key, "title": line.title, "state": line.state, "word": line.word, "text": line.text,
-             "ms": None if line.ms is None else round(line.ms, 1)}
-            for line in probe.protocols
-        ],
-        "address": probe.reach.ip if probe.reach is not None else "",
-        # Какие адреса сайта пробовали и чем кончилось: видно, на чём держится вывод.
-        "tried": [{"address": ip, "result": kind} for ip, kind in probe.tried],
-        "address_confirmed": probe.address_confirmed,
-        "hosts_stale": probe.hosts_stale,
-        "note": probe.discovery_note,
-    }
 
 
 def _freeze_address(run: _Run, host: str) -> str:
@@ -1098,260 +774,12 @@ def _wait_plain(future: Future):
     return future.result()
 
 
-_LEVEL_ORDER = {Level.FAIL: 0, Level.WARN: 1, Level.UNKNOWN: 2, Level.OK: 3}
-# Блокировки, которые обходит стратегия Zapret.
-_BYPASSABLE = (ReachState.DPI, ReachState.FREEZE)
 
 
-def _no_geo_service(_host: str) -> str:
-    return ""
 
 
-def _problem(
-    level: Level,
-    text: str,
-    advice=(),
-    *,
-    action: str = "",
-    target: str = "",
-    kind: str = block_kind.KIND_OTHER,
-    title: str = "",
-    evidence=(),
-) -> dict:
-    """Строка итога. ``kind`` — вид блокировки: по нему экран собирает строки в группы.
-
-    ``title`` — короткое название для строки внутри группы (вид блокировки там
-    уже назван в заголовке). ``evidence`` — на чём основан вывод; эти же фразы
-    стоят первыми в ``advice``.
-    """
-    return {
-        "level": level.value,
-        "text": text,
-        "advice": list(advice),
-        "action": action,
-        "target": target,
-        "kind": kind,
-        "title": title,
-        "evidence": list(evidence),
-    }
 
 
-def _collect_problems(
-    services: dict[str, Service],
-    verdicts: dict[str, ServiceVerdict],
-    collected: dict[str, list[_Probe]],
-    *,
-    voice,
-    freeze,
-    zapret_running: bool | None,
-    geo_service_for: Callable[[str], str] | None = None,
-    reference: list[dict] | None = None,
-    ipv6: ipv6_check.Ipv6Verdict | None = None,
-    system: tuple[system_state.SystemItem, ...] = (),
-    telegram: telegram_check.TelegramReport | None = None,
-) -> tuple[list[dict], list[str], list[str]]:
-    """Итог для экрана: проблемы по важности, открывающиеся сервисы, подменённые DNS."""
-    problems: list[dict] = []
-
-    controls = [key for key, service in services.items() if service.control]
-    foreign = [key for key in controls if not services[key].domestic]
-    domestic = [key for key in controls if services[key].domestic]
-    # Только настоящий провал контрольных сайтов: «не успели проверить»
-    # (лимит времени) — не «нет интернета», иначе такой прогон спрятал бы
-    # найденные блокировки остальных сайтов.
-    # «Не открывается» у контрольного сайта — только когда до него нет дороги.
-    # Обрыв после 16 КБ или чужой сертификат — это блокировка, которую лечат
-    # иначе, а не «закрыты все зарубежные адреса».
-    no_road = (ReachState.IP_BLOCK, ReachState.DPI)
-
-    def _down(key: str) -> bool:
-        probes = collected.get(key) or ()
-        return bool(probes) and all(probe.reach_state in no_road for probe in probes)
-
-    # Эталонные DNS-серверы — зарубежные адреса, к которым программа ходит напрямую.
-    # Если хоть один ответил, зарубежные адреса не закрыты и интернет есть.
-    foreign_reachable = any(item.get("ok") for item in reference or ())
-    foreign_down = bool(foreign) and all(_down(key) for key in foreign) and not foreign_reachable
-    domestic_up = bool(domestic) and all(verdicts[key].level == Level.OK for key in domestic)
-    whitelisted = foreign_down and domestic_up
-    offline = bool(controls) and all(_down(key) for key in controls) and not foreign_reachable
-    names = ", ".join(services[key].label for key in foreign)
-    if whitelisted:
-        problems.append(
-            _problem(
-                Level.FAIL,
-                f"Открываются только российские сайты ({', '.join(services[key].label for key in domestic)}), "
-                f"а зарубежные контрольные ({names}) — нет. Похоже на режим «белых списков»: провайдер "
-                "пропускает только разрешённые адреса",
-                (
-                    "В таком режиме Zapret не помогает: закрыты сами адреса, а не отдельные сайты. "
-                    "Обычно это временное ограничение, чаще в мобильных сетях — проверьте другую сеть.",
-                ),
-                kind=block_kind.KIND_NETWORK,
-            )
-        )
-    elif offline:
-        problems.append(
-            _problem(
-                Level.FAIL,
-                f"Не открываются даже контрольные сайты ({', '.join(services[key].label for key in controls)}) — "
-                "похоже, нет интернета или всё соединение режет антивирус, прокси или VPN",
-                ("Проверьте подключение к интернету и повторите проверку.",),
-                kind=block_kind.KIND_NETWORK,
-            )
-        )
-    # В обоих случаях причина общая и уже названа: совет «подберите стратегию»
-    # у каждого сайта был бы неправдой и шумом.
-    offline = offline or whitelisted
-
-    # Сервисы идут в том же порядке, что и в отчёте: «Открываются: …» не должен
-    # начинаться с сайтов, у которых просто подменён DNS. Проблемы по важности
-    # сортируются в конце, и внутри одного уровня этот порядок сохраняется.
-    working: list[str] = []
-    for key, service in services.items():
-        if service.control:
-            continue
-        verdict = verdicts[key]
-        broken = [probe for probe in collected.get(key, ()) if probe.reach_state != ReachState.OK]
-        if verdict.level in (Level.FAIL, Level.WARN) and broken:
-            if offline:
-                # Без интернета «Zapret не обходит блокировку» у каждого сайта —
-                # неправда и шум: причина одна, она уже написана первой строкой.
-                continue
-            advice = tuple(item for item in verdict.advice if item != _ADVICE_DNS)
-            # Стратегия помогает только от DPI и обрыва. При чужом сертификате,
-            # недоступном адресе или без адреса кнопка подбора увела бы не туда.
-            bypassable = next((probe for probe in broken if probe.reach_state in _BYPASSABLE), None)
-            action = ""
-            if bypassable is not None:
-                action = "strategy" if zapret_running else "start_zapret"
-            target = (bypassable or broken[0]).host
-            # Гео-сайт сам ограничивает доступ из России: стратегия его не
-            # чинит, и совет «подберите стратегию» увёл бы пользователя не туда.
-            geo = next(
-                ((probe.host, name) for probe in broken if (name := (geo_service_for or _no_geo_service)(probe.host))),
-                None,
-            )
-            if geo is not None:
-                target, geo_service = geo
-                advice = (_advice_geo_site(geo_service),) + tuple(
-                    item for item in advice if item not in _ADVICE_VIA_ZAPRET
-                )
-                action = "hosts"
-            causes = tuple(
-                dict.fromkeys(_sentence(probe.cause.text) + "." for probe in broken if probe.cause is not None)
-            )
-            problems.append(
-                _problem(
-                    verdict.level,
-                    verdict.headline,
-                    causes + advice,
-                    action=action,
-                    target=target,
-                    kind=verdict.kind or block_kind.KIND_OTHER,
-                    # Сервис не открывается целиком — в группе хватит названия;
-                    # «открывается, но не работают картинки» нужно сказать полностью.
-                    title=service.label if verdict.level == Level.FAIL else "",
-                    evidence=causes,
-                )
-            )
-        elif verdict.level == Level.UNKNOWN:
-            if not offline:
-                problems.append(_problem(Level.UNKNOWN, verdict.headline, verdict.advice))
-        else:
-            working.append(service.label)
-
-    if freeze is not None and freeze.level in (Level.FAIL, Level.WARN):
-        problems.append(
-            _problem(
-                freeze.level,
-                freeze.headline,
-                freeze.advice,
-                action="strategy" if zapret_running else "start_zapret",
-                kind=block_kind.KIND_CUT,
-            )
-        )
-    elif freeze is not None and freeze.level == Level.UNKNOWN and not offline:
-        problems.append(_problem(freeze.level, freeze.headline, freeze.advice))
-    if voice is not None and voice.level != Level.OK and not offline:
-        problems.append(
-            _problem(voice.level, voice.headline, voice.advice, action="strategy_voice", kind=block_kind.KIND_VOICE)
-        )
-    # Один молчащий дата-центр — не проблема для человека: приложение возьмёт другой.
-    if telegram is not None and telegram.level == Level.FAIL and not offline:
-        problems.append(_problem(telegram.level, telegram.headline, telegram.advice, title="Telegram"))
-
-    spoofed = [
-        probe.host
-        for probes in collected.values()
-        for probe in probes
-        if probe.judgement is not None and probe.judgement.state == DnsState.SPOOFED
-    ]
-    if spoofed:
-        shown = ", ".join(spoofed[:5]) + (f" и ещё {len(spoofed) - 5}" if len(spoofed) > 5 else "")
-        problems.append(
-            _problem(
-                Level.WARN,
-                f"DNS подменяет ответы для {shown}. Браузер с защищённым DNS этого не замечает, а программы, "
-                "которые спрашивают адрес у Windows, эти сайты не откроют",
-                (_ADVICE_DNS,),
-                action="dns",
-                kind=block_kind.KIND_DNS,
-            )
-        )
-    # QUIC заблокирован, а сам сайт открывается: это не «сайт не работает», но
-    # браузер сначала пробует QUIC и переходит на обычное соединение с задержкой.
-    quic_blocked = [
-        services[key].label
-        for key, probes in collected.items()
-        if any(
-            probe.quic is not None
-            and probe.quic.code == quic_probe.QUIC_BLOCKED_BY_NAME
-            and probe.reach_state == ReachState.OK
-            for probe in probes
-        )
-    ]
-    if quic_blocked and not offline:
-        problems.append(
-            _problem(
-                Level.WARN,
-                f"QUIC (UDP 443) не проходит по имени для: {', '.join(quic_blocked)}. Сайты открываются обычным "
-                "соединением, но браузер сначала пробует QUIC, поэтому открытие и начало видео могут запаздывать"
-                + (
-                    ". Так режет провайдер, но так же действует и сам Zapret, если в пресете QUIC отключён намеренно"
-                    if zapret_running
-                    else ""
-                ),
-                (_ADVICE_QUIC,),
-                kind=block_kind.KIND_QUIC,
-            )
-        )
-    # Неполадки самого компьютера показываются всегда: они объясняют и «нет интернета».
-    for item in system:
-        level = _SYSTEM_PROBLEM_LEVEL.get(item.level)
-        if level is not None:
-            problems.append(
-                _problem(
-                    level,
-                    f"{item.title}: {item.text}",
-                    (item.advice,) if item.advice else (),
-                    kind=block_kind.KIND_SYSTEM,
-                )
-            )
-    if ipv6 is not None and ipv6.code == ipv6_check.IPV6_BROKEN and not offline:
-        problems.append(_problem(Level.WARN, f"IPv6 {ipv6.text}", (_ADVICE_IPV6,), kind=block_kind.KIND_NETWORK))
-    for item in _blocked_references(reference or []):
-        problems.append(
-            _problem(
-                Level.WARN,
-                _reference_text(item),
-                (_ADVICE_BLOCKED_REFERENCE,),
-                action="dns",
-                kind=block_kind.KIND_DNS,
-            )
-        )
-    problems.sort(key=lambda item: _LEVEL_ORDER.get(Level(item["level"]), 9))
-    return problems, working, spoofed
 
 
 def _system_has_ipv6_route() -> bool | None:
@@ -1379,10 +807,6 @@ _IPV6_ICON = {
     ipv6_check.IPV6_BROKEN: "⚠️",
     ipv6_check.IPV6_UNKNOWN: "❔",
 }
-_ADVICE_IPV6 = (
-    "Из-за этого сайты открываются с задержкой: браузер сначала ждёт IPv6. Перезагрузите роутер; "
-    "если не поможет — снимите галочку «IP версии 6» в свойствах сетевого адаптера Windows."
-)
 
 
 _CLOCK_HOST = "www.google.com"
@@ -1420,7 +844,6 @@ _SYSTEM_ICON = {
     system_state.LEVEL_FAIL: "❌",
     system_state.LEVEL_UNKNOWN: "❔",
 }
-_SYSTEM_PROBLEM_LEVEL = {system_state.LEVEL_FAIL: Level.FAIL, system_state.LEVEL_WARN: Level.WARN}
 
 
 _DNS_FINDING_LEVEL = {"fail": Level.FAIL, "warn": Level.WARN}
@@ -1486,7 +909,7 @@ def _find_filter_place(run: _Run, services: dict[str, Service], collected: dict[
         "address": ip,
         "found": found,
         "hop": verdict.hop,
-        "text": _sentence(verdict.text),
+        "text": report_text.sentence(verdict.text),
         "hops": [
             {"ttl": hop.ttl, "address": hop.address, "rtt_ms": hop.rtt_ms}
             for hop in (trace.hops if trace.supported else ())
@@ -1494,29 +917,10 @@ def _find_filter_place(run: _Run, services: dict[str, Service], collected: dict[
     }
 
 
-def _blocked_references(reference: list[dict]) -> list[dict]:
-    """Эталонные серверы, которые не ответили ни разу, хотя другие отвечали.
-
-    Если молчат все, дело не в отдельном сервере: это уже «нет интернета» или
-    «эталон недоступен», и об этом сказано в другом месте отчёта.
-    """
-    down = [item for item in reference if not item["ok"]]
-    return down if len(down) < len(reference) else []
 
 
-def _reference_text(item: dict) -> str:
-    reason = f": {item['reason']}" if item["reason"] else ""
-    return f"Шифрованный DNS {item['label']} ({item['address']}) недоступен{reason}"
 
 
-_ADVICE_QUIC = (
-    "В пресете должен быть profile для UDP 443 (QUIC) с этими сайтами. Проще всего выбрать готовый пресет, "
-    "где он есть, или отключить QUIC в браузере (в Chrome: chrome://flags → Experimental QUIC protocol)."
-)
-_ADVICE_BLOCKED_REFERENCE = (
-    "Похоже, этот сервер закрыт у вашего провайдера. Не выбирайте его для защищённого DNS: "
-    "Windows молча вернётся к обычным запросам, которые видны и подменяются."
-)
 
 
 def _check_network(run: _Run, other_tools) -> dict:
@@ -1557,26 +961,10 @@ def _check_network(run: _Run, other_tools) -> dict:
     }
 
 
-def _telegram_text(item: telegram_check.DcResult) -> str:
-    if item.connected is None:
-        return "проверку прервали"
-    if item.connected:
-        took = "меньше чем за 1 мс" if (item.ms or 0) < 1 else f"за {round(item.ms or 0)} мс"
-        return f"соединение {took}" + (" (со второй попытки)" if item.attempts > 1 else "")
-    return f"не соединился, попыток: {item.attempts}"
 
 
-def _telegram_state(item: telegram_check.DcResult) -> str:
-    return "unknown" if item.connected is None else ("ok" if item.connected else "fail")
 
 
-def _section_lines(title: str, report, rows) -> list[str]:
-    icon = {Level.OK: "✅", Level.WARN: "⚠️", Level.FAIL: "❌", Level.UNKNOWN: "❔"}
-    lines = ["", f"━━━━━━━━ {title} ━━━━━━━━"]
-    for mark, name, text in rows:
-        lines.append(f"{mark} {name}: {text}")
-    lines.append(f"{icon[report.level]} {report.headline}")
-    return lines
 
 
 def run_blockcheck(
@@ -1709,7 +1097,7 @@ def run_blockcheck(
                 emit(f"❔ Голосовые серверы: проверка не выполнилась ({exc})")
             step(STEP_VOICE)
             if voice is not None:
-                for line in _section_lines(
+                for line in report_text.section_lines(
                     "Голосовые звонки (UDP)",
                     voice,
                     [("✅" if item.answered else "❌", item.name, item.text) for item in voice.servers],
@@ -1725,11 +1113,11 @@ def run_blockcheck(
                 emit(f"❔ Дата-центры Telegram: проверка не выполнилась ({exc})")
             if telegram is not None:
                 marks = {"ok": "✅", "fail": "❌", "unknown": "❔"}
-                for line in _section_lines(
+                for line in report_text.section_lines(
                     "Telegram: дата-центры",
                     telegram,
                     [
-                        (marks[_telegram_state(item)], f"{item.center.name} ({item.center.address})", _telegram_text(item))
+                        (marks[report_text.telegram_state(item)], f"{item.center.name} ({item.center.address})", report_text.telegram_text(item))
                         for item in telegram.servers
                     ],
                 ):
@@ -1755,7 +1143,7 @@ def run_blockcheck(
                 emit(f"❔ Обрыв на 16–20 КБ: проверка не выполнилась ({exc})")
             if freeze is not None:
                 marks = {"ok": "✅", "freeze": "❌", "unknown": "❔"}
-                for line in _section_lines(
+                for line in report_text.section_lines(
                     "Обрыв на 16–20 КБ",
                     freeze,
                     [(marks[item.state.value], item.name, item.text) for item in freeze.servers],
@@ -1773,7 +1161,7 @@ def run_blockcheck(
             key: _service_verdict(service, collected[key], zapret_running=zapret_running)
             for key, service in services.items()
         }
-        problems, working, spoofed = _collect_problems(
+        problems, working, spoofed = problem_rules.collect_problems(
             services,
             verdicts,
             collected,
@@ -1790,13 +1178,13 @@ def run_blockcheck(
             for finding in dns_servers["findings"]:
                 level = _DNS_FINDING_LEVEL.get(finding["level"])
                 if level is not None:
-                    problems.append(_problem(level, finding["text"], action="dns", kind=block_kind.KIND_DNS))
-            problems.sort(key=lambda item: _LEVEL_ORDER.get(Level(item["level"]), 9))
+                    problems.append(problem_rules.problem(level, finding["text"], action="dns", kind=block_kind.KIND_DNS))
+            problems.sort(key=lambda item: problem_rules.LEVEL_ORDER.get(Level(item["level"]), 9))
 
         emit("")
         emit("━━━━━━━━ 📊 Итог ━━━━━━━━")
         if run.timed_out:
-            emit(_timed_out_line(run.deadline_seconds))
+            emit(report_text.timed_out_line(run.deadline_seconds))
         icon = {"ok": "✅", "warn": "⚠️", "fail": "❌", "unknown": "❔"}
         for problem in problems:
             emit(f"{icon[problem['level']]} {problem['text']}")
@@ -1820,14 +1208,14 @@ def run_blockcheck(
                     "headline": verdicts[key].headline,
                     "advice": list(verdicts[key].advice),
                     "dns_note": verdicts[key].dns_note,
-                    "targets": [_target_report(probe) for probe in collected[key]],
+                    "targets": [report_text.target_report(probe) for probe in collected[key]],
                 }
                 for key, service in services.items()
             ],
-            "voice": _section_report(
+            "voice": report_text.section_report(
                 voice, [(item.name, "ok" if item.answered else "fail", item.text) for item in voice.servers]
             ) if voice else None,
-            "freeze": _section_report(
+            "freeze": report_text.section_report(
                 freeze, [(item.name, item.state.value, item.text) for item in freeze.servers]
             ) | {
                 # По серверу: провайдер, метка, в какую сторону оборвалось и за сколько проверили.
@@ -1852,8 +1240,8 @@ def run_blockcheck(
                     {
                         "name": item.center.name,
                         "address": item.center.address,
-                        "state": _telegram_state(item),
-                        "text": _telegram_text(item),
+                        "state": report_text.telegram_state(item),
+                        "text": report_text.telegram_text(item),
                     }
                     for item in telegram.servers
                 ],
@@ -1884,22 +1272,13 @@ def run_blockcheck(
         run.close()
 
 
-def _section_report(report, rows) -> dict:
-    return {
-        "level": report.level.value,
-        "headline": report.headline,
-        "advice": list(report.advice),
-        # state: ok / fail / freeze / unknown — «не удалось проверить» не должно
-        # выглядеть как «не работает».
-        "items": [{"name": name, "ok": state == "ok", "state": state, "text": text} for name, state, text in rows],
-    }
 
 
 def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
     """Проверка DNS подмены для вкладки «Проверка DNS подмены»."""
     services = build_services(SCOPE_MAIN)
     targets_count = sum(len(service.targets) for service in services.values())
-    run = _Run(should_stop, workers=targets_count * _WORKERS_PER_TARGET)
+    run = _Run(should_stop, workers=targets_count * _WORKERS_PER_TARGET, deadline=RUN_DEADLINE)
     started = time.monotonic()
     try:
         emit("🔍 ПРОВЕРКА DNS ПОДМЕНЫ")
@@ -1915,7 +1294,7 @@ def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
         spoofed = _has_spoofing(collected)
         emit("━━━━━━━━ 📊 Итог ━━━━━━━━")
         if run.timed_out:
-            emit(_timed_out_line(run.deadline_seconds))
+            emit(report_text.timed_out_line(run.deadline_seconds))
         if spoofed:
             emit("❌ Обнаружена DNS подмена:")
             for probes in collected.values():
@@ -1936,9 +1315,9 @@ def run_dns_check(*, emit: Emit, should_stop: ShouldStop | None = None) -> dict:
         else:
             emit("✅ DNS работает честно. Если сайты не открываются — дело не в DNS, а в блокировке соединения.")
         reference = run.reference_report()
-        for item in _blocked_references(reference):
-            emit(f"⚠️ {_reference_text(item)}")
-            emit(f"   👉 {_ADVICE_BLOCKED_REFERENCE}")
+        for item in problem_rules.blocked_references(reference):
+            emit(f"⚠️ {problem_rules.reference_text(item)}")
+            emit(f"   👉 {problem_rules.ADVICE_BLOCKED_REFERENCE}")
         emit(f"Проверка заняла {time.monotonic() - started:.1f} с.")
         return {
             "summary": {"dns_poisoning_detected": spoofed},
