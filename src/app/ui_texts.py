@@ -2173,33 +2173,69 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Новый DNS",
         "en": "New DNS",
     },
+    "page.network.custom_server.eyebrow.new": {
+        "ru": "Новый сервер",
+        "en": "New server",
+    },
+    "page.network.custom_server.eyebrow.edit": {
+        "ru": "Свой сервер",
+        "en": "Custom server",
+    },
+    "page.network.custom_server.header.name": {
+        "ru": "Свой DNS-сервер",
+        "en": "Custom DNS server",
+    },
+    "page.network.custom_server.summary.empty": {
+        "ru": "Вставьте адрес DoH или впишите IP-адреса сервера — одного из двух достаточно.",
+        "en": "Paste a DoH address or type the server's IP addresses — either one is enough.",
+    },
+    "page.network.custom_server.summary.doh_only": {
+        "ru": "Шифрованный DNS (DoH). IP-адреса сервера программа найдёт и проверит сама.",
+        "en": "Encrypted DNS (DoH). The app finds and verifies the server's IP addresses itself.",
+    },
+    "page.network.custom_server.summary.doh": {
+        "ru": "Шифрованный DNS (DoH) · {addresses}",
+        "en": "Encrypted DNS (DoH) · {addresses}",
+    },
+    "page.network.custom_server.summary.plain": {
+        "ru": "Обычный DNS без шифрования · {addresses}",
+        "en": "Plain DNS without encryption · {addresses}",
+    },
+    "page.network.custom_server.checking.detail": {
+        "ru": "Ищу адреса сервера и проверяю каждый запросом DoH…",
+        "en": "Finding the server's addresses and checking each one with a DoH query…",
+    },
+    "page.network.custom_server.addresses.auto": {
+        "ru": "Найдутся сами",
+        "en": "Found automatically",
+    },
     "page.network.custom_server.doh": {
         "ru": "Адрес DoH",
         "en": "DoH address",
     },
     "page.network.custom_server.doh.hint": {
-        "ru": "Шифрованный DNS, как в браузере. Вставьте адрес — IP-адреса сервера программа найдёт и проверит сама.",
-        "en": "Encrypted DNS, like in a browser. Paste the address — the app finds and verifies the server's IP addresses itself.",
+        "ru": "Шифрованный DNS, как в браузере. Одной этой строки достаточно",
+        "en": "Encrypted DNS, like in a browser. This one line is enough",
     },
     "page.network.custom_server.addresses": {
         "ru": "IP-адреса",
         "en": "IP addresses",
     },
     "page.network.custom_server.addresses.hint": {
-        "ru": "Через пробел, первым — основной; IPv4 и IPv6 вместе. С адресом DoH поле можно оставить пустым.",
-        "en": "Space-separated, primary first; IPv4 and IPv6 together. With a DoH address this field may stay empty.",
+        "ru": "Через пробел, основной — первым. IPv4 и IPv6 вместе",
+        "en": "Space-separated, primary first. IPv4 and IPv6 together",
     },
     "page.network.custom_server.name": {
         "ru": "Название",
         "en": "Name",
     },
     "page.network.custom_server.name.hint": {
-        "ru": "Подпись на плитке. Можно не писать — подставится имя сервера.",
-        "en": "The tile caption. Optional — the server name is used by default.",
+        "ru": "Подпись плитки в списке DNS",
+        "en": "The tile caption in the DNS list",
     },
     "page.network.custom_server.name.placeholder": {
-        "ru": "Например, Мой DNS",
-        "en": "For example, My DNS",
+        "ru": "Мой DNS",
+        "en": "My DNS",
     },
     "page.network.custom_server.cancel": {
         "ru": "Отмена",
@@ -2222,8 +2258,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Save",
     },
     "page.network.custom_server.checking": {
-        "ru": "Проверяю сервер…",
-        "en": "Checking the server…",
+        "ru": "Проверяю…",
+        "en": "Checking…",
     },
     "page.network.custom_server.saving": {
         "ru": "Сохраняю…",

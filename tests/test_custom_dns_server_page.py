@@ -1,4 +1,4 @@
-"""Страница «Свой DNS»: форма, ошибки под полями, сохранение и хлебные крошки."""
+"""Страница «Свой DNS»: шапка с итогом, строки полей, сохранение и хлебные крошки."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget
 
 from app.page_names import PageName
 from dns.state import CustomServerResult
@@ -43,6 +43,12 @@ class CustomDnsServerPageTests(unittest.TestCase):
         self.addCleanup(page.deleteLater)
         page._save_lane.request = Mock()
         return page
+
+    @staticmethod
+    def _type(edit, text: str) -> None:
+        """Ввод текста пользователем: setText сам сигнал правки не шлёт."""
+        edit.setText(text)
+        edit.textEdited.emit(text)
 
     def _crumbs(self, page) -> list[str]:
         return [item.text for item in page.breadcrumb.items]
@@ -85,14 +91,134 @@ class CustomDnsServerPageTests(unittest.TestCase):
         self.assertEqual(page.error_text(), "")
         self.assertFalse(page.doh_edit.isError())
 
-    def test_empty_name_field_shows_the_name_the_server_will_get(self) -> None:
+    def test_header_shows_what_the_typed_text_will_become(self) -> None:
+        page = self._page()
+        page.open_server(None)
+        self.assertEqual((page.eyebrow_label.text(), page.title_text.text()), ("Новый сервер", "Свой DNS"))
+        self.assertIn("одного из двух достаточно", page.detail_label.text())
+
+        self._type(page.doh_edit, "https://dns.example.com/dns-query")
+
+        # Одна строка DoH: название и адреса подставятся сами — это видно сразу.
+        self.assertEqual(page.title_text.text(), "dns.example.com")
+        self.assertIn("найдёт и проверит сама", page.detail_label.text())
+        self.assertEqual(page.name_edit.placeholderText(), "dns.example.com")
+        self.assertEqual(page.addresses_edit.placeholderText(), "Найдутся сами")
+
+        self._type(page.addresses_edit, "203.0.113.5 2001:db8::5")
+        self.assertEqual(page.detail_label.text(), "Шифрованный DNS (DoH) · 203.0.113.5 · 2001:db8::5")
+
+        self._type(page.doh_edit, "")
+        self._type(page.name_edit, "Мой сервер")
+        self.assertEqual(page.title_text.text(), "Мой сервер")
+        self.assertEqual(page.detail_label.text(), "Обычный DNS без шифрования · 203.0.113.5 · 2001:db8::5")
+        self.assertEqual(page.addresses_edit.placeholderText(), "9.9.9.9 149.112.112.112")
+        self.assertIn("Мой сервер", page.header.accessibleDescription())
+
+    def test_half_typed_field_keeps_the_last_clear_summary(self) -> None:
+        page = self._page()
+        page.open_server(None)
+        self._type(page.addresses_edit, "9.9.9.9")
+        clear = page.detail_label.text()
+
+        # «9.9.» — ещё не адрес: шапка не мигает ошибкой, пока человек печатает.
+        self._type(page.addresses_edit, "9.9.9.9 149.112.")
+
+        self.assertEqual(page.detail_label.text(), clear)
+        self.assertEqual(page.error_text(), "")
+        self.assertEqual(page.doh_edit.text(), "")
+
+    def test_typing_by_hand_is_never_moved_between_fields(self) -> None:
         page = self._page()
         page.open_server(None)
 
-        page.doh_edit.setText("https://dns.example.com/dns-query")
-        page.doh_edit.textEdited.emit(page.doh_edit.text())
+        # По одному знаку — это набор, а не вставка: текст остаётся там, где его пишут.
+        text = "dns.example.com 9.9.9.9"
+        for length in range(1, len(text) + 1):
+            self._type(page.doh_edit, text[:length])
 
-        self.assertEqual(page.name_edit.placeholderText(), "dns.example.com")
+        self.assertEqual((page.doh_edit.text(), page.addresses_edit.text()), (text, ""))
+
+    def test_pasted_doh_with_addresses_is_spread_over_the_fields(self) -> None:
+        page = self._page()
+        page.open_server(None)
+
+        # Так выглядит строка из «Копировать DNS в буфер обмена».
+        self._type(page.doh_edit, "https://dns.example.com/dns-query, 203.0.113.5, 2001:db8::5")
+
+        self.assertEqual(page.doh_edit.text(), "https://dns.example.com/dns-query")
+        self.assertEqual(page.addresses_edit.text(), "203.0.113.5 2001:db8::5")
+
+        page.open_server(None)
+        self._type(page.addresses_edit, "dns.example.com/dns-query 203.0.113.5")
+        self.assertEqual((page.doh_edit.text(), page.addresses_edit.text()), ("dns.example.com/dns-query", "203.0.113.5"))
+
+    def test_paste_does_not_overwrite_a_filled_field(self) -> None:
+        page = self._page()
+        page.open_server(SECURE)
+
+        self._type(page.doh_edit, "https://other.example/dns-query 198.51.100.7")
+
+        self.assertEqual(page.addresses_edit.text(), "203.0.113.5 203.0.113.6 2001:db8::5")
+        self.assertEqual(page.doh_edit.text(), "https://other.example/dns-query 198.51.100.7")
+
+    def test_existing_server_is_shown_in_the_header(self) -> None:
+        page = self._page()
+
+        page.open_server(SECURE)
+
+        self.assertEqual((page.eyebrow_label.text(), page.title_text.text()), ("Свой сервер", "Мой шифрованный"))
+        self.assertEqual(
+            page.detail_label.text(),
+            "Шифрованный DNS (DoH) · 203.0.113.5 · 203.0.113.6 · 2001:db8::5",
+        )
+
+    def test_page_is_built_from_standard_setting_rows(self) -> None:
+        from ui.widgets.win11_controls import Win11ControlRow
+
+        page = self._page()
+
+        for row, edit in (
+            (page.doh_row, page.doh_edit),
+            (page.addresses_row, page.addresses_edit),
+            (page.name_row, page.name_edit),
+        ):
+            self.assertIsInstance(row, Win11ControlRow)
+            self.assertIs(edit.parent(), row)
+            # Строка с пояснением — стандартной высоты, как на остальных страницах настроек.
+            self.assertEqual(row.height(), 70)
+            self.assertTrue(row.contentLabel.text())
+        # Кнопки действия стоят в шапке, рядом с итогом.
+        self.assertIs(page.save_button.parent(), page.header)
+        self.assertIs(page.cancel_button.parent(), page.header)
+
+    def test_form_keeps_rows_whole_when_a_long_error_wraps_in_a_narrow_window(self) -> None:
+        page = self._page()
+        window = QMainWindow()
+        self.addCleanup(window.deleteLater)
+        window.setCentralWidget(page)
+        window.resize(820, 560)
+        window.show()
+        page.open_server(None)
+        page.doh_edit.setText("https://dns.example.com/dns-query")
+        page.save_button.click()
+
+        page._on_saved(
+            CustomServerResult(
+                success=False,
+                field="doh",
+                error="Сервер dns.example.com найден (203.0.113.5), но на запрос DoH не ответил: сервер молчит. "
+                "Проверьте адрес DoH; возможно, сервер закрыт на вашей линии.",
+            )
+        )
+        self._app.processEvents()
+
+        rows = (page.doh_row, page.addresses_row, page.name_row)
+        self.assertGreater(page.error_label.height(), 30)
+        for upper, lower in zip(rows, rows[1:]):
+            self.assertGreaterEqual(lower.y(), upper.y() + upper.height())
+        self.assertLessEqual(rows[-1].y() + rows[-1].height(), page.card.height())
+        window.takeCentralWidget()
 
     # ── сохранение ──────────────────────────────────────────
 
@@ -106,7 +232,10 @@ class CustomDnsServerPageTests(unittest.TestCase):
         server = page._save_lane.request.call_args.args[0]
         self.assertEqual(server["doh"], "https://dns.example.com/dns-query")
         self.assertEqual((server["ipv4"], server["ipv6"], server["name"]), ([], [], "dns.example.com"))
-        self.assertEqual(page.save_button.text(), "Проверяю сервер…")
+        self.assertEqual(page.save_button.text(), "Проверяю…")
+        self.assertIn("проверяю каждый запросом DoH", page.detail_label.text())
+        # Пока идёт проверка, вокруг значка бежит комета — как при смене DNS.
+        self.assertTrue(page.badge.is_busy())
         # Повторное нажатие, пока идёт проверка, второй раз не сохраняет.
         page.save_button.click()
         page._save_lane.request.assert_called_once()
@@ -133,7 +262,7 @@ class CustomDnsServerPageTests(unittest.TestCase):
 
         self.assertEqual(page._save_lane.request.call_args.args[0]["ipv4"], ["9.9.9.9"])
 
-    def test_wrong_input_is_reported_under_its_field_and_not_saved(self) -> None:
+    def test_wrong_input_is_reported_in_the_header_and_marks_its_field(self) -> None:
         page = self._page()
         page.open_server(None)
         page.doh_edit.setText("https://dns.example.com/dns-query")
@@ -142,18 +271,22 @@ class CustomDnsServerPageTests(unittest.TestCase):
         page.save_button.click()
 
         page._save_lane.request.assert_not_called()
-        self.assertIn("кот", page.addresses_error.text())
-        self.assertFalse(page.addresses_error.isHidden())
-        self.assertTrue(page.addresses_hint.isHidden())
+        self.assertIn("кот", page.error_label.text())
+        # Ошибка встаёт на место строки состояния, её поле подчёркнуто.
+        self.assertFalse(page.error_label.isHidden())
+        self.assertTrue(page.detail_label.isHidden())
         self.assertTrue(page.addresses_edit.isError())
         self.assertFalse(page.doh_edit.isError())
-        self.assertIn("Ошибка", page.addresses_error.accessibleName())
+        self.assertIn("Ошибка", page.error_label.accessibleName())
+        self.assertIn("кот", page.header.accessibleDescription())
 
-        # Правка поля убирает ошибку и возвращает пояснение.
+        # Правка поля убирает ошибку и возвращает строку состояния.
+        page.addresses_edit.setText("9.9.9.9")
         page.addresses_edit.textEdited.emit("9.9.9.9")
-        self.assertTrue(page.addresses_error.isHidden())
-        self.assertFalse(page.addresses_hint.isHidden())
+        self.assertTrue(page.error_label.isHidden())
+        self.assertFalse(page.detail_label.isHidden())
         self.assertFalse(page.addresses_edit.isError())
+        self.assertEqual(page.detail_label.text(), "Шифрованный DNS (DoH) · 9.9.9.9")
 
     def test_empty_form_asks_for_doh_or_addresses(self) -> None:
         page = self._page()
@@ -161,7 +294,7 @@ class CustomDnsServerPageTests(unittest.TestCase):
 
         page.save_button.click()
 
-        self.assertIn("адрес DoH", page.doh_error.text())
+        self.assertIn("адрес DoH", page.error_label.text())
         self.assertTrue(page.doh_edit.isError())
 
     def test_failed_check_shows_the_reason_and_unlocks_the_form(self) -> None:
@@ -172,8 +305,10 @@ class CustomDnsServerPageTests(unittest.TestCase):
 
         page._on_saved(CustomServerResult(success=False, error="сервер молчит", field="doh"))
 
-        self.assertEqual(page.doh_error.text(), "сервер молчит")
+        self.assertEqual(page.error_label.text(), "сервер молчит")
+        self.assertTrue(page.doh_edit.isError())
         self.assertFalse(page.doh_edit.isReadOnly())
+        self.assertFalse(page.badge.is_busy() and page._busy)
         self.assertEqual(page.save_button.text(), "Добавить")
         self.open_dns_page.assert_not_called()
 
@@ -184,7 +319,7 @@ class CustomDnsServerPageTests(unittest.TestCase):
 
         page._on_saved(CustomServerResult(success=False, error="Сервер с названием «Дом» уже есть.", field="name"))
 
-        self.assertIn("«Дом»", page.name_error.text())
+        self.assertIn("«Дом»", page.error_label.text())
         self.assertTrue(page.name_edit.isError())
 
     def test_saved_server_is_announced_and_page_returns_to_dns(self) -> None:
@@ -297,7 +432,9 @@ class CustomDnsServerPageTests(unittest.TestCase):
         page.set_ui_language("en")
 
         self.assertEqual(self._crumbs(page)[1], "New DNS")
-        self.assertEqual((page.doh_title.text(), page.save_button.text()), ("DoH address", "Add"))
+        self.assertEqual((page.doh_row.titleLabel.text(), page.save_button.text()), ("DoH address", "Add"))
+        self.assertEqual(page.eyebrow_label.text(), "New server")
+        self.assertIn("DoH address", page.detail_label.text())
 
     # ── доступность ─────────────────────────────────────────
 

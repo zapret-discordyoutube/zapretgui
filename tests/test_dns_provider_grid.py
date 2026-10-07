@@ -328,12 +328,12 @@ class DnsNowBadgeMotionTests(unittest.TestCase):
         cls._app = QApplication.instance() or QApplication([])
 
     def _badge(self, enabled: bool = True):
-        from dns.ui.now_panel import _Badge
+        from dns.ui.now_panel import DnsBadge
 
         item = patch("dns.ui.now_panel.are_live_animations_enabled", return_value=enabled)
         item.start()
         self.addCleanup(item.stop)
-        badge = _Badge()
+        badge = DnsBadge()
         self.addCleanup(badge.deleteLater)
         badge.show()
         return badge

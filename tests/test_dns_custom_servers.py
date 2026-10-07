@@ -65,6 +65,9 @@ class DohTemplateTests(unittest.TestCase):
             "https://dns.example.com:99999/dns-query",
             "https://user@dns.example.com/dns-query",
             "https://dns.example.com/dns-query?dns=abc",
+            # Недописанный IP-адрес — не имя сервера.
+            "149.112.",
+            "149.112",
         ):
             with self.subTest(text=text):
                 self.assertIsNone(parse_doh_template(text))
@@ -109,6 +112,31 @@ class FormTests(unittest.TestCase):
         self.assertEqual(wrong.field, FIELD_ADDRESSES)
         self.assertIn("кот", wrong.error)
         self.assertIsNone(wrong.server)
+
+
+class PastedTextTests(unittest.TestCase):
+    def test_doh_with_addresses_is_split_into_two_fields(self) -> None:
+        self.assertEqual(
+            custom_servers.split_pasted("https://dns.example.com/dns-query, 203.0.113.5, 2001:db8::5"),
+            ("https://dns.example.com/dns-query", "203.0.113.5 2001:db8::5"),
+        )
+        # Именно так кладёт сервер в буфер «Копировать DNS».
+        self.assertEqual(
+            custom_servers.split_pasted(custom_servers.clipboard_text(SECURE)),
+            ("https://dns.example.com/dns-query", "203.0.113.5 203.0.113.6 2001:db8::5"),
+        )
+
+    def test_unclear_text_is_left_alone(self) -> None:
+        for text in (
+            "9.9.9.9 149.112.112.112",
+            "https://dns.example.com/dns-query",
+            "кот 9.9.9.9",
+            "a.example/q b.example/q 9.9.9.9",
+            "9.9.9.9 149.112.",
+            "",
+        ):
+            with self.subTest(text=text):
+                self.assertIsNone(custom_servers.split_pasted(text))
 
 
 class ServerListTests(unittest.TestCase):

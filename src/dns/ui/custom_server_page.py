@@ -6,6 +6,15 @@
 название сервера). Какой сервер править, странице сообщает команда
 edit_custom_server (см. main.window_page_presenters).
 
+Страница собрана так же, как остальные страницы настроек:
+
+- шапка — карточка в стиле панели «Сейчас» страницы DNS: значок своего
+  сервера, название и строка состояния. Строка сразу показывает, что
+  получится из введённого (шифрованный DNS или обычный, какие адреса), а
+  при сохранении — ход проверки и её ошибку. Справа кнопки «Отмена» и
+  «Добавить»;
+- ниже — три строки настроек во всю ширину: адрес DoH, IP-адреса, название.
+
 Достаточно одной строки: адреса DoH (https://имя/dns-query) — IP-адреса
 сервера программа найдёт и проверит сама. Можно, наоборот, вписать только
 IP-адреса, это обычный DNS без шифрования.
@@ -16,23 +25,25 @@ IP-адреса, это обычный DNS без шифрования.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
+    BodyLabel,
     BreadcrumbBar,
     CaptionLabel,
-    IndeterminateProgressBar,
     InfoBar,
     InfoBarPosition,
     LineEdit,
     PrimaryPushButton,
     PushButton,
-    StrongBodyLabel,
+    SimpleCardWidget,
+    SubtitleLabel,
 )
 
 from app.ui_texts import tr as tr_catalog
 from dns import custom_servers
+from dns.ui.now_panel import DnsBadge
 from log.log import log
 from ui.accessibility import (
     remove_line_edit_buttons_from_tab_order,
@@ -40,15 +51,51 @@ from ui.accessibility import (
     set_control_accessibility,
     set_state_text,
 )
-from ui.fluent_widgets import SettingsCard, style_semantic_caption_label
+from ui.fluent_widgets import style_semantic_caption_label
 from ui.latest_worker_lane import LatestWorkerLane
 from ui.pages.base_page import BasePage
+from ui.widgets.win11_controls import Win11ControlRow
 
-FORM_MAX_WIDTH = 720
+# Значок и цвет своего сервера — те же, что на его плитке в списке DNS.
+SERVER_ICON = "fa5s.edit"
+SERVER_COLOR = "#22c55e"
+FIELD_WIDTH = 440
+BUTTON_MIN_WIDTH = 120
+
+# Строки формы: ключ перевода и текст по умолчанию для названия и пояснения.
+ROW_DOH = (
+    ("page.network.custom_server.doh", "Адрес DoH"),
+    ("page.network.custom_server.doh.hint", "Шифрованный DNS, как в браузере. Одной этой строки достаточно"),
+)
+ROW_ADDRESSES = (
+    ("page.network.custom_server.addresses", "IP-адреса"),
+    ("page.network.custom_server.addresses.hint", "Через пробел, основной — первым. IPv4 и IPv6 вместе"),
+)
+ROW_NAME = (
+    ("page.network.custom_server.name", "Название"),
+    ("page.network.custom_server.name.hint", "Подпись плитки в списке DNS"),
+)
+
+
+class _FormHost(QWidget):
+    """Вся форма: шапка и строки под ней.
+
+    Желаемый размер считается для узкой формы нарочно. Страница берёт эту
+    высоту как наибольшую и потом только уменьшает её под настоящую ширину.
+    Без этого длинная ошибка в шапке, перенесённая на третью строку в узком
+    окне, отнимала бы высоту у строк под ней.
+    """
+
+    HINT_WIDTH = 560
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        hint = super().sizeHint()
+        width = min(hint.width(), self.HINT_WIDTH)
+        return QSize(width, max(hint.height(), self.heightForWidth(width)))
 
 
 class CustomDnsServerPage(BasePage):
-    """Форма одного своего DNS-сервера: адрес DoH, IP-адреса и название."""
+    """Один свой DNS-сервер: шапка с итогом и три строки — адрес DoH, IP-адреса, название."""
 
     def __init__(self, parent=None, *, deps):
         super().__init__(
@@ -62,9 +109,13 @@ class CustomDnsServerPage(BasePage):
         # Запись сервера, который правят; пустая — добавляется новый.
         self._server: dict = custom_servers.copy_server(None)
         self._busy = False
-        # Сохранение ищет IP-адреса сервера в сети: кнопка пишет, чем занята.
+        # Сохранение ищет IP-адреса сервера в сети: шапка и кнопка пишут, чем заняты.
         self._busy_lookup = False
         self._error_text = ""
+        # Последний понятный итог введённого: держится, пока поле заполнено наполовину.
+        self._settled_detail = ""
+        # Длина текста поля до последней правки: по скачку длины видно вставку.
+        self._typed_length: dict[LineEdit, int] = {}
         self._closed = False
         self._save_lane = LatestWorkerLane(
             name="dns_custom_server_save",
@@ -94,118 +145,105 @@ class CustomDnsServerPage(BasePage):
         self.breadcrumb = BreadcrumbBar(self.content)
         self.breadcrumb.currentItemChanged.connect(self._on_breadcrumb_item_changed)
         self.add_widget(self.breadcrumb)
-        self.add_spacing(8)
 
-        self.card = SettingsCard(parent=self.content)
-        self.card.setMaximumWidth(FORM_MAX_WIDTH)
-        form = QVBoxLayout()
-        form.setContentsMargins(4, 2, 4, 2)
-        form.setSpacing(4)
+        # Вся форма целиком: шапка и строки под ней.
+        self.card = _FormHost(self.content)
+        form = QVBoxLayout(self.card)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(16)
+        form.addWidget(self._build_header())
 
-        self.doh_title, self.doh_edit, self.doh_hint, self.doh_error = self._field(form)
-        form.addSpacing(14)
-        self.addresses_title, self.addresses_edit, self.addresses_hint, self.addresses_error = self._field(form)
-        form.addSpacing(14)
-        self.name_title, self.name_edit, self.name_hint, self.name_error = self._field(form)
+        # Строки стоят плотно, как в группе настроек.
+        rows = QVBoxLayout()
+        rows.setSpacing(3)
+        self.doh_row, self.doh_edit = self._row("fa5s.lock", ROW_DOH)
+        self.addresses_row, self.addresses_edit = self._row("fa5s.network-wired", ROW_ADDRESSES)
+        self.name_row, self.name_edit = self._row("fa5s.tag", ROW_NAME)
+        for row in (self.doh_row, self.addresses_row, self.name_row):
+            rows.addWidget(row)
+        form.addLayout(rows)
+        self.add_widget(self.card)
 
-        # Ошибка, которая не относится к одному полю (сбой самой записи).
-        self.error_label = self._error_label()
-        form.addSpacing(6)
-        form.addWidget(self.error_label)
+        self.doh_edit.textEdited.connect(lambda text: self._on_text_edited(self.doh_edit, text))
+        self.addresses_edit.textEdited.connect(lambda text: self._on_text_edited(self.addresses_edit, text))
+        self.name_edit.textEdited.connect(lambda text: self._on_text_edited(self.name_edit, text))
 
-        self.progress_bar = IndeterminateProgressBar(self.card, start=False)
-        self.progress_bar.hide()
-        form.addWidget(self.progress_bar)
+    def _build_header(self) -> QWidget:
+        """Шапка: значок сервера, что получится из введённого и кнопки действия."""
+        self.header = SimpleCardWidget(self.card)
+        self.header.setObjectName("customDnsHeader")
+        self.header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # Вокруг круга значка место под свечение: внешний отступ на столько же меньше.
+        glow_pad = (DnsBadge.BOX - DnsBadge.CIRCLE) // 2
+        layout = QHBoxLayout(self.header)
+        layout.setContentsMargins(20 - glow_pad, 18 - glow_pad, 20, 18 - glow_pad)
+        layout.setSpacing(16 - glow_pad)
+
+        self.badge = DnsBadge(self.header)
+        self.badge.set_icon(SERVER_ICON, SERVER_COLOR)
+        layout.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
+
+        text = QVBoxLayout()
+        text.setContentsMargins(0, glow_pad, 0, glow_pad)
+        text.setSpacing(2)
+        self.eyebrow_label = CaptionLabel("", self.header)
+        self.eyebrow_label.setTextColor(QColor(0, 0, 0, 115), QColor(255, 255, 255, 125))
+        text.addWidget(self.eyebrow_label)
+        self.title_text = SubtitleLabel("", self.header)
+        text.addWidget(self.title_text)
+        self.detail_label = BodyLabel("", self.header)
+        self.detail_label.setWordWrap(True)
+        self.detail_label.setTextColor(QColor(0, 0, 0, 160), QColor(255, 255, 255, 170))
+        text.addWidget(self.detail_label)
+        # Ошибка встаёт на место строки состояния.
+        self.error_label = BodyLabel("", self.header)
+        self.error_label.setWordWrap(True)
+        style_semantic_caption_label(self.error_label, tone="error")
+        self.error_label.hide()
+        text.addWidget(self.error_label)
+        # Растяжку сюда не ставить: с ней шапка забирает всю свободную высоту страницы.
+        layout.addLayout(text, 1)
 
         buttons = QHBoxLayout()
-        buttons.setContentsMargins(0, 10, 0, 0)
+        buttons.setContentsMargins(12, glow_pad, 0, 0)
         buttons.setSpacing(8)
-        buttons.addStretch(1)
-        self.cancel_button = PushButton("", self.card)
+        self.cancel_button = PushButton("", self.header)
         self.cancel_button.clicked.connect(self._cancel)
-        buttons.addWidget(self.cancel_button)
-        self.save_button = PrimaryPushButton("", self.card)
+        self.save_button = PrimaryPushButton("", self.header)
+        self.save_button.setMinimumWidth(BUTTON_MIN_WIDTH)
         self.save_button.clicked.connect(self._save)
+        buttons.addWidget(self.cancel_button)
         buttons.addWidget(self.save_button)
-        form.addLayout(buttons)
+        layout.addLayout(buttons, 0)
+        layout.setAlignment(buttons, Qt.AlignmentFlag.AlignTop)
+        return self.header
 
-        self.card.add_layout(form)
-        # Форма не растягивается на всю ширину окна и прижата к левому краю.
-        row = QWidget(self.content)
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.addWidget(self.card, 1)
-        row_layout.addStretch(0)
-        self.add_widget(row)
+    def _row(self, icon_name: str, texts) -> tuple[Win11ControlRow, LineEdit]:
+        """Строка настройки с полем ввода справа.
 
-        for edit in (self.doh_edit, self.addresses_edit, self.name_edit):
-            edit.setClearButtonEnabled(True)
-            edit.returnPressed.connect(self._save)
-            edit.textEdited.connect(self._on_text_edited)
-            remove_line_edit_buttons_from_tab_order(edit)
-
-    def _error_label(self) -> CaptionLabel:
-        label = CaptionLabel("", self.card)
-        label.setWordWrap(True)
-        style_semantic_caption_label(label, tone="error")
-        label.hide()
-        return label
-
-    def _field(self, form: QVBoxLayout) -> tuple[StrongBodyLabel, LineEdit, CaptionLabel, CaptionLabel]:
-        """Поле формы: подпись, строка ввода и пояснение под ней.
-
-        Ошибка поля показывается на месте пояснения, прямо под строкой ввода.
+        Пояснение задаётся сразу при создании: по нему строка выбирает свою высоту.
         """
-        title = StrongBodyLabel("", self.card)
-        edit = LineEdit(self.card)
-        hint = CaptionLabel("", self.card)
-        hint.setWordWrap(True)
-        hint.setTextColor(QColor(0, 0, 0, 150), QColor(255, 255, 255, 160))
-        error = self._error_label()
-        form.addWidget(title)
-        form.addWidget(edit)
-        form.addWidget(hint)
-        form.addWidget(error)
-        return title, edit, hint, error
+        title, hint = texts
+        row = Win11ControlRow(icon_name, self._t(*title), self._t(*hint), parent=self.card)
+        edit = LineEdit(row)
+        edit.setFixedWidth(FIELD_WIDTH)
+        edit.setClearButtonEnabled(True)
+        edit.returnPressed.connect(self._save)
+        remove_line_edit_buttons_from_tab_order(edit)
+        row.add_control(edit)
+        return row, edit
 
     def _retranslate(self) -> None:
         t = self._t
-        self.doh_title.setText(t("page.network.custom_server.doh", "Адрес DoH"))
         self.doh_edit.setPlaceholderText("https://dns.example.com/dns-query")
-        self.doh_hint.setText(
-            t(
-                "page.network.custom_server.doh.hint",
-                "Шифрованный DNS, как в браузере. Вставьте адрес — IP-адреса сервера программа найдёт и проверит сама.",
-            )
-        )
-        self.addresses_title.setText(t("page.network.custom_server.addresses", "IP-адреса"))
-        self.addresses_edit.setPlaceholderText("9.9.9.9 149.112.112.112 2620:fe::fe")
-        self.addresses_hint.setText(
-            t(
-                "page.network.custom_server.addresses.hint",
-                "Через пробел, первым — основной; IPv4 и IPv6 вместе. С адресом DoH поле можно оставить пустым.",
-            )
-        )
-        self.name_title.setText(t("page.network.custom_server.name", "Название"))
-        self.name_hint.setText(
-            t("page.network.custom_server.name.hint", "Подпись на плитке. Можно не писать — подставится имя сервера.")
-        )
         self.cancel_button.setText(t("page.network.custom_server.cancel", "Отмена"))
-        set_control_accessibility(
-            self.doh_edit,
-            name=self.doh_title.text(),
-            description=self.doh_hint.text(),
-        )
-        set_control_accessibility(
-            self.addresses_edit,
-            name=self.addresses_title.text(),
-            description=self.addresses_hint.text(),
-        )
-        set_control_accessibility(
-            self.name_edit,
-            name=self.name_title.text(),
-            description=self.name_hint.text(),
-        )
+        for row, edit, (title, hint) in (
+            (self.doh_row, self.doh_edit, ROW_DOH),
+            (self.addresses_row, self.addresses_edit, ROW_ADDRESSES),
+            (self.name_row, self.name_edit, ROW_NAME),
+        ):
+            row.set_texts(t(*title), t(*hint))
+            set_control_accessibility(edit, name=t(*title), description=t(*hint))
         set_control_accessibility(
             self.cancel_button,
             name=t("page.network.custom_server.cancel.name", "Отмена: вернуться к настройке DNS"),
@@ -216,6 +254,13 @@ class CustomDnsServerPage(BasePage):
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
         self._retranslate()
+
+    def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
+        """Значок рисует себя сам и берёт цвета темы при отрисовке — просто перерисовать."""
+        _ = tokens, force
+        badge = getattr(self, "badge", None)
+        if badge is not None:
+            badge.update()
 
     # ── какой сервер открыт ─────────────────────────────────
 
@@ -229,9 +274,11 @@ class CustomDnsServerPage(BasePage):
         """Показывает запись сервера в полях; None — чистая форма нового сервера."""
         self._abandon_save()
         self._server = custom_servers.copy_server(server)
+        self._settled_detail = ""
         self.doh_edit.setText(self._server["doh"])
         self.addresses_edit.setText(custom_servers.addresses_text(self._server))
         self.name_edit.setText(self._server["name"])
+        self._typed_length = {item: len(item.text()) for item in (self.doh_edit, self.addresses_edit, self.name_edit)}
         self._show_error("", "")
         self._render()
 
@@ -247,6 +294,14 @@ class CustomDnsServerPage(BasePage):
         super().cleanup()
 
     # ── отрисовка ───────────────────────────────────────────
+
+    def _read_form(self) -> custom_servers.CustomServerForm:
+        return custom_servers.read_form(
+            server_id=self._server["id"],
+            name=self.name_edit.text(),
+            doh=self.doh_edit.text(),
+            addresses=self.addresses_edit.text(),
+        )
 
     def _current_title(self) -> str:
         if self.is_editing():
@@ -264,11 +319,11 @@ class CustomDnsServerPage(BasePage):
         finally:
             self.breadcrumb.blockSignals(False)
         self._render_save_button()
-        self._render_name_placeholder()
+        self._render_summary()
 
     def _render_save_button(self) -> None:
         if self._busy and self._busy_lookup:
-            text = self._t("page.network.custom_server.checking", "Проверяю сервер…")
+            text = self._t("page.network.custom_server.checking", "Проверяю…")
         elif self._busy:
             text = self._t("page.network.custom_server.saving", "Сохраняю…")
         elif self.is_editing():
@@ -285,35 +340,99 @@ class CustomDnsServerPage(BasePage):
             ),
         )
 
-    def _render_name_placeholder(self) -> None:
-        """В пустом поле названия видно, каким оно станет само."""
+    def _summary(self, form: custom_servers.CustomServerForm) -> str:
+        """Что получится из введённого — одной фразой для строки состояния."""
+        server = form.server
+        if server is None:
+            return self._t(
+                "page.network.custom_server.summary.empty",
+                "Вставьте адрес DoH или впишите IP-адреса сервера — одного из двух достаточно.",
+            )
+        addresses = " · ".join([*server["ipv4"], *server["ipv6"]])
+        if form.needs_lookup:
+            return self._t(
+                "page.network.custom_server.summary.doh_only",
+                "Шифрованный DNS (DoH). IP-адреса сервера программа найдёт и проверит сама.",
+            )
+        if server["doh"]:
+            return self._t(
+                "page.network.custom_server.summary.doh",
+                "Шифрованный DNS (DoH) · {addresses}",
+                addresses=addresses,
+            )
+        return self._t(
+            "page.network.custom_server.summary.plain",
+            "Обычный DNS без шифрования · {addresses}",
+            addresses=addresses,
+        )
+
+    def _render_summary(self) -> None:
+        """Шапка и подсказки в пустых полях: всё, что видно из уже введённого."""
         form = self._read_form()
-        fallback = self._t("page.network.custom_server.name.placeholder", "Например, Мой DNS")
-        self.name_edit.setPlaceholderText(form.server["name"] if form.server and not self.name_edit.text().strip() else fallback)
+        server = form.server
+        typed = any(edit.text().strip() for edit in (self.doh_edit, self.addresses_edit, self.name_edit))
+        self.eyebrow_label.setText(
+            self._t("page.network.custom_server.eyebrow.edit", "Свой сервер")
+            if self.is_editing()
+            else self._t("page.network.custom_server.eyebrow.new", "Новый сервер")
+        )
+        name = self.name_edit.text().strip() or (server["name"] if server else "")
+        self.title_text.setText(name or self._t("page.network.custom_server.title", "Свой DNS"))
+
+        if server is not None or not typed:
+            self._settled_detail = self._summary(form)
+        if self._busy and self._busy_lookup:
+            detail = self._t(
+                "page.network.custom_server.checking.detail",
+                "Ищу адреса сервера и проверяю каждый запросом DoH…",
+            )
+        elif self._busy:
+            detail = self._t("page.network.custom_server.saving", "Сохраняю…")
+        else:
+            # Поле заполнено наполовину — показываем последний понятный итог.
+            detail = self._settled_detail or self._summary(custom_servers.CustomServerForm())
+        self.detail_label.setText(detail)
+        self.detail_label.setVisible(not self._error_text)
+        self.badge.set_busy(self._busy)
+
+        # В пустых полях видно, что подставится само.
+        self.addresses_edit.setPlaceholderText(
+            self._t("page.network.custom_server.addresses.auto", "Найдутся сами")
+            if server is not None and form.needs_lookup
+            else "9.9.9.9 149.112.112.112"
+        )
+        self.name_edit.setPlaceholderText(
+            server["name"]
+            if server is not None and not self.name_edit.text().strip()
+            else self._t("page.network.custom_server.name.placeholder", "Мой DNS")
+        )
+        summary = f"{self.eyebrow_label.text()}: {self.title_text.text()}. {self._error_text or detail}"
+        set_control_accessibility(
+            self.header,
+            name=self._t("page.network.custom_server.header.name", "Свой DNS-сервер"),
+            description=summary,
+        )
+        set_state_text(self.title_text, summary)
 
     def _show_error(self, text: str, field: str) -> None:
-        """Ошибка встаёт на место пояснения своего поля; пустой текст убирает все ошибки."""
+        """Ошибка встаёт на место строки состояния, её поле подчёркивается красным."""
         fields = {
-            custom_servers.FIELD_DOH: (self.doh_edit, self.doh_hint, self.doh_error),
-            custom_servers.FIELD_ADDRESSES: (self.addresses_edit, self.addresses_hint, self.addresses_error),
-            custom_servers.FIELD_NAME: (self.name_edit, self.name_hint, self.name_error),
+            custom_servers.FIELD_DOH: self.doh_edit,
+            custom_servers.FIELD_ADDRESSES: self.addresses_edit,
+            custom_servers.FIELD_NAME: self.name_edit,
         }
-        shown = self.error_label
-        for name, (edit, hint, error) in fields.items():
-            here = bool(text) and name == field
-            edit.setError(here)
-            hint.setVisible(not here)
-            error.setVisible(here)
-            if here:
-                shown = error
-        self.error_label.setVisible(bool(text) and shown is self.error_label)
+        for name, edit in fields.items():
+            edit.setError(bool(text) and name == field)
         self._error_text = text
+        self.error_label.setText(text)
+        self.error_label.setVisible(bool(text))
+        self.detail_label.setVisible(not text)
         if not text:
             return
-        shown.setText(text)
-        set_state_text(shown, self._t("page.network.custom_server.error", "Ошибка: {text}", text=text))
+        set_state_text(self.error_label, self._t("page.network.custom_server.error", "Ошибка: {text}", text=text))
+        self._render_summary()
         if field in fields:
-            fields[field][0].setFocus(Qt.FocusReason.OtherFocusReason)
+            fields[field].setFocus(Qt.FocusReason.OtherFocusReason)
 
     def error_text(self) -> str:
         """Текст показанной ошибки или пустая строка."""
@@ -324,27 +443,38 @@ class CustomDnsServerPage(BasePage):
         # Поля не выключаются, а запираются: выключение увело бы фокус с поля.
         for edit in (self.doh_edit, self.addresses_edit, self.name_edit):
             edit.setReadOnly(self._busy)
-        self.progress_bar.setVisible(self._busy)
-        if self._busy:
-            self.progress_bar.start()
-        else:
-            self.progress_bar.stop()
         self._render_save_button()
+        self._render_summary()
 
     # ── действия ────────────────────────────────────────────
 
-    def _read_form(self) -> custom_servers.CustomServerForm:
-        return custom_servers.read_form(
-            server_id=self._server["id"],
-            name=self.name_edit.text(),
-            doh=self.doh_edit.text(),
-            addresses=self.addresses_edit.text(),
-        )
-
-    def _on_text_edited(self, _text: str) -> None:
+    def _on_text_edited(self, edit: LineEdit, text: str) -> None:
         if self._error_text:
             self._show_error("", "")
-        self._render_name_placeholder()
+        # Вставка добавляет сразу несколько знаков, набор с клавиатуры — по одному.
+        pasted = len(text) - self._typed_length.get(edit, 0) > 1
+        if pasted:
+            self._spread_pasted(edit, text)
+        self._typed_length = {item: len(item.text()) for item in (self.doh_edit, self.addresses_edit, self.name_edit)}
+        self._render_summary()
+
+    def _spread_pasted(self, edit: LineEdit, text: str) -> None:
+        """Вставили «адрес DoH и IP-адреса» одной строкой — раскладываем по своим полям.
+
+        Так выглядит строка из «Копировать DNS» и из описаний серверов. Чужое
+        поле заполняется, только если оно пустое.
+        """
+        if edit is self.name_edit:
+            return
+        pasted = custom_servers.split_pasted(text)
+        if pasted is None:
+            return
+        other = self.addresses_edit if edit is self.doh_edit else self.doh_edit
+        if other.text().strip():
+            return
+        doh, addresses = pasted
+        self.doh_edit.setText(doh)
+        self.addresses_edit.setText(addresses)
 
     def _on_breadcrumb_item_changed(self, key: str) -> None:
         # Клик по крошке обрезал путь: восстанавливаем его для следующего захода.

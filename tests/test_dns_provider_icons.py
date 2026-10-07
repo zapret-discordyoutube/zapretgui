@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtWidgets import QApplication
 
 from dns.dns_providers import DNS_PROVIDERS
-from dns.ui.now_panel import _Badge
+from dns.ui.now_panel import DnsBadge
 from dns.ui.provider_grid import DnsProviderGrid, DnsTile
 from hosts.ui.profile_icons import profile_icon
 from profile.ui import profile_icon as profile_icon_module
@@ -106,7 +106,7 @@ class DnsProviderIconTests(unittest.TestCase):
     def test_now_badge_draws_the_logo_and_not_a_letter_stub(self) -> None:
         # Значок не показан на экране, поэтому «переворота монетки» нет:
         # сразу рисуется новый значок.
-        badge = _Badge()
+        badge = DnsBadge()
         self.addCleanup(badge.deleteLater)
         badge.set_icon("own:opendns:OD", "#fe7702")
 

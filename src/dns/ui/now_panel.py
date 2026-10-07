@@ -63,7 +63,7 @@ class AdapterChip:
     checked: bool = True
 
 
-class _Badge(QWidget):
+class DnsBadge(QWidget):
     """Крупный значок текущего DNS в круге его цвета.
 
     Светится мягким ореолом своего цвета. Пока DNS применяется, вокруг бежит
@@ -199,7 +199,7 @@ class DnsNowPanel(SimpleCardWidget):
         self._adapters_empty_text = "Сетевые адаптеры не найдены"
 
         # Вокруг круга значка 10 px под свечение: внешний отступ на столько же меньше.
-        glow_pad = (_Badge.BOX - _Badge.CIRCLE) // 2
+        glow_pad = (DnsBadge.BOX - DnsBadge.CIRCLE) // 2
         root = QVBoxLayout(self)
         root.setContentsMargins(20 - glow_pad, 18 - glow_pad, 20, 16)
         root.setSpacing(14 - glow_pad)
@@ -207,7 +207,7 @@ class DnsNowPanel(SimpleCardWidget):
         # ── что стоит сейчас ──
         head = QHBoxLayout()
         head.setSpacing(16 - glow_pad)
-        self.badge = _Badge(self)
+        self.badge = DnsBadge(self)
         head.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
 
         text = QVBoxLayout()
@@ -404,4 +404,4 @@ class DnsNowPanel(SimpleCardWidget):
         return QSize(640, super().sizeHint().height())
 
 
-__all__ = ["AdapterChip", "DnsNowPanel", "NowState"]
+__all__ = ["AdapterChip", "DnsBadge", "DnsNowPanel", "NowState"]

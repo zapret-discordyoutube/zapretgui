@@ -97,6 +97,9 @@ def parse_doh_template(text: str) -> DohTemplate | None:
         labels = host.split(".")
         if len(labels) < 2 or len(host) > 253 or not all(_HOST_LABEL.match(label) for label in labels):
             return None
+        # Имя из одних цифр («149.112») — недописанный IP-адрес, а не сервер.
+        if labels[-1].isdigit():
+            return None
         shown_host = host
     else:
         host = str(address)
@@ -126,6 +129,22 @@ def split_addresses(text: str) -> tuple[list[str], list[str], list[str]]:
         if str(address) not in bucket:
             bucket.append(str(address))
     return ipv4, ipv6, bad
+
+
+def split_pasted(text: str) -> tuple[str, str] | None:
+    """Текст «адрес DoH и IP-адреса вместе» → (адрес DoH, IP-адреса) или None.
+
+    Так выглядит то, что кладёт в буфер «Копировать DNS» (clipboard_text), и
+    строка из описания сервера на его сайте. Вставленное в одно поле
+    раскладывается по двум, только если разбор однозначен: ровно один адрес
+    DoH и хотя бы один IP-адрес.
+    """
+    parts = [part for part in _ADDRESS_SEPARATORS.split(str(text or "").strip()) if part]
+    addresses = [part for part in parts if _ip(part) is not None]
+    others = [part for part in parts if _ip(part) is None]
+    if not addresses or len(others) != 1 or parse_doh_template(others[0]) is None:
+        return None
+    return others[0], " ".join(addresses)
 
 
 def new_server_id() -> str:
@@ -308,6 +327,7 @@ __all__ = [
     "read_form",
     "remove_server",
     "split_addresses",
+    "split_pasted",
     "unique_copy_name",
     "upsert_server",
 ]
