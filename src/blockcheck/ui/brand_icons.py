@@ -7,6 +7,7 @@
 
 - ``site_brand`` — значок сайта по ключу сервиса, названию или адресу;
 - ``brands_in_text`` — значки DNS-сервисов, названных в тексте находки;
+- ``named_brand`` — значок по названию сайта, DNS-сервиса или хостинга;
 - ``BrandIcon`` — сам значок на экране.
 """
 
@@ -102,6 +103,26 @@ def brands_in_text(text: str) -> list[Brand]:
     return [brand for needles, brand in _DNS if any(needle in lowered for needle in needles)]
 
 
+def named_brand(name: str) -> Brand | None:
+    """Значок по названию: сайт, DNS-сервис или хостинг (Akamai, Cloudflare, OVH …)."""
+    brand = site_brand(name)
+    if brand is not None:
+        return brand
+    found = brands_in_text(name)
+    if found:
+        return found[0]
+    try:
+        from profile.icons import resolve_profile_icon
+
+        spec = resolve_profile_icon(name)
+    except Exception:
+        return None
+    # Набор логотипов отвечает и буквами-заглушками: они здесь не нужны.
+    if spec.icon_name.startswith(("simple:", "own:")):
+        return Brand(spec.icon_name, spec.color, name)
+    return None
+
+
 def readable_color(color: str, *, light_theme: bool) -> str:
     """Фирменный цвет, который видно на фоне: чёрный логотип на тёмной теме стал бы невидимым."""
     value = QColor(color)
@@ -155,4 +176,4 @@ class BrandIcon(QLabel):
             pass
 
 
-__all__ = ["Brand", "BrandIcon", "brands_in_text", "readable_color", "site_brand"]
+__all__ = ["Brand", "BrandIcon", "brands_in_text", "named_brand", "readable_color", "site_brand"]

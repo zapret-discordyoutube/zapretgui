@@ -64,6 +64,20 @@ class ToneDot(QWidget):
         painter.end()
 
 
+def dot_on_first_line(dot: ToneDot, line_height: int = 20) -> QWidget:
+    """Точка для строки с переносом: стоит напротив первой строки текста.
+
+    Держатель фиксированного размера ставится в строку с ``AlignTop``. Вложенная
+    раскладка с растяжкой здесь не годится: она отнимает ширину у текста, и
+    высота строки с переносом считается неверно.
+    """
+    holder = QWidget(dot.parentWidget())
+    holder.setFixedSize(dot.width(), line_height)
+    dot.setParent(holder)
+    dot.move(0, (line_height - dot.height()) // 2)
+    return holder
+
+
 def paint_dot(painter: QPainter, rect: QRectF, color: QColor, *, hollow: bool = False) -> None:
     if hollow:
         painter.setPen(QPen(color, 1.6))
@@ -102,8 +116,6 @@ class ToneGroup(QWidget):
 
     ``plain`` — группа без названия и подложки: строки идут как обычный список
     (для того, что ни к какому виду не отнесли).
-    ``flat`` — заголовок есть, а общей подложки нет: внутри лежат карточки со
-    своей подложкой, и вторая вокруг них была бы лишней.
     """
 
     def __init__(
@@ -115,16 +127,15 @@ class ToneGroup(QWidget):
         count: int = 0,
         about: str = "",
         plain: bool = False,
-        flat: bool = False,
     ) -> None:
         super().__init__(parent)
         self._color_for = color_for
-        self._plain = plain or flat
+        self._plain = plain
         self._surface = QColor()
         self._body = QVBoxLayout(self)
-        self._body.setSpacing(8)
+        self._body.setSpacing(6)
         if self._plain:
-            self._body.setContentsMargins(0, 4 if flat else 0, 0, 0)
+            self._body.setContentsMargins(0, 0, 0, 0)
         else:
             self._body.setContentsMargins(14, 12, 12, 12)
 
@@ -178,4 +189,4 @@ class ToneGroup(QWidget):
         painter.end()
 
 
-__all__ = ["MUTED_TEXT", "ToneDot", "ToneGroup", "TonePill", "mute", "paint_dot"]
+__all__ = ["MUTED_TEXT", "ToneDot", "ToneGroup", "TonePill", "dot_on_first_line", "mute", "paint_dot"]

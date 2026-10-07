@@ -391,14 +391,31 @@ class PageCardsTests(unittest.TestCase):
         page._on_finished({**_REPORT, "problems": [], "working": []})
         self.assertTrue(page._progress_card.isHidden())
 
+        page.resize(900, 420)
+        page.show()
+        QApplication.processEvents()
+        bar = page.verticalScrollBar()
+        bar.setValue(min(180, bar.maximum()))
+        was_at = bar.value()
+
         page._open_card_detail(page._result_cards.card("hostings").card)
         self.assertFalse(page._detail_view.isHidden())
         self.assertTrue(page._tabs_pivot.isHidden())
         self.assertTrue(all(widget.isHidden() for widget in page._tab_widgets))
+        # На подстранице первой идёт строка пути: название и описание раздела скрыты.
+        self.assertTrue(page.title_label.isHidden())
+        self.assertTrue(page.subtitle_label.isHidden())
+        self.assertEqual(bar.value(), 0)
 
         page._detail_view.closed.emit()
+        QApplication.processEvents()
         self.assertTrue(page._detail_view.isHidden())
         self.assertFalse(page._tabs_pivot.isHidden())
+        self.assertFalse(page.title_label.isHidden())
+        self.assertFalse(page.subtitle_label.isHidden())
+        # Возврат — к тому месту списка, с которого уходили.
+        self.assertGreater(was_at, 0)
+        self.assertEqual(bar.value(), was_at)
         self.assertFalse(page._results_card.isHidden())
         self.assertTrue(page._progress_card.isHidden())
 

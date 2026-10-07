@@ -36,14 +36,15 @@ from qfluentwidgets import (
 )
 
 from blockcheck.ui.block_kinds_view import kind_color
-from blockcheck.ui.brand_icons import BrandIcon, site_brand
+from blockcheck.ui.brand_icons import BrandIcon, named_brand, site_brand
 from blockcheck.ui.result_cards_model import PREVIEW_LINES, Card, Counter, DotGroup, Line, Section, build_cards, build_counters
 from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
+from ui.widgets.share_bar import ShareBar
 from ui.widgets.stagger_float_in import float_in
-from ui.widgets.tone_group import ToneDot, mute
+from ui.widgets.tone_group import ToneDot, dot_on_first_line, mute
 
 CARD_RADIUS = 8
 GRID_GAP = 10
@@ -192,11 +193,7 @@ class _LineRow(QWidget):
         state = line.state
         dot = ToneDot(lambda tokens: state_color(state, tokens), self, size=7, hollow=state in _HOLLOW_STATES)
         if wrap:
-            dot_box = QVBoxLayout()
-            dot_box.setContentsMargins(0, 7, 0, 0)
-            dot_box.addWidget(dot)
-            dot_box.addStretch(1)
-            layout.addLayout(dot_box)
+            layout.addWidget(dot_on_first_line(dot), 0, Qt.AlignmentFlag.AlignTop)
         else:
             layout.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
         if wrap:
@@ -819,16 +816,177 @@ def card_plain_text(card: Card) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-class _SectionBlock(QWidget):
-    def __init__(self, section: Section, parent=None) -> None:
+# Значок строки отчёта — по тому, что измеряли. Цвет значка — состояние строки.
+_LINE_ICONS = {
+    "Соединение": "fa5s.plug",
+    "Адрес сервера": "fa5s.map-marker-alt",
+    "Как блокируют": "fa5s.ban",
+    "QUIC (UDP 443)": "fa5s.bolt",
+    "Объём загрузки": "fa5s.download",
+    "DNS": "fa5s.network-wired",
+    "Заметка": "fa5s.sticky-note",
+}
+_ADVICE_TITLE = "Что делать"
+_ABOUT_TITLE = "Что это за проверка"
+# Состояния, которые считаются в сводке отчёта, и подписи к их числам.
+_TALLY = (("ok", "в порядке"), ("fail", "с проблемой"), ("warn", "с замечанием"), ("unknown", "нет ответа"))
+NAME_COLUMN_MIN = 120
+NAME_COLUMN_MAX = 320
+
+
+def line_icon(line: Line, section: Section) -> str:
+    """Значок строки отчёта. Пусто — у строки точка состояния."""
+    if section.title == _ADVICE_TITLE:
+        return "fa5s.arrow-right"
+    if line.name.startswith("TLS"):
+        return "fa5s.lock"
+    if line.name.startswith("HTTP"):
+        return "fa5s.unlock-alt"
+    return _LINE_ICONS.get(line.name, "")
+
+
+def section_icon(section: Section, card: Card) -> tuple[str, str]:
+    """(значок, фирменный цвет) раздела отчёта. Цвет пустой — значок нейтральный."""
+    if section.title == _ADVICE_TITLE:
+        return "fa5s.lightbulb", ""
+    if section.title == _ABOUT_TITLE:
+        return "fa5s.info-circle", ""
+    if section.text and not section.lines:
+        return "fa5s.file-alt", ""
+    head = section.title.split(" — ")[0]
+    if card.site:
+        # Раздел сайта — один его адрес: «www.youtube.com — сайт».
+        return ("fa5s.link", "") if "." in head else ("fa5s.shield-alt", "")
+    brand = named_brand(head)
+    if brand is not None:
+        return brand.icon, brand.color
+    return "fa5s.list-ul", ""
+
+
+def tally(lines) -> dict[str, int]:
+    """Сколько строк в каком состоянии. Справочные строки (info) не считаются."""
+    counts = {state: 0 for state, _caption in _TALLY}
+    for line in lines:
+        if line.state in counts:
+            counts[line.state] += 1
+    return {state: count for state, count in counts.items() if count}
+
+
+class _CountLabel(StrongBodyLabel):
+    """Число, которое досчитывает от нуля до своего значения."""
+
+    def __init__(self, value: int, parent=None, *, pixel_size: int = 22) -> None:
         super().__init__(parent)
+        self.setText(str(value))
+        self._value = int(value)
+        font = self.font()
+        font.setPixelSize(pixel_size)
+        font.setWeight(QFont.Weight.DemiBold)
+        self.setFont(font)
+        self._anim = QVariantAnimation(self)
+        self._anim.setStartValue(0.0)
+        self._anim.setEndValue(1.0)
+        self._anim.setDuration(REVEAL_MS)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.valueChanged.connect(lambda share: self.setText(str(int(round(self._value * float(share))))))
+
+    def value(self) -> int:
+        return self._value
+
+    def play(self) -> None:
+        if are_live_animations_enabled() and self._value:
+            self._anim.start()
+
+
+class _ReportRow(QWidget):
+    """Строка отчёта как в таблице: значок, что измеряли (столбец одной ширины) и что получилось."""
+
+    def __init__(self, line: Line, icon: str, name_width: int, parent=None, *, divided: bool = False) -> None:
+        super().__init__(parent)
+        self.line = line
+        self._divided = divided
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 7, 0, 7)
+        layout.setSpacing(10)
+
+        state = line.state
+        holder = QWidget(self)
+        holder.setFixedSize(16, 20)
+        if icon:
+            self.marker = _StateIcon(state, holder, size=13, icon=icon)
+            self.marker.move(0, 2)
+        else:
+            self.marker = ToneDot(lambda tokens: state_color(state, tokens), holder, size=7, hollow=state in _HOLLOW_STATES)
+            self.marker.move(4, 6)
+        layout.addWidget(holder, 0, Qt.AlignmentFlag.AlignTop)
+
+        self.name_label = BodyLabel(line.name, self)
+        self.name_label.setWordWrap(True)
+        self.name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.text_label: BodyLabel | None = None
+        if line.text:
+            # «Что измеряли» — приглушённо и в столбец, «что получилось» — основным цветом.
+            mute(self.name_label)
+            self.name_label.setFixedWidth(name_width)
+            layout.addWidget(self.name_label, 0, Qt.AlignmentFlag.AlignTop)
+            self.text_label = BodyLabel(line.text, self)
+            self.text_label.setWordWrap(True)
+            self.text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            layout.addWidget(self.text_label, 1, Qt.AlignmentFlag.AlignTop)
+        else:
+            layout.addWidget(self.name_label, 1, Qt.AlignmentFlag.AlignTop)
+        set_state_text(self, f"{line.name}: {line.text}" if line.text else line.name)
+        self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        _ = event
+        if not self._divided:
+            return
+        painter = QPainter(self)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 20) if _is_light() else QColor(255, 255, 255, 18))
+        painter.drawRect(0, 0, self.width(), 1)
+        painter.end()
+
+
+class _SectionBlock(QWidget):
+    """Раздел отчёта: значок, название, сводка «сколько в порядке» с полосой и строки-таблица."""
+
+    def __init__(self, section: Section, parent=None, *, icon: str = "fa5s.list-ul", color: str = "") -> None:
+        super().__init__(parent)
+        self.section = section
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(16, 12, 16, 8)
+        layout.setSpacing(0)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 6)
+        header.setSpacing(10)
+        self.icon = BrandIcon(icon, color, self, size=16)
+        header.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignVCenter)
         self.title_label = StrongBodyLabel(section.title, self)
         self.title_label.setWordWrap(True)
-        layout.addWidget(self.title_label)
-        self.rows = [_LineRow(line, self, wrap=True) for line in section.lines]
+        header.addWidget(self.title_label, 1, Qt.AlignmentFlag.AlignVCenter)
+        # Сводка раздела: сколько строк в порядке и полоса долей.
+        self.bar: ShareBar | None = None
+        self.summary_label: CaptionLabel | None = None
+        counts = tally(section.lines)
+        total = sum(counts.values())
+        if total >= 2 and set(counts) & {"ok", "fail"}:
+            self.summary_label = mute(CaptionLabel(f"в порядке {counts.get('ok', 0)} из {total}", self))
+            header.addWidget(self.summary_label, 0, Qt.AlignmentFlag.AlignVCenter)
+            self.bar = ShareBar(state_color, self)
+            self.bar.setFixedWidth(110)
+            self.bar.set_segments([(state, counts[state]) for state, _caption in _TALLY if state in counts])
+            header.addWidget(self.bar, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(header)
+
+        metrics = QFontMetrics(self.title_label.font())
+        widest = max((metrics.horizontalAdvance(line.name) for line in section.lines if line.text), default=0)
+        name_width = max(NAME_COLUMN_MIN, min(NAME_COLUMN_MAX, widest + 12))
+        self.rows = [
+            _ReportRow(line, line_icon(line, section), name_width, self, divided=True) for line in section.lines
+        ]
         for row in self.rows:
             layout.addWidget(row)
         self.text_label: QLabel | None = None
@@ -840,6 +998,7 @@ class _SectionBlock(QWidget):
             self.text_label.setFont(font)
             self.text_label.setTextFormat(Qt.TextFormat.PlainText)
             self.text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self.text_label.setContentsMargins(0, 4, 0, 6)
             layout.addWidget(self.text_label)
 
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -852,8 +1011,128 @@ class _SectionBlock(QWidget):
         painter.end()
 
 
+class _ReportHero(QWidget):
+    """Шапка отчёта: логотип, название, результат, метки и сводка по всем измерениям."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._card: Card | None = None
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 16, 16, 16)
+        root.setSpacing(12)
+        top = QHBoxLayout()
+        top.setSpacing(14)
+        self.icon = BrandIcon("fa5s.globe", "", self, size=34)
+        top.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignTop)
+        titles = QVBoxLayout()
+        titles.setSpacing(3)
+        self.title_label = SubtitleLabel("", self)
+        titles.addWidget(self.title_label)
+        status_row = QHBoxLayout()
+        status_row.setSpacing(7)
+        self._status_dot = ToneDot(self._status_color, self)
+        status_row.addWidget(self._status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.status_label = BodyLabel("", self)
+        status_row.addWidget(self.status_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        status_row.addStretch(1)
+        titles.addLayout(status_row)
+        self._chips_host = QWidget(self)
+        self._chips_flow = FlowLayout(self._chips_host, needAni=False)
+        self._chips_flow.setContentsMargins(0, 4, 0, 0)
+        self._chips_flow.setHorizontalSpacing(6)
+        self._chips_flow.setVerticalSpacing(4)
+        titles.addWidget(self._chips_host)
+        top.addLayout(titles, 1)
+        self._stats = QHBoxLayout()
+        self._stats.setSpacing(22)
+        top.addLayout(self._stats)
+        top.addSpacing(8)
+        self.copy_button = PushButton("Скопировать", self)
+        top.addWidget(self.copy_button, 0, Qt.AlignmentFlag.AlignTop)
+        root.addLayout(top)
+        self.bar = ShareBar(state_color, self)
+        root.addWidget(self.bar)
+        self.counts: list[_CountLabel] = []
+        self.chip_labels: list[QLabel] = []
+        self._stat_widgets: list[QWidget] = []
+        self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
+
+    def _status_color(self, tokens=None) -> str:
+        return card_color(self._card, tokens) if self._card is not None else state_color("unknown", tokens)
+
+    def set_card(self, card: Card) -> None:
+        self._card = card
+        self.title_label.setText(card.title)
+        self.status_label.setText(card.status)
+        brand = site_brand(card.key.removeprefix("site:"), card.title) if card.site else None
+        self.icon.set_icon(brand.icon if brand else card.icon, brand.color if brand else "")
+
+        self._chips_flow.takeAllWidgets()
+        for widget in (*self.chip_labels, *self._stat_widgets):
+            widget.setParent(None)
+            widget.deleteLater()
+        self.chip_labels, self._stat_widgets, self.counts = [], [], []
+        for text, state in card.chips:
+            chip = QLabel(text, self._chips_host)
+            chip.setFixedHeight(20)
+            chip.setProperty("chipState", state)
+            self._chips_flow.addWidget(chip)
+            self.chip_labels.append(chip)
+        self._chips_host.setVisible(bool(self.chip_labels))
+
+        counts = tally(line for section in card.sections for line in section.lines)
+        for state, caption in _TALLY:
+            if state not in counts:
+                continue
+            box = QWidget(self)
+            column = QVBoxLayout(box)
+            column.setContentsMargins(0, 0, 0, 0)
+            column.setSpacing(0)
+            number = _CountLabel(counts[state], box)
+            column.addWidget(number, 0, Qt.AlignmentFlag.AlignRight)
+            caption_row = QHBoxLayout()
+            caption_row.setSpacing(5)
+            caption_row.addWidget(
+                ToneDot(lambda tokens, s=state: state_color(s, tokens), box, size=6, hollow=state in _HOLLOW_STATES),
+                0,
+                Qt.AlignmentFlag.AlignVCenter,
+            )
+            caption_row.addWidget(mute(CaptionLabel(caption, box)), 0, Qt.AlignmentFlag.AlignVCenter)
+            column.addLayout(caption_row)
+            self._stats.addWidget(box, 0, Qt.AlignmentFlag.AlignTop)
+            self._stat_widgets.append(box)
+            self.counts.append(number)
+            number.play()
+        self.bar.setVisible(sum(counts.values()) >= 2)
+        self.bar.set_segments([(state, counts[state]) for state, _caption in _TALLY if state in counts])
+        self._apply_theme_refresh()
+
+    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
+        _ = force
+        if self._card is None:
+            return
+        color = QColor(card_color(self._card, tokens))
+        self.status_label.setTextColor(color, color)
+        self._status_dot._apply_theme_refresh(tokens)
+        for chip in self.chip_labels:
+            state = str(chip.property("chipState") or "info")
+            chip.setStyleSheet(
+                _chip_style(state_color(state, tokens) if state in _LOUD_CHIPS else _muted_text(tokens), tokens)
+            )
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        _ = event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 12) if _is_light() else QColor(255, 255, 255, 11))
+        painter.drawRoundedRect(self.rect(), CARD_RADIUS, CARD_RADIUS)
+        painter.end()
+
+
 class ResultDetailView(QWidget):
-    """Подробности карточки на всю страницу: путь «BlockCheck → карточка» и разделы."""
+    """Отчёт по одной карточке на всю страницу: путь «BlockCheck → карточка», шапка-сводка и разделы."""
 
     closed = pyqtSignal()
     ROOT_KEY = "blockcheck"
@@ -870,25 +1149,17 @@ class ResultDetailView(QWidget):
         self.breadcrumb.currentItemChanged.connect(self._on_breadcrumb)
         self._layout.addWidget(self.breadcrumb)
 
-        header = QHBoxLayout()
-        header.setSpacing(10)
-        self._icon = BrandIcon("fa5s.globe", "", self, size=24)
-        header.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.title_label = SubtitleLabel("", self)
-        header.addWidget(self.title_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        header.addSpacing(4)
-        self.status_label = BodyLabel("", self)
-        header.addWidget(self.status_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        header.addStretch(1)
-        self.copy_button = PushButton("Скопировать", self)
+        self.hero = _ReportHero(self)
+        self.title_label = self.hero.title_label
+        self.status_label = self.hero.status_label
+        self.copy_button = self.hero.copy_button
         set_control_accessibility(
             self.copy_button,
             name="Скопировать подробности",
             description="Кладёт все измерения этой проверки в буфер обмена обычным текстом.",
         )
         self.copy_button.clicked.connect(self._copy)
-        header.addWidget(self.copy_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        self._layout.addLayout(header)
+        self._layout.addWidget(self.hero)
 
         self._sections_host = QWidget(self)
         self._sections_layout = QVBoxLayout(self._sections_host)
@@ -896,7 +1167,6 @@ class ResultDetailView(QWidget):
         self._sections_layout.setSpacing(8)
         self._layout.addWidget(self._sections_host)
         self.blocks: list[_SectionBlock] = []
-        self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
 
     def card(self) -> Card | None:
         return self._card
@@ -911,27 +1181,20 @@ class ResultDetailView(QWidget):
             set_breadcrumb_accessibility(self.breadcrumb, ["BlockCheck", card.title])
         finally:
             self.breadcrumb.blockSignals(False)
-        self.title_label.setText(card.title)
-        self.status_label.setText(card.status)
-        brand = site_brand(card.key.removeprefix("site:"), card.title) if card.site else None
-        self._icon.set_icon(brand.icon if brand else card.icon, brand.color if brand else "")
+        self.copy_button.setText("Скопировать")
+        self.hero.set_card(card)
         for block in self.blocks:
             block.setParent(None)
             block.deleteLater()
-        self.blocks = [_SectionBlock(section, self._sections_host) for section in card.sections]
+        self.blocks = []
+        for section in card.sections:
+            icon, color = section_icon(section, card)
+            self.blocks.append(_SectionBlock(section, self._sections_host, icon=icon, color=color))
         for order, block in enumerate(self.blocks):
             self._sections_layout.addWidget(block)
             float_in(block, delay_ms=min(order, 8) * 45)
-        self._apply_theme_refresh()
         set_state_text(self, f"Подробности: {card.title}, {card.status}, разделов {len(card.sections)}")
         self._sync_height()
-
-    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
-        _ = force
-        if self._card is None:
-            return
-        color = QColor(card_color(self._card, tokens))
-        self.status_label.setTextColor(color, color)
 
     def _on_breadcrumb(self, key: str) -> None:
         if key == self.ROOT_KEY:

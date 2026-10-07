@@ -662,10 +662,11 @@ class BlockcheckPage(BasePage):
         tab_key = self.TAB_ORDER[index]
         self._active_tab_index = index
         # Вкладку могут сменить и снаружи, пока поверх открыты подробности или отчёт.
-        for view in (self._server_detail_view, self._log_report_view):
+        for view in (self._detail_view, self._server_detail_view, self._log_report_view):
             if view is not None and not view.isHidden():
                 view.setVisible(False)
                 self._tabs_pivot.setVisible(True)
+        self._set_page_header_visible(True)
 
         if self._tabs_pivot is not None:
             try:
@@ -824,20 +825,22 @@ class BlockcheckPage(BasePage):
             self._detail_view.closed.connect(self._close_card_detail)
             self._detail_view.setVisible(False)
             self.add_widget(self._detail_view)
-        for widget in self._tab_widgets:
-            widget.setVisible(False)
-        self._tabs_pivot.setVisible(False)
+        self._show_over_tabs(self._detail_view)
         self._detail_view.show_card(card)
-        self._detail_view.setVisible(True)
         self._detail_view.setFocus()
-        self._scroll_to_top()
+
+    def _set_page_header_visible(self, visible: bool) -> None:
+        """На подстранице первой идёт строка пути: название и описание раздела там лишние."""
+        for label in (self.title_label, self.subtitle_label):
+            if label is not None:
+                label.setVisible(visible)
 
     def _close_card_detail(self) -> None:
         if self._detail_view is None or self._detail_view.isHidden():
             return
-        self._detail_view.setVisible(False)
-        self._tabs_pivot.setVisible(True)
         self._switch_tab(self._active_tab_index)
+        # Возвращаем к той карточке, с которой уходили: список длинный, искать её заново незачем.
+        QTimer.singleShot(0, self._restore_over_tabs_scroll)
 
     def _show_over_tabs(self, view: QWidget) -> None:
         """Страница подробностей занимает место вкладок; назад ведёт её строка пути."""
@@ -856,6 +859,7 @@ class BlockcheckPage(BasePage):
             if page is not None and page is not view:
                 page.setVisible(False)
         self._tabs_pivot.setVisible(False)
+        self._set_page_header_visible(False)
         view.setVisible(True)
         self._scroll_to_top()
 
