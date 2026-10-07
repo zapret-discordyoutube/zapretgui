@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QLabel, QWidget
 
 from blockcheck.ui.brand_icons import brands_in_text, named_brand, readable_color, site_brand
 from blockcheck.ui.check_results import (
@@ -23,6 +23,7 @@ from blockcheck.ui.check_results import (
 )
 from blockcheck.ui.result_cards import (
     ANIMATED_BLOCKS,
+    TEXT_PREVIEW_LINES,
     ResultCard,
     ResultDetailView,
     TilesGrid,
@@ -277,6 +278,44 @@ class TilesTests(unittest.TestCase):
 
         self.assertTrue(all(block.grid is not None and block.rows == [] for block in view.blocks))
         self.assertEqual(rise.call_count, ANIMATED_BLOCKS)
+
+
+class LongTextTests(unittest.TestCase):
+    """Длинный текст отчёта — в редакторе со своей прокруткой, а не одной надписью на сотни строк."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_text_section_is_an_editor_of_limited_height_and_opens_full_page(self) -> None:
+        table = "\n".join(f"Cloudflare   1.1.1.{index}   {index} мс   обрыв" for index in range(300))
+        card = Card(
+            key="dns_servers",
+            icon="fa5s.network-wired",
+            title="DNS-серверы",
+            level="fail",
+            status="Есть проблемы",
+            sections=(Section("Все серверы и способы связи", text=table),),
+        )
+        view = ResultDetailView()
+        self.addCleanup(view.deleteLater)
+        view.resize(1000, 700)
+        view.show()
+        opened = []
+        view.text_opened.connect(lambda title, text: opened.append((title, text)))
+        view.show_card(card)
+        self.app.processEvents()
+
+        [block] = view.blocks
+        self.assertTrue(block.editor.isReadOnly())
+        # Высота — на несколько строк, а не на все триста: дальше прокручивает сам редактор.
+        line = block.editor.fontMetrics().lineSpacing()
+        self.assertLess(block.editor.height(), (TEXT_PREVIEW_LINES + 4) * line)
+        self.assertLess(view.minimumHeight(), 700)
+        # Самой надписи на весь текст больше нет.
+        self.assertFalse(any(table in label.text() for label in block.findChildren(QLabel)))
+        block.open_text_button.click()
+        self.assertEqual(opened, [("Все серверы и способы связи", table)])
 
 
 class ReportTests(unittest.TestCase):

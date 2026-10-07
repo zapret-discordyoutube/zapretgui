@@ -830,6 +830,7 @@ class BlockcheckPage(BasePage):
         if self._detail_view is None:
             self._detail_view = ResultDetailView(self.content)
             self._detail_view.closed.connect(self._close_card_detail)
+            self._detail_view.text_opened.connect(self._open_section_text)
             self._detail_view.setVisible(False)
             self.add_widget(self._detail_view)
         self._show_over_tabs(self._detail_view)
@@ -940,6 +941,10 @@ class BlockcheckPage(BasePage):
                 description="Технические подробности проверки: адреса, ответы DNS и время ответа серверов.",
             )
         )
+
+    def _open_section_text(self, title: str, text: str) -> None:
+        """«Открыть на всю страницу» у длинного текста в отчёте карточки."""
+        self._open_log_report(LogReport(title=title, text=text, root_title="BlockCheck"))
 
     def _on_problem_action(self, action: str, target: str) -> None:
         """Кнопки у проблем в итоге: подбор стратегии с нужной целью, запуск

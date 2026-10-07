@@ -43,6 +43,9 @@ from blockcheck.ui.brand_icons import BrandIcon, named_brand, site_brand
 from blockcheck.ui.result_cards_model import PREVIEW_LINES, Card, Counter, DotGroup, Line, Section, build_cards, build_counters
 from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
+from ui.code_editor.chunked_fill import ChunkedReadOnlyFill
+from ui.code_editor.editor import CodeEditor
+from ui.code_editor.log_syntax import LogSyntaxHighlighter
 from ui.fluent_widgets import set_tooltip
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
@@ -852,6 +855,8 @@ _ABOUT_TITLE = "Что это за проверка"
 _TALLY = (("ok", "в порядке"), ("fail", "с проблемой"), ("warn", "с замечанием"), ("unknown", "нет ответа"))
 # Сколько первых карточек сетки появляется с анимацией.
 ANIMATED_CARDS = 8
+# Сколько строк длинного текста видно в отчёте без прокрутки; остальное — внутри редактора.
+TEXT_PREVIEW_LINES = 16
 # Сколько первых блоков отчёта появляется с анимацией.
 ANIMATED_BLOCKS = 4
 NAME_COLUMN_MIN = 120
@@ -1155,6 +1160,9 @@ class TilesGrid(QWidget):
 class _SectionBlock(QWidget):
     """Раздел отчёта: значок, название, сводка «сколько в порядке» с полосой и строки-таблица."""
 
+    # Просят открыть текст раздела на всю страницу: (название, текст).
+    text_opened = pyqtSignal(str, str)
+
     def __init__(
         self, section: Section, parent=None, *, icon: str = "fa5s.list-ul", color: str = "", tiles: bool = False
     ) -> None:
@@ -1203,17 +1211,28 @@ class _SectionBlock(QWidget):
             ]
             for row in self.rows:
                 layout.addWidget(row)
-        self.text_label: QLabel | None = None
+        # Длинный текст (таблица серверов, узлы по дороге) — в редакторе с подсветкой и своей
+        # прокруткой. Одной надписью на сотни строк он перерисовывался целиком при каждой
+        # прокрутке страницы, и страница заметно тормозила.
+        self.editor: CodeEditor | None = None
+        self.open_text_button: PushButton | None = None
         if section.text:
-            self.text_label = QLabel(section.text, self)
-            font = QFont("Consolas")
-            font.setStyleHint(QFont.StyleHint.Monospace)
-            font.setPointSize(9)
-            self.text_label.setFont(font)
-            self.text_label.setTextFormat(Qt.TextFormat.PlainText)
-            self.text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            self.text_label.setContentsMargins(0, 4, 0, 6)
-            layout.addWidget(self.text_label)
+            self.open_text_button = PushButton("Открыть на всю страницу", self)
+            set_control_accessibility(
+                self.open_text_button,
+                name=f"Открыть на всю страницу: {section.title}",
+                description="Открывает этот текст страницей-редактором с поиском и переходом к строке.",
+            )
+            self.open_text_button.clicked.connect(lambda _checked=False: self.text_opened.emit(section.title, section.text))
+            header.addWidget(self.open_text_button, 0, Qt.AlignmentFlag.AlignVCenter)
+            self.editor = CodeEditor(self, highlighter_factory=lambda document: LogSyntaxHighlighter(document))
+            self.editor.setReadOnly(True)
+            self._fill = ChunkedReadOnlyFill(self.editor)
+            self._fill.set_text(section.text)
+            lines = min(TEXT_PREVIEW_LINES, section.text.count("\n") + 1)
+            self.editor.setFixedHeight(lines * self.editor.fontMetrics().lineSpacing() + 28)
+            layout.addWidget(self.editor)
+            layout.addSpacing(8)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         _ = event
@@ -1349,6 +1368,8 @@ class ResultDetailView(QWidget):
     """Отчёт по одной карточке на всю страницу: путь «BlockCheck → карточка», шапка-сводка и разделы."""
 
     closed = pyqtSignal()
+    # Просят открыть длинный текст раздела страницей-редактором: (название, текст).
+    text_opened = pyqtSignal(str, str)
     ROOT_KEY = "blockcheck"
     CARD_KEY = "card"
 
@@ -1405,9 +1426,9 @@ class ResultDetailView(QWidget):
         self.blocks = []
         for section in card.sections:
             icon, color = section_icon(section, card)
-            self.blocks.append(
-                _SectionBlock(section, self._sections_host, icon=icon, color=color, tiles=wants_tiles(section, card))
-            )
+            block = _SectionBlock(section, self._sections_host, icon=icon, color=color, tiles=wants_tiles(section, card))
+            block.text_opened.connect(self.text_opened)
+            self.blocks.append(block)
         for order, block in enumerate(self.blocks):
             self._sections_layout.addWidget(block)
             # Выплывают только первые блоки — те, что видны сразу. Анимация каждого из

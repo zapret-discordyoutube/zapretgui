@@ -417,6 +417,15 @@ class PageCardsTests(unittest.TestCase):
         self.assertGreater(was_at, 0)
         self.assertEqual(bar.value(), was_at)
 
+        # Длинный текст из отчёта карточки открывается страницей-редактором.
+        page._open_card_by_key("dns_servers")
+        page._detail_view.text_opened.emit("Все серверы", "строка 1\nстрока 2")
+        self.assertFalse(page._log_report_view.isHidden())
+        self.assertTrue(page._detail_view.isHidden())
+        self.assertEqual(page._log_report_view.report().title, "Все серверы")
+        page._escape_shortcut.activated.emit()
+        self.assertTrue(page._log_report_view.isHidden())
+
         # Строка итога открывает ту же страницу по ключу карточки, а Esc закрывает её с любого места.
         page._open_card_by_key("hostings")
         self.assertFalse(page._detail_view.isHidden())
