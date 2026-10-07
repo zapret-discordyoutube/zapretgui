@@ -593,6 +593,14 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Проверка покажет, какие DNS-серверы и какими способами доступны в вашей сети: обычный DNS (порт 53) и шифрованный — DoT (порт 853) и DoH (порт 443). Провайдер может закрыть любой из них отдельно и для отдельного адреса. Заодно видно, не подменяются ли ответы по дороге.",
         "en": "The check shows which DNS servers are reachable in your network and how: plain DNS (port 53) and encrypted DoT (port 853) and DoH (port 443). A provider can block any of them separately and for a single address. It also shows whether answers are replaced on the way.",
     },
+    "page.server_check.idle.title": {
+        "ru": "Медоед обзвонит DNS-серверы",
+        "en": "The honey badger will call the DNS servers",
+    },
+    "page.server_check.pending.title": {
+        "ru": "Опрашиваем серверы",
+        "en": "Asking the servers",
+    },
     "page.server_check.button.start": {
         "ru": "Проверить серверы",
         "en": "Check servers",
@@ -602,8 +610,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Check DNS servers",
     },
     "page.server_check.button.start.description": {
-        "ru": "Спросить каждый адрес каждого DNS-сервера всеми способами. Занимает около двадцати секунд.",
-        "en": "Ask every address of every DNS server in every way. Takes about twenty seconds.",
+        "ru": "Спросить каждый адрес каждого DNS-сервера всеми способами, по три раза. Занимает около десяти секунд.",
+        "en": "Ask every address of every DNS server in every way, three times each. Takes about ten seconds.",
     },
     "page.server_check.button.stop": {
         "ru": "Остановить",
@@ -629,10 +637,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Открыть полный текст проверки — его можно скопировать и отправить.",
         "en": "Open the full text of the check — it can be copied and sent.",
     },
-    "page.server_check.section.summary": {
-        "ru": "Итог",
-        "en": "Summary",
-    },
     "page.server_check.section.table": {
         "ru": "Серверы по адресам",
         "en": "Servers by address",
@@ -656,14 +660,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.server_check.table.description": {
         "ru": "Для каждого адреса: время ответа на пинг и каждым способом связи или причина отказа.",
         "en": "For every address: response time to ping and by every transport, or the reason of failure.",
-    },
-    "page.server_check.status.ready": {
-        "ru": "Нажмите «Проверить серверы», чтобы начать.",
-        "en": "Press Check servers to begin.",
-    },
-    "page.server_check.status.starting": {
-        "ru": "Начинаем проверку серверов…",
-        "en": "Starting the server check…",
     },
     "page.server_check.status.failed": {
         "ru": "Проверка не удалась",

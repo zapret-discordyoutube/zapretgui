@@ -83,6 +83,14 @@ _RU: dict[str, tuple[str, ...]] = {
         "Ищем, не подменяет ли кто-то адреса по дороге…",
         "Проверяем, не врёт ли DNS…",
     ),
+    "dns_servers": (
+        "Обзваниваем DNS-серверы: «Алло, вы на месте?»",
+        "Спрашиваем каждого трижды — вдруг передумает…",
+        "Стучимся в порты 53, 853 и 443 по очереди…",
+        "Сверяем, кто на самом деле снял трубку…",
+        "Ищем, не подслушивает ли кто-то по дороге…",
+        "Меряем, кто отвечает быстрее всех…",
+    ),
 }
 
 _EN: dict[str, tuple[str, ...]] = {
@@ -111,6 +119,11 @@ _EN: dict[str, tuple[str, ...]] = {
         "Asking every site: «How are you?»",
     ),
     "dns": ("Comparing addresses with an honest phonebook…",),
+    "dns_servers": (
+        "Calling DNS servers: «Hello, anyone home?»",
+        "Asking each one three times — just in case…",
+        "Checking who really picked up the phone…",
+    ),
 }
 
 # Функции обхода → набор фраз. Первое совпадение по порядку выигрывает.

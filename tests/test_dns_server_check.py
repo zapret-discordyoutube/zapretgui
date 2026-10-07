@@ -11,6 +11,7 @@ from utils.dns_wire import (
     FAILURE_CANCELLED,
     FAILURE_CERT,
     FAILURE_REFUSED,
+    FAILURE_RESET,
     FAILURE_TIMEOUT,
     STATUS_EMPTY,
     STATUS_ERROR,
@@ -180,7 +181,10 @@ class ProbeTests(unittest.TestCase):
 
         self.assertEqual([row.cell(name).state for name in sc.TRANSPORTS], [sc.STATE_OK] * 5)
         self.assertEqual(row.cell(sc.TRANSPORT_ICMP).elapsed_ms, 7.0)
-        self.assertEqual(net.kinds(sc.PROBE_DOMAIN), ["doh", "dot", "tcp", "udp"])
+        # Каждым способом — серия запросов: блокировка может включиться не с первого.
+        self.assertEqual(net.kinds(sc.PROBE_DOMAIN), sorted(["doh", "dot", "tcp", "udp"] * sc.PROBE_ATTEMPTS))
+        self.assertEqual(row.cell(sc.TRANSPORT_DOH).trail, (True,) * sc.PROBE_ATTEMPTS)
+        self.assertFalse(row.cell(sc.TRANSPORT_DOH).unstable)
         self.assertIn(("dot", "8.8.8.8", sc.PROBE_DOMAIN, "dns.google"), net.calls)
 
     def test_server_without_encrypted_names_skips_those_transports(self) -> None:
@@ -189,7 +193,7 @@ class ProbeTests(unittest.TestCase):
 
         self.assertEqual(row.cell(sc.TRANSPORT_DOT).state, sc.STATE_SKIP)
         self.assertEqual(row.cell(sc.TRANSPORT_DOH).state, sc.STATE_SKIP)
-        self.assertEqual(net.kinds(sc.PROBE_DOMAIN), ["tcp", "udp"])
+        self.assertEqual(set(net.kinds(sc.PROBE_DOMAIN)), {"tcp", "udp"})
 
     def test_silence_is_retried_once_and_refusal_is_not(self) -> None:
         net = _Net(udp=lambda address, name: TIMEOUT, tcp=lambda address, name: DnsQueryResult(status=STATUS_ERROR, failure=FAILURE_REFUSED))
@@ -198,6 +202,44 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(net.kinds(sc.PROBE_DOMAIN), ["tcp", "udp", "udp"])
         self.assertEqual(row.cell(sc.TRANSPORT_UDP).reason, "сервер молчит")
         self.assertEqual(row.cell(sc.TRANSPORT_TCP).reason, "порт закрыт")
+
+    def test_block_that_starts_after_first_request_is_seen(self) -> None:
+        reset = DnsQueryResult(status=STATUS_ERROR, failure=FAILURE_RESET)
+        asked: list[str] = []
+
+        def doh(address, name, host):
+            if name != sc.PROBE_DOMAIN:
+                return _answer("5.5.5.5")
+            asked.append(name)
+            return _answer("5.5.5.5", ms=40.0) if len(asked) == 1 else reset
+
+        row = _Net(doh=doh).probe()
+        cell = row.cell(sc.TRANSPORT_DOH)
+
+        self.assertEqual((cell.state, cell.trail, cell.elapsed_ms), (sc.STATE_OK, (True, False, False), 40.0))
+        self.assertTrue(cell.unstable and cell.fades)
+        self.assertEqual(cell.failure, FAILURE_RESET)
+        # Запрос без имени нужен, только когда по имени не ответили с самого начала.
+        self.assertIsNone(row.doh_by_address)
+
+    def test_time_is_the_middle_one_of_the_series(self) -> None:
+        times = iter((90.0, 10.0, 30.0))
+
+        def tcp(address, name):
+            return _answer("5.5.5.5", ms=next(times) if name == sc.PROBE_DOMAIN else 1.0)
+
+        row = _Net(tcp=tcp).probe(PLAIN)
+
+        self.assertEqual(row.cell(sc.TRANSPORT_TCP).elapsed_ms, 30.0)
+
+    def test_dead_address_asks_without_name_alongside_the_retry(self) -> None:
+        net = _Net(doh=lambda address, name, host: TIMEOUT)
+        row = net.probe()
+
+        # По имени: запрос и повтор; без имени — один запрос, без второго срока ожидания.
+        self.assertEqual(sorted(call[3] for call in net.calls if call[0] == "doh"), ["", "dns.google", "dns.google"])
+        self.assertEqual(row.cell(sc.TRANSPORT_DOH).trail, (False, False))
+        self.assertTrue(row.doh_by_address.failed)
 
     def test_doh_is_tried_without_name_only_when_name_may_be_blocked(self) -> None:
         def blocked_by_name(address, name, host):
@@ -319,7 +361,36 @@ class RowVerdictTests(unittest.TestCase):
         self.assertEqual(self._findings(_row(udp_egress="9.9.9.99", secure_egress="2.2.2.2")), ())
 
 
+    def test_server_answering_every_other_time_is_noted(self) -> None:
+        lost_once = sc.Cell(state=sc.STATE_OK, elapsed_ms=9.0, failure=FAILURE_TIMEOUT, reason="сервер молчит", trail=(True, False, True))
+        (finding,) = self._findings(_row(udp=lost_once))
+        # Один потерянный запрос — шум сети, а не тревога.
+        self.assertEqual((finding.level, finding.code), (sc.LEVEL_INFO, sc.CODE_UNSTABLE))
+        self.assertIn("обычный DNS (UDP) — 2 из 3 запросов (сервер молчит)", finding.text)
+        self.assertNotIn("Первые запросы проходят", finding.text)
+
+        cut = sc.Cell(state=sc.STATE_OK, elapsed_ms=40.0, failure=FAILURE_RESET, reason="соединение оборвано", trail=(True, False, False))
+        (finding,) = self._findings(_row(doh=cut))
+        self.assertEqual((finding.level, finding.code), (sc.LEVEL_WARN, sc.CODE_UNSTABLE))
+        self.assertIn("DoH — 1 из 3 запросов", finding.text)
+        self.assertIn("Первые запросы проходят, а следующие уже нет.", finding.text)
+
+
 class ReportVerdictTests(unittest.TestCase):
+    def test_shaky_servers_are_named_and_not_recommended(self) -> None:
+        cut = sc.Cell(state=sc.STATE_OK, elapsed_ms=5.0, failure=FAILURE_RESET, reason="соединение оборвано", trail=(True, False, False))
+        rows = (_judged(_row(GOOGLE, doh=cut)), _judged(_row(QUAD9, doh=_ok(80.0))))
+        findings = sc.judge_report(rows, False, OWNERS.get)
+
+        shaky = next(finding for finding in findings if finding.code == sc.CODE_UNSTABLE)
+        self.assertEqual(shaky.level, sc.LEVEL_WARN)
+        self.assertIn("Google DNS (8.8.8.8)", shaky.text)
+        self.assertIn("не с первого запроса", shaky.text)
+        # Быстрый, но отвечающий через раз сервер советовать нельзя.
+        best = next(finding for finding in findings if finding.code == sc.CODE_BEST)
+        self.assertIn("Quad9 (9.9.9.9)", best.text)
+        self.assertIn("Без замечаний: 1 из 2", best.text)
+
     def _report(self, rows, canary=False):
         rows = tuple(_judged(row) for row in rows)
         return sc.judge_report(rows, canary, OWNERS.get)
@@ -377,8 +448,8 @@ class ReportVerdictTests(unittest.TestCase):
         findings = self._report([_row(GOOGLE, doh=_fail(), dot=_fail()), _row(QUAD9)])
 
         texts = " ".join(finding.text for finding in findings)
-        self.assertIn("DoT (порт 853) закрыт у: Google DNS (8.8.8.8)", texts)
-        self.assertIn("DoH (порт 443) закрыт у: Google DNS (8.8.8.8)", texts)
+        self.assertIn("DoT (порт 853) закрыт у части серверов: Google DNS (8.8.8.8)", texts)
+        self.assertIn("DoH (порт 443) закрыт у части серверов: Google DNS (8.8.8.8)", texts)
         # Сервер с закрытым шифрованием для защищённого DNS не предлагается.
         best = next(finding for finding in findings if finding.code == sc.CODE_BEST)
         self.assertIn("Quad9", best.text)

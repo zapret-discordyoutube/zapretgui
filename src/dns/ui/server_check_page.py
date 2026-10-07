@@ -6,23 +6,19 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QHBoxLayout, QHeaderView, QSizePolicy, QTableWidgetItem
-from qfluentwidgets import (
-    FluentIcon,
-    IndeterminateProgressBar,
-    PrimaryPushButton,
-    PushButton,
-    StrongBodyLabel,
-    TableWidget,
-)
+from PyQt6.QtWidgets import QHeaderView, QSizePolicy, QTableWidgetItem
+from qfluentwidgets import FluentIcon, PrimaryPushButton, PushButton, StrongBodyLabel, TableWidget
 
 import dns.domain_lookup_plans as tones
 import dns.server_check_plans as plans
+import dns.server_check_verdict as verdicts
+from blockcheck.ui.fun_texts import phrases
 from app.ui_texts import tr as tr_catalog
 from dns.server_check import LEVEL_FAIL, LEVEL_WARN, TRANSPORTS
 from dns.ui.domain_lookup_page import _InfoLines, _tone_color
+from dns.ui.server_check_widgets import ServerCheckVerdictPanel
 from log.log import log
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.fluent_widgets import SettingsCard, set_tooltip
@@ -30,12 +26,24 @@ from ui.latest_worker_lane import LatestWorkerLane
 from ui.log_report_dialog import show_log_report_dialog
 from ui.pages.base_page import BasePage
 from ui.theme_refresh import ThemeRefreshBinding
-from ui.widgets.fluent_item_tooltip import install_fluent_item_tooltips, set_fluent_item_tooltip
+from ui.widgets.fluent_item_tooltip import (
+    FLUENT_ITEM_TOOLTIP_ROLE,
+    install_fluent_item_tooltips,
+    set_fluent_item_tooltip,
+)
+from ui.widgets.stagger_float_in import float_in
 
 _FIRST_TRANSPORT_COLUMN = 2
 _NOTE_COLUMN = _FIRST_TRANSPORT_COLUMN + len(TRANSPORTS)
-_CELL_TONES = {plans.CELL_OK: tones.TONE_SUCCESS, plans.CELL_FAIL: tones.TONE_ERROR, plans.CELL_MUTED: tones.TONE_MUTED}
+_CELL_TONES = {
+    plans.CELL_OK: tones.TONE_SUCCESS,
+    plans.CELL_WARN: tones.TONE_WARNING,
+    plans.CELL_FAIL: tones.TONE_ERROR,
+    plans.CELL_MUTED: tones.TONE_MUTED,
+}
 _NOTE_TONES = {LEVEL_FAIL: tones.TONE_ERROR, LEVEL_WARN: tones.TONE_WARNING}
+# Промежуточные результаты приходят пачками по несколько в секунду: показываем не чаще.
+_STAGE_INTERVAL_MS = 120
 
 
 class DnsServersTable(TableWidget):
@@ -49,9 +57,12 @@ class DnsServersTable(TableWidget):
         self.verticalHeader().setVisible(False)
         self.setWordWrap(False)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # Ширину столбцов считаем сами, один раз на пачку изменений. В режиме
+        # «по содержимому» Qt заново обмеряет весь столбец после каждой записи
+        # в ячейку — на полной таблице окно замирало на секунду.
         header = self.horizontalHeader()
         for column in range(_NOTE_COLUMN):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(_NOTE_COLUMN, QHeaderView.ResizeMode.Stretch)
         install_fluent_item_tooltips(self)
         self._rows: tuple[plans.ServerRow, ...] = ()
@@ -60,22 +71,45 @@ class DnsServersTable(TableWidget):
     def set_headers(self, server: str, address: str, note: str) -> None:
         titles = [plans.TRANSPORT_TITLES[transport] for transport in TRANSPORTS]
         self.setHorizontalHeaderLabels([server, address, *titles, note])
+        self._fit_columns()
 
     def show_rows(self, rows) -> None:
-        self._rows = tuple(rows)
-        self.setRowCount(len(self._rows))
-        for index, row in enumerate(self._rows):
-            for column, text in enumerate((row.server, row.address, *row.cells, row.note)):
-                item = self.item(index, column)
-                if item is None:
-                    item = QTableWidgetItem()
-                    self.setItem(index, column, item)
+        rows = tuple(rows)
+        previous, self._rows = self._rows, rows
+        # Переписываем только строки, которые изменились.
+        changed = [index for index, row in enumerate(rows) if index >= len(previous) or previous[index] != row]
+        resized = len(rows) != len(previous)
+        if not changed and not resized:
+            return
+        self.setUpdatesEnabled(False)
+        try:
+            if resized:
+                self.setRowCount(len(rows))
+            for index in changed:
+                self._fill_row(index, rows[index])
+            self._fit_columns()
+        finally:
+            self.setUpdatesEnabled(True)
+        if resized:
+            self._fit_height()
+        problems = sum(1 for row in rows if row.level in (LEVEL_WARN, LEVEL_FAIL))
+        set_state_text(self, f"Проверка DNS-серверов: {len(rows)} адресов, с замечаниями {problems}")
+
+    def _fill_row(self, index: int, row: plans.ServerRow) -> None:
+        for column, text in enumerate((row.server, row.address, *row.cells, row.note)):
+            item = self.item(index, column)
+            if item is None:
+                item = QTableWidgetItem()
+                self.setItem(index, column, item)
+            if item.text() != text:
                 item.setText(text)
+            if item.data(FLUENT_ITEM_TOOLTIP_ROLE) != row.tooltip:
                 set_fluent_item_tooltip(item, row.tooltip)
-        self._apply_theme_refresh()
-        self._fit_height()
-        problems = sum(1 for row in self._rows if row.level in (LEVEL_WARN, LEVEL_FAIL))
-        set_state_text(self, f"Проверка DNS-серверов: {len(self._rows)} адресов, с замечаниями {problems}")
+        self._paint_row(index, row)
+
+    def _fit_columns(self) -> None:
+        for column in range(_NOTE_COLUMN):
+            self.resizeColumnToContents(column)
 
     def _fit_height(self) -> None:
         height = self.horizontalHeader().height() + 2 * self.frameWidth() + 4
@@ -92,18 +126,21 @@ class DnsServersTable(TableWidget):
         else:
             item.setForeground(QColor(_tone_color(tone)))
 
+    def _paint_row(self, index: int, row: plans.ServerRow) -> None:
+        for offset, level in enumerate(row.cell_levels):
+            self._paint(self.item(index, _FIRST_TRANSPORT_COLUMN + offset), _CELL_TONES.get(level))
+        self._paint(self.item(index, _NOTE_COLUMN), _NOTE_TONES.get(row.note_level, tones.TONE_MUTED))
+
     def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
         _ = tokens, force
         for index, row in enumerate(self._rows):
-            for offset, level in enumerate(row.cell_levels):
-                self._paint(self.item(index, _FIRST_TRANSPORT_COLUMN + offset), _CELL_TONES.get(level))
-            self._paint(self.item(index, _NOTE_COLUMN), _NOTE_TONES.get(row.note_level, tones.TONE_MUTED))
+            self._paint_row(index, row)
 
 
 class ServerCheckPage(BasePage):
     """Какие DNS-серверы и какими способами доступны в этой сети."""
 
-    def __init__(self, parent=None, *, dns_feature, embedded: bool = False):
+    def __init__(self, parent=None, *, dns_feature, embedded: bool = False, open_dns_settings=None):
         super().__init__(
             "DNS-серверы",
             "Каждый адрес каждого сервера: пинг, обычный и шифрованный DNS, перехват по дороге",
@@ -112,9 +149,16 @@ class ServerCheckPage(BasePage):
             subtitle_key="page.server_check.subtitle",
         )
         self._dns = dns_feature
+        self._open_dns_settings = open_dns_settings
         self._closed = False
         self._report = None
         self._running = False
+        # Последний промежуточный результат, который ещё не показан.
+        self._staged = None
+        self._stage_timer = QTimer(self)
+        self._stage_timer.setSingleShot(True)
+        self._stage_timer.setInterval(_STAGE_INTERVAL_MS)
+        self._stage_timer.timeout.connect(self._flush_stage)
         self._lane = LatestWorkerLane(
             name="dns_server_check",
             create_worker=self._create_worker,
@@ -136,64 +180,32 @@ class ServerCheckPage(BasePage):
     # ── сборка ──────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        self.control_card = SettingsCard()
-        self.intro_lines = _InfoLines(self.control_card)
-        self.control_card.add_widget(self.intro_lines)
-        row = QHBoxLayout()
-        row.setSpacing(10)
-        self.start_button = PrimaryPushButton(FluentIcon.PLAY, "", self.control_card)
+        self.verdict_panel = ServerCheckVerdictPanel(on_open_dns_settings=self._open_dns_settings)
+        self.start_button = PrimaryPushButton(FluentIcon.PLAY, "", self.verdict_panel)
         self.start_button.clicked.connect(self.start_check)
-        row.addWidget(self.start_button)
-        self.stop_button = PushButton(FluentIcon.CANCEL, "", self.control_card)
+        self.stop_button = PushButton(FluentIcon.CANCEL, "", self.verdict_panel)
         self.stop_button.clicked.connect(self.stop_check)
-        row.addWidget(self.stop_button)
-        self.report_button = PushButton(FluentIcon.DOCUMENT, "", self.control_card)
+        self.report_button = PushButton(FluentIcon.DOCUMENT, "", self.verdict_panel)
         self.report_button.clicked.connect(self._open_report)
-        row.addWidget(self.report_button)
-        row.addStretch(1)
-        self.control_card.add_layout(row)
-        self.status_lines = _InfoLines(self.control_card)
-        self.control_card.add_widget(self.status_lines)
-        self.progress_bar = IndeterminateProgressBar(self.control_card)
-        self.progress_bar.setVisible(False)
-        self.control_card.add_widget(self.progress_bar)
-        self.layout.addWidget(self.control_card)
-
-        self.summary_card = SettingsCard()
-        self.summary_title = StrongBodyLabel("", self.summary_card)
-        self.summary_card.add_widget(self.summary_title)
-        self.summary_lines = _InfoLines(self.summary_card)
-        self.summary_card.add_widget(self.summary_lines)
-        self.layout.addWidget(self.summary_card)
+        self.verdict_panel.add_actions(self.start_button, self.stop_button, self.report_button)
+        self.layout.addWidget(self.verdict_panel)
 
         self.table_card = SettingsCard()
         self.table_title = StrongBodyLabel("", self.table_card)
         self.table_card.add_widget(self.table_title)
+        self.status_lines = _InfoLines(self.table_card)
+        self.table_card.add_widget(self.status_lines)
         self.table = DnsServersTable(self.table_card)
         self.table_card.add_widget(self.table)
+        self.table_card.setVisible(False)
         self.layout.addWidget(self.table_card)
-
-        for card in (self.summary_card, self.table_card):
-            card.setVisible(False)
         self.layout.addStretch()
 
     def _apply_texts(self) -> None:
-        self.intro_lines.set_lines(
-            (
-                tones.InfoLine(
-                    self._t(
-                        "intro",
-                        "Проверка покажет, какие DNS-серверы и какими способами доступны в вашей сети: обычный DNS "
-                        "(порт 53) и шифрованный — DoT (порт 853) и DoH (порт 443). Провайдер может закрыть любой "
-                        "из них отдельно и для отдельного адреса. Заодно видно, не подменяются ли ответы по дороге.",
-                    )
-                ),
-            )
-        )
         self.start_button.setText(self._t("button.start", "Проверить серверы"))
         start_description = self._t(
             "button.start.description",
-            "Спросить каждый адрес каждого DNS-сервера всеми способами. Занимает около двадцати секунд.",
+            "Спросить каждый адрес каждого DNS-сервера всеми способами, по три раза. Занимает около десяти секунд.",
         )
         set_tooltip(self.start_button, start_description)
         set_control_accessibility(
@@ -215,7 +227,6 @@ class ServerCheckPage(BasePage):
             name=self._t("button.report.name", "Открыть отчёт проверки DNS-серверов"),
             description=report_description,
         )
-        self.summary_title.setText(self._t("section.summary", "Итог"))
         self.table_title.setText(self._t("section.table", "Серверы по адресам"))
         self.table.set_headers(
             self._t("column.server", "Сервер"),
@@ -230,12 +241,26 @@ class ServerCheckPage(BasePage):
                 "Для каждого адреса: время ответа на пинг и каждым способом связи или причина отказа.",
             ),
         )
-        if self._report is None:
-            self.status_lines.set_lines(
-                (tones.InfoLine(self._t("status.ready", "Нажмите «Проверить серверы», чтобы начать.")),)
-            )
-        else:
-            self._show_report(self._report)
+        if self._report is not None:
+            # Смена языка — не новый итог: без салюта и без выплывания строк.
+            self._show_report(self._report, celebrate=False)
+        elif not self._running:
+            self._show_idle()
+
+    def _show_idle(self) -> None:
+        self.verdict_panel.set_idle(
+            self._t("idle.title", "Медоед обзвонит DNS-серверы"),
+            self._t(
+                "intro",
+                "Проверка покажет, какие DNS-серверы и какими способами доступны в вашей сети: обычный DNS "
+                "(порт 53) и шифрованный — DoT (порт 853) и DoH (порт 443). Провайдер может закрыть любой "
+                "из них отдельно и для отдельного адреса. Заодно видно, не подменяются ли ответы по дороге.",
+            ),
+        )
+
+    def _progress_title(self, done: int, total: int) -> str:
+        title = self._t("pending.title", "Опрашиваем серверы")
+        return f"{title}: {done} / {total}" if total else f"{title}…"
 
     # ── запуск и остановка ──────────────────────────────────
 
@@ -249,27 +274,16 @@ class ServerCheckPage(BasePage):
         self.start_button.setEnabled(not running)
         self.stop_button.setVisible(running)
         self.report_button.setEnabled(self._report is not None and not running)
-        self.progress_bar.setVisible(running)
-        if running:
-            self.progress_bar.start()
-        else:
-            self.progress_bar.stop()
-        set_state_text(
-            self.progress_bar,
-            "Проверка DNS-серверов: выполняется" if running else "Проверка DNS-серверов: не выполняется",
-        )
 
     def start_check(self) -> None:
         if self._closed or self._running:
             return
         # Старые результаты не копим: каждая проверка начинается с чистого экрана.
         self._report = None
-        for card in (self.summary_card, self.table_card):
-            card.setVisible(False)
+        self._drop_staged()
+        self.table_card.setVisible(False)
         self.table.show_rows(())
-        self.status_lines.set_lines(
-            (tones.InfoLine(self._t("status.starting", "Начинаем проверку серверов…"), tones.TONE_ACCENT),)
-        )
+        self.verdict_panel.set_pending(self._progress_title(0, 0), phrases("dns_servers", self._ui_language))
         self._set_running(True)
         self._lane.request()
 
@@ -288,11 +302,26 @@ class ServerCheckPage(BasePage):
     def _on_stage(self, request_id: int, report) -> None:
         if not self._lane.runtime.is_current(request_id, cleanup_in_progress=self._closed):
             return
-        self._show_report(report)
+        if report.finished:
+            # Готовый отчёт следом придёт как итог: дважды подряд таблицу не рисуем.
+            return
+        self._staged = report
+        if not self._stage_timer.isActive():
+            self._stage_timer.start()
+
+    def _flush_stage(self) -> None:
+        report, self._staged = self._staged, None
+        if report is not None and self._running and not self._closed:
+            self._show_report(report)
+
+    def _drop_staged(self) -> None:
+        self._stage_timer.stop()
+        self._staged = None
 
     def _on_finished(self, report) -> None:
         if self._closed:
             return
+        self._drop_staged()
         self._show_report(report)
         self.stop_button.setEnabled(True)
         self._set_running(False)
@@ -300,23 +329,28 @@ class ServerCheckPage(BasePage):
     def _on_failed(self, error: str) -> None:
         if self._closed:
             return
-        self.status_lines.set_lines(
-            (tones.InfoLine(f"{self._t('status.failed', 'Проверка не удалась')}: {error}", tones.TONE_ERROR),)
-        )
+        self._drop_staged()
+        self.verdict_panel.set_failed(self._t("status.failed", "Проверка не удалась"), str(error))
         self.stop_button.setEnabled(True)
         self._set_running(False)
 
-    def _show_report(self, report) -> None:
+    def _show_report(self, report, *, celebrate: bool = True) -> None:
         self._report = report
-        self.status_lines.set_lines((plans.build_status(report),))
-        summary = plans.build_summary(report)
-        self.summary_card.setVisible(bool(summary))
-        if summary:
-            self.summary_lines.set_lines(summary)
         rows = plans.build_rows(report)
+        appeared = bool(rows) and self.table_card.isHidden()
         self.table_card.setVisible(bool(rows))
-        if rows:
-            self.table.show_rows(rows)
+        self.table.show_rows(rows)
+        # Пока проверка идёт, её ход виден в панели итога: вторая строка о том же не нужна.
+        self.status_lines.set_lines((plans.build_status(report),) if report.finished else ())
+        if appeared and celebrate:
+            float_in(self.table_card)
+        tally = verdicts.tally(report)
+        if report.finished:
+            self.verdict_panel.show_verdict(verdicts.build_verdict(report), tally, celebrate=celebrate)
+        else:
+            self.verdict_panel.show_progress(
+                self._progress_title(len(report.rows), report.total), len(report.rows), report.total, tally
+            )
 
     def _open_report(self) -> None:
         if self._report is None:
@@ -342,6 +376,7 @@ class ServerCheckPage(BasePage):
 
     def cleanup(self) -> None:
         self._closed = True
+        self._drop_staged()
         self._lane.close()
         super().cleanup()
 

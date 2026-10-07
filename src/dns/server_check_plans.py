@@ -20,6 +20,7 @@ from dns.server_check import (
     CODE_DOT_BLOCKED,
     CODE_TCP_BLOCKED,
     CODE_UDP_BLOCKED,
+    CODE_UNSTABLE,
     LEVEL_FAIL,
     LEVEL_INFO,
     LEVEL_OK,
@@ -58,6 +59,8 @@ TRANSPORT_TITLES = {
 }
 
 CELL_OK = "ok"
+# Отвечает, но не на каждый запрос.
+CELL_WARN = "warn"
 CELL_FAIL = "fail"
 CELL_MUTED = "muted"
 
@@ -80,7 +83,9 @@ _LEVEL_MARKS = {LEVEL_FAIL: "✗", LEVEL_WARN: "!", LEVEL_INFO: "·", LEVEL_OK: 
 
 # Эти выводы уже видны в ячейках способов связи: в столбце замечаний они
 # только повторяли бы таблицу. В подсказке строки и в отчёте они остаются.
-_SHOWN_IN_CELLS = frozenset({CODE_UDP_BLOCKED, CODE_TCP_BLOCKED, CODE_DOT_BLOCKED, CODE_DOH_BLOCKED})
+_SHOWN_IN_CELLS = frozenset(
+    {CODE_UDP_BLOCKED, CODE_TCP_BLOCKED, CODE_DOT_BLOCKED, CODE_DOH_BLOCKED, CODE_UNSTABLE}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +110,8 @@ def format_ms(value: float | None) -> str:
 
 def cell_text(transport: str, cell: Cell) -> str:
     if cell.state == STATE_OK:
+        if cell.unstable:
+            return f"{format_ms(cell.elapsed_ms)} · {cell.answered} из {cell.attempts}"
         return format_ms(cell.elapsed_ms)
     if cell.state == STATE_SKIP:
         return "—"
@@ -117,7 +124,7 @@ def cell_text(transport: str, cell: Cell) -> str:
 
 def cell_level(transport: str, cell: Cell) -> str:
     if cell.state == STATE_OK:
-        return CELL_OK
+        return CELL_WARN if cell.unstable else CELL_OK
     # Молчание на пинг — обычное дело, красным его красить нельзя.
     if cell.state == STATE_FAIL and transport != TRANSPORT_ICMP:
         return CELL_FAIL
@@ -146,10 +153,13 @@ def _row_tooltip(report: ServerCheckReport, row: Observation) -> str:
     for transport in TRANSPORTS:
         cell = row.cell(transport)
         text = cell_text(transport, cell)
-        if cell.state == STATE_FAIL and cell.reason:
+        if cell.state in (STATE_FAIL, STATE_SKIP) and cell.reason:
             text = cell.reason
-        elif cell.state == STATE_SKIP and cell.reason:
-            text = cell.reason
+        elif cell.unstable:
+            text = (
+                f"{format_ms(cell.elapsed_ms)}, ответил на {cell.answered} из {cell.attempts} запросов "
+                f"(остальные: {cell.reason})"
+            )
         lines.append(f"{TRANSPORT_TITLES[transport]}: {text}")
     if row.udp_egress or row.secure_egress:
         lines.append(f"Кто выполняет обычные запросы: {_owner_text(report, row.udp_egress) or 'не узнали'}")
@@ -257,6 +267,7 @@ __all__ = [
     "CELL_FAIL",
     "CELL_MUTED",
     "CELL_OK",
+    "CELL_WARN",
     "TRANSPORT_TITLES",
     "ServerRow",
     "build_rows",

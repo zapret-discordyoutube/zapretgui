@@ -5,13 +5,15 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QHeaderView
 
 from blockcheck.ui.page import BlockcheckPage
 from dns import server_check as sc
 from dns import server_check_plans as plans
-from dns.ui.server_check_page import ServerCheckPage
+from dns import server_check_verdict as verdicts
+from dns.ui.server_check_page import DnsServersTable, ServerCheckPage
 from utils.dns_wire import FAILURE_REFUSED, FAILURE_TIMEOUT
+from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_IDLE
 from utils.ip_owner import IpOwner
 
 GOOGLE = sc.CheckTarget("Google DNS", "8.8.8.8", dot_host="dns.google", doh_host="dns.google")
@@ -87,6 +89,14 @@ class PlanTests(unittest.TestCase):
         self.assertEqual((blocked.note_level, blocked.level), (sc.LEVEL_INFO, sc.LEVEL_WARN))
         self.assertEqual((healthy.level, healthy.note), (sc.LEVEL_OK, "Без замечаний"))
 
+    def test_transport_answering_every_other_time_shows_how_many_of_how_many(self) -> None:
+        shaky = sc.Cell(state=sc.STATE_OK, elapsed_ms=40.0, failure=FAILURE_TIMEOUT, reason="сервер молчит", trail=(True, False, False))
+        row = _row(BACKUP, icmp=_ok(1.0), udp=_ok(9.0), tcp=_ok(20.0), dot=_ok(60.0), doh=shaky)
+        (shown,) = plans.build_rows(_report(rows=(row,), total=1))
+
+        self.assertEqual((shown.cells[-1], shown.cell_levels[-1]), ("40 мс · 1 из 3", plans.CELL_WARN))
+        self.assertIn("DoH 443: 40 мс, ответил на 1 из 3 запросов (остальные: сервер молчит)", shown.tooltip)
+
     def test_row_with_only_closed_transports_has_empty_note_not_all_clear(self) -> None:
         only_closed = sc.Observation(
             target=GOOGLE,
@@ -156,6 +166,89 @@ class PlanTests(unittest.TestCase):
         self.assertIn("! Шифрованный DNS по DoH закрыт: порт закрыт", text)
 
 
+class VerdictTests(unittest.TestCase):
+    def _real(self, rows, canary=False, **overrides) -> sc.ServerCheckReport:
+        rows = tuple(rows)
+        return _report(rows=rows, total=len(rows), canary=canary, findings=sc.judge_report(rows, canary, {}.get), **overrides)
+
+    def test_findings_from_the_real_judge_split_into_title_and_detail(self) -> None:
+        # Тексты берём у настоящего judge_report: смена их формата должна ронять этот тест.
+        verdict = verdicts.build_verdict(self._real((BLOCKED, HEALTHY), canary=True))
+
+        self.assertEqual((verdict.kind, verdict.suggests_encrypted_dns), (verdicts.KIND_FAIL, True))
+        by_title = {item.title: item for item in verdict.items}
+        intercepted = by_title["Обычные DNS-запросы перехватываются по дороге"]
+        self.assertEqual(intercepted.level, sc.LEVEL_FAIL)
+        self.assertTrue(intercepted.detail.startswith("Ответил адрес, где DNS-сервера нет."))
+        dot = by_title["Шифрованный DNS по DoT (порт 853) закрыт у части серверов"]
+        self.assertEqual((dot.level, dot.detail), (sc.LEVEL_WARN, "Google DNS (8.8.8.8)."))
+        best = by_title["Для защищённого DNS сейчас лучше всего подходит Google DNS (8.8.4.4)"]
+        self.assertEqual(best.detail, "Шифрованный запрос проходит за 55 мс. Без замечаний: 1 из 2 адресов.")
+        for item in verdict.items:
+            self.assertFalse(item.title.endswith((":", ".", " у")), item.title)
+
+    def test_headline_follows_the_worst_finding(self) -> None:
+        closed = sc.Observation(target=GOOGLE, cells=BLOCKED.cells, findings=BLOCKED.findings[1:])
+        self.assertEqual(verdicts.build_verdict(self._real((closed, HEALTHY))).kind, verdicts.KIND_WARN)
+
+        clean = verdicts.build_verdict(self._real((HEALTHY,)))
+        self.assertEqual((clean.kind, clean.suggests_encrypted_dns), (verdicts.KIND_OK, False))
+
+        bypass = sc.Finding(sc.LEVEL_INFO, sc.CODE_BYPASS_RUNNING, "Во время проверки работали: Zapret. Такие программы…")
+        item = verdicts.split_finding(bypass)
+        self.assertEqual((item.title, item.detail), ("Проверка шла вместе с программами обхода", bypass.text))
+
+        stopped = verdicts.build_verdict(_report(rows=(HEALTHY,), stopped=True, findings=()))
+        self.assertEqual((stopped.kind, stopped.items), (verdicts.KIND_STOPPED, ()))
+        self.assertIn("1 из 2 адресов", stopped.detail)
+        self.assertEqual(verdicts.build_verdict(_report(rows=(), total=0, findings=())).kind, verdicts.KIND_EMPTY)
+
+    def test_counters_show_answering_while_running_and_remarks_at_the_end(self) -> None:
+        silent = sc.Cell(state=sc.STATE_FAIL, failure=FAILURE_TIMEOUT, reason="сервер молчит")
+        dead = _row(
+            sc.CheckTarget("Xbox DNS", "10.9.9.9"), icmp=_ok(1.0), udp=silent, tcp=silent, dot=silent, doh=silent,
+            findings=(sc.Finding(sc.LEVEL_FAIL, sc.CODE_DEAD, "не отвечает ни одним способом"),),
+        )
+        rows = (BLOCKED, HEALTHY, dead)
+
+        self.assertEqual(verdicts.tally(_report(rows=rows, total=3, finished=False)), verdicts.Tally(good=2, silent=1))
+        self.assertEqual(verdicts.tally(_report(rows=rows, total=3)), verdicts.Tally(good=1, remarks=1, silent=1))
+
+
+class TableTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication([])
+
+    def test_only_changed_rows_are_rewritten_and_widths_are_measured_once(self) -> None:
+        table = DnsServersTable()
+        self.addCleanup(table.deleteLater)
+        table.set_headers("Сервер", "Адрес", "Замечания")
+        header = table.horizontalHeader()
+        # Режим «по содержимому» заново обмеряет столбец после каждой записи в ячейку.
+        modes = {header.sectionResizeMode(column) for column in range(table.columnCount() - 1)}
+        self.assertEqual(modes, {QHeaderView.ResizeMode.Fixed})
+
+        many = tuple(
+            _row(sc.CheckTarget(f"Сервер {index}", f"10.0.{index}.1"), icmp=_ok(1.0), udp=_ok(2.0), tcp=_ok(3.0), dot=_ok(4.0), doh=_ok(5.0))
+            for index in range(40)
+        )
+        table.show_rows(plans.build_rows(_report(rows=many, total=40, finished=False)))
+        self.assertGreater(table.columnWidth(1), 40)
+
+        slow = _row(many[7].target, icmp=_ok(1.0), udp=_ok(2.0), tcp=_ok(3.0), dot=_ok(4.0), doh=_ok(1234.0))
+        changed = many[:7] + (slow,) + many[8:]
+        with patch.object(table, "_fill_row", wraps=table._fill_row) as fill, patch.object(
+            table, "_fit_columns", wraps=table._fit_columns
+        ) as fit:
+            table.show_rows(plans.build_rows(_report(rows=changed, total=40, finished=False)))
+            self.assertEqual([call.args[0] for call in fill.call_args_list], [7])
+            fit.assert_called_once()
+            table.show_rows(plans.build_rows(_report(rows=changed, total=40, finished=False)))
+            fit.assert_called_once()
+        self.assertEqual(table.item(7, 6).text(), "1234 мс")
+
+
 class ServerCheckPageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -185,9 +278,12 @@ class ServerCheckPageTests(unittest.TestCase):
         self.assertEqual(host._normalize_tab_key("servers"), "dns_servers")
         self.assertEqual(host._tabs_pivot.currentRouteKey(), "dns_servers")
 
-        # До первой проверки показывать нечего.
-        self.assertTrue(page.summary_card.isHidden())
+        # До первой проверки таблицы нет, медоед ждёт и объясняет, что будет проверено.
+        panel = page.verdict_panel
+        self.assertEqual((panel.kind, panel.mascot.mood()), ("idle", MOOD_IDLE))
+        self.assertIn("DoH (порт 443)", panel.detail_label.text())
         self.assertTrue(page.table_card.isHidden())
+        self.assertTrue(panel.progress_bar.isHidden())
         self.assertFalse(page.report_button.isEnabled())
 
         # Запуск: запрос уходит в дорожку, кнопки переключаются.
@@ -199,6 +295,9 @@ class ServerCheckPageTests(unittest.TestCase):
         self.assertFalse(page.stop_button.isHidden())
         page.start_check()  # повторное нажатие во время проверки ничего не делает
         page._lane.request.assert_called_once()
+        self.assertEqual((panel.kind, panel.mascot.mood()), ("pending", MOOD_BUSY))
+        self.assertFalse(panel.progress_bar.isHidden())
+        self.assertTrue(panel.ticker.is_running())
 
         # Фабрика воркера подписывается на промежуточные результаты.
         created = page._create_worker(5, None)
@@ -216,12 +315,39 @@ class ServerCheckPageTests(unittest.TestCase):
         page._on_stage(999, _report())
         self.assertIsNone(page._report)
 
-        # Итог: карточки видны, таблица заполнена по столбцам способов связи.
+        # Промежуточные результаты копятся и показываются не чаще раза в несколько кадров,
+        # а готовый отчёт из них пропускается: следом он придёт как итог.
+        page._lane.runtime.is_current = Mock(return_value=True)
+        partial = _report(rows=(HEALTHY,), finished=False, findings=())
+        with patch.object(page, "_show_report", wraps=page._show_report) as shown:
+            page._on_stage(5, _report(rows=(), finished=False, findings=()))
+            page._on_stage(5, partial)
+            page._on_stage(5, _report())
+            shown.assert_not_called()
+            page._flush_stage()
+            shown.assert_called_once_with(partial)
+        self.assertEqual((panel.kind, panel.progress_bar.value(), panel.progress_bar.maximum()), ("pending", 1, 2))
+        self.assertIn("1 / 2", panel.title_label.text())
+        self.assertEqual((panel.good_badge.value(), panel.good_badge.label_text()), (1, "✓ 1  отвечают"))
+        self.assertEqual(page.table.rowCount(), 1)
+
+        # Итог: медоед насторожился, главная фраза и находки с заголовком и подробностями.
         page._on_finished(_report())
+        self.assertEqual((panel.kind, panel.mascot.mood()), (verdicts.KIND_FAIL, MOOD_ALARM))
+        self.assertEqual(panel.title_label.text(), "Обычный DNS перехватывают — нужен шифрованный")
+        self.assertTrue(panel.progress_bar.isHidden())
+        self.assertFalse(panel.ticker.is_running())
+        titles = [row.title_label.text() for row in panel.finding_rows()]
+        self.assertEqual(titles[0], "Обычные DNS-запросы перехватываются по дороге")
+        self.assertIn("лучше всего подходит Google DNS (8.8.4.4)", titles[1])
+        self.assertEqual(
+            (panel.good_badge.label_text(), panel.remarks_badge.value(), panel.silent_badge.isHidden()),
+            ("✓ 1  без замечаний", 1, True),
+        )
+        self.assertIn("Проверено 2 из 2 адресов", page.status_lines._lines[0].text)
         self.assertFalse(page._running)
         self.assertTrue(page.start_button.isEnabled())
         self.assertTrue(page.report_button.isEnabled())
-        self.assertFalse(page.summary_card.isHidden())
         self.assertFalse(page.table_card.isHidden())
         table = page.table
         headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
@@ -231,15 +357,16 @@ class ServerCheckPageTests(unittest.TestCase):
         self.assertEqual(shown[:7], ["Google DNS", "8.8.8.8", "нет ответа", "12 мс", "30 мс", "молчит", "порт закрыт"])
         self.assertIn("NSDI", shown[7])
         self.assertEqual(table.item(1, 1).text(), "8.8.4.4")
-        self.assertIn("перехватываются", page.summary_lines._lines[0].text)
         self.assertIn("с замечаниями 1", table.accessibleName())
 
         # Новая проверка начинается с чистого экрана.
         page.start_check()
         self.assertTrue(page.table_card.isHidden())
         self.assertEqual(table.rowCount(), 0)
+        self.assertEqual((panel.kind, panel.finding_rows()), ("pending", []))
         page._on_failed("нет сети")
-        self.assertIn("Проверка не удалась: нет сети", page.status_lines._lines[0].text)
+        self.assertEqual((panel.kind, panel.title_label.text()), ("error", "Проверка не удалась"))
+        self.assertEqual(panel.detail_label.text(), "нет сети")
         self.assertFalse(page._running)
 
         # Английский интерфейс: подписи кнопок и столбцов переведены.
