@@ -23,7 +23,10 @@ _LUA_INIT_OPTION = "--lua-init="
 # (winws_runtime.runners.preset_runner_support._INLINE_ARG_SPLIT_RE).
 _INLINE_OPTION_SPLIT_RE = re.compile(r"(?<=\S)\s+(?=--)")
 _STRATEGY_TAG_RE = re.compile(r":strategy=\d+", re.IGNORECASE)
-_CIRCULAR_LUA_DESYNC_RE = re.compile(r"(?<!\S)--lua-desync=circular(?::\S*)?(?=\s|$)", re.IGNORECASE)
+# Оркестраторы, которые сами выбирают среди инстансов с меткой :strategy=N.
+_CIRCULAR_LUA_DESYNC_RE = re.compile(
+    r"(?<!\S)--lua-desync=(?:circular|shadow_probe)(?::\S*)?(?=\s|$)", re.IGNORECASE
+)
 
 
 def is_winws2_circular_preset_source(source_text: str) -> bool:

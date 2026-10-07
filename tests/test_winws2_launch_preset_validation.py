@@ -189,6 +189,20 @@ class Winws2LaunchPresetValidationTests(unittest.TestCase):
                 )
             )
         )
+        # shadow_probe — такой же оркестратор над метками :strategy=N.
+        self.assertTrue(
+            is_winws2_circular_preset_text(
+                "\n".join(
+                    (
+                        "# Preset: anything",
+                        "--in-range=-s1",
+                        "--lua-desync=shadow_probe:probes=4",
+                        "--lua-desync=fake:strategy=1",
+                        "",
+                    )
+                )
+            )
+        )
         self.assertFalse(
             is_winws2_circular_preset_text(
                 "\n".join(
