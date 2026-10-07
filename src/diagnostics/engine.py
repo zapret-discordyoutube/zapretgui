@@ -856,7 +856,15 @@ def run_blockcheck(
             for finding in dns_servers["findings"]:
                 level = sections.DNS_FINDING_LEVEL.get(finding["level"])
                 if level is not None:
-                    problems.append(problem_rules.problem(level, finding["text"], action="dns", kind=block_kind.KIND_DNS))
+                    problems.append(
+                        problem_rules.problem(
+                            level,
+                            finding["text"],
+                            action="dns",
+                            kind=block_kind.KIND_DNS,
+                            parts=sections.dns_finding_parts(finding),
+                        )
+                    )
             problems.sort(key=lambda item: problem_rules.LEVEL_ORDER.get(Level(item["level"]), 9))
 
         services_report = report_text.services_report(services, verdicts, collected)

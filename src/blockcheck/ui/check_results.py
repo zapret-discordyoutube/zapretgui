@@ -27,7 +27,7 @@ from blockcheck.ui.block_kinds_view import KindsOverview, kind_color, site_group
 from blockcheck.ui.finding_parts import CardsFlow, FindingCard, ServerChip, split_server_list, theme_color
 from ui.widgets.elided_label import ElidedLabel as _ElidedLabel
 from blockcheck.ui.result_cards import finding_detail_card
-from blockcheck.ui.result_cards_model import build_cards
+from blockcheck.ui.result_cards_model import build_cards, read_finding_parts
 from blockcheck.ui.brand_icons import BrandIcon, site_brand
 from diagnostics.block_kind import KIND_ORDER, KIND_OTHER, KINDS, kind_info
 from ui.accessibility import set_control_accessibility, set_state_text
@@ -180,6 +180,23 @@ def split_named_sites(title: str) -> tuple[str, list[str]]:
     if match is None:
         return title, []
     return match.group(1), [name.strip() for name in match.group(2).split(",") if name.strip()]
+
+
+def problem_parts(problem: dict) -> tuple[str, list[tuple[str, list[str]]], int, str, str]:
+    """Проблема по частям: заголовок, метки, сколько серверов не названо, пояснение и подробности для подсказки.
+
+    Находка про DNS-серверы приходит уже частями (``parts``) — с полным перечнем
+    серверов. Иначе фраза делится здесь: так показываются остальные проблемы и
+    отчёты прошлых проверок, где частей ещё не было.
+    """
+    ready = read_finding_parts(problem.get("parts"))
+    if ready is not None:
+        return ready.title, ready.services(), 0, ready.note, ready.detail()
+    title, detail = split_problem_text(problem)
+    # Сайты из заголовка («… для: YouTube, X») уходят в метки с логотипами.
+    title, named_sites = split_named_sites(title)
+    servers, more, rest = split_server_list(detail) if problem.get("kind") == "dns" else ([], 0, detail)
+    return title, [*[(name, []) for name in named_sites], *servers], more, rest, detail
 
 
 def cut_providers(report: dict) -> list[tuple[str, list[str]]]:
@@ -425,15 +442,13 @@ def problem_finding_card(problem: dict, parent=None) -> FindingCard:
     """Находка не про сайт (DNS и подобное) карточкой; пояснение и совет — в подсказке."""
     level = str(problem.get("level") or "unknown")
     tone = _level_tone(level)
-    title, detail = split_problem_text(problem)
-    title, named_sites = split_named_sites(title)
-    servers, more, rest = split_server_list(detail) if problem.get("kind") == "dns" else ([], 0, detail)
+    title, servers, more, rest, detail = problem_parts(problem)
     evidence = set(problem.get("evidence") or ())
     advice = [str(item) if item in evidence else f"→ {item}" for item in problem.get("advice") or ()]
     return FindingCard(
         title,
         parent,
-        servers=[*[(name, []) for name in named_sites], *servers, *(problem.get("chips") or ())],
+        servers=[*servers, *(problem.get("chips") or ())],
         more=more,
         note=rest,
         hint="\n".join(part for part in (title, detail, *advice) if part),
@@ -509,11 +524,9 @@ class _ProblemRow(QWidget):
         texts = QVBoxLayout()
         texts.setSpacing(3)
         if bare or not grouped:
-            title, detail, named_sites = str(problem.get("text") or ""), "", []
+            title, servers, more, rest = str(problem.get("text") or ""), [], 0, ""
         else:
-            title, detail = split_problem_text(problem)
-            # Сайты из заголовка («… для: YouTube, X») уходят в метки с логотипами.
-            title, named_sites = split_named_sites(title)
+            title, servers, more, rest, _detail = problem_parts(problem)
         self.text_label = BodyLabel(title, self) if bare or not grouped else StrongBodyLabel(title, self)
         self.text_label.setWordWrap(True)
         self.text_label.setTextInteractionFlags(text_flags)
@@ -522,8 +535,7 @@ class _ProblemRow(QWidget):
         # Перечень DNS-серверов — метками: по одной на сервис, адреса в подсказке.
         self.server_chips: list[ServerChip] = []
         self.more_label: CaptionLabel | None = None
-        servers, more, rest = split_server_list(detail) if problem.get("kind") == "dns" else ([], 0, detail)
-        servers = [*[(name, []) for name in named_sites], *servers, *(problem.get("chips") or ())]
+        servers = [*servers, *(problem.get("chips") or ())]
         if servers:
             chips = QWidget(self)
             flow = FlowLayout(chips, needAni=False)
@@ -722,7 +734,12 @@ class _ProblemGroup(ToneGroup):
                     card.set_clickable()
                     card.clicked.connect(
                         lambda item=problem, parent_key=key: on_open_child(
-                            parent_key, finding_detail_card(str(item.get("text") or ""), str(item.get("level") or ""))
+                            parent_key,
+                            finding_detail_card(
+                                str(item.get("text") or ""),
+                                str(item.get("level") or ""),
+                                read_finding_parts(item.get("parts")),
+                            ),
                         )
                     )
                 self.findings_flow.add(card)

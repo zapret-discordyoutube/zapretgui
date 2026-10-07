@@ -78,14 +78,17 @@ def problem(
     kind: str = block_kind.KIND_OTHER,
     title: str = "",
     evidence=(),
+    parts: dict | None = None,
 ) -> dict:
     """Строка итога. ``kind`` — вид блокировки: по нему экран собирает строки в группы.
 
     ``title`` — короткое название для строки внутри группы (вид блокировки там
     уже назван в заголовке). ``evidence`` — на чём основан вывод; эти же фразы
-    стоят первыми в ``advice``.
+    стоят первыми в ``advice``. ``parts`` — та же фраза готовыми частями
+    (``title``, ``servers``, ``note``) у находок про DNS-серверы; лежит отдельным
+    ключом, потому что ``title`` самой проблемы — это название сайта.
     """
-    return {
+    record = {
         "level": level.value,
         "text": text,
         "advice": list(advice),
@@ -95,6 +98,9 @@ def problem(
         "title": title,
         "evidence": list(evidence),
     }
+    if parts:
+        record["parts"] = dict(parts)
+    return record
 
 
 def collect_problems(

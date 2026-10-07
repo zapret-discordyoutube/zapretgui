@@ -11,8 +11,8 @@ from PyQt6.QtWidgets import QApplication, QScrollArea
 
 from blockcheck.ui.check_results import BlockcheckSummaryPanel
 from blockcheck.ui.finding_parts import split_finding
-from blockcheck.ui.result_cards import ResultDetailView, server_card, wants_findings
-from blockcheck.ui.result_cards_model import Card, Line, Section
+from blockcheck.ui.result_cards import ResultDetailView, finding_detail_card, server_card, wants_findings
+from blockcheck.ui.result_cards_model import Card, FindingParts, Line, Section, build_cards
 from blockcheck.ui.server_matrix import cell_state, count_state, parse_server_table, summarize_servers
 
 TABLE = "\n".join(
@@ -114,6 +114,9 @@ class ReportOnScreenTests(unittest.TestCase):
         self.assertEqual([chip.text for chip in card.server_chips], ["Quad9 ×2"])
         self.assertEqual(card.more_label.text(), "и ещё 3")
         self.assertIn("Так бывает.", card.hint_text)
+        # Отчёт прошлой проверки хранит только фразу: на странице находки перечень остаётся обрезанным.
+        past = finding_detail_card(conclusions.section.lines[0].name, "warn")
+        self.assertEqual([line.name for line in past.sections[1].lines], ["Quad9", "и ещё 3"])
         # Таблица — сводкой по сервисам; сырой текст открывается кнопкой, а не лежит на странице.
         self.assertEqual([service.name for service in table.matrix.services()], ["Cloudflare", "Quad9"])
         self.assertIsNone(table.editor)
@@ -130,6 +133,64 @@ class ReportOnScreenTests(unittest.TestCase):
         self.assertEqual([section.title for section in view.card().sections], ["Что найдено", "Серверы", "Что это значит"])
         self.assertTrue(view.go_back())
         self.assertIn("2606:4700:4700::1111: Пинг — 4 мс, UDP 53 — 41 мс · 2 из 3", table.matrix.hint(0))
+
+    def test_ready_parts_give_the_whole_server_list_without_cutting_the_phrase(self) -> None:
+        servers = [["Quad9", "9.9.9.9"], ["Quad9", "149.112.112.112"], ["Cloudflare", "1.1.1.1"], ["AdGuard", "94.140.14.14"]]
+        servers += [["Google DNS", "8.8.8.8"], ["Google DNS", "8.8.4.4"]]
+        report = {
+            "dns_servers": {
+                "level": "warn",
+                "findings": [
+                    {
+                        "level": "warn",
+                        "text": "Отвечают через раз: Quad9 (9.9.9.9), Quad9 (149.112.112.112), Cloudflare (1.1.1.1), AdGuard (94.140.14.14) и ещё 2. Так бывает.",
+                        "title": "Отвечают через раз",
+                        "servers": servers,
+                        "note": "Так бывает.",
+                    },
+                    # Вторая находка — как в отчёте прошлой проверки: только фраза.
+                    {"level": "info", "text": "Не отвечают совсем: Xbox DNS (111.88.96.50) и ещё 5."},
+                ],
+                "text": "",
+            }
+        }
+        [card] = [item for item in build_cards(report) if item.key == "dns_servers"]
+        ready, past = card.sections[0].lines
+        self.assertEqual(ready.parts, FindingParts("Отвечают через раз", tuple((name, address) for name, address in servers), "Так бывает."))
+        self.assertIsNone(past.parts)
+        # Фраза целиком остаётся как была — она идёт в текст для копирования.
+        self.assertTrue(ready.name.endswith("и ещё 2. Так бывает."))
+
+        view = self._view()
+        view.show_card(card)
+        self.app.processEvents()
+        shown, old = view.blocks[0].rows
+        self.assertEqual(shown.title, "Отвечают через раз")
+        # Метки — по сервисам со счётчиком; «и ещё» считает не поместившиеся сервисы, а не обрезку фразы.
+        self.assertEqual([chip.text for chip in shown.server_chips], ["Quad9 ×2", "Cloudflare", "AdGuard"])
+        self.assertEqual(shown.more_label.text(), "и ещё 1")
+        self.assertEqual(
+            shown.hint_text,
+            "Отвечают через раз\nQuad9: 9.9.9.9, 149.112.112.112\nCloudflare: 1.1.1.1\nAdGuard: 94.140.14.14\n"
+            "Google DNS: 8.8.8.8, 8.8.4.4\nТак бывает.",
+        )
+        # Старая находка показана как раньше: фраза делится на экране.
+        self.assertEqual(old.title, "Не отвечают совсем")
+        self.assertEqual([chip.text for chip in old.server_chips], ["Xbox DNS"])
+        self.assertEqual(old.more_label.text(), "и ещё 5")
+
+        page = finding_detail_card(ready.name, ready.state, ready.parts)
+        self.assertEqual(page.title, "Отвечают через раз")
+        self.assertEqual(
+            [(line.name, line.text) for line in page.sections[1].lines],
+            [
+                ("Quad9", "9.9.9.9, 149.112.112.112"),
+                ("Cloudflare", "1.1.1.1"),
+                ("AdGuard", "94.140.14.14"),
+                ("Google DNS", "8.8.8.8, 8.8.4.4"),
+            ],
+        )
+        self.assertEqual(page.sections[2].lines[0].name, "Так бывает.")
 
     def test_server_page_tells_what_was_checked_and_what_it_means(self) -> None:
         card = server_card(AKAMAI.lines[1], AKAMAI)

@@ -20,6 +20,8 @@ from blockcheck.ui.check_results import (
     cut_providers,
     problem_brand,
     problem_card_key,
+    problem_finding_card,
+    problem_parts,
     split_named_sites,
     split_problem_text,
     split_server_list,
@@ -442,6 +444,53 @@ class CardsOnScreenTests(unittest.TestCase):
         self.assertIsNone(dns.icon)
         self.assertIsNotNone(dns.dot)
         self.assertIsNotNone(dns.action_button)
+
+    def test_dns_problem_with_ready_parts_lists_every_server(self) -> None:
+        text = "Обычные ответы подменяются у серверов: Cloudflare (1.1.1.1), Cloudflare (1.0.0.1), AdGuard (94.140.14.14), Quad9 (9.9.9.9) и ещё 2."
+        servers = [["Cloudflare", "1.1.1.1"], ["Cloudflare", "1.0.0.1"], ["AdGuard", "94.140.14.14"], ["Quad9", "9.9.9.9"]]
+        servers += [["Quad9", "149.112.112.112"], ["Google DNS", "8.8.8.8"]]
+        ready = {
+            **_problem(text, kind="dns", action="dns"),
+            "parts": {"title": "Обычные ответы подменяются у серверов", "servers": servers, "note": ""},
+        }
+        # Проблема из отчёта прошлой проверки: частей нет, есть только фраза.
+        past = _problem(text, kind="dns", action="dns")
+
+        self.assertEqual(
+            problem_parts(ready),
+            (
+                "Обычные ответы подменяются у серверов",
+                [
+                    ("Cloudflare", ["1.1.1.1", "1.0.0.1"]),
+                    ("AdGuard", ["94.140.14.14"]),
+                    ("Quad9", ["9.9.9.9", "149.112.112.112"]),
+                    ("Google DNS", ["8.8.8.8"]),
+                ],
+                0,
+                "",
+                "Cloudflare: 1.1.1.1, 1.0.0.1\nAdGuard: 94.140.14.14\nQuad9: 9.9.9.9, 149.112.112.112\nGoogle DNS: 8.8.8.8",
+            ),
+        )
+        title, chips, more, rest, _detail = problem_parts(past)
+        self.assertEqual((title, [name for name, _addresses in chips], more, rest), (ready["parts"]["title"], ["Cloudflare", "AdGuard", "Quad9"], 2, ""))
+
+        card = problem_finding_card(ready)
+        self.addCleanup(card.deleteLater)
+        self.assertEqual([chip.text for chip in card.server_chips], ["Cloudflare ×2", "AdGuard", "Quad9 ×2"])
+        self.assertEqual(card.more_label.text(), "и ещё 1")
+        self.assertIn("Google DNS: 8.8.8.8", card.hint_text)
+        old = problem_finding_card(past)
+        self.addCleanup(old.deleteLater)
+        self.assertEqual([chip.text for chip in old.server_chips], ["Cloudflare ×2", "AdGuard", "Quad9"])
+        self.assertEqual(old.more_label.text(), "и ещё 2")
+
+        panel = BlockcheckSummaryPanel(on_action=lambda *_args: None)
+        self.addCleanup(panel.deleteLater)
+        panel.show_report({"problems": [ready]})
+        [row] = panel.problem_rows()
+        self.assertEqual(row.text_label.text(), "Обычные ответы подменяются у серверов")
+        self.assertEqual([chip.text for chip in row.server_chips], ["Cloudflare ×2", "AdGuard", "Quad9 ×2", "Google DNS"])
+        self.assertIsNone(row.more_label)
 
     def test_narrow_card_shows_title_and_status_in_full(self) -> None:
         card = Card(

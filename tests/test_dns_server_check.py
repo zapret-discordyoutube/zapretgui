@@ -553,6 +553,71 @@ class ReportVerdictTests(unittest.TestCase):
         # Оговорка не отменяет остальные выводы.
         self.assertIn(sc.CODE_INTERCEPTED, _codes(findings))
 
+    def test_findings_carry_ready_parts_with_the_whole_server_list(self) -> None:
+        spoofed = sc.Finding(sc.LEVEL_FAIL, sc.CODE_SPOOFED, "обычные ответы подменяются")
+        targets = [sc.CheckTarget("Cloudflare", f"1.1.1.{index}") for index in range(1, 7)]
+        rows = tuple(_row(target, doh=_ok(20.0), findings=(spoofed,)) for target in targets) + (_row(QUAD9, doh=_ok(80.0)),)
+        findings = sc.judge_report(rows, False, OWNERS.get)
+
+        named = next(finding for finding in findings if finding.code == sc.CODE_SPOOFED)
+        # Фраза для журнала обрезана, а перечень для экрана — полный.
+        self.assertEqual(
+            named.text,
+            "Обычные ответы подменяются у серверов: Cloudflare (1.1.1.1), Cloudflare (1.1.1.2), "
+            "Cloudflare (1.1.1.3), Cloudflare (1.1.1.4) и ещё 2.",
+        )
+        self.assertEqual(named.title, "Обычные ответы подменяются у серверов")
+        self.assertEqual(named.servers, tuple(("Cloudflare", f"1.1.1.{index}") for index in range(1, 7)))
+        self.assertEqual(named.note, "")
+        best = next(finding for finding in findings if finding.code == sc.CODE_BEST)
+        self.assertEqual((best.title, best.servers), ("Для защищённого DNS сейчас лучше всего подходит", (("Quad9", "9.9.9.9"),)))
+        self.assertEqual(best.note, "Шифрованный запрос проходит за 80 мс. Без замечаний: 1 из 7 адресов.")
+
+    def test_every_listing_finding_has_title_servers_and_note(self) -> None:
+        cut = sc.Cell(state=sc.STATE_OK, elapsed_ms=5.0, failure=FAILURE_RESET, reason="соединение оборвано", trail=(True, False, False))
+        refused = sc.Finding(sc.LEVEL_INFO, sc.CODE_SELF_FILTER, "сам не отдаёт адреса сайтов: rutor.info")
+        second = sc.CheckTarget("Google DNS", "8.8.4.4")
+        rows = (
+            _judged(_row(GOOGLE, dot=_fail(), doh=cut)),
+            _row(second, findings=(refused,)),
+            _judged(_row(QUAD9, udp=_fail(), tcp=_fail(), dot=_fail(), doh=_fail())),
+            _judged(_row(PLAIN, udp=_fail(), dot=SKIP, doh=SKIP)),
+        )
+        parts = {finding.title: (finding.servers, finding.note) for finding in sc.judge_report(rows, False, OWNERS.get)}
+
+        self.assertEqual(parts["Шифрованный DNS по DoT (порт 853) закрыт у части серверов"], ((("Google DNS", "8.8.8.8"),), ""))
+        self.assertEqual(parts["Обычный DNS (UDP, порт 53) закрыт у части серверов"], (((PLAIN.provider, PLAIN.address),), ""))
+        self.assertEqual(
+            parts["Отвечают через раз"],
+            ((("Google DNS", "8.8.8.8"),), "Так бывает, когда блокировка включается не с первого запроса."),
+        )
+        # Во фразе фильтрующий сервис назван один раз, а в перечне — его адреса.
+        servers, note = parts["Сами не отдают часть сайтов"]
+        self.assertEqual(servers, (("Google DNS", "8.8.4.4"),))
+        self.assertIn("решение самих серверов", note)
+        self.assertEqual(parts["Не отвечают совсем"], ((("Quad9", "9.9.9.9"),), ""))
+
+    def test_findings_without_a_list_keep_the_explanation_as_a_note(self) -> None:
+        dead = [_judged(_row(sc.CheckTarget("Cloudflare", f"1.1.1.{index}"), dot=_fail())) for index in range(1, 4)]
+        findings = sc.judge_report(tuple(dead), True, OWNERS.get, ("Zapret",))
+        parts = {finding.code: finding for finding in findings}
+
+        bypass = parts[sc.CODE_BYPASS_RUNNING]
+        self.assertEqual((bypass.title, bypass.servers), ("Во время проверки работали", ()))
+        self.assertTrue(bypass.note.startswith("Zapret. Такие программы"))
+        caught = parts[sc.CODE_INTERCEPTED]
+        self.assertEqual(caught.title, "Обычные DNS-запросы перехватываются по дороге (провайдером или роутером)")
+        self.assertTrue(caught.note.startswith("Ответил адрес, где DNS-сервера нет."))
+        closed = next(finding for finding in findings if "закрыт целиком" in finding.text)
+        self.assertEqual(
+            (closed.title, closed.servers, closed.note),
+            ("Шифрованный DNS по DoT (порт 853) закрыт целиком", (), "Не ответил ни один из 3 адресов."),
+        )
+        # Заголовок и пояснение вместе не теряют ничего из фразы.
+        for finding in findings:
+            self.assertTrue(finding.title, finding.text)
+            self.assertTrue(finding.text.startswith(finding.title), finding.text)
+
     def test_dead_servers_alone_do_not_get_all_clear(self) -> None:
         findings = self._report([_row(PLAIN, udp=_fail(), tcp=_fail(), dot=SKIP, doh=SKIP)])
 

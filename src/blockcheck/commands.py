@@ -122,13 +122,23 @@ def load_past_blockcheck_report(log_file: str | None) -> dict | None:
     return report if isinstance(report, dict) else None
 
 
+def _finding_record(finding) -> dict:
+    """Находка словарём: фраза целиком и она же готовыми частями — заголовок, все серверы, пояснение."""
+    record = {"level": str(finding.level), "text": str(finding.text)}
+    if finding.title:
+        record["title"] = str(finding.title)
+        record["servers"] = [[str(name), str(address)] for name, address in finding.servers]
+        record["note"] = str(finding.note)
+    return record
+
+
 def check_dns_servers(*, should_stop=None) -> dict:
     """Проверка DNS-серверов для «Полной проверки»: выводы и полный текст одним словарём."""
     from dns import server_check_plans
     from dns.commands import run_server_check
 
     report = run_server_check(should_stop=should_stop)
-    findings = [{"level": str(item.level), "text": str(item.text)} for item in report.findings]
+    findings = [_finding_record(item) for item in report.findings]
     levels = {item["level"] for item in findings}
     level = next((name for name in ("fail", "warn") if name in levels), "ok" if findings else "unknown")
     return {"level": level, "findings": findings, "text": server_check_plans.build_text_report(report)}

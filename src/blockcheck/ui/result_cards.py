@@ -42,7 +42,17 @@ from blockcheck.ui.block_kinds_view import kind_color
 from blockcheck.ui.brand_icons import BrandIcon, named_brand, site_brand
 from blockcheck.ui.finding_parts import CardsFlow, FindingCard, split_finding, split_server_list
 from blockcheck.ui.server_matrix import ServerMatrix, ServiceSummary, cell_state, parse_server_table
-from blockcheck.ui.result_cards_model import PREVIEW_LINES, Card, Counter, DotGroup, Line, Section, build_cards, build_counters
+from blockcheck.ui.result_cards_model import (
+    PREVIEW_LINES,
+    Card,
+    Counter,
+    DotGroup,
+    FindingParts,
+    Line,
+    Section,
+    build_cards,
+    build_counters,
+)
 from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
 from ui.code_editor.chunked_fill import ChunkedReadOnlyFill
@@ -1027,10 +1037,17 @@ def server_card(line: Line, section: Section) -> Card:
 _STATE_WORDS = {"ok": "В порядке", "warn": "Работает не полностью", "fail": "Мешает работе"}
 
 
-def finding_detail_card(text: str, state: str) -> Card:
-    """Отчёт по одной находке: что найдено, какие серверы названы и что это значит."""
-    title, detail = split_finding(text)
-    servers, more, rest = split_server_list(detail)
+def finding_detail_card(text: str, state: str, parts: FindingParts | None = None) -> Card:
+    """Отчёт по одной находке: что найдено, какие серверы названы и что это значит.
+
+    ``parts`` — находка готовыми частями: тогда названы все серверы. Без них
+    (отчёт прошлой проверки) фраза делится здесь, и перечень в ней обрезан.
+    """
+    if parts is not None:
+        title, servers, more, rest = parts.title, parts.services(), 0, parts.note
+    else:
+        title, detail = split_finding(text)
+        servers, more, rest = split_server_list(detail)
     sections = [Section("Что найдено", (Line(state, str(text)),))]
     if servers:
         lines = [Line("info", name, ", ".join(addresses) or "адрес не назван") for name, addresses in servers]
@@ -1079,8 +1096,12 @@ def wants_findings(section: Section, card: Card) -> bool:
 
 def finding_card(line: Line, parent=None) -> FindingCard:
     """Вывод про DNS карточкой: заголовок, серверы метками, остальное — в подсказке."""
-    title, detail = split_finding(line.name)
-    servers, more, rest = split_server_list(detail)
+    if line.parts is not None:
+        # Проверка отдала находку частями: перечень полный, фразу резать не нужно.
+        title, servers, more, rest, detail = line.parts.title, line.parts.services(), 0, line.parts.note, line.parts.detail()
+    else:
+        title, detail = split_finding(line.name)
+        servers, more, rest = split_server_list(detail)
     state = line.state
     return FindingCard(
         title,
@@ -1311,7 +1332,7 @@ class _SectionBlock(QWidget):
             self.rows = [finding_card(line, self.findings_flow) for line in section.lines]
             for card, line in zip(self.rows, section.lines):
                 card.set_clickable()
-                card.clicked.connect(lambda item=line: self.child_opened.emit(finding_detail_card(item.name, item.state)))
+                card.clicked.connect(lambda item=line: self.child_opened.emit(finding_detail_card(item.name, item.state, item.parts)))
                 self.findings_flow.add(card)
             layout.addSpacing(2)
             layout.addWidget(self.findings_flow)

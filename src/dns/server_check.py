@@ -199,9 +199,19 @@ class DomainFact:
 
 @dataclass(frozen=True, slots=True)
 class Finding:
+    """Вывод проверки. ``text`` — фраза целиком, для журнала и текстового отчёта.
+
+    Остальное — та же находка готовыми частями для экрана, чтобы он не резал
+    фразу сам: короткий заголовок, полный перечень серверов (название сервиса
+    и адрес, без обрезки) и пояснение.
+    """
+
     level: str
     code: str
     text: str
+    title: str = ""
+    servers: tuple[tuple[str, str], ...] = ()
+    note: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -684,6 +694,14 @@ def _label(row: Observation) -> str:
     return f"{row.target.provider} ({row.target.address})"
 
 
+def _pair(row: Observation) -> tuple[str, str]:
+    return row.target.provider, row.target.address
+
+
+def _labels(servers: Iterable[tuple[str, str]]) -> list[str]:
+    return [f"{provider} ({address})" for provider, address in servers]
+
+
 def _short_list(items: list[str], limit: int = 4) -> str:
     shown = ", ".join(items[:limit])
     return f"{shown} и ещё {len(items) - limit}" if len(items) > limit else shown
@@ -726,15 +744,26 @@ def _without_remarks(row: Observation) -> bool:
 _WHOLESALE_MIN = 3
 
 
-def _transport_summary(rows: tuple[Observation, ...], transport: str, title: str, codes: tuple[str, ...]) -> str:
-    """Одна строка о закрытом способе связи: «закрыт целиком» или у каких серверов."""
+def _transport_summary(
+    rows: tuple[Observation, ...], transport: str, title: str, codes: tuple[str, ...], code: str
+) -> Finding | None:
+    """Одна находка о закрытом способе связи: «закрыт целиком» или у каких серверов."""
     tried = [row for row in rows if row.cell(transport).state in (STATE_OK, STATE_FAIL)]
     closed = [row for row in tried if any(finding.code in codes for finding in row.findings)]
     if not closed:
-        return ""
+        return None
     if len(closed) == len(tried) and len(tried) >= _WHOLESALE_MIN:
-        return f"{title} закрыт целиком: не ответил ни один из {len(tried)} адресов."
-    return f"{title} закрыт у части серверов: {_short_list([_label(row) for row in closed])}."
+        note = f"не ответил ни один из {len(tried)} адресов."
+        return Finding(
+            LEVEL_WARN, code, f"{title} закрыт целиком: {note}", title=f"{title} закрыт целиком", note=_capital(note)
+        )
+    servers = tuple(_pair(row) for row in closed)
+    head = f"{title} закрыт у части серверов"
+    return Finding(LEVEL_WARN, code, f"{head}: {_short_list(_labels(servers))}.", title=head, servers=servers)
+
+
+def _capital(text: str) -> str:
+    return f"{text[:1].upper()}{text[1:]}"
 
 
 def judge_report(
@@ -747,14 +776,12 @@ def judge_report(
     findings: list[Finding] = []
     if bypass:
         # Первой строкой: от этого зависит, как читать всё остальное.
-        findings.append(
-            Finding(
-                LEVEL_INFO,
-                CODE_BYPASS_RUNNING,
-                f"Во время проверки работали: {', '.join(bypass)}. Такие программы меняют соединения и DNS, "
-                "поэтому результат показывает сеть вместе с ними, а не «чистую» сеть провайдера.",
-            )
+        note = (
+            f"{', '.join(bypass)}. Такие программы меняют соединения и DNS, "
+            "поэтому результат показывает сеть вместе с ними, а не «чистую» сеть провайдера."
         )
+        head = "Во время проверки работали"
+        findings.append(Finding(LEVEL_INFO, CODE_BYPASS_RUNNING, f"{head}: {note}", title=head, note=note))
     network, providers = _shared_foreign_network(rows, owner_of)
     if canary or network is not None:
         evidence: list[str] = []
@@ -764,69 +791,70 @@ def judge_report(
             evidence.append(
                 f"обычные запросы к {_short_list(providers)} на самом деле выполняет одна сеть — {_owner_name(network)}"
             )
-        findings.append(
-            Finding(
-                LEVEL_FAIL,
-                CODE_INTERCEPTED,
-                "Обычные DNS-запросы перехватываются по дороге (провайдером или роутером): "
-                + "; ".join(evidence)
-                + ". Какой бы сервер вы ни выбрали, без шифрования отвечает перехватчик.",
-            )
-        )
+        head = "Обычные DNS-запросы перехватываются по дороге (провайдером или роутером)"
+        note = "; ".join(evidence) + ". Какой бы сервер вы ни выбрали, без шифрования отвечает перехватчик."
+        findings.append(Finding(LEVEL_FAIL, CODE_INTERCEPTED, f"{head}: {note}", title=head, note=_capital(note)))
 
-    spoofed = [_label(row) for row in rows if any(finding.code == CODE_SPOOFED for finding in row.findings)]
+    spoofed = tuple(_pair(row) for row in rows if _has(row, CODE_SPOOFED))
     if spoofed:
+        head = "Обычные ответы подменяются у серверов"
         findings.append(
-            Finding(LEVEL_FAIL, CODE_SPOOFED, f"Обычные ответы подменяются у серверов: {_short_list(spoofed)}.")
+            Finding(LEVEL_FAIL, CODE_SPOOFED, f"{head}: {_short_list(_labels(spoofed))}.", title=head, servers=spoofed)
         )
 
-    encrypted = [
-        text
-        for text in (
-            _transport_summary(rows, TRANSPORT_DOT, "Шифрованный DNS по DoT (порт 853)", (CODE_DOT_BLOCKED,)),
-            _transport_summary(
-                rows, TRANSPORT_DOH, "Шифрованный DNS по DoH (порт 443)", (CODE_DOH_BLOCKED, CODE_DOH_NAME_BLOCKED)
-            ),
-        )
-        if text
-    ]
-    for text in encrypted:
-        findings.append(Finding(LEVEL_WARN, CODE_DOH_BLOCKED, text))
-    udp_closed = _transport_summary(rows, TRANSPORT_UDP, "Обычный DNS (UDP, порт 53)", (CODE_UDP_BLOCKED,))
-    if udp_closed:
-        findings.append(Finding(LEVEL_WARN, CODE_UDP_BLOCKED, udp_closed))
+    closed = (
+        _transport_summary(
+            rows, TRANSPORT_DOT, "Шифрованный DNS по DoT (порт 853)", (CODE_DOT_BLOCKED,), CODE_DOH_BLOCKED
+        ),
+        _transport_summary(
+            rows,
+            TRANSPORT_DOH,
+            "Шифрованный DNS по DoH (порт 443)",
+            (CODE_DOH_BLOCKED, CODE_DOH_NAME_BLOCKED),
+            CODE_DOH_BLOCKED,
+        ),
+        _transport_summary(rows, TRANSPORT_UDP, "Обычный DNS (UDP, порт 53)", (CODE_UDP_BLOCKED,), CODE_UDP_BLOCKED),
+    )
+    findings.extend(finding for finding in closed if finding is not None)
     # Случайные потери и настоящие срывы — разные вещи: первые только считаем, вторые называем.
-    shaky = [_label(row) for row in rows if _has(row, CODE_UNSTABLE, LEVEL_WARN)]
+    shaky = tuple(_pair(row) for row in rows if _has(row, CODE_UNSTABLE, LEVEL_WARN))
     if shaky:
+        head, note = "Отвечают через раз", "Так бывает, когда блокировка включается не с первого запроса."
         findings.append(
             Finding(
                 LEVEL_WARN,
                 CODE_UNSTABLE,
-                f"Отвечают через раз: {_short_list(shaky)}. Так бывает, когда блокировка включается не с первого запроса.",
+                f"{head}: {_short_list(_labels(shaky))}. {note}",
+                title=head,
+                servers=shaky,
+                note=note,
             )
         )
     lossy = sum(1 for row in rows if _has(row, CODE_UNSTABLE, LEVEL_INFO))
     if lossy:
-        findings.append(
-            Finding(
-                LEVEL_INFO,
-                CODE_UNSTABLE,
-                f"Потеряли по одному запросу: {lossy} из {len(rows)} адресов. Похоже на обычные потери в сети.",
-            )
-        )
-    filtering = list(dict.fromkeys(row.target.provider for row in rows if _has(row, CODE_SELF_FILTER)))
+        head = "Потеряли по одному запросу"
+        note = f"{lossy} из {len(rows)} адресов. Похоже на обычные потери в сети."
+        findings.append(Finding(LEVEL_INFO, CODE_UNSTABLE, f"{head}: {note}", title=head, note=note))
+    filtering = tuple(_pair(row) for row in rows if _has(row, CODE_SELF_FILTER))
     if filtering:
+        # Фильтрует сервис целиком, поэтому во фразе — названия без повторов; адреса — в перечне.
+        names = list(dict.fromkeys(provider for provider, _address in filtering))
+        head = "Сами не отдают часть сайтов"
+        note = "Это решение самих серверов: так они отвечают и по шифрованному пути."
         findings.append(
             Finding(
                 LEVEL_INFO,
                 CODE_SELF_FILTER,
-                f"Сами не отдают часть сайтов: {_short_list(filtering)}. Это решение самих серверов: "
-                "так они отвечают и по шифрованному пути.",
+                f"{head}: {_short_list(names)}. {note}",
+                title=head,
+                servers=filtering,
+                note=note,
             )
         )
-    dead = [_label(row) for row in rows if any(finding.code == CODE_DEAD for finding in row.findings)]
+    dead = tuple(_pair(row) for row in rows if _has(row, CODE_DEAD))
     if dead:
-        findings.append(Finding(LEVEL_INFO, CODE_DEAD, f"Не отвечают совсем: {_short_list(dead)}."))
+        head = "Не отвечают совсем"
+        findings.append(Finding(LEVEL_INFO, CODE_DEAD, f"{head}: {_short_list(_labels(dead))}.", title=head, servers=dead))
 
     # Windows шифрует запросы по DoH и по имени сервера: годится только тот, кто так отвечает.
     usable = [
@@ -839,19 +867,24 @@ def judge_report(
     if usable:
         best = min(usable, key=lambda row: row.cell(TRANSPORT_DOH).elapsed_ms or float("inf"))
         clean = sum(1 for row in rows if _without_remarks(row))
+        note = (
+            f"шифрованный запрос проходит за {max(1, round(best.cell(TRANSPORT_DOH).elapsed_ms or 0))} мс. "
+            f"Без замечаний: {clean} из {len(rows)} адресов."
+        )
         findings.append(
             Finding(
                 LEVEL_OK,
                 CODE_BEST,
-                f"Для защищённого DNS сейчас лучше всего подходит {_label(best)}: шифрованный запрос проходит за "
-                f"{max(1, round(best.cell(TRANSPORT_DOH).elapsed_ms or 0))} мс. "
-                f"Без замечаний: {clean} из {len(rows)} адресов.",
+                f"Для защищённого DNS сейчас лучше всего подходит {_label(best)}: {note}",
+                title="Для защищённого DNS сейчас лучше всего подходит",
+                servers=(_pair(best),),
+                note=_capital(note),
             )
         )
     elif rows and not any(finding.level in (LEVEL_WARN, LEVEL_FAIL, LEVEL_OK) for finding in findings) and not any(
         finding.code == CODE_DEAD for finding in findings
     ):
-        findings.append(Finding(LEVEL_OK, CODE_ALL_FINE, "Замечаний нет."))
+        findings.append(Finding(LEVEL_OK, CODE_ALL_FINE, "Замечаний нет.", title="Замечаний нет"))
     return tuple(findings)
 
 

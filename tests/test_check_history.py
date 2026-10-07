@@ -77,10 +77,18 @@ class DnsServersAdapterTests(unittest.TestCase):
 
         from blockcheck import commands
 
+        from dns.server_check import Finding
+
         report = SimpleNamespace(
             findings=(
-                SimpleNamespace(level="info", text="Не отвечают совсем: X."),
-                SimpleNamespace(level="warn", text="DoT закрыт у: Y."),
+                Finding(
+                    "info",
+                    "dead",
+                    "Не отвечают совсем: X (1.1.1.1).",
+                    title="Не отвечают совсем",
+                    servers=(("X", "1.1.1.1"),),
+                ),
+                Finding("warn", "dot_blocked", "DoT закрыт у: Y."),
             )
         )
         stops: list = []
@@ -97,6 +105,17 @@ class DnsServersAdapterTests(unittest.TestCase):
             result = commands.check_dns_servers(should_stop=marker)
 
         self.assertEqual(result["level"], "warn")
+        # Находка идёт фразой и готовыми частями; если частей нет — только фразой.
+        self.assertEqual(
+            result["findings"][0],
+            {
+                "level": "info",
+                "text": "Не отвечают совсем: X (1.1.1.1).",
+                "title": "Не отвечают совсем",
+                "servers": [["X", "1.1.1.1"]],
+                "note": "",
+            },
+        )
         self.assertEqual(result["findings"][1], {"level": "warn", "text": "DoT закрыт у: Y."})
         self.assertEqual(result["text"], "таблица")
         self.assertIs(stops[0], marker)
@@ -105,9 +124,10 @@ class DnsServersAdapterTests(unittest.TestCase):
         from types import SimpleNamespace
 
         from blockcheck import commands
+        from dns.server_check import Finding
 
         def level(*levels):
-            report = SimpleNamespace(findings=tuple(SimpleNamespace(level=item, text="x") for item in levels))
+            report = SimpleNamespace(findings=tuple(Finding(item, "code", "x") for item in levels))
             with (
                 patch("dns.commands.run_server_check", lambda **_k: report),
                 patch("dns.server_check_plans.build_text_report", lambda _report: ""),

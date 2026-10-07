@@ -754,6 +754,27 @@ class FullCheckTests(unittest.TestCase):
         # Пометки и «лучший сервер» в список проблем не идут.
         self.assertFalse([item for item in result["problems"] if "Xbox DNS" in item["text"] or "лучше всего" in item["text"]])
 
+    def test_dns_finding_parts_reach_the_report_and_the_problem(self) -> None:
+        spoofed = {
+            "level": "fail",
+            "text": "Обычные ответы подменяются у серверов: Cloudflare (1.1.1.1) и ещё 1.",
+            "title": "Обычные ответы подменяются у серверов",
+            "servers": [["Cloudflare", "1.1.1.1"], ["Cloudflare", "1.0.0.1"]],
+            "note": "",
+        }
+        plain = {"level": "warn", "text": "DNS без частей: старая проверка."}
+        result, _lines, _calls = self._run(dns={"level": "fail", "findings": [spoofed, plain], "text": ""})
+
+        self.assertEqual(result["dns_servers"]["findings"], [spoofed, plain])
+        with_parts, without = [item for item in result["problems"] if item["action"] == "dns"]
+        # Части лежат отдельным ключом: «title» самой проблемы — это название сайта.
+        self.assertEqual(with_parts["title"], "")
+        self.assertEqual(
+            with_parts["parts"],
+            {"title": spoofed["title"], "servers": spoofed["servers"], "note": ""},
+        )
+        self.assertNotIn("parts", without)
+
     def test_filter_place_is_searched_for_site_with_quic_blocked_by_name(self) -> None:
         from diagnostics import path_trace
         from utils.windows_icmp import HOP_ROUTER
