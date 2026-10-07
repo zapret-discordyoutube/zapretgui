@@ -254,24 +254,18 @@ class ControlPageWindowsFeatureMixin:
     def _on_internet_cleanup_clicked(self) -> None:
         import presets.ui.control.control_runtime as control_runtime
 
+        # Плитку на время работы не выключаем: сброс длится доли секунды, а выключение
+        # нажатой кнопки уводит фокус и прокручивает страницу. От повторного нажатия
+        # защищает проверка ниже.
+        if self._ensure_internet_cleanup_runtime().is_running():
+            return
+
         start_plan = control_runtime.build_internet_cleanup_start_plan(language=self._ui_language)
         for dialog_plan in start_plan.confirmations:
             if not self._confirm_windows_feature_action(dialog_plan):
                 return
 
-        if start_plan.start_status:
-            self._set_status(start_plan.start_status)
-
-        self._request_internet_cleanup()
-
-    def _set_internet_cleanup_enabled(self, enabled: bool) -> None:
-        # Плитка «Сбросить сеть Windows» бледнеет и не нажимается, пока сброс идёт.
-        card = getattr(self, "internet_cleanup_card", None)
-        if card is not None:
-            try:
-                card.setEnabled(bool(enabled))
-            except Exception:
-                pass
+        self._start_internet_cleanup_worker()
 
     def _ensure_internet_cleanup_runtime(self) -> OneShotWorkerRuntime:
         runtime = self.__dict__.get("_internet_cleanup_runtime")
@@ -282,31 +276,14 @@ class ControlPageWindowsFeatureMixin:
             self._internet_cleanup_runtime = runtime
         return runtime
 
-    def _request_internet_cleanup(self) -> None:
-        runtime = self._ensure_internet_cleanup_runtime()
-        if runtime.is_running():
-            self._set_status("Сброс сети Windows уже выполняется...")
-            return
-        self._set_internet_cleanup_enabled(False)
-        self._start_internet_cleanup_worker()
-
     def _start_internet_cleanup_worker(self) -> None:
         from windows_features.internet_cleanup import InternetCleanupWorker
 
-        runtime = self._ensure_internet_cleanup_runtime()
-        runtime.start_qthread_worker(
+        self._ensure_internet_cleanup_runtime().start_qthread_worker(
             worker_factory=lambda request_id: InternetCleanupWorker(request_id, parent=self),
             on_loaded=self._on_internet_cleanup_finished,
             on_failed=self._on_internet_cleanup_failed,
-            on_finished=self._on_internet_cleanup_worker_finished,
-            bind_worker=lambda worker: worker.status.connect(self._on_internet_cleanup_status),
         )
-
-    def _on_internet_cleanup_status(self, request_id: int, message: str) -> None:
-        runtime = self._ensure_internet_cleanup_runtime()
-        if not runtime.is_current(request_id, cleanup_in_progress=bool(getattr(self, "_cleanup_in_progress", False))):
-            return
-        self._set_status(str(message or ""))
 
     def _on_internet_cleanup_finished(self, request_id: int, result) -> None:
         runtime = self._ensure_internet_cleanup_runtime()
@@ -322,17 +299,13 @@ class ControlPageWindowsFeatureMixin:
 
         self._show_windows_feature_action_result(build_internet_cleanup_error_result(str(error or "")))
 
-    def _on_internet_cleanup_worker_finished(self, worker) -> None:
-        if not self._is_current_worker_finish(self.__dict__.get("_internet_cleanup_runtime"), worker):
-            return
-        self._set_internet_cleanup_enabled(True)
-
     def _stop_internet_cleanup_worker(self) -> None:
         runtime = self.__dict__.get("_internet_cleanup_runtime")
         if runtime is not None:
+            # Сброс занимает доли секунды, дольше всего — проверка, отвечает ли прокси.
             runtime.stop(
                 blocking=True,
-                wait_timeout_ms=45000,
+                wait_timeout_ms=5000,
                 terminate_wait_ms=1000,
                 warning_prefix="Internet cleanup worker",
             )

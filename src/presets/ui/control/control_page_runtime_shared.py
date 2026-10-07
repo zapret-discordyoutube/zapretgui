@@ -151,12 +151,19 @@ def show_action_result_plan(plan, *, parent_widget, set_status, info_bar_cls, to
     if plan.final_status:
         set_status(plan.final_status)
 
+    # Обычное сообщение гаснет через секунду. Итог из нескольких строк за это время
+    # не прочитать, поэтому план может сам сказать, сколько его показывать.
+    options = {}
+    duration_ms = getattr(plan, "duration_ms", None)
+    if duration_ms is not None:
+        options["duration"] = int(duration_ms)
+
     if plan.level == "success":
-        info_bar_cls.success(title=plan.title, content=plan.content, parent=parent_widget)
+        info_bar_cls.success(title=plan.title, content=plan.content, parent=parent_widget, **options)
     elif plan.level == "warning":
-        info_bar_cls.warning(title=plan.title, content=plan.content, parent=parent_widget)
+        info_bar_cls.warning(title=plan.title, content=plan.content, parent=parent_widget, **options)
     else:
-        info_bar_cls.error(title=plan.title, content=plan.content, parent=parent_widget)
+        info_bar_cls.error(title=plan.title, content=plan.content, parent=parent_widget, **options)
 
 
 def apply_status_plan(

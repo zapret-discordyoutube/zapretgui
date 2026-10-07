@@ -73,7 +73,7 @@ def quick_action_specs(text_prefix: str) -> tuple[QuickActionSpec, ...]:
             title=("page.control.internet_cleanup.title", "Сбросить сеть Windows"),
             content=(
                 "page.control.internet_cleanup.desc",
-                "Очистить DNS, proxy и Winsock. Может понадобиться перезагрузка",
+                "Очистить кэш DNS, зависший прокси и Winsock. Без перезагрузки",
             ),
             accessible_name=("page.control.internet_cleanup.accessible_name", "Сбросить сеть Windows"),
         ),

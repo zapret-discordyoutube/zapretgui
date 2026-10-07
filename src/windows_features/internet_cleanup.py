@@ -1,21 +1,52 @@
+"""Сброс сети Windows: то, что лежит за плиткой «Сбросить сеть Windows».
+
+Чинит только то, что ломается на самом деле, и только вызовами WinAPI
+(windows_features.internet_cleanup_winapi) — без запуска netsh и разбора его
+текста. Всё выполняется за доли секунды и не требует перезагрузки:
+
+- кэш DNS и кэш адресов с маршрутами очищаются всегда: Windows сразу
+  узнаёт всё заново;
+- прокси WinHTTP сбрасывается, только если он задан;
+- системный прокси отключается, только если он смотрит на этот же компьютер
+  и там никто не отвечает — так бывает после аварийно закрытого VPN или
+  прокси-клиента. Работающий прокси не трогается;
+- из каталога Winsock удаляются надстройки посторонних программ (LSP).
+
+Адреса, DNS-серверы и прочие настройки сетевых адаптеров не меняются.
+"""
+
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from log.log import log
-from utils.subproc import get_system_exe, run_hidden
+from windows_features import internet_cleanup_winapi as winapi
+
+# Столько ждём ответа от прокси на этом же компьютере. Работающая программа
+# отвечает мгновенно, а на закрытый порт Windows стучится около двух секунд.
+PROXY_PROBE_TIMEOUT_SECONDS = 0.5
+MAX_LISTED_ITEMS = 3
+# Сколько итог висит на экране: в нём несколько строк, а ошибку ещё нужно успеть понять.
+RESULT_DURATION_MS = 8000
+PROBLEM_DURATION_MS = 15000
 
 
 @dataclass(frozen=True, slots=True)
-class InternetCleanupCommand:
+class CleanupStep:
+    """Один шаг сброса.
+
+    `run` возвращает фразу о том, что сделано, или пустую строку, если менять
+    было нечего. Ошибку Windows он отдаёт исключением.
+    """
+
     label: str
-    args: tuple[str, ...]
-    timeout_seconds: int = 45
+    run: Callable[[], str]
 
 
 @dataclass(slots=True)
@@ -25,228 +56,180 @@ class InternetCleanupActionResult:
     content: str
     revert_checked: bool | None
     final_status: str
+    duration_ms: int = RESULT_DURATION_MS
 
 
-def build_internet_cleanup_commands(
-    *,
-    resolve_system_exe: Callable[[str], str] = get_system_exe,
-) -> tuple[InternetCleanupCommand, ...]:
-    netsh = resolve_system_exe("netsh.exe")
-    return (
-        InternetCleanupCommand("Сброс TCP/IP", (netsh, "int", "ip", "reset")),
-        InternetCleanupCommand("Сброс WinHTTP proxy", (netsh, "winhttp", "reset", "proxy")),
-        InternetCleanupCommand("Сброс Winsock", (netsh, "winsock", "reset")),
-        InternetCleanupCommand("Сброс IPv4", (netsh, "interface", "ipv4", "reset")),
-        InternetCleanupCommand("Сброс IPv6", (netsh, "interface", "ipv6", "reset")),
-        InternetCleanupCommand(
-            "Настройка динамических TCP-портов",
-            (
-                netsh,
-                "int",
-                "ipv4",
-                "set",
-                "dynamicport",
-                "tcp",
-                "start=10000",
-                "num=30000",
-            ),
-        ),
-    )
+# ── шаги ──────────────────────────────────────────────────────────────────
 
 
-def _flush_dns_cache_native() -> bool:
+def _flush_dns_cache() -> str:
+    from dns.winapi import flush_resolver_cache
+
+    if not flush_resolver_cache():
+        raise OSError("Windows не смогла очистить кэш DNS")
+    return "Кэш DNS очищен."
+
+
+def _flush_address_caches() -> str:
+    winapi.flush_neighbor_and_path_caches()
+    return "Кэш адресов и маршрутов очищен."
+
+
+def _reset_winhttp_proxy() -> str:
+    proxy = winapi.read_winhttp_proxy()
+    if not proxy:
+        return ""
+    winapi.reset_winhttp_proxy()
+    return f"Прокси WinHTTP ({proxy}) сброшен."
+
+
+def _proxy_endpoints(server: str) -> list[tuple[str, int]] | None:
+    """Разбирает адрес системного прокси на пары «узел, порт».
+
+    Windows хранит либо один адрес («127.0.0.1:10809»), либо список по
+    протоколам («http=127.0.0.1:10809;socks=127.0.0.1:10808»). None — запись
+    не удалось понять; такой прокси не трогаем.
+    """
+    endpoints: list[tuple[str, int]] = []
+    for part in re.split(r"[;\s]+", str(server or "").strip()):
+        if not part:
+            continue
+        address = part.rsplit("=", 1)[-1].split("://", 1)[-1].strip("/")
+        match = re.fullmatch(r"\[(?P<v6>[^\]]+)\]:(?P<v6port>\d+)|(?P<host>[^:\[\]]+):(?P<port>\d+)", address)
+        if match is None:
+            return None
+        host = match.group("v6") or match.group("host")
+        port = int(match.group("v6port") or match.group("port"))
+        if not 0 < port < 65536:
+            return None
+        if (host, port) not in endpoints:
+            endpoints.append((host, port))
+    return endpoints or None
+
+
+def _is_this_computer(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
     try:
-        from dns.winapi import flush_resolver_cache
-
-        return bool(flush_resolver_cache())
-    except Exception as exc:
-        log(f"Не удалось очистить DNS-кэш через WinAPI: {exc}", "DEBUG")
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
         return False
 
 
-def _default_command_runner(args: Sequence[str], *, timeout: int):
-    return run_hidden(
-        tuple(args),
-        wait=True,
-        capture_output=True,
-        text=False,
-        timeout=timeout,
-        shell=False,
+def _accepts_connections(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=PROXY_PROBE_TIMEOUT_SECONDS):
+            return True
+    except OSError:
+        return False
+
+
+def _disable_dead_system_proxy() -> str:
+    proxy = winapi.read_system_proxy()
+    if not proxy.enabled or not proxy.server:
+        return ""
+    endpoints = _proxy_endpoints(proxy.server)
+    if endpoints is None or not all(_is_this_computer(host) for host, _port in endpoints):
+        # Прокси в сети (рабочий, провайдерский) — не наше дело.
+        return ""
+    if any(_accepts_connections(host, port) for host, port in endpoints):
+        return ""
+    winapi.disable_system_proxy()
+    return f"Системный прокси {proxy.server} отключён: программа по этому адресу не отвечает."
+
+
+def _remove_winsock_addons() -> str:
+    providers = winapi.list_layered_winsock_providers()
+    if not providers:
+        return ""
+    for provider in providers:
+        log(f"Сброс сети: удаляется надстройка Winsock «{provider.name}»", "INFO")
+        winapi.remove_winsock_provider(provider)
+    names = list(dict.fromkeys(provider.name for provider in providers))
+    listed = ", ".join(f"«{name}»" for name in names[:MAX_LISTED_ITEMS])
+    if len(names) > MAX_LISTED_ITEMS:
+        listed += f" и ещё {len(names) - MAX_LISTED_ITEMS}"
+    return (
+        f"Удалены надстройки Winsock: {listed}. "
+        "Перезапустите браузер и другие программы, чтобы они перестали ими пользоваться."
     )
 
 
-_MOJIBAKE_MARKERS = (
-    "\ufffd",
-    "╨",
-    "╤",
-    "Ð",
-    "Ñ",
-    "Рџ",
-    "Р°",
-    "Р±",
-    "Рµ",
-    "Рѕ",
-    "С‚",
-    "СЂ",
-    "СЃ",
-)
-_CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
+def default_cleanup_steps() -> tuple[CleanupStep, ...]:
+    return (
+        CleanupStep("кэш DNS", _flush_dns_cache),
+        CleanupStep("кэш адресов и маршрутов", _flush_address_caches),
+        CleanupStep("прокси WinHTTP", _reset_winhttp_proxy),
+        CleanupStep("системный прокси", _disable_dead_system_proxy),
+        CleanupStep("Winsock", _remove_winsock_addons),
+    )
 
 
-def _decoded_text_score(text: str) -> int:
-    cyrillic = len(_CYRILLIC_RE.findall(text))
-    mojibake = sum(text.count(marker) for marker in _MOJIBAKE_MARKERS)
-    replacement = text.count("\ufffd")
-    controls = sum(1 for char in text if ord(char) < 32 and char not in "\r\n\t")
-    return cyrillic * 3 - mojibake * 8 - replacement * 20 - controls * 5
-
-
-def _repair_predecoded_mojibake(text: str) -> str:
-    candidates = [text]
-    for source_encoding, target_encoding in (("cp866", "cp1251"), ("cp1251", "cp866")):
-        try:
-            candidates.append(text.encode(source_encoding).decode(target_encoding))
-        except UnicodeError:
-            continue
-    return max(candidates, key=_decoded_text_score)
-
-
-def _decode_command_output(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return _repair_predecoded_mojibake(value)
-    if isinstance(value, bytes):
-        candidates = [
-            value.decode(encoding, errors="replace")
-            for encoding in ("utf-8-sig", "cp866", "cp1251")
-        ]
-        return max(candidates, key=_decoded_text_score)
-    return str(value)
-
-
-def _looks_like_success_line(line: str) -> bool:
-    normalized = line.strip().upper()
-    return normalized in {"OK", "OK."} or normalized.endswith(" OK!") or normalized.endswith("- OK!")
-
-
-def _first_relevant_error_line(text: str) -> str:
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    for line in lines:
-        if not _looks_like_success_line(line):
-            return line
-    return lines[0] if lines else ""
-
-
-def _short_error_from_completed(completed: Any) -> str:
-    stderr = _decode_command_output(getattr(completed, "stderr", "")).strip()
-    stdout = _decode_command_output(getattr(completed, "stdout", "")).strip()
-    text = stderr or stdout
-    first_line = _first_relevant_error_line(text)
-    if len(first_line) <= 180:
-        return first_line
-    return first_line[:177] + "..."
+# ── выполнение ────────────────────────────────────────────────────────────
 
 
 def build_internet_cleanup_error_result(error: str) -> InternetCleanupActionResult:
     return InternetCleanupActionResult(
         level="error",
         title="Сброс сети не выполнен",
-        content=str(error or "Не удалось выполнить очистку сети Windows."),
+        content=str(error or "Не удалось выполнить сброс сети Windows."),
         revert_checked=None,
         final_status="",
+        duration_ms=PROBLEM_DURATION_MS,
     )
 
 
-def run_internet_cleanup(
-    *,
-    command_runner: Callable[..., Any] | None = None,
-    flush_dns_cache: Callable[[], bool] | None = None,
-    status_callback: Callable[[str], None] | None = None,
-    should_stop: Callable[[], bool] | None = None,
-    resolve_system_exe: Callable[[str], str] = get_system_exe,
-) -> InternetCleanupActionResult:
-    runner = command_runner or _default_command_runner
-    flush_dns = flush_dns_cache or _flush_dns_cache_native
-    commands = build_internet_cleanup_commands(resolve_system_exe=resolve_system_exe)
-
+def run_internet_cleanup(steps: Sequence[CleanupStep] | None = None) -> InternetCleanupActionResult:
+    """Выполняет все шаги по порядку; ошибка одного шага не мешает остальным."""
+    done: list[str] = []
+    untouched: list[str] = []
     failed: list[str] = []
-    completed_count = 0
-    for command in commands:
-        if should_stop is not None and should_stop():
-            return build_internet_cleanup_error_result("Сброс сети Windows остановлен.")
-        if status_callback is not None:
-            status_callback(f"{command.label}...")
+    for step in default_cleanup_steps() if steps is None else steps:
         try:
-            completed = runner(command.args, timeout=command.timeout_seconds)
+            note = str(step.run() or "")
         except Exception as exc:
-            failed.append(f"{command.label}: {exc}")
+            log(f"Сброс сети: {step.label} — ошибка: {exc}", "WARNING")
+            failed.append(f"{step.label} — {exc}")
             continue
+        log(f"Сброс сети: {step.label} — {note or 'менять нечего'}", "INFO")
+        (done if note else untouched).append(note or step.label)
 
-        return_code = int(getattr(completed, "returncode", 1) or 0)
-        if return_code == 0:
-            completed_count += 1
-            continue
-        detail = _short_error_from_completed(completed)
-        failed.append(f"{command.label}: код {return_code}" + (f", {detail}" if detail else ""))
-
-    if should_stop is not None and should_stop():
-        return build_internet_cleanup_error_result("Сброс сети Windows остановлен.")
-    if status_callback is not None:
-        status_callback("Очистка DNS-кэша...")
-    dns_ok = bool(flush_dns())
-    if dns_ok:
-        completed_count += 1
-    else:
-        failed.append("Очистка DNS-кэша: не выполнена")
-
+    lines = list(done)
+    if untouched:
+        lines.append(f"Менять не пришлось: {', '.join(untouched)}.")
     if not failed:
         return InternetCleanupActionResult(
             level="success",
             title="Сеть Windows сброшена",
-            content=(
-                "Очистка выполнена. Если интернет не восстановится сразу, "
-                "перезагрузите Windows."
-            ),
+            content="\n".join(lines),
             revert_checked=None,
-            final_status="Готово",
+            final_status="",
         )
 
-    if completed_count > 0:
-        return InternetCleanupActionResult(
-            level="warning",
-            title="Сеть сброшена частично",
-            content=(
-                "Часть действий выполнена, но есть ошибки:\n"
-                + "\n".join(failed[:4])
-                + "\n\nПосле этого всё равно может понадобиться перезагрузка Windows."
-            ),
-            revert_checked=None,
-            final_status="Готово",
-        )
-
-    return build_internet_cleanup_error_result("\n".join(failed[:4]))
+    problems = "Не получилось: " + "; ".join(failed) + "."
+    if not lines:
+        return build_internet_cleanup_error_result(problems)
+    return InternetCleanupActionResult(
+        level="warning",
+        title="Сеть сброшена частично",
+        content="\n".join([*lines, problems]),
+        revert_checked=None,
+        final_status="",
+        duration_ms=PROBLEM_DURATION_MS,
+    )
 
 
 class InternetCleanupWorker(QThread):
     loaded = pyqtSignal(int, object)
     failed = pyqtSignal(int, str)
-    status = pyqtSignal(int, str)
 
     def __init__(self, request_id: int, *, parent=None):
         super().__init__(parent)
         self._request_id = int(request_id)
-        self._stop_requested = False
-
-    def stop(self) -> None:
-        self._stop_requested = True
 
     def run(self) -> None:
         try:
-            result = run_internet_cleanup(
-                status_callback=lambda message: self.status.emit(self._request_id, message),
-                should_stop=lambda: bool(self._stop_requested),
-            )
+            result = run_internet_cleanup()
         except Exception as exc:
             log(f"InternetCleanupWorker: не удалось выполнить сброс сети: {exc}", "WARNING")
             self.failed.emit(self._request_id, str(exc))
@@ -255,10 +238,10 @@ class InternetCleanupWorker(QThread):
 
 
 __all__ = [
+    "CleanupStep",
     "InternetCleanupActionResult",
-    "InternetCleanupCommand",
     "InternetCleanupWorker",
-    "build_internet_cleanup_commands",
     "build_internet_cleanup_error_result",
+    "default_cleanup_steps",
     "run_internet_cleanup",
 ]
