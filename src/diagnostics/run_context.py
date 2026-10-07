@@ -28,6 +28,9 @@ from utils.windows_dns_query import DnsAnswer
 
 ShouldStop = Callable[[], bool]
 
+RECHECK_OPENED = "opened"
+RECHECK_SAME = "same"
+
 
 class Stopped(Exception):
     pass
@@ -74,6 +77,9 @@ class Probe:
     tried_silent: bool = False
     # Адрес из файла hosts не ответил, а настоящий адрес сайта открылся.
     hosts_stale: bool = False
+    # Чем кончилась повторная проверка поодиночке: ``RECHECK_OPENED`` — сайт открылся
+    # (первый сбой дала нагрузка самой проверки), ``RECHECK_SAME`` — не открылся снова.
+    rechecked: str = ""
 
     @property
     def address_confirmed(self) -> bool:

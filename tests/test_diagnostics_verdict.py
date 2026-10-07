@@ -84,9 +84,17 @@ class JudgeDnsTests(unittest.TestCase):
         self.assertEqual(judgement.state, DnsState.UNKNOWN)
 
     def test_stub_and_private_addresses_are_spoofing(self) -> None:
-        for ip in ("195.82.146.214", "127.0.0.1", "0.0.0.0", "10.10.10.10", "192.168.1.1"):
+        for ip in ("195.82.146.214", "127.0.0.1", "0.0.0.0", "10.10.10.10"):
             with self.subTest(ip=ip):
                 self.assertEqual(self._judge(system_ips=(ip,)).state, DnsState.SPOOFED)
+
+    def test_home_network_address_is_a_home_filter_not_the_provider(self) -> None:
+        """Роутер с родительским контролем, Pi-hole, AdGuard Home отвечают адресом домашней сети."""
+        for ip in ("192.168.1.1", "10.0.0.5", "172.16.3.9"):
+            with self.subTest(ip=ip):
+                judgement = self._judge(system_ips=(ip,))
+                self.assertEqual(judgement.state, DnsState.LOCAL)
+                self.assertIn("это не провайдер", judgement.reason)
 
     def test_vpn_fake_ip_is_local_not_spoofing(self) -> None:
         self.assertEqual(self._judge(system_ips=("198.18.0.12",)).state, DnsState.LOCAL)
@@ -98,10 +106,14 @@ class JudgeDnsTests(unittest.TestCase):
         self.assertIn("hosts", judgement.reason)
 
     def test_occasional_nxdomain_with_real_addresses_is_spoofing(self) -> None:
-        judgement = self._judge(check_kind="", nxdomain_count=1, attempts=3)
+        judgement = self._judge(check_kind="", nxdomain_count=2, attempts=3)
 
         self.assertEqual(judgement.state, DnsState.SPOOFED)
-        self.assertIn("1 из 3", judgement.reason)
+        self.assertIn("2 из 3", judgement.reason)
+        # Один такой ответ из трёх бывает и при сбое самого DNS-сервера: выводом не считается.
+        self.assertNotEqual(self._judge(check_kind="", nxdomain_count=1, attempts=3).state, DnsState.SPOOFED)
+        # Запрос был один, и он дал «сайта нет» при известных адресах — тут сравнивать не с чем, вывод остаётся.
+        self.assertEqual(self._judge(check_kind="", nxdomain_count=1, attempts=1).state, DnsState.SPOOFED)
 
     def test_nxdomain_for_existing_site_is_dns_block(self) -> None:
         judgement = self._judge(system_ips=(), system_status=DNS_STATUS_NAME_ERROR, check_kind="")
@@ -263,6 +275,8 @@ class _Net:
                 ),
             ),
             patch.object(engine, "https_get", side_effect=_https_get),
+            # Пауза перед повтором нужна настоящей сети; сценариям она только добавляет секунды.
+            patch.object(engine, "RETRY_PAUSE_S", 0.0),
             # Уточнение причины ходит в сеть само: в сценариях движка оно подменено.
             patch.object(engine.block_cause, "collect", side_effect=self._collect),
             patch.object(engine.quic_probe, "collect", side_effect=self._quic),
@@ -873,12 +887,50 @@ class EngineScenarioTests(unittest.TestCase):
         text = "\n".join(lines)
 
         discord_calls = [ip for host, ip in net.calls if host == "discord.com"]
-        self.assertEqual(sorted(discord_calls), sorted(DISCORD_REAL))
+        # Оба адреса пробуются в общем залпе и ещё раз — при повторной проверке поодиночке.
+        self.assertEqual(sorted(discord_calls), sorted(DISCORD_REAL * 2))
+        discord_target = result["services"][0]["targets"][0]
+        self.assertEqual(discord_target["rechecked"], "same")
+        self.assertIn("повторная проверка поодиночке дала то же", discord_target["text"])
         self.assertFalse(result["dns_poisoning_detected"])
         self.assertEqual(result["services"][0]["level"], "fail")
         self.assertIn("Подбор стратегии", text)
         hosts_order = [line.split(" ")[1] for line in lines if line.startswith("❌ ") and "." in line.split(" ")[1]]
         self.assertEqual(hosts_order[:3], ["discord.com", "gateway.discord.gg", "cdn.discordapp.com"])
+
+    def test_site_that_opens_on_the_calm_second_check_is_not_reported_as_blocked(self) -> None:
+        """Первый сбой дала нагрузка самой проверки: при повторе поодиночке сайт открывается."""
+        seen: dict[str, int] = {}
+
+        def _https(host, ip):
+            seen[host] = seen.get(host, 0) + 1
+            # discord.com не соединяется в залпе (оба адреса и повтор после паузы), потом открывается.
+            if host == "discord.com" and seen[host] <= 3:
+                return ProbeResult(ip=ip, kind=KIND_CONNECT, connect_fail="timeout")
+            return _ok(ip)
+
+        net = _Net(https=_https)
+        with patch.object(engine, "RETRY_PAUSE_S", 0.0):
+            result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+
+        discord = next(item for item in result["services"] if item["key"] == "discord")
+        self.assertEqual(discord["level"], "ok")
+        self.assertEqual(discord["targets"][0]["rechecked"], "opened")
+        self.assertIn("со второй проверки, поодиночке", discord["targets"][0]["text"])
+        self.assertFalse(any(item["target"] == "discord.com" for item in result["problems"]))
+
+    def test_dns_tab_does_not_recheck(self) -> None:
+        """Вкладка «DNS подмена» проверяет DNS, а не открываемость: повторный проход ей не нужен."""
+        calls = []
+
+        def _https(host, ip):
+            calls.append(host)
+            return ProbeResult(ip=ip, kind=KIND_RESET)
+
+        net = _Net(system=("5.6.7.8",), https=_https)
+        net.run(engine.run_dns_check, emit=lambda _line: None)
+
+        self.assertEqual(len(calls), len(set(calls)))
 
     def test_site_blocked_over_ipv4_but_open_over_ipv6_is_reported_as_working(self) -> None:
         """Браузер сам уходит на IPv6, поэтому и проверка обязана его попробовать."""

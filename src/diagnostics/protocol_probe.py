@@ -23,6 +23,7 @@ from diagnostics.block_cause import (
     HELLO_ALERT,
     HELLO_CANCELLED,
     HELLO_CONNECT,
+    HELLO_ERROR,
     HELLO_OK,
     HELLO_RESET,
     HELLO_TIMEOUT,
@@ -132,6 +133,8 @@ def _tls_line(key: str, result: HelloResult | None) -> ProtocolLine | None:
         return ProtocolLine(key, title, STATE_FAIL, "молчит", "после приветствия ответа нет")
     if result.kind == HELLO_CONNECT:
         return ProtocolLine(key, title, STATE_UNKNOWN, "нет соединения", "не удалось соединиться с адресом")
+    if result.kind == HELLO_ERROR:
+        return ProtocolLine(key, title, STATE_UNKNOWN, "не проверено", "шифрование не установилось, причину определить не удалось")
     return ProtocolLine(key, title, STATE_FAIL, "чужой ответ", "вместо шифрования пришло что-то другое: ответил не сервер")
 
 

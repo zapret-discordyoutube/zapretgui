@@ -64,6 +64,9 @@ from diagnostics.limits import (
     HTTPS_TIMEOUT,
     REACH_ADDRESSES,
     READ_TIMEOUT,
+    RECHECK_AT_ONCE,
+    RECHECK_NEEDS_S,
+    RECHECK_SITES,
     RETRY_PAUSE_S,
     RUN_DEADLINE,
     RUN_DEADLINE_ALL,
@@ -74,6 +77,7 @@ from diagnostics.limits import (
     SOURCE_SYSTEM,
     VIDEO_SERVERS,
 )
+from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME
 from diagnostics.run_context import Probe as _Probe
 from diagnostics.run_context import Run as _Run
 from diagnostics.run_context import Stopped as _Stopped
@@ -686,25 +690,80 @@ def _run_probes(
             volume = full and not service.control
             planned.append((key, target, run.submit(_probe, run, target, key, full=full, volume=volume)))
 
+    # Сначала дожидаемся всех, затем перепроверяем упавшие, и только потом печатаем:
+    # перепроверка может изменить результат.
+    done_probes: list[tuple[str, Target, _Probe | None, str]] = []
+    for key, target, future in planned:
+        try:
+            done_probes.append((key, target, run.wait(future), ""))
+        except _Stopped:
+            raise
+        except Exception as exc:
+            done_probes.append((key, target, None, str(exc)))
+    if full:
+        done_probes = _recheck_failed(run, services, done_probes)
+
     collected: dict[str, list[_Probe]] = {key: [] for key in services}
     current_service = ""
-    for key, target, future in planned:
+    for key, target, probe, error in done_probes:
         if key != current_service:
             current_service = key
             emit("")
             emit(f"━━━━━━━━ {services[key].label} ━━━━━━━━")
-        try:
-            probe = run.wait(future)
-        except _Stopped:
-            raise
-        except Exception as exc:
-            emit(f"❔ {target.host} — {target.purpose}: проверка не выполнилась ({exc})")
+        if probe is None:
+            emit(f"❔ {target.host} — {target.purpose}: проверка не выполнилась ({error})")
             continue
         collected[key].append(probe)
         for line in report_text.probe_lines(probe, full=full):
             emit(line)
     emit("")
     return collected
+
+
+def _recheck_failed(run: _Run, services: dict[str, Service], done_probes: list) -> list:
+    """Сайты, которые не открылись, проверяются ещё раз — поодиночке, когда залп закончился.
+
+    Первая проверка идёт по десяткам сайтов разом. Если сбой дала сама эта
+    нагрузка (роутер или провайдер не успели), при спокойной повторной проверке
+    сайт откроется. Не открылся снова — сбой настоящий.
+    """
+    failed = [
+        index
+        for index, (_key, _target, probe, _error) in enumerate(done_probes)
+        if probe is not None and probe.reach_state in (ReachState.IP_BLOCK, ReachState.DPI)
+    ][:RECHECK_SITES]
+    if not failed or run.dns_cancelled() or run.deadline - time.monotonic() < RECHECK_NEEDS_S:
+        return done_probes
+    gate = threading.BoundedSemaphore(RECHECK_AT_ONCE)
+
+    def _again(index: int) -> _Probe | None:
+        key, target, first, _error = done_probes[index]
+        with gate:
+            if run.dns_cancelled():
+                return None
+            again = _probe_target(run, target, key, full=True, volume=not services[key].control)
+        if again.reach is None or again.reach.kind == KIND_CANCELLED:
+            # Повтор не успел — остаётся первый результат, без пометки.
+            return None
+        again.rechecked = RECHECK_OPENED if again.reach_state == ReachState.OK else RECHECK_SAME
+        if first.reach_state != again.reach_state and again.reach_state != ReachState.OK:
+            # Сбой другого вида: берём свежий, но «подтверждённым» его не считаем.
+            again.rechecked = ""
+        return again
+
+    futures = [(index, run.submit(_again, index)) for index in failed]
+    result = list(done_probes)
+    for index, future in futures:
+        try:
+            again = run.wait(future)
+        except _Stopped:
+            raise
+        except Exception:
+            continue
+        if again is not None:
+            key, target, _first, error = result[index]
+            result[index] = (key, target, again, error)
+    return result
 
 
 def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: bool | None) -> ServiceVerdict:

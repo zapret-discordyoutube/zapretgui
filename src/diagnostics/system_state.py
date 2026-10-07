@@ -63,7 +63,6 @@ _TUNNEL_WORDS = (
     "sing-box",
     "vpn",
 )
-_IF_TYPE_PPP = 23
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +125,9 @@ def tunnel_adapters(interfaces) -> tuple[str, ...]:
         description = str(getattr(interface, "description", "") or "")
         name = str(getattr(interface, "name", "") or "")
         text = f"{description} {name}".lower()
-        if getattr(interface, "if_type", 0) == _IF_TYPE_PPP or any(word in text for word in _TUNNEL_WORDS):
+        # Тип «PPP» бывает и у обычного подключения к провайдеру (PPPoE), поэтому сам
+        # по себе VPN не означает: нужно название, похожее на VPN.
+        if any(word in text for word in _TUNNEL_WORDS):
             label = name or description
             if label and label not in found:
                 found.append(label)

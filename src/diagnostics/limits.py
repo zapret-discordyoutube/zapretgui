@@ -17,6 +17,9 @@ __all__ = [
     "REACH_ADDRESSES",
     "REACH_ATTEMPTS",
     "READ_TIMEOUT",
+    "RECHECK_AT_ONCE",
+    "RECHECK_NEEDS_S",
+    "RECHECK_SITES",
     "RETRY_PAUSE_S",
     "RUN_DEADLINE",
     "RUN_DEADLINE_ALL",
@@ -56,6 +59,11 @@ RUN_DEADLINE_ALL = 45.0
 # Полная проверка ждёт ещё DNS-серверы и поиск места фильтра.
 RUN_DEADLINE_FULL = 180.0
 FILTER_MAX_TTL = 20
+# Повторная проверка сайтов, которые не открылись: сколько сайтов перепроверять,
+# сколько одновременно и сколько секунд должно оставаться до общего срока.
+RECHECK_SITES = 16
+RECHECK_AT_ONCE = 3
+RECHECK_NEEDS_S = 25.0
 FREEZE_READ_TIMEOUT = 4.0
 
 # Откуда взят адрес, по которому проверяли сайт.

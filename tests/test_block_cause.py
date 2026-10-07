@@ -217,6 +217,30 @@ RESET = bc.HelloResult(bc.HELLO_RESET)
 SILENCE = bc.HelloResult(bc.HELLO_TIMEOUT)
 
 
+class StubMarkerTests(unittest.TestCase):
+    def test_law_number_alone_is_not_a_block_page(self) -> None:
+        """Номер закона встречается на обычных страницах — новости, справки."""
+        page = bc.HttpFacts(status=200, body="Статья о законе 149-ФЗ и его поправках".encode())
+
+        self.assertEqual(bc.stub_reason("example.org", page), "")
+
+    def test_law_number_with_words_about_restricted_access_is_a_block_page(self) -> None:
+        page = bc.HttpFacts(status=200, body="Доступ ограничен на основании 149-ФЗ".encode())
+
+        self.assertIn("149-ФЗ", bc.stub_reason("example.org", page))
+
+    def test_registry_link_is_enough_on_its_own(self) -> None:
+        page = bc.HttpFacts(status=200, body=b'<a href="https://eais.rkn.gov.ru/">')
+
+        self.assertIn("реестр", bc.stub_reason("example.org", page))
+
+    def test_unknown_tls_error_is_not_called_a_foreign_answer(self) -> None:
+        error = ssl.SSLError(1, "[SSL: UNSUPPORTED_PROTOCOL] unsupported protocol")
+        error.reason = "UNSUPPORTED_PROTOCOL"
+
+        self.assertEqual(bc._hello_failure(error).kind, bc.HELLO_ERROR)
+
+
 class JudgeTests(unittest.TestCase):
     def test_other_name_answers_means_block_by_name(self) -> None:
         for neutral, nameless in ((ANSWER, RESET), (REFUSAL, RESET), (RESET, ANSWER)):

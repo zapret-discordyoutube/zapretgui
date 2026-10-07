@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from diagnostics import block_kind, quic_probe, telegram_check, volume_probe
 from diagnostics.limits import DNS_ATTEMPTS, HTTPS_TIMEOUT, SOURCE_HOSTS, SOURCE_REFERENCE
-from diagnostics.run_context import Probe
+from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME, Probe
 from diagnostics.verdict import DnsState, Level, ReachState, describe_reach
 
 # Молчание по QUIC — не поломка: сервер может его не поддерживать.
@@ -67,7 +67,8 @@ def reach_text(probe: Probe) -> str:
         if ":" in result.ip:
             return f"открывается по IPv6, по IPv4 — нет ({result.elapsed_ms:.0f} мс{tls}, {result.ip})"
         stale = " — адрес из файла hosts не ответил, запись в нём устарела" if probe.hosts_stale else ""
-        return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source}){stale}"
+        again = " — со второй проверки, поодиночке: первый сбой дала нагрузка самой проверки" if probe.rechecked == RECHECK_OPENED else ""
+        return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source}){stale}{again}"
     text = fail_text(probe)
     if result is None or not result.ip:
         return text
@@ -77,7 +78,8 @@ def reach_text(probe: Probe) -> str:
     else:
         tries = f", попыток: {probe.attempts}" if probe.attempts > 1 else ""
     ipv6 = ", по IPv6 тоже не открылся" if probe.ipv6_result is not None else ""
-    return f"{text} ({result.ip}{source}{tries}{ipv6})"
+    again = ", повторная проверка поодиночке дала то же" if probe.rechecked == RECHECK_SAME else ""
+    return f"{text} ({result.ip}{source}{tries}{ipv6}{again})"
 
 
 def dns_detail(probe: Probe) -> str:
@@ -176,6 +178,8 @@ def target_report(probe: Probe) -> dict:
         "tried": [{"address": ip, "result": kind} for ip, kind in probe.tried],
         "address_confirmed": probe.address_confirmed,
         "hosts_stale": probe.hosts_stale,
+        # Повторная проверка поодиночке: "opened" — открылся со второго раза, "same" — сбой повторился.
+        "rechecked": probe.rechecked,
         "note": probe.discovery_note,
     }
 

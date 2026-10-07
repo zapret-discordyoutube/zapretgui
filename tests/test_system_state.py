@@ -154,7 +154,8 @@ class TunnelAdapterTests(unittest.TestCase):
             self._adapter("OpenVPN TAP", "TAP-Windows Adapter V9"),
         ]
 
-        self.assertEqual(ss.tunnel_adapters(adapters), ("wg0", "Подключение", "OpenVPN TAP"))
+        # PPPoE — обычное подключение к провайдеру, а не VPN: его тип адаптера сам ничего не значит.
+        self.assertEqual(ss.tunnel_adapters(adapters), ("wg0", "OpenVPN TAP"))
 
     def test_disconnected_vpn_and_virtual_machine_adapters_are_not_vpn(self) -> None:
         adapters = [

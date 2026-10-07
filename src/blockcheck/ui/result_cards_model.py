@@ -242,6 +242,10 @@ def _site_card(service: dict) -> Card:
                     ", ".join(f"{step.get('address', '')} — {_TRIED_WORDS.get(str(step.get('result')), 'сбой')}" for step in tried),
                 )
             )
+        if item.get("rechecked") == "opened":
+            rows.append(Line(INFO, "Повторная проверка", "открылся со второго раза, поодиночке — первый сбой дала нагрузка самой проверки"))
+        elif item.get("rechecked") == "same":
+            rows.append(Line(INFO, "Повторная проверка", "поодиночке, когда остальные проверки закончились, — результат тот же"))
         if item.get("hosts_stale"):
             rows.append(
                 Line(WARN, "Файл hosts", "записанный в нём адрес не ответил, сайт открылся по настоящему адресу — запись устарела")

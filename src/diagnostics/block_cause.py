@@ -78,6 +78,7 @@ HELLO_TIMEOUT = "timeout"
 HELLO_CONNECT = "connect"  # не удалось даже соединиться
 HELLO_GARBAGE = "garbage"  # пришло не шифрование: ответил не сервер
 HELLO_CANCELLED = "cancelled"
+HELLO_ERROR = "error"  # ошибка, которую не удалось истолковать
 
 CAUSE_STUB_PAGE = "stub_page"
 CAUSE_BY_NAME = "by_name"
@@ -104,12 +105,15 @@ _STUB_HOSTS = (
 )
 # Признаки в тексте страницы. Только такие, которых на обычном сайте не бывает:
 # слова вроде «заблокирован» встречаются и на обычных страницах.
-_STUB_MARKERS = (
-    b"eais.rkn.gov.ru",
-    b"blocklist.rkn.gov.ru",
-    b"nap.rkn.gov.ru",
-    b"149-\xd1\x84\xd0\xb7",  # «149-фз»
-    b"149-fz",
+_STUB_MARKERS = ("eais.rkn.gov.ru", "blocklist.rkn.gov.ru", "nap.rkn.gov.ru")
+# Номер закона встречается и на обычных страницах (новости, справки), поэтому
+# сам по себе признаком не считается — только вместе со словами об ограничении доступа.
+_LAW_MARKERS = ("149-фз", "149-fz")
+_RESTRICTED_MARKERS = (
+    "доступ ограничен",
+    "доступ к ресурсу ограничен",
+    "доступ к информационному ресурсу ограничен",
+    "доступ закрыт",
 )
 
 
@@ -199,7 +203,8 @@ def _hello_failure(error: ssl.SSLError) -> HelloResult:
         return HelloResult(HELLO_GARBAGE, reason)
     if "ALERT" in text or "UNRECOGNIZED_NAME" in text or "HANDSHAKE_FAILURE" in text:
         return HelloResult(HELLO_ALERT, reason)
-    return HelloResult(HELLO_GARBAGE, reason or str(error))
+    # Незнакомая ошибка шифрования — это «не поняли», а не «ответил чужой сервер».
+    return HelloResult(HELLO_ERROR, reason or str(error))
 
 
 def tls_hello(
@@ -314,10 +319,13 @@ def stub_reason(host: str, facts: HttpFacts | None) -> str:
         for stub in _STUB_HOSTS:
             if target == stub or target.endswith("." + stub):
                 return f"перенаправление на страницу о блокировке {target}"
-    lowered = facts.body.lower()
-    for marker in _STUB_MARKERS:
-        if marker in lowered:
+    # Страницы провайдеров бывают в обеих кодировках, а регистр букв — любой.
+    for encoding in ("utf-8", "cp1251"):
+        text = facts.body.decode(encoding, errors="ignore").lower()
+        if any(marker in text for marker in _STUB_MARKERS):
             return "страница со ссылкой на реестр блокировок"
+        if any(marker in text for marker in _LAW_MARKERS) and any(marker in text for marker in _RESTRICTED_MARKERS):
+            return "страница об ограничении доступа по закону 149-ФЗ"
     return ""
 
 

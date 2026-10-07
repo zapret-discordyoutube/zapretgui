@@ -96,7 +96,9 @@ def judge_dns(
     # Провайдер подсовывает «сайта нет» наперегонки с настоящим ответом: иногда
     # первым приходит настоящий. Хоть один такой ответ при существующем сайте —
     # подмена, даже если в остальных попытках адрес пришёл правильный.
-    if system_ips and nxdomain_count and reference_ips:
+    # Один такой ответ из нескольких бывает и при сбое самого DNS-сервера, поэтому
+    # вывод делается, только когда «сайта нет» пришло не один раз.
+    if system_ips and reference_ips and nxdomain_count >= min(2, max(1, attempts)):
         return DnsJudgement(
             DnsState.SPOOFED,
             f"DNS отвечает то правильно, то «такого сайта нет» ({nxdomain_count} из {attempts} раз) — "
@@ -114,6 +116,17 @@ def judge_dns(
     fake_ips = [ip for ip in system_ips if address_kind(ip) == AddressKind.FAKE_IP]
     if fake_ips:
         return DnsJudgement(DnsState.LOCAL, f"адрес {fake_ips[0]} выдал VPN-клиент (режим fake-ip) — это не провайдер")
+
+    # Адрес домашней сети возвращают домашние фильтры: роутер с родительским контролем,
+    # Pi-hole, AdGuard Home. Это настройка сети человека, а не провайдер. Адрес «никуда»
+    # (0.0.0.0, 127.0.0.1) сюда не входит: им отвечают и DNS-серверы провайдеров.
+    home = [ip for ip in system_ips if address_kind(ip) == AddressKind.LOCAL]
+    if home and not any(address_kind(ip) == AddressKind.BLOCK_STUB for ip in system_ips):
+        return DnsJudgement(
+            DnsState.LOCAL,
+            f"DNS вернул адрес домашней сети {home[0]} — так отвечают фильтры на роутере или компьютере "
+            "(родительский контроль, Pi-hole, AdGuard Home), это не провайдер",
+        )
 
     stubs = [ip for ip in system_ips if is_stub_address(ip)]
     if stubs:
