@@ -26,6 +26,7 @@ from blockcheck.ui.result_cards import _SectionBlock
 from blockcheck.ui.result_cards_model import Line, Section
 from log.log import log
 from ui.accessibility import set_control_accessibility, set_state_text
+from ui.widgets.check_hero import CheckHero
 from ui.fluent_widgets import SettingsCard, set_tooltip
 from ui.latest_worker_lane import LatestWorkerLane
 from ui.pages.base_page import BasePage
@@ -163,7 +164,9 @@ class DomainLookupPage(BasePage):
     # ── сборка ──────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        self.control_card = SettingsCard()
+        # Вкладка начинается с той же панели, что и остальные вкладки раздела: талисман,
+        # главная фраза, пояснение, под ними — поле и кнопки.
+        self.control_card = CheckHero("fa5s.search-location")
         row = QHBoxLayout()
         row.setSpacing(10)
         self.target_input = LineEdit(self.control_card)
@@ -234,6 +237,14 @@ class DomainLookupPage(BasePage):
         self.layout.addStretch()
 
     def _apply_texts(self) -> None:
+        self.control_card.set_texts(
+            self._t("hero.title", "Проверка домена или адреса"),
+            self._t(
+                "hero.detail",
+                "Покажем, отвечает ли сервер на пинг, что про этот домен говорят разные DNS-серверы "
+                "и какие ещё сайты живут на том же адресе.",
+            ),
+        )
         self.target_input.setPlaceholderText(self._t("placeholder", "Домен или IP-адрес: example.com, 1.2.3.4"))
         set_control_accessibility(
             self.target_input,

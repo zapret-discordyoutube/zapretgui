@@ -217,7 +217,6 @@ class StrategyScanPage(BasePage):
         self._stop_btn = control_widgets.stop_btn
         self._mode_combo.currentIndexChanged.connect(self._update_control_accessibility)
         self._mode_combo.currentIndexChanged.connect(self._refresh_mode_hint)
-        self.add_widget(self._control_card)
 
         # ── Ход и итог, результаты ──
         results_widgets = build_strategy_scan_results_section(on_apply_best=self._on_apply_best)
@@ -226,7 +225,13 @@ class StrategyScanPage(BasePage):
         self._status_label = results_widgets.status_label
         self._results_card = results_widgets.results_card
         self._results_view = results_widgets.results_view
+        # Вкладка начинается с панели с главной фразой и кнопками — как «DNS-серверы» и остальные
+        # вкладки раздела; настройки подбора стоят под ней.
+        self._scan_panel.run_actions.addWidget(self._start_btn)
+        self._scan_panel.run_actions.addWidget(self._stop_btn)
+        self._scan_panel.run_actions.addStretch(1)
         self.add_widget(self._scan_panel)
+        self.add_widget(self._control_card)
         self.add_widget(self._results_card)
 
         # ── Подробный лог (в отдельном окне) и обращение ──

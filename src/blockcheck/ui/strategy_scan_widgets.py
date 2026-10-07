@@ -30,6 +30,7 @@ from qfluentwidgets import (
 )
 
 from blockcheck.ui.check_results import _HeightKeeper, tone_color
+from blockcheck.ui.brand_icons import BrandIcon
 from ui.accessibility import enable_keyboard_click, set_control_accessibility, set_state_text
 from ui.animation_policy import are_live_animations_enabled
 from ui.fluent_widgets import SemanticNotice, set_tooltip
@@ -382,22 +383,33 @@ class ScanProgressPanel(_HeightKeeper, SimpleCardWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        # Размеры шапки — те же, что у панелей остальных вкладок раздела (образец — «DNS-серверы»).
         root = QHBoxLayout(self)
-        root.setContentsMargins(18, 16, 18, 16)
-        root.setSpacing(16)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(14)
 
         self.mascot = Mascot(self, size=56)
         root.addWidget(self.mascot, 0, Qt.AlignmentFlag.AlignTop)
 
         body = QVBoxLayout()
         body.setSpacing(8)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        self.title_icon = BrandIcon("fa5s.search", "", self, size=24)
+        title_row.addWidget(self.title_icon, 0, Qt.AlignmentFlag.AlignVCenter)
         self.title_label = SubtitleLabel("", self)
         self.title_label.setWordWrap(True)
-        body.addWidget(self.title_label)
+        title_row.addWidget(self.title_label, 1)
+        body.addLayout(title_row)
         # Строка статуса страницы: в покое — подсказка, в конце — итог цифрами.
-        self.status_label = CaptionLabel("", self)
+        self.status_label = BodyLabel("", self)
         self.status_label.setWordWrap(True)
         body.addWidget(self.status_label)
+        # Кнопки страницы («Найти рабочую стратегию», «Остановить») — сразу под главной фразой.
+        self.run_actions = QHBoxLayout()
+        self.run_actions.setContentsMargins(0, 2, 0, 0)
+        self.run_actions.setSpacing(10)
+        body.addLayout(self.run_actions)
 
         self.steps = StepList(self)
         self.steps.reset(list(SCAN_STEPS))

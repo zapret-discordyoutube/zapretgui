@@ -127,8 +127,14 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         page = _make_page()
         self.addCleanup(page.deleteLater)
 
-        for card in (page._control_card, page._domains_card, page._results_card, page._footer_card):
+        for card in (page._domains_card, page._results_card, page._footer_card):
             self.assertIsNone(card._title_label)
+        # Отдельной карточки управления нет: «Проверить» и выбор набора стоят в панели итога,
+        # под главной фразой, — так же, как кнопки на вкладке «DNS-серверы».
+        self.assertIs(page._control_card, page._summary_panel)
+        actions = page._summary_panel.actions
+        self.assertEqual([actions.itemAt(index).widget() for index in range(2)], [page._start_btn, page._stop_btn])
+        self.assertIs(page._scope_combo.parentWidget(), page._summary_panel)
         # Пустая таблица до первой проверки не показывается.
         self.assertTrue(page._results_card.isHidden())
         # Отчёта ещё нет — блока «Отчёт / Подготовить обращение» тоже нет.

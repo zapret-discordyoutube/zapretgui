@@ -2,7 +2,6 @@
 """Страница проверки DNS подмены провайдером."""
 
 from PyQt6.QtCore import QTimer, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout
 
 from ui.pages.base_page import BasePage
 from ui.latest_value_worker_state import LatestValueWorkerState
@@ -98,9 +97,11 @@ class DNSCheckPage(BasePage):
         карточки «Что проверяем» и подписи «Действия»: кнопки и статус — одна
         строка, под ней итог. Подробный лог открывается в отдельном окне.
         """
-        self.control_card = SettingsCard()
-        row = QHBoxLayout()
-        row.setSpacing(10)
+        # Итог с медоедом; кнопки стоят в нём же, под главной фразой, — как на вкладке «DNS-серверы».
+        self.summary_panel = DnsSummaryPanel(on_open_dns_settings=self._open_dns_settings)
+        # Имя осталось от отдельной карточки с кнопками: теперь они в панели итога.
+        self.control_card = self.summary_panel
+        row = self.summary_panel.actions
 
         self.check_button = PrimaryPushButton(
             tr_catalog("page.dns_check.button.start", language=self._ui_language, default="Начать проверку"),
@@ -130,8 +131,6 @@ class DNSCheckPage(BasePage):
             tone="muted",
             bold=False,
         )
-        row.addSpacing(8)
-        row.addWidget(self.status_label, 1)
 
         self.log_button = PushButton(
             tr_catalog("page.dns_check.button.log", language=self._ui_language, default="Подробный лог"),
@@ -168,18 +167,16 @@ class DNSCheckPage(BasePage):
         self.save_button.setEnabled(False)
         self.save_button.clicked.connect(self.save_results)
         row.addWidget(self.save_button)
-        self.control_card.add_layout(row)
 
         # start=False: иначе анимация крутится и у скрытой полосы, пока жива страница.
         self.progress_bar = IndeterminateProgressBar(self, start=False)
         self.progress_bar.setVisible(False)
         set_state_text(self.progress_bar, "Ход проверки DNS: не выполняется")
-        self.control_card.add_widget(self.progress_bar)
+        # Кнопки стоят рядом, как на вкладке «DNS-серверы»; строка состояния — после них.
+        row.addSpacing(8)
+        row.addWidget(self.status_label, 1)
+        self.summary_panel.progress_slot.addWidget(self.progress_bar)
         self._update_action_button_state_text()
-        self.layout.addWidget(self.control_card)
-
-        # Итог с медоедом и список доменов.
-        self.summary_panel = DnsSummaryPanel(on_open_dns_settings=self._open_dns_settings)
         self.layout.addWidget(self.summary_panel)
         self.domains_card = SettingsCard()
         self.domains_view = DnsDomainsView()

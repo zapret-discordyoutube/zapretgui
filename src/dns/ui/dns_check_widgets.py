@@ -11,7 +11,7 @@ from collections.abc import Callable
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SimpleCardWidget, StrongBodyLabel
+from qfluentwidgets import BodyLabel, CaptionLabel, PushButton, SimpleCardWidget, SubtitleLabel
 
 from blockcheck.ui.check_results import _HeightKeeper, tone_color
 from ui.accessibility import set_control_accessibility, set_state_text
@@ -105,7 +105,8 @@ class DnsSummaryPanel(_HeightKeeper, SimpleCardWidget):
         root = QHBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(14)
-        self.mascot = Mascot(self, size=44)
+        # Размеры шапки — те же, что у панелей остальных вкладок раздела (образец — «DNS-серверы»).
+        self.mascot = Mascot(self, size=56)
         root.addWidget(self.mascot, 0, Qt.AlignmentFlag.AlignTop)
         body = QVBoxLayout()
         body.setSpacing(4)
@@ -114,16 +115,25 @@ class DnsSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self._icon = QLabel(self)
         self._icon.setFixedSize(24, 24)
         title_row.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.title_label = StrongBodyLabel("", self)
+        self.title_label = SubtitleLabel("", self)
         self.title_label.setWordWrap(True)
         title_row.addWidget(self.title_label, 1)
         body.addLayout(title_row)
-        self.detail_label = CaptionLabel("", self)
+        self.detail_label = BodyLabel("", self)
         self.detail_label.setWordWrap(True)
         body.addWidget(self.detail_label)
         self.ticker = FunTicker(self)
         self.ticker.setVisible(False)
         body.addWidget(self.ticker)
+        # Кнопки страницы («Начать проверку», «Подробный лог», «Сохранить») — сразу под главной фразой.
+        self.actions = QHBoxLayout()
+        self.actions.setContentsMargins(0, 6, 0, 0)
+        self.actions.setSpacing(10)
+        body.addLayout(self.actions)
+        # Место под полосу хода проверки: страница кладёт её сюда.
+        self.progress_slot = QVBoxLayout()
+        self.progress_slot.setContentsMargins(0, 0, 0, 0)
+        body.addLayout(self.progress_slot)
         self.open_settings_btn = None
         if on_open_dns_settings is not None:
             actions = QHBoxLayout()
@@ -209,7 +219,7 @@ class DnsSummaryPanel(_HeightKeeper, SimpleCardWidget):
         }.get(self._kind, ("fa5s.exclamation-triangle", "warning"))
         color = tone_color(tone, tokens) or None
         try:
-            self._icon.setPixmap(get_cached_qta_pixmap(icon_name, color=color, size=20, muted_fallback=color is None))
+            self._icon.setPixmap(get_cached_qta_pixmap(icon_name, color=color, size=24, muted_fallback=color is None))
         except Exception:
             pass
 

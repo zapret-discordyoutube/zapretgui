@@ -784,26 +784,27 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self._level = "idle"
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 18)
-        root.setSpacing(12)
+        # Размеры шапки — те же, что у панелей остальных вкладок раздела (образец — «DNS-серверы»).
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(10)
 
         header = QHBoxLayout()
-        header.setSpacing(12)
+        header.setSpacing(14)
         # Медоед-талисман: работает, пока идёт проверка, и реагирует на итог.
-        self.mascot = Mascot(self, size=44)
+        self.mascot = Mascot(self, size=56)
         header.addWidget(self.mascot, 0, Qt.AlignmentFlag.AlignTop)
         titles = QVBoxLayout()
-        titles.setSpacing(2)
+        titles.setSpacing(4)
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
         self._icon = QLabel(self)
-        self._icon.setFixedSize(20, 20)
+        self._icon.setFixedSize(24, 24)
         title_row.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
         self.title_label = SubtitleLabel("", self)
         self.title_label.setWordWrap(True)
         title_row.addWidget(self.title_label, 1)
         titles.addLayout(title_row)
-        self.env_label = mute(CaptionLabel("", self))
+        self.env_label = BodyLabel("", self)
         self.env_label.setWordWrap(True)
         titles.addWidget(self.env_label)
         # Что изменилось с прошлой такой же проверки.
@@ -814,6 +815,11 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self.ticker = FunTicker(self)
         self.ticker.setVisible(False)
         titles.addWidget(self.ticker)
+        # Кнопки страницы («Проверить», «Остановить») и выбор набора — сразу под главной фразой.
+        self.actions = QHBoxLayout()
+        self.actions.setContentsMargins(0, 6, 0, 0)
+        self.actions.setSpacing(10)
+        titles.addLayout(self.actions)
         header.addLayout(titles, 1)
         root.addLayout(header)
 
@@ -1009,7 +1015,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         icon_name, tone = _LEVEL_ICONS.get(self._level, _LEVEL_ICONS["unknown"])
         color = tone_color(tone, tokens) or None
         try:
-            self._icon.setPixmap(get_cached_qta_pixmap(icon_name, color=color, size=20, muted_fallback=color is None))
+            self._icon.setPixmap(get_cached_qta_pixmap(icon_name, color=color, size=24, muted_fallback=color is None))
         except Exception:
             pass
 

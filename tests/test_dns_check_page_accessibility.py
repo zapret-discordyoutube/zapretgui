@@ -61,7 +61,10 @@ class DNSCheckPageAccessibilityTests(unittest.TestCase):
         self.addCleanup(page.deleteLater)
 
         self.assertTrue(page.title_label.isHidden())
-        self.assertIsNone(page.control_card._title_label)
+        # Отдельной карточки с кнопками нет: они стоят в панели итога, под главной фразой.
+        self.assertIs(page.control_card, page.summary_panel)
+        self.assertIs(page.summary_panel.actions.itemAt(0).widget(), page.check_button)
+        self.assertIs(page.progress_bar.parentWidget(), page.summary_panel)
         self.assertFalse(hasattr(page, "info_card"))
 
     def test_progress_bar_exposes_screen_reader_state(self) -> None:

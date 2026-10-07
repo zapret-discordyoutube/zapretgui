@@ -317,11 +317,23 @@ class BlockcheckPage(BasePage):
         self.add_widget(self._tabs_pivot)
         self._log_ui_timing("blockcheck_ui.tabs.build", section_started_at)
 
-        # ── Что проверить и кнопка: одна строка ──
+        # ── Итог и управление — одна панель, как на вкладке «DNS-серверы»: главная фраза,
+        # пояснение и под ними кнопка «Проверить» с выбором набора ──
         section_started_at = time.perf_counter()
-        self._control_card = SettingsCard()
-        row = QHBoxLayout()
-        row.setSpacing(12)
+        self._summary_panel = BlockcheckSummaryPanel(
+            on_action=self._on_problem_action,
+            parent=self.content,
+            on_open=self._open_card_by_key,
+            on_open_child=self._open_card_child_by_key,
+        )
+        # Esc закрывает любую подстраницу раздела, где бы ни стоял фокус.
+        self._escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        self._escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._escape_shortcut.activated.connect(self._close_subpage)
+        self._add_tab_widget(self._summary_panel)
+        # Имя осталось от отдельной карточки управления: теперь управление стоит в панели итога.
+        self._control_card = self._summary_panel
+        row = self._summary_panel.actions
         self._scope_label = BodyLabel(tr_catalog("page.blockcheck.scope", default="Что проверить:"))
         set_state_text(self._scope_label, f"Поле BlockCheck: {self._scope_label.text()}")
         row.addWidget(self._scope_label)
@@ -374,7 +386,7 @@ class BlockcheckPage(BasePage):
         set_control_accessibility(self._start_btn, name="Запустить BlockCheck", description=start_description)
         set_state_text(self._start_btn, "Запустить BlockCheck")
         self._start_btn.clicked.connect(self._on_start)
-        row.addWidget(self._start_btn)
+        row.insertWidget(0, self._start_btn)
 
         self._stop_btn = PushButton(tr_catalog("page.blockcheck.stop", default="Остановить"))
         self._stop_btn.setIcon(FluentIcon.CANCEL)
@@ -388,9 +400,7 @@ class BlockcheckPage(BasePage):
         self._stop_btn.clicked.connect(self._on_stop)
         self._stop_btn.setEnabled(False)
         self._stop_btn.setVisible(False)
-        row.addWidget(self._stop_btn)
-        self._control_card.add_layout(row)
-        self._add_tab_widget(self._control_card)
+        row.insertWidget(1, self._stop_btn)
         self._log_ui_timing("blockcheck_ui.control_card.build", section_started_at)
 
         # ── Свои домены ──
@@ -415,19 +425,6 @@ class BlockcheckPage(BasePage):
         self._domains_flow_layout = domains_widgets.flow_layout
         self._add_tab_widget(self._domains_card)
         self._log_ui_timing("blockcheck_ui.domains_card.build", section_started_at)
-
-        # ── Итог и список сайтов ──
-        self._summary_panel = BlockcheckSummaryPanel(
-            on_action=self._on_problem_action,
-            parent=self.content,
-            on_open=self._open_card_by_key,
-            on_open_child=self._open_card_child_by_key,
-        )
-        # Esc закрывает любую подстраницу раздела, где бы ни стоял фокус.
-        self._escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
-        self._escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        self._escape_shortcut.activated.connect(self._close_subpage)
-        self._add_tab_widget(self._summary_panel)
 
         # Ход проверки по шагам: виден, только пока она идёт.
         self._progress_card = SettingsCard()
