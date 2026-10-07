@@ -106,14 +106,12 @@ class JudgeDnsTests(unittest.TestCase):
         self.assertIn("hosts", judgement.reason)
 
     def test_occasional_nxdomain_with_real_addresses_is_spoofing(self) -> None:
-        judgement = self._judge(check_kind="", nxdomain_count=2, attempts=3)
+        # Хватает и одного раза из трёх: исправный DNS про существующий сайт так не отвечает,
+        # а у пользователя провайдер подсовывал «сайта нет» именно через раз.
+        judgement = self._judge(check_kind="", nxdomain_count=1, attempts=3)
 
         self.assertEqual(judgement.state, DnsState.SPOOFED)
-        self.assertIn("2 из 3", judgement.reason)
-        # Один такой ответ из трёх бывает и при сбое самого DNS-сервера: выводом не считается.
-        self.assertNotEqual(self._judge(check_kind="", nxdomain_count=1, attempts=3).state, DnsState.SPOOFED)
-        # Запрос был один, и он дал «сайта нет» при известных адресах — тут сравнивать не с чем, вывод остаётся.
-        self.assertEqual(self._judge(check_kind="", nxdomain_count=1, attempts=1).state, DnsState.SPOOFED)
+        self.assertIn("1 из 3", judgement.reason)
 
     def test_nxdomain_for_existing_site_is_dns_block(self) -> None:
         judgement = self._judge(system_ips=(), system_status=DNS_STATUS_NAME_ERROR, check_kind="")
