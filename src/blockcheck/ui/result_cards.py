@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 from PyQt6.QtCore import QEasingCurve, QEvent, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QToolTip, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     BreadcrumbBar,
@@ -49,6 +49,7 @@ from ui.code_editor.log_syntax import LogSyntaxHighlighter
 from ui.fluent_widgets import set_tooltip
 from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
+from ui.widgets.hover_hint import HoverHint
 from ui.widgets.share_bar import ShareBar
 from ui.widgets.stagger_float_in import float_in
 from ui.widgets.tone_group import ToneDot, dot_on_first_line, mute
@@ -253,6 +254,7 @@ class HostingDots(QWidget):
         self._reveal = 1.0
         # Прямоугольники точек с подсказками — для наведения мыши.
         self._hits: list[tuple[QRectF, str]] = []
+        self._hint = HoverHint(self, delay_ms=0)
         self.setMouseTracking(True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._anim = QVariantAnimation(self)
@@ -352,12 +354,11 @@ class HostingDots(QWidget):
 
     def event(self, event) -> bool:
         if event.type() == QEvent.Type.ToolTip:
-            hint = self.hint_at(event.pos().x(), event.pos().y())
-            if hint:
-                QToolTip.showText(event.globalPos(), hint, self)
-            else:
-                QToolTip.hideText()
+            # Своя подсказка вместо системной: та на тёмной теме мелькает белым окном.
+            self._hint.show(self.hint_at(event.pos().x(), event.pos().y()), event.globalPos())
             return True
+        if event.type() == QEvent.Type.Leave:
+            self._hint.hide()
         return super().event(event)
 
 
@@ -1040,6 +1041,7 @@ class TilesGrid(QWidget):
         policy.setHeightForWidth(True)
         self.setSizePolicy(policy)
         self.setMouseTracking(True)
+        self._hint = HoverHint(self)
         self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
         set_state_text(self, "; ".join(f"{tile.title}: {tile.result}" for tile in self._tiles))
 
@@ -1083,20 +1085,18 @@ class TilesGrid(QWidget):
         if hover != self._hover:
             self._hover = hover
             self.update()
+            self._hint.show(self._tiles[hover].hint if hover >= 0 else "", event.globalPosition().toPoint())
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         self._hover = -1
+        self._hint.hide()
         self.update()
         super().leaveEvent(event)
 
     def event(self, event) -> bool:
+        # Системную подсказку не показываем: на тёмной теме она мелькает белым окном.
         if event.type() == QEvent.Type.ToolTip:
-            index = self.tile_at(event.pos().x(), event.pos().y())
-            if index >= 0:
-                QToolTip.showText(event.globalPos(), self._tiles[index].hint, self)
-            else:
-                QToolTip.hideText()
             return True
         return super().event(event)
 
@@ -1367,15 +1367,20 @@ class _ReportHero(QWidget):
 class ResultDetailView(QWidget):
     """Отчёт по одной карточке на всю страницу: путь «BlockCheck → карточка», шапка-сводка и разделы."""
 
+    # Шаг назад: туда, откуда отчёт открыли (вкладка BlockCheck или прошлая проверка).
     closed = pyqtSignal()
+    # «BlockCheck» в строке пути, когда отчёт открыт из прошлой проверки: сразу на вкладку.
+    root_requested = pyqtSignal()
     # Просят открыть длинный текст раздела страницей-редактором: (название, текст).
     text_opened = pyqtSignal(str, str)
     ROOT_KEY = "blockcheck"
+    PARENT_KEY = "parent"
     CARD_KEY = "card"
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._card: Card | None = None
+        self._parent_title = ""
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(10)
@@ -1408,14 +1413,19 @@ class ResultDetailView(QWidget):
     def card(self) -> Card | None:
         return self._card
 
-    def show_card(self, card: Card) -> None:
+    def show_card(self, card: Card, *, parent_title: str = "") -> None:
+        """``parent_title`` — промежуточный шаг строки пути: прошлая проверка, из которой открыт отчёт."""
         self._card = card
+        self._parent_title = str(parent_title or "")
+        path = ["BlockCheck", *([self._parent_title] if self._parent_title else []), card.title]
         self.breadcrumb.blockSignals(True)
         try:
             self.breadcrumb.clear()
             self.breadcrumb.addItem(self.ROOT_KEY, "BlockCheck")
+            if self._parent_title:
+                self.breadcrumb.addItem(self.PARENT_KEY, self._parent_title)
             self.breadcrumb.addItem(self.CARD_KEY, card.title)
-            set_breadcrumb_accessibility(self.breadcrumb, ["BlockCheck", card.title])
+            set_breadcrumb_accessibility(self.breadcrumb, path)
         finally:
             self.breadcrumb.blockSignals(False)
         self.copy_button.setText("Скопировать")
@@ -1439,8 +1449,10 @@ class ResultDetailView(QWidget):
         self._sync_height()
 
     def _on_breadcrumb(self, key: str) -> None:
-        if key == self.ROOT_KEY:
+        if key == self.PARENT_KEY:
             self.closed.emit()
+        elif key == self.ROOT_KEY:
+            (self.root_requested if self._parent_title else self.closed).emit()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:

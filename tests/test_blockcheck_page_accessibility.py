@@ -382,14 +382,14 @@ class BlockKindsOnScreenTests(unittest.TestCase):
         self.assertIn("SNI", sni.about_label.text())
         # Одинаковый у обоих сайтов совет показан один раз — в заголовке группы.
         self.assertEqual([label.text() for label in sni.shared_labels], ["→ Подберите другую стратегию"])
-        self.assertEqual([row.text_label.text() for row in sni.rows], ["X", "LinkedIn"])
-        # В строке остаётся только её свидетельство — и без стрелки: это факт, а не действие.
-        self.assertEqual([label.full_text() for label in sni.rows[0].advice_labels], ["С именем x.com соединение обрывается."])
-        self.assertEqual(sni.rows[0].hint_text, "С именем x.com соединение обрывается.")
-        self.assertEqual(sni.rows[0].action_button.text(), "Подобрать стратегию")
-        # В группе из одной строки совет остаётся у строки.
+        # Сайты — карточки одной сетки: в карточке название, объяснение — в подсказке.
+        self.assertEqual([card.title for card in sni.rows], ["X", "LinkedIn"])
+        self.assertEqual(sni.flow.cards(), sni.rows)
+        self.assertIn("С именем x.com соединение обрывается.", sni.rows[0].hint_text)
+        self.assertEqual(sni.rows[0].action_button.toolTip(), "Подобрать стратегию для x.com")
+        # В группе из одного сайта совет не выносится в заголовок: он в подсказке карточки.
         self.assertEqual(groups[0].shared_labels, [])
-        self.assertEqual([label.full_text() for label in groups[0].rows[0].advice_labels], ["→ Попробуйте другой DNS"])
+        self.assertIn("→ Попробуйте другой DNS", groups[0].rows[0].hint_text)
         # Все строки по-прежнему доступны списком: группы, затем «Открываются».
         self.assertEqual(len(panel.problem_rows()), 6)
 
@@ -401,9 +401,10 @@ class BlockKindsOnScreenTests(unittest.TestCase):
         [group] = panel.problem_groups()
         self.assertEqual(group.kind(), "other")
         self.assertIsNone(group.title_label)
-        # Заголовок отдельно, пояснение отдельно — как у строк в группах.
-        self.assertEqual(group.rows[0].text_label.text(), "X (Twitter) не открывается")
-        self.assertEqual(group.rows[0].detail_label.text(), "Соединение блокирует провайдер.")
+        # Сайт без вида блокировки — такая же карточка: название, что с ним, причина в подсказке.
+        card = group.rows[0]
+        self.assertEqual((card.title, card.note), ("X (Twitter)", "не открывается"))
+        self.assertIn("Соединение блокирует провайдер.", card.hint_text)
 
 
 class HistoryCardTests(unittest.TestCase):

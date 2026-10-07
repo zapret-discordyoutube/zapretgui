@@ -167,6 +167,9 @@ class BlockcheckPage(BasePage):
         self._server_detail_view = None
         # Прошлая проверка из блока «Прошлые проверки», на всю страницу.
         self._past_check_view = None
+        # Отчёт карточки открыт из прошлой проверки — и где в ней стояла прокрутка.
+        self._detail_from_past = False
+        self._past_return_scroll = 0
         self._log_report_view = None
         self._over_tabs_return_scroll = 0
         # Что открыто поверх вкладок, для журнала экранов окна; None — видна сама вкладка.
@@ -840,11 +843,17 @@ class BlockcheckPage(BasePage):
         if self._detail_view is None:
             self._detail_view = ResultDetailView(self.content)
             self._detail_view.closed.connect(self._close_card_detail)
+            self._detail_view.root_requested.connect(self._close_card_detail_to_tab)
             self._detail_view.text_opened.connect(self._open_section_text)
             self._detail_view.setVisible(False)
             self.add_widget(self._detail_view)
-        self._show_over_tabs(self._detail_view)
-        self._detail_view.show_card(card)
+        # Отчёт открыт из прошлой проверки: «назад» ведёт в неё же, к тому же месту.
+        past = self._past_check_view
+        self._detail_from_past = past is not None and not past.isHidden()
+        if self._detail_from_past:
+            self._past_return_scroll = self.verticalScrollBar().value()
+        self._show_over_tabs(self._detail_view, remember_scroll=not self._detail_from_past)
+        self._detail_view.show_card(card, parent_title=past.title() if self._detail_from_past else "")
         self._detail_view.setFocus()
         self._note_over_tabs_screen("card", card.key, card.title, card)
 
@@ -870,13 +879,30 @@ class BlockcheckPage(BasePage):
     def _close_card_detail(self) -> None:
         if self._detail_view is None or self._detail_view.isHidden():
             return
+        if self._detail_from_past and self._past_check_view is not None:
+            self._detail_from_past = False
+            self._show_over_tabs(self._past_check_view, remember_scroll=False)
+            self._past_check_view.setFocus()
+            QTimer.singleShot(0, lambda: self.verticalScrollBar().setValue(self._past_return_scroll))
+            return
+        self._close_card_detail_to_tab()
+
+    def _close_card_detail_to_tab(self) -> None:
+        if self._detail_view is None or self._detail_view.isHidden():
+            return
+        self._detail_from_past = False
         self._switch_tab(self._active_tab_index)
         # Возвращаем к той карточке, с которой уходили: список длинный, искать её заново незачем.
         QTimer.singleShot(0, self._restore_over_tabs_scroll)
 
-    def _show_over_tabs(self, view: QWidget) -> None:
-        """Страница подробностей занимает место вкладок; назад ведёт её строка пути."""
-        self._over_tabs_return_scroll = self.verticalScrollBar().value()
+    def _show_over_tabs(self, view: QWidget, *, remember_scroll: bool = True) -> None:
+        """Страница подробностей занимает место вкладок; назад ведёт её строка пути.
+
+        ``remember_scroll`` выключают при переходе между подстраницами: место
+        прокрутки вкладки уже запомнено и затирать его нельзя.
+        """
+        if remember_scroll:
+            self._over_tabs_return_scroll = self.verticalScrollBar().value()
         for widget in self._tab_widgets:
             widget.setVisible(False)
         for page in (

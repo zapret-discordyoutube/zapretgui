@@ -162,9 +162,56 @@ class PastCheckOnScreenTests(unittest.TestCase):
         self.assertTrue(view.note_label.isHidden())
         self.assertEqual([card.card.key for card in view.cards.cards()], ["site:youtube"])
 
+        # Отчёт карточки, открытый отсюда, возвращает сюда же: строка пути получает шаг «проверка».
+        view.card_opened.emit(view.cards.cards()[0].card)
+        detail = page._detail_view
+        self.assertFalse(detail.isHidden())
+        self.assertTrue(view.isHidden())
+        self.assertEqual(detail.breadcrumb.count(), 3)
+        detail.closed.emit()
+        self.assertFalse(view.isHidden())
+        self.assertTrue(detail.isHidden())
+        self.assertTrue(page._tabs_pivot.isHidden())
+        # А «BlockCheck» в строке пути ведёт сразу на вкладку.
+        view.card_opened.emit(view.cards.cards()[0].card)
+        detail._on_breadcrumb(detail.ROOT_KEY)
+        self.assertTrue(detail.isHidden())
+        self.assertTrue(view.isHidden())
+        self.assertFalse(page._tabs_pivot.isHidden())
+
+        page._history_list.run_opened.emit({**RUNS[2], "log_file": "C:/logs/run.log"})
         page._escape_shortcut.activated.emit()
         self.assertTrue(view.isHidden())
         self.assertFalse(page._tabs_pivot.isHidden())
+
+    def test_hover_hint_is_the_program_tooltip_not_the_system_one(self) -> None:
+        from PyQt6.QtCore import QEvent, QPointF
+        from PyQt6.QtGui import QHelpEvent, QMouseEvent
+
+        def move(y: int) -> None:
+            point = QPointF(200, y)
+            event = QMouseEvent(
+                QEvent.Type.MouseMove,
+                point,
+                QPointF(table.mapToGlobal(point.toPoint())),
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            QApplication.sendEvent(table, event)
+
+        widget = BlockcheckHistoryList()
+        self.addCleanup(widget.deleteLater)
+        widget.resize(1000, 300)
+        widget.show()
+        widget.show_history(RUNS)
+        table = widget.table
+        move(table.HEADER + 5)
+        self.assertIn("Нажмите, чтобы открыть эту проверку", table._hint.text())
+        # Системная подсказка подавлена: на тёмной теме она мелькала белым окном.
+        self.assertTrue(table.event(QHelpEvent(QEvent.Type.ToolTip, QPoint(200, 40), table.mapToGlobal(QPoint(200, 40)))))
+        move(5)
+        self.assertEqual(table._hint.text(), "")
 
     def test_without_the_saved_file_the_page_shows_the_history_record_and_says_so(self) -> None:
         page = self._page(_Feature(None))

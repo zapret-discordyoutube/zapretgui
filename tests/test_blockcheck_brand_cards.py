@@ -13,7 +13,10 @@ from PyQt6.QtWidgets import QApplication, QLabel, QWidget
 from blockcheck.ui.brand_icons import brands_in_text, named_brand, readable_color, site_brand
 from blockcheck.ui.check_results import (
     BlockcheckSummaryPanel,
-    cluster_problems,
+    is_site_problem,
+    site_explanation,
+    site_name,
+    site_note,
     cut_providers,
     problem_brand,
     problem_card_key,
@@ -123,17 +126,29 @@ class ProblemListTests(unittest.TestCase):
         )
         self.assertEqual(split_named_sites("Отвечают через раз"), ("Отвечают через раз", []))
 
-    def test_sites_with_the_same_explanation_share_one_row(self) -> None:
-        same = "Тот же адрес отвечает по порту 80."
-        problems = [
-            _problem("Telegram не открывается", kind="ip", title="Telegram", advice=["Адрес отвечает на пинг."]),
-            _problem("Instagram не открывается", kind="ip", title="Instagram", advice=[same, "общий"]),
-            _problem("X не открывается", kind="ip", title="X (Twitter)", advice=[same, "общий"]),
-            # С кнопкой не объединяется: у кнопки своя цель.
-            _problem("LinkedIn не открывается", kind="ip", title="LinkedIn", advice=[same, "общий"], action="strategy"),
-        ]
-        clusters = cluster_problems(problems, hidden_advice=("общий",))
-        self.assertEqual([[item["title"] for item in cluster] for cluster in clusters], [["Telegram"], ["Instagram", "X (Twitter)"], ["LinkedIn"]])
+    def test_site_card_says_only_what_differs_and_keeps_the_rest_for_the_hint(self) -> None:
+        full = _problem(
+            "Telegram не открывается: бан",
+            kind="ip",
+            title="Telegram",
+            target="telegram.org",
+            advice=["Адрес отвечает на пинг.", "Попробуйте VPN"],
+            evidence=["Адрес отвечает на пинг."],
+        )
+        self.assertEqual((site_name(full), site_note({**full, "cause_word": "адрес закрыт"})), ("Telegram", "telegram.org · адрес закрыт"))
+        self.assertEqual(site_explanation(full), ("Адрес отвечает на пинг.", "→ Попробуйте VPN"))
+        # Частично работающий сайт: название — с карточки, вторая строка — что не работает.
+        partial = {**_problem("YouTube открывается, но не работают видео: сервер заблокирован", kind="ip", level="warn"), "site_label": "YouTube"}
+        self.assertEqual((site_name(partial), site_note(partial)), ("YouTube", "открывается, но не работают видео"))
+        self.assertEqual(site_explanation(partial), ("Сервер заблокирован.",))
+
+    def test_sites_are_cards_and_everything_else_stays_a_row(self) -> None:
+        self.assertTrue(is_site_problem(_problem("Canva не открывается", kind="noconnect", title="Canva")))
+        self.assertTrue(is_site_problem(_problem("Не открывается", kind="sni", target="x.com")))
+        self.assertFalse(is_site_problem(_problem("Обычные ответы подменяются", kind="dns")))
+        self.assertFalse(is_site_problem(_problem("Звонки в Telegram могут не работать", kind="voice")))
+        # Общая строка про обрыв на 16 КБ — не про один сайт.
+        self.assertFalse(is_site_problem(_problem("Обрывается загрузка с зарубежных серверов", kind="cut16")))
 
     def test_cut_providers_lists_only_servers_with_a_cut(self) -> None:
         report = {
@@ -175,33 +190,43 @@ class OpenReportTests(unittest.TestCase):
         self.assertEqual(problem_card_key(_problem("Провайдер обрывает загрузку", kind="cut16"), report), "hostings")
         self.assertEqual(problem_card_key(_problem("Что-то ещё"), report), "")
 
-    def test_rows_open_reports_and_each_site_of_a_shared_row_opens_its_own(self) -> None:
-        opened = []
-        panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open=opened.append)
+    def test_site_cards_open_their_reports_and_carry_no_repeated_text(self) -> None:
+        opened, acted = [], []
+        panel = BlockcheckSummaryPanel(on_action=lambda *args: acted.append(args), on_open=opened.append)
         self.addCleanup(panel.deleteLater)
         same = "Тот же адрес отвечает по порту 80."
         panel.show_report(
             {
                 **self.REPORT,
                 "problems": [
-                    # Объяснение — свидетельство проверки: оно остаётся в строке, а не уходит в заголовок группы.
-                    _problem("Telegram не открывается", kind="ip", title="Telegram", advice=[same], evidence=[same]),
-                    _problem("X не открывается", kind="ip", title="X (Twitter)", advice=[same], evidence=[same]),
+                    _problem("Telegram не открывается", kind="ip", title="Telegram", target="telegram.org", advice=[same], evidence=[same]),
+                    _problem("X не открывается", kind="ip", title="X (Twitter)", target="x.com", advice=[same], evidence=[same], action="strategy"),
                     # Карточки «Этот компьютер» в этом отчёте нет — строка не нажимается.
                     _problem("Что-то: непонятное", kind="system"),
                 ],
             }
         )
 
-        system, shared = sorted(panel.problem_rows(), key=lambda row: len(row.badges))
-        self.assertEqual([badge.card_key for badge in shared.badges], ["site:telegram", "site:x"])
-        self.assertEqual(shared.focusPolicy(), Qt.FocusPolicy.TabFocus)
-        QTest.mouseClick(shared.badges[1], Qt.MouseButton.LeftButton)
-        QTest.keyClick(shared, Qt.Key.Key_Return)
+        system, telegram, x = sorted(panel.problem_rows(), key=lambda row: getattr(row, "title", ""))
+        [ip_group] = [group for group in panel.problem_groups() if group.kind() == "ip"]
+        # Оба сайта — в одной сетке; текста объяснения между карточками нет.
+        self.assertEqual(ip_group.flow.cards(), [telegram, x])
+        self.assertEqual((telegram.title, telegram.note), ("Telegram", "telegram.org"))
+        self.assertEqual((telegram.card_key, x.card_key), ("site:telegram", "site:x"))
+        self.assertEqual((telegram.icon.icon_name(), telegram.icon.brand_color()), ("simple:telegram:TG", "#26A5E4"))
+        # Объяснение целиком — в подсказке.
+        self.assertIn(same, telegram.hint_text)
+        self.assertIn(same, telegram.toolTip())
+
+        self.assertEqual(x.focusPolicy(), Qt.FocusPolicy.TabFocus)
+        QTest.mouseClick(x, Qt.MouseButton.LeftButton)
+        QTest.keyClick(telegram, Qt.Key.Key_Return)
         self.assertEqual(opened, ["site:x", "site:telegram"])
-        # Объяснение — одной линией; целиком оно в подсказке.
-        self.assertEqual([label.full_text() for label in shared.advice_labels], [same])
-        self.assertIn(same, shared.toolTip())
+        # Кнопка-значок делает своё дело и говорит о нём в подсказке; отчёт при этом не открывается.
+        self.assertIsNone(telegram.action_button)
+        self.assertEqual(x.action_button.toolTip(), "Подобрать стратегию для x.com")
+        x.action_button.click()
+        self.assertEqual((acted, len(opened)), ([("strategy", "x.com")], 2))
         self.assertEqual(system.card_key, "")
         QTest.mouseClick(system, Qt.MouseButton.LeftButton)
         self.assertEqual(len(opened), 2)
@@ -405,7 +430,7 @@ class CardsOnScreenTests(unittest.TestCase):
 
         site, dns = panel.problem_rows()
         self.assertEqual((site.icon.icon_name(), site.icon.brand_color()), ("simple:telegram:TG", "#26A5E4"))
-        self.assertEqual(site.text_label.text(), "Telegram")
+        self.assertEqual(site.title, "Telegram")
         self.assertIsNone(site.dot)
         self.assertEqual(dns.text_label.text(), "Шифрованный DNS по DoT закрыт у части серверов")
         # Перечень адресов свёрнут в метку сервиса со счётчиком; остальное — пояснение.
