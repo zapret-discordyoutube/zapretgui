@@ -137,6 +137,11 @@ def build_restart_splash_spec(
         footer=t("footer", "Окно закроется само, когда откроется новая версия"),
         window_title=t("window_title", "Zapret — обновление"),
         files_template=t("files_template", "{done} из {total} файлов"),
+        statuses=(
+            t("status.done", "Готово"),
+            t("status.active", "Выполняется"),
+            t("status.waiting", "Ожидает"),
+        ),
         # Окно показывает шутки по порядку: перемешиваем здесь, чтобы каждое
         # обновление начиналось с другой и они не повторялись.
         jokes=tuple(_shuffled(fun_phrases("restarting", language))),

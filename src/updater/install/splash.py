@@ -55,6 +55,8 @@ class RestartSplashSpec:
     window_title: str
     # «{done} из {total} файлов» — ход копирования на этапе установки.
     files_template: str = "{done} из {total} файлов"
+    # Пояснение под названием этапа: готов, идёт сейчас, ещё впереди.
+    statuses: tuple[str, str, str] = ("Готово", "Выполняется", "Ожидает")
     jokes: tuple[str, ...] = ()
     colors: dict = field(default_factory=dict)
     font_family: str = "Segoe UI"
@@ -82,6 +84,7 @@ class RestartSplashSpec:
                 "footer": str(self.footer),
                 "window_title": str(self.window_title),
                 "files_template": str(self.files_template),
+                "statuses": [str(item) for item in self.statuses],
             },
             "jokes": [str(item) for item in self.jokes if str(item or "").strip()],
             "colors": {str(key): str(value) for key, value in dict(self.colors).items()},

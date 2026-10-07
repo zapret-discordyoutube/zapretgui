@@ -60,6 +60,7 @@ class PrepareSplashTests(_StateDirCase):
         payload = json.loads((self.state_dir / paths.RESTART_SPLASH_SPEC_NAME).read_text(encoding="utf-8"))
         self.assertEqual((payload["x"], payload["y"], payload["width"], payload["height"]), (10, 20, 900, 600))
         self.assertEqual(payload["texts"]["stages"][1], "Устанавливаем v2.0")
+        self.assertEqual(len(payload["texts"]["statuses"]), 3)
         self.assertEqual(payload["app_process_name"], "Zapret")
         self.assertEqual(payload["old_pid"], os.getpid())
         self.assertEqual((self.state_dir / paths.RESTART_SPLASH_LOGO_NAME).read_bytes(), b"\x89PNG-logo")
@@ -238,6 +239,7 @@ class SplashSpecTests(unittest.TestCase):
         self.assertIn("v2.0", spec.title)
         self.assertIn("v1.9", spec.subtitle)
         self.assertEqual(len(spec.stages), 3)
+        self.assertEqual(spec.statuses, ("Готово", "Выполняется", "Ожидает"))
         self.assertCountEqual(spec.jokes, fun_phrases("restarting", "ru"))
 
         hidden = build_restart_splash_spec(
@@ -245,6 +247,7 @@ class SplashSpecTests(unittest.TestCase):
         )
         self.assertGreaterEqual(hidden.width, 720)
         self.assertIn("Updating", hidden.title)
+        self.assertEqual(hidden.statuses, ("Done", "In progress", "Waiting"))
 
 
 class SplashScriptContractTests(unittest.TestCase):
