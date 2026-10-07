@@ -122,6 +122,16 @@ class ApplicationPaths:
         return self.user_dir / "fakes"
 
     @property
+    def engine_state_dir(self) -> Path:
+        """Файлы, которые пишет сам winws2 (память подбора стратегий).
+
+        Движок после запуска понижает себе права и может писать только в
+        каталог из параметра ``--writable=user/winws2``; остальная ``user``
+        (настройки, базы) ему на запись закрыта.
+        """
+        return self.user_dir / "winws2"
+
+    @property
     def hosts_catalog_database(self) -> Path:
         return self.system_dir / "hosts_catalog.sqlite3"
 
