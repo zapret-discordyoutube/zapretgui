@@ -18,6 +18,7 @@ from telegram_proxy.proxy.routes import (
     KIND_UPSTREAM,
     KIND_USER_DOMAIN,
     KIND_USER_WORKER,
+    TUNNELS_PER_CONNECTION,
     PlanInput,
     build_plan,
 )
@@ -35,6 +36,10 @@ class FakeClock:
         return self.now
 
 
+# Сколько воркеров-туннелей попадает в план одного соединения.
+TUNNELS = [KIND_TUNNEL] * min(len(TUNNEL_HOSTS), TUNNELS_PER_CONNECTION)
+
+
 def kinds(plan) -> list[str]:
     return [route.kind for route in plan]
 
@@ -46,7 +51,7 @@ class RoutePlanTests(unittest.TestCase):
 
     def test_dc2_goes_relay_fronts_tunnel_then_country_socks(self) -> None:
         plan = build_plan(PlanInput(dc=2, is_media=False, target_host="149.154.167.51", upstream=PRESET), self.health)
-        self.assertEqual(kinds(plan), [KIND_RELAY, KIND_FRONT, KIND_FRONT, KIND_FRONT, KIND_TUNNEL, KIND_UPSTREAM])
+        self.assertEqual(kinds(plan), [KIND_RELAY, KIND_FRONT, KIND_FRONT, KIND_FRONT, *TUNNELS, KIND_UPSTREAM])
         relay = plan[0]
         self.assertEqual((relay.connect_host, relay.sni), ("149.154.167.220", "kws2.web.telegram.org"))
         self.assertTrue(plan[1].sni.startswith("kws2."))
@@ -58,12 +63,12 @@ class RoutePlanTests(unittest.TestCase):
 
     def test_dc1_has_no_relay_and_starts_with_fronts(self) -> None:
         plan = build_plan(PlanInput(dc=1, is_media=False, target_host="149.154.175.50"), self.health)
-        self.assertEqual(kinds(plan), [KIND_FRONT, KIND_FRONT, KIND_FRONT, KIND_TUNNEL, KIND_DIRECT])
+        self.assertEqual(kinds(plan), [KIND_FRONT, KIND_FRONT, KIND_FRONT, *TUNNELS, KIND_DIRECT])
 
     def test_dc203_uses_only_tunnel_before_fallbacks(self) -> None:
         plan = build_plan(PlanInput(dc=203, is_media=False, target_host="91.105.192.100", upstream=PRESET), self.health)
-        self.assertEqual(kinds(plan), [KIND_TUNNEL, KIND_UPSTREAM])
-        self.assertIn(plan[0].sni, TUNNEL_HOSTS)
+        self.assertEqual(kinds(plan), [*TUNNELS, KIND_UPSTREAM])
+        self.assertLessEqual({route.sni for route in plan[:-1]}, set(TUNNEL_HOSTS))
 
     def test_tunnels_are_tried_in_a_circle_from_this_install_start(self) -> None:
         hosts = ("a.workers.dev", "b.workers.dev", "c.workers.dev", "d.workers.dev")
