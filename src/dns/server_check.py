@@ -259,6 +259,8 @@ class ServerCheckReport:
     stopped: bool = False
     timed_out: bool = False
     elapsed_s: float = 0.0
+    # Запись этой проверки в истории вкладки (с путём к файлу отчёта). None — в историю не попала.
+    history_entry: dict | None = None
 
     def owner_of(self, ip: str) -> IpOwner | None:
         for address, owner in self.owners:

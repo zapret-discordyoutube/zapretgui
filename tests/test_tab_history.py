@@ -106,16 +106,63 @@ class CommandTests(unittest.TestCase):
         from dns import commands
 
         results = {"domains": {"a.example": {"state": "ok"}}}
-        with patch("diagnostics.engine.run_dns_check", return_value=results), patch("settings.store.add_tab_history_run") as add:
-            self.assertEqual(commands.run_dns_poisoning_check(), results)
+        saved = patch("dns.commands._save_past_check", return_value="dns_check_1.json")
+        with patch("diagnostics.engine.run_dns_check", return_value=dict(results)), patch("settings.store.add_tab_history_run") as add, saved:
+            got = commands.run_dns_poisoning_check()
+        self.assertEqual(got["domains"], results["domains"])
         self.assertEqual((add.call_args.args[0], add.call_args.args[1]["kind"]), ("dns_history", "dns"))
+        # На экран уходит та самая запись, что сохранена в настройки, — с путём к файлу отчёта.
+        self.assertEqual(got["history_entry"], add.call_args.args[1])
+        self.assertEqual(got["history_entry"]["log_file"], "dns_check_1.json")
 
-        with patch("diagnostics.engine.run_dns_check", return_value=results), patch("settings.store.add_tab_history_run", side_effect=OSError("диск")):
-            self.assertEqual(commands.run_dns_poisoning_check(), results)
+        with patch("diagnostics.engine.run_dns_check", return_value=dict(results)), patch("settings.store.add_tab_history_run", side_effect=OSError("диск")), saved:
+            self.assertEqual(commands.run_dns_poisoning_check()["domains"], results["domains"])
 
-        with patch("diagnostics.engine.run_dns_check", return_value={"stopped": True}), patch("settings.store.add_tab_history_run") as add:
+        with patch("diagnostics.engine.run_dns_check", return_value={"stopped": True}), patch("settings.store.add_tab_history_run") as add, saved as save:
             commands.run_dns_poisoning_check()
         add.assert_not_called()
+        save.assert_not_called()
+
+    def test_past_dns_and_server_checks_are_saved_whole_and_read_back(self) -> None:
+        import tempfile
+
+        from test_dns_server_check_page import _report as server_report
+
+        from dns import commands
+
+        with tempfile.TemporaryDirectory() as folder, patch("config.runtime_layout.APPLICATION_PATHS", SimpleNamespace(logs_dir=folder)):
+            results = {"domains": {"a.example": {"state": "spoofed", "ips": ["1.2.3.4"]}}}
+            with patch("diagnostics.engine.run_dns_check", return_value=dict(results)), patch("settings.store.add_tab_history_run"):
+                got = commands.run_dns_poisoning_check()
+            self.assertEqual(commands.load_past_dns_check_report(got["history_entry"]["log_file"]), results)
+
+            report = server_report()
+            with (
+                patch("dns.server_check.run_server_check", return_value=report),
+                patch("dns.commands.build_server_check_targets", return_value=()),
+                patch("dns.commands._running_bypass", return_value=()),
+                patch("settings.store.add_tab_history_run") as add,
+            ):
+                finished = commands.run_server_check()
+            entry = finished.history_entry
+            self.assertEqual((add.call_args.args[0], add.call_args.args[1]), ("servers_history", entry))
+            self.assertEqual(entry["kind"], "servers")
+            # Отчёт возвращается из файла тем же объектом: карточки по нему получаются те же.
+            self.assertEqual(commands.load_past_server_check_report(entry["log_file"]), report)
+            # Чужой или испорченный файл — «отчёта нет», а не ошибка.
+            self.assertIsNone(commands.load_past_server_check_report(got["history_entry"]["log_file"]))
+            self.assertIsNone(commands.load_past_dns_check_report(""))
+
+    def test_server_check_entry_names_the_worst_finding_and_skips_unfinished_runs(self) -> None:
+        from test_dns_server_check_page import _report as server_report
+
+        report = server_report()
+        entry = history.server_check_entry(report, when=WHEN)
+        self.assertEqual((entry["kind"], entry["time"], entry["log_file"]), ("servers", WHEN.isoformat(timespec="seconds"), ""))
+        self.assertIn(entry["level"], ("ok", "warn", "fail"))
+        self.assertTrue(entry["headline"])
+        self.assertIsNone(history.server_check_entry(server_report(finished=False)))
+        self.assertIsNone(history.server_check_entry(server_report(stopped=True)))
 
     def test_domain_entry_is_built_only_for_finished_lookups(self) -> None:
         from dns import domain_lookup_plans as plans

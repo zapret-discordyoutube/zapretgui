@@ -51,7 +51,13 @@ def run_dns_poisoning_check(*, log_callback=None, should_stop=None) -> dict:
     results = dict(results or {})
     from diagnostics.history import dns_check_entry
 
-    _remember_check("dns_history", dns_check_entry(results))
+    entry = dns_check_entry(results)
+    if entry is not None:
+        # Итог целиком — в файл: прошлая проверка открывается теми же карточками.
+        entry["log_file"] = _save_past_check("dns_check", {"format": DNS_CHECK_FORMAT, "report": results})
+        # Экран показывает ту самую запись, что сохранена в настройки.
+        results["history_entry"] = entry
+    _remember_check("dns_history", entry)
     return results
 
 
@@ -305,14 +311,16 @@ def run_domain_lookup(target: str, *, use_external: bool = True, on_stage=None, 
 
 
 DOMAIN_LOOKUP_FORMAT = "zapretgui.domain_lookup/1"
-# Столько файлов прошлых проверок домена хранится; история вкладки короче.
-DOMAIN_LOOKUP_FILES_KEPT = 40
+DNS_CHECK_FORMAT = "zapretgui.dns_check/1"
+SERVER_CHECK_FORMAT = "zapretgui.server_check/1"
+# Столько файлов прошлых проверок каждой вкладки хранится; история вкладки короче.
+PAST_CHECK_FILES_KEPT = 40
 
 
-def save_domain_lookup_text(target: str, text: str, report=None) -> str:
-    """Кладёт проверку домена в папку журналов. Возвращает путь; пусто — записать не удалось.
+def _save_past_check(prefix: str, document: dict) -> str:
+    """Кладёт отчёт проверки вкладки в папку журналов. Возвращает путь; пусто — записать не удалось.
 
-    В файле и сам отчёт (по нему прошлая проверка рисуется теми же карточками), и его текст.
+    У каждой вкладки свои файлы (``prefix``); старые сверх ``PAST_CHECK_FILES_KEPT`` удаляются.
     """
     import json
     import os
@@ -323,16 +331,11 @@ def save_domain_lookup_text(target: str, text: str, report=None) -> str:
 
         folder = str(APPLICATION_PATHS.logs_dir)
         os.makedirs(folder, exist_ok=True)
-        path = os.path.join(folder, f"domain_lookup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-        document = {"format": DOMAIN_LOOKUP_FORMAT, "target": str(target), "text": str(text).split("\n")}
-        if report is not None:
-            from utils.dataclass_json import to_plain
-
-            document["report"] = to_plain(report)
+        path = os.path.join(folder, f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
         with open(path, "w", encoding="utf-8") as stream:
             json.dump(document, stream, ensure_ascii=False, indent=1)
-        old = sorted(name for name in os.listdir(folder) if name.startswith("domain_lookup_") and name.endswith(".json"))
-        for name in old[:-DOMAIN_LOOKUP_FILES_KEPT]:
+        old = sorted(name for name in os.listdir(folder) if name.startswith(f"{prefix}_") and name.endswith(".json"))
+        for name in old[:-PAST_CHECK_FILES_KEPT]:
             try:
                 os.remove(os.path.join(folder, name))
             except OSError:
@@ -342,7 +345,7 @@ def save_domain_lookup_text(target: str, text: str, report=None) -> str:
         return ""
 
 
-def _read_domain_lookup(log_file: str | None) -> dict:
+def _read_past_check(log_file: str | None, expected_format: str) -> dict:
     import json
 
     if not log_file:
@@ -352,14 +355,27 @@ def _read_domain_lookup(log_file: str | None) -> dict:
             document = json.load(stream)
     except (OSError, ValueError):
         return {}
-    if not isinstance(document, dict) or document.get("format") != DOMAIN_LOOKUP_FORMAT:
+    if not isinstance(document, dict) or document.get("format") != expected_format:
         return {}
     return document
 
 
+def save_domain_lookup_text(target: str, text: str, report=None) -> str:
+    """Кладёт проверку домена в папку журналов. Возвращает путь; пусто — записать не удалось.
+
+    В файле и сам отчёт (по нему прошлая проверка рисуется теми же карточками), и его текст.
+    """
+    document = {"format": DOMAIN_LOOKUP_FORMAT, "target": str(target), "text": str(text).split("\n")}
+    if report is not None:
+        from utils.dataclass_json import to_plain
+
+        document["report"] = to_plain(report)
+    return _save_past_check("domain_lookup", document)
+
+
 def load_past_domain_lookup(log_file: str | None) -> str:
     """Текст прошлой проверки домена. Пусто — файла нет или он не читается."""
-    lines = _read_domain_lookup(log_file).get("text")
+    lines = _read_past_check(log_file, DOMAIN_LOOKUP_FORMAT).get("text")
     return "\n".join(str(line) for line in lines) if isinstance(lines, list) else ""
 
 
@@ -371,7 +387,21 @@ def load_past_domain_lookup_report(log_file: str | None):
     from dns.domain_lookup import DomainLookupReport
     from utils.dataclass_json import from_plain
 
-    return from_plain(DomainLookupReport, _read_domain_lookup(log_file).get("report"))
+    return from_plain(DomainLookupReport, _read_past_check(log_file, DOMAIN_LOOKUP_FORMAT).get("report"))
+
+
+def load_past_dns_check_report(log_file: str | None) -> dict | None:
+    """Итог прошлой проверки DNS подмены — тем же словарём, что уходил на экран вкладки. None — файла нет."""
+    report = _read_past_check(log_file, DNS_CHECK_FORMAT).get("report")
+    return report if isinstance(report, dict) else None
+
+
+def load_past_server_check_report(log_file: str | None):
+    """Отчёт прошлой проверки DNS-серверов — тем же объектом, из которого строятся карточки. None — файла нет."""
+    from dns.server_check import ServerCheckReport
+    from utils.dataclass_json import from_plain
+
+    return from_plain(ServerCheckReport, _read_past_check(log_file, SERVER_CHECK_FORMAT).get("report"))
 
 
 def _remember_check(key: str, entry: dict | None) -> None:
@@ -405,12 +435,20 @@ def build_server_check_targets():
 def run_server_check(*, on_progress=None, should_stop=None):
     from dns.server_check import run_server_check as _run_server_check
 
-    return _run_server_check(
+    report = _run_server_check(
         build_server_check_targets(),
         on_progress=on_progress,
         should_stop=should_stop,
         bypass=_running_bypass(),
     )
+    from diagnostics.history import server_check_entry
+    from utils.dataclass_json import to_plain
+
+    entry = server_check_entry(report)
+    if entry is not None:
+        entry["log_file"] = _save_past_check("server_check", {"format": SERVER_CHECK_FORMAT, "report": to_plain(report)})
+    _remember_check("servers_history", entry)
+    return replace(report, history_entry=entry)
 
 
 def _running_bypass() -> tuple[str, ...]:

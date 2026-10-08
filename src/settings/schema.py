@@ -42,7 +42,7 @@ VALID_TRAY_CLOSE_MODES = frozenset(
 CHECK_HISTORY_LIMIT = 50
 # История вкладок «Проверка домена» и «DNS подмена»: свои списки, короче общего.
 TAB_HISTORY_LIMIT = 20
-TAB_HISTORY_KEYS = ("domain_history", "dns_history")
+TAB_HISTORY_KEYS = ("domain_history", "dns_history", "servers_history")
 # Ограничения на одну запись истории: настройки читаются целиком, раздувать их нельзя.
 CHECK_HISTORY_TEXT_LIMIT = 400
 CHECK_HISTORY_PROBLEMS_LIMIT = 12
@@ -262,6 +262,7 @@ def default_blockcheck() -> dict[str, Any]:
         # Прошлые проверки вкладок «Проверка домена» и «DNS подмена» — в том же виде, что check_history.
         "domain_history": [],
         "dns_history": [],
+        "servers_history": [],
     }
 
 

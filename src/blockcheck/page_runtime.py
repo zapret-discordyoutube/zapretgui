@@ -13,6 +13,8 @@ class BlockcheckPageInitialStatePlan:
     # Прошлые проверки вкладок «Проверка домена» и «DNS подмена».
     domain_history: tuple[dict, ...] = ()
     dns_history: tuple[dict, ...] = ()
+    # Прошлые проверки вкладки «DNS-серверы».
+    servers_history: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +48,7 @@ def load_page_initial_state() -> BlockcheckPageInitialStatePlan:
             check_history=_runs("check_history"),
             domain_history=_runs("domain_history"),
             dns_history=_runs("dns_history"),
+            servers_history=_runs("servers_history"),
         )
     except Exception:
         return BlockcheckPageInitialStatePlan(user_domains=())

@@ -23,6 +23,8 @@ class DnsFeature:
     # Текст прошлой проверки домена по пути из записи истории; пусто — файла нет.
     load_past_domain_lookup: Callable = lambda _log_file: ""
     load_past_domain_lookup_report: Callable = lambda _log_file: None
+    load_past_dns_check_report: Callable = lambda _log_file: None
+    load_past_server_check_report: Callable = lambda _log_file: None
 
 
 def build_dns_feature() -> DnsFeature:
@@ -181,4 +183,6 @@ def build_dns_feature() -> DnsFeature:
         create_server_check_worker=_create_server_check_worker,
         load_past_domain_lookup=lambda log_file: _commands().load_past_domain_lookup(log_file),
         load_past_domain_lookup_report=lambda log_file: _commands().load_past_domain_lookup_report(log_file),
+        load_past_dns_check_report=lambda log_file: _commands().load_past_dns_check_report(log_file),
+        load_past_server_check_report=lambda log_file: _commands().load_past_server_check_report(log_file),
     )

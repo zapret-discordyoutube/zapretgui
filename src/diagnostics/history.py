@@ -68,6 +68,7 @@ def blockcheck_entry(report: dict, *, log_file: str = "", when: datetime | None 
 
 KIND_DOMAIN = "domain"
 KIND_DNS = "dns"
+KIND_SERVERS = "servers"
 
 
 def dns_check_entry(results: dict, *, when: datetime | None = None) -> dict | None:
@@ -93,6 +94,27 @@ def dns_check_entry(results: dict, *, when: datetime | None = None) -> dict | No
         "headline": headline,
         "problems": [f"{host}: {domains[host].get('reason') or 'адрес подменён'}" for host in spoofed],
         "states": states,
+        "log_file": "",
+    }
+
+
+def server_check_entry(report, *, when: datetime | None = None) -> dict | None:
+    """Запись о проверке DNS-серверов. None — проверку остановили или она не закончилась."""
+    if not getattr(report, "finished", False) or getattr(report, "stopped", False) or not report.rows:
+        return None
+    findings = list(report.findings)
+    order = {"fail": 0, "warn": 1}
+    worst = min(findings, key=lambda item: order.get(str(item.level), 2), default=None)
+    level = str(worst.level) if worst is not None and str(worst.level) in order else "ok"
+    headline = (worst.title or worst.text) if worst is not None and level != "ok" else "Замечаний нет"
+    return {
+        "kind": KIND_SERVERS,
+        "time": (when or datetime.now()).isoformat(timespec="seconds"),
+        "title": f"Адресов проверено: {len(report.rows)}",
+        "level": level,
+        "headline": str(headline),
+        "problems": [str(item.title or item.text) for item in findings if str(item.level) in order],
+        "states": {},
         "log_file": "",
     }
 
