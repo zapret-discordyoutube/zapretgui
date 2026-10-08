@@ -428,7 +428,7 @@ def _probe_host(
         if quic_future is not None:
             probe.quic = quic_probe.judge(quic_future.result())
         if protocols_future is not None:
-            probe.protocols = protocol_probe.judge(protocols_future.result())
+            probe.settle_protocols(protocol_probe.judge(protocols_future.result()))
     return probe
 
 

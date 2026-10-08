@@ -83,6 +83,21 @@ class Probe:
     rechecked: str = ""
 
     @property
+    def browser_only(self) -> bool:
+        """Обычное соединение рвут, а приветствие, какое шлёт Chrome, до сервера доходит.
+
+        Человек открывает сайт браузером, поэтому такой сайт для него открывается:
+        фильтр (или стратегия обхода) пропускает именно браузерное приветствие.
+        """
+        return any(line.code == protocol_probe.CODE_BROWSER_ONLY for line in self.protocols)
+
+    def settle_protocols(self, lines: tuple) -> None:
+        """Принимает строки «TLS 1.2 / TLS 1.3 / как Chrome / HTTP» и поправляет по ним вывод."""
+        self.protocols = lines
+        if self.reach_state == ReachState.DPI and self.browser_only:
+            self.reach_state = ReachState.OK
+
+    @property
     def address_confirmed(self) -> bool:
         """Несоединение перепроверено: молчат все адреса сайта, и другим путём он не открылся.
 

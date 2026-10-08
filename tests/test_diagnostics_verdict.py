@@ -926,6 +926,35 @@ class EngineScenarioTests(unittest.TestCase):
         self.assertIn(("www.youtube.com", "142.251.157.4"), net.calls)
         self.assertNotIn("❌ YouTube", text)
 
+    def test_site_that_passes_with_a_chrome_hello_counts_as_opening_in_a_browser(self) -> None:
+        # Простое соединение рвут, а приветствие, какое шлёт Chrome, до сервера доходит:
+        # человек открывает сайт браузером, значит, для него он открывается.
+        from diagnostics.block_cause import HELLO_OK, HELLO_RESET, HelloResult
+
+        def run(browser_kind):
+            net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET))
+            net.protocol_facts = lambda host, ip: engine.protocol_probe.ProtocolFacts(
+                host=host,
+                ip=ip,
+                tls12=HelloResult(HELLO_RESET),
+                tls13=HelloResult(HELLO_RESET),
+                browser=HelloResult(browser_kind, ms=40.0),
+            )
+            result = net.run(engine.run_blockcheck, "main", emit=lambda _line: None)
+            discord = next(item for item in result["services"] if item["key"] == "discord")
+            return discord, result
+
+        discord, result = run(HELLO_OK)
+        self.assertEqual(discord["targets"][0]["state"], "ok")
+        self.assertIn("открывается в браузере", discord["targets"][0]["text"])
+        self.assertIn("Discord", result["working"])
+        self.assertFalse([item for item in result["problems"] if "Discord не открывается" in item["text"]])
+
+        # Браузерное приветствие тоже рвут — сайт по-прежнему не открывается.
+        discord, result = run(HELLO_RESET)
+        self.assertEqual(discord["targets"][0]["state"], "dpi")
+        self.assertNotIn("Discord", result["working"])
+
     def test_blocks_found_while_vpn_tools_run_are_marked_as_direct_road_only(self) -> None:
         # Проверка ходит напрямую, а VPN умеет вести браузер своей дорогой: «не соединяется»
         # у нас при нём не значит «не открывается у человека». Без VPN оговорки нет.
