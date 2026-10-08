@@ -45,6 +45,7 @@ from utils.socket_cancel import SocketCancel
 __all__ = [
     "CODE_BROWSER_ONLY",
     "CODE_FINGERPRINT",
+    "HINTS",
     "PROTO_BROWSER",
     "PROTO_HTTP",
     "PROTO_TLS12",
@@ -176,9 +177,13 @@ def _tls_line(key: str, result: HelloResult | None) -> ProtocolLine | None:
             key, title, STATE_INFO, "нет у сервера", "сервер ответил отказом: этой версией он не работает — это не блокировка"
         )
     if result.kind == HELLO_RESET:
-        return ProtocolLine(key, title, STATE_FAIL, "сброс", "соединение сброшено на приветствии")
+        return ProtocolLine(
+            key, title, STATE_FAIL, "сброс", "соединение оборвано сразу после приветствия — так фильтр рвёт соединения с этим сайтом"
+        )
     if result.kind == HELLO_TIMEOUT:
-        return ProtocolLine(key, title, STATE_FAIL, "молчит", "после приветствия ответа нет")
+        return ProtocolLine(
+            key, title, STATE_FAIL, "молчит", "на приветствие никто не ответил — так фильтр молча глушит соединения с этим сайтом"
+        )
     if result.kind == HELLO_CONNECT:
         return ProtocolLine(key, title, STATE_UNKNOWN, "нет соединения", "не удалось соединиться с адресом")
     if result.kind == HELLO_ERROR:
@@ -267,4 +272,35 @@ def judge(facts: ProtocolFacts | None) -> tuple[ProtocolLine, ...]:
         _browser_line(facts),
         _http_line(facts),
     )
-    return tuple(line for line in lines if line is not None)
+    found = tuple(line for line in lines if line is not None)
+    if any(line.code == CODE_BROWSER_ONLY for line in found):
+        found = tuple(_calm(line) if line.key in (PROTO_TLS12, PROTO_TLS13) else line for line in found)
+    return found
+
+
+# Что это за дорога — одной фразой для человека, который видит слово впервые.
+HINTS = {
+    PROTO_TLS12: "TLS 1.2 — прежняя версия шифрования. Так подключаются старые программы и устройства; браузеры почти всегда берут TLS 1.3.",
+    PROTO_TLS13: "TLS 1.3 — нынешняя версия шифрования. Здесь её проверяют простым соединением, каким ходят программы, а не браузер.",
+    PROTO_BROWSER: "То же шифрование, но приветствие составлено как у браузера Chrome. Эта строка ближе всего к тому, что вы увидите в браузере.",
+    PROTO_HTTP: "Обычное соединение без шифрования (порт 80). Сайты отвечают на него переходом на защищённый адрес — это норма.",
+}
+WORD_NOT_FOR_BROWSER = "не мешает"
+
+
+def _calm(line: ProtocolLine) -> ProtocolLine:
+    """Обычное приветствие режут, но браузерное проходит: человеку это не мешает, и красным быть не должно."""
+    if line.state != STATE_FAIL:
+        return line
+    how = "молча глушит (ответа нет)" if line.word == "молчит" else "обрывает"
+    return ProtocolLine(
+        line.key,
+        line.title,
+        STATE_INFO,
+        WORD_NOT_FOR_BROWSER,
+        f"простое соединение с этим шифрованием фильтр {how}. Так ходят некоторые программы, но не браузер: "
+        "он шлёт другое приветствие, и оно проходит (строка «Как Chrome»). Сайту в браузере это не мешает, "
+        "исправлять ничего не нужно",
+        line.ms,
+        line.code,
+    )

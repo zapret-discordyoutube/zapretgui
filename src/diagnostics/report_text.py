@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from diagnostics import block_kind, quic_probe, telegram_check, volume_probe
+from diagnostics import block_kind, protocol_probe, quic_probe, telegram_check, volume_probe
 from diagnostics.limits import DNS_ATTEMPTS, HTTPS_TIMEOUT, SOURCE_HOSTS, SOURCE_REFERENCE
 from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME, Probe
 from diagnostics.verdict import DnsState, Level, ReachState, describe_reach
@@ -208,7 +208,9 @@ def target_report(probe: Probe) -> dict:
         # Тот же адрес по TLS 1.2, TLS 1.3, «как Chrome» и HTTP отдельно.
         "protocols": [
             {"key": line.key, "title": line.title, "state": line.state, "word": line.word, "text": line.text,
-             "ms": None if line.ms is None else round(line.ms, 1), "code": line.code}
+             "ms": None if line.ms is None else round(line.ms, 1), "code": line.code,
+             # Что это за дорога — пояснение для подсказки на экране.
+             "hint": protocol_probe.HINTS.get(line.key, "")}
             for line in probe.protocols
         ],
         "address": probe.reach.ip if probe.reach is not None else "",

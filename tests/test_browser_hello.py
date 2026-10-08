@@ -181,6 +181,30 @@ class BrowserLineTests(unittest.TestCase):
         self.assertEqual(_browser_line(_facts(tls12=nothing, tls13=nothing, browser=OK)).code, "")
         self.assertEqual(_browser_line(_facts(tls12=OK, tls13=RESET, browser=OK)).code, "")
 
+    def test_plain_hello_cut_is_not_shown_red_when_the_browser_hello_passes(self) -> None:
+        # Вопрос пользователя: у YouTube «Открывается», а TLS 1.2 и TLS 1.3 красные «молчит» — это плохо?
+        # Нет: режут простое соединение, а браузерное проходит. Красного и слова «молчит» быть не должно.
+        lines = {line.key: line for line in pp.judge(_facts(tls12=SILENT, tls13=RESET, browser=OK))}
+
+        for key in (pp.PROTO_TLS12, pp.PROTO_TLS13):
+            self.assertEqual((lines[key].state, lines[key].word), (pp.STATE_INFO, pp.WORD_NOT_FOR_BROWSER))
+            self.assertIn("Сайту в браузере это не мешает", lines[key].text)
+            self.assertIn("исправлять ничего не нужно", lines[key].text)
+        self.assertIn("молча глушит", lines[pp.PROTO_TLS12].text)
+        self.assertIn("обрывает", lines[pp.PROTO_TLS13].text)
+        self.assertEqual(lines[pp.PROTO_BROWSER].code, pp.CODE_BROWSER_ONLY)
+
+    def test_plain_hello_cut_stays_red_when_the_browser_hello_is_cut_too(self) -> None:
+        lines = {line.key: line for line in pp.judge(_facts(tls12=SILENT, tls13=SILENT, browser=SILENT))}
+
+        self.assertEqual((lines[pp.PROTO_TLS13].state, lines[pp.PROTO_TLS13].word), (pp.STATE_FAIL, "молчит"))
+        # И красное слово объяснено: что случилось и кто это делает.
+        self.assertIn("фильтр молча глушит", lines[pp.PROTO_TLS13].text)
+
+    def test_every_road_has_a_plain_explanation(self) -> None:
+        self.assertEqual(set(pp.HINTS), {pp.PROTO_TLS12, pp.PROTO_TLS13, pp.PROTO_BROWSER, pp.PROTO_HTTP})
+        self.assertTrue(all(len(text) > 40 for text in pp.HINTS.values()))
+
     def test_no_connection_and_cancel_give_no_verdict(self) -> None:
         self.assertEqual(_browser_line(_facts(tls12=OK, browser=bc.HelloResult(bc.HELLO_CONNECT))).state, "unknown")
         self.assertEqual([line.key for line in pp.judge(_facts(tls12=OK, browser=bc.HelloResult(bc.HELLO_CANCELLED)))], ["tls12"])
