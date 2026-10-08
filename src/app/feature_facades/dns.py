@@ -24,6 +24,7 @@ class DnsFeature:
     load_past_domain_lookup: Callable = lambda _log_file: ""
     load_past_domain_lookup_report: Callable = lambda _log_file: None
     load_past_dns_check_report: Callable = lambda _log_file: None
+    load_past_dns_check_text: Callable = lambda _log_file: ""
     load_past_server_check_report: Callable = lambda _log_file: None
 
 
@@ -184,5 +185,6 @@ def build_dns_feature() -> DnsFeature:
         load_past_domain_lookup=lambda log_file: _commands().load_past_domain_lookup(log_file),
         load_past_domain_lookup_report=lambda log_file: _commands().load_past_domain_lookup_report(log_file),
         load_past_dns_check_report=lambda log_file: _commands().load_past_dns_check_report(log_file),
+        load_past_dns_check_text=lambda log_file: _commands().load_past_dns_check_text(log_file),
         load_past_server_check_report=lambda log_file: _commands().load_past_server_check_report(log_file),
     )

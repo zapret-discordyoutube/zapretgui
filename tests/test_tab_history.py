@@ -132,9 +132,19 @@ class CommandTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder, patch("config.runtime_layout.APPLICATION_PATHS", SimpleNamespace(logs_dir=folder)):
             results = {"domains": {"a.example": {"state": "spoofed", "ips": ["1.2.3.4"]}}}
-            with patch("diagnostics.engine.run_dns_check", return_value=dict(results)), patch("settings.store.add_tab_history_run"):
-                got = commands.run_dns_poisoning_check()
+            def fake_check(*, emit, should_stop):
+                emit("строка первая")
+                emit("строка вторая")
+                return dict(results)
+
+            shown: list[str] = []
+            with patch("diagnostics.engine.run_dns_check", fake_check), patch("settings.store.add_tab_history_run"):
+                got = commands.run_dns_poisoning_check(log_callback=shown.append)
             self.assertEqual(commands.load_past_dns_check_report(got["history_entry"]["log_file"]), results)
+            # Текст отчёта лежит в том же файле — по нему у прошлой проверки работает кнопка «Отчёт».
+            self.assertEqual(commands.load_past_dns_check_text(got["history_entry"]["log_file"]), "строка первая\nстрока вторая")
+            self.assertEqual(shown, ["строка первая", "строка вторая"])
+            self.assertEqual(commands.load_past_dns_check_text(""), "")
 
             report = server_report()
             with (

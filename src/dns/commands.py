@@ -44,17 +44,23 @@ def create_dns_check_save_worker(request_id: int, *, file_path: str, plain_text:
 def run_dns_poisoning_check(*, log_callback=None, should_stop=None) -> dict:
     from diagnostics.engine import run_dns_check
 
-    results = run_dns_check(
-        emit=log_callback or (lambda _line: None),
-        should_stop=should_stop,
-    )
+    # Строки отчёта копятся, чтобы лечь в тот же файл: у прошлой проверки по ним работает кнопка «Отчёт».
+    lines: list[str] = []
+
+    def emit(line: str) -> None:
+        lines.append(str(line))
+        if log_callback is not None:
+            log_callback(line)
+
+    results = run_dns_check(emit=emit, should_stop=should_stop)
     results = dict(results or {})
     from diagnostics.history import dns_check_entry
 
     entry = dns_check_entry(results)
     if entry is not None:
         # Итог целиком — в файл: прошлая проверка открывается теми же карточками.
-        entry["log_file"] = _save_past_check("dns_check", {"format": DNS_CHECK_FORMAT, "report": results})
+        document = {"format": DNS_CHECK_FORMAT, "report": results, "text": lines}
+        entry["log_file"] = _save_past_check("dns_check", document)
         # Экран показывает ту самую запись, что сохранена в настройки.
         results["history_entry"] = entry
     _remember_check("dns_history", entry)
@@ -394,6 +400,12 @@ def load_past_dns_check_report(log_file: str | None) -> dict | None:
     """Итог прошлой проверки DNS подмены — тем же словарём, что уходил на экран вкладки. None — файла нет."""
     report = _read_past_check(log_file, DNS_CHECK_FORMAT).get("report")
     return report if isinstance(report, dict) else None
+
+
+def load_past_dns_check_text(log_file: str | None) -> str:
+    """Текст прошлой проверки DNS подмены. Пусто — файла нет или текст в него не клали."""
+    lines = _read_past_check(log_file, DNS_CHECK_FORMAT).get("text")
+    return "\n".join(str(line) for line in lines) if isinstance(lines, list) else ""
 
 
 def load_past_server_check_report(log_file: str | None):
