@@ -740,6 +740,9 @@ def check_crowd(run: Run, collected: dict[str, list[Probe]], services, emit: Emi
         "host": facts.host,
         "address": facts.ip,
         "label": next(services[key].label for key, probes in collected.items() if site in probes),
+        # Слово итога и исходы по строкам — готовыми словами: экран их только показывает.
+        "status": crowd_probe.STATUS[verdict.code],
+        "rows": crowd_probe.rows(facts),
         "text": report_text.sentence(verdict.text),
         "advice": verdict.advice,
         # Факты как есть: исход одиночного соединения до пачки, каждого из пачки и одиночного после.

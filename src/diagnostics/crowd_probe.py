@@ -45,9 +45,11 @@ __all__ = [
     "CROWD_STUCK",
     "CROWD_UNKNOWN",
     "CrowdFacts",
+    "STATUS",
     "CrowdVerdict",
     "collect",
     "judge",
+    "rows",
 ]
 
 # Сколько соединений открыть разом: на одно больше порога из описания.
@@ -129,6 +131,43 @@ def collect(
             recovered = clock() - started
             break
     return CrowdFacts(host, ip, before, crowd, after, line, recovered, clock() - started)
+
+
+# Слово итога для карточки.
+STATUS = {
+    CROWD_NONE: "Не замирает",
+    CROWD_FREEZE: "Замирает от нескольких соединений",
+    CROWD_STUCK: "Замолчал и не вернулся",
+    CROWD_LIMIT: "Сайт сам ограничивает",
+    CROWD_UNKNOWN: "Не удалось проверить",
+}
+_OUTCOME_WORDS = {
+    HELLO_OK: ("ответило", "ok"),
+    HELLO_ALERT: ("дошло до сервера", "ok"),
+    HELLO_RESET: ("сброшено", "fail"),
+    HELLO_TIMEOUT: ("без ответа", "fail"),
+}
+
+
+def _row(title: str, kind: str) -> dict:
+    word, state = _OUTCOME_WORDS.get(kind, ("не установилось", "unknown"))
+    return {"title": title, "text": word, "state": state}
+
+
+def rows(facts: CrowdFacts) -> list[dict]:
+    """Что было с каждым соединением — строками для экрана: до пачки, пачка, после, контроль, возвращение."""
+    found = [_row("Одно соединение до пачки", facts.before)]
+    found += [_row(f"Соединение {index} из {len(facts.crowd)} одновременных", kind) for index, kind in enumerate(facts.crowd, 1)]
+    if facts.after:
+        found.append(_row("Одно соединение сразу после пачки", facts.after))
+    if facts.control:
+        row = _row("Контрольный сайт в это же время", facts.control)
+        found.append({**row, "text": "отвечает" if row["state"] == "ok" else "не отвечает"})
+    if facts.recovered_s is not None:
+        found.append({"title": "Сайт снова ответил", "text": f"через {facts.recovered_s:.0f} с", "state": "info"})
+    elif facts.control and facts.waited_s:
+        found.append({"title": "Ждали возвращения сайта", "text": f"{facts.waited_s:.0f} с — не вернулся", "state": "warn"})
+    return found
 
 
 ADVICE_FREEZE = (

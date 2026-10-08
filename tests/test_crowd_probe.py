@@ -125,6 +125,29 @@ class CrowdTests(unittest.TestCase):
         self.assertEqual(verdict.code, cp.CROWD_UNKNOWN)
         self.assertEqual(line.asked, ["one"])
 
+    def test_rows_tell_each_connection_in_words(self) -> None:
+        # Экран коды исходов в слова не переводит: строки приходят готовыми.
+        frozen = cp.rows(_Line(freezes=True, frozen_for=120.0).collect())
+        texts = [(row["title"], row["text"], row["state"]) for row in frozen]
+
+        self.assertEqual(texts[0], ("Одно соединение до пачки", "ответило", "ok"))
+        self.assertIn(("Соединение 4 из 4 одновременных", "без ответа", "fail"), texts)
+        self.assertIn(("Одно соединение сразу после пачки", "без ответа", "fail"), texts)
+        self.assertIn(("Контрольный сайт в это же время", "отвечает", "ok"), texts)
+        self.assertEqual(texts[-1], ("Сайт снова ответил", "через 120 с", "info"))
+
+        calm = cp.rows(_Line().collect())
+        self.assertEqual(len(calm), 1 + cp.CROWD + 1)
+        self.assertEqual({row["state"] for row in calm}, {"ok"})
+
+        stuck = cp.rows(_Line(freezes=True, frozen_for=10_000.0).collect())
+        self.assertEqual((stuck[-1]["title"], stuck[-1]["state"]), ("Ждали возвращения сайта", "warn"))
+
+    def test_every_outcome_has_a_status_word(self) -> None:
+        codes = (cp.CROWD_NONE, cp.CROWD_FREEZE, cp.CROWD_STUCK, cp.CROWD_LIMIT, cp.CROWD_UNKNOWN)
+
+        self.assertEqual(set(cp.STATUS), set(codes))
+
     def test_cancel_gives_no_verdict(self) -> None:
         self.assertIsNone(cp.judge(None))
         self.assertIsNone(cp.judge(cp.CrowdFacts(HOST, IP, HELLO_OK, (HELLO_CANCELLED,) * 4, HELLO_OK)))
@@ -169,6 +192,8 @@ class SectionTests(unittest.TestCase):
         self.assertEqual(asked, ["b.example"])
         self.assertEqual((result["state"], result["level"], result["label"]), (cp.CROWD_NONE, "ok", "B"))
         self.assertEqual(result["crowd"], [HELLO_OK] * 4)
+        self.assertEqual(result["status"], "Не замирает")
+        self.assertEqual(len(result["rows"]), 6)
         self.assertTrue(any("Несколько соединений сразу" in line for line in lines))
 
     def test_probe_is_not_run_with_a_bypass_working(self) -> None:
