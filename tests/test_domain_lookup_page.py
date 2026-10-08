@@ -99,6 +99,16 @@ class DomainLookupPageTests(unittest.TestCase):
         page._on_stage(999, _report(target="old.example"))
         self.assertIsNone(page._report)
 
+        # Промежуточные ответы идут десятками: экран перерисовывается один раз, последним из них.
+        page._lane.runtime.is_current = lambda *_a, **_k: True
+        shown: list = []
+        with patch.object(page, "_show_report", shown.append):
+            for name in ("a.example", "b.example", "c.example"):
+                page._on_stage(5, _report(target=name))
+            self.assertEqual(shown, [])
+            page._flush_stage()
+        self.assertEqual([item.target for item in shown], ["c.example"])
+
         # Итог: карточки видны, таблица заполнена, заглушка помечена.
         page._on_finished(_report())
         self.assertFalse(page._running)
@@ -171,3 +181,27 @@ class DomainLookupPageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RowsViewReuseTests(unittest.TestCase):
+    def test_only_changed_groups_are_rebuilt(self) -> None:
+        from PyQt6.QtWidgets import QApplication
+
+        from dns import domain_lookup_plans as plans
+        from dns.ui.domain_lookup_page import RowsView
+
+        _app = QApplication.instance() or QApplication([])
+
+        def group(title: str, count: int):
+            return plans.RowGroup(title, tuple(plans.Row("ok", f"строка {n}", "значение") for n in range(count)))
+
+        view = RowsView()
+        view.show_groups((group("Первая", 3), group("Вторая", 2)))
+        first, second = list(view._blocks)
+
+        # Вторая группа выросла: первая остаётся тем же виджетом, пересобирается только вторая.
+        view.show_groups((group("Первая", 3), group("Вторая", 5)))
+
+        self.assertIs(view._blocks[0], first)
+        self.assertIsNot(view._blocks[1], second)
+        self.assertEqual(len(view.groups()[1].rows), 5)

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel,
@@ -111,18 +111,26 @@ class RowsView(QWidget):
         groups = tuple(groups)
         if groups == self._shown:
             return
-        self._shown = groups
-        for block in self._blocks:
+        # Перестраивается только то, что изменилось: строка — это несколько виджетов,
+        # и пересборка всех групп на каждый новый ответ подвешивала окно.
+        same = 0
+        while same < min(len(groups), len(self._shown)) and groups[same] == self._shown[same]:
+            same += 1
+        for block in self._blocks[same:]:
             self._layout.removeWidget(block)
             block.deleteLater()
-        self._blocks = []
-        for group in groups:
+        self._blocks = self._blocks[:same]
+        self._shown = groups
+        for group in groups[same:]:
             section = Section(group.title, tuple(Line(row.state, row.name, row.text) for row in group.rows))
             block = _SectionBlock(section, self, icon=self._icon)
             self._layout.addWidget(block)
             self._blocks.append(block)
         set_state_text(self, "; ".join(f"{group.title}: строк {len(group.rows)}" for group in groups) or "нет данных")
 
+
+# Как часто экран перерисовывается, пока идут промежуточные ответы.
+STAGE_REDRAW_MS = 300
 
 HISTORY_TITLE = "Прошлые проверки"
 HISTORY_SHOWN = 20
@@ -153,6 +161,10 @@ class DomainLookupPage(BasePage):
         self._dns = dns_feature
         self._closed = False
         self._report = None
+        self._pending_stage = None
+        self._stage_timer = QTimer(self)
+        self._stage_timer.setSingleShot(True)
+        self._stage_timer.timeout.connect(self._flush_stage)
         # Что сейчас показано в поле соседей: сравниваем с этой строкой, а не читаем текст обратно из поля.
         self._running = False
         self._lane = LatestWorkerLane(
@@ -396,7 +408,15 @@ class DomainLookupPage(BasePage):
     def _on_stage(self, request_id: int, report) -> None:
         if not self._lane.runtime.is_current(request_id, cleanup_in_progress=self._closed):
             return
-        self._show_report(report)
+        # Ответы приходят десятками за секунду; экран обновляется не чаще раза в STAGE_REDRAW_MS.
+        self._pending_stage = report
+        if not self._stage_timer.isActive():
+            self._stage_timer.start(STAGE_REDRAW_MS)
+
+    def _flush_stage(self) -> None:
+        report, self._pending_stage = self._pending_stage, None
+        if report is not None and not self._closed:
+            self._show_report(report)
 
     def set_history(self, runs) -> None:
         """Показывает прошлые проверки (от старых к новым, как они лежат в настройках)."""
@@ -415,6 +435,8 @@ class DomainLookupPage(BasePage):
         self._remember(report)
         if self._closed:
             return
+        self._stage_timer.stop()
+        self._pending_stage = None
         self._show_report(report)
         self.stop_button.setEnabled(True)
         self._set_running(False)
@@ -481,6 +503,7 @@ class DomainLookupPage(BasePage):
 
     def cleanup(self) -> None:
         self._closed = True
+        self._stage_timer.stop()
         self._lane.close()
         super().cleanup()
 
