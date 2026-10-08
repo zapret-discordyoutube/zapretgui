@@ -722,9 +722,6 @@ def run_blockcheck(
             )
         emit("⏳ Проверяем так же, как браузер: TLS 1.3, правильные адреса сайтов…")
 
-        # Список реестра РКН обновляется в стороне; к концу проверки берём то, что успело.
-        registry_wait = sections.start_registry()
-
         # Звонки и обрыв на 16 КБ проверяются всегда: режим меняет только список сайтов.
         voice_future = run.submit(check_voice, run.submit, _wait_plain)
         burst_future = run.submit(sections.check_udp_burst, run)
@@ -753,11 +750,15 @@ def run_blockcheck(
         )
         ipv6_future = run.submit(sections.check_ipv6, run)
         system_future = run.submit(sections.check_system, run, services, zapret_running)
-        dns_future = run.submit(check_dns_servers, should_stop=run.dns_cancelled) if full and check_dns_servers else None
 
         collected = _run_probes(
             run, services, full=True, emit=emit, on_done=lambda done, total: step(STEP_SITES, done, total)
         )
+        # Тяжёлое идёт по очереди, а не разом с сайтами: проверка DNS-серверов — это сотни
+        # своих соединений, сборка списка реестра РКН — секунды счёта. Вместе с сайтами
+        # они забирали процессор у окна программы, и оно замирало.
+        dns_future = run.submit(check_dns_servers, should_stop=run.dns_cancelled) if full and check_dns_servers else None
+        registry_wait = sections.start_registry()
 
         ipv6 = _settle(run, ipv6_future, emit, "IPv6")
         step(STEP_IPV6)

@@ -106,3 +106,47 @@ class UiFreezeWatchdogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BusyThreadsReportTests(unittest.TestCase):
+    def test_freeze_message_names_what_other_threads_are_doing(self) -> None:
+        # Заморозку обычно вызывает чужой поток: в сообщении должно быть видно, чем он занят,
+        # причём потоки, стоящие в одной строке кода, идут одной записью со счётчиком.
+        import threading
+
+        from ui import ui_freeze_watchdog as module
+
+        import time
+
+        gate = threading.Lock()
+        gate.acquire()
+        started = threading.Semaphore(0)
+
+        def crunch() -> None:
+            started.release()
+            gate.acquire()
+            gate.release()
+
+        workers = [threading.Thread(target=crunch, name=f"числодробилка-{n}") for n in range(3)]
+        for worker in workers:
+            worker.start()
+        try:
+            for _worker in workers:
+                started.acquire()
+            # Все трое должны дойти до одной и той же строки — ожидания замка.
+            time.sleep(0.05)
+            text = module._format_busy_threads()
+        finally:
+            gate.release()
+            for worker in workers:
+                worker.join()
+
+        lines = [line for line in text.splitlines() if "crunch" in line]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("3 потоков", lines[0])
+
+        logged: list[str] = []
+        watchdog = module.UiFreezeWatchdog(log_fn=lambda message, _level: logged.append(message))
+        watchdog._busy_threads_fn = lambda: "  поток: файл.py:1 работа"
+        watchdog._report_freeze_started(3.0)
+        self.assertIn("Занятые фоновые потоки", logged[0])

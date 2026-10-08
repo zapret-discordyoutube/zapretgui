@@ -68,10 +68,14 @@ def _format_gui_stack() -> str:
 _IDLE_THREAD_FUNCTIONS = frozenset({"wait", "get", "sleep", "select", "_worker", "run_forever", "_run_once"})
 
 
+# Сколько мест в коде перечислять в сообщении о заморозке.
+_BUSY_LINES_LIMIT = 20
+
+
 def _format_busy_threads() -> str:
     """Чем заняты остальные потоки: по одной строке на поток.
 
-    Нужно jitter-режиму. Когда стек GUI-потока кончается на app.exec(), сам
+    Когда стек GUI-потока кончается на app.exec(), сам
     он питоновский код не выполняет: либо работает Qt (отрисовка), либо ждёт
     GIL, который держит фоновый поток. Отличить одно от другого можно только
     увидев, что в этот момент исполняют остальные.
@@ -82,11 +86,13 @@ def _format_busy_threads() -> str:
 
     skip = {gui_thread_id(), threading.get_ident()}
     names = {thread.ident: thread.name for thread in threading.enumerate()}
-    lines: list[str] = []
     try:
         frames = sys._current_frames()
     except Exception:
         return ""
+    # Место в коде → потоки, которые там стоят. Проверки сети держат десятки
+    # потоков в одной и той же строке: по строке на поток журнал бы утонул.
+    places: dict[str, list[str]] = {}
     for ident, frame in frames.items():
         if ident in skip or frame is None:
             continue
@@ -94,9 +100,13 @@ def _format_busy_threads() -> str:
         # Потоки, спящие в ожидании задачи, шумят и ничего не объясняют.
         if code.co_name in _IDLE_THREAD_FUNCTIONS:
             continue
-        lines.append(
-            f"  {names.get(ident, ident)}: {code.co_filename}:{frame.f_lineno} {code.co_name}"
-        )
+        places.setdefault(f"{code.co_filename}:{frame.f_lineno} {code.co_name}", []).append(str(names.get(ident, ident)))
+    lines = [
+        f"  {owners[0]}: {place}" if len(owners) == 1 else f"  {len(owners)} потоков ({owners[0]}…): {place}"
+        for place, owners in sorted(places.items(), key=lambda item: -len(item[1]))
+    ]
+    if len(lines) > _BUSY_LINES_LIMIT:
+        lines = [*lines[:_BUSY_LINES_LIMIT], f"  … и ещё мест: {len(lines) - _BUSY_LINES_LIMIT}"]
     return "\n".join(lines)
 
 
@@ -274,8 +284,8 @@ class UiFreezeWatchdog(QObject):
 
     def _busy_threads_tail(self) -> str:
         """Хвост сообщения о рывке: какие фоновые потоки работали в этот момент."""
-        if not self._is_jitter_mode():
-            return ""
+        # Пишется при любой заморозке, не только в режиме охоты за рывками: полный
+        # дамп потоков снимается лишь с пяти секунд, а первое сообщение приходит раньше.
         try:
             busy = str(self._busy_threads_fn() or "")
         except Exception:
