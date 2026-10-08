@@ -387,14 +387,16 @@ DNS_PROVIDERS = {
         # гео-ограничением (ChatGPT, Claude, Gemini, Spotify и другие из каталога
         # hosts) отдаёт со своим адресом и сам пересылает соединение на настоящий
         # сайт; остальные имена — настоящий ответ, без фильтров. Список имён —
-        # /etc/zapret-dns/zones.txt на сервере. Шифрованный DNS появится вместе
-        # с именем dns.zapret.moe: тогда добавить "doh" и "dot".
+        # /etc/zapret-dns/zones.txt на сервере. Шифрованный DNS — по имени
+        # dns.zapret.moe: DoH на общем порту 443, DoT на 853 (проверено 2026-10-09).
         "Zapret DNS": {
             "ipv4": ["144.31.82.230"],
             "ipv6": ["2a01:ecc0:500:8e::2"],
             "desc": "Нейросети и Spotify",
             "icon": "fa5s.rocket",
             "color": "#60CDFF",
+            "doh": "https://dns.zapret.moe/dns-query",
+            "dot": "dns.zapret.moe",
             "dnssec": True,
         },
         # Кроме подмены адресов сайтов ИИ, рекламные имена отдаёт пустым адресом
