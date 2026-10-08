@@ -139,6 +139,7 @@ CDN_FRONT_DCS: tuple[int, ...] = (1, 2, 3, 4, 5)
 TUNNEL_HOSTS: tuple[str, ...] = (
     "edge.amberwick.workers.dev",
     "fuckyourkn.copperbrook.workers.dev",
+    "nodeone.brackencombe.workers.dev",
 )
 
 
