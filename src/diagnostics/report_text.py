@@ -376,9 +376,21 @@ def service_roads(probes, dns_note: str = "") -> list[dict]:
     return roads
 
 
+# Как именно блокируют — коротким словом для метки (код из ``block_cause``).
+_CAUSE_WORDS = {
+    "by_name": "блокировка по имени",
+    "name_whitelist": "проходят только разрешённые имена",
+    "by_address": "закрыт адрес",
+    "stub_page": "страница провайдера",
+    "address_closed": "адрес закрыт",
+    "address_silent": "адрес молчит",
+}
+
+
 def service_tags(service, probes) -> list[dict]:
     """Метки сайта о том, чего в дорогах нет. Метку реестра РКН дописывает ``registry.annotate``."""
-    tags = []
+    causes = dict.fromkeys(_CAUSE_WORDS[probe.cause.code] for probe in probes if probe.cause is not None and probe.cause.code in _CAUSE_WORDS)
+    tags = [{"key": "cause", "text": word, "state": "fail"} for word in causes]
     if any(probe.volume is not None and probe.volume.code == volume_probe.VOLUME_CUT for probe in probes):
         tags.append({"key": "cut16", "text": "обрыв на 16 КБ", "state": "warn"})
     if any(probe.hosts_stale for probe in probes):

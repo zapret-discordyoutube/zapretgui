@@ -795,6 +795,34 @@ class SiteWordsComeFromTheReportTests(unittest.TestCase):
         self.assertEqual(discord["level"], "fail")
         self.assertNotIn(discord["status"], ("Открывается", "Есть проблемы", ""))
 
+    def test_way_of_blocking_is_a_ready_tag(self) -> None:
+        # Раньше слово «блокировка по имени» для шапки и подсказок собирал экран по коду причины.
+        bc = engine.block_cause
+        net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_RESET, stage="tls"))
+        net.cause_facts = lambda host, result: bc.CauseFacts(
+            host=host,
+            result=result,
+            neutral=bc.HelloResult(bc.HELLO_OK),
+            nameless=bc.HelloResult(bc.HELLO_RESET),
+            real_again=bc.HelloResult(bc.HELLO_RESET),
+        )
+        discord = self._discord(net.run(engine.run_blockcheck, "full", emit=lambda _line: None))
+        causes = [tag for tag in discord["tags"] if tag["key"] == "cause"]
+
+        self.assertEqual({target["cause"] for target in discord["targets"]}, {"by_name"})
+        self.assertEqual(causes, [{"key": "cause", "text": "блокировка по имени", "state": "fail"}])
+
+    def test_single_site_check_carries_the_same_words_and_the_registry_tag(self) -> None:
+        # «Проверка домена» показывает ту же карточку: слова и метка реестра должны быть и там.
+        net = _Net()
+        net.registry = engine.registry.Index(hosts=engine.registry.build_hosts(["example.org"])[0], updated=1000.0)
+        net.protocol_facts = self._protocols(engine.block_cause.HELLO_OK, engine.block_cause.HELLO_OK, engine.block_cause.HELLO_OK)
+        site = net.run(engine.check_site, "example.org")
+
+        self.assertEqual(site["status"], "Открывается")
+        self.assertTrue(site["roads"])
+        self.assertIn({"key": "registry", "text": "в реестре РКН", "state": "info"}, site["tags"])
+
     def test_control_and_registry_tags(self) -> None:
         net = _Net()
         net.registry = engine.registry.Index(hosts=engine.registry.build_hosts(["discord.com"])[0], updated=1000.0)
