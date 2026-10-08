@@ -787,27 +787,41 @@ def _filter_card(place: dict) -> Card:
     )
 
 
-_WAY_STATES = {"passed": (OK, "проходит"), "cut": (FAIL, "режется"), "unstable": (UNKNOWN, "через раз"), "no_control": (UNKNOWN, "сервер такое не принимает")}
+_WAY_STATES = {"passed": OK, "cut": FAIL}
+_HABIT_STATUS = {
+    "tcp": "Не склеивает пакеты",
+    "timer": "Склеивает только подряд",
+    "records": "Не разбирает записи TLS",
+    "none": "Собирает приветствие целиком",
+    "not_by_name": "По имени не режет",
+}
 
 
 def _habits_card(habits: dict) -> Card:
     """«Как работает фильтр»: какое дробление приветствия проходит и режется ли ECH."""
     ech = habits.get("ech") or {}
     ech_state = {"blocked": WARN, "fine": OK}.get(str(ech.get("state")), UNKNOWN)
-    lines = [Line(INFO, _capital(str(habits.get("headline") or "")))]
+    from diagnostics.filter_habits import NOT_RUN, way_text
+
+    disturbed = [str(name) for name in habits.get("disturbed") or ()]
+    lines = [Line(WARN if disturbed else INFO, _capital(str(habits.get("headline") or "")))]
     if habits.get("advice"):
-        lines.append(Line(INFO, "Какие стратегии пробовать", str(habits["advice"])))
+        lines.append(Line(INFO, "Что делать" if disturbed else "Какие стратегии пробовать", str(habits["advice"])))
     if ech.get("text"):
         lines.append(Line(ech_state, "ECH", _capital(str(ech["text"]))))
-    sections = []
+    sections = [Section("Что делает фильтр", tuple(lines[:2]))]
     for site in habits.get("sites") or ():
         rows = [Line(INFO, "Вывод", _capital(str(site.get("text") or "")))]
         if site.get("advice"):
             rows.append(Line(INFO, "Какие стратегии пробовать", str(site["advice"])))
         for way in site.get("ways") or ():
-            state, word = _WAY_STATES.get(str(way.get("state")), (UNKNOWN, ""))
-            rows.append(Line(state, str(way.get("title") or ""), word))
+            if way.get("state") == NOT_RUN:
+                continue
+            # Строка способа: что вышло с именем сайта, что с безобидным именем и что это значит.
+            rows.append(Line(_WAY_STATES.get(str(way.get("state")), UNKNOWN), str(way.get("title") or ""), way_text(way)))
         sections.append(Section(f"{site.get('host', '')} ({site.get('address', '')})", tuple(rows)))
+    if habits.get("sites") and habits.get("limits"):
+        sections.append(Section("Чего эта проверка не видит", (Line(INFO, str(habits["limits"])),)))
     if ech.get("text"):
         rows = [Line(ech_state, "Шифрованное имя сайта (ECH)", _capital(str(ech["text"])))]
         if ech.get("advice"):
@@ -817,11 +831,25 @@ def _habits_card(habits: dict) -> Card:
         key="habits",
         icon="fa5s.cut",
         title="Как работает фильтр",
-        level=WARN if ech_state == WARN else INFO,
-        status="ECH режется" if ech_state == WARN else ("Проверено дробление" if habits.get("sites") else "ECH проходит"),
+        level=WARN if ech_state == WARN or disturbed else INFO,
+        status=_habits_status(habits, disturbed, ech_state),
         lines=tuple(lines),
         sections=tuple(sections),
     )
+
+
+def _habits_status(habits: dict, disturbed: list[str], ech_state: str) -> str:
+    """Слово результата на карточке: вывод о фильтре, если он один на все сайты."""
+    if disturbed:
+        return "Мешает обход"
+    codes = {str(site.get("code")) for site in habits.get("sites") or ()} - {"unknown"}
+    if len(codes) == 1:
+        return _HABIT_STATUS.get(codes.pop(), "Проверено дробление")
+    if len(codes) > 1:
+        return "По сайтам по-разному"
+    if habits.get("sites"):
+        return "Вывода нет"
+    return "ECH режется" if ech_state == WARN else "ECH проходит"
 
 
 def _network_card(network: dict) -> Card:

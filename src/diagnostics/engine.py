@@ -834,7 +834,9 @@ def run_blockcheck(
             else None
         )
         extra = full and not run.dns_cancelled()
-        habits = _attempt(emit, "Как работает фильтр", lambda: sections.check_filter_habits(run, collected, emit)) if extra else None
+        local = (["Zapret"] if zapret_running else []) + list(other_tools)
+        habits_call = functools.partial(sections.check_filter_habits, run, collected, emit, tools=local)
+        habits = _attempt(emit, "Как работает фильтр", habits_call) if extra else None
         if full:
             step(STEP_FILTER)
         speed = _attempt(emit, "Скорость", lambda: sections.check_speed(run, emit)) if full and not run.dns_cancelled() else None

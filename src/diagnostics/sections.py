@@ -458,15 +458,28 @@ def check_udp_burst(run: Run) -> udp_burst.BurstVerdict | None:
 
 
 HABIT_SITES = 3
+# Срок одной пробы дробления: их десятки подряд к одному адресу, а «молчание» фильтра видно и за три секунды.
+HABIT_TIMEOUT_S = 3.0
 ECH_HOST = "www.cloudflare.com"
 
 
-def check_filter_habits(run: Run, collected: dict[str, list[Probe]], emit: Emit) -> dict | None:
-    """Как работает фильтр: какое дробление приветствия проходит и режется ли ECH."""
+def check_filter_habits(run: Run, collected: dict[str, list[Probe]], emit: Emit, *, tools=()) -> dict | None:
+    """Как работает фильтр: какое дробление приветствия проходит и режется ли ECH.
+
+    ``tools`` — запущенные Zapret, VPN и другие программы обхода: пробы идут через
+    них, поэтому вывод помечается как «сеть вместе с обходом».
+    """
     from diagnostics import block_cause, browser_hello
 
     def _send(ip: str, parts: tuple[bytes, ...], pause: float) -> str:
-        return browser_hello.send_parts(ip, parts, pause=pause, cancel=run.probe_cancel).kind
+        return browser_hello.send_parts(
+            ip, parts, pause=pause, timeout=HABIT_TIMEOUT_S, cancel=run.probe_cancel
+        ).kind
+
+    def _rest(seconds: float) -> None:
+        # Передышка между соединениями к одному адресу; «Стоп» её не ждёт.
+        if not run.dns_cancelled():
+            time.sleep(seconds)
 
     probes = [probe for items in collected.values() for probe in items]
     # Дробление сравнивается только там, где блокировка по имени уже доказана.
@@ -483,12 +496,12 @@ def check_filter_habits(run: Run, collected: dict[str, list[Probe]], emit: Emit)
         return None
     ech_future = run.submit(filter_habits.check_ech, cloudflare.reach.ip, send=_send) if cloudflare is not None else None
     split_futures = [
-        run.submit(filter_habits.check_split, probe.host, ip, send=_send, submit=run.submit)
+        run.submit(filter_habits.check_split, probe.host, ip, send=_send, pause=_rest)
         for ip, probe in list(blocked.items())[:HABIT_SITES]
     ]
     splits = [verdict for verdict in (filter_habits.judge_split(run.wait(future)) for future in split_futures) if verdict is not None]
     ech = filter_habits.judge_ech(run.wait(ech_future) if ech_future is not None else None)
-    report = filter_habits.summarize(splits, ech)
+    report = filter_habits.summarize(splits, ech, tools=tools)
     if report is None:
         return None
     for line in filter_habits.lines(report):
