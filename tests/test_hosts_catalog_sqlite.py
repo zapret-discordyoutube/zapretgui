@@ -81,7 +81,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertFalse(
             (PROJECT_ROOT / "private_zapretgui" / "resources" / "json" / "hosts_catalog").exists()
         )
-        self.assertEqual(catalog.catalog_version, "2026.10.08.4")
+        self.assertEqual(catalog.catalog_version, "2026.10.08.5")
         # У каждого сервиса свой значок, а не запасной глобус.
         self.assertEqual(
             [name for name, (icon, _color) in catalog.service_icons.items() if icon == "fa5s.globe"],
@@ -113,7 +113,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
         self.assertEqual(catalog.service_icons["Grok"], ("own:grok:GR", None))
         self.assertEqual(len(catalog.content_sha256), 64)
         self.assertEqual(len(catalog.service_order), 73)
-        self.assertEqual(len(catalog.dns_profiles), 5)
+        self.assertEqual(len(catalog.dns_profiles), 6)
         for removed in ("xbox_dns_old", "malw_dns", "malw_dns_v2"):
             self.assertNotIn(removed, catalog.dns_profiles)
         self.assertNotIn("fin_dns", catalog.dns_profiles)
@@ -131,7 +131,7 @@ class HostsCatalogSqliteTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA application_id").fetchone()[0], CATALOG_APPLICATION_ID)
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], CATALOG_SCHEMA_VERSION)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM domains").fetchone()[0], 786)
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 3767)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM dns_answers").fetchone()[0], 3968)
             self.assertIsNone(
                 connection.execute(
                     "SELECT 1 FROM dns_profiles WHERE profile_id = 'fin_dns'"
@@ -193,6 +193,50 @@ class HostsCatalogSqliteTests(unittest.TestCase):
                 self.assertEqual(chatgpt_ip[0], (proxy_ip,), profile_id)
         finally:
             connection.close()
+
+    def test_dns_ai_profile_covers_only_services_its_node_opens(self) -> None:
+        """DNS-AI ведёт через свой узел 27 имён; узел для Google из России не открывался."""
+        connection = sqlite3.connect(PRIVATE_DATABASE)
+        try:
+            services = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT DISTINCT d.service_id FROM dns_answers a"
+                    " JOIN domains d USING(domain_id) WHERE a.profile_id = 'dns_ai'"
+                )
+            }
+            self.assertEqual(
+                services,
+                {
+                    "dns.chatgpt_and_sora_openai",
+                    "dns.claude",
+                    "dns.grok",
+                    "dns.microsoft_copilot_designer_xbox",
+                    "dns.manus",
+                },
+            )
+            first = dict(
+                connection.execute(
+                    "SELECT d.hostname, a.ip_address FROM dns_answers a JOIN domains d USING(domain_id)"
+                    " WHERE a.profile_id = 'dns_ai' AND a.priority = 0"
+                )
+            )
+            for host in ("chatgpt.com", "api.openai.com", "claude.ai", "grok.com", "copilot.microsoft.com", "manus.im"):
+                self.assertEqual(first[host], "62.60.230.61", host)
+            # Имя, которое DNS-AI через узел не ведёт, держит настоящий адрес сайта.
+            self.assertNotEqual(first["console.anthropic.com"], "62.60.230.61")
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM dns_answers WHERE ip_address = '191.44.41.215'"
+                ).fetchone()[0],
+                0,
+            )
+        finally:
+            connection.close()
+
+        self.proxy_domains.invalidate_hosts_catalog_cache()
+        self.assertIn("dns_ai", self.proxy_domains.get_service_available_dns_profiles("Claude"))
+        self.assertNotIn("dns_ai", self.proxy_domains.get_service_available_dns_profiles("Gemini AI"))
 
     def test_githubusercontent_service_has_ipv6_and_ipv4_for_every_host(self) -> None:
         connection = sqlite3.connect(PRIVATE_DATABASE)

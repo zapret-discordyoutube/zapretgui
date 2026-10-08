@@ -22,6 +22,7 @@ _SAME_SERVER_IN_HOSTS = {
     "Comss DNS": "comss_dns",
     "AstraCat": "astracat",
     "GeoHide": "geohide",
+    "DNS-AI": "dns_ai",
 }
 
 
