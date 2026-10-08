@@ -782,6 +782,18 @@ class LightAndFittingTests(unittest.TestCase):
         self.assertTrue(panel.compare_band.headline().startswith("Неточно — работал VPN"))
         self.assertIn(compare["headline"], panel.compare_band.headline())
         panel.compare_band.grab()
+        # VPN запущены, но интернет идёт мимо них: проверка описывает провайдера — строка спокойная,
+        # а сравнению верить можно.
+        aside = {"problems": [], "compare": {**compare, "disturbed": False}, "other_bypass_tools": ["sing-box", "WireGuard"], "tools_in_path": []}
+        panel.show_report(aside)
+        self.assertFalse(panel.bypass_label.isHidden())
+        self.assertIn("интернет идёт напрямую, мимо них", panel.bypass_label.text())
+        self.assertNotIn("Внимание", panel.bypass_label.text())
+        self.assertEqual(panel.compare_band.headline(), compare["headline"])
+        # На дороге проверки стоит только одна из запущенных — называем её, и сравнение помечает сама проверка.
+        panel.show_report({**aside, "tools_in_path": ["WireGuard"], "compare": {**compare, "disturbed": True}})
+        self.assertIn("Внимание: во время проверки работали WireGuard.", panel.bypass_label.text())
+        self.assertTrue(panel.compare_band.headline().startswith("Неточно"))
         # Новая проверка предупреждение снимает.
         panel.set_pending()
         self.assertTrue(panel.bypass_label.isHidden())

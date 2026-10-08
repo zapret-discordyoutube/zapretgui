@@ -42,7 +42,7 @@ from ui.widgets.columns_flow import ColumnsFlow
 from ui.widgets.hover_hint import HoverHint
 from ui.widgets.reveal import Reveal
 from ui.widgets.stagger_float_in import float_in
-from ui.widgets.tone_group import ToneDot, ToneGroup, dot_on_first_line, mute
+from ui.widgets.tone_group import MUTED_TEXT, ToneDot, ToneGroup, dot_on_first_line, mute
 
 ActionHandler = Callable[[str, str], None]
 # Открыть полный отчёт по карточке: получает её ключ («site:youtube», «hostings» …).
@@ -589,6 +589,17 @@ def bypass_warning(tools) -> str:
     return (
         f"Внимание: во время проверки работали {', '.join(names)}. Итог показывает сеть вместе с ними, "
         "а не то, что делает провайдер. Чтобы увидеть настоящую картину, остановите их и повторите проверку."
+    )
+
+
+def bypass_note(tools) -> str:
+    """Спокойная строка: VPN запущены, но интернет идёт мимо них. Пусто — их нет."""
+    names = [str(name) for name in tools or () if str(name).strip()]
+    if not names:
+        return ""
+    return (
+        f"Запущены {', '.join(names)}, но интернет идёт напрямую, мимо них: проверка описывает сеть провайдера. "
+        "Браузер и приложения при этом могут ходить через них и открывать то, что здесь закрыто."
     )
 
 
@@ -1217,15 +1228,26 @@ class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
         self._sync_min_height()
 
     def _show_bypass(self, report: dict | None) -> None:
-        """Предупреждение: во время проверки работали VPN или другие программы обхода (кроме самого Zapret)."""
-        tools = [str(name) for name in (report or {}).get("other_bypass_tools") or () if str(name).strip()]
-        text = bypass_warning(tools)
+        """Строка о VPN и программах обхода, запущенных во время проверки (кроме самого Zapret).
+
+        Тревожная — только когда программа стоит на дороге проверки: тогда итог описывает
+        сеть вместе с ней. Запущена, но интернет идёт мимо — спокойная строка: проверка
+        честно показывает провайдера, просто браузер может ходить иначе.
+        """
+        report = report or {}
+        running = [str(name) for name in report.get("other_bypass_tools") or () if str(name).strip()]
+        # У отчётов до появления «на дороге» этого ключа нет: считаем, как раньше, что мешают все.
+        in_path = [str(name) for name in report.get("tools_in_path", running) or () if str(name).strip()]
+        text = bypass_warning(in_path) or bypass_note(running)
         self.bypass_label.setText(text)
         self.bypass_label.setVisible(bool(text))
         if text:
-            color = QColor(tone_color("warning") or "#d99a4e")
-            self.bypass_label.setTextColor(color, color)
-        self.compare_band.set_unreliable(bool(tools))
+            warning = QColor(tone_color("warning") or "#d99a4e")
+            # Порядок цветов — светлая тема, затем тёмная.
+            self.bypass_label.setTextColor(warning if in_path else MUTED_TEXT[0], warning if in_path else MUTED_TEXT[1])
+        compare = report.get("compare")
+        disturbed = compare.get("disturbed") if isinstance(compare, dict) and "disturbed" in compare else bool(in_path)
+        self.compare_band.set_unreliable(bool(disturbed))
 
     def _show_changes(self, report: dict | None) -> None:
         changes = [str(item) for item in (report or {}).get("changes") or ()]
