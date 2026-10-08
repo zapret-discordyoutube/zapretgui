@@ -9,12 +9,16 @@ from __future__ import annotations
 самоподписанные, поэтому такой ответ слабее ответа Forgejo — он используется
 только когда Forgejo недоступен.
 
-Зеркала опрашиваются параллельно, первый корректный ответ побеждает. Мёртвое
-зеркало не задерживает остальные и не «застревает» выбранным.
+Зеркала опрашиваются одновременно. Первый корректный ответ не побеждает
+сразу: остальным даётся короткое время ответить, и берётся самая новая
+версия. Иначе отставшее зеркало, ответив первым, выдало бы старый выпуск за
+новейший. Мёртвое зеркало никого не задерживает дольше этого времени.
 """
 
+import queue
+import threading
 import time
-from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import urllib3
@@ -25,11 +29,13 @@ from ..channel_utils import is_dev_update_channel, normalize_update_channel
 from ..network_hints import maybe_log_disable_dpi_for_update
 from ..release_contract import ReleaseArtifactMetadata
 from ..server_config import VPS_SERVERS, should_verify_ssl
-from ..versions import normalize_version
-from .http import MIRROR_TIMEOUT, first_success, new_session, short_error
+from ..versions import normalize_version, version_key
+from .http import MIRROR_TIMEOUT, Outcome, new_session, short_error
 
 
 MIRRORS_DEADLINE_SECONDS = 20.0
+# Сколько ждать остальные зеркала после первого корректного ответа.
+MIRRORS_SETTLE_SECONDS = 1.5
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -117,22 +123,19 @@ def release_from_versions(
     return release
 
 
-def _mirror_job(server: dict[str, Any], channel: str) -> Callable[[], dict[str, Any]]:
-    def job() -> dict[str, Any]:
-        name = str(server.get("name") or server.get("host"))
-        try:
-            data, protocol, base_url, verify_ssl, _elapsed = fetch_versions(server)
-            return release_from_versions(
-                data,
-                channel,
-                base_url=base_url,
-                verify_ssl=verify_ssl,
-                source=f"{name} ({protocol})",
-            )
-        except Exception as exc:
-            raise MirrorReleaseError(f"{name}: {short_error(exc)}") from exc
-
-    return job
+def _ask(server: dict[str, Any], channel: str) -> dict[str, Any]:
+    name = str(server.get("name") or server.get("host"))
+    try:
+        data, protocol, base_url, verify_ssl, _elapsed = fetch_versions(server)
+        return release_from_versions(
+            data,
+            channel,
+            base_url=base_url,
+            verify_ssl=verify_ssl,
+            source=f"{name} ({protocol})",
+        )
+    except Exception as exc:
+        raise MirrorReleaseError(f"{name}: {short_error(exc)}") from exc
 
 
 def fetch_latest_release(
@@ -140,38 +143,75 @@ def fetch_latest_release(
     *,
     servers: list[dict[str, Any]] | None = None,
     timeout: float = MIRRORS_DEADLINE_SECONDS,
+    settle: float = MIRRORS_SETTLE_SECONDS,
 ) -> dict[str, Any]:
-    """Первый корректный выпуск канала от любого зеркала."""
+    """Самый новый выпуск канала среди ответивших зеркал."""
     selected = servers if servers is not None else mirror_servers()
     if not selected:
         raise MirrorReleaseError("зеркала не настроены")
-    release, errors = first_success(
-        [_mirror_job(server, channel) for server in selected],
-        timeout=timeout,
-        name="update-mirror",
-    )
-    if release is not None:
-        log(f"✅ Зеркало {release['source']}: выпуск {release['version']}", "🔄 RELEASE")
-        return release
-    reasons = "; ".join(str(error) for error in errors) or "нет ответа за отведённое время"
-    raise MirrorReleaseError(reasons)
+    answers: queue.Queue[tuple[int, Outcome[dict[str, Any]]]] = queue.Queue()
+
+    def run(index: int, server: dict[str, Any]) -> None:
+        try:
+            answers.put((index, Outcome(value=_ask(server, channel))))
+        except BaseException as exc:  # noqa: BLE001 — итог передаётся ждущему
+            answers.put((index, Outcome(error=exc)))
+
+    for index, server in enumerate(selected):
+        threading.Thread(target=run, args=(index, server), name=f"update-mirror-{index}", daemon=True).start()
+
+    deadline = time.monotonic() + float(timeout)
+    releases: dict[int, dict[str, Any]] = {}
+    errors: list[str] = []
+    for _ in selected:
+        try:
+            index, outcome = answers.get(timeout=max(deadline - time.monotonic(), 0.0))
+        except queue.Empty:
+            break
+        if not outcome.ok:
+            errors.append(str(outcome.error))
+            continue
+        if not releases:
+            deadline = min(deadline, time.monotonic() + float(settle))
+        releases[index] = outcome.value or {}
+
+    if not releases:
+        raise MirrorReleaseError("; ".join(errors) or "нет ответа за отведённое время")
+    # При равных версиях — зеркало, стоящее раньше в конфигурации сборки.
+    _index, release = max(releases.items(), key=lambda item: (version_key(item[1]["version"]), -item[0]))
+    log(f"✅ Зеркало {release['source']}: выпуск {release['version']}", "🔄 RELEASE")
+    return release
 
 
-def download_sources(file_name: str) -> list[tuple[str, bool]]:
-    """Адреса того же файла на зеркалах: сначала HTTPS всех зеркал, затем HTTP."""
-    https = [
-        (f"https://{server['host']}:{server['https_port']}/download/{file_name}", bool(should_verify_ssl()))
+@dataclass(frozen=True, slots=True)
+class MirrorDownload:
+    """Адреса одного файла на одном зеркале: основной HTTPS и запасной HTTP."""
+
+    name: str
+    host: str
+    https_url: str
+    http_url: str
+    verify_ssl: bool
+
+
+def download_sources(file_name: str) -> list[MirrorDownload]:
+    """Адреса файла выпуска на каждом зеркале, в порядке из конфигурации сборки."""
+    return [
+        MirrorDownload(
+            name=str(server.get("name") or server["host"]),
+            host=str(server["host"]),
+            https_url=f"https://{server['host']}:{server['https_port']}/download/{file_name}",
+            http_url=f"http://{server['host']}:{server['http_port']}/download/{file_name}",
+            verify_ssl=bool(should_verify_ssl()),
+        )
         for server in VPS_SERVERS
     ]
-    http = [
-        (f"http://{server['host']}:{server['http_port']}/download/{file_name}", False)
-        for server in VPS_SERVERS
-    ]
-    return https + http
 
 
 __all__ = [
     "MIRRORS_DEADLINE_SECONDS",
+    "MIRRORS_SETTLE_SECONDS",
+    "MirrorDownload",
     "MirrorReleaseError",
     "download_sources",
     "fetch_latest_release",

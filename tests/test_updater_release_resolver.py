@@ -192,17 +192,44 @@ class MirrorReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(mirrors.MirrorReleaseError, "VPS 1.*VPS 2|VPS 2.*VPS 1"):
                 mirrors.fetch_latest_release("dev", servers=self.SERVERS, timeout=2.0)
 
-    def test_download_sources_prefer_https_on_every_mirror(self) -> None:
+    def test_stale_mirror_answering_first_does_not_hide_a_newer_release(self) -> None:
+        """Раньше побеждал первый ответ: отставшее зеркало выдавало старый выпуск за новейший."""
+        stale = {"dev": {**self.VERSIONS["dev"], "version": "21.1.5.79"}}
+
+        def fetch(server: dict):
+            if server["id"] == "dead":
+                return stale, "HTTPS", f"https://{server['host']}:888", False, 0.01
+            time.sleep(0.1)
+            return self.VERSIONS, "HTTPS", f"https://{server['host']}:888", False, 0.1
+
+        with patch.object(mirrors, "fetch_versions", side_effect=fetch):
+            release = mirrors.fetch_latest_release("dev", servers=self.SERVERS, timeout=2.0)
+
+        self.assertEqual(release["version"], "21.1.5.80")
+        self.assertEqual(release["source"], "VPS 2 (HTTPS)")
+
+    def test_silent_mirror_is_not_awaited_longer_than_the_settle_time(self) -> None:
+        def fetch(server: dict):
+            if server["id"] == "dead":
+                time.sleep(5)
+            return self.VERSIONS, "HTTPS", f"https://{server['host']}:888", False, 0.01
+
+        started = time.monotonic()
+        with patch.object(mirrors, "fetch_versions", side_effect=fetch):
+            release = mirrors.fetch_latest_release("dev", servers=self.SERVERS, timeout=10.0, settle=0.2)
+
+        self.assertEqual(release["source"], "VPS 2 (HTTPS)")
+        self.assertLess(time.monotonic() - started, 2.0)
+
+    def test_download_sources_give_https_and_http_of_every_mirror(self) -> None:
         with patch.object(mirrors, "VPS_SERVERS", self.SERVERS):
             sources = mirrors.download_sources("file.exe")
 
         self.assertEqual(
-            [url for url, _verify in sources],
+            [(source.name, source.host, source.https_url, source.http_url) for source in sources],
             [
-                "https://dead.example:888/download/file.exe",
-                "https://live.example:888/download/file.exe",
-                "http://dead.example:887/download/file.exe",
-                "http://live.example:887/download/file.exe",
+                ("VPS 1", "dead.example", "https://dead.example:888/download/file.exe", "http://dead.example:887/download/file.exe"),
+                ("VPS 2", "live.example", "https://live.example:888/download/file.exe", "http://live.example:887/download/file.exe"),
             ],
         )
 
