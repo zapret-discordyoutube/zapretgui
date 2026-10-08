@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QWidget
 
 from log.log import log
 
+from ui.block_build import ensure_page_blocks, gui_build_turn
 from ui.navigation.history_controller import WindowNavigationHistory
 from ui.navigation.text_sync import apply_ui_language_to_page
 from ui.navigation.schema import (
@@ -93,6 +94,9 @@ class WindowPageHost:
         if not callable(handler):
             log(f"[PAGE_HOST] page {page_name.name} не принимает команды", "WARNING")
             return False
+        # Команда может обратиться к любому виджету страницы, в том числе из
+        # блока, который ещё не собран (см. ui.block_build).
+        ensure_page_blocks(page)
         return bool(handler(str(command or ""), dict(payload or {})))
 
     def current_page(self) -> QWidget | None:
@@ -201,7 +205,12 @@ class WindowPageHost:
             return page
 
         step_started_at = time.perf_counter()
-        created_page = self._page_factory.create_page(page_name)
+        # Рядом с занятым фоновым потоком сборка идёт в разы дольше. Сборка
+        # про запас и так ждёт своей очереди с фоновой дорожкой запуска; тут
+        # то же самое для сборки по щелчку: пока страница собирается, дорожка
+        # новую задачу не начинает.
+        with gui_build_turn():
+            created_page = self._page_factory.create_page(page_name)
         self._log_step_timing(page_name, "ensure.create", step_started_at)
         if created_page is None:
             return None

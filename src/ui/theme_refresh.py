@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import inspect
+import weakref
 
+from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QObject, QTimer
 
 from ui.theme import get_theme_tokens
@@ -17,6 +19,54 @@ def build_theme_refresh_key(tokens) -> tuple[str, str, str, str, str]:
         str(getattr(tokens, "surface_bg", "")),
         str(getattr(tokens, "surface_border", "")),
     )
+
+
+class _ThemeSignalHub:
+    """Одна подписка на сигналы темы на все привязки программы.
+
+    Раньше каждая привязка сама подключалась к двум сигналам темы и к сигналу
+    удаления своего виджета — три подключения на виджет. Подключение сигнала
+    отпускает общий замок Python, и рядом с занятым фоновым потоком каждое
+    стоит интервал переключения потоков: на странице с тридцатью привязками
+    это было заметной частью её сборки (замер: 24–30 привязок на страницу).
+
+    Здесь подключение одно на весь процесс. Привязки хранятся слабыми
+    ссылками: привязка — дочерний объект своего виджета и удаляется вместе с
+    ним, после чего её здесь просто нет. Отдельная подписка на удаление
+    виджета для этого не нужна.
+    """
+
+    def __init__(self) -> None:
+        self._bindings: weakref.WeakSet = weakref.WeakSet()
+        self._connected = False
+
+    def add(self, binding: "ThemeRefreshBinding") -> None:
+        self._bindings.add(binding)
+        if not self._connected:
+            self._connected = True
+            qconfig.themeChanged.connect(self._on_theme_signal)
+            qconfig.themeColorChanged.connect(self._on_theme_signal)
+
+    def discard(self, binding: "ThemeRefreshBinding") -> None:
+        self._bindings.discard(binding)
+
+    def __contains__(self, binding: object) -> bool:
+        return binding in self._bindings
+
+    def _on_theme_signal(self, *_args) -> None:
+        for binding in tuple(self._bindings):
+            if sip.isdeleted(binding):
+                # Виджет удалён вместе со своей привязкой.
+                self._bindings.discard(binding)
+                continue
+            try:
+                binding._on_theme_signal()
+            except RuntimeError:
+                # Виджет умер прямо во время рассылки.
+                self._bindings.discard(binding)
+
+
+_theme_signal_hub = _ThemeSignalHub()
 
 
 class ThemeRefreshBinding(QObject):
@@ -47,22 +97,10 @@ class ThemeRefreshBinding(QObject):
         except Exception:
             pass
 
-        try:
-            qconfig.themeChanged.connect(self._on_theme_signal)
-        except Exception:
-            pass
-        try:
-            qconfig.themeColorChanged.connect(self._on_theme_signal)
-        except Exception:
-            pass
-        # Автоуборка: в Nuitka-сборке PyQt не разрывает qconfig-подписки
-        # при удалении C++-объекта (receiver у compiled-method не
-        # распознаётся), поэтому отписываемся сами в момент destroyed —
-        # он приходит до удаления детей target, binding ещё жив.
-        try:
-            target.destroyed.connect(self._on_target_destroyed)
-        except Exception:
-            pass
+        # Сигналы темы привязка получает через общую рассылку: своих
+        # подключений у неё нет (см. _ThemeSignalHub). Привязка удаляется
+        # вместе с виджетом, и рассылка забывает её сама.
+        _theme_signal_hub.add(self)
 
     def eventFilter(self, watched, event):  # noqa: N802 (Qt override)
         if self._cleanup_in_progress:
@@ -124,15 +162,10 @@ class ThemeRefreshBinding(QObject):
         self._pending_force = False
         self.request_refresh(force=pending_force)
 
-    def _on_target_destroyed(self, *_args) -> None:
-        self.cleanup()
-
     def _target_is_dead(self) -> bool:
         if self._target is None:
             return True
         try:
-            from PyQt6 import sip
-
             return bool(sip.isdeleted(self._target))
         except Exception:
             return False
@@ -223,16 +256,7 @@ class ThemeRefreshBinding(QObject):
             except Exception:
                 pass
 
-        if qconfig is not None:
-            try:
-                qconfig.themeChanged.disconnect(self._on_theme_signal)
-            except Exception:
-                pass
-            try:
-                qconfig.themeColorChanged.disconnect(self._on_theme_signal)
-            except Exception:
-                pass
-
+        _theme_signal_hub.discard(self)
         self._target = None
 
 

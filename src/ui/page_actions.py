@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.page_names import PageName
+from ui.block_build import ensure_page_blocks
 from ui.window_ui_session import get_window_ui_session
 
 
@@ -16,6 +17,7 @@ def switch_page_tab(window, page_name: PageName, tab_key: str) -> bool:
     if page is None:
         return False
     try:
+        ensure_page_blocks(page)
         page.switch_to_tab(tab_key)
         return True
     except Exception:

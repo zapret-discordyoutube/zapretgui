@@ -28,6 +28,7 @@ import weakref
 from log.log import log
 
 _INSTALLED = False
+_LABEL_MENU_MARK = "_zapret_label_menu_connected"
 
 
 class _ThemeSubscriberRegistry:
@@ -146,10 +147,25 @@ def _patch_fluent_label_base(qconfig) -> None:
         self.setFont(self.getFont())
         self.setTextColor()
         _label_registry.register(self)
-        self.customContextMenuRequested.connect(self._onContextMenuRequested)
         return self
 
     FluentLabelBase._init = _guarded_init
+
+    # Сигнал «своё меню» нужен только надписи, которой такое меню включили
+    # (в библиотеке это текст диалога). Библиотека подключала его каждой
+    # надписи при создании. Подключение сигнала отпускает общий замок Python:
+    # рядом с занятым фоновым потоком каждое стоит интервал переключения, а
+    # надписей на странице десятки. Подключаем в момент включения меню.
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QLabel
+
+    def _set_context_menu_policy(self, policy) -> None:
+        if policy == Qt.ContextMenuPolicy.CustomContextMenu and not self.__dict__.get(_LABEL_MENU_MARK):
+            self.__dict__[_LABEL_MENU_MARK] = True
+            self.customContextMenuRequested.connect(self._onContextMenuRequested)
+        QLabel.setContextMenuPolicy(self, policy)
+
+    FluentLabelBase.setContextMenuPolicy = _set_context_menu_policy
 
 
 def install_qfluent_theme_signal_guards() -> None:

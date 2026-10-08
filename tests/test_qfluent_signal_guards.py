@@ -151,18 +151,85 @@ class QFluentSignalGuardsTests(unittest.TestCase):
         _emit_theme_changed()
         self.assertEqual(len(calls), 1)
 
-    def test_theme_refresh_binding_cleans_up_on_target_destroy(self) -> None:
+    def test_label_connects_its_menu_signal_only_when_the_menu_is_enabled(self) -> None:
+        # Библиотека подключала сигнал «своё меню» каждой надписи при создании;
+        # нужен он только надписи, которой такое меню включили.
+        from PyQt6.QtCore import Qt
+        from qfluentwidgets import BodyLabel
+
+        label = BodyLabel("текст")
+        self.addCleanup(label.deleteLater)
+        self.assertEqual(label.receivers(label.customContextMenuRequested), 0)
+
+        label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.assertEqual(label.contextMenuPolicy(), Qt.ContextMenuPolicy.CustomContextMenu)
+        self.assertEqual(label.receivers(label.customContextMenuRequested), 1)
+        # Повторное включение не подключает сигнал второй раз.
+        label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.assertEqual(label.receivers(label.customContextMenuRequested), 1)
+
+    def test_theme_refresh_binding_is_forgotten_with_its_target(self) -> None:
+        from ui.theme_refresh import ThemeRefreshBinding, _theme_signal_hub
+
+        calls: list[str] = []
+        target = QWidget()
+        binding = ThemeRefreshBinding(target, lambda: calls.append("applied"))
+        self.assertIn(binding, _theme_signal_hub)
+        sip.delete(target)
+        _emit_theme_changed()  # не должно бросать
+        self.assertNotIn(
+            binding,
+            _theme_signal_hub,
+            "привязка удалённого виджета не должна оставаться в рассылке сигналов темы",
+        )
+        self.assertEqual(calls, [])
+
+    def test_theme_refresh_binding_makes_no_connections_of_its_own(self) -> None:
+        # Раньше — три подключения сигналов на привязку (две темы и удаление
+        # виджета). Подключение отпускает общий замок Python, и на странице с
+        # десятками привязок это замедляло её сборку рядом с фоновым потоком.
+        from qfluentwidgets.common.config import qconfig
+
         from ui.theme_refresh import ThemeRefreshBinding
 
-        target = QWidget()
-        binding = ThemeRefreshBinding(target, lambda: None)
-        self.assertFalse(binding._cleanup_in_progress)
-        sip.delete(target)
-        self.assertTrue(
-            binding._cleanup_in_progress,
-            "destroyed цели должен снимать qconfig-подписки binding'а",
-        )
-        _emit_theme_changed()  # не должно бросать
+        first = QWidget()
+        self.addCleanup(first.deleteLater)
+        ThemeRefreshBinding(first, lambda: None)
+        theme_before = _theme_receivers(qconfig)
+        color_before = int(qconfig.receivers(qconfig.themeColorChanged))
+
+        targets = [QWidget() for _ in range(20)]
+        for target in targets:
+            self.addCleanup(target.deleteLater)
+            before = target.receivers(target.destroyed)
+            ThemeRefreshBinding(target, lambda: None)
+            self.assertEqual(target.receivers(target.destroyed), before)
+        self.assertEqual(_theme_receivers(qconfig), theme_before)
+        self.assertEqual(int(qconfig.receivers(qconfig.themeColorChanged)), color_before)
+
+    def test_theme_signal_reaches_every_live_binding(self) -> None:
+        from ui.theme_refresh import ThemeRefreshBinding
+
+        applied: list[int] = []
+        targets = [QWidget() for _ in range(3)]
+        bindings = []
+        for index, target in enumerate(targets):
+            self.addCleanup(target.deleteLater)
+            target.show()
+            bindings.append(ThemeRefreshBinding(target, lambda index=index: applied.append(index)))
+        for binding in bindings:
+            binding.invalidate()
+        _emit_theme_changed()
+        QApplication.processEvents()
+        self.assertEqual(sorted(applied), [0, 1, 2])
+
+        bindings[1].cleanup()
+        applied.clear()
+        for binding in bindings:
+            binding.invalidate()
+        _emit_theme_changed()
+        QApplication.processEvents()
+        self.assertEqual(sorted(applied), [0, 2])
 
     def test_theme_refresh_binding_guard_when_destroyed_missed(self) -> None:
         """Даже если destroyed не дошёл, сигнал по мёртвой цели чистится молча."""

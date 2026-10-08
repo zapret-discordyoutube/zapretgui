@@ -250,14 +250,28 @@ def is_local_lane_busy() -> bool:
     return _LOCAL_LANE.is_busy()
 
 
+# Сколько вложенных сборок сейчас идёт в GUI-потоке: сборка страницы про запас
+# достраивает внутри себя её блоки первого экрана. Меняется только в GUI-потоке.
+_gui_build_depth = 0
+
+
 @contextmanager
 def gui_build_turn() -> Iterator[None]:
-    """Очередь GUI-потока: пока он собирает страницу, дорожка новую задачу не начинает."""
+    """Очередь GUI-потока: пока он собирает страницу или её блок, дорожка новую задачу не начинает.
+
+    Вызывается только из GUI-потока; вложенные вызовы допустимы — дорожка
+    ждёт, пока закончится самый внешний.
+    """
+    global _gui_build_depth
+    _gui_build_depth += 1
     _GUI_BUILD_DONE.clear()
     try:
         yield
     finally:
-        _GUI_BUILD_DONE.set()
+        _gui_build_depth -= 1
+        if _gui_build_depth <= 0:
+            _gui_build_depth = 0
+            _GUI_BUILD_DONE.set()
 
 
 def _log_task_failure(task_name: str, exc: Exception) -> None:

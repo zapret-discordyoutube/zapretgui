@@ -63,9 +63,19 @@ class PostStartupHost:
         show_page(self._window, page_name)
 
     def ensure_page(self, page_name):
+        """Собирает страницу про запас вместе с блоками её первого экрана.
+
+        Страница, которая собирается блоками, при показе достраивает первый
+        экран. Здесь это делается заранее, чтобы щелчок по подготовленной
+        странице не платил и за него.
+        """
         from ui.window_adapter import ensure_page
 
-        return ensure_page(self._window, page_name)
+        page = ensure_page(self._window, page_name)
+        build_first_screen = getattr(page, "build_first_screen_blocks", None)
+        if callable(build_first_screen):
+            build_first_screen()
+        return page
 
     def start_onboarding_tour(self) -> bool:
         """Пробует показать обучающий тур. False — окно пока не готово."""

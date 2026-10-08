@@ -735,6 +735,7 @@ class OnboardingOverlay(QWidget):
         page_name = self._ctx.pages.get(page_key)
         if page_name is None:
             return False
+        from ui.block_build import ensure_page_blocks
         from ui.window_adapter import get_current_page, get_loaded_page, show_page
 
         window = self._window
@@ -748,6 +749,9 @@ class OnboardingOverlay(QWidget):
                 show_page(window, page_name, allow_internal=True)
             page = get_loaded_page(window, page_name)
             self._page_changed = True
+        # Экскурсия показывает цели по всей странице, в том числе в блоках,
+        # которые собираются позже (см. ui.block_build).
+        ensure_page_blocks(page)
         self._ctx.current_page = page
         self._ctx.current_page_key = page_key
         return is_alive_widget(page)

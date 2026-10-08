@@ -263,6 +263,14 @@ def ensure_qt_runtime() -> QApplication:
         "StartupQtFluentIconCache",
         f"{(_time.perf_counter() - t_icon_cache) * 1000:.0f}ms",
     )
+    t_style_cache = _time.perf_counter()
+    from ui.qfluent_style_cache import install_qfluent_style_cache
+
+    install_qfluent_style_cache()
+    emit_startup_metric(
+        "StartupQtFluentStyleCache",
+        f"{(_time.perf_counter() - t_style_cache) * 1000:.0f}ms",
+    )
     t_button_motion = _time.perf_counter()
     from ui.button_motion import install_button_motion
 

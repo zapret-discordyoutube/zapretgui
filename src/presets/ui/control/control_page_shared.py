@@ -11,6 +11,28 @@ if TYPE_CHECKING:
     from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 
 
+# Блоки настроек главной страницы. Они лежат ниже края окна и собираются
+# позже страницы, каждая группа — отдельно (см. ui.block_build).
+PROGRAM_SETTINGS_BLOCK = "program_settings"
+WINDOWS_SETTINGS_BLOCK = "windows_settings"
+FINE_TUNING_BLOCK = "fine_tuning"
+LAST_MESSAGE_BLOCK = "last_message"
+# Примерная высота блока: столько места он занимает, пока не собран.
+SETTINGS_BLOCK_HEIGHTS = {
+    PROGRAM_SETTINGS_BLOCK: 354,
+    WINDOWS_SETTINGS_BLOCK: 266,
+    FINE_TUNING_BLOCK: 300,
+    LAST_MESSAGE_BLOCK: 73,
+}
+# Какая цель экскурсии в каком блоке лежит.
+_TOUR_TARGET_BLOCKS = {
+    "program_settings": PROGRAM_SETTINGS_BLOCK,
+    "windows_settings": WINDOWS_SETTINGS_BLOCK,
+    "fine_tuning": FINE_TUNING_BLOCK,
+    "fakes": FINE_TUNING_BLOCK,
+}
+
+
 class ControlPageActionMixin:
     """Общие действия для страниц управления.
 
@@ -64,6 +86,10 @@ class ControlPageActionMixin:
             return getattr(getattr(self, "top_summary", None), "preset_item", None)
         if name == "quick_actions":
             return getattr(self, "quick_actions_grid", None)
+        block = _TOUR_TARGET_BLOCKS.get(name)
+        if block is not None:
+            # Эта карточка лежит в блоке, который собирается позже страницы.
+            self.ensure_block(block)
         if name == "program_settings":
             return getattr(self, "program_settings_card", None)
         if name == "windows_settings":

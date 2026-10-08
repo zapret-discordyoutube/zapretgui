@@ -5,12 +5,18 @@ import unittest
 
 
 class ControlPageImmediateStartupTests(unittest.TestCase):
-    def test_control_pages_build_settings_sections_immediately(self) -> None:
-        """Секции настроек строятся синхронно в _build_ui — намеренно.
+    def test_control_pages_build_settings_as_a_block_below_the_first_screen(self) -> None:
+        """Настройки главной страницы — блок, который собирается позже страницы.
 
-        Отложенную сборку (таймерами) уже пробовали дважды и откатывали:
-        таймеры создавались криво, интерфейс появлялся дольше. Не возвращать
-        без явного решения владельца.
+        История. Отложенную сборку таймерами пробовали дважды и откатывали:
+        таймеры откладывали всё подряд, в том числе видимое, и интерфейс
+        появлялся дольше. 2026-10-08 владелец решил: то, чего не видно, не
+        строить сразу, а достраивать позже.
+
+        Отличие от прошлых попыток — в ядре ui.block_build: всё, что видно при
+        открытии, собирается сразу и без таймеров (в том числе этот блок, если
+        окно высокое и он попадает в первый экран); откладывается только то,
+        что ниже края окна. Свои таймеры для этого страница не заводит.
         """
         import presets.ui.control.zapret1.page as zapret1_page
         import presets.ui.control.zapret2.page as zapret2_page
@@ -20,14 +26,36 @@ class ControlPageImmediateStartupTests(unittest.TestCase):
                 page_source = inspect.getsource(page_cls)
                 build_ui_source = inspect.getsource(page_cls._build_ui)
 
-                self.assertIn("_build_settings_sections", build_ui_source)
+                self.assertIn("self._add_settings_blocks()", build_ui_source)
+                blocks_source = inspect.getsource(page_cls._add_settings_blocks)
+                self.assertIn("self.add_lazy_block(", blocks_source)
+                for block in ("PROGRAM_SETTINGS_BLOCK", "WINDOWS_SETTINGS_BLOCK", "FINE_TUNING_BLOCK", "LAST_MESSAGE_BLOCK"):
+                    self.assertIn(block, blocks_source)
+                # Группу никто не собирает напрямую в обход ядра.
+                for builder in ("_build_program_settings_block", "_build_windows_settings_block", "_build_fine_tuning_block"):
+                    self.assertNotIn(f"self.{builder}()", page_source)
+                # Первый экран страница собирает сама и сразу: таймеров в сборке нет.
+                self.assertNotIn("QTimer", build_ui_source)
+                self.assertNotIn("singleShot", build_ui_source)
                 self.assertIn("_attach_program_settings_runtime", build_ui_source)
                 self.assertIn("_schedule_additional_settings_reload(force=True)", build_ui_source)
+                # Старая отложенная сборка на собственных таймерах не возвращается.
                 self.assertNotIn("_build_deferred_sections", page_source)
                 self.assertNotIn("_run_deferred_show_work", page_source)
                 self.assertNotIn("_startup_can_run_deferred_sections", page_source)
                 self.assertNotIn("STARTUP_DEFERRED_SECTIONS", page_source)
                 self.assertNotIn("_build_settings_sections_deferred", page_source)
+
+                # Блок собран позже страницы: настройки, пришедшие раньше него,
+                # применяются в конце его сборки.
+                for builder in ("_build_program_settings_block", "_build_windows_settings_block", "_build_fine_tuning_block"):
+                    self.assertIn(
+                        "self._apply_settings_that_came_before_the_block()",
+                        inspect.getsource(getattr(page_cls, builder)),
+                    )
+                # Перевод и экскурсия обращаются к карточкам блоков — достраивают их сами.
+                self.assertIn("self.ensure_all_blocks()", inspect.getsource(page_cls.set_ui_language))
+                self.assertIn("self.ensure_block(block)", inspect.getsource(page_cls.onboarding_target))
 
     def test_additional_settings_workers_are_imported_only_when_requested(self) -> None:
         import presets.ui.control.zapret2.page as zapret2_page
@@ -99,13 +127,12 @@ class ControlPageImmediateStartupTests(unittest.TestCase):
 
         import presets.ui.control.zapret2.sections_build as sections_build
 
-        source = inspect.getsource(sections_build.build_winws2_pages_settings_sections)
-        widget_fields = getattr(sections_build.Zapret2SettingsBuildWidgets, "__dataclass_fields__", {})
+        source = inspect.getsource(sections_build)
 
         self.assertNotIn("profile_ui_mode_card = build_push_setting_card_common", source)
         self.assertNotIn("on_open_profile_ui_mode_dialog", source)
         self.assertNotIn("get_cached_qta_pixmap", source)
-        self.assertNotIn("profile_ui_mode_btn", widget_fields)
+        self.assertNotIn("profile_ui_mode_btn", source)
 
     def test_zapret2_profile_ui_mode_legacy_option_is_removed(self) -> None:
         import app.ui_texts as ui_texts
@@ -141,11 +168,11 @@ class ControlPageImmediateStartupTests(unittest.TestCase):
         import presets.ui.control.zapret2.sections_build as sections_build
         from presets.ui.control.zapret2.page import Zapret2ModeControlPage
 
-        page_source = inspect.getsource(Zapret2ModeControlPage._build_settings_sections)
-        builder_source = inspect.getsource(sections_build.build_winws2_pages_settings_sections)
+        page_source = inspect.getsource(Zapret2ModeControlPage._build_program_settings_block)
+        builder_source = inspect.getsource(sections_build.build_program_settings_group)
 
-        self.assertIn("enable_setting_card_group_auto_height(program_settings_card)", builder_source)
-        self.assertNotIn("enable_setting_card_group_auto_height(self.program_settings_card)", page_source)
+        self.assertIn("enable_setting_card_group_auto_height(card)", builder_source)
+        self.assertNotIn("enable_setting_card_group_auto_height(", page_source)
 
     def test_control_settings_sections_defer_themed_action_icons(self) -> None:
         import inspect

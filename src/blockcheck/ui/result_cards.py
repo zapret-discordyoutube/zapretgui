@@ -65,6 +65,7 @@ from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.elided_label import ElidedLabel as _ElidedLabel
 from ui.widgets.hover_hint import HoverHint
 from ui.widgets.share_bar import ShareBar
+from ui.block_build import DeferredFill
 from ui.widgets.stagger_float_in import float_in
 from ui.widgets.tone_group import ToneDot, dot_on_first_line, mute, paint_dot
 
@@ -465,6 +466,26 @@ class ResultCard(QWidget):
     def height_for(self, width: int) -> int:
         return self._places(width)[4]
 
+    @classmethod
+    def estimated_height(cls, card: Card) -> int:
+        """Примерная высота карточки по её данным, без создания виджета.
+
+        Нужна сетке, чтобы занять место под карточки, которых ещё нет
+        (см. ``CardsGrid``). Считает то же, что ``_places``, но метки кладёт
+        в один ряд, а точки хостингов берёт одной строкой.
+        """
+        height = cls.PAD_Y + cls.HEADER
+        lines = min(len(card.lines), PREVIEW_LINES)
+        if lines:
+            height += cls.HEADER_GAP + lines * (cls.LINE + cls.LINE_GAP) - cls.LINE_GAP
+        if len(card.lines) > lines:
+            height += cls.LINE_GAP + cls.MORE
+        if card.dots:
+            height += cls.LINE_GAP + cls.LINE * 2
+        if card.chips:
+            height += cls.LINE_GAP + 2 + cls.CHIP
+        return height + cls.PAD_Y
+
     def hasHeightForWidth(self) -> bool:  # noqa: N802
         return True
 
@@ -634,41 +655,86 @@ class CardsGrid(QWidget):
 
     opened = pyqtSignal(object)
 
+    # Сколько карточек создаётся за один присест. Остальные — когда до них
+    # долистали или в паузе (см. ui.block_build): итог большой проверки —
+    # это десятки карточек, а в окно попадает один-два ряда.
+    CHUNK = 12
+
     def __init__(self, min_card_width: int = 280, parent=None) -> None:
         super().__init__(parent)
         self._min_card_width = int(min_card_width)
         self._cards: list[ResultCard] = []
+        self._fill = DeferredFill(self, "cards_grid")
+        # Карточки, которые ещё не созданы, и где кончаются созданные.
+        self._waiting: list[Card] = []
+        self._built_bottom = 0
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
     def cards(self) -> list[ResultCard]:
+        # Тому, кто спрашивает карточки, они нужны все и сейчас.
+        while self._fill.ensure_built():
+            pass
         return list(self._cards)
 
     def columns_for(self, width: int) -> int:
         return max(1, (int(width) + GRID_GAP) // (self._min_card_width + GRID_GAP))
 
     def clear(self) -> None:
+        self._fill.cancel()
         for card in self._cards:
             card.setParent(None)
             card.deleteLater()
         self._cards = []
+        self._waiting = []
+        self._built_bottom = 0
         self.setFixedHeight(0)
 
     def show_cards(self, cards: list[Card], *, animate: bool = True, first_delay_ms: int = 0) -> None:
         self.clear()
-        for card in cards:
+        cards = list(cards)
+        if not cards:
+            return
+        self._waiting = cards
+        shown_now = self._fill.schedule(lambda: self._fill_chunk(cards, animate, first_delay_ms, first=True))
+        if not shown_now:
+            # Место под карточки занято сразу: полоса прокрутки почти верной длины.
+            self._place()
+
+    def _estimated_height(self, cards: list[Card]) -> int:
+        """Высота места под ещё не созданные карточки: по их данным, без виджетов."""
+        if not cards:
+            return 0
+        columns = self.columns_for(max(self.width(), self._min_card_width))
+        wide = sum(ResultCard.estimated_height(card) + GRID_GAP for card in cards if card.wide)
+        narrow = sum(ResultCard.estimated_height(card) + GRID_GAP for card in cards if not card.wide)
+        return max(0, wide + -(-narrow // columns) - GRID_GAP)
+
+    def _fill_chunk(self, cards: list[Card], animate: bool, first_delay_ms: int, *, first: bool) -> None:
+        chunk, rest = cards[: self.CHUNK], cards[self.CHUNK :]
+        widgets = []
+        for card in chunk:
             widget = ResultCard(card, self)
             widget.opened.connect(self.opened)
             widget.show()
             self._cards.append(widget)
+            widgets.append(widget)
+        self._waiting = rest
         self._place()
         if animate:
-            # Выплывают первые карточки; остальные появляются сразу — анимация каждой
-            # из десятков карточек делала показ итога тяжёлым.
-            for order, widget in enumerate(self._cards[:ANIMATED_CARDS]):
-                widget.play(first_delay_ms + order * 55)
-            for widget in self._cards[ANIMATED_CARDS:]:
+            # Выплывают первые карточки сетки и те достроенные позже, что видны
+            # в окне: невидимые встают на место без полёта.
+            for order, widget in enumerate(widgets[:ANIMATED_CARDS]):
+                widget.play((first_delay_ms if first else 0) + order * 55)
+            for widget in widgets[ANIMATED_CARDS:]:
                 if widget.dots is not None:
                     widget.dots.play()
+        if rest:
+            self._fill.schedule(
+                lambda: self._fill_chunk(rest, animate, first_delay_ms, first=False),
+                # Следующие карточки нужны сразу, только если до их места долистали.
+                wanted=lambda rect: rect.bottom() >= self._built_bottom,
+                run_now_if_visible=False,
+            )
 
     def sync_cards(self, cards: list[Card], *, animate: bool = True) -> None:
         """Приводит сетку к новому набору карточек, не трогая те, что не изменились.
@@ -714,7 +780,7 @@ class CardsGrid(QWidget):
 
     def _place(self) -> None:
         width = self.width()
-        if width <= 0 or not self._cards:
+        if width <= 0 or not (self._cards or self._waiting):
             return
         columns = self.columns_for(width)
         column_width = (width - GRID_GAP * (columns - 1)) // columns
@@ -745,7 +811,11 @@ class CardsGrid(QWidget):
                 flush()
         flush()
         heights = [top]
+        self._built_bottom = max(heights)
         total = max(0, max(heights) - GRID_GAP)
+        if self._waiting:
+            # Под карточки, которых ещё нет, держим место примерной высоты.
+            total = self._built_bottom + self._estimated_height(self._waiting)
         if total != self.height():
             self.setFixedHeight(total)
 

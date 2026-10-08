@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import time
 import unittest
 from importlib import import_module
 from unittest import mock
@@ -43,35 +44,39 @@ class PageFloatInContractTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_rise_effect_reuses_source_snapshot_between_frames(self) -> None:
-        # Для виджета Qt не кэширует sourcePixmap(): без своего снимка каждый
-        # кадр выплывания заново рисовал карточку со всеми детьми на CPU.
+    def test_block_is_painted_once_for_the_whole_flight(self) -> None:
+        # Раньше каждый кадр выплывания (а потом каждые 0,12 с) заново рисовал
+        # карточку со всеми детьми на CPU. Теперь блок снимается в картинку
+        # один раз, а летит картинка.
         class _Counting(QWidget):
             paints = 0
 
             def paintEvent(self, event) -> None:  # noqa: N802
                 type(self).paints += 1
 
-        host = QWidget()
-        host.resize(200, 120)
-        child = _Counting(host)
-        child.setGeometry(10, 10, 120, 60)
-        effect = float_module._RiseEffect(child)
-        child.setGraphicsEffect(effect)
-        effect.set_progress(0.5)
-        self.addCleanup(host.deleteLater)
+        container = QWidget()
+        self.addCleanup(container.deleteLater)
+        layout = QVBoxLayout(container)
+        card = _Counting()
+        card.setMinimumHeight(60)
+        layout.addWidget(card)
+        container.resize(240, 160)
+        controller = attach_stagger_float_in(container)
+        container.show()
+        QApplication.processEvents()
+        _Counting.paints = 0
 
-        clock = [100.0]
-        with mock.patch.object(float_module.time, "monotonic", side_effect=lambda: clock[0]):
-            for step in range(5):
-                effect.set_progress(0.5 + step * 0.05)
-                host.grab()
-            self.assertEqual(_Counting.paints, 1)
+        deadline = time.monotonic() + float_module.FLOAT_IN_DURATION_MS / 1000 * 0.6
+        while time.monotonic() < deadline:
+            QApplication.processEvents()
+        self.assertTrue(controller.is_running())
+        self.assertEqual(_Counting.paints, 1, "за полёт блок рисуется один раз — в снимок")
 
-            clock[0] += float_module._SOURCE_REFRESH_S
-            effect.set_progress(0.9)
-            host.grab()
-            self.assertEqual(_Counting.paints, 2)
+        deadline = time.monotonic() + float_module.FLOAT_IN_DURATION_MS / 1000 * 0.6 + 0.2
+        while time.monotonic() < deadline:
+            QApplication.processEvents()
+        self.assertFalse(controller.is_running())
+        self.assertEqual(_Counting.paints, 2, "второй раз — когда встал на место")
 
     def test_every_registered_page_gets_float_in(self) -> None:
         from ui.page_registry import PAGE_CLASS_SPECS
@@ -116,7 +121,9 @@ class PageFloatInContractTests(unittest.TestCase):
         controller.play()
 
         self.assertEqual(own.played, [float_module.FLOAT_IN_STEP_MS])
-        self.assertIsNone(own.graphicsEffect())
+        # Свой вход виджет рисует сам: общий слой его не прячет и не снимает.
+        self.assertFalse(float_module.is_floating_in(own))
+        self.assertTrue(own.mask().isEmpty())
         controller.finish_all()
         self.assertEqual(own.finished, 1)
 
@@ -145,6 +152,31 @@ class PageFloatInContractTests(unittest.TestCase):
             self.assertTrue(grid._entrance_finished(late))
             controller.finish_all()
             self.assertIsNone(grid._entrance_start)
+
+    def test_hosts_tiles_float_in_when_services_arrive_on_an_open_page(self) -> None:
+        # Список сервисов готовит фоновый поток: при первом показе в сетке
+        # одна плитка-заглушка, и вход при показе доставался только ей.
+        from test_hosts_page_draft import HostsPageTests, _manual_snapshot
+
+        helper = HostsPageTests("test_page_scrolls_as_a_whole")
+        self.addCleanup(helper.doCleanups)
+        page = helper._page(_manual_snapshot())
+        grid = page.tiles
+        tiles = grid.tiles()
+        self.assertGreater(len(tiles), 1)
+
+        grid.set_tiles(tiles[:1])
+        page.show()
+        QApplication.processEvents()
+        stagger_float_in(page.content).finish_all()
+        self.assertIsNone(grid._entrance_start)
+
+        grid.set_tiles(tiles)
+        QApplication.processEvents()
+        QApplication.processEvents()
+        self.assertIsNotNone(grid._entrance_start, "настоящие плитки должны выплыть, а не просто возникнуть")
+        self.assertGreater(len(grid._entrance_order), 1)
+        grid.finish_float_in()
 
 
 if __name__ == "__main__":

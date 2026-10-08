@@ -107,7 +107,8 @@ def build_mode_status_section_common(
     status_text.addLayout(title_row)
     status_text.addWidget(status_desc)
 
-    progress_bar = indeterminate_progress_bar_cls(parent)
+    # start=False: иначе анимация крутится и у скрытой полосы, пока жива страница.
+    progress_bar = indeterminate_progress_bar_cls(parent, start=False)
     progress_bar.setVisible(False)
     set_control_accessibility(
         progress_bar,

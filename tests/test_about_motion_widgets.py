@@ -11,7 +11,12 @@ from PyQt6.QtWidgets import QApplication, QLabel, QScrollArea, QVBoxLayout, QWid
 
 import ui.widgets.stagger_float_in as float_module
 import ui.widgets.turning_globe as globe_module
-from ui.widgets.stagger_float_in import attach_stagger_float_in, skip_float_in
+from ui.widgets.stagger_float_in import (
+    attach_stagger_float_in,
+    float_in_progress_of,
+    is_floating_in,
+    skip_float_in,
+)
 from ui.widgets.turning_globe import GLOBE_ICONS, TurningGlobe
 
 
@@ -41,26 +46,30 @@ class StaggerFloatInTests(unittest.TestCase):
         self.container.resize(300, 200)
         self.controller = attach_stagger_float_in(self.container)
 
-    def test_cards_float_in_one_after_another_then_effects_are_removed(self) -> None:
+    def test_cards_float_in_one_after_another_then_stand_in_place(self) -> None:
         self.container.show()
         _wait(0.12)
 
         self.assertTrue(self.controller.is_running())
-        self.assertIsNone(self.own_entrance.graphicsEffect())
-        progress = [card.graphicsEffect()._progress for card in self.cards]
+        self.assertFalse(is_floating_in(self.own_entrance))
+        progress = [float_in_progress_of(card) for card in self.cards]
         self.assertGreater(progress[0], progress[2])
+        # Появление рисует общий слой, а не графический эффект на каждой карточке.
+        self.assertTrue(all(card.graphicsEffect() is None for card in self.cards))
         self.container.grab()
 
         _wait((float_module.FLOAT_IN_DURATION_MS + 3 * float_module.FLOAT_IN_STEP_MS) / 1000 + 0.2)
         self.assertFalse(self.controller.is_running())
-        self.assertTrue(all(card.graphicsEffect() is None for card in self.cards))
+        self.assertFalse(any(is_floating_in(card) for card in self.cards))
+        # Настоящие карточки снова видны: маска полёта снята.
+        self.assertTrue(all(card.mask().isEmpty() for card in self.cards))
 
     def test_nothing_floats_when_live_animations_are_off(self) -> None:
         with mock.patch.object(float_module, "are_live_animations_enabled", return_value=False):
             self.container.show()
             _wait(0.05)
         self.assertFalse(self.controller.is_running())
-        self.assertTrue(all(card.graphicsEffect() is None for card in self.cards))
+        self.assertFalse(any(is_floating_in(card) for card in self.cards))
 
     def test_cards_below_the_window_edge_stay_in_place(self) -> None:
         scroll = QScrollArea()
@@ -82,8 +91,8 @@ class StaggerFloatInTests(unittest.TestCase):
         _wait(0.05)
 
         self.assertTrue(controller.is_running())
-        self.assertIsNotNone(top.graphicsEffect())
-        self.assertIsNone(below.graphicsEffect())
+        self.assertTrue(is_floating_in(top))
+        self.assertFalse(is_floating_in(below))
 
     def test_hiding_finishes_immediately(self) -> None:
         self.container.show()
@@ -91,7 +100,8 @@ class StaggerFloatInTests(unittest.TestCase):
         self.container.hide()
         QApplication.processEvents()
         self.assertFalse(self.controller.is_running())
-        self.assertTrue(all(card.graphicsEffect() is None for card in self.cards))
+        self.assertFalse(any(is_floating_in(card) for card in self.cards))
+        self.assertTrue(all(card.mask().isEmpty() for card in self.cards))
 
 
 class TurningGlobeTests(unittest.TestCase):
@@ -171,11 +181,11 @@ class PageOpenFloatInTests(unittest.TestCase):
             _wait(0.05)
 
             self.assertTrue(float_module.stagger_float_in(page.content).is_running())
-            self.assertIsNotNone(card.graphicsEffect())
+            self.assertTrue(float_module.is_floating_in(card))
 
             page.hide()
             QApplication.processEvents()
-            self.assertIsNone(card.graphicsEffect())
+            self.assertFalse(float_module.is_floating_in(card))
 
 
 class AboutPageMotionWiringTests(unittest.TestCase):

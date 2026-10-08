@@ -1884,6 +1884,9 @@ class StartupRuntimeSetupTests(unittest.TestCase):
         self.assertEqual(premium_effects.snowflakes_enabled, False)
 
     def test_control_pages_build_settings_sections_without_startup_delay(self) -> None:
+        # Настройки — блоки, которые собираются по правилам ui.block_build
+        # (видимое — сразу при показе, остальное — позже). От этапов запуска
+        # программы их сборка не зависит: страница ничего не ждёт сама.
         from presets.ui.control.zapret1.page import Zapret1ModeControlPage
         from presets.ui.control.zapret2.page import Zapret2ModeControlPage
 
@@ -1892,7 +1895,7 @@ class StartupRuntimeSetupTests(unittest.TestCase):
                 page_source = inspect.getsource(page_cls)
                 build_ui_source = inspect.getsource(page_cls._build_ui)
 
-                self.assertIn("_build_settings_sections", build_ui_source)
+                self.assertIn("self._add_settings_blocks()", build_ui_source)
                 self.assertIn("_attach_program_settings_runtime", build_ui_source)
                 self.assertIn("_schedule_additional_settings_reload(force=True)", build_ui_source)
                 self.assertNotIn("startup_post_init_ready", page_source)

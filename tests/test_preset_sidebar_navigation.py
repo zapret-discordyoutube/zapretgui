@@ -131,9 +131,13 @@ class PresetSidebarNavigationTests(unittest.TestCase):
         combined_source = "\n".join(
             (
                 inspect.getsource(Zapret1ModeControlPage._build_ui),
-                inspect.getsource(Zapret1ModeControlPage._build_settings_sections),
+                inspect.getsource(Zapret1ModeControlPage._build_program_settings_block),
+                inspect.getsource(Zapret1ModeControlPage._build_windows_settings_block),
+                inspect.getsource(Zapret1ModeControlPage._build_fine_tuning_block),
                 inspect.getsource(Zapret2ModeControlPage._build_ui),
-                inspect.getsource(Zapret2ModeControlPage._build_settings_sections),
+                inspect.getsource(Zapret2ModeControlPage._build_program_settings_block),
+                inspect.getsource(Zapret2ModeControlPage._build_windows_settings_block),
+                inspect.getsource(Zapret2ModeControlPage._build_fine_tuning_block),
             )
         )
 

@@ -173,16 +173,19 @@ class SettingsGroupsTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication([])
 
-    def _build(self, module, builder_name: str, **extra):
+    def _build(self, module, *, fakes: bool = False):
+        """Три группы настроек одного режима — теми же строителями, что и страница."""
+        from types import SimpleNamespace
+
         from qfluentwidgets import PushSettingCard, SettingCardGroup
 
+        from presets.ui.control.windows_features.build import build_windows_settings_group
         from ui.widgets.win11_controls import Win11ComboRow, Win11ToggleRow
 
         parent = QWidget()
         self.addCleanup(parent.deleteLater)
         noop = lambda *_args, **_kwargs: None  # noqa: E731
-        widgets = getattr(module, builder_name)(
-            add_section_title=noop,
+        program = module.build_program_settings_group(
             tr_fn=_tr("ru"),
             content_parent=parent,
             setting_card_group_cls=SettingCardGroup,
@@ -191,15 +194,41 @@ class SettingsGroupsTests(unittest.TestCase):
             on_gui_autostart_toggled=noop,
             on_auto_dpi_toggled=noop,
             on_tray_close_mode_changed=noop,
+            on_discord_restart_changed=noop,
+        )
+        windows = build_windows_settings_group(
+            tr_fn=_tr("ru"),
+            content_parent=parent,
+            setting_card_group_cls=SettingCardGroup,
+            win11_toggle_row_cls=Win11ToggleRow,
             on_defender_toggled=noop,
             on_max_blocker_toggled=noop,
             on_state_media_block_toggled=noop,
-            on_discord_restart_changed=noop,
+        )
+        fine = module.build_fine_tuning_group(
+            tr_fn=_tr("ru"),
+            content_parent=parent,
+            win11_toggle_row_cls=Win11ToggleRow,
             on_wssize_toggled=noop,
             on_debug_log_toggled=noop,
-            **({"push_setting_card_cls": PushSettingCard, "on_open_fakes": noop} if extra.get("fakes") else {}),
+            **({"push_setting_card_cls": PushSettingCard, "on_open_fakes": noop} if fakes else {}),
         )
-        return widgets
+        return SimpleNamespace(
+            program_settings_card=program.card,
+            gui_autostart_toggle=program.gui_autostart_toggle,
+            auto_dpi_toggle=program.auto_dpi_toggle,
+            tray_close_mode_combo=program.tray_close_mode_combo,
+            discord_restart_toggle=program.discord_restart_toggle,
+            windows_settings_card=windows.card,
+            defender_toggle=windows.defender_toggle,
+            max_block_toggle=windows.max_block_toggle,
+            state_media_block_toggle=windows.state_media_block_toggle,
+            additional_settings_card=fine.card,
+            additional_settings_notice=fine.notice,
+            wssize_toggle=fine.wssize_toggle,
+            debug_log_toggle=fine.debug_log_toggle,
+            fakes_card=getattr(fine, "fakes_card", None),
+        )
 
     def _assert_groups(self, widgets, *, fakes: bool) -> None:
         launch, windows, advanced = (
@@ -231,17 +260,17 @@ class SettingsGroupsTests(unittest.TestCase):
         self.assertIs(widgets.additional_settings_notice.parent(), advanced)
 
     def test_zapret2_groups(self) -> None:
-        widgets = self._build(zapret2_sections, "build_winws2_pages_settings_sections", fakes=True)
+        widgets = self._build(zapret2_sections, fakes=True)
         self._assert_groups(widgets, fakes=True)
 
     def test_zapret1_groups(self) -> None:
-        widgets = self._build(zapret1_sections, "build_winws1_pages_settings_sections")
+        widgets = self._build(zapret1_sections)
         self._assert_groups(widgets, fakes=False)
 
     def test_language_switch_retitles_all_three_groups(self) -> None:
         from presets.ui.control.zapret2.runtime_helpers import apply_profile_language
 
-        widgets = self._build(zapret2_sections, "build_winws2_pages_settings_sections", fakes=True)
+        widgets = self._build(zapret2_sections, fakes=True)
         close_btn = __import__("qfluentwidgets").TransparentPushButton("x")
         self.addCleanup(close_btn.deleteLater)
         apply_profile_language(

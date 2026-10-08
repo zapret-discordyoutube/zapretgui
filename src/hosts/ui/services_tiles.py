@@ -192,6 +192,12 @@ class HostsTilesGrid(QWidget):
         self._sync_frames()
         if old_layout != [(tile.kind, tile.key) for tile in self._tiles]:
             self.update()
+            if len(old_layout) <= 1 and len(self._tiles) > 1 and self.isVisible():
+                # Сервисы пришли на уже открытую страницу: вход при показе
+                # достался одной плитке-заглушке, а настоящие плитки просто
+                # возникали. Они выплывают так же, как при показе; место
+                # сетки к этому моменту ещё не пересчитано — ждём оборот.
+                QTimer.singleShot(0, self._play_entrance_for_new_tiles)
             return
         for tile, rect in zip(self._tiles, self._rects):
             previous = old_by_key.get(tile.key)
@@ -215,6 +221,10 @@ class HostsTilesGrid(QWidget):
         self._entrance_start = self._now() + max(0, int(delay_ms)) / 1000.0
         self._sync_frames()
         self.update(visible)
+
+    def _play_entrance_for_new_tiles(self) -> None:
+        if self.isVisible():
+            self.play_float_in(0)
 
     def finish_float_in(self) -> None:
         """Сразу поставить всё на место (страницу скрыли или показали заново)."""

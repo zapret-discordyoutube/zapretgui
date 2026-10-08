@@ -6,9 +6,6 @@ from PyQt6.QtCore import QTimer
 from ui.pages.base_page import BasePage
 from settings.mode import EXE_NAME_WINWS1, ZAPRET1_MODE
 from presets.ui.control.zapret1.build import build_winws1_pages_status_section
-from presets.ui.control.zapret1.sections_build import (
-    build_winws1_pages_settings_sections,
-)
 from presets.ui.control.zapret1.runtime_helpers import (
     apply_program_settings_snapshot,
     apply_status_plan,
@@ -31,6 +28,11 @@ from presets.ui.control.windows_features.runtime import ControlPageWindowsFeatur
 from app.state_store import AppUiState, MainWindowStateStore
 from donater.premium_display import premium_display_from_ui_state
 from presets.ui.control.control_page_shared import (
+    FINE_TUNING_BLOCK,
+    LAST_MESSAGE_BLOCK,
+    PROGRAM_SETTINGS_BLOCK,
+    SETTINGS_BLOCK_HEIGHTS,
+    WINDOWS_SETTINGS_BLOCK,
     ControlPageActionMixin,
     bind_control_ui_state_store,
     cleanup_control_page_subscriptions,
@@ -52,6 +54,9 @@ TOP_SUMMARY_PROFILE_RETRY_MS = 750
 TOP_SUMMARY_PROFILE_RETRY_LIMIT = 10
 ADDITIONAL_SETTINGS_PRESET_SWITCH_RELOAD_DELAY_MS = 180
 TOP_SUMMARY_PRESET_SWITCH_RELOAD_DELAY_MS = 180
+
+
+_FINE_TUNING_HEIGHT = 228
 
 
 class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMixin, BasePage):
@@ -140,6 +145,9 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.last_status_message_dot = None
         self.last_status_message_title = None
         self.last_status_message_label = None
+        # Последнее, что пришло для блока настроек: применяется, когда блок собран.
+        self._program_settings_snapshot = None
+        self._additional_settings_plan = None
         self.test_card = None
         self.internet_cleanup_card = None
         self.folder_card = None
@@ -229,16 +237,34 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.docs_card = quick_actions.docs_card
         self.add_widget(self.quick_actions_grid)
 
-        self._build_settings_sections()
+        self._add_settings_blocks()
         self._attach_program_settings_runtime()
         self._schedule_additional_settings_reload(force=True)
 
-    def _build_settings_sections(self) -> None:
-        self.add_spacing(8)
+    def _add_settings_blocks(self) -> None:
+        """Отводит место под настройки, которые собираются позже страницы.
+
+        Настройки лежат ниже края окна (59% элементов страницы): место под
+        них занято сразу, а сами группы собираются, когда до них долистали,
+        или по одной в паузах — см. ui.block_build. Группа — отдельный блок,
+        чтобы каждая достройка была короче кадра анимации на главной.
+        Всё, что видно при открытии, собрано выше сразу, без таймеров.
+        """
+        for name, build in (
+            (PROGRAM_SETTINGS_BLOCK, self._build_program_settings_block),
+            (WINDOWS_SETTINGS_BLOCK, self._build_windows_settings_block),
+            (FINE_TUNING_BLOCK, self._build_fine_tuning_block),
+            (LAST_MESSAGE_BLOCK, self._build_last_message_block),
+        ):
+            # В Zapret 1 нет карточки «Фейки»: группа тонкой настройки ниже.
+            height = _FINE_TUNING_HEIGHT if name == FINE_TUNING_BLOCK else SETTINGS_BLOCK_HEIGHTS[name]
+            self.add_lazy_block(name, build, estimated_height=height)
+
+    def _build_program_settings_block(self) -> None:
+        from presets.ui.control.zapret1.sections_build import build_program_settings_group
         from ui.widgets.win11_controls import Win11ComboRow, Win11ToggleRow
 
-        section_widgets = build_winws1_pages_settings_sections(
-            add_section_title=self.add_section_title,
+        group = build_program_settings_group(
             tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
             content_parent=self.content,
             setting_card_group_cls=SettingCardGroup,
@@ -247,36 +273,58 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
             on_gui_autostart_toggled=self._on_gui_autostart_toggled,
             on_auto_dpi_toggled=self._on_auto_dpi_toggled,
             on_tray_close_mode_changed=self._on_tray_close_mode_changed,
+            on_discord_restart_changed=self._on_discord_restart_changed,
+        )
+        self.program_settings_card = group.card
+        self.gui_autostart_toggle = group.gui_autostart_toggle
+        self.auto_dpi_toggle = group.auto_dpi_toggle
+        self.tray_close_mode_combo = group.tray_close_mode_combo
+        self.discord_restart_toggle = group.discord_restart_toggle
+        self.add_spacing(32)
+        self.add_widget(self.program_settings_card)
+        self._apply_settings_that_came_before_the_block()
+
+    def _build_windows_settings_block(self) -> None:
+        from presets.ui.control.windows_features.build import build_windows_settings_group
+        from ui.widgets.win11_controls import Win11ToggleRow
+
+        group = build_windows_settings_group(
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            content_parent=self.content,
+            setting_card_group_cls=SettingCardGroup,
+            win11_toggle_row_cls=Win11ToggleRow,
             on_defender_toggled=self._on_defender_toggled,
             on_max_blocker_toggled=self._on_max_blocker_toggled,
             on_state_media_block_toggled=self._on_state_media_block_toggled,
-            on_discord_restart_changed=self._on_discord_restart_changed,
+        )
+        self.windows_settings_card = group.card
+        self.defender_toggle = group.defender_toggle
+        self.max_block_toggle = group.max_block_toggle
+        self.state_media_block_toggle = group.state_media_block_toggle
+        self.add_spacing(16)
+        self.add_widget(self.windows_settings_card)
+        self._apply_settings_that_came_before_the_block()
+
+    def _build_fine_tuning_block(self) -> None:
+        from presets.ui.control.zapret1.sections_build import build_fine_tuning_group
+        from ui.widgets.win11_controls import Win11ToggleRow
+
+        group = build_fine_tuning_group(
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            content_parent=self.content,
+            win11_toggle_row_cls=Win11ToggleRow,
             on_wssize_toggled=self._on_wssize_toggled,
             on_debug_log_toggled=self._on_debug_log_toggled,
         )
-        self.program_settings_section_label = section_widgets.program_settings_section_label
-        self.program_settings_card = section_widgets.program_settings_card
-        self.gui_autostart_toggle = section_widgets.gui_autostart_toggle
-        self.auto_dpi_toggle = section_widgets.auto_dpi_toggle
-        self.tray_close_mode_combo = section_widgets.tray_close_mode_combo
-        self.defender_toggle = section_widgets.defender_toggle
-        self.max_block_toggle = section_widgets.max_block_toggle
-        self.state_media_block_toggle = section_widgets.state_media_block_toggle
-        self.add_widget(self.program_settings_card)
-
+        self.additional_settings_card = group.card
+        self.additional_settings_notice = group.notice
+        self.wssize_toggle = group.wssize_toggle
+        self.debug_log_toggle = group.debug_log_toggle
         self.add_spacing(16)
-        self.windows_settings_card = section_widgets.windows_settings_card
-        self.add_widget(self.windows_settings_card)
-
-        self.add_spacing(16)
-        self.additional_settings_card = section_widgets.additional_settings_card
-        self.additional_settings_notice = section_widgets.additional_settings_notice
-        self.discord_restart_toggle = section_widgets.discord_restart_toggle
-        self.wssize_toggle = section_widgets.wssize_toggle
-        self.debug_log_toggle = section_widgets.debug_log_toggle
         self.add_widget(self.additional_settings_card)
+        self._apply_settings_that_came_before_the_block()
 
-        self.add_spacing(16)
+    def _build_last_message_block(self) -> None:
         last_message_widgets = build_last_status_message_card_common(
             tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
             strong_body_label_cls=StrongBodyLabel,
@@ -286,9 +334,16 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self.last_status_message_dot = last_message_widgets.dot
         self.last_status_message_title = last_message_widgets.title_label
         self.last_status_message_label = last_message_widgets.message_label
+        self.add_spacing(16)
         self.add_widget(self.last_status_message_card)
         self._refresh_last_status_message()
 
+    def _apply_settings_that_came_before_the_block(self) -> None:
+        """Блок собран позже страницы: настройки могли прийти раньше него."""
+        if self._program_settings_snapshot is not None:
+            self._apply_program_settings_snapshot(self._program_settings_snapshot)
+        if self._additional_settings_plan is not None:
+            self._apply_additional_settings_state(self._additional_settings_plan)
 
     def _attach_program_settings_runtime(self) -> None:
         self._attach_program_settings_runtime_fn(
@@ -299,6 +354,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
     def _apply_program_settings_snapshot(self, snapshot) -> None:
         if self._cleanup_in_progress:
             return
+        self._program_settings_snapshot = snapshot
         apply_program_settings_snapshot(
             snapshot,
             auto_dpi_toggle=self.auto_dpi_toggle,
@@ -322,6 +378,7 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
         self._request_program_settings_save("tray_close_mode", str(mode or "normal"))
 
     def _apply_additional_settings_state(self, plan) -> None:
+        self._additional_settings_plan = plan
         if self.discord_restart_toggle is not None:
             self._set_toggle_checked(
                 self.discord_restart_toggle,
@@ -906,6 +963,8 @@ class Zapret1ModeControlPage(ControlPageWindowsFeatureMixin, ControlPageActionMi
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
+        # Перевод обращается ко всем карточкам настроек.
+        self.ensure_all_blocks()
         if self.uptime_label is not None:
             self.uptime_label.set_language(self._ui_language)
         if self.top_summary is not None:

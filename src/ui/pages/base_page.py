@@ -17,6 +17,7 @@ from qfluentwidgets import (
 
 from app.ui_texts import tr as tr_catalog, normalize_language
 from ui.accessibility import remove_scrollbar_arrow_buttons_from_tab_order, set_state_text
+from ui.block_build import LazyBlock, block_build_queue
 from ui.navigation.history import ScreenState
 from ui.performance_metrics import log_page_timing
 from ui.smooth_scroll import (
@@ -24,7 +25,7 @@ from ui.smooth_scroll import (
     apply_page_smooth_scroll_preference,
     apply_smooth_scroll_mode,
 )
-from ui.widgets.stagger_float_in import attach_stagger_float_in
+from ui.widgets.stagger_float_in import attach_stagger_float_in, float_in_group
 
 
 class ScrollBlockingPlainTextEdit(_FluentPlainTextEdit):
@@ -144,6 +145,12 @@ class BasePage(_FluentScrollArea):
         self._content_paint_metric_next_token = 0
         self._ready_callbacks: list[object] = []
         self._cleanup_in_progress = False
+        # Блоки страницы, которые собираются позже (см. add_lazy_block).
+        self._lazy_blocks: dict[str, LazyBlock] = {}
+        # Раскладка блока, который собирается прямо сейчас: в неё кладут
+        # add_widget, add_spacing и add_section_title.
+        self._block_layouts: list[QVBoxLayout] = []
+        self._building_first_screen = False
         self._page_theme_refresh = self._create_page_theme_refresh_if_needed()
 
         # Ensure objectName is set (required by FluentWindow.addSubInterface)
@@ -445,15 +452,209 @@ class BasePage(_FluentScrollArea):
             self.subtitle_label.setVisible(False)
         self.vBoxLayout.setContentsMargins(0, 8, 0, 0)
 
+    def _build_layout(self) -> QVBoxLayout:
+        """Куда сейчас кладут виджеты: в собираемый блок или прямо на страницу."""
+        return self._block_layouts[-1] if self._block_layouts else self.vBoxLayout
+
     def add_widget(self, widget: QWidget, stretch: int = 0):
         """Добавляет виджет на страницу"""
-        self.vBoxLayout.addWidget(widget, stretch)
+        self._build_layout().addWidget(widget, stretch)
 
     def add_spacing(self, height: int = 16):
         """Добавляет вертикальный отступ"""
         from PyQt6.QtWidgets import QSpacerItem
         spacer = QSpacerItem(0, height, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        self.vBoxLayout.addItem(spacer)
+        self._build_layout().addItem(spacer)
+
+    # ------------------------------------------------------------------
+    # Блоки, которые собираются позже (см. ui.block_build)
+    # ------------------------------------------------------------------
+
+    def add_lazy_block(self, name: str, build, *, estimated_height: int) -> LazyBlock:
+        """Отводит на странице место под блок, который соберётся позже.
+
+        ``build()`` вызывается, когда блок понадобился: при показе страницы,
+        если он попадает в первый экран; когда до него долистали; иначе —
+        в паузе. Внутри ``build`` виджеты кладут как обычно — ``add_widget``,
+        ``add_spacing``, ``add_section_title``: они попадают в блок.
+
+        ``estimated_height`` — примерная высота блока: столько места он
+        занимает, пока не собран.
+
+        Виджеты блока появляются позже страницы. Код, который обращается к
+        ним в любой момент (применение настроек, смена языка), должен либо
+        сам достроить блок (``ensure_block``), либо уметь его дождаться:
+        строитель блока применяет текущее состояние в конце сборки.
+        """
+        if name in self._lazy_blocks:
+            raise ValueError(f"Блок {name!r} уже есть на странице")
+        block = LazyBlock(
+            name,
+            lambda built_block: self._fill_lazy_block(built_block, build),
+            estimated_height=estimated_height,
+            spacing=self.vBoxLayout.spacing(),
+            after_built=self._after_lazy_block_built,
+            parent=self.content,
+        )
+        self._lazy_blocks[name] = block
+        self.vBoxLayout.addWidget(block)
+        return block
+
+    def _fill_lazy_block(self, block: LazyBlock, build) -> None:
+        self._height_of_block_above = self._block_height_if_above_viewport(block)
+        self._block_layouts.append(block.layout())
+        try:
+            build()
+        finally:
+            self._block_layouts.pop()
+
+    def _after_lazy_block_built(self, block: LazyBlock) -> None:
+        above = self.__dict__.pop("_height_of_block_above", None)
+        if above is not None:
+            self._keep_view_in_place(block, above)
+        if not self._building_first_screen:
+            # Блок достроен уже после показа страницы: его видимые виджеты
+            # выплывают. Блоки первого экрана выплывают вместе со страницей.
+            float_in_group(block)
+
+    def _block_height_if_above_viewport(self, block: LazyBlock) -> int | None:
+        """Высота несобранного блока, если он целиком выше видимой области."""
+        try:
+            if not self.isVisible():
+                return None
+            scrolled = int(self.verticalScrollBar().value())
+            if scrolled <= 0 or block.geometry().bottom() >= scrolled:
+                return None
+            return int(block.height())
+        except Exception:
+            return None
+
+    def _keep_view_in_place(self, block: LazyBlock, old_height: int) -> None:
+        """Блок выше видимой области изменил высоту: то, на что человек смотрит, не должно уехать."""
+        try:
+            # Раскладку досчитываем сейчас, а не в следующем обороте цикла
+            # событий: иначе один кадр содержимое стояло бы со сдвигом.
+            QApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+            delta = int(block.height()) - int(old_height)
+            if delta:
+                bar = self.verticalScrollBar()
+                bar.setValue(bar.value() + delta)
+        except Exception:
+            pass
+
+    def lazy_block(self, name: str) -> LazyBlock | None:
+        return self._lazy_blocks.get(name)
+
+    def ensure_block(self, name: str) -> bool:
+        """Достраивает блок сейчас. False — такого блока нет."""
+        block = self._lazy_blocks.get(name)
+        if block is None:
+            return False
+        block.ensure_built()
+        return True
+
+    def ensure_all_blocks(self) -> None:
+        """Достраивает страницу целиком: нужна тому, кто обращается к любым её виджетам."""
+        for block in tuple(self._lazy_blocks.values()):
+            block.ensure_built()
+
+    def is_page_built(self) -> bool:
+        """Все блоки страницы собраны (у страницы без блоков — всегда)."""
+        return all(block.is_built() for block in self._lazy_blocks.values())
+
+    def build_first_screen_blocks(self) -> None:
+        """Собирает блоки, которые попадают в первый экран.
+
+        Вызывается при показе страницы — сразу, без таймеров: человек видит
+        готовый экран. Фоновая подготовка страницы про запас вызывает это
+        заранее, чтобы щелчок по ней не платил за первый экран.
+        """
+        pending = [block for block in self._lazy_blocks.values() if not block.is_built()]
+        if not pending:
+            return
+        width, limit = self._first_screen_size()
+        self._building_first_screen = True
+        try:
+            for block in pending:
+                if self._estimated_block_top(block, width) >= limit:
+                    # Блоки идут сверху вниз: следующие ещё ниже.
+                    break
+                block.ensure_built()
+        finally:
+            self._building_first_screen = False
+
+    def _first_screen_size(self) -> tuple[int, int]:
+        """Ширина и высота видимой области, какой она будет на экране.
+
+        В момент показа страница ещё не получила свой размер: стопка страниц
+        раздаёт его в следующем обороте цикла событий. Поэтому размер берём у
+        того, в ком страница лежит, — она займёт его целиком.
+        """
+        try:
+            host = self.parentWidget()
+            if host is not None and host.width() >= 200 and host.height() >= 200:
+                return int(host.width()), int(host.height())
+            viewport = self.viewport()
+            if viewport.width() >= 200 and viewport.height() >= 200:
+                return int(viewport.width()), int(viewport.height())
+        except Exception:
+            pass
+        return 900, 700
+
+    def _estimated_block_top(self, block: LazyBlock, page_width: int = 0) -> int:
+        """Где примерно начинается блок, пока раскладка страницы ещё не посчитана."""
+        layout = self.vBoxLayout
+        margins = layout.contentsMargins()
+        top = int(margins.top())
+        spacing = max(0, int(layout.spacing()))
+        width = max(0, int(page_width) - margins.left() - margins.right())
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            if item is None:
+                continue
+            if item.widget() is block:
+                break
+            height = self._estimated_item_height(item, width)
+            if height is not None:
+                # Промежуток раскладка ставит только между виджетами:
+                # отступ-распорка занимает свою высоту и ничего сверх неё.
+                top += height + (spacing if item.widget() is not None else 0)
+        return top
+
+    @classmethod
+    def _estimated_item_height(cls, item, width: int = 0) -> int | None:
+        """Примерная высота элемента раскладки. None — элемент места не занимает.
+
+        Спрашиваем сам виджет, а не элемент раскладки: виджет, только что
+        добавленный на видимую страницу, Qt показывает в следующем обороте
+        цикла событий, и до этого раскладка считает его высоту нулевой.
+        ``width`` — ширина, которая ему достанется: текст с переносом строк
+        без неё отвечает высотой для узкой колонки.
+        """
+        widget = item.widget()
+        if widget is None:
+            return max(0, int(item.sizeHint().height()))
+        if widget.isHidden() and widget.testAttribute(Qt.WidgetAttribute.WA_WState_ExplicitShowHide):
+            return None
+        if isinstance(widget, LazyBlock) and widget.is_built():
+            inner = widget.layout()
+            total = 0
+            widgets = 0
+            for index in range(inner.count()):
+                inner_item = inner.itemAt(index)
+                height = cls._estimated_item_height(inner_item, width)
+                if height is None:
+                    continue
+                total += height
+                widgets += 1 if inner_item.widget() is not None else 0
+            return total + max(0, int(inner.spacing())) * max(0, widgets - 1)
+        height = -1
+        if width > 0 and widget.hasHeightForWidth():
+            height = int(widget.heightForWidth(width))
+        if height < 0:
+            height = int(widget.sizeHint().height())
+        height = max(height, int(widget.minimumHeight()))
+        return max(0, min(height, int(widget.maximumHeight())))
 
     def add_section_title(
         self,
@@ -473,7 +674,7 @@ class BasePage(_FluentScrollArea):
         label.setProperty("tone", "primary")
         if text_key:
             self._section_title_bindings.append((label, text_key, fallback_text or text_key))
-        self.vBoxLayout.addWidget(label)
+        self._build_layout().addWidget(label)
         if return_widget:
             return label
 
@@ -532,6 +733,12 @@ class BasePage(_FluentScrollArea):
         step_started_at = _time.perf_counter()
         self._sync_content_width_to_viewport()
         self._log_show_step_timing("qt_show.sync_width", step_started_at)
+        if self._lazy_blocks and not self.is_page_built():
+            step_started_at = _time.perf_counter()
+            self.build_first_screen_blocks()
+            self._log_show_step_timing("qt_show.first_screen_blocks", step_started_at)
+            # Остальные блоки достроятся в паузах, пока страница открыта.
+            block_build_queue().page_shown()
         step_started_at = _time.perf_counter()
         self._flush_ready_callbacks()
         self._log_show_step_timing("qt_show.ready_callbacks", step_started_at)
@@ -549,11 +756,18 @@ class BasePage(_FluentScrollArea):
         self._schedule_first_keyboard_focus()
 
     def _schedule_first_keyboard_focus(self) -> None:
+        # Фокус при открытии просят дважды: сама страница при показе и окно
+        # после переключения. Поиск обходит все виджеты страницы — хватит
+        # одного раза.
+        if self.__dict__.get("_keyboard_focus_scheduled"):
+            return
+        self._keyboard_focus_scheduled = True
         QTimer.singleShot(0, self._focus_first_keyboard_control_if_needed)
 
     def _focus_first_keyboard_control_if_needed(self) -> None:
         """Ставит фокус на первый управляемый с клавиатуры элемент страницы."""
 
+        self._keyboard_focus_scheduled = False
         if not self.isVisible():
             return
         if self._has_focus_inside_page():

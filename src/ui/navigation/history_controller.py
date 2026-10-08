@@ -18,6 +18,7 @@ from PyQt6.QtCore import QTimer
 
 from app.page_names import PageName
 from log.log import log
+from ui.block_build import ensure_page_blocks
 from ui.navigation.history import HistoryEntry, NavigationHistory, ScreenState
 
 
@@ -130,6 +131,8 @@ class WindowNavigationHistory:
             if not self._page_host.show_page(entry.page, allow_internal=True):
                 return False
             page = self._page_host.get_loaded_page(entry.page)
+            # Записанный экран может лежать в блоке, который ещё не собран.
+            ensure_page_blocks(page)
             restore = getattr(page, "restore_navigation_screen", None)
             restored = bool(restore(entry.screen)) if callable(restore) else not entry.screen.key
             if not restored or read_page_screen(page).key != entry.screen.key:

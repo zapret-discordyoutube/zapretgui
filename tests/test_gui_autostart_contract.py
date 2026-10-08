@@ -328,13 +328,13 @@ class GuiAutostartContractTests(unittest.TestCase):
         import presets.ui.control.zapret2.sections_build as winws2_sections
 
         for source in (
-            inspect.getsource(winws1_sections.build_winws1_pages_settings_sections),
-            inspect.getsource(winws2_sections.build_winws2_pages_settings_sections),
+            inspect.getsource(winws1_sections.build_program_settings_group),
+            inspect.getsource(winws2_sections.build_program_settings_group),
         ):
             self.assertIn("gui_autostart_toggle", source)
             self.assertLess(
-                source.index("program_settings_card.addSettingCard(gui_autostart_toggle)"),
-                source.index("program_settings_card.addSettingCard(auto_dpi_toggle)"),
+                source.index("card.addSettingCard(gui_autostart_toggle)"),
+                source.index("card.addSettingCard(auto_dpi_toggle)"),
             )
 
     def test_autostart_is_no_longer_registered_as_standalone_page(self) -> None:
