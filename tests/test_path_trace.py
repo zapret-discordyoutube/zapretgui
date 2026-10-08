@@ -217,6 +217,48 @@ class DistanceTests(unittest.TestCase):
         self.assertIsNone(measure(7, holes=(8,)))
         self.assertIsNone(pt.tcp_distance("2001:db8::1"))
 
+    def test_distance_with_a_hint_asks_only_the_neighbourhood(self) -> None:
+        def measure(reached_from: int, around: int):
+            asked: list[int] = []
+
+            def connects(ip, ttl, *_a):
+                asked.append(ttl)
+                return ttl >= reached_from
+
+            return pt.tcp_distance(TARGET, max_hops=30, around=around, connects=connects), sorted(asked)
+
+        # Подсказка верна: семь соединений вокруг неё вместо тридцати.
+        self.assertEqual(measure(12, around=12), (12, [9, 10, 11, 12, 13, 14, 15]))
+        # Сервер ближе, чем подсказка: в окрестности соединились все, нижняя граница
+        # не видна — идёт полный перебор, и он находит настоящее расстояние.
+        distance, asked = measure(4, around=12)
+        self.assertEqual(distance, 4)
+        self.assertEqual(asked, list(range(1, 16)))
+
+    def test_distance_search_stops_once_the_server_is_passed(self) -> None:
+        asked: list[int] = []
+
+        def connects(ip, ttl, *_a):
+            asked.append(ttl)
+            return ttl >= 6
+
+        self.assertEqual(pt.tcp_distance(TARGET, max_hops=30, connects=connects), 6)
+        self.assertEqual(max(asked), pt.DISTANCE_AT_ONCE)
+
+    def test_trace_does_not_ask_hops_far_beyond_the_target(self) -> None:
+        asked: list[int] = []
+
+        def probe(ip, ttl, *, timeout_ms):
+            asked.append(ttl)
+            return TraceHopResult(HOP_TARGET, TARGET, 5.0) if ttl >= 3 else TraceHopResult(HOP_ROUTER, f"10.0.0.{ttl}", 1.0)
+
+        trace = pt.trace_route(TARGET, max_hops=30, probe=probe)
+
+        self.assertTrue(trace.reached)
+        self.assertEqual(len(trace.hops), 3)
+        # Первая волна уходит целиком, дальше неё спрашивать уже незачем.
+        self.assertLessEqual(max(asked), pt.TRACE_AT_ONCE)
+
 
 class _TcpServer:
     """Сервер на этом компьютере: принимает соединение и отвечает заданным образом."""

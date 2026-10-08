@@ -174,13 +174,24 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(missed.state, "not_found")
         self.assertIn("гаснет только у сервера", missed.sentence)
 
+    def test_nothing_found_while_a_bypass_tool_runs_is_blamed_on_the_tool(self) -> None:
+        # Zapret переделывает пакеты с запрещённым именем: «фильтра нет» при нём ничего не значит.
+        silent = fp.SiteVerdict("x.com", "5.5.5.5", pt.FILTER_NOT_STATEFUL, None, 7, "фильтр не запоминает соединение")
+        for kwargs in ({"zapret_running": True}, {"other_tools": ("Xray",)}):
+            place = fp.aggregate([silent], _hops(), **kwargs)
+            self.assertEqual(place.state, "disturbed")
+            self.assertIn("Остановите", place.sentence)
+        self.assertEqual(fp.aggregate([silent], _hops(), zapret_running=False).state, "not_found")
+
 
 class CollectAndReportTests(unittest.TestCase):
     def _run(self):
         candidates = [fp.Candidate("a.example", "45.1.0.1", ("quic", "tcp")), fp.Candidate("b.example", "45.2.0.1", ("quic",))]
         asked: list[tuple[str, str, str]] = []
 
-        def locate(method, host, ip):
+        def locate(method, host, ip, traced):
+            # Дорога к этому времени уже известна: по ней поиск знает расстояние до сервера.
+            assert traced is not None and traced.reached
             asked.append((method, host, ip))
             return _found(4)
 

@@ -517,12 +517,11 @@ def _run_probes(
     done = [0]
     # Десятки сайтов разом — это сотни запросов к эталонным DNS-серверам в одну
     # секунду: они начинают отказывать, и это выглядело бы как блокировка.
-    gate = threading.BoundedSemaphore(SITES_AT_ONCE)
+    lane = run.lane(SITES_AT_ONCE)
 
     def _probe(*args, **kwargs) -> _Probe:
         try:
-            with gate:
-                return _probe_target(*args, **kwargs)
+            return _probe_target(*args, **kwargs)
         finally:
             if on_done is not None:
                 with lock:
@@ -538,7 +537,7 @@ def _run_probes(
             # Объём по одному соединению — это десятки запросов подряд: контрольные
             # сайты ими не нагружаем, их всё равно не блокируют.
             volume = full and not service.control
-            planned.append((key, target, run.submit(_probe, run, target, key, full=full, volume=volume)))
+            planned.append((key, target, lane.submit(_probe, run, target, key, full=full, volume=volume)))
 
     # Сначала дожидаемся всех, затем перепроверяем упавшие, и только потом печатаем:
     # перепроверка может изменить результат.
@@ -584,14 +583,13 @@ def _recheck_failed(run: _Run, services: dict[str, Service], done_probes: list) 
     ][:RECHECK_SITES]
     if not failed or run.dns_cancelled() or run.deadline - time.monotonic() < RECHECK_NEEDS_S:
         return done_probes
-    gate = threading.BoundedSemaphore(RECHECK_AT_ONCE)
+    lane = run.lane(RECHECK_AT_ONCE)
 
     def _again(index: int) -> _Probe | None:
         key, target, first, _error = done_probes[index]
-        with gate:
-            if run.dns_cancelled():
-                return None
-            again = _probe_target(run, target, key, full=True, volume=not services[key].control)
+        if run.dns_cancelled():
+            return None
+        again = _probe_target(run, target, key, full=True, volume=not services[key].control)
         if again.reach is None or again.reach.kind == KIND_CANCELLED:
             # Повтор не успел — остаётся первый результат, без пометки.
             return None
@@ -601,7 +599,7 @@ def _recheck_failed(run: _Run, services: dict[str, Service], done_probes: list) 
             again.rechecked = ""
         return again
 
-    futures = [(index, run.submit(_again, index)) for index in failed]
+    futures = [(index, lane.submit(_again, index)) for index in failed]
     result = list(done_probes)
     for index, future in futures:
         try:
@@ -683,7 +681,7 @@ def run_blockcheck(
     ``check_dns_servers`` — проверка DNS-серверов для полной проверки: получает
     ``should_stop`` и возвращает ``{"level", "findings": [{"level", "text"}], "text"}``.
     """
-    from diagnostics.freeze_check import check_freeze, summarize_freeze
+    from diagnostics.freeze_check import EVERY_AT_ONCE, check_freeze, summarize_freeze
     from diagnostics.voice_check import check_voice, summarize_voice
 
     scope = str(scope or "").strip().lower()
@@ -732,7 +730,7 @@ def run_blockcheck(
         burst_future = run.submit(sections.check_udp_burst, run)
         freeze_future = run.submit(
             check_freeze,
-            run.submit,
+            run.lane(EVERY_AT_ONCE).submit,
             _wait_plain,
             lambda host, path: sections.download(run, host, path),
             lambda host, path: sections.upload(run, host, path),

@@ -19,6 +19,7 @@ __all__ = [
     "READ_TIMEOUT",
     "REGISTRY_WAIT_S",
     "RECHECK_AT_ONCE",
+    "REFERENCE_AT_ONCE",
     "RECHECK_NEEDS_S",
     "RECHECK_SITES",
     "RETRY_PAUSE_S",
@@ -67,6 +68,10 @@ FILTER_MAX_TTL = 20
 REGISTRY_WAIT_S = 8.0
 RECHECK_SITES = 24
 RECHECK_AT_ONCE = 3
+# Сколько вопросов к эталонным DNS-серверам идёт одновременно. Без предела
+# четырнадцать сайтов разом открывали полторы сотни шифрованных соединений за
+# треть секунды — на этом и тормозил компьютер в начале проверки.
+REFERENCE_AT_ONCE = 32
 # Запас небольшой: повтор, который не успел, просто оставляет первый результат.
 RECHECK_NEEDS_S = 12.0
 FREEZE_READ_TIMEOUT = 4.0

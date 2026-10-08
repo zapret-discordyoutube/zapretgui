@@ -192,24 +192,27 @@ def pick_candidates(sites: Iterable[tuple[str, str, bool, bool]], limit: int = M
 def collect(
     candidates: Iterable[Candidate],
     *,
-    locate: Callable[[str, str, str], FilterFacts],
+    locate: Callable[[str, str, str, RouteTrace | None], FilterFacts],
     trace: Callable[[str], RouteTrace | None],
     submit: Callable,
 ) -> tuple[SiteFacts, ...]:
     """Факты по каждому сайту. Сайты идут одновременно, способы на одном сайте — по очереди.
 
-    ``locate(способ, имя, адрес)`` ищет место фильтра, ``trace(адрес)`` — узлы
-    по дороге. По очереди — потому что фильтр запоминает соединение, и две
-    пробы к одному адресу разом мешали бы друг другу.
+    ``trace(адрес)`` — узлы по дороге, ``locate(способ, имя, адрес, дорога)``
+    ищет место фильтра. Сначала дорога: по ней видно, сколько узлов до сервера,
+    и поиску не приходится перебирать все сроки жизни. Способы по очереди —
+    потому что фильтр запоминает соединение, и две пробы к одному адресу разом
+    мешали бы друг другу.
     """
 
     def one(candidate: Candidate) -> SiteFacts:
-        route = submit(trace, candidate.ip)
-        found = tuple((method, locate(method, candidate.host, candidate.ip)) for method in candidate.methods)
         try:
-            traced = route.result()
+            traced = trace(candidate.ip)
         except Exception:
             traced = None
+        found = tuple(
+            (method, locate(method, candidate.host, candidate.ip, traced)) for method in candidate.methods
+        )
         return SiteFacts(candidate.host, candidate.ip, traced, found)
 
     futures = [submit(one, candidate) for candidate in candidates]
@@ -367,6 +370,16 @@ def aggregate(
     found = [item for item in verdicts if item.code == FILTER_FOUND and item.hop]
     if not found:
         best = verdicts[0]
+        if local:
+            # Программа обхода переделывает пакеты с запрещённым именем: фильтр на них не
+            # срабатывает, и поиск видит «фильтра нет» там, где он есть.
+            return Placement(
+                STATE_DISTURBED,
+                f"Место фильтра не найдено, но во время поиска работал {', '.join(local)}: программа обхода "
+                "переделывает пакеты с запрещённым именем, и фильтр на них не срабатывает. Остановите её и "
+                "повторите проверку — место фильтра ищется только на сети без обхода.",
+                reasons=tuple(f"{item.host}: {item.text}" for item in verdicts),
+            )
         return Placement(
             STATE_NOT_FOUND,
             f"Место фильтра определить не удалось: {best.text}.",

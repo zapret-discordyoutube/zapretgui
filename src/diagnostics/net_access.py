@@ -56,7 +56,7 @@ def doh_lookup(run: Run, host: str, record_type: int = TYPE_A) -> tuple[bool, tu
     def _one(resolver: ReferenceResolver) -> DnsQueryResult:
         return query_doh(resolver.address, host, record_type, timeout_s=DOH_TIMEOUT, cancel=run.probe_cancel)
 
-    futures = [(resolver, run.submit(_one, resolver)) for resolver in REFERENCE_RESOLVERS]
+    futures = [(resolver, run.reference_lane.submit(_one, resolver)) for resolver in REFERENCE_RESOLVERS]
     answered = False
     ips: list[str] = []
     for resolver, future in futures:

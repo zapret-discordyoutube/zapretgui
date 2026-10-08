@@ -311,8 +311,24 @@ def find_filter_place(
     )
     pairs = {filter_place.METHOD_QUIC: path_trace.send_pair, filter_place.METHOD_TCP: path_trace.tcp_pair}
 
-    def _locate(method: str, host: str, ip: str) -> path_trace.FilterFacts:
-        return path_trace.locate_filter(ip, host, max_ttl=FILTER_MAX_TTL, cancel=run.probe_cancel, pair=pairs[method])
+    distances: dict[str, int | None] = {}
+
+    def _distance(ip: str, traced, cancel) -> int | None:
+        # Расстояние у сайта одно на оба способа: второй раз не меряем.
+        if ip not in distances:
+            around = len(traced.hops) if traced is not None and traced.supported and traced.reached else 0
+            distances[ip] = path_trace.tcp_distance(ip, cancel=cancel, around=around)
+        return distances[ip]
+
+    def _locate(method: str, host: str, ip: str, traced) -> path_trace.FilterFacts:
+        return path_trace.locate_filter(
+            ip,
+            host,
+            max_ttl=FILTER_MAX_TTL,
+            cancel=run.probe_cancel,
+            pair=pairs[method],
+            distance_of=lambda address, cancel: _distance(address, traced, cancel),
+        )
 
     def _trace(ip: str) -> path_trace.RouteTrace:
         return path_trace.trace_route(ip, should_stop=run.dns_cancelled)

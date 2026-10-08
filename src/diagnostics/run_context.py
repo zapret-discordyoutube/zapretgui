@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from diagnostics import block_cause, block_kind, protocol_probe, quic_probe, volume_probe
-from diagnostics.limits import RUN_DEADLINE
+from diagnostics.limits import REFERENCE_AT_ONCE, RUN_DEADLINE
 from diagnostics.services import Target
 from diagnostics.tls_probe import KIND_CONNECT, ProbeResult
 from diagnostics.verdict import DnsJudgement, ReachState
@@ -115,6 +116,67 @@ class Probe:
         )
 
 
+class Lane:
+    """Очередь задач с пределом «не больше ``limit`` одновременно».
+
+    Задача, которой ещё не пришла очередь, просто лежит в списке и потока не
+    занимает. Раньше предел держал семафор: каждая ждущая задача уже сидела в
+    своём потоке, и полная проверка поднимала сотни потоков только ради ожидания.
+    """
+
+    def __init__(self, pool: ThreadPoolExecutor, limit: int) -> None:
+        self._pool = pool
+        self._limit = max(1, int(limit))
+        self._lock = threading.Lock()
+        self._waiting: deque[tuple[Future, Callable, tuple, dict]] = deque()
+        self._running = 0
+        self._closed = False
+
+    def submit(self, fn, *args, **kwargs) -> Future:
+        future: Future = Future()
+        with self._lock:
+            if self._closed:
+                future.cancel()
+                return future
+            self._waiting.append((future, fn, args, kwargs))
+        self._pump()
+        return future
+
+    def _pump(self) -> None:
+        while True:
+            with self._lock:
+                if self._closed or self._running >= self._limit or not self._waiting:
+                    return
+                item = self._waiting.popleft()
+                self._running += 1
+            try:
+                self._pool.submit(self._work, *item)
+            except RuntimeError:
+                # Пул уже закрыт («Стоп» или конец прогона): задача не состоится.
+                with self._lock:
+                    self._running -= 1
+                item[0].cancel()
+
+    def _work(self, future: Future, fn, args, kwargs) -> None:
+        try:
+            if future.set_running_or_notify_cancel():
+                try:
+                    future.set_result(fn(*args, **kwargs))
+                except BaseException as error:
+                    future.set_exception(error)
+        finally:
+            with self._lock:
+                self._running -= 1
+            self._pump()
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            waiting, self._waiting = list(self._waiting), deque()
+        for future, *_rest in waiting:
+            future.cancel()
+
+
 class Run:
     """Общие для одного прогона пул потоков, дедлайн и отмена.
 
@@ -136,6 +198,9 @@ class Run:
         self.deadline_seconds = RUN_DEADLINE if deadline is None else float(deadline)
         self.deadline = time.monotonic() + self.deadline_seconds
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="diag")
+        self._lanes: list[Lane] = []
+        # Вопросы к эталонным DNS-серверам: каждый — отдельное шифрованное соединение.
+        self.reference_lane = self.lane(REFERENCE_AT_ONCE)
 
     def _cancel_all(self) -> None:
         self.probe_cancel.cancel()
@@ -200,6 +265,12 @@ class Run:
     def submit(self, fn, *args, **kwargs) -> Future:
         return self.pool.submit(fn, *args, **kwargs)
 
+    def lane(self, limit: int) -> Lane:
+        """Очередь для однотипных задач: не больше ``limit`` разом, остальные ждут без потока."""
+        lane = Lane(self.pool, limit)
+        self._lanes.append(lane)
+        return lane
+
     def wait(self, future: Future):
         """Ждёт результат, не пропуская «Стоп» и общий дедлайн."""
         while True:
@@ -213,4 +284,6 @@ class Run:
 
     def close(self) -> None:
         self._cancel_all()
+        for lane in self._lanes:
+            lane.close()
         self.pool.shutdown(wait=False, cancel_futures=True)

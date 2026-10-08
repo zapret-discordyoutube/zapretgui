@@ -55,6 +55,7 @@ from __future__ import annotations
 import socket
 import struct
 import sys
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -106,6 +107,12 @@ FILTER_AT_TARGET = "at_target"
 
 # Сколько ждать соединения при измерении расстояния и сброса при поиске по TCP.
 DISTANCE_TIMEOUT_S = 1.5
+# Сколько соединений разом при измерении расстояния и на сколько узлов в обе
+# стороны проверяется подсказка трассировки.
+DISTANCE_AT_ONCE = 10
+DISTANCE_AROUND = 3
+# Сколько узлов трассировка спрашивает одновременно.
+TRACE_AT_ONCE = 10
 TCP_WINDOW_S = 1.2
 
 # Имя, которое не блокируют: с ним тот же опыт должен проходить.
@@ -145,21 +152,33 @@ def trace_route(
     should_stop: Callable[[], bool] | None = None,
     probe: Callable[..., TraceHopResult] = trace_hop_ipv4,
 ) -> RouteTrace:
-    """Все узлы до ``ip``. Сроки жизни проверяются одновременно, поэтому это быстро."""
+    """Все узлы до ``ip``. Идут по ``TRACE_AT_ONCE`` узлов разом, от ближних к дальним.
+
+    Как только ответил сам адрес, узлы дальше него не спрашиваются: пинг с
+    большим сроком жизни всё равно дошёл бы до того же адреса.
+    """
     if ":" in ip:
         return RouteTrace(target=ip, supported=False)
+    lock = threading.Lock()
+    reached = [max_hops + 1]
 
     def one(ttl: int) -> Hop:
         result = TraceHopResult(HOP_SILENT)
         for _attempt in range(max(1, int(attempts))):
             if should_stop is not None and should_stop():
                 break
+            with lock:
+                if ttl > reached[0]:
+                    break
             result = probe(ip, ttl, timeout_ms=timeout_ms)
             if result.kind != HOP_SILENT:
                 break
+        if result.kind == HOP_TARGET:
+            with lock:
+                reached[0] = min(reached[0], ttl)
         return Hop(ttl=ttl, kind=result.kind, address=result.address, rtt_ms=result.rtt_ms)
 
-    with ThreadPoolExecutor(max_workers=max_hops, thread_name_prefix="trace") as pool:
+    with ThreadPoolExecutor(max_workers=min(TRACE_AT_ONCE, max_hops), thread_name_prefix="trace") as pool:
         hops = list(pool.map(one, range(1, max_hops + 1)))
     if any(hop.kind == HOP_UNSUPPORTED for hop in hops):
         return RouteTrace(target=ip, supported=False)
@@ -240,6 +259,18 @@ def _connects_with(ip: str, ttl: int, port: int, timeout: float, token: SocketCa
             close_quietly(sock)
 
 
+def _first_reaching(reached: dict[int, bool]) -> int | None:
+    """Наименьший срок жизни, с которым соединились, если следом соединились ещё дважды.
+
+    Дорога одна: если хватило ``first`` узлов, должно хватать и большего срока.
+    Разрозненные попадания (балансировка по разным дорогам, потери) — не расстояние.
+    """
+    first = min((ttl for ttl, ok in reached.items() if ok), default=None)
+    if first is None or not all(reached.get(ttl) for ttl in (first + 1, first + 2)):
+        return None
+    return first
+
+
 def tcp_distance(
     ip: str,
     *,
@@ -247,26 +278,51 @@ def tcp_distance(
     max_hops: int = MAX_HOPS,
     timeout: float = DISTANCE_TIMEOUT_S,
     cancel: SocketCancel | None = None,
+    around: int = 0,
+    connects: Callable[..., bool] | None = None,
 ) -> int | None:
     """Сколько узлов до сервера: наименьший срок жизни, с которым соединение устанавливается.
 
     Меряется той же дорогой, какой пойдут пробы (TCP 443), и не зависит от того,
     отвечают ли узлы на пинг. None — соединиться не удалось ни с каким сроком
     жизни, расстояние неизвестно.
+
+    ``around`` — подсказка от трассировки пингом: если она есть, сначала
+    проверяются только сроки жизни рядом с ней (семь соединений вместо тридцати).
+    Полный перебор идёт, только когда подсказки нет или она не подтвердилась, —
+    и то по ``DISTANCE_AT_ONCE`` соединений разом: тридцать одновременных
+    соединений к одному адресу сами выглядят для фильтра подозрительно.
     """
     if ":" in ip:
         return None
     token = cancel or SocketCancel()
-    with ThreadPoolExecutor(max_workers=max_hops, thread_name_prefix="distance") as pool:
-        reached = list(pool.map(lambda ttl: _connects_with(ip, ttl, port, timeout, token), range(1, max_hops + 1)))
-    if token.cancelled or not any(reached):
-        return None
-    first = reached.index(True) + 1
-    # Дорога одна: если хватило ``first`` узлов, должно хватать и большего срока. Разрозненные
-    # попадания (балансировка по разным дорогам, потери) — расстояние ненадёжно.
-    if not all(reached[first - 1 : first + 2]):
-        return None
-    return first
+    connect = connects or _connects_with
+    reached: dict[int, bool] = {}
+
+    def ask(ttls: list[int]) -> None:
+        with ThreadPoolExecutor(max_workers=len(ttls), thread_name_prefix="distance") as pool:
+            reached.update(zip(ttls, pool.map(lambda ttl: connect(ip, ttl, port, timeout, token), ttls)))
+
+    if around:
+        low = max(1, int(around) - DISTANCE_AROUND)
+        ask(list(range(low, min(max_hops, int(around) + DISTANCE_AROUND) + 1)))
+        if token.cancelled:
+            return None
+        first = _first_reaching(reached)
+        # Годится, только если ниже найденного срока есть несоединившийся: иначе сервер может быть ещё ближе.
+        if first is not None and (first == 1 or reached.get(first - 1) is False):
+            return first
+    for start in range(1, max_hops + 1, DISTANCE_AT_ONCE):
+        wave = [ttl for ttl in range(start, min(max_hops, start + DISTANCE_AT_ONCE - 1) + 1) if ttl not in reached]
+        if wave:
+            ask(wave)
+        if token.cancelled:
+            return None
+        first = min((ttl for ttl, ok in reached.items() if ok), default=None)
+        # Дальше идти незачем: всё от первого узла до двух следующих за найденным уже проверено.
+        if first is not None and all(ttl in reached for ttl in range(1, first + 3)):
+            break
+    return _first_reaching(reached)
 
 
 def tcp_pair(

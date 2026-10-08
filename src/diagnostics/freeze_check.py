@@ -242,8 +242,9 @@ def check_freeze(
     """Провайдеры проверяются параллельно, адреса одного провайдера — по очереди.
 
     ``every`` — полная проверка: каждый адрес списка проверяется сам по себе,
-    без запасных, не больше ``EVERY_AT_ONCE`` одновременно (десятки соединений
-    разом сами дали бы ложные обрывы). ``on_server(сервер, готово, всего)``
+    без запасных. Сколько серверов идёт одновременно, решает ``submit``: движок
+    даёт очередь на ``EVERY_AT_ONCE`` (десятки соединений разом сами дали бы
+    ложные обрывы). ``on_server(сервер, готово, всего)``
     зовётся по мере готовности — для хода проверки на экране.
 
     ``download(host, path)`` и ``upload(host, path)`` сами выбирают IP. Запасной
@@ -258,13 +259,11 @@ def check_freeze(
         return time.monotonic() - started < budget
 
     picked = every_freeze_target(TCP_16_20_TARGETS) if every else pick_freeze_targets(TCP_16_20_TARGETS)
-    gate = threading.BoundedSemaphore(EVERY_AT_ONCE)
     lock = threading.Lock()
     done = [0]
 
     def _one(provider: str, candidates: list[dict]) -> FreezeServer:
-        with gate:
-            server = _check_provider(provider, candidates, download, _fallback_allowed, upload)
+        server = _check_provider(provider, candidates, download, _fallback_allowed, upload)
         if on_server is not None:
             with lock:
                 done[0] += 1

@@ -19,7 +19,6 @@ from blockcheck.ui.result_cards import (
     card_plain_text,
 )
 from blockcheck.ui.result_cards_model import FILTER_MARK, PREVIEW_LINES, build_cards, build_counters
-from diagnostics import freeze_check
 from diagnostics.freeze_check import FreezeState, check_freeze, every_freeze_target
 from diagnostics.tls_probe import ProbeResult
 
@@ -564,12 +563,13 @@ class EveryHostingTests(unittest.TestCase):
                 active[0] -= 1
             return None
 
-        with (
-            ThreadPoolExecutor(max_workers=12) as pool,
-            patch("blockcheck.data_lists.TCP_16_20_TARGETS", targets),
-            patch.object(freeze_check, "EVERY_AT_ONCE", 3),
-        ):
-            servers = check_freeze(pool.submit, lambda future: future.result(), download, every=True)
+        # Предел держит очередь прогона: ждущий сервер не занимает поток.
+        from diagnostics.run_context import Run
+
+        run = Run(None, workers=12)
+        self.addCleanup(run.close)
+        with patch("blockcheck.data_lists.TCP_16_20_TARGETS", targets):
+            servers = check_freeze(run.lane(3).submit, lambda future: future.result(), download, every=True)
 
         self.assertEqual(len(servers), 12)
         self.assertLessEqual(peak[0], 3)
