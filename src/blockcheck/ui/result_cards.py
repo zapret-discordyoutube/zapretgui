@@ -899,18 +899,25 @@ class ResultCardsView(QWidget):
         менялись бы каждую секунду.
         """
         cards = build_cards(report)
+        # Пока проверка идёт, показанные карточки стоят на своих местах, новые встают в конец.
+        # Порядок «проблемные первыми» наводит итог: иначе каждый найденный нерабочий сайт
+        # сдвигал бы всё, что пользователь уже читает.
+        places = {card.key: order for order, card in enumerate(self._shown)}
+        cards = sorted(cards, key=lambda card: places.get(card.key, len(places)))
         if cards == self._shown:
             return
         self._live = True
-        self._place_cards(cards, animate=True)
+        self._place_cards(cards, animate=True, keep_order=True)
         set_state_text(self, f"Результаты BlockCheck: проверка идёт, карточек {len(cards)}")
 
-    def _place_cards(self, cards: list[Card], *, animate: bool) -> None:
+    def _place_cards(self, cards: list[Card], *, animate: bool, keep_order: bool = False) -> None:
         self._shown = cards
         sites = [card for card in cards if card.site]
-        # Широкая карточка занимает весь ряд: стоя посреди списка, она оставляла перед собой
-        # ряд с одной карточкой и пустотой. Широкие идут первыми, остальные заполняют ряды подряд.
-        checks = sorted((card for card in cards if not card.site), key=lambda card: not card.wide)
+        checks = [card for card in cards if not card.site]
+        if not keep_order:
+            # Широкая карточка занимает весь ряд: стоя посреди списка, она оставляла перед собой
+            # ряд с одной карточкой и пустотой. Широкие идут первыми, остальные заполняют ряды подряд.
+            checks = sorted(checks, key=lambda card: not card.wide)
         self.sites_title.setVisible(bool(sites))
         self.checks_title.setVisible(bool(checks))
         if self._live:

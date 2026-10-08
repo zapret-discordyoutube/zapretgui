@@ -222,6 +222,27 @@ class PastCheckOnScreenTests(unittest.TestCase):
         move(5)
         self.assertEqual(table._hint.text(), "")
 
+    def test_past_check_opens_its_text_from_the_report_and_says_when_there_is_none(self) -> None:
+        from blockcheck.ui.past_check_view import PastCheckView
+
+        view = PastCheckView()
+        self.addCleanup(view.deleteLater)
+        opened = []
+        view.text_opened.connect(lambda title, text: opened.append((title, text)))
+        run = {"time": "2026-10-08T12:00:00", "title": "Все сайты", "level": "ok"}
+
+        # Текст той проверки лежит в самом её отчёте.
+        view.show_run(run, {"problems": [], "working": ["Discord"], "text": ["строка 1", "строка 2"]})
+        self.assertTrue(view.report_button.isEnabled())
+        view.report_button.click()
+        self.assertEqual(opened, [(f"Отчёт: {view.title()}", "строка 1\nстрока 2")])
+        # Отчёт, сохранённый до этого, текста не содержит: кнопка выключена и говорит почему.
+        view.show_run(run, {"problems": [], "working": ["Discord"]})
+        self.assertFalse(view.report_button.isEnabled())
+        self.assertIn("не сохранялся", view.report_button.toolTip())
+        view.show_run(run, None)
+        self.assertFalse(view.report_button.isEnabled())
+
     def test_without_the_saved_file_the_page_shows_the_history_record_and_says_so(self) -> None:
         page = self._page(_Feature(None))
         page._open_past_check(RUNS[0])

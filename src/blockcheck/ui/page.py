@@ -864,7 +864,8 @@ class BlockcheckPage(BasePage):
             return
         self._reset_ui()
         self._progress_card.setVisible(False)
-        self._report_btn.setEnabled(bool(self._report_lines))
+        has_text = bool(self._report_lines) or bool(isinstance(report, dict) and report.get("text"))
+        self._report_btn.setEnabled(has_text)
         self._set_support_footer_available(True)
         if isinstance(report, dict) and report.get("failed"):
             # Падение — не «остановлено»: пользователь ничего не нажимал.
@@ -1092,12 +1093,19 @@ class BlockcheckPage(BasePage):
         self._open_log_report(
             LogReport(
                 title="Подробный отчёт BlockCheck",
-                text="\n".join(self._report_lines),
+                text=self._report_text(),
                 root_title="BlockCheck",
                 empty_text="Проверка ещё не запускалась.",
                 description="Технические подробности проверки: адреса, ответы DNS и время ответа серверов.",
             )
         )
+
+    def _report_text(self) -> str:
+        """Текст отчёта: из самого отчёта (он же лежит в файле проверки), иначе — что успели записать по ходу."""
+        lines = (self._last_report or {}).get("text")
+        if isinstance(lines, (list, tuple)) and lines:
+            return "\n".join(str(line) for line in lines)
+        return "\n".join(self._report_lines)
 
     def _ensure_past_check_view(self):
         if self._past_check_view is None:
@@ -1107,6 +1115,7 @@ class BlockcheckPage(BasePage):
             self._past_check_view.closed.connect(self._close_over_tabs)
             self._past_check_view.card_opened.connect(self._open_card_detail)
             self._past_check_view.child_opened.connect(self._open_card_child)
+            self._past_check_view.text_opened.connect(self._open_section_text)
             self._past_check_view.setVisible(False)
             self.add_widget(self._past_check_view)
         return self._past_check_view

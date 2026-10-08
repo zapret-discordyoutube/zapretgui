@@ -334,11 +334,12 @@ class CardsWidgetsTests(unittest.TestCase):
         self.assertEqual(view.counters.tiles(), [])
 
         view.show_partial({**empty, "services": [first, second]})
-        # Сайт с проблемой встаёт первым; уже показанная карточка — тот же виджет, а не новый.
-        youtube, kept = view.sites_grid.cards()
+        # Пока проверка идёт, показанная карточка стоит на месте (и это тот же виджет), новая — следом,
+        # хотя сайт с проблемой в итоге встанет первым.
+        kept, youtube = view.sites_grid.cards()
         self.assertIs(kept, discord)
         self.assertEqual(youtube.card.title, "YouTube")
-        self.assertGreater(kept.x(), youtube.x())
+        self.assertGreater(youtube.x(), kept.x())
 
         # Сайт перепроверили, и он открылся: его карточка заменилась, соседняя не тронута.
         fixed = _service("youtube", "YouTube", "ok", [_target("www.youtube.com")])
@@ -356,6 +357,9 @@ class CardsWidgetsTests(unittest.TestCase):
         self.assertIs(after["site:youtube"], by_key["site:youtube"])
         self.assertTrue(view.checks_grid.cards())
         self.assertTrue(view.counters.tiles())
+        # Порядок «проблемные первыми» наводит итог.
+        view.show_report({**final, "services": [first, second]}, animate=False)
+        self.assertEqual([widget.card.title for widget in view.sites_grid.cards()], ["YouTube", "Discord"])
         # Новая проверка начинает с чистого места.
         view.clear()
         self.assertFalse(view.has_cards())

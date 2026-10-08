@@ -10,17 +10,21 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
-from qfluentwidgets import BreadcrumbBar, CaptionLabel
+from qfluentwidgets import BreadcrumbBar, CaptionLabel, FluentIcon, PushButton
 
 from blockcheck.ui.check_results import ActionHandler, BlockcheckSummaryPanel
 from blockcheck.ui.result_cards import ResultCardsView
-from ui.accessibility import set_breadcrumb_accessibility, set_state_text
+from ui.accessibility import set_breadcrumb_accessibility, set_control_accessibility, set_state_text
+from ui.fluent_widgets import set_tooltip
 from ui.widgets.tone_group import mute
 
 _NOT_SAVED = (
     "Полный отчёт этой проверки не сохранился — показано то, что записано в истории: "
     "какие сайты открывались и список проблем."
 )
+
+
+_NO_TEXT = "Текст этой проверки не сохранялся: она сделана до того, как текст стали класть в отчёт."
 
 
 def report_from_history(run: dict) -> dict:
@@ -47,6 +51,8 @@ class PastCheckView(QWidget):
     card_opened = pyqtSignal(object)
     # Нажали находку: (карточка-родитель, отчёт находки) — страница на уровень глубже.
     child_opened = pyqtSignal(object, object)
+    # Просят открыть текст отчёта той проверки страницей-редактором: (название, текст).
+    text_opened = pyqtSignal(str, str)
     ROOT_KEY = "blockcheck"
     RUN_KEY = "run"
 
@@ -67,6 +73,12 @@ class PastCheckView(QWidget):
             on_action=on_action, parent=self, on_open=self._open_card_by_key, on_open_child=self._open_child
         )
         layout.addWidget(self.summary)
+        # Текст той проверки лежит в её отчёте; у проверок, сохранённых раньше, его нет.
+        self._text = ""
+        self.report_button = PushButton(FluentIcon.DOCUMENT, "Отчёт", self)
+        self.report_button.clicked.connect(lambda _checked=False: self.text_opened.emit(f"Отчёт: {self._title}", self._text))
+        self.summary.actions.addWidget(self.report_button)
+        self.summary.actions.addStretch(1)
         self.cards = ResultCardsView(self)
         self.cards.opened.connect(self.card_opened)
         layout.addWidget(self.cards)
@@ -93,6 +105,12 @@ class PastCheckView(QWidget):
         shown = report if report is not None else report_from_history(run)
         self.summary.show_report(shown)
         self.cards.show_report(shown)
+        lines = (report or {}).get("text")
+        self._text = "\n".join(str(line) for line in lines) if isinstance(lines, (list, tuple)) else ""
+        self.report_button.setEnabled(bool(self._text))
+        hint = "Открыть полный текст той проверки." if self._text else _NO_TEXT
+        set_tooltip(self.report_button, hint)
+        set_control_accessibility(self.report_button, name="Отчёт прошлой проверки", description=hint)
         set_state_text(self, f"Прошлая проверка {title}: {self.summary.title_label.text()}")
 
     def _open_card_by_key(self, key: str) -> None:
