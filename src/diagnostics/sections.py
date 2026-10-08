@@ -14,6 +14,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Future
+from dataclasses import replace
 
 from diagnostics import (
     block_kind,
@@ -356,6 +357,7 @@ def find_filter_place(
     hops = filter_place.describe_hops(route, own_asn=own_asn, owner_of=_owner)
     placement = filter_place.aggregate(verdicts, hops, zapret_running=zapret_running, other_tools=other_tools)
     place = filter_place.report(placement, verdicts, hops, shown)
+    place.update(filter_place.mechanisms(verdicts, _dns_place(run, _trace)))
     if shown is None and plain is not None and hops:
         place["host"], place["address"] = plain.host, plain.reach.ip
     for line in filter_place.lines(place):
@@ -447,6 +449,22 @@ def emit_voice(voice, emit: Emit) -> None:
     rows = [("✅" if item.answered else ("❌" if item.decided else "❔"), item.name, item.text) for item in voice.servers]
     for line in report_text.section_lines("Голосовые звонки (UDP)", voice, rows):
         emit(line)
+
+
+def _dns_place(run: Run, trace: Callable):
+    """Где перехватывают обычные DNS-запросы (см. ``diagnostics.dns_place``). None — проверку сняли."""
+    from diagnostics import dns_place
+
+    route = run.submit(trace, dns_place.DNS_SERVER)
+    facts = dns_place.collect(
+        lambda ttl: dns_place.ask_with_ttl(dns_place.DNS_SERVER, ttl, cancel=run.probe_cancel), submit=run.submit
+    )
+    try:
+        traced = route.result()
+    except Exception:
+        traced = None
+    reached = traced is not None and traced.supported and traced.reached
+    return dns_place.judge(replace(facts, distance=len(traced.hops) if reached else 0))
 
 
 def check_udp_burst(run: Run) -> udp_burst.BurstVerdict | None:

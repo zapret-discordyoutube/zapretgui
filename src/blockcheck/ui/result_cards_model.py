@@ -739,6 +739,17 @@ def _filter_card(place: dict) -> Card:
         preview.append(Line(INFO, "Дорога показана до", str(place["host"])))
 
     sections = [Section("Вывод", tuple(preview[:2]))]
+    mechanisms = [
+        Line(WARN if item.get("hop") else UNKNOWN, str(item.get("title") or ""), _capital(str(item.get("text") or "")))
+        for item in place.get("mechanisms") or ()
+    ]
+    if mechanisms:
+        if place.get("same_place"):
+            mechanisms.append(Line(INFO, "Один фильтр или несколько", str(place["same_place"])))
+        sections.append(Section("Чем и где режут", tuple(mechanisms)))
+    unmeasured = [Line(INFO, str(item.get("title") or ""), str(item.get("text") or "")) for item in place.get("unmeasured") or ()]
+    if unmeasured and mechanisms:
+        sections.append(Section("Место не измеряется", tuple(unmeasured)))
     site_rows: list[Line] = []
     for item in sites:
         distance = f" · до сервера {item['distance']} узлов" if item.get("distance") else ""

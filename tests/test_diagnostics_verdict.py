@@ -213,6 +213,7 @@ class _Net:
         self.cause_facts = cause_facts
         self.refined: list[str] = []
         self.bypass_tools: tuple[str, ...] = ()
+        self.dns_place = None
         # Что «показал» QUIC: по умолчанию проверку будто сняли — вывода нет.
         self.quic_facts = None
         self.quic_asked: list[tuple[str, str]] = []
@@ -298,6 +299,8 @@ class _Net:
             patch.object(sections, "start_registry", return_value=lambda _seconds: self.registry),
             # Пробы «как работает фильтр» шлют свои приветствия в сеть.
             patch.object(sections, "check_filter_habits", side_effect=lambda _run, _collected, _emit, **_kwargs: self.habits),
+            # Место перехвата DNS — настоящие пакеты в сеть: в сценариях движка его нет.
+            patch.object(sections, "_dns_place", side_effect=lambda _run, _trace: self.dns_place),
             # Серии пакетов UDP уходят на настоящие серверы.
             patch.object(sections, "check_udp_burst", side_effect=lambda _run: self.burst),
             patch.object(engine, "running_bypass_tools", return_value=self.bypass_tools),

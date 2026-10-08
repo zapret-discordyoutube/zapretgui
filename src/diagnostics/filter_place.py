@@ -58,6 +58,7 @@ __all__ = [
     "describe_hops",
     "judge_site",
     "lines",
+    "mechanisms",
     "pick_candidates",
     "report",
 ]
@@ -227,7 +228,7 @@ def judge_site(facts: SiteFacts) -> SiteVerdict | None:
     if trace is not None and trace.reached:
         distances.append(len(trace.hops))
     for method, found in facts.found:
-        verdict = path_trace.judge_filter(found, trace)
+        verdict = path_trace.judge_filter(found, trace, method=method)
         if verdict is None:
             continue
         if found.distance:
@@ -485,6 +486,72 @@ def report(
     }
 
 
+MECHANISM_TITLES = {
+    METHOD_QUIC: "QUIC по имени сайта",
+    METHOD_TCP: "TLS по имени сайта (сброс соединения)",
+    "dns": "Перехват обычных DNS-запросов",
+}
+# Механизмы, место которых обычным соединением не найти, и почему.
+UNMEASURED = (
+    (
+        "Бан по адресу",
+        "пакет к закрытому адресу пропадает так же, как пакет с истёкшим сроком жизни, — где именно, "
+        "обычным соединением не различить",
+    ),
+    (
+        "Обрыв загрузки на 16–20 КБ",
+        "обрыв случается на ответе сервера, а его срок жизни задаёт сервер — приём со сроком жизни здесь не работает",
+    ),
+)
+
+
+def mechanisms(verdicts: Iterable[SiteVerdict], dns=None) -> dict:
+    """Место каждого механизма по отдельности: фильтров на дороге бывает несколько.
+
+    Поиск по одному механизму видит только первое место, где поток гаснет, —
+    второе устройство за ним не разглядеть. Зато у разных механизмов места
+    находятся независимо: разошлись — устройств не меньше двух. ``dns`` — вывод
+    ``diagnostics.dns_place.judge`` или None.
+    """
+    verdicts = tuple(verdicts)
+    found: list[dict] = []
+    for method in (METHOD_QUIC, METHOD_TCP):
+        tried = [(site, part) for site in verdicts for part in site.methods if part.method == method]
+        if not tried:
+            continue
+        hops = Counter(part.hop for _site, part in tried if part.code == FILTER_FOUND and part.hop)
+        if hops:
+            hop, votes = hops.most_common(1)[0]
+            where = "не дальше первого узла" if hop == 1 else f"между узлами {hop - 1} и {hop}"
+            spread = "" if len(hops) == 1 else f"; на других сайтах — узлы {', '.join(str(item) for item in sorted(hops) if item != hop)}"
+            text = f"{where} — совпало по {_sites_word(votes)} из {len(tried)}{spread}"
+        else:
+            hop, text = None, f"место не найдено: {tried[0][1].text}"
+        found.append({"key": method, "title": MECHANISM_TITLES[method], "hop": hop, "text": text})
+    if dns is not None:
+        found.append({"key": "dns", "title": MECHANISM_TITLES["dns"], "hop": dns.hop, "text": dns.text})
+    places = sorted({item["hop"] for item in found if item["hop"]})
+    if len(places) > 1:
+        same = (
+            f"Места у механизмов разные (узлы {', '.join(str(item) for item in places)}): "
+            "устройств на дороге не меньше двух."
+        )
+    elif places and sum(1 for item in found if item["hop"]) > 1:
+        same = "Места у механизмов совпали: это может быть одно устройство. Второе, стоящее дальше, этим способом не увидеть."
+    elif places:
+        same = (
+            "Место найдено по одному механизму. Поиск видит только первое место, где соединение гаснет: "
+            "второй фильтр, стоящий дальше, за ним не разглядеть."
+        )
+    else:
+        same = ""
+    return {
+        "mechanisms": found,
+        "same_place": same,
+        "unmeasured": [{"title": title, "text": text} for title, text in UNMEASURED],
+    }
+
+
 def lines(place: dict) -> list[str]:
     """Раздел «Где стоит фильтр» для текстового отчёта."""
     out = ["", "━━━━━━━━ Где стоит фильтр ━━━━━━━━"]
@@ -498,6 +565,14 @@ def lines(place: dict) -> list[str]:
         out.append(f"   {mark} {site.get('host', '')} ({site.get('address', '')}{distance}): {site.get('text', '')}")
         for method in site.get("methods") or ():
             out.append(f"        {method.get('title', '')}: {method.get('text', '')}")
+    if place.get("mechanisms"):
+        out.append("   Чем и где режут:")
+        for item in place["mechanisms"]:
+            out.append(f"      {'📍' if item.get('hop') else '❔'} {item.get('title', '')}: {item.get('text', '')}")
+        if place.get("same_place"):
+            out.append(f"      ℹ️ {place['same_place']}")
+        for item in place.get("unmeasured") or ():
+            out.append(f"      ➖ {item.get('title', '')}: место не измеряется — {item.get('text', '')}")
     hops = place.get("hops") or ()
     if hops:
         out.append(f"   Дорога до {place.get('host', '')}:")

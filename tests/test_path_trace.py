@@ -276,7 +276,7 @@ class _TcpServer:
         conn, _addr = self.listener.accept()
         try:
             conn.settimeout(2)
-            conn.recv(4096)
+            self.received = conn.recv(4096)
             if self.behaviour == "answer":
                 conn.sendall(b"\x16\x03\x03\x00\x04")
                 self.stop.wait(1)
@@ -296,6 +296,29 @@ class TcpPairTests(unittest.TestCase):
         server = _TcpServer(behaviour)
         self.addCleanup(server.stop.set)
         return pt.tcp_pair("127.0.0.1", "x.com", ttl, port=server.port, window=0.5)
+
+    def test_control_asks_with_a_harmless_name_and_the_probe_with_the_real_one(self) -> None:
+        # Запрещённое имя на контроле сбросил бы сам фильтр: контроль не проходил бы никогда —
+        # так и было на живой линии у всех четырёх сайтов.
+        def sent(ttl):
+            server = _TcpServer("answer")
+            self.addCleanup(server.stop.set)
+            pt.tcp_pair("127.0.0.1", "blocked.example", ttl, port=server.port, window=0.5)
+            return server.received
+
+        control, probe = sent(None), sent(64)
+        self.assertIn(pt.NEUTRAL_NAME.encode(), control)
+        self.assertNotIn(b"blocked.example", control)
+        self.assertIn(b"blocked.example", probe)
+        # Приветствие простое, одним пакетом — такое фильтр и режет.
+        self.assertLess(len(probe), 1000)
+
+    def test_words_about_the_control_name_the_right_way(self) -> None:
+        failed = pt.FilterFacts(control_ok=False, distance=9)
+        self.assertIn("QUIC", pt.judge_filter(failed).text)
+        self.assertNotIn("QUIC", pt.judge_filter(failed, method="tcp").text)
+        silent = pt.FilterFacts(control_ok=True, stateful=False, distance=9)
+        self.assertIn("сброс не приходит", pt.judge_filter(silent, method="tcp").text)
 
     def test_control_is_alive_only_when_the_server_answers(self) -> None:
         self.assertIs(self._pair("answer", None), True)

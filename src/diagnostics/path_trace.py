@@ -336,10 +336,15 @@ def tcp_pair(
 ) -> bool | None:
     """Проба по TCP. True — соединение живо, False — погашено, None — проверку сняли.
 
-    ``ttl is None`` — контроль: приветствие с именем ``name`` обычным сроком
-    жизни, «живо» значит, что сервер ответил. Иначе приветствие уходит со сроком
-    жизни ``ttl``, и «погашено» значит, что за ``window`` секунд пришёл сброс:
-    сервер такого пакета не видел, сбросить мог только фильтр на дороге.
+    ``ttl is None`` — контроль: приветствие с БЕЗОБИДНЫМ именем и обычным сроком
+    жизни, «живо» значит, что сервер на него ответил. Запрещённое имя на контроле
+    слать нельзя: его сбросит сам фильтр, и контроль не пройдёт никогда. Иначе
+    приветствие с именем ``name`` уходит со сроком жизни ``ttl``, и «погашено»
+    значит, что за ``window`` секунд пришёл сброс: сервер такого пакета не
+    видел, сбросить мог только фильтр на дороге.
+
+    Приветствие простое, одним пакетом: именно такое фильтр режет. Браузерное с
+    постквантовым ключом занимает два пакета и у части сайтов проходит.
     """
     from diagnostics.browser_hello import build_hello
 
@@ -355,7 +360,7 @@ def tcp_pair(
         if ttl is not None:
             # Срок жизни остаётся низким всё окно: повторные отправки системы тоже не дойдут до сервера.
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, max(1, min(255, int(ttl))))
-        sock.sendall(build_hello(name))
+        sock.sendall(build_hello(NEUTRAL_NAME if ttl is None else name, post_quantum=False))
         sock.settimeout(window)
         try:
             answer = sock.recv(16)
@@ -486,8 +491,28 @@ def _hop_name(trace: RouteTrace | None, ttl: int) -> str:
     return f"узлом {ttl} ({hop.address})"
 
 
-def judge_filter(facts: FilterFacts, trace: RouteTrace | None = None) -> FilterVerdict | None:
-    """Вывод о месте фильтра или None, если проверку сняли."""
+# Слова способа для фраз о контроле: у QUIC и у TCP проверяется разное.
+_NO_CONTROL_TEXT = {
+    "quic": "сервер не ответил даже на обычный пакет QUIC — искать место фильтра этим способом не на чем",
+    "tcp": (
+        "сервер не ответил на приветствие с безобидным именем — без этого сброс от фильтра "
+        "не отличить от отказа самого сервера"
+    ),
+}
+_NOT_STATEFUL_TEXT = {
+    "quic": (
+        "после пакета с запрещённым именем обычный пакет всё равно проходит: фильтр не запоминает "
+        "соединение, и найти его место этим способом нельзя"
+    ),
+    "tcp": (
+        "на приветствие с запрещённым именем сброс не приходит: фильтр здесь не шлёт его сам "
+        "(он молчит или портит ответ сервера), и найти его место этим способом нельзя"
+    ),
+}
+
+
+def judge_filter(facts: FilterFacts, trace: RouteTrace | None = None, *, method: str = "quic") -> FilterVerdict | None:
+    """Вывод о месте фильтра или None, если проверку сняли. ``method`` — способ поиска: от него зависят слова."""
     if facts.cancelled:
         return None
     if facts.distance is None:
@@ -502,16 +527,9 @@ def judge_filter(facts: FilterFacts, trace: RouteTrace | None = None) -> FilterV
             "VPN или антивирус по дороге — искать место фильтра за ними нельзя",
         )
     if not facts.control_ok:
-        return FilterVerdict(
-            FILTER_NO_CONTROL,
-            "сервер не ответил даже на обычный пакет QUIC — искать место фильтра не на чем",
-        )
+        return FilterVerdict(FILTER_NO_CONTROL, _NO_CONTROL_TEXT.get(method, _NO_CONTROL_TEXT["quic"]))
     if not facts.stateful:
-        return FilterVerdict(
-            FILTER_NOT_STATEFUL,
-            "после пакета с запрещённым именем обычный пакет всё равно проходит: фильтр не запоминает "
-            "соединение, и найти его место этим способом нельзя",
-        )
+        return FilterVerdict(FILTER_NOT_STATEFUL, _NOT_STATEFUL_TEXT.get(method, _NOT_STATEFUL_TEXT["quic"]))
     hop = facts.first_blocked_ttl
     # Сервер по трассе пингом может оказаться ближе, чем по TCP: берём меньшее.
     target_at = min(

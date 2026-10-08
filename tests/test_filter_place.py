@@ -186,6 +186,63 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(fp.aggregate([silent], _hops(), zapret_running=False).state, "not_found")
 
 
+class MechanismsTests(unittest.TestCase):
+    """Фильтров на дороге бывает несколько: место у каждого механизма своё."""
+
+    @staticmethod
+    def _site(host, quic=None, tcp=None, tcp_text="сброс не приходит"):
+        methods = []
+        if quic is not None:
+            methods.append(fp.MethodVerdict("quic", pt.FILTER_FOUND if quic else pt.FILTER_NOT_ON_PATH, quic or None, "текст"))
+        if tcp is not None:
+            methods.append(fp.MethodVerdict("tcp", pt.FILTER_FOUND if tcp else pt.FILTER_NOT_STATEFUL, tcp or None, tcp_text))
+        return fp.SiteVerdict(host, "45.1.0.1", pt.FILTER_FOUND, quic or tcp or None, 9, "текст", tuple(methods))
+
+    def test_each_mechanism_gets_its_own_place(self) -> None:
+        from diagnostics import dns_place
+
+        dns = dns_place.DnsPlaceVerdict(dns_place.PLACE_FOUND, "перехватывают между узлами 3 и 4", 4)
+        result = fp.mechanisms([self._site("a.example", quic=2, tcp=2), self._site("b.example", quic=2, tcp=0)], dns)
+        by_key = {item["key"]: item for item in result["mechanisms"]}
+
+        self.assertEqual((by_key["quic"]["hop"], by_key["tcp"]["hop"], by_key["dns"]["hop"]), (2, 2, 4))
+        self.assertIn("совпало по 2 сайтам из 2", by_key["quic"]["text"])
+        self.assertIn("совпало по 1 сайту из 2", by_key["tcp"]["text"])
+        # Разные места у разных механизмов — устройств не меньше двух.
+        self.assertIn("не меньше двух", result["same_place"])
+        self.assertEqual([item["title"] for item in result["unmeasured"]], ["Бан по адресу", "Обрыв загрузки на 16–20 КБ"])
+
+    def test_same_place_is_not_called_one_device_and_a_single_mechanism_says_so(self) -> None:
+        both = fp.mechanisms([self._site("a.example", quic=2, tcp=2)])
+        self.assertIn("может быть одно устройство", both["same_place"])
+        self.assertIn("не увидеть", both["same_place"])
+
+        single = fp.mechanisms([self._site("a.example", quic=2, tcp=0)])
+        self.assertIn("по одному механизму", single["same_place"])
+        tcp = next(item for item in single["mechanisms"] if item["key"] == "tcp")
+        self.assertEqual((tcp["hop"], tcp["text"]), (None, "место не найдено: сброс не приходит"))
+
+        self.assertEqual(fp.mechanisms([])["mechanisms"], [])
+        self.assertEqual(fp.mechanisms([])["same_place"], "")
+
+    def test_card_and_text_show_the_mechanisms(self) -> None:
+        from blockcheck.ui.result_cards_model import build_cards
+
+        place = {"state": "found", "found": True, "hop": 2, "text": "Фильтр стоит между узлами 1 и 2", "sites": [], "hops": [], "reasons": []}
+        place.update(fp.mechanisms([self._site("a.example", quic=2, tcp=0)]))
+        [card] = build_cards({"filter": place})
+
+        titles = [section.title for section in card.sections]
+        self.assertEqual(titles[:3], ["Вывод", "Чем и где режут", "Место не измеряется"])
+        rows = {line.name: line for line in card.sections[1].lines}
+        self.assertEqual(rows["QUIC по имени сайта"].state, "warn")
+        self.assertEqual(rows["TLS по имени сайта (сброс соединения)"].state, "unknown")
+        self.assertIn("Один фильтр или несколько", rows)
+        text = "\n".join(fp.lines(place))
+        self.assertIn("📍 QUIC по имени сайта: между узлами 1 и 2", text)
+        self.assertIn("➖ Бан по адресу: место не измеряется", text)
+
+
 class CollectAndReportTests(unittest.TestCase):
     def _run(self):
         candidates = [fp.Candidate("a.example", "45.1.0.1", ("quic", "tcp")), fp.Candidate("b.example", "45.2.0.1", ("quic",))]
