@@ -64,6 +64,7 @@ from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.elided_label import ElidedLabel as _ElidedLabel
 from ui.widgets.hover_hint import HoverHint
+from ui.widgets.reveal import RISE_PX, Reveal
 from ui.widgets.share_bar import ShareBar
 from ui.block_build import DeferredFill
 from ui.widgets.stagger_float_in import float_in
@@ -386,6 +387,8 @@ class ResultCard(QWidget):
         # только то, чего в дорогах нет. У остальных карточек меток столько, сколько есть.
         self._marks = tuple(card.marks)
         self._chips = tuple(card.tags if card.marks else card.chips)
+        # Строки и дороги проявляются по очереди при первом показе карточки.
+        self.reveal = Reveal(self, duration_ms=520)
 
         self.dots: HostingDots | None = None
         if card.dots:
@@ -561,7 +564,9 @@ class ResultCard(QWidget):
 
         lines_top, more_top, _dots_top, chips, _height, _marks_top = self._places(self.width())
         inner = max(8, right - left - 14)
+        parts = len(self._lines) + len(self._marks) + len(chips)
         for order, line in enumerate(self._lines):
+            painter.setOpacity(self.reveal.part(order, parts))
             row_top = lines_top + order * (self.LINE + self.LINE_GAP)
             paint_dot(
                 painter,
@@ -585,11 +590,13 @@ class ResultCard(QWidget):
                     int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
                     metrics.elidedText(line.text, Qt.TextElideMode.ElideRight, int(rest)),
                 )
+        painter.setOpacity(1.0)
         if self._more:
             painter.setPen(muted)
             painter.drawText(QRectF(left, more_top, right - left, self.MORE), left_flag, self._more)
         for index, mark in enumerate(self._marks):
             rect = self.mark_rect(index)
+            painter.setOpacity(self.reveal.part(len(self._lines) + index, parts))
             color = QColor(state_color(mark.state))
             try:
                 icon = get_cached_qta_pixmap(mark.icon, color=color.name(), size=12)
@@ -609,7 +616,8 @@ class ResultCard(QWidget):
                     metrics.elidedText(mark.word, Qt.TextElideMode.ElideRight, int(rest)),
                 )
         back = QColor(0, 0, 0, 13) if light else QColor(255, 255, 255, 15)
-        for (label, state), rect in zip(self._chips, chips):
+        for order, ((label, state), rect) in enumerate(zip(self._chips, chips)):
+            painter.setOpacity(self.reveal.part(len(self._lines) + len(self._marks) + order, parts))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(back)
             painter.drawRoundedRect(rect, 4, 4)
@@ -1268,6 +1276,8 @@ class RowsTable(QWidget):
         self._metrics = QFontMetrics(self._font)
         self._tops: list[tuple[float, float]] = []
         self._placed_for = -1
+        # Строки проявляются по очереди при первом показе.
+        self.reveal = Reveal(self)
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         policy.setHeightForWidth(True)
         self.setSizePolicy(policy)
@@ -1343,9 +1353,14 @@ class RowsTable(QWidget):
         painter.setFont(self._font)
         flags = self._wrap_flags()
         width = self.width()
-        for (top, height), line, icon in zip(self._place(width), self._lines, self._icons):
+        count = len(self._lines)
+        for order, ((top, height), line, icon) in enumerate(zip(self._place(width), self._lines, self._icons)):
             if top > event.rect().bottom() or top + height < event.rect().top():
                 continue
+            shown = self.reveal.part(order, count)
+            if shown <= 0.0:
+                continue
+            painter.setOpacity(shown)
             painter.fillRect(QRectF(0, top, width, 1), divider)
             color = QColor(state_color(line.state))
             y = top + self.PAD
@@ -1585,6 +1600,8 @@ class TilesGrid(QWidget):
         self.setSizePolicy(policy)
         self.setMouseTracking(True)
         self._hint = HoverHint(self)
+        # Плитки проявляются по очереди при первом показе.
+        self.reveal = Reveal(self)
         self._theme_refresh = ThemeRefreshBinding(self, lambda *_args, **_kwargs: self.update())
         set_state_text(self, "; ".join(f"{tile.title}: {tile.result}" for tile in self._tiles))
 
@@ -1665,10 +1682,16 @@ class TilesGrid(QWidget):
         small_font = QFont(self.font())
         small_font.setPixelSize(12)
         title_metrics, small_metrics = QFontMetrics(title_font), QFontMetrics(small_font)
+        count = len(self._tiles)
         for index, tile in enumerate(self._tiles):
             rect = self.tile_rect(index)
             if not rect.intersects(QRectF(event.rect())):
                 continue
+            shown = self.reveal.part(index, count)
+            if shown <= 0.0:
+                continue
+            painter.setOpacity(shown)
+            rect.translate(0, RISE_PX * (1.0 - shown))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(hover if index == self._hover else base)
             painter.drawRoundedRect(rect, 6, 6)
