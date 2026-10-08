@@ -559,6 +559,8 @@ class ReportVerdictTests(unittest.TestCase):
 
         dot = next(finding for finding in findings if "DoT" in finding.text)
         self.assertIn("закрыт целиком", dot.text)
+        # У находки про DoT свой код, а не код DoH.
+        self.assertEqual(dot.code, sc.CODE_DOT_BLOCKED)
         self.assertIn("ни один из 3", dot.text)
         self.assertNotIn("8.8.8.8", dot.text)
 

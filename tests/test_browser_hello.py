@@ -168,6 +168,19 @@ class BrowserLineTests(unittest.TestCase):
         self.assertEqual((line.state, line.code), ("ok", pp.CODE_BROWSER_ONLY))
         self.assertIn("в самом браузере сайт, возможно, открывается", line.text)
 
+    def test_failed_connection_next_to_a_cut_hello_does_not_cancel_the_verdict(self) -> None:
+        # Живой случай (Signal при работающем Zapret): TLS 1.2 не соединился, TLS 1.3 сброшен,
+        # браузерное приветствие прошло — в браузере сайт открывается.
+        line = _browser_line(_facts(tls12=bc.HelloResult(bc.HELLO_CONNECT), tls13=RESET, browser=OK))
+
+        self.assertEqual(line.code, pp.CODE_BROWSER_ONLY)
+
+    def test_failed_connections_alone_are_not_a_cut(self) -> None:
+        nothing = bc.HelloResult(bc.HELLO_CONNECT)
+
+        self.assertEqual(_browser_line(_facts(tls12=nothing, tls13=nothing, browser=OK)).code, "")
+        self.assertEqual(_browser_line(_facts(tls12=OK, tls13=RESET, browser=OK)).code, "")
+
     def test_no_connection_and_cancel_give_no_verdict(self) -> None:
         self.assertEqual(_browser_line(_facts(tls12=OK, browser=bc.HelloResult(bc.HELLO_CONNECT))).state, "unknown")
         self.assertEqual([line.key for line in pp.judge(_facts(tls12=OK, browser=bc.HelloResult(bc.HELLO_CANCELLED)))], ["tls12"])

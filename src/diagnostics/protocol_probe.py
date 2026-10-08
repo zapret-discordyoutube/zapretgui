@@ -194,7 +194,9 @@ def _browser_line(facts: ProtocolFacts) -> ProtocolLine | None:
         return None
     plain = [item.kind for item in (facts.tls12, facts.tls13) if item is not None]
     plain_passes = HELLO_OK in plain
-    plain_cut = bool(plain) and all(kind in (HELLO_RESET, HELLO_TIMEOUT) for kind in plain)
+    # Обычное приветствие режут: ни одно не прошло и хотя бы одно оборвано или пропало. Несостоявшееся
+    # соединение рядом с оборванным вывода не отменяет: до сервера оно просто не дошло.
+    plain_cut = not plain_passes and any(kind in (HELLO_RESET, HELLO_TIMEOUT) for kind in plain)
     # Отказ сервера — тоже ответ сервера: приветствие до него дошло.
     if result.kind in (HELLO_OK, HELLO_ALERT):
         if plain_cut:

@@ -10,12 +10,15 @@
 
 from __future__ import annotations
 
+import functools
 import gzip
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from concurrent.futures import Future
 
-from diagnostics.limits import DNS_TIMEOUT, DOH_TIMEOUT, HTTPS_TIMEOUT, READ_TIMEOUT
+from diagnostics.limits import DNS_TIMEOUT, DOH_TIMEOUT, HTTPS_TIMEOUT, READ_TIMEOUT, REFERENCE_GRACE_S
 from diagnostics.run_context import Run
 from diagnostics.tls_probe import ProbeResult, https_get
 from utils.dns_reference import REFERENCE_RESOLVERS, ReferenceResolver
@@ -50,23 +53,50 @@ def doh_lookup(run: Run, host: str, record_type: int = TYPE_A) -> tuple[bool, tu
     """Эталонные адреса по DNS-over-HTTPS. (ответил ли хоть один, адреса).
 
     Спрашиваются все эталонные серверы сразу, ответы складываются. Кто из них
-    не ответил и почему — запоминается в прогоне и попадает в отчёт.
+    не ответил и почему — запоминается в прогоне и попадает в отчёт. Молчащего
+    сервера сайт не ждёт: после первого ответа остальным даётся ``REFERENCE_GRACE_S``.
     """
 
     def _one(resolver: ReferenceResolver) -> DnsQueryResult:
         return query_doh(resolver.address, host, record_type, timeout_s=DOH_TIMEOUT, cancel=run.probe_cancel)
 
-    futures = [(resolver, run.reference_lane.submit(_one, resolver)) for resolver in REFERENCE_RESOLVERS]
-    answered = False
+    lock = threading.Lock()
+    answered = [False]
     ips: list[str] = []
-    for resolver, future in futures:
-        result = future.result()
-        run.note_reference(resolver, result)
-        answered = answered or result.answered
-        for ip in result.values(record_type):
-            if ip not in ips:
-                ips.append(ip)
-    return answered, tuple(ips)
+    first_answer = threading.Event()
+    left = [len(REFERENCE_RESOLVERS)]
+    everyone = threading.Event()
+
+    def _done(resolver: ReferenceResolver, future: Future) -> None:
+        # Ответ опоздавшего сервера тоже учитывается в отчёте о серверах, хотя сайт его уже не ждёт.
+        try:
+            result = None if future.cancelled() else future.result()
+        except Exception:
+            result = None
+        with lock:
+            if result is not None:
+                run.note_reference(resolver, result)
+                answered[0] = answered[0] or result.answered
+                for ip in result.values(record_type):
+                    if ip not in ips:
+                        ips.append(ip)
+                if result.answered:
+                    first_answer.set()
+            left[0] -= 1
+            if not left[0]:
+                everyone.set()
+
+    for resolver in REFERENCE_RESOLVERS:
+        future = run.reference_lane.submit(_one, resolver)
+        future.add_done_callback(functools.partial(_done, resolver))
+    # Как только ответил первый сервер, остальным даётся ещё секунда: закрытый провайдером
+    # эталонный сервер иначе отнимал бы свои пять секунд у каждого проверяемого сайта.
+    while not everyone.wait(0.05):
+        if first_answer.is_set():
+            everyone.wait(REFERENCE_GRACE_S)
+            break
+    with lock:
+        return answered[0], tuple(ips)
 
 
 def doh_ask(run: Run, name: str, record_type: int) -> DnsQueryResult | None:

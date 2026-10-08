@@ -386,6 +386,38 @@ class ReferenceResolverTests(unittest.TestCase):
         self.assertNotIn("8.8.8.8", {item["address"] for item in result["reference"]})
         self.assertFalse([item for item in result["problems"] if "Шифрованный DNS" in item["text"]])
 
+    def test_silent_reference_server_does_not_hold_every_site(self) -> None:
+        # Живой случай: один эталонный сервер закрыт провайдером и молчит весь срок.
+        # Раньше каждый сайт ждал его пять секунд.
+        release = threading.Event()
+
+        def doh(server, _host, rtype, **_kwargs):
+            if server == "8.8.8.8":
+                release.wait(5)
+                return self._answer(rtype, "8.8.8.80")
+            return self._answer(rtype, "1.1.1.10")
+
+        run = engine._Run(None, workers=8)
+        try:
+            with patch.object(net_access, "query_doh", doh), patch.object(net_access, "REFERENCE_GRACE_S", 0.1):
+                started = time.monotonic()
+                answered, ips = net_access.doh_lookup(run, "example.com")
+                waited = time.monotonic() - started
+                self.assertNotIn("8.8.8.8", {item["address"] for item in run.reference_report()})
+                release.set()
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline and "8.8.8.8" not in {item["address"] for item in run.reference_report()}:
+                    time.sleep(0.01)
+                # Опоздавший ответ всё равно попал в отчёт о серверах.
+                self.assertIn("8.8.8.8", {item["address"] for item in run.reference_report()})
+        finally:
+            release.set()
+            run.close()
+
+        self.assertTrue(answered)
+        self.assertEqual(ips, ("1.1.1.10",))
+        self.assertLess(waited, 1.5)
+
     def test_answers_of_all_reference_servers_are_merged(self) -> None:
         by_server = {"1.1.1.1": ("1.1.1.10",), "8.8.8.8": ("8.8.8.80", "1.1.1.10")}
 

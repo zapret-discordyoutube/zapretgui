@@ -818,7 +818,7 @@ def judge_report(
 
     closed = (
         _transport_summary(
-            rows, TRANSPORT_DOT, "Шифрованный DNS по DoT (порт 853)", (CODE_DOT_BLOCKED,), CODE_DOH_BLOCKED
+            rows, TRANSPORT_DOT, "Шифрованный DNS по DoT (порт 853)", (CODE_DOT_BLOCKED,), CODE_DOT_BLOCKED
         ),
         _transport_summary(
             rows,

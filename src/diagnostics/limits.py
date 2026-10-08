@@ -21,6 +21,7 @@ __all__ = [
     "REGISTRY_WAIT_S",
     "RECHECK_AT_ONCE",
     "REFERENCE_AT_ONCE",
+    "REFERENCE_GRACE_S",
     "RECHECK_NEEDS_S",
     "RECHECK_SITES",
     "RETRY_PAUSE_S",
@@ -39,6 +40,9 @@ DNS_TIMEOUT = 4.0
 # «всё честно». Три запроса подряд ловят и такую подмену.
 DNS_ATTEMPTS = 3
 DOH_TIMEOUT = 5.0
+# Сколько ждать остальные эталонные серверы после первого ответа. Обычно они отвечают за
+# десятые доли секунды; закрытый провайдером сервер молчит весь срок.
+REFERENCE_GRACE_S = 1.0
 HTTPS_TIMEOUT = 5.0
 READ_TIMEOUT = 3.0
 REACH_ATTEMPTS = 2
