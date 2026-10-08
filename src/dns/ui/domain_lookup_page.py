@@ -428,8 +428,10 @@ class DomainLookupPage(BasePage):
         self.history_card.setVisible(bool(groups))
 
     def _remember(self, report) -> None:
-        # Сама запись в настройки уже сделана фоновым потоком проверки; здесь — только экран.
-        entry = plans.build_history_entry(report)
+        # Запись в настройки и файл полного текста уже сделал фоновый поток проверки; экран берёт
+        # ту же запись. Своя, собранная заново, была бы без пути к файлу — и прошлая проверка
+        # открывалась бы словами «полный текст не сохранился» до перезапуска программы.
+        entry = getattr(report, "history_entry", None) or plans.build_history_entry(report)
         if entry is not None:
             self.set_history([*getattr(self, "_history_runs", []), entry][-HISTORY_SHOWN:])
 

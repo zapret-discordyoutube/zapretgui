@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from dns.state import CustomServerResult, DnsCommandResult, DnsState
 
 
@@ -298,7 +300,8 @@ def run_domain_lookup(target: str, *, use_external: bool = True, on_stage=None, 
         # Полный текст проверки — в файл: запись истории на вкладке открывает его страницей.
         entry["log_file"] = save_domain_lookup_text(report.target, build_text_report(report))
     _remember_check("domain_history", entry)
-    return report
+    # Экран показывает именно сохранённую запись: соберёт свою — в ней не будет пути к полному тексту.
+    return replace(report, history_entry=entry)
 
 
 DOMAIN_LOOKUP_FORMAT = "zapretgui.domain_lookup/1"

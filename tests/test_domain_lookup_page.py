@@ -355,3 +355,50 @@ class RowsViewReuseTests(unittest.TestCase):
         self.assertIs(view._blocks[0], first)
         self.assertIsNot(view._blocks[1], second)
         self.assertEqual(len(view.groups()[1].rows), 5)
+
+
+class PastCheckTextTests(unittest.TestCase):
+    """Прошлая проверка открывается полным текстом сразу, а не только после перезапуска программы."""
+
+    def test_command_returns_the_saved_entry_with_the_path_to_the_full_text(self) -> None:
+        import tempfile
+        from types import SimpleNamespace
+
+        from dns import commands
+
+        with tempfile.TemporaryDirectory() as folder:
+            with (
+                patch("dns.domain_lookup.run_domain_lookup", return_value=_report(finished=True)),
+                patch("dns.commands.build_domain_lookup_servers", return_value=()),
+                patch("config.runtime_layout.APPLICATION_PATHS", SimpleNamespace(logs_dir=folder)),
+                patch("settings.store.add_tab_history_run") as add,
+            ):
+                report = commands.run_domain_lookup("example.com")
+
+            entry = report.history_entry
+            # В настройки и на экран уходит одна и та же запись.
+            self.assertEqual(add.call_args.args[1], entry)
+            self.assertTrue(entry["log_file"].startswith(folder))
+            self.assertIn("example.com", commands.load_past_domain_lookup(entry["log_file"]))
+
+    def test_just_finished_check_opens_its_full_text_from_the_history(self) -> None:
+        from PyQt6.QtWidgets import QApplication
+
+        from dns.ui.domain_lookup_page import DomainLookupPage
+
+        _app = QApplication.instance() or QApplication([])
+        feature = Mock()
+        feature.load_past_domain_lookup = lambda path: "полный текст проверки" if path == "run.json" else ""
+        page = DomainLookupPage(dns_feature=feature, embedded=True)
+        self.addCleanup(page.deleteLater)
+        opened: list = []
+        page.report_requested.connect(opened.append)
+        saved = {"kind": "domain", "time": "2026-10-08T16:06:00", "title": "example.com", "level": "ok",
+                 "headline": "Готово", "problems": [], "states": {}, "log_file": "run.json"}
+
+        page._on_finished(_report(finished=True, history_entry=saved))
+        page._open_past(0)
+
+        self.assertEqual(opened[-1].text, "полный текст проверки")
+        self.assertNotIn("не сохранился", opened[-1].text)
+

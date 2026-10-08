@@ -221,6 +221,9 @@ class DomainLookupReport:
     # Как сайт открывается: TLS 1.2 и 1.3, «как Chrome», HTTP, QUIC, способ блокировки, реестр РКН.
     # Та же запись сервиса, что в отчёте BlockCheck (``diagnostics.engine.check_site``); только для доменов.
     site: dict | None = None
+    # Запись этой проверки в истории вкладки — та самая, что сохранена в настройки (с путём
+    # к файлу полного текста). None — проверку прервали, в историю она не попала.
+    history_entry: dict | None = None
     finished: bool = False
     stopped: bool = False
     timed_out: bool = False
