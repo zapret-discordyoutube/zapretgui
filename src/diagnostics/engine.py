@@ -42,6 +42,7 @@ from datetime import datetime
 
 from diagnostics import (
     block_cause,
+    cert_owner,
     net_access,
     protocol_probe,
     quic_probe,
@@ -83,6 +84,7 @@ from diagnostics.services import (
     site_service,
 )
 from diagnostics.tls_probe import (
+    KIND_CERT,
     KIND_CANCELLED,
 )
 from diagnostics.verdict import (
@@ -278,6 +280,12 @@ def _probe_host(
             probe.reference_ipv6 = doh6_future.result()[1]
         _check_reach(run, probe, read_limit=read_limit)
         probe.reach_state = judge_reach(probe.reach)
+        # Чужой сертификат — у самого сайта или у адреса из hosts, который не подошёл: читаем, чей он.
+        local = probe.local_check if probe.hosts_stale else None
+        wrong = probe.reach if probe.reach_state == ReachState.CERT else (local if local and local.kind == KIND_CERT else None)
+        if wrong is not None and not run.dns_cancelled():
+            names = cert_owner.collect(host, wrong.ip, cancel=run.probe_cancel)
+            probe.cert = cert_owner.judge(names, host, problem=wrong.cert_problem, from_hosts=wrong.ip in probe.hosts_ips)
         probe.mark("reach")
         # Пакеты QUIC уходят сразу, а ждём их после уточнения причины: обе
         # проверки идут одновременно.
@@ -498,6 +506,7 @@ def _service_verdict(service: Service, probes: list[_Probe], *, zapret_running: 
             dns=probe.judgement.state if probe.judgement else DnsState.UNKNOWN,
             main=probe.target.main,
             kind=probe.kind,
+            hosts_stale=probe.hosts_stale,
         )
         for probe in probes
     ]

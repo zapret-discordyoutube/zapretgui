@@ -213,6 +213,11 @@ class _Net:
         self.cause_facts = cause_facts
         self.refined: list[str] = []
         self.bypass_tools: tuple[str, ...] = ()
+        # Что написано в чужом сертификате (``utils.cert_reader.CertNames``) и у каких адресов его читали.
+        self.cert_names = None
+        self.cert_asked: list[tuple[str, str]] = []
+        # Адреса сайта из файла hosts: по умолчанию записей нет.
+        self.hosts: tuple[str, ...] = ()
         self.dns_place = None
         # Что «показал» QUIC: по умолчанию проверку будто сняли — вывода нет.
         self.quic_facts = None
@@ -292,7 +297,9 @@ class _Net:
             patch.object(sections, "check_speed", side_effect=lambda _run, _emit, *_sites: self.speed),
             patch.object(engine.telegram_check, "check_telegram", side_effect=lambda *_a, **_k: self.telegram),
             patch.object(sections, "check_system", side_effect=lambda _run, _services, _zapret=None: self.system_items),
-            patch.object(net_access, "hosts_file_ipv4", return_value=()),
+            patch.object(net_access, "hosts_file_ipv4", side_effect=lambda _host: self.hosts),
+            # Чужой сертификат читается отдельным соединением — в сценариях движка сети нет.
+            patch.object(engine.cert_owner, "collect", side_effect=self._cert),
             patch.object(net_access, "system_dns_servers", return_value=("83.220.169.155",)),
             patch.object(sections, "zapret_status", return_value=(True, "✅ Zapret запущен")),
             # Список реестра РКН качается из сети и лежит на диске: в сценариях движка его нет.
@@ -309,6 +316,10 @@ class _Net:
             patch("diagnostics.voice_check.check_voice", return_value=self.voice),
             patch("diagnostics.freeze_check.check_freeze", return_value=self.freeze),
         )
+
+    def _cert(self, host, ip, **_kwargs):
+        self.cert_asked.append((host, ip))
+        return self.cert_names
 
     def run(self, fn, *args, **kwargs):
         from contextlib import ExitStack
@@ -644,6 +655,66 @@ class FreezeUploadWiringTests(unittest.TestCase):
         ):
             self.assertIsNone(sections.upload(stopped, "cdn.example", "/"))
         collect.assert_not_called()
+
+
+class ForeignCertificateTests(unittest.TestCase):
+    """Чужой сертификат: отчёт называет, кто ответил вместо сайта, и что с этим делать."""
+
+    HOSTS_IP = "203.0.113.9"
+
+    @staticmethod
+    def _names(**fields):
+        from utils.cert_reader import CertNames
+
+        return CertNames(**fields)
+
+    def _discord(self, result) -> tuple[dict, dict]:
+        service = next(item for item in result["services"] if item["label"] == "Discord")
+        return service, next(item for item in service["targets"] if item["host"] == "discord.com")
+
+    def test_stale_hosts_record_is_a_problem_even_though_the_real_address_opens(self) -> None:
+        # Живой случай (ChatGPT у пользователя): в hosts записан сервер-посредник, которого больше нет.
+        # Проверка открыла сайт по настоящему адресу, а браузер пойдёт по записи и упрётся в чужой сервер.
+        def https(host, ip):
+            if ip == self.HOSTS_IP:
+                return ProbeResult(ip=ip, kind=KIND_CERT, cert_problem="сертификат выдан другому сайту")
+            return _ok(ip)
+
+        net = _Net(https=https)
+        net.hosts = (self.HOSTS_IP,)
+        net.cert_names = self._names(subject="other.example", issuer="R11", issuer_org="Let's Encrypt", names=("other.example",))
+        result = net.run(engine.run_blockcheck, "full", emit=lambda _line: None)
+        service, target = self._discord(result)
+
+        self.assertTrue(target["hosts_stale"])
+        self.assertEqual(service["level"], "warn")
+        self.assertEqual(target["cert"]["code"], "hosts")
+        self.assertIn("other.example", target["cert"]["text"])
+        self.assertIn(("discord.com", self.HOSTS_IP), net.cert_asked)
+        problem = next(item for item in result["problems"] if "Discord" in item["text"])
+        self.assertEqual((problem["level"], problem["action"]), ("warn", "hosts"))
+        self.assertIn("в файле hosts для него записан нерабочий адрес", problem["text"])
+        self.assertTrue(any("чужой сервер" in line for line in problem["advice"]))
+        self.assertNotIn("Discord", result["working"])
+
+    def test_antivirus_inspecting_https_is_named_in_the_problem(self) -> None:
+        net = _Net(https=lambda host, ip: ProbeResult(ip=ip, kind=KIND_CERT, cert_problem="сертификат выдан неизвестным центром"))
+        net.cert_names = self._names(subject="discord.com", issuer="ESET SSL Filter CA", names=("discord.com",))
+        result = net.run(engine.run_blockcheck, "full", emit=lambda _line: None)
+        _service, target = self._discord(result)
+
+        self.assertEqual(target["cert"]["code"], "antivirus")
+        self.assertIn("ESET", target["text"])
+        problem = next(item for item in result["problems"] if "Discord" in item["text"])
+        self.assertTrue(any("ESET" in line for line in problem["advice"]))
+        self.assertEqual(problem["action"], "")
+
+    def test_site_with_valid_certificate_has_no_certificate_note(self) -> None:
+        net = _Net()
+        result = net.run(engine.run_blockcheck, "full", emit=lambda _line: None)
+
+        self.assertIsNone(self._discord(result)[1]["cert"])
+        self.assertEqual(net.cert_asked, [])
 
 
 class SystemStateInReportTests(unittest.TestCase):

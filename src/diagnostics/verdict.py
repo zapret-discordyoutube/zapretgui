@@ -38,6 +38,7 @@ from utils.address_kinds import AddressKind, address_kind, is_stub_address
 from utils.windows_dns_query import DNS_STATUS_NAME_ERROR, DNS_STATUS_NO_RECORDS
 
 __all__ = [
+    "ADVICE_HOSTS_STALE",
     "DnsJudgement",
     "DnsState",
     "FREEZE_MAX_BYTES",
@@ -249,6 +250,8 @@ class TargetOutcome:
     # Вид блокировки (``diagnostics.block_kind``), если его уточнили пробами.
     # Пусто — берётся тот, что следует из одного исхода ``reach``.
     kind: str = ""
+    # Сам сайт открылся, но адрес, записанный для него в файле hosts, не работает.
+    hosts_stale: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +299,11 @@ _ADVICE_CERT = (
 _ADVICE_HOSTS = (
     "Удалите или исправьте запись этого сайта в файле hosts (страница «Редактор hosts») — "
     "адрес в ней устарел."
+)
+ADVICE_HOSTS_STALE = (
+    "Откройте «Редактор hosts», выключите и снова включите этот сервис или выберите для него другой "
+    "профиль — запишется рабочий адрес. Если сервис вам там не нужен, просто выключите его: сайт "
+    "откроется по своему настоящему адресу."
 )
 _ADVICE_IP = "Серверы недоступны по адресу. Zapret в таком случае помогает не всегда — попробуйте другой DNS или VPN."
 _ADVICE_NO_CONNECT = (
@@ -390,7 +398,17 @@ def summarize_service(
     secondary_broken = [item for item in targets if item is not main and item.reach in _BROKEN]
     if main.reach == ReachState.OK:
         advice: tuple[str, ...] = ()
-        if not secondary_broken:
+        stale = [item.host for item in targets if item.hosts_stale and item.reach == ReachState.OK]
+        if stale and not secondary_broken:
+            # Проверка дошла до сайта по настоящему адресу, а браузер и программы возьмут адрес из
+            # hosts и упрутся в нерабочий сервер. «Открывается» было бы неправдой для человека.
+            level = Level.WARN
+            headline = (
+                f"{label}: сам сайт доступен, но в файле hosts для него записан нерабочий адрес — "
+                "браузер пойдёт на него и сайт не откроет"
+            )
+            advice = (ADVICE_HOSTS_STALE,)
+        elif not secondary_broken:
             level = Level.WARN if spoofed else Level.OK
             headline = f"{label} открывается"
         else:

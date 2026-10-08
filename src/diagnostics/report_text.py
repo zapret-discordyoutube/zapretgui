@@ -57,6 +57,8 @@ def fail_text(probe: Probe) -> str:
     """Почему адрес не открылся — одной фразой."""
     if probe.volume is not None and probe.volume.code == volume_probe.VOLUME_CUT:
         return f"{probe.volume.text} — так провайдер обрывает загрузку"
+    if probe.reach_state == ReachState.CERT and probe.cert is not None:
+        return probe.cert.text
     return describe_reach(probe.reach, timeout=HTTPS_TIMEOUT)
 
 
@@ -92,7 +94,10 @@ def reach_text(probe: Probe) -> str:
         tls = f", {result.tls_version.replace('TLSv', 'TLS ')}" if result.tls_version else ""
         if ":" in result.ip:
             return f"открывается по IPv6, по IPv4 — нет ({result.elapsed_ms:.0f} мс{tls}, {result.ip})"
-        stale = " — адрес из файла hosts не ответил, запись в нём устарела" if probe.hosts_stale else ""
+        stale = ""
+        if probe.hosts_stale:
+            what = probe.cert.text if probe.cert is not None else "адрес из файла hosts не работает, запись в нём устарела"
+            stale = f" — {what}; браузер пойдёт по этой записи и сайт не откроет"
         again = " — со второй проверки, поодиночке: первый сбой дала нагрузка самой проверки" if probe.rechecked == RECHECK_OPENED else ""
         return f"открывается ({result.elapsed_ms:.0f} мс{tls}, {result.ip}{source}){stale}{again}"
     text = fail_text(probe)
@@ -149,6 +154,9 @@ def probe_lines(probe: Probe, *, full: bool) -> list[str]:
     icon = "✅" if probe.reach_state == ReachState.OK else "❌"
     if probe.reach_state == ReachState.UNKNOWN:
         icon = "❔"
+    if probe.hosts_stale and probe.reach_state == ReachState.OK:
+        # Проверка сайт открыла, а браузер по записи в hosts — не откроет.
+        icon = "⚠️"
     lines = [f"{icon} {title}: {reach_text(probe)}"]
     if probe.kind:
         lines.append(f"   🏷 Вид блокировки: {block_kind.kind_info(probe.kind).title}")
@@ -208,6 +216,17 @@ def target_report(probe: Probe) -> dict:
         "hosts_stale": probe.hosts_stale,
         # Повторная проверка поодиночке: "opened" — открылся со второго раза, "same" — сбой повторился.
         "rechecked": probe.rechecked,
+        # Чужой сертификат: кто ответил вместо сайта и что с этим делать. None — сертификат в порядке.
+        "cert": None
+        if probe.cert is None
+        else {
+            "code": probe.cert.code,
+            "text": probe.cert.text,
+            "advice": probe.cert.advice,
+            "subject": probe.cert.subject,
+            "issuer": probe.cert.issuer,
+            "names": list(probe.cert.names),
+        },
         "seconds": round(probe.seconds, 1),
         # На что ушло время: части проверки по порядку (названия — в ``STAGE_TITLES``).
         "stages": dict(probe.stages),

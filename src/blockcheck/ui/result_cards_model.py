@@ -242,7 +242,8 @@ def site_level(service: dict) -> str:
     targets = list(service.get("targets") or ())
     if level in (OK, WARN) and targets and all(item.get("ok") for item in targets):
         # Сайт открывается, но приветствие с составом Chrome не проходит: в браузере он может висеть.
-        return WARN if _by_fingerprint(targets) else OK
+        # Или запись в hosts ведёт на нерабочий адрес: проверка сайт открыла, а браузер не откроет.
+        return WARN if _by_fingerprint(targets) or any(item.get("hosts_stale") for item in targets) else OK
     return level
 
 
@@ -364,8 +365,22 @@ def _site_card(service: dict) -> Card:
             rows.append(Line(INFO, "Повторная проверка", "поодиночке, когда остальные проверки закончились, — результат тот же"))
         if item.get("hosts_stale"):
             rows.append(
-                Line(WARN, "Файл hosts", "записанный в нём адрес не ответил, сайт открылся по настоящему адресу — запись устарела")
+                Line(
+                    WARN,
+                    "Файл hosts",
+                    "записанный в нём адрес не работает. Проверка открыла сайт по настоящему адресу, "
+                    "а браузер пойдёт по записи и сайт не откроет — обновите её в «Редакторе hosts»",
+                )
             )
+        cert = item.get("cert") or {}
+        if cert:
+            rows.append(Line(FAIL, "Чужой сертификат", str(cert.get("text") or "")))
+            if cert.get("issuer"):
+                rows.append(Line(INFO, "Кем выдан", str(cert["issuer"])))
+            if cert.get("names"):
+                rows.append(Line(INFO, "Каким сайтам выдан", ", ".join(map(str, cert["names"][:6]))))
+            if cert.get("advice"):
+                rows.append(Line(INFO, "Что делать", str(cert["advice"])))
         for proto in item.get("protocols") or ():
             rows.append(
                 Line(_PROTOCOL_STATES.get(str(proto.get("state")), UNKNOWN), str(proto.get("title") or ""), str(proto.get("text") or ""))

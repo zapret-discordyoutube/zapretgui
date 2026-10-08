@@ -227,6 +227,9 @@ def collect_problems(
             continue
         verdict = verdicts[key]
         broken = [probe for probe in collected.get(key, ()) if probe.reach_state != ReachState.OK]
+        # Сайт открылся по настоящему адресу, а запись в hosts ведёт на нерабочий: для человека это поломка.
+        stale = [probe for probe in collected.get(key, ()) if probe.hosts_stale] if not broken else []
+        broken = broken or stale
         if verdict.level in (Level.FAIL, Level.WARN) and broken:
             if offline:
                 # Без интернета «Zapret не обходит блокировку» у каждого сайта —
@@ -240,6 +243,8 @@ def collect_problems(
             if bypassable is not None:
                 action = _zapret_action(zapret_running)
             target = (bypassable or broken[0]).host
+            if stale:
+                action = "hosts"
             # Гео-сайт сам ограничивает доступ из России: стратегия его не
             # чинит, и совет «подберите стратегию» увёл бы пользователя не туда.
             geo = next(
@@ -255,6 +260,10 @@ def collect_problems(
             causes = tuple(
                 dict.fromkeys(report_text.sentence(probe.cause.text) + "." for probe in broken if probe.cause is not None)
             )
+            # Чужой сертификат: кто именно ответил вместо сайта и что с этим делать — первым делом.
+            certs = [probe.cert for probe in broken if probe.cert is not None]
+            causes = tuple(dict.fromkeys(report_text.sentence(item.text) + "." for item in certs)) + causes
+            advice = tuple(dict.fromkeys(item.advice for item in certs if item.advice)) + advice
             problems.append(
                 problem(
                     verdict.level,

@@ -65,6 +65,8 @@ class Probe:
     reach_state: ReachState = ReachState.UNKNOWN
     # Как именно блокируют (по имени сайта, по адресу, страницей провайдера), если удалось выяснить.
     cause: block_cause.Cause | None = None
+    # Кто ответил вместо сайта, когда сертификат не прошёл проверку (``cert_owner.CertVerdict``).
+    cert: object | None = None
     # Проходит ли QUIC (UDP 443) к этому сайту. None — не проверяли или проверку сняли.
     quic: quic_probe.QuicVerdict | None = None
     # Проходит ли по одному соединению больше 16 КБ. None — не проверяли:
