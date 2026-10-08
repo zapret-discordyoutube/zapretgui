@@ -132,6 +132,10 @@ class Scene:
     # Сколько доли круга плашка идёт от «Вы» до сайта. В длинной сцене пакеты
     # едут быстрее: иначе последний не успевал бы дойти до конца круга.
     travel: float = TRAVEL
+    # Номер пакета, на котором проверка приняла решение о соединении. Дальше
+    # она это соединение не смотрит: следующие пакеты идут без остановки —
+    # так ведёт себя настоящий ТСПУ. -1 — смотрит каждый пакет.
+    decided_on: int = -1
 
 
 SCENES: dict[str, Scene] = {
@@ -149,6 +153,7 @@ SCENES: dict[str, Scene] = {
         ),
         bubble_key="fake",
         bubble_trigger=0,
+        decided_on=0,
     ),
     "multisplit": Scene(
         packets=(Packet("you", part="1"), Packet("tube.com", part="2")),
@@ -206,6 +211,7 @@ SCENES: dict[str, Scene] = {
         travel=0.34,
         bubble_key="fake_host",
         bubble_trigger=1,
+        decided_on=1,
     ),
     "tcpseg": Scene(
         packets=(
@@ -473,6 +479,8 @@ class TechniqueIllustration(QWidget):
         for index, packet in enumerate(scene.packets):
             if index > 0 and scene.packets[index - 1].glued_to_next:
                 continue
+            if 0 <= scene.decided_on < index:
+                continue  # решение уже принято — этот пакет проверка не смотрит
             moment = times.verdict if packet.fate == "blocked" else times.starts[index] + scene.travel * at_gate
             if 0.0 < moment < FADE_FROM:
                 points.append((moment, index))
@@ -640,6 +648,9 @@ class TechniqueIllustration(QWidget):
             else:
                 verdict = (self._tr("onboarding.scene.log.passed", "пропустил"), "pass")
                 site = (self._tr("onboarding.scene.log.accepted", "принят"), "ok") if raw >= 1.0 else wait
+            if 0 <= scene.decided_on < index:
+                # Проверка уже решила, что соединение разрешённое.
+                verdict = (self._tr("onboarding.scene.log.not_checked", "уже не смотрит"), "none")
             # Пока пакет стоит у проверки, решения ещё нет: оно появляется в
             # середине остановки — одновременно в журнале и под проверкой.
             gate_alpha = 1.0
@@ -903,7 +914,7 @@ class TechniqueIllustration(QWidget):
             tint_strength=blocked * fade,
             text_rect=QRectF(layout.gate_rect.left(), layout.gate_rect.top() + 3, layout.gate_rect.width(), 22),
         )
-        self._paint_scan(painter, layout, frames, chips, phase, colors)
+        self._paint_scan(painter, layout, frames, chips, phase, colors, rows)
         self._paint_gate_caption(painter, layout, rows, colors, fade)
         self._paint_node(
             painter,
@@ -1067,17 +1078,42 @@ class TechniqueIllustration(QWidget):
             round(a.alpha() + (b.alpha() - a.alpha()) * k),
         )
 
-    def _paint_scan(self, painter, layout: _Layout, frames, chips, phase: float, colors) -> None:
-        """Пока плашка внутри проверки, блок подсвечен и по нему бегает луч."""
+    def scan_state(self, rows: list[LogRow]) -> tuple[float, float | None, str]:
+        """Что сейчас делает проверка: (яркость подсветки, где луч 0…1 или None, тон).
+
+        Луч идёт по пакету только до решения. Как только проверка решила,
+        сканировать больше нечего: луч пропадает, а блок коротко окрашивается
+        в тон решения и гаснет. Пакеты, которые подъезжают или уже уезжают,
+        проверка не трогает.
+        """
+        active = next((row for row in rows if row.active), None)
+        if active is None:
+            return 0.0, None, ""
+        progress = self._hold_progress
+        if progress < VERDICT_AT:
+            return _ease_out(progress / TEXT_FADE_HOLD), progress / VERDICT_AT, "scan"
+        fading = 1.0 - _ease_in((progress - VERDICT_AT) / (1.0 - VERDICT_AT))
+        return fading, None, active.gate[1]
+
+    def _paint_scan(self, painter, layout: _Layout, frames, chips, phase: float, colors, rows) -> None:
+        """Подсветка блока проверки и луч по пакету, пока решения ещё нет."""
         gate = layout.gate_rect
-        reach = gate.width() / 2
-        glow = 0.0
-        for frame in frames:
-            near = 1.0 - abs(frame.x - layout.gate_x) / (reach + chips[frame.index] / 2)
-            glow = max(glow, _clamp01(near) * frame.alpha)
+        if self._with_holds or self._held_packet >= 0:
+            glow, beam_at, tone = self.scan_state(rows)
+        else:
+            # Одиночный кадр без остановок: подсветка по близости пакета к проверке.
+            reach = gate.width() / 2
+            glow, tone = 0.0, "scan"
+            for frame in frames:
+                near = 1.0 - abs(frame.x - layout.gate_x) / (reach + chips[frame.index] / 2)
+                glow = max(glow, _clamp01(near) * frame.alpha)
+            beam_at = 0.5 - 0.5 * math.cos(phase * math.tau * 9)
         if glow <= 0.01:
             return
-        accent = QColor(colors["accent"])
+        # Блок, который уже покраснел от блокировки, поверх не перекрашивается.
+        if tone == "block":
+            return
+        accent = QColor({"ok": PASS_GREEN, "pass": colors["text"]}.get(tone, colors["accent"]))
         painter.save()
         fill = QColor(accent)
         fill.setAlpha(round(34 * glow))
@@ -1086,18 +1122,19 @@ class TechniqueIllustration(QWidget):
         painter.setPen(QPen(border, 1.5))
         painter.setBrush(fill)
         painter.drawRoundedRect(gate, NODE_RADIUS, NODE_RADIUS)
-        sweep = 0.5 - 0.5 * math.cos(phase * math.tau * 9 + self._anim_ms / 260.0)
-        x = gate.left() + 10 + (gate.width() - 20) * sweep
-        beam = QLinearGradient(x, gate.top() + 22, x, gate.bottom() - 6)
-        edge = QColor(accent)
-        edge.setAlpha(0)
-        mid = QColor(accent)
-        mid.setAlpha(round(220 * glow))
-        beam.setColorAt(0.0, edge)
-        beam.setColorAt(0.5, mid)
-        beam.setColorAt(1.0, edge)
-        painter.setPen(QPen(QBrush(beam), 2))
-        painter.drawLine(QPointF(x, gate.top() + 22), QPointF(x, gate.bottom() - 6))
+        if beam_at is not None:
+            # Луч проходит блок один раз слева направо — и к решению доходит до края.
+            x = gate.left() + 10 + (gate.width() - 20) * _clamp01(beam_at)
+            beam = QLinearGradient(x, gate.top() + 22, x, gate.bottom() - 6)
+            edge = QColor(accent)
+            edge.setAlpha(0)
+            mid = QColor(accent)
+            mid.setAlpha(round(220 * glow))
+            beam.setColorAt(0.0, edge)
+            beam.setColorAt(0.5, mid)
+            beam.setColorAt(1.0, edge)
+            painter.setPen(QPen(QBrush(beam), 2))
+            painter.drawLine(QPointF(x, gate.top() + 22), QPointF(x, gate.bottom() - 6))
         painter.restore()
 
     def _paint_pulse(self, painter, rect: QRectF, t: float) -> None:

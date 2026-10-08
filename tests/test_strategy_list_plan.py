@@ -717,7 +717,7 @@ class AnalyzerSceneTests(unittest.TestCase):
         _widget, done = self._rows("fake", STATIC_PHASE)
         # «Не принят» верно для любой защиты: подделка либо не дошла, либо отброшена сайтом.
         self.assertEqual((done[1].gate, done[1].site), (("принял за настоящий", "ok"), ("не принят", "drop")))
-        self.assertEqual((done[2].label, done[2].gate, done[2].site), ("youtube.com", ("пропустил", "pass"), ("принят", "ok")))
+        self.assertEqual((done[2].label, done[2].gate, done[2].site), ("youtube.com", ("уже не смотрит", "none"), ("принят", "ok")))
 
     def test_blocked_packet_never_reaches_the_site(self) -> None:
         from ui.onboarding.illustrations import STATIC_PHASE
@@ -742,8 +742,11 @@ class AnalyzerSceneTests(unittest.TestCase):
 
         widget, _frames = self._frames("fake", 0.1)
         points = widget.hold_points()
-        self.assertEqual([index for _moment, index in points], [0, 1])
-        self.assertEqual(widget.cycle_ms(), PERIOD_MS + 2 * HOLD_MS)
+        # Подделка убедила проверку — настоящий пакет следом она уже не смотрит.
+        self.assertEqual([index for _moment, index in points], [0])
+        self.assertEqual(widget.cycle_ms(), PERIOD_MS + HOLD_MS)
+        split, _frames = self._frames("multisplit", 0.1)
+        self.assertEqual([index for _moment, index in split.hold_points()], [0, 1])
 
         moment, index = points[0]
         reach = moment * PERIOD_MS
@@ -773,6 +776,17 @@ class AnalyzerSceneTests(unittest.TestCase):
 
         early = rows_at(VERDICT_AT / 2)[index + 1]
         self.assertEqual((early.active, early.gate), (True, ("проверяет…", "scan")))
+
+        # Луч идёт по пакету, только пока решения нет.
+        glow, beam_at, tone = widget.scan_state(list(rows_at(VERDICT_AT / 2).values()))
+        self.assertEqual(tone, "scan")
+        self.assertIsNotNone(beam_at)
+        self.assertGreater(glow, 0.0)
+        _glow, beam_after, tone_after = widget.scan_state(list(rows_at(0.7).values()))
+        self.assertEqual((beam_after, tone_after), (None, "ok"))
+        # Пакет, который уже уехал от проверки, она не подсвечивает.
+        widget._phase, widget._held_packet, widget._hold_progress = widget._clock_state(reach + HOLD_MS + 50)
+        self.assertEqual(widget.scan_state(widget.log_rows(widget._phase)), (0.0, None, ""))
 
         late = rows_at(0.95)[index + 1]
         self.assertEqual((late.active, late.gate), (True, ("принял за настоящий", "ok")))

@@ -6322,6 +6322,7 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     "onboarding.scene.log.kind.junk": {"ru": "мусор", "en": "junk"},
     "onboarding.scene.log.kind.syn": {"ru": "SYN с данными", "en": "SYN with data"},
     "onboarding.scene.log.scanning": {"ru": "проверяет…", "en": "inspecting…"},
+    "onboarding.scene.log.not_checked": {"ru": "уже не смотрит", "en": "no longer inspects"},
     "onboarding.scene.checking": {"ru": "проверяет #{number}…", "en": "inspecting #{number}…"},
     "onboarding.scene.log.gate": {"ru": "ТСПУ", "en": "DPI"},
     "onboarding.scene.log.site": {"ru": "сайт", "en": "site"},
