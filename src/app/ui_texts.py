@@ -6336,7 +6336,6 @@ TEXTS_ONBOARDING: dict[str, dict[str, str]] = {
     # ТСПУ — оборудование у провайдера, которое проверяет трафик и блокирует сайты.
     "onboarding.scene.provider": {"ru": "ТСПУ", "en": "DPI"},
     "onboarding.scene.site": {"ru": "Сайт", "en": "Site"},
-    "onboarding.scene.check": {"ru": "проверка", "en": "inspection"},
     "onboarding.scene.junk": {"ru": "мусор", "en": "junk"},
     "onboarding.scene.one_packet": {"ru": "один пакет", "en": "one packet"},
     "onboarding.scene.log.packet": {"ru": "пакет", "en": "packet"},

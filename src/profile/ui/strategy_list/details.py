@@ -196,7 +196,7 @@ class _Row(QWidget):
 class _Chip(QFrame):
     """Настройка шага короткой меткой: значок и несколько слов, пояснение — в подсказке."""
 
-    def __init__(self, note, parent=None) -> None:
+    def __init__(self, note, text: str, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("strategyChip")
         self.setStyleSheet(f"QFrame#strategyChip {{ background: {_soft_fill()}; border-radius: 12px; }}")
@@ -206,9 +206,9 @@ class _Chip(QFrame):
         icon = IconWidget(_fluent_icon(_NOTE_ICONS.get(note.kind, "INFO")), self)
         icon.setFixedSize(14, 14)
         layout.addWidget(icon)
-        layout.addWidget(CaptionLabel(note.chip))
+        layout.addWidget(CaptionLabel(text))
         set_tooltip(self, note.hint)
-        set_control_accessibility(self, name=note.chip, description=note.hint)
+        set_control_accessibility(self, name=text, description=note.hint)
 
 
 class _StepRow(QWidget):
@@ -261,7 +261,8 @@ class _StepRow(QWidget):
             flow.setHorizontalSpacing(6)
             flow.setVerticalSpacing(6)
             for note in step.notes:
-                flow.addWidget(_Chip(note, chips))
+                for chip_text in note.chips:
+                    flow.addWidget(_Chip(note, chip_text, chips))
             layout.addWidget(chips)
 
         for caution in step.cautions:

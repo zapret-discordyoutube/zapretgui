@@ -567,6 +567,25 @@ class DetailsTests(_WidgetCase):
         cards["YouTube · видео"].clicked.emit()
         self.assertEqual([list(call) for call in chosen], [["profile:3"]])
 
+    def test_many_cut_places_do_not_make_the_page_wider_than_the_window(self) -> None:
+        """Страница не прокручивается вбок: всё, что шире окна, просто обрезается."""
+        from PyQt6.QtWidgets import QApplication
+
+        entries = _entries()
+        entries["many-cuts"] = _entry(
+            "Many cuts", "--lua-desync=multisplit:pos=1,host+2,sld+2,sld+5,sniext+1,sniext+2,endhost-2:seqovl=1"
+        )
+        widget = self._widget(entries=entries)
+        widget.resize(900, 700)
+        widget.show()
+        widget.show_details("many-cuts")
+        QApplication.processEvents()
+        view = widget._details_view
+
+        content = view._scroll.widget()
+        self.assertLessEqual(content.minimumSizeHint().width(), view._scroll.viewport().width())
+        self.assertLessEqual(content.width(), view._scroll.viewport().width())
+
     def test_click_on_step_switches_the_animated_scheme(self) -> None:
         entries = _entries()
         entries["two-steps"] = _entry("Two steps", "--lua-desync=fake:blob=x\n--lua-desync=multidisorder:pos=2\n--lua-desync=wssize:wsize=1")

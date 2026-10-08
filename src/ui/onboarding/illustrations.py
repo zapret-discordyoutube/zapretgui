@@ -158,13 +158,13 @@ SCENES: dict[str, Scene] = {
     "multisplit": Scene(
         packets=(Packet("you", part="1"), Packet("tube.com", part="2")),
         bubble_key="unknown",
-        bubble_trigger=0,
+        bubble_trigger=1,
         bubble_tone="confused",
     ),
     "multidisorder": Scene(
         packets=(Packet("tube.com", part="2"), Packet("you", part="1")),
         bubble_key="unknown",
-        bubble_trigger=0,
+        bubble_trigger=1,
         bubble_tone="confused",
     ),
     # Порядок пакетов — как в lua/zapret-antidpi.lua: каждая настоящая часть
@@ -983,25 +983,34 @@ class TechniqueIllustration(QWidget):
             )
         self._paint_log(painter, rows, fade, colors)
 
+    def gate_caption(self, rows: list[LogRow]) -> tuple[str, str]:
+        """Подпись под проверкой и её тон. Пусто, когда у проверки никто не стоит:
+        пакет, который подъезжает или уже пропущен, она не проверяет."""
+        active = next((row for row in rows if row.active), None)
+        if active is None:
+            return "", ""
+        if active.gate[1] == "scan":
+            text = self._tr("onboarding.scene.checking", "проверяет #{number}…").format(number=active.number)
+        else:
+            text = f"#{active.number}: {active.gate[0]}"
+        return text, active.gate[1]
+
     def _paint_gate_caption(self, painter, layout: _Layout, rows: list[LogRow], colors, fade: float) -> None:
         """Подпись под проверкой: что она делает с пакетом, который стоит у неё.
 
         Тот же текст и в тот же миг появляется в журнале — схема и журнал
         говорят одно.
         """
-        active = next((row for row in rows if row.active), None)
-        text, color, bold = self._tr("onboarding.scene.check", "проверка"), colors["muted"], False
-        if active is not None:
-            tones = {"ok": PASS_GREEN, "pass": colors["text"], "block": BLOCK_RED, "scan": colors["accent"]}
-            if active.gate[1] == "scan":
-                text = self._tr("onboarding.scene.checking", "проверяет #{number}…").format(number=active.number)
-            else:
-                text = f"#{active.number}: {active.gate[0]}"
-            color, bold = tones.get(active.gate[1], colors["muted"]), True
+        text, tone = self.gate_caption(rows)
+        if not text:
+            return
+        active = next(row for row in rows if row.active)
+        tones = {"ok": PASS_GREEN, "pass": colors["text"], "block": BLOCK_RED, "scan": colors["accent"]}
+        color = tones.get(tone, colors["muted"])
         small = QFont(self.font())
         small.setPointSizeF(max(7.0, small.pointSizeF() - 1.5))
-        small.setBold(bold)
-        show = active.gate_alpha if active is not None else 1.0
+        small.setBold(True)
+        show = active.gate_alpha
         painter.save()
         painter.setOpacity(fade * show)
         painter.setFont(small)

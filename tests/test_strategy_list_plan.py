@@ -787,6 +787,9 @@ class AnalyzerSceneTests(unittest.TestCase):
         # Пакет, который уже уехал от проверки, она не подсвечивает.
         widget._phase, widget._held_packet, widget._hold_progress = widget._clock_state(reach + HOLD_MS + 50)
         self.assertEqual(widget.scan_state(widget.log_rows(widget._phase)), (0.0, None, ""))
+        # И под проверкой ничего не написано: пропущенный пакет она не проверяет.
+        self.assertEqual(widget.gate_caption(widget.log_rows(widget._phase)), ("", ""))
+        self.assertEqual(widget.gate_caption(list(rows_at(VERDICT_AT / 2).values())), ("проверяет #1…", "scan"))
 
         late = rows_at(0.95)[index + 1]
         self.assertEqual((late.active, late.gate), (True, ("принял за настоящий", "ok")))
@@ -798,6 +801,31 @@ class AnalyzerSceneTests(unittest.TestCase):
         self.assertGreater(widget._since_verdict(SCENES["fake"], widget._phase, scene_times), 0.0)
         widget._hold_progress = VERDICT_AT / 2
         self.assertLess(widget._since_verdict(SCENES["fake"], widget._phase, scene_times), 0.0)
+
+    def test_split_verdict_is_said_after_the_last_part_is_checked(self) -> None:
+        """«Не узнал» звучит, когда проверены все части, а не после первой."""
+        from ui.onboarding.illustrations import SCENES
+
+        for key in ("multisplit", "multidisorder"):
+            self.assertEqual(SCENES[key].bubble_trigger, len(SCENES[key].packets) - 1, key)
+
+    def test_each_cut_place_is_its_own_short_chip(self) -> None:
+        """Одна метка со всеми местами разреза шире окна — у каждого места своя."""
+        from profile.strategy_list.knowledge import explain_strategy
+
+        step = explain_strategy("--lua-desync=multisplit:pos=1,host+2,sld+2,sniext+1")[0]
+        cut = next(note for note in step.notes if note.kind == "cut")
+        self.assertEqual(
+            cut.chips,
+            (
+                "Разрез: после 1-го байта",
+                "Разрез: в начале имени сайта (host+2)",
+                "Разрез: в начале основной части имени сайта (sld+2)",
+                "Разрез: у поля с именем сайта (sniext+1)",
+            ),
+        )
+        one = next(n for n in explain_strategy("--lua-desync=multisplit:pos=midsld")[0].notes if n.kind == "cut")
+        self.assertEqual(one.chips, (one.chip,))
 
     def test_glued_packet_stops_once_and_resume_continues_from_the_same_frame(self) -> None:
         from ui.onboarding.illustrations import PERIOD_MS

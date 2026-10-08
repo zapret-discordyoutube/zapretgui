@@ -43,6 +43,16 @@ class StepNote:
         return f"{self.label}: {self.value}"
 
     @property
+    def chips(self) -> tuple[str, ...]:
+        """Метки на странице. Каждое место разреза — своя короткая метка:
+        одна длинная строка со всеми местами не помещается в окно."""
+        if self.kind == "cut":
+            places = [place.strip() for place in self.value.split(";") if place.strip()]
+            if len(places) > 1:
+                return tuple(f"Разрез: {place}" for place in places)
+        return (self.chip,)
+
+    @property
     def hint(self) -> str:
         return " ".join(part for part in (f"{self.label}.", self.detail) if part)
 
