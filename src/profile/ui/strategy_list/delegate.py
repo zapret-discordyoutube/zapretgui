@@ -13,20 +13,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QModelIndex, QRect, QSize, Qt
+from PyQt6.QtCore import QModelIndex, QRect, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from profile.strategy_list import BADGE_PERSONAL, BADGE_WARNING, ROW_GROUP, ROW_SECTION, VisibleRow
-from profile.ui.strategy_list.icons import state_icon
+from profile.ui.strategy_list.icons import strategy_icon
 from profile.ui.strategy_list.model import ROW_ROLE
 from profile.ui.widgets.payload_badge import PAYLOAD_BADGE_HEIGHT, paint_payload_badge, payload_badge_width
 from ui.theme import get_cached_qta_pixmap, get_theme_tokens, to_qcolor
-from ui.widgets.active_row_motion import active_row_motion
 from ui.widgets.fluent_item_tooltip import FluentItemToolTipController
 from ui.widgets.folder_header import folder_header_font, folder_header_icon_color, folder_header_icon_name
 from ui.widgets.hover_row import paint_profile_hover_row
-from ui.widgets.row_hover_motion import paint_icon_motion, row_hover_motion
 
 SELECTED_TEXT = "Выбрана"
 MENU_HINT = (
@@ -62,6 +60,8 @@ class _Style:
     metrics: QFontMetrics
     small_metrics: QFontMetrics
     selected_width: int
+    # Цвет плитки под значком: им обведена отметка «работает / не работает».
+    tile_backdrop: str
 
 
 def _build_style(base_font: QFont) -> _Style:
@@ -83,6 +83,7 @@ def _build_style(base_font: QFont) -> _Style:
         metrics=metrics,
         small_metrics=QFontMetrics(small),
         selected_width=metrics.horizontalAdvance(SELECTED_TEXT) + 18,
+        tile_backdrop="#f3f3f3" if tokens.is_light else "#2b2b2b",
     )
 
 
@@ -226,21 +227,30 @@ class StrategyListDelegate(QStyledItemDelegate):
         hovered = bool(state & QStyle.StateFlag.State_MouseOver)
         focused = bool(state & QStyle.StateFlag.State_HasFocus) or bool(state & QStyle.StateFlag.State_Selected)
 
-        motion = active_row_motion(self._view)
-        hover = row_hover_motion(self._view)
-        live_hover = hover is not None and not focused
+        motion = self._view.motion()
+        # Щелчок зажигает плитку раньше, чем список узнаёт о новой выбранной,
+        # поэтому яркость берётся у движения, а не из самой строки.
+        active = 1.0 if focused and item.is_current else motion.active_level(row.key)
         paint_profile_hover_row(
             painter,
             rect,
-            active=item.is_current,
             hovered=hovered,
             selected=focused,
-            show_active_marker=not (motion is not None and motion.hides_static_marker(index)),
-            active_reveal=motion.row_reveal(index) if motion is not None else None,
-            residual_active=motion.row_residual(index) if motion is not None else 0.0,
-            hover_level=hover.hover_level(index) if live_hover else None,
-            sheen=hover.sheen_progress(index) if live_hover else None,
+            hover_level=None if focused else motion.hover_level(row.key),
         )
+        if active > 0.0:
+            glow = QColor(style.accent_soft)
+            glow.setAlphaF(glow.alphaF() * active)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(glow)
+            painter.drawRoundedRect(rect, 10, 10)
+            # Полоска акцента вырастает из середины края плитки.
+            full = max(12, rect.height() - 12)
+            height = max(2.0, full * active)
+            painter.setBrush(style.accent)
+            painter.setOpacity(active)
+            painter.drawRoundedRect(QRectF(rect.left() + 6, rect.center().y() + 0.5 - height / 2, 4, height), 2, 2)
+            painter.setOpacity(1.0)
 
         metrics = style.metrics
         center_y = rect.center().y()
@@ -249,20 +259,23 @@ class StrategyListDelegate(QStyledItemDelegate):
         left = rect.left() + 14
         right = rect.right() - 10
 
+        # Значок показывает способ обхода (подделка, нарезка, перестановка…),
+        # в его углу — отметка человека. Цветной только сам рисунок — по
+        # цвету способы различаются с одного взгляда; подложка нейтральная.
         icon_size = _TILE_ICON_SIZE if two_lines else _ROW_ICON_SIZE
-        icon_dy = round(motion.icon_offset(index)) if motion is not None else 0
-        icon_rect = QRect(left, center_y - icon_size // 2 + icon_dy, icon_size, icon_size)
-        pixmap = state_icon(
+        icon_rect = QRect(left, center_y - icon_size // 2, icon_size, icon_size)
+        pixmap = strategy_icon(
+            item.family_key,
+            item.family_color or style.fg_muted.name(),
             item.rating,
-            item.is_current,
             icon_size,
             painter.device().devicePixelRatioF(),
-            style.accent.name(),
+            style.tile_backdrop,
             style.fg_muted.name(),
         )
         if dimmed:
             painter.setOpacity(0.6)
-        paint_icon_motion(painter, icon_rect, hover, index, lambda: painter.drawPixmap(icon_rect, pixmap))
+        painter.drawPixmap(icon_rect, pixmap)
         if dimmed:
             painter.setOpacity(1.0)
         left = self._text_left(rect)
@@ -406,14 +419,13 @@ class StrategyListDelegate(QStyledItemDelegate):
         rect = self._view.row_paint_rect(option.rect)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
         focused = bool(option.state & QStyle.StateFlag.State_HasFocus)
-        hover = row_hover_motion(self._view)
         paint_profile_hover_row(
             painter,
             rect,
             hovered=hovered,
             selected=focused,
             fill_idle=False,
-            hover_level=hover.hover_level(index) if hover is not None and not focused else None,
+            hover_level=None if focused else self._view.motion().hover_level(row.key),
         )
         center_y = rect.center().y()
         left = rect.left() + 12
@@ -426,7 +438,7 @@ class StrategyListDelegate(QStyledItemDelegate):
         icon = get_cached_qta_pixmap(group.icon_name, color=group.color or tokens.fg_muted, size=_ICON_SIZE)
         if not icon.isNull():
             icon_rect = QRect(left, center_y - _ICON_SIZE // 2, _ICON_SIZE, _ICON_SIZE)
-            paint_icon_motion(painter, icon_rect, hover, index, lambda: painter.drawPixmap(icon_rect, icon))
+            painter.drawPixmap(icon_rect, icon)
         left += _ICON_SIZE + 10
 
         body_font = QFont(painter.font())

@@ -476,6 +476,54 @@ class DetailsTests(_WidgetCase):
         widget._list.flush_pending_choice()
         self.assertEqual(len(applied), 0)
 
+    def test_clicked_tile_lights_up_at_once_and_double_click_takes_it_back(self) -> None:
+        """Плитка загорается в момент щелчка, а не когда стратегия применится."""
+        widget = self._with_details(current="fake-01")
+        widget._on_group_toggle("fake", True)
+        motion = widget._list.motion()
+        current = next(row.key for row in self._rows(widget) if row.item is not None and row.item.is_current)
+        self.assertEqual(motion.active_key(), current)
+
+        self._press(widget, "i:fake-05")
+        self.assertEqual(motion.active_key(), "i:fake-05")
+        # Список ещё показывает прежнюю выбранную — подсветка щелчка не сбрасывается.
+        widget._list._sync_active_from_model()
+        self.assertEqual(motion.active_key(), "i:fake-05")
+
+        # Щелчок оказался двойным: стратегия не применена, подсветка вернулась.
+        self._press(widget, "i:fake-05", double=True)
+        self.assertEqual(motion.active_key(), current)
+
+    def test_tile_motion_fades_by_row_key_and_stops_when_settled(self) -> None:
+        from profile.ui.strategy_list import motion as motion_module
+
+        widget = self._with_details(current="fake-01")
+        widget.show()
+        widget._on_group_toggle("fake", True)
+        motion = widget._list.motion()
+        previous = motion.active_key()
+        self.assertEqual(previous, "i:fake-01")
+        with patch.object(motion_module, "are_live_animations_enabled", return_value=True):
+            # Плитка, только что появившаяся на экране, сначала догорает до конца.
+            for _step in range(40):
+                motion._last_tick -= 0.03
+                motion._tick()
+            motion.set_active("i:fake-05", optimistic=True)
+            self.assertTrue(motion.is_running())
+            self.assertEqual((motion.active_level("i:fake-05"), motion.active_level(previous)), (0.0, 1.0))
+            # Перестройка списка не сбивает переход: уровни привязаны к ключу строки.
+            widget._list.list_model().beginResetModel()
+            widget._list.list_model().endResetModel()
+            motion._last_tick -= 0.03
+            motion._tick()
+            self.assertGreater(motion.active_level("i:fake-05"), 0.0)
+            self.assertLess(motion.active_level(previous), 1.0)
+            for _step in range(40):
+                motion._last_tick -= 0.03
+                motion._tick()
+        self.assertEqual((motion.active_level("i:fake-05"), motion.active_level(previous)), (1.0, 0.0))
+        self.assertFalse(motion.is_running())
+
     def test_single_click_applies_only_after_waiting_for_second_click(self) -> None:
         widget = self._with_details(current="split-00")
         widget._on_group_toggle("fake", True)
@@ -830,8 +878,23 @@ class LayoutAndAccessibilityTests(_WidgetCase):
         self.assertNotEqual(plain.toImage(), other.toImage())
         self.assertNotEqual(icons.strategy_icon("unknown-family", "#6fb8ff", "", 28, 1.0, "#2d2d2d").toImage(), plain.toImage())
 
-    def test_tile_icon_shows_what_the_person_knows_about_the_strategy(self) -> None:
-        """Значок плитки — состояние: не пробовал, работает, не работает, выбрана сейчас."""
+    def test_tile_shows_the_method_icon_with_the_person_mark(self) -> None:
+        """По значку плитки видно способ обхода, а в его углу — отметку человека."""
+        from profile.ui.strategy_list import delegate as delegate_module
+
+        widget = self._widget()
+        with patch.object(delegate_module, "strategy_icon", wraps=delegate_module.strategy_icon) as icon:
+            widget._list.viewport().grab()
+
+        items = [row.item for row in self._rows(widget) if row.kind == ROW_STRATEGY]
+        drawn = {(call.args[0], call.args[2]) for call in icon.call_args_list}
+        self.assertTrue(drawn)
+        self.assertLessEqual(drawn, {(item.family_key, item.rating) for item in items})
+        # Подложка нейтральная и у всех одна: цветной только рисунок способа.
+        self.assertEqual(len({call.args[6] for call in icon.call_args_list}), 1)
+
+    def test_state_icon_shows_what_the_person_knows_about_the_strategy(self) -> None:
+        """Значок состояния: не пробовал, работает, не работает, выбрана сейчас."""
         from profile.ui.strategy_list import icons
 
         def icon(rating: str, is_current: bool):

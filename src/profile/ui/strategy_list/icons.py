@@ -1,11 +1,12 @@
 """Значки стратегий, нарисованные линиями.
 
-На плитке списка стоит значок состояния (``state_icon``): пустой кружок — ещё
-не пробовали, зелёная галочка — работает, красный крестик — не работает, точка
-в кружке — выбрана сейчас. Способ обхода там написан словами.
+И на плитке списка, и на странице подробностей стоит значок способа обхода
+(``strategy_icon``: подделка, нарезка, перестановка…), в его углу — оценка
+человека: зелёная галочка «работает» или красный крестик «не работает». На
+плитке подложка значка нейтральная, цветной только сам рисунок.
 
-На странице подробностей — значок способа обхода (``strategy_icon``: подделка,
-нарезка, перестановка…) в цветной подложке, в его углу та же оценка человека.
+``state_icon`` — отдельный значок состояния (кружок, галочка, крестик) для
+мест, где способ обхода не важен.
 
 Значки рисуются кистью, а не шрифтом значков: они не зависят от того, какие
 шрифты попали в сборку программы. Каждый вид рисуется один раз и хранится
@@ -156,12 +157,15 @@ def _mark(painter: QPainter, size: float, rating: str, backdrop: QColor) -> None
         _line(painter, x - step * 0.8, y + step * 0.8, x + step * 0.8, y - step * 0.8)
 
 
-def strategy_icon(family_key: str, color: str, rating: str, size: int, device_ratio: float, backdrop: str) -> QPixmap:
+def strategy_icon(
+    family_key: str, color: str, rating: str, size: int, device_ratio: float, backdrop: str, plate: str = ""
+) -> QPixmap:
     """Готовая картинка значка стратегии: способ обхода и оценка человека.
 
     backdrop — цвет плитки под значком: им обведена отметка оценки.
+    plate — цвет подложки; пусто — подложка того же цвета, что рисунок.
     """
-    key = (family_key, color, rating, int(size), round(float(device_ratio), 2), backdrop)
+    key = (family_key, color, rating, int(size), round(float(device_ratio), 2), backdrop, plate)
     cached = _CACHE.get(key)
     if cached is not None:
         return cached
@@ -174,7 +178,7 @@ def strategy_icon(family_key: str, color: str, rating: str, size: int, device_ra
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
     tint = QColor(color) if QColor(color).isValid() else QColor("#9aa6b2")
-    fill = QColor(tint)
+    fill = QColor(plate) if QColor(plate).isValid() else QColor(tint)
     fill.setAlpha(38)
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(fill)

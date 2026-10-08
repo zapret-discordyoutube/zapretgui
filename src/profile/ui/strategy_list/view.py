@@ -11,11 +11,10 @@ from PyQt6.QtWidgets import QAbstractItemView, QAbstractScrollArea, QApplication
 
 from profile.strategy_list import ROW_GROUP, ROW_SECTION, ROW_STRATEGY
 from profile.ui.strategy_list.delegate import StrategyListDelegate
-from profile.ui.strategy_list.model import ACTIVE_ROLE, ROW_ROLE, StrategyListModel
-from ui.widgets.active_row_motion import attach_active_row_motion
+from profile.ui.strategy_list.model import ROW_ROLE, StrategyListModel
+from profile.ui.strategy_list.motion import TileMotion
 from ui.widgets.fluent_scrollbar import install_fluent_scrollbars
 from ui.widgets.hover_row import profile_hover_row_rect
-from ui.widgets.row_hover_motion import attach_row_hover_motion
 
 GROUP_ROW_HEIGHT = 31
 SECTION_ROW_HEIGHT = 26
@@ -25,6 +24,10 @@ TILE_HEIGHT = 46
 # читаться целиком, а не обрываться многоточием.
 TILE_MIN_WIDTH = 380
 MAX_TILE_COLUMNS = 3
+# Сколько ждать второго щелчка, прежде чем применить стратегию. Ждать полный
+# системный промежуток двойного щелчка (полсекунды) слишком долго: выбор
+# стратегии ощущался бы запоздалым.
+CHOICE_WAIT_MS = 220
 
 
 class StrategyListView(QListView):
@@ -70,9 +73,10 @@ class StrategyListView(QListView):
             "QListView::item:hover { background: transparent; }"
         )
         self._scrollbars = install_fluent_scrollbars(self, vertical=True, horizontal=False)
-        # При выборе другой стратегии полоска акцента переезжает к новой строке.
-        attach_active_row_motion(self, ACTIVE_ROLE, row_rect_fn=self.row_paint_rect)
-        attach_row_hover_motion(self, row_filter=self._row_hover_allowed)
+        # Плавное наведение и смена выбранной плитки (см. motion.py).
+        self._motion = TileMotion(self, key_at=self._hover_key_at, rect_of_key=self._rect_of_key)
+        self._model.modelReset.connect(self._sync_active_from_model)
+        self._model.dataChanged.connect(self._sync_active_from_model)
         # Обычный щелчок применяет стратегию не сразу, а после короткого
         # ожидания второго щелчка: двойной щелчок открывает подробности и
         # применять стратегию при этом не должен.
@@ -103,9 +107,29 @@ class StrategyListView(QListView):
             self.scrollTo(index, QAbstractItemView.ScrollHint.EnsureVisible)
         return True
 
-    def _row_hover_allowed(self, index) -> bool:
-        row = self.row_for_index(index)
-        return row is not None and row.kind != ROW_SECTION
+    def motion(self) -> TileMotion:
+        return self._motion
+
+    def _hover_key_at(self, pos: QPoint) -> str:
+        row = self.row_for_index(self.indexAt(pos))
+        return row.key if row is not None and row.kind != ROW_SECTION else ""
+
+    def _rect_of_key(self, key: str) -> QRect | None:
+        position = self._model.row_of_key(key)
+        return self.visualRect(self._model.index(position, 0)) if position >= 0 else None
+
+    def _current_strategy_key(self) -> str:
+        for row in self._model.rows():
+            if row.item is not None and row.item.is_current:
+                return row.key
+        return ""
+
+    def _sync_active_from_model(self, *args) -> None:
+        _ = args
+        key = self._current_strategy_key()
+        # Выбранная стратегия может лежать в свёрнутой группе: строки нет —
+        # гасить прежнюю плитку не из-за чего, она просто не видна.
+        self._motion.set_active(key, animate=bool(key))
 
     # ------------------------------------------------------------------
     # Плитки в несколько столбцов
@@ -212,7 +236,9 @@ class StrategyListView(QListView):
                 self.details_requested.emit(row.strategy_id)
             else:
                 self._pending_choice = row.strategy_id
-                self._choice_timer.start(QApplication.doubleClickInterval())
+                # Плитка загорается сразу: человек видит, что щелчок принят.
+                self._motion.set_active(row.key, optimistic=True)
+                self._choice_timer.start(min(CHOICE_WAIT_MS, QApplication.doubleClickInterval()))
 
     def mouseDoubleClickEvent(self, event):  # noqa: N802
         index = self.indexAt(event.position().toPoint())
@@ -234,6 +260,11 @@ class StrategyListView(QListView):
 
     def _cancel_pending_choice(self) -> None:
         self._choice_timer.stop()
+        if self._pending_choice:
+            # Щелчок оказался началом двойного: стратегия не применяется,
+            # подсветка возвращается к действительно выбранной.
+            self._motion.cancel_optimistic()
+            self._sync_active_from_model()
         self._pending_choice = ""
 
     def flush_pending_choice(self) -> None:
