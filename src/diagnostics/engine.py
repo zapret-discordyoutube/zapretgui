@@ -585,9 +585,9 @@ def run_blockcheck(
         zapret_running, zapret_line = sections.zapret_status()
         emit(zapret_line)
         other_tools = running_bypass_tools()
-        # Запущенный VPN мешает проверке, только если интернет на самом деле идёт через него.
-        in_path = tools_in_path(other_tools, sections.vpn_routed() if other_tools else False)
-        if other_tools:
+        # VPN мешает проверке, только если интернет идёт через его адаптер; прокси — не мешает вовсе.
+        in_path = tools_in_path(other_tools, sections.routed_adapters())
+        if other_tools or in_path:
             emit(sections.tools_line(other_tools, in_path))
         emit("⏳ Проверяем так же, как браузер: TLS 1.3, правильные адреса сайтов…")
         # Разделы, которых в этом режиме нет или которые не удались, в отчёте остаются пустыми.

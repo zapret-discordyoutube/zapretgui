@@ -151,28 +151,37 @@ def zapret_status() -> tuple[bool | None, str]:
     return False, f"❌ Zapret не запущен ({WINWS_EXE_FAMILY_LABEL} нет среди процессов)"
 
 
-def vpn_routed() -> bool | None:
-    """Идёт ли интернет через VPN-подключение. None — узнать не удалось."""
+def routed_adapters() -> tuple[str, ...] | None:
+    """VPN-адаптеры, через которые сейчас идёт интернет. Пусто — напрямую; None — узнать не удалось."""
     try:
-        return bool(system_state._read_tunnels_routed())
+        return tuple(system_state._read_tunnels_routed())
     except Exception:
         return None
 
 
 def tools_line(other_tools, in_path) -> str:
-    """Строка отчёта о запущенных VPN и программах обхода. Пусто — их нет."""
-    if not other_tools:
+    """Строка отчёта о запущенных VPN, прокси и программах обхода. Пусто — их нет."""
+    from utils.bypass_tools import tool_kind
+
+    if not other_tools and not in_path:
         return ""
-    names = ", ".join(other_tools)
+    parts = []
     if in_path:
-        return (
-            f"ℹ️ Запущены другие программы обхода или VPN: {names}. "
-            "Если они сейчас включены, результат показывает сеть вместе с ними, а не «чистую» сеть провайдера."
+        parts.append(
+            f"На дороге проверки стоит: {', '.join(in_path)} — результат показывает сеть вместе с этим, "
+            "а не «чистую» сеть провайдера."
         )
-    return (
-        f"ℹ️ Запущены {names}, но интернет идёт напрямую, мимо них: проверка описывает сеть провайдера. "
-        "Браузер и приложения при этом могут ходить через них и открывать то, что здесь закрыто."
-    )
+    idle = [name for name in other_tools if name not in in_path]
+    proxies = [name for name in idle if tool_kind(name) == "proxy"]
+    vpns = [name for name in idle if tool_kind(name) == "vpn"]
+    if vpns and not any(name.startswith("VPN-подключение") for name in in_path):
+        parts.append(f"VPN запущен, но не подключён: {', '.join(vpns)} — интернет идёт мимо него.")
+    if proxies:
+        parts.append(
+            f"Работает прокси: {', '.join(proxies)}. Проверка ходит в сеть напрямую, мимо прокси; браузер "
+            "и приложения, которым он назначен, могут открывать то, что здесь закрыто."
+        )
+    return "ℹ️ " + " ".join(parts) if parts else ""
 
 
 def download(run: Run, host: str, path: str) -> ProbeResult | None:

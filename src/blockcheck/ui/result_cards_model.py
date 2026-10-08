@@ -1150,11 +1150,17 @@ def _run_card(report: dict) -> Card | None:
     # В отчётах до появления этого поля его нет: тогда считаем, что мешали все запущенные.
     in_path = report.get("tools_in_path")
     in_path = tools if in_path is None else [str(name) for name in in_path]
+    from utils.bypass_tools import tool_kind
+
     idle = [name for name in tools if name not in in_path]
+    proxies = [name for name in idle if tool_kind(name) == "proxy"]
+    vpns = [name for name in idle if tool_kind(name) == "vpn"]
     if in_path:
         conditions.append(Line(WARN, "На дороге проверки стояли", ", ".join(in_path)))
-    if idle:
-        conditions.append(Line(INFO, "Запущены, но интернет шёл мимо них", ", ".join(idle)))
+    if vpns and not any(name.startswith("VPN-подключение") for name in in_path):
+        conditions.append(Line(INFO, "VPN запущен, но не подключён", ", ".join(vpns)))
+    if proxies:
+        conditions.append(Line(INFO, "Прокси (проверка ходит мимо него)", ", ".join(proxies)))
     tools = in_path
     listing = _registry_lines(report.get("registry") or {})
     if not times and not conditions and not listing:
