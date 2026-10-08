@@ -414,9 +414,13 @@ class NewSectionsCardsTests(unittest.TestCase):
             {"key": "quic", "label": "QUIC", "state": "warn", "word": "закрыт", "text": "QUIC режут", "hint": "быстрый способ"},
             {"key": "dns", "label": "DNS", "state": "unknown", "word": "—", "text": "сверить не удалось", "hint": "справочная"},
         ]
-        tags = [{"key": "registry", "text": "в реестре РКН", "state": "info"}, {"key": "cut16", "text": "обрыв на 16 КБ", "state": "warn"}]
+        tags = [
+            {"key": "cause", "text": "причина из отчёта", "state": "fail"},
+            {"key": "registry", "text": "в реестре РКН", "state": "info"},
+            {"key": "cut16", "text": "обрыв на 16 КБ", "state": "warn"},
+        ]
         # Данные адреса нарочно говорят другое: если бы экран выводил слова сам, они бы разошлись с отчётом.
-        target = _target("example.org", main=True, ok=True, quic="ok", dns_state="spoofed", hosts_stale=True, unstable="через раз", volume="", cert={"code": "antivirus"})
+        target = _target("example.org", main=True, ok=True, quic="ok", dns_state="spoofed", hosts_stale=True, unstable="через раз", volume="", cert={"code": "antivirus"}, cause="by_name")
         service = {
             **_service("example", "Example", "warn", [target], kind="fingerprint"),
             "status": "Слово из отчёта",
@@ -432,7 +436,11 @@ class NewSectionsCardsTests(unittest.TestCase):
 
         self.assertEqual((card.status, card.level, card.kind), ("Слово из отчёта", "warn", "fingerprint"))
         self.assertEqual([(mark.label, mark.word, mark.state) for mark in card.marks], [(road["label"], road["word"], road["state"]) for road in roads])
-        self.assertEqual(card.tags, tuple((tag["text"], tag["state"]) for tag in tags))
+        # Причина — из отчёта: она идёт в полный набор меток, а на самой карточке не повторяет слово итога.
+        self.assertEqual(card.tags, tuple((tag["text"], tag["state"]) for tag in tags if tag["key"] != "cause"))
+        self.assertIn(("причина из отчёта", "fail"), card.chips)
+        # Своего слова причины экран не подставляет, хотя у адреса стоит код блокировки по имени.
+        self.assertNotIn("блокировка по имени", [text for text, _state in card.chips])
         # Подсказка дороги — пояснение и фраза из отчёта, без добавок.
         self.assertEqual(card.marks[4].hint, "быстрый способ\nQUIC режут")
         # Значок — по ключу дороги: это вид, он остаётся на экране.

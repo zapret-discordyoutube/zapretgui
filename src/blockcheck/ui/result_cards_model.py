@@ -212,14 +212,6 @@ _TRIED_WORDS = {
 }
 _PROTOCOL_STATES = {"ok": OK, "fail": FAIL, "info": INFO, "unknown": UNKNOWN}
 _SITE_STATUS = {OK: "Открывается", WARN: "Есть проблемы", FAIL: "Не открывается", UNKNOWN: "Не удалось проверить"}
-_CAUSE_WORDS = {
-    "by_name": "блокировка по имени",
-    "name_whitelist": "проходят только разрешённые имена",
-    "by_address": "закрыт адрес",
-    "stub_page": "страница провайдера",
-    "address_closed": "адрес закрыт",
-    "address_silent": "адрес молчит",
-}
 _LEVEL_ORDER = {FAIL: 0, WARN: 1, UNKNOWN: 2, OK: 3}
 
 
@@ -298,6 +290,15 @@ _LEGACY_QUIC_HINT = (
     "Если он закрыт, браузер сам переходит на обычное соединение."
 )
 _LEGACY_DNS_HINT = "DNS — справочная, которая по имени сайта выдаёт его адрес. Провайдер может подменять её ответы."
+# Слово причины по её коду у адреса: свежий отчёт отдаёт его готовой меткой (tags, key=cause).
+_LEGACY_CAUSE_WORDS = {
+    "by_name": "блокировка по имени",
+    "name_whitelist": "проходят только разрешённые имена",
+    "by_address": "закрыт адрес",
+    "stub_page": "страница провайдера",
+    "address_closed": "адрес закрыт",
+    "address_silent": "адрес молчит",
+}
 _LEGACY_ROAD_KEYS = {"TLS 1.2": "tls12", "TLS 1.3": "tls13", "Как Chrome": "browser", "HTTP": "http"}
 
 
@@ -341,7 +342,8 @@ def _legacy_site_words(service: dict, level: str, kind: str) -> tuple[str, list[
     elif probed:
         roads.append({"key": "dns", "label": "DNS", "state": "unknown", "word": "—", "text": "", "hint": _LEGACY_DNS_HINT})
 
-    tags = []
+    causes = dict.fromkeys(_LEGACY_CAUSE_WORDS[item["cause"]] for item in targets if item.get("cause") in _LEGACY_CAUSE_WORDS)
+    tags = [{"key": "cause", "text": word, "state": "fail"} for word in causes]
     if any(item.get("volume") == "cut" for item in targets):
         tags.append({"key": "cut16", "text": "обрыв на 16 КБ", "state": "warn"})
     if any(item.get("hosts_stale") for item in targets):
@@ -430,12 +432,13 @@ def _site_card(service: dict) -> Card:
         )
         for road in roads
     ]
-    tags = [(str(item.get("text") or ""), _shown_state(item.get("state"))) for item in tag_items]
-    # Полный набор меток — для шапки отчёта и подсказки: дороги словами, причина, метки.
+    all_tags = [(str(item.get("key") or ""), str(item.get("text") or ""), _shown_state(item.get("state"))) for item in tag_items]
+    # На самой карточке метка причины не нужна — она повторяла бы слово итога под названием сайта.
+    # Это выбор вида; сама причина приходит из отчёта и идёт в полный набор меток ниже.
+    tags = [(text, state) for tag_key, text, state in all_tags if tag_key != "cause"]
+    # Полный набор меток — для шапки отчёта и подсказки: дороги словами, затем метки отчёта (причина первой).
     chips: list[tuple[str, str]] = [(f"{mark.label}: {mark.word}", mark.state) for mark in marks if mark.word != "—"]
-    for word in dict.fromkeys(_CAUSE_WORDS[item["cause"]] for item in targets if item.get("cause") in _CAUSE_WORDS):
-        chips.append((word, FAIL))
-    chips.extend(tags)
+    chips.extend((text, state) for _tag_key, text, state in all_tags)
 
     detail: list[Section] = []
     for item in targets:
