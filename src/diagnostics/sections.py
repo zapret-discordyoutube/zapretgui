@@ -361,6 +361,35 @@ def find_filter_place(
     return place
 
 
+def live_services(services: dict, verdict_of: Callable, publish: Callable[[list], None]) -> Callable:
+    """Возвращает приёмник «сайт проверен»: сервис уходит на экран, как только готовы все его адреса.
+
+    ``verdict_of(сервис, пробы)`` даёт итог сервиса, ``publish(список)`` получает
+    готовые сервисы в том же виде, что и в итоговом отчёте. После перепроверки
+    движок кладёт окончательный список — он заменяет этот предварительный.
+    """
+    lock = threading.Lock()
+    done: dict[str, list[Probe]] = {}
+
+    def on_probe(key: str, probe: Probe) -> None:
+        with lock:
+            done.setdefault(key, []).append(probe)
+            ready = {name: list(done[name]) for name in services if len(done.get(name, ())) >= len(services[name].targets)}
+        verdicts = {name: verdict_of(services[name], probes) for name, probes in ready.items()}
+        publish(report_text.services_report({name: services[name] for name in ready}, verdicts, ready))
+
+    return on_probe
+
+
+def emit_voice(voice, emit: Emit) -> None:
+    """Раздел «Голосовые звонки» текстового отчёта."""
+    if voice is None:
+        return
+    rows = [("✅" if item.answered else ("❌" if item.decided else "❔"), item.name, item.text) for item in voice.servers]
+    for line in report_text.section_lines("Голосовые звонки (UDP)", voice, rows):
+        emit(line)
+
+
 def check_udp_burst(run: Run) -> udp_burst.BurstVerdict | None:
     """Серии UDP-пакетов: не замирает ли поток после первых двух десятков (см. ``diagnostics.udp_burst``)."""
     facts = udp_burst.check_bursts(

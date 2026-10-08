@@ -926,6 +926,21 @@ class EngineScenarioTests(unittest.TestCase):
         self.assertIn(("www.youtube.com", "142.251.157.4"), net.calls)
         self.assertNotIn("❌ YouTube", text)
 
+    def test_report_grows_during_the_check_and_the_last_partial_is_the_final_one(self) -> None:
+        # Экран рисует разделы по мере готовности. Сервисы приходят по одному, а не разом в конце;
+        # последний опубликованный отчёт — это и есть итоговый.
+        seen: list[dict] = []
+        final = _Net().run(engine.run_blockcheck, "main", emit=lambda _line: None, partial=seen.append)
+
+        counts = [len(item["services"] or ()) for item in seen]
+        self.assertIn(1, counts)
+        self.assertEqual(counts, sorted(counts))
+        self.assertTrue(all(item["partial"] for item in seen[:-1]))
+        self.assertEqual(seen[-1], final)
+        self.assertFalse(final["partial"])
+        # Набор разделов один и тот же с первого отчёта: экран не гадает, каких ключей ещё нет.
+        self.assertLessEqual(set(engine._REPORT_SECTIONS), set(seen[0]))
+
     def test_site_that_passes_with_a_chrome_hello_counts_as_opening_in_a_browser(self) -> None:
         # Простое соединение рвут, а приветствие, какое шлёт Chrome, до сервера доходит:
         # человек открывает сайт браузером, значит, для него он открывается.

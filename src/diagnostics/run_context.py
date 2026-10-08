@@ -164,6 +164,34 @@ class Steps:
         return "⏱ По шагам: " + " · ".join(parts) if parts else ""
 
 
+class Live:
+    """Отчёт, который растёт по ходу проверки: единственное место, где лежит её итог.
+
+    Каждый раздел кладётся сюда, как только готов (``put``), и тут же уходит
+    наружу — экран рисует его сразу, не дожидаясь конца проверки. Итоговый отчёт
+    — это тот же словарь, а не отдельная сборка: показанное по ходу и сохранённое
+    в конце разойтись не могут.
+    """
+
+    def __init__(self, publish: Callable[[dict], None] | None, **start) -> None:
+        self._publish = publish
+        self._lock = threading.Lock()
+        self.data: dict = dict(start)
+
+    def put(self, **parts) -> dict:
+        # Разделы кладут и рабочие потоки (сайты по мере готовности), поэтому под замком.
+        with self._lock:
+            self.data.update(parts)
+            # Копия верхнего уровня: получатель не должен видеть, как словарь дополняется дальше.
+            snapshot = dict(self.data)
+        if self._publish is not None:
+            try:
+                self._publish(snapshot)
+            except Exception:
+                pass
+        return self.data
+
+
 class Lane:
     """Очередь задач с пределом «не больше ``limit`` одновременно».
 

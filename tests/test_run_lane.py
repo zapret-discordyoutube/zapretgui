@@ -113,3 +113,29 @@ class StagesTests(unittest.TestCase):
         steps("sites", 5, 5)
         self.assertEqual(list(steps.seconds()), ["sites"])
         self.assertIn("сайты", steps.line({"sites": "сайты"}))
+
+
+class LiveReportTests(unittest.TestCase):
+    def test_every_section_is_published_as_soon_as_it_is_put(self) -> None:
+        from diagnostics.run_context import Live
+
+        seen: list[dict] = []
+        live = Live(seen.append, scope="full")
+        live.put(services=["a"])
+        final = live.put(voice={"ok": True})
+
+        self.assertEqual(seen[0], {"scope": "full", "services": ["a"]})
+        self.assertEqual(seen[1], {"scope": "full", "services": ["a"], "voice": {"ok": True}})
+        # Итог — тот же словарь, что публиковался по ходу, а не отдельная сборка.
+        self.assertEqual(final, seen[-1])
+        # Получатель держит снимок: дальнейшие разделы его не меняют.
+        live.put(ipv6={})
+        self.assertNotIn("ipv6", seen[1])
+
+    def test_a_broken_listener_does_not_break_the_check(self) -> None:
+        from diagnostics.run_context import Live
+
+        def broken(_report: dict) -> None:
+            raise RuntimeError("экран закрыли")
+
+        self.assertEqual(Live(broken).put(done=True), {"done": True})

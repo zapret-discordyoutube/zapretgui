@@ -25,6 +25,9 @@ class BlockcheckWorker(QObject):
     finished = pyqtSignal(object)
     # Ход проверки: шаг, сколько готово и сколько всего (см. engine.PROGRESS_STEPS).
     progress = pyqtSignal(str, int, int)
+    # Отчёт по ходу проверки: тот же словарь, что придёт в ``finished``, но пока неполный
+    # (``report["partial"]`` истинно). Приходит после каждого проверенного сервиса и раздела.
+    partial = pyqtSignal(object)
 
     def __init__(
         self,
@@ -85,6 +88,7 @@ class BlockcheckWorker(QObject):
                 geo_service_for=self._geo_service_lookup(),
                 check_dns_servers=self._check_dns_servers,
                 progress=self.progress.emit,
+                partial=self.partial.emit,
             )
             if isinstance(report, dict) and report.get("stopped"):
                 report = None

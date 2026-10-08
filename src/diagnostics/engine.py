@@ -33,6 +33,7 @@ BlockCheck отвечает на вопрос «какие сайты откры
 
 from __future__ import annotations
 
+import functools
 import threading
 import time
 from collections.abc import Callable
@@ -73,7 +74,7 @@ from diagnostics.limits import (
     VIDEO_SERVERS,
 )
 from diagnostics.run_context import RECHECK_OPENED, RECHECK_SAME, Probe as _Probe, Run as _Run
-from diagnostics.run_context import Steps as _Steps, Stopped as _Stopped
+from diagnostics.run_context import Live as _Live, Steps as _Steps, Stopped as _Stopped
 from diagnostics.services import (
     GOOGLEVIDEO_FALLBACK_HOST,
     SCOPE_ALL,
@@ -142,6 +143,8 @@ STEP_IPV6 = "ipv6"
 STEP_SYSTEM = "system"
 STEP_DNS_SERVERS = "dns_servers"
 STEP_FILTER = "filter"
+# Разделы отчёта, которые заполняются по ходу проверки.
+_REPORT_SECTIONS = ("services", "voice", "freeze", "telegram", "network", "speed", "ipv6", "dns_servers", "filter", "habits")
 PROGRESS_STEPS = (STEP_SITES, STEP_HOSTINGS, STEP_VOICE, STEP_IPV6, STEP_SYSTEM, STEP_DNS_SERVERS, STEP_FILTER)
 # Сколько потоков нужно одной цели в худшем случае: сама цель, три запроса к
 # DNS системы, два эталона (A и AAAA) по запросу на каждый эталонный сервер и
@@ -505,6 +508,7 @@ def _run_probes(
     full: bool,
     emit: Emit,
     on_done: Callable[[int, int], None] | None = None,
+    on_probe: Callable[[str, _Probe], None] | None = None,
 ) -> dict[str, list[_Probe]]:
     """Запускает все цели сразу и печатает их блоки по порядку.
 
@@ -519,7 +523,10 @@ def _run_probes(
 
     def _probe(*args, **kwargs) -> _Probe:
         try:
-            return _probe_target(*args, **kwargs)
+            probe = _probe_target(*args, **kwargs)
+            if on_probe is not None:
+                on_probe(args[2], probe)
+            return probe
         finally:
             if on_done is not None:
                 with lock:
@@ -675,11 +682,13 @@ def run_blockcheck(
     geo_service_for: Callable[[str], str] | None = None,
     check_dns_servers: Callable[..., dict] | None = None,
     progress: Callable[[str, int, int], None] | None = None,
+    partial: Callable[[dict], None] | None = None,
 ) -> dict:
     """Проверка BlockCheck. Печатает отчёт через ``emit`` и возвращает итог для экрана.
 
     ``progress(шаг, готово, всего)`` — ход проверки для экрана; шаги перечислены
-    в ``PROGRESS_STEPS``. Зовётся из рабочих потоков.
+    в ``PROGRESS_STEPS``. Зовётся из рабочих потоков. ``partial(отчёт)`` — тот же
+    отчёт, что вернётся в конце, но пока неполный: зовётся после каждого раздела.
 
     ``geo_service_for`` — поиск «адрес → сервис» по гео-сайтам каталога hosts:
     таким сайтам советуется hosts или DNS, а не подбор стратегии.
@@ -719,6 +728,9 @@ def run_blockcheck(
                 "Если они сейчас включены, результат показывает сеть вместе с ними, а не «чистую» сеть провайдера."
             )
         emit("⏳ Проверяем так же, как браузер: TLS 1.3, правильные адреса сайтов…")
+        # Разделы, которых в этом режиме нет или которые не удались, в отчёте остаются пустыми.
+        live = _Live(partial, scope=scope, environment=environment, zapret_running=zapret_running, zapret_line=zapret_line)
+        live.data.update(dict.fromkeys(_REPORT_SECTIONS), other_bypass_tools=list(other_tools), partial=True)
 
         # Звонки и обрыв на 16 КБ проверяются всегда: режим меняет только список сайтов.
         voice_future = run.later(STEP_VOICE, check_voice, run.submit, _wait_plain)
@@ -752,9 +764,14 @@ def run_blockcheck(
         system_future = run.later(STEP_SYSTEM, sections.check_system, run, services, zapret_running)
 
         step(STEP_SITES, 0, targets_count)
-        collected = _run_probes(
-            run, services, full=True, emit=emit, on_done=lambda done, total: step(STEP_SITES, done, total)
-        )
+        verdict_of = functools.partial(_service_verdict, zapret_running=zapret_running)
+        # Сервис уходит на экран, как только проверены все его адреса, а не когда кончатся все сайты.
+        on_probe = sections.live_services(services, verdict_of, lambda ready: live.put(services=ready))
+        on_done = functools.partial(step, STEP_SITES)
+        collected = _run_probes(run, services, full=True, emit=emit, on_done=on_done, on_probe=on_probe)
+        verdicts = {key: verdict_of(service, collected[key]) for key, service in services.items()}
+        services_report = report_text.services_report(services, verdicts, collected)
+        live.put(services=services_report)
         # Шаги идут по очереди, как строки на экране, а не все разом: вместе они
         # забирали процессор у окна программы, и оно замирало.
         dns = full and check_dns_servers
@@ -763,10 +780,32 @@ def run_blockcheck(
         run.start_stages(PROGRESS_STEPS[1:6], lambda name, done: name == STEP_HOSTINGS or step(name, int(done), 1))
         registry_wait = sections.start_registry()
 
+        freeze_facts = _settle(run, freeze_future, emit, "Обрыв на 16–20 КБ")
+        freeze = summarize_freeze(freeze_facts, zapret_running=zapret_running) if freeze_facts is not None else None
+        if freeze is not None:
+            marks = {"ok": "✅", "freeze": "❌", "unknown": "❔"}
+            for line in report_text.section_lines(
+                "Обрыв на 16–20 КБ",
+                freeze,
+                [(marks[item.state.value], item.name, item.text) for item in freeze.servers],
+            ):
+                emit(line)
+        live.put(freeze=report_text.freeze_report(freeze))
+
+        voice_facts = _settle(run, voice_future, emit, "Голосовые серверы")
+        voice = summarize_voice(voice_facts) if voice_facts is not None else None
+        sections.emit_voice(voice, emit)
+
+        burst = _settle(run, burst_future, emit, "Серия пакетов UDP")
+        for line in udp_burst.lines(burst):
+            emit(line)
+        live.put(voice=report_text.voice_report(voice, burst))
+
         ipv6 = _settle(run, ipv6_future, emit, "IPv6")
         if ipv6 is not None:
             emit("━━━━━━━━ IPv6 ━━━━━━━━")
             emit(f"{sections.IPV6_ICON[ipv6.code]} IPv6 {ipv6.text}")
+            live.put(ipv6={"state": ipv6.code, "text": ipv6.text})
 
         system: tuple[system_state.SystemItem, ...] = tuple(_settle(run, system_future, emit, "Состояние системы") or ())
         if system:
@@ -774,20 +813,7 @@ def run_blockcheck(
             emit("━━━━━━━━ Состояние системы ━━━━━━━━")
             for item in system:
                 emit(f"{sections.SYSTEM_ICON[item.level]} {item.title}: {item.text}")
-
-        voice_facts = _settle(run, voice_future, emit, "Голосовые серверы")
-        voice = summarize_voice(voice_facts) if voice_facts is not None else None
-        if voice is not None:
-            for line in report_text.section_lines(
-                "Голосовые звонки (UDP)",
-                voice,
-                [("✅" if item.answered else ("❌" if item.decided else "❔"), item.name, item.text) for item in voice.servers],
-            ):
-                emit(line)
-
-        burst = _settle(run, burst_future, emit, "Серия пакетов UDP")
-        for line in udp_burst.lines(burst):
-            emit(line)
+        live.put(system=report_text.system_report(system))
 
         telegram_facts = _settle(run, telegram_future, emit, "Дата-центры Telegram")
         telegram = (
@@ -813,19 +839,10 @@ def run_blockcheck(
             emit("━━━━━━━━ Ваша сеть ━━━━━━━━")
             for item in network["lines"]:
                 emit(f"{'⚠️' if item['state'] == 'warn' else 'ℹ️'} {item['name']}: {item['text']}")
-
-        freeze_facts = _settle(run, freeze_future, emit, "Обрыв на 16–20 КБ")
-        freeze = summarize_freeze(freeze_facts, zapret_running=zapret_running) if freeze_facts is not None else None
-        if freeze is not None:
-            marks = {"ok": "✅", "freeze": "❌", "unknown": "❔"}
-            for line in report_text.section_lines(
-                "Обрыв на 16–20 КБ",
-                freeze,
-                [(marks[item.state.value], item.name, item.text) for item in freeze.servers],
-            ):
-                emit(line)
+        live.put(telegram=report_text.telegram_report(telegram), network=network)
 
         dns_servers = sections.finish_dns_servers(run, dns_future, emit) if dns_future is not None else None
+        live.put(dns_servers=dns_servers)
         if full:
             step(STEP_FILTER, 0, 1)
         filter_place = (
@@ -845,11 +862,8 @@ def run_blockcheck(
         if full:
             step(STEP_FILTER)
         speed = _attempt(emit, "Скорость", lambda: sections.check_speed(run, emit)) if full and not run.dns_cancelled() else None
+        live.put(filter=filter_place, habits=habits, speed=speed)
 
-        verdicts = {
-            key: _service_verdict(service, collected[key], zapret_running=zapret_running)
-            for key, service in services.items()
-        }
         problems, working, spoofed = problem_rules.collect_problems(
             services,
             verdicts,
@@ -880,7 +894,6 @@ def run_blockcheck(
                     )
         problems.sort(key=lambda item: problem_rules.LEVEL_ORDER.get(Level(item["level"]), 9))
 
-        services_report = report_text.services_report(services, verdicts, collected)
         registry_index = registry_wait(REGISTRY_WAIT_S)
         registry.annotate(services_report, registry_index)
         for line in registry.lines(services_report, registry_index):
@@ -892,33 +905,18 @@ def run_blockcheck(
         ):
             emit(line)
 
-        return {
-            "scope": scope,
-            "services": services_report,
-            "registry": registry.summary(registry_index),
-            "voice": report_text.voice_report(voice, burst),
-            "freeze": report_text.freeze_report(freeze),
-            "telegram": report_text.telegram_report(telegram),
-            "network": network,
-            "speed": speed,
-            "problems": problems,
-            "working": working,
-            "spoofed_hosts": spoofed,
-            "reference": run.reference_report(),
-            "ipv6": {"state": ipv6.code, "text": ipv6.text} if ipv6 is not None else None,
-            "dns_servers": dns_servers,
-            "filter": filter_place,
-            "habits": habits,
-            "system": report_text.system_report(system),
-            "environment": environment,
-            "zapret_running": zapret_running,
-            "zapret_line": zapret_line,
-            "other_bypass_tools": list(other_tools),
-            "timed_out": run.timed_out,
-            "elapsed": elapsed,
-            "step_seconds": step.seconds(),
-            "dns_poisoning_detected": bool(spoofed),
-        }
+        return live.put(
+            registry=registry.summary(registry_index),
+            problems=problems,
+            working=working,
+            spoofed_hosts=spoofed,
+            reference=run.reference_report(),
+            timed_out=run.timed_out,
+            elapsed=elapsed,
+            step_seconds=step.seconds(),
+            dns_poisoning_detected=bool(spoofed),
+            partial=False,
+        )
     except _Stopped:
         return {"stopped": True}
     finally:
