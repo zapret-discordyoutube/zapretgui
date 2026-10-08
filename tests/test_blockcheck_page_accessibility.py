@@ -233,7 +233,7 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         # Сначала сломанное; YouTube открывается — подмена DNS только меткой.
         self.assertEqual(names[0], "X (Twitter)")
         self.assertEqual(cards["YouTube"].status, "Открывается")
-        self.assertIn(("DNS подменён", "warn"), cards["YouTube"].chips)
+        self.assertIn(("DNS: подменён", "warn"), cards["YouTube"].chips)
         self.assertIn("Голосовые звонки (UDP)", names)
         # Ход проверки после итога убирается.
         self.assertTrue(page._progress_card.isHidden())

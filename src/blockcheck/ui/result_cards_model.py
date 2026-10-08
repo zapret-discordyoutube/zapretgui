@@ -237,29 +237,123 @@ def _capital(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def has_ready_words(service: dict) -> bool:
+    """Свежий отчёт: слово итога, дороги и метки сайта лежат в нём готовыми (``status``, ``roads``, ``tags``).
+
+    Отчёт — единственный источник истины: экран эти слова только показывает. У
+    отчётов, сохранённых до этого, полей нет — для них работает запасной путь
+    ``_legacy_site_words``.
+    """
+    return "status" in service and "roads" in service
+
+
 def site_level(service: dict) -> str:
-    """Уровень карточки сайта. Подмена DNS при открывающемся сайте — не «проблема
-    сайта»: о ней общая строка в итоге, а здесь — метка."""
-    level = _state(service.get("level"))
-    targets = list(service.get("targets") or ())
-    if level in (OK, WARN) and targets and all(item.get("ok") for item in targets):
-        # Сайт открывается, но приветствие с составом Chrome не проходит: в браузере он может висеть.
-        # Или запись в hosts ведёт на нерабочий адрес: проверка сайт открыла, а браузер не откроет.
-        return WARN if _by_fingerprint(targets) or any(item.get("hosts_stale") or item.get("unstable") for item in targets) else OK
-    return level
-
-
-def _by_fingerprint(targets: list) -> bool:
-    return any(proto.get("code") == "fingerprint" for item in targets for proto in item.get("protocols") or ())
+    """Уровень карточки сайта: у свежего отчёта — как в отчёте, у старого — запасной вывод."""
+    if has_ready_words(service):
+        return _state(service.get("level"))
+    return _legacy_site_level(service)
 
 
 def site_kind(service: dict, level: str) -> str:
     """Вид блокировки сайта. Пусто — сайт открывается или вид неизвестен."""
     kind = str(service.get("kind") or "")
-    if not kind and level == WARN and any(item.get("unstable") for item in service.get("targets") or ()):
-        # Открылся, но через раз: свой вид — третий исход между «открывается» и «заблокирован».
-        return KIND_UNSTABLE
+    if not has_ready_words(service):
+        kind = _legacy_site_kind(service, level, kind)
     return kind if level in (FAIL, WARN) and kind in KINDS and kind != KIND_OTHER else ""
+
+
+# ---------------------------------------------------------------------------
+# ЗАПАСНОЙ ПУТЬ: только для отчётов, сохранённых до того, как слова сайта стали
+# приходить готовыми. Свежий отчёт сюда не попадает (см. has_ready_words).
+# Новые правила сюда не добавлять — они пишутся в diagnostics.report_text.
+# ---------------------------------------------------------------------------
+
+
+def _legacy_site_level(service: dict) -> str:
+    level = _state(service.get("level"))
+    targets = list(service.get("targets") or ())
+    if level in (OK, WARN) and targets and all(item.get("ok") for item in targets):
+        fingerprint = any(proto.get("code") == "fingerprint" for item in targets for proto in item.get("protocols") or ())
+        return WARN if fingerprint or any(item.get("hosts_stale") or item.get("unstable") for item in targets) else OK
+    return level
+
+
+def _legacy_site_kind(service: dict, level: str, kind: str) -> str:
+    if not kind and level == WARN and any(item.get("unstable") for item in service.get("targets") or ()):
+        return KIND_UNSTABLE
+    return kind
+
+
+_LEGACY_CERT_STATUS = {
+    "antivirus": "Сертификат подменяет антивирус",
+    "debug_proxy": "Сертификат подменяет прокси-отладчик",
+    "state_ca": "Сертификат государственного центра",
+    "hosts": "Адрес из hosts ведёт не туда",
+    "other_site": "Отвечает другой сайт",
+    "self_signed": "Самоподписанный сертификат",
+    "unknown_issuer": "Сертификат от неизвестного центра",
+}
+_LEGACY_QUIC_HINT = (
+    "QUIC — быстрый способ соединения поверх UDP: им браузер открывает YouTube и многие крупные сайты. "
+    "Если он закрыт, браузер сам переходит на обычное соединение."
+)
+_LEGACY_DNS_HINT = "DNS — справочная, которая по имени сайта выдаёт его адрес. Провайдер может подменять её ответы."
+_LEGACY_ROAD_KEYS = {"TLS 1.2": "tls12", "TLS 1.3": "tls13", "Как Chrome": "browser", "HTTP": "http"}
+
+
+def _legacy_site_words(service: dict, level: str, kind: str) -> tuple[str, list[dict], list[dict]]:
+    """Слово итога, дороги и метки старого отчёта — в том же виде, в каком их отдаёт свежий."""
+    targets = list(service.get("targets") or ())
+    status = _capital(kind_info(kind).short) if kind else _SITE_STATUS[level]
+    cert = next((str((item.get("cert") or {}).get("code") or "") for item in targets if (item.get("cert") or {}).get("code")), "")
+    if cert:
+        status = _LEGACY_CERT_STATUS.get(cert, "Чужой сертификат")
+    elif any(item.get("hosts_stale") for item in targets):
+        status = "Мешает запись в hosts"
+
+    main = next((item for item in targets if item.get("main")), targets[0] if targets else {})
+    roads = [
+        {
+            "key": _LEGACY_ROAD_KEYS.get(str(proto.get("title") or ""), str(proto.get("key") or "")),
+            "label": str(proto.get("title") or "").removeprefix("Как "),
+            "state": str(proto.get("state") or "unknown"),
+            "word": str(proto.get("word") or ""),
+            "text": str(proto.get("text") or ""),
+            "hint": str(proto.get("hint") or ""),
+        }
+        for proto in main.get("protocols") or ()
+    ]
+    # Совсем старый отчёт дорог по протоколам не содержит: тогда QUIC и DNS показываются,
+    # только если про них что-то известно, — прочерки без остальных дорог ничего не говорят.
+    probed = bool(roads)
+    quic = {str(item.get("quic") or "") for item in targets}
+    if "blocked_by_name" in quic:
+        roads.append({"key": "quic", "label": "QUIC", "state": "warn", "word": "закрыт", "text": "", "hint": _LEGACY_QUIC_HINT})
+    elif "ok" in quic:
+        roads.append({"key": "quic", "label": "QUIC", "state": "ok", "word": "работает", "text": "", "hint": _LEGACY_QUIC_HINT})
+    elif probed:
+        roads.append({"key": "quic", "label": "QUIC", "state": "unknown", "word": "—", "text": "", "hint": _LEGACY_QUIC_HINT})
+    dns_states = {str(item.get("dns_state") or "") for item in targets}
+    if service.get("dns_note") or "spoofed" in dns_states:
+        roads.append({"key": "dns", "label": "DNS", "state": "warn", "word": "подменён", "text": "", "hint": _LEGACY_DNS_HINT})
+    elif probed and dns_states and not dns_states & {"", "unknown"}:
+        roads.append({"key": "dns", "label": "DNS", "state": "ok", "word": "честный", "text": "", "hint": _LEGACY_DNS_HINT})
+    elif probed:
+        roads.append({"key": "dns", "label": "DNS", "state": "unknown", "word": "—", "text": "", "hint": _LEGACY_DNS_HINT})
+
+    tags = []
+    if any(item.get("volume") == "cut" for item in targets):
+        tags.append({"key": "cut16", "text": "обрыв на 16 КБ", "state": "warn"})
+    if any(item.get("hosts_stale") for item in targets):
+        tags.append({"key": "hosts", "text": "запись в hosts устарела", "state": "warn"})
+    if any((item.get("registry") or {}).get("listed") for item in targets):
+        tags.append({"key": "registry", "text": "в реестре РКН", "state": "info"})
+    if service.get("control"):
+        tags.append({"key": "control", "text": "контрольный", "state": "info"})
+    return status, roads, tags
+
+
+# --------------------------- конец запасного пути ---------------------------
 
 
 def _target_state(item: dict) -> str:
@@ -289,45 +383,25 @@ def site_card(service: dict) -> Card:
     return _site_card(service)
 
 
-_MARK_ICONS = {"TLS 1.2": "fa5s.lock", "TLS 1.3": "fa5s.lock", "Как Chrome": "fa5b.chrome", "HTTP": "fa5s.unlock-alt"}
-
-
 # В ячейке сетки места на одно-два слова.
 _MARK_WORDS = {"нет соединения": "нет связи"}
 
 
-_QUIC_HINT = (
-    "QUIC — быстрый способ соединения поверх UDP: им браузер открывает YouTube и многие крупные сайты. "
-    "Если он закрыт, браузер сам переходит на обычное соединение."
-)
-_DNS_HINT = "DNS — справочная, которая по имени сайта выдаёт его адрес. Провайдер может подменять её ответы."
-
-
-def _mark_icon(title: str) -> str:
-    return _MARK_ICONS.get(title, "fa5s.plug")
-
-
-# Кто ответил вместо сайта — словом итога на карточке (код из отчёта: targets[].cert.code).
-_CERT_STATUS = {
-    "antivirus": "Сертификат подменяет антивирус",
-    "debug_proxy": "Сертификат подменяет прокси-отладчик",
-    "state_ca": "Сертификат государственного центра",
-    "hosts": "Адрес из hosts ведёт не туда",
-    "other_site": "Отвечает другой сайт",
-    "self_signed": "Самоподписанный сертификат",
-    "unknown_issuer": "Сертификат от неизвестного центра",
+# Значок дороги — по её ключу из отчёта. Это вид: какие бывают дороги и что они значат, решает отчёт.
+_ROAD_ICONS = {
+    "tls12": "fa5s.lock",
+    "tls13": "fa5s.lock",
+    "browser": "fa5b.chrome",
+    "http": "fa5s.unlock-alt",
+    "quic": "fa5s.bolt",
+    "dns": "fa5s.exchange-alt",
 }
 
 
-def _own_cause_status(targets) -> str:
-    """Слово итога, когда сайту мешает не фильтр провайдера: чужой сертификат или запись в hosts. Пусто — не тот случай."""
-    for item in targets:
-        code = str((item.get("cert") or {}).get("code") or "")
-        if code:
-            return _CERT_STATUS.get(code, "Чужой сертификат")
-    if any(item.get("hosts_stale") for item in targets):
-        return "Мешает запись в hosts"
-    return ""
+def _shown_state(value) -> str:
+    """Состояние дороги или метки из отчёта; незнакомое показывается как «неизвестно»."""
+    state = str(value or "")
+    return state if state in (OK, WARN, FAIL, INFO, UNKNOWN) else UNKNOWN
 
 
 def _site_card(service: dict) -> Card:
@@ -335,52 +409,32 @@ def _site_card(service: dict) -> Card:
     targets = list(service.get("targets") or ())
     level = site_level(service)
     kind = site_kind(service, level)
-    status = _capital(kind_info(kind).short) if kind else _SITE_STATUS[level]
-    # Когда причина не у провайдера, общее «Есть проблемы» ничего не говорит: называем её прямо.
-    status = _own_cause_status(targets) or status
+    if has_ready_words(service):
+        # Слово итога, дороги и метки — из отчёта как есть: экран их не выводит и не дополняет.
+        status, roads, tag_items = str(service.get("status") or ""), service.get("roads") or (), service.get("tags") or ()
+    else:
+        status, roads, tag_items = _legacy_site_words(service, level, kind)
 
     lines = tuple(
         Line(_target_state(item), str(item.get("purpose") or item.get("host") or ""), str(item.get("short") or ""))
         for item in targets
     )
-    chips: list[tuple[str, str]] = []
-    marks: list[Mark] = []
-    tags: list[tuple[str, str]] = []
-    # Три дороги к главному адресу сайта: TLS 1.2, TLS 1.3 и HTTP.
-    main = next((item for item in targets if item.get("main")), targets[0] if targets else {})
-    for proto in main.get("protocols") or ():
-        title, word = str(proto.get("title") or ""), str(proto.get("word") or "")
-        state = _PROTOCOL_STATES.get(str(proto.get("state")), UNKNOWN)
-        chips.append((f"{title}: {word}", state))
-        hint = "\n".join(part for part in (str(proto.get("hint") or ""), str(proto.get("text") or "")) if part)
-        marks.append(Mark(title.removeprefix("Как "), _MARK_WORDS.get(word, word), state, _mark_icon(title), hint))
+    marks = [
+        Mark(
+            str(road.get("label") or ""),
+            # Сокращение слова под ширину ячейки — вид; само слово пришло из отчёта.
+            _MARK_WORDS.get(str(road.get("word") or ""), str(road.get("word") or "")),
+            _shown_state(road.get("state")),
+            _ROAD_ICONS.get(str(road.get("key") or ""), "fa5s.plug"),
+            "\n".join(part for part in (str(road.get("hint") or ""), str(road.get("text") or "")) if part),
+        )
+        for road in roads
+    ]
+    tags = [(str(item.get("text") or ""), _shown_state(item.get("state"))) for item in tag_items]
+    # Полный набор меток — для шапки отчёта и подсказки: дороги словами, причина, метки.
+    chips: list[tuple[str, str]] = [(f"{mark.label}: {mark.word}", mark.state) for mark in marks if mark.word != "—"]
     for word in dict.fromkeys(_CAUSE_WORDS[item["cause"]] for item in targets if item.get("cause") in _CAUSE_WORDS):
         chips.append((word, FAIL))
-    quic = {str(item.get("quic") or "") for item in targets}
-    if "blocked_by_name" in quic:
-        chips.append(("QUIC закрыт", WARN))
-        marks.append(Mark("QUIC", "закрыт", WARN, "fa5s.bolt", _QUIC_HINT + "\nЗдесь его режут: сайт откроется обычным способом, чуть медленнее."))
-    elif "ok" in quic:
-        chips.append(("QUIC работает", OK))
-        marks.append(Mark("QUIC", "работает", OK, "fa5s.bolt", _QUIC_HINT))
-    elif marks:
-        marks.append(Mark("QUIC", "—", UNKNOWN, "fa5s.bolt", _QUIC_HINT + "\nУ этого сайта не проверялся или сервер его не поддерживает."))
-    if any(item.get("volume") == "cut" for item in targets):
-        tags.append(("обрыв на 16 КБ", WARN))
-    dns_states = {str(item.get("dns_state") or "") for item in targets}
-    if service.get("dns_note") or "spoofed" in dns_states:
-        marks.append(Mark("DNS", "подменён", WARN, "fa5s.exchange-alt", _DNS_HINT + "\nЗдесь ответ подменён: лечится DNS с шифрованием в разделе «Настройка DNS»."))
-    elif marks:
-        clean = bool(dns_states) and not dns_states & {"", "unknown"}
-        marks.append(Mark("DNS", "честный" if clean else "—", OK if clean else UNKNOWN, "fa5s.exchange-alt", _DNS_HINT))
-    if service.get("dns_note"):
-        chips.append(("DNS подменён", WARN))
-    if any(item.get("hosts_stale") for item in targets):
-        tags.append(("запись в hosts устарела", WARN))
-    if any((item.get("registry") or {}).get("listed") for item in targets):
-        tags.append(("в реестре РКН", INFO))
-    if service.get("control"):
-        tags.append(("контрольный", INFO))
     chips.extend(tags)
 
     detail: list[Section] = []
@@ -464,8 +518,7 @@ def _site_card(service: dict) -> Card:
         kind=kind,
         lines=lines,
         chips=tuple(chips),
-        # Дороги показывают, только когда главный адрес проверяли по протоколам отдельно.
-        marks=tuple(marks) if main.get("protocols") else (),
+        marks=tuple(marks),
         tags=tuple(tags),
         sections=tuple(detail),
         site=True,

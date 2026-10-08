@@ -309,7 +309,7 @@ class FingerprintOnScreenTests(unittest.TestCase):
         card = self._card("fingerprint")
 
         self.assertEqual((card.level, card.status), ("warn", "Есть проблемы"))
-        self.assertIn(("Как Chrome: режется", "fail"), card.chips)
+        self.assertIn(("Chrome: режется", "fail"), card.chips)
         self.assertEqual(self._card("").level, "ok")
 
     def test_every_block_kind_has_a_title_a_place_and_a_colour(self) -> None:

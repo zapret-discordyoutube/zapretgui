@@ -132,13 +132,13 @@ class CardsModelTests(unittest.TestCase):
         card = self.cards["site:youtube"]
 
         self.assertEqual((card.level, card.status), ("ok", "Открывается"))
-        self.assertIn(("QUIC закрыт", "warn"), card.chips)
-        self.assertIn(("DNS подменён", "warn"), card.chips)
+        self.assertIn(("QUIC: закрыт", "warn"), card.chips)
+        self.assertIn(("DNS: подменён", "warn"), card.chips)
         self.assertEqual([line.name for line in card.lines], ["сайт", "превью видео"])
 
     def test_control_and_unknown_sites(self) -> None:
         self.assertIn(("контрольный", "info"), self.cards["site:google"].chips)
-        self.assertIn(("QUIC работает", "ok"), self.cards["site:google"].chips)
+        self.assertIn(("QUIC: работает", "ok"), self.cards["site:google"].chips)
         unknown = self.cards["site:user:my.example"]
         self.assertEqual((unknown.level, unknown.status, unknown.icon), ("unknown", "Не удалось проверить", "fa5s.globe"))
         self.assertEqual(unknown.lines[0].state, "unknown")
@@ -401,6 +401,51 @@ class NewSectionsCardsTests(unittest.TestCase):
         widget.mouseMoveEvent(move)
         self.assertEqual(widget._mark_hint.text(), widget.mark_hint(2))
         widget.grab()
+
+    def test_site_card_words_come_from_the_report_and_nothing_is_derived(self) -> None:
+        """Сторож: у свежего отчёта слово итога, дороги и метки карточки — ровно те, что в отчёте."""
+        from blockcheck.ui import result_cards_model as model
+
+        roads = [
+            {"key": "tls12", "label": "TLS 1.2", "state": "info", "word": "не мешает", "text": "молчит, исправлять не нужно", "hint": "старый вид защищённого соединения"},
+            {"key": "tls13", "label": "TLS 1.3", "state": "fail", "word": "сброс", "text": "соединение сброшено", "hint": "современный вид"},
+            {"key": "browser", "label": "Chrome", "state": "ok", "word": "проходит", "text": "проходит", "hint": "так здоровается браузер"},
+            {"key": "http", "label": "HTTP", "state": "info", "word": "переход", "text": "переход на HTTPS", "hint": "без защиты"},
+            {"key": "quic", "label": "QUIC", "state": "warn", "word": "закрыт", "text": "QUIC режут", "hint": "быстрый способ"},
+            {"key": "dns", "label": "DNS", "state": "unknown", "word": "—", "text": "сверить не удалось", "hint": "справочная"},
+        ]
+        tags = [{"key": "registry", "text": "в реестре РКН", "state": "info"}, {"key": "cut16", "text": "обрыв на 16 КБ", "state": "warn"}]
+        # Данные адреса нарочно говорят другое: если бы экран выводил слова сам, они бы разошлись с отчётом.
+        target = _target("example.org", main=True, ok=True, quic="ok", dns_state="spoofed", hosts_stale=True, unstable="через раз", volume="", cert={"code": "antivirus"})
+        service = {
+            **_service("example", "Example", "warn", [target], kind="fingerprint"),
+            "status": "Слово из отчёта",
+            "roads": roads,
+            "tags": tags,
+            "dns_note": "подмена",
+            "control": True,
+        }
+        with patch.object(model, "_legacy_site_words", side_effect=AssertionError("у свежего отчёта запасной путь не нужен")), patch.object(
+            model, "_legacy_site_level", side_effect=AssertionError("уровень берётся из отчёта")
+        ), patch.object(model, "_legacy_site_kind", side_effect=AssertionError("вид берётся из отчёта")):
+            [card] = [item for item in build_cards({"services": [service]}) if item.site]
+
+        self.assertEqual((card.status, card.level, card.kind), ("Слово из отчёта", "warn", "fingerprint"))
+        self.assertEqual([(mark.label, mark.word, mark.state) for mark in card.marks], [(road["label"], road["word"], road["state"]) for road in roads])
+        self.assertEqual(card.tags, tuple((tag["text"], tag["state"]) for tag in tags))
+        # Подсказка дороги — пояснение и фраза из отчёта, без добавок.
+        self.assertEqual(card.marks[4].hint, "быстрый способ\nQUIC режут")
+        # Значок — по ключу дороги: это вид, он остаётся на экране.
+        self.assertEqual([mark.icon for mark in card.marks], ["fa5s.lock", "fa5s.lock", "fa5b.chrome", "fa5s.unlock-alt", "fa5s.bolt", "fa5s.exchange-alt"])
+        # Уровень и вид — как в отчёте, даже когда данные адресов намекают на другое.
+        self.assertEqual(model.site_level({**service, "level": "ok"}), "ok")
+        self.assertEqual(model.site_kind({**service, "kind": ""}, "warn"), "")
+
+        # Отчёт, сохранённый до этой правки, слов не содержит — работает подписанный запасной путь.
+        old = _service("example", "Example", "warn", [_target("example.org", main=True, hosts_stale=True)])
+        self.assertFalse(model.has_ready_words(old))
+        [legacy] = [item for item in build_cards({"services": [old]}) if item.site]
+        self.assertEqual(legacy.status, "Мешает запись в hosts")
 
     def test_no_comparison_no_card(self) -> None:
         self.assertFalse([card for card in build_cards({"compare": None}) if card.key == "compare"])
