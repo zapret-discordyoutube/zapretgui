@@ -336,6 +336,10 @@ class HostingDots(QWidget):
         return super().event(event)
 
 
+# Самая узкая карточка сайта в сетке под итогом.
+SITE_CARD_MIN_WIDTH = 304
+
+
 class ResultCard(QWidget):
     """Карточка одной проверки. Нажатие (или Enter) открывает подробности.
 
@@ -360,6 +364,7 @@ class ResultCard(QWidget):
     CHIP_GAP_Y = 4
     MARK_ROW = 20
     MARK_COLUMNS = 2
+    MARK_GAP = 8
 
     def __init__(self, card: Card, parent=None) -> None:
         super().__init__(parent)
@@ -389,6 +394,11 @@ class ResultCard(QWidget):
         self._chips = tuple(card.tags if card.marks else card.chips)
         # Строки и дороги проявляются по очереди при первом показе карточки.
         self.reveal = Reveal(self, duration_ms=520)
+        # Над дорогой — своя подсказка: что это за дорога простыми словами и чем кончилась проба.
+        self._mark_hint = HoverHint(self, delay_ms=250)
+        self._hinted_mark = -1
+        if self._marks:
+            self.setMouseTracking(True)
 
         self.dots: HostingDots | None = None
         if card.dots:
@@ -461,10 +471,11 @@ class ResultCard(QWidget):
     def mark_rect(self, index: int) -> QRectF:
         """Место дороги номер ``index``: у всех карточек одной ширины оно одно и то же."""
         inner = self.width() - self.PAD_X * 2
-        cell = inner / self.MARK_COLUMNS
+        # Зазор только между столбцами: у края карточки он ячейке не нужен.
+        cell = (inner - self.MARK_GAP * (self.MARK_COLUMNS - 1)) / self.MARK_COLUMNS
         row, column = divmod(index, self.MARK_COLUMNS)
         top = self._places(self.width())[5] + row * self.MARK_ROW
-        return QRectF(self.PAD_X + column * cell, top, cell - 8, self.MARK_ROW)
+        return QRectF(self.PAD_X + column * (cell + self.MARK_GAP), top, cell, self.MARK_ROW)
 
     def height_for(self, width: int) -> int:
         return self._places(width)[4]
@@ -627,10 +638,33 @@ class ResultCard(QWidget):
             painter.drawText(inside, left_flag, metrics.elidedText(label, Qt.TextElideMode.ElideRight, int(inside.width())))
         painter.end()
 
+    def mark_at(self, x: float, y: float) -> int:
+        """Номер дороги под точкой; ``-1`` — там её нет."""
+        return next((index for index in range(len(self._marks)) if self.mark_rect(index).contains(x, y)), -1)
+
+    def mark_hint(self, index: int) -> str:
+        if not 0 <= index < len(self._marks):
+            return ""
+        mark = self._marks[index]
+        return "\n".join(part for part in (f"{mark.label}: {mark.word}", mark.hint) if part)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        index = self.mark_at(event.position().x(), event.position().y())
+        if index != self._hinted_mark:
+            self._hinted_mark = index
+            self._mark_hint.show(self.mark_hint(index), event.globalPosition().toPoint())
+        super().mouseMoveEvent(event)
+
     def event(self, event) -> bool:
         if event.type() in (QEvent.Type.HoverEnter, QEvent.Type.HoverLeave):
             self._hover = event.type() == QEvent.Type.HoverEnter
+            if not self._hover:
+                self._hinted_mark = -1
+                self._mark_hint.hide()
             self.update()
+        # Над дорогой показана её подсказка: общая подсказка карточки поверх неё не нужна.
+        if event.type() == QEvent.Type.ToolTip and self._hinted_mark >= 0:
+            return True
         return super().event(event)
 
     def focusInEvent(self, event) -> None:  # noqa: N802
@@ -934,7 +968,8 @@ class ResultCardsView(QWidget):
         layout.addWidget(self.counters)
         self.sites_title = StrongBodyLabel("Сайты", self)
         layout.addWidget(self.sites_title)
-        self.sites_grid = CardsGrid(250, self)
+        # Шире прежнего: в ячейке дороги должны целиком помещаться подпись и слово («Chrome проходит»).
+        self.sites_grid = CardsGrid(SITE_CARD_MIN_WIDTH, self)
         layout.addWidget(self.sites_grid)
         self.checks_title = StrongBodyLabel("Сеть и компьютер", self)
         layout.addWidget(self.checks_title)

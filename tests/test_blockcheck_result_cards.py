@@ -357,6 +357,51 @@ class NewSectionsCardsTests(unittest.TestCase):
         [other] = [item for item in build_cards({"services": [both]}) if item.site]
         self.assertEqual(other.status, "Мешает запись в hosts")
 
+    def test_mark_explains_itself_on_hover_and_its_word_fits(self) -> None:
+        from PyQt6.QtCore import QPointF
+        from PyQt6.QtGui import QMouseEvent
+
+        from blockcheck.ui.result_cards import SITE_CARD_MIN_WIDTH, ResultCard
+
+        def proto(title: str, state: str, word: str, hint: str, text: str) -> dict:
+            return {"key": title, "title": title, "state": state, "word": word, "text": text, "hint": hint}
+
+        protocols = [
+            # Браузерное приветствие проходит — обычные «молчат», и это не беда: состояние нейтральное.
+            proto("TLS 1.2", "info", "не мешает", "TLS 1.2 — старый вид защищённого соединения.", "Молчит, но исправлять ничего не нужно."),
+            proto("TLS 1.3", "info", "не мешает", "TLS 1.3 — современный вид защищённого соединения.", "Молчит, но исправлять ничего не нужно."),
+            proto("Как Chrome", "ok", "проходит", "Так здоровается браузер Chrome.", "проходит"),
+            proto("HTTP", "info", "переход", "HTTP — соединение без защиты.", "переход на HTTPS"),
+        ]
+        service = _service("youtube", "YouTube", "ok", [_target("www.youtube.com", main=True, protocols=protocols, quic="ok", dns_state="ok")])
+        [card] = [item for item in build_cards({"services": [service]}) if item.site]
+        tls, _tls13, chrome, _http, quic, dns = card.marks
+        # Подсказка: что это за дорога простыми словами и чем кончилась проба; у QUIC и DNS текст свой.
+        self.assertEqual(tls.state, "info")
+        self.assertIn("старый вид защищённого соединения", tls.hint)
+        self.assertIn("исправлять ничего не нужно", tls.hint)
+        self.assertIn("быстрый способ соединения", quic.hint)
+        self.assertIn("справочная", dns.hint)
+
+        widget = ResultCard(card)
+        self.addCleanup(widget.deleteLater)
+        widget.resize(SITE_CARD_MIN_WIDTH, widget.height_for(SITE_CARD_MIN_WIDTH))
+        widget.show()
+        # В самой узкой карточке сетки слово у «Chrome» помещается целиком.
+        cell = widget.mark_rect(2)
+        need = 18 + widget._text_metrics.horizontalAdvance(chrome.label) + 2 + 6 + widget._text_metrics.horizontalAdvance(chrome.word)
+        self.assertLessEqual(need, cell.width())
+        # Наведение на дорогу показывает её подсказку; над остальной карточкой её нет.
+        center = cell.center()
+        self.assertEqual(widget.mark_at(center.x(), center.y()), 2)
+        self.assertEqual(widget.mark_at(5, 5), -1)
+        self.assertEqual(widget.mark_hint(2), "Chrome: проходит\nТак здоровается браузер Chrome.\nпроходит")
+        self.assertEqual(widget.mark_hint(-1), "")
+        move = QMouseEvent(QMouseEvent.Type.MouseMove, QPointF(center), QPointF(widget.mapToGlobal(center.toPoint())), Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+        widget.mouseMoveEvent(move)
+        self.assertEqual(widget._mark_hint.text(), widget.mark_hint(2))
+        widget.grab()
+
     def test_no_comparison_no_card(self) -> None:
         self.assertFalse([card for card in build_cards({"compare": None}) if card.key == "compare"])
 

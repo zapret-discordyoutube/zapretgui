@@ -124,6 +124,8 @@ class Mark:
     word: str
     state: str
     icon: str
+    # Что это за дорога простыми словами — подсказка при наведении: «TLS», «QUIC» человеку ничего не говорят.
+    hint: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +296,13 @@ _MARK_ICONS = {"TLS 1.2": "fa5s.lock", "TLS 1.3": "fa5s.lock", "Как Chrome": 
 _MARK_WORDS = {"нет соединения": "нет связи"}
 
 
+_QUIC_HINT = (
+    "QUIC — быстрый способ соединения поверх UDP: им браузер открывает YouTube и многие крупные сайты. "
+    "Если он закрыт, браузер сам переходит на обычное соединение."
+)
+_DNS_HINT = "DNS — справочная, которая по имени сайта выдаёт его адрес. Провайдер может подменять её ответы."
+
+
 def _mark_icon(title: str) -> str:
     return _MARK_ICONS.get(title, "fa5s.plug")
 
@@ -343,26 +352,27 @@ def _site_card(service: dict) -> Card:
         title, word = str(proto.get("title") or ""), str(proto.get("word") or "")
         state = _PROTOCOL_STATES.get(str(proto.get("state")), UNKNOWN)
         chips.append((f"{title}: {word}", state))
-        marks.append(Mark(title.removeprefix("Как "), _MARK_WORDS.get(word, word), state, _mark_icon(title)))
+        hint = "\n".join(part for part in (str(proto.get("hint") or ""), str(proto.get("text") or "")) if part)
+        marks.append(Mark(title.removeprefix("Как "), _MARK_WORDS.get(word, word), state, _mark_icon(title), hint))
     for word in dict.fromkeys(_CAUSE_WORDS[item["cause"]] for item in targets if item.get("cause") in _CAUSE_WORDS):
         chips.append((word, FAIL))
     quic = {str(item.get("quic") or "") for item in targets}
     if "blocked_by_name" in quic:
         chips.append(("QUIC закрыт", WARN))
-        marks.append(Mark("QUIC", "закрыт", WARN, "fa5s.bolt"))
+        marks.append(Mark("QUIC", "закрыт", WARN, "fa5s.bolt", _QUIC_HINT + "\nЗдесь его режут: сайт откроется обычным способом, чуть медленнее."))
     elif "ok" in quic:
         chips.append(("QUIC работает", OK))
-        marks.append(Mark("QUIC", "работает", OK, "fa5s.bolt"))
+        marks.append(Mark("QUIC", "работает", OK, "fa5s.bolt", _QUIC_HINT))
     elif marks:
-        marks.append(Mark("QUIC", "—", UNKNOWN, "fa5s.bolt"))
+        marks.append(Mark("QUIC", "—", UNKNOWN, "fa5s.bolt", _QUIC_HINT + "\nУ этого сайта не проверялся или сервер его не поддерживает."))
     if any(item.get("volume") == "cut" for item in targets):
         tags.append(("обрыв на 16 КБ", WARN))
     dns_states = {str(item.get("dns_state") or "") for item in targets}
     if service.get("dns_note") or "spoofed" in dns_states:
-        marks.append(Mark("DNS", "подменён", WARN, "fa5s.exchange-alt"))
+        marks.append(Mark("DNS", "подменён", WARN, "fa5s.exchange-alt", _DNS_HINT + "\nЗдесь ответ подменён: лечится DNS с шифрованием в разделе «Настройка DNS»."))
     elif marks:
         clean = bool(dns_states) and not dns_states & {"", "unknown"}
-        marks.append(Mark("DNS", "честный" if clean else "—", OK if clean else UNKNOWN, "fa5s.exchange-alt"))
+        marks.append(Mark("DNS", "честный" if clean else "—", OK if clean else UNKNOWN, "fa5s.exchange-alt", _DNS_HINT))
     if service.get("dns_note"):
         chips.append(("DNS подменён", WARN))
     if any(item.get("hosts_stale") for item in targets):
