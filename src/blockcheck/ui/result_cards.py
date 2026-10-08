@@ -1507,8 +1507,10 @@ class _SectionBlock(QWidget):
     ) -> None:
         super().__init__(parent)
         self.section = section
+        # Раздел из карточек — без своей подложки: она есть у каждой карточки внутри.
+        self._flat = tiles or findings
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 8)
+        layout.setContentsMargins(*((0, 8, 0, 4) if self._flat else (16, 12, 16, 8)))
         layout.setSpacing(0)
 
         header = QHBoxLayout()
@@ -1607,6 +1609,8 @@ class _SectionBlock(QWidget):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         _ = event
+        if self._flat:
+            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)

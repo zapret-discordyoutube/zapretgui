@@ -640,3 +640,40 @@ class LightAndFittingTests(unittest.TestCase):
         self.assertEqual(opened, [])
         self.assertEqual(grid.cursor().shape(), Qt.CursorShape.ArrowCursor)
         grid.grab()
+
+    def test_small_groups_stand_side_by_side_and_only_cards_have_a_background(self) -> None:
+        panel = BlockcheckSummaryPanel(on_action=lambda *_args: None, on_open=lambda _key: None)
+        self.addCleanup(panel.deleteLater)
+        sites = [_problem(f"Сайт {n} не открывается", kind="sni", title=f"Сайт {n}", target=f"site{n}.example") for n in range(5)]
+        panel.show_report(
+            {
+                "problems": [
+                    _problem("Telegram не открывается", kind="ip", title="Telegram", target="www.telegram.org"),
+                    *sites,
+                    _problem("QUIC (UDP 443) не проходит по имени: YouTube", kind="quic", level="warn"),
+                    _problem("Звонки в Telegram могут не работать", kind="voice", level="warn"),
+                ]
+            }
+        )
+        panel.resize(1400, 900)
+        panel.show()
+        self.app.processEvents()
+
+        kinds = [group.kind() for group in panel.problem_groups()]
+        self.assertEqual(kinds[:2], ["ip", "sni"])
+        small = panel.small_groups
+        # Три группы по одной карточке делят строку; большая группа сайтов — во всю ширину под ними.
+        self.assertEqual([group.kind() for group in small.blocks()], ["ip", "quic", "voice"])
+        self.assertEqual((small.columns(), len({group.y() for group in small.blocks()})), (3, 1))
+        big = panel.problem_groups()[1]
+        self.assertGreater(big.width(), 1300)
+        self.assertGreater(big.mapTo(panel, big.rect().topLeft()).y(), small.y())
+        # Пояснение вида блокировки в столбце — в подсказке заголовка, а не абзацем.
+        first = small.blocks()[0]
+        self.assertTrue(first.about_label.isHidden())
+        self.assertEqual(first.title_label.toolTip(), first.about_label.text())
+        self.assertFalse(big.about_label.isHidden())
+        # Адрес на карточке сайта — без «www.».
+        self.assertEqual(first.rows[0].note, "telegram.org")
+        # Порядок строк для остального кода — по важности групп, как раньше.
+        self.assertEqual(len(panel.problem_rows()), 8)

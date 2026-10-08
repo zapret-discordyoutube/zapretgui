@@ -37,7 +37,8 @@ class TabHeroesTests(unittest.TestCase):
                 self.assertEqual(panel.mascot.size(), sample)
                 # Главная фраза — крупным шрифтом, как на вкладке-образце «DNS-серверы».
                 self.assertIsInstance(panel.title_label, SubtitleLabel)
-                margins = panel.layout().contentsMargins()
+                # У итога BlockCheck подложка только у шапки: группы проблем лежат под ней без своей.
+                margins = getattr(panel, "hero", panel).layout().contentsMargins()
                 self.assertEqual((margins.left(), margins.top(), margins.right(), margins.bottom()), (16, 14, 16, 14))
 
     def test_panels_take_page_buttons_right_under_the_main_phrase(self) -> None:

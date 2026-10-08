@@ -60,6 +60,7 @@ from qfluentwidgets import (
     FluentIcon,
 )
 
+from ui.widgets.flat_section import FlatSection
 from ui.fluent_widgets import SettingsCard, InfoBarHelper, set_tooltip
 from log.log import log
 
@@ -422,7 +423,8 @@ class BlockcheckPage(BasePage):
         section_started_at = time.perf_counter()
         domains_widgets = build_blockcheck_domains_ui(
             tr_fn=lambda key, default: tr_catalog(key, default=default),
-            settings_card_cls=SettingsCard,
+            # Строка стоит в шапке панели итога, своей подложки у неё нет.
+            settings_card_cls=lambda: FlatSection(spacing=4),
             qhbox_layout_cls=QHBoxLayout,
             qwidget_cls=QWidget,
             caption_label_cls=CaptionLabel,
@@ -438,7 +440,8 @@ class BlockcheckPage(BasePage):
         self._add_domain_btn = domains_widgets.add_button
         self._domains_flow = domains_widgets.flow_widget
         self._domains_flow_layout = domains_widgets.flow_layout
-        self._add_tab_widget(self._domains_card)
+        # Свои домены — часть управления проверкой: под кнопкой «Проверить», а не под результатами.
+        self._summary_panel.controls.addWidget(self._domains_card)
         self._log_ui_timing("blockcheck_ui.domains_card.build", section_started_at)
 
         # Ход проверки по шагам: виден, только пока она идёт.
@@ -449,7 +452,8 @@ class BlockcheckPage(BasePage):
         self._progress_card.setVisible(False)
 
         # Карточки: по одной на сайт и на каждую проверку. Нажатие открывает подробности.
-        self._results_card = SettingsCard()
+        # Без своей подложки: она есть у каждой карточки внутри.
+        self._results_card = FlatSection()
         self._result_cards = ResultCardsView()
         self._result_cards.opened.connect(self._open_card_detail)
         self._results_card.add_widget(self._result_cards)

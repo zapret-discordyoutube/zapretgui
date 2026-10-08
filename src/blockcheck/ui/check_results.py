@@ -36,6 +36,7 @@ from ui.theme import get_cached_qta_pixmap
 from ui.theme_refresh import ThemeRefreshBinding
 from ui.widgets.fun import FunTicker, Mascot, burst_confetti
 from ui.widgets.fun.mascot import MOOD_ALARM, MOOD_BUSY, MOOD_HAPPY, MOOD_IDLE, MOOD_SAD
+from ui.widgets.columns_flow import ColumnsFlow
 from ui.widgets.hover_hint import HoverHint
 from ui.widgets.stagger_float_in import float_in
 from ui.widgets.tone_group import ToneDot, ToneGroup, dot_on_first_line, mute
@@ -289,7 +290,9 @@ def site_note(problem: dict) -> str:
         rest = head.removeprefix(site_name(problem)).strip(" ,")
         if rest:
             return rest
-    return " · ".join(part for part in (str(problem.get("target") or ""), str(problem.get("cause_word") or "")) if part)
+    # Адрес — без «www.»: строка короче и реже обрезается.
+    target = str(problem.get("target") or "").removeprefix("www.")
+    return " · ".join(part for part in (target, str(problem.get("cause_word") or "")) if part)
 
 
 def site_explanation(problem: dict) -> tuple[str, ...]:
@@ -302,6 +305,10 @@ def site_explanation(problem: dict) -> tuple[str, ...]:
         if tail:
             lines.insert(0, f"{tail[:1].upper()}{tail[1:]}{'' if tail.endswith('.') else '.'}")
     return tuple(lines)
+
+
+# Уже этого адрес и причина на карточке сайта не помещаются.
+SITE_CARD_MIN_WIDTH = 240
 
 
 class _SiteCard(QWidget):
@@ -677,6 +684,8 @@ class _ProblemGroup(ToneGroup):
             count=len(problems),
             about=info.about or _OTHER_ABOUT,
             plain=plain,
+            # Подложка — только у карточек: группа на своей подложке давала «виджет в виджете».
+            flat=True,
         )
         self._kind = kind
         hidden = () if plain else tuple(shared_advice(problems))
@@ -687,7 +696,7 @@ class _ProblemGroup(ToneGroup):
         self.rows: list[_SiteCard | FindingCard | _ProblemRow] = []
         self.flow: CardsFlow | None = None
         if sites:
-            self.flow = CardsFlow(self)
+            self.flow = CardsFlow(self, min_width=SITE_CARD_MIN_WIDTH)
             for problem in sites:
                 card = _SiteCard(problem, on_action, self.flow, card_key=key_for(problem), on_open=on_open)
                 self.flow.add(card)
@@ -770,8 +779,17 @@ class _ProblemGroup(ToneGroup):
         return self._kind
 
 
-class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
-    """Итог проверки: одна фраза, картина блокировок и проблемы по видам с советами."""
+class BlockcheckSummaryPanel(_HeightKeeper, QWidget):
+    """Итог проверки: одна фраза, картина блокировок и проблемы по видам с советами.
+
+    Подложка есть только у шапки (``hero``) и у самих карточек. Картина
+    блокировок и группы проблем лежат прямо на странице: общая подложка под
+    группами, а под ней ещё подложка панели читались как «виджет в виджете».
+    """
+
+    # Группа из стольких карточек (и меньше) — небольшая: такие стоят рядом, столбцами.
+    SMALL_GROUP = 2
+    GROUP_COLUMN_WIDTH = 400
 
     def __init__(
         self,
@@ -787,7 +805,12 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self._on_open_child = on_open_child
         self._level = "idle"
 
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(12)
+        self.hero = SimpleCardWidget(self)
+        outer.addWidget(self.hero)
+        root = QVBoxLayout(self.hero)
         # Размеры шапки — те же, что у панелей остальных вкладок раздела (образец — «DNS-серверы»).
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(10)
@@ -824,6 +847,12 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self.actions.setContentsMargins(0, 6, 0, 0)
         self.actions.setSpacing(10)
         titles.addLayout(self.actions)
+        # Остальное управление страницы (свои домены) — здесь же, под кнопками: всё, чем
+        # проверку настраивают и запускают, стоит в шапке, а не под результатами.
+        self.controls = QVBoxLayout()
+        self.controls.setContentsMargins(0, 0, 0, 0)
+        self.controls.setSpacing(6)
+        titles.addLayout(self.controls)
         header.addLayout(titles, 1)
         root.addLayout(header)
 
@@ -831,13 +860,16 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         self.overview = KindsOverview(self)
         self.overview.tile_opened.connect(self.scroll_to_group)
         self.overview.setVisible(False)
-        root.addWidget(self.overview)
+        outer.addWidget(self.overview)
 
         self._problems_host = QWidget(self)
         self._problems_layout = QVBoxLayout(self._problems_host)
         self._problems_layout.setContentsMargins(0, 0, 0, 0)
-        self._problems_layout.setSpacing(8)
-        root.addWidget(self._problems_host)
+        self._problems_layout.setSpacing(14)
+        outer.addWidget(self._problems_host)
+        self._groups: list[_ProblemGroup] = []
+        self._bare_rows: list[_ProblemRow] = []
+        self.small_groups: ColumnsFlow | None = None
 
         self._theme_refresh = ThemeRefreshBinding(self, self._apply_theme_refresh)
         self.set_idle()
@@ -848,13 +880,9 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
 
     def problem_rows(self) -> list[_ProblemRow]:
         rows = []
-        for index in range(self._problems_layout.count()):
-            widget = self._problems_layout.itemAt(index).widget()
-            if isinstance(widget, _ProblemGroup):
-                rows.extend(widget.rows)
-            elif isinstance(widget, _ProblemRow):
-                rows.append(widget)
-        return rows
+        for group in self._groups:
+            rows.extend(group.rows)
+        return [*rows, *self._bare_rows]
 
     def scroll_to_group(self, kind: str) -> bool:
         """Нажатие на плитку вида блокировки: страница прокручивается к его группе. ``False`` — группы нет."""
@@ -871,11 +899,8 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
         return True
 
     def problem_groups(self) -> list[_ProblemGroup]:
-        return [
-            widget
-            for index in range(self._problems_layout.count())
-            if isinstance(widget := self._problems_layout.itemAt(index).widget(), _ProblemGroup)
-        ]
+        """Группы в порядке важности (на экране небольшие группы собраны в столбцы)."""
+        return list(self._groups)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -901,6 +926,9 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+        self._groups = []
+        self._bare_rows = []
+        self.small_groups = None
         self._problems_host.setVisible(False)
 
     def _set_state(self, level: str, title: str, env: str = "", *, mood: str = MOOD_IDLE, fun: str = "") -> None:
@@ -988,7 +1016,7 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
             key = problem_card_key(problem, report)
             return key if key in cards and self._on_open is not None else ""
 
-        rows: list[QWidget] = [
+        self._groups = [
             _ProblemGroup(
                 kind,
                 items,
@@ -1000,13 +1028,34 @@ class BlockcheckSummaryPanel(_HeightKeeper, SimpleCardWidget):
             )
             for kind, items in group_problems(problems)
         ]
+        # Небольшие группы (одна-две карточки) стоят рядом столбцами — там, где шла первая из
+        # них; каждая во всю ширину окна была бы на три четверти пустой. Большие — во всю ширину.
+        small = [group for group in self._groups if len(group.rows) <= self.SMALL_GROUP]
+        rows: list[QWidget] = []
+        if len(small) > 1:
+            self.small_groups = ColumnsFlow(self._problems_host, min_width=self.GROUP_COLUMN_WIDTH)
+            self.small_groups.replaced.connect(self._schedule_min_height_sync, Qt.ConnectionType.QueuedConnection)
+            for group in self._groups:
+                if group in small:
+                    if self.small_groups not in rows:
+                        rows.append(self.small_groups)
+                    # В столбце пояснение вида блокировки — в подсказке заголовка: абзацы разной
+                    # длины ставили бы карточки соседних групп на разной высоте.
+                    if group.about_label is not None and group.title_label is not None:
+                        set_tooltip(group.title_label, group.about_label.text())
+                        group.about_label.setVisible(False)
+                    self.small_groups.add(group)
+                else:
+                    rows.append(group)
+        else:
+            rows = list(self._groups)
         working = list(report.get("working") or ())
         if working and problems:
-            rows.append(
-                _ProblemRow(
-                    {"level": "ok", "text": f"Открываются: {', '.join(working)}"}, None, self._problems_host, bare=True
-                )
+            bare = _ProblemRow(
+                {"level": "ok", "text": f"Открываются: {', '.join(working)}"}, None, self._problems_host, bare=True
             )
+            self._bare_rows = [bare]
+            rows.append(bare)
         for row in rows:
             self._problems_layout.addWidget(row)
         self._problems_host.setVisible(bool(rows))

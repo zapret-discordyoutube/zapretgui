@@ -193,7 +193,7 @@ class FindingCard(QWidget):
     """
 
     HEIGHT = 54
-    MIN_WIDTH = 340
+    MIN_WIDTH = 380
     CHIPS_SHOWN = 3
     CHIP_GAP = 12
     # Нажали карточку (когда ей есть что открыть).

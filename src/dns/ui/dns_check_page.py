@@ -7,6 +7,7 @@ from ui.pages.base_page import BasePage
 from ui.latest_value_worker_state import LatestValueWorkerState
 from ui.one_shot_worker_runtime import OneShotWorkerRuntime
 import dns.dns_check_plans as dns_check_page_plans
+from ui.widgets.flat_section import FlatSection
 from ui.fluent_widgets import SettingsCard, set_tooltip
 from ui.theme import get_theme_tokens
 from ui.theme_semantic import get_semantic_palette
@@ -187,7 +188,8 @@ class DNSCheckPage(BasePage):
         # Прошлые проверки DNS подмены: когда проверяли и чем кончилось.
         from dns.ui.domain_lookup_page import RowsView
 
-        self.history_card = SettingsCard()
+        # Без своей подложки: она есть у каждой плитки внутри.
+        self.history_card = FlatSection()
         self.history_rows = RowsView(self.history_card, icon="fa5s.history")
         self.history_card.add_widget(self.history_rows)
         self.history_card.setVisible(False)

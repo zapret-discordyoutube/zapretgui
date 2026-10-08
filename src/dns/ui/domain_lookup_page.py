@@ -29,6 +29,7 @@ from dns.ui import domain_lookup_cards as lookup_cards
 from log.log import log
 from ui.accessibility import set_control_accessibility, set_state_text
 from ui.widgets.check_hero import CheckHero
+from ui.widgets.flat_section import FlatSection
 from ui.fluent_widgets import SettingsCard, set_tooltip
 from ui.latest_worker_lane import LatestWorkerLane
 from ui.pages.base_page import BasePage
@@ -243,7 +244,8 @@ class DomainLookupPage(BasePage):
 
         self.status_lines = _InfoLines(self.control_card)
         self.control_card.add_widget(self.status_lines)
-        self.progress_bar = IndeterminateProgressBar(self.control_card)
+        # start=False: иначе анимация крутится и у скрытой полосы, пока жива страница.
+        self.progress_bar = IndeterminateProgressBar(self.control_card, start=False)
         self.progress_bar.setVisible(False)
         self.control_card.add_widget(self.progress_bar)
         self.ticker = FunTicker(self.control_card)
@@ -259,7 +261,8 @@ class DomainLookupPage(BasePage):
         self.layout.addWidget(self.cards)
 
         # Прошлые проверки: что проверяли и чем кончилось. Видна, пока есть записи.
-        self.history_card = SettingsCard()
+        # Без своей подложки: она есть у каждой плитки внутри.
+        self.history_card = FlatSection()
         self.history_rows = RowsView(self.history_card, icon="fa5s.history")
         self.history_card.add_widget(self.history_rows)
         self.layout.addWidget(self.history_card)

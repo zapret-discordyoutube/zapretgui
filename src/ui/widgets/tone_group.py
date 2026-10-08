@@ -115,7 +115,8 @@ class ToneGroup(QWidget):
     """Группа строк одного вида.
 
     ``plain`` — группа без названия и подложки: строки идут как обычный список
-    (для того, что ни к какому виду не отнесли).
+    (для того, что ни к какому виду не отнесли). ``flat`` — с названием, но без
+    подложки: для группы карточек, у которых подложка своя.
     """
 
     def __init__(
@@ -127,15 +128,20 @@ class ToneGroup(QWidget):
         count: int = 0,
         about: str = "",
         plain: bool = False,
+        flat: bool = False,
     ) -> None:
         super().__init__(parent)
         self._color_for = color_for
         self._plain = plain
+        # Группа карточек: подложка есть у карточек, второй — под ними — не нужно.
+        self._flat = flat
         self._surface = QColor()
         self._body = QVBoxLayout(self)
         self._body.setSpacing(6)
         if self._plain:
             self._body.setContentsMargins(0, 0, 0, 0)
+        elif self._flat:
+            self._body.setContentsMargins(0, 6, 0, 6)
         else:
             self._body.setContentsMargins(14, 12, 12, 12)
 
@@ -147,6 +153,9 @@ class ToneGroup(QWidget):
             header.setSpacing(8)
             header.addWidget(ToneDot(color_for, self), 0, Qt.AlignmentFlag.AlignVCenter)
             self.title_label = StrongBodyLabel(title, self)
+            if flat:
+                # Заголовки соседних групп стоят на одной линии — с кнопкой в заголовке или без.
+                self.title_label.setMinimumHeight(30)
             header.addWidget(self.title_label, 0, Qt.AlignmentFlag.AlignVCenter)
             if count > 1:
                 header.addWidget(mute(CaptionLabel(str(count), self)), 0, Qt.AlignmentFlag.AlignVCenter)
@@ -188,7 +197,7 @@ class ToneGroup(QWidget):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         _ = event
-        if self._plain:
+        if self._plain or self._flat:
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

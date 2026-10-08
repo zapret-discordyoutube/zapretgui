@@ -134,7 +134,16 @@ class BlockcheckPageAccessibilityTests(unittest.TestCase):
         self.assertIs(page._control_card, page._summary_panel)
         actions = page._summary_panel.actions
         self.assertEqual([actions.itemAt(index).widget() for index in range(2)], [page._start_btn, page._stop_btn])
-        self.assertIs(page._scope_combo.parentWidget(), page._summary_panel)
+        self.assertIs(page._scope_combo.parentWidget(), page._summary_panel.hero)
+        # «Свои домены» — тоже управление проверкой: стоят в шапке, под кнопками, а не под результатами.
+        self.assertIs(page._domains_card.parentWidget(), page._summary_panel.hero)
+        self.assertIs(page._summary_panel.controls.itemAt(0).widget(), page._domains_card)
+        # Подложка — только у шапки и у самих карточек: разделы с карточками её не рисуют.
+        from qfluentwidgets import CardWidget
+
+        for flat in (page._summary_panel, page._results_card, page._domains_card):
+            self.assertNotIsInstance(flat, CardWidget)
+            self.assertEqual(flat.findChildren(CardWidget, options=Qt.FindChildOption.FindDirectChildrenOnly)[1:], [])
         # Пустая таблица до первой проверки не показывается.
         self.assertTrue(page._results_card.isHidden())
         # Отчёта ещё нет — блока «Отчёт / Подготовить обращение» тоже нет.
